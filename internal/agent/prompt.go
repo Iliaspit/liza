@@ -139,6 +139,7 @@ func buildTaskRoleContextData(task *models.Task, state *models.State, config Sup
 		TaskOrdinal:    taskOrdinal,
 		DependsOn:      task.DependsOn,
 		TaskRolePair:   task.RolePair,
+		TDDEnabled:     state.Config.IsTDDEnabled(),
 
 		// Config/state
 		ProjectRoot: config.ProjectRoot,

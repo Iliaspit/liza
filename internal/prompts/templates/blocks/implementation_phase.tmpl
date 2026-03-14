@@ -6,6 +6,7 @@
 Read the implementation plan at {{.PlanRef}} for task decomposition context.
 {{- end}}
 1. Work ONLY in the worktree directory. Use git -C {{.Worktree}} for all git commands.
+{{- if .TDDEnabled}}
 2. TDD (code tasks): Write tests FIRST that verify done_when criteria, then implement until tests pass
 3. Tests are MANDATORY for code tasks — Code Reviewer will reject code without tests. Invoke skill: testing.
    Tests must be discoverable via standard runners (e.g. pytest, go test) — not just runnable when explicitly named.
@@ -18,6 +19,18 @@ Read the implementation plan at {{.PlanRef}} for task decomposition context.
 7. Invoke skill: clean-code at the end of the implementation
 8. Validate ALL done_when criteria are met
 9. If context exhaustion is near (~90%): run liza_handoff with summary + next_action (or structured fields), then exit with code 42
+{{- else}}
+2. Behavioral tests belong in separate follow-up tasks — focus on implementation.
+   Write clean, testable code so follow-up test tasks can exercise the behavior.
+3. Exempt: doc-only, config-only, or spec-only tasks (no code = no tests required)
+4. Mechanical test updates: For structural refactoring (file split/move), updating test
+   file-path references or imports to reflect the new file layout is in-scope and does
+   not trigger the test separation guideline in item 2. The test's invariant (what it validates)
+   must be preserved.
+5. Invoke skill: clean-code at the end of the implementation
+6. Validate ALL done_when criteria are met
+7. If context exhaustion is near (~90%): run liza_handoff with summary + next_action (or structured fields), then exit with code 42
+{{- end}}
 {{- else if eq .Role "code-planner"}}
 
 IMPLEMENTATION PHASE:

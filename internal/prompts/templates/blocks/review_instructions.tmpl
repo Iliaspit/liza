@@ -23,11 +23,16 @@ INSTRUCTIONS:
    Each review is a fresh evaluation: "does this worktree satisfy the task?"
 4. Invoke skill: code-review, then apply it to the full diff
 5. If change touches specs/, introduces new abstractions, adds state/lifecycle, or spans 3+ modules: also invoke skill: systemic-thinking
+{{- if .TDDEnabled}}
 6. TDD QUALITY (code tasks): Tests must cover done_when criteria — REJECT if tests are superficial or don't exercise the actual requirements
    Exception: mechanical test updates (file-path strings, import paths) caused by
    structural refactoring are NOT behavioral test changes — do not reject for these.
 7. Test discovery (e.g. pytest, python -m unittest discover) finding 0 tests is a blocker — tests must be discoverable, not just runnable when explicitly named
 8. Verify the done_when criteria are met AND tests exercise those criteria (for code tasks)
+{{- else}}
+6. TDD is disabled for this workspace — do not reject for missing tests. Verify implementation quality and done_when criteria.
+7. Verify the done_when criteria are met (for code tasks)
+{{- end}}
 {{- if ne .PlanRef ""}}
 9. Read the implementation plan at {{.PlanRef}} for task decomposition and intent context
 {{- end}}
@@ -59,6 +64,9 @@ REVIEW CHECKLIST:
 | Plan file location | Plan artifact not in diff at specs/plans/TIMESTAMP-{{.TaskID}}.md |
 | output[] matches plan | For each output[] entry, compare desc, done_when, scope, and spec_ref against the plan artifact in the worktree — they must be identical, not paraphrased or extended |
 | Cross-reference consistency | For every cross-reference in the plan ("owned by CPx", "depends on CPx", "out of scope for CPx"), the referenced task must explicitly state that responsibility, dependency, or exclusion. Reject if any dangling reference. |
+{{- if not .TDDEnabled}}
+| Test task coverage | TDD is disabled — verify plan includes separate test follow-up tasks for code tasks that need coverage |
+{{- end}}
 {{- if ne .ValidationPlan ""}}
 
 DOER VALIDATION PLAN: {{.ValidationPlan}}

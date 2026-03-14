@@ -141,7 +141,10 @@ Agents don't discover and claim their own work. Each agent's supervisor (the Go 
 
 ### TDD Enforcement
 
-TDD is mandatory for all code tasks in MAS. Tests must be written first against `done_when` criteria, encoding spec intent before implementation exists. This prevents the failure mode where tests validate what code does rather than what the spec requires. See ADR-0007.
+TDD is mandatory by default for all code tasks in MAS. Tests must be written first against
+`done_when` criteria, encoding spec intent before implementation exists. Workspaces can opt
+out via `tdd_enabled: false` in config (set by `liza init --no-tdd`), in which case the
+Code Planner is instructed to create separate test follow-up tasks. See ADR-0007, ADR-0044.
 
 ## Directory Structure
 

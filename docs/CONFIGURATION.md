@@ -113,6 +113,18 @@ All configuration lives in `.liza/state.yaml` under the `config` section.
 | `reviewer_poll_interval` | 30 | — | — | seconds | Reviewer polling interval |
 | `reviewer_max_wait` | 7200 | — | — | seconds | Max reviewer idle before exit |
 | `post_worktree_cmd` | (none) | — | — | shell cmd | Command run after worktree creation (e.g. `npm install`) |
+| `tdd_enabled` | true | — | — | bool | Enable/disable TDD enforcement (nil = true) |
+
+### TDD Configuration
+
+| Value | Behavior |
+|-------|----------|
+| `true` (default) | TDD mandatory: coders write tests first, reviewers reject missing tests, submission gate checks for test files |
+| `false` | Tests as separate tasks: code planner is instructed to create follow-up test tasks, submission gate and reviewer do not enforce test file presence |
+
+Set at workspace creation: `liza init --no-tdd "description" --spec specs/vision.md`
+
+To change after creation: `liza pause`, edit `state.yaml` config section, `liza validate`, `liza resume`.
 
 ### Agent Execution Timeouts
 

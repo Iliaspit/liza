@@ -128,7 +128,7 @@ Piping the same output through different tools hoping for different results is N
 | Success criteria | Each task must have falsifiable `done_when` statement |
 | Scope boundary | Each task must state what is explicitly IN scope (functional area, not file names — file structure is the coder's decision) |
 | Dependency check | If task depends on another, state the dependency |
-| TDD inclusion | Code tasks include tests — do NOT create separate "add tests" tasks (exempt: doc/config/spec-only) |
+| TDD inclusion | Code tasks include tests (when tdd_enabled, default) — or have separate test tasks (when disabled) |
 
 Tasks missing any gate remain DRAFT until completed. This enables:
 - Code Reviewer validation against spec
@@ -155,13 +155,14 @@ Tasks missing any gate remain DRAFT until completed. This enables:
 - Good: `"429 responses trigger exponential backoff starting at 1s"`
 - Bad: `"Rate limiting is handled appropriately"`
 
-**TDD Enforcement (code tasks only):**
-- Each code task MUST include tests — Orchestrator does NOT create separate "add tests" tasks
+**TDD Enforcement (code tasks only, when `tdd_enabled` — default true):**
+- When `tdd_enabled` is true (default): each code task MUST include tests — Orchestrator does NOT create separate "add tests" tasks
 - Coder writes tests FIRST that verify `done_when` criteria, then implements until tests pass
 - Code Reviewer REJECTS code submissions without tests covering `done_when`
+- When `tdd_enabled` is false: the Code Planner is instructed to create separate test follow-up tasks; submission gate and reviewer do not enforce test presence
 - Exempt: documentation-only, config-only, or spec-only tasks (no code = no tests required)
-- Waiver: code tasks with no behavior change (cosmetic fixes, comment edits) can declare `tdd_not_required` with justification in the checkpoint; Code Reviewer verifies
-- Rationale: Coder can't validate their work without tests; separate test tasks break TDD flow
+- Waiver (TDD-enabled only): code tasks with no behavior change (cosmetic fixes, comment edits) can declare `tdd_not_required` with justification in the checkpoint; Code Reviewer verifies
+- Rationale: See ADR-0007 (original) and ADR-0044 (configurable extension)
 
 **`done_when` vs Tests:**
 - `done_when` is the **acceptance criterion** — what the Code Reviewer validates

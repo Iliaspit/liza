@@ -171,6 +171,7 @@ symlinks needed for pairing (no .liza/ workspace):
 		entryPoint, _ := cmd.Flags().GetString("entry-point")
 		branch, _ := cmd.Flags().GetString("branch")
 		postCreateCmd, _ := cmd.Flags().GetString("post-worktree-cmd")
+		noTDD, _ := cmd.Flags().GetBool("no-tdd")
 		if err := commands.InitCommandWithConfig(commands.InitParams{
 			Description:     description,
 			SpecRef:         specRef,
@@ -180,6 +181,7 @@ symlinks needed for pairing (no .liza/ workspace):
 			PostWorktreeCmd: postCreateCmd,
 			AutoResume:      autoResume,
 			Agents:          agents,
+			NoTDD:           noTDD,
 			Stdin:           os.Stdin,
 		}); err != nil {
 			return err
@@ -295,6 +297,7 @@ func init() {
 	initCmd.Flags().String("branch", "integration", "integration branch name")
 	initCmd.Flags().String("post-worktree-cmd", "", "shell command to run after worktree creation (e.g. 'make setup')")
 	initCmd.Flags().Bool("auto-resume", false, "automatically resume at checkpoint and sprint completion")
+	initCmd.Flags().Bool("no-tdd", false, "disable TDD enforcement (tests as separate tasks)")
 	initCmd.Flags().Bool("claude", false, "create CLAUDE.md symlink to ~/.liza/CORE.md")
 	initCmd.Flags().Bool("codex", false, "create AGENTS.md symlink to ~/.liza/CORE.md")
 	initCmd.Flags().Bool("gemini", false, "create GEMINI.md symlink to ~/.liza/CORE.md")

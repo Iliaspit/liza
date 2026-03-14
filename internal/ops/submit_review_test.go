@@ -146,6 +146,161 @@ func TestSubmitForReview_TDDWaiverBypassesTestRequirement(t *testing.T) {
 	}
 }
 
+func TestSubmitForReview_TDDDisabled_NoTestFiles_Succeeds(t *testing.T) {
+	// Behavior test: when TDDEnabled is false, SubmitForReview must succeed
+	// for a code task with no test files. This exercises the actual gate
+	// at submit_review.go:124, not just the Config helper.
+	tmpDir := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, tmpDir)
+	statePath, _ := testhelpers.SetupLizaDir(t, tmpDir)
+
+	testhelpers.MustGit(t, tmpDir, "checkout", "integration")
+
+	g := git.New(tmpDir)
+	taskID := "task-tdd-disabled"
+	baseCommit, err := g.CreateWorktree(taskID, "integration")
+	if err != nil {
+		t.Fatalf("CreateWorktree() error = %v", err)
+	}
+	wtPath := g.GetWorktreePath(taskID)
+
+	// Add only implementation files — NO test files
+	if err := os.WriteFile(filepath.Join(wtPath, "feature.go"), []byte("package main\n\nfunc feature() {}\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	testhelpers.MustGit(t, wtPath, "add", "feature.go")
+	testhelpers.MustGit(t, wtPath, "commit", "-m", "Add feature without tests")
+	wtCommit := testhelpers.MustGit(t, wtPath, "rev-parse", "HEAD")
+
+	agentID := "coder-1"
+	leaseExpires := time.Now().UTC().Add(30 * time.Minute)
+	worktree := g.GetWorktreeRelPath(taskID)
+	tddEnabled := false
+	initialState := &models.State{
+		Config: models.Config{
+			IntegrationBranch: "integration",
+			LeaseDuration:     1800,
+			TDDEnabled:        &tddEnabled,
+		},
+		Tasks: []models.Task{
+			{
+				ID:           taskID,
+				Description:  "Feature with TDD disabled",
+				Status:       models.TaskStatusImplementing,
+				RolePair:     "coding-pair",
+				AssignedTo:   &agentID,
+				LeaseExpires: &leaseExpires,
+				Worktree:     &worktree,
+				BaseCommit:   &baseCommit,
+				Iteration:    1,
+				Created:      time.Now().UTC(),
+				History: []models.TaskHistoryEntry{
+					{
+						Time:  time.Now().UTC(),
+						Event: models.TaskEventPreExecutionCheckpoint,
+						Agent: &agentID,
+						Extra: map[string]any{
+							"intent":          "Add feature",
+							"validation_plan": "go build",
+							"files_to_modify": []string{"feature.go"},
+						},
+					},
+				},
+			},
+		},
+		Agents: map[string]models.Agent{
+			agentID: {Status: models.AgentStatusWorking, CurrentTask: &taskID},
+		},
+	}
+
+	testhelpers.WriteInitialState(t, statePath, initialState)
+
+	result, err := SubmitForReview(tmpDir, taskID, wtCommit, agentID)
+	if err != nil {
+		t.Fatalf("SubmitForReview() with TDD disabled should succeed without test files, got error: %v", err)
+	}
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	if result.TaskID != taskID {
+		t.Errorf("expected TaskID %q, got %q", taskID, result.TaskID)
+	}
+}
+
+func TestSubmitForReview_TDDEnabled_NoTestFiles_Fails(t *testing.T) {
+	// Companion behavior test: with TDD enabled (default), the same scenario
+	// must fail with a precondition error about missing test files.
+	tmpDir := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, tmpDir)
+	statePath, _ := testhelpers.SetupLizaDir(t, tmpDir)
+
+	testhelpers.MustGit(t, tmpDir, "checkout", "integration")
+
+	g := git.New(tmpDir)
+	taskID := "task-tdd-enabled"
+	baseCommit, err := g.CreateWorktree(taskID, "integration")
+	if err != nil {
+		t.Fatalf("CreateWorktree() error = %v", err)
+	}
+	wtPath := g.GetWorktreePath(taskID)
+
+	// Add only implementation files — NO test files
+	if err := os.WriteFile(filepath.Join(wtPath, "feature.go"), []byte("package main\n\nfunc feature() {}\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	testhelpers.MustGit(t, wtPath, "add", "feature.go")
+	testhelpers.MustGit(t, wtPath, "commit", "-m", "Add feature without tests")
+	wtCommit := testhelpers.MustGit(t, wtPath, "rev-parse", "HEAD")
+
+	agentID := "coder-1"
+	leaseExpires := time.Now().UTC().Add(30 * time.Minute)
+	worktree := g.GetWorktreeRelPath(taskID)
+	// TDDEnabled is nil (default = true)
+	initialState := &models.State{
+		Config: models.Config{
+			IntegrationBranch: "integration",
+			LeaseDuration:     1800,
+		},
+		Tasks: []models.Task{
+			{
+				ID:           taskID,
+				Description:  "Feature with TDD enabled",
+				Status:       models.TaskStatusImplementing,
+				RolePair:     "coding-pair",
+				AssignedTo:   &agentID,
+				LeaseExpires: &leaseExpires,
+				Worktree:     &worktree,
+				BaseCommit:   &baseCommit,
+				Iteration:    1,
+				Created:      time.Now().UTC(),
+				History: []models.TaskHistoryEntry{
+					{
+						Time:  time.Now().UTC(),
+						Event: models.TaskEventPreExecutionCheckpoint,
+						Agent: &agentID,
+						Extra: map[string]any{
+							"intent":          "Add feature",
+							"validation_plan": "go build",
+							"files_to_modify": []string{"feature.go"},
+						},
+					},
+				},
+			},
+		},
+		Agents: map[string]models.Agent{
+			agentID: {Status: models.AgentStatusWorking, CurrentTask: &taskID},
+		},
+	}
+
+	testhelpers.WriteInitialState(t, statePath, initialState)
+
+	_, err = SubmitForReview(tmpDir, taskID, wtCommit, agentID)
+	if err == nil {
+		t.Fatal("SubmitForReview() with TDD enabled should fail without test files")
+	}
+	testhelpers.RequireErrorContains(t, err, "code tasks must include test files")
+}
+
 func TestSubmitForReview_NoCheckpoint(t *testing.T) {
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)

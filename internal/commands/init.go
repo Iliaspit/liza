@@ -27,6 +27,7 @@ type InitParams struct {
 	Branch           string   // --branch: integration branch name (default: "integration")
 	PostWorktreeCmd  string   // --post-worktree-cmd: shell command to run after worktree creation
 	AutoResume       bool     // --auto-resume: automatically resume at checkpoint and sprint completion
+	NoTDD            bool     // --no-tdd: disable TDD enforcement
 	Agents           []string // --claude, --codex, --gemini, --mistral
 	Stdin            io.Reader
 	ForceInteractive bool   // bypass TTY check (for testing)
@@ -667,6 +668,11 @@ func InitCommandWithConfig(params InitParams) error {
 			AutoResume:               params.AutoResume,
 			PostWorktreeCmd:          stringPtrOrNil(postWorktreeCmd),
 		},
+	}
+
+	if params.NoTDD {
+		tddEnabled := false
+		state.Config.TDDEnabled = &tddEnabled
 	}
 
 	// Write state file

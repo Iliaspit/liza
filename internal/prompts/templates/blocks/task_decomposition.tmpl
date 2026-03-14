@@ -28,4 +28,11 @@ When a task is pure structural refactoring (file split/move with no behavior cha
 done_when MUST distinguish behavioral test changes (not expected) from mechanical test
 updates (expected). Mechanical updates (file-path strings, import paths) that preserve
 the test's invariant are expected and in-scope — include affected test files in scope.
+{{- if not .TDDEnabled}}
+
+TEST TASK SEPARATION:
+TDD is disabled — code tasks should NOT include behavioral tests. Instead, create
+separate follow-up test tasks for each code task that needs test coverage.
+Test tasks should depend on their corresponding code task.
+{{- end}}
 {{- end -}}

@@ -1758,3 +1758,75 @@ func TestInitCommandWithConfig_EntryPointWithoutConfig(t *testing.T) {
 		t.Errorf("state.Goal.EntryPoint = %q, want %q", state.Goal.EntryPoint, "detailed-spec")
 	}
 }
+
+func TestInitCommandWithConfig_NoTDD(t *testing.T) {
+	tmpDir := setupGitRepo(t)
+	defer os.RemoveAll(tmpDir)
+	setupGlobalLiza(t)
+
+	originalDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(originalDir)
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatal(err)
+	}
+
+	testhelpers.CreateSpecFile(t, tmpDir, "vision.md", "# Vision\n")
+
+	err = InitCommandWithConfig(InitParams{
+		Description: "Goal with TDD disabled",
+		SpecRef:     "specs/vision.md",
+		NoTDD:       true,
+	})
+	if err != nil {
+		t.Fatalf("InitCommandWithConfig() error = %v", err)
+	}
+
+	bb := db.New(filepath.Join(tmpDir, ".liza", "state.yaml"))
+	state, err := bb.Read()
+	if err != nil {
+		t.Fatalf("Failed to read state: %v", err)
+	}
+	if state.Config.TDDEnabled == nil {
+		t.Fatal("state.Config.TDDEnabled is nil, want *false")
+	}
+	if *state.Config.TDDEnabled {
+		t.Error("state.Config.TDDEnabled is true, want false")
+	}
+}
+
+func TestInitCommandWithConfig_NoTDDOmittedByDefault(t *testing.T) {
+	tmpDir := setupGitRepo(t)
+	defer os.RemoveAll(tmpDir)
+	setupGlobalLiza(t)
+
+	originalDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(originalDir)
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatal(err)
+	}
+
+	testhelpers.CreateSpecFile(t, tmpDir, "vision.md", "# Vision\n")
+
+	err = InitCommandWithConfig(InitParams{
+		Description: "Goal without --no-tdd",
+		SpecRef:     "specs/vision.md",
+	})
+	if err != nil {
+		t.Fatalf("InitCommandWithConfig() error = %v", err)
+	}
+
+	bb := db.New(filepath.Join(tmpDir, ".liza", "state.yaml"))
+	state, err := bb.Read()
+	if err != nil {
+		t.Fatalf("Failed to read state: %v", err)
+	}
+	if state.Config.TDDEnabled != nil {
+		t.Errorf("state.Config.TDDEnabled = %v, want nil", *state.Config.TDDEnabled)
+	}
+}

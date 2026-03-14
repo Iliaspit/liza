@@ -1584,3 +1584,243 @@ func TestCollectivePlanScoping_PhaseConsistencyRule(t *testing.T) {
 		}
 	})
 }
+
+func TestCoderContext_TDDEnabled(t *testing.T) {
+	projectRoot := setupPipelineConfig(t)
+	resolver := testPipelineResolver(t)
+	sections, err := resolver.ContextSections("coder")
+	if err != nil {
+		t.Fatalf("ContextSections: %v", err)
+	}
+
+	data := &RoleContextData{
+		Role: "coder", AgentID: "coder-1", RoleType: "doer",
+		TaskID: "task-1", Description: "Add feature",
+		DoneWhen: "Feature works", Scope: "Feature module",
+		Worktree:    projectRoot + "/.worktrees/task-1",
+		ProjectRoot: projectRoot,
+		TDDEnabled:  true,
+	}
+
+	result, err := BuildRoleContext("coder", sections, data)
+	if err != nil {
+		t.Fatalf("BuildRoleContext() error = %v", err)
+	}
+
+	wantContains := []string{
+		"TDD (code tasks): Write tests FIRST",
+		"Tests are MANDATORY for code tasks",
+		"TDD waiver: For cosmetic-only changes",
+		"tdd_not_required",
+	}
+	for _, want := range wantContains {
+		if !strings.Contains(result, want) {
+			t.Errorf("TDD enabled: missing %q", want)
+		}
+	}
+}
+
+func TestCoderContext_TDDDisabled(t *testing.T) {
+	projectRoot := setupPipelineConfig(t)
+	resolver := testPipelineResolver(t)
+	sections, err := resolver.ContextSections("coder")
+	if err != nil {
+		t.Fatalf("ContextSections: %v", err)
+	}
+
+	data := &RoleContextData{
+		Role: "coder", AgentID: "coder-1", RoleType: "doer",
+		TaskID: "task-1", Description: "Add feature",
+		DoneWhen: "Feature works", Scope: "Feature module",
+		Worktree:    projectRoot + "/.worktrees/task-1",
+		ProjectRoot: projectRoot,
+		TDDEnabled:  false,
+	}
+
+	result, err := BuildRoleContext("coder", sections, data)
+	if err != nil {
+		t.Fatalf("BuildRoleContext() error = %v", err)
+	}
+
+	wantContains := []string{
+		"Behavioral tests belong in separate follow-up tasks",
+		"Write clean, testable code",
+		"not trigger the test separation guideline in item 2",
+	}
+	for _, want := range wantContains {
+		if !strings.Contains(result, want) {
+			t.Errorf("TDD disabled: missing %q", want)
+		}
+	}
+
+	wantNotContain := []string{
+		"TDD (code tasks): Write tests FIRST",
+		"Tests are MANDATORY for code tasks",
+		"TDD waiver: For cosmetic-only changes",
+		"not trigger the TDD requirement in item 3",
+	}
+	for _, notWant := range wantNotContain {
+		if strings.Contains(result, notWant) {
+			t.Errorf("TDD disabled: should not contain %q", notWant)
+		}
+	}
+}
+
+func TestReviewerContext_TDDEnabled(t *testing.T) {
+	projectRoot := setupPipelineConfig(t)
+	resolver := testPipelineResolver(t)
+	sections, err := resolver.ContextSections("code-reviewer")
+	if err != nil {
+		t.Fatalf("ContextSections: %v", err)
+	}
+
+	data := &RoleContextData{
+		Role: "code-reviewer", AgentID: "reviewer-1", RoleType: "reviewer",
+		TaskID: "task-review-1", Description: "Review feature",
+		DoneWhen: "Feature works",
+		Worktree:     projectRoot + "/.worktrees/task-review-1",
+		BaseCommit:   "abc123",
+		ReviewCommit: "def456",
+		AssignedTo:   "coder-1",
+		ProjectRoot:  projectRoot,
+		TDDEnabled:   true,
+	}
+
+	result, err := BuildRoleContext("code-reviewer", sections, data)
+	if err != nil {
+		t.Fatalf("BuildRoleContext() error = %v", err)
+	}
+
+	if !strings.Contains(result, "TDD QUALITY") {
+		t.Error("TDD enabled reviewer: missing TDD QUALITY gate")
+	}
+	if strings.Contains(result, "TDD is disabled for this workspace") {
+		t.Error("TDD enabled reviewer: should not mention TDD disabled")
+	}
+}
+
+func TestReviewerContext_TDDDisabled(t *testing.T) {
+	projectRoot := setupPipelineConfig(t)
+	resolver := testPipelineResolver(t)
+	sections, err := resolver.ContextSections("code-reviewer")
+	if err != nil {
+		t.Fatalf("ContextSections: %v", err)
+	}
+
+	data := &RoleContextData{
+		Role: "code-reviewer", AgentID: "reviewer-1", RoleType: "reviewer",
+		TaskID: "task-review-1", Description: "Review feature",
+		DoneWhen: "Feature works",
+		Worktree:     projectRoot + "/.worktrees/task-review-1",
+		BaseCommit:   "abc123",
+		ReviewCommit: "def456",
+		AssignedTo:   "coder-1",
+		ProjectRoot:  projectRoot,
+		TDDEnabled:   false,
+	}
+
+	result, err := BuildRoleContext("code-reviewer", sections, data)
+	if err != nil {
+		t.Fatalf("BuildRoleContext() error = %v", err)
+	}
+
+	if !strings.Contains(result, "TDD is disabled for this workspace") {
+		t.Error("TDD disabled reviewer: missing TDD disabled notice")
+	}
+	if strings.Contains(result, "TDD QUALITY") {
+		t.Error("TDD disabled reviewer: should not mention TDD QUALITY")
+	}
+}
+
+func TestOrchestratorContext_TDDEnabled(t *testing.T) {
+	projectRoot := setupPipelineConfig(t)
+	state := testhelpers.CreateValidState()
+	// Default config — TDDEnabled is nil, IsTDDEnabled() returns true
+
+	dashboard, wakeInstr, err := RenderOrchestratorDashboard(state, projectRoot, "orch-1")
+	if err != nil {
+		t.Fatalf("RenderOrchestratorDashboard() error = %v", err)
+	}
+
+	result := dashboard + "\n" + wakeInstr
+	if !strings.Contains(result, "TDD inclusion") {
+		t.Error("TDD enabled orchestrator: missing TDD inclusion gate")
+	}
+}
+
+func TestOrchestratorContext_TDDDisabled(t *testing.T) {
+	projectRoot := setupPipelineConfig(t)
+	state := testhelpers.CreateValidState()
+	v := false
+	state.Config.TDDEnabled = &v
+
+	dashboard, wakeInstr, err := RenderOrchestratorDashboard(state, projectRoot, "orch-1")
+	if err != nil {
+		t.Fatalf("RenderOrchestratorDashboard() error = %v", err)
+	}
+
+	result := dashboard + "\n" + wakeInstr
+	if !strings.Contains(result, "separate test follow-up tasks") {
+		t.Error("TDD disabled orchestrator: missing test follow-up guidance")
+	}
+	if strings.Contains(result, "TDD inclusion") {
+		t.Error("TDD disabled orchestrator: should not mention TDD inclusion")
+	}
+}
+
+func TestCodePlannerContext_TDDDisabled(t *testing.T) {
+	projectRoot := setupPipelineConfig(t)
+	resolver := testPipelineResolver(t)
+	sections, err := resolver.ContextSections("code-planner")
+	if err != nil {
+		t.Fatalf("ContextSections: %v", err)
+	}
+
+	data := &RoleContextData{
+		Role: "code-planner", AgentID: "planner-1", RoleType: "doer",
+		TaskID: "plan-1", Description: "Plan feature",
+		DoneWhen: "Plan complete", Scope: "Feature scope",
+		Worktree:    projectRoot + "/.worktrees/plan-1",
+		ProjectRoot: projectRoot,
+		TDDEnabled:  false,
+	}
+
+	result, err := BuildRoleContext("code-planner", sections, data)
+	if err != nil {
+		t.Fatalf("BuildRoleContext() error = %v", err)
+	}
+
+	if !strings.Contains(result, "TEST TASK SEPARATION") {
+		t.Error("TDD disabled planner: missing TEST TASK SEPARATION guidance")
+	}
+}
+
+func TestCodePlanReviewerContext_TDDDisabled(t *testing.T) {
+	projectRoot := setupPipelineConfig(t)
+	resolver := testPipelineResolver(t)
+	sections, err := resolver.ContextSections("code-plan-reviewer")
+	if err != nil {
+		t.Fatalf("ContextSections: %v", err)
+	}
+
+	data := &RoleContextData{
+		Role: "code-plan-reviewer", AgentID: "plan-reviewer-1", RoleType: "reviewer",
+		TaskID: "plan-review-1", Description: "Review plan",
+		DoneWhen: "Plan reviewed",
+		Worktree:     projectRoot + "/.worktrees/plan-review-1",
+		BaseCommit:   "abc123",
+		ReviewCommit: "def456",
+		AssignedTo:   "planner-1",
+		ProjectRoot:  projectRoot,
+		TDDEnabled:   false,
+	}
+
+	result, err := BuildRoleContext("code-plan-reviewer", sections, data)
+	if err != nil {
+		t.Fatalf("BuildRoleContext() error = %v", err)
+	}
+
+	if !strings.Contains(result, "Test task coverage") {
+		t.Error("TDD disabled plan reviewer: missing test task coverage checklist")
+	}
+}

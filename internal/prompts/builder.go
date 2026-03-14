@@ -139,21 +139,26 @@ SELF-VALIDATION GATES (verify before adding each task):
 | Success criteria | Each task must have falsifiable done |
 | Scope boundary | IN scope stated (functional area, not file names) |
 | Dependency check | Dependencies stated if any |
-| TDD inclusion | Code tasks include tests |
-
+`, agentID, agentID, agentID, agentID, agentID, agentID))
+	if state.Config.IsTDDEnabled() {
+		b.WriteString("| TDD inclusion | Code tasks include tests |\n")
+	} else {
+		b.WriteString("| Test follow-up | Code tasks have separate test follow-up tasks |\n")
+	}
+	b.WriteString(`
 FIELD FORMAT GUIDELINES:
 - done: observable behavior, specific, falsifiable. Bad: "works correctly". Good: "GET /users returns 200"
 - spec: path to spec optionally with #anchor
 
 TASK CREATION ORDER:
-When adding multiple tasks with dependencies, create them in topological order — dependency-free tasks first, then tasks that depend on them. liza_add_tasks validates that all `+"`depends`"+` IDs already exist; creating a task that references a not-yet-created dependency will fail.
+When adding multiple tasks with dependencies, create them in topological order — dependency-free tasks first, then tasks that depend on them. liza_add_tasks validates that all ` + "`depends`" + ` IDs already exist; creating a task that references a not-yet-created dependency will fail.
 
 ERROR RECOVERY:
 On MCP tool errors, diagnose the root cause before retrying. Read the error message, investigate the constraint that failed (e.g. missing dependency, invalid state), and fix the underlying issue. Do NOT retry the same call blindly.
 
 MULTIPLE BLOCKED TASKS: Process sequentially by priority (lowest number first), then by timestamp.
 Work unit = all planned state changes executed. Do NOT exit until all tools have been called.
-`, agentID, agentID, agentID, agentID, agentID, agentID))
+`)
 
 	// Wake instruction is rendered separately by the wake-instructions block
 	wakeInstr := fmt.Sprintf("INSTRUCTIONS:\n%s", wakeInstructions)

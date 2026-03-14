@@ -1,5 +1,10 @@
 # Changelog
 
+## [2026-03-14]
+- Added: Build epic `1.7` (TDD Configuration)
+- Added: Build story `1.7.1` (TDD Opt-Out Flag)
+- Added: Build story `1.7.2` (OutputEntry Inter-Task Dependencies)
+
 ## [2026-02-22]
 - Added: Build epic `1.1` (Contract System)
 - Added: Build epic `1.2` (Multi-Agent Coordination)

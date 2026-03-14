@@ -1,5 +1,8 @@
 # 7 - TDD Enforcement in Multi-Agent System
 
+> **Note**: ADR-0044 extends this decision to make TDD enforcement configurable
+> per workspace. The default remains TDD-mandatory. See ADR-0044 for details.
+
 ## Context and Problem Statement
 
 In pairing mode, a human reviews code and can catch when tests validate implementation rather than spec — TDD could be just a user preference. In multi-agent mode, there's no human in the short loop.

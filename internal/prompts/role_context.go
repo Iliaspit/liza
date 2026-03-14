@@ -62,6 +62,7 @@ type RoleContextData struct {
 	StatePath   string
 	SpecsDir    string
 	GoalDesc    string
+	TDDEnabled  bool // whether TDD enforcement is active
 
 	// Declarative (from pipeline YAML)
 	MandatoryDocs []string

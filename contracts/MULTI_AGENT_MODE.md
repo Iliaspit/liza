@@ -130,9 +130,11 @@ If 2 different Code Reviewers fail to issue a verdict on the same task (exit wit
 Each criterion is a test. All must pass. No more, no less.
 Example: `app greet` prints "Hello, World!", `app greet --name Alice` prints "Hello, Alice!"
 
-**TDD Enforcement:** Code tasks must include tests. Submission is rejected without test files
-unless the checkpoint declares `tdd_not_required` with justification (e.g. cosmetic-only change).
-The reviewer verifies the justification.
+**TDD Enforcement:** When `tdd_enabled` (default): code tasks must include tests. Submission
+is rejected without test files unless the checkpoint declares `tdd_not_required` with
+justification (e.g. cosmetic-only change). The reviewer verifies the justification.
+When `tdd_enabled` is false: the Code Planner is instructed to create separate test follow-up
+tasks; submission gate and reviewer do not enforce test file presence.
 
 **scope Defines Boundaries:**
 IN-scope items specify what may be touched. Touching OUT-scope files is a violation.
