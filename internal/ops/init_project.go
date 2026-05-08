@@ -230,8 +230,11 @@ func InitProject(projectRoot string, params InitProjectParams) error {
 		return fmt.Errorf("failed to create lock file: %w", err)
 	}
 
-	// Create integration branch (non-fatal)
-	_ = createIntegrationBranchAt(projectRoot, branch)
+	// Create integration branch. Init must not succeed with a broken scaffold.
+	if err := createIntegrationBranchAt(projectRoot, branch); err != nil {
+		cleanup()
+		return fmt.Errorf("failed to create integration branch %q: %w", branch, err)
+	}
 
 	return nil
 }
@@ -245,11 +248,18 @@ func validateBranch(name string) error {
 	return nil
 }
 
-// createIntegrationBranchAt creates a git branch at projectRoot if it doesn't exist.
+// createIntegrationBranchAt creates a git branch at projectRoot if it doesn't
+// exist. Repositories with no commits cannot materialize the branch ref yet, so
+// callers must surface a clear error instead of silently continuing.
 func createIntegrationBranchAt(projectRoot, name string) error {
 	cmd := exec.Command("git", "-C", projectRoot, "rev-parse", "--verify", name)
 	if err := cmd.Run(); err == nil {
 		return nil // branch already exists
+	}
+
+	cmd = exec.Command("git", "-C", projectRoot, "rev-parse", "--verify", "HEAD")
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("repo has no commits (HEAD is unborn)")
 	}
 
 	cmd = exec.Command("git", "-C", projectRoot, "branch", name, "HEAD")

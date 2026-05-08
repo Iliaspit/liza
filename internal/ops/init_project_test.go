@@ -36,6 +36,36 @@ func setupInitTestDir(t *testing.T) (projectRoot, specFile string) {
 	return projectRoot, specFile
 }
 
+func setupInitTestDirNoCommit(t *testing.T) (projectRoot, specFile string) {
+	t.Helper()
+
+	testhelpers.SetupGlobalLiza(t)
+	projectRoot = t.TempDir()
+
+	cmds := [][]string{
+		{"git", "-C", projectRoot, "init"},
+		{"git", "-C", projectRoot, "config", "user.email", "test@test.com"},
+		{"git", "-C", projectRoot, "config", "user.name", "Test"},
+	}
+	for _, args := range cmds {
+		cmd := exec.Command(args[0], args[1:]...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git command %v failed: %v\n%s", args, err, out)
+		}
+	}
+
+	specDir := filepath.Join(projectRoot, "specs")
+	if err := os.MkdirAll(specDir, 0755); err != nil {
+		t.Fatalf("Failed to create specs dir: %v", err)
+	}
+	specFile = filepath.Join(specDir, "goal.md")
+	if err := os.WriteFile(specFile, []byte("# Test Goal\n"), 0644); err != nil {
+		t.Fatalf("Failed to write spec file: %v", err)
+	}
+
+	return projectRoot, specFile
+}
+
 // gitInit initializes a bare-minimum git repo with an initial commit.
 func gitInit(t *testing.T, dir string) {
 	t.Helper()
@@ -229,6 +259,31 @@ func TestInitProject_StateReadableAfterSuccess(t *testing.T) {
 	}
 	if state.Config.Mode != models.SystemModeRunning {
 		t.Errorf("Mode = %v, want RUNNING", state.Config.Mode)
+	}
+}
+
+func TestInitProject_NoCommitsDoesNotLeaveMissingIntegrationBranch(t *testing.T) {
+	projectRoot, specFile := setupInitTestDirNoCommit(t)
+
+	err := InitProject(projectRoot, InitProjectParams{
+		Description: "Test project",
+		SpecRef:     specFile,
+	})
+	if err != nil {
+		if !strings.Contains(err.Error(), "commit") &&
+			!strings.Contains(err.Error(), "HEAD") &&
+			!strings.Contains(err.Error(), "integration branch") {
+			t.Fatalf("InitProject() error = %v, want no error with integration branch created or a clear no-commits failure", err)
+		}
+		return
+	}
+
+	out, branchErr := exec.Command("git", "-C", projectRoot, "branch", "--list", "integration").CombinedOutput()
+	if branchErr != nil {
+		t.Fatalf("git branch --list integration failed: %v\n%s", branchErr, out)
+	}
+	if strings.TrimSpace(string(out)) == "" {
+		t.Fatal("InitProject() succeeded in a no-commit repo but did not create the integration branch")
 	}
 }
 
