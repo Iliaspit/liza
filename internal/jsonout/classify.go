@@ -51,6 +51,11 @@ func ClassifyError(err error) (code string, message string) {
 		return "not_found", "resource not found"
 	}
 
+	var validationErr *lizaerrors.ValidationError
+	if errors.As(err, &validationErr) {
+		return "validation", validationErr.Message
+	}
+
 	var postWrite *ops.PostWriteValidationError
 	if errors.As(err, &postWrite) {
 		return "validation", "validation failed: precondition not met"

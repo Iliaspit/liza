@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -336,6 +337,38 @@ func TestJSON_Validate_Invalid(t *testing.T) {
 	}
 	if errObj["code"] == nil || errObj["code"] == "" {
 		t.Errorf("expected error code to be set, got %v", errObj["code"])
+	}
+}
+
+func TestJSON_Validate_DanglingParentTaskReportsValidationDetails(t *testing.T) {
+	projectRoot, _ := setupMutationTestProject(t, func(state *models.State) {
+		now := time.Now().UTC()
+		child := testhelpers.BuildTaskByStatus("task-child", models.TaskStatusReady, now)
+		missingParent := "missing-parent"
+		child.ParentTask = &missingParent
+		state.Tasks = []models.Task{child}
+	})
+
+	stdout, err := executeRootCommandCapture(t, projectRoot, "validate", "--json", "--skip-spec-check")
+	if err == nil {
+		t.Fatalf("expected validate --json to fail for dangling parent_task")
+	}
+
+	env := parseEnvelope(t, stdout)
+	if env["ok"] != false {
+		t.Fatalf("expected ok=false, got %v", env["ok"])
+	}
+
+	errObj, ok := env["error"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected error to be object, got %T", env["error"])
+	}
+	if errObj["code"] != "validation" {
+		t.Fatalf("error.code = %v, want validation", errObj["code"])
+	}
+	msg, _ := errObj["message"].(string)
+	if !strings.Contains(msg, "parent_task") || !strings.Contains(msg, "missing-parent") {
+		t.Fatalf("error.message = %q, want dangling parent_task details", msg)
 	}
 }
 
