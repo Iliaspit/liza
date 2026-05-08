@@ -126,6 +126,8 @@ type ProceedResult struct {
 
 // transitionDef defines a manual transition between role pairs.
 type transitionDef struct {
+	// sourceRolePair is the role-pair allowed to trigger this transition.
+	sourceRolePair string
 	// requiredStatus is the source task status required for this transition.
 	requiredStatus models.TaskStatus
 	// targetStatus is the status assigned to child tasks.
@@ -383,8 +385,13 @@ func proceedInner(s *models.State, taskID, transitionName string, tDef transitio
 		return fmt.Errorf("task %q not found", taskID)
 	}
 
-	if task.Status != tDef.requiredStatus {
-		return fmt.Errorf("task %q must be at %s for transition %q (current: %s)",
+	if task.RolePair != tDef.sourceRolePair {
+		return fmt.Errorf("task %q has role_pair %q, but transition %q requires source role_pair %q",
+			taskID, task.RolePair, transitionName, tDef.sourceRolePair)
+	}
+
+	if task.Status != tDef.requiredStatus && task.Status != models.TaskStatusMerged {
+		return fmt.Errorf("task %q must be at %s (or MERGED) for transition %q (current: %s)",
 			taskID, tDef.requiredStatus, transitionName, task.Status)
 	}
 
@@ -1076,6 +1083,10 @@ func buildTransitionDefFromPipeline(resolver *pipeline.Resolver, transitionName 
 	if err != nil {
 		return transitionDef{}, fmt.Errorf("invalid target role-pair in transition %q: %w", transitionName, err)
 	}
+	sourcePair, err := resolver.TransitionSourceRolePair(transitionName)
+	if err != nil {
+		return transitionDef{}, fmt.Errorf("invalid source role-pair in transition %q: %w", transitionName, err)
+	}
 
 	// Resolve doer display name and task type from the target role-pair.
 	// Task type is derived from the doer role via the taskWorkflows registry,
@@ -1089,6 +1100,7 @@ func buildTransitionDefFromPipeline(resolver *pipeline.Resolver, transitionName 
 	}
 
 	return transitionDef{
+		sourceRolePair:  sourcePair,
 		requiredStatus:  fromStatus,
 		targetStatus:    toStatus,
 		cardinality:     td.Cardinality,

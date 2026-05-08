@@ -56,6 +56,9 @@ Each transition in `.liza/pipeline.yaml` has a `cardinality`:
 
 Creates child tasks based on a completed task's `output[]` and the transition's cardinality. After proceed, run `liza resume` to start the next sprint.
 
+The source task may be either at the transition's configured source state or already at `MERGED`.
+`MERGED` is treated as satisfying the transition precondition because `liza proceed` operates from sprint-terminal source tasks and does not change the source task's status.
+
 ```bash
 liza proceed <task-id> <transition-name>
 ```

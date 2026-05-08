@@ -963,6 +963,83 @@ func TestProceed_EpicToUS_ChildRetainsCodingType(t *testing.T) {
 	}
 }
 
+func TestProceed_OneToOne_AcceptsMergedApprovedParent(t *testing.T) {
+	tmpDir, stateFile := setupPhase2PipelineProceedTest(t)
+
+	state := testhelpers.CreateValidState()
+	state.PipelineVersion = 2
+	state.Sprint.Status = models.SprintStatusCompleted
+
+	now := time.Now().UTC()
+	parentID := "epic-task-merged"
+	reviewCommit := "abc123"
+	task := models.Task{
+		ID:           parentID,
+		Type:         models.TaskTypeEpicPlanning,
+		RolePair:     "epic-planning-pair",
+		Description:  "Merged approved epic",
+		Status:       models.TaskStatusMerged,
+		Priority:     1,
+		Created:      now,
+		SpecRef:      "specs/auth.md",
+		DoneWhen:     "Epic approved and merged",
+		Scope:        "auth module",
+		ReviewCommit: &reviewCommit,
+		Output: []models.OutputEntry{
+			{Desc: "Login story", DoneWhen: "Login works", Scope: "auth", SpecRef: "specs/auth.md#login"},
+		},
+		History: []models.TaskHistoryEntry{},
+	}
+	state.Tasks = append(state.Tasks, task)
+	state.Sprint.Scope.Planned = []string{parentID}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	result, err := Proceed(tmpDir, parentID, "epic-to-us")
+	if err != nil {
+		t.Fatalf("Proceed() should accept MERGED parent for approved transition, got error: %v", err)
+	}
+	if len(result.ChildTaskIDs) != 1 {
+		t.Fatalf("ChildTaskIDs count = %d, want 1", len(result.ChildTaskIDs))
+	}
+}
+
+func TestProceed_OneToOne_RejectsMergedTaskFromWrongRolePair(t *testing.T) {
+	tmpDir, stateFile := setupPhase2PipelineProceedTest(t)
+
+	state := testhelpers.CreateValidState()
+	state.PipelineVersion = 2
+	state.Sprint.Status = models.SprintStatusCompleted
+
+	now := time.Now().UTC()
+	taskID := "coding-task-merged"
+	reviewCommit := "abc123"
+	task := models.Task{
+		ID:           taskID,
+		Type:         models.TaskTypeCoding,
+		RolePair:     "coding-pair",
+		Description:  "Merged coding task",
+		Status:       models.TaskStatusMerged,
+		Priority:     1,
+		Created:      now,
+		SpecRef:      "specs/auth.md",
+		DoneWhen:     "Coding merged",
+		Scope:        "auth module",
+		ReviewCommit: &reviewCommit,
+		History:      []models.TaskHistoryEntry{},
+	}
+	state.Tasks = append(state.Tasks, task)
+	state.Sprint.Scope.Planned = []string{taskID}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	_, err := Proceed(tmpDir, taskID, "epic-to-us")
+	if err == nil {
+		t.Fatal("Proceed() should reject MERGED task from wrong role_pair for transition")
+	}
+	if !strings.Contains(err.Error(), "role_pair") || !strings.Contains(err.Error(), "epic-planning-pair") {
+		t.Fatalf("Proceed() error = %q, want source role_pair mismatch details", err.Error())
+	}
+}
+
 func TestProceed_OneToOne_CrashRecovery_ChildExists(t *testing.T) {
 	tmpDir, stateFile := setupPhase2PipelineProceedTest(t)
 
