@@ -51,6 +51,21 @@ func findDependentTasks(tasks []models.Task, taskID string) []string {
 	return deps
 }
 
+// findParentReferencingTasks returns IDs of tasks that reference the given
+// taskID via parent_task or parent_tasks.
+func findParentReferencingTasks(tasks []models.Task, taskID string) []string {
+	var refs []string
+	for _, t := range tasks {
+		for _, parentID := range t.EffectiveParentTasks() {
+			if parentID == taskID {
+				refs = append(refs, t.ID)
+				break
+			}
+		}
+	}
+	return refs
+}
+
 // CheckDeleteTask validates that a task can be deleted and returns info needed
 // for interactive decisions (e.g., APPROVED confirmation, worktree deletion prompt).
 // Returns an error for hard blocks (MERGED without force, active lease, under review,
@@ -77,6 +92,10 @@ func CheckDeleteTask(projectRoot, taskID string, force bool) (*DeleteTaskInfo, e
 	dependentTasks := findDependentTasks(state.Tasks, taskID)
 	if len(dependentTasks) > 0 && !force {
 		return nil, fmt.Errorf("cannot delete task %s: tasks %v depend on it (use --force to override)", taskID, dependentTasks)
+	}
+	parentReferencingTasks := findParentReferencingTasks(state.Tasks, taskID)
+	if len(parentReferencingTasks) > 0 && !force {
+		return nil, fmt.Errorf("cannot delete task %s: task %s references it via parent_task (use --force to override)", taskID, parentReferencingTasks[0])
 	}
 
 	info := &DeleteTaskInfo{
@@ -129,6 +148,9 @@ func DeleteTask(projectRoot, taskID string, force, deleteWorktree bool, reason s
 		if deps := findDependentTasks(state.Tasks, taskID); len(deps) > 0 {
 			return nil, fmt.Errorf("cannot delete task %s: task %s depends on it (use --force to override)", taskID, deps[0])
 		}
+		if parentRefs := findParentReferencingTasks(state.Tasks, taskID); len(parentRefs) > 0 {
+			return nil, fmt.Errorf("cannot delete task %s: task %s references it via parent_task (use --force to override)", taskID, parentRefs[0])
+		}
 	}
 
 	taskStatus := task.Status
@@ -155,6 +177,9 @@ func DeleteTask(projectRoot, taskID string, force, deleteWorktree bool, reason s
 			}
 			if deps := findDependentTasks(state.Tasks, taskID); len(deps) > 0 {
 				return fmt.Errorf("cannot delete task %s: task %s depends on it (use --force to override)", taskID, deps[0])
+			}
+			if parentRefs := findParentReferencingTasks(state.Tasks, taskID); len(parentRefs) > 0 {
+				return fmt.Errorf("cannot delete task %s: task %s references it via parent_task (use --force to override)", taskID, parentRefs[0])
 			}
 		}
 

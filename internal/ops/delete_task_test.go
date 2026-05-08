@@ -398,6 +398,69 @@ func TestDeleteTask_DependentsForce(t *testing.T) {
 	}
 }
 
+func TestDeleteTask_BlocksDeletionWhenChildParentTaskReferencesTarget(t *testing.T) {
+	tmpDir := t.TempDir()
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	now := time.Now().UTC()
+
+	state := testhelpers.CreateValidState()
+	parent := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusReady, now)
+	child := testhelpers.BuildTaskByStatus("task-2", models.TaskStatusReady, now)
+	child.ParentTask = strPtr("task-1")
+	state.Tasks = append(state.Tasks, parent, child)
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	_, err := DeleteTask(tmpDir, "task-1", false, false, "cleanup")
+	if err == nil {
+		t.Fatal("DeleteTask() should reject deleting a parent task that is still referenced by child.parent_task")
+	}
+	if !strings.Contains(err.Error(), "parent_task") && !strings.Contains(err.Error(), "depends on it") {
+		t.Fatalf("DeleteTask() error = %q, want to mention parent/child referential integrity", err.Error())
+	}
+
+	bb := db.New(stateFile)
+	readState, readErr := bb.Read()
+	if readErr != nil {
+		t.Fatalf("Failed to read state: %v", readErr)
+	}
+	if readState.FindTask("task-1") == nil {
+		t.Fatal("Parent task should still exist after blocked deletion")
+	}
+}
+
+func TestDeleteTask_ParentReferenceForceBypassesBlock(t *testing.T) {
+	tmpDir := t.TempDir()
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	now := time.Now().UTC()
+
+	state := testhelpers.CreateValidState()
+	parent := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusReady, now)
+	child := testhelpers.BuildTaskByStatus("task-2", models.TaskStatusReady, now)
+	child.ParentTask = strPtr("task-1")
+	state.Tasks = append(state.Tasks, parent, child)
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	result, err := DeleteTask(tmpDir, "task-1", true, false, "forced cleanup")
+	if err != nil {
+		t.Fatalf("DeleteTask() with force should bypass parent_task block: %v", err)
+	}
+	if result.TaskID != "task-1" {
+		t.Fatalf("TaskID = %q, want %q", result.TaskID, "task-1")
+	}
+
+	bb := db.New(stateFile)
+	readState, readErr := bb.Read()
+	if readErr != nil {
+		t.Fatalf("Failed to read state: %v", readErr)
+	}
+	if readState.FindTask("task-1") != nil {
+		t.Fatal("Parent task should be deleted when force=true")
+	}
+	if readState.FindTask("task-2") == nil {
+		t.Fatal("Child task should remain after forced parent deletion")
+	}
+}
+
 // --- Worktree handling ---
 
 func TestDeleteTask_NoWorktree(t *testing.T) {
