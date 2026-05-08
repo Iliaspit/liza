@@ -4,6 +4,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -17,6 +20,8 @@ import (
 // instances holds per-path singleton Blackboard instances.
 // All production code should use For() to get a shared instance.
 var instances sync.Map
+
+var unsafeBlockScalarIndentRE = regexp.MustCompile(`^(.*?)([|>])([1-9])([+-]?)$`)
 
 // Blackboard provides thread-safe access to the state.yaml file
 type Blackboard struct {
@@ -241,12 +246,88 @@ func (bb *Blackboard) writeStateData(data []byte) error {
 	return nil
 }
 
+func yamlBytesParse(data []byte) error {
+	var probe any
+	return yaml.Unmarshal(data, &probe)
+}
+
+func rewriteUnsafeBlockScalarIndents(data []byte) []byte {
+	lines := strings.Split(string(data), "\n")
+	out := make([]string, 0, len(lines)+4)
+	for i, line := range lines {
+		m := unsafeBlockScalarIndentRE.FindStringSubmatch(line)
+		if m == nil {
+			out = append(out, line)
+			continue
+		}
+
+		explicitIndent, err := strconv.Atoi(m[3])
+		if err != nil {
+			out = append(out, line)
+			continue
+		}
+
+		nextIndent, found := nextNonEmptyLineIndent(lines, i+1)
+		if !found {
+			out = append(out, line)
+			continue
+		}
+
+		requiredIndent := len(leadingWhitespace(line)) + explicitIndent
+		if len(nextIndent) >= requiredIndent {
+			out = append(out, line)
+			continue
+		}
+
+		out = append(out, m[1]+m[2]+m[4])
+		out = append(out, nextIndent)
+	}
+	return []byte(strings.Join(out, "\n"))
+}
+
+func nextNonEmptyLineIndent(lines []string, start int) (string, bool) {
+	for i := start; i < len(lines); i++ {
+		if strings.TrimSpace(lines[i]) == "" {
+			continue
+		}
+		return leadingWhitespace(lines[i]), true
+	}
+	return "", false
+}
+
+func leadingWhitespace(s string) string {
+	idx := len(s) - len(strings.TrimLeft(s, " \t"))
+	if idx <= 0 {
+		return ""
+	}
+	return s[:idx]
+}
+
+func marshalStateForWrite(state *models.State) ([]byte, error) {
+	data, err := yaml.Marshal(state)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal state: %w", err)
+	}
+	if err := yamlBytesParse(data); err == nil {
+		return data, nil
+	}
+
+	// Why: go-yaml can emit broken explicit indent indicators such as `|4-`
+	// for leading-blank-line scalars; rewriting only the header preserves the
+	// original text while keeping state.yaml parseable.
+	rewritten := rewriteUnsafeBlockScalarIndents(data)
+	if err := yamlBytesParse(rewritten); err != nil {
+		return nil, fmt.Errorf("failed to marshal parseable state YAML: %w", err)
+	}
+	return rewritten, nil
+}
+
 // Write writes the state to the state file atomically with fsync
 func (bb *Blackboard) Write(state *models.State) error {
 	err := bb.fileLock.WithLockOperation("write", func() error {
-		data, err := yaml.Marshal(state)
+		data, err := marshalStateForWrite(state)
 		if err != nil {
-			return fmt.Errorf("failed to marshal state: %w", err)
+			return err
 		}
 		return bb.writeStateData(data)
 	})
@@ -278,9 +359,9 @@ func (bb *Blackboard) Modify(fn func(*models.State) error) error {
 			return fmt.Errorf("modification function failed: %w", err)
 		}
 
-		data, err = yaml.Marshal(&state)
+		data, err = marshalStateForWrite(&state)
 		if err != nil {
-			return fmt.Errorf("failed to marshal state: %w", err)
+			return err
 		}
 		return bb.writeStateData(data)
 	})

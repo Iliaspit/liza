@@ -1736,6 +1736,126 @@ sprint:
 	}
 }
 
+// TestBlackboardWriteRoundTripsLeadingBlankLineBlockScalars verifies that
+// state writes remain parseable when multiline scalar fields begin with a
+// leading blank line. This covers rejection_reason and history.reason because
+// reviewer-style markdown often starts with a blank line before headings.
+func TestBlackboardWriteRoundTripsLeadingBlankLineBlockScalars(t *testing.T) {
+	dir := t.TempDir()
+	statePath := filepath.Join(dir, "state.yaml")
+	now := time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC)
+	rejection := "\n---\nBlockers: 2\n- [blocker] specs/plans/EP-001.md:135: PATCH no-op\n- [blocker] docs/usage.md:12: Colon: inside prose"
+	historyReason := "\n---\nBlockers: 1\n- [blocker] internal/ops/proceed.go:386: wrong transition"
+
+	state := &models.State{
+		Version: 1,
+		Goal: models.Goal{
+			ID:          "goal-1",
+			Description: "repro",
+			SpecRef:     "specs/goals/repro.md",
+			Created:     now,
+			Status:      models.GoalStatusInProgress,
+		},
+		Tasks: []models.Task{{
+			ID:              "task-1",
+			Description:     "rejected task",
+			Status:          models.TaskStatusRejected,
+			Priority:        1,
+			SpecRef:         "specs/goals/repro.md",
+			DoneWhen:        "done",
+			Scope:           "small",
+			Created:         now,
+			RejectionReason: &rejection,
+			History: []models.TaskHistoryEntry{{
+				Time:   now,
+				Event:  models.TaskEventRejected,
+				Reason: &historyReason,
+			}},
+		}},
+		Agents: map[string]models.Agent{},
+		Config: models.Config{IntegrationBranch: "main"},
+	}
+
+	bb := New(statePath)
+	if err := bb.Write(state); err != nil {
+		t.Fatalf("Write failed: %v", err)
+	}
+
+	roundTripped, err := bb.Read()
+	if err != nil {
+		data, readErr := os.ReadFile(statePath)
+		if readErr != nil {
+			t.Fatalf("Read failed: %v (also failed to inspect state.yaml: %v)", err, readErr)
+		}
+		t.Fatalf("Read failed after write: %v\nemitted YAML:\n%s", err, string(data))
+	}
+
+	if got := roundTripped.Tasks[0].RejectionReason; got == nil || *got != rejection {
+		t.Fatalf("rejection_reason round-trip mismatch: got %#v", got)
+	}
+	if got := roundTripped.Tasks[0].History[0].Reason; got == nil || *got != historyReason {
+		t.Fatalf("history.reason round-trip mismatch: got %#v", got)
+	}
+}
+
+func TestBlackboardWritePreservesValidExplicitIndentSiblingScalars(t *testing.T) {
+	dir := t.TempDir()
+	statePath := filepath.Join(dir, "state.yaml")
+	now := time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC)
+	rejection := "\n---\nBlockers: 2\n- [blocker] specs/plans/EP-001.md:135: PATCH no-op"
+	validIndented := "  foo\n  bar\n"
+
+	state := &models.State{
+		Version: 1,
+		Goal: models.Goal{
+			ID:          "goal-1",
+			Description: "repro",
+			SpecRef:     "specs/goals/repro.md",
+			Created:     now,
+			Status:      models.GoalStatusInProgress,
+		},
+		Tasks: []models.Task{{
+			ID:              "task-1",
+			Description:     "rejected task",
+			Status:          models.TaskStatusRejected,
+			Priority:        1,
+			SpecRef:         "specs/goals/repro.md",
+			DoneWhen:        "done",
+			Scope:           "small",
+			Created:         now,
+			RejectionReason: &rejection,
+			History:         []models.TaskHistoryEntry{},
+		}},
+		Agents: map[string]models.Agent{},
+		Config: models.Config{IntegrationBranch: "main"},
+		Extra: map[string]any{
+			"valid_indented_scalar": validIndented,
+		},
+	}
+
+	bb := New(statePath)
+	if err := bb.Write(state); err != nil {
+		t.Fatalf("Write failed: %v", err)
+	}
+
+	roundTripped, err := bb.Read()
+	if err != nil {
+		data, readErr := os.ReadFile(statePath)
+		if readErr != nil {
+			t.Fatalf("Read failed: %v (also failed to inspect state.yaml: %v)", err, readErr)
+		}
+		t.Fatalf("Read failed after write: %v\nemitted YAML:\n%s", err, string(data))
+	}
+
+	got, ok := roundTripped.Extra["valid_indented_scalar"].(string)
+	if !ok {
+		t.Fatalf("valid_indented_scalar missing or not string: %#v", roundTripped.Extra["valid_indented_scalar"])
+	}
+	if got != validIndented {
+		t.Fatalf("valid_indented_scalar round-trip mismatch:\n got: %q\nwant: %q", got, validIndented)
+	}
+}
+
 // TestBlackboardReadNormalizesUnderscoreRoles verifies that Read returns
 // hyphenated Agent.Role even when state.yaml contains underscore-form roles.
 func TestBlackboardReadNormalizesUnderscoreRoles(t *testing.T) {
