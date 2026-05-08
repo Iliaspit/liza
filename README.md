@@ -223,22 +223,10 @@ liza init --claude --codex --gemini --mistral
 ```
 The interactive wizard walks through mode selection (pairing vs full MAS), agent selection, and handles existing `CLAUDE.md` conflicts automatically. Claude is fully automated; for other CLIs see [contract activation](https://github.com/liza-mas/liza/blob/main/contracts/contract-activation.md) for additional manual steps.
 
-> **Claude environment overrides:**<br>
-> Create a `claude.env` file at your project root to inject environment variables into Claude CLI agent processes.
-> The supervisor reads this file automatically if it exists. Format: `KEY=VALUE`, one per line (comments with `#`).
-> See https://code.claude.com/docs/en/env-vars.
-> ```bash
-> # claude.env — example
-> # Mitigate recent token usage spike, https://x.com/kunchenguid/status/2043511416448307378
-> CLAUDE_CODE_EFFORT_LEVEL=high
-> CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING=1
-> CLAUDE_CODE_DISABLE_AUTO_MEMORY=1
-> CLAUDE_CODE_SUBAGENT_MODEL=sonnet
-> ```
-
 ### Pairing and MAS Modes
 
-> **New to Liza?** Start with Pairing mode — it's the fastest way to experience how the behavioral contract changes agent behavior. The trust you build watching agents pause at gates, surface assumptions, and validate before claiming done is what makes letting them run autonomously in Multi-Agent mode a comfortable next step.
+> **New to Liza?** Start with Pairing mode — it's the fastest way to experience how the behavioral contract changes agent behavior. The trust you build watching agents pause at gates, surface assumptions, and validate before claiming done is what makes letting them run autonomously in Multi-Agent mode a comfortable next step.<br>
+> **Reading [USAGE_MULTI_AGENTS](support-docs/USAGE_MULTI_AGENTS.md)** thoroughly before running a multi-agent pipeline is essential to a successful experience. Liza is complex system.
 
 - **Pairing**: See [Pairing Guide](support-docs/USAGE_PAIRING.md) — human-agent collaboration under contract
 - **Multi-Agent (Liza)**: See [USAGE](support-docs/USAGE_MULTI_AGENTS.md), then try the [DEMO](docs/DEMO.md)
@@ -270,7 +258,7 @@ liza init "Project goal" --spec specs/vision.md     # Initialize blackboard
 liza init "Goal" --spec s.md \
   --config pipeline.yaml --entry-point epic-planning # Pipeline-configured init
 liza add-task --id t1 --desc "..." --spec "..." \
-  --done "..." --scope "..."                        # Add tasks
+  --done "..." --scope "..."                        # Add tasks (advanced feature for special cases)
 liza tui                                            # Live TUI (spawn agents, monitor, manage)
 liza agent coder                                    # Start agent supervisor (or spawn from TUI)
 liza validate                                       # Validate state
@@ -286,6 +274,19 @@ liza analyze                                        # Circuit breaker analysis
 ```
 
 > ️⚠️ To use Claude Code with your Claude subscription, make sure the ANTHROPIC_API_KEY environment variable is not set by default on a new shell start ([Claude support](https://support.claude.com/en/articles/12304248-managing-api-key-environment-variables-in-claude-code), not specific to Liza).
+
+> **Claude environment overrides:**<br>
+> Create a `claude.env` file at your project root to inject environment variables into Claude CLI agent processes.
+> The supervisor reads this file automatically if it exists. Format: `KEY=VALUE`, one per line (comments with `#`).
+> See https://code.claude.com/docs/en/env-vars.
+> ```bash
+> # claude.env — example
+> # Mitigate recent token usage spike, https://x.com/kunchenguid/status/2043511416448307378
+> CLAUDE_CODE_EFFORT_LEVEL=high
+> CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING=1
+> CLAUDE_CODE_DISABLE_AUTO_MEMORY=1
+> CLAUDE_CODE_SUBAGENT_MODEL=sonnet
+> ```
 
 ### Diagnosing Issues
 
