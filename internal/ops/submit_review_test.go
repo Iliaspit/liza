@@ -314,6 +314,37 @@ func TestSubmitForReview_RebaseConflict_TransitionsToIntegrationFailed(t *testin
 	}
 }
 
+func TestSubmitForReview_RebaseConflict_RecordsSubmissionHandoffForIntegrationFailed(t *testing.T) {
+	tmpDir, taskID, wtCommit, agentID, bb := setupRebaseConflictScenario(t)
+
+	_, err := SubmitForReview(tmpDir, taskID, wtCommit, agentID)
+	if err == nil {
+		t.Fatal("expected error due to rebase conflict, got nil")
+	}
+
+	var ifErr *IntegrationFailedError
+	if !stderrors.As(err, &ifErr) {
+		t.Fatalf("expected *IntegrationFailedError, got %T: %v", err, err)
+	}
+
+	state, err := bb.Read()
+	testhelpers.AssertNoError(t, err)
+	task := state.FindTask(taskID)
+	if task == nil {
+		t.Fatal("task not found")
+	}
+	if task.Status != models.TaskStatusIntegrationFailed {
+		t.Fatalf("task status = %s, want %s", task.Status, models.TaskStatusIntegrationFailed)
+	}
+
+	for _, event := range task.HandoffEvents {
+		if event.Trigger == models.HandoffTriggerSubmission {
+			return
+		}
+	}
+	t.Fatalf("INTEGRATION_FAILED task missing submission handoff event; handoff_events = %+v", task.HandoffEvents)
+}
+
 // setupSuccessfulSubmitScenario creates a git repo with a worktree that can be
 // cleanly rebased onto integration. Returns (tmpDir, taskID, worktreeCommitSHA, agentID, blackboard).
 func setupSuccessfulSubmitScenario(t *testing.T) (string, string, string, string, *db.Blackboard) {

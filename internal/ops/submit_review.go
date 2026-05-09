@@ -266,13 +266,21 @@ func markSubmitRebaseConflict(bb *db.Blackboard, taskID, agentID string, pipelin
 		t.AssignedTo = nil
 		t.LeaseExpires = nil
 
+		now := time.Now().UTC()
 		entry := models.TaskHistoryEntry{
-			Time:   time.Now().UTC(),
+			Time:   now,
 			Event:  models.TaskEventIntegrationFailed,
 			Agent:  &agentID,
 			Reason: &reason,
 		}
 		t.History = append(t.History, entry)
+		t.HandoffEvents = append(t.HandoffEvents, models.HandoffEvent{
+			Timestamp: now,
+			Agent:     agentID,
+			Trigger:   models.HandoffTriggerSubmission,
+			Failed:    []string{reason},
+			NextStep:  "resolve integration conflict and resubmit",
+		})
 
 		// Release the agent so it can pick up other work
 		if agent, ok := s.Agents[agentID]; ok {
