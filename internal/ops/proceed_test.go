@@ -2968,6 +2968,7 @@ func TestProceedInner_InheritedDepsAppendedAfterSiblingDeps(t *testing.T) {
 	}
 
 	tDef := transitionDef{
+		sourceRolePair: "code-planning-pair",
 		requiredStatus: models.TaskStatusMerged,
 		targetStatus:   models.TaskStatus("DRAFT_CODE"),
 		cardinality:    "per-subtask",
