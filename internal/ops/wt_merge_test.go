@@ -867,6 +867,19 @@ func TestMergeWorktree_MergeConflict(t *testing.T) {
 	if len(task.FailedBy) == 0 || task.FailedBy[0] != agentID {
 		t.Errorf("FailedBy = %v, want [%s]", task.FailedBy, agentID)
 	}
+	if !hasHandoffTriggerForTest(task.HandoffEvents, models.HandoffTriggerSubmission) {
+		t.Fatalf("INTEGRATION_FAILED task missing submission handoff event; handoff_events = %+v", task.HandoffEvents)
+	}
+	diagnostic := latestIntegrationFailureDiagnostic(t, task)
+	if diagnostic["reason"] != IntegrationReasonMergeConflict {
+		t.Errorf("diagnostic reason = %v, want %q", diagnostic["reason"], IntegrationReasonMergeConflict)
+	}
+	if diagnostic["operation"] != "wt-merge" {
+		t.Errorf("diagnostic operation = %v, want wt-merge", diagnostic["operation"])
+	}
+	if diagnostic["recovery_hint"] == "" {
+		t.Error("diagnostic recovery_hint is empty")
+	}
 }
 
 func TestMergeWorktree_IntegrationTestFailure(t *testing.T) {

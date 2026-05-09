@@ -55,6 +55,10 @@ const (
 	IntegrationReasonTestsFailed   = "integration tests failed"
 )
 
+const (
+	integrationOperationWTMerge = "wt-merge"
+)
+
 // IntegrationFailedError indicates the merge or integration tests failed.
 // State has been updated to INTEGRATION_FAILED appropriately.
 type IntegrationFailedError struct {
@@ -152,11 +156,19 @@ func markIntegrationFailedWithDiagnostic(
 			entry.Commit = &mergeCommit
 		}
 		if len(diagnostic) > 0 {
+			t.IntegrationFailure = cloneMapForTaskDiagnostic(diagnostic)
 			entry.Extra = map[string]any{
-				"diagnostic": diagnostic,
+				"diagnostic": cloneMapForTaskDiagnostic(diagnostic),
 			}
 		}
 		t.History = append(t.History, entry)
+		t.HandoffEvents = append(t.HandoffEvents, models.HandoffEvent{
+			Timestamp: time.Now().UTC(),
+			Agent:     agentID,
+			Trigger:   models.HandoffTriggerSubmission,
+			Failed:    []string{reason},
+			NextStep:  integrationFailureRecoveryHint(reason),
+		})
 
 		return nil
 	})
@@ -164,6 +176,7 @@ func markIntegrationFailedWithDiagnostic(
 
 func integrationFailureDiagnostic(reason, mergeCommit, testOutput string, rollbackErr error) map[string]any {
 	diagnostic := map[string]any{
+		"operation":     integrationOperationWTMerge,
 		"reason":        reason,
 		"recovery_hint": integrationFailureRecoveryHint(reason),
 	}
@@ -182,6 +195,17 @@ func integrationFailureDiagnostic(reason, mergeCommit, testOutput string, rollba
 		diagnostic["rollback_error"] = rollbackErr.Error()
 	}
 	return diagnostic
+}
+
+func cloneMapForTaskDiagnostic(values map[string]any) map[string]any {
+	if len(values) == 0 {
+		return nil
+	}
+	clone := make(map[string]any, len(values))
+	for key, value := range values {
+		clone[key] = value
+	}
+	return clone
 }
 
 func integrationFailureDiagnosticWithDetail(reason, detail, mergeCommit, testOutput string, rollbackErr error) map[string]any {
@@ -552,6 +576,7 @@ func MergeWorktree(projectRoot, taskID, agentID string, mergeExtra ...map[string
 		}
 		t.Worktree = nil
 		t.MergeCommit = &mergeCommit
+		t.IntegrationFailure = nil
 
 		// Record completion handoff event — audit trail for sprint analysis.
 		t.HandoffEvents = append(t.HandoffEvents, models.HandoffEvent{

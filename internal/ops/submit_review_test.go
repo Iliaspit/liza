@@ -338,12 +338,42 @@ func TestSubmitForReview_RebaseConflict_RecordsSubmissionHandoffForIntegrationFa
 		t.Fatalf("task status = %s, want %s", task.Status, models.TaskStatusIntegrationFailed)
 	}
 
+	foundSubmission := false
 	for _, event := range task.HandoffEvents {
 		if event.Trigger == models.HandoffTriggerSubmission {
-			return
+			foundSubmission = true
+			break
 		}
 	}
-	t.Fatalf("INTEGRATION_FAILED task missing submission handoff event; handoff_events = %+v", task.HandoffEvents)
+	if !foundSubmission {
+		t.Fatalf("INTEGRATION_FAILED task missing submission handoff event; handoff_events = %+v", task.HandoffEvents)
+	}
+
+	var diagnostic map[string]any
+	for i := len(task.History) - 1; i >= 0; i-- {
+		entry := task.History[i]
+		if entry.Event != models.TaskEventIntegrationFailed {
+			continue
+		}
+		var ok bool
+		diagnostic, ok = entry.Extra["diagnostic"].(map[string]any)
+		if !ok {
+			t.Fatalf("integration_failed history entry missing diagnostic; Extra = %#v", entry.Extra)
+		}
+		break
+	}
+	if diagnostic == nil {
+		t.Fatal("missing integration_failed history entry")
+	}
+	if diagnostic["operation"] != "submit-for-review" {
+		t.Errorf("diagnostic operation = %v, want submit-for-review", diagnostic["operation"])
+	}
+	if diagnostic["reason"] != IntegrationReasonMergeConflict {
+		t.Errorf("diagnostic reason = %v, want %q", diagnostic["reason"], IntegrationReasonMergeConflict)
+	}
+	if diagnostic["recovery_hint"] == "" {
+		t.Error("diagnostic recovery_hint is empty")
+	}
 }
 
 // setupSuccessfulSubmitScenario creates a git repo with a worktree that can be

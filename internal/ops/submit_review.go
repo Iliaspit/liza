@@ -16,6 +16,8 @@ import (
 	"github.com/liza-mas/liza/internal/paths"
 )
 
+const integrationOperationSubmitForReview = "submit-for-review"
+
 // SubmitForReviewResult contains the outcome of submitting a task for review.
 type SubmitForReviewResult struct {
 	TaskID       string `json:"task_id"`
@@ -304,12 +306,21 @@ func markSubmitRebaseConflict(bb *db.Blackboard, taskID, agentID string, pipelin
 		t.LeaseExpires = nil
 
 		now := time.Now().UTC()
+		diagnostic := map[string]any{
+			"operation":     integrationOperationSubmitForReview,
+			"reason":        reason,
+			"recovery_hint": "resolve the submit-time rebase conflict in the task worktree, then resubmit for review",
+		}
 		entry := models.TaskHistoryEntry{
 			Time:   now,
 			Event:  models.TaskEventIntegrationFailed,
 			Agent:  &agentID,
 			Reason: &reason,
+			Extra: map[string]any{
+				"diagnostic": diagnostic,
+			},
 		}
+		t.IntegrationFailure = cloneMapForTaskDiagnostic(diagnostic)
 		t.History = append(t.History, entry)
 		t.HandoffEvents = append(t.HandoffEvents, models.HandoffEvent{
 			Timestamp: now,

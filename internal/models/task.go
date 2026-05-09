@@ -224,6 +224,7 @@ type Task struct {
 	Supersedes          *string            `yaml:"supersedes,omitempty"`
 	RescopeReason       *string            `yaml:"rescope_reason,omitempty"`
 	FailedBy            []string           `yaml:"failed_by,omitempty"`
+	IntegrationFailure  map[string]any     `yaml:"integration_failure,omitempty" json:"integration_failure,omitempty"`
 	Attempt             int                `yaml:"attempt,omitempty"`
 	DependsOn           []string           `yaml:"depends_on,omitempty"`
 	IntegrationFix      bool               `yaml:"integration_fix,omitempty"`
