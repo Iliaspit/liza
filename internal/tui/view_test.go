@@ -874,6 +874,31 @@ func TestRenderActivityPanel_AlertEntryFormat(t *testing.T) {
 	assertContains(t, out, "agent coder-1 lease expired", "alert entry should contain message")
 }
 
+func TestRenderActivityPanel_ResolvedAlertEntryFormat(t *testing.T) {
+	ts := time.Date(2026, 3, 26, 15, 0, 0, 0, time.UTC)
+	m := Model{
+		width:      120,
+		height:     40,
+		columnTier: ColumnTierStandard,
+		styles:     NewStyles(120),
+		activities: []ActivityEntry{
+			{
+				Timestamp: ts,
+				Source:    "alert",
+				Level:     "🚨",
+				Action:    "INVALID STATE",
+				Detail:    "MERGED task still has worktree: task-1",
+				AlertKey:  "INVALID STATE:MERGED task still has worktree: task-1",
+				Resolved:  true,
+			},
+		},
+	}
+
+	out := m.renderActivityPanel(10)
+	assertContains(t, out, "resolved INVALID STATE", "resolved alert should be marked historical")
+	assertContains(t, out, "MERGED task still has worktree", "resolved alert should retain original detail")
+}
+
 func TestRenderActivityPanel_AlertEntryColoredLevel(t *testing.T) {
 	ts := time.Date(2026, 3, 26, 15, 0, 0, 0, time.UTC)
 

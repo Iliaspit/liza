@@ -1938,6 +1938,102 @@ func TestRunChecksWithState_StuckAlertsDedupedAndRealertAfterClear(t *testing.T)
 	}
 }
 
+func TestRunChecksWithStateSnapshot_ReportsActiveKeysForThrottledAlerts(t *testing.T) {
+	now := time.Now().UTC()
+
+	tmpDir := t.TempDir()
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	testhelpers.SetupPipelineConfig(t, tmpDir)
+
+	config := WatchConfig{
+		ProjectRoot: tmpDir,
+		AlertsLog:   paths.New(tmpDir).AlertsLogPath(),
+		StateCache:  make(map[string]time.Time),
+	}
+
+	failedState := testhelpers.CreateValidState()
+	failedState.Tasks = []models.Task{
+		testhelpers.BuildTaskByStatus("task-1", models.TaskStatusIntegrationFailed, now),
+	}
+	testhelpers.WriteInitialState(t, stateFile, failedState)
+
+	first := RunChecksWithStateSnapshot(failedState, config)
+	if got := countAlertsByCategory(first.Alerts, "INTEGRATION FAILED"); got != 1 {
+		t.Fatalf("first poll emitted alerts = %d, want 1; alerts: %v", got, first.Alerts)
+	}
+	if len(first.ActiveKeys) == 0 {
+		t.Fatal("first poll should report active alert keys")
+	}
+
+	second := RunChecksWithStateSnapshot(failedState, config)
+	if got := countAlertsByCategory(second.Alerts, "INTEGRATION FAILED"); got != 0 {
+		t.Fatalf("second poll emitted alerts = %d, want 0; alerts: %v", got, second.Alerts)
+	}
+	if len(second.ActiveKeys) == 0 {
+		t.Fatal("second poll should keep active alert key despite throttling")
+	}
+
+	mergedState := testhelpers.CreateValidState()
+	mergedState.Tasks = []models.Task{
+		testhelpers.BuildTaskByStatus("task-1", models.TaskStatusMerged, now),
+	}
+	testhelpers.WriteInitialState(t, stateFile, mergedState)
+
+	cleared := RunChecksWithStateSnapshot(mergedState, config)
+	for key := range second.ActiveKeys {
+		if cleared.ActiveKeys[key] {
+			t.Fatalf("cleared poll still reports inactive key %q active", key)
+		}
+	}
+}
+
+func TestRunChecksWithStateSnapshot_ReportsActiveKeysForLeaseExpired(t *testing.T) {
+	now := time.Now().UTC()
+
+	tmpDir := t.TempDir()
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	testhelpers.SetupPipelineConfig(t, tmpDir)
+
+	taskID := "task-lease"
+	expiredLease := now.Add(-models.LeaseExpiryGracePeriod - time.Minute)
+	state := testhelpers.CreateValidState()
+	state.Tasks = []models.Task{
+		testhelpers.BuildTaskByStatus(taskID, models.TaskStatusImplementing, now),
+	}
+	state.Agents = map[string]models.Agent{
+		"coder-1": {
+			Role:         models.RoleCoder,
+			Status:       models.AgentStatusWorking,
+			CurrentTask:  &taskID,
+			LeaseExpires: &expiredLease,
+			Heartbeat:    now,
+		},
+	}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	config := WatchConfig{
+		ProjectRoot: tmpDir,
+		AlertsLog:   paths.New(tmpDir).AlertsLogPath(),
+		StateCache:  make(map[string]time.Time),
+	}
+
+	snapshot := RunChecksWithStateSnapshot(state, config)
+	if got := countAlertsByCategory(snapshot.Alerts, "LEASE EXPIRED"); got != 1 {
+		t.Fatalf("LEASE EXPIRED alerts = %d, want 1; alerts: %v", got, snapshot.Alerts)
+	}
+
+	for _, alert := range snapshot.Alerts {
+		if alert.Category != "LEASE EXPIRED" {
+			continue
+		}
+		if !snapshot.ActiveKeys[AlertKey(alert)] {
+			t.Fatalf("LEASE EXPIRED active key %q missing from snapshot", AlertKey(alert))
+		}
+		return
+	}
+	t.Fatal("missing LEASE EXPIRED alert")
+}
+
 func countAlertsByCategory(alerts []Alert, category string) int {
 	count := 0
 	for _, alert := range alerts {

@@ -197,6 +197,94 @@ func TestUpdateAlertsMsgWriteErrSurfacesInActivityFeed(t *testing.T) {
 	}
 }
 
+func TestUpdateAlertsMsgMarksInactiveAlertsResolved(t *testing.T) {
+	m := testModel()
+	key := "INVALID STATE:MERGED task still has worktree: task-1"
+
+	result, _ := m.Update(alertsMsg{
+		Alerts: []AlertMsg{{
+			Timestamp: time.Now(),
+			Level:     "🚨",
+			Category:  "INVALID STATE",
+			Message:   "MERGED task still has worktree: task-1",
+			Key:       key,
+		}},
+		ActiveAlertKeys: map[string]bool{key: true},
+		StateCache:      map[string]time.Time{},
+	})
+	updated := result.(Model)
+	if len(updated.activities) != 1 {
+		t.Fatalf("activities = %d, want 1", len(updated.activities))
+	}
+	if updated.activities[0].Resolved {
+		t.Fatal("new active alert should not be resolved")
+	}
+
+	result, _ = updated.Update(alertsMsg{
+		Alerts:          nil,
+		ActiveAlertKeys: map[string]bool{},
+		StateCache:      map[string]time.Time{},
+	})
+	updated = result.(Model)
+	if !updated.activities[0].Resolved {
+		t.Fatal("previous alert should be marked resolved when absent from active alert keys")
+	}
+}
+
+func TestUpdateAlertsMsgKeepsThrottledActiveAlertsCurrent(t *testing.T) {
+	m := testModel()
+	key := "INTEGRATION FAILED:task-1 needs integration recovery"
+
+	result, _ := m.Update(alertsMsg{
+		Alerts: []AlertMsg{{
+			Timestamp: time.Now(),
+			Level:     "🚨",
+			Category:  "INTEGRATION FAILED",
+			Message:   "task-1 needs integration recovery",
+			Key:       key,
+		}},
+		ActiveAlertKeys: map[string]bool{key: true},
+		StateCache:      map[string]time.Time{},
+	})
+	updated := result.(Model)
+
+	result, _ = updated.Update(alertsMsg{
+		Alerts:          nil,
+		ActiveAlertKeys: map[string]bool{key: true},
+		StateCache:      map[string]time.Time{},
+	})
+	updated = result.(Model)
+	if updated.activities[0].Resolved {
+		t.Fatal("throttled alert should remain current while active alert key is present")
+	}
+}
+
+func TestUpdateAlertsMsgClearsResolvedAlertBanner(t *testing.T) {
+	key := "INVALID STATE:MERGED task still has worktree: task-1"
+	m := testModel()
+	m.alertBanner = &ActivityEntry{
+		Source:   "alert",
+		Level:    "🚨",
+		Action:   "INVALID STATE",
+		Detail:   "MERGED task still has worktree: task-1",
+		AlertKey: key,
+	}
+	m.alertExpiry = time.Now().Add(time.Minute)
+
+	result, _ := m.Update(alertsMsg{
+		Alerts:          nil,
+		ActiveAlertKeys: map[string]bool{},
+		StateCache:      map[string]time.Time{},
+	})
+	updated := result.(Model)
+	if updated.alertBanner != nil {
+		t.Fatal("resolved critical alert should clear alert banner")
+	}
+	if !updated.alertExpiry.IsZero() {
+		t.Fatalf("resolved critical alert should clear alert expiry, got %v", updated.alertExpiry)
+	}
+}
+
 func TestUpdateLogEntriesMsgUpdatesPositionAndAppends(t *testing.T) {
 	m := testModel()
 	m.logPosition = 100

@@ -512,6 +512,10 @@ func (m Model) formatActivityEntry(e ActivityEntry) string {
 	case "alert":
 		// HH:MM:SS  {level}  {category}: {message}
 		levelStyled := m.colorLevel(e.Level)
+		if e.Resolved {
+			levelStyled = lipgloss.NewStyle().Foreground(ColorTerminal).Render("✓")
+			return m.styles.Dimmed.Render(fmt.Sprintf("  %s  %s  resolved %s: %s", ts, levelStyled, e.Action, e.Detail))
+		}
 		return fmt.Sprintf("  %s  %s  %s: %s", ts, levelStyled, e.Action, e.Detail)
 
 	case "anomaly":

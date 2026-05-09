@@ -48,6 +48,13 @@ type Alert struct {
 	Message   string
 }
 
+// AlertSnapshot contains both newly emitted alerts and the complete set of
+// currently active alert identities for consumers that need freshness state.
+type AlertSnapshot struct {
+	Alerts     []Alert
+	ActiveKeys map[string]bool
+}
+
 func (a Alert) String() string {
 	return fmt.Sprintf("[%s] %s %s: %s",
 		a.Timestamp.UTC().Format(time.RFC3339),
@@ -172,6 +179,12 @@ func runChecks(_ context.Context, config WatchConfig) error {
 // sprint stalled, and state validity checks against the provided state.
 // The config.StateCache is modified in place for alert throttling.
 func RunChecksWithState(state *models.State, config WatchConfig) []Alert {
+	return RunChecksWithStateSnapshot(state, config).Alerts
+}
+
+// RunChecksWithStateSnapshot runs checks and returns emitted alerts plus active
+// alert keys before throttling. The config.StateCache is modified in place.
+func RunChecksWithStateSnapshot(state *models.State, config WatchConfig) AlertSnapshot {
 	if config.StateCache == nil {
 		config.StateCache = make(map[string]time.Time)
 	}
@@ -231,7 +244,43 @@ func RunChecksWithState(state *models.State, config WatchConfig) []Alert {
 		})
 	}
 
-	return reconcileStuckAlerts(alerts, config.StateCache)
+	activeKeys := activeAlertKeys(alerts)
+	return AlertSnapshot{
+		Alerts:     reconcileStuckAlerts(alerts, config.StateCache),
+		ActiveKeys: activeKeys,
+	}
+}
+
+func activeAlertKeys(alerts []Alert) map[string]bool {
+	keys := make(map[string]bool, len(alerts))
+	for _, alert := range alerts {
+		if !isFreshnessTrackedAlertCategory(alert.Category) {
+			continue
+		}
+		keys[AlertKey(alert)] = true
+	}
+	return keys
+}
+
+// AlertKey returns a stable identity for an alert condition.
+func AlertKey(alert Alert) string {
+	return alert.Category + ":" + alert.Message
+}
+
+func isFreshnessTrackedAlertCategory(category string) bool {
+	// Only track categories that are recomputed and emitted on every check while
+	// active, or are deduped after building a full active set. Categories with
+	// internal throttle caches, such as STALLED or STALE SENTINEL, need their
+	// checks to expose active identities before the TUI can safely resolve them.
+	if isStuckAlertCategory(category) {
+		return true
+	}
+	switch category {
+	case "LEASE EXPIRED", "REVIEW LEASE EXPIRED":
+		return true
+	default:
+		return false
+	}
 }
 
 func reconcileStuckAlerts(alerts []Alert, cache map[string]time.Time) []Alert {
@@ -277,7 +326,7 @@ func isStuckAlertCategory(category string) bool {
 }
 
 func stuckAlertCacheKey(alert Alert) string {
-	return stuckAlertCachePrefix + alert.Category + ":" + alert.Message
+	return stuckAlertCachePrefix + AlertKey(alert)
 }
 
 func checkCircuitBreakerEscalation(state *models.State, cache map[string]time.Time) []Alert {

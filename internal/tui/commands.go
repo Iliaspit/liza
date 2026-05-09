@@ -120,31 +120,37 @@ func runChecksCmd(projectRoot, alertsLogPath string, state *models.State, cache 
 			StateCache:  cacheCopy,
 		}
 
-		alerts := commands.RunChecksWithState(state, config)
+		snapshot := commands.RunChecksWithStateSnapshot(state, config)
 
 		// Write each alert to alerts.log
 		var writeErr error
-		for _, a := range alerts {
+		for _, a := range snapshot.Alerts {
 			if err := commands.WriteAlert(alertsLogPath, a); err != nil && writeErr == nil {
 				writeErr = err
 			}
 		}
 
 		// Convert to TUI AlertMsg types
-		alertMsgs := make([]AlertMsg, len(alerts))
-		for i, a := range alerts {
+		alertMsgs := make([]AlertMsg, len(snapshot.Alerts))
+		for i, a := range snapshot.Alerts {
+			key := commands.AlertKey(a)
+			if !snapshot.ActiveKeys[key] {
+				key = ""
+			}
 			alertMsgs[i] = AlertMsg{
 				Timestamp: a.Timestamp,
 				Level:     string(a.Level),
 				Category:  a.Category,
 				Message:   a.Message,
+				Key:       key,
 			}
 		}
 
 		return alertsMsg{
-			Alerts:     alertMsgs,
-			StateCache: cacheCopy,
-			WriteErr:   writeErr,
+			Alerts:          alertMsgs,
+			ActiveAlertKeys: snapshot.ActiveKeys,
+			StateCache:      cacheCopy,
+			WriteErr:        writeErr,
 		}
 	}
 }

@@ -58,6 +58,7 @@ type AlertMsg struct {
 	Level     string // "⚠️" or "🚨"
 	Category  string
 	Message   string
+	Key       string
 }
 
 // CmdResultMsg carries the result of a command execution (success or error).
@@ -99,9 +100,10 @@ type watcherClosedMsg struct{}
 //
 //lint:ignore U1000 used by commands.go and update.go
 type alertsMsg struct {
-	Alerts     []AlertMsg
-	StateCache map[string]time.Time
-	WriteErr   error // non-nil if alert persistence to alerts.log failed
+	Alerts          []AlertMsg
+	ActiveAlertKeys map[string]bool
+	StateCache      map[string]time.Time
+	WriteErr        error // non-nil if alert persistence to alerts.log failed
 }
 
 // errMsg carries an error from an async Cmd function.
@@ -124,6 +126,8 @@ type ActivityEntry struct {
 	Task      string // empty if not task-specific
 	Detail    string
 	Level     string // empty for log entries, "⚠️" or "🚨" for alerts
+	AlertKey  string // stable watch-alert identity; empty for non-watch entries
+	Resolved  bool   // true when a later check no longer reports AlertKey active
 }
 
 // ColumnTier defines which columns are visible at a given terminal width.

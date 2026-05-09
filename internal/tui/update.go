@@ -97,6 +97,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case alertsMsg:
 		// Update state cache with modified copy from check goroutine
 		m.stateCache = msg.StateCache
+		m.activities = resolveInactiveAlerts(m.activities, msg.ActiveAlertKeys)
+		if shouldClearResolvedBanner(m.alertBanner, msg.ActiveAlertKeys) {
+			m.alertBanner = nil
+			m.alertExpiry = time.Time{}
+		}
 
 		for _, a := range msg.Alerts {
 			entry := ActivityEntry{
@@ -105,6 +110,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				Action:    a.Category,
 				Detail:    a.Message,
 				Level:     a.Level,
+				AlertKey:  a.Key,
 			}
 			m.activities = appendActivity(m.activities, entry)
 
@@ -620,6 +626,26 @@ func appendActivity(activities []ActivityEntry, entry ActivityEntry) []ActivityE
 		activities = activities[len(activities)-200:]
 	}
 	return activities
+}
+
+func resolveInactiveAlerts(activities []ActivityEntry, activeKeys map[string]bool) []ActivityEntry {
+	if activeKeys == nil {
+		return activities
+	}
+	for i := range activities {
+		if activities[i].Source != "alert" || activities[i].AlertKey == "" {
+			continue
+		}
+		activities[i].Resolved = !activeKeys[activities[i].AlertKey]
+	}
+	return activities
+}
+
+func shouldClearResolvedBanner(alertBanner *ActivityEntry, activeKeys map[string]bool) bool {
+	if alertBanner == nil || alertBanner.AlertKey == "" || activeKeys == nil {
+		return false
+	}
+	return !activeKeys[alertBanner.AlertKey]
 }
 
 // formatAnomalyDetails converts an anomaly's Details map to a compact display string.
