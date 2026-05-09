@@ -200,9 +200,10 @@ func TestSecretMaskerAddEntries(t *testing.T) {
 		m.AddEntries([]string{
 			"BACKUP_API_KEY=sk-same-secret-value",
 		})
-		// Should still have only one secret entry
-		if len(m.secrets) != 1 {
-			t.Errorf("expected 1 secret after dedup, got %d", len(m.secrets))
+		input := "first=sk-same-secret-value second=sk-same-secret-value"
+		want := "first=*** second=***"
+		if got := m.MaskText(input); got != want {
+			t.Errorf("MaskText =\n  %q\nwant\n  %q", got, want)
 		}
 	})
 }

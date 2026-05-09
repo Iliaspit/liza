@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/liza-mas/liza/internal/db"
 	lizaerrors "github.com/liza-mas/liza/internal/errors"
@@ -20,10 +21,17 @@ import (
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/paths"
 	"github.com/liza-mas/liza/internal/projectdetect"
+	"github.com/liza-mas/liza/internal/secretmask"
 )
 
 // maxMergeRetries is the maximum number of CAS retry attempts for the merge loop.
 const maxMergeRetries = 3
+
+// maxIntegrationDiagnosticOutputExcerptBytes bounds test output persisted into
+// task history. Full output remains transient on IntegrationFailedError.
+const maxIntegrationDiagnosticOutputExcerptBytes = 4096
+
+const integrationTestCommand = "scripts/integration-test.sh"
 
 // DefaultIntegrationTestTimeout bounds how long integration tests may run
 // before the merge pipeline kills them. A hanging test without this timeout
@@ -90,6 +98,23 @@ func pipelineTransition(t *models.Task, to models.TaskStatus, pb *pipelineBundle
 // Re-validates the task is still in an approved state to prevent concurrent transitions.
 // If mergeCommit is non-empty, it's recorded on both the task and the history entry.
 func markIntegrationFailed(bb *db.Blackboard, taskID, agentID, reason, mergeCommit string, pb *pipelineBundle) error {
+	return markIntegrationFailedWithDiagnostic(
+		bb,
+		taskID,
+		agentID,
+		reason,
+		mergeCommit,
+		pb,
+		integrationFailureDiagnostic(reason, mergeCommit, "", nil),
+	)
+}
+
+func markIntegrationFailedWithDiagnostic(
+	bb *db.Blackboard,
+	taskID, agentID, reason, mergeCommit string,
+	pb *pipelineBundle,
+	diagnostic map[string]any,
+) error {
 	var pr models.PipelineResolver
 	if pb != nil {
 		pr = pb.pr
@@ -126,10 +151,71 @@ func markIntegrationFailed(bb *db.Blackboard, taskID, agentID, reason, mergeComm
 			t.MergeCommit = &mergeCommit
 			entry.Commit = &mergeCommit
 		}
+		if len(diagnostic) > 0 {
+			entry.Extra = map[string]any{
+				"diagnostic": diagnostic,
+			}
+		}
 		t.History = append(t.History, entry)
 
 		return nil
 	})
+}
+
+func integrationFailureDiagnostic(reason, mergeCommit, testOutput string, rollbackErr error) map[string]any {
+	diagnostic := map[string]any{
+		"reason":        reason,
+		"recovery_hint": integrationFailureRecoveryHint(reason),
+	}
+	if mergeCommit != "" {
+		diagnostic["merge_commit"] = mergeCommit
+	}
+	if testOutput != "" {
+		outputExcerpt, truncated := persistedOutputExcerpt(secretmask.New().MaskText(testOutput), maxIntegrationDiagnosticOutputExcerptBytes)
+		diagnostic["test_output_excerpt"] = outputExcerpt
+		diagnostic["output_truncated"] = truncated
+		// Raw byte count is pre-redaction; it describes the transient command output size.
+		diagnostic["output_bytes"] = len([]byte(testOutput))
+		diagnostic["failing_command"] = integrationTestCommand
+	}
+	if rollbackErr != nil {
+		diagnostic["rollback_error"] = rollbackErr.Error()
+	}
+	return diagnostic
+}
+
+func integrationFailureDiagnosticWithDetail(reason, detail, mergeCommit, testOutput string, rollbackErr error) map[string]any {
+	diagnostic := integrationFailureDiagnostic(reason, mergeCommit, testOutput, rollbackErr)
+	if detail != "" {
+		diagnostic["detail"] = detail
+	}
+	return diagnostic
+}
+
+func persistedOutputExcerpt(output string, maxBytes int) (string, bool) {
+	if maxBytes <= 0 || len([]byte(output)) <= maxBytes {
+		return output, false
+	}
+
+	excerpt := []byte(output)
+	excerpt = excerpt[:maxBytes]
+	for !utf8.Valid(excerpt) && len(excerpt) > 0 {
+		excerpt = excerpt[:len(excerpt)-1]
+	}
+	return string(excerpt), true
+}
+
+func integrationFailureRecoveryHint(reason string) string {
+	switch reason {
+	case IntegrationReasonHEADMismatch:
+		return "verify the task worktree HEAD matches review_commit before retrying integration"
+	case IntegrationReasonMergeConflict:
+		return "resolve the integration conflict in the task worktree, resubmit, and retry merge"
+	case IntegrationReasonTestsFailed:
+		return "inspect the integration test output, fix the task branch, resubmit, and retry merge"
+	default:
+		return "inspect the integration failure details before retrying merge"
+	}
 }
 
 // shortSHA truncates a SHA to 7 characters for log messages.
@@ -303,8 +389,9 @@ func MergeWorktree(projectRoot, taskID, agentID string, mergeExtra ...map[string
 
 		if wtHEAD != expectedCommit {
 			// HEAD mismatch indicates state corruption — stops retry loops, preserves worktree
-			reason := fmt.Sprintf("worktree HEAD (%s) does not match approved commit (%s)", shortSHA(wtHEAD), shortSHA(expectedCommit))
-			if err := markIntegrationFailed(bb, taskID, agentID, reason, "", pb); err != nil {
+			detail := fmt.Sprintf("worktree HEAD (%s) does not match approved commit (%s)", shortSHA(wtHEAD), shortSHA(expectedCommit))
+			diagnostic := integrationFailureDiagnosticWithDetail(IntegrationReasonHEADMismatch, detail, "", "", nil)
+			if err := markIntegrationFailedWithDiagnostic(bb, taskID, agentID, IntegrationReasonHEADMismatch, "", pb, diagnostic); err != nil {
 				return nil, fmt.Errorf("failed to update state to INTEGRATION_FAILED: %w", err)
 			}
 
@@ -360,7 +447,7 @@ func MergeWorktree(projectRoot, taskID, agentID string, mergeExtra ...map[string
 	var testsRan bool
 	var noTestScriptFound bool
 	var testOutput string
-	integrationTestScript := filepath.Join(projectRoot, "scripts", "integration-test.sh")
+	integrationTestScript := filepath.Join(projectRoot, integrationTestCommand)
 	if _, statErr := os.Stat(integrationTestScript); statErr == nil {
 		testsRan = true
 		var combinedOutput bytes.Buffer
@@ -402,7 +489,8 @@ func MergeWorktree(projectRoot, taskID, agentID string, mergeExtra ...map[string
 				}
 			}
 
-			if updateErr := markIntegrationFailed(bb, taskID, agentID, "integration tests failed", mergeCommit, pb); updateErr != nil {
+			diagnostic := integrationFailureDiagnostic(IntegrationReasonTestsFailed, mergeCommit, testOutput, rollbackErr)
+			if updateErr := markIntegrationFailedWithDiagnostic(bb, taskID, agentID, IntegrationReasonTestsFailed, mergeCommit, pb, diagnostic); updateErr != nil {
 				return nil, fmt.Errorf("failed to update state to INTEGRATION_FAILED: %w", updateErr)
 			}
 

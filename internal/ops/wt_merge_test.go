@@ -938,6 +938,107 @@ func TestMergeWorktree_IntegrationTestFailure(t *testing.T) {
 	}
 }
 
+func TestMergeWorktree_IntegrationFailurePersistsDiagnostic(t *testing.T) {
+	taskID := "merge-diagnostic"
+	agentID := "coder-1"
+	tmpDir, stateFile := setupMergeTestRepo(t, taskID, agentID)
+
+	const (
+		secretValue       = "abcd1234efgh5678"
+		overlappingSecret = "1234efgh"
+		partiallyRedacted = "abcd***5678"
+	)
+	t.Setenv("LIZA_TEST_API_KEY", secretValue)
+	t.Setenv("LIZA_TEST_TOKEN", overlappingSecret)
+
+	scriptsDir := filepath.Join(tmpDir, "scripts")
+	if err := os.MkdirAll(scriptsDir, 0755); err != nil {
+		t.Fatalf("Failed to create scripts dir: %v", err)
+	}
+	script := filepath.Join(scriptsDir, "integration-test.sh")
+	scriptBody := "#!/bin/sh\n" +
+		"echo \"FAIL: DiagnosticEvidence $LIZA_TEST_API_KEY $LIZA_TEST_TOKEN\"\n" +
+		"head -c 5000 /dev/zero | tr '\\000' 'x'\n" +
+		"exit 1\n"
+	if err := os.WriteFile(script, []byte(scriptBody), 0755); err != nil {
+		t.Fatalf("Failed to write test script: %v", err)
+	}
+
+	_, err := MergeWorktree(tmpDir, taskID, agentID)
+	if err == nil {
+		t.Fatal("Expected error for test failure, got nil")
+	}
+
+	var intErr *IntegrationFailedError
+	if !errors.As(err, &intErr) {
+		t.Fatalf("Expected *IntegrationFailedError, got %T: %v", err, err)
+	}
+
+	state := readStateForTest(t, stateFile)
+	task := state.FindTask(taskID)
+	if task == nil {
+		t.Fatal("Task not found in state")
+	}
+	if task.Status != models.TaskStatusIntegrationFailed {
+		t.Fatalf("Task status = %v, want INTEGRATION_FAILED", task.Status)
+	}
+
+	diagnostic := latestIntegrationFailureDiagnostic(t, task)
+	if diagnostic["reason"] != IntegrationReasonTestsFailed {
+		t.Errorf("diagnostic reason = %v, want %q", diagnostic["reason"], IntegrationReasonTestsFailed)
+	}
+	if _, ok := diagnostic["test_output"]; ok {
+		t.Errorf("diagnostic should not persist raw test_output; got %v", diagnostic["test_output"])
+	}
+	testOutputExcerpt, _ := diagnostic["test_output_excerpt"].(string)
+	if !strings.Contains(testOutputExcerpt, "FAIL: DiagnosticEvidence") {
+		t.Errorf("diagnostic test_output_excerpt = %q, want failing test evidence", testOutputExcerpt)
+	}
+	if strings.Contains(testOutputExcerpt, secretValue) {
+		t.Error("diagnostic test_output_excerpt should redact environment-derived secrets")
+	}
+	if strings.Contains(testOutputExcerpt, overlappingSecret) {
+		t.Error("diagnostic test_output_excerpt should redact overlapping environment-derived secrets")
+	}
+	if strings.Contains(testOutputExcerpt, partiallyRedacted) {
+		t.Error("diagnostic test_output_excerpt should not leak partially redacted overlapping secrets")
+	}
+	if len([]byte(testOutputExcerpt)) > maxIntegrationDiagnosticOutputExcerptBytes {
+		t.Errorf("diagnostic test_output_excerpt bytes = %d, want <= %d", len([]byte(testOutputExcerpt)), maxIntegrationDiagnosticOutputExcerptBytes)
+	}
+	if diagnostic["output_truncated"] != true {
+		t.Errorf("diagnostic output_truncated = %v, want true", diagnostic["output_truncated"])
+	}
+	outputBytes, _ := diagnostic["output_bytes"].(int)
+	if outputBytes <= maxIntegrationDiagnosticOutputExcerptBytes {
+		t.Errorf("diagnostic output_bytes = %d, want > %d", outputBytes, maxIntegrationDiagnosticOutputExcerptBytes)
+	}
+	if diagnostic["failing_command"] != integrationTestCommand {
+		t.Errorf("diagnostic failing_command = %v, want %q", diagnostic["failing_command"], integrationTestCommand)
+	}
+	recoveryHint, _ := diagnostic["recovery_hint"].(string)
+	if recoveryHint == "" {
+		t.Error("diagnostic recovery_hint is empty")
+	}
+}
+
+func latestIntegrationFailureDiagnostic(t *testing.T, task *models.Task) map[string]any {
+	t.Helper()
+	for i := len(task.History) - 1; i >= 0; i-- {
+		entry := task.History[i]
+		if entry.Event != models.TaskEventIntegrationFailed {
+			continue
+		}
+		diagnostic, ok := entry.Extra["diagnostic"].(map[string]any)
+		if !ok {
+			t.Fatalf("integration_failed history entry missing structured diagnostic; Extra = %#v", entry.Extra)
+		}
+		return diagnostic
+	}
+	t.Fatal("missing integration_failed history entry")
+	return nil
+}
+
 func TestMergeWorktree_IntegrationTestTimeout(t *testing.T) {
 	taskID := "merge-timeout"
 	agentID := "coder-1"
@@ -1137,6 +1238,24 @@ func TestMergeWorktree_HEADMismatch(t *testing.T) {
 	}
 	if intErr.Reason != IntegrationReasonHEADMismatch {
 		t.Errorf("Reason = %q, want %q", intErr.Reason, IntegrationReasonHEADMismatch)
+	}
+
+	state := readStateForTest(t, stateFile)
+	task := state.FindTask(taskID)
+	if task == nil {
+		t.Fatal("Task not found in state")
+	}
+	diagnostic := latestIntegrationFailureDiagnostic(t, task)
+	if diagnostic["reason"] != IntegrationReasonHEADMismatch {
+		t.Errorf("diagnostic reason = %v, want %q", diagnostic["reason"], IntegrationReasonHEADMismatch)
+	}
+	detail, _ := diagnostic["detail"].(string)
+	if !strings.Contains(detail, "does not match approved commit") {
+		t.Errorf("diagnostic detail = %q, want HEAD mismatch detail", detail)
+	}
+	recoveryHint, _ := diagnostic["recovery_hint"].(string)
+	if !strings.Contains(recoveryHint, "worktree HEAD matches review_commit") {
+		t.Errorf("diagnostic recovery_hint = %q, want HEAD mismatch guidance", recoveryHint)
 	}
 }
 
