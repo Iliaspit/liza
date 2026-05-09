@@ -6,9 +6,14 @@ import "fmt"
 // operation could execute. The Reason field is intentionally client-facing
 // so that agents receive actionable feedback.
 type PreconditionError struct {
-	Reason string
+	Reason  string
+	Details map[string]any
 }
 
 func (e *PreconditionError) Error() string {
 	return fmt.Sprintf("validation failed: %s", e.Reason)
+}
+
+func (e *PreconditionError) SafeDetails() map[string]any {
+	return e.Details
 }

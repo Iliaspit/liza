@@ -152,6 +152,46 @@ func TestHasTestFiles_WithShellTestFile(t *testing.T) {
 	}
 }
 
+func TestHasTestFiles_WithNestedPythonTestFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, tmpDir)
+
+	g := git.New(tmpDir)
+	taskID := "task-nested-python-test"
+	baseCommit, err := g.CreateWorktree(taskID, "main")
+	if err != nil {
+		t.Fatalf("Failed to create worktree: %v", err)
+	}
+
+	wtPath := g.GetWorktreePath(taskID)
+	testDir := filepath.Join(wtPath, "tests", "backend")
+	if err := os.MkdirAll(testDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	testFile := filepath.Join(testDir, "test_source_resolution.py")
+	if err := os.WriteFile(testFile, []byte("def test_source_resolution():\n    assert True\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	testhelpers.MustGit(t, wtPath, "add", "tests/backend/test_source_resolution.py")
+	testhelpers.MustGit(t, wtPath, "commit", "-m", "Modify nested Python test")
+
+	diagnostics, err := AnalyzeTestFiles(g, taskID, baseCommit, "HEAD")
+	if err != nil {
+		t.Fatalf("AnalyzeTestFiles failed: %v", err)
+	}
+	if len(diagnostics.TestFilesMatched) != 1 || diagnostics.TestFilesMatched[0] != "tests/backend/test_source_resolution.py" {
+		t.Fatalf("TestFilesMatched = %v, want [tests/backend/test_source_resolution.py]", diagnostics.TestFilesMatched)
+	}
+
+	hasTests, err := HasTestFiles(g, taskID, baseCommit)
+	if err != nil {
+		t.Fatalf("HasTestFiles failed: %v", err)
+	}
+	if !hasTests {
+		t.Error("Expected HasTestFiles to return true for nested Python test file")
+	}
+}
+
 func TestHasTestFiles_WithoutTestFile(t *testing.T) {
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)

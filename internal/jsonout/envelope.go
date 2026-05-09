@@ -16,8 +16,9 @@ type Envelope struct {
 
 // ErrorDetail contains structured error information.
 type ErrorDetail struct {
-	Code    string `json:"code"`
-	Message string `json:"message"`
+	Code    string         `json:"code"`
+	Message string         `json:"message"`
+	Details map[string]any `json:"details,omitempty"`
 }
 
 // ErrAlreadyWritten is a sentinel error indicating that a JSON error envelope
@@ -39,6 +40,7 @@ func WriteResult(w io.Writer, result any, warnings []string, err error) error {
 			Error: &ErrorDetail{
 				Code:    code,
 				Message: msg,
+				Details: ErrorDetails(err),
 			},
 		}
 		_ = enc.Encode(env)

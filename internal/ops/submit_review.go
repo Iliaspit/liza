@@ -126,12 +126,15 @@ func SubmitForReview(projectRoot, taskID, commitRef, agentID string) (*SubmitFor
 	// TDD enforcement: code tasks must include test files (doer roles only).
 	roleType, _ := resolver.RoleType(runtimeRole)
 	if roleType == "doer" && task.EffectiveType() == models.TaskTypeCoding && task.BaseCommit != nil {
-		hasTests, err := HasTestFiles(g, taskID, *task.BaseCommit)
+		testDiagnostics, err := AnalyzeTestFiles(g, taskID, *task.BaseCommit, preRebaseCommit)
 		if err != nil {
 			return nil, &OperationalError{Message: "failed to check for test files", Err: err}
 		}
-		if !hasTests && GetTDDWaiver(task.History, agentID) == "" {
-			return nil, &PreconditionError{Reason: fmt.Sprintf("task %s: code tasks must include test files (e.g. *_test.go, *.test.ts, test_*.py) — TDD is mandatory", taskID)}
+		if len(testDiagnostics.TestFilesMatched) == 0 && GetTDDWaiver(task.History, agentID) == "" {
+			return nil, &PreconditionError{
+				Reason:  fmt.Sprintf("task %s: code tasks must include test files (e.g. *_test.go, *.test.ts, test_*.py) — TDD is mandatory", taskID),
+				Details: testDiagnostics.Details(),
+			}
 		}
 	}
 

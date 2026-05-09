@@ -7,6 +7,47 @@ import (
 	"github.com/liza-mas/liza/internal/git"
 )
 
+var testFileMatcherPatterns = []string{
+	"*_test.go",
+	"*_test.py",
+	"test_*.py",
+	"*.test.{js,ts,jsx,tsx}",
+	"*.spec.{js,ts,jsx,tsx}",
+	"__tests__/*.{js,ts,jsx,tsx}",
+	"test_*.sh",
+	"*_test.sh",
+	"*_test.rb",
+	"*_spec.rb",
+	"*Test.java",
+	"Test*.java",
+	"*Tests.java",
+	"*Test.kt",
+	"Test*.kt",
+	"*Tests.kt",
+	"*_test.rs",
+	"tests/*.rs",
+}
+
+// TestFileDiagnostics records the exact range and matcher results used by the
+// TDD gate. It is safe to expose in JSON errors.
+type TestFileDiagnostics struct {
+	BaseRef                string   `json:"base_ref"`
+	HeadRef                string   `json:"head_ref"`
+	ChangedFilesConsidered []string `json:"changed_files_considered"`
+	TestFilesMatched       []string `json:"test_files_matched"`
+	MatcherPatterns        []string `json:"matcher_patterns"`
+}
+
+func (d TestFileDiagnostics) Details() map[string]any {
+	return map[string]any{
+		"base_ref":                 d.BaseRef,
+		"head_ref":                 d.HeadRef,
+		"changed_files_considered": d.ChangedFilesConsidered,
+		"test_files_matched":       d.TestFilesMatched,
+		"matcher_patterns":         d.MatcherPatterns,
+	}
+}
+
 // isTestFile returns true if the filename matches known test file patterns
 // across Go, Python, JS/TS, Shell, Ruby, Java, Kotlin, and Rust.
 func isTestFile(name string) bool {
@@ -74,18 +115,35 @@ func isTestFile(name string) bool {
 	return false
 }
 
+// AnalyzeTestFiles returns the full TDD gate analysis for files changed between
+// baseCommit and headRef in the task worktree.
+func AnalyzeTestFiles(g *git.Git, taskID, baseCommit, headRef string) (*TestFileDiagnostics, error) {
+	wtPath := g.GetWorktreePath(taskID)
+	files, err := g.DiffFiles(wtPath, baseCommit, headRef)
+	if err != nil {
+		return nil, err
+	}
+	matched := make([]string, 0)
+	for _, f := range files {
+		if isTestFile(f) {
+			matched = append(matched, f)
+		}
+	}
+	return &TestFileDiagnostics{
+		BaseRef:                baseCommit,
+		HeadRef:                headRef,
+		ChangedFilesConsidered: files,
+		TestFilesMatched:       matched,
+		MatcherPatterns:        append([]string(nil), testFileMatcherPatterns...),
+	}, nil
+}
+
 // HasTestFiles checks whether the commits between baseCommit and HEAD in the
 // task worktree include any test files (added or modified).
 func HasTestFiles(g *git.Git, taskID, baseCommit string) (bool, error) {
-	wtPath := g.GetWorktreePath(taskID)
-	files, err := g.DiffFiles(wtPath, baseCommit, "HEAD")
+	diagnostics, err := AnalyzeTestFiles(g, taskID, baseCommit, "HEAD")
 	if err != nil {
 		return false, err
 	}
-	for _, f := range files {
-		if isTestFile(f) {
-			return true, nil
-		}
-	}
-	return false, nil
+	return len(diagnostics.TestFilesMatched) > 0, nil
 }

@@ -378,6 +378,9 @@ liza submit-for-review task-3 HEAD
 # Requires: HEAD resolves to .worktrees/task-3 HEAD (pre-rebase)
 # Sets READY_FOR_REVIEW + post-rebase review_commit + history
 ```
+With `--json`, missing-test TDD failures include `error.details` with
+`base_ref`, `head_ref`, changed files considered, matched test files, and matcher
+patterns.
 
 **liza submit-verdict** — Submit review verdict (Code Reviewer)
 ```bash

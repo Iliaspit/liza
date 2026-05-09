@@ -462,6 +462,81 @@ func TestSubmitForReview_WritesHandoffEvent(t *testing.T) {
 	}
 }
 
+func TestSubmitForReview_TDDEnforcement_AcceptsNestedPythonTestFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, tmpDir)
+	statePath, _ := testhelpers.SetupLizaDir(t, tmpDir)
+
+	testhelpers.MustGit(t, tmpDir, "checkout", "integration")
+
+	g := git.New(tmpDir)
+	taskID := "task-nested-python-submit"
+	baseCommit, err := g.CreateWorktree(taskID, "integration")
+	if err != nil {
+		t.Fatalf("CreateWorktree() error = %v", err)
+	}
+	wtPath := g.GetWorktreePath(taskID)
+
+	testDir := filepath.Join(wtPath, "tests", "backend")
+	if err := os.MkdirAll(testDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(wtPath, "source_resolution.py"), []byte("def resolve():\n    return True\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(testDir, "test_source_resolution.py"), []byte("def test_resolve():\n    assert True\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	testhelpers.MustGit(t, wtPath, "add", "source_resolution.py", "tests/backend/test_source_resolution.py")
+	testhelpers.MustGit(t, wtPath, "commit", "-m", "Add source resolution with nested Python test")
+	wtCommit := testhelpers.MustGit(t, wtPath, "rev-parse", "HEAD")
+
+	agentID := "coder-1"
+	leaseExpires := time.Now().UTC().Add(30 * time.Minute)
+	worktree := g.GetWorktreeRelPath(taskID)
+	initialState := &models.State{
+		Config: models.Config{
+			IntegrationBranch: "integration",
+			LeaseDuration:     1800,
+		},
+		Tasks: []models.Task{
+			{
+				ID:           taskID,
+				Type:         models.TaskTypeCoding,
+				Description:  "Task with nested Python test",
+				Status:       models.TaskStatusImplementing,
+				RolePair:     "coding-pair",
+				AssignedTo:   &agentID,
+				LeaseExpires: &leaseExpires,
+				Worktree:     &worktree,
+				BaseCommit:   &baseCommit,
+				Iteration:    1,
+				Created:      time.Now().UTC(),
+				History: []models.TaskHistoryEntry{
+					{
+						Time:  time.Now().UTC(),
+						Event: models.TaskEventPreExecutionCheckpoint,
+						Agent: &agentID,
+						Extra: map[string]any{
+							"intent":          "test nested Python TDD detection",
+							"validation_plan": "submit-for-review accepts nested Python test file",
+							"files_to_modify": []string{"source_resolution.py", "tests/backend/test_source_resolution.py"},
+						},
+					},
+				},
+			},
+		},
+		Agents: map[string]models.Agent{
+			agentID: {Status: models.AgentStatusWorking, CurrentTask: &taskID},
+		},
+	}
+	testhelpers.WriteInitialState(t, statePath, initialState)
+
+	if _, err := SubmitForReview(tmpDir, taskID, wtCommit, agentID); err != nil {
+		t.Fatalf("SubmitForReview() unexpected error: %v", err)
+	}
+}
+
 func TestSubmitForReview_ResolvesHeadInWorktree(t *testing.T) {
 	tmpDir, taskID, _, agentID, bb := setupSuccessfulSubmitScenario(t)
 
@@ -599,6 +674,107 @@ func TestSubmitForReview_TDDEnforcement_CustomDoerRole(t *testing.T) {
 	testhelpers.RequireErrorContains(t, err, "code tasks must include test files")
 }
 
+func TestSubmitForReview_TDDFailure_IncludesDiagnosticDetails(t *testing.T) {
+	tmpDir := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, tmpDir)
+	statePath, _ := testhelpers.SetupLizaDir(t, tmpDir)
+
+	testhelpers.MustGit(t, tmpDir, "checkout", "integration")
+
+	g := git.New(tmpDir)
+	taskID := "task-tdd-diagnostics"
+	baseCommit, err := g.CreateWorktree(taskID, "integration")
+	if err != nil {
+		t.Fatalf("CreateWorktree() error = %v", err)
+	}
+	wtPath := g.GetWorktreePath(taskID)
+
+	if err := os.WriteFile(filepath.Join(wtPath, "main.go"), []byte("package main\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	testhelpers.MustGit(t, wtPath, "add", "main.go")
+	testhelpers.MustGit(t, wtPath, "commit", "-m", "Non-test commit")
+	wtCommit := testhelpers.MustGit(t, wtPath, "rev-parse", "HEAD")
+
+	agentID := "coder-1"
+	leaseExpires := time.Now().UTC().Add(30 * time.Minute)
+	worktree := g.GetWorktreeRelPath(taskID)
+	initialState := &models.State{
+		Config: models.Config{
+			IntegrationBranch: "integration",
+			LeaseDuration:     1800,
+		},
+		Tasks: []models.Task{
+			{
+				ID:           taskID,
+				Type:         models.TaskTypeCoding,
+				Description:  "TDD diagnostic details test",
+				Status:       models.TaskStatusImplementing,
+				RolePair:     "coding-pair",
+				AssignedTo:   &agentID,
+				LeaseExpires: &leaseExpires,
+				Worktree:     &worktree,
+				BaseCommit:   &baseCommit,
+				Iteration:    1,
+				Created:      time.Now().UTC(),
+				History: []models.TaskHistoryEntry{
+					{
+						Time:  time.Now().UTC(),
+						Event: models.TaskEventPreExecutionCheckpoint,
+						Agent: &agentID,
+						Extra: map[string]any{
+							"intent":          "test TDD diagnostics",
+							"validation_plan": "verify missing-test error includes inspected files",
+							"files_to_modify": []string{"main.go"},
+						},
+					},
+				},
+			},
+		},
+		Agents: map[string]models.Agent{
+			agentID: {Status: models.AgentStatusWorking, CurrentTask: &taskID},
+		},
+	}
+	testhelpers.WriteInitialState(t, statePath, initialState)
+
+	_, err = SubmitForReview(tmpDir, taskID, wtCommit, agentID)
+	if err == nil {
+		t.Fatal("Expected TDD enforcement error, got nil")
+	}
+
+	var precondition *PreconditionError
+	if !stderrors.As(err, &precondition) {
+		t.Fatalf("expected *PreconditionError, got %T: %v", err, err)
+	}
+	if precondition.Details["base_ref"] != baseCommit {
+		t.Errorf("base_ref = %v, want %s", precondition.Details["base_ref"], baseCommit)
+	}
+	if precondition.Details["head_ref"] != wtCommit {
+		t.Errorf("head_ref = %v, want %s", precondition.Details["head_ref"], wtCommit)
+	}
+	changed, ok := precondition.Details["changed_files_considered"].([]string)
+	if !ok {
+		t.Fatalf("changed_files_considered has type %T, want []string", precondition.Details["changed_files_considered"])
+	}
+	if len(changed) != 1 || changed[0] != "main.go" {
+		t.Errorf("changed_files_considered = %v, want [main.go]", changed)
+	}
+	matched, ok := precondition.Details["test_files_matched"].([]string)
+	if !ok {
+		t.Fatalf("test_files_matched has type %T, want []string", precondition.Details["test_files_matched"])
+	}
+	if len(matched) != 0 {
+		t.Errorf("test_files_matched = %v, want empty", matched)
+	}
+	patterns, ok := precondition.Details["matcher_patterns"].([]string)
+	if !ok {
+		t.Fatalf("matcher_patterns has type %T, want []string", precondition.Details["matcher_patterns"])
+	}
+	if !containsString(patterns, "test_*.py") {
+		t.Errorf("matcher_patterns = %v, want to contain test_*.py", patterns)
+	}
+}
+
 // TestSubmitForReview_ZeroDiffIntegration verifies that SubmitForReview succeeds
 // when the integration analyst has not committed any code changes to its worktree.
 // The analyst produces findings (not code), so zero-diff submission must work:
@@ -692,4 +868,13 @@ func TestSubmitForReview_ZeroDiffIntegration(t *testing.T) {
 	if task.ReviewCommit == nil || *task.ReviewCommit == "" {
 		t.Error("expected task.ReviewCommit to be set")
 	}
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }

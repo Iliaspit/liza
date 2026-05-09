@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"testing"
+
+	"github.com/liza-mas/liza/internal/ops"
 )
 
 func TestWriteResult_Success(t *testing.T) {
@@ -78,6 +80,39 @@ func TestWriteResult_Error(t *testing.T) {
 	}
 	if env.Error.Message != "internal error" {
 		t.Errorf("error.message = %q, want %q", env.Error.Message, "internal error")
+	}
+}
+
+func TestWriteResult_ErrorWithDetails(t *testing.T) {
+	var buf bytes.Buffer
+	inputErr := &ops.PreconditionError{
+		Reason: "task T1: code tasks must include test files",
+		Details: map[string]any{
+			"base_ref":                 "abc123",
+			"head_ref":                 "def456",
+			"changed_files_considered": []string{"main.go"},
+			"test_files_matched":       []string{},
+			"matcher_patterns":         []string{"test_*.py"},
+		},
+	}
+
+	err := WriteResult(&buf, nil, nil, inputErr)
+	if !errors.Is(err, ErrAlreadyWritten) {
+		t.Fatalf("err = %v, want ErrAlreadyWritten", err)
+	}
+
+	var raw map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &raw); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	errObj := raw["error"].(map[string]any)
+	details := errObj["details"].(map[string]any)
+	if details["base_ref"] != "abc123" {
+		t.Errorf("base_ref = %v, want abc123", details["base_ref"])
+	}
+	changed := details["changed_files_considered"].([]any)
+	if len(changed) != 1 || changed[0] != "main.go" {
+		t.Errorf("changed_files_considered = %v, want [main.go]", changed)
 	}
 }
 

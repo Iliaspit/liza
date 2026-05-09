@@ -88,6 +88,20 @@ func ClassifyError(err error) (code string, message string) {
 	return classifyUntyped(err)
 }
 
+type safeDetails interface {
+	SafeDetails() map[string]any
+}
+
+// ErrorDetails returns bounded, explicitly safe diagnostic details for typed
+// errors that opt in. Untyped errors never expose details.
+func ErrorDetails(err error) map[string]any {
+	var detailed safeDetails
+	if errors.As(err, &detailed) {
+		return detailed.SafeDetails()
+	}
+	return nil
+}
+
 // classifyUntyped maps untyped errors to codes via string matching.
 // Returns ("internal", "internal error") when no pattern matches.
 func classifyUntyped(err error) (code string, message string) {
