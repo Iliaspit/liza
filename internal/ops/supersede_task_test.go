@@ -231,6 +231,43 @@ func TestSupersedeTask_FromRejected(t *testing.T) {
 	}
 }
 
+func TestSupersedeTask_FromIntegrationFailedMissingWorktree(t *testing.T) {
+	tmpDir := t.TempDir()
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+
+	now := time.Now().UTC()
+	state := testhelpers.CreateValidState()
+	task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusIntegrationFailed, now)
+	worktree := ".worktrees/task-1"
+	task.Worktree = &worktree
+	state.Tasks = []models.Task{task}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	result, err := SupersedeTask(tmpDir, "task-1", nil, "Completed externally by merged PR", "orchestrator-1")
+	if err != nil {
+		t.Fatalf("SupersedeTask() error: %v", err)
+	}
+	if result.OriginalStatus != models.TaskStatusIntegrationFailed {
+		t.Errorf("OriginalStatus = %v, want INTEGRATION_FAILED", result.OriginalStatus)
+	}
+
+	bb := db.New(stateFile)
+	readState, err := bb.Read()
+	if err != nil {
+		t.Fatalf("Failed to read state: %v", err)
+	}
+	updated := readState.FindTask("task-1")
+	if updated == nil {
+		t.Fatal("Task not found")
+	}
+	if updated.Status != models.TaskStatusSuperseded {
+		t.Errorf("Status = %v, want SUPERSEDED", updated.Status)
+	}
+	if updated.Worktree != nil {
+		t.Errorf("Worktree = %v, want nil", *updated.Worktree)
+	}
+}
+
 func TestSupersedeTask_FromReady(t *testing.T) {
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)

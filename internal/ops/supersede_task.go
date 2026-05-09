@@ -51,8 +51,10 @@ func SupersedeTask(projectRoot, taskID string, replacementIDs []string, reason, 
 
 	originalStatus := task.Status
 
-	// Supersede is allowed from: any initial (DRAFT_*) state, any rejected state, or BLOCKED.
-	allowed := originalStatus == models.TaskStatusBlocked
+	// Supersede is allowed from: any initial (DRAFT_*) state, any rejected
+	// state, BLOCKED, or INTEGRATION_FAILED when external repair/replacement
+	// made the failed task obsolete.
+	allowed := originalStatus == models.TaskStatusBlocked || originalStatus == models.TaskStatusIntegrationFailed
 	if !allowed && task.RolePair != "" {
 		// Pipeline-aware path: resolve initial/rejected from the task's role-pair.
 		initialStatus, err := pb.resolver.InitialStatus(task.RolePair)
@@ -97,6 +99,7 @@ func SupersedeTask(projectRoot, taskID string, replacementIDs []string, reason, 
 		currentTask.ReviewingBy = nil
 		currentTask.ReviewLeaseExpires = nil
 		currentTask.Worktree = nil
+		currentTask.IntegrationFailure = nil
 
 		now := time.Now().UTC()
 		var note string

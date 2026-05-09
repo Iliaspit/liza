@@ -39,6 +39,7 @@ All system mechanics are provided by the `liza` Go binary (assumed in PATH). See
 | `liza wt-create <task> [--fresh]` | Create worktree for task |
 | `liza wt-merge <task>` | Merge approved worktree (supervisor-executed after APPROVED) |
 | `liza wt-delete <task>` | Clean up abandoned/merged worktree |
+| `liza reconcile-merged <task> --merge-commit <sha>` | Mark an INTEGRATION_FAILED task as MERGED after verifying external completion |
 | `liza update-sprint-metrics` | Recompute sprint.metrics from task state |
 | `liza clear-stale-review-claims` | Clear expired review claims |
 | `liza recover-task <task-id>` | Recover by task ID (release claims + worktree/branch + agent) |
@@ -382,6 +383,9 @@ With `--json`, missing-test TDD failures include `error.details` with
 `base_ref`, `head_ref`, changed files considered, matched test files, and matcher
 patterns. Non-conflict rebase failures include bounded `error.details` with the
 git command, rebase refs, stdout/stderr excerpt, and recovery hint.
+Submit-time integration failures also persist `task.integration_failure` and an
+`integration_failed` history diagnostic with the operation, reason, and recovery
+hint.
 
 **liza submit-verdict** — Submit review verdict (Code Reviewer)
 ```bash
@@ -403,6 +407,21 @@ liza wt-merge task-3
 # Performs working-tree-less merge using git merge-tree + commit-tree + update-ref
 # Working tree files transiently synced for integration tests, then restored
 # Multiple reviewers can merge concurrently without race conditions
+```
+Merge conflicts persist a structured diagnostic with the operation, reason, and
+recovery hint.
+Tasks moved to `INTEGRATION_FAILED` persist the same diagnostic on
+`task.integration_failure` and the `integration_failed` history entry.
+For older `INTEGRATION_FAILED` tasks without structured diagnostics, `liza get
+tasks --json` and watch alerts synthesize a conservative recovery diagnostic
+from the status and worktree metadata.
+
+**liza reconcile-merged** — Reconcile externally completed integration failures
+```bash
+liza reconcile-merged task-3 --merge-commit abc123 --pr-url https://github.com/org/repo/pull/17 --reason "PR merged externally"
+# Task must be INTEGRATION_FAILED
+# merge-commit must resolve locally
+# Clears stale worktree/claim metadata and records a MERGED history event
 ```
 
 **liza wt-delete** — Delete worktree

@@ -436,12 +436,60 @@ func TestCheckIntegrationFailures(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			state := &models.State{Tasks: tt.tasks}
-			alerts := checkIntegrationFailures(state)
+			alerts := checkIntegrationFailures(state, "")
 
 			if len(alerts) != tt.wantAlerts {
 				t.Errorf("len(alerts) = %d, want %d", len(alerts), tt.wantAlerts)
 			}
 		})
+	}
+}
+
+func TestCheckIntegrationFailures_IncludesDiagnosticDetails(t *testing.T) {
+	now := time.Now().UTC()
+	task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusIntegrationFailed, now)
+	task.IntegrationFailure = map[string]any{
+		"operation":     "wt-merge",
+		"reason":        "integration tests failed",
+		"recovery_hint": "inspect test output and fix the task worktree",
+	}
+	state := &models.State{Tasks: []models.Task{task}}
+
+	alerts := checkIntegrationFailures(state, "")
+	if len(alerts) != 1 {
+		t.Fatalf("len(alerts) = %d, want 1", len(alerts))
+	}
+	message := alerts[0].Message
+	for _, want := range []string{
+		"task-1",
+		"operation=wt-merge",
+		"reason=integration tests failed",
+		"recovery_hint=inspect test output and fix the task worktree",
+	} {
+		if !strings.Contains(message, want) {
+			t.Errorf("Message = %q, want containing %q", message, want)
+		}
+	}
+}
+
+func TestCheckIntegrationFailures_SynthesizesLegacyDiagnostic(t *testing.T) {
+	now := time.Now().UTC()
+	task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusIntegrationFailed, now)
+	state := &models.State{Tasks: []models.Task{task}}
+
+	alerts := checkIntegrationFailures(state, "")
+	if len(alerts) != 1 {
+		t.Fatalf("len(alerts) = %d, want 1", len(alerts))
+	}
+	message := alerts[0].Message
+	for _, want := range []string{
+		"operation=unknown",
+		"legacy INTEGRATION_FAILED state has no structured diagnostic",
+		"reconcile-merged",
+	} {
+		if !strings.Contains(message, want) {
+			t.Errorf("Message = %q, want containing %q", message, want)
+		}
 	}
 }
 

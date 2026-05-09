@@ -13,6 +13,7 @@ pipeline:
         - add-tasks
         - supersede-task
         - cancel-task
+        - reconcile-merged
         - sprint-checkpoint
         - analyze
         - delete-agent

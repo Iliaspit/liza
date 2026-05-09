@@ -135,9 +135,10 @@ func handleEntityQuery(state *models.State, entity string, args []string, opts I
 		return formatOutput(state.Sprint, opts.Format)
 	case "tasks":
 		taskOpts := inspectTasksOptions{
-			Format:  opts.Format,
-			Summary: opts.Summary,
-			Active:  opts.Active,
+			Format:      opts.Format,
+			Summary:     opts.Summary,
+			Active:      opts.Active,
+			ProjectRoot: opts.ProjectRoot,
 		}
 		if len(args) > 0 {
 			return asString(inspectTask(state, args[0], taskOpts))

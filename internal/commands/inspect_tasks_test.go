@@ -461,7 +461,7 @@ func TestTaskInfo_ComputedFields(t *testing.T) {
 		},
 	}
 
-	info := buildTaskInfo(&task)
+	info := buildTaskInfo(&task, "")
 
 	// Check that computed fields are set
 	if info.Age == "" {
@@ -645,7 +645,7 @@ func TestTaskInfo_DependenciesField(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			info := buildTaskInfo(tt.task)
+			info := buildTaskInfo(tt.task, "")
 
 			if len(info.DependsOn) != tt.wantDepsCount {
 				t.Errorf("expected %d dependencies, got %d", tt.wantDepsCount, len(info.DependsOn))
@@ -753,7 +753,7 @@ func TestBuildTaskInfo_AttemptNum_UsesEffectiveAttempt(t *testing.T) {
 				Attempt:   tt.attempt,
 				Iteration: 3,
 			}
-			info := buildTaskInfo(task)
+			info := buildTaskInfo(task, "")
 			if info.AttemptNum != tt.wantAttemptNum {
 				t.Errorf("AttemptNum = %d, want %d", info.AttemptNum, tt.wantAttemptNum)
 			}
@@ -856,5 +856,139 @@ func TestFormatTaskValue_WithDependencies(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestInspectTasks_IncludesLatestIntegrationFailureDiagnostic(t *testing.T) {
+	now := time.Now()
+	state := &models.State{
+		Tasks: []models.Task{
+			{
+				ID:          "task-1",
+				Description: "Failed integration",
+				Status:      models.TaskStatusIntegrationFailed,
+				Priority:    1,
+				Created:     now.Add(-time.Hour),
+				History: []models.TaskHistoryEntry{
+					{
+						Time:  now.Add(-30 * time.Minute),
+						Event: models.TaskEventIntegrationFailed,
+						Extra: map[string]any{
+							"diagnostic": map[string]any{
+								"reason":        "merge conflict",
+								"operation":     "wt-merge",
+								"recovery_hint": "resolve the integration conflict",
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	result, err := inspectTasks(state, inspectTasksOptions{Internal: true})
+	if err != nil {
+		t.Fatalf("inspectTasks() error = %v", err)
+	}
+	infos := result.([]taskInfo)
+	if len(infos) != 1 {
+		t.Fatalf("len(infos) = %d, want 1", len(infos))
+	}
+	info := infos[0]
+	if info.IntegrationFailure == nil {
+		t.Fatal("IntegrationFailure is nil")
+	}
+	if info.IntegrationFailure["operation"] != "wt-merge" {
+		t.Errorf("operation = %v, want wt-merge", info.IntegrationFailure["operation"])
+	}
+	if info.IntegrationFailure["recovery_hint"] == "" {
+		t.Error("recovery_hint is empty")
+	}
+}
+
+func TestInspectTasks_SynthesizesLegacyIntegrationFailureDiagnostic(t *testing.T) {
+	tmpDir := t.TempDir()
+	now := time.Now()
+	worktree := ".worktrees/task-1"
+	state := &models.State{
+		Tasks: []models.Task{
+			{
+				ID:          "task-1",
+				Description: "Legacy failed integration",
+				Status:      models.TaskStatusIntegrationFailed,
+				Priority:    1,
+				Created:     now.Add(-time.Hour),
+				Worktree:    &worktree,
+			},
+		},
+	}
+
+	result, err := inspectTasks(state, inspectTasksOptions{Internal: true, ProjectRoot: tmpDir})
+	if err != nil {
+		t.Fatalf("inspectTasks() error = %v", err)
+	}
+	infos := result.([]taskInfo)
+	if len(infos) != 1 {
+		t.Fatalf("len(infos) = %d, want 1", len(infos))
+	}
+	diagnostic := infos[0].IntegrationFailure
+	if diagnostic == nil {
+		t.Fatal("IntegrationFailure is nil")
+	}
+	if diagnostic["operation"] != "unknown" {
+		t.Errorf("operation = %v, want unknown", diagnostic["operation"])
+	}
+	if diagnostic["worktree_state"] != "missing" {
+		t.Errorf("worktree_state = %v, want missing", diagnostic["worktree_state"])
+	}
+	if diagnostic["worktree_missing"] != true {
+		t.Errorf("worktree_missing = %v, want true", diagnostic["worktree_missing"])
+	}
+	hint, _ := diagnostic["recovery_hint"].(string)
+	if !strings.Contains(hint, "reconcile-merged") {
+		t.Errorf("recovery_hint = %q, want reconcile-merged guidance", hint)
+	}
+}
+
+func TestInspectTasks_IncludesLatestPRURL(t *testing.T) {
+	now := time.Now()
+	state := &models.State{
+		Tasks: []models.Task{
+			{
+				ID:          "task-1",
+				Description: "Externally merged",
+				Status:      models.TaskStatusMerged,
+				Priority:    1,
+				Created:     now.Add(-time.Hour),
+				History: []models.TaskHistoryEntry{
+					{
+						Time:  now.Add(-30 * time.Minute),
+						Event: models.TaskEventMerged,
+						Extra: map[string]any{
+							"pr_url": "https://github.com/example/repo/pull/414",
+						},
+					},
+					{
+						Time:  now.Add(-10 * time.Minute),
+						Event: models.TaskEventBlocked,
+						Extra: map[string]any{
+							"pr_url": "not-an-integration-pr-url",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	result, err := inspectTasks(state, inspectTasksOptions{Internal: true})
+	if err != nil {
+		t.Fatalf("inspectTasks() error = %v", err)
+	}
+	infos := result.([]taskInfo)
+	if len(infos) != 1 {
+		t.Fatalf("len(infos) = %d, want 1", len(infos))
+	}
+	if infos[0].PRURL == nil || *infos[0].PRURL != "https://github.com/example/repo/pull/414" {
+		t.Errorf("PRURL = %v, want PR URL", infos[0].PRURL)
 	}
 }

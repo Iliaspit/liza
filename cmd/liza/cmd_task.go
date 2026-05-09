@@ -508,6 +508,67 @@ Example:
 	},
 }
 
+var reconcileMergedCmd = &cobra.Command{
+	Use:   "reconcile-merged <task-id>",
+	Short: "Mark an externally merged integration failure as merged",
+	Long: `Mark an INTEGRATION_FAILED task as MERGED after verifying it was completed outside Liza.
+
+This is intended for recovery from stale integration-failure state, such as when
+a GitHub PR was merged manually and the task worktree is already gone.
+
+Example:
+  liza reconcile-merged task-3 --merge-commit abc123 --pr-url https://github.com/org/repo/pull/17 --reason "PR merged externally"`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) (retErr error) {
+		if isJSON(cmd) {
+			log.SetOutput(io.Discard)
+			defer log.SetOutput(os.Stderr)
+			defer func() {
+				if retErr != nil && !errors.Is(retErr, jsonout.ErrAlreadyWritten) {
+					_ = jsonout.WriteResult(os.Stdout, nil, nil, retErr)
+					retErr = jsonout.ErrAlreadyWritten
+				}
+			}()
+		}
+
+		taskID := args[0]
+		mergeCommit, _ := cmd.Flags().GetString("merge-commit")
+		prURL, _ := cmd.Flags().GetString("pr-url")
+		reason, _ := cmd.Flags().GetString("reason")
+
+		agentID, err := resolveOrchestratorID(cmd)
+		if err != nil {
+			return err
+		}
+
+		projectRoot, err := requireProjectRoot()
+		if err != nil {
+			return err
+		}
+
+		resolver, err := loadResolverForRBAC(projectRoot)
+		if err != nil {
+			return err
+		}
+		if err := validateAllowedOperation(resolver, agentID, "reconcile-merged"); err != nil {
+			return err
+		}
+
+		result, err := ops.ReconcileMerged(projectRoot, taskID, mergeCommit, prURL, reason, agentID)
+		if isJSON(cmd) {
+			return jsonout.WriteResult(os.Stdout, result, nil, err)
+		}
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(os.Stdout, "Reconciled task %s as MERGED at %s\n", result.TaskID, result.MergeCommit)
+		for _, warning := range result.Warnings {
+			fmt.Fprintf(os.Stderr, "warning: %s\n", warning)
+		}
+		return nil
+	},
+}
+
 var deleteTaskCmd = &cobra.Command{
 	Use:   "task <task-id>",
 	Short: "Delete a task from the state database",
@@ -826,6 +887,7 @@ func init() {
 	rootCmd.AddCommand(addTasksCmd)
 	rootCmd.AddCommand(supersedeTaskCmd)
 	rootCmd.AddCommand(cancelTaskCmd)
+	rootCmd.AddCommand(reconcileMergedCmd)
 	rootCmd.AddCommand(markBlockedCmd)
 	rootCmd.AddCommand(assessBlockedCmd)
 	rootCmd.AddCommand(assessHypothesisExhaustedCmd)
@@ -839,6 +901,7 @@ func init() {
 	addJSONFlag(addTasksCmd)
 	addJSONFlag(supersedeTaskCmd)
 	addJSONFlag(cancelTaskCmd)
+	addJSONFlag(reconcileMergedCmd)
 	addJSONFlag(markBlockedCmd)
 	addJSONFlag(assessBlockedCmd)
 	addJSONFlag(assessHypothesisExhaustedCmd)
@@ -851,6 +914,12 @@ func init() {
 	supersedeTaskCmd.Flags().String("reason", "", "reason for superseding (required)")
 	supersedeTaskCmd.MarkFlagRequired("reason")
 	addAgentIDFlag(cancelTaskCmd)
+	addAgentIDFlag(reconcileMergedCmd)
+	reconcileMergedCmd.Flags().String("merge-commit", "", "merge commit that completed the task externally (required)")
+	reconcileMergedCmd.Flags().String("pr-url", "", "pull request URL for the external merge")
+	reconcileMergedCmd.Flags().String("reason", "", "reason for reconciliation (required)")
+	reconcileMergedCmd.MarkFlagRequired("merge-commit")
+	reconcileMergedCmd.MarkFlagRequired("reason")
 
 	// Mark-blocked command flags
 	markBlockedCmd.Flags().String("reason", "", "reason why the task is blocked (required)")

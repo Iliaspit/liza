@@ -217,7 +217,7 @@ func RunChecksWithStateSnapshot(state *models.State, config WatchConfig) AlertSn
 		func() []Alert { return checkBlockedTasks(state, config.StateCache) },
 		func() []Alert { return checkOrphanedRejected(state, config.StateCache) },
 		func() []Alert { return checkReviewLoops(state) },
-		func() []Alert { return checkIntegrationFailures(state) },
+		func() []Alert { return checkIntegrationFailures(state, config.ProjectRoot) },
 		func() []Alert { return checkHypothesisExhaustion(state) },
 		func() []Alert { return checkReassigned(state, config.StateCache) },
 		func() []Alert { return checkApproachingLimits(state) },
@@ -560,7 +560,7 @@ func checkReviewLoops(state *models.State) []Alert {
 	return alerts
 }
 
-func checkIntegrationFailures(state *models.State) []Alert {
+func checkIntegrationFailures(state *models.State, projectRoot string) []Alert {
 	var alerts []Alert
 	now := time.Now().UTC()
 
@@ -570,7 +570,7 @@ func checkIntegrationFailures(state *models.State) []Alert {
 				Timestamp: now,
 				Level:     AlertLevelCritical,
 				Category:  "INTEGRATION FAILED",
-				Message:   task.ID,
+				Message:   integrationFailureAlertMessage(&task, projectRoot),
 			})
 		}
 	}
