@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/liza-mas/liza/internal/db"
@@ -163,7 +164,11 @@ func SubmitForReview(projectRoot, taskID, commitRef, agentID string) (*SubmitFor
 		// agent can retry without a state transition.
 		var rebaseConflict *gitpkg.RebaseConflictError
 		if !stderrors.As(err, &rebaseConflict) {
-			return nil, &OperationalError{Message: "rebase failed (not a merge conflict)", Err: err}
+			return nil, &OperationalError{
+				Message: "rebase failed (not a merge conflict)",
+				Details: rebaseFailureDetails(err, integrationBranch, rebaseBase, preRebaseCommit),
+				Err:     err,
+			}
 		}
 
 		// Transition to INTEGRATION_FAILED so the orchestrator re-queues the task.
@@ -245,6 +250,35 @@ func SubmitForReview(projectRoot, taskID, commitRef, agentID string) (*SubmitFor
 		ReviewCommit: postRebaseCommit,
 		AgentID:      agentID,
 	}, nil
+}
+
+func rebaseFailureDetails(err error, integrationBranch, rebaseBase, preRebaseCommit string) map[string]any {
+	details := map[string]any{
+		"rebase_base_ref":       "FETCH_HEAD",
+		"integration_branch":    integrationBranch,
+		"integration_head":      rebaseBase,
+		"pre_rebase_head":       preRebaseCommit,
+		"recovery_hint":         "Inspect the task worktree, resolve the git rebase failure or abort any stale rebase state, then retry submit-for-review.",
+		"stdout_stderr_excerpt": truncateForDiagnostics(err.Error(), 2000),
+	}
+
+	var rebaseErr *gitpkg.RebaseError
+	if stderrors.As(err, &rebaseErr) {
+		details["command"] = strings.Join(rebaseErr.Command, " ")
+		details["stdout_stderr_excerpt"] = truncateForDiagnostics(rebaseErr.Output, 2000)
+	}
+	return details
+}
+
+func truncateForDiagnostics(s string, limit int) string {
+	s = strings.TrimSpace(s)
+	if len(s) <= limit {
+		return s
+	}
+	if limit <= 3 {
+		return s[:limit]
+	}
+	return s[:limit-3] + "..."
 }
 
 // markSubmitRebaseConflict transitions a task from IMPLEMENTING (or pipeline executing

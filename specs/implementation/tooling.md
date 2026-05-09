@@ -380,7 +380,8 @@ liza submit-for-review task-3 HEAD
 ```
 With `--json`, missing-test TDD failures include `error.details` with
 `base_ref`, `head_ref`, changed files considered, matched test files, and matcher
-patterns.
+patterns. Non-conflict rebase failures include bounded `error.details` with the
+git command, rebase refs, stdout/stderr excerpt, and recovery hint.
 
 **liza submit-verdict** — Submit review verdict (Code Reviewer)
 ```bash

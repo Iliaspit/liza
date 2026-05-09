@@ -16,6 +16,21 @@ func (e *RebaseConflictError) Error() string {
 	return fmt.Sprintf("rebase conflict: %s", e.Output)
 }
 
+// RebaseError indicates a non-conflict git rebase failure.
+type RebaseError struct {
+	Command []string
+	Output  string // combined stdout/stderr from git
+	Err     error
+}
+
+func (e *RebaseError) Error() string {
+	return fmt.Sprintf("rebase failed: %v\nOutput: %s", e.Err, e.Output)
+}
+
+func (e *RebaseError) Unwrap() error {
+	return e.Err
+}
+
 // FetchFromLocal fetches latest commits for a branch from the project root
 // Used in worktrees to sync with integration branch
 func (g *Git) FetchFromLocal(wtPath string, branch string) error {
@@ -41,7 +56,11 @@ func (g *Git) RebaseOnto(wtPath string, baseBranch string) error {
 			strings.Contains(out, "could not apply") {
 			return &RebaseConflictError{Output: out}
 		}
-		return fmt.Errorf("rebase failed: %w\nOutput: %s", err, out)
+		return &RebaseError{
+			Command: []string{"git", "rebase", baseBranch},
+			Output:  out,
+			Err:     err,
+		}
 	}
 	return nil
 }

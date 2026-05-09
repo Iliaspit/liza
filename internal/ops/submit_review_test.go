@@ -4,6 +4,7 @@ import (
 	stderrors "errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -772,6 +773,37 @@ func TestSubmitForReview_TDDFailure_IncludesDiagnosticDetails(t *testing.T) {
 	}
 	if !containsString(patterns, "test_*.py") {
 		t.Errorf("matcher_patterns = %v, want to contain test_*.py", patterns)
+	}
+}
+
+func TestSubmitForReview_NonConflictRebaseDetailsIncludeRecoveryContext(t *testing.T) {
+	err := &git.RebaseError{
+		Command: []string{"git", "rebase", "FETCH_HEAD"},
+		Output:  "fatal: It seems that there is already a rebase-merge directory.",
+		Err:     stderrors.New("exit status 128"),
+	}
+
+	details := rebaseFailureDetails(err, "integration", "abc123", "def456")
+	if details["command"] != "git rebase FETCH_HEAD" {
+		t.Errorf("command = %v, want git rebase FETCH_HEAD", details["command"])
+	}
+	if details["integration_branch"] != "integration" {
+		t.Errorf("integration_branch = %v, want integration", details["integration_branch"])
+	}
+	if details["integration_head"] != "abc123" {
+		t.Errorf("integration_head = %v, want abc123", details["integration_head"])
+	}
+	if details["pre_rebase_head"] != "def456" {
+		t.Errorf("pre_rebase_head = %v, want def456", details["pre_rebase_head"])
+	}
+	if details["rebase_base_ref"] != "FETCH_HEAD" {
+		t.Errorf("rebase_base_ref = %v, want FETCH_HEAD", details["rebase_base_ref"])
+	}
+	if !strings.Contains(details["stdout_stderr_excerpt"].(string), "rebase-merge") {
+		t.Errorf("stdout_stderr_excerpt = %v, want rebase output excerpt", details["stdout_stderr_excerpt"])
+	}
+	if !strings.Contains(details["recovery_hint"].(string), "retry submit-for-review") {
+		t.Errorf("recovery_hint = %v, want retry guidance", details["recovery_hint"])
 	}
 }
 

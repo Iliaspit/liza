@@ -250,6 +250,16 @@ func TestRebaseOnto_AlreadyInProgress(t *testing.T) {
 	if stderrors.As(err, &rebaseConflict) {
 		t.Errorf("Expected generic rebase error, got *RebaseConflictError: %v", err)
 	}
+	var rebaseErr *RebaseError
+	if !stderrors.As(err, &rebaseErr) {
+		t.Fatalf("Expected *RebaseError, got %T: %v", err, err)
+	}
+	if strings.Join(rebaseErr.Command, " ") != "git rebase FETCH_HEAD" {
+		t.Errorf("Command = %v, want [git rebase FETCH_HEAD]", rebaseErr.Command)
+	}
+	if rebaseErr.Output == "" {
+		t.Error("Expected RebaseError.Output to include git stdout/stderr")
+	}
 	if !strings.Contains(err.Error(), "rebase failed") {
 		t.Errorf("Expected wrapped 'rebase failed' error, got: %v", err)
 	}
