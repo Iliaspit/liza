@@ -151,8 +151,9 @@ liza submit-for-review → liza await-verdict → handle result
 ```
 
 - **REJECTED**: Fix issues, resubmit (session stays alive — no cold restart)
-- **ALREADY_TRANSITIONED**: Verdict was recovered after the task moved onward; follow `safe_action` (`stop` when another agent owns the task, `revise` when you still own it)
-- **APPROVED** / **NEW_ATTEMPT** / **TIMEOUT** / **ABORTED**: Exit normally
+- **ALREADY_TRANSITIONED**: Verdict was recovered after the task moved onward; follow `safe_action` (`stop` means exit without more worktree commands, `revise` means you still own it)
+- **APPROVED** / **TERMINAL** with `safe_action: stop`: Exit normally; do not run more worktree commands because merge cleanup may remove the task worktree
+- **NEW_ATTEMPT** / **TIMEOUT** / **ABORTED**: Exit normally
 
 ### Reviewer: Verdict → Await → Re-review
 

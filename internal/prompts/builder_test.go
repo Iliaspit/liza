@@ -1564,6 +1564,7 @@ func TestBuildRoleContext_AwaitVerdictLoopRendersForAllDoers(t *testing.T) {
 		"sole polling primitive",
 		"Call await-verdict at most 3 times",
 		"Do NOT poll liza get",
+		"Do NOT run more worktree commands after APPROVED, TERMINAL, or ALREADY_TRANSITIONED",
 	}
 
 	for _, tc := range doerRoles {

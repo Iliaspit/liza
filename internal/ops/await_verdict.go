@@ -90,6 +90,8 @@ func AwaitVerdict(ctx context.Context, projectRoot, taskID, agentID string, time
 			Verdict:    VerdictTerminal,
 			TaskStatus: task.Status,
 			Reason:     fmt.Sprintf("task already %s — no verdict expected", task.Status),
+			Guidance:   stopVerdictGuidance(task.Status),
+			SafeAction: SafeActionStop,
 		}, nil
 	}
 
@@ -198,10 +200,7 @@ func AwaitVerdict(ctx context.Context, projectRoot, taskID, agentID string, time
 			currentTask := evState.FindTask(taskID)
 			if currentTask == nil {
 				releaseOwnership(bb, agentID)
-				return &AwaitVerdictResult{
-					Verdict: VerdictTerminal,
-					Reason:  "task disappeared from state",
-				}, nil
+				return disappearedVerdictResult(), nil
 			}
 			if vc := checkVerdictStatus(currentTask, resolver, rolePair); vc != nil {
 				return handleVerdictResult(bb, currentTask, agentID, projectRoot, resolver, rolePair)
@@ -336,6 +335,8 @@ func handleVerdictResult(bb *db.Blackboard, task *models.Task, agentID, projectR
 			Verdict:       VerdictApproved,
 			TaskStatus:    task.Status,
 			ReviewerAgent: extractReviewerFromHistory(task),
+			Guidance:      stopVerdictGuidance(task.Status),
+			SafeAction:    SafeActionStop,
 		}, nil
 
 	case rejected:
@@ -371,6 +372,8 @@ func handleVerdictResult(bb *db.Blackboard, task *models.Task, agentID, projectR
 					Reason:        reason,
 					ReviewerAgent: reviewer,
 					TaskStatus:    task.Status,
+					Guidance:      stopVerdictGuidance(task.Status),
+					SafeAction:    SafeActionStop,
 				}, nil
 			}
 			// Infrastructure error during reclaim.
@@ -407,6 +410,8 @@ func handleVerdictResult(bb *db.Blackboard, task *models.Task, agentID, projectR
 			Verdict:    VerdictTerminal,
 			TaskStatus: task.Status,
 			Reason:     fmt.Sprintf("task entered non-awaitable status: %s", task.Status),
+			Guidance:   stopVerdictGuidance(task.Status),
+			SafeAction: SafeActionStop,
 		}, nil
 	}
 }
@@ -436,10 +441,7 @@ func awaitVerdictPolling(ctx context.Context, bb *db.Blackboard, taskID, agentID
 			currentTask := state.FindTask(taskID)
 			if currentTask == nil {
 				releaseOwnership(bb, agentID)
-				return &AwaitVerdictResult{
-					Verdict: VerdictTerminal,
-					Reason:  "task disappeared from state",
-				}, nil
+				return disappearedVerdictResult(), nil
 			}
 			if vc := checkVerdictStatus(currentTask, resolver, rolePair); vc != nil {
 				return handleVerdictResult(bb, currentTask, agentID, projectRoot, resolver, rolePair)
@@ -618,6 +620,25 @@ func safeActionForRecoveredVerdict(task *models.Task, agentID, verdictEvent stri
 	return SafeActionStop
 }
 
+func stopVerdictGuidance(status models.TaskStatus) string {
+	if status == "" {
+		return "Stop this session; do not run more worktree commands for this submission."
+	}
+	return fmt.Sprintf(
+		"Stop this session; do not run more worktree commands for this submission. Task status is %s, and Liza may clean up the task worktree after terminal merge.",
+		status,
+	)
+}
+
+func disappearedVerdictResult() *AwaitVerdictResult {
+	return &AwaitVerdictResult{
+		Verdict:    VerdictTerminal,
+		Reason:     "task disappeared from state",
+		Guidance:   stopVerdictGuidance(""),
+		SafeAction: SafeActionStop,
+	}
+}
+
 func recoveredVerdictGuidance(result *AwaitVerdictResult) string {
 	if result.SafeAction == SafeActionRevise {
 		return fmt.Sprintf(
@@ -627,13 +648,13 @@ func recoveredVerdictGuidance(result *AwaitVerdictResult) string {
 	}
 	if result.CurrentAssignee != "" {
 		return fmt.Sprintf(
-			"Review verdict was recovered after the task already moved to %s and is assigned to %s. Stop this session; do not resubmit from stale context.",
+			"Review verdict was recovered after the task already moved to %s and is assigned to %s. Stop this session; do not resubmit from stale context or run more worktree commands.",
 			result.TaskStatus,
 			result.CurrentAssignee,
 		)
 	}
 	return fmt.Sprintf(
-		"Review verdict was recovered after the task already moved to %s. Stop this session; do not retry await-verdict for this submission.",
+		"Review verdict was recovered after the task already moved to %s. Stop this session; do not retry await-verdict or run more worktree commands for this submission.",
 		result.TaskStatus,
 	)
 }

@@ -341,6 +341,12 @@ func TestAwaitVerdict_Approved(t *testing.T) {
 	if result.TaskStatus != models.TaskStatusApproved {
 		t.Errorf("TaskStatus = %q, want %s", result.TaskStatus, models.TaskStatusApproved)
 	}
+	if result.SafeAction != SafeActionStop {
+		t.Errorf("SafeAction = %q, want %q", result.SafeAction, SafeActionStop)
+	}
+	if !strings.Contains(result.Guidance, "Stop this session") {
+		t.Errorf("Guidance = %q, want stop-session guidance", result.Guidance)
+	}
 
 	// Verify ownership released.
 	s, readErr := bb.Read()
@@ -563,6 +569,12 @@ func TestAwaitVerdict_Terminal(t *testing.T) {
 	if result.TaskStatus != models.TaskStatusBlocked {
 		t.Errorf("TaskStatus = %q, want BLOCKED", result.TaskStatus)
 	}
+	if result.SafeAction != SafeActionStop {
+		t.Errorf("SafeAction = %q, want %q", result.SafeAction, SafeActionStop)
+	}
+	if !strings.Contains(result.Guidance, "Stop this session") {
+		t.Errorf("Guidance = %q, want stop-session guidance", result.Guidance)
+	}
 
 	// Verify ownership released.
 	s, readErr := bb.Read()
@@ -697,6 +709,12 @@ func TestAwaitVerdict_AlreadyBlocked(t *testing.T) {
 	if result.TaskStatus != models.TaskStatusBlocked {
 		t.Errorf("TaskStatus = %q, want BLOCKED", result.TaskStatus)
 	}
+	if result.SafeAction != SafeActionStop {
+		t.Errorf("SafeAction = %q, want %q", result.SafeAction, SafeActionStop)
+	}
+	if !strings.Contains(result.Guidance, "Stop this session") {
+		t.Errorf("Guidance = %q, want stop-session guidance", result.Guidance)
+	}
 
 	// Verify no ownership mutation.
 	bb := db.For(stateFile)
@@ -739,6 +757,12 @@ func TestAwaitVerdict_AlreadyTerminal(t *testing.T) {
 	if result.TaskStatus != models.TaskStatusSuperseded {
 		t.Errorf("TaskStatus = %q, want SUPERSEDED", result.TaskStatus)
 	}
+	if result.SafeAction != SafeActionStop {
+		t.Errorf("SafeAction = %q, want %q", result.SafeAction, SafeActionStop)
+	}
+	if !strings.Contains(result.Guidance, "Stop this session") {
+		t.Errorf("Guidance = %q, want stop-session guidance", result.Guidance)
+	}
 }
 
 func TestAwaitVerdict_AlreadyApproved(t *testing.T) {
@@ -775,6 +799,61 @@ func TestAwaitVerdict_AlreadyApproved(t *testing.T) {
 	}
 	if result.ReviewerAgent != "code-reviewer-1" {
 		t.Errorf("ReviewerAgent = %q, want code-reviewer-1", result.ReviewerAgent)
+	}
+	if result.SafeAction != SafeActionStop {
+		t.Errorf("SafeAction = %q, want %q", result.SafeAction, SafeActionStop)
+	}
+	if !strings.Contains(result.Guidance, "Stop this session") {
+		t.Errorf("Guidance = %q, want stop-session guidance", result.Guidance)
+	}
+}
+
+func TestAwaitVerdict_AlreadyMergedWithApprovalHistoryStopsWorktreeCommands(t *testing.T) {
+	tmpDir := t.TempDir()
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+
+	now := time.Now().UTC()
+	state := testhelpers.CreateValidState()
+	task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusMerged, now)
+	reviewer := "code-reviewer-1"
+	reviewCommit := "review-commit"
+	task.ReviewCommit = &reviewCommit
+	task.History = append(task.History,
+		models.TaskHistoryEntry{
+			Time:   now.Add(-2 * time.Minute),
+			Event:  models.TaskEventSubmittedForReview,
+			Agent:  strPtr("coder-1"),
+			Commit: &reviewCommit,
+		},
+		models.TaskHistoryEntry{
+			Time:   now.Add(-1 * time.Minute),
+			Event:  models.TaskEventApproved,
+			Agent:  &reviewer,
+			Commit: &reviewCommit,
+		},
+	)
+	state.Tasks = []models.Task{task}
+	state.Agents["coder-1"] = models.Agent{
+		Role:   "coder",
+		Status: models.AgentStatusIdle,
+	}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	result, err := AwaitVerdict(context.Background(), tmpDir, "task-1", "coder-1", 10*time.Second)
+	if err != nil {
+		t.Fatalf("AwaitVerdict error: %v", err)
+	}
+	if result.Verdict != VerdictAlreadyTransitioned {
+		t.Errorf("Verdict = %q, want %q", result.Verdict, VerdictAlreadyTransitioned)
+	}
+	if result.TaskStatus != models.TaskStatusMerged {
+		t.Errorf("TaskStatus = %q, want MERGED", result.TaskStatus)
+	}
+	if result.SafeAction != SafeActionStop {
+		t.Errorf("SafeAction = %q, want %q", result.SafeAction, SafeActionStop)
+	}
+	if !strings.Contains(result.Guidance, "do not retry await-verdict or run more worktree commands") {
+		t.Errorf("Guidance = %q, want no-worktree-command guidance", result.Guidance)
 	}
 }
 
