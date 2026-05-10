@@ -60,6 +60,9 @@ func CreateWorktree(projectRoot, taskID string, fresh bool) (*CreateWorktreeResu
 	// Check if worktree already exists
 	if _, err := os.Stat(worktreeDir); err == nil {
 		if !fresh {
+			if err := gitWrapper.ValidateWorktreeHealth(taskID); err != nil {
+				return nil, fmt.Errorf("existing worktree not healthy: %w", err)
+			}
 			result := &CreateWorktreeResult{
 				TaskID:         taskID,
 				WorktreeDir:    worktreeDir,

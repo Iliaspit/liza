@@ -667,6 +667,64 @@ func TestClaimTask_ReadyWithStaleBranchAndWorktree(t *testing.T) {
 	}
 }
 
+func TestClaimTask_ReadyWithPrunableWorktreeRegistration_RecreatesCleanWorktree(t *testing.T) {
+	tmpDir := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, tmpDir)
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+
+	now := time.Now().UTC()
+	state := testhelpers.CreateValidState()
+	state.Tasks = []models.Task{
+		testhelpers.BuildTaskByStatus("task-1", models.TaskStatusReady, now),
+	}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	gitWrapper := git.New(tmpDir)
+	integrationSHA, err := gitWrapper.GetCommitSHA("integration")
+	if err != nil {
+		t.Fatalf("failed to read integration SHA: %v", err)
+	}
+	if _, err := gitWrapper.CreateWorktree("task-1", "integration"); err != nil {
+		t.Fatalf("failed to create stale worktree: %v", err)
+	}
+
+	// Simulate a bootstrap/cleanup failure that deleted the directory without
+	// unregistering Git's worktree metadata. Git still considers the task branch
+	// checked out until Liza cleans up the registration.
+	wtDir := filepath.Join(tmpDir, ".worktrees", "task-1")
+	if err := os.RemoveAll(wtDir); err != nil {
+		t.Fatalf("failed to remove worktree directory: %v", err)
+	}
+
+	result, err := ClaimTask(tmpDir, "task-1", "coder-1")
+	if err != nil {
+		t.Fatalf("ClaimTask() should recover stale prunable worktree registration, got: %v", err)
+	}
+
+	worktreeHead, err := gitWrapper.GetWorktreeHEAD("task-1")
+	if err != nil {
+		t.Fatalf("expected valid recreated worktree HEAD, got: %v", err)
+	}
+	if worktreeHead != integrationSHA {
+		t.Errorf("Worktree HEAD = %s, want integration SHA %s", worktreeHead, integrationSHA)
+	}
+	if result.BaseCommit != integrationSHA {
+		t.Errorf("BaseCommit = %s, want integration SHA %s", result.BaseCommit, integrationSHA)
+	}
+
+	readState := readClaimStateForTest(t, stateFile)
+	task := readState.FindTask("task-1")
+	if task == nil {
+		t.Fatal("task not found")
+	}
+	if task.Status != models.TaskStatusImplementing {
+		t.Errorf("Status = %v, want IMPLEMENTING", task.Status)
+	}
+	if task.Worktree == nil || *task.Worktree != filepath.Join(paths.WorktreesDirName, "task-1") {
+		t.Errorf("Worktree = %v, want .worktrees/task-1", task.Worktree)
+	}
+}
+
 func TestHandleReadyClaimWorktree_ConcurrentWinnerDoesNotDeleteWorktree(t *testing.T) {
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)

@@ -288,6 +288,42 @@ func TestValidateWorktreeHealth(t *testing.T) {
 	}
 }
 
+func TestValidateWorktreeHealthRejectsUnresolvableHEAD(t *testing.T) {
+	repoDir := setupTestRepo(t)
+	g := New(repoDir)
+
+	taskID := "task-unborn-head"
+	if _, err := g.CreateWorktree(taskID, "integration"); err != nil {
+		t.Fatalf("CreateWorktree() error = %v", err)
+	}
+
+	worktreePath := g.GetWorktreePath(taskID)
+	gitLinkPath := filepath.Join(worktreePath, ".git")
+	gitLink, err := os.ReadFile(gitLinkPath)
+	if err != nil {
+		t.Fatalf("failed to read worktree .git link: %v", err)
+	}
+	gitDir, ok := strings.CutPrefix(strings.TrimSpace(string(gitLink)), "gitdir: ")
+	if !ok {
+		t.Fatalf("unexpected .git link contents: %q", string(gitLink))
+	}
+	if !filepath.IsAbs(gitDir) {
+		gitDir = filepath.Join(worktreePath, gitDir)
+	}
+
+	if err := os.WriteFile(filepath.Join(gitDir, "HEAD"), []byte("ref: refs/heads/task/missing-head\n"), 0644); err != nil {
+		t.Fatalf("failed to corrupt worktree HEAD: %v", err)
+	}
+
+	err = g.ValidateWorktreeHealth(taskID)
+	if err == nil {
+		t.Fatal("ValidateWorktreeHealth() should reject a worktree whose HEAD cannot resolve")
+	}
+	if !strings.Contains(err.Error(), "HEAD") {
+		t.Errorf("ValidateWorktreeHealth() error = %v, want HEAD resolution detail", err)
+	}
+}
+
 func TestRemoveWorktreeFallbackCleansTargetedMetadata(t *testing.T) {
 	repoDir := setupTestRepo(t)
 	g := New(repoDir)

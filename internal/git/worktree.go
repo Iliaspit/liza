@@ -89,8 +89,13 @@ func (g *Git) RemoveWorktreeDir(taskID string) error {
 	}
 	worktreePath := filepath.Join(g.projectRoot, paths.WorktreesDirName, taskID)
 
-	// Nothing to do if worktree directory doesn't exist
+	metadataDir := filepath.Join(g.projectRoot, ".git", "worktrees", taskID)
+
+	// If the directory is already gone, Git may still have a stale worktree
+	// registration that keeps the task branch "checked out". Clear only this
+	// task's metadata; global prune can interfere with concurrent worktree adds.
 	if _, err := os.Stat(worktreePath); os.IsNotExist(err) {
+		_ = os.RemoveAll(metadataDir)
 		return nil
 	}
 
@@ -101,11 +106,6 @@ func (g *Git) RemoveWorktreeDir(taskID string) error {
 		if err := os.RemoveAll(worktreePath); err != nil {
 			return fmt.Errorf("failed to remove worktree directory: %w", err)
 		}
-		// Clean up git's internal worktree tracking for this specific task.
-		// Targeted removal instead of global "git worktree prune" to prevent
-		// interference with concurrent worktree operations (global prune can
-		// corrupt in-flight "git worktree add" for other tasks).
-		metadataDir := filepath.Join(g.projectRoot, ".git", "worktrees", taskID)
 		_ = os.RemoveAll(metadataDir)
 	}
 
@@ -227,6 +227,10 @@ func (g *Git) ValidateWorktreeHealth(taskID string) error {
 			return fmt.Errorf("worktree .git link file missing: %s (orphaned worktree)", gitFile)
 		}
 		return fmt.Errorf("worktree .git link file inaccessible: %w", err)
+	}
+
+	if _, err := g.execInDir(worktreePath, "rev-parse", "--verify", "HEAD^{commit}"); err != nil {
+		return fmt.Errorf("worktree HEAD cannot resolve to a commit: %w", err)
 	}
 
 	return nil

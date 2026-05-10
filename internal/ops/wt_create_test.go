@@ -110,6 +110,45 @@ func TestCreateWorktree_AlreadyExists(t *testing.T) {
 	}
 }
 
+func TestCreateWorktree_ExistingWorktreeWithUnresolvableHEADFails(t *testing.T) {
+	tmpDir := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, tmpDir)
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+
+	now := time.Now().UTC()
+	state := testhelpers.CreateValidState()
+	state.Tasks = []models.Task{
+		testhelpers.BuildTaskByStatus("task-1", models.TaskStatusImplementing, now),
+	}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	testhelpers.CreateTestWorktree(t, tmpDir, "task-1")
+	worktreeDir := filepath.Join(tmpDir, ".worktrees", "task-1")
+	gitLinkPath := filepath.Join(worktreeDir, ".git")
+	gitLink, err := os.ReadFile(gitLinkPath)
+	if err != nil {
+		t.Fatalf("failed to read worktree .git link: %v", err)
+	}
+	gitDir, ok := strings.CutPrefix(strings.TrimSpace(string(gitLink)), "gitdir: ")
+	if !ok {
+		t.Fatalf("unexpected .git link contents: %q", string(gitLink))
+	}
+	if !filepath.IsAbs(gitDir) {
+		gitDir = filepath.Join(worktreeDir, gitDir)
+	}
+	if err := os.WriteFile(filepath.Join(gitDir, "HEAD"), []byte("ref: refs/heads/task/missing-head\n"), 0644); err != nil {
+		t.Fatalf("failed to corrupt worktree HEAD: %v", err)
+	}
+
+	_, err = CreateWorktree(tmpDir, "task-1", false)
+	if err == nil {
+		t.Fatal("CreateWorktree() should reject an existing worktree whose HEAD cannot resolve")
+	}
+	if !strings.Contains(err.Error(), "existing worktree not healthy") || !strings.Contains(err.Error(), "HEAD") {
+		t.Errorf("CreateWorktree() error = %v, want existing worktree health and HEAD details", err)
+	}
+}
+
 // TestCreateWorktree_InstallsPreCommitHook covers the post-submit commit guard:
 // after wt-create, the worktree must have the liza pre-commit hook wired up
 // via extensions.worktreeConfig + --worktree core.hooksPath. Without all three

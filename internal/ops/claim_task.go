@@ -384,8 +384,8 @@ func handleReadyClaimWorktree(
 		_ = gitWrapper.DeleteBranch(branchName)
 	} else if branchExists {
 		log.Printf("WARNING: claim-task %s: removing stale branch %s for READY task", taskID, branchName)
-		if cleanupErr := gitWrapper.DeleteBranch(branchName); cleanupErr != nil {
-			return fmt.Errorf("failed to remove stale branch %s: %w", branchName, cleanupErr)
+		if cleanupErr := gitWrapper.RemoveWorktree(taskID); cleanupErr != nil {
+			return fmt.Errorf("failed to clean up stale worktree/branch for %s: %w", branchName, cleanupErr)
 		}
 	}
 
