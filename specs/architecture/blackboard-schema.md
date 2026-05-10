@@ -267,6 +267,10 @@ Optional:
 - `plan_ref` (`string`): Path to the plan artifact (repo-relative). Set by doer via `set-task-output`. Normalized by `NormalizeSpecRef` (worktree prefixes stripped).
 - `arch_ref` (`string`): Path to the architecture document (repo-relative). Set by architect via `set-task-output`. Normalized by `NormalizeSpecRef` (worktree prefixes stripped). Propagated to child tasks by `proceed.go` during transitions.
 
+Artifact reference fields are scalar repo-relative refs, optionally with a
+`#fragment` anchor. Delimiter-joined multi-refs such as `specs/a.md; specs/b.md`
+are invalid; use scope text or a future structured multi-ref field instead.
+
 **`arch_ref` Propagation:**
 
 `arch_ref` flows through the pipeline in two hops:
@@ -899,6 +903,7 @@ invariants:
   - "Task failed_by list must contain unique agent IDs"
   - "Task parent_task/parent_tasks must reference existing task IDs"
   - "Task output entries must have all required fields (desc, done_when, scope, spec_ref)"
+  - "Artifact reference fields are scalar repo-relative refs; semicolon-joined multi-refs are rejected"
   - "Task arch_ref must not contain worktree prefix (.worktrees/) — must be repo-relative"
   - "Task arch_ref must reference an existing file (checked via checkSpecFileExists against project root then integration branch)"
   - "Task output entry arch_ref must not contain worktree prefix (.worktrees/) — must be repo-relative"

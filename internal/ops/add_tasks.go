@@ -66,6 +66,12 @@ func AddTask(statePath, logPath string, input *AddTaskInput, orchestratorID stri
 	if input.SpecRef == "" {
 		return nil, &PreconditionError{Reason: "spec_ref is required"}
 	}
+	if err := statevalidate.ValidateArtifactRefScalar("spec_ref", input.SpecRef, input.ID); err != nil {
+		return nil, &PreconditionError{Reason: err.Error()}
+	}
+	if err := statevalidate.ValidateArtifactRefScalar("plan_ref", input.PlanRef, input.ID); err != nil {
+		return nil, &PreconditionError{Reason: err.Error()}
+	}
 	if input.DoneWhen == "" {
 		return nil, &PreconditionError{Reason: "done_when is required"}
 	}

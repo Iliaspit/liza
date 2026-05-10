@@ -6,6 +6,7 @@ import (
 	"github.com/liza-mas/liza/internal/db"
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/paths"
+	"github.com/liza-mas/liza/internal/statevalidate"
 )
 
 // SetTaskOutputInput contains the parameters for setting output entries on a task.
@@ -40,6 +41,19 @@ func SetTaskOutput(projectRoot string, input *SetTaskOutputInput) error {
 		}
 		if err := models.ValidateDependsOn(entry.DependsOn, i, len(input.Output)); err != nil {
 			return &PreconditionError{Reason: err.Error()}
+		}
+		for _, ref := range []struct {
+			field string
+			value string
+		}{
+			{field: "spec_ref", value: entry.SpecRef},
+			{field: "epic_ref", value: entry.EpicRef},
+			{field: "plan_ref", value: entry.PlanRef},
+			{field: "arch_ref", value: entry.ArchRef},
+		} {
+			if err := statevalidate.ValidateArtifactRefScalar(fmt.Sprintf("output[%d].%s", i, ref.field), ref.value, input.TaskID); err != nil {
+				return &PreconditionError{Reason: err.Error()}
+			}
 		}
 	}
 

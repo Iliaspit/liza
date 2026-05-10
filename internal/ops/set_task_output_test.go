@@ -40,6 +40,20 @@ func TestSetTaskOutput_Validation(t *testing.T) {
 			input:       SetTaskOutputInput{TaskID: "t1", AgentID: "coder-1", Output: []models.OutputEntry{{Desc: "d", DoneWhen: "dw"}}},
 			errContains: "output[0].scope is required",
 		},
+		{
+			name: "output entry semicolon-joined spec_ref",
+			input: SetTaskOutputInput{
+				TaskID:  "t1",
+				AgentID: "coder-1",
+				Output: []models.OutputEntry{{
+					Desc:     "d",
+					DoneWhen: "dw",
+					Scope:    "s",
+					SpecRef:  "specs/a.md; specs/b.md#section",
+				}},
+			},
+			errContains: "multiple refs",
+		},
 	}
 
 	for _, tt := range tests {

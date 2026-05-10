@@ -384,14 +384,26 @@ func validateTaskOutput(task *models.Task) error {
 		if strings.Contains(entry.SpecRef, ".worktrees/") {
 			return fmt.Errorf("task %s output[%d] spec_ref contains worktree prefix (must be repo-relative): %s", task.ID, i, entry.SpecRef)
 		}
+		if err := ValidateArtifactRefScalar(fmt.Sprintf("output[%d].spec_ref", i), entry.SpecRef, task.ID); err != nil {
+			return err
+		}
 		if entry.EpicRef != "" && strings.Contains(entry.EpicRef, ".worktrees/") {
 			return fmt.Errorf("task %s output[%d] epic_ref contains worktree prefix (must be repo-relative): %s", task.ID, i, entry.EpicRef)
+		}
+		if err := ValidateArtifactRefScalar(fmt.Sprintf("output[%d].epic_ref", i), entry.EpicRef, task.ID); err != nil {
+			return err
 		}
 		if entry.PlanRef != "" && strings.Contains(entry.PlanRef, ".worktrees/") {
 			return fmt.Errorf("task %s output[%d] plan_ref contains worktree prefix (must be repo-relative): %s", task.ID, i, entry.PlanRef)
 		}
+		if err := ValidateArtifactRefScalar(fmt.Sprintf("output[%d].plan_ref", i), entry.PlanRef, task.ID); err != nil {
+			return err
+		}
 		if entry.ArchRef != "" && strings.Contains(entry.ArchRef, ".worktrees/") {
 			return fmt.Errorf("task %s output[%d] arch_ref contains worktree prefix (must be repo-relative): %s", task.ID, i, entry.ArchRef)
+		}
+		if err := ValidateArtifactRefScalar(fmt.Sprintf("output[%d].arch_ref", i), entry.ArchRef, task.ID); err != nil {
+			return err
 		}
 	}
 	return nil
