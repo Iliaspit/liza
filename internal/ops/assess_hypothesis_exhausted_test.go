@@ -142,9 +142,14 @@ func TestAssessHypothesisExhausted_Success(t *testing.T) {
 	if readTask == nil {
 		t.Fatal("Task not found")
 	}
-	// Status should remain unchanged
-	if readTask.Status != models.TaskStatusReady {
-		t.Errorf("Status = %v, want %v (unchanged)", readTask.Status, models.TaskStatusReady)
+	if readTask.Status != models.TaskStatusBlocked {
+		t.Errorf("Status = %v, want %v", readTask.Status, models.TaskStatusBlocked)
+	}
+	if readTask.BlockedReason == nil || !strings.Contains(*readTask.BlockedReason, "hypothesis_exhaustion") {
+		t.Errorf("BlockedReason = %v, want hypothesis_exhaustion", readTask.BlockedReason)
+	}
+	if len(readTask.BlockedQuestions) == 0 {
+		t.Fatal("BlockedQuestions is empty")
 	}
 
 	lastHistory := readTask.History[len(readTask.History)-1]

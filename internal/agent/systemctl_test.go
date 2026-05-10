@@ -204,7 +204,7 @@ func TestVerifyOrchestratorStateChanges_BlockedNotResolved(t *testing.T) {
 }
 
 // TestVerifyOrchestratorStateChanges_HypothesisExhaustedNotResolved verifies that
-// the orchestrator validation accepts when exhausted tasks remain unchanged (no-op exit)
+// the orchestrator validation rejects when exhausted tasks remain claimable.
 func TestVerifyOrchestratorStateChanges_HypothesisExhaustedNotResolved(t *testing.T) {
 	tmpDir := t.TempDir()
 	statePath, _ := testhelpers.SetupLizaDir(t, tmpDir)
@@ -253,8 +253,62 @@ func TestVerifyOrchestratorStateChanges_HypothesisExhaustedNotResolved(t *testin
 	bb := db.New(statePath)
 
 	err := verifyOrchestratorStateChanges(bb, stateBefore, nil, nil, nil)
+	if err == nil {
+		t.Fatal("Expected error for no-op HYPOTHESIS_EXHAUSTED exit, got nil")
+	}
+	if !strings.Contains(err.Error(), "unresolved exhausted count didn't decrease") {
+		t.Fatalf("error = %v, want unresolved exhausted count message", err)
+	}
+}
+
+func TestVerifyOrchestratorStateChanges_HypothesisExhaustedBlocked(t *testing.T) {
+	tmpDir := t.TempDir()
+	statePath, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	testhelpers.SetupPipelineConfig(t, tmpDir)
+
+	now := time.Now().UTC()
+
+	exhaustedTask := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusReady, now)
+	exhaustedTask.FailedBy = []string{"coder-1", "coder-2"}
+	stateBefore := &models.State{
+		Version: 1,
+		Goal: models.Goal{
+			ID:          "goal-1",
+			Description: "Test goal",
+			Status:      models.GoalStatusInProgress,
+			Created:     now,
+		},
+		Agents: map[string]models.Agent{
+			"orchestrator-1": {Role: "orchestrator", Status: models.AgentStatusPlanning, Heartbeat: now},
+		},
+		Tasks:  []models.Task{exhaustedTask},
+		Config: models.Config{IntegrationBranch: "main"},
+	}
+
+	blockedTask := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusBlocked, now)
+	blockedTask.FailedBy = []string{"coder-1", "coder-2"}
+	stateAfter := &models.State{
+		Version: 1,
+		Goal: models.Goal{
+			ID:          "goal-1",
+			Description: "Test goal",
+			Status:      models.GoalStatusInProgress,
+			Created:     now,
+		},
+		Agents: map[string]models.Agent{
+			"orchestrator-1": {Role: "orchestrator", Status: models.AgentStatusIdle, Heartbeat: now},
+		},
+		Tasks:  []models.Task{blockedTask},
+		Config: models.Config{IntegrationBranch: "main"},
+	}
+
+	testhelpers.WriteInitialState(t, statePath, stateAfter)
+
+	bb := db.New(statePath)
+
+	err := verifyOrchestratorStateChanges(bb, stateBefore, nil, nil, nil)
 	if err != nil {
-		t.Errorf("Expected no error for no-op HYPOTHESIS_EXHAUSTED exit (may require human intervention), got: %v", err)
+		t.Errorf("Expected no error for blocked HYPOTHESIS_EXHAUSTED exit, got: %v", err)
 	}
 }
 

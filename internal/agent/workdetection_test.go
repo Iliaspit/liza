@@ -525,6 +525,18 @@ func TestDetectOrchestratorWakeTriggers(t *testing.T) {
 			wantCount:   0,
 		},
 		{
+			name: "blocked hypothesis exhausted uses blocked trigger",
+			state: func() *models.State {
+				state := testhelpers.CreateValidState()
+				task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusBlocked, now)
+				task.FailedBy = []string{"coder-1", "coder-2"}
+				state.Tasks = []models.Task{task}
+				return state
+			}(),
+			wantTrigger: WakeTriggerBlocked,
+			wantCount:   1,
+		},
+		{
 			name: "hypothesis exhausted assessed new rejection activity - wake",
 			state: func() *models.State {
 				state := testhelpers.CreateValidState()

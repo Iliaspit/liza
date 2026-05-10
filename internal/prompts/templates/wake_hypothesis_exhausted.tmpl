@@ -29,7 +29,7 @@ Multiple coders failed on same task. Re-evaluate and act NOW:
    - If you resolved it (superseded, updated guidance, fixed spec): no further action needed for that task
    - If you CANNOT resolve it now: run liza assess-hypothesis-exhausted to record your assessment
      Run: liza assess-hypothesis-exhausted <task-id> --note "<why it cannot be resolved now>" --agent-id {{.AgentID}} --json
-     This prevents re-waking for the same exhausted task. The task will trigger again only when new information arrives (new failures, human notes).
+     This transitions unresolved exhausted work to BLOCKED so it cannot be reassigned unchanged, and prevents re-waking until new information arrives (new failures, human notes).
 6. All state modifications must be executed before you exit.
 
 Do NOT call liza sprint-checkpoint. You must either supersede the task, update its guidance, or assess it. Do NOT defer.

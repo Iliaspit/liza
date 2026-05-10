@@ -322,6 +322,9 @@ func markSubmitRebaseConflict(bb *db.Blackboard, taskID, agentID string, pipelin
 		}
 		t.IntegrationFailure = cloneMapForTaskDiagnostic(diagnostic)
 		t.History = append(t.History, entry)
+		if _, err := blockTaskForHypothesisExhaustion(t, agentID, pipelineTransitions, now); err != nil {
+			return err
+		}
 		t.HandoffEvents = append(t.HandoffEvents, models.HandoffEvent{
 			Timestamp: now,
 			Agent:     agentID,

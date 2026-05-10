@@ -18,9 +18,8 @@ type AssessHypothesisExhaustedResult struct {
 }
 
 // AssessHypothesisExhausted records that the orchestrator has assessed a hypothesis-exhausted task.
-// Appends an orchestrator_assessment history entry without changing task status.
-// This prevents the wake-detection loop where the orchestrator repeatedly wakes
-// for hypothesis-exhausted tasks it has already triaged.
+// If the exhausted task is not already BLOCKED, it transitions the task to BLOCKED
+// so the task cannot be reassigned unchanged.
 func AssessHypothesisExhausted(projectRoot, taskID, note, agentID string) (*AssessHypothesisExhaustedResult, error) {
 	if taskID == "" {
 		return nil, &PreconditionError{Reason: "task ID is required"}
@@ -37,8 +36,13 @@ func AssessHypothesisExhausted(projectRoot, taskID, note, agentID string) (*Asse
 	lp := paths.New(projectRoot)
 	bb := db.For(lp.StatePath())
 	now := time.Now().UTC()
+	resolver, _, err := loadResolver(projectRoot)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load pipeline config: %w", err)
+	}
+	pipelineTransitions := BuildPipelineTransitions(resolver)
 
-	err := bb.Modify(func(state *models.State) error {
+	err = bb.Modify(func(state *models.State) error {
 		task := state.FindTask(taskID)
 		if task == nil {
 			return &errors.NotFoundError{Entity: "task", ID: taskID}
@@ -49,6 +53,10 @@ func AssessHypothesisExhausted(projectRoot, taskID, note, agentID string) (*Asse
 		}
 		if task.Status.IsTerminal() {
 			return &PreconditionError{Reason: fmt.Sprintf("task must not be in terminal status, current status: %s", task.Status)}
+		}
+
+		if _, err := blockTaskForHypothesisExhaustion(task, agentID, pipelineTransitions, now); err != nil {
+			return err
 		}
 
 		entry := models.TaskHistoryEntry{

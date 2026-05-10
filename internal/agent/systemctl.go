@@ -217,25 +217,13 @@ func verifyOrchestratorStateChanges(bb *db.Blackboard, stateBefore *models.State
 		}
 
 	case WakeTriggerHypothesisExhausted:
-		// HYPOTHESIS_EXHAUSTED: expect exhausted tasks to be updated or superseded
-		exhaustedBefore := 0
-		exhaustedAfter := 0
-		for _, task := range stateBefore.Tasks {
-			if len(task.FailedBy) >= 2 {
-				exhaustedBefore++
-			}
-		}
-		for _, task := range stateAfter.Tasks {
-			if len(task.FailedBy) >= 2 {
-				exhaustedAfter++
-			}
-		}
+		// HYPOTHESIS_EXHAUSTED: expect exhausted tasks to be blocked, superseded, or otherwise made non-claimable.
+		exhaustedBefore := countUnresolvedHypothesisExhausted(stateBefore)
+		exhaustedAfter := countUnresolvedHypothesisExhausted(stateAfter)
 		if exhaustedAfter < exhaustedBefore {
 			logger.Info("Orchestrator handled exhausted hypotheses", "before", exhaustedBefore, "after", exhaustedAfter)
 		} else {
-			logger.Info("Orchestrator could not resolve exhausted hypotheses",
-				"before", exhaustedBefore, "after", exhaustedAfter,
-				"hint", "May require human intervention or spec revision")
+			return fmt.Errorf("orchestrator completed with HYPOTHESIS_EXHAUSTED trigger but unresolved exhausted count didn't decrease (before: %d, after: %d)", exhaustedBefore, exhaustedAfter)
 		}
 
 	case WakeTriggerImmediateDiscovery:
@@ -308,4 +296,14 @@ func verifyOrchestratorStateChanges(bb *db.Blackboard, stateBefore *models.State
 	}
 
 	return nil
+}
+
+func countUnresolvedHypothesisExhausted(state *models.State) int {
+	count := 0
+	for _, task := range state.Tasks {
+		if len(task.FailedBy) >= 2 && task.Status != models.TaskStatusBlocked && !task.Status.IsTerminal() {
+			count++
+		}
+	}
+	return count
 }

@@ -586,6 +586,9 @@ func checkHypothesisExhaustion(state *models.State) []Alert {
 		if task.Status.IsTerminal() {
 			continue
 		}
+		if task.Status == models.TaskStatusBlocked {
+			continue
+		}
 		if len(task.FailedBy) >= 2 {
 			alerts = append(alerts, Alert{
 				Timestamp: now,

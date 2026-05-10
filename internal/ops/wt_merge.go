@@ -135,18 +135,9 @@ func markIntegrationFailedWithDiagnostic(
 			return err
 		}
 		t.FailedBy = appendUniqueAgentID(t.FailedBy, agentID)
-
-		// Refresh lease — task stays assigned to original coder for conflict resolution.
-		renewLease(s, t)
-		if t.AssignedTo != nil {
-			if agent, ok := s.Agents[*t.AssignedTo]; ok {
-				agent.LeaseExpires = t.LeaseExpires
-				s.Agents[*t.AssignedTo] = agent
-			}
-		}
-
+		now := time.Now().UTC()
 		entry := models.TaskHistoryEntry{
-			Time:   time.Now(),
+			Time:   now,
 			Event:  models.TaskEventIntegrationFailed,
 			Agent:  &agentID,
 			Reason: &reason,
@@ -162,6 +153,21 @@ func markIntegrationFailedWithDiagnostic(
 			}
 		}
 		t.History = append(t.History, entry)
+		blocked, err := blockTaskForHypothesisExhaustion(t, agentID, pb.transitions, now)
+		if err != nil {
+			return err
+		}
+
+		if !blocked {
+			// Refresh lease — task stays assigned to original coder for conflict resolution.
+			renewLease(s, t)
+			if t.AssignedTo != nil {
+				if agent, ok := s.Agents[*t.AssignedTo]; ok {
+					agent.LeaseExpires = t.LeaseExpires
+					s.Agents[*t.AssignedTo] = agent
+				}
+			}
+		}
 		t.HandoffEvents = append(t.HandoffEvents, models.HandoffEvent{
 			Timestamp: time.Now().UTC(),
 			Agent:     agentID,

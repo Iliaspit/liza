@@ -315,6 +315,43 @@ func TestSubmitForReview_RebaseConflict_TransitionsToIntegrationFailed(t *testin
 	}
 }
 
+func TestSubmitForReview_RebaseConflict_SecondFailureBlocksTask(t *testing.T) {
+	tmpDir, taskID, wtCommit, agentID, bb := setupRebaseConflictScenario(t)
+
+	err := bb.Modify(func(state *models.State) error {
+		task := state.FindTask(taskID)
+		task.FailedBy = []string{"coder-2"}
+		return nil
+	})
+	testhelpers.AssertNoError(t, err)
+
+	_, err = SubmitForReview(tmpDir, taskID, wtCommit, agentID)
+	if err == nil {
+		t.Fatal("expected error due to rebase conflict, got nil")
+	}
+
+	var ifErr *IntegrationFailedError
+	if !stderrors.As(err, &ifErr) {
+		t.Fatalf("expected *IntegrationFailedError, got %T: %v", err, err)
+	}
+
+	state, err := bb.Read()
+	testhelpers.AssertNoError(t, err)
+	task := state.FindTask(taskID)
+	if task.Status != models.TaskStatusBlocked {
+		t.Fatalf("task status = %s, want %s", task.Status, models.TaskStatusBlocked)
+	}
+	if task.BlockedReason == nil || !strings.Contains(*task.BlockedReason, "hypothesis_exhaustion") {
+		t.Fatalf("BlockedReason = %v, want hypothesis_exhaustion", task.BlockedReason)
+	}
+	if task.AssignedTo != nil || task.LeaseExpires != nil {
+		t.Fatalf("blocked exhausted task should be unassigned with no lease, assigned=%v lease=%v", task.AssignedTo, task.LeaseExpires)
+	}
+	if len(task.FailedBy) != 2 || task.FailedBy[0] != "coder-2" || task.FailedBy[1] != agentID {
+		t.Fatalf("FailedBy = %v, want [coder-2 %s]", task.FailedBy, agentID)
+	}
+}
+
 func TestSubmitForReview_RebaseConflict_RecordsSubmissionHandoffForIntegrationFailed(t *testing.T) {
 	tmpDir, taskID, wtCommit, agentID, bb := setupRebaseConflictScenario(t)
 

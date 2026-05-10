@@ -882,6 +882,68 @@ func TestMergeWorktree_MergeConflict(t *testing.T) {
 	}
 }
 
+func TestMergeWorktree_MergeConflict_SecondFailureBlocksTask(t *testing.T) {
+	taskID := "merge-conflict-second-failure"
+	agentID := "coder-1"
+	tmpDir, stateFile := setupMergeTestRepo(t, taskID, agentID)
+
+	bb := db.New(stateFile)
+	err := bb.Modify(func(state *models.State) error {
+		task := state.FindTask(taskID)
+		task.FailedBy = []string{"coder-2"}
+		return nil
+	})
+	testhelpers.AssertNoError(t, err)
+
+	cmd := exec.Command("git", "-C", tmpDir, "checkout", "integration")
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("Failed to checkout integration: %v", err)
+	}
+
+	conflictFile := filepath.Join(tmpDir, "test-"+taskID+".txt")
+	if err := os.WriteFile(conflictFile, []byte("conflicting content"), 0644); err != nil {
+		t.Fatalf("Failed to write conflict file: %v", err)
+	}
+
+	cmd = exec.Command("git", "-C", tmpDir, "add", ".")
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("Failed to git add: %v", err)
+	}
+
+	cmd = exec.Command("git", "-C", tmpDir, "commit", "-m", "Conflicting commit")
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("Failed to commit: %v", err)
+	}
+
+	_, err = MergeWorktree(tmpDir, taskID, agentID)
+	if err == nil {
+		t.Fatal("Expected error for merge conflict, got nil")
+	}
+
+	var intErr *IntegrationFailedError
+	if !errors.As(err, &intErr) {
+		t.Fatalf("Expected *IntegrationFailedError, got %T: %v", err, err)
+	}
+
+	state := readStateForTest(t, stateFile)
+	task := state.FindTask(taskID)
+	if task == nil {
+		t.Fatal("Task not found in state")
+	}
+	if task.Status != models.TaskStatusBlocked {
+		t.Fatalf("Task status = %v, want %v", task.Status, models.TaskStatusBlocked)
+	}
+	if task.BlockedReason == nil || !strings.Contains(*task.BlockedReason, "hypothesis_exhaustion") {
+		t.Fatalf("BlockedReason = %v, want hypothesis_exhaustion", task.BlockedReason)
+	}
+	if task.AssignedTo != nil || task.LeaseExpires != nil {
+		t.Fatalf("blocked exhausted task should be unassigned with no lease, assigned=%v lease=%v", task.AssignedTo, task.LeaseExpires)
+	}
+	if len(task.FailedBy) != 2 || task.FailedBy[0] != "coder-2" || task.FailedBy[1] != agentID {
+		t.Fatalf("FailedBy = %v, want [coder-2 %s]", task.FailedBy, agentID)
+	}
+}
+
 func TestMergeWorktree_IntegrationTestFailure(t *testing.T) {
 	taskID := "merge-testfail"
 	agentID := "coder-1"

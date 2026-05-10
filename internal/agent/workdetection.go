@@ -205,7 +205,9 @@ func isTaskActionableSinceAssessment(task *models.Task, state *models.State) boo
 func countHypothesisExhaustedTasks(state *models.State) int {
 	count := 0
 	for i := range state.Tasks {
-		if len(state.Tasks[i].FailedBy) >= 2 && !state.Tasks[i].Status.IsTerminal() &&
+		if len(state.Tasks[i].FailedBy) >= 2 &&
+			state.Tasks[i].Status != models.TaskStatusBlocked &&
+			!state.Tasks[i].Status.IsTerminal() &&
 			isTaskActionableSinceAssessment(&state.Tasks[i], state) {
 			count++
 		}

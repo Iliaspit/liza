@@ -77,7 +77,7 @@ func BuildPipelineTransitions(r *pipeline.Resolver) map[models.TaskStatus][]mode
 		executingStatuses = append(executingStatuses, ls.executing)
 
 		// Cross-cutting additions per lifecycle phase:
-		tm[ls.initial] = append(tm[ls.initial], models.TaskStatusAbandoned, models.TaskStatusSuperseded)
+		tm[ls.initial] = append(tm[ls.initial], models.TaskStatusAbandoned, models.TaskStatusBlocked, models.TaskStatusSuperseded)
 		tm[ls.executing] = append(tm[ls.executing], models.TaskStatusBlocked, ls.initial, models.TaskStatusIntegrationFailed)
 		tm[ls.reviewing] = append(tm[ls.reviewing], ls.submitted, models.TaskStatusBlocked)
 		tm[ls.rejected] = append(tm[ls.rejected], ls.executing, models.TaskStatusBlocked, models.TaskStatusSuperseded, models.TaskStatusAbandoned)
@@ -102,6 +102,7 @@ func BuildPipelineTransitions(r *pipeline.Resolver) map[models.TaskStatus][]mode
 	tm[models.TaskStatusBlocked] = []models.TaskStatus{models.TaskStatusSuperseded, models.TaskStatusAbandoned}
 	tm[models.TaskStatusIntegrationFailed] = append([]models.TaskStatus{
 		models.TaskStatusAbandoned,
+		models.TaskStatusBlocked,
 		models.TaskStatusSuperseded,
 		models.TaskStatusMerged,
 	}, executingStatuses...)

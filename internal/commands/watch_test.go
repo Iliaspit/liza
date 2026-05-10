@@ -534,6 +534,17 @@ func TestCheckHypothesisExhaustion(t *testing.T) {
 			},
 			wantAlerts: 0,
 		},
+		{
+			name: "blocked task with two failures handled by blocked alert",
+			tasks: []models.Task{
+				func() models.Task {
+					task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusBlocked, now)
+					task.FailedBy = []string{"coder-1", "coder-2"}
+					return task
+				}(),
+			},
+			wantAlerts: 0,
+		},
 	}
 
 	for _, tt := range tests {
