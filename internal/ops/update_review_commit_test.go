@@ -88,6 +88,15 @@ func TestUpdateReviewCommit_HappyPath_Submitted(t *testing.T) {
 			if entry.Reason == nil || !strings.Contains(*entry.Reason, staleCommit) {
 				t.Errorf("history reason should reference old commit %s", staleCommit)
 			}
+			if entry.Commit == nil || *entry.Commit != wtHEAD {
+				t.Errorf("history commit = %v, want %s", entry.Commit, wtHEAD)
+			}
+			if entry.Extra["old_review_commit"] != staleCommit {
+				t.Errorf("old_review_commit extra = %v, want %s", entry.Extra["old_review_commit"], staleCommit)
+			}
+			if entry.Extra["new_review_commit"] != wtHEAD {
+				t.Errorf("new_review_commit extra = %v, want %s", entry.Extra["new_review_commit"], wtHEAD)
+			}
 			break
 		}
 	}

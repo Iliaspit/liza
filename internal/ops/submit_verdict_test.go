@@ -136,6 +136,12 @@ func TestSubmitVerdict_Approved(t *testing.T) {
 	if lastHistory.Event != models.TaskEventApproved {
 		t.Errorf("History event = %q, want %q", lastHistory.Event, models.TaskEventApproved)
 	}
+	if task.ReviewCommit == nil {
+		t.Fatal("ReviewCommit is nil")
+	}
+	if lastHistory.Commit == nil || *lastHistory.Commit != *task.ReviewCommit {
+		t.Fatalf("History commit = %v, want %s", lastHistory.Commit, *task.ReviewCommit)
+	}
 }
 
 func TestSubmitVerdict_Rejected(t *testing.T) {
@@ -194,6 +200,12 @@ func TestSubmitVerdict_Rejected(t *testing.T) {
 	lastHistory := task.History[len(task.History)-1]
 	if lastHistory.Event != models.TaskEventRejected {
 		t.Errorf("History event = %q, want %q", lastHistory.Event, models.TaskEventRejected)
+	}
+	if task.ReviewCommit == nil {
+		t.Fatal("ReviewCommit is nil")
+	}
+	if lastHistory.Commit == nil || *lastHistory.Commit != *task.ReviewCommit {
+		t.Fatalf("History commit = %v, want %s", lastHistory.Commit, *task.ReviewCommit)
 	}
 }
 

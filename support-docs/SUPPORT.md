@@ -151,6 +151,7 @@ liza submit-for-review → liza await-verdict → handle result
 ```
 
 - **REJECTED**: Fix issues, resubmit (session stays alive — no cold restart)
+- **ALREADY_TRANSITIONED**: Verdict was recovered after the task moved onward; follow `safe_action` (`stop` when another agent owns the task, `revise` when you still own it)
 - **APPROVED** / **NEW_ATTEMPT** / **TIMEOUT** / **ABORTED**: Exit normally
 
 ### Reviewer: Verdict → Await → Re-review

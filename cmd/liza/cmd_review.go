@@ -298,6 +298,7 @@ Requirements:
 Possible outcomes:
   - APPROVED: work accepted, agent can exit
   - REJECTED: work needs revision, reason provided
+  - ALREADY_TRANSITIONED: verdict was recovered after task moved onward; follow safe_action
   - TIMEOUT: no verdict within timeout period
   - NEW_ATTEMPT: task reassigned for fresh attempt
   - ABORTED: task was superseded or cancelled`,

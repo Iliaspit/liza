@@ -528,6 +528,14 @@ func TestSubmitForReview_WritesHandoffEvent(t *testing.T) {
 	if len(event.Failed) != 0 {
 		t.Errorf("HandoffEvent.Failed should be empty for submission, got %v", event.Failed)
 	}
+
+	lastHistory := task.History[len(task.History)-1]
+	if lastHistory.Event != models.TaskEventSubmittedForReview {
+		t.Fatalf("History event = %q, want %q", lastHistory.Event, models.TaskEventSubmittedForReview)
+	}
+	if lastHistory.Commit == nil || *lastHistory.Commit != result.ReviewCommit {
+		t.Fatalf("History commit = %v, want %s", lastHistory.Commit, result.ReviewCommit)
+	}
 }
 
 func TestSubmitForReview_TDDEnforcement_AcceptsNestedPythonTestFile(t *testing.T) {

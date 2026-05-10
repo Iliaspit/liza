@@ -222,9 +222,10 @@ func SubmitVerdict(projectRoot, taskID, verdict, reason, agentID, impact string)
 
 			// Build history entry with optional impact in Extra
 			historyEntry := models.TaskHistoryEntry{
-				Time:  now,
-				Event: models.TaskEventApproved,
-				Agent: &agentID,
+				Time:   now,
+				Event:  models.TaskEventApproved,
+				Agent:  &agentID,
+				Commit: task.ReviewCommit,
 			}
 			if impact != "" {
 				historyEntry.Extra = map[string]any{"impact": impact}
@@ -277,6 +278,7 @@ func SubmitVerdict(projectRoot, taskID, verdict, reason, agentID, impact string)
 				Event:  models.TaskEventRejected,
 				Agent:  &agentID,
 				Reason: &reason,
+				Commit: task.ReviewCommit,
 			})
 
 			// Refresh lease — coder needs time to address rejection.

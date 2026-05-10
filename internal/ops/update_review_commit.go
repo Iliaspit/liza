@@ -149,6 +149,11 @@ func UpdateReviewCommit(projectRoot, taskID, changedBy string) (*UpdateReviewCom
 			Event:  models.TaskEventReviewCommitUpdated,
 			Agent:  &changedBy,
 			Reason: &updateReason,
+			Commit: &wtHEAD,
+			Extra: map[string]any{
+				"old_review_commit": oldReviewCommit,
+				"new_review_commit": wtHEAD,
+			},
 		})
 
 		return nil

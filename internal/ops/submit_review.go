@@ -227,9 +227,10 @@ func SubmitForReview(projectRoot, taskID, commitRef, agentID string) (*SubmitFor
 		task.BaseCommit = &rebaseBase
 
 		task.History = append(task.History, models.TaskHistoryEntry{
-			Time:  now,
-			Event: models.TaskEventSubmittedForReview,
-			Agent: &agentID,
+			Time:   now,
+			Event:  models.TaskEventSubmittedForReview,
+			Agent:  &agentID,
+			Commit: &postRebaseCommit,
 		})
 
 		task.HandoffEvents = append(task.HandoffEvents, models.HandoffEvent{

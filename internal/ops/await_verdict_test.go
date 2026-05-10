@@ -557,8 +557,8 @@ func TestAwaitVerdict_Terminal(t *testing.T) {
 	if result.Verdict != VerdictTerminal {
 		t.Errorf("Verdict = %q, want TERMINAL", result.Verdict)
 	}
-	if !strings.Contains(result.Reason, "terminal status") {
-		t.Errorf("Reason = %q, want to contain 'terminal status'", result.Reason)
+	if !strings.Contains(result.Reason, "non-awaitable status") {
+		t.Errorf("Reason = %q, want to contain 'non-awaitable status'", result.Reason)
 	}
 	if result.TaskStatus != models.TaskStatusBlocked {
 		t.Errorf("TaskStatus = %q, want BLOCKED", result.TaskStatus)
@@ -993,5 +993,288 @@ func TestAwaitVerdict_RaceGuard(t *testing.T) {
 	agent2 := s.Agents["coder-2"]
 	if agent2.CurrentTask != nil && *agent2.CurrentTask == "task-1" {
 		t.Error("coder-2 should not have acquired the task")
+	}
+}
+
+func TestAwaitVerdict_RejectedAlreadyReassigned_ReturnsVerdict(t *testing.T) {
+	tmpDir := t.TempDir()
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+
+	now := time.Now().UTC()
+	state := testhelpers.CreateValidState()
+
+	reviewCommit := "abc123"
+	reason := "Missing error handling"
+	reviewer := "code-reviewer-1"
+	task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusImplementing, now)
+	task.AssignedTo = strPtr("coder-2")
+	task.ReviewCommit = &reviewCommit
+	task.RejectionReason = &reason
+	task.History = append(task.History,
+		models.TaskHistoryEntry{
+			Time:   now.Add(-2 * time.Minute),
+			Event:  models.TaskEventSubmittedForReview,
+			Agent:  strPtr("coder-1"),
+			Commit: &reviewCommit,
+		},
+		models.TaskHistoryEntry{
+			Time:   now.Add(-1 * time.Minute),
+			Event:  models.TaskEventRejected,
+			Agent:  &reviewer,
+			Reason: &reason,
+			Commit: &reviewCommit,
+		},
+		models.TaskHistoryEntry{
+			Time:             now,
+			Event:            models.TaskEventReassignedAfterRejection,
+			Agent:            strPtr("coder-2"),
+			PreviousAssignee: strPtr("coder-1"),
+		},
+	)
+	state.Tasks = []models.Task{task}
+	state.Agents["coder-1"] = models.Agent{
+		Role:   "coder",
+		Status: models.AgentStatusWaiting,
+	}
+	state.Agents["coder-2"] = models.Agent{
+		Role:        "coder",
+		Status:      models.AgentStatusWorking,
+		CurrentTask: strPtr("task-1"),
+	}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	result, err := AwaitVerdict(context.Background(), tmpDir, "task-1", "coder-1", 10*time.Second)
+	if err != nil {
+		t.Fatalf("AwaitVerdict error: %v", err)
+	}
+	if result.Verdict != VerdictAlreadyTransitioned {
+		t.Errorf("Verdict = %q, want %q", result.Verdict, VerdictAlreadyTransitioned)
+	}
+	if result.Reason != reason {
+		t.Errorf("Reason = %q, want %q", result.Reason, reason)
+	}
+	if result.ReviewerAgent != reviewer {
+		t.Errorf("ReviewerAgent = %q, want %q", result.ReviewerAgent, reviewer)
+	}
+	if result.TaskStatus != models.TaskStatusImplementing {
+		t.Errorf("TaskStatus = %q, want %s", result.TaskStatus, models.TaskStatusImplementing)
+	}
+	if result.CurrentAssignee != "coder-2" {
+		t.Errorf("CurrentAssignee = %q, want coder-2", result.CurrentAssignee)
+	}
+	if result.ReviewCommit != reviewCommit {
+		t.Errorf("ReviewCommit = %q, want %q", result.ReviewCommit, reviewCommit)
+	}
+	if result.SafeAction != SafeActionStop {
+		t.Errorf("SafeAction = %q, want %q", result.SafeAction, SafeActionStop)
+	}
+}
+
+func TestAwaitVerdict_RejectedBeforeLaterSubmission_ReturnsCallerVerdict(t *testing.T) {
+	tmpDir := t.TempDir()
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+
+	now := time.Now().UTC()
+	state := testhelpers.CreateValidState()
+
+	firstCommit := "commit-coder-1"
+	secondCommit := "commit-coder-2"
+	reason := "Missing error handling"
+	reviewer := "code-reviewer-1"
+	task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusReadyForReview, now)
+	task.AssignedTo = strPtr("coder-2")
+	task.ReviewCommit = &secondCommit
+	task.History = append(task.History,
+		models.TaskHistoryEntry{
+			Time:   now.Add(-4 * time.Minute),
+			Event:  models.TaskEventSubmittedForReview,
+			Agent:  strPtr("coder-1"),
+			Commit: &firstCommit,
+		},
+		models.TaskHistoryEntry{
+			Time:   now.Add(-3 * time.Minute),
+			Event:  models.TaskEventRejected,
+			Agent:  &reviewer,
+			Reason: &reason,
+			Commit: &firstCommit,
+		},
+		models.TaskHistoryEntry{
+			Time:             now.Add(-2 * time.Minute),
+			Event:            models.TaskEventReassignedAfterRejection,
+			Agent:            strPtr("coder-2"),
+			PreviousAssignee: strPtr("coder-1"),
+		},
+		models.TaskHistoryEntry{
+			Time:   now.Add(-1 * time.Minute),
+			Event:  models.TaskEventSubmittedForReview,
+			Agent:  strPtr("coder-2"),
+			Commit: &secondCommit,
+		},
+	)
+	state.Tasks = []models.Task{task}
+	state.Agents["coder-1"] = models.Agent{
+		Role:   "coder",
+		Status: models.AgentStatusWaiting,
+	}
+	state.Agents["coder-2"] = models.Agent{
+		Role:        "coder",
+		Status:      models.AgentStatusWorking,
+		CurrentTask: strPtr("task-1"),
+	}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	result, err := AwaitVerdict(context.Background(), tmpDir, "task-1", "coder-1", 10*time.Second)
+	if err != nil {
+		t.Fatalf("AwaitVerdict error: %v", err)
+	}
+	if result.Verdict != VerdictAlreadyTransitioned {
+		t.Errorf("Verdict = %q, want %q", result.Verdict, VerdictAlreadyTransitioned)
+	}
+	if result.Reason != reason {
+		t.Errorf("Reason = %q, want %q", result.Reason, reason)
+	}
+	if result.ReviewCommit != firstCommit {
+		t.Errorf("ReviewCommit = %q, want %q", result.ReviewCommit, firstCommit)
+	}
+	if result.CurrentAssignee != "coder-2" {
+		t.Errorf("CurrentAssignee = %q, want coder-2", result.CurrentAssignee)
+	}
+	if result.SafeAction != SafeActionStop {
+		t.Errorf("SafeAction = %q, want %q", result.SafeAction, SafeActionStop)
+	}
+}
+
+func TestAwaitVerdict_RejectedAfterReviewCommitUpdate_ReturnsUpdatedVerdict(t *testing.T) {
+	tmpDir := t.TempDir()
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+
+	now := time.Now().UTC()
+	state := testhelpers.CreateValidState()
+
+	oldCommit := "old-review-commit"
+	newCommit := "new-review-commit"
+	reason := "Tests fail after rebase"
+	reviewer := "code-reviewer-1"
+	task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusImplementing, now)
+	task.AssignedTo = strPtr("coder-2")
+	task.ReviewCommit = &newCommit
+	task.RejectionReason = &reason
+	task.History = append(task.History,
+		models.TaskHistoryEntry{
+			Time:   now.Add(-4 * time.Minute),
+			Event:  models.TaskEventSubmittedForReview,
+			Agent:  strPtr("coder-1"),
+			Commit: &oldCommit,
+		},
+		models.TaskHistoryEntry{
+			Time:   now.Add(-3 * time.Minute),
+			Event:  models.TaskEventReviewCommitUpdated,
+			Agent:  strPtr("human"),
+			Commit: &newCommit,
+			Extra: map[string]any{
+				"old_review_commit": oldCommit,
+				"new_review_commit": newCommit,
+			},
+		},
+		models.TaskHistoryEntry{
+			Time:   now.Add(-2 * time.Minute),
+			Event:  models.TaskEventRejected,
+			Agent:  &reviewer,
+			Reason: &reason,
+			Commit: &newCommit,
+		},
+		models.TaskHistoryEntry{
+			Time:             now.Add(-1 * time.Minute),
+			Event:            models.TaskEventReassignedAfterRejection,
+			Agent:            strPtr("coder-2"),
+			PreviousAssignee: strPtr("coder-1"),
+		},
+	)
+	state.Tasks = []models.Task{task}
+	state.Agents["coder-1"] = models.Agent{
+		Role:   "coder",
+		Status: models.AgentStatusWaiting,
+	}
+	state.Agents["coder-2"] = models.Agent{
+		Role:        "coder",
+		Status:      models.AgentStatusWorking,
+		CurrentTask: strPtr("task-1"),
+	}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	result, err := AwaitVerdict(context.Background(), tmpDir, "task-1", "coder-1", 10*time.Second)
+	if err != nil {
+		t.Fatalf("AwaitVerdict error: %v", err)
+	}
+	if result.Verdict != VerdictAlreadyTransitioned {
+		t.Errorf("Verdict = %q, want %q", result.Verdict, VerdictAlreadyTransitioned)
+	}
+	if result.Reason != reason {
+		t.Errorf("Reason = %q, want %q", result.Reason, reason)
+	}
+	if result.ReviewCommit != newCommit {
+		t.Errorf("ReviewCommit = %q, want %q", result.ReviewCommit, newCommit)
+	}
+}
+
+func TestHandleVerdictResult_NonAwaitableStatusRecoversVerdict(t *testing.T) {
+	tmpDir := t.TempDir()
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+
+	now := time.Now().UTC()
+	state := testhelpers.CreateValidState()
+
+	reviewCommit := "abc123"
+	reason := "Missing error handling"
+	reviewer := "code-reviewer-1"
+	task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusImplementing, now)
+	task.AssignedTo = strPtr("coder-2")
+	task.ReviewCommit = &reviewCommit
+	task.RejectionReason = &reason
+	task.History = append(task.History,
+		models.TaskHistoryEntry{
+			Time:   now.Add(-2 * time.Minute),
+			Event:  models.TaskEventSubmittedForReview,
+			Agent:  strPtr("coder-1"),
+			Commit: &reviewCommit,
+		},
+		models.TaskHistoryEntry{
+			Time:   now.Add(-1 * time.Minute),
+			Event:  models.TaskEventRejected,
+			Agent:  &reviewer,
+			Reason: &reason,
+			Commit: &reviewCommit,
+		},
+	)
+	state.Tasks = []models.Task{task}
+	state.Agents["coder-1"] = models.Agent{
+		Role:        "coder",
+		Status:      models.AgentStatusWaiting,
+		CurrentTask: strPtr("task-1"),
+	}
+	state.Agents["coder-2"] = models.Agent{
+		Role:        "coder",
+		Status:      models.AgentStatusWorking,
+		CurrentTask: strPtr("task-1"),
+	}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	resolver, _, err := loadResolver(tmpDir)
+	if err != nil {
+		t.Fatalf("loadResolver error: %v", err)
+	}
+	bb := db.For(stateFile)
+	result, err := handleVerdictResult(bb, &task, "coder-1", tmpDir, resolver, task.RolePair)
+	if err != nil {
+		t.Fatalf("handleVerdictResult error: %v", err)
+	}
+	if result.Verdict != VerdictAlreadyTransitioned {
+		t.Errorf("Verdict = %q, want %q", result.Verdict, VerdictAlreadyTransitioned)
+	}
+	if result.Reason != reason {
+		t.Errorf("Reason = %q, want %q", result.Reason, reason)
+	}
+	if result.ReviewCommit != reviewCommit {
+		t.Errorf("ReviewCommit = %q, want %q", result.ReviewCommit, reviewCommit)
 	}
 }
