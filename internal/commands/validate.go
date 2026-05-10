@@ -23,7 +23,7 @@ func SetWarnWriter(w io.Writer) {
 // Returns an error with detailed description if validation fails.
 func ValidateCommand(statePath string, skipSpecFileCheck bool) error {
 	if err := statevalidate.ValidateStateFile(statePath, skipSpecFileCheck, warnWriter); err != nil {
-		return &lizaerrors.ValidationError{Message: err.Error()}
+		return &lizaerrors.ValidationError{Message: err.Error(), Err: err}
 	}
 	return nil
 }

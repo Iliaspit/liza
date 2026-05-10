@@ -63,6 +63,9 @@ func IsAgentCollision(err error) bool {
 // or invalid field values). Mapped to HTTP 400 by the API layer.
 type ValidationError struct {
 	Message string
+	Err     error
 }
 
 func (e *ValidationError) Error() string { return e.Message }
+
+func (e *ValidationError) Unwrap() error { return e.Err }

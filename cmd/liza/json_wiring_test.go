@@ -372,6 +372,62 @@ func TestJSON_Validate_DanglingParentTaskReportsValidationDetails(t *testing.T) 
 	}
 }
 
+func TestJSON_Validate_MissingArtifactRefReportsFieldTaskAndValue(t *testing.T) {
+	projectRoot, statePath := setupMutationTestProject(t, func(state *models.State) {
+		now := time.Now().UTC()
+		task := testhelpers.BuildTaskByStatus("task-plan-missing", models.TaskStatusMerged, now)
+		task.SpecRef = "specs/vision.md"
+		task.PlanRef = "specs/plans/missing.md"
+		state.Tasks = []models.Task{task}
+	})
+	specDir := filepath.Join(projectRoot, "specs")
+	if err := os.MkdirAll(specDir, 0755); err != nil {
+		t.Fatalf("failed to create specs dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(specDir, "vision.md"), []byte("# Vision\n"), 0644); err != nil {
+		t.Fatalf("failed to create vision spec: %v", err)
+	}
+	state := readState(t, statePath)
+	task := mustFindTask(t, state, "task-plan-missing")
+	if task.PlanRef != "specs/plans/missing.md" {
+		t.Fatalf("PlanRef = %q, want specs/plans/missing.md", task.PlanRef)
+	}
+
+	stdout, err := executeRootCommandCapture(t, projectRoot, "validate", "--json", "--skip-spec-check=false")
+	if err == nil {
+		t.Fatalf("expected validate --json to fail for missing plan_ref")
+	}
+
+	env := parseEnvelope(t, stdout)
+	errObj, ok := env["error"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected error to be object, got %T", env["error"])
+	}
+	if errObj["code"] != "validation" {
+		t.Fatalf("error.code = %v, want validation", errObj["code"])
+	}
+	msg, _ := errObj["message"].(string)
+	if !strings.Contains(msg, "plan_ref file not found") || !strings.Contains(msg, "task-plan-missing") || strings.Contains(msg, "spec_ref file not found") {
+		t.Fatalf("error.message = %q, want field-specific plan_ref details", msg)
+	}
+	details, ok := errObj["details"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected error.details to be object, got %T", errObj["details"])
+	}
+	if details["field"] != "plan_ref" {
+		t.Errorf("details.field = %v, want plan_ref", details["field"])
+	}
+	if details["task_id"] != "task-plan-missing" {
+		t.Errorf("details.task_id = %v, want task-plan-missing", details["task_id"])
+	}
+	if details["value"] != "specs/plans/missing.md" {
+		t.Errorf("details.value = %v, want specs/plans/missing.md", details["value"])
+	}
+	if _, exists := details["resolved_path"]; exists {
+		t.Errorf("details.resolved_path should not be exposed: %v", details["resolved_path"])
+	}
+}
+
 func TestJSON_RBACError(t *testing.T) {
 	projectRoot, _ := setupMutationTestProject(t, func(state *models.State) {
 		now := time.Now().UTC()

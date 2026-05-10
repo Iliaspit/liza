@@ -201,32 +201,32 @@ func validateTaskInvariants(state *models.State, projectRoot string, skipSpecFil
 			return fmt.Errorf("task %s spec_ref contains worktree prefix (must be repo-relative): %s", task.ID, task.SpecRef)
 		}
 		if !skipSpecFileCheck && task.SpecRef != "" {
-			if err := checkSpecFileExists(projectRoot, task.SpecRef, state.Config.IntegrationBranch); err != nil {
-				return fmt.Errorf("%w (task: %s)", err, task.ID)
+			if err := checkArtifactRefFileExists(projectRoot, "spec_ref", task.SpecRef, state.Config.IntegrationBranch, task.ID); err != nil {
+				return err
 			}
 		}
 		if task.EpicRef != "" && strings.Contains(task.EpicRef, ".worktrees/") {
 			return fmt.Errorf("task %s epic_ref contains worktree prefix (must be repo-relative): %s", task.ID, task.EpicRef)
 		}
 		if !skipSpecFileCheck && task.EpicRef != "" {
-			if err := checkSpecFileExists(projectRoot, task.EpicRef, state.Config.IntegrationBranch); err != nil {
-				return fmt.Errorf("epic_ref: %w (task: %s)", err, task.ID)
+			if err := checkArtifactRefFileExists(projectRoot, "epic_ref", task.EpicRef, state.Config.IntegrationBranch, task.ID); err != nil {
+				return err
 			}
 		}
 		if task.PlanRef != "" && strings.Contains(task.PlanRef, ".worktrees/") {
 			return fmt.Errorf("task %s plan_ref contains worktree prefix (must be repo-relative): %s", task.ID, task.PlanRef)
 		}
 		if !skipSpecFileCheck && task.PlanRef != "" {
-			if err := checkSpecFileExists(projectRoot, task.PlanRef, state.Config.IntegrationBranch); err != nil {
-				return fmt.Errorf("plan_ref: %w (task: %s)", err, task.ID)
+			if err := checkArtifactRefFileExists(projectRoot, "plan_ref", task.PlanRef, state.Config.IntegrationBranch, task.ID); err != nil {
+				return err
 			}
 		}
 		if task.ArchRef != "" && strings.Contains(task.ArchRef, ".worktrees/") {
 			return fmt.Errorf("task %s arch_ref contains worktree prefix (must be repo-relative): %s", task.ID, task.ArchRef)
 		}
 		if !skipSpecFileCheck && task.ArchRef != "" {
-			if err := checkSpecFileExists(projectRoot, task.ArchRef, state.Config.IntegrationBranch); err != nil {
-				return fmt.Errorf("arch_ref: %w (task: %s)", err, task.ID)
+			if err := checkArtifactRefFileExists(projectRoot, "arch_ref", task.ArchRef, state.Config.IntegrationBranch, task.ID); err != nil {
+				return err
 			}
 		}
 

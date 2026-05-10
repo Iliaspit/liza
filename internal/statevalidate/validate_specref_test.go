@@ -252,6 +252,50 @@ func TestCheckSpecFileExists_GitFallback_FileNotOnAnyBranch(t *testing.T) {
 	}
 }
 
+func TestCheckArtifactRefFileExists_FieldSpecificDetails(t *testing.T) {
+	repoDir := initGitRepo(t, "integration", "specs/auth.md", "# Auth spec")
+
+	err := checkArtifactRefFileExists(repoDir, "plan_ref", "specs/plans/missing.md", "integration", "task-1")
+	if err == nil {
+		t.Fatal("Expected error for missing plan_ref")
+	}
+
+	refErr, ok := err.(*ArtifactRefError)
+	if !ok {
+		t.Fatalf("error type = %T, want *ArtifactRefError", err)
+	}
+	if refErr.Field != "plan_ref" {
+		t.Errorf("Field = %q, want plan_ref", refErr.Field)
+	}
+	if refErr.TaskID != "task-1" {
+		t.Errorf("TaskID = %q, want task-1", refErr.TaskID)
+	}
+	if refErr.Cause != artifactRefNotFoundCause {
+		t.Errorf("Cause = %q, want %q", refErr.Cause, artifactRefNotFoundCause)
+	}
+	if strings.Contains(err.Error(), "spec_ref") {
+		t.Errorf("Error = %q, should not mention spec_ref for plan_ref failure", err.Error())
+	}
+}
+
+func TestValidateArtifactRefScalarRejectsSemicolonJoinedRefs(t *testing.T) {
+	err := ValidateArtifactRefScalar("spec_ref", "specs/a.md; specs/b.md#section", "task-1")
+	if err == nil {
+		t.Fatal("Expected error for semicolon-joined refs")
+	}
+
+	refErr, ok := err.(*ArtifactRefError)
+	if !ok {
+		t.Fatalf("error type = %T, want *ArtifactRefError", err)
+	}
+	if refErr.Cause != artifactRefMultipleRefsCause {
+		t.Errorf("Cause = %q, want %q", refErr.Cause, artifactRefMultipleRefsCause)
+	}
+	if !strings.Contains(err.Error(), "multiple refs") {
+		t.Errorf("Error = %q, want multiple refs message", err.Error())
+	}
+}
+
 func TestCheckSpecFileExists_GitFallback_EmptyBranch(t *testing.T) {
 	repoDir := initGitRepo(t, "integration", "specs/auth.md", "# Auth spec")
 

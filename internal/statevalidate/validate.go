@@ -13,6 +13,66 @@ import (
 	"github.com/liza-mas/liza/internal/pipeline"
 )
 
+const artifactRefMultipleRefsCause = "multiple_refs_not_supported"
+const artifactRefNotFoundCause = "file_not_found"
+
+// ArtifactRefError carries safe diagnostics for invalid artifact references.
+type ArtifactRefError struct {
+	Field  string
+	Value  string
+	TaskID string
+	Cause  string
+}
+
+func (e *ArtifactRefError) Error() string {
+	field := e.Field
+	if field == "" {
+		field = "spec_ref"
+	}
+	switch e.Cause {
+	case artifactRefMultipleRefsCause:
+		return formatArtifactRefError(field, "contains multiple refs; use one repo-relative ref", e.Value, e.TaskID)
+	default:
+		return formatArtifactRefError(field, "file not found", e.Value, e.TaskID)
+	}
+}
+
+func (e *ArtifactRefError) SafeDetails() map[string]any {
+	details := map[string]any{
+		"field": e.Field,
+		"value": e.Value,
+		"cause": e.Cause,
+	}
+	if e.TaskID != "" {
+		details["task_id"] = e.TaskID
+	}
+	return details
+}
+
+func formatArtifactRefError(field, reason, value, taskID string) string {
+	if taskID != "" {
+		return fmt.Sprintf("%s %s: %s (task: %s)", field, reason, value, taskID)
+	}
+	return fmt.Sprintf("%s %s: %s", field, reason, value)
+}
+
+// ValidateArtifactRefScalar rejects delimiter-joined refs. Artifact ref fields
+// are scalar repo-relative refs; multi-reference formats must be explicit data.
+func ValidateArtifactRefScalar(field, value, taskID string) error {
+	if value == "" {
+		return nil
+	}
+	if strings.Contains(value, ";") {
+		return &ArtifactRefError{
+			Field:  field,
+			Value:  value,
+			TaskID: taskID,
+			Cause:  artifactRefMultipleRefsCause,
+		}
+	}
+	return nil
+}
+
 // ValidateStateFile validates the state.yaml file against all schema rules.
 // It orchestrates the full validation sequence: required fields, task states,
 // task invariants, dependencies, agent invariants, discovered items, anomalies,
@@ -90,29 +150,41 @@ func ValidateAnomalies(state *models.State, projectRoot string, skipSpecFileChec
 // both required-fields and task-invariants validation to ensure specs are
 // reachable.
 func checkSpecFileExists(projectRoot, specRef, integrationBranch string) error {
-	specFile := specRef
-	if idx := strings.Index(specFile, "#"); idx != -1 {
-		specFile = specFile[:idx]
+	return checkArtifactRefFileExists(projectRoot, "spec_ref", specRef, integrationBranch, "")
+}
+
+func checkArtifactRefFileExists(projectRoot, field, ref, integrationBranch, taskID string) error {
+	if err := ValidateArtifactRefScalar(field, ref, taskID); err != nil {
+		return err
 	}
-	specPath := specFile
-	if !filepath.IsAbs(specPath) {
-		specPath = filepath.Join(projectRoot, specFile)
+	refFile := ref
+	if idx := strings.Index(refFile, "#"); idx != -1 {
+		refFile = refFile[:idx]
 	}
-	if _, err := os.Stat(specPath); err == nil {
+	refPath := refFile
+	if !filepath.IsAbs(refPath) {
+		refPath = filepath.Join(projectRoot, refFile)
+	}
+	if _, err := os.Stat(refPath); err == nil {
 		return nil
 	}
 	// Fallback: file may exist on integration branch but not on the repo-root
 	// filesystem (e.g. merged by a sibling worktree). Try git cat-file -e.
 	// If git is not on PATH or the branch doesn't exist, this falls through
 	// gracefully to the "file not found" error below.
-	if integrationBranch != "" && projectRoot != "" && !filepath.IsAbs(specFile) {
-		cmd := gitenv.Command("cat-file", "-e", integrationBranch+":"+specFile)
+	if integrationBranch != "" && projectRoot != "" && !filepath.IsAbs(refFile) {
+		cmd := gitenv.Command("cat-file", "-e", integrationBranch+":"+refFile)
 		cmd.Dir = projectRoot
 		if err := cmd.Run(); err == nil {
 			return nil
 		}
 	}
-	return fmt.Errorf("spec_ref file not found: %s", specFile)
+	return &ArtifactRefError{
+		Field:  field,
+		Value:  ref,
+		TaskID: taskID,
+		Cause:  artifactRefNotFoundCause,
+	}
 }
 
 // buildTaskIDSet creates a lookup set of all task IDs for O(1) existence

@@ -6,6 +6,7 @@ import (
 
 	"github.com/liza-mas/liza/internal/errors"
 	"github.com/liza-mas/liza/internal/ops"
+	"github.com/liza-mas/liza/internal/statevalidate"
 )
 
 func TestClassifyError_NotFoundError(t *testing.T) {
@@ -38,6 +39,26 @@ func TestClassifyError_PostWriteValidationError(t *testing.T) {
 	}
 	if msg != "validation failed: precondition not met" {
 		t.Errorf("message = %q, want %q", msg, "validation failed: precondition not met")
+	}
+}
+
+func TestErrorDetails_UnwrapsValidationError(t *testing.T) {
+	inputErr := &errors.ValidationError{
+		Message: "plan_ref file not found: specs/plans/missing.md (task: task-1)",
+		Err: &statevalidate.ArtifactRefError{
+			Field:  "plan_ref",
+			Value:  "specs/plans/missing.md",
+			TaskID: "task-1",
+			Cause:  "file_not_found",
+		},
+	}
+
+	details := ErrorDetails(inputErr)
+	if details["field"] != "plan_ref" {
+		t.Errorf("field = %v, want plan_ref", details["field"])
+	}
+	if details["task_id"] != "task-1" {
+		t.Errorf("task_id = %v, want task-1", details["task_id"])
 	}
 }
 
