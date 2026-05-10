@@ -225,13 +225,6 @@ var validateCmd = &cobra.Command{
 Returns detailed error messages if validation fails.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) (retErr error) {
-		statePath := ""
-		if len(args) > 0 {
-			statePath = args[0]
-		} else {
-			statePath = filepath.Join(paths.LizaDirName, paths.StateFileName)
-		}
-
 		skipSpecCheck, _ := cmd.Flags().GetBool("skip-spec-check")
 
 		if isJSON(cmd) {
@@ -248,7 +241,11 @@ Returns detailed error messages if validation fails.`,
 			commands.SetWarnWriter(&warnBuf)
 			defer commands.SetWarnWriter(os.Stderr)
 
-			err := commands.ValidateCommand(statePath, skipSpecCheck)
+			statePath, err := resolveValidateStatePath(args)
+			if err != nil {
+				return err
+			}
+			err = commands.ValidateCommand(statePath, skipSpecCheck)
 			var warnings []string
 			if warnBuf.Len() > 0 {
 				for _, line := range strings.Split(strings.TrimSpace(warnBuf.String()), "\n") {
@@ -263,13 +260,28 @@ Returns detailed error messages if validation fails.`,
 			return jsonout.WriteResult(os.Stdout, map[string]bool{"valid": true}, warnings, nil)
 		}
 
-		err := commands.ValidateCommand(statePath, skipSpecCheck)
+		statePath, err := resolveValidateStatePath(args)
+		if err != nil {
+			return err
+		}
+		err = commands.ValidateCommand(statePath, skipSpecCheck)
 		if err != nil {
 			return err
 		}
 		fmt.Println("VALID")
 		return nil
 	},
+}
+
+func resolveValidateStatePath(args []string) (string, error) {
+	if len(args) > 0 {
+		return args[0], nil
+	}
+	projectRoot, err := requireProjectRoot()
+	if err != nil {
+		return "", err
+	}
+	return paths.New(projectRoot).StatePath(), nil
 }
 
 var migrateCmd = &cobra.Command{

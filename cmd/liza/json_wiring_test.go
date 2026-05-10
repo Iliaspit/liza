@@ -407,6 +407,56 @@ func TestJSON_Validate_Valid(t *testing.T) {
 	}
 }
 
+func TestJSON_Validate_DefaultStatePathWorksFromTaskWorktree(t *testing.T) {
+	projectRoot, _ := setupMutationTestProject(t, nil)
+	taskID := "task-validate-worktree"
+	testhelpers.CreateTestWorktree(t, projectRoot, taskID)
+	worktreeDir := filepath.Join(projectRoot, ".worktrees", taskID)
+
+	stdout, err := executeRootCommandCapture(t, worktreeDir, "validate", "--json", "--skip-spec-check")
+	if err != nil {
+		t.Fatalf("validate --json from task worktree failed: %v", err)
+	}
+
+	env := parseEnvelope(t, stdout)
+	if env["ok"] != true {
+		t.Fatalf("expected ok=true, got %v", env["ok"])
+	}
+
+	result, ok := env["result"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected result to be object, got %T", env["result"])
+	}
+	if result["valid"] != true {
+		t.Errorf("expected valid=true, got %v", result["valid"])
+	}
+}
+
+func TestJSON_Validate_DefaultStatePathRequiresProjectRoot(t *testing.T) {
+	nonProjectRoot := t.TempDir()
+
+	stdout, err := executeRootCommandCapture(t, nonProjectRoot, "validate", "--json", "--skip-spec-check")
+	if err == nil {
+		t.Fatalf("expected project root detection error, got nil")
+	}
+
+	env := parseEnvelope(t, stdout)
+	if env["ok"] != false {
+		t.Fatalf("expected ok=false, got %v", env["ok"])
+	}
+	errObj, ok := env["error"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected error to be object, got %T", env["error"])
+	}
+	if errObj["code"] != "project_root" {
+		t.Fatalf("error.code = %v, want project_root", errObj["code"])
+	}
+	msg, _ := errObj["message"].(string)
+	if msg == "" || msg == "internal error" || !strings.Contains(msg, "project root") {
+		t.Fatalf("error.message = %q, want actionable project root details", msg)
+	}
+}
+
 func TestJSON_Validate_Invalid(t *testing.T) {
 	// Create a project with an invalid state (empty/broken state file)
 	projectRoot := t.TempDir()
