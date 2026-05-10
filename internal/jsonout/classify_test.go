@@ -20,6 +20,67 @@ func TestClassifyError_NotFoundError(t *testing.T) {
 	}
 }
 
+func TestClassifyError_StructuredOperationalCategories(t *testing.T) {
+	tests := []struct {
+		name     string
+		err      error
+		wantCode string
+		wantMsg  string
+	}{
+		{
+			name:     "project root",
+			err:      &errors.ProjectRootError{Operation: "claim-task", Err: fmt.Errorf("not a git repository")},
+			wantCode: "project_root",
+			wantMsg:  "claim-task: failed to detect project root",
+		},
+		{
+			name:     "pipeline config",
+			err:      &errors.PipelineConfigError{Operation: "claim-task", Err: fmt.Errorf("invalid yaml")},
+			wantCode: "pipeline_config",
+			wantMsg:  "claim-task: failed to load pipeline config",
+		},
+		{
+			name: "permission",
+			err: &errors.PermissionError{
+				Operation: "claim-task",
+				AgentID:   "orchestrator-1",
+				Role:      "orchestrator",
+				Reason:    `operation "claim-task" not allowed for role "orchestrator" (agent orchestrator-1)`,
+			},
+			wantCode: "permission_denied",
+			wantMsg:  `operation "claim-task" not allowed for role "orchestrator" (agent orchestrator-1)`,
+		},
+		{
+			name:     "state schema",
+			err:      &errors.StateSchemaError{Operation: "validate", Err: fmt.Errorf("failed to parse state.yaml")},
+			wantCode: "state_schema",
+			wantMsg:  "state schema validation failed: failed to parse state.yaml",
+		},
+		{
+			name: "worktree context",
+			err: &errors.WorktreeContextError{
+				Operation: "submit-for-review",
+				TaskID:    "task-1",
+				Reason:    "worktree directory does not exist",
+			},
+			wantCode: "worktree_context",
+			wantMsg:  "worktree directory does not exist",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			code, msg := ClassifyError(tt.err)
+			if code != tt.wantCode {
+				t.Errorf("code = %q, want %q", code, tt.wantCode)
+			}
+			if msg != tt.wantMsg {
+				t.Errorf("message = %q, want %q", msg, tt.wantMsg)
+			}
+		})
+	}
+}
+
 func TestClassifyError_PreconditionError(t *testing.T) {
 	err := &ops.PreconditionError{Reason: "task is not IMPLEMENTING"}
 	code, msg := ClassifyError(err)

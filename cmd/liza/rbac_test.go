@@ -1,10 +1,12 @@
 package main
 
 import (
+	stderrors "errors"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	lizaerrors "github.com/liza-mas/liza/internal/errors"
 	"github.com/liza-mas/liza/internal/pipeline"
 	"github.com/liza-mas/liza/internal/testhelpers"
 )
@@ -145,8 +147,12 @@ func TestLoadResolverForRBAC_MissingConfig(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for missing config, got nil")
 	}
-	if !strings.Contains(err.Error(), "cannot authorize operation") {
-		t.Errorf("error %q missing expected substring %q", err.Error(), "cannot authorize operation")
+	var cfgErr *lizaerrors.PipelineConfigError
+	if !stderrors.As(err, &cfgErr) {
+		t.Fatalf("error type = %T, want *PipelineConfigError", err)
+	}
+	if cfgErr.Operation != "rbac" {
+		t.Errorf("operation = %q, want rbac", cfgErr.Operation)
 	}
 }
 
@@ -171,7 +177,11 @@ func TestLoadResolverFromDir_MissingConfig(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for missing config, got nil")
 	}
-	if !strings.Contains(err.Error(), "cannot authorize operation") {
-		t.Errorf("error %q missing expected substring %q", err.Error(), "cannot authorize operation")
+	var cfgErr *lizaerrors.PipelineConfigError
+	if !stderrors.As(err, &cfgErr) {
+		t.Fatalf("error type = %T, want *PipelineConfigError", err)
+	}
+	if cfgErr.Operation != "rbac" {
+		t.Errorf("operation = %q, want rbac", cfgErr.Operation)
 	}
 }

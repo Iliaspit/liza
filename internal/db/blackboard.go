@@ -117,7 +117,7 @@ func (bb *Blackboard) Read() (*models.State, error) {
 		}
 
 		if err := yaml.Unmarshal(data, &state); err != nil {
-			return fmt.Errorf("failed to parse state.yaml: %w", err)
+			return &errors.StateSchemaError{Operation: "state read", Err: err}
 		}
 
 		return nil
@@ -185,7 +185,7 @@ func (bb *Blackboard) ReadCached() (*models.State, error) {
 
 	var state models.State
 	if err := yaml.Unmarshal(data, &state); err != nil {
-		return nil, fmt.Errorf("failed to parse state.yaml: %w", err)
+		return nil, &errors.StateSchemaError{Operation: "state read cached", Err: err}
 	}
 
 	normalizeAgentRoles(&state)
@@ -349,7 +349,7 @@ func (bb *Blackboard) Modify(fn func(*models.State) error) error {
 
 		var state models.State
 		if err := yaml.Unmarshal(data, &state); err != nil {
-			return fmt.Errorf("failed to parse state: %w", err)
+			return &errors.StateSchemaError{Operation: "state modify", Err: err}
 		}
 
 		normalizeAgentRoles(&state)

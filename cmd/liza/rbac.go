@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	lizaerrors "github.com/liza-mas/liza/internal/errors"
 	"github.com/liza-mas/liza/internal/identity"
 	"github.com/liza-mas/liza/internal/pipeline"
 )
@@ -14,7 +15,7 @@ import (
 func loadResolverForRBAC(projectRoot string) (*pipeline.Resolver, error) {
 	cfg, err := pipeline.LoadFrozen(projectRoot)
 	if err != nil {
-		return nil, fmt.Errorf("cannot authorize operation: failed to load pipeline config: %w", err)
+		return nil, &lizaerrors.PipelineConfigError{Operation: "rbac", Err: err}
 	}
 	return pipeline.NewResolver(cfg), nil
 }
@@ -25,7 +26,7 @@ func loadResolverForRBAC(projectRoot string) (*pipeline.Resolver, error) {
 func loadResolverFromDir(lizaDir string) (*pipeline.Resolver, error) {
 	cfg, err := pipeline.Load(filepath.Join(lizaDir, "pipeline.yaml"))
 	if err != nil {
-		return nil, fmt.Errorf("cannot authorize operation: failed to load pipeline config: %w", err)
+		return nil, &lizaerrors.PipelineConfigError{Operation: "rbac", Err: err}
 	}
 	return pipeline.NewResolver(cfg), nil
 }
@@ -35,18 +36,34 @@ func loadResolverFromDir(lizaDir string) (*pipeline.Resolver, error) {
 func validateAllowedOperation(resolver *pipeline.Resolver, agentID, operationName string) error {
 	role, err := identity.ExtractRole(agentID)
 	if err != nil {
-		return fmt.Errorf("cannot validate operation %q for agent %q: %w", operationName, agentID, err)
+		return &lizaerrors.PermissionError{
+			Operation: operationName,
+			AgentID:   agentID,
+			Reason:    fmt.Sprintf("cannot validate operation %q for agent %q", operationName, agentID),
+			Err:       err,
+		}
 	}
 	ops, err := resolver.AllowedOperations(role)
 	if err != nil {
-		return fmt.Errorf("cannot validate operation %q for agent %q: %w", operationName, agentID, err)
+		return &lizaerrors.PermissionError{
+			Operation: operationName,
+			AgentID:   agentID,
+			Role:      role,
+			Reason:    fmt.Sprintf("cannot validate operation %q for agent %q", operationName, agentID),
+			Err:       err,
+		}
 	}
 	for _, op := range ops {
 		if op == operationName {
 			return nil
 		}
 	}
-	return fmt.Errorf("operation %q not allowed for role %q (agent %s)", operationName, role, agentID)
+	return &lizaerrors.PermissionError{
+		Operation: operationName,
+		AgentID:   agentID,
+		Role:      role,
+		Reason:    fmt.Sprintf("operation %q not allowed for role %q (agent %s)", operationName, role, agentID),
+	}
 }
 
 // validateRoleType checks whether the agent identified by agentID has one of
@@ -56,16 +73,29 @@ func validateRoleType(resolver *pipeline.Resolver, agentID string, allowedTypes 
 
 	role, err := identity.ExtractRole(agentID)
 	if err != nil {
-		return fmt.Errorf("cannot validate role type %s for agent %q: %w", typesLabel, agentID, err)
+		return &lizaerrors.PermissionError{
+			AgentID: agentID,
+			Reason:  fmt.Sprintf("cannot validate role type %s for agent %q", typesLabel, agentID),
+			Err:     err,
+		}
 	}
 	actualType, err := resolver.RoleType(role)
 	if err != nil {
-		return fmt.Errorf("cannot validate role type %s for agent %q: %w", typesLabel, agentID, err)
+		return &lizaerrors.PermissionError{
+			AgentID: agentID,
+			Role:    role,
+			Reason:  fmt.Sprintf("cannot validate role type %s for agent %q", typesLabel, agentID),
+			Err:     err,
+		}
 	}
 	for _, allowed := range allowedTypes {
 		if actualType == allowed {
 			return nil
 		}
 	}
-	return fmt.Errorf("command requires role type %s but agent %q has type %q", typesLabel, agentID, actualType)
+	return &lizaerrors.PermissionError{
+		AgentID: agentID,
+		Role:    role,
+		Reason:  fmt.Sprintf("command requires role type %s but agent %q has type %q", typesLabel, agentID, actualType),
+	}
 }

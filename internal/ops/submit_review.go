@@ -57,7 +57,7 @@ func SubmitForReview(projectRoot, taskID, commitRef, agentID string) (*SubmitFor
 	// Resolve expected statuses from pipeline config
 	resolver, _, resolverErr := loadResolver(projectRoot)
 	if resolverErr != nil {
-		return nil, &OperationalError{Message: "failed to load pipeline config", Err: resolverErr}
+		return nil, resolverErr
 	}
 	if task.RolePair == "" {
 		return nil, &PreconditionError{Reason: fmt.Sprintf("task %s has no role_pair set", taskID)}
@@ -98,7 +98,12 @@ func SubmitForReview(projectRoot, taskID, commitRef, agentID string) (*SubmitFor
 	wtPath := g.GetWorktreePath(taskID)
 
 	if _, err := os.Stat(wtPath); os.IsNotExist(err) {
-		return nil, &PreconditionError{Reason: fmt.Sprintf("worktree directory does not exist: %s", wtPath)}
+		return nil, &errors.WorktreeContextError{
+			Operation: integrationOperationSubmitForReview,
+			TaskID:    taskID,
+			Reason:    "worktree directory does not exist",
+			Err:       err,
+		}
 	}
 
 	wtBranch, err := g.GetWorktreeBranch(wtPath)

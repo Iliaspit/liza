@@ -51,6 +51,31 @@ func ClassifyError(err error) (code string, message string) {
 		return "not_found", "resource not found"
 	}
 
+	var projectRootErr *lizaerrors.ProjectRootError
+	if errors.As(err, &projectRootErr) {
+		return "project_root", projectRootErr.Error()
+	}
+
+	var pipelineConfigErr *lizaerrors.PipelineConfigError
+	if errors.As(err, &pipelineConfigErr) {
+		return "pipeline_config", pipelineConfigErr.Error()
+	}
+
+	var permissionErr *lizaerrors.PermissionError
+	if errors.As(err, &permissionErr) {
+		return "permission_denied", permissionErr.Error()
+	}
+
+	var stateSchemaErr *lizaerrors.StateSchemaError
+	if errors.As(err, &stateSchemaErr) {
+		return "state_schema", stateSchemaErr.Error()
+	}
+
+	var worktreeContextErr *lizaerrors.WorktreeContextError
+	if errors.As(err, &worktreeContextErr) {
+		return "worktree_context", worktreeContextErr.Error()
+	}
+
 	var validationErr *lizaerrors.ValidationError
 	if errors.As(err, &validationErr) {
 		return "validation", validationErr.Message

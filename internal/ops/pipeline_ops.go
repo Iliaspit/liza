@@ -1,9 +1,9 @@
 package ops
 
 import (
-	"fmt"
 	"log"
 
+	lizaerrors "github.com/liza-mas/liza/internal/errors"
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/pipeline"
 )
@@ -12,7 +12,7 @@ import (
 func loadResolver(projectRoot string) (*pipeline.Resolver, *pipeline.PipelineConfig, error) {
 	cfg, err := pipeline.LoadFrozen(projectRoot)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, &lizaerrors.PipelineConfigError{Operation: "load resolver", Err: err}
 	}
 	return pipeline.NewResolver(cfg), cfg, nil
 }
@@ -132,7 +132,7 @@ type PipelineDetectionContext struct {
 func LoadDetectionContext(projectRoot string) (*PipelineDetectionContext, error) {
 	resolver, _, err := loadResolver(projectRoot)
 	if err != nil {
-		return nil, fmt.Errorf("loading pipeline config for detection context: %w", err)
+		return nil, err
 	}
 	var m2oInfos []ManyToOneTransitionInfo
 	for _, td := range resolver.AllTransitions() {

@@ -49,7 +49,7 @@ func UpdateReviewCommit(projectRoot, taskID, changedBy string) (*UpdateReviewCom
 
 	resolver, _, resolverErr := loadResolver(projectRoot)
 	if resolverErr != nil {
-		return nil, fmt.Errorf("failed to load pipeline config: %w", resolverErr)
+		return nil, resolverErr
 	}
 	if task.RolePair == "" {
 		return nil, &PreconditionError{Reason: fmt.Sprintf("task %s has no role_pair set", taskID)}
@@ -76,9 +76,19 @@ func UpdateReviewCommit(projectRoot, taskID, changedBy string) (*UpdateReviewCom
 	g := git.New(projectRoot)
 	wtPath := g.GetWorktreePath(taskID)
 	if _, statErr := os.Stat(wtPath); os.IsNotExist(statErr) {
-		return nil, &PreconditionError{Reason: fmt.Sprintf("worktree directory does not exist: %s", wtPath)}
+		return nil, &errors.WorktreeContextError{
+			Operation: "update-review-commit",
+			TaskID:    taskID,
+			Reason:    "worktree directory does not exist",
+			Err:       statErr,
+		}
 	} else if statErr != nil {
-		return nil, fmt.Errorf("failed to stat worktree %s: %w", wtPath, statErr)
+		return nil, &errors.WorktreeContextError{
+			Operation: "update-review-commit",
+			TaskID:    taskID,
+			Reason:    "failed to stat worktree",
+			Err:       statErr,
+		}
 	}
 
 	wtHEAD, err := g.GetWorktreeHEAD(taskID)

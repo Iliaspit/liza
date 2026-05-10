@@ -11,7 +11,7 @@ import (
 func readTaskState(bb *db.Blackboard, taskID string) (*models.State, *models.Task, error) {
 	state, err := bb.Read()
 	if err != nil {
-		return nil, nil, &OperationalError{Message: "failed to read state", Err: err}
+		return nil, nil, err
 	}
 	task := state.FindTask(taskID)
 	if task == nil {

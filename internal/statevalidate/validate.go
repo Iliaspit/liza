@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/liza-mas/liza/internal/db"
+	lizaerrors "github.com/liza-mas/liza/internal/errors"
 	"github.com/liza-mas/liza/internal/gitenv"
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/pipeline"
@@ -89,7 +90,7 @@ func ValidateStateFile(statePath string, skipSpecFileCheck bool, warnWriter io.W
 	bb := db.For(statePath)
 	state, err := bb.Read()
 	if err != nil {
-		return fmt.Errorf("failed to read state file: %w", err)
+		return &lizaerrors.StateSchemaError{Operation: "validate", Err: err}
 	}
 
 	return ValidateState(state, projectRoot, skipSpecFileCheck, warnWriter)
@@ -106,7 +107,7 @@ func ValidateState(state *models.State, projectRoot string, skipSpecFileCheck bo
 	var resolver *pipeline.Resolver
 	cfg, cfgErr := pipeline.LoadFrozen(projectRoot)
 	if cfgErr != nil {
-		return fmt.Errorf("failed to load pipeline config: %w", cfgErr)
+		return &lizaerrors.PipelineConfigError{Operation: "validate", Err: cfgErr}
 	}
 	if cfg != nil {
 		resolver = pipeline.NewResolver(cfg)

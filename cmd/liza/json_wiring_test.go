@@ -550,9 +550,177 @@ func TestJSON_RBACError(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected error to be object, got %T", env["error"])
 	}
-	// RBAC errors are classified as "internal" since they're untyped fmt.Errorf
-	if errObj["code"] == nil || errObj["code"] == "" {
-		t.Errorf("expected error code to be set, got %v", errObj["code"])
+	if errObj["code"] != "permission_denied" {
+		t.Fatalf("error.code = %v, want permission_denied", errObj["code"])
+	}
+	msg, _ := errObj["message"].(string)
+	if msg == "" || msg == "internal error" {
+		t.Fatalf("error.message = %q, want actionable RBAC failure details", msg)
+	}
+}
+
+func TestJSON_ProjectRootDetectionErrorReportsActionableContext(t *testing.T) {
+	nonProjectRoot := t.TempDir()
+
+	stdout, err := executeRootCommandCapture(t, nonProjectRoot, "claim-task", "task-no-root", "coder-1", "--json")
+	if err == nil {
+		t.Fatalf("expected project root detection error, got nil")
+	}
+
+	env := parseEnvelope(t, stdout)
+	if env["ok"] != false {
+		t.Fatalf("expected ok=false, got %v", env["ok"])
+	}
+
+	errObj, ok := env["error"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected error to be object, got %T", env["error"])
+	}
+	if errObj["code"] != "project_root" {
+		t.Fatalf("error.code = %v, want project_root", errObj["code"])
+	}
+	msg, _ := errObj["message"].(string)
+	if msg == "" || msg == "internal error" {
+		t.Fatalf("error.message = %q, want actionable project root detection details", msg)
+	}
+	if !strings.Contains(msg, "project root") {
+		t.Fatalf("error.message = %q, want project root context", msg)
+	}
+}
+
+func TestJSON_PipelineConfigErrorReportsActionableContext(t *testing.T) {
+	projectRoot, _ := setupMutationTestProject(t, func(state *models.State) {
+		now := time.Now().UTC()
+		state.Tasks = []models.Task{
+			testhelpers.BuildTaskByStatus("task-pipeline-json", models.TaskStatusReady, now),
+		}
+	})
+	pipelinePath := filepath.Join(projectRoot, ".liza", "pipeline.yaml")
+	if err := os.WriteFile(pipelinePath, []byte("roles: [\n"), 0644); err != nil {
+		t.Fatalf("failed to corrupt pipeline config: %v", err)
+	}
+
+	stdout, err := executeRootCommandCapture(t, projectRoot, "claim-task", "task-pipeline-json", "coder-1", "--json")
+	if err == nil {
+		t.Fatalf("expected pipeline config error, got nil")
+	}
+
+	env := parseEnvelope(t, stdout)
+	if env["ok"] != false {
+		t.Fatalf("expected ok=false, got %v", env["ok"])
+	}
+	errObj, ok := env["error"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected error to be object, got %T", env["error"])
+	}
+	if errObj["code"] != "pipeline_config" {
+		t.Fatalf("error.code = %v, want pipeline_config", errObj["code"])
+	}
+	msg, _ := errObj["message"].(string)
+	if msg == "" || msg == "internal error" || !strings.Contains(msg, "pipeline config") {
+		t.Fatalf("error.message = %q, want actionable pipeline config details", msg)
+	}
+}
+
+func TestJSON_StateSchemaErrorReportsActionableContext(t *testing.T) {
+	projectRoot, statePath := setupMutationTestProject(t, nil)
+	if err := os.WriteFile(statePath, []byte("tasks: [\n"), 0644); err != nil {
+		t.Fatalf("failed to corrupt state file: %v", err)
+	}
+
+	stdout, err := executeRootCommandCapture(t, projectRoot, "validate", "--json", "--skip-spec-check")
+	if err == nil {
+		t.Fatalf("expected state schema error, got nil")
+	}
+
+	env := parseEnvelope(t, stdout)
+	if env["ok"] != false {
+		t.Fatalf("expected ok=false, got %v", env["ok"])
+	}
+	errObj, ok := env["error"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected error to be object, got %T", env["error"])
+	}
+	if errObj["code"] != "state_schema" {
+		t.Fatalf("error.code = %v, want state_schema", errObj["code"])
+	}
+	msg, _ := errObj["message"].(string)
+	if msg == "" || msg == "internal error" || !strings.Contains(msg, "state schema") {
+		t.Fatalf("error.message = %q, want actionable state schema details", msg)
+	}
+}
+
+func TestJSON_StateTransitionSchemaErrorReportsActionableContext(t *testing.T) {
+	projectRoot, statePath := setupMutationTestProject(t, nil)
+	if err := os.WriteFile(statePath, []byte("tasks: [\n"), 0644); err != nil {
+		t.Fatalf("failed to corrupt state file: %v", err)
+	}
+
+	stdout, err := executeRootCommandCapture(t, projectRoot,
+		"mark-blocked", "task-corrupt-state",
+		"--reason", "state parse failure repro",
+		"--questions", "What should repair do?",
+		"--agent-id", "coder-1",
+		"--json",
+	)
+	if err == nil {
+		t.Fatalf("expected state schema error, got nil")
+	}
+
+	env := parseEnvelope(t, stdout)
+	if env["ok"] != false {
+		t.Fatalf("expected ok=false, got %v", env["ok"])
+	}
+	errObj, ok := env["error"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected error to be object, got %T", env["error"])
+	}
+	if errObj["code"] != "state_schema" {
+		t.Fatalf("error.code = %v, want state_schema", errObj["code"])
+	}
+	msg, _ := errObj["message"].(string)
+	if msg == "" || msg == "internal error" || !strings.Contains(msg, "state schema") {
+		t.Fatalf("error.message = %q, want actionable state schema details", msg)
+	}
+}
+
+func TestJSON_WorktreeContextErrorReportsActionableContext(t *testing.T) {
+	projectRoot, _ := setupMutationTestProject(t, func(state *models.State) {
+		now := time.Now().UTC()
+		agentID := "coder-1"
+		task := testhelpers.BuildTaskByStatus("task-worktree-json", models.TaskStatusImplementing, now)
+		task.History = append(task.History, models.TaskHistoryEntry{
+			Time:  now,
+			Event: models.TaskEventPreExecutionCheckpoint,
+			Agent: &agentID,
+			Extra: map[string]any{
+				"intent":          "exercise missing worktree JSON diagnostics",
+				"validation_plan": "submit-for-review reports worktree context",
+			},
+		})
+		state.Tasks = []models.Task{task}
+	})
+
+	stdout, err := executeRootCommandCapture(t, projectRoot,
+		"submit-for-review", "task-worktree-json", "HEAD", "--agent-id", "coder-1", "--json")
+	if err == nil {
+		t.Fatalf("expected worktree context error, got nil")
+	}
+
+	env := parseEnvelope(t, stdout)
+	if env["ok"] != false {
+		t.Fatalf("expected ok=false, got %v", env["ok"])
+	}
+	errObj, ok := env["error"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected error to be object, got %T", env["error"])
+	}
+	if errObj["code"] != "worktree_context" {
+		t.Fatalf("error.code = %v, want worktree_context", errObj["code"])
+	}
+	msg, _ := errObj["message"].(string)
+	if msg == "" || msg == "internal error" || !strings.Contains(msg, "worktree") {
+		t.Fatalf("error.message = %q, want actionable worktree context details", msg)
 	}
 }
 

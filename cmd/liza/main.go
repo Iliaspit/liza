@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
+	lizaerrors "github.com/liza-mas/liza/internal/errors"
 	"github.com/liza-mas/liza/internal/identity"
 	"github.com/liza-mas/liza/internal/jsonout"
 	"github.com/liza-mas/liza/internal/ops"
@@ -40,7 +41,7 @@ var deleteCmd = &cobra.Command{
 func requireProjectRoot() (string, error) {
 	projectRoot, err := paths.GetProjectRoot()
 	if err != nil {
-		return "", fmt.Errorf("failed to detect project root: %w", err)
+		return "", &lizaerrors.ProjectRootError{Operation: rootCmd.CommandPath(), Err: err}
 	}
 	return projectRoot, nil
 }

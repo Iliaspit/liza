@@ -69,3 +69,140 @@ type ValidationError struct {
 func (e *ValidationError) Error() string { return e.Message }
 
 func (e *ValidationError) Unwrap() error { return e.Err }
+
+// ProjectRootError indicates that Liza could not resolve the project root from
+// the current execution context.
+type ProjectRootError struct {
+	Operation string
+	Err       error
+}
+
+func (e *ProjectRootError) Error() string {
+	if e.Operation != "" {
+		return fmt.Sprintf("%s: failed to detect project root", e.Operation)
+	}
+	return "failed to detect project root"
+}
+
+func (e *ProjectRootError) Unwrap() error { return e.Err }
+
+func (e *ProjectRootError) SafeDetails() map[string]any {
+	details := map[string]any{}
+	if e.Operation != "" {
+		details["operation"] = e.Operation
+	}
+	return details
+}
+
+// PipelineConfigError indicates that the frozen pipeline config could not be
+// loaded or parsed for an operation that depends on role/status metadata.
+type PipelineConfigError struct {
+	Operation string
+	Err       error
+}
+
+func (e *PipelineConfigError) Error() string {
+	if e.Operation != "" {
+		return fmt.Sprintf("%s: failed to load pipeline config", e.Operation)
+	}
+	return "failed to load pipeline config"
+}
+
+func (e *PipelineConfigError) Unwrap() error { return e.Err }
+
+func (e *PipelineConfigError) SafeDetails() map[string]any {
+	details := map[string]any{}
+	if e.Operation != "" {
+		details["operation"] = e.Operation
+	}
+	return details
+}
+
+// PermissionError indicates that an agent identity is not authorized for an
+// operation under the active pipeline role rules.
+type PermissionError struct {
+	Operation string
+	AgentID   string
+	Role      string
+	Reason    string
+	Err       error
+}
+
+func (e *PermissionError) Error() string {
+	if e.Reason != "" && e.Err != nil {
+		return fmt.Sprintf("%s: %v", e.Reason, e.Err)
+	}
+	if e.Reason != "" {
+		return e.Reason
+	}
+	return "permission denied"
+}
+
+func (e *PermissionError) Unwrap() error { return e.Err }
+
+func (e *PermissionError) SafeDetails() map[string]any {
+	details := map[string]any{}
+	if e.Operation != "" {
+		details["operation"] = e.Operation
+	}
+	if e.AgentID != "" {
+		details["agent_id"] = e.AgentID
+	}
+	if e.Role != "" {
+		details["role"] = e.Role
+	}
+	return details
+}
+
+// StateSchemaError indicates that state.yaml could not be read as a valid Liza
+// state document, before command-specific preconditions can be evaluated.
+type StateSchemaError struct {
+	Operation string
+	Err       error
+}
+
+func (e *StateSchemaError) Error() string {
+	if e.Err != nil {
+		return fmt.Sprintf("state schema validation failed: %v", e.Err)
+	}
+	return "state schema validation failed"
+}
+
+func (e *StateSchemaError) Unwrap() error { return e.Err }
+
+func (e *StateSchemaError) SafeDetails() map[string]any {
+	details := map[string]any{}
+	if e.Operation != "" {
+		details["operation"] = e.Operation
+	}
+	return details
+}
+
+// WorktreeContextError indicates that the task's expected worktree context is
+// missing or inconsistent for the requested operation.
+type WorktreeContextError struct {
+	Operation string
+	TaskID    string
+	Reason    string
+	Err       error
+}
+
+func (e *WorktreeContextError) Error() string {
+	if e.Reason != "" {
+		return e.Reason
+	}
+	return "worktree context invalid"
+}
+
+func (e *WorktreeContextError) Unwrap() error { return e.Err }
+
+func (e *WorktreeContextError) SafeDetails() map[string]any {
+	details := map[string]any{}
+	if e.Operation != "" {
+		details["operation"] = e.Operation
+	}
+	if e.TaskID != "" {
+		details["task_id"] = e.TaskID
+	}
+	return details
+}
