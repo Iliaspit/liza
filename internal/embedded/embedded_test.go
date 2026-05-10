@@ -1409,7 +1409,7 @@ func TestWriteCodexProjectHooks_NewFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to read codex config: %v", err)
 	}
-	if string(configContent) != "[features]\ncodex_hooks = true\n" {
+	if string(configContent) != "[features]\nhooks = true\n" {
 		t.Errorf("unexpected codex config:\n%s", string(configContent))
 	}
 
@@ -1566,7 +1566,7 @@ func TestWriteCodexProjectHooks_MergesExistingFiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"model = \"gpt-5\"", "[features]", "other = true", "codex_hooks = true"} {
+	for _, want := range []string{"model = \"gpt-5\"", "[features]", "other = true", "hooks = true"} {
 		if !strings.Contains(string(configContent), want) {
 			t.Errorf("config missing %q:\n%s", want, string(configContent))
 		}

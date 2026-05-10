@@ -2093,7 +2093,7 @@ func verifyCodexHooks(t *testing.T, projectRoot string) {
 	if err != nil {
 		t.Fatalf("Codex project config not created: %v", err)
 	}
-	if !strings.Contains(string(configContent), "codex_hooks = true") {
+	if !strings.Contains(string(configContent), "hooks = true") {
 		t.Errorf("Codex project config missing hooks feature:\n%s", string(configContent))
 	}
 

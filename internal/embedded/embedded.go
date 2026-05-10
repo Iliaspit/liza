@@ -443,7 +443,7 @@ func WriteCodexProjectPermissions(projectRoot string, reader *bufio.Reader) erro
 }
 
 // WriteCodexProjectHooks writes repo-local Codex hook configuration and hook
-// scripts to .codex/. Codex also requires the codex_hooks feature flag in an
+// scripts to .codex/. Codex also requires the hooks feature flag in an
 // active config layer, so this manages the project-local config.toml feature.
 func WriteCodexProjectHooks(projectRoot string, reader *bufio.Reader) error {
 	if reader == nil {
@@ -516,7 +516,7 @@ func ensureCodexDir(codexDir string) error {
 func prepareCodexHooksFeature(configPath string, reader *bufio.Reader) (bool, string, error) {
 	existing, err := os.ReadFile(configPath)
 	if os.IsNotExist(err) {
-		return true, "[features]\ncodex_hooks = true\n", nil
+		return true, "[features]\nhooks = true\n", nil
 	}
 	if err != nil {
 		return false, "", fmt.Errorf("failed to read codex project config: %w", err)
@@ -541,21 +541,21 @@ func mergeCodexHooksFeature(content string) (string, bool) {
 	lines := strings.Split(content, "\n")
 	sectionStart, sectionEnd := findTomlSection(lines, "features")
 	if sectionStart == -1 {
-		return appendTomlBlock(content, "[features]\ncodex_hooks = true\n"), true
+		return appendTomlBlock(content, "[features]\nhooks = true\n"), true
 	}
 
-	featureLineStart, featureLineEnd := findTomlAssignment(lines, sectionStart+1, sectionEnd, "codex_hooks")
+	featureLineStart, featureLineEnd := findTomlAssignment(lines, sectionStart+1, sectionEnd, "hooks")
 	if featureLineStart == -1 {
-		updated := insertLines(lines, sectionEnd, []string{"codex_hooks = true"})
+		updated := insertLines(lines, sectionEnd, []string{"hooks = true"})
 		return ensureTrailingNewline(strings.Join(updated, "\n")), true
 	}
 
 	assignment := strings.TrimSpace(stripTomlLineComment(strings.Join(lines[featureLineStart:featureLineEnd+1], "\n")))
-	if assignment == "codex_hooks = true" {
+	if assignment == "hooks = true" {
 		return content, false
 	}
 
-	lines[featureLineStart] = "codex_hooks = true"
+	lines[featureLineStart] = "hooks = true"
 	if featureLineEnd > featureLineStart {
 		lines = append(lines[:featureLineStart+1], lines[featureLineEnd+1:]...)
 	}
