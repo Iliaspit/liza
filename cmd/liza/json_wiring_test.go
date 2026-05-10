@@ -110,6 +110,105 @@ func TestJSON_ClaimTask_Error(t *testing.T) {
 	}
 }
 
+func TestJSON_AddTasks_PartialItemFailureKeepsOKEnvelope(t *testing.T) {
+	projectRoot, statePath := setupMutationTestProject(t, func(state *models.State) {
+		now := time.Now().UTC()
+		dupTask := testhelpers.BuildTaskByStatus("dup-task", models.TaskStatusReady, now)
+		dupTask.SpecRef = "specs/vision.md"
+		state.Tasks = []models.Task{dupTask}
+	})
+	testhelpers.CreateSpecFile(t, projectRoot, "vision.md", "# Vision\n")
+	testhelpers.CreateSpecFile(t, projectRoot, "feature.md", "# Feature\n")
+
+	tasks := []map[string]any{
+		{
+			"id":        "new-json-task",
+			"desc":      "Task added before duplicate",
+			"spec":      "specs/feature.md",
+			"done":      "done",
+			"scope":     "internal/ops",
+			"priority":  1,
+			"role_pair": "coding-pair",
+		},
+		{
+			"id":        "dup-task",
+			"desc":      "Duplicate task",
+			"spec":      "specs/vision.md",
+			"done":      "done",
+			"scope":     "internal/ops",
+			"priority":  1,
+			"role_pair": "coding-pair",
+		},
+	}
+	data, err := json.Marshal(tasks)
+	if err != nil {
+		t.Fatalf("failed to marshal tasks: %v", err)
+	}
+	tasksFile := filepath.Join(projectRoot, "tasks.json")
+	if err := os.WriteFile(tasksFile, data, 0644); err != nil {
+		t.Fatalf("failed to write tasks file: %v", err)
+	}
+
+	stdout, err := executeRootCommandCapture(t, projectRoot,
+		"add-tasks",
+		"--tasks-file", tasksFile,
+		"--agent-id", "orchestrator-1",
+		"--json",
+	)
+	if err != nil {
+		t.Fatalf("add-tasks --json returned top-level error: %v", err)
+	}
+
+	env := parseEnvelope(t, stdout)
+	if env["ok"] != true {
+		t.Fatalf("expected ok=true for item-level partial failure, got %v", env["ok"])
+	}
+	if _, exists := env["error"]; exists {
+		t.Fatalf("expected no top-level error for item-level partial failure, got %v", env["error"])
+	}
+
+	result, ok := env["result"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected result to be object, got %T", env["result"])
+	}
+	results, ok := result["results"].([]any)
+	if !ok {
+		t.Fatalf("expected result.results to be array, got %T", result["results"])
+	}
+	if len(results) != 2 {
+		t.Fatalf("result count = %d, want 2", len(results))
+	}
+	first, ok := results[0].(map[string]any)
+	if !ok {
+		t.Fatalf("first result has type %T, want object", results[0])
+	}
+	if first["success"] != true || first["task_id"] != "new-json-task" {
+		t.Fatalf("first result = %v, want successful new-json-task", first)
+	}
+	second, ok := results[1].(map[string]any)
+	if !ok {
+		t.Fatalf("second result has type %T, want object", results[1])
+	}
+	errMsg, _ := second["error"].(string)
+	if second["success"] != false || second["task_id"] != "dup-task" || !strings.Contains(errMsg, "already exists") {
+		t.Fatalf("second result = %v, want duplicate item failure", second)
+	}
+
+	state := readState(t, statePath)
+	if state.FindTask("new-json-task") == nil {
+		t.Fatal("new-json-task was not persisted after successful item result")
+	}
+	dupCount := 0
+	for _, task := range state.Tasks {
+		if task.ID == "dup-task" {
+			dupCount++
+		}
+	}
+	if dupCount != 1 {
+		t.Fatalf("dup-task count = %d, want 1", dupCount)
+	}
+}
+
 func TestJSON_Status_WithWarnings(t *testing.T) {
 	// Set up project with corrupted pipeline config so resolver load fails.
 	projectRoot, _ := setupMutationTestProject(t, nil)

@@ -396,7 +396,7 @@ func TestAddTask_DuplicateID(t *testing.T) {
 	}
 }
 
-func TestAddTask_PostWriteValidationFailure(t *testing.T) {
+func TestAddTask_ValidationFailureDoesNotPersistTask(t *testing.T) {
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 	logFile := filepath.Join(tmpDir, ".liza", "log.jsonl")
@@ -430,16 +430,40 @@ func TestAddTask_PostWriteValidationFailure(t *testing.T) {
 
 	_, err := AddTask(stateFile, logFile, input, "orchestrator-1")
 	if err == nil {
-		t.Fatal("expected post-write validation error")
+		t.Fatal("expected validation error")
 	}
 
-	var validationErr *PostWriteValidationError
-	if !errors.As(err, &validationErr) {
-		t.Fatalf("expected PostWriteValidationError, got %T: %v", err, err)
+	if !strings.Contains(err.Error(), "modification function failed") {
+		t.Fatalf("error = %q, want candidate state validation failure before persistence", err.Error())
 	}
 
-	if !strings.Contains(err.Error(), "state validation failed") {
-		t.Fatalf("error = %q, want to contain %q", err.Error(), "state validation failed")
+	bb := db.New(stateFile)
+	readState, readErr := bb.Read()
+	if readErr != nil {
+		t.Fatalf("Failed to read state: %v", readErr)
+	}
+	if readState.FindTask("task-added-before-validation-failure") != nil {
+		t.Fatal("task was persisted even though validation failed")
+	}
+}
+
+func TestAddTask_RejectsSemicolonJoinedSpecRef(t *testing.T) {
+	input := &AddTaskInput{
+		ID:          "task-multiref",
+		Description: "Task with invalid multi-ref",
+		SpecRef:     "specs/a.md; specs/b.md#section",
+		DoneWhen:    "done",
+		Scope:       "scope",
+		Priority:    1,
+		RolePair:    "coding-pair",
+	}
+
+	_, err := AddTask("/nonexistent/.liza/state.yaml", "/dev/null", input, "orchestrator-1")
+	if err == nil {
+		t.Fatal("expected error for semicolon-joined spec_ref")
+	}
+	if !strings.Contains(err.Error(), "multiple refs") {
+		t.Fatalf("error = %q, want multiple refs", err.Error())
 	}
 }
 
@@ -523,6 +547,64 @@ func TestAddTasks_PartialSuccess(t *testing.T) {
 	}
 	if readState.FindTask("new-task") == nil {
 		t.Error("new-task should exist in state")
+	}
+}
+
+func TestAddTasks_InvalidCurrentStateReturnsTopLevelErrorWithoutPersisting(t *testing.T) {
+	tmpDir := t.TempDir()
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	logFile := filepath.Join(tmpDir, ".liza", "log.jsonl")
+	testhelpers.CreateSpecFile(t, tmpDir, "vision.md", "# Vision\n")
+	testhelpers.CreateSpecFile(t, tmpDir, "feature.md", "# Feature\n")
+
+	state := testhelpers.CreateValidState()
+	state.Tasks = append(state.Tasks, models.Task{
+		ID:          "invalid-existing-task",
+		Description: "Invalid existing task",
+		Status:      models.TaskStatusImplementing,
+		RolePair:    "coding-pair",
+		Priority:    1,
+		SpecRef:     "specs/vision.md",
+		DoneWhen:    "done",
+		Scope:       "scope",
+		Created:     time.Now().UTC(),
+		History:     []models.TaskHistoryEntry{},
+	})
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	input := &AddTasksInput{
+		OrchestratorID: "orchestrator-1",
+		Tasks: []AddTaskInput{
+			{
+				ID:          "new-task",
+				Description: "A new task",
+				SpecRef:     "specs/feature.md",
+				DoneWhen:    "Tests pass",
+				Scope:       "internal/ops",
+				Priority:    1,
+				RolePair:    "coding-pair",
+			},
+		},
+	}
+
+	result, err := AddTasks(stateFile, logFile, input)
+	if err == nil {
+		t.Fatal("expected top-level error for invalid current state")
+	}
+	if result != nil {
+		t.Fatalf("result = %#v, want nil when batch is rejected before writes", result)
+	}
+	if !strings.Contains(err.Error(), "current state validation failed") {
+		t.Fatalf("error = %q, want current state validation failure", err.Error())
+	}
+
+	bb := db.New(stateFile)
+	readState, readErr := bb.Read()
+	if readErr != nil {
+		t.Fatalf("Failed to read state: %v", readErr)
+	}
+	if readState.FindTask("new-task") != nil {
+		t.Fatal("new-task was persisted even though add-tasks returned top-level failure")
 	}
 }
 

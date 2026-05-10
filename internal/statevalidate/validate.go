@@ -92,6 +92,16 @@ func ValidateStateFile(statePath string, skipSpecFileCheck bool, warnWriter io.W
 		return fmt.Errorf("failed to read state file: %w", err)
 	}
 
+	return ValidateState(state, projectRoot, skipSpecFileCheck, warnWriter)
+}
+
+// ValidateState validates an in-memory state using the same rules as
+// ValidateStateFile. Callers use this before persisting candidate mutations.
+func ValidateState(state *models.State, projectRoot string, skipSpecFileCheck bool, warnWriter io.Writer) error {
+	if warnWriter == nil {
+		warnWriter = io.Discard
+	}
+
 	// Load pipeline resolver
 	var resolver *pipeline.Resolver
 	cfg, cfgErr := pipeline.LoadFrozen(projectRoot)

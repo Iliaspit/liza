@@ -163,6 +163,10 @@ func AddTask(statePath, logPath string, input *AddTaskInput, orchestratorID stri
 		}
 		state.Goal.AlignmentHistory = append(state.Goal.AlignmentHistory, alignmentEntry)
 
+		if err := statevalidate.ValidateState(state, projectRoot, false, io.Discard); err != nil {
+			return err
+		}
+
 		return nil
 	})
 
@@ -183,10 +187,6 @@ func AddTask(statePath, logPath string, input *AddTaskInput, orchestratorID stri
 
 	if err := logger.Append(logEntry); err != nil {
 		result.Warnings = append(result.Warnings, fmt.Sprintf("activity log write failed: %v", err))
-	}
-
-	if err := statevalidate.ValidateStateFile(statePath, false, io.Discard); err != nil {
-		return nil, &PostWriteValidationError{Err: err}
 	}
 
 	return result, nil
@@ -220,6 +220,9 @@ func AddTasks(statePath, logPath string, input *AddTasksInput) (*AddTasksResult,
 	orchestratorID := input.OrchestratorID
 	if orchestratorID == "" {
 		return nil, &PreconditionError{Reason: "orchestrator agent ID is required"}
+	}
+	if err := statevalidate.ValidateStateFile(statePath, false, io.Discard); err != nil {
+		return nil, &PreconditionError{Reason: fmt.Sprintf("current state validation failed: %v", err)}
 	}
 	result := &AddTasksResult{Results: make([]AddTaskItemResult, 0, len(input.Tasks))}
 	for i := range input.Tasks {
