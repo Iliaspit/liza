@@ -231,6 +231,37 @@ func TestUpdateAlertsMsgMarksInactiveAlertsResolved(t *testing.T) {
 	}
 }
 
+func TestUpdateAlertsMsgDropsResolvedLeaseExpiredAlert(t *testing.T) {
+	m := testModel()
+	key := "LEASE EXPIRED:coder-4 on task-1"
+
+	result, _ := m.Update(alertsMsg{
+		Alerts: []AlertMsg{{
+			Timestamp: time.Now(),
+			Level:     "⚠️",
+			Category:  "LEASE EXPIRED",
+			Message:   "coder-4 on task-1",
+			Key:       key,
+		}},
+		ActiveAlertKeys: map[string]bool{key: true},
+		StateCache:      map[string]time.Time{},
+	})
+	updated := result.(Model)
+	if len(updated.activities) != 1 {
+		t.Fatalf("activities = %d, want 1", len(updated.activities))
+	}
+
+	result, _ = updated.Update(alertsMsg{
+		Alerts:          nil,
+		ActiveAlertKeys: map[string]bool{},
+		StateCache:      map[string]time.Time{},
+	})
+	updated = result.(Model)
+	if len(updated.activities) != 0 {
+		t.Fatalf("resolved lease-expired alert should be dropped, got %+v", updated.activities)
+	}
+}
+
 func TestUpdateAlertsMsgKeepsThrottledActiveAlertsCurrent(t *testing.T) {
 	m := testModel()
 	key := "INTEGRATION FAILED:task-1 needs integration recovery"

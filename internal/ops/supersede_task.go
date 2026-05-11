@@ -94,6 +94,7 @@ func SupersedeTask(projectRoot, taskID string, replacementIDs []string, reason, 
 		currentTask.SupersededBy = replacementIDs
 		currentTask.RescopeReason = &reason
 
+		releaseAgentsForTask(state, taskID)
 		currentTask.AssignedTo = nil
 		currentTask.LeaseExpires = nil
 		currentTask.ReviewingBy = nil

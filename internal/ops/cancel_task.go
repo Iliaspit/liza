@@ -63,6 +63,7 @@ func CancelTask(projectRoot, taskID, reason, agentID string) (*CancelResult, err
 			return err
 		}
 
+		releaseAgentsForTask(state, taskID)
 		currentTask.AssignedTo = nil
 		currentTask.LeaseExpires = nil
 		currentTask.ReviewingBy = nil

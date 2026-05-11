@@ -16,7 +16,7 @@ var hypothesisExhaustionBlockedQuestions = []string{
 	"Should the orchestrator supersede, split, or abandon this task?",
 }
 
-func blockTaskForHypothesisExhaustion(task *models.Task, agentID string, transitions map[models.TaskStatus][]models.TaskStatus, now time.Time) (bool, error) {
+func blockTaskForHypothesisExhaustion(state *models.State, task *models.Task, agentID string, transitions map[models.TaskStatus][]models.TaskStatus, now time.Time) (bool, error) {
 	if len(task.FailedBy) < 2 || task.Status == models.TaskStatusBlocked || task.Status.IsTerminal() {
 		return false, nil
 	}
@@ -27,6 +27,7 @@ func blockTaskForHypothesisExhaustion(task *models.Task, agentID string, transit
 	reason := hypothesisExhaustionBlockedReason
 	task.BlockedReason = &reason
 	task.BlockedQuestions = slices.Clone(hypothesisExhaustionBlockedQuestions)
+	releaseAgentsForTask(state, task.ID)
 	task.AssignedTo = nil
 	task.LeaseExpires = nil
 	task.ReviewingBy = nil

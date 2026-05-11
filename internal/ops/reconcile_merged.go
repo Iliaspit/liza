@@ -73,6 +73,7 @@ func ReconcileMerged(projectRoot, taskID, mergeCommit, prURL, reason, agentID st
 			return err
 		}
 
+		releaseAgentsForTask(state, taskID)
 		currentTask.Worktree = nil
 		currentTask.AssignedTo = nil
 		currentTask.LeaseExpires = nil

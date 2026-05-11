@@ -153,7 +153,7 @@ func markIntegrationFailedWithDiagnostic(
 			}
 		}
 		t.History = append(t.History, entry)
-		blocked, err := blockTaskForHypothesisExhaustion(t, agentID, pb.transitions, now)
+		blocked, err := blockTaskForHypothesisExhaustion(s, t, agentID, pb.transitions, now)
 		if err != nil {
 			return err
 		}

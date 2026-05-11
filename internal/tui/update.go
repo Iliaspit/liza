@@ -98,6 +98,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Update state cache with modified copy from check goroutine
 		m.stateCache = msg.StateCache
 		m.activities = resolveInactiveAlerts(m.activities, msg.ActiveAlertKeys)
+		m.activities = dropResolvedTransientAlerts(m.activities)
 		if shouldClearResolvedBanner(m.alertBanner, msg.ActiveAlertKeys) {
 			m.alertBanner = nil
 			m.alertExpiry = time.Time{}
@@ -639,6 +640,26 @@ func resolveInactiveAlerts(activities []ActivityEntry, activeKeys map[string]boo
 		activities[i].Resolved = !activeKeys[activities[i].AlertKey]
 	}
 	return activities
+}
+
+func dropResolvedTransientAlerts(activities []ActivityEntry) []ActivityEntry {
+	kept := activities[:0]
+	for _, activity := range activities {
+		if activity.Source == "alert" && activity.Resolved && isTransientAlertCategory(activity.Action) {
+			continue
+		}
+		kept = append(kept, activity)
+	}
+	return kept
+}
+
+func isTransientAlertCategory(category string) bool {
+	switch category {
+	case "LEASE EXPIRED", "REVIEW LEASE EXPIRED":
+		return true
+	default:
+		return false
+	}
 }
 
 func shouldClearResolvedBanner(alertBanner *ActivityEntry, activeKeys map[string]bool) bool {

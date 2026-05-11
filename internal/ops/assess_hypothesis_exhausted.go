@@ -55,7 +55,7 @@ func AssessHypothesisExhausted(projectRoot, taskID, note, agentID string) (*Asse
 			return &PreconditionError{Reason: fmt.Sprintf("task must not be in terminal status, current status: %s", task.Status)}
 		}
 
-		if _, err := blockTaskForHypothesisExhaustion(task, agentID, pipelineTransitions, now); err != nil {
+		if _, err := blockTaskForHypothesisExhaustion(state, task, agentID, pipelineTransitions, now); err != nil {
 			return err
 		}
 

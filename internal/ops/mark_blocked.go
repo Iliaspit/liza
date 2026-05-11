@@ -72,6 +72,7 @@ func MarkBlocked(projectRoot, taskID, reason string, questions []string, agentID
 		}
 		task.BlockedReason = &reason
 		task.BlockedQuestions = questions
+		releaseAgentsForTask(state, taskID)
 		task.AssignedTo = nil
 		task.LeaseExpires = nil
 
