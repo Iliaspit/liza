@@ -70,6 +70,17 @@ func (e *ValidationError) Error() string { return e.Message }
 
 func (e *ValidationError) Unwrap() error { return e.Err }
 
+// CLIInputError represents a command-line input or precondition failure whose
+// message is safe to expose in structured CLI output.
+type CLIInputError struct {
+	Message string
+	Err     error
+}
+
+func (e *CLIInputError) Error() string { return e.Message }
+
+func (e *CLIInputError) Unwrap() error { return e.Err }
+
 // ProjectRootError indicates that Liza could not resolve the project root from
 // the current execution context.
 type ProjectRootError struct {

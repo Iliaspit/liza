@@ -92,6 +92,20 @@ func TestClassifyError_PreconditionError(t *testing.T) {
 	}
 }
 
+func TestClassifyError_CLIInputError(t *testing.T) {
+	err := &errors.CLIInputError{
+		Message: "reading tasks file: open missing.json: no such file or directory",
+		Err:     fmt.Errorf("open missing.json: no such file or directory"),
+	}
+	code, msg := ClassifyError(err)
+	if code != "validation" {
+		t.Errorf("code = %q, want %q", code, "validation")
+	}
+	if msg != err.Message {
+		t.Errorf("message = %q, want %q", msg, err.Message)
+	}
+}
+
 func TestClassifyError_PostWriteValidationError(t *testing.T) {
 	err := &ops.PostWriteValidationError{Err: fmt.Errorf("invariant broken")}
 	code, msg := ClassifyError(err)

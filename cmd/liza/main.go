@@ -58,6 +58,17 @@ func requireAgentID(cmd *cobra.Command) (string, error) {
 	return agentID, nil
 }
 
+func cliValidationError(message string) error {
+	return &lizaerrors.CLIInputError{Message: message}
+}
+
+func cliValidationWrap(message string, err error) error {
+	return &lizaerrors.CLIInputError{
+		Message: fmt.Sprintf("%s: %v", message, err),
+		Err:     err,
+	}
+}
+
 // resolveOrchestratorID resolves the orchestrator agent ID from flag, env var,
 // or workspace state (the registered orchestrator). Used by commands that default
 // to the orchestrator identity when no explicit agent ID is provided.

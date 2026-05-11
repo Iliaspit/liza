@@ -81,6 +81,11 @@ func ClassifyError(err error) (code string, message string) {
 		return "validation", validationErr.Message
 	}
 
+	var cliInputErr *lizaerrors.CLIInputError
+	if errors.As(err, &cliInputErr) {
+		return "validation", cliInputErr.Message
+	}
+
 	var postWrite *ops.PostWriteValidationError
 	if errors.As(err, &postWrite) {
 		return "validation", "validation failed: precondition not met"

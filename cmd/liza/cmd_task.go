@@ -109,9 +109,9 @@ Example YAML file format:
 			statePath = filepath.Join(paths.LizaDirName, paths.StateFileName)
 			logPath = filepath.Join(paths.LizaDirName, paths.LogFileName)
 		} else if statePath != "" && logPath == "" {
-			return fmt.Errorf("if --state is provided, --log must also be provided")
+			return cliValidationError("if --state is provided, --log must also be provided")
 		} else if statePath == "" && logPath != "" {
-			return fmt.Errorf("if --log is provided, --state must also be provided")
+			return cliValidationError("if --log is provided, --state must also be provided")
 		}
 
 		filePath, _ := cmd.Flags().GetString("file")
@@ -121,7 +121,7 @@ Example YAML file format:
 			var err error
 			input, err = commands.LoadTaskInputFromFile(filePath)
 			if err != nil {
-				return err
+				return cliValidationError(err.Error())
 			}
 		} else {
 			input = &commands.TaskInput{}
@@ -137,7 +137,7 @@ Example YAML file format:
 			specVal, _ := cmd.Flags().GetString("spec")
 			absSpec, err := filepath.Abs(specVal)
 			if err != nil {
-				return fmt.Errorf("failed to resolve spec path: %w", err)
+				return cliValidationWrap("failed to resolve spec path", err)
 			}
 			input.SpecRef = absSpec
 		}
@@ -355,19 +355,19 @@ func markBlockedOptionsFromFlags(cmd *cobra.Command) (ops.MarkBlockedOptions, er
 		return ops.MarkBlockedOptions{}, nil
 	}
 	if strings.TrimSpace(operation) == "" {
-		return ops.MarkBlockedOptions{}, fmt.Errorf("--repair-operation is required when repair request fields are provided")
+		return ops.MarkBlockedOptions{}, cliValidationError("--repair-operation is required when repair request fields are provided")
 	}
 	if strings.TrimSpace(target) == "" {
-		return ops.MarkBlockedOptions{}, fmt.Errorf("--repair-target is required when repair request fields are provided")
+		return ops.MarkBlockedOptions{}, cliValidationError("--repair-target is required when repair request fields are provided")
 	}
 	if strings.TrimSpace(command) == "" {
-		return ops.MarkBlockedOptions{}, fmt.Errorf("--repair-command is required when repair request fields are provided")
+		return ops.MarkBlockedOptions{}, cliValidationError("--repair-command is required when repair request fields are provided")
 	}
 	if !hasNonEmptyValue(evidence) {
-		return ops.MarkBlockedOptions{}, fmt.Errorf("--repair-evidence is required when repair request fields are provided")
+		return ops.MarkBlockedOptions{}, cliValidationError("--repair-evidence is required when repair request fields are provided")
 	}
 	if !hasNonEmptyValue(validation) {
-		return ops.MarkBlockedOptions{}, fmt.Errorf("--repair-validation is required when repair request fields are provided")
+		return ops.MarkBlockedOptions{}, cliValidationError("--repair-validation is required when repair request fields are provided")
 	}
 	return ops.MarkBlockedOptions{
 		RepairRequest: &models.RepairRequest{
@@ -794,12 +794,12 @@ Example:
 
 		outputFile, _ := cmd.Flags().GetString("output")
 		if outputFile == "" {
-			return fmt.Errorf("--output is required")
+			return cliValidationError("--output is required")
 		}
 
 		data, err := os.ReadFile(outputFile)
 		if err != nil {
-			return fmt.Errorf("reading output file: %w", err)
+			return cliValidationWrap("reading output file", err)
 		}
 
 		var entries []models.OutputEntry
@@ -857,12 +857,12 @@ Example:
 
 		filePath, _ := cmd.Flags().GetString("tasks-file")
 		if filePath == "" {
-			return fmt.Errorf("--tasks-file is required")
+			return cliValidationError("--tasks-file is required")
 		}
 
 		data, err := os.ReadFile(filePath)
 		if err != nil {
-			return fmt.Errorf("reading tasks file: %w", err)
+			return cliValidationWrap("reading tasks file", err)
 		}
 
 		var tasks []ops.AddTaskInput
@@ -1017,7 +1017,6 @@ func init() {
 	// Add-tasks (batch) command flags
 	addAgentIDFlag(addTasksCmd)
 	addTasksCmd.Flags().String("tasks-file", "", "path to JSON file with task definitions array (required)")
-	addTasksCmd.MarkFlagRequired("tasks-file")
 
 	// Write-checkpoint command flags
 	addAgentIDFlag(writeCheckpointCmd)
@@ -1035,7 +1034,6 @@ func init() {
 	// Set-task-output command flags
 	addAgentIDFlag(setTaskOutputCmd)
 	setTaskOutputCmd.Flags().String("output", "", "path to JSON file with output entries array (required)")
-	setTaskOutputCmd.MarkFlagRequired("output")
 
 	// Delete task command flags
 	deleteTaskCmd.Flags().Bool("force", false, "force deletion even if task has dependencies or is in restricted state")

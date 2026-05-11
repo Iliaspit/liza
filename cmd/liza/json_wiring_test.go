@@ -50,6 +50,32 @@ func parseEnvelope(t *testing.T, stdout string) map[string]any {
 	return env
 }
 
+func assertJSONError(t *testing.T, stdout string, wantCode string, wantMessageParts ...string) {
+	t.Helper()
+
+	env := parseEnvelope(t, stdout)
+	if env["ok"] != false {
+		t.Fatalf("expected ok=false, got %v", env["ok"])
+	}
+
+	errObj, ok := env["error"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected error to be object, got %T", env["error"])
+	}
+	if errObj["code"] != wantCode {
+		t.Fatalf("error.code = %v, want %s", errObj["code"], wantCode)
+	}
+	msg, _ := errObj["message"].(string)
+	if msg == "" || msg == "internal error" {
+		t.Fatalf("error.message = %q, want actionable message", msg)
+	}
+	for _, part := range wantMessageParts {
+		if !strings.Contains(msg, part) {
+			t.Fatalf("error.message = %q, want substring %q", msg, part)
+		}
+	}
+}
+
 func TestJSON_ClaimTask_Success(t *testing.T) {
 	projectRoot, _ := setupMutationTestProject(t, func(state *models.State) {
 		now := time.Now().UTC()
@@ -107,6 +133,37 @@ func TestJSON_ClaimTask_Error(t *testing.T) {
 	}
 	if errObj["code"] != "not_found" {
 		t.Errorf("error code = %v, want not_found", errObj["code"])
+	}
+}
+
+func TestJSON_AddTask_CLIInputErrorsAreActionable(t *testing.T) {
+	projectRoot, _ := setupMutationTestProject(t, nil)
+
+	tests := []struct {
+		name      string
+		args      []string
+		wantParts []string
+	}{
+		{
+			name:      "state without log",
+			args:      []string{"add-task", "--state", filepath.Join(projectRoot, "state.yaml"), "--json"},
+			wantParts: []string{"--state", "--log"},
+		},
+		{
+			name:      "missing task input file",
+			args:      []string{"add-task", "--file", filepath.Join(projectRoot, "missing-task.yaml"), "--json"},
+			wantParts: []string{"failed to read task file", "missing-task.yaml"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stdout, err := executeRootCommandCapture(t, projectRoot, tt.args...)
+			if err == nil {
+				t.Fatalf("expected CLI input error, got nil")
+			}
+			assertJSONError(t, stdout, "validation", tt.wantParts...)
+		})
 	}
 }
 
@@ -209,6 +266,38 @@ func TestJSON_AddTasks_PartialItemFailureKeepsOKEnvelope(t *testing.T) {
 	}
 }
 
+func TestJSON_AddTasks_MissingTasksFileReportsActionableValidation(t *testing.T) {
+	projectRoot, _ := setupMutationTestProject(t, nil)
+	missingFile := filepath.Join(projectRoot, "missing-tasks.json")
+
+	tests := []struct {
+		name      string
+		args      []string
+		wantParts []string
+	}{
+		{
+			name:      "omitted tasks file flag",
+			args:      []string{"add-tasks", "--json"},
+			wantParts: []string{"--tasks-file is required"},
+		},
+		{
+			name:      "missing tasks file",
+			args:      []string{"add-tasks", "--tasks-file", missingFile, "--json"},
+			wantParts: []string{"reading tasks file", "missing-tasks.json"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stdout, err := executeRootCommandCapture(t, projectRoot, tt.args...)
+			if err == nil {
+				t.Fatalf("expected tasks file validation error, got nil")
+			}
+			assertJSONError(t, stdout, "validation", tt.wantParts...)
+		})
+	}
+}
+
 func TestJSON_AddTasks_MissingOrchestratorReportsActionablePrecondition(t *testing.T) {
 	projectRoot, _ := setupMutationTestProject(t, nil)
 	t.Setenv("LIZA_AGENT_ID", "")
@@ -258,6 +347,64 @@ func TestJSON_AddTasks_MissingOrchestratorReportsActionablePrecondition(t *testi
 	if msg == "" || msg == "internal error" || !strings.Contains(msg, "no orchestrator agent registered") || !strings.Contains(msg, "--agent-id") {
 		t.Fatalf("error.message = %q, want actionable orchestrator precondition details", msg)
 	}
+}
+
+func TestJSON_SetTaskOutput_MissingOutputFileReportsActionableValidation(t *testing.T) {
+	projectRoot, _ := setupMutationTestProject(t, nil)
+	missingFile := filepath.Join(projectRoot, "missing-output.json")
+
+	tests := []struct {
+		name      string
+		args      []string
+		wantParts []string
+	}{
+		{
+			name: "omitted output flag",
+			args: []string{
+				"set-task-output", "task-json-output",
+				"--agent-id", "epic-planner-1",
+				"--json",
+			},
+			wantParts: []string{"--output is required"},
+		},
+		{
+			name: "missing output file",
+			args: []string{
+				"set-task-output", "task-json-output",
+				"--agent-id", "epic-planner-1",
+				"--output", missingFile,
+				"--json",
+			},
+			wantParts: []string{"reading output file", "missing-output.json"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stdout, err := executeRootCommandCapture(t, projectRoot, tt.args...)
+			if err == nil {
+				t.Fatalf("expected output validation error, got nil")
+			}
+			assertJSONError(t, stdout, "validation", tt.wantParts...)
+		})
+	}
+}
+
+func TestJSON_MarkBlocked_IncompleteRepairRequestReportsActionableValidation(t *testing.T) {
+	projectRoot, _ := setupMutationTestProject(t, nil)
+
+	stdout, err := executeRootCommandCapture(t, projectRoot,
+		"mark-blocked", "task-incomplete-repair-request",
+		"--agent-id", "coder-1",
+		"--reason", "Required state repair is orchestrator-only",
+		"--questions", "Can the orchestrator restore the missing parent task?",
+		"--repair-operation", "add-task",
+		"--json",
+	)
+	if err == nil {
+		t.Fatalf("expected incomplete repair request validation error, got nil")
+	}
+	assertJSONError(t, stdout, "validation", "--repair-target is required")
 }
 
 func TestJSON_Status_WithWarnings(t *testing.T) {

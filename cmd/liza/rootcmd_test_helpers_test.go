@@ -121,6 +121,9 @@ func resetRootCmdForTest(t *testing.T) {
 		for _, name := range []string{"spec", "config", "entry-point", "branch", "post-worktree-cmd", "auto-resume", "default-cli", "default-doer-cli", "default-reviewer-cli", "cli", "claude", "codex", "gemini", "mistral"} {
 			resetFlagIfPresent(child, name)
 		}
+		for _, name := range []string{"state", "log", "file", "id", "desc", "done", "scope", "priority", "role-pair", "output", "tasks-file"} {
+			resetFlagIfPresent(child, name)
+		}
 	}
 
 	rootCmd.SetOut(io.Discard)
