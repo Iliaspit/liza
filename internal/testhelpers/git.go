@@ -18,9 +18,7 @@ import (
 //	testhelpers.MustGit(t, repoDir, "commit", "-m", "message")
 func MustGit(t *testing.T, dir string, args ...string) string {
 	t.Helper()
-	cmd := gitenv.Command(args...)
-	cmd.Dir = dir
-	output, err := cmd.CombinedOutput()
+	output, err := gitenv.CombinedOutput(dir, args...)
 	if err != nil {
 		t.Fatalf("git %v failed: %v\nOutput: %s", args, err, output)
 	}

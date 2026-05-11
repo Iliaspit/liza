@@ -29,9 +29,7 @@ func New(projectRoot string) *Git {
 
 // exec runs a git command in the project root and returns output
 func (g *Git) exec(args ...string) (string, error) {
-	cmd := gitenv.Command(args...)
-	cmd.Dir = g.projectRoot
-	output, err := cmd.CombinedOutput()
+	output, err := gitenv.CombinedOutput(g.projectRoot, args...)
 	if err != nil {
 		return "", fmt.Errorf("git %v failed: %w\nOutput: %s", args, err, output)
 	}
@@ -40,9 +38,7 @@ func (g *Git) exec(args ...string) (string, error) {
 
 // execInDir runs a git command in a specific directory
 func (g *Git) execInDir(dir string, args ...string) (string, error) {
-	cmd := gitenv.Command(args...)
-	cmd.Dir = dir
-	output, err := cmd.CombinedOutput()
+	output, err := gitenv.CombinedOutput(dir, args...)
 	if err != nil {
 		return "", fmt.Errorf("git %v failed: %w\nOutput: %s", args, err, output)
 	}

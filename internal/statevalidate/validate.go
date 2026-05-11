@@ -184,9 +184,7 @@ func checkArtifactRefFileExists(projectRoot, field, ref, integrationBranch, task
 	// If git is not on PATH or the branch doesn't exist, this falls through
 	// gracefully to the "file not found" error below.
 	if integrationBranch != "" && projectRoot != "" && !filepath.IsAbs(refFile) {
-		cmd := gitenv.Command("cat-file", "-e", integrationBranch+":"+refFile)
-		cmd.Dir = projectRoot
-		if err := cmd.Run(); err == nil {
+		if _, err := gitenv.CombinedOutput(projectRoot, "cat-file", "-e", integrationBranch+":"+refFile); err == nil {
 			return nil
 		}
 	}

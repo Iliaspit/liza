@@ -45,9 +45,7 @@ func (g *Git) FetchFromLocal(wtPath string, branch string) error {
 // Must be called from within a worktree context.
 // Returns *RebaseConflictError for merge conflicts, generic error for other failures.
 func (g *Git) RebaseOnto(wtPath string, baseBranch string) error {
-	cmd := gitenv.Command("rebase", baseBranch)
-	cmd.Dir = wtPath
-	rawOutput, err := cmd.CombinedOutput()
+	rawOutput, err := gitenv.CombinedOutput(wtPath, "rebase", baseBranch)
 	if err != nil {
 		out := string(rawOutput)
 		// Classify using canonical git conflict markers from command output only,

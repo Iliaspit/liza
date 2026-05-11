@@ -165,16 +165,14 @@ func GlobalLizaDir() (string, error) {
 // In a worktree: returns the main repo directory (parent of .git common dir)
 func GetProjectRoot() (string, error) {
 	// Get the toplevel directory
-	toplevelCmd := gitenv.Command("rev-parse", "--show-toplevel")
-	toplevelOut, err := toplevelCmd.Output()
+	toplevelOut, err := gitenv.Output("", "rev-parse", "--show-toplevel")
 	if err != nil {
 		return "", fmt.Errorf("not a git repository or git command failed: %w", err)
 	}
 	toplevel := strings.TrimSpace(string(toplevelOut))
 
 	// Get the common git directory
-	commonDirCmd := gitenv.Command("rev-parse", "--git-common-dir")
-	commonDirOut, err := commonDirCmd.Output()
+	commonDirOut, err := gitenv.Output("", "rev-parse", "--git-common-dir")
 	if err != nil {
 		return "", fmt.Errorf("failed to get git common dir: %w", err)
 	}
