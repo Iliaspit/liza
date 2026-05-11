@@ -36,7 +36,7 @@ func TestInitCommand(t *testing.T) {
 			description: "Test goal",
 			specRef:     "specs/vision.md",
 			setup: func(t *testing.T, tmpDir string) {
-				testhelpers.CreateSpecFile(t, tmpDir, "vision.md", "# Vision\n")
+				testhelpers.CreateCommittedSpecFile(t, tmpDir, "vision.md", "# Vision\n")
 			},
 			wantErr: false,
 		},
@@ -45,7 +45,7 @@ func TestInitCommand(t *testing.T) {
 			description: "Test goal",
 			specRef:     "specs/vision.md",
 			setup: func(t *testing.T, tmpDir string) {
-				testhelpers.CreateSpecFile(t, tmpDir, "vision.md", "# Vision\n")
+				testhelpers.CreateCommittedSpecFile(t, tmpDir, "vision.md", "# Vision\n")
 				// Create .liza directory
 				lizaDir := paths.New(tmpDir).LizaDir()
 				if err := os.Mkdir(lizaDir, 0755); err != nil {
@@ -69,7 +69,7 @@ func TestInitCommand(t *testing.T) {
 			specRef:     "specs/vision.md",
 			skipGlobal:  true,
 			setup: func(t *testing.T, tmpDir string) {
-				testhelpers.CreateSpecFile(t, tmpDir, "vision.md", "# Vision\n")
+				testhelpers.CreateCommittedSpecFile(t, tmpDir, "vision.md", "# Vision\n")
 			},
 			wantErr:     true,
 			errContains: "Run 'liza setup' first",
@@ -141,7 +141,7 @@ func TestInitCommandDirectoryStructure(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	testhelpers.CreateSpecFile(t, tmpDir, "vision.md", "# Vision\n")
+	testhelpers.CreateCommittedSpecFile(t, tmpDir, "vision.md", "# Vision\n")
 
 	// Run init
 	if err := InitCommand("Test goal", "specs/vision.md", nil); err != nil {
@@ -197,7 +197,7 @@ func TestInitCommandIntegrationBranch(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	testhelpers.CreateSpecFile(t, tmpDir, "vision.md", "# Vision\n")
+	testhelpers.CreateCommittedSpecFile(t, tmpDir, "vision.md", "# Vision\n")
 
 	// Verify integration branch doesn't exist
 	cmd := exec.Command("git", "rev-parse", "--verify", "integration")
@@ -232,7 +232,7 @@ func TestInitCommandExistingIntegrationBranch(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	testhelpers.CreateSpecFile(t, tmpDir, "vision.md", "# Vision\n")
+	testhelpers.CreateCommittedSpecFile(t, tmpDir, "vision.md", "# Vision\n")
 
 	cmd := exec.Command("git", "branch", "integration", "HEAD")
 	cmd.Dir = tmpDir
@@ -251,7 +251,7 @@ func TestInitCommandExistingIntegrationBranch(t *testing.T) {
 	}
 }
 
-func TestInitCommandNoCommitsFailsFast(t *testing.T) {
+func TestInitCommandNoCommitsWithUncommittedSpecFailsBeforeArtifacts(t *testing.T) {
 	tmpDir := setupGitRepoNoCommit(t)
 	defer os.RemoveAll(tmpDir)
 
@@ -272,8 +272,8 @@ func TestInitCommandNoCommitsFailsFast(t *testing.T) {
 	if err == nil {
 		t.Fatal("InitCommand() succeeded in a no-commit repo")
 	}
-	if !strings.Contains(err.Error(), "integration branch") || !strings.Contains(err.Error(), "HEAD is unborn") {
-		t.Fatalf("InitCommand() error = %v, want integration branch unborn HEAD error", err)
+	if !strings.Contains(err.Error(), "spec file") || !strings.Contains(err.Error(), "commit") {
+		t.Fatalf("InitCommand() error = %v, want spec commit precondition", err)
 	}
 
 	if _, err := os.Stat(paths.New(tmpDir).LizaDir()); !os.IsNotExist(err) {
@@ -300,6 +300,119 @@ func TestInitCommandNoCommitsFailsFast(t *testing.T) {
 	}
 }
 
+func TestIntegrationBranchNeedsCreateNoCommits(t *testing.T) {
+	tmpDir := setupGitRepoNoCommit(t)
+	defer os.RemoveAll(tmpDir)
+
+	originalDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(originalDir)
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = integrationBranchNeedsCreate("integration")
+	if err == nil {
+		t.Fatal("integrationBranchNeedsCreate() succeeded in a no-commit repo")
+	}
+	if !strings.Contains(err.Error(), "HEAD is unborn") {
+		t.Fatalf("integrationBranchNeedsCreate() error = %v, want unborn HEAD error", err)
+	}
+}
+
+func TestInitCommandSpecMustBeFullyCommitted(t *testing.T) {
+	tests := []struct {
+		name  string
+		setup func(t *testing.T, tmpDir string)
+	}{
+		{
+			name: "untracked spec",
+			setup: func(t *testing.T, tmpDir string) {
+				testhelpers.CreateSpecFile(t, tmpDir, "vision.md", "# Vision\n")
+			},
+		},
+		{
+			name: "staged new spec",
+			setup: func(t *testing.T, tmpDir string) {
+				testhelpers.CreateSpecFile(t, tmpDir, "vision.md", "# Vision\n")
+				cmd := exec.Command("git", "add", "specs/vision.md")
+				cmd.Dir = tmpDir
+				if out, err := cmd.CombinedOutput(); err != nil {
+					t.Fatalf("git add spec failed: %v\n%s", err, out)
+				}
+			},
+		},
+		{
+			name: "staged spec modification",
+			setup: func(t *testing.T, tmpDir string) {
+				testhelpers.CreateCommittedSpecFile(t, tmpDir, "vision.md", "# Vision\n")
+				specPath := filepath.Join(tmpDir, "specs", "vision.md")
+				if err := os.WriteFile(specPath, []byte("# Changed\n"), 0644); err != nil {
+					t.Fatal(err)
+				}
+				cmd := exec.Command("git", "add", "specs/vision.md")
+				cmd.Dir = tmpDir
+				if out, err := cmd.CombinedOutput(); err != nil {
+					t.Fatalf("git add spec failed: %v\n%s", err, out)
+				}
+			},
+		},
+		{
+			name: "unstaged spec modification",
+			setup: func(t *testing.T, tmpDir string) {
+				testhelpers.CreateCommittedSpecFile(t, tmpDir, "vision.md", "# Vision\n")
+				specPath := filepath.Join(tmpDir, "specs", "vision.md")
+				if err := os.WriteFile(specPath, []byte("# Changed\n"), 0644); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := setupGitRepo(t)
+			defer os.RemoveAll(tmpDir)
+
+			setupGlobalLiza(t)
+
+			originalDir, err := os.Getwd()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer os.Chdir(originalDir)
+			if err := os.Chdir(tmpDir); err != nil {
+				t.Fatal(err)
+			}
+
+			tt.setup(t, tmpDir)
+
+			err = InitCommand("Test goal", "specs/vision.md", nil)
+			if err == nil {
+				t.Fatal("InitCommand() succeeded with a spec that was not fully committed")
+			}
+			if !strings.Contains(err.Error(), "spec file") || !strings.Contains(err.Error(), "commit") {
+				t.Fatalf("InitCommand() error = %v, want spec commit precondition", err)
+			}
+			if _, err := os.Stat(paths.New(tmpDir).LizaDir()); !os.IsNotExist(err) {
+				t.Fatalf(".liza directory state after failed init = %v, want not exist", err)
+			}
+
+			cmd := exec.Command("git", "branch", "--list", "integration")
+			cmd.Dir = tmpDir
+			out, branchErr := cmd.CombinedOutput()
+			if branchErr != nil {
+				t.Fatalf("git branch --list integration failed: %v\n%s", branchErr, out)
+			}
+			if strings.TrimSpace(string(out)) != "" {
+				t.Fatalf("integration branch exists after failed init: %s", out)
+			}
+		})
+	}
+}
+
 func TestInitCommandCustomBranch(t *testing.T) {
 	tmpDir := setupGitRepo(t)
 	defer os.RemoveAll(tmpDir)
@@ -315,7 +428,7 @@ func TestInitCommandCustomBranch(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	testhelpers.CreateSpecFile(t, tmpDir, "vision.md", "# Vision\n")
+	testhelpers.CreateCommittedSpecFile(t, tmpDir, "vision.md", "# Vision\n")
 
 	customBranch := "develop"
 
@@ -371,7 +484,7 @@ func TestInitCommandInvalidBranchName(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	testhelpers.CreateSpecFile(t, tmpDir, "vision.md", "# Vision\n")
+	testhelpers.CreateCommittedSpecFile(t, tmpDir, "vision.md", "# Vision\n")
 
 	invalidNames := []string{"my branch", "..bad", "refs/heads/", "branch~1"}
 	for _, name := range invalidNames {
@@ -503,9 +616,8 @@ func verifyInitialization(t *testing.T, tmpDir, description, specRef string) {
 	if state.Goal.Description != description {
 		t.Errorf("state.Goal.Description = %q, want %q", state.Goal.Description, description)
 	}
-	wantSpecRef := filepath.Join(tmpDir, specRef)
-	if state.Goal.SpecRef != wantSpecRef {
-		t.Errorf("state.Goal.SpecRef = %q, want %q", state.Goal.SpecRef, wantSpecRef)
+	if state.Goal.SpecRef != specRef {
+		t.Errorf("state.Goal.SpecRef = %q, want %q", state.Goal.SpecRef, specRef)
 	}
 	if state.Goal.Status != models.GoalStatusInProgress {
 		t.Errorf("state.Goal.Status = %v, want %v", state.Goal.Status, models.GoalStatusInProgress)
@@ -595,7 +707,7 @@ func TestInitCommand_CreatesContractSymlinks(t *testing.T) {
 	}
 
 	// Setup
-	testhelpers.CreateSpecFile(t, gitDir, "vision.md", "# Vision\n")
+	testhelpers.CreateCommittedSpecFile(t, gitDir, "vision.md", "# Vision\n")
 
 	// Run init with explicit agent flags
 	err = InitCommandWithConfig(InitParams{
@@ -650,7 +762,7 @@ func TestInitCommand_SkipsCorrectSymlinks(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	testhelpers.CreateSpecFile(t, gitDir, "vision.md", "# Vision\n")
+	testhelpers.CreateCommittedSpecFile(t, gitDir, "vision.md", "# Vision\n")
 
 	// Pre-create CLAUDE.md as the correct symlink (absolute to global)
 	globalDir := filepath.Join(fakeHome, ".liza")
@@ -690,7 +802,7 @@ func TestInitCommand_BrownfieldFallsBackToGlobal(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	testhelpers.CreateSpecFile(t, gitDir, "vision.md", "# Vision\n")
+	testhelpers.CreateCommittedSpecFile(t, gitDir, "vision.md", "# Vision\n")
 
 	// Pre-create CLAUDE.md as a regular file (brownfield project)
 	existingContent := "# Custom contract\n"
@@ -747,7 +859,7 @@ func TestInitCommand_BrownfieldExistingLizaAtGlobalSkipsCreation(t *testing.T) {
 	defer os.Chdir(originalDir)
 	os.Chdir(gitDir)
 
-	testhelpers.CreateSpecFile(t, gitDir, "vision.md", "# Vision\n")
+	testhelpers.CreateCommittedSpecFile(t, gitDir, "vision.md", "# Vision\n")
 
 	coreFile := filepath.Join(fakeHome, ".liza", "CORE.md")
 
@@ -790,7 +902,7 @@ func TestInitCommand_BrownfieldBothOccupiedWarns(t *testing.T) {
 	defer os.Chdir(originalDir)
 	os.Chdir(gitDir)
 
-	testhelpers.CreateSpecFile(t, gitDir, "vision.md", "# Vision\n")
+	testhelpers.CreateCommittedSpecFile(t, gitDir, "vision.md", "# Vision\n")
 
 	// CLAUDE.md at repo root (non-Liza)
 	os.WriteFile(filepath.Join(gitDir, "CLAUDE.md"), []byte("project"), 0644)
@@ -846,7 +958,7 @@ func TestInitCommand_BrownfieldDuplicateLizaWarns(t *testing.T) {
 	defer os.Chdir(originalDir)
 	os.Chdir(gitDir)
 
-	testhelpers.CreateSpecFile(t, gitDir, "vision.md", "# Vision\n")
+	testhelpers.CreateCommittedSpecFile(t, gitDir, "vision.md", "# Vision\n")
 
 	coreFile := filepath.Join(fakeHome, ".liza", "CORE.md")
 
@@ -892,7 +1004,7 @@ func TestInitCommand_ContractActionLocalCreatesCLAUDELocalMd(t *testing.T) {
 	defer os.Chdir(originalDir)
 	os.Chdir(gitDir)
 
-	testhelpers.CreateSpecFile(t, gitDir, "vision.md", "# Vision\n")
+	testhelpers.CreateCommittedSpecFile(t, gitDir, "vision.md", "# Vision\n")
 
 	// Pre-create CLAUDE.md as a regular file (brownfield project)
 	os.WriteFile(filepath.Join(gitDir, "CLAUDE.md"), []byte("project"), 0644)
@@ -966,7 +1078,7 @@ func TestInitCommand_WritesClaudeSettings(t *testing.T) {
 	}
 
 	// Setup
-	testhelpers.CreateSpecFile(t, gitDir, "vision.md", "# Vision\n")
+	testhelpers.CreateCommittedSpecFile(t, gitDir, "vision.md", "# Vision\n")
 
 	// Run init
 	err = InitCommand("Test goal", "specs/vision.md", nil)
@@ -1113,7 +1225,7 @@ func TestInitCommandWithConfig_FreezesPipeline(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	testhelpers.CreateSpecFile(t, tmpDir, "vision.md", "# Vision\n")
+	testhelpers.CreateCommittedSpecFile(t, tmpDir, "vision.md", "# Vision\n")
 	configPath := writePipelineConfig(t, tmpDir, validPipelineYAML)
 
 	err = InitCommandWithConfig(InitParams{
@@ -1160,7 +1272,7 @@ func TestInitCommandWithConfig_EntryPoint(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	testhelpers.CreateSpecFile(t, tmpDir, "vision.md", "# Vision\n")
+	testhelpers.CreateCommittedSpecFile(t, tmpDir, "vision.md", "# Vision\n")
 	configPath := writePipelineConfig(t, tmpDir, validPipelineYAML)
 
 	err = InitCommandWithConfig(InitParams{
@@ -1198,7 +1310,7 @@ func TestInitCommandWithConfig_NoConfigAutoFreezes(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	testhelpers.CreateSpecFile(t, tmpDir, "vision.md", "# Vision\n")
+	testhelpers.CreateCommittedSpecFile(t, tmpDir, "vision.md", "# Vision\n")
 
 	// Init without --config auto-freezes embedded pipeline
 	err = InitCommand("Legacy goal", "specs/vision.md", nil)
@@ -1247,7 +1359,7 @@ func TestInitCommandWithConfig_InvalidConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	testhelpers.CreateSpecFile(t, tmpDir, "vision.md", "# Vision\n")
+	testhelpers.CreateCommittedSpecFile(t, tmpDir, "vision.md", "# Vision\n")
 
 	// Write invalid pipeline config (missing required fields)
 	invalidYAML := `pipeline:
@@ -1286,7 +1398,7 @@ func TestInitCommandWithConfig_NonexistentEntryPoint(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	testhelpers.CreateSpecFile(t, tmpDir, "vision.md", "# Vision\n")
+	testhelpers.CreateCommittedSpecFile(t, tmpDir, "vision.md", "# Vision\n")
 	configPath := writePipelineConfig(t, tmpDir, validPipelineYAML)
 
 	err = InitCommandWithConfig(InitParams{
@@ -1316,7 +1428,7 @@ func TestInitCommandWithConfig_PostWorktreeCmd(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	testhelpers.CreateSpecFile(t, tmpDir, "vision.md", "# Vision\n")
+	testhelpers.CreateCommittedSpecFile(t, tmpDir, "vision.md", "# Vision\n")
 
 	err = InitCommandWithConfig(InitParams{
 		Description:     "Goal with post-worktree-cmd",
@@ -1355,7 +1467,7 @@ func TestInitCommandWithConfig_PostWorktreeCmdOmittedWhenEmpty(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	testhelpers.CreateSpecFile(t, tmpDir, "vision.md", "# Vision\n")
+	testhelpers.CreateCommittedSpecFile(t, tmpDir, "vision.md", "# Vision\n")
 
 	err = InitCommandWithConfig(InitParams{
 		Description: "Goal without post-worktree-cmd",
@@ -1787,7 +1899,7 @@ func TestInitCommandWithConfig_AutoSuggestsPostWorktreeCmd(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	testhelpers.CreateSpecFile(t, tmpDir, "vision.md", "# Vision\n")
+	testhelpers.CreateCommittedSpecFile(t, tmpDir, "vision.md", "# Vision\n")
 
 	// Create package.json + yarn.lock to trigger suggestion
 	os.WriteFile(filepath.Join(tmpDir, "package.json"), []byte(`{"name":"test"}`), 0644)
@@ -1832,7 +1944,7 @@ func TestInitCommandWithConfig_AutoSuggestDeclined(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	testhelpers.CreateSpecFile(t, tmpDir, "vision.md", "# Vision\n")
+	testhelpers.CreateCommittedSpecFile(t, tmpDir, "vision.md", "# Vision\n")
 
 	// Create package.json to trigger suggestion
 	os.WriteFile(filepath.Join(tmpDir, "package.json"), []byte(`{"name":"test"}`), 0644)
@@ -1873,7 +1985,7 @@ func TestInitCommandWithConfig_NonInteractiveSkipsAutoDetect(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	testhelpers.CreateSpecFile(t, tmpDir, "vision.md", "# Vision\n")
+	testhelpers.CreateCommittedSpecFile(t, tmpDir, "vision.md", "# Vision\n")
 
 	// Create package.json + yarn.lock — would trigger prompt in interactive mode
 	os.WriteFile(filepath.Join(tmpDir, "package.json"), []byte(`{"name":"test"}`), 0644)
@@ -1914,7 +2026,7 @@ func TestInitCommandWithConfig_ExplicitFlagSkipsAutoDetect(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	testhelpers.CreateSpecFile(t, tmpDir, "vision.md", "# Vision\n")
+	testhelpers.CreateCommittedSpecFile(t, tmpDir, "vision.md", "# Vision\n")
 
 	// Create package.json + yarn.lock
 	os.WriteFile(filepath.Join(tmpDir, "package.json"), []byte(`{"name":"test"}`), 0644)
@@ -1958,7 +2070,7 @@ func TestInitCommandWithConfig_WarnsWhenNodeModulesMissing(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	testhelpers.CreateSpecFile(t, tmpDir, "vision.md", "# Vision\n")
+	testhelpers.CreateCommittedSpecFile(t, tmpDir, "vision.md", "# Vision\n")
 
 	// Create package.json + lockfile but NO node_modules
 	os.WriteFile(filepath.Join(tmpDir, "package.json"), []byte(`{"name":"test"}`), 0644)
@@ -2003,7 +2115,7 @@ func TestInitCommandWithConfig_NoWarningWhenNodeModulesPresent(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	testhelpers.CreateSpecFile(t, tmpDir, "vision.md", "# Vision\n")
+	testhelpers.CreateCommittedSpecFile(t, tmpDir, "vision.md", "# Vision\n")
 
 	// Create package.json + lockfile AND node_modules
 	os.WriteFile(filepath.Join(tmpDir, "package.json"), []byte(`{"name":"test"}`), 0644)
@@ -2049,7 +2161,7 @@ func TestInitCommandWithConfig_EntryPointWithoutConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	testhelpers.CreateSpecFile(t, tmpDir, "vision.md", "# Vision\n")
+	testhelpers.CreateCommittedSpecFile(t, tmpDir, "vision.md", "# Vision\n")
 
 	// --entry-point without --config now succeeds because embedded pipeline
 	// is auto-loaded and "detailed-spec" exists in the embedded config
@@ -2087,7 +2199,7 @@ func TestInitCommandWithConfig_DefaultCLI(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	testhelpers.CreateSpecFile(t, tmpDir, "vision.md", "# Vision\n")
+	testhelpers.CreateCommittedSpecFile(t, tmpDir, "vision.md", "# Vision\n")
 
 	err = InitCommandWithConfig(InitParams{
 		Description: "Goal with default CLI",
@@ -2122,7 +2234,7 @@ func TestInitCommandWithConfig_RoleSpecificDefaultCLIs(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	testhelpers.CreateSpecFile(t, tmpDir, "vision.md", "# Vision\n")
+	testhelpers.CreateCommittedSpecFile(t, tmpDir, "vision.md", "# Vision\n")
 
 	err = InitCommandWithConfig(InitParams{
 		Description:        "Goal with role-specific default CLIs",
@@ -2161,7 +2273,7 @@ func TestInitCommandWithConfig_DefaultCLIOmittedWhenEmpty(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	testhelpers.CreateSpecFile(t, tmpDir, "vision.md", "# Vision\n")
+	testhelpers.CreateCommittedSpecFile(t, tmpDir, "vision.md", "# Vision\n")
 
 	err = InitCommandWithConfig(InitParams{
 		Description: "Goal without default CLI",
@@ -2216,7 +2328,7 @@ func TestInitCommand_WorkspaceInit(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	testhelpers.CreateSpecFile(t, tmpDir, "vision.md", "# Vision\n")
+	testhelpers.CreateCommittedSpecFile(t, tmpDir, "vision.md", "# Vision\n")
 
 	// Capture stdout to verify init output
 	oldStdout := os.Stdout

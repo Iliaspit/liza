@@ -12,6 +12,7 @@ import (
 	"github.com/liza-mas/liza/internal/db"
 	"github.com/liza-mas/liza/internal/embedded"
 	lzerr "github.com/liza-mas/liza/internal/errors"
+	"github.com/liza-mas/liza/internal/initcheck"
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/paths"
 	"github.com/liza-mas/liza/internal/pipeline"
@@ -87,6 +88,10 @@ func InitProject(projectRoot string, params InitProjectParams) error {
 	if _, err := os.Stat(specPath); os.IsNotExist(err) {
 		return &lzerr.ValidationError{Message: fmt.Sprintf("spec file does not exist: %s", params.SpecRef)}
 	}
+	specRepoRel, err := initcheck.EnsureSpecCommittedClean(projectRoot, specPath)
+	if err != nil {
+		return &lzerr.ValidationError{Message: err.Error()}
+	}
 
 	// Validate global config exists (liza setup prerequisite)
 	globalDir, err := paths.GlobalLizaDir()
@@ -137,7 +142,7 @@ func InitProject(projectRoot string, params InitProjectParams) error {
 		Goal: models.Goal{
 			ID:          goalID,
 			Description: params.Description,
-			SpecRef:     specPath,
+			SpecRef:     specRepoRel,
 			EntryPoint:  params.EntryPoint,
 			Created:     timestamp,
 			Status:      models.GoalStatusInProgress,

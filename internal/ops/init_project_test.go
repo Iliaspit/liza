@@ -32,6 +32,16 @@ func setupInitTestDir(t *testing.T) (projectRoot, specFile string) {
 	if err := os.WriteFile(specFile, []byte("# Test Goal\n"), 0644); err != nil {
 		t.Fatalf("Failed to write spec file: %v", err)
 	}
+	cmds := [][]string{
+		{"git", "-C", projectRoot, "add", "specs/goal.md"},
+		{"git", "-C", projectRoot, "commit", "-m", "Add goal spec"},
+	}
+	for _, args := range cmds {
+		cmd := exec.Command(args[0], args[1:]...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git command %v failed: %v\n%s", args, err, out)
+		}
+	}
 
 	return projectRoot, specFile
 }
@@ -120,8 +130,8 @@ func TestInitProject_Success(t *testing.T) {
 	if state.Goal.Description != "Test project" {
 		t.Errorf("Description = %q, want %q", state.Goal.Description, "Test project")
 	}
-	if state.Goal.SpecRef != specFile {
-		t.Errorf("SpecRef = %q, want %q", state.Goal.SpecRef, specFile)
+	if state.Goal.SpecRef != "specs/goal.md" {
+		t.Errorf("SpecRef = %q, want %q", state.Goal.SpecRef, "specs/goal.md")
 	}
 
 	// Verify log file exists
@@ -284,6 +294,35 @@ func TestInitProject_NoCommitsDoesNotLeaveMissingIntegrationBranch(t *testing.T)
 	}
 	if strings.TrimSpace(string(out)) == "" {
 		t.Fatal("InitProject() succeeded in a no-commit repo but did not create the integration branch")
+	}
+}
+
+func TestInitProject_UncommittedSpecFailsBeforeArtifacts(t *testing.T) {
+	testhelpers.SetupGlobalLiza(t)
+	projectRoot := t.TempDir()
+	gitInit(t, projectRoot)
+
+	specDir := filepath.Join(projectRoot, "specs")
+	if err := os.MkdirAll(specDir, 0755); err != nil {
+		t.Fatalf("Failed to create specs dir: %v", err)
+	}
+	specFile := filepath.Join(specDir, "goal.md")
+	if err := os.WriteFile(specFile, []byte("# Test Goal\n"), 0644); err != nil {
+		t.Fatalf("Failed to write spec file: %v", err)
+	}
+
+	err := InitProject(projectRoot, InitProjectParams{
+		Description: "Test project",
+		SpecRef:     specFile,
+	})
+	if err == nil {
+		t.Fatal("InitProject() succeeded with an uncommitted spec")
+	}
+	if !strings.Contains(err.Error(), "spec file") || !strings.Contains(err.Error(), "commit") {
+		t.Fatalf("InitProject() error = %v, want spec commit precondition", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(projectRoot, ".liza")); !os.IsNotExist(statErr) {
+		t.Fatalf(".liza directory state after failed init = %v, want not exist", statErr)
 	}
 }
 

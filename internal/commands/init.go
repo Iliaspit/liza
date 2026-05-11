@@ -13,6 +13,7 @@ import (
 	"github.com/liza-mas/liza/internal/db"
 	"github.com/liza-mas/liza/internal/embedded"
 	gitpkg "github.com/liza-mas/liza/internal/gitenv"
+	"github.com/liza-mas/liza/internal/initcheck"
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/paths"
 	"github.com/liza-mas/liza/internal/pipeline"
@@ -539,6 +540,10 @@ func InitCommandWithConfig(params InitParams) error {
 	if _, err := os.Stat(specPath); os.IsNotExist(err) {
 		return fmt.Errorf("spec file does not exist: %s\nCreate spec document first. See templates/vision-template.md", specRef)
 	}
+	specRepoRel, err := initcheck.EnsureSpecCommittedClean(lizaPaths.ProjectRoot(), specPath)
+	if err != nil {
+		return err
+	}
 
 	// Validate global config exists (liza setup must have been run)
 	globalDir, err := paths.GlobalLizaDir()
@@ -680,7 +685,7 @@ func InitCommandWithConfig(params InitParams) error {
 		Goal: models.Goal{
 			ID:          goalID,
 			Description: description,
-			SpecRef:     specPath,
+			SpecRef:     specRepoRel,
 			EntryPoint:  entryPoint,
 			Created:     timestamp,
 			Status:      models.GoalStatusInProgress,

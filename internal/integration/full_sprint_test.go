@@ -308,7 +308,7 @@ func TestFullSprintSequence(t *testing.T) {
 	t.Cleanup(func() { _ = os.Chdir(originalDir) })
 
 	// Create spec file (required by AddTask validation).
-	testhelpers.CreateSpecFile(t, projectDir, "feature.md", "# E2E Sprint Feature\nTest feature for full sprint sequence.")
+	testhelpers.CreateCommittedSpecFileOnIntegration(t, projectDir, "feature.md", "# E2E Sprint Feature\nTest feature for full sprint sequence.")
 
 	// Write the production pipeline.yaml to a temp location so
 	// InitCommandWithConfig can read it.

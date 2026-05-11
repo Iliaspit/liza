@@ -52,7 +52,7 @@ func setupTestProject(t *testing.T) (projectDir string, cleanup func()) {
 func setupIntegrationTest(t *testing.T, projectDir string, taskIDs []string) (*db.Blackboard, string, string) {
 	t.Helper()
 
-	testhelpers.CreateSpecFile(t, projectDir, "feature.md", "# Feature")
+	testhelpers.CreateCommittedSpecFileOnIntegration(t, projectDir, "feature.md", "# Feature")
 
 	if err := commands.InitCommand("Test goal", "specs/feature.md", nil); err != nil {
 		t.Fatalf("Init failed: %v", err)
@@ -326,7 +326,7 @@ func TestIntegrationPipelineWithFindings(t *testing.T) {
 
 	// Step 1: Initialize project
 	t.Log("Step 1: Initialize project")
-	testhelpers.CreateSpecFile(t, projectDir, "feature.md", "# Feature")
+	testhelpers.CreateCommittedSpecFileOnIntegration(t, projectDir, "feature.md", "# Feature")
 
 	if err := commands.InitCommand("Integration test goal", "specs/feature.md", nil); err != nil {
 		t.Fatalf("Init failed: %v", err)
@@ -551,7 +551,7 @@ func TestIntegrationPipelineCleanScan(t *testing.T) {
 	defer cleanup()
 
 	// Setup: init + spec + integration task
-	testhelpers.CreateSpecFile(t, projectDir, "feature.md", "# Feature")
+	testhelpers.CreateCommittedSpecFileOnIntegration(t, projectDir, "feature.md", "# Feature")
 
 	if err := commands.InitCommand("Clean scan goal", "specs/feature.md", nil); err != nil {
 		t.Fatalf("Init failed: %v", err)
@@ -675,7 +675,7 @@ func TestArchitecturePairWorkflow(t *testing.T) {
 
 	// Step 1: Initialize project
 	t.Log("Step 1: Initialize project")
-	testhelpers.CreateSpecFile(t, projectDir, "arch-feature.md", "# Architecture Feature")
+	testhelpers.CreateCommittedSpecFileOnIntegration(t, projectDir, "arch-feature.md", "# Architecture Feature")
 
 	if err := commands.InitCommand("Architecture test goal", "specs/arch-feature.md", nil); err != nil {
 		t.Fatalf("Init failed: %v", err)
@@ -1122,7 +1122,7 @@ func TestManyToOneTransitionLifecycle(t *testing.T) {
 
 	// Step 1: Initialize project
 	t.Log("Step 1: Initialize project")
-	testhelpers.CreateSpecFile(t, projectDir, "feature.md", "# Feature Spec")
+	testhelpers.CreateCommittedSpecFileOnIntegration(t, projectDir, "feature.md", "# Feature Spec")
 
 	if err := commands.InitCommand("Many-to-one test goal", "specs/feature.md", nil); err != nil {
 		t.Fatalf("Init failed: %v", err)
@@ -1434,7 +1434,7 @@ func TestArchRefPropagation(t *testing.T) {
 
 	// Step 1: Initialize project
 	t.Log("Step 1: Initialize project")
-	testhelpers.CreateSpecFile(t, projectDir, "arch-prop.md", "# Arch Ref Propagation Feature")
+	testhelpers.CreateCommittedSpecFileOnIntegration(t, projectDir, "arch-prop.md", "# Arch Ref Propagation Feature")
 
 	if err := commands.InitCommand("Arch ref propagation test", "specs/arch-prop.md", nil); err != nil {
 		t.Fatalf("Init failed: %v", err)

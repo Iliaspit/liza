@@ -135,3 +135,24 @@ func CreateSpecFile(t *testing.T, tmpDir, filename, content string) string {
 
 	return specFile
 }
+
+// CreateCommittedSpecFile creates a spec file and commits it to HEAD.
+func CreateCommittedSpecFile(t *testing.T, tmpDir, filename, content string) string {
+	t.Helper()
+
+	specFile := CreateSpecFile(t, tmpDir, filename, content)
+	relPath := filepath.ToSlash(filepath.Join("specs", filename))
+	MustGit(t, tmpDir, "add", relPath)
+	MustGit(t, tmpDir, "commit", "-m", "Add spec")
+	return specFile
+}
+
+// CreateCommittedSpecFileOnIntegration creates a committed spec file and moves
+// the test integration branch to that commit.
+func CreateCommittedSpecFileOnIntegration(t *testing.T, tmpDir, filename, content string) string {
+	t.Helper()
+
+	specFile := CreateCommittedSpecFile(t, tmpDir, filename, content)
+	MustGit(t, tmpDir, "branch", "-f", "integration", "HEAD")
+	return specFile
+}

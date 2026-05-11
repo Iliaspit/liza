@@ -80,7 +80,8 @@ var initCmd = &cobra.Command{
 generating initial state.yaml, and setting up the integration branch.
 
 The description argument is required and describes the goal.
-The spec file (default: specs/vision.md) must exist before initialization.
+The spec file (default: specs/vision.md) must exist and be fully committed
+before initialization.
 
 Use --config to provide a pipeline YAML file (defaults to ~/.liza/pipeline.yaml).
 The config is validated and frozen into .liza/pipeline.yaml. Use --entry-point to
