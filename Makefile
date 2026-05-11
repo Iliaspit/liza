@@ -34,11 +34,11 @@ build: sync-embedded
 # The sync-embedded step copies contracts/ and skills/ into internal/embedded/ for go:embed.
 # claude-settings.json and hooks/ are mastered directly in internal/embedded/.
 test: sync-embedded check-testhelpers
-	go test -v -race -coverprofile=coverage.out ./...
+	go test -race -coverprofile=coverage.out ./...
 
 # Run e2e tests (full sprint sequence with mock CLI — ~40s)
 test-e2e: sync-embedded check-testhelpers
-	go test -v -race -tags e2e -run TestFullSprintSequence ./internal/integration/ -count=1
+	go test -race -tags e2e -run TestFullSprintSequence ./internal/integration/ -count=1
 
 # Run tests with coverage report
 coverage: test
