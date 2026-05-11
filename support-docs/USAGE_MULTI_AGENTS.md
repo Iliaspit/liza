@@ -16,6 +16,8 @@ See [DEMO](../docs/DEMO.md) for a full example.
 
 **Worktrees** — Agents don't work directly on your main branch. Each task gets its own [git worktree](https://git-scm.com/docs/git-worktree) (under `.worktrees/task-N/`), giving agents isolated workspaces that can't interfere with each other or with your working copy. Completed work merges into the integration branch, then into main. This means Liza requires a git repository and only one Liza context per repository.
 
+**Git boundary** — Liza manages local git state: task worktrees, task branches, review commits, and the configured integration branch. Publishing commits to GitHub, opening pull requests, choosing remote PR bases, enabling automerge, or reconciling GitHub-side branch state is an operator-owned handoff workflow, not part of Liza's lifecycle.
+
 ### Project Structure
 
 ```
