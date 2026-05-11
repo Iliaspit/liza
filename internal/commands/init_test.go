@@ -217,6 +217,89 @@ func TestInitCommandIntegrationBranch(t *testing.T) {
 	}
 }
 
+func TestInitCommandExistingIntegrationBranch(t *testing.T) {
+	tmpDir := setupGitRepo(t)
+	defer os.RemoveAll(tmpDir)
+
+	setupGlobalLiza(t)
+
+	originalDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(originalDir)
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatal(err)
+	}
+
+	testhelpers.CreateSpecFile(t, tmpDir, "vision.md", "# Vision\n")
+
+	cmd := exec.Command("git", "branch", "integration", "HEAD")
+	cmd.Dir = tmpDir
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("failed to create pre-existing integration branch: %v\n%s", err, output)
+	}
+
+	if err := InitCommand("Test goal", "specs/vision.md", nil); err != nil {
+		t.Fatalf("InitCommand() error = %v", err)
+	}
+
+	cmd = exec.Command("git", "rev-parse", "--verify", "integration")
+	cmd.Dir = tmpDir
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("integration branch missing after init: %v\n%s", err, output)
+	}
+}
+
+func TestInitCommandNoCommitsFailsFast(t *testing.T) {
+	tmpDir := setupGitRepoNoCommit(t)
+	defer os.RemoveAll(tmpDir)
+
+	setupGlobalLiza(t)
+
+	originalDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(originalDir)
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatal(err)
+	}
+
+	testhelpers.CreateSpecFile(t, tmpDir, "vision.md", "# Vision\n")
+
+	err = InitCommand("Test goal", "specs/vision.md", nil)
+	if err == nil {
+		t.Fatal("InitCommand() succeeded in a no-commit repo")
+	}
+	if !strings.Contains(err.Error(), "integration branch") || !strings.Contains(err.Error(), "HEAD is unborn") {
+		t.Fatalf("InitCommand() error = %v, want integration branch unborn HEAD error", err)
+	}
+
+	if _, err := os.Stat(paths.New(tmpDir).LizaDir()); !os.IsNotExist(err) {
+		t.Fatalf(".liza directory state after failed init = %v, want not exist", err)
+	}
+	for _, relPath := range []string{
+		"GUARDRAILS.md",
+		".claude",
+		".claudeignore",
+	} {
+		if _, err := os.Stat(filepath.Join(tmpDir, relPath)); !os.IsNotExist(err) {
+			t.Fatalf("%s state after failed init = %v, want not exist", relPath, err)
+		}
+	}
+
+	cmd := exec.Command("git", "branch", "--list", "integration")
+	cmd.Dir = tmpDir
+	out, branchErr := cmd.CombinedOutput()
+	if branchErr != nil {
+		t.Fatalf("git branch --list integration failed: %v\n%s", branchErr, out)
+	}
+	if strings.TrimSpace(string(out)) != "" {
+		t.Fatalf("integration branch exists after failed init: %s", out)
+	}
+}
+
 func TestInitCommandCustomBranch(t *testing.T) {
 	tmpDir := setupGitRepo(t)
 	defer os.RemoveAll(tmpDir)
@@ -357,6 +440,39 @@ func setupGitRepo(t *testing.T) string {
 	}
 
 	cmd = exec.Command("git", "commit", "-m", "Initial commit")
+	cmd.Dir = tmpDir
+	if err := cmd.Run(); err != nil {
+		t.Fatal(err)
+	}
+
+	return tmpDir
+}
+
+func setupGitRepoNoCommit(t *testing.T) string {
+	t.Helper()
+
+	tmpDir := t.TempDir()
+
+	// Resolve symlinks so paths match os.Getwd() on macOS
+	// (macOS: /var -> /private/var, but t.TempDir() returns /var/...)
+	tmpDir, err := filepath.EvalSymlinks(tmpDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := exec.Command("git", "init", "-b", "main")
+	cmd.Dir = tmpDir
+	if err := cmd.Run(); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd = exec.Command("git", "config", "user.email", "test@example.com")
+	cmd.Dir = tmpDir
+	if err := cmd.Run(); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd = exec.Command("git", "config", "user.name", "Test User")
 	cmd.Dir = tmpDir
 	if err := cmd.Run(); err != nil {
 		t.Fatal(err)

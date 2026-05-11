@@ -553,6 +553,10 @@ func InitCommandWithConfig(params InitParams) error {
 		return fmt.Errorf("cannot access global config at %s: %w\nCheck permissions on %s", globalCoreFile, err, globalDir)
 	}
 
+	if _, err := integrationBranchNeedsCreate(branch); err != nil {
+		return fmt.Errorf("failed to create integration branch %q: %w", branch, err)
+	}
+
 	// Create directory structure
 	if err := os.MkdirAll(lizaPaths.LizaDir(), 0755); err != nil {
 		return fmt.Errorf("failed to create .liza directory: %w", err)
@@ -782,9 +786,8 @@ func InitCommandWithConfig(params InitParams) error {
 
 	// Create integration branch if it doesn't exist
 	if err := createIntegrationBranch(branch); err != nil {
-		// Don't fail the entire init if branch creation fails
-		// Just log the error - this is what bash version does
-		fmt.Fprintf(os.Stderr, "Warning: failed to create integration branch: %v\n", err)
+		cleanupInit()
+		return fmt.Errorf("failed to create integration branch %q: %w", branch, err)
 	}
 
 	fmt.Printf("Liza initialized at %s\n", lizaPaths.LizaDir())
@@ -815,18 +818,35 @@ func validateBranchName(name string) error {
 }
 
 func createIntegrationBranch(name string) error {
-	cmd := gitpkg.Command("rev-parse", "--verify", name)
-	if err := cmd.Run(); err == nil {
+	needsCreate, err := integrationBranchNeedsCreate(name)
+	if err != nil {
+		return err
+	}
+	if !needsCreate {
 		return nil
 	}
 
-	cmd = gitpkg.Command("branch", name, "HEAD")
+	cmd := gitpkg.Command("branch", name, "HEAD")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("git branch failed: %w: %s", err, string(output))
 	}
 
 	return nil
+}
+
+func integrationBranchNeedsCreate(name string) (bool, error) {
+	cmd := gitpkg.Command("rev-parse", "--verify", name)
+	if err := cmd.Run(); err == nil {
+		return false, nil
+	}
+
+	cmd = gitpkg.Command("rev-parse", "--verify", "HEAD")
+	if err := cmd.Run(); err != nil {
+		return false, fmt.Errorf("repo has no commits (HEAD is unborn)")
+	}
+
+	return true, nil
 }
 
 // stringPtrOrNil returns a pointer to s if non-empty, otherwise nil.
