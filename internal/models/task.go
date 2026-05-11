@@ -328,6 +328,8 @@ func ValidateDependsOn(deps []string, entryIndex, totalEntries int) error {
 // PipelineResolver provides pipeline state resolution for tasks with role-pairs.
 // Implemented by pipeline.Resolver.
 type PipelineResolver interface {
+	RoleType(role string) (string, error)
+	AllRoleNames() []string
 	DoerRole(rolePair string) (string, error)
 	ReviewerRole(rolePair string) (string, error)
 	InitialStatus(rolePair string) (TaskStatus, error)

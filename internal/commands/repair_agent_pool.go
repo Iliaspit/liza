@@ -26,6 +26,7 @@ type MissingRoleWork struct {
 	Role      string   `json:"role"`
 	TaskIDs   []string `json:"task_ids"`
 	TaskCount int      `json:"task_count"`
+	CLI       string   `json:"cli,omitempty"`
 }
 
 type SpawnedAgent struct {
@@ -44,6 +45,7 @@ type FailedAgentSpawn struct {
 
 type RepairAgentPoolResult struct {
 	CLI      string             `json:"cli"`
+	RoleCLIs map[string]string  `json:"role_clis,omitempty"`
 	DryRun   bool               `json:"dry_run"`
 	Missing  []MissingRoleWork  `json:"missing"`
 	Spawned  []SpawnedAgent     `json:"spawned,omitempty"`
@@ -82,22 +84,37 @@ func RepairAgentPool(opts RepairAgentPoolOptions) (*RepairAgentPoolResult, error
 		return nil, fmt.Errorf("failed to load pipeline resolver: %w", err)
 	}
 
-	cliName := opts.CLI
-	if cliName == "" {
-		cliName = agent.ResolveDefaultCLI(state.Config.DefaultCLI)
-	}
-	if !slices.Contains(agent.ValidCLIs(), cliName) {
-		return nil, fmt.Errorf("invalid CLI: %s (must be %s)", cliName, strings.Join(agent.ValidCLIs(), ", "))
+	if opts.CLI != "" && !slices.Contains(agent.ValidCLIs(), opts.CLI) {
+		return nil, fmt.Errorf("invalid CLI: %s (must be %s)", opts.CLI, strings.Join(agent.ValidCLIs(), ", "))
 	}
 
 	missing := FindMissingRolesWithClaimableWork(state, pr)
 	result := &RepairAgentPoolResult{
-		CLI:     cliName,
+		CLI:     opts.CLI,
 		DryRun:  opts.DryRun,
 		Missing: missing,
 	}
 
-	for _, roleWork := range missing {
+	commonImplicitCLI := ""
+	heterogeneousImplicitCLI := false
+	for i, roleWork := range missing {
+		cliName, err := resolveRepairCLI(opts.CLI, roleWork.Role, state, pr)
+		if err != nil {
+			return nil, err
+		}
+		result.Missing[i].CLI = cliName
+		if opts.CLI == "" {
+			if result.RoleCLIs == nil {
+				result.RoleCLIs = make(map[string]string)
+			}
+			result.RoleCLIs[roleWork.Role] = cliName
+			if commonImplicitCLI == "" && !heterogeneousImplicitCLI {
+				commonImplicitCLI = cliName
+			} else if commonImplicitCLI != cliName {
+				commonImplicitCLI = ""
+				heterogeneousImplicitCLI = true
+			}
+		}
 		spawn := SpawnedAgent{
 			Role:    roleWork.Role,
 			CLI:     cliName,
@@ -123,11 +140,34 @@ func RepairAgentPool(opts RepairAgentPoolOptions) (*RepairAgentPoolResult, error
 		result.Spawned = append(result.Spawned, spawn)
 	}
 
+	if opts.CLI == "" && !heterogeneousImplicitCLI {
+		result.CLI = commonImplicitCLI
+	}
+
 	if len(result.Failed) > 0 {
 		return result, repairAgentPoolSpawnError(result)
 	}
 
 	return result, nil
+}
+
+func resolveRepairCLI(explicitCLI, role string, state *models.State, pr models.PipelineResolver) (string, error) {
+	if explicitCLI != "" {
+		return explicitCLI, nil
+	}
+	roleType, err := pr.RoleType(role)
+	if err != nil {
+		return "", err
+	}
+	cliName := agent.ResolveDefaultCLIForRole(roleType, agent.CLIResolutionConfig{
+		DefaultCLI:         state.Config.DefaultCLI,
+		DefaultDoerCLI:     state.Config.DefaultDoerCLI,
+		DefaultReviewerCLI: state.Config.DefaultReviewerCLI,
+	})
+	if !slices.Contains(agent.ValidCLIs(), cliName) {
+		return "", fmt.Errorf("invalid CLI for role %s: %s (must be %s)", role, cliName, strings.Join(agent.ValidCLIs(), ", "))
+	}
+	return cliName, nil
 }
 
 func repairAgentPoolSpawnError(result *RepairAgentPoolResult) error {

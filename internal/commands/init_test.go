@@ -1992,6 +1992,45 @@ func TestInitCommandWithConfig_DefaultCLI(t *testing.T) {
 	}
 }
 
+func TestInitCommandWithConfig_RoleSpecificDefaultCLIs(t *testing.T) {
+	tmpDir := setupGitRepo(t)
+	defer os.RemoveAll(tmpDir)
+	setupGlobalLiza(t)
+
+	originalDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(originalDir)
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatal(err)
+	}
+
+	testhelpers.CreateSpecFile(t, tmpDir, "vision.md", "# Vision\n")
+
+	err = InitCommandWithConfig(InitParams{
+		Description:        "Goal with role-specific default CLIs",
+		SpecRef:            "specs/vision.md",
+		DefaultDoerCLI:     "codex",
+		DefaultReviewerCLI: "gemini",
+	})
+	if err != nil {
+		t.Fatalf("InitCommandWithConfig() error = %v", err)
+	}
+
+	bb := db.New(filepath.Join(tmpDir, ".liza", "state.yaml"))
+	state, err := bb.Read()
+	if err != nil {
+		t.Fatalf("Failed to read state: %v", err)
+	}
+	if state.Config.DefaultDoerCLI != "codex" {
+		t.Errorf("state.Config.DefaultDoerCLI = %q, want %q", state.Config.DefaultDoerCLI, "codex")
+	}
+	if state.Config.DefaultReviewerCLI != "gemini" {
+		t.Errorf("state.Config.DefaultReviewerCLI = %q, want %q", state.Config.DefaultReviewerCLI, "gemini")
+	}
+}
+
 func TestInitCommandWithConfig_DefaultCLIOmittedWhenEmpty(t *testing.T) {
 	tmpDir := setupGitRepo(t)
 	defer os.RemoveAll(tmpDir)
@@ -2024,6 +2063,12 @@ func TestInitCommandWithConfig_DefaultCLIOmittedWhenEmpty(t *testing.T) {
 	if state.Config.DefaultCLI != "" {
 		t.Errorf("state.Config.DefaultCLI = %q, want empty", state.Config.DefaultCLI)
 	}
+	if state.Config.DefaultDoerCLI != "" {
+		t.Errorf("state.Config.DefaultDoerCLI = %q, want empty", state.Config.DefaultDoerCLI)
+	}
+	if state.Config.DefaultReviewerCLI != "" {
+		t.Errorf("state.Config.DefaultReviewerCLI = %q, want empty", state.Config.DefaultReviewerCLI)
+	}
 
 	// Verify omitempty: default_cli should not appear in YAML
 	data, err := os.ReadFile(filepath.Join(tmpDir, ".liza", "state.yaml"))
@@ -2032,6 +2077,12 @@ func TestInitCommandWithConfig_DefaultCLIOmittedWhenEmpty(t *testing.T) {
 	}
 	if strings.Contains(string(data), "default_cli") {
 		t.Error("state.yaml contains default_cli key, want omitted when empty")
+	}
+	if strings.Contains(string(data), "default_doer_cli") {
+		t.Error("state.yaml contains default_doer_cli key, want omitted when empty")
+	}
+	if strings.Contains(string(data), "default_reviewer_cli") {
+		t.Error("state.yaml contains default_reviewer_cli key, want omitted when empty")
 	}
 }
 

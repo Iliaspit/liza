@@ -329,12 +329,23 @@ func loadRolesCmd(projectRoot string) tea.Cmd {
 		if err != nil {
 			return rolesMsg{}
 		}
+		roles := resolver.AllRoleNames()
+
 		pr, ok := resolver.(*pipeline.Resolver)
 		if !ok {
 			return rolesMsg{}
 		}
+		roleTypes := make(map[string]string)
+		for _, role := range roles {
+			roleType, err := resolver.RoleType(role)
+			if err != nil {
+				return rolesMsg{}
+			}
+			roleTypes[role] = roleType
+		}
 		return rolesMsg{
-			Roles:     pr.AllRoleNames(),
+			Roles:     roles,
+			RoleTypes: roleTypes,
 			RolePairs: pr.RolePairNames(),
 		}
 	}

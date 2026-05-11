@@ -73,6 +73,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case rolesMsg:
 		m.roleCompletions = msg.Roles
+		m.roleTypes = msg.RoleTypes
 		m.rolePairNames = msg.RolePairs
 		return m, nil
 
@@ -334,7 +335,13 @@ func (m Model) executeInlineAction(action InlineAction, value string) (tea.Model
 				return CmdResultMsg{Success: false, Message: fmt.Sprintf("unknown role %q", value)}
 			}
 		}
-		return m, spawnAgentCmd(m.projectRoot, value, m.resolvedDefaultCLI())
+		cli, ok := m.resolvedDefaultCLIForRole(value)
+		if !ok {
+			return m, func() tea.Msg {
+				return CmdResultMsg{Success: false, Message: fmt.Sprintf("role type for %q is not loaded yet", value)}
+			}
+		}
+		return m, spawnAgentCmd(m.projectRoot, value, cli)
 	case InlineActionSpawnWith:
 		if value == "" {
 			return m, nil
@@ -344,11 +351,17 @@ func (m Model) executeInlineAction(action InlineAction, value string) (tea.Model
 				return CmdResultMsg{Success: false, Message: fmt.Sprintf("unknown role %q", value)}
 			}
 		}
+		cli, ok := m.resolvedDefaultCLIForRole(value)
+		if !ok {
+			return m, func() tea.Msg {
+				return CmdResultMsg{Success: false, Message: fmt.Sprintf("role type for %q is not loaded yet", value)}
+			}
+		}
 		// Phase 2: ask for CLI
 		m.spawnRole = value
 		m.inputMode = InputModeInline
 		m.inlineAction = InlineActionSpawnCLI
-		m.inlineLabel = fmt.Sprintf("CLI (%s): ", m.resolvedDefaultCLI())
+		m.inlineLabel = fmt.Sprintf("CLI (%s): ", cli)
 		m.textInput.Reset()
 		m.textInput.Focus()
 		m.completionIdx = 0
@@ -357,7 +370,15 @@ func (m Model) executeInlineAction(action InlineAction, value string) (tea.Model
 	case InlineActionSpawnCLI:
 		cli := value
 		if cli == "" {
-			cli = m.resolvedDefaultCLI()
+			resolvedCLI, ok := m.resolvedDefaultCLIForRole(m.spawnRole)
+			if !ok {
+				role := m.spawnRole
+				m.spawnRole = ""
+				return m, func() tea.Msg {
+					return CmdResultMsg{Success: false, Message: fmt.Sprintf("role type for %q is not loaded yet", role)}
+				}
+			}
+			cli = resolvedCLI
 		}
 		if !slices.Contains(agent.ValidCLIs(), cli) {
 			m.spawnRole = ""

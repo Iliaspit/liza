@@ -318,7 +318,7 @@ Either way: claim the task, fix in worktree, resubmit for review. The resolution
 
 **Cause:** Tasks are immediately claimable by a pipeline role, but no live agent for that runtime role is registered.
 
-**Fix:** Run `liza repair-agent-pool --dry-run` to preview the repair, then `liza repair-agent-pool --cli <name>` to spawn the missing roles. If `--cli` is omitted, Liza uses `config.default_cli`, then `LIZA_DEFAULT_CLI`, then `claude`.
+**Fix:** Run `liza repair-agent-pool --dry-run` to preview the repair, then `liza repair-agent-pool --cli <name>` to spawn the missing roles. If `--cli` is omitted, Liza uses role-specific config (`config.default_doer_cli` for doers and orchestrators, `config.default_reviewer_cli` for reviewers), then role-specific env (`LIZA_DEFAULT_DOER_CLI` for doers and orchestrators, `LIZA_DEFAULT_REVIEWER_CLI` for reviewers), then `config.default_cli`, then `LIZA_DEFAULT_CLI`, then `claude`.
 
 ---
 

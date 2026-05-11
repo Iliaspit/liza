@@ -240,6 +240,12 @@ func TestLoadRolesCmd_WithPipelineConfig(t *testing.T) {
 		if len(v.Roles) == 0 {
 			t.Fatal("expected non-empty Roles from pipeline config")
 		}
+		if v.RoleTypes["coder"] != "doer" {
+			t.Fatalf("RoleTypes[coder] = %q, want doer", v.RoleTypes["coder"])
+		}
+		if v.RoleTypes["code-reviewer"] != "reviewer" {
+			t.Fatalf("RoleTypes[code-reviewer] = %q, want reviewer", v.RoleTypes["code-reviewer"])
+		}
 	default:
 		t.Fatalf("expected rolesMsg, got %T: %+v", msg, msg)
 	}

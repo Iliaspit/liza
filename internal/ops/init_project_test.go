@@ -356,6 +356,33 @@ func TestInitProject_DefaultCLI(t *testing.T) {
 	}
 }
 
+func TestInitProject_RoleSpecificDefaultCLIs(t *testing.T) {
+	projectRoot, specFile := setupInitTestDir(t)
+
+	err := InitProject(projectRoot, InitProjectParams{
+		Description:        "Test project",
+		SpecRef:            specFile,
+		DefaultDoerCLI:     "codex",
+		DefaultReviewerCLI: "gemini",
+	})
+	if err != nil {
+		t.Fatalf("InitProject() error: %v", err)
+	}
+
+	statePath := filepath.Join(projectRoot, ".liza", "state.yaml")
+	bb := db.For(statePath)
+	state, err := bb.Read()
+	if err != nil {
+		t.Fatalf("Failed to read state: %v", err)
+	}
+	if state.Config.DefaultDoerCLI != "codex" {
+		t.Errorf("DefaultDoerCLI = %q, want %q", state.Config.DefaultDoerCLI, "codex")
+	}
+	if state.Config.DefaultReviewerCLI != "gemini" {
+		t.Errorf("DefaultReviewerCLI = %q, want %q", state.Config.DefaultReviewerCLI, "gemini")
+	}
+}
+
 func TestInitProject_DefaultCLIEmpty(t *testing.T) {
 	projectRoot, specFile := setupInitTestDir(t)
 
@@ -376,6 +403,12 @@ func TestInitProject_DefaultCLIEmpty(t *testing.T) {
 	if state.Config.DefaultCLI != "" {
 		t.Errorf("DefaultCLI = %q, want empty", state.Config.DefaultCLI)
 	}
+	if state.Config.DefaultDoerCLI != "" {
+		t.Errorf("DefaultDoerCLI = %q, want empty", state.Config.DefaultDoerCLI)
+	}
+	if state.Config.DefaultReviewerCLI != "" {
+		t.Errorf("DefaultReviewerCLI = %q, want empty", state.Config.DefaultReviewerCLI)
+	}
 
 	// Verify omitempty
 	data, err := os.ReadFile(statePath)
@@ -384,5 +417,11 @@ func TestInitProject_DefaultCLIEmpty(t *testing.T) {
 	}
 	if strings.Contains(string(data), "default_cli") {
 		t.Error("state.yaml contains default_cli, want omitted when empty")
+	}
+	if strings.Contains(string(data), "default_doer_cli") {
+		t.Error("state.yaml contains default_doer_cli, want omitted when empty")
+	}
+	if strings.Contains(string(data), "default_reviewer_cli") {
+		t.Error("state.yaml contains default_reviewer_cli, want omitted when empty")
 	}
 }

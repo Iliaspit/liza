@@ -21,18 +21,20 @@ import (
 
 // InitParams holds the parameters for InitCommand.
 type InitParams struct {
-	Description      string
-	SpecRef          string
-	ConfigPath       string   // --config: path to pipeline YAML
-	EntryPoint       string   // --entry-point: name of entry-point in config
-	Branch           string   // --branch: integration branch name (default: "integration")
-	PostWorktreeCmd  string   // --post-worktree-cmd: shell command to run after worktree creation
-	AutoResume       bool     // --auto-resume: automatically resume at checkpoint and sprint completion
-	DefaultCLI       string   // --default-cli: default CLI for agent spawning
-	Agents           []string // --claude, --codex, --gemini, --mistral
-	Stdin            io.Reader
-	ForceInteractive bool   // bypass TTY check (for testing)
-	ContractAction   string // "global", "rename", "skip", or "" (default behavior)
+	Description        string
+	SpecRef            string
+	ConfigPath         string   // --config: path to pipeline YAML
+	EntryPoint         string   // --entry-point: name of entry-point in config
+	Branch             string   // --branch: integration branch name (default: "integration")
+	PostWorktreeCmd    string   // --post-worktree-cmd: shell command to run after worktree creation
+	AutoResume         bool     // --auto-resume: automatically resume at checkpoint and sprint completion
+	DefaultCLI         string   // --default-cli: default CLI for agent spawning
+	DefaultDoerCLI     string   // --default-doer-cli: default CLI for doer and orchestrator agent spawning
+	DefaultReviewerCLI string   // --default-reviewer-cli: default CLI for reviewer agent spawning
+	Agents             []string // --claude, --codex, --gemini, --mistral
+	Stdin              io.Reader
+	ForceInteractive   bool   // bypass TTY check (for testing)
+	ContractAction     string // "global", "rename", "skip", or "" (default behavior)
 }
 
 // InitAgentRepoSymlinks maps agent flag names to the repo-root symlink filename.
@@ -734,6 +736,8 @@ func InitCommandWithConfig(params InitParams) error {
 			ReviewerPollInterval:     30,
 			ReviewerMaxWait:          7200,
 			DefaultCLI:               params.DefaultCLI,
+			DefaultDoerCLI:           params.DefaultDoerCLI,
+			DefaultReviewerCLI:       params.DefaultReviewerCLI,
 			IntegrationBranch:        branch,
 			EscalationWebhook:        nil,
 			Mode:                     models.SystemModeRunning,

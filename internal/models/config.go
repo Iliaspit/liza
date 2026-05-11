@@ -126,6 +126,8 @@ type Config struct {
 	CrashRestartThreshold    int            `yaml:"crash_restart_threshold,omitempty"`
 	SpinningRestartThreshold int            `yaml:"spinning_restart_threshold,omitempty"`
 	DefaultCLI               string         `yaml:"default_cli,omitempty"`
+	DefaultDoerCLI           string         `yaml:"default_doer_cli,omitempty"`
+	DefaultReviewerCLI       string         `yaml:"default_reviewer_cli,omitempty"`
 	IntegrationBranch        string         `yaml:"integration_branch"`
 	EscalationWebhook        *string        `yaml:"escalation_webhook,omitempty"`
 	Mode                     SystemMode     `yaml:"mode,omitempty"`

@@ -116,6 +116,8 @@ func TestAgentCmd_ExplicitFlagOverridesInvalidState(t *testing.T) {
 // value to observe it in the error message.
 func TestAgentCmd_EnvVarOverridesConst(t *testing.T) {
 	t.Setenv("LIZA_DEFAULT_CLI", "envtestcli")
+	t.Setenv("LIZA_DEFAULT_DOER_CLI", "")
+	t.Setenv("LIZA_DEFAULT_REVIEWER_CLI", "")
 	projectRoot := setupAgentTestProject(t, "")
 
 	oldDir, _ := os.Getwd()
@@ -128,5 +130,55 @@ func TestAgentCmd_EnvVarOverridesConst(t *testing.T) {
 
 	if err == nil || !strings.Contains(err.Error(), "invalid CLI: envtestcli") {
 		t.Fatalf("expected 'invalid CLI: envtestcli' (from env), got: %v", err)
+	}
+}
+
+func TestAgentCmd_RoleSpecificEnvOverridesGlobalEnv(t *testing.T) {
+	tests := []struct {
+		name     string
+		role     string
+		envName  string
+		envValue string
+	}{
+		{
+			name:     "doer",
+			role:     "coder",
+			envName:  "LIZA_DEFAULT_DOER_CLI",
+			envValue: "doercli",
+		},
+		{
+			name:     "orchestrator uses doer default",
+			role:     "orchestrator",
+			envName:  "LIZA_DEFAULT_DOER_CLI",
+			envValue: "doercli",
+		},
+		{
+			name:     "reviewer",
+			role:     "code-reviewer",
+			envName:  "LIZA_DEFAULT_REVIEWER_CLI",
+			envValue: "reviewercli",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("LIZA_DEFAULT_CLI", "globalcli")
+			t.Setenv("LIZA_DEFAULT_DOER_CLI", "")
+			t.Setenv("LIZA_DEFAULT_REVIEWER_CLI", "")
+			t.Setenv(tt.envName, tt.envValue)
+			projectRoot := setupAgentTestProject(t, "")
+
+			oldDir, _ := os.Getwd()
+			defer func() { _ = os.Chdir(oldDir) }()
+			_ = os.Chdir(projectRoot)
+
+			resetRootCmdForTest(t)
+			rootCmd.SetArgs([]string{"agent", tt.role})
+			err := rootCmd.Execute()
+
+			if err == nil || !strings.Contains(err.Error(), "invalid CLI: "+tt.envValue) {
+				t.Fatalf("expected invalid CLI from %s=%s, got: %v", tt.envName, tt.envValue, err)
+			}
+		})
 	}
 }

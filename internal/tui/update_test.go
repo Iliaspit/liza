@@ -686,7 +686,10 @@ func TestUpdate_StopDoneMsgReturnsQuit(t *testing.T) {
 
 func TestUpdate_RolesMsg(t *testing.T) {
 	m := testModel()
-	msg := rolesMsg{Roles: []string{"coder", "reviewer"}}
+	msg := rolesMsg{
+		Roles:     []string{"coder", "reviewer"},
+		RoleTypes: map[string]string{"coder": "doer", "reviewer": "reviewer"},
+	}
 	result, _ := m.Update(msg)
 	m2 := result.(Model)
 
@@ -695,6 +698,9 @@ func TestUpdate_RolesMsg(t *testing.T) {
 	}
 	if m2.roleCompletions[0] != "coder" || m2.roleCompletions[1] != "reviewer" {
 		t.Errorf("roleCompletions = %v, want [coder reviewer]", m2.roleCompletions)
+	}
+	if m2.roleTypes["coder"] != "doer" || m2.roleTypes["reviewer"] != "reviewer" {
+		t.Errorf("roleTypes = %v, want coder/reviewer types", m2.roleTypes)
 	}
 }
 
@@ -760,6 +766,7 @@ func TestHandleInlineKey_EnterSpawnWithValueReturnsCmd(t *testing.T) {
 	m := testModel()
 	m.inputMode = InputModeInline
 	m.inlineAction = InlineActionSpawn
+	m.roleTypes = map[string]string{"coder": "doer"}
 	m.textInput.Focus()
 	m.textInput.SetValue("coder")
 
@@ -772,6 +779,41 @@ func TestHandleInlineKey_EnterSpawnWithValueReturnsCmd(t *testing.T) {
 	}
 	if cmd == nil {
 		t.Fatal("Enter with spawn action and value 'coder' should return a non-nil tea.Cmd")
+	}
+}
+
+func TestHandleInlineKey_EnterSpawnWithMissingRoleTypeKeepsNormalMode(t *testing.T) {
+	m := testModel()
+	m.inputMode = InputModeInline
+	m.inlineAction = InlineActionSpawnWith
+	m.roleCompletions = []string{"code-reviewer"}
+	m.roleTypes = nil
+	m.textInput.Focus()
+	m.textInput.SetValue("code-reviewer")
+
+	msg := tea.KeyMsg{Type: tea.KeyEnter}
+	result, cmd := m.Update(msg)
+	m2 := result.(Model)
+
+	if cmd == nil {
+		t.Fatal("Enter with missing role type should return an error cmd")
+	}
+	msgResult := cmd()
+	cmdResult, ok := msgResult.(CmdResultMsg)
+	if !ok {
+		t.Fatalf("cmd returned %T, want CmdResultMsg", msgResult)
+	}
+	if cmdResult.Success {
+		t.Fatal("missing role type command result Success = true, want false")
+	}
+	if m2.inputMode != InputModeNormal {
+		t.Errorf("inputMode = %d, want InputModeNormal after error", m2.inputMode)
+	}
+	if m2.inlineAction != InlineActionNone {
+		t.Errorf("inlineAction = %d, want InlineActionNone after error", m2.inlineAction)
+	}
+	if m2.spawnRole != "" {
+		t.Errorf("spawnRole = %q, want empty after error", m2.spawnRole)
 	}
 }
 
@@ -1349,5 +1391,41 @@ func TestResolvedDefaultCLI_ConfigSet(t *testing.T) {
 	got := m.resolvedDefaultCLI()
 	if got != "codex" {
 		t.Errorf("resolvedDefaultCLI() with config codex = %q, want %q", got, "codex")
+	}
+}
+
+func TestResolvedDefaultCLIForRole_RoleSpecificConfig(t *testing.T) {
+	t.Setenv("LIZA_DEFAULT_CLI", "")
+	t.Setenv("LIZA_DEFAULT_DOER_CLI", "")
+	t.Setenv("LIZA_DEFAULT_REVIEWER_CLI", "")
+	m := testModel()
+	m.roleTypes = map[string]string{
+		"coder":         "doer",
+		"orchestrator":  "orchestrator",
+		"code-reviewer": "reviewer",
+	}
+	m.state = &models.State{
+		Config: models.Config{
+			DefaultCLI:         "claude",
+			DefaultDoerCLI:     "codex",
+			DefaultReviewerCLI: "gemini",
+		},
+	}
+
+	if got, ok := m.resolvedDefaultCLIForRole("coder"); !ok || got != "codex" {
+		t.Errorf("resolvedDefaultCLIForRole(coder) = %q, want codex", got)
+	}
+	if got, ok := m.resolvedDefaultCLIForRole("orchestrator"); !ok || got != "codex" {
+		t.Errorf("resolvedDefaultCLIForRole(orchestrator) = %q, want codex", got)
+	}
+	if got, ok := m.resolvedDefaultCLIForRole("code-reviewer"); !ok || got != "gemini" {
+		t.Errorf("resolvedDefaultCLIForRole(code-reviewer) = %q, want gemini", got)
+	}
+}
+
+func TestResolvedDefaultCLIForRole_UnknownRole(t *testing.T) {
+	m := testModel()
+	if got, ok := m.resolvedDefaultCLIForRole("code-reviewer"); ok || got != "" {
+		t.Errorf("resolvedDefaultCLIForRole(unknown) = (%q, %v), want empty false", got, ok)
 	}
 }

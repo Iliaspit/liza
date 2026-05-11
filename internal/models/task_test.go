@@ -23,6 +23,17 @@ type claimTestResolver struct {
 
 func (r *claimTestResolver) DoerRole(string) (string, error)     { return r.doer, nil }
 func (r *claimTestResolver) ReviewerRole(string) (string, error) { return r.reviewer, nil }
+func (r *claimTestResolver) RoleType(role string) (string, error) {
+	switch role {
+	case r.doer:
+		return "doer", nil
+	case r.reviewer:
+		return "reviewer", nil
+	default:
+		return "", fmt.Errorf("unknown role %q", role)
+	}
+}
+func (r *claimTestResolver) AllRoleNames() []string { return []string{r.doer, r.reviewer} }
 func (r *claimTestResolver) InitialStatus(string) (TaskStatus, error) {
 	return r.initial, nil
 }

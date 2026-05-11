@@ -89,6 +89,10 @@ Example:
 		if !slices.Contains(validRoles, role) {
 			return fmt.Errorf("invalid role: %s (valid: %s)", role, strings.Join(validRoles, ", "))
 		}
+		roleType, err := pipeline.NewResolver(pipelineCfg).RoleType(role)
+		if err != nil {
+			return err
+		}
 
 		// Resolve agent ID: flag > env var > auto-generate from state
 		flagValue, _ := cmd.Flags().GetString("agent-id")
@@ -113,16 +117,20 @@ Example:
 
 		// Resolve default CLI from state config when --cli is not explicitly set
 		flagChanged := cmd.Flags().Changed("cli")
-		var stateConfigCLI string
+		var cliConfig agent.CLIResolutionConfig
 		if !flagChanged {
 			bb := db.For(statePath)
 			if state, err := bb.Read(); err == nil {
-				stateConfigCLI = state.Config.DefaultCLI
+				cliConfig = agent.CLIResolutionConfig{
+					DefaultCLI:         state.Config.DefaultCLI,
+					DefaultDoerCLI:     state.Config.DefaultDoerCLI,
+					DefaultReviewerCLI: state.Config.DefaultReviewerCLI,
+				}
 			} else {
 				fmt.Fprintf(os.Stderr, "Warning: could not read state for default CLI: %v\n", err)
 			}
 		}
-		cliName = agent.ResolveCLIFromState(flagChanged, cliName, stateConfigCLI)
+		cliName = agent.ResolveCLIFromStateForRole(flagChanged, cliName, roleType, cliConfig)
 
 		if !slices.Contains(agent.ValidCLIs(), cliName) {
 			return fmt.Errorf("invalid CLI: %s (must be %s)", cliName, strings.Join(agent.ValidCLIs(), ", "))
@@ -258,7 +266,8 @@ agent, then spawns one agent process per missing role. The --missing flag is kep
 as an explicit spelling of the default behavior.
 
 Use --cli to choose the backend for newly spawned agents. When omitted, the CLI
-defaults to config.default_cli, then LIZA_DEFAULT_CLI, then claude.
+defaults to role-specific config, role-specific env, config.default_cli,
+LIZA_DEFAULT_CLI, then claude.
 
 Examples:
   liza repair-agent-pool --dry-run
@@ -311,7 +320,7 @@ func init() {
 
 	// Agent command flags
 	addAgentIDFlag(agentCmd)
-	agentCmd.Flags().String("cli", "", "CLI to use; defaults to config default_cli, then LIZA_DEFAULT_CLI env, then claude ("+strings.Join(agent.ValidCLIs(), ", ")+")")
+	agentCmd.Flags().String("cli", "", "CLI to use; defaults by role-specific then global config/env; see docs ("+strings.Join(agent.ValidCLIs(), ", ")+")")
 	agentCmd.Flags().BoolP("interactive", "i", false, "Print prompt location, don't execute CLI")
 	agentCmd.Flags().Bool("no-log", false, "Disable saving agent output to .liza/agent-outputs/")
 
@@ -326,7 +335,7 @@ func init() {
 
 	// Repair agent pool command flags
 	repairAgentPoolCmd.Flags().Bool("missing", false, "spawn roles with claimable work and no registered agent")
-	repairAgentPoolCmd.Flags().String("cli", "", "CLI to use for spawned agents; defaults to config default_cli, then LIZA_DEFAULT_CLI, then claude")
+	repairAgentPoolCmd.Flags().String("cli", "", "CLI to use for spawned agents; defaults by role-specific then global config/env; see docs")
 	repairAgentPoolCmd.Flags().Bool("dry-run", false, "print missing roles and spawn commands without launching agents")
 
 	// Delete agent command flags

@@ -66,6 +66,9 @@ All configuration lives in `.liza/state.yaml` under the `config` section.
 | `planner_max_wait` | 7200 | — | — | seconds | Max planner idle before exit |
 | `reviewer_poll_interval` | 30 | — | — | seconds | Reviewer polling interval |
 | `reviewer_max_wait` | 7200 | — | — | seconds | Max reviewer idle before exit |
+| `default_cli` | (none) | — | — | CLI name | Global default coding agent CLI |
+| `default_doer_cli` | (none) | — | — | CLI name | Default coding agent CLI for doers and orchestrators |
+| `default_reviewer_cli` | (none) | — | — | CLI name | Default coding agent CLI for reviewers |
 | `post_worktree_cmd` | (none) | — | — | shell cmd | Command run after worktree creation (e.g. `npm install`) |
 
 ### Agent Execution Timeouts
@@ -202,7 +205,7 @@ When `liza tui` triggers the circuit breaker, it also sets `sprint.status` to `C
 
 ## Supported CLIs
 
-The `--cli` flag on `liza agent` and `liza repair-agent-pool` selects which coding agent to invoke. When omitted, the default is resolved from `config.default_cli` in `state.yaml`, then the `LIZA_DEFAULT_CLI` environment variable, then `claude`. Set the default at init time with `liza init --default-cli <cli>`.
+The `--cli` flag on `liza agent` and `liza repair-agent-pool` selects which coding agent to invoke. When omitted, the default is resolved from role-specific config (`config.default_doer_cli` for doers and orchestrators, `config.default_reviewer_cli` for reviewers), then role-specific env (`LIZA_DEFAULT_DOER_CLI` for doers and orchestrators, `LIZA_DEFAULT_REVIEWER_CLI` for reviewers), then `config.default_cli`, then `LIZA_DEFAULT_CLI`, then `claude`. Set defaults at init time with `liza init --default-cli <cli>`, `liza init --default-doer-cli <cli>`, or `liza init --default-reviewer-cli <cli>`.
 
 | CLI | Notes |
 |-----|-------|

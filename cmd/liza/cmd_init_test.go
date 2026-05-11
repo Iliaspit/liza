@@ -54,14 +54,39 @@ func TestInitDispatch_WorkspaceFlagsRequireDescription(t *testing.T) {
 			wantErr: "requires a description argument",
 		},
 		{
+			name:    "default-doer-cli without description errors",
+			args:    []string{"init", "--default-doer-cli", "codex"},
+			wantErr: "requires a description argument",
+		},
+		{
+			name:    "default-reviewer-cli without description errors",
+			args:    []string{"init", "--default-reviewer-cli", "gemini"},
+			wantErr: "requires a description argument",
+		},
+		{
 			name:    "agent flag with default-cli and no description errors",
 			args:    []string{"init", "--codex", "--default-cli", "codex"},
+			wantErr: "workspace flags",
+		},
+		{
+			name:    "agent flag with default-doer-cli and no description errors",
+			args:    []string{"init", "--codex", "--default-doer-cli", "codex"},
 			wantErr: "workspace flags",
 		},
 		{
 			name:    "invalid default-cli value errors",
 			args:    []string{"init", "--default-cli", "invalid", "Goal"},
 			wantErr: "invalid --default-cli",
+		},
+		{
+			name:    "invalid default-doer-cli value errors",
+			args:    []string{"init", "--default-doer-cli", "invalid", "Goal"},
+			wantErr: "invalid --default-doer-cli",
+		},
+		{
+			name:    "invalid default-reviewer-cli value errors",
+			args:    []string{"init", "--default-reviewer-cli", "invalid", "Goal"},
+			wantErr: "invalid --default-reviewer-cli",
 		},
 	}
 

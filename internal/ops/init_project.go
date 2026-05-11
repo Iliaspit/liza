@@ -19,14 +19,16 @@ import (
 
 // InitProjectParams holds parameters for non-interactive project initialization.
 type InitProjectParams struct {
-	Description     string
-	SpecRef         string
-	Branch          string // default "integration" if empty
-	EntryPoint      string // optional
-	PostWorktreeCmd string // optional
-	DefaultCLI      string // optional; default CLI for agent spawning
-	AutoResume      bool
-	PipelineConfig  []byte // optional raw YAML; nil = use embedded default
+	Description        string
+	SpecRef            string
+	Branch             string // default "integration" if empty
+	EntryPoint         string // optional
+	PostWorktreeCmd    string // optional
+	DefaultCLI         string // optional; default CLI for agent spawning
+	DefaultDoerCLI     string // optional; default CLI for doer and orchestrator agent spawning
+	DefaultReviewerCLI string // optional; default CLI for reviewer agent spawning
+	AutoResume         bool
+	PipelineConfig     []byte // optional raw YAML; nil = use embedded default
 }
 
 // InitProject initializes a Liza workspace at projectRoot. No terminal I/O.
@@ -195,6 +197,8 @@ func InitProject(projectRoot string, params InitProjectParams) error {
 			ReviewerPollInterval:     30,
 			ReviewerMaxWait:          7200,
 			DefaultCLI:               params.DefaultCLI,
+			DefaultDoerCLI:           params.DefaultDoerCLI,
+			DefaultReviewerCLI:       params.DefaultReviewerCLI,
 			IntegrationBranch:        branch,
 			EscalationWebhook:        nil,
 			Mode:                     models.SystemModeRunning,

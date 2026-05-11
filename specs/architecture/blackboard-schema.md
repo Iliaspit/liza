@@ -657,12 +657,19 @@ config:
   coder_max_wait: 300           # Max seconds to wait for claimable work
   exit42_restart_threshold: 5   # Consecutive exit-42 restarts without progress before BLOCKED (default: 5)
   exit42_max_backoff_seconds: 60 # Max backoff delay between exit-42 restarts (default: 60)
+  default_cli: claude           # Optional global default agent CLI
+  default_doer_cli: codex       # Optional default CLI for doer and orchestrator roles
+  default_reviewer_cli: gemini  # Optional default CLI for reviewer roles
   integration_branch: integration
   escalation_webhook: null      # Optional: URL for external notifications
 ```
 
 **Config Scope:**
 - Config values are **goal-level defaults** (apply to all tasks in current goal)
+- Agent CLI defaults resolve in this order: explicit `--cli`, role-specific config
+  (`default_doer_cli` for doers and orchestrators, `default_reviewer_cli` for reviewers),
+  role-specific env (`LIZA_DEFAULT_DOER_CLI` / `LIZA_DEFAULT_REVIEWER_CLI`),
+  `default_cli`, `LIZA_DEFAULT_CLI`, then `claude`.
 - **Per-task overrides** (v1): Tasks can override `max_coder_iterations` and `max_review_cycles`:
   ```yaml
   - id: task-5

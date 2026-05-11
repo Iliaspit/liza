@@ -1533,8 +1533,19 @@ type mockPipelineResolver struct {
 	reviewing2        TaskStatus
 }
 
-func (m *mockPipelineResolver) DoerRole(string) (string, error)            { return m.doer, nil }
-func (m *mockPipelineResolver) ReviewerRole(string) (string, error)        { return m.reviewer, nil }
+func (m *mockPipelineResolver) DoerRole(string) (string, error)     { return m.doer, nil }
+func (m *mockPipelineResolver) ReviewerRole(string) (string, error) { return m.reviewer, nil }
+func (m *mockPipelineResolver) RoleType(role string) (string, error) {
+	switch role {
+	case m.doer:
+		return "doer", nil
+	case m.reviewer:
+		return "reviewer", nil
+	default:
+		return "", fmt.Errorf("unknown role %q", role)
+	}
+}
+func (m *mockPipelineResolver) AllRoleNames() []string                     { return []string{m.doer, m.reviewer} }
 func (m *mockPipelineResolver) InitialStatus(string) (TaskStatus, error)   { return m.initial, nil }
 func (m *mockPipelineResolver) RejectedStatus(string) (TaskStatus, error)  { return m.rejected, nil }
 func (m *mockPipelineResolver) SubmittedStatus(string) (TaskStatus, error) { return m.submitted, nil }

@@ -103,8 +103,16 @@ symlinks needed for pairing (no .liza/ workspace):
 		agents := collectAgentFlags(cmd)
 		autoResume, _ := cmd.Flags().GetBool("auto-resume")
 		defaultCLI, _ := cmd.Flags().GetString("default-cli")
-		if defaultCLI != "" && !slices.Contains(agent.ValidCLIs(), defaultCLI) {
-			return fmt.Errorf("invalid --default-cli: %s (must be %s)", defaultCLI, strings.Join(agent.ValidCLIs(), ", "))
+		defaultDoerCLI, _ := cmd.Flags().GetString("default-doer-cli")
+		defaultReviewerCLI, _ := cmd.Flags().GetString("default-reviewer-cli")
+		if err := validateDefaultCLIFlag("default-cli", defaultCLI); err != nil {
+			return err
+		}
+		if err := validateDefaultCLIFlag("default-doer-cli", defaultDoerCLI); err != nil {
+			return err
+		}
+		if err := validateDefaultCLIFlag("default-reviewer-cli", defaultReviewerCLI); err != nil {
+			return err
 		}
 
 		// Interactive wizard: no args, no agent flags, no explicit workspace flags, TTY
@@ -148,17 +156,19 @@ symlinks needed for pairing (no .liza/ workspace):
 				return nil
 			}
 			if err := commands.InitCommandWithConfig(commands.InitParams{
-				Description:     result.Description,
-				SpecRef:         result.SpecRef,
-				ConfigPath:      configPath,
-				EntryPoint:      result.EntryPoint,
-				Branch:          branch,
-				PostWorktreeCmd: postWorktreeCmd,
-				AutoResume:      autoResume,
-				DefaultCLI:      defaultCLI,
-				Agents:          result.Agents,
-				Stdin:           os.Stdin,
-				ContractAction:  result.ContractAction,
+				Description:        result.Description,
+				SpecRef:            result.SpecRef,
+				ConfigPath:         configPath,
+				EntryPoint:         result.EntryPoint,
+				Branch:             branch,
+				PostWorktreeCmd:    postWorktreeCmd,
+				AutoResume:         autoResume,
+				DefaultCLI:         defaultCLI,
+				DefaultDoerCLI:     defaultDoerCLI,
+				DefaultReviewerCLI: defaultReviewerCLI,
+				Agents:             result.Agents,
+				Stdin:              os.Stdin,
+				ContractAction:     result.ContractAction,
 			}); err != nil {
 				return err
 			}
@@ -175,7 +185,7 @@ symlinks needed for pairing (no .liza/ workspace):
 				return fmt.Errorf("--auto-resume requires full workspace init (provide a description)")
 			}
 			if hasExplicitInitFlags(cmd) {
-				return fmt.Errorf("workspace flags (--branch, --config, --spec, --entry-point, --post-worktree-cmd, --default-cli) require a description argument for full workspace init")
+				return fmt.Errorf("workspace flags (--branch, --config, --spec, --entry-point, --post-worktree-cmd, --default-cli, --default-doer-cli, --default-reviewer-cli) require a description argument for full workspace init")
 			}
 			if err := commands.InitPairingCommand(commands.InitPairingParams{
 				Agents: agents,
@@ -195,16 +205,18 @@ symlinks needed for pairing (no .liza/ workspace):
 		branch, _ := cmd.Flags().GetString("branch")
 		postCreateCmd, _ := cmd.Flags().GetString("post-worktree-cmd")
 		if err := commands.InitCommandWithConfig(commands.InitParams{
-			Description:     description,
-			SpecRef:         specRef,
-			ConfigPath:      configPath,
-			EntryPoint:      entryPoint,
-			Branch:          branch,
-			PostWorktreeCmd: postCreateCmd,
-			AutoResume:      autoResume,
-			DefaultCLI:      defaultCLI,
-			Agents:          agents,
-			Stdin:           os.Stdin,
+			Description:        description,
+			SpecRef:            specRef,
+			ConfigPath:         configPath,
+			EntryPoint:         entryPoint,
+			Branch:             branch,
+			PostWorktreeCmd:    postCreateCmd,
+			AutoResume:         autoResume,
+			DefaultCLI:         defaultCLI,
+			DefaultDoerCLI:     defaultDoerCLI,
+			DefaultReviewerCLI: defaultReviewerCLI,
+			Agents:             agents,
+			Stdin:              os.Stdin,
 		}); err != nil {
 			return err
 		}
@@ -320,12 +332,22 @@ var agentFlagNames = []string{"claude", "codex", "gemini", "mistral"}
 // hasExplicitInitFlags returns true if any workspace-specific flag was explicitly set.
 // This prevents the interactive wizard from silently swallowing CLI flags it doesn't collect.
 func hasExplicitInitFlags(cmd *cobra.Command) bool {
-	for _, name := range []string{"spec", "config", "entry-point", "branch", "post-worktree-cmd", "default-cli"} {
+	for _, name := range []string{"spec", "config", "entry-point", "branch", "post-worktree-cmd", "default-cli", "default-doer-cli", "default-reviewer-cli"} {
 		if cmd.Flags().Changed(name) {
 			return true
 		}
 	}
 	return false
+}
+
+func validateDefaultCLIFlag(name, value string) error {
+	if value == "" {
+		return nil
+	}
+	if !slices.Contains(agent.ValidCLIs(), value) {
+		return fmt.Errorf("invalid --%s: %s (must be %s)", name, value, strings.Join(agent.ValidCLIs(), ", "))
+	}
+	return nil
 }
 
 // collectAgentFlags returns the agent names whose boolean flags are set on cmd.
@@ -362,6 +384,8 @@ func init() {
 	initCmd.Flags().String("post-worktree-cmd", "", "shell command to run after worktree creation (e.g. 'make setup')")
 	initCmd.Flags().Bool("auto-resume", false, "automatically resume at checkpoint and sprint completion")
 	initCmd.Flags().String("default-cli", "", "default CLI for agent spawning ("+strings.Join(agent.ValidCLIs(), ", ")+")")
+	initCmd.Flags().String("default-doer-cli", "", "default CLI for doer and orchestrator agent spawning ("+strings.Join(agent.ValidCLIs(), ", ")+")")
+	initCmd.Flags().String("default-reviewer-cli", "", "default CLI for reviewer agent spawning ("+strings.Join(agent.ValidCLIs(), ", ")+")")
 	initCmd.Flags().Bool("claude", false, "create CLAUDE.md symlink to ~/.liza/CORE.md")
 	initCmd.Flags().Bool("codex", false, "create AGENTS.md symlink to ~/.liza/CORE.md and configure repo hooks")
 	initCmd.Flags().Bool("gemini", false, "create GEMINI.md symlink to ~/.liza/CORE.md")

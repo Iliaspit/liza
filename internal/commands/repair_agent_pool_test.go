@@ -2,6 +2,7 @@ package commands
 
 import (
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -91,6 +92,48 @@ func TestRepairAgentPool_DryRunUsesConfiguredDefaultCLI(t *testing.T) {
 	}
 }
 
+func TestRepairAgentPool_DryRunUsesRoleSpecificDefaultCLIs(t *testing.T) {
+	state := testhelpers.CreateValidState()
+	state.Config.DefaultDoerCLI = "codex"
+	state.Config.DefaultReviewerCLI = "gemini"
+	now := time.Now().UTC()
+	state.Tasks = []models.Task{
+		testhelpers.BuildTaskByStatus("task-1", models.TaskStatusReady, now),
+		testhelpers.BuildTaskByStatus("review-1", models.TaskStatusReadyForReview, now),
+	}
+	projectRoot := writeRepairAgentPoolState(t, state)
+
+	var calls []spawnedAgentCall
+	withFakeRepairSpawner(t, &calls, nil)
+
+	result, err := RepairAgentPool(RepairAgentPoolOptions{
+		ProjectRoot: projectRoot,
+		Missing:     true,
+		DryRun:      true,
+	})
+	if err != nil {
+		t.Fatalf("RepairAgentPool() error = %v", err)
+	}
+	if len(calls) != 0 {
+		t.Fatalf("dry run spawned agents: %+v", calls)
+	}
+	if result.CLI != "" {
+		t.Errorf("CLI = %q, want empty for heterogeneous role-specific defaults", result.CLI)
+	}
+	if result.RoleCLIs["coder"] != "codex" {
+		t.Errorf("RoleCLIs[coder] = %q, want codex", result.RoleCLIs["coder"])
+	}
+	if result.RoleCLIs["code-reviewer"] != "gemini" {
+		t.Errorf("RoleCLIs[code-reviewer] = %q, want gemini", result.RoleCLIs["code-reviewer"])
+	}
+	if !slices.Contains(result.Commands, "liza agent coder --cli codex") {
+		t.Errorf("commands = %v, want coder codex command", result.Commands)
+	}
+	if !slices.Contains(result.Commands, "liza agent code-reviewer --cli gemini") {
+		t.Errorf("commands = %v, want code-reviewer gemini command", result.Commands)
+	}
+}
+
 func TestRepairAgentPool_ExplicitCLISpawnsOneAgentPerMissingRole(t *testing.T) {
 	state := testhelpers.CreateValidState()
 	state.Tasks = []models.Task{
@@ -118,6 +161,9 @@ func TestRepairAgentPool_ExplicitCLISpawnsOneAgentPerMissingRole(t *testing.T) {
 	}
 	if len(result.Spawned) != 1 {
 		t.Fatalf("spawned = %+v, want one", result.Spawned)
+	}
+	if result.CLI != "codex" {
+		t.Errorf("CLI = %q, want codex for explicit CLI", result.CLI)
 	}
 	if result.Missing[0].TaskCount != 2 {
 		t.Errorf("TaskCount = %d, want 2", result.Missing[0].TaskCount)

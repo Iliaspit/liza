@@ -118,7 +118,7 @@ func resetRootCmdForTest(t *testing.T) {
 			resetFlagIfPresent(child, name)
 		}
 		// Init command workspace flags — must reset Changed state between tests.
-		for _, name := range []string{"spec", "config", "entry-point", "branch", "post-worktree-cmd", "auto-resume", "default-cli", "cli", "claude", "codex", "gemini", "mistral"} {
+		for _, name := range []string{"spec", "config", "entry-point", "branch", "post-worktree-cmd", "auto-resume", "default-cli", "default-doer-cli", "default-reviewer-cli", "cli", "claude", "codex", "gemini", "mistral"} {
 			resetFlagIfPresent(child, name)
 		}
 	}

@@ -7,6 +7,8 @@ import (
 func TestResolveDefaultCLI(t *testing.T) {
 	// Clean env for test isolation
 	t.Setenv("LIZA_DEFAULT_CLI", "")
+	t.Setenv("LIZA_DEFAULT_DOER_CLI", "")
+	t.Setenv("LIZA_DEFAULT_REVIEWER_CLI", "")
 
 	tests := []struct {
 		name        string
@@ -46,6 +48,104 @@ func TestResolveDefaultCLI(t *testing.T) {
 			got := ResolveDefaultCLI(tt.configValue)
 			if got != tt.want {
 				t.Errorf("ResolveDefaultCLI(%q) = %q, want %q", tt.configValue, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestResolveDefaultCLIForRole(t *testing.T) {
+	t.Setenv("LIZA_DEFAULT_CLI", "")
+	t.Setenv("LIZA_DEFAULT_DOER_CLI", "")
+	t.Setenv("LIZA_DEFAULT_REVIEWER_CLI", "")
+
+	tests := []struct {
+		name     string
+		roleType string
+		config   CLIResolutionConfig
+		env      map[string]string
+		want     string
+	}{
+		{
+			name:     "doer role-specific config wins",
+			roleType: "doer",
+			config: CLIResolutionConfig{
+				DefaultCLI:     "claude",
+				DefaultDoerCLI: "codex",
+			},
+			env:  map[string]string{"LIZA_DEFAULT_DOER_CLI": "gemini"},
+			want: "codex",
+		},
+		{
+			name:     "orchestrator uses doer config",
+			roleType: "orchestrator",
+			config: CLIResolutionConfig{
+				DefaultCLI:     "claude",
+				DefaultDoerCLI: "mistral",
+			},
+			want: "mistral",
+		},
+		{
+			name:     "reviewer role-specific config wins",
+			roleType: "reviewer",
+			config: CLIResolutionConfig{
+				DefaultCLI:         "claude",
+				DefaultReviewerCLI: "gemini",
+			},
+			env:  map[string]string{"LIZA_DEFAULT_REVIEWER_CLI": "codex"},
+			want: "gemini",
+		},
+		{
+			name:     "role env wins over global config",
+			roleType: "reviewer",
+			config: CLIResolutionConfig{
+				DefaultCLI: "codex",
+			},
+			env:  map[string]string{"LIZA_DEFAULT_REVIEWER_CLI": "gemini"},
+			want: "gemini",
+		},
+		{
+			name:     "doer env used before global env",
+			roleType: "doer",
+			env: map[string]string{
+				"LIZA_DEFAULT_DOER_CLI": "codex",
+				"LIZA_DEFAULT_CLI":      "gemini",
+			},
+			want: "codex",
+		},
+		{
+			name:     "reviewer env used before global env",
+			roleType: "reviewer",
+			env: map[string]string{
+				"LIZA_DEFAULT_REVIEWER_CLI": "mistral",
+				"LIZA_DEFAULT_CLI":          "gemini",
+			},
+			want: "mistral",
+		},
+		{
+			name:     "global env fallback",
+			roleType: "reviewer",
+			env:      map[string]string{"LIZA_DEFAULT_CLI": "gemini"},
+			want:     "gemini",
+		},
+		{
+			name:     "const fallback",
+			roleType: "reviewer",
+			want:     DefaultCLI,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("LIZA_DEFAULT_CLI", "")
+			t.Setenv("LIZA_DEFAULT_DOER_CLI", "")
+			t.Setenv("LIZA_DEFAULT_REVIEWER_CLI", "")
+			for name, value := range tt.env {
+				t.Setenv(name, value)
+			}
+
+			got := ResolveDefaultCLIForRole(tt.roleType, tt.config)
+			if got != tt.want {
+				t.Errorf("ResolveDefaultCLIForRole(%q, %+v) = %q, want %q", tt.roleType, tt.config, got, tt.want)
 			}
 		})
 	}

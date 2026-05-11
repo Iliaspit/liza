@@ -837,6 +837,8 @@ func (r *diversityTestResolver) PartiallyApprovedStatus(string) (models.TaskStat
 
 // Unused interface methods — return errors.
 func (r *diversityTestResolver) DoerRole(string) (string, error) { return "", fmt.Errorf("unused") }
+func (r *diversityTestResolver) RoleType(string) (string, error) { return "", fmt.Errorf("unused") }
+func (r *diversityTestResolver) AllRoleNames() []string          { return nil }
 func (r *diversityTestResolver) InitialStatus(string) (models.TaskStatus, error) {
 	return "", fmt.Errorf("unused")
 }

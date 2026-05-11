@@ -38,6 +38,7 @@ const (
 // rolesMsg carries loaded role and role-pair names from pipeline config.
 type rolesMsg struct {
 	Roles     []string
+	RoleTypes map[string]string
 	RolePairs []string
 }
 
@@ -168,20 +169,21 @@ type Model struct {
 	columnTier ColumnTier // current column visibility tier
 
 	// Input
-	inputMode        InputMode        // current input mode
-	keys             KeyMap           // key bindings
-	textInput        textinput.Model  // Bubbles text input for inline prompts
-	huhForm          *huh.Form        // active Huh form (nil when no form)
-	formData         *addTaskFormData // bound form data for Huh form fields
-	inlineAction     InlineAction     // which action inline input serves
-	inlineLabel      string           // prompt label shown before textinput (e.g., "Role: ")
-	roleCompletions  []string         // cached role names from pipeline config for tab-completion
-	rolePairNames    []string         // cached role-pair names from pipeline config for add-task form
-	agentCompletions []string         // snapshot of agent IDs for tab-completion (built on 't' press)
-	completionIdx    int              // current position in tab-completion cycle
-	completionPrefix string           // text prefix when Tab was first pressed (filters completions)
-	spawnRole        string           // role name pending CLI selection (S flow)
-	terminateTarget  string           // agent ID pending termination confirmation
+	inputMode        InputMode         // current input mode
+	keys             KeyMap            // key bindings
+	textInput        textinput.Model   // Bubbles text input for inline prompts
+	huhForm          *huh.Form         // active Huh form (nil when no form)
+	formData         *addTaskFormData  // bound form data for Huh form fields
+	inlineAction     InlineAction      // which action inline input serves
+	inlineLabel      string            // prompt label shown before textinput (e.g., "Role: ")
+	roleCompletions  []string          // cached role names from pipeline config for tab-completion
+	roleTypes        map[string]string // cached role name to role type from pipeline config
+	rolePairNames    []string          // cached role-pair names from pipeline config for add-task form
+	agentCompletions []string          // snapshot of agent IDs for tab-completion (built on 't' press)
+	completionIdx    int               // current position in tab-completion cycle
+	completionPrefix string            // text prefix when Tab was first pressed (filters completions)
+	spawnRole        string            // role name pending CLI selection (S flow)
+	terminateTarget  string            // agent ID pending termination confirmation
 
 	// Visual
 	styles Styles // Lipgloss styles (adapted to width)
@@ -212,13 +214,32 @@ type Model struct {
 	projectRoot string // root directory for state.yaml, log.yaml, alerts.log
 }
 
-// resolvedDefaultCLI returns the effective default CLI from config, with nil-safe fallback.
-// Uses the full resolution chain (config → LIZA_DEFAULT_CLI env → const) even when state is nil.
+// resolvedDefaultCLI returns the effective global default CLI from config, with nil-safe fallback.
 func (m Model) resolvedDefaultCLI() string {
 	if m.state == nil {
 		return agent.ResolveDefaultCLI("")
 	}
 	return agent.ResolveDefaultCLI(m.state.Config.DefaultCLI)
+}
+
+// resolvedDefaultCLIForRole returns the effective default CLI for a role name.
+func (m Model) resolvedDefaultCLIForRole(role string) (string, bool) {
+	roleType, ok := m.roleTypes[role]
+	if !ok || roleType == "" {
+		return "", false
+	}
+	return agent.ResolveDefaultCLIForRole(roleType, m.cliResolutionConfig()), true
+}
+
+func (m Model) cliResolutionConfig() agent.CLIResolutionConfig {
+	if m.state == nil {
+		return agent.CLIResolutionConfig{}
+	}
+	return agent.CLIResolutionConfig{
+		DefaultCLI:         m.state.Config.DefaultCLI,
+		DefaultDoerCLI:     m.state.Config.DefaultDoerCLI,
+		DefaultReviewerCLI: m.state.Config.DefaultReviewerCLI,
+	}
 }
 
 // New creates a new Model. Creates the fsnotify watcher and blackboard.
