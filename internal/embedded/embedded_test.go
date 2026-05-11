@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -1102,17 +1103,60 @@ func TestWriteCodexProjectPermissions_NewFile(t *testing.T) {
 	}
 
 	text := string(content)
-	for _, want := range []string{
-		"[sandbox_workspace_write]",
-		`"` + projectRoot + `"`,
-		`"` + filepath.Join(projectRoot, ".git") + `"`,
-	} {
+	for _, want := range expectedCodexWritableRootSnippets(projectRoot) {
 		if !strings.Contains(text, want) {
 			t.Errorf("config missing %q:\n%s", want, text)
 		}
 	}
+	if !strings.Contains(text, "[sandbox_workspace_write]") {
+		t.Errorf("config missing sandbox_workspace_write section:\n%s", text)
+	}
 	if strings.Contains(text, "approval_policy") {
 		t.Errorf("new config should contain minimal project permissions only:\n%s", text)
+	}
+}
+
+func expectedCodexWritableRootSnippets(projectRoot string) []string {
+	snippets := []string{
+		`"` + projectRoot + `"`,
+		`"` + filepath.Join(projectRoot, ".git") + `"`,
+	}
+	if runtime.GOOS != "windows" {
+		snippets = append(snippets, `"/tmp"`)
+	}
+	return snippets
+}
+
+func TestRenderCodexProjectConfig_RendersWritableRootsExactly(t *testing.T) {
+	projectRoot := "/tmp/project"
+	gitDir := filepath.Join(projectRoot, ".git")
+
+	got := renderCodexProjectConfig([]string{projectRoot, gitDir, "/tmp"})
+	want := `[sandbox_workspace_write]
+writable_roots = [
+  "/tmp/project",
+  "/tmp/project/.git",
+  "/tmp",
+]
+`
+	if got != want {
+		t.Fatalf("rendered config mismatch\nwant:\n%s\ngot:\n%s", want, got)
+	}
+}
+
+func TestRenderCodexProjectConfig_RemovesTmpPlaceholderWhenAbsent(t *testing.T) {
+	projectRoot := "/tmp/project"
+	gitDir := filepath.Join(projectRoot, ".git")
+
+	got := renderCodexProjectConfig([]string{projectRoot, gitDir})
+	want := `[sandbox_workspace_write]
+writable_roots = [
+  "/tmp/project",
+  "/tmp/project/.git",
+]
+`
+	if got != want {
+		t.Fatalf("rendered config mismatch\nwant:\n%s\ngot:\n%s", want, got)
 	}
 }
 
@@ -1180,13 +1224,11 @@ writable_roots = [
 		t.Fatalf("failed to read codex config: %v", err)
 	}
 	text := string(content)
-	for _, want := range []string{
+	for _, want := range append([]string{
 		`model = "gpt-5"`,
 		"# keep this comment",
 		`"/home/test/.npm"`,
-		`"` + projectRoot + `"`,
-		`"` + filepath.Join(projectRoot, ".git") + `"`,
-	} {
+	}, expectedCodexWritableRootSnippets(projectRoot)...) {
 		if !strings.Contains(text, want) {
 			t.Errorf("merged config missing %q:\n%s", want, text)
 		}
@@ -1247,12 +1289,10 @@ func TestWriteCodexProjectPermissions_AppendsMissingSection(t *testing.T) {
 		t.Fatalf("failed to read codex config: %v", err)
 	}
 	text := string(content)
-	for _, want := range []string{
+	for _, want := range append([]string{
 		original,
 		"[sandbox_workspace_write]",
-		`"` + projectRoot + `"`,
-		`"` + filepath.Join(projectRoot, ".git") + `"`,
-	} {
+	}, expectedCodexWritableRootSnippets(projectRoot)...) {
 		if !strings.Contains(text, want) {
 			t.Errorf("config missing %q:\n%s", want, text)
 		}
@@ -1287,12 +1327,13 @@ writable_roots = ["/home/test/.npm"] # keep inline comment
 		t.Fatalf("failed to read codex config: %v", err)
 	}
 	text := string(content)
-	for _, want := range []string{
-		`writable_roots = ["/home/test/.npm", "` + projectRoot + `", "` + filepath.Join(projectRoot, ".git") + `"] # keep inline comment`,
-	} {
+	for _, want := range append([]string{`"/home/test/.npm"`}, expectedCodexWritableRootSnippets(projectRoot)...) {
 		if !strings.Contains(text, want) {
 			t.Errorf("config missing %q:\n%s", want, text)
 		}
+	}
+	if !strings.Contains(text, "# keep inline comment") {
+		t.Errorf("config should preserve inline comment:\n%s", text)
 	}
 }
 
@@ -1309,10 +1350,11 @@ func TestWriteCodexProjectPermissions_NoDuplicateRoots(t *testing.T) {
 		t.Fatal(err)
 	}
 	original := `[sandbox_workspace_write]
-writable_roots = [
-  "` + projectRoot + `",
-  "` + filepath.Join(projectRoot, ".git") + `",
-]
+writable_roots = [` + "\n" +
+		`  "` + projectRoot + `",` + "\n" +
+		`  "` + filepath.Join(projectRoot, ".git") + `",` + "\n" +
+		codexTmpRootLineForTest() +
+		`]
 `
 	if err := os.WriteFile(configPath, []byte(original), 0644); err != nil {
 		t.Fatal(err)
@@ -1330,6 +1372,13 @@ writable_roots = [
 	if string(content) != original {
 		t.Errorf("already-configured roots should not be rewritten:\n%s", string(content))
 	}
+}
+
+func codexTmpRootLineForTest() string {
+	if runtime.GOOS == "windows" {
+		return ""
+	}
+	return `  "/tmp",` + "\n"
 }
 
 func TestWriteHooks(t *testing.T) {

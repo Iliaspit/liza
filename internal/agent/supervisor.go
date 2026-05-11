@@ -411,7 +411,7 @@ func cliSupportsStdin(cliName string) bool {
 	return cliName != "vibe"
 }
 
-func buildCodexArgs(projectRoot, prompt string, useStdin bool, outputsDir string) []string {
+func buildCodexArgs(projectRoot, prompt string, useStdin bool, outputsDir string, additionalDirs []string) []string {
 	var args []string
 	if useStdin {
 		args = append(args, "exec", "-")
@@ -420,18 +420,59 @@ func buildCodexArgs(projectRoot, prompt string, useStdin bool, outputsDir string
 	}
 	// --full-auto enables Codex's auto-approval mode within the OS-enforced sandbox.
 	args = append(args, "--full-auto")
+	for _, dir := range additionalDirs {
+		if dir == "" {
+			continue
+		}
+		args = append(args, "--add-dir", dir)
+	}
 	if outputsDir != "" {
 		args = append(args, "--json")
 	}
 	return args
 }
 
+func codexInteractiveArgs(additionalDirs []string) []string {
+	var args []string
+	for _, dir := range additionalDirs {
+		if dir == "" {
+			continue
+		}
+		args = append(args, "--add-dir", dir)
+	}
+	return args
+}
+
+func codexAdditionalDirs(projectRoot string, state *models.State, taskID string) []string {
+	var dirs []string
+	if state != nil && taskID != "" {
+		task := state.FindTask(taskID)
+		if task != nil {
+			dirs = append(dirs, resolveWorktreePath(projectRoot, task.Worktree))
+		}
+	}
+	return uniqueNonEmptyStrings(dirs)
+}
+
+func uniqueNonEmptyStrings(values []string) []string {
+	seen := make(map[string]bool, len(values))
+	var unique []string
+	for _, value := range values {
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		unique = append(unique, value)
+	}
+	return unique
+}
+
 // CLIExecutor interface for testing (mock vs real CLI)
 type CLIExecutor interface {
-	Execute(ctx context.Context, cliName string, agentID string, prompt string, projectRoot string) (CLIExecutionResult, error)
+	Execute(ctx context.Context, cliName string, agentID string, prompt string, projectRoot string, additionalDirs []string) (CLIExecutionResult, error)
 	// ExecuteInteractive launches the CLI without a prompt arg, with stdin connected,
 	// so the user can paste the prompt manually. Used by -i (interactive) mode.
-	ExecuteInteractive(ctx context.Context, cliName string, projectRoot string) (exitCode int, err error)
+	ExecuteInteractive(ctx context.Context, cliName string, projectRoot string, additionalDirs []string) (exitCode int, err error)
 }
 
 type CLIExecutionResult struct {
@@ -452,7 +493,7 @@ func NewDefaultCLIExecutor(outputsDir string) *DefaultCLIExecutor {
 	return &DefaultCLIExecutor{outputsDir: outputsDir, masker: masker}
 }
 
-func (d *DefaultCLIExecutor) Execute(ctx context.Context, cliName string, agentID string, prompt string, projectRoot string) (CLIExecutionResult, error) {
+func (d *DefaultCLIExecutor) Execute(ctx context.Context, cliName string, agentID string, prompt string, projectRoot string, additionalDirs []string) (CLIExecutionResult, error) {
 	// Map CLI names (mistral -> vibe)
 	actualCLI := cliName
 	if cliName == "mistral" {
@@ -479,7 +520,7 @@ func (d *DefaultCLIExecutor) Execute(ctx context.Context, cliName string, agentI
 		}
 		cmd = exec.CommandContext(ctx, "claude", args...)
 	case "codex":
-		args := buildCodexArgs(projectRoot, prompt, useStdin, d.outputsDir)
+		args := buildCodexArgs(projectRoot, prompt, useStdin, d.outputsDir, additionalDirs)
 		cmd = exec.CommandContext(ctx, "codex", args...)
 	case "gemini":
 		args := []string{"-p"}
@@ -586,7 +627,7 @@ func (d *DefaultCLIExecutor) Execute(ctx context.Context, cliName string, agentI
 	return CLIExecutionResult{ExitCode: 0, Output: output}, nil
 }
 
-func (d *DefaultCLIExecutor) ExecuteInteractive(ctx context.Context, cliName string, projectRoot string) (int, error) {
+func (d *DefaultCLIExecutor) ExecuteInteractive(ctx context.Context, cliName string, projectRoot string, additionalDirs []string) (int, error) {
 	// Map CLI names (mistral -> vibe)
 	actualCLI := cliName
 	if cliName == "mistral" {
@@ -597,7 +638,8 @@ func (d *DefaultCLIExecutor) ExecuteInteractive(ctx context.Context, cliName str
 	var cmd *exec.Cmd
 	switch actualCLI {
 	case "codex":
-		cmd = exec.CommandContext(ctx, "codex")
+		args := codexInteractiveArgs(additionalDirs)
+		cmd = exec.CommandContext(ctx, "codex", args...)
 	default:
 		cmd = exec.CommandContext(ctx, actualCLI)
 	}
@@ -850,7 +892,8 @@ func RunSupervisor(ctx context.Context, config SupervisorConfig) error {
 		GetLogger().Info("Prompt saved", "file", promptFile)
 
 		// Execute agent
-		exitCode, currentOutput, err := executeAgent(ctx, config, prompt)
+		additionalDirs := codexAdditionalDirs(config.ProjectRoot, stateBefore, taskID)
+		exitCode, currentOutput, err := executeAgent(ctx, config, prompt, additionalDirs)
 		if err != nil {
 			return fmt.Errorf("agent execution error: %w", err)
 		}

@@ -2,4 +2,5 @@
 writable_roots = [
   "{{REPO_ROOT}}",
   "{{REPO_GIT_DIR}}",
+  "{{TMP_WRITABLE_ROOT}}",
 ]

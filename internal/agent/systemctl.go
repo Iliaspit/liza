@@ -132,14 +132,14 @@ func waitWhilePaused(ctx context.Context, projectRoot string) error {
 }
 
 // executeAgent executes the CLI with timeout
-func executeAgent(ctx context.Context, config SupervisorConfig, prompt string) (int, string, error) {
+func executeAgent(ctx context.Context, config SupervisorConfig, prompt string, additionalDirs []string) (int, string, error) {
 	logger := GetLogger()
 	// Interactive mode: launch CLI without -p so user can paste the prompt
 	if config.Interactive {
 		fmt.Println("=== INTERACTIVE MODE ===")
 		fmt.Println("Paste the prompt from the file above into the CLI session.")
 		fmt.Printf("Launching: %s\n", config.CLIName)
-		exitCode, err := config.Executor.ExecuteInteractive(ctx, config.CLIName, config.ProjectRoot)
+		exitCode, err := config.Executor.ExecuteInteractive(ctx, config.CLIName, config.ProjectRoot, additionalDirs)
 		return exitCode, "", err
 	}
 
@@ -151,7 +151,7 @@ func executeAgent(ctx context.Context, config SupervisorConfig, prompt string) (
 	// so we don't start one here.
 
 	// Execute CLI with timeout
-	result, err := config.Executor.Execute(execCtx, config.CLIName, config.AgentID, prompt, config.ProjectRoot)
+	result, err := config.Executor.Execute(execCtx, config.CLIName, config.AgentID, prompt, config.ProjectRoot, additionalDirs)
 
 	// Check if execution timed out
 	if err != nil && errors.Is(err, context.DeadlineExceeded) {

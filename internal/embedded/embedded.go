@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 
@@ -609,7 +610,11 @@ func codexProjectWritableRoots(projectRoot string) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve project root: %w", err)
 	}
-	return []string{absRoot, filepath.Join(absRoot, ".git")}, nil
+	roots := []string{absRoot, filepath.Join(absRoot, ".git")}
+	if runtime.GOOS != "windows" {
+		roots = append(roots, "/tmp")
+	}
+	return roots, nil
 }
 
 func renderCodexProjectConfig(roots []string) string {
@@ -617,6 +622,11 @@ func renderCodexProjectConfig(roots []string) string {
 	if len(roots) >= 2 {
 		content = strings.ReplaceAll(content, "{{REPO_ROOT}}", tomlStringPlaceholderValue(roots[0]))
 		content = strings.ReplaceAll(content, "{{REPO_GIT_DIR}}", tomlStringPlaceholderValue(roots[1]))
+	}
+	if len(roots) >= 3 {
+		content = strings.ReplaceAll(content, "{{TMP_WRITABLE_ROOT}}", tomlStringPlaceholderValue(roots[2]))
+	} else {
+		content = strings.ReplaceAll(content, "  \"{{TMP_WRITABLE_ROOT}}\",\n", "")
 	}
 	return ensureTrailingNewline(content)
 }

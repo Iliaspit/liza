@@ -29,30 +29,32 @@ type MockCLIExecutor struct {
 	ExitCode         int
 	Output           string
 	ExitError        error
-	OnExecute        func(ctx context.Context, cliName string, agentID string, prompt string, projectRoot string) error
+	OnExecute        func(ctx context.Context, cliName string, agentID string, prompt string, projectRoot string, additionalDirs []string) error
 }
 
 type MockCLICall struct {
-	CLIName string
-	AgentID string
-	Prompt  string
+	CLIName        string
+	AgentID        string
+	Prompt         string
+	ProjectRoot    string
+	AdditionalDirs []string
 }
 
-func (m *MockCLIExecutor) Execute(ctx context.Context, cliName string, agentID string, prompt string, projectRoot string) (CLIExecutionResult, error) {
+func (m *MockCLIExecutor) Execute(ctx context.Context, cliName string, agentID string, prompt string, projectRoot string, additionalDirs []string) (CLIExecutionResult, error) {
 	m.mu.Lock()
-	m.Calls = append(m.Calls, MockCLICall{CLIName: cliName, AgentID: agentID, Prompt: prompt})
+	m.Calls = append(m.Calls, MockCLICall{CLIName: cliName, AgentID: agentID, Prompt: prompt, ProjectRoot: projectRoot, AdditionalDirs: slices.Clone(additionalDirs)})
 	m.mu.Unlock()
 	if m.OnExecute != nil {
-		if err := m.OnExecute(ctx, cliName, agentID, prompt, projectRoot); err != nil {
+		if err := m.OnExecute(ctx, cliName, agentID, prompt, projectRoot, additionalDirs); err != nil {
 			return CLIExecutionResult{ExitCode: m.ExitCode, Output: m.Output}, err
 		}
 	}
 	return CLIExecutionResult{ExitCode: m.ExitCode, Output: m.Output}, m.ExitError
 }
 
-func (m *MockCLIExecutor) ExecuteInteractive(ctx context.Context, cliName string, projectRoot string) (int, error) {
+func (m *MockCLIExecutor) ExecuteInteractive(ctx context.Context, cliName string, projectRoot string, additionalDirs []string) (int, error) {
 	m.mu.Lock()
-	m.InteractiveCalls = append(m.InteractiveCalls, MockCLICall{CLIName: cliName})
+	m.InteractiveCalls = append(m.InteractiveCalls, MockCLICall{CLIName: cliName, ProjectRoot: projectRoot, AdditionalDirs: slices.Clone(additionalDirs)})
 	m.mu.Unlock()
 	return m.ExitCode, m.ExitError
 }
@@ -82,7 +84,7 @@ func TestMockCLIExecution(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	result, err := mock.Execute(ctx, "claude", "claude-1", "test prompt", "/tmp/test-project")
+	result, err := mock.Execute(ctx, "claude", "claude-1", "test prompt", "/tmp/test-project", nil)
 
 	if err != nil {
 		t.Errorf("Execute() error = %v", err)
@@ -127,7 +129,7 @@ printf 'stderr-before sk-test-secret-value stderr-after\n' >&2
 	t.Setenv("ANTHROPIC_API_KEY", "sk-test-secret-value")
 
 	executor := NewDefaultCLIExecutor(outputsDir)
-	result, err := executor.Execute(context.Background(), "claude", "coder-1", "prompt body", projectRoot)
+	result, err := executor.Execute(context.Background(), "claude", "coder-1", "prompt body", projectRoot, nil)
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
 	}
@@ -200,7 +202,7 @@ func TestSupervisor_Exit0ProviderAuditDegradedContinuesPostExecution(t *testing.
 		ExitCode: 0,
 		Output:   auditOutput,
 	}
-	mock.OnExecute = func(ctx context.Context, cliName, agentID, prompt, projectRoot string) error {
+	mock.OnExecute = func(ctx context.Context, cliName, agentID, prompt, projectRoot string, additionalDirs []string) error {
 		reviewCommit := testhelpers.MustGit(t, projectRoot, "rev-parse", "HEAD")
 		return bb.Modify(func(s *models.State) error {
 			task := s.FindTask(taskID)
@@ -755,7 +757,7 @@ func TestCLISupportsStdin(t *testing.T) {
 
 func TestBuildCodexArgs(t *testing.T) {
 	t.Run("stdin without logging uses full-auto", func(t *testing.T) {
-		args := buildCodexArgs("/tmp/project", "ignored", true, "")
+		args := buildCodexArgs("/tmp/project", "ignored", true, "", []string{"/tmp", "/tmp/project/.worktrees/task-1"})
 
 		if !slices.Contains(args, "--full-auto") {
 			t.Fatalf("args = %v, want --full-auto flag", args)
@@ -769,6 +771,8 @@ func TestBuildCodexArgs(t *testing.T) {
 		if slices.Contains(args, "--json") {
 			t.Fatalf("args = %v, did not expect --json without logging", args)
 		}
+		assertCodexAddDir(t, args, "/tmp")
+		assertCodexAddDir(t, args, "/tmp/project/.worktrees/task-1")
 		for _, a := range args {
 			if strings.Contains(a, "mcp_servers") {
 				t.Fatalf("args = %v, did not expect mcp_servers config", args)
@@ -777,7 +781,7 @@ func TestBuildCodexArgs(t *testing.T) {
 	})
 
 	t.Run("prompt with logging emits json", func(t *testing.T) {
-		args := buildCodexArgs("/tmp/project", "do the thing", false, "/tmp/logs")
+		args := buildCodexArgs("/tmp/project", "do the thing", false, "/tmp/logs", nil)
 
 		if !slices.Contains(args, "do the thing") {
 			t.Fatalf("args = %v, want prompt argument", args)
@@ -794,6 +798,53 @@ func TestBuildCodexArgs(t *testing.T) {
 			}
 		}
 	})
+}
+
+func TestCodexInteractiveArgs(t *testing.T) {
+	args := codexInteractiveArgs([]string{"/tmp", "", "/tmp/project/.worktrees/task-1"})
+
+	assertCodexAddDir(t, args, "/tmp")
+	assertCodexAddDir(t, args, "/tmp/project/.worktrees/task-1")
+	if slices.Contains(args, "") {
+		t.Fatalf("args = %v, did not expect empty argument", args)
+	}
+}
+
+func TestCodexAdditionalDirs(t *testing.T) {
+	t.Run("no task context returns empty dirs", func(t *testing.T) {
+		if dirs := codexAdditionalDirs("/tmp/project", nil, ""); len(dirs) != 0 {
+			t.Fatalf("dirs = %v, want empty", dirs)
+		}
+	})
+
+	t.Run("task worktree is added", func(t *testing.T) {
+		projectRoot := "/tmp/project"
+		worktreeRel := ".worktrees/task-1"
+		state := &models.State{
+			Tasks: []models.Task{
+				{
+					ID:       "task-1",
+					Worktree: &worktreeRel,
+				},
+			},
+		}
+
+		dirs := codexAdditionalDirs(projectRoot, state, "task-1")
+
+		if !slices.Contains(dirs, filepath.Join(projectRoot, worktreeRel)) {
+			t.Fatalf("dirs = %v, want task worktree", dirs)
+		}
+	})
+}
+
+func assertCodexAddDir(t *testing.T, args []string, wantDir string) {
+	t.Helper()
+	for i := 0; i < len(args)-1; i++ {
+		if args[i] == "--add-dir" && args[i+1] == wantDir {
+			return
+		}
+	}
+	t.Fatalf("args = %v, want --add-dir %s", args, wantDir)
 }
 
 // buildPromptFailureFixture wires a minimal ARCHITECTING architect task
