@@ -94,3 +94,64 @@ func TestSaveOutputMasksSecrets(t *testing.T) {
 		}
 	})
 }
+
+func TestStreamingOutputFileMasksSecretsAcrossWrites(t *testing.T) {
+	dir := t.TempDir()
+	masker := newSecretMaskerFromEnv([]string{
+		"ANTHROPIC_API_KEY=sk-ant-secret-key-value",
+	})
+	w := newStreamingOutputFile(dir, "coder-1", "txt", "20260511-120000", masker)
+
+	if _, err := w.Write([]byte("before sk-ant-sec")); err != nil {
+		t.Fatalf("first Write error: %v", err)
+	}
+
+	path := filepath.Join(dir, "coder-1-20260511-120000.txt")
+	gotDuring, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("streaming file should exist during execution: %v", err)
+	}
+	if string(gotDuring) != "before " {
+		t.Fatalf("partial secret should be held during stream, got %q", gotDuring)
+	}
+
+	if _, err := w.Write([]byte("ret-key-value after")); err != nil {
+		t.Fatalf("second Write error: %v", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("Close error: %v", err)
+	}
+
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile error: %v", err)
+	}
+	if strings.Contains(string(got), "sk-ant-secret-key-value") {
+		t.Fatalf("persisted stream leaked secret: %q", got)
+	}
+	want := "before *** after"
+	if string(got) != want {
+		t.Fatalf("persisted stream = %q, want %q", got, want)
+	}
+}
+
+func TestStreamingOutputFileWithoutMaskerWritesRawOutput(t *testing.T) {
+	dir := t.TempDir()
+	w := newStreamingOutputFile(dir, "reviewer-1", "err", "20260511-120001", nil)
+
+	if _, err := w.Write([]byte("raw stderr")); err != nil {
+		t.Fatalf("Write error: %v", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("Close error: %v", err)
+	}
+
+	path := filepath.Join(dir, "reviewer-1-20260511-120001.err")
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile error: %v", err)
+	}
+	if string(got) != "raw stderr" {
+		t.Fatalf("persisted stream = %q, want %q", got, "raw stderr")
+	}
+}

@@ -198,7 +198,7 @@ All of the above plus: epic-planner, epic-plan-reviewer, us-writer, us-reviewer.
 Each agent command accepts a `--cli` flag to select the coding agent CLI: `claude`, `codex`, `gemini`, `mistral`, or `kimi`. When `--cli` is omitted, the default is resolved from `config.default_cli` in `state.yaml`, then `LIZA_DEFAULT_CLI` env var, then `claude`. Set the default at init time with `liza init --default-cli codex "..."`, or edit `state.yaml` directly.
 In the TUI, `s` spawns with the configured default CLI; `S` prompts for CLI selection.
 
-Agent output is automatically persisted to `.liza/agent-outputs/` (stdout as `.txt`, stderr as `.err`). Pass `--no-log` to disable. Persisted files are automatically masked — secret values from environment variables (API keys, tokens, passwords) are replaced with `***`. Live terminal output remains unmasked. Logging is automatically disabled in `-i` (interactive) mode.
+Agent output is automatically streamed to `.liza/agent-outputs/` while the CLI runs (stdout as `.txt`, stderr as `.err`). Pass `--no-log` to disable. Persisted files are automatically masked — secret values from environment variables (API keys, tokens, passwords) are replaced with `***`. Live terminal output remains unmasked. Logging is automatically disabled in `-i` (interactive) mode.
 See [Analyzing Agent Logs](#analyzing-agent-logs) for analysis tools.
 
 Multiple agents of the same role can run in parallel (IDs auto-increment):
@@ -456,7 +456,7 @@ In both cases, the pattern is the same: run the analysis, read the friction repo
 
 #### Log Format
 
-Logs are captured by default (disable with `--no-log`) as NDJSON files (one JSON object per line) from `claude --verbose --output-format stream-json`. Two formats exist depending on the agent role:
+Logs are captured by default (disable with `--no-log`) as incrementally written NDJSON files (one JSON object per line) from `claude --verbose --output-format stream-json`. Two formats exist depending on the agent role:
 
 | Format | First event | Seen in | Token detail |
 |--------|-------------|---------|--------------|

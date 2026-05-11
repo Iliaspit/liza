@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -102,6 +103,81 @@ func TestMockCLIExecution(t *testing.T) {
 	}
 	if call.Prompt != "test prompt" {
 		t.Errorf("Prompt = %s, want 'test prompt'", call.Prompt)
+	}
+}
+
+func TestDefaultCLIExecutorStreamsMaskedOutputFiles(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake CLI shell script test requires /bin/sh")
+	}
+
+	projectRoot := t.TempDir()
+	outputsDir := filepath.Join(projectRoot, ".liza", "agent-outputs")
+	binDir := t.TempDir()
+	fakeClaude := filepath.Join(binDir, "claude")
+	script := `#!/bin/sh
+printf 'stdout-before sk-test-secret-value stdout-after\n'
+printf 'stderr-before sk-test-secret-value stderr-after\n' >&2
+`
+	if err := os.WriteFile(fakeClaude, []byte(script), 0755); err != nil {
+		t.Fatalf("write fake claude: %v", err)
+	}
+
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("ANTHROPIC_API_KEY", "sk-test-secret-value")
+
+	executor := NewDefaultCLIExecutor(outputsDir)
+	result, err := executor.Execute(context.Background(), "claude", "coder-1", "prompt body", projectRoot)
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0", result.ExitCode)
+	}
+	if strings.Contains(result.Output, "sk-test-secret-value") {
+		t.Fatalf("result output leaked secret: %q", result.Output)
+	}
+	if !strings.Contains(result.Output, "stdout-before *** stdout-after") {
+		t.Fatalf("result output missing masked stdout: %q", result.Output)
+	}
+	if !strings.Contains(result.Output, "stderr-before *** stderr-after") {
+		t.Fatalf("result output missing masked stderr: %q", result.Output)
+	}
+
+	txtFiles, err := filepath.Glob(filepath.Join(outputsDir, "coder-1-*.txt"))
+	if err != nil {
+		t.Fatalf("glob txt: %v", err)
+	}
+	errFiles, err := filepath.Glob(filepath.Join(outputsDir, "coder-1-*.err"))
+	if err != nil {
+		t.Fatalf("glob err: %v", err)
+	}
+	if len(txtFiles) != 1 || len(errFiles) != 1 {
+		t.Fatalf("output files txt=%v err=%v, want one of each", txtFiles, errFiles)
+	}
+
+	txtStem := strings.TrimSuffix(filepath.Base(txtFiles[0]), ".txt")
+	errStem := strings.TrimSuffix(filepath.Base(errFiles[0]), ".err")
+	if txtStem != errStem {
+		t.Fatalf("stdout/stderr files should share timestamp, got %q and %q", txtStem, errStem)
+	}
+
+	stdoutLog, err := os.ReadFile(txtFiles[0])
+	if err != nil {
+		t.Fatalf("read stdout log: %v", err)
+	}
+	stderrLog, err := os.ReadFile(errFiles[0])
+	if err != nil {
+		t.Fatalf("read stderr log: %v", err)
+	}
+	if strings.Contains(string(stdoutLog), "sk-test-secret-value") || strings.Contains(string(stderrLog), "sk-test-secret-value") {
+		t.Fatalf("persisted logs leaked secret:\nstdout=%q\nstderr=%q", stdoutLog, stderrLog)
+	}
+	if string(stdoutLog) != "stdout-before *** stdout-after\n" {
+		t.Fatalf("stdout log = %q", stdoutLog)
+	}
+	if string(stderrLog) != "stderr-before *** stderr-after\n" {
+		t.Fatalf("stderr log = %q", stderrLog)
 	}
 }
 

@@ -542,13 +542,30 @@ func (d *DefaultCLIExecutor) Execute(ctx context.Context, cliName string, agentI
 	// Separate buffers avoid the concurrency issue: exec.Cmd drains each pipe
 	// in its own goroutine, so each buffer is written by exactly one goroutine.
 	var stdoutBuf, stderrBuf strings.Builder
+	var stdoutLog, stderrLog *streamingOutputFile
 	if d.outputsDir != "" {
-		cmd.Stdout = io.MultiWriter(os.Stdout, &stdoutBuf)
-		cmd.Stderr = io.MultiWriter(os.Stderr, &stderrBuf)
+		timestamp := time.Now().UTC().Format("20060102-150405")
+		stdoutLog = newStreamingOutputFile(d.outputsDir, agentID, "txt", timestamp, d.masker)
+		stderrLog = newStreamingOutputFile(d.outputsDir, agentID, "err", timestamp, d.masker)
+		cmd.Stdout = io.MultiWriter(os.Stdout, &stdoutBuf, stdoutLog)
+		cmd.Stderr = io.MultiWriter(os.Stderr, &stderrBuf, stderrLog)
 	} else {
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 	}
+
+	defer func() {
+		if stdoutLog != nil {
+			if closeErr := stdoutLog.Close(); closeErr != nil {
+				GetLogger().Warn("Failed to stream agent stdout", "error", closeErr, "agent_id", agentID, "ext", "txt")
+			}
+		}
+		if stderrLog != nil {
+			if closeErr := stderrLog.Close(); closeErr != nil {
+				GetLogger().Warn("Failed to stream agent stderr", "error", closeErr, "agent_id", agentID, "ext", "err")
+			}
+		}
+	}()
 
 	err := cmd.Run()
 
@@ -557,20 +574,6 @@ func (d *DefaultCLIExecutor) Execute(ctx context.Context, cliName string, agentI
 	output := stdout + "\n" + stderr
 	if d.masker != nil {
 		output = d.masker.MaskText(output)
-	}
-
-	// Save stdout and stderr to separate files if logging is enabled.
-	if d.outputsDir != "" {
-		save := func(ext, content string) {
-			if content == "" {
-				return
-			}
-			if _, saveErr := saveOutput(d.outputsDir, agentID, ext, content, d.masker); saveErr != nil {
-				GetLogger().Warn("Failed to save agent output", "error", saveErr, "agent_id", agentID, "ext", ext)
-			}
-		}
-		save("txt", stdout)
-		save("err", stderr)
 	}
 
 	if err != nil {
