@@ -431,13 +431,14 @@ func TestSetTaskOutput_DependsOnRoundTrip(t *testing.T) {
 	state := testhelpers.CreateValidState()
 	state.Tasks = []models.Task{
 		testhelpers.BuildTaskByStatus("task-1", models.TaskStatusImplementing, now),
+		testhelpers.BuildTaskByStatus("external-task", models.TaskStatusMerged, now),
 	}
 	testhelpers.WriteInitialState(t, stateFile, state)
 
 	output := []models.OutputEntry{
 		{Desc: "Setup", DoneWhen: "ready", Scope: "db", SpecRef: "specs/db.md"},
 		{Desc: "Build", DoneWhen: "works", Scope: "api", SpecRef: "specs/api.md", DependsOn: []string{"0"}},
-		{Desc: "Test", DoneWhen: "green", Scope: "test", SpecRef: "specs/test.md", DependsOn: []string{"0", "1"}},
+		{Desc: "Test", DoneWhen: "green", Scope: "test", SpecRef: "specs/test.md", DependsOn: []string{"0", "1"}, TaskDependsOn: []string{" external-task "}},
 	}
 
 	err := SetTaskOutput(tmpDir, &SetTaskOutputInput{
@@ -470,6 +471,9 @@ func TestSetTaskOutput_DependsOnRoundTrip(t *testing.T) {
 	}
 	if len(task.Output[2].DependsOn) != 2 || task.Output[2].DependsOn[0] != "0" || task.Output[2].DependsOn[1] != "1" {
 		t.Errorf("Output[2].DependsOn = %v, want [\"0\", \"1\"]", task.Output[2].DependsOn)
+	}
+	if len(task.Output[2].TaskDependsOn) != 1 || task.Output[2].TaskDependsOn[0] != "external-task" {
+		t.Errorf("Output[2].TaskDependsOn = %v, want [\"external-task\"]", task.Output[2].TaskDependsOn)
 	}
 }
 
@@ -514,6 +518,13 @@ func TestSetTaskOutput_DependsOnValidation(t *testing.T) {
 			},
 			errContains: `unknown kind "bootstrap-pre-commit"`,
 		},
+		{
+			name: "invalid task_depends_on ID",
+			output: []models.OutputEntry{
+				{Desc: "d", DoneWhen: "dw", Scope: "s", TaskDependsOn: []string{"../bad"}},
+			},
+			errContains: "task_depends_on contains invalid task ID",
+		},
 	}
 
 	for _, tt := range tests {
@@ -526,6 +537,31 @@ func TestSetTaskOutput_DependsOnValidation(t *testing.T) {
 			testhelpers.RequireErrorContains(t, err, tt.errContains)
 		})
 	}
+}
+
+func TestSetTaskOutput_TaskDependsOnRejectsMissingTask(t *testing.T) {
+	tmpDir := t.TempDir()
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	now := time.Now().UTC()
+
+	state := testhelpers.CreateValidState()
+	state.Tasks = []models.Task{
+		testhelpers.BuildTaskByStatus("task-1", models.TaskStatusImplementing, now),
+	}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	err := SetTaskOutput(tmpDir, &SetTaskOutputInput{
+		TaskID:  "task-1",
+		AgentID: "coder-1",
+		Output: []models.OutputEntry{{
+			Desc:          "Validate existing work",
+			DoneWhen:      "evidence recorded",
+			Scope:         "specs/evidence",
+			SpecRef:       "specs/evidence.md",
+			TaskDependsOn: []string{"missing-task"},
+		}},
+	})
+	testhelpers.RequireErrorContains(t, err, `output[0].task_depends_on references non-existent task "missing-task"`)
 }
 
 func TestSetTaskOutput_CodePlanningStatus(t *testing.T) {

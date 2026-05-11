@@ -196,6 +196,8 @@ Key task fields:
 - `rejection_reason` — reviewer feedback on rejection
 - `depends_on` — task IDs that must be terminal before this task is claimable
 - `output[]` — structured output entries (used by `liza proceed` to create child tasks)
+  - `output[].depends_on` — sibling output indexes resolved during `proceed`
+  - `output[].task_depends_on` — existing concrete task IDs copied to generated child tasks
 - `history[]` — timestamped event log per task
 
 Key agent fields:

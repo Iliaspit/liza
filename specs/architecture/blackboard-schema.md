@@ -266,6 +266,7 @@ Required:
 Optional:
 - `plan_ref` (`string`): Path to the plan artifact (repo-relative). Set by doer via `set-task-output`. Normalized by `NormalizeSpecRef` (worktree prefixes stripped).
 - `arch_ref` (`string`): Path to the architecture document (repo-relative). Set by architect via `set-task-output`. Normalized by `NormalizeSpecRef` (worktree prefixes stripped). Propagated to child tasks by `proceed.go` during transitions.
+- `task_depends_on` (`[]string`): Existing concrete task IDs outside this `output[]`. Set by doer via `set-task-output`; copied to generated child tasks as scheduler-facing `depends_on`.
 
 Artifact reference fields are scalar repo-relative refs, optionally with a
 `#fragment` anchor. Delimiter-joined multi-refs such as `specs/a.md; specs/b.md`
@@ -320,8 +321,10 @@ The `parent-tasks-context` template block renders upstream parent task metadata 
 
 **Auto-inherited DependsOn:** When a source task has `depends_on` and the upstream dependency
 has already executed the same transition, child tasks inherit those upstream children as
-additional `depends_on` entries. Sibling deps (from `output[]` DependsOn indices) are resolved
-first, inherited deps appended after.
+additional `depends_on` entries. Dependency composition order is:
+1. Sibling deps from `output[].depends_on` index references, resolved to generated child task IDs
+2. Concrete task deps from `output[].task_depends_on`
+3. Inherited phase-gate deps from upstream parents' children
 
 **`transition_cycle_blocked` history event:** Added by `ExecuteAvailableTransitions` when
 circular `depends_on` prevents topological ordering. Semantics:

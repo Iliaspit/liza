@@ -113,8 +113,9 @@ claimable(task, role) =
 > parent tasks that have `depends_on`, the children automatically inherit dependencies on
 > upstream parents' children (from the same transition). This propagates the phase-gate
 > barrier: if plan-2 depends on plan-1, then plan-2's coding children depend on plan-1's
-> coding children. The inherited deps are appended after sibling deps (from `output[]` DependsOn
-> indices). This is transition-specific — only the same transition name contributes.
+> coding children. Child dependency composition order is sibling deps from `output[].depends_on`
+> index references, then concrete task deps from `output[].task_depends_on`, then inherited
+> phase-gate deps. This is transition-specific — only the same transition name contributes.
 
 When new task types are added (e.g., `specification`, `architecture`), they define their own role workflow in the registry. The supervisor and work detection derive behavior from the registry rather than hardcoding role checks.
 

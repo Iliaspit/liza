@@ -51,7 +51,8 @@ plan from the provided spec artifacts (architecture document, goal spec, or assi
    Each entry becomes a child task after merge. The Code Plan Reviewer will verify these.
    Fields: desc (single intent), done_when (falsifiable), scope (boundary), spec_ref (source),
    plan_ref (repo-relative path to the plan file — set to the plan file path from step 2 for all entries),
-   depends_on (optional array of sibling index strings, e.g. ["0", "2"] — resolved to child task IDs at transition).
+   depends_on (optional array of sibling index strings, e.g. ["0", "2"] — resolved to child task IDs at transition),
+   task_depends_on (optional array of existing concrete task IDs outside this output[]).
    Extract each field verbatim from the plan file — do not compose from memory or paraphrase.
 4. Update worktree artifacts required by DONE WHEN.
 5. Validate done_when criteria with concrete checks.
@@ -114,7 +115,8 @@ IMPLEMENTATION PHASE:
    Fields: desc (single cohesive capability), done_when (falsifiable), scope (boundary),
    spec_ref (goal spec reference — preserves traceability to the original requirements),
    epic_ref (epic document path with section anchor — locates the specific capability for downstream agents),
-   depends_on (optional array of sibling index strings for capability ordering).
+   depends_on (optional array of sibling index strings for capability ordering),
+   task_depends_on (optional array of existing concrete task IDs outside this output[]).
    desc: extract verbatim from the capability's one-sentence description in the epic.
    done_when: derive a falsifiable condition from the capability description and story documents.
    scope: derive from the capability's story documents table and out-of-scope section.
@@ -179,7 +181,8 @@ IMPLEMENTATION PHASE:
    Each entry becomes a code-planning child task after merge. The Architecture Reviewer will verify these.
    Fields: desc (scope boundary), done_when (falsifiable), scope (what the code-planner covers),
    spec_ref (goal spec — same for all entries), arch_ref (repo-relative path to the arch doc from step 5),
-   depends_on (optional array of sibling index strings for ordering constraints).
+   depends_on (optional array of sibling index strings for ordering constraints),
+   task_depends_on (optional array of existing concrete task IDs outside this output[]).
    Extract each field verbatim from the arch doc — do not compose from memory or paraphrase.
 
 BOOTSTRAP-PRECOMMIT REQUIREMENTS:

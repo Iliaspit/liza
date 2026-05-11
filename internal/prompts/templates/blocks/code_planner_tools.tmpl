@@ -13,10 +13,11 @@ CODE PLANNER TOOLS:
   Create that JSON file next to the plan file with a file-writing tool, not a Bash heredoc (heredoc with JSON triggers a shell safety block).
   Do NOT write task-output JSON under .liza/agent-outputs/; that directory is runtime state, not a committed plan artifact location.
   JSON file contains: [
-    {"desc": "...", "done_when": "...", "scope": "...", "spec_ref": "...", "plan_ref": "...", "depends_on": ["0", "2"]}
+    {"desc": "...", "done_when": "...", "scope": "...", "spec_ref": "...", "plan_ref": "...", "depends_on": ["0", "2"], "task_depends_on": ["existing-task-id"]}
   ]
   depends_on: optional array of sibling index strings. "0" means "depends on output[0]".
   Indices are resolved to child task IDs at transition time.
+  task_depends_on: optional array of existing concrete task IDs. Use this for dependencies on tasks outside this output[].
 - liza handoff — Context near exhaustion (~90%)
   liza handoff {{.TaskID}} "<what is done>" "<exact next step>" --agent-id {{.AgentID}} --json
 - liza mark-blocked — Cannot proceed

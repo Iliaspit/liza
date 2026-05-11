@@ -680,7 +680,12 @@ var setTaskOutputCmd = &cobra.Command{
 	Long: `Define output entries that will become downstream tasks after merge.
 
 Reads output entries from a JSON file. Each entry must have desc, done_when,
-and scope. Optional fields: spec_ref, plan_ref, arch_ref, depends_on.
+and scope. Optional fields: spec_ref, plan_ref, arch_ref, depends_on,
+task_depends_on.
+
+depends_on contains sibling output indexes, e.g. "0" for output[0].
+task_depends_on contains existing concrete task IDs to copy onto generated
+child tasks.
 
 Requirements:
   - Agent ID must be provided (via --agent-id flag or LIZA_AGENT_ID env var)
@@ -695,7 +700,7 @@ Example:
   cat > outputs.json <<'EOF'
   [
     {"desc": "Subtask 1", "done_when": "Tests pass", "scope": "internal/pkg"},
-    {"desc": "Subtask 2", "done_when": "API works", "scope": "internal/api", "depends_on": ["0"]}
+    {"desc": "Subtask 2", "done_when": "API works", "scope": "internal/api", "depends_on": ["0"], "task_depends_on": ["existing-task-id"]}
   ]
   EOF
   liza set-task-output task-1 --output outputs.json`,

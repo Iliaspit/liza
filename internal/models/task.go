@@ -273,6 +273,8 @@ type OutputEntry struct {
 	ArchRef   string   `yaml:"arch_ref,omitempty" json:"arch_ref,omitempty"`
 	Kind      string   `yaml:"kind,omitempty" json:"kind,omitempty"`
 	DependsOn []string `yaml:"depends_on,omitempty" json:"depends_on,omitempty"`
+	// TaskDependsOn names existing concrete task IDs to copy onto generated child tasks.
+	TaskDependsOn []string `yaml:"task_depends_on,omitempty" json:"task_depends_on,omitempty"`
 }
 
 // validKinds is the registry of non-empty OutputEntry.Kind / Task.Kind values.

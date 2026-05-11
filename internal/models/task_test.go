@@ -574,7 +574,8 @@ func TestOutputEntry_JSONUnmarshal(t *testing.T) {
 			"spec_ref": "specs/auth.md",
 			"plan_ref": "specs/plans/plan-1.md",
 			"arch_ref": "specs/arch-plan/arch-1.md",
-			"depends_on": ["0", "2"]
+			"depends_on": ["0", "2"],
+			"task_depends_on": ["github-175-runtime-capture-artifact-coverage"]
 		}
 	]`
 
@@ -606,6 +607,9 @@ func TestOutputEntry_JSONUnmarshal(t *testing.T) {
 	}
 	if len(e.DependsOn) != 2 || e.DependsOn[0] != "0" || e.DependsOn[1] != "2" {
 		t.Errorf("DependsOn = %v", e.DependsOn)
+	}
+	if len(e.TaskDependsOn) != 1 || e.TaskDependsOn[0] != "github-175-runtime-capture-artifact-coverage" {
+		t.Errorf("TaskDependsOn = %v", e.TaskDependsOn)
 	}
 }
 

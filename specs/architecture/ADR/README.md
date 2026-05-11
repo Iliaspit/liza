@@ -59,3 +59,4 @@
 | [0055 — Integration Sub-Pipeline](0055-integration-sub-pipeline.md) | Automated branch-wide integration analysis with clean terminal states, auto-transitions, and fix-task generation reusing the coding-pair. |
 | [0056 — Architecture Step with Many-to-One Transitions](0056-architecture-step-many-to-one-transitions.md) | Architecture consolidation point with new `many-to-one` fan-in cardinality, `arch_ref` propagation, and multi-parent task linkage. |
 | [0057 — MCP Server Removal and CLI-Native Access Control](0057-mcp-server-removal-cli-native-access-control.md) | Remove MCP server entirely; move RBAC to CLI `--agent-id` validation, add `--json` structured output. Supersedes ADR-0039, ADR-0043. |
+| [0058 — Output Entry Concrete Task Dependencies](0058-output-entry-task-dependencies.md) | Add `task_depends_on` on `OutputEntry` so generated child tasks can depend on existing concrete task IDs while `depends_on` stays sibling-index-only. |

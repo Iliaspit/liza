@@ -1121,7 +1121,9 @@ func buildChildTask(childID, parentID string, entry models.OutputEntry, targetSt
 		idx, _ := strconv.Atoi(ref) // validated upstream in validateOutputEntry
 		deps = append(deps, siblingIDs[idx])
 	}
+	deps = append(deps, entry.TaskDependsOn...)
 	deps = append(deps, inheritedDeps...)
+	deps = dedupeStrings(deps)
 
 	epicRef := entry.EpicRef
 	if epicRef == "" {

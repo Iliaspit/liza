@@ -2,6 +2,7 @@ package ops
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/liza-mas/liza/internal/db"
 	"github.com/liza-mas/liza/internal/models"
@@ -42,6 +43,9 @@ func SetTaskOutput(projectRoot string, input *SetTaskOutputInput) error {
 		if err := models.ValidateDependsOn(entry.DependsOn, i, len(input.Output)); err != nil {
 			return &PreconditionError{Reason: err.Error()}
 		}
+		if err := validateTaskDependsOn(entry.TaskDependsOn, i); err != nil {
+			return &PreconditionError{Reason: err.Error()}
+		}
 		for _, ref := range []struct {
 			field string
 			value string
@@ -64,6 +68,7 @@ func SetTaskOutput(projectRoot string, input *SetTaskOutputInput) error {
 		input.Output[i].EpicRef = paths.NormalizeSpecRef(input.Output[i].EpicRef)
 		input.Output[i].PlanRef = paths.NormalizeSpecRef(input.Output[i].PlanRef)
 		input.Output[i].ArchRef = paths.NormalizeSpecRef(input.Output[i].ArchRef)
+		input.Output[i].TaskDependsOn = normalizeTaskDependsOn(input.Output[i].TaskDependsOn)
 	}
 
 	lp := paths.New(projectRoot)
@@ -99,7 +104,39 @@ func SetTaskOutput(projectRoot string, input *SetTaskOutputInput) error {
 			return &PreconditionError{Reason: fmt.Sprintf("task %s is not assigned to agent %s (currently assigned to: %s)", input.TaskID, input.AgentID, currentAgent)}
 		}
 
+		for i, entry := range input.Output {
+			for _, depID := range entry.TaskDependsOn {
+				if state.FindTask(depID) == nil {
+					return &PreconditionError{Reason: fmt.Sprintf("output[%d].task_depends_on references non-existent task %q", i, depID)}
+				}
+			}
+		}
+
 		task.Output = input.Output
 		return nil
 	})
+}
+
+func validateTaskDependsOn(deps []string, entryIndex int) error {
+	for _, depID := range deps {
+		trimmed := strings.TrimSpace(depID)
+		if trimmed == "" {
+			continue
+		}
+		if err := paths.ValidateTaskID(trimmed); err != nil {
+			return fmt.Errorf("output[%d].task_depends_on contains invalid task ID %q: %w", entryIndex, depID, err)
+		}
+	}
+	return nil
+}
+
+func normalizeTaskDependsOn(deps []string) []string {
+	normalized := make([]string, 0, len(deps))
+	for _, depID := range deps {
+		trimmed := strings.TrimSpace(depID)
+		if trimmed != "" {
+			normalized = append(normalized, trimmed)
+		}
+	}
+	return normalized
 }

@@ -1723,7 +1723,9 @@ func TestProceed_DependsOnResolvesToChildTaskIDs(t *testing.T) {
 
 	now := time.Now().UTC()
 	parentID := "plan-deps-1"
+	externalDepID := "existing-implementation"
 	reviewCommit := "abc123"
+	externalDep := testhelpers.BuildTaskByStatus(externalDepID, models.TaskStatusMerged, now)
 	task := models.Task{
 		ID:           parentID,
 		Type:         models.TaskTypeCoding,
@@ -1739,10 +1741,11 @@ func TestProceed_DependsOnResolvesToChildTaskIDs(t *testing.T) {
 		Output: []models.OutputEntry{
 			{Desc: "Setup DB", DoneWhen: "DB ready", Scope: "db", SpecRef: "specs/db.md"},
 			{Desc: "Build API", DoneWhen: "API works", Scope: "api", SpecRef: "specs/api.md", DependsOn: []string{"0"}},
-			{Desc: "Build UI", DoneWhen: "UI works", Scope: "ui", SpecRef: "specs/ui.md", DependsOn: []string{"0", "1"}},
+			{Desc: "Build UI", DoneWhen: "UI works", Scope: "ui", SpecRef: "specs/ui.md", DependsOn: []string{"0", "1"}, TaskDependsOn: []string{externalDepID}},
 		},
 		History: []models.TaskHistoryEntry{},
 	}
+	state.Tasks = append(state.Tasks, externalDep)
 	state.Tasks = append(state.Tasks, task)
 	state.Sprint.Scope.Planned = []string{parentID}
 	testhelpers.WriteInitialState(t, stateFile, state)
@@ -1785,9 +1788,9 @@ func TestProceed_DependsOnResolvesToChildTaskIDs(t *testing.T) {
 		t.Errorf("child1.DependsOn = %v, want [%s]", child1.DependsOn, child0ID)
 	}
 
-	// Child 2: depends on child 0 and child 1
-	if len(child2.DependsOn) != 2 || child2.DependsOn[0] != child0ID || child2.DependsOn[1] != child1ID {
-		t.Errorf("child2.DependsOn = %v, want [%s, %s]", child2.DependsOn, child0ID, child1ID)
+	// Child 2: depends on child 0, child 1, and an existing concrete task
+	if len(child2.DependsOn) != 3 || child2.DependsOn[0] != child0ID || child2.DependsOn[1] != child1ID || child2.DependsOn[2] != externalDepID {
+		t.Errorf("child2.DependsOn = %v, want [%s, %s, %s]", child2.DependsOn, child0ID, child1ID, externalDepID)
 	}
 }
 
