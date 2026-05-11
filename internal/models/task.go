@@ -184,6 +184,16 @@ type Approval struct {
 	Timestamp time.Time `yaml:"timestamp"`
 }
 
+// RepairRequest carries a structured request from a blocked doer to the
+// orchestrator for state repairs that the doer is not authorized to perform.
+type RepairRequest struct {
+	Operation  string   `yaml:"operation" json:"operation"`
+	Target     string   `yaml:"target,omitempty" json:"target,omitempty"`
+	Command    string   `yaml:"command,omitempty" json:"command,omitempty"`
+	Evidence   []string `yaml:"evidence,omitempty" json:"evidence,omitempty"`
+	Validation []string `yaml:"validation,omitempty" json:"validation,omitempty"`
+}
+
 // Task represents a single task in the Liza system
 type Task struct {
 	ID                  string             `yaml:"id"`
@@ -220,6 +230,7 @@ type Task struct {
 	RejectionReason     *string            `yaml:"rejection_reason,omitempty"`
 	BlockedReason       *string            `yaml:"blocked_reason,omitempty"`
 	BlockedQuestions    []string           `yaml:"blocked_questions,omitempty"`
+	RepairRequest       *RepairRequest     `yaml:"repair_request,omitempty" json:"repair_request,omitempty"`
 	SupersededBy        []string           `yaml:"superseded_by,omitempty"`
 	Supersedes          *string            `yaml:"supersedes,omitempty"`
 	RescopeReason       *string            `yaml:"rescope_reason,omitempty"`

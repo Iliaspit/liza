@@ -12,4 +12,5 @@ US WRITER TOOLS:
 - liza mark-blocked — Cannot proceed
   liza mark-blocked {{.TaskID}} --agent-id {{.AgentID}} --reason "<what is blocking>" --questions "<q1>" --questions "<q2>" --json
   If a command failure is the blocker, `--reason` MUST include the exact failing command and stderr/error text. Do NOT infer root cause without a captured failure.
+  If the blocker requires an orchestrator-only repair, add --repair-operation, --repair-target, --repair-command, --repair-evidence, and --repair-validation.
 {{- end -}}

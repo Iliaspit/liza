@@ -286,6 +286,7 @@ Effects:
   - status = BLOCKED
   - blocked_reason = <reason>
   - blocked_questions = [<questions>]
+  - repair_request = <structured orchestrator repair request> when --repair-* flags are provided
   - Clear assigned_to
   - Clear lease_expires
   - Add history entry with event "blocked"
@@ -307,6 +308,10 @@ Effects:
 
 		reason, _ := cmd.Flags().GetString("reason")
 		questions, _ := cmd.Flags().GetStringSlice("questions")
+		opts, err := markBlockedOptionsFromFlags(cmd)
+		if err != nil {
+			return err
+		}
 
 		agentID, err := requireAgentID(cmd)
 		if err != nil {
@@ -327,11 +332,61 @@ Effects:
 		}
 
 		if isJSON(cmd) {
-			result, err := ops.MarkBlocked(projectRoot, taskID, reason, questions, agentID)
+			result, err := ops.MarkBlockedWithOptions(projectRoot, taskID, reason, questions, agentID, opts)
 			return jsonout.WriteResult(os.Stdout, result, nil, err)
 		}
-		return commands.MarkBlockedCommand(projectRoot, taskID, reason, questions, agentID)
+		return commands.MarkBlockedWithOptionsCommand(projectRoot, taskID, reason, questions, agentID, opts)
 	},
+}
+
+func markBlockedOptionsFromFlags(cmd *cobra.Command) (ops.MarkBlockedOptions, error) {
+	operation, _ := cmd.Flags().GetString("repair-operation")
+	target, _ := cmd.Flags().GetString("repair-target")
+	command, _ := cmd.Flags().GetString("repair-command")
+	evidence, _ := cmd.Flags().GetStringArray("repair-evidence")
+	validation, _ := cmd.Flags().GetStringArray("repair-validation")
+
+	hasRepairRequest := strings.TrimSpace(operation) != "" ||
+		strings.TrimSpace(target) != "" ||
+		strings.TrimSpace(command) != "" ||
+		hasNonEmptyValue(evidence) ||
+		hasNonEmptyValue(validation)
+	if !hasRepairRequest {
+		return ops.MarkBlockedOptions{}, nil
+	}
+	if strings.TrimSpace(operation) == "" {
+		return ops.MarkBlockedOptions{}, fmt.Errorf("--repair-operation is required when repair request fields are provided")
+	}
+	if strings.TrimSpace(target) == "" {
+		return ops.MarkBlockedOptions{}, fmt.Errorf("--repair-target is required when repair request fields are provided")
+	}
+	if strings.TrimSpace(command) == "" {
+		return ops.MarkBlockedOptions{}, fmt.Errorf("--repair-command is required when repair request fields are provided")
+	}
+	if !hasNonEmptyValue(evidence) {
+		return ops.MarkBlockedOptions{}, fmt.Errorf("--repair-evidence is required when repair request fields are provided")
+	}
+	if !hasNonEmptyValue(validation) {
+		return ops.MarkBlockedOptions{}, fmt.Errorf("--repair-validation is required when repair request fields are provided")
+	}
+	return ops.MarkBlockedOptions{
+		RepairRequest: &models.RepairRequest{
+			Operation:  operation,
+			Target:     target,
+			Command:    command,
+			Evidence:   evidence,
+			Validation: validation,
+		},
+	}, nil
+}
+
+func hasNonEmptyValue(values []string) bool {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 var assessBlockedCmd = &cobra.Command{
@@ -929,6 +984,11 @@ func init() {
 	// Mark-blocked command flags
 	markBlockedCmd.Flags().String("reason", "", "reason why the task is blocked (required)")
 	markBlockedCmd.Flags().StringSlice("questions", nil, "clarifying questions (1-3 required)")
+	markBlockedCmd.Flags().String("repair-operation", "", "orchestrator-only repair operation requested for this blocker")
+	markBlockedCmd.Flags().String("repair-target", "", "task or state object the requested repair should modify")
+	markBlockedCmd.Flags().String("repair-command", "", "exact command the orchestrator should run or adapt")
+	markBlockedCmd.Flags().StringArray("repair-evidence", nil, "evidence gathered before requesting orchestrator repair")
+	markBlockedCmd.Flags().StringArray("repair-validation", nil, "validation already run or required after orchestrator repair")
 	markBlockedCmd.Flags().String("agent-id", "", "agent ID marking the task as blocked")
 	markBlockedCmd.MarkFlagRequired("reason")
 	markBlockedCmd.MarkFlagRequired("questions")

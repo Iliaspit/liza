@@ -176,6 +176,14 @@ tasks:
     blocked_questions:
       - "Is the rate limit spec incomplete?"
       - "Should we split into detection vs handling subtasks?"
+    repair_request:
+      operation: add-task
+      target: architecture-2
+      command: "liza add-task --id architecture-2 ... --agent-id orchestrator-1 --json"
+      evidence:
+        - "coder command failed: command requires role type [orchestrator]"
+      validation:
+        - "python -m pytest -q tests/backend/test_workflow_contract.py -q"
     failed_by: [coder-1, coder-2]  # Tracks hypothesis exhaustion
     created: 2025-01-17T16:00:00Z
 
@@ -893,6 +901,7 @@ invariants:
   - "REVIEWING task must have review_commit"
   - "REJECTED task must have rejection_reason"
   - "BLOCKED task must have blocked_reason and blocked_questions"
+  - "BLOCKED task repair_request, when present, must have operation, target, command, evidence, and validation"
   - "SUPERSEDED task must have rescope_reason (superseded_by is optional)"
   - "MERGED task must not have worktree"
   - "Task type must be a known type (currently: 'coding', 'planning'); empty defaults to 'coding'"

@@ -7,6 +7,7 @@ import (
 
 	"github.com/liza-mas/liza/internal/db"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 )
 
 func TestResetRootCmdForTestResetsIdentityFlags(t *testing.T) {
@@ -17,6 +18,9 @@ func TestResetRootCmdForTestResetsIdentityFlags(t *testing.T) {
 	// --changed-by is now a local flag on specific commands (e.g. pause)
 	if err := pauseCmd.Flags().Set("changed-by", "auditor-4"); err != nil {
 		t.Fatalf("set --changed-by failed: %v", err)
+	}
+	if err := markBlockedCmd.Flags().Set("repair-evidence", "rbac failure"); err != nil {
+		t.Fatalf("set --repair-evidence failed: %v", err)
 	}
 
 	resetRootCmdForTest(t)
@@ -35,6 +39,14 @@ func TestResetRootCmdForTestResetsIdentityFlags(t *testing.T) {
 	}
 	if changedBy != "" {
 		t.Fatalf("--changed-by = %q, want empty", changedBy)
+	}
+
+	repairEvidence, err := markBlockedCmd.Flags().GetStringArray("repair-evidence")
+	if err != nil {
+		t.Fatalf("get --repair-evidence failed: %v", err)
+	}
+	if len(repairEvidence) != 0 {
+		t.Fatalf("--repair-evidence = %v, want empty", repairEvidence)
 	}
 }
 
@@ -102,6 +114,9 @@ func resetRootCmdForTest(t *testing.T) {
 		resetFlagIfPresent(child, "json")
 		resetFlagIfPresent(child, "summary")
 		resetFlagIfPresent(child, "active")
+		for _, name := range []string{"reason", "questions", "repair-operation", "repair-target", "repair-command", "repair-evidence", "repair-validation"} {
+			resetFlagIfPresent(child, name)
+		}
 		// Init command workspace flags — must reset Changed state between tests.
 		for _, name := range []string{"spec", "config", "entry-point", "branch", "post-worktree-cmd", "auto-resume", "default-cli", "cli", "claude", "codex", "gemini", "mistral"} {
 			resetFlagIfPresent(child, name)
@@ -116,6 +131,11 @@ func resetRootCmdForTest(t *testing.T) {
 func resetFlagIfPresent(cmd *cobra.Command, name string) {
 	f := cmd.Flags().Lookup(name)
 	if f != nil {
+		if sliceValue, ok := f.Value.(pflag.SliceValue); ok {
+			_ = sliceValue.Replace(nil)
+			f.Changed = false
+			return
+		}
 		_ = f.Value.Set(f.DefValue)
 		f.Changed = false
 	}

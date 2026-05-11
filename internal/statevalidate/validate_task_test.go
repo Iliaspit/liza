@@ -138,6 +138,76 @@ func TestValidateTaskInvariants_EnforcesStatusSpecificRequiredFields(t *testing.
 			wantErr: "BLOCKED task without blocked_questions: task-1",
 		},
 		{
+			name: "blocked repair request requires operation",
+			task: func() models.Task {
+				task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusBlocked, time.Now().UTC())
+				task.RepairRequest = &models.RepairRequest{
+					Target:     "architecture-2",
+					Command:    "liza add-task --json",
+					Evidence:   []string{"command requires role type [orchestrator]"},
+					Validation: []string{"go test ./cmd/liza"},
+				}
+				return task
+			},
+			wantErr: "BLOCKED task repair_request without operation: task-1",
+		},
+		{
+			name: "blocked repair request requires target",
+			task: func() models.Task {
+				task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusBlocked, time.Now().UTC())
+				task.RepairRequest = &models.RepairRequest{
+					Operation:  "add-task",
+					Command:    "liza add-task --json",
+					Evidence:   []string{"command requires role type [orchestrator]"},
+					Validation: []string{"go test ./cmd/liza"},
+				}
+				return task
+			},
+			wantErr: "BLOCKED task repair_request without target: task-1",
+		},
+		{
+			name: "blocked repair request requires command",
+			task: func() models.Task {
+				task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusBlocked, time.Now().UTC())
+				task.RepairRequest = &models.RepairRequest{
+					Operation:  "add-task",
+					Target:     "architecture-2",
+					Evidence:   []string{"command requires role type [orchestrator]"},
+					Validation: []string{"go test ./cmd/liza"},
+				}
+				return task
+			},
+			wantErr: "BLOCKED task repair_request without command: task-1",
+		},
+		{
+			name: "blocked repair request requires evidence",
+			task: func() models.Task {
+				task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusBlocked, time.Now().UTC())
+				task.RepairRequest = &models.RepairRequest{
+					Operation:  "add-task",
+					Target:     "architecture-2",
+					Command:    "liza add-task --json",
+					Validation: []string{"go test ./cmd/liza"},
+				}
+				return task
+			},
+			wantErr: "BLOCKED task repair_request without evidence: task-1",
+		},
+		{
+			name: "blocked repair request requires validation",
+			task: func() models.Task {
+				task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusBlocked, time.Now().UTC())
+				task.RepairRequest = &models.RepairRequest{
+					Operation: "add-task",
+					Target:    "architecture-2",
+					Command:   "liza add-task --json",
+					Evidence:  []string{"command requires role type [orchestrator]"},
+				}
+				return task
+			},
+			wantErr: "BLOCKED task repair_request without validation: task-1",
+		},
+		{
 			name: "rejected status requires rejection_reason",
 			task: func() models.Task {
 				task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusRejected, time.Now().UTC())

@@ -3,6 +3,8 @@
 BLOCKING PROTOCOL:
 Required fields: blocked_reason (what's blocking + what you attempted), blocked_questions (1-3 specific questions)
 If a CLI command, git command, or tool invocation is the blocker, blocked_reason MUST include the exact failing command and the observed stderr/error text. Do NOT speculate about root cause without captured failure output.
+If the blocker is an orchestrator-only state repair, include a complete structured repair request on liza mark-blocked:
+  --repair-operation "<operation>" --repair-target "<task/state target>" --repair-command "<exact command or command sketch>" --repair-evidence "<observed failure>" --repair-validation "<validation already run or needed>"
 Do NOT block for: questions answerable by reading specs, style preferences, missing nice-to-haves.
 
 ENVIRONMENT CONSTRAINT:

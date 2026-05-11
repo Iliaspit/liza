@@ -1,8 +1,9 @@
 {{- define "wake_blocked_tasks" -}}
 Tasks are BLOCKED. Analyze and resolve immediately:
 
-1. Read blocked tasks from blackboard — understand blocker_reason
+1. Read blocked tasks from blackboard — understand blocked_reason, blocked_questions, and repair_request if present
 2. Determine if blocker is:
+   - Structured repair_request present → verify the target state still needs repair, then apply the requested orchestrator-only operation if valid
    - Missing dependency → create prerequisite task (run liza add-tasks --tasks-file <path.json> --agent-id {{.AgentID}} --json NOW)
    - Spec ambiguity → clarify spec, then supersede with corrected task
    - External dependency → document, possibly supersede task

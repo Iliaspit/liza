@@ -348,6 +348,21 @@ func validateStatusFields(task *models.Task, sc *statusClassifier) error {
 		if len(task.BlockedQuestions) == 0 {
 			return fmt.Errorf("BLOCKED task without blocked_questions: %s", task.ID)
 		}
+		if task.RepairRequest != nil && strings.TrimSpace(task.RepairRequest.Operation) == "" {
+			return fmt.Errorf("BLOCKED task repair_request without operation: %s", task.ID)
+		}
+		if task.RepairRequest != nil && strings.TrimSpace(task.RepairRequest.Target) == "" {
+			return fmt.Errorf("BLOCKED task repair_request without target: %s", task.ID)
+		}
+		if task.RepairRequest != nil && strings.TrimSpace(task.RepairRequest.Command) == "" {
+			return fmt.Errorf("BLOCKED task repair_request without command: %s", task.ID)
+		}
+		if task.RepairRequest != nil && len(nonEmptyStrings(task.RepairRequest.Evidence)) == 0 {
+			return fmt.Errorf("BLOCKED task repair_request without evidence: %s", task.ID)
+		}
+		if task.RepairRequest != nil && len(nonEmptyStrings(task.RepairRequest.Validation)) == 0 {
+			return fmt.Errorf("BLOCKED task repair_request without validation: %s", task.ID)
+		}
 	}
 
 	if sc.IsRejected(task.Status) && task.RejectionReason == nil {
@@ -361,6 +376,16 @@ func validateStatusFields(task *models.Task, sc *statusClassifier) error {
 	}
 
 	return nil
+}
+
+func nonEmptyStrings(values []string) []string {
+	var nonEmpty []string
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			nonEmpty = append(nonEmpty, value)
+		}
+	}
+	return nonEmpty
 }
 
 // validateTaskOutput checks that each output entry has all required fields

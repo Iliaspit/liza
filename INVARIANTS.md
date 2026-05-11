@@ -50,7 +50,7 @@ Each task status requires specific fields to be set. Validated on every state tr
 | READY_FOR_REVIEW, CODING_PLAN_TO_REVIEW | `review_commit` | spec, code |
 | REVIEWING, REVIEWING_CODING_PLAN | `reviewing_by`, `review_lease_expires`, `review_commit` | spec, code |
 | APPROVED, CODING_PLAN_APPROVED | `review_commit` | spec, code |
-| BLOCKED | `blocked_reason`, `blocked_questions` (non-empty) | spec, code |
+| BLOCKED | `blocked_reason`, `blocked_questions` (non-empty); optional complete `repair_request` (`operation`, `target`, `command`, non-empty `evidence`, non-empty `validation`) when a repair request is present | spec, code |
 | REJECTED, CODING_PLAN_REJECTED | `rejection_reason` | spec, code |
 | SUPERSEDED | `superseded_by` (non-empty), `rescope_reason` | spec, code |
 | MERGED | `worktree` must be nil (cleanup invariant) | spec, code |

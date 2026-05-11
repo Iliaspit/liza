@@ -24,49 +24,52 @@ type inspectTasksOptions struct {
 
 // taskInfo represents task information with computed fields
 type taskInfo struct {
-	ID                 string               `json:"id" yaml:"id"`
-	Description        string               `json:"description" yaml:"description"`
-	Status             string               `json:"status" yaml:"status"`
-	Priority           int                  `json:"priority" yaml:"priority"`
-	AssignedTo         *string              `json:"assigned_to,omitempty" yaml:"assigned_to,omitempty"`
-	ReviewingBy        *string              `json:"reviewing_by,omitempty" yaml:"reviewing_by,omitempty"`
-	DependsOn          []string             `json:"depends_on,omitempty" yaml:"depends_on,omitempty"`
-	Age                string               `json:"age" yaml:"age"`                       // Computed: time since created
-	TimeInStatus       string               `json:"time_in_status" yaml:"time_in_status"` // Computed: time in current status
-	BlockedReason      *string              `json:"blocked_reason,omitempty" yaml:"blocked_reason,omitempty"`
-	Iteration          int                  `json:"iteration,omitempty" yaml:"iteration,omitempty"`
-	ReviewCycles       int                  `json:"review_cycles,omitempty" yaml:"review_cycles,omitempty"`
-	LeaseExpires       *string              `json:"lease_expires,omitempty" yaml:"lease_expires,omitempty"`
-	Worktree           *string              `json:"worktree,omitempty" yaml:"worktree,omitempty"`
-	DoneWhen           string               `json:"done_when,omitempty" yaml:"done_when,omitempty"`
-	Scope              string               `json:"scope,omitempty" yaml:"scope,omitempty"`
-	SpecRef            string               `json:"spec_ref,omitempty" yaml:"spec_ref,omitempty"`
-	MergeCommit        *string              `json:"merge_commit,omitempty" yaml:"merge_commit,omitempty"`
-	PRURL              *string              `json:"pr_url,omitempty" yaml:"pr_url,omitempty"`
-	RejectionReason    *string              `json:"rejection_reason,omitempty" yaml:"rejection_reason,omitempty"`
-	IntegrationFailure map[string]any       `json:"integration_failure,omitempty" yaml:"integration_failure,omitempty"`
-	Output             []models.OutputEntry `json:"output,omitempty" yaml:"output,omitempty"`
-	AttemptNum         int                  `json:"attempt_num,omitempty" yaml:"attempt_num,omitempty"`
+	ID                 string                `json:"id" yaml:"id"`
+	Description        string                `json:"description" yaml:"description"`
+	Status             string                `json:"status" yaml:"status"`
+	Priority           int                   `json:"priority" yaml:"priority"`
+	AssignedTo         *string               `json:"assigned_to,omitempty" yaml:"assigned_to,omitempty"`
+	ReviewingBy        *string               `json:"reviewing_by,omitempty" yaml:"reviewing_by,omitempty"`
+	DependsOn          []string              `json:"depends_on,omitempty" yaml:"depends_on,omitempty"`
+	Age                string                `json:"age" yaml:"age"`                       // Computed: time since created
+	TimeInStatus       string                `json:"time_in_status" yaml:"time_in_status"` // Computed: time in current status
+	BlockedReason      *string               `json:"blocked_reason,omitempty" yaml:"blocked_reason,omitempty"`
+	BlockedQuestions   []string              `json:"blocked_questions,omitempty" yaml:"blocked_questions,omitempty"`
+	RepairRequest      *models.RepairRequest `json:"repair_request,omitempty" yaml:"repair_request,omitempty"`
+	Iteration          int                   `json:"iteration,omitempty" yaml:"iteration,omitempty"`
+	ReviewCycles       int                   `json:"review_cycles,omitempty" yaml:"review_cycles,omitempty"`
+	LeaseExpires       *string               `json:"lease_expires,omitempty" yaml:"lease_expires,omitempty"`
+	Worktree           *string               `json:"worktree,omitempty" yaml:"worktree,omitempty"`
+	DoneWhen           string                `json:"done_when,omitempty" yaml:"done_when,omitempty"`
+	Scope              string                `json:"scope,omitempty" yaml:"scope,omitempty"`
+	SpecRef            string                `json:"spec_ref,omitempty" yaml:"spec_ref,omitempty"`
+	MergeCommit        *string               `json:"merge_commit,omitempty" yaml:"merge_commit,omitempty"`
+	PRURL              *string               `json:"pr_url,omitempty" yaml:"pr_url,omitempty"`
+	RejectionReason    *string               `json:"rejection_reason,omitempty" yaml:"rejection_reason,omitempty"`
+	IntegrationFailure map[string]any        `json:"integration_failure,omitempty" yaml:"integration_failure,omitempty"`
+	Output             []models.OutputEntry  `json:"output,omitempty" yaml:"output,omitempty"`
+	AttemptNum         int                   `json:"attempt_num,omitempty" yaml:"attempt_num,omitempty"`
 }
 
 // taskSummaryInfo is a compact task projection for agent orchestration.
 type taskSummaryInfo struct {
-	ID               string   `json:"id" yaml:"id"`
-	Status           string   `json:"status" yaml:"status"`
-	RolePair         string   `json:"role_pair,omitempty" yaml:"role_pair,omitempty"`
-	Priority         int      `json:"priority" yaml:"priority"`
-	AssignedTo       *string  `json:"assigned_to,omitempty" yaml:"assigned_to,omitempty"`
-	ReviewingBy      *string  `json:"reviewing_by,omitempty" yaml:"reviewing_by,omitempty"`
-	DependsOn        []string `json:"depends_on,omitempty" yaml:"depends_on,omitempty"`
-	Attempt          int      `json:"attempt" yaml:"attempt"`
-	ReviewCycles     int      `json:"review_cycles,omitempty" yaml:"review_cycles,omitempty"`
-	LeaseExpires     *string  `json:"lease_expires,omitempty" yaml:"lease_expires,omitempty"`
-	BlockedReason    *string  `json:"blocked_reason,omitempty" yaml:"blocked_reason,omitempty"`
-	BlockedQuestions []string `json:"blocked_questions,omitempty" yaml:"blocked_questions,omitempty"`
-	RejectionReason  *string  `json:"rejection_reason,omitempty" yaml:"rejection_reason,omitempty"`
-	FailedBy         []string `json:"failed_by,omitempty" yaml:"failed_by,omitempty"`
-	OutputCount      int      `json:"output_count,omitempty" yaml:"output_count,omitempty"`
-	OutputKinds      []string `json:"output_kinds,omitempty" yaml:"output_kinds,omitempty"`
+	ID               string                `json:"id" yaml:"id"`
+	Status           string                `json:"status" yaml:"status"`
+	RolePair         string                `json:"role_pair,omitempty" yaml:"role_pair,omitempty"`
+	Priority         int                   `json:"priority" yaml:"priority"`
+	AssignedTo       *string               `json:"assigned_to,omitempty" yaml:"assigned_to,omitempty"`
+	ReviewingBy      *string               `json:"reviewing_by,omitempty" yaml:"reviewing_by,omitempty"`
+	DependsOn        []string              `json:"depends_on,omitempty" yaml:"depends_on,omitempty"`
+	Attempt          int                   `json:"attempt" yaml:"attempt"`
+	ReviewCycles     int                   `json:"review_cycles,omitempty" yaml:"review_cycles,omitempty"`
+	LeaseExpires     *string               `json:"lease_expires,omitempty" yaml:"lease_expires,omitempty"`
+	BlockedReason    *string               `json:"blocked_reason,omitempty" yaml:"blocked_reason,omitempty"`
+	BlockedQuestions []string              `json:"blocked_questions,omitempty" yaml:"blocked_questions,omitempty"`
+	RepairRequest    *models.RepairRequest `json:"repair_request,omitempty" yaml:"repair_request,omitempty"`
+	RejectionReason  *string               `json:"rejection_reason,omitempty" yaml:"rejection_reason,omitempty"`
+	FailedBy         []string              `json:"failed_by,omitempty" yaml:"failed_by,omitempty"`
+	OutputCount      int                   `json:"output_count,omitempty" yaml:"output_count,omitempty"`
+	OutputKinds      []string              `json:"output_kinds,omitempty" yaml:"output_kinds,omitempty"`
 }
 
 // inspectTasks lists all tasks or filters by criteria
@@ -128,6 +131,8 @@ func buildTaskInfo(task *models.Task, projectRoot string) taskInfo {
 		ReviewingBy:        task.ReviewingBy,
 		DependsOn:          task.DependsOn,
 		BlockedReason:      task.BlockedReason,
+		BlockedQuestions:   task.BlockedQuestions,
+		RepairRequest:      task.RepairRequest,
 		Iteration:          task.Iteration,
 		ReviewCycles:       task.ReviewCyclesCurrent,
 		Worktree:           task.Worktree,
@@ -167,6 +172,7 @@ func buildTaskSummaryInfo(task *models.Task) taskSummaryInfo {
 		ReviewCycles:     task.ReviewCyclesCurrent,
 		BlockedReason:    task.BlockedReason,
 		BlockedQuestions: task.BlockedQuestions,
+		RepairRequest:    task.RepairRequest,
 		RejectionReason:  task.RejectionReason,
 		FailedBy:         task.FailedBy,
 		OutputCount:      len(task.Output),

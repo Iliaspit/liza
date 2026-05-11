@@ -49,6 +49,8 @@ func TestGetCommand(t *testing.T) {
 	task1 := "task-1"
 	task2 := "fix-auth-bug"    // Non-standard task ID
 	task3 := "feature-xyz-123" // Another non-standard task ID
+	task4 := "task-repair-request"
+	blockedReason := "Required state repair is orchestrator-only"
 
 	state := &models.State{
 		Version: 1,
@@ -107,6 +109,25 @@ func TestGetCommand(t *testing.T) {
 				DoneWhen:    "Feature is implemented",
 				Scope:       "Feature module",
 				Created:     now.Add(-4 * time.Hour),
+			},
+			{
+				ID:               task4,
+				Description:      "Restore missing architecture task",
+				Status:           models.TaskStatusBlocked,
+				Priority:         1,
+				BlockedReason:    &blockedReason,
+				BlockedQuestions: []string{"Can the orchestrator restore the missing architecture task?"},
+				RepairRequest: &models.RepairRequest{
+					Operation:  "add-task",
+					Target:     "architecture-2",
+					Command:    "liza add-task --id architecture-2 --agent-id orchestrator-1 --json",
+					Evidence:   []string{"command requires role type [orchestrator]"},
+					Validation: []string{"go test ./cmd/liza -run TestWorkflowContract"},
+				},
+				SpecRef:  "specs/architecture.md",
+				DoneWhen: "Architecture task exists in state",
+				Scope:    "Blackboard task state",
+				Created:  now.Add(-5 * time.Hour),
 			},
 		},
 		Agents: map[string]models.Agent{
@@ -252,6 +273,20 @@ func TestGetCommand(t *testing.T) {
 			name:         "get task by ID shorthand - JSON",
 			args:         []string{"get", "task-1", "--format", "json"},
 			wantContains: []string{`"id": "task-1"`, `"status": "IMPLEMENTING_CODE"`},
+		},
+		{
+			name: "get blocked task by ID shorthand - JSON includes repair request",
+			args: []string{"get", "task-repair-request", "--format", "json"},
+			wantContains: []string{
+				`"id": "task-repair-request"`,
+				`"blocked_questions": [`,
+				`"repair_request": {`,
+				`"operation": "add-task"`,
+				`"target": "architecture-2"`,
+				`"command": "liza add-task --id architecture-2 --agent-id orchestrator-1 --json"`,
+				`"evidence": [`,
+				`"validation": [`,
+			},
 		},
 		{
 			name:         "get agent by ID shorthand",

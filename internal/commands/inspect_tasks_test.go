@@ -482,6 +482,41 @@ func TestTaskInfo_ComputedFields(t *testing.T) {
 	}
 }
 
+func TestBuildTaskInfo_IncludesBlockedRepairRequest(t *testing.T) {
+	reason := "Required state repair is orchestrator-only"
+	task := models.Task{
+		ID:               "task-repair",
+		Description:      "Repair missing parent",
+		Status:           models.TaskStatusBlocked,
+		Priority:         1,
+		BlockedReason:    &reason,
+		BlockedQuestions: []string{"Can the orchestrator restore architecture-2?"},
+		RepairRequest: &models.RepairRequest{
+			Operation:  "add-task",
+			Target:     "architecture-2",
+			Command:    "liza add-task --id architecture-2 --agent-id orchestrator-1 --json",
+			Evidence:   []string{`command requires role type [orchestrator] but agent "coder-1" has type "doer"`},
+			Validation: []string{"python -m pytest -q tests/backend/test_workflow_contract.py -q"},
+		},
+		Created: time.Now().UTC(),
+	}
+
+	info := buildTaskInfo(&task, "")
+
+	if len(info.BlockedQuestions) != 1 {
+		t.Fatalf("BlockedQuestions len = %d, want 1", len(info.BlockedQuestions))
+	}
+	if info.RepairRequest == nil {
+		t.Fatal("RepairRequest is nil")
+	}
+	if info.RepairRequest.Operation != "add-task" {
+		t.Fatalf("RepairRequest.Operation = %q, want add-task", info.RepairRequest.Operation)
+	}
+	if info.RepairRequest.Target != "architecture-2" {
+		t.Fatalf("RepairRequest.Target = %q, want architecture-2", info.RepairRequest.Target)
+	}
+}
+
 func TestTaskInfo_MultipleFilters(t *testing.T) {
 	now := time.Now()
 	assignedTo1 := "coder-1"

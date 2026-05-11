@@ -193,6 +193,7 @@ Key task fields:
 - `iteration` — doer iteration count
 - `review_cycles_current` / `review_cycles_total` — rejection count
 - `blocked_reason` / `blocked_questions` — why the task is stuck
+- `repair_request` — optional complete orchestrator-only repair request captured when the blocker is a state transition the assigned agent cannot perform (`operation`, `target`, `command`, `evidence`, `validation`)
 - `rejection_reason` — reviewer feedback on rejection
 - `depends_on` — task IDs that must be terminal before this task is claimable
 - `output[]` — structured output entries (used by `liza proceed` to create child tasks)
@@ -284,7 +285,7 @@ Exit 42 with `handoff_pending: true` on the task means context exhaustion — th
 
 ### BLOCKED task
 **Symptom**: Task in BLOCKED state, agents skip it.
-**Diagnosis**: Read `blocked_reason` and `blocked_questions` in state.yaml.
+**Diagnosis**: Read `blocked_reason`, `blocked_questions`, and optional `repair_request` in state.yaml.
 **Fix**: Either `liza supersede-task <id> [replacements] --reason "..."` (replace with new tasks or mark completed externally) or resolve the blocker and use `liza recover-task <id>` to reset.
 
 ### Integration failure

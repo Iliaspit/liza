@@ -119,6 +119,131 @@ func TestMarkBlocked_Success(t *testing.T) {
 	}
 }
 
+func TestMarkBlockedWithOptions_RepairRequest(t *testing.T) {
+	tmpDir := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, tmpDir)
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+
+	now := time.Now().UTC()
+	state := testhelpers.CreateValidState()
+	state.Tasks = []models.Task{
+		testhelpers.BuildTaskByStatus("task-1", models.TaskStatusImplementing, now),
+	}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	result, err := MarkBlockedWithOptions(
+		tmpDir,
+		"task-1",
+		"Required state repair is orchestrator-only",
+		[]string{"Can the orchestrator restore the missing parent task?"},
+		"coder-1",
+		MarkBlockedOptions{
+			RepairRequest: &models.RepairRequest{
+				Operation:  " add-task ",
+				Target:     " architecture-2 ",
+				Command:    " liza add-task --id architecture-2 --agent-id orchestrator-1 --json ",
+				Evidence:   []string{" command requires role type [orchestrator] ", ""},
+				Validation: []string{" python -m pytest -q tests/backend/test_workflow_contract.py -q "},
+			},
+		},
+	)
+	if err != nil {
+		t.Fatalf("MarkBlockedWithOptions() error: %v", err)
+	}
+	if result.RepairRequest == nil {
+		t.Fatal("RepairRequest result is nil")
+	}
+	if result.RepairRequest.Operation != "add-task" {
+		t.Errorf("Operation = %q, want add-task", result.RepairRequest.Operation)
+	}
+
+	bb := db.New(stateFile)
+	readState, err := bb.Read()
+	if err != nil {
+		t.Fatalf("Failed to read state: %v", err)
+	}
+	task := readState.FindTask("task-1")
+	if task == nil {
+		t.Fatal("Task not found")
+	}
+	if task.RepairRequest == nil {
+		t.Fatal("task.RepairRequest is nil")
+	}
+	if task.RepairRequest.Target != "architecture-2" {
+		t.Errorf("Target = %q, want architecture-2", task.RepairRequest.Target)
+	}
+	if task.RepairRequest.Command != "liza add-task --id architecture-2 --agent-id orchestrator-1 --json" {
+		t.Errorf("Command = %q", task.RepairRequest.Command)
+	}
+	if len(task.RepairRequest.Evidence) != 1 {
+		t.Errorf("Evidence len = %d, want 1", len(task.RepairRequest.Evidence))
+	}
+	if len(task.RepairRequest.Validation) != 1 {
+		t.Errorf("Validation len = %d, want 1", len(task.RepairRequest.Validation))
+	}
+}
+
+func TestMarkBlockedWithOptions_RepairRequestRequiresCompleteRequest(t *testing.T) {
+	valid := models.RepairRequest{
+		Operation:  "add-task",
+		Target:     "architecture-2",
+		Command:    "liza add-task --id architecture-2 --agent-id orchestrator-1 --json",
+		Evidence:   []string{"command requires role type [orchestrator]"},
+		Validation: []string{"go test ./cmd/liza"},
+	}
+
+	tests := []struct {
+		name          string
+		repairRequest models.RepairRequest
+		wantErr       string
+	}{
+		{
+			name:          "missing operation",
+			repairRequest: models.RepairRequest{Target: valid.Target, Command: valid.Command, Evidence: valid.Evidence, Validation: valid.Validation},
+			wantErr:       "repair request operation is required",
+		},
+		{
+			name:          "missing target",
+			repairRequest: models.RepairRequest{Operation: valid.Operation, Command: valid.Command, Evidence: valid.Evidence, Validation: valid.Validation},
+			wantErr:       "repair request target is required",
+		},
+		{
+			name:          "missing command",
+			repairRequest: models.RepairRequest{Operation: valid.Operation, Target: valid.Target, Evidence: valid.Evidence, Validation: valid.Validation},
+			wantErr:       "repair request command is required",
+		},
+		{
+			name:          "missing evidence",
+			repairRequest: models.RepairRequest{Operation: valid.Operation, Target: valid.Target, Command: valid.Command, Validation: valid.Validation},
+			wantErr:       "repair request evidence is required",
+		},
+		{
+			name:          "missing validation",
+			repairRequest: models.RepairRequest{Operation: valid.Operation, Target: valid.Target, Command: valid.Command, Evidence: valid.Evidence},
+			wantErr:       "repair request validation is required",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := MarkBlockedWithOptions(
+				"/nonexistent",
+				"task-1",
+				"blocked",
+				[]string{"q1"},
+				"coder-1",
+				MarkBlockedOptions{RepairRequest: &tt.repairRequest},
+			)
+			if err == nil {
+				t.Fatal("Expected error, got nil")
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Errorf("Error = %q, want %q", err.Error(), tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestMarkBlocked_TaskNotFound(t *testing.T) {
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)

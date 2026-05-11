@@ -260,6 +260,89 @@ func TestMutationCommandWiring(t *testing.T) {
 		}
 	})
 
+	t.Run("mark-blocked persists orchestrator repair request", func(t *testing.T) {
+		projectRoot, statePath := setupMutationTestProject(t, func(state *models.State) {
+			now := time.Now().UTC()
+			state.Tasks = []models.Task{
+				testhelpers.BuildTaskByStatus("task-repair-request", models.TaskStatusImplementing, now),
+			}
+		})
+
+		err := executeRootCommand(
+			t,
+			projectRoot,
+			"mark-blocked",
+			"task-repair-request",
+			"--agent-id",
+			"coder-1",
+			"--reason",
+			"Required state repair is orchestrator-only",
+			"--questions",
+			"Can the orchestrator restore the missing parent task?",
+			"--repair-operation",
+			"add-task",
+			"--repair-target",
+			"architecture-2",
+			"--repair-command",
+			"liza add-task --id architecture-2 --agent-id orchestrator-1 --json",
+			"--repair-evidence",
+			`command requires role type [orchestrator] but agent "coder-1" has type "doer"`,
+			"--repair-validation",
+			"python -m pytest -q tests/backend/test_workflow_contract.py -q",
+		)
+		if err != nil {
+			t.Fatalf("mark-blocked execute failed: %v", err)
+		}
+
+		state := readState(t, statePath)
+		task := mustFindTask(t, state, "task-repair-request")
+		if task.Status != models.TaskStatusBlocked {
+			t.Fatalf("task status = %s, want %s", task.Status, models.TaskStatusBlocked)
+		}
+		if task.RepairRequest == nil {
+			t.Fatal("repair_request not persisted")
+		}
+		if task.RepairRequest.Operation != "add-task" {
+			t.Fatalf("repair operation = %q, want add-task", task.RepairRequest.Operation)
+		}
+		if task.RepairRequest.Target != "architecture-2" {
+			t.Fatalf("repair target = %q, want architecture-2", task.RepairRequest.Target)
+		}
+		if len(task.RepairRequest.Evidence) != 1 {
+			t.Fatalf("repair evidence len = %d, want 1", len(task.RepairRequest.Evidence))
+		}
+	})
+
+	t.Run("mark-blocked validates incomplete repair request flags", func(t *testing.T) {
+		projectRoot, _ := setupMutationTestProject(t, func(state *models.State) {
+			now := time.Now().UTC()
+			state.Tasks = []models.Task{
+				testhelpers.BuildTaskByStatus("task-incomplete-repair-request", models.TaskStatusImplementing, now),
+			}
+		})
+
+		err := executeRootCommand(
+			t,
+			projectRoot,
+			"mark-blocked",
+			"task-incomplete-repair-request",
+			"--agent-id",
+			"coder-1",
+			"--reason",
+			"Required state repair is orchestrator-only",
+			"--questions",
+			"Can the orchestrator restore the missing parent task?",
+			"--repair-operation",
+			"add-task",
+		)
+		if err == nil {
+			t.Fatal("expected incomplete repair request error, got nil")
+		}
+		if !strings.Contains(err.Error(), "--repair-target is required when repair request fields are provided") {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
 	t.Run("update-review-commit uses --changed-by and updates state", func(t *testing.T) {
 		// This command is RBAC-exempt (--changed-by, same as release-claim):
 		// it is an operator recovery action for rebased worktrees, not an
