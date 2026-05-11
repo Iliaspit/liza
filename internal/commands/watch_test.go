@@ -1526,12 +1526,13 @@ func TestCheckMissingRoles(t *testing.T) {
 
 	t.Run("no missing role — agent registered for claimable task", func(t *testing.T) {
 		pr := loadTestResolver(t)
+		leaseExpires := now.Add(30 * time.Minute)
 		state := &models.State{
 			Tasks: []models.Task{
 				testhelpers.BuildTaskByStatus("task-1", models.TaskStatusReady, now),
 			},
 			Agents: map[string]models.Agent{
-				"coder-1": {Role: "coder", Status: models.AgentStatusIdle},
+				"coder-1": {Role: "coder", Status: models.AgentStatusIdle, LeaseExpires: &leaseExpires},
 			},
 		}
 		cache := make(map[string]time.Time)
@@ -1568,6 +1569,30 @@ func TestCheckMissingRoles(t *testing.T) {
 		}
 		if !strings.Contains(alerts[0].Message, "task-1") {
 			t.Errorf("Message = %q, expected to contain 'task-1'", alerts[0].Message)
+		}
+		if !strings.Contains(alerts[0].Message, "liza repair-agent-pool --dry-run") {
+			t.Errorf("Message = %q, expected repair-agent-pool hint", alerts[0].Message)
+		}
+	})
+
+	t.Run("expired agent lease does not suppress missing role alert", func(t *testing.T) {
+		pr := loadTestResolver(t)
+		leaseExpires := now.Add(-time.Minute)
+		state := &models.State{
+			Tasks: []models.Task{
+				testhelpers.BuildTaskByStatus("task-1", models.TaskStatusReady, now),
+			},
+			Agents: map[string]models.Agent{
+				"coder-1": {Role: "coder", Status: models.AgentStatusIdle, LeaseExpires: &leaseExpires},
+			},
+		}
+		cache := make(map[string]time.Time)
+		alerts := checkMissingRoles(state, pr, cache)
+		if len(alerts) != 1 {
+			t.Fatalf("len(alerts) = %d, want 1; alerts: %v", len(alerts), alerts)
+		}
+		if !strings.Contains(alerts[0].Message, "coder") {
+			t.Errorf("Message = %q, expected to contain 'coder'", alerts[0].Message)
 		}
 	})
 
@@ -1654,7 +1679,8 @@ func TestCheckMissingRoles(t *testing.T) {
 		}
 
 		// Agent of that role appears — cache should clear.
-		state.Agents["coder-1"] = models.Agent{Role: "coder", Status: models.AgentStatusIdle}
+		leaseExpires := now.Add(30 * time.Minute)
+		state.Agents["coder-1"] = models.Agent{Role: "coder", Status: models.AgentStatusIdle, LeaseExpires: &leaseExpires}
 		alerts = checkMissingRoles(state, pr, cache)
 		if len(alerts) != 0 {
 			t.Errorf("after agent appears: len(alerts) = %d, want 0", len(alerts))

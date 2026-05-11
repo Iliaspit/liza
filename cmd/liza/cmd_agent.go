@@ -248,6 +248,39 @@ By default, refuses to recover agents whose PID is still alive.`,
 	},
 }
 
+var repairAgentPoolCmd = &cobra.Command{
+	Use:   "repair-agent-pool",
+	Short: "Repair missing agent roles for claimable work",
+	Long: `Repair the runtime agent pool for claimable work.
+
+By default, detects roles with immediately claimable tasks but no live registered
+agent, then spawns one agent process per missing role. The --missing flag is kept
+as an explicit spelling of the default behavior.
+
+Use --cli to choose the backend for newly spawned agents. When omitted, the CLI
+defaults to config.default_cli, then LIZA_DEFAULT_CLI, then claude.
+
+Examples:
+  liza repair-agent-pool --dry-run
+  liza repair-agent-pool --cli codex`,
+	Args: cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		missing, _ := cmd.Flags().GetBool("missing")
+		cli, _ := cmd.Flags().GetString("cli")
+		dryRun, _ := cmd.Flags().GetBool("dry-run")
+		projectRoot, err := requireProjectRoot()
+		if err != nil {
+			return err
+		}
+		return commands.RepairAgentPoolCommand(commands.RepairAgentPoolOptions{
+			ProjectRoot: projectRoot,
+			Missing:     missing,
+			CLI:         cli,
+			DryRun:      dryRun,
+		})
+	},
+}
+
 var deleteAgentCmd = &cobra.Command{
 	Use:   "agent <agent-id>",
 	Short: "Delete an agent from the state database",
@@ -273,6 +306,7 @@ func init() {
 	rootCmd.AddCommand(agentCmd)
 	rootCmd.AddCommand(recoverTaskCmd)
 	rootCmd.AddCommand(recoverAgentCmd)
+	rootCmd.AddCommand(repairAgentPoolCmd)
 	deleteCmd.AddCommand(deleteAgentCmd)
 
 	// Agent command flags
@@ -289,6 +323,11 @@ func init() {
 	recoverAgentCmd.Flags().Bool("force", false, "override PID liveness check (refuse by default if process is alive)")
 	recoverAgentCmd.Flags().String("cli", "", "respawn the agent after cleanup using this CLI (e.g., claude, codex)")
 	recoverAgentCmd.Flags().String("reason", "agent recovery", "reason for recovering the agent")
+
+	// Repair agent pool command flags
+	repairAgentPoolCmd.Flags().Bool("missing", false, "spawn roles with claimable work and no registered agent")
+	repairAgentPoolCmd.Flags().String("cli", "", "CLI to use for spawned agents; defaults to config default_cli, then LIZA_DEFAULT_CLI, then claude")
+	repairAgentPoolCmd.Flags().Bool("dry-run", false, "print missing roles and spawn commands without launching agents")
 
 	// Delete agent command flags
 	deleteAgentCmd.Flags().Bool("force", false, "force deletion even if agent has active lease or current task")

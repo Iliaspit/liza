@@ -312,6 +312,14 @@ Either way: claim the task, fix in worktree, resubmit for review. The resolution
 
 **Fix:** Extend the lease or increase `config.lease_duration`. See [CONFIGURATION.md](CONFIGURATION.md#configuration-matrix) for tuning parameters.
 
+### MISSING ROLE alert
+
+**Error:** `⚠️ MISSING ROLE: no registered agent for role code-planner`
+
+**Cause:** Tasks are immediately claimable by a pipeline role, but no live agent for that runtime role is registered.
+
+**Fix:** Run `liza repair-agent-pool --dry-run` to preview the repair, then `liza repair-agent-pool --cli <name>` to spawn the missing roles. If `--cli` is omitted, Liza uses `config.default_cli`, then `LIZA_DEFAULT_CLI`, then `claude`.
+
 ---
 
 ## Initialization Issues

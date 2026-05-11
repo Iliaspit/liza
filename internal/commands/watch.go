@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"sort"
 	"strings"
 	"time"
 
@@ -833,59 +832,16 @@ func checkMissingRoles(state *models.State, pr models.PipelineResolver, cache ma
 		return nil
 	}
 
-	// Build set of registered runtime roles from state.Agents.
-	// Any agent with a matching Role field counts, regardless of status —
-	// the point is: is there anyone who could eventually claim this work?
-	registeredRoles := make(map[string]bool)
-	for _, agent := range state.Agents {
-		if agent.Role != "" {
-			registeredRoles[agent.Role] = true
-		}
-	}
-
-	// Map missing runtime role → list of claimable task IDs waiting for that role.
-	missingRoleTasks := make(map[string][]string)
-
-	for i := range state.Tasks {
-		task := &state.Tasks[i]
-		if task.Status.IsTerminal() || task.RolePair == "" {
-			continue
-		}
-
-		// Resolve doer and reviewer runtime roles for this task's role-pair.
-		doerRuntime, err := pr.DoerRole(task.RolePair)
-		if err != nil {
-			continue // unknown role pair — skip gracefully
-		}
-		reviewerRuntime, err := pr.ReviewerRole(task.RolePair)
-		if err != nil {
-			continue
-		}
-
-		// Check doer: skip if role is registered, use role directly for IsClaimable.
-		if !registeredRoles[doerRuntime] && task.IsClaimable(doerRuntime, state.Tasks, pr) {
-			missingRoleTasks[doerRuntime] = append(missingRoleTasks[doerRuntime], task.ID)
-		}
-
-		// Check reviewer: same pattern.
-		if !registeredRoles[reviewerRuntime] && task.IsClaimable(reviewerRuntime, state.Tasks, pr) {
-			missingRoleTasks[reviewerRuntime] = append(missingRoleTasks[reviewerRuntime], task.ID)
-		}
-	}
-
 	// Emit alerts for each missing role, throttled by cache.
 	var alerts []Alert
 	now := time.Now().UTC()
 
-	// Sort keys for deterministic alert order.
-	sortedRoles := make([]string, 0, len(missingRoleTasks))
-	for role := range missingRoleTasks {
-		sortedRoles = append(sortedRoles, role)
-	}
-	sort.Strings(sortedRoles)
-
-	for _, role := range sortedRoles {
-		taskIDs := missingRoleTasks[role]
+	missingRoles := FindMissingRolesWithClaimableWork(state, pr)
+	missingRoleSet := make(map[string]bool, len(missingRoles))
+	for _, roleWork := range missingRoles {
+		role := roleWork.Role
+		taskIDs := roleWork.TaskIDs
+		missingRoleSet[role] = true
 		cacheKey := "missing-role:" + role
 		if _, seen := cache[cacheKey]; seen {
 			continue
@@ -900,11 +856,11 @@ func checkMissingRoles(state *models.State, pr models.PipelineResolver, cache ma
 			suffix = fmt.Sprintf("... and %d more", len(taskIDs)-maxListed)
 		}
 		msg := fmt.Sprintf("no registered agent for role %s — %d task(s) waiting (%s",
-			role, len(taskIDs), strings.Join(listed, ", "))
+			role, roleWork.TaskCount, strings.Join(listed, ", "))
 		if suffix != "" {
 			msg += ", " + suffix
 		}
-		msg += ")"
+		msg += "); run `liza repair-agent-pool --dry-run` to preview repair"
 
 		alerts = append(alerts, Alert{
 			Timestamp: now,
@@ -925,7 +881,7 @@ func checkMissingRoles(state *models.State, pr models.PipelineResolver, cache ma
 			continue
 		}
 		role := strings.TrimPrefix(key, "missing-role:")
-		if _, stillMissing := missingRoleTasks[role]; !stillMissing {
+		if !missingRoleSet[role] {
 			delete(cache, key)
 		}
 	}

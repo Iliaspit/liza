@@ -1,0 +1,333 @@
+package commands
+
+import (
+	"errors"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/liza-mas/liza/internal/models"
+	"github.com/liza-mas/liza/internal/testhelpers"
+)
+
+type spawnedAgentCall struct {
+	projectRoot string
+	role        string
+	cli         string
+}
+
+func withFakeRepairSpawner(t *testing.T, calls *[]spawnedAgentCall, err error) {
+	t.Helper()
+
+	withFakeRepairSpawnerByRole(t, calls, func(role string) error {
+		return err
+	})
+}
+
+func withFakeRepairSpawnerByRole(t *testing.T, calls *[]spawnedAgentCall, errForRole func(role string) error) {
+	t.Helper()
+
+	original := repairAgentPoolSpawn
+	repairAgentPoolSpawn = func(projectRoot, role, cli string) (int, error) {
+		*calls = append(*calls, spawnedAgentCall{
+			projectRoot: projectRoot,
+			role:        role,
+			cli:         cli,
+		})
+		err := errForRole(role)
+		if err != nil {
+			return 0, err
+		}
+		return 12345, nil
+	}
+	t.Cleanup(func() {
+		repairAgentPoolSpawn = original
+	})
+}
+
+func writeRepairAgentPoolState(t *testing.T, state *models.State) string {
+	t.Helper()
+
+	tmpDir := t.TempDir()
+	statePath, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	testhelpers.SetupPipelineConfig(t, tmpDir)
+	testhelpers.WriteInitialState(t, statePath, state)
+	return tmpDir
+}
+
+func TestRepairAgentPool_DryRunUsesConfiguredDefaultCLI(t *testing.T) {
+	state := testhelpers.CreateValidState()
+	state.Config.DefaultCLI = "gemini"
+	state.Tasks = []models.Task{
+		testhelpers.BuildTaskByStatus("plan-1", models.TaskStatusDraftCodingPlan, time.Now().UTC()),
+	}
+	projectRoot := writeRepairAgentPoolState(t, state)
+
+	var calls []spawnedAgentCall
+	withFakeRepairSpawner(t, &calls, nil)
+
+	result, err := RepairAgentPool(RepairAgentPoolOptions{
+		ProjectRoot: projectRoot,
+		Missing:     true,
+		DryRun:      true,
+	})
+	if err != nil {
+		t.Fatalf("RepairAgentPool() error = %v", err)
+	}
+	if len(calls) != 0 {
+		t.Fatalf("dry run spawned agents: %+v", calls)
+	}
+	if result.CLI != "gemini" {
+		t.Errorf("CLI = %q, want gemini", result.CLI)
+	}
+	if len(result.Missing) != 1 {
+		t.Fatalf("missing roles = %+v, want one role", result.Missing)
+	}
+	if result.Missing[0].Role != "code-planner" {
+		t.Errorf("missing role = %q, want code-planner", result.Missing[0].Role)
+	}
+	if result.Commands[0] != "liza agent code-planner --cli gemini" {
+		t.Errorf("command = %q", result.Commands[0])
+	}
+}
+
+func TestRepairAgentPool_ExplicitCLISpawnsOneAgentPerMissingRole(t *testing.T) {
+	state := testhelpers.CreateValidState()
+	state.Tasks = []models.Task{
+		testhelpers.BuildTaskByStatus("task-1", models.TaskStatusReady, time.Now().UTC()),
+		testhelpers.BuildTaskByStatus("task-2", models.TaskStatusReady, time.Now().UTC()),
+	}
+	projectRoot := writeRepairAgentPoolState(t, state)
+
+	var calls []spawnedAgentCall
+	withFakeRepairSpawner(t, &calls, nil)
+
+	result, err := RepairAgentPool(RepairAgentPoolOptions{
+		ProjectRoot: projectRoot,
+		Missing:     true,
+		CLI:         "codex",
+	})
+	if err != nil {
+		t.Fatalf("RepairAgentPool() error = %v", err)
+	}
+	if len(calls) != 1 {
+		t.Fatalf("spawn calls = %+v, want one", calls)
+	}
+	if calls[0].role != "coder" || calls[0].cli != "codex" {
+		t.Errorf("spawn call = %+v, want coder/codex", calls[0])
+	}
+	if len(result.Spawned) != 1 {
+		t.Fatalf("spawned = %+v, want one", result.Spawned)
+	}
+	if result.Missing[0].TaskCount != 2 {
+		t.Errorf("TaskCount = %d, want 2", result.Missing[0].TaskCount)
+	}
+}
+
+func TestRepairAgentPool_RegisteredRoleIsNotMissing(t *testing.T) {
+	now := time.Now().UTC()
+	leaseExpires := now.Add(30 * time.Minute)
+	state := testhelpers.CreateValidState()
+	state.Tasks = []models.Task{
+		testhelpers.BuildTaskByStatus("task-1", models.TaskStatusReady, now),
+	}
+	state.Agents["coder-1"] = models.Agent{
+		Role:         "coder",
+		Status:       models.AgentStatusIdle,
+		Heartbeat:    now,
+		LeaseExpires: &leaseExpires,
+	}
+	projectRoot := writeRepairAgentPoolState(t, state)
+
+	var calls []spawnedAgentCall
+	withFakeRepairSpawner(t, &calls, nil)
+
+	result, err := RepairAgentPool(RepairAgentPoolOptions{
+		ProjectRoot: projectRoot,
+		Missing:     true,
+		CLI:         "claude",
+	})
+	if err != nil {
+		t.Fatalf("RepairAgentPool() error = %v", err)
+	}
+	if len(result.Missing) != 0 {
+		t.Fatalf("missing roles = %+v, want none", result.Missing)
+	}
+	if len(calls) != 0 {
+		t.Fatalf("spawn calls = %+v, want none", calls)
+	}
+}
+
+func TestRepairAgentPool_NilLeaseWithRecentHeartbeatIsNotMissing(t *testing.T) {
+	now := time.Now().UTC()
+	state := testhelpers.CreateValidState()
+	state.Tasks = []models.Task{
+		testhelpers.BuildTaskByStatus("task-1", models.TaskStatusReady, now),
+	}
+	state.Agents["coder-1"] = models.Agent{
+		Role:      "coder",
+		Status:    models.AgentStatusIdle,
+		Heartbeat: now.Add(-time.Minute),
+	}
+	projectRoot := writeRepairAgentPoolState(t, state)
+
+	var calls []spawnedAgentCall
+	withFakeRepairSpawner(t, &calls, nil)
+
+	result, err := RepairAgentPool(RepairAgentPoolOptions{
+		ProjectRoot: projectRoot,
+		CLI:         "claude",
+		DryRun:      true,
+	})
+	if err != nil {
+		t.Fatalf("RepairAgentPool() error = %v", err)
+	}
+	if len(result.Missing) != 0 {
+		t.Fatalf("missing roles = %+v, want none", result.Missing)
+	}
+	if len(calls) != 0 {
+		t.Fatalf("spawn calls = %+v, want none", calls)
+	}
+}
+
+func TestRepairAgentPool_DefaultsToMissingRepair(t *testing.T) {
+	state := testhelpers.CreateValidState()
+	state.Tasks = []models.Task{
+		testhelpers.BuildTaskByStatus("task-1", models.TaskStatusReady, time.Now().UTC()),
+	}
+	projectRoot := writeRepairAgentPoolState(t, state)
+
+	result, err := RepairAgentPool(RepairAgentPoolOptions{
+		ProjectRoot: projectRoot,
+		DryRun:      true,
+	})
+	if err != nil {
+		t.Fatalf("RepairAgentPool() error = %v", err)
+	}
+	if len(result.Missing) != 1 || result.Missing[0].Role != "coder" {
+		t.Fatalf("missing roles = %+v, want coder", result.Missing)
+	}
+}
+
+func TestRepairAgentPool_NilLeaseWithStaleHeartbeatIsMissing(t *testing.T) {
+	now := time.Now().UTC()
+	state := testhelpers.CreateValidState()
+	state.Tasks = []models.Task{
+		testhelpers.BuildTaskByStatus("task-1", models.TaskStatusReady, now),
+	}
+	state.Agents["coder-1"] = models.Agent{
+		Role:      "coder",
+		Status:    models.AgentStatusIdle,
+		Heartbeat: now.Add(-(models.DefaultHeartbeatIntervalSec*time.Second + models.LeaseExpiryGracePeriod + time.Minute)),
+	}
+	projectRoot := writeRepairAgentPoolState(t, state)
+
+	result, err := RepairAgentPool(RepairAgentPoolOptions{
+		ProjectRoot: projectRoot,
+		CLI:         "claude",
+		DryRun:      true,
+	})
+	if err != nil {
+		t.Fatalf("RepairAgentPool() error = %v", err)
+	}
+	if len(result.Missing) != 1 || result.Missing[0].Role != "coder" {
+		t.Fatalf("missing roles = %+v, want coder", result.Missing)
+	}
+}
+
+func TestRepairAgentPool_ExpiredAgentLeaseIsMissing(t *testing.T) {
+	now := time.Now().UTC()
+	leaseExpires := now.Add(-time.Minute)
+	state := testhelpers.CreateValidState()
+	state.Tasks = []models.Task{
+		testhelpers.BuildTaskByStatus("task-1", models.TaskStatusReady, now),
+	}
+	state.Agents["coder-1"] = models.Agent{
+		Role:         "coder",
+		Status:       models.AgentStatusIdle,
+		Heartbeat:    now.Add(-2 * time.Minute),
+		LeaseExpires: &leaseExpires,
+	}
+	projectRoot := writeRepairAgentPoolState(t, state)
+
+	result, err := RepairAgentPool(RepairAgentPoolOptions{
+		ProjectRoot: projectRoot,
+		CLI:         "claude",
+		DryRun:      true,
+	})
+	if err != nil {
+		t.Fatalf("RepairAgentPool() error = %v", err)
+	}
+	if len(result.Missing) != 1 || result.Missing[0].Role != "coder" {
+		t.Fatalf("missing roles = %+v, want coder", result.Missing)
+	}
+}
+
+func TestRepairAgentPoolRejectsInvalidCLI(t *testing.T) {
+	state := testhelpers.CreateValidState()
+	state.Tasks = []models.Task{
+		testhelpers.BuildTaskByStatus("task-1", models.TaskStatusReady, time.Now().UTC()),
+	}
+	projectRoot := writeRepairAgentPoolState(t, state)
+
+	_, err := RepairAgentPool(RepairAgentPoolOptions{
+		ProjectRoot: projectRoot,
+		Missing:     true,
+		CLI:         "unknown",
+	})
+	if err == nil {
+		t.Fatal("RepairAgentPool() error = nil, want error")
+	}
+	if !strings.Contains(err.Error(), "invalid CLI") {
+		t.Fatalf("error = %q, want invalid CLI", err)
+	}
+}
+
+func TestRepairAgentPoolAttemptsAllMissingRolesOnSpawnFailure(t *testing.T) {
+	state := testhelpers.CreateValidState()
+	now := time.Now().UTC()
+	state.Tasks = []models.Task{
+		testhelpers.BuildTaskByStatus("task-1", models.TaskStatusReady, now),
+		testhelpers.BuildTaskByStatus("plan-1", models.TaskStatusDraftCodingPlan, now),
+		testhelpers.BuildTaskByStatus("review-1", models.TaskStatusReadyForReview, now),
+	}
+	projectRoot := writeRepairAgentPoolState(t, state)
+
+	var calls []spawnedAgentCall
+	withFakeRepairSpawnerByRole(t, &calls, func(role string) error {
+		if role == "code-reviewer" {
+			return errors.New("boom")
+		}
+		return nil
+	})
+
+	result, err := RepairAgentPool(RepairAgentPoolOptions{
+		ProjectRoot: projectRoot,
+		Missing:     true,
+		CLI:         "claude",
+	})
+	if err == nil {
+		t.Fatal("RepairAgentPool() error = nil, want error")
+	}
+	if !strings.Contains(err.Error(), "failed to start 1 of 3 missing role agent") {
+		t.Fatalf("error = %q, want summarized spawn failure", err)
+	}
+	if result == nil {
+		t.Fatal("result = nil, want partial result")
+	}
+	if len(calls) != 3 {
+		t.Fatalf("spawn calls = %+v, want all 3 missing roles attempted", calls)
+	}
+	if len(result.Commands) != 3 {
+		t.Fatalf("commands = %+v, want command for each missing role", result.Commands)
+	}
+	if len(result.Spawned) != 2 {
+		t.Fatalf("spawned = %+v, want 2 successful starts", result.Spawned)
+	}
+	if len(result.Failed) != 1 {
+		t.Fatalf("failed = %+v, want 1 failed start", result.Failed)
+	}
+	if result.Failed[0].Role != "code-reviewer" || result.Failed[0].Error != "boom" {
+		t.Fatalf("failed = %+v, want code-reviewer boom", result.Failed)
+	}
+}

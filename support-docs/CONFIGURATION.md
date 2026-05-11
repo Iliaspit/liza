@@ -202,7 +202,7 @@ When `liza tui` triggers the circuit breaker, it also sets `sprint.status` to `C
 
 ## Supported CLIs
 
-The `--cli` flag on `liza agent` selects which coding agent to invoke. When omitted, the default is resolved from `config.default_cli` in `state.yaml`, then the `LIZA_DEFAULT_CLI` environment variable, then `claude`. Set the default at init time with `liza init --default-cli <cli>`.
+The `--cli` flag on `liza agent` and `liza repair-agent-pool` selects which coding agent to invoke. When omitted, the default is resolved from `config.default_cli` in `state.yaml`, then the `LIZA_DEFAULT_CLI` environment variable, then `claude`. Set the default at init time with `liza init --default-cli <cli>`.
 
 | CLI | Notes |
 |-----|-------|

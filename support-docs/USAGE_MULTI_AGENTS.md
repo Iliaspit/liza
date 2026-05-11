@@ -157,6 +157,8 @@ The TUI (`liza tui`) is the primary way to spawn and monitor agents. Press `s` t
 
 Alternatively, spawn agents from the CLI: `liza agent <role>`. Agent identity defaults to the first `{role}-N` not already registered with a valid lease (e.g., `coder-1`, or `coder-2` if `coder-1` is active). Override with `--agent-id` or the `LIZA_AGENT_ID` environment variable.
 
+If claimable work is stuck because no live agent is registered for the required role, run `liza repair-agent-pool`. Add `--cli <name>` to choose the backend for newly spawned agents, or `--dry-run` to print the exact spawn commands without launching them.
+
 Roles are organized into three sub-pipelines (specification, coding, integration). Which agents you need depends on your entry point:
 
 ```
@@ -370,6 +372,7 @@ The `liza` binary provides all system operations. Key commands:
 | `liza init <goal> --spec <spec_ref> [--branch <name>]` | Initialize `.liza/` directory with blackboard (spec_ref defaults to specs/vision.md, branch defaults to integration) |
 | **Agents & Monitoring** |                                                                                                                      |
 | `liza agent <role> [--agent-id <id>]` | Agent supervisor (start, restart, backoff loop; ID auto-assigned if omitted)                                         |
+| `liza repair-agent-pool [--cli <name>] [--dry-run]` | Spawn one agent for each claimable-work role that has no live registered agent                                      |
 | `liza tui` | Live TUI: spawn agents, monitor state, manage system                                                                 |
 | `liza status` | Show system and task status at a glance                                                                              |
 | **System Control** |                                                                                                                      |
