@@ -251,6 +251,96 @@ func TestDetectPatterns(t *testing.T) {
 			wantEvidence:  "Multiple tasks blocked by same external service: GitHub API",
 		},
 		{
+			name: "provider_audit_degradation - 2+ agents for same provider",
+			anomalies: []models.Anomaly{
+				{
+					Timestamp: now,
+					Task:      "task-1",
+					Reporter:  "coder-1",
+					Type:      "provider_audit_degraded",
+					Details: map[string]any{
+						"provider": "codex",
+						"agent_id": "coder-1",
+						"message":  "failed to record rollout items",
+					},
+				},
+				{
+					Timestamp: now,
+					Task:      "task-2",
+					Reporter:  "code-reviewer-1",
+					Type:      "provider_audit_degraded",
+					Details: map[string]any{
+						"provider": "codex",
+						"agent_id": "code-reviewer-1",
+						"message":  "failed to record rollout items",
+					},
+				},
+			},
+			wantTriggered: true,
+			wantPattern:   "provider_audit_degradation",
+			wantSeverity:  "OBSERVABILITY_DEGRADED",
+			wantEvidence:  "2 provider_audit_degraded anomalies for provider codex across 2 agents",
+		},
+		{
+			name: "provider_audit_degradation - 3+ hits from same agent",
+			anomalies: []models.Anomaly{
+				{
+					Timestamp: now,
+					Task:      "task-1",
+					Reporter:  "coder-1",
+					Type:      "provider_audit_degraded",
+					Details: map[string]any{
+						"provider": "codex",
+						"agent_id": "coder-1",
+						"message":  "failed to record rollout items",
+					},
+				},
+				{
+					Timestamp: now,
+					Task:      "task-2",
+					Reporter:  "coder-1",
+					Type:      "provider_audit_degraded",
+					Details: map[string]any{
+						"provider": "codex",
+						"agent_id": "coder-1",
+						"message":  "failed to record rollout items",
+					},
+				},
+				{
+					Timestamp: now,
+					Task:      "task-3",
+					Reporter:  "coder-1",
+					Type:      "provider_audit_degraded",
+					Details: map[string]any{
+						"provider": "codex",
+						"agent_id": "coder-1",
+						"message":  "failed to record rollout items",
+					},
+				},
+			},
+			wantTriggered: true,
+			wantPattern:   "provider_audit_degradation",
+			wantSeverity:  "OBSERVABILITY_DEGRADED",
+			wantEvidence:  "3 provider_audit_degraded anomalies for provider codex across 1 agents",
+		},
+		{
+			name: "provider_audit_degradation - one hit below threshold",
+			anomalies: []models.Anomaly{
+				{
+					Timestamp: now,
+					Task:      "task-1",
+					Reporter:  "coder-1",
+					Type:      "provider_audit_degraded",
+					Details: map[string]any{
+						"provider": "codex",
+						"agent_id": "coder-1",
+						"message":  "failed to record rollout items",
+					},
+				},
+			},
+			wantTriggered: false,
+		},
+		{
 			name: "multiple patterns - returns first match (retry_cluster)",
 			anomalies: []models.Anomaly{
 				// retry_cluster pattern

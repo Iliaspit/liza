@@ -858,6 +858,8 @@ func RunSupervisor(ctx context.Context, config SupervisorConfig) error {
 			GetLogger().Warn("Failed to reset agent status after exit", "error", err, "agent_id", config.AgentID)
 		}
 
+		handleProviderAuditDegraded(bb, config, effectiveTask, currentOutput)
+
 		// Handle exit code
 		switch exitCode {
 		case 0:

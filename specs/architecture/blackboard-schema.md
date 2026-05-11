@@ -861,6 +861,7 @@ For detailed definition including edge cases (submodules, untracked files), see 
 | `review_exhaustion` | Orchestrator | Two reviewers failed to issue verdict on same task |
 | `reviewer_loop` | Code Reviewer | Reviewer stuck in command loop, self-aborted |
 | `system_ambiguity` | Any role | Liza protocol or role definition unclear, escalated to Orchestrator |
+| `provider_audit_degraded` | Supervisor | Provider ran but transcript/rollout persistence is suspect |
 
 **Required Details Fields (validated by `liza validate`):**
 
@@ -873,6 +874,7 @@ For detailed definition including edge cases (submodules, untracked files), see 
 | `reviewer_loop` | `count`, `command_pattern` | Reviewer self-abort on repetitive commands |
 | `review_exhaustion` | `reviewers_failed`, `common_blocker` | Two reviewers failed to complete review |
 | `system_ambiguity` | `protocol_section`, `question` | Track Liza system gaps for human clarification |
+| `provider_audit_degraded` | `provider`, `agent_id`, `message` | Aggregate provider audit degradation across agents |
 
 Anomalies with malformed details will fail validation. This ensures circuit breaker pattern detection has reliable data.
 The agent should be very specific about the faced issue so this may be reproduced and investigated.
@@ -920,7 +922,7 @@ invariants:
   - "Task arch_ref must reference an existing file (checked via checkSpecFileExists against project root then integration branch)"
   - "Task output entry arch_ref must not contain worktree prefix (.worktrees/) — must be repo-relative"
   # Note: output entry arch_ref does NOT have file-existence validation (entries are set before merge)
-  - "Anomaly type must be one of: retry_loop, trade_off, spec_ambiguity, external_blocker, assumption_violated, scope_deviation, workaround, debt_created, spec_changed, hypothesis_exhaustion, spec_gap, review_budget_exhausted, review_exhaustion, reviewer_loop, system_ambiguity"
+  - "Anomaly type must be one of: retry_loop, trade_off, spec_ambiguity, external_blocker, assumption_violated, scope_deviation, workaround, debt_created, spec_changed, hypothesis_exhaustion, spec_gap, review_budget_exhausted, review_exhaustion, reviewer_loop, system_ambiguity, provider_audit_degraded"
   # Transition invariants (runtime-enforced, not statically validated)
   # These are enforced by agent behavior and atomic operations during state transitions.
   # `liza validate` validates static state invariants; these require history analysis.

@@ -27,6 +27,7 @@ func DetectPatterns(anomalies []models.Anomaly) PatternResult {
 		checkSpecGapCluster,
 		checkWorkaroundPattern,
 		checkExternalServiceOutage,
+		checkProviderAuditDegradation,
 	}
 	for _, check := range checks {
 		if result := check(anomalies); result.Triggered {
@@ -148,6 +149,28 @@ func checkExternalServiceOutage(anomalies []models.Anomaly) PatternResult {
 				Pattern:   "external_service_outage",
 				Severity:  "EXTERNAL_DEPENDENCY",
 				Evidence:  fmt.Sprintf("Multiple tasks blocked by same external service: %s", service),
+			}
+		}
+	}
+	return PatternResult{Triggered: false}
+}
+
+func checkProviderAuditDegradation(anomalies []models.Anomaly) PatternResult {
+	auditDegraded := filterByType(anomalies, "provider_audit_degraded")
+	groups := groupByField(auditDegraded, "provider")
+	for provider, group := range groups {
+		agents := make(map[string]bool)
+		for _, anomaly := range group {
+			if agentID, ok := anomaly.Details["agent_id"].(string); ok && agentID != "" {
+				agents[agentID] = true
+			}
+		}
+		if len(agents) >= 2 || len(group) >= 3 {
+			return PatternResult{
+				Triggered: true,
+				Pattern:   "provider_audit_degradation",
+				Severity:  "OBSERVABILITY_DEGRADED",
+				Evidence:  fmt.Sprintf("%d provider_audit_degraded anomalies for provider %s across %d agents", len(group), provider, len(agents)),
 			}
 		}
 	}

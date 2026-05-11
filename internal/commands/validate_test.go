@@ -629,6 +629,14 @@ func TestValidateAnomalies_RequiredDetailsByType(t *testing.T) {
 			},
 			errContains: "assumption_violated anomaly",
 		},
+		{
+			name: "provider_audit_degraded missing required details fails",
+			anomaly: models.Anomaly{
+				Type:    "provider_audit_degraded",
+				Details: map[string]any{"provider": "codex", "agent_id": "coder-1"},
+			},
+			errContains: "provider_audit_degraded anomaly",
+		},
 	}
 
 	for _, tt := range tests {
@@ -687,6 +695,13 @@ func TestValidateAnomalies_RequestedTypeBranchesPassWithValidDetails(t *testing.
 			anomaly: models.Anomaly{
 				Type:    "assumption_violated",
 				Details: map[string]any{"assumption": "single reviewer", "reality": "reviewer unavailable"},
+			},
+		},
+		{
+			name: "provider_audit_degraded branch",
+			anomaly: models.Anomaly{
+				Type:    "provider_audit_degraded",
+				Details: map[string]any{"provider": "codex", "agent_id": "coder-1", "message": "failed to record rollout items"},
 			},
 		},
 	}

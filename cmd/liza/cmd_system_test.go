@@ -119,3 +119,18 @@ func TestTuiCmd_ExplicitHeadlessSkipsFallback(t *testing.T) {
 		t.Errorf("fallback message should not appear when --headless is explicit, stderr = %q", stderr.String())
 	}
 }
+
+func TestAnalyzeHelpListsProviderAuditDegradation(t *testing.T) {
+	helpText := analyzeCmd.Long
+
+	expected := []string{
+		"provider_audit_degradation",
+		"2+ agents or 3+ hits for same provider",
+		"OBSERVABILITY_DEGRADED",
+	}
+	for _, want := range expected {
+		if !strings.Contains(helpText, want) {
+			t.Fatalf("analyze help missing %q\nHelp:\n%s", want, helpText)
+		}
+	}
+}

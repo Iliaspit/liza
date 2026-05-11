@@ -53,6 +53,10 @@ func validateAnomalies(state *models.State, projectRoot string, skipSpecFileChec
 			if anomaly.Details["protocol_section"] == nil || anomaly.Details["question"] == nil {
 				return fmt.Errorf("system_ambiguity anomaly at index %d missing required details (protocol_section, question)", i)
 			}
+		case "provider_audit_degraded":
+			if anomaly.Details["provider"] == nil || anomaly.Details["agent_id"] == nil || anomaly.Details["message"] == nil {
+				return fmt.Errorf("provider_audit_degraded anomaly at index %d missing required details (provider, agent_id, message)", i)
+			}
 		}
 	}
 	return nil

@@ -4,6 +4,8 @@ import (
 	"context"
 	stderrors "errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -26,6 +28,7 @@ type MockCLIExecutor struct {
 	ExitCode         int
 	Output           string
 	ExitError        error
+	OnExecute        func(ctx context.Context, cliName string, agentID string, prompt string, projectRoot string) error
 }
 
 type MockCLICall struct {
@@ -38,6 +41,11 @@ func (m *MockCLIExecutor) Execute(ctx context.Context, cliName string, agentID s
 	m.mu.Lock()
 	m.Calls = append(m.Calls, MockCLICall{CLIName: cliName, AgentID: agentID, Prompt: prompt})
 	m.mu.Unlock()
+	if m.OnExecute != nil {
+		if err := m.OnExecute(ctx, cliName, agentID, prompt, projectRoot); err != nil {
+			return CLIExecutionResult{ExitCode: m.ExitCode, Output: m.Output}, err
+		}
+	}
 	return CLIExecutionResult{ExitCode: m.ExitCode, Output: m.Output}, m.ExitError
 }
 
@@ -94,6 +102,92 @@ func TestMockCLIExecution(t *testing.T) {
 	}
 	if call.Prompt != "test prompt" {
 		t.Errorf("Prompt = %s, want 'test prompt'", call.Prompt)
+	}
+}
+
+func TestSupervisor_Exit0ProviderAuditDegradedContinuesPostExecution(t *testing.T) {
+	projectRoot := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, projectRoot)
+	statePath, _ := testhelpers.SetupLizaDir(t, projectRoot)
+
+	now := time.Now().UTC()
+	taskID := "task-audit-exit0"
+	state := testhelpers.CreateValidState()
+	state.Config.CoderPollInterval = 1
+	state.Config.CoderMaxWait = 1
+	state.Config.LeaseDuration = 300
+	state.Tasks = []models.Task{testhelpers.BuildTaskByStatus(taskID, models.TaskStatusReady, now)}
+	bb := testhelpers.WriteInitialState(t, statePath, state)
+
+	auditOutput := `ERROR codex_core::session: failed to record rollout items: thread 019e983f-f3a2-7071-8a66-aa1774db9101 not found`
+	mock := &MockCLIExecutor{
+		ExitCode: 0,
+		Output:   auditOutput,
+	}
+	mock.OnExecute = func(ctx context.Context, cliName, agentID, prompt, projectRoot string) error {
+		reviewCommit := testhelpers.MustGit(t, projectRoot, "rev-parse", "HEAD")
+		return bb.Modify(func(s *models.State) error {
+			task := s.FindTask(taskID)
+			if task == nil {
+				t.Fatalf("task %q not found", taskID)
+			}
+			task.Status = models.TaskStatusReadyForReview
+			task.ReviewCommit = &reviewCommit
+			task.HandoffEvents = append(task.HandoffEvents, models.HandoffEvent{
+				Timestamp: time.Now().UTC(),
+				Agent:     agentID,
+				Trigger:   models.HandoffTriggerSubmission,
+			})
+			return nil
+		})
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	err := RunSupervisor(ctx, SupervisorConfig{
+		AgentID:          "coder-1",
+		Role:             "coder",
+		ProjectRoot:      projectRoot,
+		StatePath:        statePath,
+		LogPath:          filepath.Join(projectRoot, ".liza", "log.yaml"),
+		SpecsDir:         filepath.Join(projectRoot, "specs"),
+		CLIName:          "codex",
+		Executor:         mock,
+		ExecutionTimeout: 10 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("RunSupervisor() error = %v", err)
+	}
+
+	if calls := mock.GetCalls(); len(calls) != 1 {
+		t.Fatalf("Execute calls = %d, want 1", len(calls))
+	}
+
+	updated, err := bb.Read()
+	if err != nil {
+		t.Fatalf("bb.Read: %v", err)
+	}
+	task := updated.FindTask(taskID)
+	if task == nil {
+		t.Fatalf("task %q not found after supervisor run", taskID)
+	}
+	if task.Status != models.TaskStatusReadyForReview {
+		t.Fatalf("task.Status = %q, want %q", task.Status, models.TaskStatusReadyForReview)
+	}
+	if len(updated.Anomalies) != 1 {
+		t.Fatalf("len(Anomalies) = %d, want 1", len(updated.Anomalies))
+	}
+	if updated.Anomalies[0].Type != ProviderAuditDegradedAnomalyType {
+		t.Fatalf("anomaly.Type = %q, want %q", updated.Anomalies[0].Type, ProviderAuditDegradedAnomalyType)
+	}
+
+	alerts, err := os.ReadFile(filepath.Join(projectRoot, ".liza", "alerts.log"))
+	if err != nil {
+		t.Fatalf("read alerts.log: %v", err)
+	}
+	if !strings.Contains(string(alerts), "PROVIDER AUDIT DEGRADED") {
+		t.Fatalf("alerts.log missing audit degradation alert:\n%s", string(alerts))
 	}
 }
 

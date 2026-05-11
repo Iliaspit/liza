@@ -77,6 +77,7 @@ Summary of types relevant to circuit breaker patterns:
 | `workaround` | Code Reviewer | workaround_pattern |
 | `debt_created` | Code Reviewer | debt_accumulation |
 | `external_blocker` | Coder | external_service_outage (aggregated by `blocker_service`) |
+| `provider_audit_degraded` | Supervisor | provider_audit_degradation |
 | `hypothesis_exhaustion` | Planner | (triggers rescope, not CB) |
 | `review_budget_exhausted` | Planner | (logged for audit; triggers Planner intervention, not CB) |
 | `spec_gap` | Planner | spec_gap_cluster |
@@ -119,6 +120,12 @@ circuit_breaker_rules:
       condition: count(type=external_blocker, same(blocker_service)) >= 2
       severity: EXTERNAL_DEPENDENCY
       action: TRIP_MODE  # Set config.mode to CIRCUIT_BREAKER_TRIPPED; human may checkpoint sprint separately
+
+    - name: provider_audit_degradation
+      description: "Provider transcript or rollout persistence degraded across agent work"
+      condition: count(type=provider_audit_degraded, same(provider), distinct(agent_id) >= 2) OR count(type=provider_audit_degraded, same(provider)) >= 3
+      severity: OBSERVABILITY_DEGRADED
+      action: TRIP_MODE
 ```
 
 ### Pattern Matching Functions

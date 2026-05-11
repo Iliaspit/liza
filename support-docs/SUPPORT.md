@@ -318,6 +318,12 @@ Exit 42 with `handoff_pending: true` on the task means context exhaustion — th
 **Diagnosis**: `ls .liza/provider-unavailable-*` or check `.liza/alerts.log` for `PROVIDER UNAVAILABLE`. Also inspect `.liza/agent-outputs/*.err` for provider startup errors.
 **Fix**: Repair the provider environment first (for Codex, ensure the agent process can access `~/.codex/sessions`), then run `liza pause` and `liza resume` to clear provider-unavailable signals before restarting agents.
 
+### Provider audit degraded
+**Symptom**: Agent work may complete, but `.liza/agent-outputs/*.err` or `.liza/alerts.log` contains `PROVIDER AUDIT DEGRADED`, for example Codex `failed to record rollout items: thread ... not found`.
+**Impact**: Treat task state and explicit task outputs as the source of truth. The provider transcript or rollout audit trail may be incomplete for the affected session.
+**Diagnosis**: Upgrade or retest the provider CLI first. Then inspect `.liza/agent-outputs/*.err`, `.liza/alerts.log`, task state, and blackboard outputs before relying on the session transcript.
+**Fix**: A single occurrence does not stop workers. Repeated occurrences across agents are recorded as `provider_audit_degraded` anomalies and can trip `liza analyze` as systemic observability degradation.
+
 ### Circuit breaker
 
 `liza analyze` detects systemic patterns. Supervisor auto-triggers on:

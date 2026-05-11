@@ -32,6 +32,7 @@ Detects the following patterns:
   - spec_gap_cluster: 2+ spec ambiguities hitting same spec reference (SPEC_FLAW)
   - workaround_pattern: 2+ workarounds/trade-offs with similar root causes (ARCHITECTURE_FLAW)
   - external_service_outage: 2+ external blockers from same service (EXTERNAL_DEPENDENCY)
+  - provider_audit_degradation: 2+ agents or 3+ hits for same provider (OBSERVABILITY_DEGRADED)
 
 If a pattern is detected:
   - Updates circuit_breaker.status to TRIGGERED

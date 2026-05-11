@@ -172,7 +172,7 @@ func (a *Anomaly) IsValidType() bool {
 		"retry_loop", "trade_off", "spec_ambiguity", "external_blocker",
 		"assumption_violated", "scope_deviation", "workaround", "debt_created",
 		"spec_changed", "hypothesis_exhaustion", "spec_gap", "review_budget_exhausted",
-		"review_exhaustion", "reviewer_loop", "system_ambiguity",
+		"review_exhaustion", "reviewer_loop", "system_ambiguity", "provider_audit_degraded",
 	}
 	return slices.Contains(validTypes, a.Type)
 }
