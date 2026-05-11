@@ -1,11 +1,14 @@
 package commands
 
 import (
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/liza-mas/liza/internal/agent"
 	"github.com/liza-mas/liza/internal/db"
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/testhelpers"
@@ -120,6 +123,63 @@ func TestResumeCommand(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestResumeCommand_WarnsOnProviderSignalClearFailure(t *testing.T) {
+	tmpDir := t.TempDir()
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	testhelpers.SetupPipelineConfig(t, tmpDir)
+
+	state := testhelpers.CreateValidState()
+	state.Config.Mode = models.SystemModePaused
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	signalPath := agent.ProviderUnavailableSignalPath(tmpDir, "codex")
+	if err := os.MkdirAll(signalPath, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(signalPath, "blocker"), []byte{}, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout := captureStdout(t, func() {
+		if err := ResumeCommand(tmpDir, "human"); err != nil {
+			t.Fatalf("ResumeCommand() error = %v", err)
+		}
+	})
+
+	if !strings.Contains(stdout, "Warning: failed to clear provider signals") {
+		t.Fatalf("stdout missing provider signal warning:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "unavailable/codex") {
+		t.Fatalf("stdout missing provider name:\n%s", stdout)
+	}
+	if _, err := os.Stat(signalPath); err != nil {
+		t.Fatalf("provider unavailable signal should remain after failed clear: %v", err)
+	}
+}
+
+func captureStdout(t *testing.T, fn func()) string {
+	t.Helper()
+
+	oldStdout := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("failed to create stdout pipe: %v", err)
+	}
+	os.Stdout = w
+	defer func() {
+		os.Stdout = oldStdout
+	}()
+
+	fn()
+
+	w.Close()
+	data, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("failed to read stdout: %v", err)
+	}
+	return string(data)
 }
 
 // TestResumeCommand_ArchiveWriteFailure verifies that when the archive file

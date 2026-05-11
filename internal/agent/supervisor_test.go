@@ -24,6 +24,7 @@ type MockCLIExecutor struct {
 	Calls            []MockCLICall
 	InteractiveCalls []MockCLICall
 	ExitCode         int
+	Output           string
 	ExitError        error
 }
 
@@ -33,11 +34,11 @@ type MockCLICall struct {
 	Prompt  string
 }
 
-func (m *MockCLIExecutor) Execute(ctx context.Context, cliName string, agentID string, prompt string, projectRoot string) (int, error) {
+func (m *MockCLIExecutor) Execute(ctx context.Context, cliName string, agentID string, prompt string, projectRoot string) (CLIExecutionResult, error) {
 	m.mu.Lock()
 	m.Calls = append(m.Calls, MockCLICall{CLIName: cliName, AgentID: agentID, Prompt: prompt})
 	m.mu.Unlock()
-	return m.ExitCode, m.ExitError
+	return CLIExecutionResult{ExitCode: m.ExitCode, Output: m.Output}, m.ExitError
 }
 
 func (m *MockCLIExecutor) ExecuteInteractive(ctx context.Context, cliName string, projectRoot string) (int, error) {
@@ -72,14 +73,14 @@ func TestMockCLIExecution(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	exitCode, err := mock.Execute(ctx, "claude", "claude-1", "test prompt", "/tmp/test-project")
+	result, err := mock.Execute(ctx, "claude", "claude-1", "test prompt", "/tmp/test-project")
 
 	if err != nil {
 		t.Errorf("Execute() error = %v", err)
 	}
 
-	if exitCode != 0 {
-		t.Errorf("Execute() exitCode = %d, want 0", exitCode)
+	if result.ExitCode != 0 {
+		t.Errorf("Execute() exitCode = %d, want 0", result.ExitCode)
 	}
 
 	calls := mock.GetCalls()

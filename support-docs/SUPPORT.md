@@ -313,6 +313,11 @@ Exit 42 with `handoff_pending: true` on the task means context exhaustion — th
 **Diagnosis**: `ls .liza/provider-quota-exhausted-*` or check `.liza/alerts.log` for `PROVIDER QUOTA EXHAUSTED`.
 **Fix**: `liza pause` then `liza resume` — pause transitions RUNNING → PAUSED, resume clears quota signals and restarts the sprint. Then restart agents. (`liza resume` alone fails because the system is still RUNNING, not PAUSED.)
 
+### Provider unavailable
+**Symptom**: Agents for a provider stop before doing useful work, often after startup/session errors such as Codex failing to access `~/.codex/sessions`. Signal file `.liza/provider-unavailable-<provider>` exists.
+**Diagnosis**: `ls .liza/provider-unavailable-*` or check `.liza/alerts.log` for `PROVIDER UNAVAILABLE`. Also inspect `.liza/agent-outputs/*.err` for provider startup errors.
+**Fix**: Repair the provider environment first (for Codex, ensure the agent process can access `~/.codex/sessions`), then run `liza pause` and `liza resume` to clear provider-unavailable signals before restarting agents.
+
 ### Circuit breaker
 
 `liza analyze` detects systemic patterns. Supervisor auto-triggers on:

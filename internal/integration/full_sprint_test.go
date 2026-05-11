@@ -52,10 +52,10 @@ type SmartMockCLIExecutor struct {
 	calls []MockExecution
 }
 
-func (m *SmartMockCLIExecutor) Execute(ctx context.Context, cliName, agentID, prompt, projectRoot string) (int, error) {
+func (m *SmartMockCLIExecutor) Execute(ctx context.Context, cliName, agentID, prompt, projectRoot string) (agent.CLIExecutionResult, error) {
 	runtimeRole, err := identity.ExtractRole(agentID)
 	if err != nil {
-		return 1, fmt.Errorf("extract role from %s: %w", agentID, err)
+		return agent.CLIExecutionResult{ExitCode: 1}, fmt.Errorf("extract role from %s: %w", agentID, err)
 	}
 
 	// Find the task assigned to this agent.
@@ -64,24 +64,24 @@ func (m *SmartMockCLIExecutor) Execute(ctx context.Context, cliName, agentID, pr
 	bb := db.For(lp.StatePath())
 	state, err := bb.Read()
 	if err != nil {
-		return 1, fmt.Errorf("read state: %w", err)
+		return agent.CLIExecutionResult{ExitCode: 1}, fmt.Errorf("read state: %w", err)
 	}
 
 	// Load pipeline resolver for executing-state checks.
 	pr, prErr := ops.LoadResolverForModels(projectRoot)
 	if prErr != nil {
-		return 1, fmt.Errorf("load pipeline resolver: %w", prErr)
+		return agent.CLIExecutionResult{ExitCode: 1}, fmt.Errorf("load pipeline resolver: %w", prErr)
 	}
 
 	// Load full pipeline resolver for role-type queries.
 	pipeCfg, pipeErr := pipeline.LoadFrozen(projectRoot)
 	if pipeErr != nil {
-		return 1, fmt.Errorf("load pipeline config: %w", pipeErr)
+		return agent.CLIExecutionResult{ExitCode: 1}, fmt.Errorf("load pipeline config: %w", pipeErr)
 	}
 	pipeResolver := pipeline.NewResolver(pipeCfg)
 	roleType, rtErr := pipeResolver.RoleType(runtimeRole)
 	if rtErr != nil {
-		return 1, fmt.Errorf("resolve role type for %s: %w", runtimeRole, rtErr)
+		return agent.CLIExecutionResult{ExitCode: 1}, fmt.Errorf("resolve role type for %s: %w", runtimeRole, rtErr)
 	}
 
 	var taskID string
@@ -103,22 +103,22 @@ func (m *SmartMockCLIExecutor) Execute(ctx context.Context, cliName, agentID, pr
 		}
 	}
 	if taskID == "" {
-		return 1, fmt.Errorf("no task assigned to %s (reviewer=%v)", agentID, isReviewer)
+		return agent.CLIExecutionResult{ExitCode: 1}, fmt.Errorf("no task assigned to %s (reviewer=%v)", agentID, isReviewer)
 	}
 
 	if roleType == "doer" {
 		if err := m.executeDoer(ctx, projectRoot, agentID, taskID, runtimeRole); err != nil {
-			return 1, err
+			return agent.CLIExecutionResult{ExitCode: 1}, err
 		}
 	} else if roleType == "reviewer" {
 		if err := m.executeReviewer(projectRoot, agentID, taskID, runtimeRole); err != nil {
-			return 1, err
+			return agent.CLIExecutionResult{ExitCode: 1}, err
 		}
 	} else {
-		return 1, fmt.Errorf("unsupported role type: %s (role: %s)", roleType, runtimeRole)
+		return agent.CLIExecutionResult{ExitCode: 1}, fmt.Errorf("unsupported role type: %s (role: %s)", roleType, runtimeRole)
 	}
 
-	return 0, nil
+	return agent.CLIExecutionResult{ExitCode: 0}, nil
 }
 
 func (m *SmartMockCLIExecutor) ExecuteInteractive(_ context.Context, _, _ string) (int, error) {

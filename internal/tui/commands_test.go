@@ -263,7 +263,7 @@ func TestLoadRolesCmd_MissingPipelineConfig(t *testing.T) {
 	}
 }
 
-func TestResumeSystemCmd_ClearsQuotaSignals(t *testing.T) {
+func TestResumeSystemCmd_ClearsProviderSignals(t *testing.T) {
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
@@ -275,9 +275,16 @@ func TestResumeSystemCmd_ClearsQuotaSignals(t *testing.T) {
 	if err := agent.WriteQuotaSignal(tmpDir, "codex", "You've hit your usage limit"); err != nil {
 		t.Fatal(err)
 	}
-	signalPath := agent.QuotaSignalPath(tmpDir, "codex")
-	if _, err := os.Stat(signalPath); err != nil {
-		t.Fatalf("signal file should exist before resume: %v", err)
+	quotaSignalPath := agent.QuotaSignalPath(tmpDir, "codex")
+	if _, err := os.Stat(quotaSignalPath); err != nil {
+		t.Fatalf("quota signal file should exist before resume: %v", err)
+	}
+	if err := agent.WriteProviderUnavailableSignal(tmpDir, "codex", "session access denied"); err != nil {
+		t.Fatal(err)
+	}
+	unavailableSignalPath := agent.ProviderUnavailableSignalPath(tmpDir, "codex")
+	if _, err := os.Stat(unavailableSignalPath); err != nil {
+		t.Fatalf("provider unavailable signal file should exist before resume: %v", err)
 	}
 
 	cmd := resumeSystemCmd(tmpDir)
@@ -293,9 +300,12 @@ func TestResumeSystemCmd_ClearsQuotaSignals(t *testing.T) {
 		t.Errorf("message = %q, want %q", result.Message, "System resumed")
 	}
 
-	// Quota signal file should be removed
-	if _, err := os.Stat(signalPath); !os.IsNotExist(err) {
+	// Provider-scoped signal files should be removed
+	if _, err := os.Stat(quotaSignalPath); !os.IsNotExist(err) {
 		t.Error("quota signal file should have been removed after resume")
+	}
+	if _, err := os.Stat(unavailableSignalPath); !os.IsNotExist(err) {
+		t.Error("provider unavailable signal file should have been removed after resume")
 	}
 }
 

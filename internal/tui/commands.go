@@ -188,7 +188,7 @@ func pauseSystemCmd(projectRoot, reason string) tea.Cmd {
 }
 
 // resumeSystemCmd resumes the system.
-// Calls ops.Resume() directly, then clears any provider quota signals
+// Calls ops.Resume() directly, then clears any provider-scoped stop signals
 // so restarted agents aren't immediately blocked.
 // Returns CmdResultMsg with result.
 func resumeSystemCmd(projectRoot string) tea.Cmd {
@@ -198,20 +198,28 @@ func resumeSystemCmd(projectRoot string) tea.Cmd {
 			return CmdResultMsg{Success: false, Message: fmt.Sprintf("resume: %v", err)}
 		}
 
-		// Clear provider quota signals (mirrors CLI resume behavior).
+		// Clear provider-scoped stop signals (mirrors CLI resume behavior).
 		var clearErrors []string
 		if matches, err := filepath.Glob(agent.QuotaSignalGlob(projectRoot)); err == nil {
 			for _, m := range matches {
 				provider := agent.ProviderFromSignalFile(m)
 				if clearErr := agent.ClearQuotaSignal(projectRoot, provider); clearErr != nil {
-					clearErrors = append(clearErrors, fmt.Sprintf("%s: %v", provider, clearErr))
+					clearErrors = append(clearErrors, fmt.Sprintf("quota/%s: %v", provider, clearErr))
+				}
+			}
+		}
+		if matches, err := filepath.Glob(agent.ProviderUnavailableSignalGlob(projectRoot)); err == nil {
+			for _, m := range matches {
+				provider := agent.ProviderFromUnavailableSignalFile(m)
+				if clearErr := agent.ClearProviderUnavailableSignal(projectRoot, provider); clearErr != nil {
+					clearErrors = append(clearErrors, fmt.Sprintf("unavailable/%s: %v", provider, clearErr))
 				}
 			}
 		}
 
 		msg := "System resumed"
 		if len(clearErrors) > 0 {
-			msg += fmt.Sprintf(" (warning: failed to clear quota signals: %s)", strings.Join(clearErrors, "; "))
+			msg += fmt.Sprintf(" (warning: failed to clear provider signals: %s)", strings.Join(clearErrors, "; "))
 		}
 		return CmdResultMsg{Success: true, Message: msg}
 	}

@@ -177,16 +177,70 @@ func TestLatestOutputContent(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	content := latestOutputContent(dir, "agent-1")
+	content := latestOutputContent(dir, "agent-1", ".txt")
 	if content != "new" {
 		t.Errorf("latestOutputContent = %q, want %q", content, "new")
+	}
+}
+
+func TestLatestAgentOutputContent_IncludesStderr(t *testing.T) {
+	dir := t.TempDir()
+
+	if err := os.WriteFile(filepath.Join(dir, "agent-1-20260328-110000.txt"), []byte("stdout"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "agent-1-20260328-110000.err"), []byte("stderr"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	content := latestAgentOutputContent(dir, "agent-1")
+	if !strings.Contains(content, "stdout") {
+		t.Errorf("latestAgentOutputContent = %q, want stdout content", content)
+	}
+	if !strings.Contains(content, "stderr") {
+		t.Errorf("latestAgentOutputContent = %q, want stderr content", content)
+	}
+}
+
+func TestLatestAgentOutputContent_StderrOnly(t *testing.T) {
+	dir := t.TempDir()
+
+	if err := os.WriteFile(filepath.Join(dir, "agent-1-20260328-110000.err"), []byte("stderr"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	content := latestAgentOutputContent(dir, "agent-1")
+	if strings.Contains(content, "stdout") {
+		t.Errorf("latestAgentOutputContent = %q, did not expect stdout content", content)
+	}
+	if !strings.Contains(content, "stderr") {
+		t.Errorf("latestAgentOutputContent = %q, want stderr content", content)
+	}
+}
+
+func TestLatestAgentOutputContent_DoesNotMixStaleStderr(t *testing.T) {
+	dir := t.TempDir()
+
+	if err := os.WriteFile(filepath.Join(dir, "agent-1-20260328-100000.err"), []byte("old provider unavailable"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "agent-1-20260328-110000.txt"), []byte("new unrelated crash"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	content := latestAgentOutputContent(dir, "agent-1")
+	if strings.Contains(content, "old provider unavailable") {
+		t.Errorf("latestAgentOutputContent = %q, should not include stale stderr", content)
+	}
+	if !strings.Contains(content, "new unrelated crash") {
+		t.Errorf("latestAgentOutputContent = %q, want latest stdout content", content)
 	}
 }
 
 func TestLatestOutputContent_NoFiles(t *testing.T) {
 	dir := t.TempDir()
 
-	content := latestOutputContent(dir, "agent-1")
+	content := latestOutputContent(dir, "agent-1", ".txt")
 	if content != "" {
 		t.Errorf("latestOutputContent = %q, want empty", content)
 	}

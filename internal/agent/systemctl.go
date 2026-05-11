@@ -132,14 +132,15 @@ func waitWhilePaused(ctx context.Context, projectRoot string) error {
 }
 
 // executeAgent executes the CLI with timeout
-func executeAgent(ctx context.Context, config SupervisorConfig, prompt string) (int, error) {
+func executeAgent(ctx context.Context, config SupervisorConfig, prompt string) (int, string, error) {
 	logger := GetLogger()
 	// Interactive mode: launch CLI without -p so user can paste the prompt
 	if config.Interactive {
 		fmt.Println("=== INTERACTIVE MODE ===")
 		fmt.Println("Paste the prompt from the file above into the CLI session.")
 		fmt.Printf("Launching: %s\n", config.CLIName)
-		return config.Executor.ExecuteInteractive(ctx, config.CLIName, config.ProjectRoot)
+		exitCode, err := config.Executor.ExecuteInteractive(ctx, config.CLIName, config.ProjectRoot)
+		return exitCode, "", err
 	}
 
 	// Create timeout context for CLI execution
@@ -150,7 +151,7 @@ func executeAgent(ctx context.Context, config SupervisorConfig, prompt string) (
 	// so we don't start one here.
 
 	// Execute CLI with timeout
-	exitCode, err := config.Executor.Execute(execCtx, config.CLIName, config.AgentID, prompt, config.ProjectRoot)
+	result, err := config.Executor.Execute(execCtx, config.CLIName, config.AgentID, prompt, config.ProjectRoot)
 
 	// Check if execution timed out
 	if err != nil && errors.Is(err, context.DeadlineExceeded) {
@@ -158,7 +159,7 @@ func executeAgent(ctx context.Context, config SupervisorConfig, prompt string) (
 			"agent_id", config.AgentID,
 			"timeout", config.ExecutionTimeout,
 			"hint", "CLI may be hung, will retry")
-		return 1, nil // Return failure code to trigger retry
+		return 1, result.Output, nil // Return failure code to trigger retry
 	}
 
 	// Check if timeout context was cancelled (even if Execute returned successfully)
@@ -167,10 +168,10 @@ func executeAgent(ctx context.Context, config SupervisorConfig, prompt string) (
 			"agent_id", config.AgentID,
 			"timeout", config.ExecutionTimeout,
 			"hint", "CLI may be hung, will retry")
-		return 1, nil // Return failure code to trigger retry
+		return 1, result.Output, nil // Return failure code to trigger retry
 	}
 
-	return exitCode, err
+	return result.ExitCode, result.Output, err
 }
 
 // verifyOrchestratorStateChanges checks if orchestrator made expected state changes after completion

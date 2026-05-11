@@ -428,10 +428,15 @@ func buildCodexArgs(projectRoot, prompt string, useStdin bool, outputsDir string
 
 // CLIExecutor interface for testing (mock vs real CLI)
 type CLIExecutor interface {
-	Execute(ctx context.Context, cliName string, agentID string, prompt string, projectRoot string) (exitCode int, err error)
+	Execute(ctx context.Context, cliName string, agentID string, prompt string, projectRoot string) (CLIExecutionResult, error)
 	// ExecuteInteractive launches the CLI without a prompt arg, with stdin connected,
 	// so the user can paste the prompt manually. Used by -i (interactive) mode.
 	ExecuteInteractive(ctx context.Context, cliName string, projectRoot string) (exitCode int, err error)
+}
+
+type CLIExecutionResult struct {
+	ExitCode int
+	Output   string
 }
 
 type DefaultCLIExecutor struct {
@@ -447,7 +452,7 @@ func NewDefaultCLIExecutor(outputsDir string) *DefaultCLIExecutor {
 	return &DefaultCLIExecutor{outputsDir: outputsDir, masker: masker}
 }
 
-func (d *DefaultCLIExecutor) Execute(ctx context.Context, cliName string, agentID string, prompt string, projectRoot string) (int, error) {
+func (d *DefaultCLIExecutor) Execute(ctx context.Context, cliName string, agentID string, prompt string, projectRoot string) (CLIExecutionResult, error) {
 	// Map CLI names (mistral -> vibe)
 	actualCLI := cliName
 	if cliName == "mistral" {
@@ -501,7 +506,7 @@ func (d *DefaultCLIExecutor) Execute(ctx context.Context, cliName string, agentI
 		}
 		cmd = exec.CommandContext(ctx, "kimi", args...)
 	default:
-		return 0, fmt.Errorf("unknown CLI: %s", cliName)
+		return CLIExecutionResult{}, fmt.Errorf("unknown CLI: %s", cliName)
 	}
 
 	// Set working directory to project root so claude can find .claude/settings.json
@@ -547,6 +552,13 @@ func (d *DefaultCLIExecutor) Execute(ctx context.Context, cliName string, agentI
 
 	err := cmd.Run()
 
+	stdout := stdoutBuf.String()
+	stderr := stderrBuf.String()
+	output := stdout + "\n" + stderr
+	if d.masker != nil {
+		output = d.masker.MaskText(output)
+	}
+
 	// Save stdout and stderr to separate files if logging is enabled.
 	if d.outputsDir != "" {
 		save := func(ext, content string) {
@@ -557,18 +569,18 @@ func (d *DefaultCLIExecutor) Execute(ctx context.Context, cliName string, agentI
 				GetLogger().Warn("Failed to save agent output", "error", saveErr, "agent_id", agentID, "ext", ext)
 			}
 		}
-		save("txt", stdoutBuf.String())
-		save("err", stderrBuf.String())
+		save("txt", stdout)
+		save("err", stderr)
 	}
 
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
-			return exitErr.ExitCode(), nil
+			return CLIExecutionResult{ExitCode: exitErr.ExitCode(), Output: output}, nil
 		}
-		return 0, err
+		return CLIExecutionResult{Output: output}, err
 	}
 
-	return 0, nil
+	return CLIExecutionResult{ExitCode: 0, Output: output}, nil
 }
 
 func (d *DefaultCLIExecutor) ExecuteInteractive(ctx context.Context, cliName string, projectRoot string) (int, error) {
@@ -710,6 +722,10 @@ func RunSupervisor(ctx context.Context, config SupervisorConfig) error {
 			return nil
 		}
 
+		if handleProviderUnavailableSignal(config) {
+			return nil
+		}
+
 		if handleQuotaSignal(config) {
 			return nil
 		}
@@ -831,7 +847,7 @@ func RunSupervisor(ctx context.Context, config SupervisorConfig) error {
 		GetLogger().Info("Prompt saved", "file", promptFile)
 
 		// Execute agent
-		exitCode, err := executeAgent(ctx, config, prompt)
+		exitCode, currentOutput, err := executeAgent(ctx, config, prompt)
 		if err != nil {
 			return fmt.Errorf("agent execution error: %w", err)
 		}
@@ -882,19 +898,8 @@ func RunSupervisor(ctx context.Context, config SupervisorConfig) error {
 		default:
 			exit42Tracker.reset(taskID)
 
-			// Check if crash was caused by provider quota exhaustion.
-			output := latestOutputContent(lizaPaths.AgentOutputsDir(), config.AgentID)
-			if qe := DetectQuotaExhaustion(output, config.CLIName); qe != nil {
-				GetLogger().Error("Provider quota exhausted, terminating",
-					"provider", qe.Provider,
-					"agent_id", config.AgentID,
-					"message", qe.Message)
-				if alertErr := LogQuotaAlert(config.ProjectRoot, qe); alertErr != nil {
-					GetLogger().Warn("Failed to write quota alert", "error", alertErr)
-				}
-				if err := WriteQuotaSignal(config.ProjectRoot, qe.Provider, qe.Message); err != nil {
-					GetLogger().Warn("Failed to write quota signal", "error", err)
-				}
+			// Check if crash was caused by a provider-scoped failure.
+			if handleClassifiedProviderCrash(config, currentOutput) {
 				return nil
 			}
 
@@ -943,4 +948,47 @@ func handleQuotaSignal(config SupervisorConfig) bool {
 		"provider", config.CLIName,
 		"agent_id", config.AgentID)
 	return true
+}
+
+func handleProviderUnavailableSignal(config SupervisorConfig) bool {
+	if !CheckProviderUnavailableSignal(config.ProjectRoot, config.CLIName) {
+		return false
+	}
+
+	GetLogger().Info("Provider unavailable, shutting down",
+		"provider", config.CLIName,
+		"agent_id", config.AgentID)
+	return true
+}
+
+func handleClassifiedProviderCrash(config SupervisorConfig, output string) bool {
+	if pu := DetectProviderUnavailable(output, config.CLIName); pu != nil {
+		GetLogger().Error("Provider unavailable, terminating",
+			"provider", pu.Provider,
+			"agent_id", config.AgentID,
+			"message", pu.Message)
+		if alertErr := LogProviderUnavailableAlert(config.ProjectRoot, pu); alertErr != nil {
+			GetLogger().Warn("Failed to write provider unavailable alert", "error", alertErr)
+		}
+		if err := WriteProviderUnavailableSignal(config.ProjectRoot, pu.Provider, pu.Message); err != nil {
+			GetLogger().Warn("Failed to write provider unavailable signal", "error", err)
+		}
+		return true
+	}
+
+	if qe := DetectQuotaExhaustion(output, config.CLIName); qe != nil {
+		GetLogger().Error("Provider quota exhausted, terminating",
+			"provider", qe.Provider,
+			"agent_id", config.AgentID,
+			"message", qe.Message)
+		if alertErr := LogQuotaAlert(config.ProjectRoot, qe); alertErr != nil {
+			GetLogger().Warn("Failed to write quota alert", "error", alertErr)
+		}
+		if err := WriteQuotaSignal(config.ProjectRoot, qe.Provider, qe.Message); err != nil {
+			GetLogger().Warn("Failed to write quota signal", "error", err)
+		}
+		return true
+	}
+
+	return false
 }
