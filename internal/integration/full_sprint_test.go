@@ -52,7 +52,7 @@ type SmartMockCLIExecutor struct {
 	calls []MockExecution
 }
 
-func (m *SmartMockCLIExecutor) Execute(ctx context.Context, cliName, agentID, prompt, projectRoot string) (agent.CLIExecutionResult, error) {
+func (m *SmartMockCLIExecutor) Execute(ctx context.Context, cliName, agentID, prompt, projectRoot string, _ []string) (agent.CLIExecutionResult, error) {
 	runtimeRole, err := identity.ExtractRole(agentID)
 	if err != nil {
 		return agent.CLIExecutionResult{ExitCode: 1}, fmt.Errorf("extract role from %s: %w", agentID, err)
@@ -121,7 +121,7 @@ func (m *SmartMockCLIExecutor) Execute(ctx context.Context, cliName, agentID, pr
 	return agent.CLIExecutionResult{ExitCode: 0}, nil
 }
 
-func (m *SmartMockCLIExecutor) ExecuteInteractive(_ context.Context, _, _ string) (int, error) {
+func (m *SmartMockCLIExecutor) ExecuteInteractive(_ context.Context, _, _ string, _ []string) (int, error) {
 	return 0, fmt.Errorf("interactive mode not supported in mock")
 }
 
