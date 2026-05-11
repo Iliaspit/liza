@@ -21,9 +21,16 @@ func ResolveOrchestratorFromState(statePath string, resolver *pipeline.Resolver)
 		return "", fmt.Errorf("reading state to resolve orchestrator: %w", err)
 	}
 	if resolver != nil {
-		return findOrchestratorByType(state, resolver)
+		return wrapOrchestratorResolutionPrecondition(findOrchestratorByType(state, resolver))
 	}
-	return state.FindOrchestratorID()
+	return wrapOrchestratorResolutionPrecondition(state.FindOrchestratorID())
+}
+
+func wrapOrchestratorResolutionPrecondition(id string, err error) (string, error) {
+	if err != nil {
+		return "", &PreconditionError{Reason: err.Error()}
+	}
+	return id, nil
 }
 
 // findOrchestratorByType iterates agents and finds the one whose role resolves

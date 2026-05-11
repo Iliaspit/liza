@@ -209,6 +209,57 @@ func TestJSON_AddTasks_PartialItemFailureKeepsOKEnvelope(t *testing.T) {
 	}
 }
 
+func TestJSON_AddTasks_MissingOrchestratorReportsActionablePrecondition(t *testing.T) {
+	projectRoot, _ := setupMutationTestProject(t, nil)
+	t.Setenv("LIZA_AGENT_ID", "")
+
+	tasks := []map[string]any{
+		{
+			"id":        "new-json-task",
+			"desc":      "New task",
+			"spec":      "specs/vision.md",
+			"done":      "done",
+			"scope":     "internal/ops",
+			"priority":  1,
+			"role_pair": "coding-pair",
+		},
+	}
+	data, err := json.Marshal(tasks)
+	if err != nil {
+		t.Fatalf("failed to marshal tasks: %v", err)
+	}
+	tasksFile := filepath.Join(projectRoot, "tasks.json")
+	if err := os.WriteFile(tasksFile, data, 0644); err != nil {
+		t.Fatalf("failed to write tasks file: %v", err)
+	}
+
+	stdout, err := executeRootCommandCapture(t, projectRoot,
+		"add-tasks",
+		"--tasks-file", tasksFile,
+		"--json",
+	)
+	if err == nil {
+		t.Fatalf("expected missing orchestrator error, got nil")
+	}
+
+	env := parseEnvelope(t, stdout)
+	if env["ok"] != false {
+		t.Fatalf("expected ok=false, got %v", env["ok"])
+	}
+
+	errObj, ok := env["error"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected error to be object, got %T", env["error"])
+	}
+	if errObj["code"] != "validation" {
+		t.Fatalf("error.code = %v, want validation", errObj["code"])
+	}
+	msg, _ := errObj["message"].(string)
+	if msg == "" || msg == "internal error" || !strings.Contains(msg, "no orchestrator agent registered") || !strings.Contains(msg, "--agent-id") {
+		t.Fatalf("error.message = %q, want actionable orchestrator precondition details", msg)
+	}
+}
+
 func TestJSON_Status_WithWarnings(t *testing.T) {
 	// Set up project with corrupted pipeline config so resolver load fails.
 	projectRoot, _ := setupMutationTestProject(t, nil)
