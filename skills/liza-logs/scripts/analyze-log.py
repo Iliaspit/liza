@@ -120,17 +120,18 @@ def _parse_ts_ms(ts_str: str) -> int:
         return 0
 
 
-def detect_format(first_line: str) -> str:
-    """Return 'rich' or 'sparse' based on the first JSON event."""
-    try:
-        obj = json.loads(first_line)
-    except json.JSONDecodeError:
-        return "unknown"
-    event_type = obj.get("type", "")
-    if event_type == "system":
-        return "rich"
-    if event_type == "thread.started":
-        return "sparse"
+def detect_format(lines: list[str]) -> str:
+    """Return 'rich' or 'sparse' based on the first structural JSON event."""
+    for line in lines[:10]:
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        event_type = obj.get("type", "")
+        if event_type == "system":
+            return "rich"
+        if event_type == "thread.started":
+            return "sparse"
     return "unknown"
 
 
@@ -1390,7 +1391,7 @@ def analyze_file(filepath: str) -> SessionReport | None:
         print(f"WARNING: Empty file: {filepath}", file=sys.stderr)
         return None
 
-    fmt = detect_format(lines[0])
+    fmt = detect_format(lines)
     if fmt == "unknown":
         print(f"WARNING: Unknown format in {filepath}, skipping", file=sys.stderr)
         return None
