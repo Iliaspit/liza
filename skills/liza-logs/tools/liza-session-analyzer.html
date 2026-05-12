@@ -35,17 +35,54 @@ function measureSparseItem(item) {
 
 function parseCoderLog(lines) {
   const items = [];
+  const turns = [];
   let usage = null;
   let threadId = null;
+  let currentTurn = null;
+  let turnSeq = 0;
+
+  function startTurn() {
+    turnSeq++;
+    currentTurn = { turnNum: turnSeq, items: [] };
+    turns.push(currentTurn);
+  }
+
   for (const line of lines) {
     try {
       const obj = JSON.parse(line);
       if (obj.type === "thread.started") threadId = obj.thread_id;
-      if (obj.type === "turn.completed" && obj.usage) usage = obj.usage;
+      if (obj.type === "turn.started") startTurn();
+      if (obj.type === "turn.completed") {
+        if (obj.usage) usage = obj.usage;
+        currentTurn = null;
+      }
+      if (obj.type === "turn.failed") {
+        if (!currentTurn) startTurn();
+        if (currentTurn.items.length === 0) {
+          const msg = obj.error?.message || obj.message || "";
+          const failedItem = {
+            id: `turn_failed_${items.length}`, type: "turn.failed",
+            status: "failed",
+            command: null, text: msg,
+            outputLen: 0,
+            outputPreview: msg.slice(0, 120).replace(/\n/g, " "),
+            chars: 0,
+            exitCode: null,
+            server: null, tool: null,
+            arguments: null,
+            changes: null,
+            result: null,
+          };
+          items.push(failedItem);
+          currentTurn.items.push(failedItem);
+        }
+        currentTurn = null;
+      }
       if (obj.type === "item.completed" && obj.item) {
+        if (!currentTurn) startTurn();
         const it = obj.item;
         const output = it.aggregated_output || "";
-        items.push({
+        const item = {
           id: it.id, type: it.type,
           status: it.status || "completed",
           command: it.command || null, text: it.text || null,
@@ -57,14 +94,16 @@ function parseCoderLog(lines) {
           arguments: it.arguments || null,
           changes: it.changes || null,
           result: it.result || null,
-        });
+        };
+        items.push(item);
+        currentTurn.items.push(item);
       }
     } catch {}
   }
   const byId = {};
   for (const item of items) { if (!byId[item.id] || item.status === "completed") byId[item.id] = item; }
   const dedupedItems = Object.values(byId).sort((a, b) => parseInt(a.id.replace("item_","")) - parseInt(b.id.replace("item_","")));
-  return { format: "codex", threadId, items: dedupedItems, usage };
+  return { format: "codex", threadId, items: dedupedItems, turns, usage };
 }
 
 function measureRichBlock(block) {
@@ -307,6 +346,60 @@ function computeMcpUsage(timeline) {
     serverStats, topTools: topTools.slice(0, 15) };
 }
 
+function buildCodexEmptyTurns(turns) {
+  const toolTypes = new Set(["command_execution", "mcp_tool_call", "file_change"]);
+  const emptyTurns = [];
+  let tool = 0;
+  for (const turn of turns || []) {
+    const items = turn.items || [];
+    if (items.some(item => toolTypes.has(item.type))) {
+      tool++;
+      continue;
+    }
+    const item = items.find(i => !toolTypes.has(i.type)) || {};
+    emptyTurns.push({
+      turnNum: turn.turnNum,
+      type: item.type || "unknown",
+      detail: item.id || "",
+      preview: truncate(item.text || item.outputPreview || "", 100),
+    });
+  }
+  const total = (turns || []).length;
+  return { unitBasis: "Codex turns", total, tool, empty: emptyTurns.length, emptyTurns };
+}
+
+function buildClaudeEmptyTurns(events, perMsgUsage) {
+  const byMsg = {};
+  for (const u of perMsgUsage || []) {
+    byMsg[u.msgId] = {
+      turnNum: Object.keys(byMsg).length + 1,
+      hasTool: false,
+      type: "assistant_message",
+      detail: u.msgId,
+      preview: "",
+    };
+  }
+  for (const ev of events) {
+    if (ev.type !== "assistant" || !ev.msgId || !byMsg[ev.msgId]) continue;
+    if (ev.contentType === "tool_use") {
+      byMsg[ev.msgId].hasTool = true;
+      continue;
+    }
+    if (!byMsg[ev.msgId].preview && ev.text) {
+      byMsg[ev.msgId].type = ev.contentType || "assistant_message";
+      byMsg[ev.msgId].preview = truncate(ev.text.replace(/\n/g, " "), 100);
+    }
+  }
+  const ordered = Object.values(byMsg).sort((a, b) => a.turnNum - b.turnNum);
+  const emptyTurns = ordered.filter(t => !t.hasTool).map(t => ({
+    turnNum: t.turnNum,
+    type: t.type,
+    detail: t.detail,
+    preview: t.preview,
+  }));
+  return { unitBasis: "API turns", total: ordered.length, tool: ordered.length - emptyTurns.length, empty: emptyTurns.length, emptyTurns };
+}
+
 function extractSecretWordsLines(text) {
   if (!text) return [];
   const lines = text.trim().split("\n").slice(0, 30);
@@ -332,7 +425,8 @@ function parseSecretWords(line) {
 // --- Analysis ---
 
 function analyzeCodex(parsed) {
-  const { items, usage } = parsed;
+  const { items, usage, turns } = parsed;
+  const emptyTurnStats = buildCodexEmptyTurns(turns || []);
   const totalInput = usage?.input_tokens || 0;
   const cachedInput = usage?.cached_input_tokens || 0;
   const freshInput = totalInput - cachedInput;
@@ -353,39 +447,41 @@ function analyzeCodex(parsed) {
     }));
   // --- Timeline from actionable items ---
   const timeline = [];
-  for (const item of items) {
-    if (item.type === "command_execution") {
-      const cmdName = extractCommandName(item.command);
-      const exitCode = item.exitCode;
-      timeline.push({
-        turnNum: 1, toolName: cmdName,
-        detail: extractCommandDetail(item.command),
-        resultChars: item.outputLen || 0,
-        isError: exitCode != null && exitCode !== 0 && !isBenignExit(cmdName, exitCode),
-        preview: item.outputPreview || "",
-      });
-    } else if (item.type === "mcp_tool_call") {
-      const name = item.server ? `${item.server}/${item.tool}` : item.tool || "mcp";
-      let detail = "";
-      if (item.arguments && typeof item.arguments === "object") {
-        for (const v of Object.values(item.arguments)) {
-          if (typeof v === "string" && v) { detail = v.slice(0, 80); break; }
+  for (const turn of turns || []) {
+    for (const item of turn.items || []) {
+      if (item.type === "command_execution") {
+        const cmdName = extractCommandName(item.command);
+        const exitCode = item.exitCode;
+        timeline.push({
+          turnNum: turn.turnNum, toolName: cmdName,
+          detail: extractCommandDetail(item.command),
+          resultChars: item.outputLen || 0,
+          isError: exitCode != null && exitCode !== 0 && !isBenignExit(cmdName, exitCode),
+          preview: item.outputPreview || "",
+        });
+      } else if (item.type === "mcp_tool_call") {
+        const name = item.server ? `${item.server}/${item.tool}` : item.tool || "mcp";
+        let detail = "";
+        if (item.arguments && typeof item.arguments === "object") {
+          for (const v of Object.values(item.arguments)) {
+            if (typeof v === "string" && v) { detail = v.slice(0, 80); break; }
+          }
         }
+        const resultText = item.result ? JSON.stringify(item.result) : "";
+        timeline.push({
+          turnNum: turn.turnNum, toolName: name, detail,
+          resultChars: resultText.length,
+          isError: item.status === "failed",
+          preview: resultText.slice(0, 120).replace(/\n/g, " "),
+        });
+      } else if (item.type === "file_change" && item.changes) {
+        const paths = item.changes.map(c => (c.path || "").split("/").pop());
+        timeline.push({
+          turnNum: turn.turnNum, toolName: "file_change",
+          detail: paths.join(", ").slice(0, 80),
+          resultChars: 0, isError: false, preview: "",
+        });
       }
-      const resultText = item.result ? JSON.stringify(item.result) : "";
-      timeline.push({
-        turnNum: 1, toolName: name, detail,
-        resultChars: resultText.length,
-        isError: item.status === "failed",
-        preview: resultText.slice(0, 120).replace(/\n/g, " "),
-      });
-    } else if (item.type === "file_change" && item.changes) {
-      const paths = item.changes.map(c => (c.path || "").split("/").pop());
-      timeline.push({
-        turnNum: 1, toolName: "file_change",
-        detail: paths.join(", ").slice(0, 80),
-        resultChars: 0, isError: false, preview: "",
-      });
     }
   }
 
@@ -462,6 +558,7 @@ function analyzeCodex(parsed) {
     timeline, toolResultBreakdown, efficiencyInsights,
     struggleSequences: findStruggleSequences(timeline),
     mcpUsage: computeMcpUsage(timeline),
+    emptyTurnStats,
     skillInvocations,
     secretWordsLines,
   };
@@ -469,6 +566,7 @@ function analyzeCodex(parsed) {
 
 function analyzeClaudeCode(parsed) {
   const { systemInfo, events, resultInfo, perMsgUsage } = parsed;
+  const emptyTurnStats = buildClaudeEmptyTurns(events, perMsgUsage || []);
   const turns = [];
   let currentTurn = null;
   for (const ev of events) {
@@ -659,6 +757,7 @@ function analyzeClaudeCode(parsed) {
     timeline, toolResultBreakdown, efficiencyInsights, systemPromptEstimate,
     struggleSequences: findStruggleSequences(timeline),
     mcpUsage: computeMcpUsage(timeline),
+    emptyTurnStats,
     skillInvocations,
     secretWordsLines,
   };
@@ -786,9 +885,44 @@ function McpUsageSection({ mcpUsage }) {
   </>);
 }
 
+function EmptyTurnsSection({ stats }) {
+  if (!stats || stats.total === 0) return null;
+  const ratio = stats.total > 0 ? (stats.empty / stats.total * 100).toFixed(2) : "0.00";
+  return (<>
+    <SectionTitle>Empty Turns</SectionTitle>
+    <div style={{ fontSize: 12, color: C.textMuted, marginBottom: 12, fontFamily: "'JetBrains Mono', monospace" }}>
+      Unit basis: {stats.unitBasis}
+    </div>
+    <Table columns={[
+      { label: "Total", key: "total", align: "right" },
+      { label: "Tool", key: "tool", align: "right" },
+      { label: "Empty", key: "empty", align: "right" },
+      { label: "Empty %", key: "ratio", align: "right" },
+    ]} rows={[{ total: stats.total, tool: stats.tool, empty: stats.empty, ratio: `${ratio}%` }]} />
+    <div style={{ fontSize: 11, color: C.textDim, margin: "12px 0 8px", textTransform: "uppercase", letterSpacing: 1 }}>
+      Empty Turn Details
+    </div>
+    {stats.emptyTurns.length > 0 ? (
+      <Table columns={[
+        { label: "#", key: "turnNum", align: "right" },
+        { label: "Type", key: "type" },
+        { label: "Detail", key: "detail", maxWidth: 220 },
+        { label: "Preview", key: "preview", maxWidth: 360, wrap: true },
+      ]} rows={stats.emptyTurns.map(t => ({
+        turnNum: t.turnNum,
+        type: t.type,
+        detail: truncate(t.detail, 36),
+        preview: t.preview,
+      }))} />
+    ) : (
+      <div style={{ fontSize: 12, color: C.textMuted }}>(none)</div>
+    )}
+  </>);
+}
+
 function CodexReport({ parsed }) {
   const analysis = useMemo(() => analyzeCodex(parsed), [parsed]);
-  const { summary, breakdown, totalCharsAll, topItems, timeline, toolResultBreakdown, efficiencyInsights, struggleSequences, mcpUsage, skillInvocations, secretWordsLines } = analysis;
+  const { summary, breakdown, totalCharsAll, topItems, timeline, toolResultBreakdown, efficiencyInsights, struggleSequences, mcpUsage, emptyTurnStats, skillInvocations, secretWordsLines } = analysis;
   return (
     <div>
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 20 }}>
@@ -829,6 +963,8 @@ function CodexReport({ parsed }) {
         { label: "Size", key: "chars", align: "right", render: r => `${(r.chars/1024).toFixed(1)} KB` },
         { label: "Est. Tokens", key: "estTokens", align: "right", render: r => formatTokens(r.estTokens) },
       ]} rows={topItems.map((c,i) => ({ rank: i+1, ...c }))} />
+
+      <EmptyTurnsSection stats={emptyTurnStats} />
 
       {Object.keys(skillInvocations).length > 0 && (<>
         <SectionTitle>Skill Invocations</SectionTitle>
@@ -942,7 +1078,7 @@ function CodexReport({ parsed }) {
 function ClaudeCodeReport({ parsed }) {
   const analysis = useMemo(() => analyzeClaudeCode(parsed), [parsed]);
   const { summary, turns, mcpStatus, perMsgUsage, contentByType, totalCharsAll,
-    timeline, toolResultBreakdown, efficiencyInsights, systemPromptEstimate, struggleSequences, mcpUsage, skillInvocations, secretWordsLines } = analysis;
+    timeline, toolResultBreakdown, efficiencyInsights, systemPromptEstimate, struggleSequences, mcpUsage, emptyTurnStats, skillInvocations, secretWordsLines } = analysis;
   const toolCalls = turns.flatMap(t => t.actions.filter(a => a.contentType === "tool_use").map(a => a.toolName)).filter(Boolean);
   const toolFreq = {};
   for (const t of toolCalls) toolFreq[t] = (toolFreq[t] || 0) + 1;
@@ -1035,6 +1171,8 @@ function ClaudeCodeReport({ parsed }) {
       <SectionTitle>Tool Usage</SectionTitle>
       <Table columns={[ { label: "Tool", key: "tool" }, { label: "Calls", key: "count", align: "right" } ]}
         rows={Object.entries(toolFreq).sort((a,b) => b[1] - a[1]).map(([tool, count]) => ({ tool, count }))} />
+
+      <EmptyTurnsSection stats={emptyTurnStats} />
 
       {Object.keys(skillInvocations).length > 0 && (<>
         <SectionTitle>Skill Invocations</SectionTitle>

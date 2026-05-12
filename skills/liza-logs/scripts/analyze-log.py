@@ -79,6 +79,16 @@ class ContentItem:
 
 
 @dataclass
+class EmptyTurn:
+    """A turn/unit where the assistant produced no tool call."""
+
+    turn_num: int = 0
+    item_type: str = ""
+    detail: str = ""
+    preview: str = ""
+
+
+@dataclass
 class SessionReport:
     meta: SessionMeta = field(default_factory=SessionMeta)
     # Aggregate usage (both formats)
@@ -91,6 +101,10 @@ class SessionReport:
     turns: list[TurnUsage] = field(default_factory=list)
     # Content items (both formats)
     items: list[ContentItem] = field(default_factory=list)
+    # Tool/no-tool turn accounting (rich: API turns; sparse: Codex turns)
+    turn_units: int = 0
+    tool_turn_units: int = 0
+    empty_turns: list[EmptyTurn] = field(default_factory=list)
     # Tool call frequency (both formats)
     tool_calls: dict[str, int] = field(default_factory=dict)
     # Turn timeline (rich only)
@@ -275,6 +289,9 @@ def parse_rich(lines: list[str]) -> SessionReport:
     seen_message_ids: dict[str, TurnUsage] = {}
     # For correlating tool_use → tool_result
     pending_tool_uses: dict[str, tuple[str, str, int]] = {}  # id → (name, detail, turn_num)
+    turn_has_tool: dict[str, bool] = {}
+    turn_empty_detail: dict[str, EmptyTurn] = {}
+    turn_order: list[str] = []
     first_assistant_texts: list[str] = []
     first_assistant_captured = False
     last_ts_ms = 0
@@ -329,13 +346,29 @@ def parse_rich(lines: list[str]) -> SessionReport:
                 )
                 seen_message_ids[msg_id] = turn
                 report.turns.append(turn)
+                turn_order.append(msg_id)
+                turn_has_tool[msg_id] = False
+                turn_empty_detail[msg_id] = EmptyTurn(
+                    turn_num=len(report.turns),
+                    item_type="assistant_message",
+                    detail=msg_id,
+                    preview="",
+                )
                 current_turn_duration_ms = 0  # reset for new turn
 
             # Extract content items and tool call names
             for block in msg.get("content", []):
+                block_type = block.get("type", "unknown")
                 item = _measure_content_block(block)
                 if item.chars > 0:
                     report.items.append(item)
+                    if msg_id and not turn_empty_detail.get(msg_id, EmptyTurn()).preview:
+                        turn_empty_detail[msg_id] = EmptyTurn(
+                            turn_num=turn_empty_detail.get(msg_id, EmptyTurn()).turn_num or len(report.turns),
+                            item_type=block_type,
+                            detail=msg_id,
+                            preview=item.preview,
+                        )
                 # Capture early assistant text blocks for secret words
                 if not first_assistant_captured and block.get("type") == "text":
                     raw = block.get("text", "")
@@ -344,6 +377,8 @@ def parse_rich(lines: list[str]) -> SessionReport:
                         if _extract_secret_words_lines(raw) or len(first_assistant_texts) >= 5:
                             first_assistant_captured = True
                 if block.get("type") == "tool_use":
+                    if msg_id:
+                        turn_has_tool[msg_id] = True
                     name = block.get("name", "unknown")
                     report.tool_calls[name] = report.tool_calls.get(name, 0) + 1
                     # Track skill invocations (Skill tool or direct file read)
@@ -448,6 +483,9 @@ def parse_rich(lines: list[str]) -> SessionReport:
         report.total_output_tokens += turn.output_tokens
 
     report.secret_words_lines = _extract_secret_words_lines("\n".join(first_assistant_texts))
+    report.turn_units = len(turn_order)
+    report.tool_turn_units = sum(1 for msg_id in turn_order if turn_has_tool.get(msg_id))
+    report.empty_turns = [turn_empty_detail[msg_id] for msg_id in turn_order if not turn_has_tool.get(msg_id)]
 
     return report
 
@@ -522,6 +560,42 @@ def parse_sparse(lines: list[str]) -> SessionReport:
     report.meta.format = "sparse"
     first_assistant_texts: list[str] = []
     first_assistant_captured = False
+    current_turn_open = False
+    current_turn_num = 0
+    current_turn_has_tool = False
+    current_turn_empty_detail: EmptyTurn | None = None
+
+    def start_turn() -> None:
+        nonlocal current_turn_has_tool
+        nonlocal current_turn_empty_detail
+        nonlocal current_turn_num
+        nonlocal current_turn_open
+
+        current_turn_num += 1
+        current_turn_open = True
+        current_turn_has_tool = False
+        current_turn_empty_detail = None
+
+    def finalize_turn(failed_msg: str = "") -> None:
+        nonlocal current_turn_open
+
+        if not current_turn_open:
+            return
+
+        report.turn_units += 1
+        if current_turn_has_tool:
+            report.tool_turn_units += 1
+        else:
+            detail = current_turn_empty_detail
+            if detail is None:
+                detail = EmptyTurn(
+                    turn_num=current_turn_num,
+                    item_type="turn.failed" if failed_msg else "turn",
+                    detail="failed turn without completed items" if failed_msg else "",
+                    preview=failed_msg[:120].replace("\n", " "),
+                )
+            report.empty_turns.append(detail)
+        current_turn_open = False
 
     for line in lines:
         line = line.strip()
@@ -537,10 +611,17 @@ def parse_sparse(lines: list[str]) -> SessionReport:
         if event_type == "thread.started":
             report.meta.session_id = obj.get("thread_id", "")
 
+        elif event_type == "turn.started":
+            if current_turn_open:
+                finalize_turn()
+            start_turn()
+
         elif event_type == "item.completed":
             item = obj.get("item", {})
             # Only count completed items (skip in_progress starts)
             if item.get("status") in ("completed", "failed", None):
+                if not current_turn_open:
+                    start_turn()
                 ci = _measure_sparse_item(item)
                 if ci.chars > 0:
                     report.items.append(ci)
@@ -554,6 +635,7 @@ def parse_sparse(lines: list[str]) -> SessionReport:
                 # Track tool calls and build timeline actions
                 itype = item.get("type", "")
                 if itype == "command_execution":
+                    current_turn_has_tool = True
                     cmd = item.get("command", "")
                     name = _extract_command_name(cmd)
                     report.tool_calls[name] = report.tool_calls.get(name, 0) + 1
@@ -567,7 +649,7 @@ def parse_sparse(lines: list[str]) -> SessionReport:
                     exit_code = item.get("exit_code", 0)
                     report.actions.append(
                         TurnAction(
-                            turn_num=1,
+                            turn_num=current_turn_num,
                             tool_name=name,
                             detail=detail[:80],
                             result_chars=len(output),
@@ -576,6 +658,7 @@ def parse_sparse(lines: list[str]) -> SessionReport:
                         )
                     )
                 elif itype == "mcp_tool_call":
+                    current_turn_has_tool = True
                     server = item.get("server", "")
                     tool = item.get("tool", "")
                     name = f"{server}/{tool}" if server else tool
@@ -597,7 +680,7 @@ def parse_sparse(lines: list[str]) -> SessionReport:
                     result_text = json.dumps(result) if isinstance(result, dict) else str(result)
                     report.actions.append(
                         TurnAction(
-                            turn_num=1,
+                            turn_num=current_turn_num,
                             tool_name=name,
                             detail=detail,
                             result_chars=len(result_text),
@@ -606,11 +689,12 @@ def parse_sparse(lines: list[str]) -> SessionReport:
                         )
                     )
                 elif itype == "file_change":
+                    current_turn_has_tool = True
                     changes = item.get("changes", [])
                     paths = [c.get("path", "").rsplit("/", 1)[-1] for c in changes]
                     report.actions.append(
                         TurnAction(
-                            turn_num=1,
+                            turn_num=current_turn_num,
                             tool_name="file_change",
                             detail=", ".join(paths)[:80],
                             result_chars=0,
@@ -618,8 +702,25 @@ def parse_sparse(lines: list[str]) -> SessionReport:
                             result_preview="",
                         )
                     )
+                else:
+                    if current_turn_empty_detail is None:
+                        current_turn_empty_detail = EmptyTurn(
+                            turn_num=current_turn_num,
+                            item_type=itype or "unknown",
+                            detail=item.get("id", ""),
+                            preview=ci.preview,
+                        )
+
+        elif event_type == "turn.failed":
+            if not current_turn_open:
+                start_turn()
+            err = obj.get("error", {})
+            msg = err.get("message", "") if isinstance(err, dict) else obj.get("message", "")
+            finalize_turn(msg)
 
         elif event_type == "turn.completed":
+            if current_turn_open:
+                finalize_turn()
             usage = obj.get("usage", {})
             total_in = usage.get("input_tokens", 0)
             cached = usage.get("cached_input_tokens", 0)
@@ -630,7 +731,10 @@ def parse_sparse(lines: list[str]) -> SessionReport:
             report.total_output_tokens = usage.get("output_tokens", 0)
             report.total_cache_creation = 0  # not available in sparse format
 
-    report.meta.num_turns = 1  # sparse format only has one turn.completed
+    if current_turn_open:
+        finalize_turn()
+
+    report.meta.num_turns = report.turn_units
 
     report.secret_words_lines = _extract_secret_words_lines("\n".join(first_assistant_texts))
 
@@ -911,6 +1015,44 @@ def render_tool_calls(report: SessionReport) -> str:
     lines.append(f"  {'-' * 40} {'-' * 6}")
     total = sum(report.tool_calls.values())
     lines.append(f"  {'TOTAL':<40s} {total:>6d}")
+    return "\n".join(lines) + "\n"
+
+
+def render_empty_turns(report: SessionReport) -> str:
+    """Empty turn/unit ratio and detail list."""
+    if report.turn_units == 0:
+        return ""
+
+    empty_count = len(report.empty_turns)
+    tool_count = report.tool_turn_units
+    empty_ratio = empty_count / report.turn_units * 100
+    unit_label = "API turns" if report.meta.format == "rich" else "Codex turns"
+
+    lines = [
+        "",
+        "-" * 72,
+        "EMPTY TURNS",
+        "-" * 72,
+        f"  Unit basis: {unit_label}",
+        "",
+        f"  {'Total':>8s}  {'Tool':>8s}  {'Empty':>8s}  {'Empty %':>8s}",
+        f"  {'-' * 8}  {'-' * 8}  {'-' * 8}  {'-' * 8}",
+        f"  {report.turn_units:>8d}  {tool_count:>8d}  {empty_count:>8d}  {empty_ratio:>7.2f}%",
+        "",
+        "  Empty turn details:",
+    ]
+
+    if not report.empty_turns:
+        lines.append("    (none)")
+        return "\n".join(lines) + "\n"
+
+    lines.append(f"  {'#':>4s}  {'Type':<18s}  {'Detail':<34s}  Preview")
+    lines.append(f"  {'-' * 4}  {'-' * 18}  {'-' * 34}  {'-' * 24}")
+    for empty in report.empty_turns:
+        detail = empty.detail[:34]
+        preview = empty.preview[:100]
+        lines.append(f"  {empty.turn_num:>4d}  {empty.item_type:<18s}  {detail:<34s}  {preview}")
+
     return "\n".join(lines) + "\n"
 
 
@@ -1347,6 +1489,7 @@ def render_report(report: SessionReport) -> str:
         render_content_breakdown(report),
         render_top_items(report),
         render_tool_calls(report),
+        render_empty_turns(report),
         render_skill_invocations(report),
         render_secret_words(report),
     ]
