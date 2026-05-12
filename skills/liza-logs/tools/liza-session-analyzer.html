@@ -38,27 +38,25 @@ function parseCoderLog(lines) {
   const turns = [];
   let usage = null;
   let threadId = null;
-  let currentTurn = null;
-  let turnSeq = 0;
+  let currentOuterTurnHasAction = false;
+  const toolTypes = new Set(["command_execution", "mcp_tool_call", "file_change"]);
 
-  function startTurn() {
-    turnSeq++;
-    currentTurn = { turnNum: turnSeq, items: [] };
-    turns.push(currentTurn);
+  function addActionTurn(item) {
+    const turn = { turnNum: turns.length + 1, items: [item] };
+    turns.push(turn);
+    return turn;
   }
 
   for (const line of lines) {
     try {
       const obj = JSON.parse(line);
       if (obj.type === "thread.started") threadId = obj.thread_id;
-      if (obj.type === "turn.started") startTurn();
+      if (obj.type === "turn.started") currentOuterTurnHasAction = false;
       if (obj.type === "turn.completed") {
         if (obj.usage) usage = obj.usage;
-        currentTurn = null;
       }
       if (obj.type === "turn.failed") {
-        if (!currentTurn) startTurn();
-        if (currentTurn.items.length === 0) {
+        if (!currentOuterTurnHasAction) {
           const msg = obj.error?.message || obj.message || "";
           const failedItem = {
             id: `turn_failed_${items.length}`, type: "turn.failed",
@@ -74,12 +72,10 @@ function parseCoderLog(lines) {
             result: null,
           };
           items.push(failedItem);
-          currentTurn.items.push(failedItem);
+          addActionTurn(failedItem);
         }
-        currentTurn = null;
       }
       if (obj.type === "item.completed" && obj.item) {
-        if (!currentTurn) startTurn();
         const it = obj.item;
         const output = it.aggregated_output || "";
         const item = {
@@ -96,7 +92,10 @@ function parseCoderLog(lines) {
           result: it.result || null,
         };
         items.push(item);
-        currentTurn.items.push(item);
+        if (toolTypes.has(item.type)) {
+          currentOuterTurnHasAction = true;
+          addActionTurn(item);
+        }
       }
     } catch {}
   }
@@ -365,7 +364,7 @@ function buildCodexEmptyTurns(turns) {
     });
   }
   const total = (turns || []).length;
-  return { unitBasis: "Codex turns", total, tool, empty: emptyTurns.length, emptyTurns };
+  return { unitBasis: "Codex action turns", total, tool, empty: emptyTurns.length, emptyTurns };
 }
 
 function buildClaudeEmptyTurns(events, perMsgUsage) {

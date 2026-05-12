@@ -101,7 +101,7 @@ class SessionReport:
     turns: list[TurnUsage] = field(default_factory=list)
     # Content items (both formats)
     items: list[ContentItem] = field(default_factory=list)
-    # Tool/no-tool turn accounting (rich: API turns; sparse: Codex turns)
+    # Tool/no-tool turn accounting (rich: API turns; sparse: Codex action turns)
     turn_units: int = 0
     tool_turn_units: int = 0
     empty_turns: list[EmptyTurn] = field(default_factory=list)
@@ -560,42 +560,13 @@ def parse_sparse(lines: list[str]) -> SessionReport:
     report.meta.format = "sparse"
     first_assistant_texts: list[str] = []
     first_assistant_captured = False
-    current_turn_open = False
-    current_turn_num = 0
-    current_turn_has_tool = False
-    current_turn_empty_detail: EmptyTurn | None = None
+    current_outer_turn_has_action = False
+    sparse_outer_turns = 0
 
-    def start_turn() -> None:
-        nonlocal current_turn_has_tool
-        nonlocal current_turn_empty_detail
-        nonlocal current_turn_num
-        nonlocal current_turn_open
-
-        current_turn_num += 1
-        current_turn_open = True
-        current_turn_has_tool = False
-        current_turn_empty_detail = None
-
-    def finalize_turn(failed_msg: str = "") -> None:
-        nonlocal current_turn_open
-
-        if not current_turn_open:
-            return
-
+    def count_action_turn() -> int:
         report.turn_units += 1
-        if current_turn_has_tool:
-            report.tool_turn_units += 1
-        else:
-            detail = current_turn_empty_detail
-            if detail is None:
-                detail = EmptyTurn(
-                    turn_num=current_turn_num,
-                    item_type="turn.failed" if failed_msg else "turn",
-                    detail="failed turn without completed items" if failed_msg else "",
-                    preview=failed_msg[:120].replace("\n", " "),
-                )
-            report.empty_turns.append(detail)
-        current_turn_open = False
+        report.tool_turn_units += 1
+        return report.turn_units
 
     for line in lines:
         line = line.strip()
@@ -612,16 +583,13 @@ def parse_sparse(lines: list[str]) -> SessionReport:
             report.meta.session_id = obj.get("thread_id", "")
 
         elif event_type == "turn.started":
-            if current_turn_open:
-                finalize_turn()
-            start_turn()
+            sparse_outer_turns += 1
+            current_outer_turn_has_action = False
 
         elif event_type == "item.completed":
             item = obj.get("item", {})
             # Only count completed items (skip in_progress starts)
             if item.get("status") in ("completed", "failed", None):
-                if not current_turn_open:
-                    start_turn()
                 ci = _measure_sparse_item(item)
                 if ci.chars > 0:
                     report.items.append(ci)
@@ -635,7 +603,8 @@ def parse_sparse(lines: list[str]) -> SessionReport:
                 # Track tool calls and build timeline actions
                 itype = item.get("type", "")
                 if itype == "command_execution":
-                    current_turn_has_tool = True
+                    current_outer_turn_has_action = True
+                    turn_num = count_action_turn()
                     cmd = item.get("command", "")
                     name = _extract_command_name(cmd)
                     report.tool_calls[name] = report.tool_calls.get(name, 0) + 1
@@ -649,7 +618,7 @@ def parse_sparse(lines: list[str]) -> SessionReport:
                     exit_code = item.get("exit_code", 0)
                     report.actions.append(
                         TurnAction(
-                            turn_num=current_turn_num,
+                            turn_num=turn_num,
                             tool_name=name,
                             detail=detail[:80],
                             result_chars=len(output),
@@ -658,7 +627,8 @@ def parse_sparse(lines: list[str]) -> SessionReport:
                         )
                     )
                 elif itype == "mcp_tool_call":
-                    current_turn_has_tool = True
+                    current_outer_turn_has_action = True
+                    turn_num = count_action_turn()
                     server = item.get("server", "")
                     tool = item.get("tool", "")
                     name = f"{server}/{tool}" if server else tool
@@ -680,7 +650,7 @@ def parse_sparse(lines: list[str]) -> SessionReport:
                     result_text = json.dumps(result) if isinstance(result, dict) else str(result)
                     report.actions.append(
                         TurnAction(
-                            turn_num=current_turn_num,
+                            turn_num=turn_num,
                             tool_name=name,
                             detail=detail,
                             result_chars=len(result_text),
@@ -689,12 +659,13 @@ def parse_sparse(lines: list[str]) -> SessionReport:
                         )
                     )
                 elif itype == "file_change":
-                    current_turn_has_tool = True
+                    current_outer_turn_has_action = True
+                    turn_num = count_action_turn()
                     changes = item.get("changes", [])
                     paths = [c.get("path", "").rsplit("/", 1)[-1] for c in changes]
                     report.actions.append(
                         TurnAction(
-                            turn_num=current_turn_num,
+                            turn_num=turn_num,
                             tool_name="file_change",
                             detail=", ".join(paths)[:80],
                             result_chars=0,
@@ -702,25 +673,22 @@ def parse_sparse(lines: list[str]) -> SessionReport:
                             result_preview="",
                         )
                     )
-                else:
-                    if current_turn_empty_detail is None:
-                        current_turn_empty_detail = EmptyTurn(
-                            turn_num=current_turn_num,
-                            item_type=itype or "unknown",
-                            detail=item.get("id", ""),
-                            preview=ci.preview,
-                        )
 
         elif event_type == "turn.failed":
-            if not current_turn_open:
-                start_turn()
-            err = obj.get("error", {})
-            msg = err.get("message", "") if isinstance(err, dict) else obj.get("message", "")
-            finalize_turn(msg)
+            if not current_outer_turn_has_action:
+                report.turn_units += 1
+                err = obj.get("error", {})
+                msg = err.get("message", "") if isinstance(err, dict) else obj.get("message", "")
+                report.empty_turns.append(
+                    EmptyTurn(
+                        turn_num=report.turn_units,
+                        item_type="turn.failed",
+                        detail="failed turn without completed actions",
+                        preview=msg[:120].replace("\n", " "),
+                    )
+                )
 
         elif event_type == "turn.completed":
-            if current_turn_open:
-                finalize_turn()
             usage = obj.get("usage", {})
             total_in = usage.get("input_tokens", 0)
             cached = usage.get("cached_input_tokens", 0)
@@ -731,10 +699,7 @@ def parse_sparse(lines: list[str]) -> SessionReport:
             report.total_output_tokens = usage.get("output_tokens", 0)
             report.total_cache_creation = 0  # not available in sparse format
 
-    if current_turn_open:
-        finalize_turn()
-
-    report.meta.num_turns = report.turn_units
+    report.meta.num_turns = sparse_outer_turns
 
     report.secret_words_lines = _extract_secret_words_lines("\n".join(first_assistant_texts))
 
@@ -1026,7 +991,7 @@ def render_empty_turns(report: SessionReport) -> str:
     empty_count = len(report.empty_turns)
     tool_count = report.tool_turn_units
     empty_ratio = empty_count / report.turn_units * 100
-    unit_label = "API turns" if report.meta.format == "rich" else "Codex turns"
+    unit_label = "API turns" if report.meta.format == "rich" else "Codex action turns"
 
     lines = [
         "",
