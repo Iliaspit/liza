@@ -57,6 +57,20 @@ SCOPE: {{files, directories, or boundaries}}
 
 Use Task tool. Subagent inherits contract but operates in Subagent Mode (no external gates, compressed output). Default is read-only; `READ-WRITE` permits state modification with mandatory Intent Gate per action.
 
+## 3b. Model Selection
+
+The `CLAUDE_CODE_SUBAGENT_MODEL` env var sets the default model.
+Override it per-agent when the task doesn't need the default's reasoning:
+
+| Task type | Model | Examples |
+|-----------|-------|----------|
+| **Mechanical** | `haiku` | grep, glob, file reads, size checks, find-and-list |
+| **Analytical** | default | code review, architecture survey, dependency analysis |
+| **Judgment-heavy** | `opus` | cross-module impact, ambiguous specs, security review |
+
+Rule of thumb: if the brief could be expressed as a shell pipeline
+but delegation is used for context isolation, use `haiku`.
+
 ---
 
 # For the Subagent
