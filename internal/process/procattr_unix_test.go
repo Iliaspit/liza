@@ -15,10 +15,17 @@ func TestSetDetachedProcessGroup_ConfiguresNewSession(t *testing.T) {
 	if cmd.SysProcAttr == nil {
 		t.Fatal("SysProcAttr = nil, want detached attributes")
 	}
-	if !cmd.SysProcAttr.Setpgid {
-		t.Fatal("Setpgid = false, want true")
+	if cmd.SysProcAttr.Setpgid {
+		t.Fatal("Setpgid = true, want false")
 	}
 	if !cmd.SysProcAttr.Setsid {
 		t.Fatal("Setsid = false, want true")
+	}
+
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	if err := cmd.Wait(); err != nil {
+		t.Fatalf("Wait() error = %v", err)
 	}
 }

@@ -7,12 +7,11 @@ import (
 	"syscall"
 )
 
-// SetDetachedProcessGroup places the command in a new session with its own
-// process group so the spawned agent does not inherit the parent's controlling
-// terminal.
+// SetDetachedProcessGroup places the command in a new session. setsid(2)
+// also creates a new process group, so setting Setpgid as well would ask the
+// child to call setpgid after becoming a session leader, which fails with EPERM.
 func SetDetachedProcessGroup(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{
-		Setpgid: true,
-		Setsid:  true,
+		Setsid: true,
 	}
 }
