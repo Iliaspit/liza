@@ -260,6 +260,34 @@ func TestMutationCommandWiring(t *testing.T) {
 		}
 	})
 
+	t.Run("unblock-task rejects non-orchestrator via allowed-operation RBAC", func(t *testing.T) {
+		projectRoot, _ := setupMutationTestProject(t, func(state *models.State) {
+			now := time.Now().UTC()
+			task := testhelpers.BuildTaskByStatus("task-unblock-rbac", models.TaskStatusBlocked, now)
+			task.RolePair = "code-planning-pair"
+			state.Tasks = []models.Task{task}
+		})
+
+		err := executeRootCommand(
+			t,
+			projectRoot,
+			"unblock-task",
+			"task-unblock-rbac",
+			"--assign-to",
+			"code-planner-1",
+			"--reason",
+			"repair verified",
+			"--agent-id",
+			"coder-1",
+		)
+		if err == nil {
+			t.Fatalf("expected RBAC error for coder calling unblock-task, got nil")
+		}
+		if !strings.Contains(err.Error(), `operation "unblock-task" not allowed for role "coder"`) {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
 	t.Run("mark-blocked persists orchestrator repair request", func(t *testing.T) {
 		projectRoot, statePath := setupMutationTestProject(t, func(state *models.State) {
 			now := time.Now().UTC()
@@ -286,7 +314,7 @@ func TestMutationCommandWiring(t *testing.T) {
 			"--repair-command",
 			"liza add-task --id architecture-2 --agent-id orchestrator-1 --json",
 			"--repair-evidence",
-			`command requires role type [orchestrator] but agent "coder-1" has type "doer"`,
+			`command=liza add-task --id architecture-2 --agent-id coder-1 --json exit_code=1 stderr=command requires role type [orchestrator] but agent "coder-1" has type "doer"`,
 			"--repair-validation",
 			"python -m pytest -q tests/backend/test_workflow_contract.py -q",
 		)

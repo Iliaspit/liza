@@ -51,6 +51,7 @@ const (
 	TaskEventApproved               TaskEventName = "approved"
 	TaskEventRejected               TaskEventName = "rejected"
 	TaskEventBlocked                TaskEventName = "blocked"
+	TaskEventUnblocked              TaskEventName = "unblocked"
 	TaskEventMerged                 TaskEventName = "merged"
 	TaskEventSuperseded             TaskEventName = "superseded"
 	TaskEventIntegrationFailed      TaskEventName = "integration_failed"

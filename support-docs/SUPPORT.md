@@ -214,7 +214,7 @@ Key agent fields:
 
 **Safe mutation methods (preference order):**
 
-1. **CLI commands** — `liza supersede-task`, `liza release-claim`, `liza recover-task`, etc. Always prefer these.
+1. **CLI commands** — `liza unblock-task`, `liza supersede-task`, `liza release-claim`, `liza recover-task`, etc. Always prefer these.
 2. **Line-level text edits** — For changes the CLI doesn't support (e.g., fixing `depends_on`, setting a status the CLI rejects). Use `liza pause` first to stop heartbeat updates, then back up before touching anything:
 
 ```bash
@@ -286,7 +286,7 @@ Exit 42 with `handoff_pending: true` on the task means context exhaustion — th
 ### BLOCKED task
 **Symptom**: Task in BLOCKED state, agents skip it.
 **Diagnosis**: Read `blocked_reason`, `blocked_questions`, and optional `repair_request` in state.yaml.
-**Fix**: Either `liza supersede-task <id> [replacements] --reason "..."` (replace with new tasks or mark completed externally) or resolve the blocker and use `liza recover-task <id>` to reset.
+**Fix**: If the blocker was repaired and the original worktree should continue, use `liza unblock-task <id> --assign-to <doer-agent-id> --reason "..."`. Otherwise use `liza supersede-task <id> [replacements] --reason "..."` (replace with new tasks or mark completed externally) or `liza recover-task <id>` to reset.
 
 ### Integration failure
 **Symptom**: Task in INTEGRATION_FAILED state.

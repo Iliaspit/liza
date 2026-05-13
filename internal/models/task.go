@@ -194,6 +194,24 @@ type RepairRequest struct {
 	Validation []string `yaml:"validation,omitempty" json:"validation,omitempty"`
 }
 
+// HasStructuredFailureEvidence reports whether evidence contains either a
+// process-style failure record (exit_code plus stderr/error) or a tool/provider
+// failure record (error without a process exit code).
+func (r RepairRequest) HasStructuredFailureEvidence() bool {
+	for _, value := range r.Evidence {
+		lower := strings.ToLower(value)
+		hasError := strings.Contains(lower, "error=")
+		if hasError && !strings.Contains(lower, "exit_code=") {
+			return true
+		}
+		if strings.Contains(lower, "exit_code=") &&
+			(strings.Contains(lower, "stderr=") || hasError) {
+			return true
+		}
+	}
+	return false
+}
+
 // Task represents a single task in the Liza system
 type Task struct {
 	ID                  string             `yaml:"id"`

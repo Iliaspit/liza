@@ -99,7 +99,10 @@ func BuildPipelineTransitions(r *pipeline.Resolver) map[models.TaskStatus][]mode
 	}
 
 	// Meta-state transitions
-	tm[models.TaskStatusBlocked] = []models.TaskStatus{models.TaskStatusSuperseded, models.TaskStatusAbandoned}
+	tm[models.TaskStatusBlocked] = append([]models.TaskStatus{
+		models.TaskStatusSuperseded,
+		models.TaskStatusAbandoned,
+	}, executingStatuses...)
 	tm[models.TaskStatusIntegrationFailed] = append([]models.TaskStatus{
 		models.TaskStatusAbandoned,
 		models.TaskStatusBlocked,

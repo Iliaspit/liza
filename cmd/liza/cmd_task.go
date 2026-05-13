@@ -339,6 +339,57 @@ Effects:
 	},
 }
 
+var unblockTaskCmd = &cobra.Command{
+	Use:   "unblock-task <task-id>",
+	Short: "Restore a repaired BLOCKED task to its executing state",
+	Long: `Restore a BLOCKED task after the orchestrator has verified that the blocker is gone.
+
+This is for repair completion, not normal task claiming. It moves the task back
+to the executing status for its role_pair, assigns it to the requested doer
+agent, clears stale blocked metadata, and records an unblocked history event.`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) (retErr error) {
+		if isJSON(cmd) {
+			log.SetOutput(io.Discard)
+			defer log.SetOutput(os.Stderr)
+			defer func() {
+				if retErr != nil && !errors.Is(retErr, jsonout.ErrAlreadyWritten) {
+					_ = jsonout.WriteResult(os.Stdout, nil, nil, retErr)
+					retErr = jsonout.ErrAlreadyWritten
+				}
+			}()
+		}
+
+		taskID := args[0]
+		assignTo, _ := cmd.Flags().GetString("assign-to")
+		reason, _ := cmd.Flags().GetString("reason")
+
+		agentID, err := resolveOrchestratorID(cmd)
+		if err != nil {
+			return err
+		}
+
+		projectRoot, err := requireProjectRoot()
+		if err != nil {
+			return err
+		}
+
+		resolver, err := loadResolverForRBAC(projectRoot)
+		if err != nil {
+			return err
+		}
+		if err := validateAllowedOperation(resolver, agentID, "unblock-task"); err != nil {
+			return err
+		}
+
+		if isJSON(cmd) {
+			result, err := ops.UnblockTask(projectRoot, taskID, assignTo, reason, agentID)
+			return jsonout.WriteResult(os.Stdout, result, nil, err)
+		}
+		return commands.UnblockTaskCommand(projectRoot, taskID, assignTo, reason, agentID)
+	},
+}
+
 func markBlockedOptionsFromFlags(cmd *cobra.Command) (ops.MarkBlockedOptions, error) {
 	operation, _ := cmd.Flags().GetString("repair-operation")
 	target, _ := cmd.Flags().GetString("repair-target")
@@ -949,6 +1000,7 @@ func init() {
 	rootCmd.AddCommand(cancelTaskCmd)
 	rootCmd.AddCommand(reconcileMergedCmd)
 	rootCmd.AddCommand(markBlockedCmd)
+	rootCmd.AddCommand(unblockTaskCmd)
 	rootCmd.AddCommand(assessBlockedCmd)
 	rootCmd.AddCommand(assessHypothesisExhaustedCmd)
 	rootCmd.AddCommand(writeCheckpointCmd)
@@ -963,6 +1015,7 @@ func init() {
 	addJSONFlag(cancelTaskCmd)
 	addJSONFlag(reconcileMergedCmd)
 	addJSONFlag(markBlockedCmd)
+	addJSONFlag(unblockTaskCmd)
 	addJSONFlag(assessBlockedCmd)
 	addJSONFlag(assessHypothesisExhaustedCmd)
 	addJSONFlag(writeCheckpointCmd)
@@ -992,6 +1045,13 @@ func init() {
 	markBlockedCmd.Flags().String("agent-id", "", "agent ID marking the task as blocked")
 	markBlockedCmd.MarkFlagRequired("reason")
 	markBlockedCmd.MarkFlagRequired("questions")
+
+	// Unblock-task command flags
+	unblockTaskCmd.Flags().String("agent-id", "", "orchestrator agent ID (auto-resolved if not provided)")
+	unblockTaskCmd.Flags().String("assign-to", "", "doer agent ID to resume the task (required)")
+	unblockTaskCmd.Flags().String("reason", "", "reason the blocked task can resume (required)")
+	unblockTaskCmd.MarkFlagRequired("assign-to")
+	unblockTaskCmd.MarkFlagRequired("reason")
 
 	// Assess-blocked command flags
 	assessBlockedCmd.Flags().String("agent-id", "", "orchestrator agent ID (auto-resolved if not provided)")

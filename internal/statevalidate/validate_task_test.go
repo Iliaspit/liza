@@ -144,7 +144,7 @@ func TestValidateTaskInvariants_EnforcesStatusSpecificRequiredFields(t *testing.
 				task.RepairRequest = &models.RepairRequest{
 					Target:     "architecture-2",
 					Command:    "liza add-task --json",
-					Evidence:   []string{"command requires role type [orchestrator]"},
+					Evidence:   []string{`command=liza add-task --json exit_code=1 stderr=command requires role type [orchestrator]`},
 					Validation: []string{"go test ./cmd/liza"},
 				}
 				return task
@@ -158,7 +158,7 @@ func TestValidateTaskInvariants_EnforcesStatusSpecificRequiredFields(t *testing.
 				task.RepairRequest = &models.RepairRequest{
 					Operation:  "add-task",
 					Command:    "liza add-task --json",
-					Evidence:   []string{"command requires role type [orchestrator]"},
+					Evidence:   []string{`command=liza add-task --json exit_code=1 stderr=command requires role type [orchestrator]`},
 					Validation: []string{"go test ./cmd/liza"},
 				}
 				return task
@@ -172,7 +172,7 @@ func TestValidateTaskInvariants_EnforcesStatusSpecificRequiredFields(t *testing.
 				task.RepairRequest = &models.RepairRequest{
 					Operation:  "add-task",
 					Target:     "architecture-2",
-					Evidence:   []string{"command requires role type [orchestrator]"},
+					Evidence:   []string{`command=liza add-task --json exit_code=1 stderr=command requires role type [orchestrator]`},
 					Validation: []string{"go test ./cmd/liza"},
 				}
 				return task
@@ -201,7 +201,7 @@ func TestValidateTaskInvariants_EnforcesStatusSpecificRequiredFields(t *testing.
 					Operation: "add-task",
 					Target:    "architecture-2",
 					Command:   "liza add-task --json",
-					Evidence:  []string{"command requires role type [orchestrator]"},
+					Evidence:  []string{`command=liza add-task --json exit_code=1 stderr=command requires role type [orchestrator]`},
 				}
 				return task
 			},
@@ -246,6 +246,25 @@ func TestValidateTaskInvariants_SupersededWithoutReplacements(t *testing.T) {
 	err := validateTaskInvariants(stateWithTasks(task), "", true, resolver, cfg)
 	if err != nil {
 		t.Errorf("superseded without replacements should be valid, got: %v", err)
+	}
+}
+
+func TestValidateTaskInvariants_LegacyRepairEvidenceRemainsValid(t *testing.T) {
+	cfg := loadTestConfig(t)
+	resolver := pipeline.NewResolver(cfg)
+
+	task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusBlocked, time.Now().UTC())
+	task.RepairRequest = &models.RepairRequest{
+		Operation:  "add-task",
+		Target:     "architecture-2",
+		Command:    "liza add-task --json",
+		Evidence:   []string{"command requires role type [orchestrator]"},
+		Validation: []string{"go test ./cmd/liza"},
+	}
+
+	err := validateTaskInvariants(stateWithTasks(task), "", true, resolver, cfg)
+	if err != nil {
+		t.Errorf("legacy repair evidence should remain valid, got: %v", err)
 	}
 }
 

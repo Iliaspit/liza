@@ -142,6 +142,9 @@ func normalizeRepairRequest(request *models.RepairRequest) (*models.RepairReques
 	if len(normalized.Validation) == 0 {
 		return nil, &PreconditionError{Reason: "repair request validation is required"}
 	}
+	if !normalized.HasStructuredFailureEvidence() {
+		return nil, &PreconditionError{Reason: "repair requests require structured failure evidence with exit_code= and stderr=, exit_code= and error=, or standalone error="}
+	}
 	return normalized, nil
 }
 

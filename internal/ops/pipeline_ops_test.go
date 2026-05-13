@@ -69,6 +69,35 @@ func TestLoadResolver_PipelineGoal(t *testing.T) {
 	}
 }
 
+func TestBuildPipelineTransitions_BlockedCanReturnToExecutingStatuses(t *testing.T) {
+	tmpDir, _ := setupPipelineTest(t)
+
+	resolver, _, err := loadResolver(tmpDir)
+	if err != nil {
+		t.Fatalf("loadResolver() error: %v", err)
+	}
+
+	transitions := BuildPipelineTransitions(resolver)
+	got := transitions[models.TaskStatusBlocked]
+	for _, want := range []models.TaskStatus{
+		models.TaskStatusCodePlanning,
+		models.TaskStatusImplementing,
+	} {
+		if !testContainsStatus(got, want) {
+			t.Fatalf("BLOCKED transitions = %v, want %s", got, want)
+		}
+	}
+}
+
+func testContainsStatus(values []models.TaskStatus, want models.TaskStatus) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
 func TestTransitionSourcePairs_PipelineGoal(t *testing.T) {
 	tmpDir, _ := setupPipelineTest(t)
 

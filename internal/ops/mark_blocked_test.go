@@ -142,7 +142,7 @@ func TestMarkBlockedWithOptions_RepairRequest(t *testing.T) {
 				Operation:  " add-task ",
 				Target:     " architecture-2 ",
 				Command:    " liza add-task --id architecture-2 --agent-id orchestrator-1 --json ",
-				Evidence:   []string{" command requires role type [orchestrator] ", ""},
+				Evidence:   []string{` command=liza add-task --id architecture-2 --agent-id coder-1 --json exit_code=1 stderr=command requires role type [orchestrator] `, ""},
 				Validation: []string{" python -m pytest -q tests/backend/test_workflow_contract.py -q "},
 			},
 		},
@@ -188,7 +188,7 @@ func TestMarkBlockedWithOptions_RepairRequestRequiresCompleteRequest(t *testing.
 		Operation:  "add-task",
 		Target:     "architecture-2",
 		Command:    "liza add-task --id architecture-2 --agent-id orchestrator-1 --json",
-		Evidence:   []string{"command requires role type [orchestrator]"},
+		Evidence:   []string{`command=liza add-task --id architecture-2 --agent-id coder-1 --json exit_code=1 stderr=command requires role type [orchestrator]`},
 		Validation: []string{"go test ./cmd/liza"},
 	}
 
@@ -241,6 +241,97 @@ func TestMarkBlockedWithOptions_RepairRequestRequiresCompleteRequest(t *testing.
 				t.Errorf("Error = %q, want %q", err.Error(), tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestMarkBlockedWithOptions_RepairRequestRequiresStructuredFailureEvidence(t *testing.T) {
+	_, err := MarkBlockedWithOptions(
+		"/nonexistent",
+		"task-1",
+		"Git metadata write access appears broken",
+		[]string{"Can the orchestrator restore git metadata write access?"},
+		"coder-1",
+		MarkBlockedOptions{
+			RepairRequest: &models.RepairRequest{
+				Operation:  "index_lock_stuck",
+				Target:     ".git/worktrees/task-1",
+				Command:    "git -C .worktrees/task-1 add file.txt",
+				Evidence:   []string{"git add failed with read-only filesystem creating index.lock"},
+				Validation: []string{"git -C .worktrees/task-1 add file.txt"},
+			},
+		},
+	)
+	if err == nil {
+		t.Fatal("Expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "structured failure evidence") {
+		t.Fatalf("Error = %q, want structured failure evidence", err.Error())
+	}
+}
+
+func TestMarkBlockedWithOptions_RepairRequestAcceptsStructuredFailureEvidence(t *testing.T) {
+	tmpDir := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, tmpDir)
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+
+	now := time.Now().UTC()
+	state := testhelpers.CreateValidState()
+	state.Tasks = []models.Task{
+		testhelpers.BuildTaskByStatus("task-1", models.TaskStatusImplementing, now),
+	}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	_, err := MarkBlockedWithOptions(
+		tmpDir,
+		"task-1",
+		"Git metadata write access appears broken",
+		[]string{"Can the orchestrator restore git metadata write access?"},
+		"coder-1",
+		MarkBlockedOptions{
+			RepairRequest: &models.RepairRequest{
+				Operation:  "restore_git_write_access",
+				Target:     ".git/worktrees/task-1",
+				Command:    "git -C .worktrees/task-1 add file.txt",
+				Evidence:   []string{"command=git -C .worktrees/task-1 add file.txt exit_code=128 stderr=fatal: Unable to create index.lock: Read-only file system"},
+				Validation: []string{"git -C .worktrees/task-1 add file.txt"},
+			},
+		},
+	)
+	if err != nil {
+		t.Fatalf("MarkBlockedWithOptions() error: %v", err)
+	}
+}
+
+func TestMarkBlockedWithOptions_RepairRequestAcceptsStandaloneErrorEvidence(t *testing.T) {
+	tmpDir := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, tmpDir)
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+
+	now := time.Now().UTC()
+	state := testhelpers.CreateValidState()
+	state.Tasks = []models.Task{
+		testhelpers.BuildTaskByStatus("task-1", models.TaskStatusImplementing, now),
+	}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	_, err := MarkBlockedWithOptions(
+		tmpDir,
+		"task-1",
+		"Provider repair is orchestrator-only",
+		[]string{"Can the orchestrator repair the provider state?"},
+		"coder-1",
+		MarkBlockedOptions{
+			RepairRequest: &models.RepairRequest{
+				Operation:  "repair-provider-state",
+				Target:     "provider/codex",
+				Command:    "provider session repair",
+				Evidence:   []string{"error=provider session thread not found"},
+				Validation: []string{"liza status --json"},
+			},
+		},
+	)
+	if err != nil {
+		t.Fatalf("MarkBlockedWithOptions() error: %v", err)
 	}
 }
 
