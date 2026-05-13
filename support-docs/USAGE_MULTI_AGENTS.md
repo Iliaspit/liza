@@ -84,8 +84,8 @@ liza version
 
 **1. Global Setup (one-time)**
 ```bash
-liza setup          # installs contracts, skills, and support docs to ~/.liza/
-liza setup --force  # overwrite existing (e.g., after liza upgrade)
+liza setup --claude --codex  # installs contracts, skills, support docs, and provider integrations
+liza setup --claude --codex --force           # overwrite existing (e.g., after liza upgrade)
 liza setup --agent-tools ~/my-agent-tools.md  # use custom AGENT_TOOLS.md
 ```
 
@@ -106,11 +106,13 @@ liza setup --agent-tools ~/my-agent-tools.md  # use custom AGENT_TOOLS.md
 > **Commit your spec file before running `liza init`.** Worktrees are created from the current branch — uncommitted files won't be visible to agents.
 
 ```bash
-# Interactive wizard (recommended for first use):
+# Interactive wizard: walks through setup choices.
 liza init
-# Walks through: mode selection → agent selection → project details → conflict resolution
 
-# Or with explicit flags:
+# Repo initialization only: creates provider contract links/hooks/config.
+liza init --claude --codex
+
+# MAS run initialization: creates .liza/state.yaml from a goal/spec.
 liza init "[Goal description]" --spec [spec_ref]
 
 # spec_ref: Path to goal specification (default: specs/vision.md)
