@@ -483,6 +483,7 @@ func (m Model) renderTaskPanel(budget int) string {
 // Three source formats per spec §Activity Panel.
 func (m Model) renderActivityPanel(height int) string {
 	title := m.styles.PanelTitle.Render("⚡ ACTIVITY")
+	contentWidth := max(m.width-4, 1) // panel border plus default horizontal padding
 
 	if len(m.activities) == 0 {
 		return m.styles.ActivityPanel.Height(max(height-2, 1)).Render(title)
@@ -497,11 +498,18 @@ func (m Model) renderActivityPanel(height int) string {
 
 	var rows []string
 	for _, e := range visible {
-		rows = append(rows, m.formatActivityEntry(e))
+		rows = append(rows, truncateActivityLine(m.formatActivityEntry(e), contentWidth))
 	}
 
 	content := title + "\n" + strings.Join(rows, "\n")
 	return m.styles.ActivityPanel.Height(max(height-2, 1)).Render(content)
+}
+
+func truncateActivityLine(line string, maxWidth int) string {
+	if maxWidth <= 0 {
+		return ""
+	}
+	return lipgloss.NewStyle().Inline(true).MaxWidth(maxWidth).Render(line)
 }
 
 // formatActivityEntry formats a single activity entry based on its source type.

@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/liza-mas/liza/internal/models"
 )
 
@@ -1023,6 +1024,32 @@ func TestRenderActivityPanel_HasBorderedPanel(t *testing.T) {
 	if !strings.Contains(out, "╭") && !strings.Contains(out, "┌") {
 		// Either rounded or normal border should be present
 		t.Log("Note: border characters may not be present in no-color/no-tty mode")
+	}
+}
+
+func TestRenderActivityPanel_TruncatesLongRowsToPanelWidth(t *testing.T) {
+	m := Model{
+		width:      80,
+		height:     24,
+		columnTier: ColumnTierStandard,
+		styles:     NewStyles(80),
+		activities: []ActivityEntry{
+			{
+				Timestamp: time.Date(2026, 5, 14, 0, 7, 3, 0, time.UTC),
+				Source:    "log",
+				Agent:     "codex-1",
+				Action:    "aggregated_output",
+				Task:      "task-1",
+				Detail:    strings.Repeat("surface-eating-detail ", 20),
+			},
+		},
+	}
+
+	out := m.renderActivityPanel(6)
+	for _, line := range strings.Split(out, "\n") {
+		if got := lipgloss.Width(line); got > m.width {
+			t.Fatalf("activity panel line width = %d, want <= %d\nline: %q", got, m.width, line)
+		}
 	}
 }
 
