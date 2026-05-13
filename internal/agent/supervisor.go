@@ -449,6 +449,9 @@ func codexAdditionalDirs(projectRoot string, state *models.State, taskID string)
 		task := state.FindTask(taskID)
 		if task != nil {
 			dirs = append(dirs, resolveWorktreePath(projectRoot, task.Worktree))
+			if task.Worktree != nil && *task.Worktree != "" {
+				dirs = append(dirs, filepath.Join(projectRoot, ".git"))
+			}
 		}
 	}
 	return uniqueNonEmptyStrings(dirs)

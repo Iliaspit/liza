@@ -74,7 +74,7 @@ args = ["-y", "@modelcontextprotocol/server-filesystem", "/home/<USER>/.claude",
 # Codex agents access Liza via `liza` CLI commands through Bash — no MCP server needed.
 ```
 
-If Codex agents must run `git add`, `git commit`, `git worktree`, or Liza review submission flows from a repo worktree, the active project root and its `.git` directory must both be listed in `writable_roots`. `liza init --codex` manages these project-specific entries and `/tmp` for scratch files. Without the `.git` entry, Codex may mount git metadata read-only even when the worktree files themselves are writable, which blocks creation of `index.lock` under `.git/worktrees/...`.
+If Codex agents must run `git add`, `git commit`, `git worktree`, or Liza review submission flows from a repo worktree, the active project root and its `.git` directory must both be listed in `writable_roots`. `liza init --codex` manages these project-specific entries and `/tmp` for scratch files. Liza also passes the task worktree and project `.git` directory as explicit `--add-dir` entries when launching Codex for a claimed task. Without writable access to `.git`, Codex may mount git metadata read-only even when the worktree files themselves are writable, which blocks creation of `index.lock` under `.git/worktrees/...`.
 
 After editing `~/.codex/config.toml`, restart Codex completely before testing.
 

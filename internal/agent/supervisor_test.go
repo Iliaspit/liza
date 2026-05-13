@@ -817,7 +817,7 @@ func TestCodexAdditionalDirs(t *testing.T) {
 		}
 	})
 
-	t.Run("task worktree is added", func(t *testing.T) {
+	t.Run("task worktree and git metadata are added", func(t *testing.T) {
 		projectRoot := "/tmp/project"
 		worktreeRel := ".worktrees/task-1"
 		state := &models.State{
@@ -833,6 +833,9 @@ func TestCodexAdditionalDirs(t *testing.T) {
 
 		if !slices.Contains(dirs, filepath.Join(projectRoot, worktreeRel)) {
 			t.Fatalf("dirs = %v, want task worktree", dirs)
+		}
+		if !slices.Contains(dirs, filepath.Join(projectRoot, ".git")) {
+			t.Fatalf("dirs = %v, want project git metadata dir", dirs)
 		}
 	})
 }

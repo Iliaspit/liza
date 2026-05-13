@@ -38,6 +38,11 @@ write git metadata for commits, worktrees, and review flows. If the file already
 exists, Liza prompts before merging those entries and preserves unrelated
 settings.
 
+When launching Codex for a claimed task, Liza passes both the task worktree and
+the project `.git` directory as explicit `--add-dir` entries. This is required
+because Git worktrees write the task index under the main repo metadata path
+(`.git/worktrees/<task>/index.lock`), not under the worktree directory itself.
+
 This is not the full Codex baseline. Users still own broader settings such as
 `approval_policy`, `sandbox_mode`, `network_access`, cache directories like
 `~/.npm`, and MCP server configuration. See
