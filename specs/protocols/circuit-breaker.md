@@ -211,6 +211,17 @@ The pattern conditions use pseudo-functions for matching:
 4. REASSESS affected tasks
 5. RESUME after artifacts updated
 
+## Anomalies (trimmed)
+1. `retry_loop` at `2025-01-18T17:29:00Z`
+   - task: `task-3`
+   - reporter: `coder-1`
+   - message_excerpt: `serialization failure on nested entity`
+
+## Anomalies (raw)
+```yaml
+# Full anomaly payloads for audit/debugging.
+```
+
 ## Human Decision Required
 - [ ] Acknowledge report
 - [ ] Confirm severity assessment

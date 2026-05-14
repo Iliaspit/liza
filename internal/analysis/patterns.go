@@ -1,6 +1,7 @@
 package analysis
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -226,6 +227,8 @@ func GenerateReport(result PatternResult, anomalies []models.Anomaly, timestamp 
 	sb.WriteString(result.Evidence)
 	sb.WriteString("\n\n")
 
+	writeTrimmedAnomalies(&sb, anomalies)
+
 	sb.WriteString("## Anomalies (raw)\n\n")
 	sb.WriteString("```yaml\n")
 	yamlData, err := yaml.Marshal(anomalies)
@@ -244,4 +247,95 @@ func GenerateReport(result PatternResult, anomalies []models.Anomaly, timestamp 
 	sb.WriteString("- [ ] Release checkpoint with decision logged\n")
 
 	return sb.String()
+}
+
+func writeTrimmedAnomalies(sb *strings.Builder, anomalies []models.Anomaly) {
+	sb.WriteString("## Anomalies (trimmed)\n\n")
+	if len(anomalies) == 0 {
+		sb.WriteString("_None_\n\n")
+		return
+	}
+
+	for i, anomaly := range anomalies {
+		task := anomaly.Task
+		if task == "" {
+			task = "-"
+		}
+		fmt.Fprintf(sb, "%d. `%s` at `%s`\n", i+1, anomaly.Type, anomaly.Timestamp.Format(time.RFC3339Nano))
+		fmt.Fprintf(sb, "   - task: `%s`\n", task)
+		fmt.Fprintf(sb, "   - reporter: `%s`\n", anomaly.Reporter)
+		writeTrimmedDetail(sb, "provider", anomaly.Details)
+		writeTrimmedDetail(sb, "agent_id", anomaly.Details)
+		writeTrimmedDetail(sb, "impact", anomaly.Details)
+		writeTrimmedMessage(sb, anomaly.Details)
+		sb.WriteString("\n")
+	}
+}
+
+func writeTrimmedDetail(sb *strings.Builder, key string, details map[string]any) {
+	value, ok := details[key].(string)
+	if !ok || value == "" {
+		return
+	}
+	fmt.Fprintf(sb, "   - %s: `%s`\n", key, compactText(value, 240))
+}
+
+func writeTrimmedMessage(sb *strings.Builder, details map[string]any) {
+	message, ok := details["message"].(string)
+	if !ok || message == "" {
+		return
+	}
+
+	if writeProviderMessageSummary(sb, message) {
+		return
+	}
+	fmt.Fprintf(sb, "   - message_excerpt: `%s`\n", compactText(message, 500))
+}
+
+func writeProviderMessageSummary(sb *strings.Builder, message string) bool {
+	var event struct {
+		Type string `json:"type"`
+		Item struct {
+			Type             string `json:"type"`
+			Command          string `json:"command"`
+			AggregatedOutput string `json:"aggregated_output"`
+			ExitCode         *int   `json:"exit_code"`
+			Status           string `json:"status"`
+		} `json:"item"`
+	}
+	if err := json.Unmarshal([]byte(message), &event); err != nil {
+		return false
+	}
+
+	wrote := false
+	if event.Type != "" || event.Item.Type != "" {
+		fmt.Fprintf(sb, "   - provider_event: `%s / %s`\n", compactText(event.Type, 80), compactText(event.Item.Type, 80))
+		wrote = true
+	}
+	if event.Item.Command != "" {
+		fmt.Fprintf(sb, "   - command: `%s`\n", compactText(event.Item.Command, 240))
+		wrote = true
+	}
+	if event.Item.Status != "" || event.Item.ExitCode != nil {
+		exitCode := "-"
+		if event.Item.ExitCode != nil {
+			exitCode = fmt.Sprintf("%d", *event.Item.ExitCode)
+		}
+		fmt.Fprintf(sb, "   - status: `%s`, exit_code: `%s`\n", compactText(event.Item.Status, 80), exitCode)
+		wrote = true
+	}
+	if event.Item.AggregatedOutput != "" {
+		fmt.Fprintf(sb, "   - aggregated_output_chars: `%d`\n", len(event.Item.AggregatedOutput))
+		wrote = true
+	}
+	return wrote
+}
+
+func compactText(value string, limit int) string {
+	compacted := strings.Join(strings.Fields(value), " ")
+	runes := []rune(compacted)
+	if len(runes) <= limit {
+		return strings.ReplaceAll(compacted, "`", "'")
+	}
+	return strings.ReplaceAll(string(runes[:limit])+"...", "`", "'")
 }

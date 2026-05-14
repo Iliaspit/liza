@@ -1,6 +1,7 @@
 package analysis
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -474,6 +475,7 @@ func TestGenerateReport(t *testing.T) {
 		"**Severity:** ARCHITECTURE_FLAW",
 		"## Trigger Evidence",
 		"3 retry_loop anomalies with similar error patterns",
+		"## Anomalies (trimmed)",
 		"## Anomalies (raw)",
 		"## Human Decision Required",
 		"- [ ] Acknowledge report",
@@ -486,6 +488,65 @@ func TestGenerateReport(t *testing.T) {
 		if !contains(report, section) {
 			t.Errorf("GenerateReport() missing expected section: %q", section)
 		}
+	}
+}
+
+func TestGenerateReportTrimsProviderAuditMessages(t *testing.T) {
+	now := time.Date(2026, 5, 14, 10, 45, 25, 0, time.UTC)
+	longOutput := strings.Repeat("SUPPORT_FULL_TEXT ", 200)
+	message := `{"type":"item.completed","item":{"type":"command_execution","command":"/usr/bin/zsh -lc 'cat .liza/SUPPORT.md'","aggregated_output":"` + longOutput + `","exit_code":0,"status":"completed"}}`
+	anomalies := []models.Anomaly{
+		{
+			Timestamp: now,
+			Reporter:  "orchestrator-1",
+			Type:      "provider_audit_degraded",
+			Details: map[string]any{
+				"provider": "codex",
+				"agent_id": "orchestrator-1",
+				"impact":   "provider transcript or rollout persistence may be incomplete",
+				"message":  message,
+			},
+		},
+	}
+
+	report := GenerateReport(PatternResult{
+		Triggered: true,
+		Pattern:   "provider_audit_degradation",
+		Severity:  "OBSERVABILITY_DEGRADED",
+		Evidence:  "1 provider_audit_degraded anomaly",
+	}, anomalies, now)
+
+	trimmedStart := strings.Index(report, "## Anomalies (trimmed)")
+	rawStart := strings.Index(report, "## Anomalies (raw)")
+	if trimmedStart == -1 {
+		t.Fatal("report missing trimmed anomalies section")
+	}
+	if rawStart == -1 {
+		t.Fatal("report missing raw anomalies section")
+	}
+	if trimmedStart > rawStart {
+		t.Fatal("trimmed anomalies section should appear before raw anomalies section")
+	}
+
+	trimmedSection := report[trimmedStart:rawStart]
+	expectedTrimmed := []string{
+		"provider: `codex`",
+		"agent_id: `orchestrator-1`",
+		"provider_event: `item.completed / command_execution`",
+		"command: `/usr/bin/zsh -lc 'cat .liza/SUPPORT.md'`",
+		"status: `completed`, exit_code: `0`",
+		"aggregated_output_chars:",
+	}
+	for _, want := range expectedTrimmed {
+		if !strings.Contains(trimmedSection, want) {
+			t.Errorf("trimmed section missing %q\nsection:\n%s", want, trimmedSection)
+		}
+	}
+	if strings.Contains(trimmedSection, "SUPPORT_FULL_TEXT") {
+		t.Fatal("trimmed section should not include raw aggregated output")
+	}
+	if !strings.Contains(report[rawStart:], "SUPPORT_FULL_TEXT") {
+		t.Fatal("raw section should preserve full anomaly payload")
 	}
 }
 

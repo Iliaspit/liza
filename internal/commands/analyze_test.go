@@ -189,6 +189,7 @@ func TestAnalyzeCommand(t *testing.T) {
 					"**Pattern:**",
 					"**Severity:**",
 					"## Trigger Evidence",
+					"## Anomalies (trimmed)",
 					"## Anomalies (raw)",
 					"## Human Decision Required",
 				}
