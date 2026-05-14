@@ -26,6 +26,7 @@ func TestTaskEventNameConstants(t *testing.T) {
 		{"IntegrationFailed", TaskEventIntegrationFailed, "integration_failed"},
 		{"HandoffInitiated", TaskEventHandoffInitiated, "handoff_initiated"},
 		{"HandoffResumed", TaskEventHandoffResumed, "handoff_resumed"},
+		{"OwnedTaskResumed", TaskEventOwnedTaskResumed, "owned_task_resumed"},
 		{"TransitionExecuted", TaskEventTransitionExecuted, "transition_executed"},
 		{"TransitionCrashRecov", TaskEventTransitionCrashRecov, "transition_crash_recovery"},
 		{"ReviewVerdictApproved", TaskEventReviewVerdictApproved, "review_verdict_approved"},

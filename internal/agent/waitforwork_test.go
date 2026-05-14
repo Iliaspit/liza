@@ -247,6 +247,42 @@ func TestWaitForCodePlannerWork(t *testing.T) {
 	}
 }
 
+func TestWaitForCodePlannerWork_OwnedExecutingTaskWakesAfterRestart(t *testing.T) {
+	tmpDir := t.TempDir()
+	statePath, _ := testhelpers.SetupLizaDir(t, tmpDir)
+
+	now := time.Now().UTC()
+	agentID := "code-planner-1"
+	task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusCodePlanning, now)
+	task.AssignedTo = &agentID
+	worktree := ".worktrees/task-1"
+	task.Worktree = &worktree
+	task.LeaseExpires = testhelpers.TimePtr(now.Add(30 * time.Minute))
+
+	state := testhelpers.CreateValidState()
+	state.Tasks = []models.Task{task}
+	state.Agents[agentID] = models.Agent{
+		Role:      models.RoleCodePlanner,
+		Status:    models.AgentStatusIdle,
+		Heartbeat: now,
+		Terminal:  "test",
+	}
+	testhelpers.WriteInitialState(t, statePath, state)
+
+	config := SupervisorConfig{StatePath: statePath, AgentID: agentID, ProjectRoot: tmpDir}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	strategy, _ := NewRoleStrategy("code-planner", testResolver(t))
+	hasWork, err := strategy.WaitForWork(ctx, db.New(statePath), config, 10*time.Millisecond, 100*time.Millisecond)
+	if err != nil {
+		t.Fatalf("WaitForWork() error = %v", err)
+	}
+	if !hasWork {
+		t.Fatal("WaitForWork() = false, want true")
+	}
+}
+
 func TestWaitForCodePlanReviewerWork(t *testing.T) {
 	now := time.Now().UTC()
 

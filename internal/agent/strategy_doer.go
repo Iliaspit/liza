@@ -68,8 +68,9 @@ func (s *doerStrategy) WaitForWork(ctx context.Context, bb *db.Blackboard, confi
 		func(state *models.State) (bool, string) {
 			claimable := models.CountClaimableTasks(state, s.role, pr)
 			resumableHandoffs := countResumableHandoffTasks(state, config.AgentID, pr)
+			resumableOwned := ops.CountResumableOwnedTasks(state, config.AgentID, pr)
 
-			logMsg := fmt.Sprintf("%s: %d claimable, %d resumable handoffs", s.role, claimable, resumableHandoffs)
+			logMsg := fmt.Sprintf("%s: %d claimable, %d resumable handoffs, %d resumable owned", s.role, claimable, resumableHandoffs, resumableOwned)
 
 			// Use richer diagnostics for coder role
 			if s.role == "coder" {
@@ -83,8 +84,16 @@ func (s *doerStrategy) WaitForWork(ctx context.Context, bb *db.Blackboard, confi
 					}
 				}
 			}
+			if resumableOwned > 0 {
+				ownedMsg := fmt.Sprintf("Found %d resumable owned task(s) for %s", resumableOwned, config.AgentID)
+				if logMsg != "" {
+					logMsg = ownedMsg + "; " + logMsg
+				} else {
+					logMsg = ownedMsg
+				}
+			}
 
-			return claimable > 0 || resumableHandoffs > 0, logMsg
+			return claimable > 0 || resumableHandoffs > 0 || resumableOwned > 0, logMsg
 		})
 }
 

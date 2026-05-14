@@ -45,6 +45,7 @@ This continues the principle from [ADR-0006](ADR/0006-supervisor-assigns-work.md
 | Post-exit reset to IDLE | After CLI exits | Agent is gone — can't update own status |
 | Orchestrator status setup | Before orchestrator launch | Sets WORKING atomically before agent sees blackboard |
 | Handoff resume detection | Before fresh claim | Supervisor checks for `handoff_pending` tasks to resume |
+| Owned executing recovery | Before fresh claim | Supervisor resumes tasks already assigned to the same doer after child CLI exit/restart |
 
 ### Supervisor-Guaranteed + CLI Fallback
 
@@ -58,6 +59,8 @@ These actions are **automatically triggered by the supervisor loop**. The CLI co
 | Stale review clearing | Reviewer startup (`registerAgent`) | `liza clear-stale-review-claims` | `commands.ClearStaleReviewClaimsCommand` |
 
 **Why CLI fallback exists:** Orchestrators or humans may need to trigger these manually (e.g., merge a task approved outside the normal reviewer flow, or clear a stale claim without restarting).
+
+Doer supervisors check work in this order: explicit handoff resume, owned executing recovery, then fresh claim. Owned executing recovery is not a handoff: it applies when an executing task is already assigned to the supervisor's agent ID, `handoff_pending` is false, the registered agent role matches the task role-pair's doer role, and the agent is either idle or already points at that task. Before spawning a replacement child CLI, the supervisor validates the existing worktree; missing or unhealthy worktrees transition the task to `BLOCKED` with a diagnostic instead of entering a restart loop.
 
 ### Agent-Initiated (via CLI commands)
 

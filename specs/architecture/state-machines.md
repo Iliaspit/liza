@@ -500,9 +500,20 @@ When exit 42 is triggered by context exhaustion:
 4. Supervisor restarts agent process (fresh LLM context)
 5. On startup, restarted agent checks `handoff_pending`:
    - `true` → read handoff, clear flag, resume work
-   - `false` → normal startup (exit was for pause/checkpoint, not context)
+   - `false` → normal startup or owned executing recovery
 
 **Distinction:** Exit 42 always restarts the agent process. The `handoff_pending` flag tells the restarted agent whether to read handoff notes or proceed normally.
+
+### Owned Executing Recovery
+
+Before claiming fresh work, doer supervisors also look for executing tasks already assigned to their agent ID with `handoff_pending: false`. This covers cases where the supervisor process is still alive or has restarted, but the child CLI that owned the task is gone. The recovery predicate is state-only and shared by wake detection and claim-time recovery:
+
+- task is in the role-pair executing status
+- `assigned_to` equals the supervisor's agent ID
+- registered agent role equals the role-pair doer role
+- agent `current_task` is empty or points at this task
+
+Resume then validates the task's worktree metadata and on-disk health. Healthy worktrees are resumed with an `owned_task_resumed` history event and a renewed lease. Missing or unhealthy worktrees transition the task to `BLOCKED` with a diagnostic instead of spawning a child process that would fail immediately.
 
 ---
 

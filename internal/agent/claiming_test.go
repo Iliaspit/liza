@@ -4,12 +4,141 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/liza-mas/liza/internal/db"
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/ops"
 	"github.com/liza-mas/liza/internal/testhelpers"
 )
+
+func TestClaimDoerTask_ResumesOwnedTaskBeforeFreshClaim(t *testing.T) {
+	tmpDir := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, tmpDir)
+	statePath, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	testhelpers.CreateTestWorktree(t, tmpDir, "task-owned")
+
+	now := time.Now().UTC()
+	agentID := "coder-1"
+	owned := testhelpers.BuildTaskByStatus("task-owned", models.TaskStatusImplementing, now)
+	owned.AssignedTo = &agentID
+	fresh := testhelpers.BuildTaskByStatus("task-fresh", models.TaskStatusReady, now)
+
+	state := testhelpers.CreateValidState()
+	state.Tasks = []models.Task{fresh, owned}
+	state.Agents[agentID] = models.Agent{
+		Role:        models.RoleCoder,
+		Status:      models.AgentStatusIdle,
+		CurrentTask: nil,
+		Heartbeat:   now,
+		Terminal:    "test",
+	}
+	testhelpers.WriteInitialState(t, statePath, state)
+
+	taskID, worktree, err := claimDoerTask(tmpDir, agentID, models.RoleCoder, db.New(statePath))
+	if err != nil {
+		t.Fatalf("claimDoerTask() error = %v", err)
+	}
+	if taskID != "task-owned" {
+		t.Fatalf("taskID = %q, want task-owned", taskID)
+	}
+	if worktree != ".worktrees/task-owned" {
+		t.Errorf("worktree = %q, want .worktrees/task-owned", worktree)
+	}
+}
+
+func TestClaimDoerTask_ResumesHandoffBeforeOwnedTask(t *testing.T) {
+	tmpDir := t.TempDir()
+	statePath, _ := testhelpers.SetupLizaDir(t, tmpDir)
+
+	now := time.Now().UTC()
+	agentID := "coder-1"
+	handoff := testhelpers.BuildTaskByStatus("task-handoff", models.TaskStatusImplementing, now)
+	handoff.AssignedTo = &agentID
+	handoff.HandoffPending = true
+	owned := testhelpers.BuildTaskByStatus("task-owned", models.TaskStatusImplementing, now)
+	owned.AssignedTo = &agentID
+
+	state := testhelpers.CreateValidState()
+	state.Tasks = []models.Task{owned, handoff}
+	state.Agents[agentID] = models.Agent{
+		Role:        models.RoleCoder,
+		Status:      models.AgentStatusWorking,
+		CurrentTask: &handoff.ID,
+		Heartbeat:   now,
+		Terminal:    "test",
+	}
+	testhelpers.WriteInitialState(t, statePath, state)
+
+	taskID, _, err := claimDoerTask(tmpDir, agentID, models.RoleCoder, db.New(statePath))
+	if err != nil {
+		t.Fatalf("claimDoerTask() error = %v", err)
+	}
+	if taskID != "task-handoff" {
+		t.Fatalf("taskID = %q, want task-handoff", taskID)
+	}
+}
+
+func TestClaimDoerTask_ResumesEpicPlannerHandoff(t *testing.T) {
+	tmpDir := t.TempDir()
+	statePath, _ := testhelpers.SetupLizaDir(t, tmpDir)
+
+	now := time.Now().UTC()
+	agentID := "epic-planner-1"
+	worktree := ".worktrees/epic-1"
+	task := models.Task{
+		ID:             "epic-1",
+		Type:           models.TaskTypeEpicPlanning,
+		Description:    "Test epic",
+		Status:         models.TaskStatus("EPIC_PLANNING"),
+		Priority:       1,
+		Created:        now,
+		SpecRef:        "README.md",
+		DoneWhen:       "Epic is planned",
+		Scope:          "Test scope",
+		RolePair:       "epic-planning-pair",
+		AssignedTo:     &agentID,
+		Worktree:       &worktree,
+		HandoffPending: true,
+		History:        []models.TaskHistoryEntry{},
+	}
+	state := testhelpers.CreateValidState()
+	state.Tasks = []models.Task{task}
+	state.Agents[agentID] = models.Agent{
+		Role:        models.RoleEpicPlanner,
+		Status:      models.AgentStatusWorking,
+		CurrentTask: &task.ID,
+		Heartbeat:   now,
+		Terminal:    "test",
+	}
+	testhelpers.WriteInitialState(t, statePath, state)
+
+	taskID, gotWorktree, err := claimDoerTask(tmpDir, agentID, models.RoleEpicPlanner, db.New(statePath))
+	if err != nil {
+		t.Fatalf("claimDoerTask() error = %v", err)
+	}
+	if taskID != "epic-1" {
+		t.Fatalf("taskID = %q, want epic-1", taskID)
+	}
+	if gotWorktree != worktree {
+		t.Errorf("worktree = %q, want %q", gotWorktree, worktree)
+	}
+
+	readState, err := db.New(statePath).Read()
+	if err != nil {
+		t.Fatalf("read state: %v", err)
+	}
+	readTask := readState.FindTask("epic-1")
+	if readTask == nil {
+		t.Fatal("epic-1 not found")
+	}
+	if readTask.HandoffPending {
+		t.Fatal("handoff_pending = true, want false")
+	}
+	if len(readTask.History) == 0 || readTask.History[len(readTask.History)-1].Event != models.TaskEventHandoffResumed {
+		t.Errorf("last history event = %v, want %s", readTask.History, models.TaskEventHandoffResumed)
+	}
+}
 
 // TestHasPendingMerges tests the hasPendingMerges function
 func TestHasPendingMerges(t *testing.T) {

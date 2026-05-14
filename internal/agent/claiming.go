@@ -17,18 +17,31 @@ import (
 func claimDoerTask(projectRoot, agentID, role string, bb *db.Blackboard) (taskID, worktree string, err error) {
 	logger := GetLogger()
 
-	if role == models.RoleCoder || role == models.RoleCodePlanner {
-		handoffResult, err := ops.ResumeHandoff(ops.ResumeHandoffInput{
-			ProjectRoot: projectRoot,
-			AgentID:     agentID,
-		})
-		if err != nil {
-			return "", "", err
-		}
-		if handoffResult.Found {
-			logger.Info("Resuming claimed task from handoff", "task_id", handoffResult.TaskID, "agent_id", agentID)
-			return handoffResult.TaskID, handoffResult.Worktree, nil
-		}
+	handoffResult, err := ops.ResumeHandoff(ops.ResumeHandoffInput{
+		ProjectRoot: projectRoot,
+		AgentID:     agentID,
+	})
+	if err != nil {
+		return "", "", err
+	}
+	if handoffResult.Found {
+		logger.Info("Resuming claimed task from handoff", "task_id", handoffResult.TaskID, "agent_id", agentID)
+		return handoffResult.TaskID, handoffResult.Worktree, nil
+	}
+
+	ownedResult, err := ops.ResumeOwnedTask(ops.ResumeOwnedTaskInput{
+		ProjectRoot: projectRoot,
+		AgentID:     agentID,
+	})
+	if err != nil {
+		return "", "", err
+	}
+	if ownedResult.Found {
+		logger.Info("Resuming owned executing task", "task_id", ownedResult.TaskID, "agent_id", agentID)
+		return ownedResult.TaskID, ownedResult.Worktree, nil
+	}
+	if ownedResult.Blocked {
+		logger.Warn("Blocked owned executing task during resume", "task_id", ownedResult.BlockedTaskID, "agent_id", agentID, "reason", ownedResult.BlockReason)
 	}
 
 	state, err := bb.Read()

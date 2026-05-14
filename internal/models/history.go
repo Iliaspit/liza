@@ -57,6 +57,7 @@ const (
 	TaskEventIntegrationFailed      TaskEventName = "integration_failed"
 	TaskEventHandoffInitiated       TaskEventName = "handoff_initiated"
 	TaskEventHandoffResumed         TaskEventName = "handoff_resumed"
+	TaskEventOwnedTaskResumed       TaskEventName = "owned_task_resumed"
 	TaskEventTransitionExecuted     TaskEventName = "transition_executed"
 	TaskEventTransitionCrashRecov   TaskEventName = "transition_crash_recovery"
 	TaskEventReviewVerdictApproved  TaskEventName = "review_verdict_approved"
