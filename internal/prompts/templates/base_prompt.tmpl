@@ -77,6 +77,9 @@ SESSION EXIT CODES (observed by supervisor — not Bash commands):
 TIMESTAMPS: YYYY-MM-DDTHH:MM:SSZ (ISO 8601 UTC). Generate: date -u +%Y-%m-%dT%H:%M:%SZ
 
 FIRST ACTIONS:
+⚠️  A session-init hook BLOCKS all non-read tool calls until the contract files are read.
+    Any Bash command other than cat/head/tail/sed/wc will be rejected.
+    Use file-read tools (Read, filesystem MCP) or cat — nothing else until step 1 is done.
 1. Read these contract files before anything else:
    - ~/.liza/MULTI_AGENT_MODE.md
    - ~/.liza/AGENT_TOOLS.md
