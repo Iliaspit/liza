@@ -18,7 +18,15 @@
 <script type="text/babel">
 const { useState, useMemo, useCallback } = React;
 
+const TOP_ITEMS_LIMIT = 10;
+
 // --- Parsers ---
+
+function parseTimestampMs(ts) {
+  if (!ts) return 0;
+  const ms = Date.parse(ts);
+  return Number.isFinite(ms) ? ms : 0;
+}
 
 function measureSparseItem(item) {
   const t = item.type;
@@ -38,6 +46,7 @@ function parseCoderLog(lines) {
   const turns = [];
   let usage = null;
   let threadId = null;
+  let outerTurns = 0;
   let currentOuterTurnHasAction = false;
   const toolTypes = new Set(["command_execution", "mcp_tool_call", "file_change"]);
 
@@ -51,7 +60,10 @@ function parseCoderLog(lines) {
     try {
       const obj = JSON.parse(line);
       if (obj.type === "thread.started") threadId = obj.thread_id;
-      if (obj.type === "turn.started") currentOuterTurnHasAction = false;
+      if (obj.type === "turn.started") {
+        outerTurns++;
+        currentOuterTurnHasAction = false;
+      }
       if (obj.type === "turn.completed") {
         if (obj.usage) usage = obj.usage;
       }
@@ -102,7 +114,7 @@ function parseCoderLog(lines) {
   const byId = {};
   for (const item of items) { if (!byId[item.id] || item.status === "completed") byId[item.id] = item; }
   const dedupedItems = Object.values(byId).sort((a, b) => parseInt(a.id.replace("item_","")) - parseInt(b.id.replace("item_","")));
-  return { format: "codex", threadId, items: dedupedItems, turns, usage };
+  return { format: "codex", threadId, outerTurns, items: dedupedItems, turns, usage };
 }
 
 function measureRichBlock(block) {
@@ -124,9 +136,22 @@ function parseOrchestratorLog(lines) {
   let resultInfo = null;
   const seenMsgIds = new Set();
   const perMsgUsage = [];
+  let lastTsMs = 0;
   for (const line of lines) {
     try {
       const obj = JSON.parse(line);
+      const tsMs = parseTimestampMs(obj.timestamp);
+      if (tsMs > 0) {
+        if (lastTsMs > 0 && perMsgUsage.length > 0) {
+          const delta = tsMs - lastTsMs;
+          if (delta > 0) {
+            // Claude stream-json events are chronological; attribute inter-event time to the active API turn.
+            const current = perMsgUsage[perMsgUsage.length - 1];
+            current.durationMs = (current.durationMs || 0) + delta;
+          }
+        }
+        lastTsMs = tsMs;
+      }
       if (obj.type === "system") {
         systemInfo = { model: obj.model, sessionId: obj.session_id, tools: obj.tools?.length || 0,
           mcpServers: obj.mcp_servers || [], skills: obj.skills?.length || 0, plugins: obj.plugins || [] };
@@ -143,6 +168,7 @@ function parseOrchestratorLog(lines) {
               cacheCreation: msg.usage.cache_creation_input_tokens || 0,
               cacheRead: msg.usage.cache_read_input_tokens || 0,
               outputTokens: msg.usage.output_tokens || 0,
+              durationMs: 0,
             });
           }
         }
@@ -152,7 +178,7 @@ function parseOrchestratorLog(lines) {
             toolInput: block.input || null, toolUseId: block.id || null,
             text: block.text || block.thinking || null,
             chars: measureRichBlock(block),
-            usage: msg.usage || null, msgId: msg.id });
+            usage: msg.usage || null, msgId: msg.id, tsMs });
         }
       }
       if (obj.type === "user") {
@@ -170,11 +196,11 @@ function parseOrchestratorLog(lines) {
               Array.isArray(part.content) ? (part.content[0]?.text || "").slice(0, 120).replace(/\n/g, " ") : "";
             if (nested > 0) events.push({
               type: "tool_result", result: part.content, chars: nested,
-              toolUseId: part.tool_use_id || null, isError: !!part.is_error, preview
+              toolUseId: part.tool_use_id || null, isError: !!part.is_error, preview, tsMs
             });
           } else if (part?.content) {
             const nested = measureToolResult(part.content);
-            if (nested > 0) events.push({ type: "tool_result", result: part.content, chars: nested });
+            if (nested > 0) events.push({ type: "tool_result", result: part.content, chars: nested, tsMs });
           }
         }
       }
@@ -439,7 +465,7 @@ function analyzeCodex(parsed) {
     itemsByType[t].chars += item.chars || 0;
     totalCharsAll += item.chars || 0;
   }
-  let topItems = items.filter(i => i.chars > 0).sort((a, b) => b.chars - a.chars).slice(0, 15)
+  let topItems = items.filter(i => i.chars > 0).sort((a, b) => b.chars - a.chars).slice(0, TOP_ITEMS_LIMIT)
     .map(i => ({
       type: i.type, chars: i.chars, estTokens: Math.ceil(i.chars / 4),
       preview: truncate(i.command || i.text || (i.server ? `${i.server}/${i.tool}` : "") || "", 80),
@@ -482,6 +508,12 @@ function analyzeCodex(parsed) {
         });
       }
     }
+  }
+  const toolFreq = {};
+  for (const t of timeline) {
+    // Sparse file_change items are side effects, not provider tool calls.
+    if (t.toolName === "file_change") continue;
+    toolFreq[t.toolName] = (toolFreq[t.toolName] || 0) + 1;
   }
 
   // --- Skill Invocations (sparse: detect read_text_file of SKILL.md) ---
@@ -552,8 +584,8 @@ function analyzeCodex(parsed) {
   return {
     summary: { totalInputTokens: totalInput, cachedInputTokens: cachedInput, freshInputTokens: freshInput,
       outputTokens: output, cacheHitRate: totalInput > 0 ? ((cachedInput / totalInput) * 100).toFixed(1) : "0",
-      totalItems: items.length },
-    breakdown: itemsByType, totalCharsAll, topItems,
+      totalItems: items.length, outerTurns: parsed.outerTurns || 0 },
+    breakdown: itemsByType, totalCharsAll, topItems, toolFreq,
     timeline, toolResultBreakdown, efficiencyInsights,
     struggleSequences: findStruggleSequences(timeline),
     mcpUsage: computeMcpUsage(timeline),
@@ -588,6 +620,13 @@ function analyzeClaudeCode(parsed) {
   const totalContextTokens = plainInput + cacheCreation + cacheRead;
   const outputTokens = totalUsage.output_tokens || 0;
   const mcpStatus = systemInfo?.mcpServers?.map(s => ({ name: s.name, status: s.status })) || [];
+  const contextWindow = Object.values(modelUsage)[0]?.contextWindow || null;
+  const peakContextTokens = perMsgUsage?.length
+    ? Math.max(...perMsgUsage.map(u => u.inputTokens + u.cacheCreation + u.cacheRead))
+    : 0;
+  const peakContextPct = contextWindow && peakContextTokens
+    ? ((peakContextTokens / contextWindow) * 100).toFixed(1)
+    : null;
 
   // Content breakdown with chars
   const contentByType = {};
@@ -600,6 +639,13 @@ function analyzeClaudeCode(parsed) {
     contentByType[ct].chars += chars;
     totalCharsAll += chars;
   }
+  const topItems = events.filter(e => (e.chars || 0) > 0).sort((a, b) => (b.chars || 0) - (a.chars || 0)).slice(0, TOP_ITEMS_LIMIT)
+    .map(e => ({
+      type: e.contentType || e.type,
+      chars: e.chars || 0,
+      estTokens: Math.ceil((e.chars || 0) / 4),
+      preview: truncate(e.text || e.toolName || e.preview || "", 80),
+    }));
 
   // --- Feature 1: Turn Timeline ---
   // Build a map of msgId → turn number using perMsgUsage index
@@ -634,10 +680,30 @@ function analyzeClaudeCode(parsed) {
         resultChars: ev.chars || 0,
         isError: effectiveError,
         preview: ev.preview || "",
+        durationMs: perMsgUsage[(pending.turnNum || 0) - 1]?.durationMs || 0,
       });
       delete pendingToolUses[ev.toolUseId];
     }
   }
+  const actionsByTurn = {};
+  for (const action of timeline) {
+    if (!actionsByTurn[action.turnNum]) actionsByTurn[action.turnNum] = [];
+    actionsByTurn[action.turnNum].push(action);
+  }
+  const longestTurns = perMsgUsage.map((u, i) => {
+    const turnNum = i + 1;
+    const actions = actionsByTurn[turnNum] || [];
+    const detail = actions.length > 0
+      ? actions.map(a => `${a.toolName}(${truncate(a.detail || "", 40)})`).join(" | ")
+      : "(text message)";
+    return {
+      turn: turnNum,
+      durationMs: u.durationMs || 0,
+      input: u.inputTokens + u.cacheCreation + u.cacheRead,
+      output: u.outputTokens,
+      detail,
+    };
+  }).filter(t => t.durationMs > 0).sort((a, b) => b.durationMs - a.durationMs).slice(0, 10);
 
   // --- Feature 2: Tool Result Breakdown (excluding MCP tools, reported separately) ---
   const toolResultBreakdown = {};
@@ -737,22 +803,18 @@ function analyzeClaudeCode(parsed) {
 
   return {
     summary: { model: Object.keys(modelUsage)[0] || systemInfo?.model || "unknown",
+      sessionId: systemInfo?.sessionId || "unknown",
       totalCostUsd: resultInfo?.totalCostUsd || 0, durationMs: resultInfo?.durationMs || 0,
       durationApiMs: resultInfo?.durationApiMs || 0, numTurns: resultInfo?.numTurns || turns.length,
       plainInputTokens: plainInput, cacheCreationTokens: cacheCreation, cacheReadTokens: cacheRead,
       totalContextTokens, outputTokens,
       cacheHitRate: totalContextTokens > 0 ? ((cacheRead / totalContextTokens) * 100).toFixed(1) : "0",
-      contextWindow: Object.values(modelUsage)[0]?.contextWindow || null,
-      contextUtilization: Object.values(modelUsage)[0]?.contextWindow
-        ? ((totalContextTokens / Object.values(modelUsage)[0].contextWindow) * 100).toFixed(1) : null,
-      peakFillPct: (() => {
-        const cw = Object.values(modelUsage)[0]?.contextWindow;
-        if (!cw || !perMsgUsage?.length) return null;
-        const maxIn = Math.max(...perMsgUsage.map(u => u.inputTokens + u.cacheCreation + u.cacheRead));
-        return ((maxIn / cw) * 100).toFixed(1);
-      })() },
+      contextWindow,
+      peakContextTokens,
+      contextUtilization: peakContextPct,
+      peakFillPct: peakContextPct },
     turns, mcpStatus, toolsAvailable: systemInfo?.tools || 0, skillsAvailable: systemInfo?.skills || 0,
-    perMsgUsage: perMsgUsage || [], contentByType, totalCharsAll,
+    perMsgUsage: perMsgUsage || [], contentByType, totalCharsAll, topItems, longestTurns,
     timeline, toolResultBreakdown, efficiencyInsights, systemPromptEstimate,
     struggleSequences: findStruggleSequences(timeline),
     mcpUsage: computeMcpUsage(timeline),
@@ -814,6 +876,23 @@ function ContextBar({ segments, total }) {
       </div>
     </div>
   );
+}
+
+function SessionHeader({ rows }) {
+  const visibleRows = rows.filter(r => r.value !== undefined && r.value !== null && r.value !== "");
+  if (visibleRows.length === 0) return null;
+  return (<>
+    <SectionTitle>Session Header</SectionTitle>
+    <div style={{ display: "grid", gridTemplateColumns: "max-content 1fr", gap: "6px 18px",
+      fontSize: 12, fontFamily: "'JetBrains Mono', monospace" }}>
+      {visibleRows.map((row, i) => (
+        <React.Fragment key={i}>
+          <div style={{ color: C.textMuted }}>{row.label}</div>
+          <div style={{ color: C.text }}>{row.value}</div>
+        </React.Fragment>
+      ))}
+    </div>
+  </>);
 }
 
 function Table({ columns, rows }) {
@@ -921,13 +1000,20 @@ function EmptyTurnsSection({ stats }) {
 
 function CodexReport({ parsed }) {
   const analysis = useMemo(() => analyzeCodex(parsed), [parsed]);
-  const { summary, breakdown, totalCharsAll, topItems, timeline, toolResultBreakdown, efficiencyInsights, struggleSequences, mcpUsage, emptyTurnStats, skillInvocations, secretWordsLines } = analysis;
+  const { summary, breakdown, totalCharsAll, topItems, toolFreq, timeline, toolResultBreakdown, efficiencyInsights, struggleSequences, mcpUsage, emptyTurnStats, skillInvocations, secretWordsLines } = analysis;
   return (
     <div>
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 20 }}>
         <span style={{ background: C.orange, color: "#000", padding: "3px 10px", borderRadius: 4, fontSize: 11, fontWeight: 700, fontFamily: "monospace" }}>CODEX</span>
         <span style={{ color: C.textMuted, fontSize: 12 }}>Thread: {parsed.threadId ? truncate(parsed.threadId, 20) : "—"}</span>
       </div>
+      <SessionHeader rows={[
+        { label: "Format", value: "sparse" },
+        { label: "Model", value: "unknown" },
+        { label: "Session", value: parsed.threadId || "unknown" },
+        { label: "Turns", value: summary.outerTurns || "unknown" },
+        { label: "Action Turns", value: emptyTurnStats.total },
+      ]} />
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
         <StatCard label="Total Input" value={formatTokens(summary.totalInputTokens)} color={C.accent} />
         <StatCard label="Cached" value={formatTokens(summary.cachedInputTokens)} sub={`${summary.cacheHitRate}% hit rate`} color={C.green} />
@@ -940,6 +1026,9 @@ function CodexReport({ parsed }) {
         { label: "Cache Hit", value: summary.cachedInputTokens, color: C.green },
         { label: "Fresh Input", value: summary.freshInputTokens, color: C.orange },
       ]} />
+      <div style={{ fontSize: 12, color: C.textMuted, marginTop: 10, fontFamily: "'JetBrains Mono', monospace" }}>
+        Note: Per-turn context growth unavailable in sparse format (single turn).
+      </div>
       <SectionTitle>Content Breakdown</SectionTitle>
       <div style={{ fontSize: 11, color: C.textMuted, marginBottom: 8 }}>
         Total content: {(totalCharsAll / 1024).toFixed(0)} KB ({formatTokens(Math.ceil(totalCharsAll / 4))} est. tokens)
@@ -954,7 +1043,7 @@ function CodexReport({ parsed }) {
         .map(([type, data]) => ({ type, count: data.count, chars: data.chars,
           estTok: Math.ceil(data.chars / 4),
           share: totalCharsAll > 0 ? ((data.chars / totalCharsAll)*100).toFixed(1)+"%" : "—" }))} />
-      <SectionTitle>Top Items by Size</SectionTitle>
+      <SectionTitle>Top {TOP_ITEMS_LIMIT} Items by Size</SectionTitle>
       <Table columns={[
         { label: "#", key: "rank", align: "right" },
         { label: "Type", key: "type" },
@@ -962,6 +1051,12 @@ function CodexReport({ parsed }) {
         { label: "Size", key: "chars", align: "right", render: r => `${(r.chars/1024).toFixed(1)} KB` },
         { label: "Est. Tokens", key: "estTokens", align: "right", render: r => formatTokens(r.estTokens) },
       ]} rows={topItems.map((c,i) => ({ rank: i+1, ...c }))} />
+
+      {Object.keys(toolFreq).length > 0 && (<>
+        <SectionTitle>Tool Usage</SectionTitle>
+        <Table columns={[ { label: "Tool", key: "tool" }, { label: "Calls", key: "count", align: "right" } ]}
+          rows={Object.entries(toolFreq).sort((a,b) => b[1] - a[1]).map(([tool, count]) => ({ tool, count }))} />
+      </>)}
 
       <EmptyTurnsSection stats={emptyTurnStats} />
 
@@ -1077,7 +1172,7 @@ function CodexReport({ parsed }) {
 function ClaudeCodeReport({ parsed }) {
   const analysis = useMemo(() => analyzeClaudeCode(parsed), [parsed]);
   const { summary, turns, mcpStatus, perMsgUsage, contentByType, totalCharsAll,
-    timeline, toolResultBreakdown, efficiencyInsights, systemPromptEstimate, struggleSequences, mcpUsage, emptyTurnStats, skillInvocations, secretWordsLines } = analysis;
+    topItems, longestTurns, timeline, toolResultBreakdown, efficiencyInsights, systemPromptEstimate, struggleSequences, mcpUsage, emptyTurnStats, skillInvocations, secretWordsLines } = analysis;
   const toolCalls = turns.flatMap(t => t.actions.filter(a => a.contentType === "tool_use").map(a => a.toolName)).filter(Boolean);
   const toolFreq = {};
   for (const t of toolCalls) toolFreq[t] = (toolFreq[t] || 0) + 1;
@@ -1090,6 +1185,15 @@ function ClaudeCodeReport({ parsed }) {
         <span style={{ background: C.purple, color: "#000", padding: "3px 10px", borderRadius: 4, fontSize: 11, fontWeight: 700, fontFamily: "monospace" }}>CLAUDE CODE</span>
         <span style={{ color: C.textMuted, fontSize: 12 }}>Model: {summary.model}</span>
       </div>
+      <SessionHeader rows={[
+        { label: "Format", value: "rich" },
+        { label: "Model", value: summary.model || "unknown" },
+        { label: "Session", value: summary.sessionId || "unknown" },
+        { label: "Duration", value: summary.durationMs ? formatDuration(summary.durationMs) : null },
+        { label: "Turns", value: summary.numTurns || turns.length },
+        { label: "Ctx Window", value: summary.contextWindow ? formatTokens(summary.contextWindow) : null },
+        { label: "Peak Fill", value: summary.peakFillPct ? `${summary.peakFillPct}%` : null },
+      ]} />
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
         <StatCard label="Cost" value={formatCost(summary.totalCostUsd)} color={C.green} />
         <StatCard label="Duration" value={formatDuration(summary.durationMs)} sub={`API: ${formatDuration(summary.durationApiMs)}`} color={C.accent} />
@@ -1104,7 +1208,7 @@ function ClaudeCodeReport({ parsed }) {
         <StatCard label="Cache Created" value={formatTokens(summary.cacheCreationTokens)} color={C.orange} />
         <StatCard label="Cache Read" value={formatTokens(summary.cacheReadTokens)} sub={`${summary.cacheHitRate}% of context`} color={C.green} />
         <StatCard label="Uncached Input" value={formatTokens(summary.plainInputTokens)} color={C.red} />
-        <StatCard label="Total Context" value={formatTokens(summary.totalContextTokens)} color={C.accent} />
+        <StatCard label="Cumulative Context" value={formatTokens(summary.totalContextTokens)} color={C.accent} />
       </div>
       <ContextBar total={summary.totalContextTokens} segments={[
         { label: "Cache Read", value: summary.cacheReadTokens, color: C.green },
@@ -1112,22 +1216,23 @@ function ClaudeCodeReport({ parsed }) {
         { label: "Uncached", value: summary.plainInputTokens, color: C.red },
       ]} />
       {summary.contextWindow && (() => {
-        const overflow = summary.totalContextTokens > summary.contextWindow;
-        const barTotal = overflow ? summary.totalContextTokens : summary.contextWindow;
+        const used = summary.peakContextTokens || 0;
+        const overflow = used > summary.contextWindow;
+        const barTotal = overflow ? used : summary.contextWindow;
         const segments = overflow
           ? [
               { label: "Used", value: summary.contextWindow, color: C.accent },
-              { label: "Overflow", value: summary.totalContextTokens - summary.contextWindow, color: C.red },
+              { label: "Overflow", value: used - summary.contextWindow, color: C.red },
             ]
           : [
-              { label: "Used", value: summary.totalContextTokens, color: C.accent },
-              { label: "Available", value: summary.contextWindow - summary.totalContextTokens, color: C.borderAccent },
+              { label: "Used", value: used, color: C.accent },
+              { label: "Available", value: summary.contextWindow - used, color: C.borderAccent },
             ];
         return <>
           <SectionTitle>Context Window Utilization</SectionTitle>
           <ContextBar total={barTotal} segments={segments} />
           <div style={{ fontSize: 11, color: overflow ? C.red : C.textMuted, marginTop: 6 }}>
-            {summary.contextUtilization}% of {formatTokens(summary.contextWindow)} context window
+            Peak turn: {formatTokens(used)} / {formatTokens(summary.contextWindow)} ({summary.contextUtilization}%)
           </div>
         </>;
       })()}
@@ -1150,6 +1255,20 @@ function ClaudeCodeReport({ parsed }) {
         })} />
       </>)}
 
+      {longestTurns.length > 0 && (<>
+        <SectionTitle>Top {TOP_ITEMS_LIMIT} Longest Turns</SectionTitle>
+        <Table columns={[
+          { label: "#", key: "turn", align: "right" },
+          { label: "Duration", key: "duration", align: "right" },
+          { label: "Input", key: "input", align: "right", render: r => formatTokens(r.input) },
+          { label: "Output", key: "output", align: "right", render: r => formatTokens(r.output) },
+          { label: "Detail", key: "detail", maxWidth: 360, wrap: true },
+        ]} rows={longestTurns.map(t => ({
+          ...t,
+          duration: formatDuration(t.durationMs),
+        }))} />
+      </>)}
+
       {totalCharsAll > 0 && (<>
         <SectionTitle>Content Breakdown</SectionTitle>
         <div style={{ fontSize: 11, color: C.textMuted, marginBottom: 8 }}>
@@ -1167,9 +1286,22 @@ function ClaudeCodeReport({ parsed }) {
             share: totalCharsAll > 0 ? ((data.chars / totalCharsAll)*100).toFixed(1)+"%" : "—" }))} />
       </>)}
 
-      <SectionTitle>Tool Usage</SectionTitle>
-      <Table columns={[ { label: "Tool", key: "tool" }, { label: "Calls", key: "count", align: "right" } ]}
-        rows={Object.entries(toolFreq).sort((a,b) => b[1] - a[1]).map(([tool, count]) => ({ tool, count }))} />
+      {topItems.length > 0 && (<>
+        <SectionTitle>Top {TOP_ITEMS_LIMIT} Items by Size</SectionTitle>
+        <Table columns={[
+          { label: "#", key: "rank", align: "right" },
+          { label: "Type", key: "type" },
+          { label: "Preview", key: "preview", maxWidth: 300, wrap: true },
+          { label: "Size", key: "chars", align: "right", render: r => `${(r.chars/1024).toFixed(1)} KB` },
+          { label: "Est. Tokens", key: "estTokens", align: "right", render: r => formatTokens(r.estTokens) },
+        ]} rows={topItems.map((c,i) => ({ rank: i+1, ...c }))} />
+      </>)}
+
+      {Object.keys(toolFreq).length > 0 && (<>
+        <SectionTitle>Tool Usage</SectionTitle>
+        <Table columns={[ { label: "Tool", key: "tool" }, { label: "Calls", key: "count", align: "right" } ]}
+          rows={Object.entries(toolFreq).sort((a,b) => b[1] - a[1]).map(([tool, count]) => ({ tool, count }))} />
+      </>)}
 
       <EmptyTurnsSection stats={emptyTurnStats} />
 
@@ -1202,6 +1334,7 @@ function ClaudeCodeReport({ parsed }) {
         <Table columns={[
           { label: "#", key: "idx", align: "right" },
           { label: "Turn", key: "turnNum", align: "right" },
+          { label: "Duration", key: "duration", align: "right" },
           { label: "Tool", key: "toolName" },
           { label: "Detail", key: "detail", maxWidth: 280, wrap: true },
           { label: "Result", key: "resultSize", align: "right" },
@@ -1210,6 +1343,7 @@ function ClaudeCodeReport({ parsed }) {
             : "" },
         ]} rows={timeline.map((t, i) => ({
           idx: i + 1, turnNum: t.turnNum, toolName: t.toolName,
+          duration: formatDuration(t.durationMs),
           detail: truncate(t.detail, 50),
           resultSize: t.resultChars >= 1024 ? `${(t.resultChars/1024).toFixed(1)}K` : `${t.resultChars}`,
           isError: t.isError,
@@ -1301,6 +1435,23 @@ function ClaudeCodeReport({ parsed }) {
               </div>
             );
           })}
+        </div>
+      </>)}
+
+      {summary.totalCostUsd !== 0 && (<>
+        <SectionTitle>Cost</SectionTitle>
+        <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, padding: 16 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px 24px", fontSize: 12,
+            fontFamily: "'JetBrains Mono', monospace" }}>
+            <div style={{ color: C.textMuted }}>Total:</div>
+            <div style={{ color: C.text }}>{formatCost(summary.totalCostUsd)}</div>
+            {summary.numTurns > 0 && <>
+              <div style={{ color: C.textMuted }}>Per-turn avg:</div>
+              <div style={{ color: C.text }}>{formatCost(summary.totalCostUsd / summary.numTurns)}</div>
+            </>}
+            <div style={{ color: C.textMuted }}>Model:</div>
+            <div style={{ color: C.text }}>{summary.model}</div>
+          </div>
         </div>
       </>)}
 
