@@ -11,7 +11,6 @@ CODE PLANNER TOOLS:
   liza set-task-output {{.TaskID}} --output {{.Worktree}}/specs/plans/{{.GoalSlug}}/TIMESTAMP-{{.TaskID}}-output.json --agent-id {{.AgentID}} --json
   Use the same TIMESTAMP as the plan file from Implementation Phase step 2.
   Create that JSON file next to the plan file with a file-writing tool, not a Bash heredoc (heredoc with JSON triggers a shell safety block).
-  Do NOT write task-output JSON under .liza/agent-outputs/; that directory is runtime state, not a committed plan artifact location.
   JSON file contains: [
     {"desc": "...", "done_when": "...", "scope": "...", "spec_ref": "...", "plan_ref": "...", "depends_on": ["0", "2"], "task_depends_on": ["existing-task-id"]}
   ]

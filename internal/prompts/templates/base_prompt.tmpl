@@ -13,6 +13,8 @@ OPERATIONAL RULES:
 - TWO .liza/ directories exist — don't confuse them:
   ~/.liza/ = installed contracts & skills (e.g. ~/.liza/MULTI_AGENT_MODE.md)
   {{.ProjectRoot}}/.liza/ = runtime state & blackboard (state.yaml, agent-outputs/)
+- Do NOT create, edit, stage, or commit files under {{.ProjectRoot}}/.liza/agent-outputs/;
+  that directory is runtime log state owned by Liza, not an artifact workspace.
 - You have FULL read access to both .liza/ directories
 - For READING state: use liza get --json with targeted queries (e.g. liza get <id> --json).
   NEVER read state.yaml directly to save context budget. liza get --json returns only the requested slice.

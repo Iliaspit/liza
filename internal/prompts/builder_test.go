@@ -46,6 +46,8 @@ func TestBuildBasePrompt(t *testing.T) {
 				"TWO .liza/ directories exist",
 				"~/.liza/ = installed contracts & skills",
 				"/project/.liza/ = runtime state & blackboard",
+				"Do NOT create, edit, stage, or commit files under /project/.liza/agent-outputs/",
+				"runtime log state owned by Liza",
 				"You have FULL read access to both .liza/ directories",
 				"For READING state: use liza get --json",
 				"For MODIFYING state: use role-specific CLI commands ONLY",
@@ -543,6 +545,8 @@ func TestBasePromptRegressionGuard(t *testing.T) {
 		"TWO .liza/ directories exist",
 		"~/.liza/ = installed contracts & skills",
 		"/project/.liza/ = runtime state & blackboard",
+		"Do NOT create, edit, stage, or commit files under /project/.liza/agent-outputs/",
+		"runtime log state owned by Liza",
 		"FULL read access to both .liza/ directories",
 	})
 
@@ -1231,7 +1235,6 @@ func TestBuildRoleContext_AllRoles(t *testing.T) {
 			"plan from the provided spec artifacts",
 			"TIMESTAMP-task-planner.md", // canonical plan file path with task ID
 			"TIMESTAMP-task-planner-output.json",
-			"Do NOT write task-output JSON under .liza/agent-outputs/",
 			"Submission requires a new worktree commit for this task",
 			"Submission proof: `liza submit-for-review` is not optional bookkeeping",
 			"COLLECTIVE PLAN SCOPING",
