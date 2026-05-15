@@ -73,6 +73,8 @@ func setupAgentTestProject(t *testing.T, defaultCLI string) string {
 // override, must produce an "invalid CLI" error naming the state's value.
 func TestAgentCmd_InvalidCLIFromStateIsRejected(t *testing.T) {
 	t.Setenv("LIZA_DEFAULT_CLI", "")
+	t.Setenv("LIZA_DEFAULT_DOER_CLI", "")
+	t.Setenv("LIZA_DEFAULT_REVIEWER_CLI", "")
 	projectRoot := setupAgentTestProject(t, "nonexistent-cli")
 
 	oldDir, _ := os.Getwd()
