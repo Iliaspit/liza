@@ -6,6 +6,7 @@ import (
 	"github.com/liza-mas/liza/internal/db"
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/roles"
+	"github.com/liza-mas/liza/internal/statehygiene"
 	"gopkg.in/yaml.v3"
 )
 
@@ -41,6 +42,9 @@ func MigrateCommand(statePath string) (bool, error) {
 		if state.Tasks[i].MigrateAttemptedField() {
 			changed = true
 		}
+	}
+	if statehygiene.ScrubStateForMigration(&state) {
+		changed = true
 	}
 
 	if !changed {

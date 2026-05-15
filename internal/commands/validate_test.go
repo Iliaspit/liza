@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/liza-mas/liza/internal/models"
+	"github.com/liza-mas/liza/internal/statevalidate"
 	"github.com/liza-mas/liza/internal/testhelpers"
 )
 
@@ -716,6 +717,26 @@ func TestValidateAnomalies_RequestedTypeBranchesPassWithValidDetails(t *testing.
 			}
 		})
 	}
+}
+
+func TestValidateStateRejectsRawProviderTranscriptMessage(t *testing.T) {
+	state := testhelpers.CreateValidState()
+	state.Anomalies = []models.Anomaly{
+		{
+			Type: "provider_audit_degraded",
+			Details: map[string]any{
+				"provider": "codex",
+				"agent_id": "orchestrator-1",
+				"message":  `{"type":"item.completed","item":{"type":"command_execution","aggregated_output":"raw output"}}`,
+			},
+		},
+	}
+
+	err := statevalidate.ValidateState(state, t.TempDir(), true, nil)
+	if err == nil {
+		t.Fatal("ValidateState() error = nil, want raw transcript rejection")
+	}
+	testhelpers.AssertErrorContains(t, err, "raw provider transcript payload")
 }
 
 func TestSetWarnWriter(t *testing.T) {

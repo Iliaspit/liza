@@ -886,6 +886,32 @@ For detailed definition including edge cases (submodules, untracked files), see 
 Anomalies with malformed details will fail validation. This ensures circuit breaker pattern detection has reliable data.
 The agent should be very specific about the faced issue so this may be reproduced and investigated.
 
+State is not a transcript store. Raw provider events, command output, and full
+`item.completed` payloads belong under `.liza/agent-outputs/`; `state.yaml`
+keeps bounded orchestration facts only. Human-readable state text fields such
+as anomaly `details.message`, handoff summaries, notes, excerpts, and command
+summaries are capped at 4096 bytes, and transcript-shaped payloads are rejected
+regardless of size. If an anomaly needs raw evidence recovery, store a bounded
+summary plus a structured reference:
+
+```yaml
+type: provider_audit_degraded
+details:
+  provider: codex
+  agent_id: orchestrator-1
+  impact: provider transcript or rollout persistence may be incomplete
+  message: provider audit degraded; inspect .liza/agent-outputs and alerts for transcript evidence
+  log_ref:
+    output_file: .liza/agent-outputs/orchestrator-1-20260515-101530.txt
+    event_id: item_abc123        # optional when available
+    byte_offset: 18422           # optional when available
+    hash: sha256:...             # optional when available
+```
+
+Legacy states containing raw transcript payloads in anomaly messages should be
+repaired with `liza migrate`, which preserves the anomaly and routing details
+while replacing the raw message with a bounded summary and scrub metadata.
+
 ```yaml
 required_fields:
   state:

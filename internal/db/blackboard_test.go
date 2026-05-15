@@ -119,6 +119,39 @@ func TestBlackboardBasicReadWrite(t *testing.T) {
 	}
 }
 
+func TestBlackboardWriteRejectsRawProviderTranscriptPayload(t *testing.T) {
+	dir := t.TempDir()
+	statePath := filepath.Join(dir, "state.yaml")
+	state := &models.State{
+		Version: 1,
+		Goal: models.Goal{
+			ID:      "goal-1",
+			Status:  models.GoalStatusInProgress,
+			Created: time.Now().UTC(),
+		},
+		Agents: map[string]models.Agent{},
+		Config: models.Config{IntegrationBranch: "main"},
+		Anomalies: []models.Anomaly{
+			{
+				Type: "provider_audit_degraded",
+				Details: map[string]any{
+					"provider": "codex",
+					"agent_id": "orchestrator-1",
+					"message":  `{"type":"item.completed","item":{"type":"command_execution","aggregated_output":"raw output"}}`,
+				},
+			},
+		},
+	}
+
+	err := New(statePath).Write(state)
+	if err == nil {
+		t.Fatal("Write() error = nil, want state hygiene error")
+	}
+	if !strings.Contains(err.Error(), "state hygiene validation failed") {
+		t.Fatalf("Write() error = %v, want state hygiene error", err)
+	}
+}
+
 // TestBlackboardReadRaw tests that ReadRaw returns exact file bytes under lock
 func TestBlackboardReadRaw(t *testing.T) {
 	dir := t.TempDir()

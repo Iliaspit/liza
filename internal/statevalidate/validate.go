@@ -12,6 +12,7 @@ import (
 	"github.com/liza-mas/liza/internal/gitenv"
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/pipeline"
+	"github.com/liza-mas/liza/internal/statehygiene"
 )
 
 const artifactRefMultipleRefsCause = "multiple_refs_not_supported"
@@ -101,6 +102,9 @@ func ValidateStateFile(statePath string, skipSpecFileCheck bool, warnWriter io.W
 func ValidateState(state *models.State, projectRoot string, skipSpecFileCheck bool, warnWriter io.Writer) error {
 	if warnWriter == nil {
 		warnWriter = io.Discard
+	}
+	if err := statehygiene.ValidateState(state); err != nil {
+		return err
 	}
 
 	// Load pipeline resolver

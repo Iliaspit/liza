@@ -318,6 +318,69 @@ func TestMigrateCommand_LegacyAttempted_Idempotent(t *testing.T) {
 	}
 }
 
+func TestMigrateCommand_ScrubsRawProviderAuditMessage(t *testing.T) {
+	tmpDir := t.TempDir()
+	statePath, _ := testhelpers.SetupLizaDir(t, tmpDir)
+
+	state := testhelpers.CreateValidState()
+	state.Anomalies = []models.Anomaly{
+		{
+			Timestamp: time.Now().UTC(),
+			Task:      "task-1",
+			Reporter:  "orchestrator-1",
+			Type:      "provider_audit_degraded",
+			Details: map[string]any{
+				"provider": "codex",
+				"agent_id": "orchestrator-1",
+				"impact":   "provider transcript or rollout persistence may be incomplete",
+				"message":  `{"type":"item.completed","item":{"type":"command_execution","aggregated_output":"raw output"}}`,
+			},
+		},
+		{
+			Timestamp: time.Now().UTC(),
+			Task:      "task-2",
+			Reporter:  "orchestrator-1",
+			Type:      "provider_audit_degraded",
+			Details: map[string]any{
+				"provider": "codex",
+				"agent_id": "orchestrator-1",
+				"message":  "Agent coder-2 deleted: terminated via TUI",
+			},
+		},
+	}
+	data, err := yaml.Marshal(state)
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+	if err := os.WriteFile(statePath, data, 0644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	changed, err := MigrateCommand(statePath)
+	if err != nil {
+		t.Fatalf("MigrateCommand() error = %v", err)
+	}
+	if !changed {
+		t.Fatal("MigrateCommand() changed = false, want true")
+	}
+
+	updated, err := db.New(statePath).Read()
+	if err != nil {
+		t.Fatalf("Read() error = %v", err)
+	}
+	got := updated.Anomalies[0].Details["message"]
+	want := "provider audit degraded; raw provider event omitted from state; inspect .liza/agent-outputs and alerts for transcript evidence"
+	if got != want {
+		t.Fatalf("scrubbed message = %q, want %q", got, want)
+	}
+	if updated.Anomalies[0].Details["message_scrubbed"] != true {
+		t.Fatalf("message_scrubbed = %v, want true", updated.Anomalies[0].Details["message_scrubbed"])
+	}
+	if got := updated.Anomalies[1].Details["message"]; got != "Agent coder-2 deleted: terminated via TUI" {
+		t.Fatalf("ordinary message changed to %q", got)
+	}
+}
+
 func TestMigrateCommand_InvalidStatePath(t *testing.T) {
 	_, err := MigrateCommand("/nonexistent/path/state.yaml")
 	if err == nil {

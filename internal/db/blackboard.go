@@ -14,6 +14,7 @@ import (
 	"github.com/liza-mas/liza/internal/filelock"
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/roles"
+	"github.com/liza-mas/liza/internal/statehygiene"
 	"gopkg.in/yaml.v3"
 )
 
@@ -304,6 +305,9 @@ func leadingWhitespace(s string) string {
 }
 
 func marshalStateForWrite(state *models.State) ([]byte, error) {
+	if err := statehygiene.ValidateState(state); err != nil {
+		return nil, fmt.Errorf("state hygiene validation failed: %w", err)
+	}
 	data, err := yaml.Marshal(state)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal state: %w", err)
