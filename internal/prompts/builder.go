@@ -114,6 +114,7 @@ func RenderOrchestratorDashboard(state *models.State, projectRoot, agentID strin
 	if cycleBlocked > 0 {
 		b.WriteString(fmt.Sprintf("- Cycle-blocked planning: %d\n", cycleBlocked))
 	}
+	writeActiveTaskDigest(&b, state.Tasks)
 
 	b.WriteString("\nORCHESTRATOR COMMANDS:\n")
 	b.WriteString(fmt.Sprintf(`- liza add-tasks — Add one or more tasks to blackboard (atomic per task, with validation)
@@ -168,6 +169,46 @@ Work unit = all planned state changes executed. Do NOT exit until all commands h
 	wakeInstr := fmt.Sprintf("INSTRUCTIONS:\n%s", wakeInstructions)
 
 	return b.String(), wakeInstr, nil
+}
+
+func writeActiveTaskDigest(b *strings.Builder, tasks []models.Task) {
+	b.WriteString("\nACTIVE TASK DIGEST:\n")
+	count := 0
+	for i := range tasks {
+		task := &tasks[i]
+		if task.Status.IsTerminal() {
+			continue
+		}
+		count++
+		if count > 12 {
+			b.WriteString("- ... additional active tasks omitted; use `liza get tasks --active --summary --json` if orchestration needs a fresh active-task scan.\n")
+			break
+		}
+		b.WriteString(fmt.Sprintf("- %s [%s]", task.ID, task.Status))
+		if task.RolePair != "" {
+			b.WriteString(fmt.Sprintf(" role_pair=%s", task.RolePair))
+		}
+		if task.AssignedTo != nil && *task.AssignedTo != "" {
+			b.WriteString(fmt.Sprintf(" assigned_to=%s", *task.AssignedTo))
+		}
+		if len(task.DependsOn) > 0 {
+			b.WriteString(fmt.Sprintf(" depends_on=%s", strings.Join(task.DependsOn, ",")))
+		}
+		b.WriteString("\n")
+		if task.BlockedReason != nil && *task.BlockedReason != "" {
+			b.WriteString(fmt.Sprintf("  blocker: %s\n", TruncateText(*task.BlockedReason, 220)))
+		}
+		if task.RepairRequest != nil && task.RepairRequest.Operation != "" {
+			b.WriteString(fmt.Sprintf("  repair: %s", task.RepairRequest.Operation))
+			if task.RepairRequest.Target != "" {
+				b.WriteString(fmt.Sprintf(" -> %s", task.RepairRequest.Target))
+			}
+			b.WriteString("\n")
+		}
+	}
+	if count == 0 {
+		b.WriteString("- none\n")
+	}
 }
 
 func countTasksByStatus(tasks []models.Task, status models.TaskStatus) int {

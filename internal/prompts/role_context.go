@@ -12,6 +12,32 @@ type CompletedTaskSummary struct {
 	SpecRef     string
 }
 
+// TaskGraphDigest provides bounded task graph context so agents can load exact
+// related tasks instead of pulling the full task list.
+type TaskGraphDigest struct {
+	DirectDependencies  []TaskGraphEntry
+	BlockedRelatedTasks []TaskGraphEntry
+	SiblingsSharingRefs []TaskGraphEntry
+	CompletedArtifacts  []TaskGraphEntry
+}
+
+// TaskGraphEntry is a compact, prompt-safe summary of a task related to the
+// assigned task.
+type TaskGraphEntry struct {
+	ID              string
+	Description     string
+	Status          string
+	RolePair        string
+	SpecRef         string
+	EpicRef         string
+	PlanRef         string
+	ArchRef         string
+	OutputRefs      []string
+	SharedRefs      []string
+	BlockedReason   string
+	RepairOperation string
+}
+
 // ParentTaskContext provides context about a parent task for architecture consolidation.
 type ParentTaskContext struct {
 	ID          string
@@ -65,6 +91,7 @@ type RoleContextData struct {
 	TaskOrdinal    int // 1-based position in sprint plan
 	DependsOn      []string
 	TaskRolePair   string
+	TaskGraph      TaskGraphDigest
 
 	// Architecture-specific (populated for architect role)
 	ParentTaskContexts         []ParentTaskContext

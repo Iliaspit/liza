@@ -3,6 +3,8 @@ package agent
 import (
 	"fmt"
 	"path/filepath"
+	"regexp"
+	"strings"
 
 	"github.com/liza-mas/liza/internal/errors"
 	"github.com/liza-mas/liza/internal/models"
@@ -148,6 +150,7 @@ func buildTaskRoleContextData(task *models.Task, state *models.State, config Sup
 		TaskOrdinal:    taskOrdinal,
 		DependsOn:      task.DependsOn,
 		TaskRolePair:   task.RolePair,
+		TaskGraph:      buildRelevantTaskGraph(state, task),
 
 		// Config/state
 		ProjectRoot: config.ProjectRoot,
@@ -223,7 +226,7 @@ func buildTaskRoleContextData(task *models.Task, state *models.State, config Sup
 			if parent != nil {
 				data.ParentTaskContexts = append(data.ParentTaskContexts, prompts.ParentTaskContext{
 					ID:          parent.ID,
-					Description: truncateDescription(parent.Description, 500),
+					Description: prompts.TruncateText(parent.Description, 500),
 					DoneWhen:    parent.DoneWhen,
 					SpecRef:     parent.SpecRef,
 					EpicRef:     parent.EpicRef,
@@ -251,7 +254,7 @@ func collectCompletedTasks(state *models.State) []prompts.CompletedTaskSummary {
 		if t.Status == models.TaskStatusMerged {
 			tasks = append(tasks, prompts.CompletedTaskSummary{
 				ID:          t.ID,
-				Description: truncateDescription(t.Description, 200),
+				Description: prompts.TruncateText(t.Description, 200),
 				DoneWhen:    t.DoneWhen,
 				SpecRef:     t.SpecRef,
 			})
@@ -300,7 +303,7 @@ func collectSiblingTasks(state *models.State, currentTaskID string) ([]prompts.S
 		if task != nil {
 			siblings = append(siblings, prompts.SiblingTaskSummary{
 				ID:          task.ID,
-				Description: truncateDescription(task.Description, 200),
+				Description: prompts.TruncateText(task.Description, 200),
 				Status:      string(task.Status),
 				PlanRef:     task.PlanRef,
 				RolePair:    task.RolePair,
@@ -317,6 +320,193 @@ func collectSiblingTasks(state *models.State, currentTaskID string) ([]prompts.S
 	return siblings, len(planned), ordinal
 }
 
+var (
+	backtickRefPattern = regexp.MustCompile("`([^`]+)`")
+	// Heuristic path extraction can match URL or date-like fragments; only
+	// shared refs are surfaced, so most one-off false positives drop out.
+	pathRefPattern = regexp.MustCompile(`[A-Za-z0-9_.@+/-]+/[A-Za-z0-9_.@+/-]+|[A-Za-z0-9_.@+-]+\.[A-Za-z0-9][A-Za-z0-9_.@+-]*`)
+)
+
+func buildRelevantTaskGraph(state *models.State, current *models.Task) prompts.TaskGraphDigest {
+	var digest prompts.TaskGraphDigest
+	currentRefs := taskScopeRefs(current)
+	seenBlocked := make(map[string]bool)
+	seenArtifacts := make(map[string]bool)
+
+	for _, depID := range current.DependsOn {
+		dep := state.FindTask(depID)
+		if dep == nil {
+			continue
+		}
+		entry := taskGraphEntry(dep, nil)
+		digest.DirectDependencies = append(digest.DirectDependencies, entry)
+		if dep.Status == models.TaskStatusBlocked && !seenBlocked[dep.ID] {
+			digest.BlockedRelatedTasks = append(digest.BlockedRelatedTasks, entry)
+			seenBlocked[dep.ID] = true
+		}
+		if isCompletedForDigest(dep) && hasArtifactRefs(entry) && !seenArtifacts[dep.ID] {
+			digest.CompletedArtifacts = append(digest.CompletedArtifacts, entry)
+			seenArtifacts[dep.ID] = true
+		}
+	}
+
+	for _, sibling := range plannedSiblings(state, current.ID) {
+		sharedRefs := intersectRefs(currentRefs, taskScopeRefs(sibling))
+		entry := taskGraphEntry(sibling, sharedRefs)
+		if len(sharedRefs) > 0 {
+			digest.SiblingsSharingRefs = append(digest.SiblingsSharingRefs, entry)
+		}
+		if sibling.Status == models.TaskStatusBlocked && !seenBlocked[sibling.ID] {
+			digest.BlockedRelatedTasks = append(digest.BlockedRelatedTasks, entry)
+			seenBlocked[sibling.ID] = true
+		}
+		if isCompletedForDigest(sibling) && hasArtifactRefs(entry) && !seenArtifacts[sibling.ID] {
+			digest.CompletedArtifacts = append(digest.CompletedArtifacts, entry)
+			seenArtifacts[sibling.ID] = true
+		}
+	}
+
+	return digest
+}
+
+func plannedSiblings(state *models.State, currentTaskID string) []*models.Task {
+	inPlan := false
+	for _, id := range state.Sprint.Scope.Planned {
+		if id == currentTaskID {
+			inPlan = true
+			break
+		}
+	}
+	if !inPlan {
+		return nil
+	}
+
+	var siblings []*models.Task
+	for _, id := range state.Sprint.Scope.Planned {
+		if id == currentTaskID {
+			continue
+		}
+		if task := state.FindTask(id); task != nil {
+			siblings = append(siblings, task)
+		}
+	}
+	return siblings
+}
+
+func taskGraphEntry(task *models.Task, sharedRefs []string) prompts.TaskGraphEntry {
+	entry := prompts.TaskGraphEntry{
+		ID:          task.ID,
+		Description: prompts.TruncateText(task.Description, 180),
+		Status:      string(task.Status),
+		RolePair:    task.RolePair,
+		SpecRef:     task.SpecRef,
+		EpicRef:     task.EpicRef,
+		PlanRef:     task.PlanRef,
+		ArchRef:     task.ArchRef,
+		OutputRefs:  outputArtifactRefs(task),
+		SharedRefs:  sharedRefs,
+	}
+	if task.BlockedReason != nil {
+		entry.BlockedReason = prompts.TruncateText(*task.BlockedReason, 220)
+	}
+	if task.RepairRequest != nil {
+		entry.RepairOperation = task.RepairRequest.Operation
+		if task.RepairRequest.Target != "" {
+			entry.RepairOperation += " -> " + task.RepairRequest.Target
+		}
+	}
+	return entry
+}
+
+func taskScopeRefs(task *models.Task) []string {
+	refs := extractFileRefs(task.Scope)
+	refs = appendUniqueStrings(refs, extractFileRefs(task.DoneWhen)...)
+	return refs
+}
+
+func extractFileRefs(text string) []string {
+	var refs []string
+	for _, match := range backtickRefPattern.FindAllStringSubmatch(text, -1) {
+		if len(match) > 1 {
+			refs = appendPathRef(refs, match[1])
+		}
+	}
+	for _, match := range pathRefPattern.FindAllString(text, -1) {
+		refs = appendPathRef(refs, match)
+	}
+	return refs
+}
+
+func appendPathRef(refs []string, ref string) []string {
+	ref = strings.Trim(ref, " \t\r\n.,;:()[]{}\"'")
+	if ref == "" || strings.Contains(ref, "*") || strings.Contains(ref, " ") {
+		return refs
+	}
+	if !strings.Contains(ref, "/") && !strings.Contains(ref, ".") {
+		return refs
+	}
+	return appendUniqueString(refs, ref)
+}
+
+func outputArtifactRefs(task *models.Task) []string {
+	var refs []string
+	for _, entry := range task.Output {
+		refs = appendUniqueString(refs, entry.SpecRef)
+		refs = appendUniqueString(refs, entry.EpicRef)
+		refs = appendUniqueString(refs, entry.PlanRef)
+		refs = appendUniqueString(refs, entry.ArchRef)
+		if len(refs) >= 8 {
+			return refs[:8]
+		}
+	}
+	return refs
+}
+
+func intersectRefs(left, right []string) []string {
+	if len(left) == 0 || len(right) == 0 {
+		return nil
+	}
+	rightSet := make(map[string]bool, len(right))
+	for _, ref := range right {
+		rightSet[ref] = true
+	}
+	var shared []string
+	for _, ref := range left {
+		if rightSet[ref] {
+			shared = append(shared, ref)
+		}
+	}
+	return shared
+}
+
+func isCompletedForDigest(task *models.Task) bool {
+	return task.Status == models.TaskStatusMerged || task.Status == models.TaskStatusSuperseded
+}
+
+func hasArtifactRefs(entry prompts.TaskGraphEntry) bool {
+	return entry.SpecRef != "" || entry.EpicRef != "" || entry.PlanRef != "" ||
+		entry.ArchRef != "" || len(entry.OutputRefs) > 0
+}
+
+func appendUniqueStrings(refs []string, candidates ...string) []string {
+	for _, candidate := range candidates {
+		refs = appendUniqueString(refs, candidate)
+	}
+	return refs
+}
+
+func appendUniqueString(refs []string, candidate string) []string {
+	if candidate == "" {
+		return refs
+	}
+	for _, existing := range refs {
+		if existing == candidate {
+			return refs
+		}
+	}
+	return append(refs, candidate)
+}
+
 // worktreeRelPath prefixes a relative path with the worktree path so agents
 // resolve it inside the worktree rather than the main repo.
 func worktreeRelPath(relPath, worktree string) string {
@@ -324,14 +514,6 @@ func worktreeRelPath(relPath, worktree string) string {
 		return relPath
 	}
 	return filepath.Join(worktree, relPath)
-}
-
-// truncateDescription shortens s to maxLen characters, appending "…" if truncated.
-func truncateDescription(s string, maxLen int) string {
-	if len(s) <= maxLen {
-		return s
-	}
-	return s[:maxLen] + "…"
 }
 
 func savePrompt(promptDir, agentID, prompt string) (string, error) {

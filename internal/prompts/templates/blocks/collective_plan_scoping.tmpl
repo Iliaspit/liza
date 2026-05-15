@@ -1,7 +1,9 @@
 {{- define "collective-plan-scoping" -}}
-{{- if gt .TotalPlanTasks 1}}
+{{- $hasGraph := or (gt (len .TaskGraph.DirectDependencies) 0) (gt (len .TaskGraph.BlockedRelatedTasks) 0) (gt (len .TaskGraph.SiblingsSharingRefs) 0) (gt (len .TaskGraph.CompletedArtifacts) 0) -}}
+{{- if or (gt .TotalPlanTasks 1) $hasGraph}}
 
 === COLLECTIVE PLAN SCOPING ===
+{{- if gt .TotalPlanTasks 1}}
 This task is {{.TaskOrdinal}} of {{.TotalPlanTasks}} in the current sprint plan.
 Read the full goal spec ({{.GoalSpecRef}}) to understand {{- if eq .RoleType "reviewer"}} the complete picture.
 Verify {{- if eq .Role "us-reviewer"}} stories stay within scope — flag Scope Absorption into sibling territory.{{- else if eq .Role "code-plan-reviewer"}} the plan stays within scope — flag scope creep into sibling territory.{{- else if eq .Role "epic-plan-reviewer"}} the epic stays within scope — flag scope creep into sibling territory.{{- else}} the implementation stays within scope — flag scope creep as a blocker.{{- end}}
@@ -19,10 +21,45 @@ Do NOT silently modify out-of-scope files — undeclared scope changes will be r
 If you discover work needed outside your scope that you cannot handle, log it as a spec_gap anomaly.
 {{- end}}
 {{- end}}
+{{- end}}
 
-SIBLING TASKS (for {{- if eq .RoleType "reviewer"}} scope boundary awareness{{- else}} context only — do NOT implement{{- end}}):
+RELEVANT TASK GRAPH DIGEST:
+Use this digest before broad state queries. If you need more detail, run `liza get <task-id> --json` for the listed ID.
+{{- if gt (len .TaskGraph.DirectDependencies) 0}}
+Direct dependencies:
+{{- range .TaskGraph.DirectDependencies}}
+{{template "task-graph-entry" .}}
+{{- end}}
+{{- else}}
+Direct dependencies: none listed.
+{{- end}}
+{{- if gt (len .TaskGraph.BlockedRelatedTasks) 0}}
+
+Blocked related tasks:
+{{- range .TaskGraph.BlockedRelatedTasks}}
+{{template "task-graph-entry" .}}
+{{- end}}
+{{- end}}
+{{- if gt (len .TaskGraph.SiblingsSharingRefs) 0}}
+
+Siblings sharing file refs:
+{{- range .TaskGraph.SiblingsSharingRefs}}
+{{template "task-graph-entry" .}}
+{{- end}}
+{{- end}}
+{{- if gt (len .TaskGraph.CompletedArtifacts) 0}}
+
+Completed artifacts:
+{{- range .TaskGraph.CompletedArtifacts}}
+{{template "task-graph-entry" .}}
+{{- end}}
+{{- end}}
+{{- if gt .TotalPlanTasks 1}}
+
+Plan siblings (scope boundary only):
 {{- range .SiblingTasks}}
-- {{.ID}}: {{.Description}}{{if ne .PlanRef ""}} — plan: {{.PlanRef}}{{end}}
+- {{.ID}} [{{.Status}}]: {{.Description}}{{if ne .PlanRef ""}} — plan: {{.PlanRef}}{{end}}
+{{- end}}
 {{- end}}
 {{- if ne .PlanRef ""}}
 PLAN ARTIFACT: {{.PlanRef}}
@@ -44,5 +81,40 @@ If your plan CANNOT be made consistent with those prior plans:
 - blocked_reason: which prior task constraint conflicts and why.
 - blocked_questions: what needs to change in prior plans to resolve.
 {{- end}}
+{{- end}}
+{{- end -}}
+
+{{- define "task-graph-entry" -}}
+- {{.ID}} [{{.Status}}{{if ne .RolePair ""}}, {{.RolePair}}{{end}}]: {{.Description}}
+  load: liza get {{.ID}} --json
+{{- if .SharedRefs}}
+  shared refs:
+{{- range .SharedRefs}}
+  - {{.}}
+{{- end}}
+{{- end}}
+{{- if or .SpecRef .EpicRef .PlanRef .ArchRef .OutputRefs}}
+  exact refs:
+{{- if .SpecRef}}
+  - spec: {{.SpecRef}}
+{{- end}}
+{{- if .EpicRef}}
+  - epic: {{.EpicRef}}
+{{- end}}
+{{- if .PlanRef}}
+  - plan: {{.PlanRef}}
+{{- end}}
+{{- if .ArchRef}}
+  - arch: {{.ArchRef}}
+{{- end}}
+{{- range .OutputRefs}}
+  - output: {{.}}
+{{- end}}
+{{- end}}
+{{- if .BlockedReason}}
+  blocker: {{.BlockedReason}}
+{{- end}}
+{{- if .RepairOperation}}
+  repair: {{.RepairOperation}}
 {{- end}}
 {{- end -}}

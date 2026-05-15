@@ -45,7 +45,9 @@ BASH CONSTRAINTS (all roles — CLI sandboxes may block these patterns):
 - Avoid using sed/awk for file editing.
 
 QUERY TOOLS (all roles):
-- liza get --json — Query state: liza get tasks --json, liza get <id> --json, liza get agents --json, liza get metrics --json
+- Query targeted state: liza get <id> --json, liza get agents --json, liza get metrics --json
+- Prefer task IDs rendered in this prompt's relevant task graph digest. Use `liza get tasks --active --summary --json` only for an orchestrator-level refresh when the prompt dashboard is stale.
+- Avoid `liza get tasks --json` unless targeted task reads and active summaries are insufficient; state why before using it.
 - liza status --json — Dashboard overview
 - liza validate --json — Validate state consistency (--skip-spec-check)
 
@@ -86,8 +88,9 @@ FIRST ACTIONS:
 {{- if .TaskID}}
 2. Query your assigned task: liza get {{.TaskID}} --json
 {{- else}}
-2. Query active task summary: liza get tasks --active --summary --json
-   Full task list only if needed: liza get tasks --json
+2. Use the orchestrator dashboard and active-task digest below first.
+   Query specific tasks with liza get <task-id> --json.
+   Refresh active summaries only if the prompt context appears stale.
 {{- end}}
 3. Read the goal spec: {{.GoalSpecRef}}
 4. Execute your role's protocol

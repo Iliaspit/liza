@@ -264,23 +264,128 @@ func TestBuildPrompt_CollectiveScoping(t *testing.T) {
 		"COLLECTIVE PLAN SCOPING",
 		"1 of 3 in the current sprint",
 		"specs/vision.md",
-		"task-2: Add user API",
-		"task-3: Add tests",
+		"RELEVANT TASK GRAPH DIGEST",
+		"Plan siblings (scope boundary only)",
+		"task-2 [DRAFT_CODE]: Add user API",
+		"task-3 [MERGED]: Add tests",
 	}
 	for _, want := range wantContains {
 		if !strings.Contains(prompt, want) {
 			t.Errorf("buildPrompt() missing expected scoping content: %q", want)
 		}
 	}
-	for _, statusTag := range []string{"[DRAFT_CODE]", "[MERGED]"} {
-		if strings.Contains(prompt, statusTag) {
-			t.Errorf("buildPrompt() should not include sibling status tag %q", statusTag)
-		}
+	// Current task should NOT appear in siblings list
+	if strings.Contains(prompt, "task-1 [") {
+		t.Error("buildPrompt() should not include current task in sibling list")
+	}
+}
+
+func TestBuildPrompt_RelevantTaskGraphDigest(t *testing.T) {
+	now := time.Now().UTC()
+	blockedReason := "waiting for migration plan"
+	state := &models.State{
+		Version: 1,
+		Goal: models.Goal{
+			ID:          "goal-1",
+			Description: "Test goal",
+			SpecRef:     "specs/vision.md",
+			Status:      models.GoalStatusInProgress,
+			Created:     now,
+		},
+		Tasks: []models.Task{
+			{
+				ID:          "task-current",
+				Description: "Implement shared repository behavior",
+				Status:      models.TaskStatusImplementing,
+				RolePair:    "coding-pair",
+				Priority:    1,
+				DependsOn:   []string{"task-dep"},
+				SpecRef:     "specs/vision.md",
+				DoneWhen:    "internal/repository.go behavior is validated",
+				Scope:       "In scope: `internal/repository.go` and tests/repository_test.go",
+				Created:     now,
+			},
+			{
+				ID:            "task-dep",
+				Description:   "Prepare migration contract",
+				Status:        models.TaskStatusBlocked,
+				RolePair:      "code-planning-pair",
+				Priority:      1,
+				SpecRef:       "specs/migration.md",
+				PlanRef:       "specs/plans/migration.md",
+				BlockedReason: &blockedReason,
+				Output: []models.OutputEntry{
+					{PlanRef: "specs/plans/migration-output.md"},
+				},
+				Created: now,
+			},
+			{
+				ID:          "task-sibling",
+				Description: "Document repository behavior",
+				Status:      models.TaskStatusMerged,
+				RolePair:    "coding-pair",
+				Priority:    2,
+				SpecRef:     "specs/repository.md",
+				PlanRef:     "specs/plans/repository.md",
+				Scope:       "In scope: internal/repository.go and docs/repository.md",
+				Created:     now,
+			},
+			{
+				ID:          "task-other-sibling",
+				Description: "Review unrelated CLI behavior",
+				Status:      models.TaskStatusReady,
+				RolePair:    "coding-pair",
+				Priority:    3,
+				SpecRef:     "specs/cli.md",
+				PlanRef:     "specs/plans/cli.md",
+				Scope:       "In scope: cmd/liza/cli.go",
+				Created:     now,
+			},
+		},
+		Sprint: models.Sprint{
+			Scope: models.SprintScope{
+				Planned: []string{"task-current", "task-sibling", "task-other-sibling"},
+			},
+		},
+		Agents: make(map[string]models.Agent),
+		Config: models.Config{IntegrationBranch: "main"},
 	}
 
-	// Current task should NOT appear in siblings list
-	if strings.Contains(prompt, "task-1: Add auth") {
-		t.Error("buildPrompt() should not include current task in sibling list")
+	tmpDir := t.TempDir()
+	config := SupervisorConfig{
+		Role:        "coder",
+		AgentID:     "coder-1",
+		ProjectRoot: tmpDir,
+		SpecsDir:    filepath.Join(tmpDir, "specs"),
+		StatePath:   filepath.Join(tmpDir, "state.yaml"),
+	}
+
+	prompt, err := testBuildPrompt(t, state, config, "task-current")
+	if err != nil {
+		t.Fatalf("BuildPrompt() error: %v", err)
+	}
+
+	for _, want := range []string{
+		"RELEVANT TASK GRAPH DIGEST",
+		"Direct dependencies:",
+		"task-dep [BLOCKED, code-planning-pair]: Prepare migration contract",
+		"load: liza get task-dep --json",
+		"Blocked related tasks:",
+		"blocker: waiting for migration plan",
+		"Siblings sharing file refs:",
+		"task-sibling [MERGED, coding-pair]: Document repository behavior",
+		"shared refs:",
+		"internal/repository.go",
+		"Completed artifacts:",
+		"plan: specs/plans/repository.md",
+		"output: specs/plans/migration-output.md",
+		"Plan siblings (scope boundary only):",
+		"task-sibling [MERGED]: Document repository behavior",
+		"task-other-sibling [DRAFT_CODE]: Review unrelated CLI behavior",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("buildPrompt() missing task graph digest content: %q", want)
+		}
 	}
 }
 
@@ -419,20 +524,15 @@ func TestBuildPrompt_CollectiveScopingOrdinal(t *testing.T) {
 		t.Error("buildPrompt() should NOT hardcode ordinal to 1")
 	}
 	// task-2 (current) should not appear in siblings
-	if strings.Contains(prompt, "task-2: Add user API") {
+	if strings.Contains(prompt, "task-2 [") {
 		t.Error("buildPrompt() should not include current task in sibling list")
 	}
 	// task-1 and task-3 should appear as siblings
-	if !strings.Contains(prompt, "task-1: Add auth") {
+	if !strings.Contains(prompt, "task-1 [MERGED]: Add auth") {
 		t.Error("buildPrompt() should include task-1 as sibling")
 	}
-	if !strings.Contains(prompt, "task-3: Add tests") {
+	if !strings.Contains(prompt, "task-3 [DRAFT_CODE]: Add tests") {
 		t.Error("buildPrompt() should include task-3 as sibling")
-	}
-	for _, statusTag := range []string{"[MERGED]", "[DRAFT_CODE]"} {
-		if strings.Contains(prompt, statusTag) {
-			t.Errorf("buildPrompt() should not include sibling status tag %q", statusTag)
-		}
 	}
 }
 
@@ -592,29 +692,6 @@ func TestSplitRef(t *testing.T) {
 	}
 }
 
-func TestTruncateDescription(t *testing.T) {
-	tests := []struct {
-		name   string
-		input  string
-		maxLen int
-		want   string
-	}{
-		{"short", "hello", 100, "hello"},
-		{"exact", strings.Repeat("a", 100), 100, strings.Repeat("a", 100)},
-		{"long", strings.Repeat("b", 200), 100, strings.Repeat("b", 100) + "…"},
-		{"empty", "", 100, ""},
-		{"unicode preserved when under limit", "héllo wörld", 100, "héllo wörld"},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			got := truncateDescription(tc.input, tc.maxLen)
-			if got != tc.want {
-				t.Errorf("truncateDescription(%q, %d) = %q, want %q", tc.input, tc.maxLen, got, tc.want)
-			}
-		})
-	}
-}
-
 func TestCollectSiblingTasks_TruncatesLongDescriptions(t *testing.T) {
 	now := time.Now().UTC()
 	longDesc := strings.Repeat("x", 400)
@@ -657,10 +734,10 @@ func TestCollectSiblingTasks_TruncatesLongDescriptions(t *testing.T) {
 	if len(siblings) != 1 {
 		t.Fatalf("len(siblings) = %d, want 1", len(siblings))
 	}
-	if len(siblings[0].Description) > 203 { // 200 + len("…") which is 3 bytes in UTF-8
+	if len(siblings[0].Description) > 203 { // 200 + len("...")
 		t.Errorf("sibling description not truncated: len=%d", len(siblings[0].Description))
 	}
-	if !strings.HasSuffix(siblings[0].Description, "…") {
+	if !strings.HasSuffix(siblings[0].Description, "...") {
 		t.Error("truncated description should end with ellipsis")
 	}
 }
