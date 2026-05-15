@@ -1201,32 +1201,40 @@ def render_mcp_usage(report: SessionReport) -> str:
 
 
 def render_turn_timeline(report: SessionReport) -> str:
-    """Turn-by-turn tool invocation timeline (rich format only)."""
+    """Turn-by-turn tool invocation timeline."""
     if not report.actions:
         return ""
 
+    has_duration = report.meta.format == "rich"
+    duration_header = f"  {'Duration':>10s}" if has_duration else ""
+    duration_separator = f"  {'-' * 10}" if has_duration else ""
+    timeline_width = 152 if has_duration else 140
+
     lines = [
         "",
-        "-" * 152,
+        "-" * timeline_width,
         "TURN TIMELINE",
-        "-" * 152,
-        f"  {'#':>3s}  {'Duration':>10s}  {'Tool':<20s} {'Detail':<100s} {'Result':>8s} {'Err':>4s}",
-        f"  {'-' * 3}  {'-' * 10}  {'-' * 20} {'-' * 100} {'-' * 8} {'-' * 4}",
+        "-" * timeline_width,
+        f"  {'#':>3s}{duration_header}  {'Tool':<20s} {'Detail':<100s} {'Result':>8s} {'Err':>4s}",
+        f"  {'-' * 3}{duration_separator}  {'-' * 20} {'-' * 100} {'-' * 8} {'-' * 4}",
     ]
 
     for i, action in enumerate(report.actions, 1):
         detail = action.detail[:100] if action.detail else ""
         result_size = f"{action.result_chars / 1024:.1f}K" if action.result_chars >= 1024 else f"{action.result_chars}"
         err = " ERR" if action.is_error else ""
-        dur = f"{action.duration_ms / 1000:.1f}s"
-        lines.append(f"  {i:>3d}  {dur:>10s}  {action.tool_name:<20s} {detail:<100s} {result_size:>8s} {err:>4s}")
+        duration_value = f"  {action.duration_ms / 1000:>9.1f}s" if has_duration else ""
+        lines.append(f"  {i:>3d}{duration_value}  {action.tool_name:<20s} {detail:<100s} {result_size:>8s} {err:>4s}")
 
     total_result = sum(a.result_chars for a in report.actions)
     error_count = sum(1 for a in report.actions if a.is_error)
-    lines.append(f"  {'-' * 3}  {'-' * 10}  {'-' * 20} {'-' * 100} {'-' * 8} {'-' * 4}")
+    lines.append(f"  {'-' * 3}{duration_separator}  {'-' * 20} {'-' * 100} {'-' * 8} {'-' * 4}")
+
+    duration_blank = f"  {'':>10s}" if has_duration else ""
+    result_padding = " " * (102 if has_duration else 104)
     lines.append(
-        f"  {'':>3s}  {'':>10s}  {len(report.actions)} calls{' ' * 102}"
-        f"{total_result / 1024:.0f}K total   {error_count} err"
+        f"  {'':>3s}{duration_blank}  {len(report.actions)} calls"
+        f"{result_padding}{total_result / 1024:.0f}K total   {error_count} err"
     )
 
     return "\n".join(lines) + "\n"
@@ -1462,23 +1470,25 @@ def render_report(report: SessionReport) -> str:
     if report.meta.format == "rich":
         sections.append(render_per_turn_growth(report))
         sections.append(render_longest_turns(report))
-        sections.append(render_turn_timeline(report))
-        sections.append(render_tool_result_breakdown(report))
-        sections.append(render_mcp_usage(report))
-        sections.append(render_efficiency_insights(report))
-        sections.append(render_struggle_sequences(report))
-        sections.append(render_cost(report))
-        sections.append(render_mcp_status(report))
     else:
         sections.append("")
         sections.append("  Note: Per-turn growth unavailable in sparse format (single turn).")
         sections.append("")
-        sections.append(render_longest_turns(report))
-        sections.append(render_turn_timeline(report))
-        sections.append(render_tool_result_breakdown(report))
-        sections.append(render_mcp_usage(report))
-        sections.append(render_efficiency_insights(report))
-        sections.append(render_struggle_sequences(report))
+
+    # Action-derived sections are available for both rich Claude logs and sparse Codex logs.
+    sections.extend(
+        [
+            render_turn_timeline(report),
+            render_tool_result_breakdown(report),
+            render_mcp_usage(report),
+            render_efficiency_insights(report),
+            render_struggle_sequences(report),
+        ]
+    )
+
+    if report.meta.format == "rich":
+        sections.append(render_cost(report))
+        sections.append(render_mcp_status(report))
 
     return "\n".join(s for s in sections if s)
 

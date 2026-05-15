@@ -21,6 +21,25 @@ def as_lines(*events: dict[str, Any]) -> list[str]:
     return [json.dumps(event) for event in events]
 
 
+def sparse_command_lines() -> list[str]:
+    return as_lines(
+        {"type": "thread.started", "thread_id": "t"},
+        {"type": "turn.started"},
+        {
+            "type": "item.completed",
+            "item": {
+                "id": "item_1",
+                "type": "command_execution",
+                "status": "completed",
+                "command": "echo ok",
+                "aggregated_output": "ok\n",
+                "exit_code": 0,
+            },
+        },
+        {"type": "turn.completed", "usage": {"input_tokens": 1, "cached_input_tokens": 0, "output_tokens": 1}},
+    )
+
+
 def test_sparse_message_and_command_in_one_turn_counts_as_tool_turn() -> None:
     analyzer = load_analyzer()
 
@@ -174,3 +193,31 @@ def test_sparse_single_outer_turn_counts_each_action_item_as_turn() -> None:
     assert report.tool_turn_units == 42
     assert report.empty_turns == []
     assert [action.turn_num for action in report.actions[-3:]] == [40, 41, 42]
+
+
+def test_sparse_report_omits_longest_turns_section() -> None:
+    analyzer = load_analyzer()
+
+    report = analyzer.parse_sparse(sparse_command_lines())
+
+    def sentinel_longest_turns(_: Any) -> str:
+        return "SENTINEL LONGEST TURNS"
+
+    analyzer.render_longest_turns = sentinel_longest_turns
+    rendered = analyzer.render_report(report)
+
+    assert "TOP 10 LONGEST TURNS" not in rendered
+    assert "SENTINEL LONGEST TURNS" not in rendered
+    assert "Note: Per-turn growth unavailable in sparse format" in rendered
+
+
+def test_sparse_turn_timeline_omits_unavailable_duration_column() -> None:
+    analyzer = load_analyzer()
+
+    report = analyzer.parse_sparse(sparse_command_lines())
+
+    rendered = analyzer.render_turn_timeline(report)
+
+    assert "TURN TIMELINE" in rendered
+    assert "Duration" not in rendered
+    assert "0.0s" not in rendered
