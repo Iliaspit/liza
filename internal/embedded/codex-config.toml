@@ -1,3 +1,20 @@
+sandbox_mode = "workspace-write"
+default_permissions = "workspace"
+
+[permissions.workspace.filesystem]
+":root" = "read"
+":tmpdir" = "write"
+"/tmp" = "write"
+
+[permissions.workspace.filesystem.":project_roots"]
+"." = "write"
+".git" = "write"
+".agents" = "read"
+".codex" = "read"
+
+[permissions.workspace.network]
+enabled = true
+
 [sandbox_workspace_write]
 writable_roots = [
   "{{REPO_ROOT}}",

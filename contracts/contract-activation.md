@@ -33,14 +33,14 @@ Verification: Run `claude` and prompt `hello`.
 
 ## Codex
 
-`liza init --codex` performs project activation: it adds the active project root,
-its `.git` directory, and `/tmp` to
-`~/.codex/config.toml` → `sandbox_workspace_write.writable_roots`, enables
-Codex hooks in `<project>/.codex/config.toml`, writes
-`<project>/.codex/hooks.json`, and deploys hook scripts to
-`<project>/.codex/hooks/`. If a config file already exists, Liza prompts before
-merging and preserves existing settings. It does not install the full baseline
-below.
+`liza init --codex` performs project activation. In `~/.codex/config.toml`, it
+adds Liza's noninteractive workspace permission baseline, including
+`sandbox_mode = "workspace-write"`, plus the active project root, its `.git`
+directory, and `/tmp` under
+`sandbox_workspace_write.writable_roots`. In `<project>/.codex/`, it enables
+Codex hooks in `config.toml`, writes `hooks.json`, and deploys hook scripts to
+`hooks/`. If a config file already exists, Liza prompts before merging and
+preserves unrelated settings. It does not install the full baseline below.
 
 The session-init hook allows the mandatory startup documents to be read through
 Codex MCP filesystem read tools, or through simple Bash read commands such as
@@ -53,6 +53,21 @@ username):
 ```toml
 approval_policy = "on-failure"
 sandbox_mode = "workspace-write"
+default_permissions = "workspace"
+
+[permissions.workspace.filesystem]
+":root" = "read"
+":tmpdir" = "write"
+"/tmp" = "write"
+
+[permissions.workspace.filesystem.":project_roots"]
+"." = "write"
+".git" = "write"
+".agents" = "read"
+".codex" = "read"
+
+[permissions.workspace.network]
+enabled = true
 
 [sandbox_workspace_write]
 network_access = true
@@ -75,6 +90,13 @@ args = ["-y", "@modelcontextprotocol/server-filesystem", "/home/<USER>/.claude",
 ```
 
 If Codex agents must run `git add`, `git commit`, `git worktree`, or Liza review submission flows from a repo worktree, the active project root and its `.git` directory must both be listed in `writable_roots`. `liza init --codex` manages these project-specific entries and `/tmp` for scratch files. Liza also passes the task worktree and project `.git` directory as explicit `--add-dir` entries when launching Codex for a claimed task. Without writable access to `.git`, Codex may mount git metadata read-only even when the worktree files themselves are writable, which blocks creation of `index.lock` under `.git/worktrees/...`.
+
+Liza launches Codex supervisors with `codex exec -` plus `-c` overrides for
+`sandbox_mode="workspace-write"`, `approval_policy="never"`,
+`default_permissions="workspace"`, the workspace filesystem profile above, and
+workspace network access. It does not use `--full-auto`; that mode can still
+leave linked worktree Git metadata read-only in some Codex sandbox
+configurations.
 
 After editing `~/.codex/config.toml`, restart Codex completely before testing.
 

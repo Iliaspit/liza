@@ -418,8 +418,9 @@ func buildCodexArgs(projectRoot, prompt string, useStdin bool, outputsDir string
 	} else {
 		args = append(args, "exec", prompt)
 	}
-	// --full-auto enables Codex's auto-approval mode within the OS-enforced sandbox.
-	args = append(args, "--full-auto")
+	for _, override := range codexWorkspacePermissionOverrides() {
+		args = append(args, "-c", override)
+	}
 	for _, dir := range additionalDirs {
 		if dir == "" {
 			continue
@@ -430,6 +431,19 @@ func buildCodexArgs(projectRoot, prompt string, useStdin bool, outputsDir string
 		args = append(args, "--json")
 	}
 	return args
+}
+
+func codexWorkspacePermissionOverrides() []string {
+	return []string{
+		`sandbox_mode="workspace-write"`,
+		`approval_policy="never"`,
+		`default_permissions="workspace"`,
+		// Codex accepts one TOML assignment per -c override. Keep the nested
+		// filesystem profile as one inline table so the quoted pseudo-root keys
+		// stay grouped under permissions.workspace.filesystem.
+		`permissions.workspace.filesystem={":root"="read", ":tmpdir"="write", "/tmp"="write", ":project_roots"={"."="write", ".git"="write", ".agents"="read", ".codex"="read"}}`,
+		`permissions.workspace.network.enabled=true`,
+	}
 }
 
 func codexInteractiveArgs(additionalDirs []string) []string {

@@ -756,11 +756,19 @@ func TestCLISupportsStdin(t *testing.T) {
 }
 
 func TestBuildCodexArgs(t *testing.T) {
-	t.Run("stdin without logging uses full-auto", func(t *testing.T) {
+	t.Run("stdin without logging disables approval prompts", func(t *testing.T) {
 		args := buildCodexArgs("/tmp/project", "ignored", true, "", []string{"/tmp", "/tmp/project/.worktrees/task-1"})
 
-		if !slices.Contains(args, "--full-auto") {
-			t.Fatalf("args = %v, want --full-auto flag", args)
+		if slices.Contains(args, "--full-auto") {
+			t.Fatalf("args = %v, did not expect --full-auto flag", args)
+		}
+		if !containsAdjacent(args, "-c", `approval_policy="never"`) {
+			t.Fatalf("args = %v, want noninteractive approval policy", args)
+		}
+		for _, override := range codexWorkspacePermissionOverrides() {
+			if !containsAdjacent(args, "-c", override) {
+				t.Fatalf("args = %v, missing Codex config override %q", args, override)
+			}
 		}
 		if slices.Contains(args, "--dangerously-bypass-approvals-and-sandbox") {
 			t.Fatalf("args = %v, did not expect bypass flag", args)
@@ -789,8 +797,16 @@ func TestBuildCodexArgs(t *testing.T) {
 		if !slices.Contains(args, "--json") {
 			t.Fatalf("args = %v, want --json when logging enabled", args)
 		}
-		if !slices.Contains(args, "--full-auto") {
-			t.Fatalf("args = %v, want --full-auto flag", args)
+		if slices.Contains(args, "--full-auto") {
+			t.Fatalf("args = %v, did not expect --full-auto flag", args)
+		}
+		if !containsAdjacent(args, "-c", `approval_policy="never"`) {
+			t.Fatalf("args = %v, want noninteractive approval policy", args)
+		}
+		for _, override := range codexWorkspacePermissionOverrides() {
+			if !containsAdjacent(args, "-c", override) {
+				t.Fatalf("args = %v, missing Codex config override %q", args, override)
+			}
 		}
 		for _, a := range args {
 			if strings.Contains(a, "mcp_servers") {
@@ -798,6 +814,15 @@ func TestBuildCodexArgs(t *testing.T) {
 			}
 		}
 	})
+}
+
+func containsAdjacent(values []string, first, second string) bool {
+	for i := 0; i+1 < len(values); i++ {
+		if values[i] == first && values[i+1] == second {
+			return true
+		}
+	}
+	return false
 }
 
 func TestCodexInteractiveArgs(t *testing.T) {

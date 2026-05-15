@@ -385,9 +385,9 @@ func WriteClaudeSettings(projectRoot string, reader *bufio.Reader) error {
 	return nil
 }
 
-// WriteCodexProjectPermissions merges the active project root and its .git
-// directory into ~/.codex/config.toml. It deliberately does not install the
-// full recommended Codex setup; users keep ownership of their global settings.
+// WriteCodexProjectPermissions merges the active project root, its .git
+// directory, and Liza's noninteractive workspace permission baseline into
+// ~/.codex/config.toml. Project-local Codex config remains reserved for hooks.
 func WriteCodexProjectPermissions(projectRoot string, reader *bufio.Reader) error {
 	if reader == nil {
 		reader = bufio.NewReader(os.Stdin)
@@ -419,7 +419,7 @@ func WriteCodexProjectPermissions(projectRoot string, reader *bufio.Reader) erro
 		return fmt.Errorf("failed to read codex config: %w", err)
 	}
 
-	merged, changed, err := mergeCodexWritableRoots(string(existingData), roots)
+	merged, changed, err := mergeCodexProjectConfig(string(existingData), roots)
 	if err != nil {
 		return err
 	}
@@ -428,7 +428,7 @@ func WriteCodexProjectPermissions(projectRoot string, reader *bufio.Reader) erro
 		return nil
 	}
 
-	ok, err := confirmMerge("Should Liza add this project's Codex writable roots to ~/.codex/config.toml? (y/n): ", reader)
+	ok, err := confirmMerge("Should Liza update ~/.codex/config.toml with this project's Codex permissions? (y/n): ", reader)
 	if err != nil {
 		return err
 	}
@@ -631,11 +631,48 @@ func renderCodexProjectConfig(roots []string) string {
 	return ensureTrailingNewline(content)
 }
 
+func mergeCodexProjectConfig(content string, roots []string) (string, bool, error) {
+	merged, rootsChanged, err := mergeCodexWritableRoots(content, roots)
+	if err != nil {
+		return "", false, err
+	}
+	merged, baselineChanged := mergeCodexWorkspacePermissionBaseline(merged)
+	return merged, rootsChanged || baselineChanged, nil
+}
+
+func mergeCodexWorkspacePermissionBaseline(content string) (string, bool) {
+	assignments := []struct {
+		section string
+		key     string
+		value   string
+	}{
+		{"", "sandbox_mode", `"workspace-write"`},
+		{"", "default_permissions", `"workspace"`},
+		{"permissions.workspace.filesystem", `":root"`, `"read"`},
+		{"permissions.workspace.filesystem", `":tmpdir"`, `"write"`},
+		{"permissions.workspace.filesystem", `"/tmp"`, `"write"`},
+		{`permissions.workspace.filesystem.":project_roots"`, `"."`, `"write"`},
+		{`permissions.workspace.filesystem.":project_roots"`, `".git"`, `"write"`},
+		{`permissions.workspace.filesystem.":project_roots"`, `".agents"`, `"read"`},
+		{`permissions.workspace.filesystem.":project_roots"`, `".codex"`, `"read"`},
+		{"permissions.workspace.network", "enabled", "true"},
+	}
+
+	updated := content
+	changed := false
+	for _, assignment := range assignments {
+		var assignmentChanged bool
+		updated, assignmentChanged = ensureTomlAssignment(updated, assignment.section, assignment.key, assignment.value)
+		changed = changed || assignmentChanged
+	}
+	return updated, changed
+}
+
 func mergeCodexWritableRoots(content string, roots []string) (string, bool, error) {
 	lines := strings.Split(content, "\n")
 	sectionStart, sectionEnd := findTomlSection(lines, "sandbox_workspace_write")
 	if sectionStart == -1 {
-		addition := renderCodexProjectConfig(roots)
+		addition := "[sandbox_workspace_write]\n" + renderWritableRootsBlock("", roots)
 		return appendTomlBlock(content, addition), true, nil
 	}
 
@@ -674,6 +711,53 @@ func mergeCodexWritableRoots(content string, roots []string) (string, bool, erro
 	}
 	updated := insertLines(lines, rootLineEnd, additions)
 	return strings.Join(updated, "\n"), true, nil
+}
+
+func ensureTomlAssignment(content, section, key, value string) (string, bool) {
+	lines := strings.Split(content, "\n")
+	start, end := tomlAssignmentRange(lines, section)
+	if start == -1 {
+		block := fmt.Sprintf("[%s]\n%s = %s\n", section, key, value)
+		return appendTomlBlock(content, block), true
+	}
+
+	lineStart, lineEnd := findTomlAssignment(lines, start, end, key)
+	wanted := key + " = " + value
+	if lineStart == -1 {
+		updated := insertLines(lines, end, []string{wanted})
+		return ensureTrailingNewline(strings.Join(updated, "\n")), true
+	}
+	if lineEnd > lineStart {
+		return content, false
+	}
+
+	current := strings.TrimSpace(stripTomlLineComment(strings.Join(lines[lineStart:lineEnd+1], "\n")))
+	if current == wanted {
+		return content, false
+	}
+
+	lines[lineStart] = wanted
+	if lineEnd > lineStart {
+		lines = append(lines[:lineStart+1], lines[lineEnd+1:]...)
+	}
+	return ensureTrailingNewline(strings.Join(lines, "\n")), true
+}
+
+func tomlAssignmentRange(lines []string, section string) (int, int) {
+	if section != "" {
+		sectionStart, sectionEnd := findTomlSection(lines, section)
+		if sectionStart == -1 {
+			return -1, -1
+		}
+		return sectionStart + 1, sectionEnd
+	}
+
+	for i, line := range lines {
+		if _, ok := tomlHeaderName(line); ok {
+			return 0, i
+		}
+	}
+	return 0, len(lines)
 }
 
 func findTomlSection(lines []string, name string) (int, int) {
@@ -850,7 +934,7 @@ func warnIncompleteCodexBaseline(content string) {
 	if codexBaselineLooksComplete(content) {
 		return
 	}
-	fmt.Fprintln(os.Stderr, "Warning: Codex config has Liza's minimal project writable roots only. For full recommended Codex setup, see contracts/contract-activation.md#codex.")
+	fmt.Fprintln(os.Stderr, "Warning: Codex config is missing optional setup such as cache roots or MCP filesystem config. For the full recommended Codex setup, see contracts/contract-activation.md#codex.")
 }
 
 func codexBaselineLooksComplete(content string) bool {

@@ -31,8 +31,10 @@ For global settings setup and provider-specific config (Claude, Codex, Gemini), 
 
 **`~/.codex/config.toml`** — global Codex CLI settings.
 
-`liza init --codex` only manages minimal project permissions in this file. It
-adds the active project root and the active project `.git` directory to
+`liza init --codex` manages the Codex permissions Liza needs for unattended
+supervisor tasks. It adds or corrects workspace permission baseline entries,
+including `sandbox_mode = "workspace-write"`, and adds the active project root
+plus the active project `.git` directory to
 `sandbox_workspace_write.writable_roots` so Codex can edit project files and
 write git metadata for commits, worktrees, and review flows. If the file already
 exists, Liza prompts before merging those entries and preserves unrelated
@@ -44,8 +46,8 @@ because Git worktrees write the task index under the main repo metadata path
 (`.git/worktrees/<task>/index.lock`), not under the worktree directory itself.
 
 This is not the full Codex baseline. Users still own broader settings such as
-`approval_policy`, `sandbox_mode`, `network_access`, cache directories like
-`~/.npm`, and MCP server configuration. See
+interactive `approval_policy`, cache directories like `~/.npm`, and MCP server
+configuration. See
 [Contract Activation](../contracts/contract-activation.md#codex) for the
 recommended complete setup.
 
