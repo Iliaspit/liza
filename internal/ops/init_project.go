@@ -201,6 +201,7 @@ func InitProject(projectRoot string, params InitProjectParams) error {
 			OrchestratorMaxWait:      7200,
 			ReviewerPollInterval:     30,
 			ReviewerMaxWait:          7200,
+			AgentProgressTimeout:     models.DefaultAgentProgressTimeoutSec,
 			DefaultCLI:               params.DefaultCLI,
 			DefaultDoerCLI:           params.DefaultDoerCLI,
 			DefaultReviewerCLI:       params.DefaultReviewerCLI,

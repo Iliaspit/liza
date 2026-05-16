@@ -117,6 +117,7 @@ func CreateValidState() *models.State {
 			OrchestratorMaxWait:      1800,
 			ReviewerPollInterval:     30,
 			ReviewerMaxWait:          1800,
+			AgentProgressTimeout:     models.DefaultAgentProgressTimeoutSec,
 			IntegrationBranch:        "integration",
 			Mode:                     models.SystemModeRunning,
 		},

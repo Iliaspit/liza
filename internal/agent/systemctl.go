@@ -131,8 +131,8 @@ func waitWhilePaused(ctx context.Context, projectRoot string) error {
 	}
 }
 
-// executeAgent executes the CLI with timeout
-func executeAgent(ctx context.Context, config SupervisorConfig, prompt string, additionalDirs []string) (int, string, error) {
+// executeAgent executes the CLI with timeout.
+func executeAgent(ctx context.Context, config SupervisorConfig, prompt string, additionalDirs []string, taskID string) (int, string, error) {
 	logger := GetLogger()
 	// Interactive mode: launch CLI without -p so user can paste the prompt
 	if config.Interactive {
@@ -146,12 +146,30 @@ func executeAgent(ctx context.Context, config SupervisorConfig, prompt string, a
 	// Create timeout context for CLI execution
 	execCtx, cancelExec := context.WithTimeout(ctx, config.ExecutionTimeout)
 	defer cancelExec()
+	progressCh := make(chan struct{}, 1)
+	markProgress := func() {
+		select {
+		case progressCh <- struct{}{}:
+		default:
+		}
+	}
+	execCtx = withExecutionProgressCallback(execCtx, markProgress)
+	stopWatchdog := startExecutionProgressWatchdog(execCtx, config, taskID, progressCh, cancelExec)
 
 	// Heartbeat is managed by RunSupervisor for the full supervisor lifetime,
 	// so we don't start one here.
 
 	// Execute CLI with timeout
 	result, err := config.Executor.Execute(execCtx, config.CLIName, config.AgentID, prompt, config.ProjectRoot, additionalDirs)
+	watchdogResult := stopWatchdog()
+	if watchdogResult.Blocked {
+		blockTaskFromSupervisor(db.For(config.StatePath), config.ProjectRoot, taskID, config.AgentID, watchdogResult.Reason)
+		logger.Error("Agent execution stopped after stale progress",
+			"agent_id", config.AgentID,
+			"task_id", taskID,
+			"reason", watchdogResult.Reason)
+		return 0, result.Output, nil
+	}
 
 	// Check if execution timed out
 	if err != nil && errors.Is(err, context.DeadlineExceeded) {

@@ -744,6 +744,7 @@ func InitCommandWithConfig(params InitParams) error {
 			OrchestratorMaxWait:      7200,
 			ReviewerPollInterval:     30,
 			ReviewerMaxWait:          7200,
+			AgentProgressTimeout:     models.DefaultAgentProgressTimeoutSec,
 			DefaultCLI:               params.DefaultCLI,
 			DefaultDoerCLI:           params.DefaultDoerCLI,
 			DefaultReviewerCLI:       params.DefaultReviewerCLI,

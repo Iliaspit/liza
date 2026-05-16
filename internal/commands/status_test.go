@@ -288,6 +288,10 @@ func TestBuildStatusData(t *testing.T) {
 				if len(data.PhaseHandoff.StaleAssignedAgents) != 1 {
 					t.Fatalf("stale assigned agents = %+v, want one stale assignment", data.PhaseHandoff.StaleAssignedAgents)
 				}
+				stale := data.PhaseHandoff.StaleAssignedAgents[0]
+				if stale.ProcessStatusSource == "" || stale.ProcessStatusDetail == "" {
+					t.Fatalf("stale process diagnostics missing: %+v", stale)
+				}
 				if !strings.Contains(data.PhaseHandoff.Explanation, "create implementation tasks after resume") {
 					t.Fatalf("handoff explanation did not describe implementation handoff: %q", data.PhaseHandoff.Explanation)
 				}
@@ -508,6 +512,12 @@ func TestBuildStatusData_AgentProcessStatus(t *testing.T) {
 	// This is just checking the field is populated
 	if agent.ProcessStatus == "" {
 		t.Error("expected ProcessStatus to be populated")
+	}
+	if agent.ProcessStatusSource == "" {
+		t.Error("expected ProcessStatusSource to be populated")
+	}
+	if agent.ProcessStatusDetail == "" {
+		t.Error("expected ProcessStatusDetail to be populated")
 	}
 
 	// TimeSinceHeartbeat should be populated

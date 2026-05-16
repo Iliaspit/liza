@@ -14,6 +14,8 @@ liza validate                      # Check blackboard against invariants
 liza analyze                       # Circuit breaker pattern detection
 ```
 
+`liza status --format json` includes `process_status_source` and `process_status_detail` for agents and phase-handoff blockers. Use these fields when a task appears assigned but the process state is ambiguous.
+
 ## Recovery Commands
 
 ```bash
@@ -84,6 +86,8 @@ Cross-pair states (not pair-specific):
 - **INTEGRATION_FAILED** — Merge conflict or test failure (coding pair only)
 
 To find the actual state names for a role-pair, check `role-pairs.<name>.states` in `.liza/pipeline.yaml`. Some pairs define extra states (e.g. `partially-approved`, `reviewing-2` for quorum review, or `clean` for no-issues-found).
+
+Supervisors automatically block a still-owned executing task when the child provider process makes no observable progress for `config.agent_progress_timeout` seconds. Observable progress is task state movement, worktree HEAD/status movement including untracked files, or provider stdout/stderr output. This prevents a stale `WORKING` agent from holding a task indefinitely when its provider process stalls. The watchdog cancels the provider and waits for it to exit before cleaning the worktree.
 
 ## Sprint Lifecycle
 

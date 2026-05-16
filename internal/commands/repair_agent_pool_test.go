@@ -57,6 +57,10 @@ func writeRepairAgentPoolState(t *testing.T, state *models.State) string {
 }
 
 func TestRepairAgentPool_DryRunUsesConfiguredDefaultCLI(t *testing.T) {
+	t.Setenv("LIZA_DEFAULT_CLI", "")
+	t.Setenv("LIZA_DEFAULT_DOER_CLI", "")
+	t.Setenv("LIZA_DEFAULT_REVIEWER_CLI", "")
+
 	state := testhelpers.CreateValidState()
 	state.Config.DefaultCLI = "gemini"
 	state.Tasks = []models.Task{

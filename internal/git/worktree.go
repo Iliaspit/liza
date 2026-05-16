@@ -106,8 +106,8 @@ func (g *Git) RemoveWorktreeDir(taskID string) error {
 		if err := os.RemoveAll(worktreePath); err != nil {
 			return fmt.Errorf("failed to remove worktree directory: %w", err)
 		}
-		_ = os.RemoveAll(metadataDir)
 	}
+	_ = os.RemoveAll(metadataDir)
 
 	return nil
 }
@@ -180,6 +180,24 @@ func (g *Git) GetWorktreePath(taskID string) string {
 // GetWorktreeRelPath returns the relative path for a task's worktree
 func (g *Git) GetWorktreeRelPath(taskID string) string {
 	return filepath.Join(paths.WorktreesDirName, taskID)
+}
+
+// WorktreeProgressSignature returns a compact signature for meaningful changes
+// inside a task worktree: HEAD movement and porcelain status changes.
+func (g *Git) WorktreeProgressSignature(taskID string) (string, error) {
+	if err := paths.ValidateTaskID(taskID); err != nil {
+		return "", fmt.Errorf("invalid task ID: %w", err)
+	}
+	worktreePath := g.GetWorktreePath(taskID)
+	head, err := g.execInDir(worktreePath, "rev-parse", "HEAD")
+	if err != nil {
+		return "", err
+	}
+	status, err := g.execInDir(worktreePath, "status", "--porcelain")
+	if err != nil {
+		return "", err
+	}
+	return head + "\n" + status, nil
 }
 
 // EnableWorktreeConfigExtension ensures the main repo has

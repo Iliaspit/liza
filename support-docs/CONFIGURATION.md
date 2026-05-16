@@ -74,6 +74,7 @@ All configuration lives in `.liza/state.yaml` under the `config` section.
 | `planner_max_wait` | 7200 | — | — | seconds | Max planner idle before exit |
 | `reviewer_poll_interval` | 30 | — | — | seconds | Reviewer polling interval |
 | `reviewer_max_wait` | 7200 | — | — | seconds | Max reviewer idle before exit |
+| `agent_progress_timeout` | 1800 | — | — | seconds | Max active execution time without state, worktree, or provider-output progress before blocking the task |
 | `default_cli` | (none) | — | — | CLI name | Global default coding agent CLI |
 | `default_doer_cli` | (none) | — | — | CLI name | Default coding agent CLI for doers and orchestrators |
 | `default_reviewer_cli` | (none) | — | — | CLI name | Default coding agent CLI for reviewers |
@@ -88,6 +89,8 @@ All configuration lives in `.liza/state.yaml` under the `config` section.
 | Planner | 4 hours | Complex planning needs time |
 
 When exceeded, supervisor kills CLI, resets agent to IDLE, retries after 5s delay.
+
+During active task execution, the supervisor also watches for observable progress. Progress means a meaningful task-state change, worktree HEAD/status change including untracked files, or provider stdout/stderr activity. If no progress is observed for `agent_progress_timeout`, the supervisor cancels the provider process, waits for it to exit, transitions the still-owned executing task to `BLOCKED`, cleans its worktree, and records the diagnostic in `blocked_reason`. The watchdog polls at `agent_progress_timeout / 4`, capped at 15 seconds.
 
 **Note:** Planners now respect `planner_max_wait` (default 2 hours). Previously planners ran indefinitely; they now exit after the configured idle timeout, same as coders and reviewers.
 

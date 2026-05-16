@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -53,13 +54,15 @@ type phaseHandoffStatus struct {
 }
 
 type phaseHandoffTask struct {
-	ID                 string `json:"id"`
-	Status             string `json:"status"`
-	RolePair           string `json:"role_pair,omitempty"`
-	AssignedTo         string `json:"assigned_to,omitempty"`
-	AgentStatus        string `json:"agent_status,omitempty"`
-	AgentProcessStatus string `json:"agent_process_status,omitempty"`
-	LeaseExpires       string `json:"lease_expires,omitempty"`
+	ID                  string `json:"id"`
+	Status              string `json:"status"`
+	RolePair            string `json:"role_pair,omitempty"`
+	AssignedTo          string `json:"assigned_to,omitempty"`
+	AgentStatus         string `json:"agent_status,omitempty"`
+	AgentProcessStatus  string `json:"agent_process_status,omitempty"`
+	ProcessStatusSource string `json:"process_status_source,omitempty"`
+	ProcessStatusDetail string `json:"process_status_detail,omitempty"`
+	LeaseExpires        string `json:"lease_expires,omitempty"`
 }
 
 type goalStatus struct {
@@ -94,13 +97,15 @@ type taskStatus struct {
 }
 
 type agentStatus struct {
-	ID                 string `json:"id"`
-	Role               string `json:"role"`
-	Status             string `json:"status"`
-	PID                int    `json:"pid"`
-	CurrentTask        string `json:"current_task"`
-	TimeSinceHeartbeat string `json:"time_since_heartbeat"`
-	ProcessStatus      string `json:"process_status"`
+	ID                  string `json:"id"`
+	Role                string `json:"role"`
+	Status              string `json:"status"`
+	PID                 int    `json:"pid"`
+	CurrentTask         string `json:"current_task"`
+	TimeSinceHeartbeat  string `json:"time_since_heartbeat"`
+	ProcessStatus       string `json:"process_status"`
+	ProcessStatusSource string `json:"process_status_source"`
+	ProcessStatusDetail string `json:"process_status_detail"`
 }
 
 type orchestratorStatus struct {
@@ -308,7 +313,10 @@ func buildPhaseHandoffStatus(state *models.State, projectRoot string) *phaseHand
 			}
 			if assignedAgent, ok := state.Agents[*task.AssignedTo]; ok {
 				blocker.AgentStatus = string(assignedAgent.Status)
-				blocker.AgentProcessStatus = getProcessStatus(assignedAgent.PID)
+				processInfo := getProcessStatusInfo(assignedAgent.PID)
+				blocker.AgentProcessStatus = processInfo.Status
+				blocker.ProcessStatusSource = processInfo.Source
+				blocker.ProcessStatusDetail = processInfo.Detail
 				if assignedAgent.CurrentTask != nil &&
 					*assignedAgent.CurrentTask == task.ID &&
 					assignedAgent.Status != models.AgentStatusIdle &&
@@ -379,7 +387,10 @@ func buildAgentStatuses(state *models.State) []agentStatus {
 
 		timeSince := now.Sub(agent.Heartbeat)
 		as.TimeSinceHeartbeat = render.FormatDuration(timeSince)
-		as.ProcessStatus = getProcessStatus(agent.PID)
+		processInfo := getProcessStatusInfo(agent.PID)
+		as.ProcessStatus = processInfo.Status
+		as.ProcessStatusSource = processInfo.Source
+		as.ProcessStatusDetail = processInfo.Detail
 		as.PID = agent.PID
 
 		agents = append(agents, as)
@@ -451,24 +462,61 @@ func buildWorkQueuesStatus(state *models.State, claimable, reviewable int, pr mo
 	}
 }
 
-// getProcessStatus checks if a process is running
-func getProcessStatus(pid int) string {
+type processStatusInfo struct {
+	Status string
+	Source string
+	Detail string
+}
+
+// getProcessStatusInfo checks process liveness and records how the status was
+// derived so callers can distinguish signal checks from missing PID data.
+func getProcessStatusInfo(pid int) processStatusInfo {
 	if pid == 0 {
-		return "unknown"
+		return processStatusInfo{
+			Status: "unknown",
+			Source: "pid",
+			Detail: "no pid recorded",
+		}
 	}
 
 	process, err := os.FindProcess(pid)
 	if err != nil {
-		return "not found"
+		return processStatusInfo{
+			Status: "not found",
+			Source: "os.FindProcess",
+			Detail: err.Error(),
+		}
 	}
 
 	// Signal 0 checks process existence without actually signaling
 	err = process.Signal(syscall.Signal(0))
 	if err == nil {
-		return "running"
+		return processStatusInfo{
+			Status: "running",
+			Source: "signal(0)",
+			Detail: "process accepted signal 0",
+		}
 	}
 
-	return "stopped"
+	if errors.Is(err, syscall.EPERM) {
+		return processStatusInfo{
+			Status: "running",
+			Source: "signal(0)",
+			Detail: "process exists but signal permission was denied",
+		}
+	}
+	if errors.Is(err, syscall.ESRCH) {
+		return processStatusInfo{
+			Status: "stopped",
+			Source: "signal(0)",
+			Detail: "process does not exist",
+		}
+	}
+	return processStatusInfo{
+		Status: "stopped",
+		Source: "signal(0)",
+		Detail: err.Error(),
+	}
 }
 
 func writeTasksSection(b *strings.Builder, tasks taskStatus) {

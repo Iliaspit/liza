@@ -35,6 +35,9 @@ type SupervisorConfig struct {
 	InitialTask      string // Optional task ID to resume
 	Executor         CLIExecutor
 	ExecutionTimeout time.Duration // Max time for agent execution before timeout
+	// ExecutionProgressTimeout is the maximum time an executing task may go
+	// without observable state, worktree, or provider-output progress.
+	ExecutionProgressTimeout time.Duration
 }
 
 type exit42RestartState struct {
@@ -229,7 +232,12 @@ func computeExit42BackoffDelay(restartCount int, maxBackoff time.Duration) time.
 
 func exit42TaskProgressSignature(task *models.Task) string {
 	snapshot := *task
+	snapshot.AssignedTo = nil
+	snapshot.LeaseExpires = nil
+	snapshot.ReviewingBy = nil
+	snapshot.ReviewLeaseExpires = nil
 	snapshot.Exit42RestartCount = 0
+	snapshot.History = nil
 
 	payload, err := json.Marshal(snapshot)
 	if err != nil {
@@ -322,6 +330,16 @@ func blockTaskFromSupervisor(bb *db.Blackboard, projectRoot, taskID, agentID, re
 		return nil
 	}); err != nil {
 		GetLogger().Warn("Failed to block task from supervisor", "error", err, "task_id", taskID)
+		return
+	}
+
+	result, err := ops.DeleteWorktree(projectRoot, taskID)
+	if err != nil {
+		GetLogger().Warn("Failed to clean blocked task worktree", "error", err, "task_id", taskID)
+		return
+	}
+	for _, warning := range result.Warnings {
+		GetLogger().Warn("Blocked task worktree cleanup warning", "warning", warning, "task_id", taskID)
 	}
 }
 
@@ -403,6 +421,14 @@ func effectiveSpinningRestartThreshold(cfg models.Config) int {
 		return cfg.SpinningRestartThreshold
 	}
 	return models.DefaultSpinningRestartThreshold
+}
+
+func effectiveAgentProgressTimeout(cfg models.Config) time.Duration {
+	seconds := cfg.AgentProgressTimeout
+	if seconds <= 0 {
+		seconds = models.DefaultAgentProgressTimeoutSec
+	}
+	return time.Duration(seconds) * time.Second
 }
 
 // cliSupportsStdin returns true if the CLI can read the prompt from stdin
@@ -613,15 +639,29 @@ func (d *DefaultCLIExecutor) Execute(ctx context.Context, cliName string, agentI
 	// in its own goroutine, so each buffer is written by exactly one goroutine.
 	var stdoutBuf, stderrBuf strings.Builder
 	var stdoutLog, stderrLog *streamingOutputFile
+	progress := executionProgressCallback(ctx)
 	if d.outputsDir != "" {
 		timestamp := time.Now().UTC().Format("20060102-150405")
 		stdoutLog = newStreamingOutputFile(d.outputsDir, agentID, "txt", timestamp, d.masker)
 		stderrLog = newStreamingOutputFile(d.outputsDir, agentID, "err", timestamp, d.masker)
-		cmd.Stdout = io.MultiWriter(os.Stdout, &stdoutBuf, stdoutLog)
-		cmd.Stderr = io.MultiWriter(os.Stderr, &stderrBuf, stderrLog)
+		stdoutWriters := []io.Writer{os.Stdout, &stdoutBuf, stdoutLog}
+		stderrWriters := []io.Writer{os.Stderr, &stderrBuf, stderrLog}
+		if progress != nil {
+			pw := progressWriter{mark: progress}
+			stdoutWriters = append(stdoutWriters, pw)
+			stderrWriters = append(stderrWriters, pw)
+		}
+		cmd.Stdout = io.MultiWriter(stdoutWriters...)
+		cmd.Stderr = io.MultiWriter(stderrWriters...)
 	} else {
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
+		if progress != nil {
+			pw := progressWriter{mark: progress}
+			cmd.Stdout = io.MultiWriter(os.Stdout, pw)
+			cmd.Stderr = io.MultiWriter(os.Stderr, pw)
+		} else {
+			cmd.Stdout = os.Stdout
+			cmd.Stderr = os.Stderr
+		}
 	}
 
 	defer func() {
@@ -778,6 +818,9 @@ func RunSupervisor(ctx context.Context, config SupervisorConfig) error {
 	if config.ExecutionTimeout == 0 {
 		config.ExecutionTimeout = strategy.DefaultTimeout()
 	}
+	if config.ExecutionProgressTimeout == 0 {
+		config.ExecutionProgressTimeout = effectiveAgentProgressTimeout(state.Config)
+	}
 
 	exit42Tracker := newExit42RestartTracker()
 	crashTracker := newCrashRestartTracker()
@@ -922,7 +965,7 @@ func RunSupervisor(ctx context.Context, config SupervisorConfig) error {
 
 		// Execute agent
 		additionalDirs := codexAdditionalDirs(config.ProjectRoot, stateBefore, taskID)
-		exitCode, currentOutput, err := executeAgent(ctx, config, prompt, additionalDirs)
+		exitCode, currentOutput, err := executeAgent(ctx, config, prompt, additionalDirs, effectiveTask)
 		if err != nil {
 			return fmt.Errorf("agent execution error: %w", err)
 		}

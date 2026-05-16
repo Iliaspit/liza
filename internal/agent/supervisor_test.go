@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/liza-mas/liza/internal/db"
+	lizagit "github.com/liza-mas/liza/internal/git"
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/ops"
 	"github.com/liza-mas/liza/internal/pipeline"
@@ -106,6 +107,166 @@ func TestMockCLIExecution(t *testing.T) {
 	}
 	if call.Prompt != "test prompt" {
 		t.Errorf("Prompt = %s, want 'test prompt'", call.Prompt)
+	}
+}
+
+func TestExecuteAgentBlocksTaskAfterProgressTimeout(t *testing.T) {
+	tmpDir := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, tmpDir)
+	statePath, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	testhelpers.SetupPipelineConfig(t, tmpDir)
+
+	now := time.Now().UTC()
+	taskID := "task-1"
+	agentID := "coder-1"
+	gw := lizagit.New(tmpDir)
+	baseCommit, err := gw.CreateWorktree(taskID, "main")
+	if err != nil {
+		t.Fatalf("CreateWorktree() error: %v", err)
+	}
+	task := testhelpers.BuildTaskByStatus(taskID, models.TaskStatusImplementing, now)
+	task.AssignedTo = &agentID
+	task.BaseCommit = &baseCommit
+	state := testhelpers.CreateValidState()
+	state.Tasks = []models.Task{task}
+	state.Agents = map[string]models.Agent{
+		agentID: {
+			Role:        models.RoleCoder,
+			Status:      models.AgentStatusWorking,
+			CurrentTask: &taskID,
+			Heartbeat:   now,
+		},
+	}
+	testhelpers.WriteInitialState(t, statePath, state)
+
+	mock := &MockCLIExecutor{
+		OnExecute: func(ctx context.Context, cliName string, agentID string, prompt string, projectRoot string, additionalDirs []string) error {
+			<-ctx.Done()
+			if _, statErr := os.Stat(filepath.Join(tmpDir, ".worktrees", taskID)); statErr != nil {
+				t.Fatalf("worktree should still exist when provider observes cancellation, stat err=%v", statErr)
+			}
+			return ctx.Err()
+		},
+	}
+	config := SupervisorConfig{
+		AgentID:                  agentID,
+		Role:                     models.RoleCoder,
+		ProjectRoot:              tmpDir,
+		StatePath:                statePath,
+		CLIName:                  "codex",
+		Executor:                 mock,
+		ExecutionTimeout:         5 * time.Second,
+		ExecutionProgressTimeout: 150 * time.Millisecond,
+	}
+
+	exitCode, _, err := executeAgent(context.Background(), config, "prompt", nil, taskID)
+	if err != nil {
+		t.Fatalf("executeAgent error: %v", err)
+	}
+	if exitCode != 0 {
+		t.Fatalf("exitCode = %d, want 0 after watchdog block", exitCode)
+	}
+
+	bb := db.For(statePath)
+	after, err := bb.Read()
+	if err != nil {
+		t.Fatalf("bb.Read: %v", err)
+	}
+	afterTask := after.FindTask(taskID)
+	if afterTask == nil {
+		t.Fatalf("task %s missing", taskID)
+	}
+	if afterTask.Status != models.TaskStatusBlocked {
+		t.Fatalf("task status = %s, want BLOCKED", afterTask.Status)
+	}
+	if afterTask.BlockedReason == nil || !strings.Contains(*afterTask.BlockedReason, "execution progress timeout") {
+		t.Fatalf("blocked reason = %v, want execution progress timeout", afterTask.BlockedReason)
+	}
+	if afterTask.AssignedTo != nil || afterTask.LeaseExpires != nil {
+		t.Fatalf("blocked task should clear assignment and lease, assigned=%v lease=%v", afterTask.AssignedTo, afterTask.LeaseExpires)
+	}
+	if afterTask.Worktree != nil {
+		t.Fatalf("blocked task worktree = %v, want nil", *afterTask.Worktree)
+	}
+	if _, err := os.Stat(filepath.Join(tmpDir, ".worktrees", taskID)); !os.IsNotExist(err) {
+		t.Fatalf("worktree directory should be removed, stat err=%v", err)
+	}
+	branchExists, err := gw.BranchExists("task/" + taskID)
+	if err != nil {
+		t.Fatalf("BranchExists error: %v", err)
+	}
+	if branchExists {
+		t.Fatalf("task branch should be removed")
+	}
+}
+
+func TestExecuteAgentOutputProgressPreventsProgressTimeout(t *testing.T) {
+	tmpDir := t.TempDir()
+	statePath, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	testhelpers.SetupPipelineConfig(t, tmpDir)
+
+	now := time.Now().UTC()
+	taskID := "task-1"
+	agentID := "coder-1"
+	task := testhelpers.BuildTaskByStatus(taskID, models.TaskStatusImplementing, now)
+	task.AssignedTo = &agentID
+	state := testhelpers.CreateValidState()
+	state.Tasks = []models.Task{task}
+	testhelpers.WriteInitialState(t, statePath, state)
+
+	mock := &MockCLIExecutor{
+		OnExecute: func(ctx context.Context, cliName string, agentID string, prompt string, projectRoot string, additionalDirs []string) error {
+			mark := executionProgressCallback(ctx)
+			deadline := time.After(280 * time.Millisecond)
+			ticker := time.NewTicker(40 * time.Millisecond)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case <-ticker.C:
+					if mark != nil {
+						mark()
+					}
+				case <-deadline:
+					if mark != nil {
+						mark()
+					}
+					return nil
+				}
+			}
+		},
+	}
+	config := SupervisorConfig{
+		AgentID:                  agentID,
+		Role:                     models.RoleCoder,
+		ProjectRoot:              tmpDir,
+		StatePath:                statePath,
+		CLIName:                  "codex",
+		Executor:                 mock,
+		ExecutionTimeout:         5 * time.Second,
+		ExecutionProgressTimeout: 120 * time.Millisecond,
+	}
+
+	exitCode, _, err := executeAgent(context.Background(), config, "prompt", nil, taskID)
+	if err != nil {
+		t.Fatalf("executeAgent error: %v", err)
+	}
+	if exitCode != 0 {
+		t.Fatalf("exitCode = %d, want 0", exitCode)
+	}
+
+	bb := db.For(statePath)
+	after, err := bb.Read()
+	if err != nil {
+		t.Fatalf("bb.Read: %v", err)
+	}
+	afterTask := after.FindTask(taskID)
+	if afterTask == nil {
+		t.Fatalf("task %s missing", taskID)
+	}
+	if afterTask.Status != models.TaskStatusImplementing {
+		t.Fatalf("task status = %s, want IMPLEMENTING_CODE", afterTask.Status)
 	}
 }
 

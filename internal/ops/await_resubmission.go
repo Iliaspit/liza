@@ -130,13 +130,24 @@ func AwaitResubmission(ctx context.Context, projectRoot, taskID, agentID string,
 			return nil, ctx.Err()
 
 		case <-abortTicker.C:
-			abortState, abortErr := bb.ReadCached()
+			abortState, abortErr := bb.Read()
 			if abortErr != nil {
 				continue
 			}
 			if abortState.Config.Mode == models.SystemModeStopped {
 				releaseReviewOwnership(bb, agentID, taskID)
 				return &AwaitResubmissionResult{Verdict: ResubmissionAborted, TaskStatus: task.Status}, nil
+			}
+			currentTask := abortState.FindTask(taskID)
+			if currentTask == nil {
+				releaseReviewOwnership(bb, agentID, taskID)
+				return &AwaitResubmissionResult{
+					Verdict: ResubmissionTerminal,
+					Reason:  "task disappeared from state",
+				}, nil
+			}
+			if rc := checkResubmissionStatus(currentTask, resolver, rolePair); rc != nil {
+				return handleResubmissionResult(bb, currentTask, agentID, resolver, rolePair)
 			}
 
 		case <-watcher.Events():

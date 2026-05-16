@@ -87,6 +87,7 @@ const (
 	DefaultExit42RestartLimit       = 5
 	DefaultCrashRestartThreshold    = 5
 	DefaultSpinningRestartThreshold = 10
+	DefaultAgentProgressTimeoutSec  = 1800 // 30 minutes
 )
 
 // Bounds for heartbeat interval validation.
@@ -125,6 +126,7 @@ type Config struct {
 	Exit42MaxBackoffSeconds  int            `yaml:"exit42_max_backoff_seconds,omitempty"`
 	CrashRestartThreshold    int            `yaml:"crash_restart_threshold,omitempty"`
 	SpinningRestartThreshold int            `yaml:"spinning_restart_threshold,omitempty"`
+	AgentProgressTimeout     int            `yaml:"agent_progress_timeout,omitempty"`
 	DefaultCLI               string         `yaml:"default_cli,omitempty"`
 	DefaultDoerCLI           string         `yaml:"default_doer_cli,omitempty"`
 	DefaultReviewerCLI       string         `yaml:"default_reviewer_cli,omitempty"`
