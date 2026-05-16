@@ -2,6 +2,7 @@ package ops
 
 import (
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -297,6 +298,245 @@ func TestResume_FromCheckpoint(t *testing.T) {
 	}
 	if readState.Sprint.Status != models.SprintStatusInProgress {
 		t.Errorf("Sprint status = %v, want IN_PROGRESS", readState.Sprint.Status)
+	}
+}
+
+func TestResume_PlanningCheckpointExecutesTransitionsMidSprint(t *testing.T) {
+	tmpDir := t.TempDir()
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	testhelpers.SetupPipelineConfig(t, tmpDir)
+
+	state := testhelpers.CreateValidState()
+	state.Config.Mode = models.SystemModeRunning
+	state.PipelineVersion = 2
+	state.Sprint.Status = models.SprintStatusCheckpoint
+	state.Sprint.CheckpointTrigger = models.CheckpointTriggerPlanningComplete
+
+	now := time.Now().UTC()
+	readyPlan := models.Task{
+		ID:          "plan-ready",
+		Type:        models.TaskTypePlanning,
+		RolePair:    "code-planning-pair",
+		Description: "Ready coding plan",
+		Status:      models.TaskStatusMerged,
+		Priority:    1,
+		Created:     now,
+		SpecRef:     "README.md",
+		DoneWhen:    "Plan approved",
+		Scope:       "pkg/x",
+		Output: []models.OutputEntry{{
+			Desc:     "Implement X",
+			DoneWhen: "tests pass",
+			Scope:    "pkg/x",
+			SpecRef:  "specs/x.md",
+		}},
+		History: []models.TaskHistoryEntry{},
+	}
+	activePlan := models.Task{
+		ID:          "plan-active",
+		Type:        models.TaskTypePlanning,
+		RolePair:    "code-planning-pair",
+		Description: "Still planning",
+		Status:      models.TaskStatusCodePlanning,
+		Priority:    1,
+		Created:     now,
+		SpecRef:     "README.md",
+		DoneWhen:    "Plan approved",
+		Scope:       "pkg/y",
+		History:     []models.TaskHistoryEntry{},
+	}
+	state.Tasks = append(state.Tasks, readyPlan, activePlan)
+	state.Sprint.Scope.Planned = []string{"plan-ready", "plan-active"}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	result, err := Resume(tmpDir, "human")
+	if err != nil {
+		t.Fatalf("Resume() error: %v", err)
+	}
+
+	if result.TransitionsExecuted != 1 {
+		t.Fatalf("TransitionsExecuted = %d, want 1", result.TransitionsExecuted)
+	}
+	if result.TransitionError != "" {
+		t.Fatalf("TransitionError = %q, want empty", result.TransitionError)
+	}
+
+	bb := db.New(stateFile)
+	readState, err := bb.Read()
+	if err != nil {
+		t.Fatalf("Failed to read state: %v", err)
+	}
+	if readState.Sprint.Status != models.SprintStatusInProgress {
+		t.Errorf("Sprint status = %v, want IN_PROGRESS", readState.Sprint.Status)
+	}
+	if readState.Sprint.CheckpointTrigger != "" {
+		t.Errorf("CheckpointTrigger = %q, want cleared", readState.Sprint.CheckpointTrigger)
+	}
+
+	source := readState.FindTask("plan-ready")
+	if source == nil || !source.TransitionsExecuted["code-plan-to-coding"] {
+		t.Fatalf("source transition not recorded: %+v", source)
+	}
+
+	childID := "plan-ready-coding-0"
+	child := readState.FindTask(childID)
+	if child == nil {
+		t.Fatalf("child task %q not found", childID)
+	}
+	if child.RolePair != "coding-pair" {
+		t.Errorf("child role_pair = %q, want coding-pair", child.RolePair)
+	}
+	if child.Status != models.TaskStatusReady {
+		t.Errorf("child status = %s, want %s", child.Status, models.TaskStatusReady)
+	}
+
+	foundChildInScope := false
+	for _, id := range readState.Sprint.Scope.Planned {
+		if id == childID {
+			foundChildInScope = true
+			break
+		}
+	}
+	if !foundChildInScope {
+		t.Errorf("child %q not in sprint scope: %v", childID, readState.Sprint.Scope.Planned)
+	}
+}
+
+func TestResume_ManyToOneCheckpointExecutesTransitionsMidSprint(t *testing.T) {
+	tmpDir := t.TempDir()
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	testhelpers.SetupPipelineConfig(t, tmpDir)
+
+	state := testhelpers.CreateValidState()
+	state.Config.Mode = models.SystemModeRunning
+	state.PipelineVersion = 2
+	state.Sprint.Status = models.SprintStatusCheckpoint
+	state.Sprint.CheckpointTrigger = models.CheckpointTriggerManyToOneReady
+
+	now := time.Now().UTC()
+	cohort := makeManyToOneCohort("epic-plan-1", "us-writing-pair", models.TaskStatusMerged, "README.md", 2)
+	activePlan := models.Task{
+		ID:          "plan-active",
+		Type:        models.TaskTypePlanning,
+		RolePair:    "code-planning-pair",
+		Description: "Still planning",
+		Status:      models.TaskStatusCodePlanning,
+		Priority:    1,
+		Created:     now,
+		SpecRef:     "README.md",
+		DoneWhen:    "Plan approved",
+		Scope:       "pkg/y",
+		History:     []models.TaskHistoryEntry{},
+	}
+	state.Tasks = append(state.Tasks, cohort[0], cohort[1], activePlan)
+	state.Sprint.Scope.Planned = []string{cohort[0].ID, cohort[1].ID, activePlan.ID}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	result, err := Resume(tmpDir, "human")
+	if err != nil {
+		t.Fatalf("Resume() error: %v", err)
+	}
+
+	if result.TransitionsExecuted != 1 {
+		t.Fatalf("TransitionsExecuted = %d, want 1", result.TransitionsExecuted)
+	}
+	if result.TransitionError != "" {
+		t.Fatalf("TransitionError = %q, want empty", result.TransitionError)
+	}
+
+	bb := db.New(stateFile)
+	readState, err := bb.Read()
+	if err != nil {
+		t.Fatalf("Failed to read state: %v", err)
+	}
+	if readState.Sprint.Status != models.SprintStatusInProgress {
+		t.Errorf("Sprint status = %v, want IN_PROGRESS", readState.Sprint.Status)
+	}
+	if readState.Sprint.CheckpointTrigger != "" {
+		t.Errorf("CheckpointTrigger = %q, want cleared", readState.Sprint.CheckpointTrigger)
+	}
+
+	childID := "epic-plan-1-architecture"
+	child := readState.FindTask(childID)
+	if child == nil {
+		t.Fatalf("child task %q not found", childID)
+	}
+	if child.RolePair != "architecture-pair" {
+		t.Errorf("child role_pair = %q, want architecture-pair", child.RolePair)
+	}
+	if child.Status != models.TaskStatus("DRAFT_ARCHITECTURE") {
+		t.Errorf("child status = %s, want DRAFT_ARCHITECTURE", child.Status)
+	}
+	for _, member := range cohort {
+		source := readState.FindTask(member.ID)
+		if source == nil || !source.TransitionsExecuted["us-to-coding"] {
+			t.Fatalf("source transition not recorded for %s: %+v", member.ID, source)
+		}
+	}
+}
+
+func TestResume_ManyToOneCheckpointExecutesTransitionsWhenAllPlannedTerminal(t *testing.T) {
+	tmpDir := t.TempDir()
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	testhelpers.SetupPipelineConfig(t, tmpDir)
+
+	state := testhelpers.CreateValidState()
+	state.Config.Mode = models.SystemModeRunning
+	state.PipelineVersion = 2
+	state.Sprint.Status = models.SprintStatusCheckpoint
+	state.Sprint.CheckpointTrigger = models.CheckpointTriggerManyToOneReady
+
+	cohort := makeManyToOneCohort("epic-plan-1", "us-writing-pair", models.TaskStatusMerged, "README.md", 2)
+	state.Tasks = append(state.Tasks, cohort[0], cohort[1])
+	state.Sprint.Scope.Planned = []string{cohort[0].ID, cohort[1].ID}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	result, err := Resume(tmpDir, "human")
+	if err != nil {
+		t.Fatalf("Resume() error: %v", err)
+	}
+
+	if result.SprintAdvanced != nil {
+		t.Fatalf("SprintAdvanced = %+v, want nil", result.SprintAdvanced)
+	}
+	if result.TransitionsExecuted != 1 {
+		t.Fatalf("TransitionsExecuted = %d, want 1", result.TransitionsExecuted)
+	}
+	if result.TransitionError != "" {
+		t.Fatalf("TransitionError = %q, want empty", result.TransitionError)
+	}
+
+	bb := db.New(stateFile)
+	readState, err := bb.Read()
+	if err != nil {
+		t.Fatalf("Failed to read state: %v", err)
+	}
+	if readState.Sprint.Status != models.SprintStatusInProgress {
+		t.Errorf("Sprint status = %v, want IN_PROGRESS", readState.Sprint.Status)
+	}
+	if readState.Sprint.CheckpointTrigger != "" {
+		t.Errorf("CheckpointTrigger = %q, want cleared", readState.Sprint.CheckpointTrigger)
+	}
+
+	childID := "epic-plan-1-architecture"
+	child := readState.FindTask(childID)
+	if child == nil {
+		t.Fatalf("child task %q not found", childID)
+	}
+	if child.RolePair != "architecture-pair" {
+		t.Errorf("child role_pair = %q, want architecture-pair", child.RolePair)
+	}
+	if child.Status != models.TaskStatus("DRAFT_ARCHITECTURE") {
+		t.Errorf("child status = %s, want DRAFT_ARCHITECTURE", child.Status)
+	}
+	if !slices.Contains(readState.Sprint.Scope.Planned, childID) {
+		t.Errorf("child %q not in sprint scope: %v", childID, readState.Sprint.Scope.Planned)
+	}
+	for _, member := range cohort {
+		source := readState.FindTask(member.ID)
+		if source == nil || !source.TransitionsExecuted["us-to-coding"] {
+			t.Fatalf("source transition not recorded for %s: %+v", member.ID, source)
+		}
 	}
 }
 
