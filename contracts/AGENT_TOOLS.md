@@ -155,6 +155,10 @@ rtk npm run build
 rtk pytest -q
 ```
 
+Temporary upstream bug workarounds, until rtk-ai/rtk#1922 and rtk-ai/rtk#925 merge:
+- Avoid Vitest/Jest metadata or non-run commands through RTK rewrite, such as `npx vitest --version`, `vitest --help`, or `rtk vitest --version`. Prefer package scripts, `npm exec -- vitest run ...`, `pnpm exec -- vitest run ...`, or `./node_modules/.bin/vitest run ...`. For metadata/help checks, use the narrow temporary exception `rtk proxy <command>`.
+- Avoid `rtk pytest --collect-only` and rewritten `pytest --collect-only`; current RTK can report collected tests as "No tests collected". When collection output is the evidence needed, use the narrow temporary exception `rtk proxy pytest --collect-only ...`.
+
 ---
 
 ## Trusted Support Tools
