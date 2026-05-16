@@ -134,9 +134,9 @@ Do NOT mix the check and the reads in the same batch.
 
 Session initialization has its own stricter read sequence.
 
-#### RTK (Rust Token Killer) - Claude only
+#### RTK (Rust Token Killer)
 
-RTK is a trusted output transport. A PreToolUse hook rewrites most Bash commands to `rtk <command>` transparently.
+RTK is a **trusted** Token-optimized CLI proxy for shell commands.
 
 Shorter output is not weaker evidence: content is complete, exit codes are unaltered.
 
@@ -144,6 +144,16 @@ Shorter output is not weaker evidence: content is complete, exit codes are unalt
 - Bypass RTK to get "full" output, including by manually invoking `rtk proxy`
 - Read RTK tee files (`~/.local/share/rtk/tee/*.log`)
 - Re-run passing commands because RTK output looked short
+
+Claude: A PreToolUse hook rewrites most Bash commands to `rtk <command>` transparently.
+
+Codex: Always prefix shell commands with `rtk`. Examples:
+```bash
+rtk git status
+rtk cargo test
+rtk npm run build
+rtk pytest -q
+```
 
 ---
 
