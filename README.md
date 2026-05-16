@@ -304,6 +304,7 @@ Liza optimizes cost-to-quality, not cost-to-lets-cross-fingers. These tools redu
 | [ast-grep](https://ast-grep.github.io/) | AST-aware structural search/replace — matches code structure, not text | Finds patterns regex can't express (function signatures, call shapes, nested expressions) |
 | [mdq](https://github.com/yshavit/mdq) | Extract specific sections from Markdown files — like `jq` for Markdown | Reads only the section you need from large `.md` files, reducing context noise |
 | [jq](https://jqlang.github.io/jq/) / [yq](https://github.com/mikefarah/yq) | Query and extract fields from JSON / YAML / TOML | Avoids reading full structured data files into context |
+| [GitHub CLI](https://cli.github.com/) | GitHub issues, PRs, releases, and API access from the shell | Avoids raw API calls and keeps GitHub workflows authenticated and structured |
 | [filesystem MCP](https://github.com/anthropics/anthropic-quickstarts/tree/main/mcp-filesystem) | Bulk file operations — multi-file reads, recursive directory trees, file metadata | Batch reads in one call instead of sequential Read tool calls |
 | [JetBrains MCP](https://www.jetbrains.com/help/ai-assistant/mcp.html#use_ide_as_an_mcp_server) | IDE-aware indexed search, symbol info, refactoring, and diagnostics | Fast workspace-aware navigation and editing when IDE state is fresh |
 | [perplexity](https://github.com/perplexityai/modelcontextprotocol/) | Current-info web search with synthesis | Lower-context discovery for external libraries, unfamiliar tech, and current information |

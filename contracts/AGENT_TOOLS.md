@@ -13,6 +13,9 @@ Refer to Security Protocol
 - **`ast-grep` for structural search**: Use `ast-grep` when the search target is a code structure that regex can't express cleanly — e.g. matching function signatures, call patterns with specific arity, nested expressions, or ignoring whitespace/comments. Patterns use the target language with `$METAVAR` placeholders. Prefer `rg` for simple text/keyword searches; prefer `ast-grep` for structural queries and refactoring.
 - **`mdq` for Markdown querying**: Use `mdq` to extract specific sections, headers, lists, or tables from Markdown files — like `jq` for Markdown. Prefer over `Read` when you only need a specific section from a large `.md` file, reducing context noise. Example: `mdq '# Section > ## Subsection' file.md`.
 - **`jq` / `yq` for structured data**: Use `jq` for JSON and `yq` for YAML/TOML. Prefer over `Read` + manual parsing when extracting specific fields from structured data files.
+- **`gh` (GitHub CLI)**: Use `gh` for GitHub issues, PRs, releases, and GitHub API queries when repository context and authentication are available. Prefer `gh` over raw `curl` calls to GitHub APIs.
+
+**Search routing**: When you'd have to guess the search string, use `codebase_search` (one call replaces multiple `rg` attempts with speculative patterns). Use `rg` when you know the exact string.
 
 ## Other authorized tools
 
@@ -22,6 +25,7 @@ Any non destructive tool by default.
 
 **Pre-Action Check:** Before file/search/web operations, use the required capability/tool from the table below. Table entries use capability labels, sometimes illustrated with concrete provider-surface examples; if the current session exposes the same capability under a different name, use the equivalent tool.
 MCP server/tool names may be normalized differently across providers (for example `-` vs `_`). Treat concrete names below as examples; use the equivalent exposed name in the current session.
+If a required or preferred MCP capability is referenced here but is not currently exposed in the tool list, use your tool-loading mechanism (e.g. `ToolSearch`, `tool_search`) to load that capability before falling back. Fallback is allowed only after the tool cannot be found/loaded, the loaded tool errors, or the result is insufficient.
 Fallback tools are permitted ONLY when the fallback condition is met OR the required tool returns an error.
 For all MCP-required rows, if the tool is unavailable in the current session, errors, or is unsupported by the provider, use the row fallback tool.
 Worktree rule: In divergent or agent-created worktrees, prefer filesystem-truth tools (`rg`, `ast-grep`, exact reads, filesystem glob/search, morph-mcp) over indexed IDE or LSP tools. Treat JetBrains indexed/project-aware rows as pairing-mode defaults unless the IDE state is known-fresh for the current worktree.
@@ -67,7 +71,7 @@ Use them when known-good for the active workspace/worktree.
 They do not replace direct reads / `rg` for verification.
 
 **Additional caveats:**
-- **morph-mcp codebase_search**: targeted semantic discovery ("how does X work?"), especially when file paths are unknown. Fallback to `rg` + exact reads when results are insufficient, rate limited, or error.
+- **morph-mcp codebase_search**: semantic discovery — use when you'd have to guess the search string. If Morph is not exposed, load it with your tool-loading mechanism (e.g. `ToolSearch`, `tool_search`) before broad exploratory `rg`. Fallback to `rg` + exact reads when results are insufficient, rate limited, or error.
 - **JetBrains** (when IDE available): Path-based reads, file diagnostics, and occasional project metadata summaries are useful. IDE-derived results may be stale or incomplete in worktrees. Verify with `rg`/direct reads when results are ambiguous.
 - **LSP**: Semantic/type-aware navigation, references, and call hierarchy. Still derived workspace state, not filesystem truth (requires language server configured).
 
