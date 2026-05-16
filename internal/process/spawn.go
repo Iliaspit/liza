@@ -3,9 +3,12 @@
 package process
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
+
+	"github.com/liza-mas/liza/internal/agent"
 )
 
 func buildSpawnCommand(projectRoot, role, cli string, extraArgs ...string) (*exec.Cmd, *os.File, error) {
@@ -34,6 +37,21 @@ func buildSpawnCommand(projectRoot, role, cli string, extraArgs ...string) (*exe
 // Returns the started command and an error. The caller owns lifecycle
 // management (the process is already started and will be reaped).
 func SpawnAgent(projectRoot, role, cli string, extraArgs ...string) (*exec.Cmd, error) {
+	if agent.CheckQuotaSignal(projectRoot, cli) {
+		err := fmt.Errorf("provider quota exhausted for %s; refusing to spawn %s", cli, role)
+		if alertErr := agent.LogQuotaSpawnBlockedAlert(projectRoot, cli, role); alertErr != nil {
+			return nil, errors.Join(err, fmt.Errorf("write quota spawn-blocked alert: %w", alertErr))
+		}
+		return nil, err
+	}
+	if agent.CheckProviderUnavailableSignal(projectRoot, cli) {
+		err := fmt.Errorf("provider unavailable for %s; refusing to spawn %s", cli, role)
+		if alertErr := agent.LogProviderUnavailableSpawnBlockedAlert(projectRoot, cli, role); alertErr != nil {
+			return nil, errors.Join(err, fmt.Errorf("write provider-unavailable spawn-blocked alert: %w", alertErr))
+		}
+		return nil, err
+	}
+
 	cmd, devNull, err := buildSpawnCommand(projectRoot, role, cli, extraArgs...)
 	if err != nil {
 		return nil, err

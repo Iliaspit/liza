@@ -2,7 +2,11 @@ package process
 
 import (
 	"os"
+	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/liza-mas/liza/internal/agent"
 )
 
 func TestBuildSpawnCommand_PassesExpectedArgs(t *testing.T) {
@@ -55,5 +59,81 @@ func TestBuildSpawnCommand_BindsAllStdioToDevNull(t *testing.T) {
 	}
 	if stderrFile.Name() != os.DevNull {
 		t.Fatalf("stderr file = %q, want %q", stderrFile.Name(), os.DevNull)
+	}
+}
+
+func TestSpawnAgent_QuotaSignalBlocksSpawnAndAlerts(t *testing.T) {
+	projectRoot := t.TempDir()
+	lizaDir := filepath.Join(projectRoot, ".liza")
+	if err := os.MkdirAll(lizaDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := agent.WriteQuotaSignal(projectRoot, "codex", "quota hit"); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd, err := SpawnAgent(projectRoot, "coder", "codex")
+	if err == nil {
+		t.Fatal("SpawnAgent error = nil, want quota refusal")
+	}
+	if cmd != nil {
+		t.Fatalf("SpawnAgent command = %#v, want nil", cmd)
+	}
+	if !strings.Contains(err.Error(), "provider quota exhausted for codex") {
+		t.Fatalf("SpawnAgent error = %q, want quota refusal", err)
+	}
+
+	alertsPath := filepath.Join(lizaDir, "alerts.log")
+	data, readErr := os.ReadFile(alertsPath)
+	if readErr != nil {
+		t.Fatalf("failed to read alerts log: %v", readErr)
+	}
+	alerts := string(data)
+	if !strings.Contains(alerts, "PROVIDER QUOTA SPAWN BLOCKED") {
+		t.Fatalf("alerts log missing spawn-blocked alert:\n%s", alerts)
+	}
+	if !strings.Contains(alerts, "codex: refused to spawn coder while quota signal is set") {
+		t.Fatalf("alerts log missing spawn-blocked details:\n%s", alerts)
+	}
+	if !strings.Contains(alerts, "delete the flag file or run liza pause then liza resume") {
+		t.Fatalf("alerts log missing recovery hint:\n%s", alerts)
+	}
+}
+
+func TestSpawnAgent_ProviderUnavailableSignalBlocksSpawnAndAlerts(t *testing.T) {
+	projectRoot := t.TempDir()
+	lizaDir := filepath.Join(projectRoot, ".liza")
+	if err := os.MkdirAll(lizaDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := agent.WriteProviderUnavailableSignal(projectRoot, "codex", "session access denied"); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd, err := SpawnAgent(projectRoot, "coder", "codex")
+	if err == nil {
+		t.Fatal("SpawnAgent error = nil, want provider-unavailable refusal")
+	}
+	if cmd != nil {
+		t.Fatalf("SpawnAgent command = %#v, want nil", cmd)
+	}
+	if !strings.Contains(err.Error(), "provider unavailable for codex") {
+		t.Fatalf("SpawnAgent error = %q, want provider-unavailable refusal", err)
+	}
+
+	alertsPath := filepath.Join(lizaDir, "alerts.log")
+	data, readErr := os.ReadFile(alertsPath)
+	if readErr != nil {
+		t.Fatalf("failed to read alerts log: %v", readErr)
+	}
+	alerts := string(data)
+	if !strings.Contains(alerts, "PROVIDER UNAVAILABLE SPAWN BLOCKED") {
+		t.Fatalf("alerts log missing spawn-blocked alert:\n%s", alerts)
+	}
+	if !strings.Contains(alerts, "codex: refused to spawn coder while provider-unavailable signal is set") {
+		t.Fatalf("alerts log missing spawn-blocked details:\n%s", alerts)
+	}
+	if !strings.Contains(alerts, "repair the provider, then delete the flag file or run liza pause then liza resume") {
+		t.Fatalf("alerts log missing recovery hint:\n%s", alerts)
 	}
 }

@@ -115,3 +115,9 @@ func ClearProviderUnavailableSignal(projectRoot, provider string) error {
 func LogProviderUnavailableAlert(projectRoot string, pu *ProviderUnavailable) error {
 	return LogAlert(projectRoot, "🚨", "PROVIDER UNAVAILABLE", pu.Provider+": "+pu.Message)
 }
+
+// LogProviderUnavailableSpawnBlockedAlert appends an alert when a provider-unavailable signal blocks spawn.
+func LogProviderUnavailableSpawnBlockedAlert(projectRoot, provider, role string) error {
+	message := fmt.Sprintf("%s: refused to spawn %s while provider-unavailable signal is set; repair the provider, then delete the flag file or run liza pause then liza resume before spawning again", provider, role)
+	return LogAlert(projectRoot, "🚨", "PROVIDER UNAVAILABLE SPAWN BLOCKED", message)
+}

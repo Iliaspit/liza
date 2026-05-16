@@ -1101,11 +1101,8 @@ func handleClassifiedProviderCrash(config SupervisorConfig, output string) bool 
 			"provider", qe.Provider,
 			"agent_id", config.AgentID,
 			"message", qe.Message)
-		if alertErr := LogQuotaAlert(config.ProjectRoot, qe); alertErr != nil {
-			GetLogger().Warn("Failed to write quota alert", "error", alertErr)
-		}
-		if err := WriteQuotaSignal(config.ProjectRoot, qe.Provider, qe.Message); err != nil {
-			GetLogger().Warn("Failed to write quota signal", "error", err)
+		if err := RaiseQuotaExhaustion(config.ProjectRoot, qe); err != nil {
+			GetLogger().Warn("Failed to raise quota exhaustion", "error", err)
 		}
 		return true
 	}

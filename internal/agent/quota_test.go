@@ -121,6 +121,38 @@ func TestQuotaSignal_WriteCheckClear(t *testing.T) {
 	}
 }
 
+func TestRaiseQuotaExhaustion_WritesAlertAndSignal(t *testing.T) {
+	projectRoot := t.TempDir()
+	lizaDir := filepath.Join(projectRoot, ".liza")
+	if err := os.MkdirAll(lizaDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := RaiseQuotaExhaustion(projectRoot, &QuotaExhaustion{
+		Provider: "codex",
+		Message:  "You've hit your usage limit",
+	}); err != nil {
+		t.Fatalf("RaiseQuotaExhaustion failed: %v", err)
+	}
+
+	if !CheckQuotaSignal(projectRoot, "codex") {
+		t.Fatal("signal should exist after raise")
+	}
+
+	alertsPath := filepath.Join(lizaDir, "alerts.log")
+	data, err := os.ReadFile(alertsPath)
+	if err != nil {
+		t.Fatalf("failed to read alerts log: %v", err)
+	}
+	alerts := string(data)
+	if !strings.Contains(alerts, "PROVIDER QUOTA EXHAUSTED") {
+		t.Fatalf("alerts log missing quota alert:\n%s", alerts)
+	}
+	if !strings.Contains(alerts, "codex: You've hit your usage limit") {
+		t.Fatalf("alerts log missing quota details:\n%s", alerts)
+	}
+}
+
 func TestClearQuotaSignal_Idempotent(t *testing.T) {
 	projectRoot := t.TempDir()
 

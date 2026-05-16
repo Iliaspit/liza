@@ -314,12 +314,12 @@ Exit 42 with `handoff_pending: true` on the task means context exhaustion — th
 
 ### Provider quota exhausted
 **Symptom**: All agents using a provider (e.g. Claude) have stopped. System mode is still RUNNING, sprint still IN_PROGRESS. Signal file `.liza/provider-quota-exhausted-<provider>` exists.
-**Diagnosis**: `ls .liza/provider-quota-exhausted-*` or check `.liza/alerts.log` for `PROVIDER QUOTA EXHAUSTED`.
+**Diagnosis**: `ls .liza/provider-quota-exhausted-*` or check `.liza/alerts.log` for `PROVIDER QUOTA EXHAUSTED`. `PROVIDER QUOTA SPAWN BLOCKED` means a spawn was attempted while the quota signal was still set; delete the flag file or run `liza pause` then `liza resume` before spawning again.
 **Fix**: `liza pause` then `liza resume` — pause transitions RUNNING → PAUSED, resume clears quota signals and restarts the sprint. Then restart agents. (`liza resume` alone fails because the system is still RUNNING, not PAUSED.)
 
 ### Provider unavailable
 **Symptom**: Agents for a provider stop before doing useful work, often after startup/session errors such as Codex failing to access `~/.codex/sessions`. Signal file `.liza/provider-unavailable-<provider>` exists.
-**Diagnosis**: `ls .liza/provider-unavailable-*` or check `.liza/alerts.log` for `PROVIDER UNAVAILABLE`. Also inspect `.liza/agent-outputs/*.err` for provider startup errors.
+**Diagnosis**: `ls .liza/provider-unavailable-*` or check `.liza/alerts.log` for `PROVIDER UNAVAILABLE`. `PROVIDER UNAVAILABLE SPAWN BLOCKED` means a spawn was attempted while the provider-unavailable signal was still set. Also inspect `.liza/agent-outputs/*.err` for provider startup errors.
 **Fix**: Repair the provider environment first (for Codex, ensure the agent process can access `~/.codex/sessions`), then run `liza pause` and `liza resume` to clear provider-unavailable signals before restarting agents.
 
 ### Provider audit degraded

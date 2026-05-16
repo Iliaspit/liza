@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -110,6 +111,20 @@ func LogAlert(projectRoot, level, category, message string) error {
 // LogQuotaAlert appends a quota-exhaustion alert to alerts.log.
 func LogQuotaAlert(projectRoot string, qe *QuotaExhaustion) error {
 	return LogAlert(projectRoot, "🚨", "PROVIDER QUOTA EXHAUSTED", qe.Provider+": "+qe.Message)
+}
+
+// RaiseQuotaExhaustion records both human-visible and process-visible quota state.
+func RaiseQuotaExhaustion(projectRoot string, qe *QuotaExhaustion) error {
+	return errors.Join(
+		LogQuotaAlert(projectRoot, qe),
+		WriteQuotaSignal(projectRoot, qe.Provider, qe.Message),
+	)
+}
+
+// LogQuotaSpawnBlockedAlert appends an alert when a stale quota signal blocks spawn.
+func LogQuotaSpawnBlockedAlert(projectRoot, provider, role string) error {
+	message := fmt.Sprintf("%s: refused to spawn %s while quota signal is set; delete the flag file or run liza pause then liza resume before spawning again", provider, role)
+	return LogAlert(projectRoot, "🚨", "PROVIDER QUOTA SPAWN BLOCKED", message)
 }
 
 // ClearQuotaSignal removes the quota signal file for a provider.
