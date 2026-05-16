@@ -34,11 +34,13 @@ For global settings setup and provider-specific config (Claude, Codex, Gemini), 
 `liza init --codex` manages the Codex permissions Liza needs for unattended
 supervisor tasks. It adds or corrects workspace permission baseline entries,
 including `sandbox_mode = "workspace-write"`, and adds the active project root
-plus the active project `.git` directory to
-`sandbox_workspace_write.writable_roots` so Codex can edit project files and
-write git metadata for commits, worktrees, and review flows. If the file already
-exists, Liza prompts before merging those entries and preserves unrelated
-settings.
+plus the active project `.git` directory to the Codex workspace-write roots so
+Codex can edit project files and write git metadata for commits, worktrees, and
+review flows. It also marks Codex/Liza support directories and user cache roots
+readable or writable in the active `permissions.workspace.filesystem` profile:
+`~/.liza` is readable for contracts and skills, while Codex state, Go cache, and
+npm cache roots are writable. If the file already exists, Liza prompts before
+merging those entries and preserves unrelated settings.
 
 When launching Codex for a claimed task, Liza passes both the task worktree and
 the project `.git` directory as explicit `--add-dir` entries. This is required
@@ -46,8 +48,7 @@ because Git worktrees write the task index under the main repo metadata path
 (`.git/worktrees/<task>/index.lock`), not under the worktree directory itself.
 
 This is not the full Codex baseline. Users still own broader settings such as
-interactive `approval_policy`, cache directories like `~/.npm`, and MCP server
-configuration. See
+interactive `approval_policy` and MCP server configuration. See
 [Contract Activation](../contracts/contract-activation.md#codex) for the
 recommended complete setup.
 

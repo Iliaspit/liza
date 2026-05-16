@@ -18,6 +18,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/liza-mas/liza/internal/codexconfig"
 	"github.com/liza-mas/liza/internal/paths"
 )
 
@@ -602,6 +603,17 @@ func codexConfigPath() (string, error) {
 	return filepath.Join(homeDir, ".codex", "config.toml"), nil
 }
 
+func codexSupportWritableRoots() []string {
+	homeDir, _ := os.UserHomeDir()
+	cacheDir, _ := os.UserCacheDir()
+	return codexconfig.SupportWritableRoots(homeDir, cacheDir)
+}
+
+func codexSupportReadableRoots() []string {
+	homeDir, _ := os.UserHomeDir()
+	return codexconfig.SupportReadableRoots(homeDir)
+}
+
 func codexProjectWritableRoots(projectRoot string) ([]string, error) {
 	if projectRoot == "" {
 		return nil, fmt.Errorf("project root is required")
@@ -611,23 +623,17 @@ func codexProjectWritableRoots(projectRoot string) ([]string, error) {
 		return nil, fmt.Errorf("failed to resolve project root: %w", err)
 	}
 	roots := []string{absRoot, filepath.Join(absRoot, ".git")}
+	roots = append(roots, codexSupportWritableRoots()...)
 	if runtime.GOOS != "windows" {
 		roots = append(roots, "/tmp")
 	}
-	return roots, nil
+	return codexconfig.UniqueNonEmptyStrings(roots), nil
 }
 
 func renderCodexProjectConfig(roots []string) string {
 	content := string(codexConfigContent)
-	if len(roots) >= 2 {
-		content = strings.ReplaceAll(content, "{{REPO_ROOT}}", tomlStringPlaceholderValue(roots[0]))
-		content = strings.ReplaceAll(content, "{{REPO_GIT_DIR}}", tomlStringPlaceholderValue(roots[1]))
-	}
-	if len(roots) >= 3 {
-		content = strings.ReplaceAll(content, "{{TMP_WRITABLE_ROOT}}", tomlStringPlaceholderValue(roots[2]))
-	} else {
-		content = strings.ReplaceAll(content, "  \"{{TMP_WRITABLE_ROOT}}\",\n", "")
-	}
+	content = strings.ReplaceAll(content, "# {{WORKSPACE_SUPPORT_ROOTS}}", strings.TrimSuffix(codexconfig.RenderWorkspaceFilesystemSupportAssignments(codexSupportReadableRoots(), codexSupportWritableRoots()), "\n"))
+	content = strings.ReplaceAll(content, "# {{WRITABLE_ROOTS_BLOCK}}", strings.TrimSuffix(renderWritableRootsBlock("", roots), "\n"))
 	return ensureTrailingNewline(content)
 }
 
@@ -663,6 +669,16 @@ func mergeCodexWorkspacePermissionBaseline(content string) (string, bool) {
 	for _, assignment := range assignments {
 		var assignmentChanged bool
 		updated, assignmentChanged = ensureTomlAssignment(updated, assignment.section, assignment.key, assignment.value)
+		changed = changed || assignmentChanged
+	}
+	for _, root := range codexSupportWritableRoots() {
+		var assignmentChanged bool
+		updated, assignmentChanged = ensureTomlAssignment(updated, "permissions.workspace.filesystem", strconv.Quote(root), `"write"`)
+		changed = changed || assignmentChanged
+	}
+	for _, root := range codexSupportReadableRoots() {
+		var assignmentChanged bool
+		updated, assignmentChanged = ensureTomlAssignment(updated, "permissions.workspace.filesystem", strconv.Quote(root), `"read"`)
 		changed = changed || assignmentChanged
 	}
 	return updated, changed
@@ -923,11 +939,6 @@ func ensureTrailingNewline(content string) string {
 
 func tomlStringValue(value string) string {
 	return strconv.Quote(value)
-}
-
-func tomlStringPlaceholderValue(value string) string {
-	quoted := tomlStringValue(value)
-	return strings.TrimSuffix(strings.TrimPrefix(quoted, `"`), `"`)
 }
 
 func warnIncompleteCodexBaseline(content string) {

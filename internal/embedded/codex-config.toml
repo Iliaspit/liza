@@ -5,6 +5,7 @@ default_permissions = "workspace"
 ":root" = "read"
 ":tmpdir" = "write"
 "/tmp" = "write"
+# {{WORKSPACE_SUPPORT_ROOTS}}
 
 [permissions.workspace.filesystem.":project_roots"]
 "." = "write"
@@ -16,8 +17,4 @@ default_permissions = "workspace"
 enabled = true
 
 [sandbox_workspace_write]
-writable_roots = [
-  "{{REPO_ROOT}}",
-  "{{REPO_GIT_DIR}}",
-  "{{TMP_WRITABLE_ROOT}}",
-]
+# {{WRITABLE_ROOTS_BLOCK}}

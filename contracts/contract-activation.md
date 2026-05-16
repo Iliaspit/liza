@@ -36,11 +36,11 @@ Verification: Run `claude` and prompt `hello`.
 `liza init --codex` performs project activation. In `~/.codex/config.toml`, it
 adds Liza's noninteractive workspace permission baseline, including
 `sandbox_mode = "workspace-write"`, plus the active project root, its `.git`
-directory, and `/tmp` under
-`sandbox_workspace_write.writable_roots`. In `<project>/.codex/`, it enables
-Codex hooks in `config.toml`, writes `hooks.json`, and deploys hook scripts to
-`hooks/`. If a config file already exists, Liza prompts before merging and
-preserves unrelated settings. It does not install the full baseline below.
+directory, `/tmp`, and Codex/Liza support/cache roots under the workspace-write
+permission profile. In `<project>/.codex/`, it enables Codex hooks in
+`config.toml`, writes `hooks.json`, and deploys hook scripts to `hooks/`. If a
+config file already exists, Liza prompts before merging and preserves unrelated
+settings. It does not install the full baseline below.
 
 The session-init hook allows the mandatory startup documents to be read through
 Codex MCP filesystem read tools, or through simple Bash read commands such as
@@ -59,6 +59,10 @@ default_permissions = "workspace"
 ":root" = "read"
 ":tmpdir" = "write"
 "/tmp" = "write"
+"/home/<USER>/.codex" = "write"
+"/home/<USER>/.liza" = "read"
+"/home/<USER>/.cache" = "write"
+"/home/<USER>/.npm" = "write"
 
 [permissions.workspace.filesystem.":project_roots"]
 "." = "write"
@@ -75,7 +79,6 @@ exclude_tmpdir_env_var = false
 exclude_slash_tmp = false
 writable_roots = [
   "/home/<USER>/.codex",
-  "/home/<USER>/.liza",
   "/home/<USER>/.cache",
   "/home/<USER>/.npm",
   "/home/<USER>/.pyenv/shims",

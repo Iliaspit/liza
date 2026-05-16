@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -814,6 +815,40 @@ func TestBuildCodexArgs(t *testing.T) {
 			}
 		}
 	})
+}
+
+func TestCodexWorkspacePermissionOverridesIncludesSupportRoots(t *testing.T) {
+	fakeHome := t.TempDir()
+	t.Setenv("HOME", fakeHome)
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(fakeHome, ".cache"))
+	cacheDir, err := os.UserCacheDir()
+	if err != nil {
+		t.Fatalf("UserCacheDir() error: %v", err)
+	}
+
+	var filesystemOverride string
+	for _, override := range codexWorkspacePermissionOverrides() {
+		if strings.HasPrefix(override, "permissions.workspace.filesystem=") {
+			filesystemOverride = override
+			break
+		}
+	}
+	if filesystemOverride == "" {
+		t.Fatal("missing permissions.workspace.filesystem override")
+	}
+	for _, want := range []string{
+		strconv.Quote(filepath.Join(fakeHome, ".codex")) + `="write"`,
+		strconv.Quote(filepath.Join(fakeHome, ".npm")) + `="write"`,
+		strconv.Quote(cacheDir) + `="write"`,
+		strconv.Quote(filepath.Join(fakeHome, ".liza")) + `="read"`,
+	} {
+		if !strings.Contains(filesystemOverride, want) {
+			t.Fatalf("override missing %q:\n%s", want, filesystemOverride)
+		}
+	}
+	if strings.Contains(filesystemOverride, strconv.Quote(filepath.Join(fakeHome, ".liza"))+`="write"`) {
+		t.Fatalf("override should not make ~/.liza writable:\n%s", filesystemOverride)
+	}
 }
 
 func containsAdjacent(values []string, first, second string) bool {

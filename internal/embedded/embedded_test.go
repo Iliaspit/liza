@@ -10,6 +10,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/liza-mas/liza/internal/codexconfig"
 )
 
 func TestListEmbeddedFiles(t *testing.T) {
@@ -1117,7 +1119,7 @@ func TestWriteCodexProjectPermissions_NewFile(t *testing.T) {
 }
 
 func expectedCodexPermissionSnippets() []string {
-	return []string{
+	snippets := []string{
 		`sandbox_mode = "workspace-write"`,
 		`default_permissions = "workspace"`,
 		`[permissions.workspace.filesystem]`,
@@ -1132,6 +1134,13 @@ func expectedCodexPermissionSnippets() []string {
 		`[permissions.workspace.network]`,
 		`enabled = true`,
 	}
+	for _, root := range codexSupportWritableRoots() {
+		snippets = append(snippets, tomlStringValue(root)+` = "write"`)
+	}
+	for _, root := range codexSupportReadableRoots() {
+		snippets = append(snippets, tomlStringValue(root)+` = "read"`)
+	}
+	return snippets
 }
 
 func expectedCodexWritableRootSnippets(projectRoot string) []string {
@@ -1152,10 +1161,13 @@ func expectedCodexConfigSnippets(projectRoot string, extra ...string) []string {
 }
 
 func TestRenderCodexProjectConfig_RendersWritableRootsExactly(t *testing.T) {
+	fakeHome := setCodexHomeForTest(t)
 	projectRoot := "/tmp/project"
 	gitDir := filepath.Join(projectRoot, ".git")
+	readRoots := codexSupportReadableRoots()
+	writeRoots := codexSupportWritableRoots()
 
-	got := renderCodexProjectConfig([]string{projectRoot, gitDir, "/tmp"})
+	got := renderCodexProjectConfig(append([]string{projectRoot, gitDir}, append(writeRoots, "/tmp")...))
 	want := `sandbox_mode = "workspace-write"
 default_permissions = "workspace"
 
@@ -1163,6 +1175,7 @@ default_permissions = "workspace"
 ":root" = "read"
 ":tmpdir" = "write"
 "/tmp" = "write"
+` + strings.TrimSuffix(codexconfig.RenderWorkspaceFilesystemSupportAssignments(readRoots, writeRoots), "\n") + `
 
 [permissions.workspace.filesystem.":project_roots"]
 "." = "write"
@@ -1177,19 +1190,28 @@ enabled = true
 writable_roots = [
   "/tmp/project",
   "/tmp/project/.git",
-  "/tmp",
+` + renderWritableRootsForTest(writeRoots, "  ") + `  "/tmp",
 ]
 `
 	if got != want {
 		t.Fatalf("rendered config mismatch\nwant:\n%s\ngot:\n%s", want, got)
 	}
+	if strings.Contains(got, tomlStringValue(filepath.Join(fakeHome, ".liza"))+` = "write"`) {
+		t.Fatalf("rendered config should not make ~/.liza writable:\n%s", got)
+	}
+	if !strings.Contains(got, tomlStringValue(filepath.Join(fakeHome, ".liza"))+` = "read"`) {
+		t.Fatalf("rendered config should make ~/.liza readable:\n%s", got)
+	}
 }
 
 func TestRenderCodexProjectConfig_RemovesTmpPlaceholderWhenAbsent(t *testing.T) {
+	setCodexHomeForTest(t)
 	projectRoot := "/tmp/project"
 	gitDir := filepath.Join(projectRoot, ".git")
+	readRoots := codexSupportReadableRoots()
+	writeRoots := codexSupportWritableRoots()
 
-	got := renderCodexProjectConfig([]string{projectRoot, gitDir})
+	got := renderCodexProjectConfig(append([]string{projectRoot, gitDir}, writeRoots...))
 	want := `sandbox_mode = "workspace-write"
 default_permissions = "workspace"
 
@@ -1197,6 +1219,7 @@ default_permissions = "workspace"
 ":root" = "read"
 ":tmpdir" = "write"
 "/tmp" = "write"
+` + strings.TrimSuffix(codexconfig.RenderWorkspaceFilesystemSupportAssignments(readRoots, writeRoots), "\n") + `
 
 [permissions.workspace.filesystem.":project_roots"]
 "." = "write"
@@ -1211,7 +1234,7 @@ enabled = true
 writable_roots = [
   "/tmp/project",
   "/tmp/project/.git",
-]
+` + renderWritableRootsForTest(writeRoots, "  ") + `]
 `
 	if got != want {
 		t.Fatalf("rendered config mismatch\nwant:\n%s\ngot:\n%s", want, got)
@@ -1507,10 +1530,29 @@ func TestWriteCodexProjectPermissions_NoDuplicateRoots(t *testing.T) {
 
 func codexProjectRootsForTest(projectRoot string) []string {
 	roots := []string{projectRoot, filepath.Join(projectRoot, ".git")}
+	roots = append(roots, codexSupportWritableRoots()...)
 	if runtime.GOOS != "windows" {
 		roots = append(roots, "/tmp")
 	}
 	return roots
+}
+
+func setCodexHomeForTest(t *testing.T) string {
+	t.Helper()
+	fakeHome := t.TempDir()
+	t.Setenv("HOME", fakeHome)
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(fakeHome, ".cache"))
+	return fakeHome
+}
+
+func renderWritableRootsForTest(roots []string, indent string) string {
+	var builder strings.Builder
+	for _, root := range roots {
+		builder.WriteString(indent)
+		builder.WriteString(tomlStringValue(root))
+		builder.WriteString(",\n")
+	}
+	return builder.String()
 }
 
 func TestWriteHooks(t *testing.T) {

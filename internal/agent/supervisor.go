@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/liza-mas/liza/internal/codexconfig"
 	"github.com/liza-mas/liza/internal/db"
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/ops"
@@ -441,7 +442,7 @@ func codexWorkspacePermissionOverrides() []string {
 		// Codex accepts one TOML assignment per -c override. Keep the nested
 		// filesystem profile as one inline table so the quoted pseudo-root keys
 		// stay grouped under permissions.workspace.filesystem.
-		`permissions.workspace.filesystem={":root"="read", ":tmpdir"="write", "/tmp"="write", ":project_roots"={"."="write", ".git"="write", ".agents"="read", ".codex"="read"}}`,
+		`permissions.workspace.filesystem=` + codexconfig.WorkspaceFilesystemInlineTable(codexSupportReadableRoots(), codexSupportWritableRoots()),
 		`permissions.workspace.network.enabled=true`,
 	}
 }
@@ -455,6 +456,17 @@ func codexInteractiveArgs(additionalDirs []string) []string {
 		args = append(args, "--add-dir", dir)
 	}
 	return args
+}
+
+func codexSupportWritableRoots() []string {
+	homeDir, _ := os.UserHomeDir()
+	cacheDir, _ := os.UserCacheDir()
+	return codexconfig.SupportWritableRoots(homeDir, cacheDir)
+}
+
+func codexSupportReadableRoots() []string {
+	homeDir, _ := os.UserHomeDir()
+	return codexconfig.SupportReadableRoots(homeDir)
 }
 
 func codexAdditionalDirs(projectRoot string, state *models.State, taskID string) []string {
