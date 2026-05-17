@@ -13,6 +13,7 @@ import (
 	"github.com/liza-mas/liza/internal/log"
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/paths"
+	"github.com/liza-mas/liza/internal/pipeline"
 	"github.com/liza-mas/liza/internal/statevalidate"
 )
 
@@ -159,6 +160,9 @@ func AddTask(statePath, logPath string, input *AddTaskInput, orchestratorID stri
 		if state.FindTask(input.ID) != nil {
 			return &PreconditionError{Reason: fmt.Sprintf("task '%s' already exists", input.ID)}
 		}
+		if err := rejectManualPipelineChildTask(state, input, resolver); err != nil {
+			return err
+		}
 		state.Tasks = append(state.Tasks, newTask)
 
 		if !slices.Contains(state.Sprint.Scope.Planned, input.ID) {
@@ -199,6 +203,69 @@ func AddTask(statePath, logPath string, input *AddTaskInput, orchestratorID stri
 	}
 
 	return result, nil
+}
+
+func rejectManualPipelineChildTask(state *models.State, input *AddTaskInput, resolver *pipeline.Resolver) error {
+	for _, td := range resolver.AllTransitions() {
+		tDef, err := buildTransitionDefFromPipeline(resolver, td.Name)
+		if err != nil {
+			continue
+		}
+		for i := range state.Tasks {
+			source := &state.Tasks[i]
+			if source.RolePair != tDef.sourceRolePair {
+				continue
+			}
+			switch td.Cardinality {
+			case "per-subtask":
+				for outputIdx := range source.Output {
+					if isTransitionChildID(input.ID,
+						perSubtaskChildID(source.ID, td.Name, outputIdx),
+						perSubtaskChildID(source.ID, tDef.taskSlug, outputIdx),
+					) {
+						return &PreconditionError{Reason: fmt.Sprintf(
+							"task %q shadows pipeline transition child %q[%d]; use liza proceed/resume for transition %q instead of add-tasks",
+							input.ID, source.ID, outputIdx, td.Name,
+						)}
+					}
+				}
+			case "one-to-one":
+				if isTransitionChildID(input.ID,
+					oneToOneChildID(source.ID, td.Name),
+					oneToOneChildID(source.ID, tDef.taskSlug),
+				) {
+					return &PreconditionError{Reason: fmt.Sprintf(
+						"task %q shadows pipeline transition child %q; use liza proceed/resume for transition %q instead of add-tasks",
+						input.ID, source.ID, td.Name,
+					)}
+				}
+			case "many-to-one":
+				cohortParentID := source.CohortParentID()
+				if cohortParentID == "" {
+					continue
+				}
+				if isTransitionChildID(input.ID,
+					manyToOneChildID(cohortParentID, td.Name),
+					manyToOneChildID(cohortParentID, tDef.taskSlug),
+				) {
+					return &PreconditionError{Reason: fmt.Sprintf(
+						"task %q shadows pipeline transition child cohort %q; use liza proceed/resume for transition %q instead of add-tasks",
+						input.ID, cohortParentID, td.Name,
+					)}
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func isTransitionChildID(inputID string, candidates ...string) bool {
+	for _, candidate := range candidates {
+		if inputID == candidate {
+			return true
+		}
+	}
+	return false
 }
 
 // AddTasksInput represents the input for batch task creation.

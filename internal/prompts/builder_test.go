@@ -314,6 +314,59 @@ func TestRenderOrchestratorDashboard(t *testing.T) {
 			},
 		},
 		{
+			name: "partial planning complete trigger",
+			state: func() *models.State {
+				state := testhelpers.CreateValidState()
+				state.Sprint.Scope.Planned = []string{"task-plan-1", "task-plan-2"}
+				planningTask := testhelpers.BuildTaskByStatus("task-plan-1", models.TaskStatusMerged, now)
+				planningTask.RolePair = "code-planning-pair"
+				planningTask.Output = []models.OutputEntry{
+					{Desc: "Implement auth", DoneWhen: "Auth works", Scope: "internal/auth"},
+				}
+				activeTask := testhelpers.BuildTaskByStatus("task-plan-2", models.TaskStatusDraftCodingPlan, now)
+				activeTask.RolePair = "code-planning-pair"
+				state.Tasks = []models.Task{planningTask, activeTask}
+				return state
+			}(),
+			wantContains: []string{
+				"WAKE TRIGGER: PLANNING_COMPLETE",
+				"- Total tasks: 2",
+				"- Merged: 1",
+				"Planning sprint tasks have been merged with output[] entries",
+				"No manual task creation is needed.",
+				"Pipeline transitions will execute automatically after checkpoint and human resume",
+			},
+			wantNotContain: []string{
+				"WAKE TRIGGER: UNKNOWN",
+			},
+		},
+		{
+			name: "checkpoint suppresses planning complete trigger",
+			state: func() *models.State {
+				state := testhelpers.CreateValidState()
+				state.Sprint.Status = models.SprintStatusCheckpoint
+				state.Sprint.Scope.Planned = []string{"task-plan-1"}
+				planningTask := testhelpers.BuildTaskByStatus("task-plan-1", models.TaskStatusMerged, now)
+				planningTask.RolePair = "code-planning-pair"
+				planningTask.Output = []models.OutputEntry{
+					{Desc: "Implement auth", DoneWhen: "Auth works", Scope: "internal/auth"},
+				}
+				state.Tasks = []models.Task{planningTask}
+				return state
+			}(),
+			wantContains: []string{
+				"WAKE TRIGGER: NONE",
+				"- Total tasks: 1",
+				"- Merged: 1",
+			},
+			wantNotContain: []string{
+				"WAKE TRIGGER: PLANNING_COMPLETE",
+				"WAKE TRIGGER: SPRINT_COMPLETE",
+				"Planning sprint tasks have been merged with output[] entries",
+				"Pipeline transitions will execute automatically after checkpoint and human resume",
+			},
+		},
+		{
 			name: "sprint complete trigger",
 			state: func() *models.State {
 				state := testhelpers.CreateValidState()

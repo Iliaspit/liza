@@ -73,10 +73,10 @@ func determineWakeTrigger(totalTasks, blocked, hypothesisExhausted, immediateDis
 	if immediateDiscoveries > 0 {
 		return "IMMEDIATE_DISCOVERY"
 	}
-	if sprintComplete && len(planningTasks) > 0 {
+	if len(planningTasks) > 0 {
 		return "PLANNING_COMPLETE"
 	}
-	if sprintComplete && m2oReadyCount > 0 {
+	if m2oReadyCount > 0 {
 		return "MANY_TO_ONE_READY"
 	}
 	if sprintComplete && codingComplete {

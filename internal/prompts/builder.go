@@ -64,20 +64,26 @@ func RenderOrchestratorDashboard(state *models.State, projectRoot, agentID strin
 	cycleBlocked := countCycleBlockedPlanning(state.Tasks, planningPairs)
 
 	sprintComplete := state.AllPlannedTasksTerminalWith(sprintTerminals)
+	wakeOpen := state.Sprint.Status != models.SprintStatusCheckpoint &&
+		state.Sprint.Status != models.SprintStatusCompleted
+	sprintCompleteForWake := sprintComplete && wakeOpen
 
 	var planningTasks []planningTaskData
-	if sprintComplete {
+	if wakeOpen {
 		planningTasks = collectMergedPlanningTasks(state, planningPairs)
 	}
 
 	codingComplete := state.Goal.BaseCommit != nil && !hasIntegrationTaskInSprint(state)
 
 	var m2oReadyCount int
-	if sprintComplete {
+	if wakeOpen {
 		m2oReadyCount = countReadyM2OCohorts(state, m2oTransitions)
 	}
 
-	wakeTrigger := determineWakeTrigger(totalTasks, blocked, hypothesisExhausted, immediateDiscoveries, sprintComplete, codingComplete, planningTasks, m2oReadyCount)
+	wakeTrigger := determineWakeTrigger(totalTasks, blocked, hypothesisExhausted, immediateDiscoveries, sprintCompleteForWake, codingComplete, planningTasks, m2oReadyCount)
+	if !wakeOpen && wakeTrigger == "UNKNOWN" {
+		wakeTrigger = "NONE"
+	}
 
 	wakeData, wakeErr := buildWakeTemplateData(state.Goal.SpecRef, state.Goal.EntryPoint, projectRoot)
 	if wakeErr != nil {

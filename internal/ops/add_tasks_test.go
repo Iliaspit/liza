@@ -252,16 +252,34 @@ const minimalPipelineYAML = `pipeline:
         approved: US_APPROVED
         rejected: US_REJECTED
   sub-pipelines:
+    story-subpipeline:
+      steps:
+        - us-writing-pair
+      transitions: []
     coding-subpipeline:
       steps:
         - code-planning-pair
         - coding-pair
       transitions:
         - name: code-plan-to-coding
+          task-slug: coding
           from: code-planning-pair.approved
           to: coding-pair.initial
           trigger: manual
           cardinality: per-subtask
+        - name: code-plan-to-single-code
+          task-slug: single-code
+          from: code-planning-pair.approved
+          to: coding-pair.initial
+          trigger: manual
+          cardinality: one-to-one
+  pipeline-transitions:
+    - name: us-to-code-plan
+      task-slug: code-planning
+      from: story-subpipeline.us-writing-pair.approved
+      to: coding-subpipeline.code-planning-pair.initial
+      trigger: manual
+      cardinality: many-to-one
   entry-points:
     detailed-spec: coding-subpipeline.code-planning-pair
 `
@@ -392,6 +410,194 @@ func TestAddTask_PipelineSuccess(t *testing.T) {
 	}
 	if task.RolePair != "code-planning-pair" {
 		t.Errorf("RolePair = %q, want %q", task.RolePair, "code-planning-pair")
+	}
+}
+
+func TestAddTask_RejectsManualPipelineTransitionChild(t *testing.T) {
+	stateFile, logFile := setupPipelineProject(t)
+	now := time.Now().UTC()
+
+	bb := db.New(stateFile)
+	state, err := bb.Read()
+	if err != nil {
+		t.Fatalf("Failed to read state: %v", err)
+	}
+	source := testhelpers.BuildTaskByStatus("plan-1", models.TaskStatusMerged, now)
+	source.Type = models.TaskTypePlanning
+	source.RolePair = "code-planning-pair"
+	source.SpecRef = "specs/feature.md"
+	source.Output = []models.OutputEntry{
+		{Desc: "Implement feature", DoneWhen: "Feature works", Scope: "internal/feature"},
+	}
+	state.Tasks = append(state.Tasks, source)
+	state.Sprint.Scope.Planned = append(state.Sprint.Scope.Planned, source.ID)
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	tests := []struct {
+		name   string
+		taskID string
+	}{
+		{
+			name:   "task slug child ID",
+			taskID: "plan-1-coding-0",
+		},
+		{
+			name:   "transition name child ID",
+			taskID: "plan-1-code-plan-to-coding-0",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			input := &AddTaskInput{
+				ID:          tt.taskID,
+				Description: "Manual duplicate child",
+				SpecRef:     "specs/feature.md",
+				DoneWhen:    "Feature works",
+				Scope:       "internal/feature",
+				Priority:    1,
+				RolePair:    "coding-pair",
+			}
+
+			_, err := AddTask(stateFile, logFile, input, "orchestrator-1")
+			if err == nil {
+				t.Fatal("expected error for manual transition child")
+			}
+			testhelpers.AssertErrorContains(t, err, "shadows pipeline transition child")
+			testhelpers.AssertErrorContains(t, err, "use liza proceed/resume")
+
+			readState, err := bb.Read()
+			if err != nil {
+				t.Fatalf("Failed to read state: %v", err)
+			}
+			if readState.FindTask(tt.taskID) != nil {
+				t.Fatalf("task %q was persisted despite rejection", tt.taskID)
+			}
+		})
+	}
+}
+
+func TestAddTask_RejectsManualOneToOnePipelineTransitionChild(t *testing.T) {
+	stateFile, logFile := setupPipelineProject(t)
+	now := time.Now().UTC()
+
+	bb := db.New(stateFile)
+	state, err := bb.Read()
+	if err != nil {
+		t.Fatalf("Failed to read state: %v", err)
+	}
+	source := testhelpers.BuildTaskByStatus("plan-1", models.TaskStatusMerged, now)
+	source.Type = models.TaskTypePlanning
+	source.RolePair = "code-planning-pair"
+	source.SpecRef = "specs/feature.md"
+	state.Tasks = append(state.Tasks, source)
+	state.Sprint.Scope.Planned = append(state.Sprint.Scope.Planned, source.ID)
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	tests := []struct {
+		name   string
+		taskID string
+	}{
+		{
+			name:   "task slug child ID",
+			taskID: "plan-1-single-code",
+		},
+		{
+			name:   "transition name child ID",
+			taskID: "plan-1-code-plan-to-single-code",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			input := &AddTaskInput{
+				ID:          tt.taskID,
+				Description: "Manual duplicate child",
+				SpecRef:     "specs/feature.md",
+				DoneWhen:    "Feature works",
+				Scope:       "internal/feature",
+				Priority:    1,
+				RolePair:    "coding-pair",
+			}
+
+			_, err := AddTask(stateFile, logFile, input, "orchestrator-1")
+			if err == nil {
+				t.Fatal("expected error for manual one-to-one transition child")
+			}
+			testhelpers.AssertErrorContains(t, err, "shadows pipeline transition child")
+			testhelpers.AssertErrorContains(t, err, "use liza proceed/resume")
+
+			readState, err := bb.Read()
+			if err != nil {
+				t.Fatalf("Failed to read state: %v", err)
+			}
+			if readState.FindTask(tt.taskID) != nil {
+				t.Fatalf("task %q was persisted despite rejection", tt.taskID)
+			}
+		})
+	}
+}
+
+func TestAddTask_RejectsManualManyToOnePipelineTransitionChild(t *testing.T) {
+	stateFile, logFile := setupPipelineProject(t)
+	now := time.Now().UTC()
+
+	bb := db.New(stateFile)
+	state, err := bb.Read()
+	if err != nil {
+		t.Fatalf("Failed to read state: %v", err)
+	}
+	parentID := "epic-1"
+	source := testhelpers.BuildTaskByStatus("us-1", models.TaskStatusMerged, now)
+	source.Type = models.TaskTypeUSWriting
+	source.RolePair = "us-writing-pair"
+	source.SpecRef = "specs/feature.md"
+	source.ParentTask = &parentID
+	state.Tasks = append(state.Tasks, source)
+	state.Sprint.Scope.Planned = append(state.Sprint.Scope.Planned, source.ID)
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	tests := []struct {
+		name   string
+		taskID string
+	}{
+		{
+			name:   "task slug child ID",
+			taskID: "epic-1-code-planning",
+		},
+		{
+			name:   "transition name child ID",
+			taskID: "epic-1-us-to-code-plan",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			input := &AddTaskInput{
+				ID:          tt.taskID,
+				Description: "Manual duplicate child",
+				SpecRef:     "specs/feature.md",
+				DoneWhen:    "Feature works",
+				Scope:       "internal/feature",
+				Priority:    1,
+				RolePair:    "code-planning-pair",
+			}
+
+			_, err := AddTask(stateFile, logFile, input, "orchestrator-1")
+			if err == nil {
+				t.Fatal("expected error for manual many-to-one transition child")
+			}
+			testhelpers.AssertErrorContains(t, err, "shadows pipeline transition child")
+			testhelpers.AssertErrorContains(t, err, "use liza proceed/resume")
+
+			readState, err := bb.Read()
+			if err != nil {
+				t.Fatalf("Failed to read state: %v", err)
+			}
+			if readState.FindTask(tt.taskID) != nil {
+				t.Fatalf("task %q was persisted despite rejection", tt.taskID)
+			}
+		})
 	}
 }
 
