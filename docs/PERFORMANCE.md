@@ -99,14 +99,14 @@ All agents use a hybrid approach: event-driven primary, 30s polling fallback.
 |-----------|---------|-----------|
 | `heartbeat_interval` | 60s | Lower = faster crash detection, more writes |
 | `lease_duration` | 1800s (30min) | Lower = faster crash recovery, more renewals |
-| `coder_max_wait` | 1800s (30min) | Lower = agents exit faster when idle |
+| `doer_max_wait` | 18000s (5hr) | Lower = agents exit faster when idle |
 | Lock timeout | 10s (code) | Lower = fail fast, may false-positive on slow systems |
 
 ### Tuning Profiles
 
 **Short tasks** (<10 min): `heartbeat: 30, lease: 900, max_wait: 600`
 
-**Long tasks** (30min-2hr): `heartbeat: 60, lease: 3600, max_wait: 7200`
+**Long tasks** (30min-5hr): `heartbeat: 60, lease: 3600, max_wait: 18000`
 
 **Network filesystems**: `heartbeat: 90, lease: 2700` (and increase lock timeout in code)
 

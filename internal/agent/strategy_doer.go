@@ -31,7 +31,10 @@ func (s *doerStrategy) DefaultTimeout() time.Duration {
 
 func (s *doerStrategy) WaitConfig(state *models.State) (pollInterval, maxWait time.Duration) {
 	poll := nonZeroOr(state.Config.CoderPollInterval, nonZeroOr(s.yamlPollSec, models.DefaultCoderPollInterval))
-	max := nonZeroOr(state.Config.CoderMaxWait, nonZeroOr(s.yamlMaxWaitSec, models.DefaultCoderMaxWait))
+	max := nonZeroOr(
+		state.Config.DoerMaxWait,
+		nonZeroOr(state.Config.DeprecatedCoderMaxWait, nonZeroOr(s.yamlMaxWaitSec, models.DefaultDoerMaxWait)),
+	)
 	return time.Duration(poll) * time.Second, time.Duration(max) * time.Second
 }
 

@@ -97,7 +97,7 @@ pipeline:
       timeouts:
         execution: 2h          # default for doer if omitted: 2h
         poll-interval: 30s     # default for doer if omitted: 30s
-        max-wait: 30m          # default for doer if omitted: 30m
+        max-wait: 5h           # default for doer if omitted: 5h
       context-sections:        # template blocks to assemble (order matters)
         - assigned-task
         - collective-plan-scoping
@@ -132,7 +132,7 @@ pipeline:
       timeouts:
         execution: 30m         # default for reviewer if omitted: 30m
         poll-interval: 30s
-        max-wait: 30m
+        max-wait: 5h
       context-sections:
         - review-task
         - collective-plan-scoping
@@ -162,7 +162,7 @@ pipeline:
       timeouts:
         execution: 4h          # default for orchestrator if omitted: 4h
         poll-interval: 60s
-        max-wait: 30m
+        max-wait: 5h
       context-sections:
         - orchestrator-dashboard
         - wake-instructions

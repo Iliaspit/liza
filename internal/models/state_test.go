@@ -230,6 +230,22 @@ func TestAgentYAMLMarshaling(t *testing.T) {
 	}
 }
 
+func TestConfigLegacyCoderMaxWaitYAML(t *testing.T) {
+	data := []byte("doer_max_wait: 120\ncoder_max_wait: 600\n")
+
+	var config Config
+	if err := yaml.Unmarshal(data, &config); err != nil {
+		t.Fatalf("Failed to unmarshal config: %v", err)
+	}
+
+	if config.DoerMaxWait != 120 {
+		t.Errorf("DoerMaxWait = %d, want 120", config.DoerMaxWait)
+	}
+	if config.DeprecatedCoderMaxWait != 600 {
+		t.Errorf("DeprecatedCoderMaxWait = %d, want 600", config.DeprecatedCoderMaxWait)
+	}
+}
+
 func TestStateYAMLMarshaling(t *testing.T) {
 	created, _ := time.Parse(time.RFC3339, "2025-01-17T14:00:00Z")
 	state := State{
@@ -285,7 +301,7 @@ func TestStateYAMLMarshaling(t *testing.T) {
 			HeartbeatInterval:  60,
 			LeaseDuration:      1800,
 			CoderPollInterval:  30,
-			CoderMaxWait:       300,
+			DoerMaxWait:        300,
 			IntegrationBranch:  "integration",
 		},
 	}

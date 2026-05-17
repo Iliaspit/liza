@@ -666,8 +666,8 @@ func verifyInitialization(t *testing.T, tmpDir, description, specRef string) {
 	if state.Config.Mode != models.SystemModeRunning {
 		t.Errorf("state.Config.Mode = %q, want %q", state.Config.Mode, models.SystemModeRunning)
 	}
-	if state.Config.CoderMaxWait != models.DefaultCoderMaxWait {
-		t.Errorf("state.Config.CoderMaxWait = %d, want %d", state.Config.CoderMaxWait, models.DefaultCoderMaxWait)
+	if state.Config.DoerMaxWait != models.DefaultDoerMaxWait {
+		t.Errorf("state.Config.DoerMaxWait = %d, want %d", state.Config.DoerMaxWait, models.DefaultDoerMaxWait)
 	}
 	if state.Config.OrchestratorMaxWait != models.DefaultOrchestratorMaxWait {
 		t.Errorf("state.Config.OrchestratorMaxWait = %d, want %d", state.Config.OrchestratorMaxWait, models.DefaultOrchestratorMaxWait)

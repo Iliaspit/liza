@@ -81,6 +81,9 @@ func findFieldByYAMLTag(value reflect.Value, tagName string) (reflect.Value, boo
 	typ := value.Type()
 	for i := 0; i < typ.NumField(); i++ {
 		field := typ.Field(i)
+		if field.Tag.Get("inspect") == "-" {
+			continue
+		}
 		yamlTag := strings.Split(field.Tag.Get("yaml"), ",")[0]
 		if yamlTag == "" || yamlTag == "-" {
 			continue

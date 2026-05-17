@@ -87,7 +87,7 @@ func TestBlackboardBasicReadWrite(t *testing.T) {
 			HeartbeatInterval:  30,
 			LeaseDuration:      300,
 			CoderPollInterval:  10,
-			CoderMaxWait:       600,
+			DoerMaxWait:        600,
 			IntegrationBranch:  "main",
 		},
 	}
@@ -1636,7 +1636,7 @@ config:
     heartbeat_interval: 30
     lease_duration: 300
     coder_poll_interval: 10
-    coder_max_wait: 600
+    doer_max_wait: 600
     integration_branch: main
     custom_config_field: config extra
 circuit_breaker:
@@ -1725,7 +1725,7 @@ config:
     heartbeat_interval: 30
     lease_duration: 300
     coder_poll_interval: 10
-    coder_max_wait: 600
+    doer_max_wait: 600
     integration_branch: main
 circuit_breaker:
     last_check: 2025-01-17T14:00:00Z
@@ -1929,7 +1929,7 @@ config:
     heartbeat_interval: 30
     lease_duration: 300
     coder_poll_interval: 10
-    coder_max_wait: 600
+    doer_max_wait: 600
     integration_branch: main
 `
 	if err := os.WriteFile(statePath, []byte(rawYAML), 0644); err != nil {
@@ -1991,7 +1991,7 @@ config:
     heartbeat_interval: 30
     lease_duration: 300
     coder_poll_interval: 10
-    coder_max_wait: 600
+    doer_max_wait: 600
     integration_branch: main
 `
 	if err := os.WriteFile(statePath, []byte(rawYAML), 0644); err != nil {
@@ -2041,7 +2041,7 @@ config:
     heartbeat_interval: 30
     lease_duration: 300
     coder_poll_interval: 10
-    coder_max_wait: 600
+    doer_max_wait: 600
     integration_branch: main
 `
 	if err := os.WriteFile(statePath, []byte(rawYAML), 0644); err != nil {
@@ -2093,7 +2093,7 @@ config:
     heartbeat_interval: 30
     lease_duration: 300
     coder_poll_interval: 10
-    coder_max_wait: 600
+    doer_max_wait: 600
     integration_branch: main
 `
 	if err := os.WriteFile(statePath, []byte(rawYAML), 0644); err != nil {
@@ -2146,7 +2146,7 @@ config:
     heartbeat_interval: 30
     lease_duration: 300
     coder_poll_interval: 10
-    coder_max_wait: 600
+    doer_max_wait: 600
     integration_branch: main
 `
 	if err := os.WriteFile(statePath, []byte(rawYAML), 0644); err != nil {
@@ -2200,7 +2200,7 @@ config:
     heartbeat_interval: 30
     lease_duration: 300
     coder_poll_interval: 10
-    coder_max_wait: 600
+    doer_max_wait: 600
     integration_branch: main
 `
 	if err := os.WriteFile(statePath, []byte(rawYAML), 0644); err != nil {
@@ -2258,7 +2258,7 @@ config:
     heartbeat_interval: 30
     lease_duration: 300
     coder_poll_interval: 10
-    coder_max_wait: 600
+    doer_max_wait: 600
     integration_branch: main
 `
 	if err := os.WriteFile(statePath, []byte(rawYAML), 0644); err != nil {

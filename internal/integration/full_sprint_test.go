@@ -354,7 +354,7 @@ func TestFullSprintSequence(t *testing.T) {
 	bb := db.New(statePath)
 	if err := bb.Modify(func(s *models.State) error {
 		s.Config.CoderPollInterval = 1
-		s.Config.CoderMaxWait = 5
+		s.Config.DoerMaxWait = 5
 		s.Config.ReviewerPollInterval = 1
 		s.Config.ReviewerMaxWait = 5
 		s.Config.OrchestratorPollInterval = 1

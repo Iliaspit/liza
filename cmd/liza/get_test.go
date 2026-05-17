@@ -174,7 +174,7 @@ func TestGetCommand(t *testing.T) {
 			HeartbeatInterval:  60,
 			LeaseDuration:      300,
 			CoderPollInterval:  10,
-			CoderMaxWait:       60,
+			DoerMaxWait:        60,
 			IntegrationBranch:  "main",
 			Mode:               models.SystemModeRunning,
 		},

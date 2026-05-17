@@ -391,7 +391,7 @@ func TestSupervisor_Exit0ProviderAuditDegradedContinuesPostExecution(t *testing.
 	taskID := "task-audit-exit0"
 	state := testhelpers.CreateValidState()
 	state.Config.CoderPollInterval = 1
-	state.Config.CoderMaxWait = 1
+	state.Config.DoerMaxWait = 1
 	state.Config.LeaseDuration = 300
 	state.Tasks = []models.Task{testhelpers.BuildTaskByStatus(taskID, models.TaskStatusReady, now)}
 	bb := testhelpers.WriteInitialState(t, statePath, state)

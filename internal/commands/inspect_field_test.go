@@ -16,10 +16,12 @@ func TestGetField(t *testing.T) {
 	state := &models.State{
 		Version: 1,
 		Config: models.Config{
-			Mode:               models.SystemModeRunning,
-			MaxCoderIterations: 10,
-			MaxReviewCycles:    5,
-			IntegrationBranch:  "main",
+			Mode:                   models.SystemModeRunning,
+			MaxCoderIterations:     10,
+			MaxReviewCycles:        5,
+			DoerMaxWait:            18000,
+			DeprecatedCoderMaxWait: 600,
+			IntegrationBranch:      "main",
 		},
 		Sprint: models.Sprint{
 			ID:     "sprint-1",
@@ -95,6 +97,12 @@ func TestGetField(t *testing.T) {
 			wantErr:   true,
 		},
 		{
+			name:      "legacy coder_max_wait is not inspectable",
+			fieldPath: "config.coder_max_wait",
+			want:      nil,
+			wantErr:   true,
+		},
+		{
 			name:      "invalid entity",
 			fieldPath: "nonexistent.field",
 			want:      nil,
@@ -133,7 +141,7 @@ func TestGetField_DiscoversAllTaggedConfigAndSprintFields(t *testing.T) {
 			HeartbeatInterval:        60,
 			LeaseDuration:            1800,
 			CoderPollInterval:        15,
-			CoderMaxWait:             900,
+			DoerMaxWait:              900,
 			OrchestratorPollInterval: 45,
 			OrchestratorMaxWait:      1200,
 			ReviewerPollInterval:     20,
@@ -458,6 +466,9 @@ func yamlLeafPathsForType(prefix string, t reflect.Type) []string {
 
 		for i := 0; i < fieldType.NumField(); i++ {
 			field := fieldType.Field(i)
+			if field.Tag.Get("inspect") == "-" {
+				continue
+			}
 			tagName := yamlTagName(field.Tag.Get("yaml"))
 			if tagName == "" {
 				continue
@@ -509,6 +520,9 @@ func findStructFieldByYAMLTag(v reflect.Value, tagName string) (reflect.Value, b
 	t := v.Type()
 	for i := 0; i < t.NumField(); i++ {
 		field := t.Field(i)
+		if field.Tag.Get("inspect") == "-" {
+			continue
+		}
 		if yamlTagName(field.Tag.Get("yaml")) == tagName {
 			return v.Field(i), true
 		}

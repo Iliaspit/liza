@@ -654,7 +654,11 @@ config:
   heartbeat_interval: 60        # Seconds
   lease_duration: 1800          # Seconds (30 minutes)
   coder_poll_interval: 30       # Seconds between work availability checks
-  coder_max_wait: 300           # Max seconds to wait for claimable work
+  doer_max_wait: 18000          # Max seconds doer supervisors wait for claimable work
+  orchestrator_poll_interval: 60 # Seconds between orchestrator work checks
+  orchestrator_max_wait: 18000  # Max seconds orchestrator waits for work
+  reviewer_poll_interval: 30    # Seconds between reviewer work checks
+  reviewer_max_wait: 18000      # Max seconds reviewers wait for work
   exit42_restart_threshold: 5   # Consecutive exit-42 restarts without progress before BLOCKED (default: 5)
   exit42_max_backoff_seconds: 60 # Max backoff delay between exit-42 restarts (default: 60)
   default_cli: claude           # Optional global default agent CLI

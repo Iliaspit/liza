@@ -69,11 +69,11 @@ All configuration lives in `.liza/state.yaml` under the `config` section.
 | `heartbeat_interval` | 60 | 1 | 300 | seconds | Heartbeat frequency |
 | `lease_duration` | 1800 | 300 | 7200 | seconds | Task lease duration |
 | `coder_poll_interval` | 30 | 5 | 120 | seconds | Check interval (legacy, now event-driven) |
-| `coder_max_wait` | 7200 | 300 | 7200 | seconds | Max idle before agent exits |
-| `planner_poll_interval` | 60 | — | — | seconds | Planner polling interval |
-| `planner_max_wait` | 7200 | — | — | seconds | Max planner idle before exit |
+| `doer_max_wait` | 18000 | 300 | — | seconds | Max idle before doer-role supervisors exit |
+| `orchestrator_poll_interval` | 60 | — | — | seconds | Orchestrator polling interval |
+| `orchestrator_max_wait` | 18000 | — | — | seconds | Max orchestrator idle before exit |
 | `reviewer_poll_interval` | 30 | — | — | seconds | Reviewer polling interval |
-| `reviewer_max_wait` | 7200 | — | — | seconds | Max reviewer idle before exit |
+| `reviewer_max_wait` | 18000 | — | — | seconds | Max reviewer idle before exit |
 | `agent_progress_timeout` | 1800 | — | — | seconds | Max active execution time without state, worktree, or provider-output progress before blocking the task |
 | `default_cli` | (none) | — | — | CLI name | Global default coding agent CLI |
 | `default_doer_cli` | (none) | — | — | CLI name | Default coding agent CLI for doers and orchestrators |
@@ -92,7 +92,7 @@ When exceeded, supervisor kills CLI, resets agent to IDLE, retries after 5s dela
 
 During active task execution, the supervisor also watches for observable progress. Progress means a meaningful task-state change, worktree HEAD/status change including untracked files, or provider stdout/stderr activity. If no progress is observed for `agent_progress_timeout`, the supervisor cancels the provider process, waits for it to exit, transitions the still-owned executing task to `BLOCKED`, cleans its worktree, and records the diagnostic in `blocked_reason`. The watchdog polls at `agent_progress_timeout / 4`, capped at 15 seconds.
 
-**Note:** Planners now respect `planner_max_wait` (default 2 hours). Previously planners ran indefinitely; they now exit after the configured idle timeout, same as coders and reviewers.
+**Note:** Doer roles now use `doer_max_wait`; legacy `coder_max_wait` is still accepted for existing state files but new projects should use `doer_max_wait`.
 
 ## Tuning Guidelines
 
@@ -101,16 +101,16 @@ During active task execution, the supervisor also watches for observable progres
 config:
   heartbeat_interval: 30
   lease_duration: 900       # 15 min
-  coder_max_wait: 600       # 10 min
+  doer_max_wait: 600       # 10 min
   max_coder_iterations: 5   # Escalate fast
 ```
 
-### Long Tasks (30min-2hr)
+### Long Tasks (30min-5hr)
 ```yaml
 config:
   heartbeat_interval: 60
   lease_duration: 3600      # 1 hour
-  coder_max_wait: 7200      # 2 hours
+  doer_max_wait: 18000     # 5 hours
   max_coder_iterations: 15  # More iterations
 ```
 

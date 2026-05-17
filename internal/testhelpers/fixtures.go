@@ -112,7 +112,7 @@ func CreateValidState() *models.State {
 			HeartbeatInterval:        60,
 			LeaseDuration:            1800,
 			CoderPollInterval:        30,
-			CoderMaxWait:             1800,
+			DoerMaxWait:              1800,
 			OrchestratorPollInterval: 60,
 			OrchestratorMaxWait:      1800,
 			ReviewerPollInterval:     30,

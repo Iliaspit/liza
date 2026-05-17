@@ -536,18 +536,18 @@ func TestWaitConfig(t *testing.T) {
 		wantPoll    time.Duration
 		wantMaxWait time.Duration
 	}{
-		// Doer roles use Coder defaults
-		{"coder", 30 * time.Second, 7200 * time.Second},
-		{"code-planner", 30 * time.Second, 7200 * time.Second},
-		{"epic-planner", 30 * time.Second, 7200 * time.Second},
-		{"us-writer", 30 * time.Second, 7200 * time.Second},
+		// Doer roles use doer defaults
+		{"coder", 30 * time.Second, 18000 * time.Second},
+		{"code-planner", 30 * time.Second, 18000 * time.Second},
+		{"epic-planner", 30 * time.Second, 18000 * time.Second},
+		{"us-writer", 30 * time.Second, 18000 * time.Second},
 		// Reviewer roles use Reviewer defaults
-		{"code-reviewer", 30 * time.Second, 7200 * time.Second},
-		{"code-plan-reviewer", 30 * time.Second, 7200 * time.Second},
-		{"epic-plan-reviewer", 30 * time.Second, 7200 * time.Second},
-		{"us-reviewer", 30 * time.Second, 7200 * time.Second},
+		{"code-reviewer", 30 * time.Second, 18000 * time.Second},
+		{"code-plan-reviewer", 30 * time.Second, 18000 * time.Second},
+		{"epic-plan-reviewer", 30 * time.Second, 18000 * time.Second},
+		{"us-reviewer", 30 * time.Second, 18000 * time.Second},
 		// Orchestrator uses Orchestrator defaults
-		{"orchestrator", 60 * time.Second, 7200 * time.Second},
+		{"orchestrator", 60 * time.Second, 18000 * time.Second},
 	}
 
 	zeroState := &models.State{}
@@ -570,11 +570,29 @@ func TestWaitConfig(t *testing.T) {
 
 	// Verify each category reads the correct config keys (not each other's).
 	t.Run("custom_config/doer", func(t *testing.T) {
-		state := &models.State{Config: models.Config{CoderPollInterval: 5, CoderMaxWait: 60}}
+		state := &models.State{Config: models.Config{CoderPollInterval: 5, DoerMaxWait: 60}}
 		s, _ := NewRoleStrategy("coder", resolver)
 		poll, maxWait := s.WaitConfig(state)
 		if poll != 5*time.Second || maxWait != 60*time.Second {
 			t.Errorf("doer WaitConfig() = (%v, %v), want (5s, 1m0s)", poll, maxWait)
+		}
+	})
+
+	t.Run("custom_config/doer_legacy_coder_max_wait", func(t *testing.T) {
+		state := &models.State{Config: models.Config{CoderPollInterval: 5, DeprecatedCoderMaxWait: 60}}
+		s, _ := NewRoleStrategy("coder", resolver)
+		poll, maxWait := s.WaitConfig(state)
+		if poll != 5*time.Second || maxWait != 60*time.Second {
+			t.Errorf("doer legacy WaitConfig() = (%v, %v), want (5s, 1m0s)", poll, maxWait)
+		}
+	})
+
+	t.Run("custom_config/doer_prefers_new_key_over_legacy", func(t *testing.T) {
+		state := &models.State{Config: models.Config{DoerMaxWait: 120, DeprecatedCoderMaxWait: 60}}
+		s, _ := NewRoleStrategy("coder", resolver)
+		_, maxWait := s.WaitConfig(state)
+		if maxWait != 120*time.Second {
+			t.Errorf("doer WaitConfig() maxWait = %v, want 2m0s from doer_max_wait", maxWait)
 		}
 	})
 
@@ -598,7 +616,7 @@ func TestWaitConfig(t *testing.T) {
 
 	// Cross-contamination: doer config should NOT affect reviewer or orchestrator
 	t.Run("custom_config/isolation", func(t *testing.T) {
-		state := &models.State{Config: models.Config{CoderPollInterval: 99, CoderMaxWait: 99}}
+		state := &models.State{Config: models.Config{CoderPollInterval: 99, DoerMaxWait: 99}}
 		reviewer, _ := NewRoleStrategy("code-reviewer", resolver)
 		poll, _ := reviewer.WaitConfig(state)
 		if poll == 99*time.Second {
@@ -613,7 +631,7 @@ func TestWaitConfig(t *testing.T) {
 
 	// Three-level hierarchy: state.yaml > YAML > type default
 	t.Run("hierarchy/yaml_overrides_type_default", func(t *testing.T) {
-		// YAML sets coder poll=45s, max-wait=20m — differs from type defaults (30s, 30m)
+		// YAML sets coder poll=45s, max-wait=20m — differs from type defaults (30s, 5h)
 		yaml := minimalPipelineYAML("2h", "45s", "20m", "4h", "60s", "30m")
 		r := loadTestResolver(t, yaml)
 
@@ -639,7 +657,7 @@ func TestWaitConfig(t *testing.T) {
 		applyResolverTimeouts(t, s, r, "coder")
 
 		// state.yaml overrides YAML values
-		state := &models.State{Config: models.Config{CoderPollInterval: 10, CoderMaxWait: 120}}
+		state := &models.State{Config: models.Config{CoderPollInterval: 10, DoerMaxWait: 120}}
 		poll, maxWait := s.WaitConfig(state)
 		if poll != 10*time.Second {
 			t.Errorf("poll = %v, want 10s (state.yaml overrides YAML)", poll)
