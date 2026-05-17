@@ -446,6 +446,91 @@ func TestAwaitVerdict_Rejected_SameAttempt(t *testing.T) {
 	}
 }
 
+func TestAwaitVerdict_Rejected_ObservedByTickWhenWatcherSilent(t *testing.T) {
+	tmpDir := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, tmpDir)
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+
+	watcherReady := make(chan struct{})
+	originalWatcher := newAwaitVerdictWatcher
+	newAwaitVerdictWatcher = func(bb *db.Blackboard) (awaitVerdictWatcher, error) {
+		close(watcherReady)
+		return silentAwaitVerdictWatcher{}, nil
+	}
+	defer func() { newAwaitVerdictWatcher = originalWatcher }()
+
+	originalTickInterval := awaitVerdictTickInterval
+	awaitVerdictTickInterval = 10 * time.Millisecond
+	defer func() { awaitVerdictTickInterval = originalTickInterval }()
+
+	now := time.Now().UTC()
+	state := testhelpers.CreateValidState()
+	state.Config.MaxCoderIterations = 10
+	state.Config.MaxReviewCycles = 5
+
+	task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusReadyForReview, now)
+	task.Iteration = 1
+	task.History = append(task.History, models.TaskHistoryEntry{
+		Time:  now,
+		Event: models.TaskEventSubmittedForReview,
+		Agent: strPtr("coder-1"),
+	})
+	state.Tasks = []models.Task{task}
+	state.Agents["coder-1"] = models.Agent{
+		Role:   "coder",
+		Status: models.AgentStatusWaiting,
+	}
+	bb := testhelpers.WriteInitialState(t, stateFile, state)
+
+	var result *AwaitVerdictResult
+	var awaitErr error
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		result, awaitErr = AwaitVerdict(context.Background(), tmpDir, "task-1", "coder-1", 2*time.Second)
+	}()
+
+	select {
+	case <-watcherReady:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for silent watcher setup")
+	}
+
+	if err := bb.Modify(func(s *models.State) error {
+		tk := s.FindTask("task-1")
+		tk.Status = models.TaskStatusRejected
+		reason := "Missing error handling"
+		tk.RejectionReason = &reason
+		reviewer := "code-reviewer-1"
+		tk.History = append(tk.History, models.TaskHistoryEntry{
+			Time:  time.Now().UTC(),
+			Event: models.TaskEventRejected,
+			Agent: &reviewer,
+		})
+		return nil
+	}); err != nil {
+		t.Fatalf("Failed to modify state: %v", err)
+	}
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("AwaitVerdict did not observe rejected verdict through periodic tick")
+	}
+	if awaitErr != nil {
+		t.Fatalf("AwaitVerdict error: %v", awaitErr)
+	}
+	if result.Verdict != VerdictRejected {
+		t.Errorf("Verdict = %q, want REJECTED", result.Verdict)
+	}
+	if result.ReviewerAgent != "code-reviewer-1" {
+		t.Errorf("ReviewerAgent = %q, want code-reviewer-1", result.ReviewerAgent)
+	}
+	if result.Iteration != 2 {
+		t.Errorf("Iteration = %d, want 2", result.Iteration)
+	}
+}
+
 func TestAwaitVerdict_Rejected_NewAttempt(t *testing.T) {
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
@@ -1356,4 +1441,18 @@ func TestHandleVerdictResult_NonAwaitableStatusRecoversVerdict(t *testing.T) {
 	if result.ReviewCommit != reviewCommit {
 		t.Errorf("ReviewCommit = %q, want %q", result.ReviewCommit, reviewCommit)
 	}
+}
+
+type silentAwaitVerdictWatcher struct{}
+
+func (silentAwaitVerdictWatcher) Events() <-chan struct{} {
+	return make(chan struct{})
+}
+
+func (silentAwaitVerdictWatcher) Errors() <-chan error {
+	return make(chan error)
+}
+
+func (silentAwaitVerdictWatcher) Close() error {
+	return nil
 }

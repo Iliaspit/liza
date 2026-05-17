@@ -778,17 +778,7 @@ func TestAwaitResubmission_RaceGuard(t *testing.T) {
 		_, awaitErr = AwaitResubmission(context.Background(), tmpDir, "task-1", "reviewer-1", 10*time.Second)
 	}()
 
-	testhelpers.WaitForAsyncSetup()
-
-	// Verify ReviewingBy is now set (reviewer-1 acquired ownership).
-	s, readErr := bb.Read()
-	if readErr != nil {
-		t.Fatalf("failed to read state: %v", readErr)
-	}
-	tk := s.FindTask("task-1")
-	if tk.ReviewingBy == nil || *tk.ReviewingBy != "reviewer-1" {
-		t.Fatal("ReviewingBy should be reviewer-1 after ownership acquisition")
-	}
+	waitForReviewOwnership(t, bb, "task-1", "reviewer-1")
 
 	// Another reviewer should NOT be able to claim the task.
 	// First transition to SUBMITTED so the task would normally be claimable by a reviewer.
@@ -815,11 +805,11 @@ func TestAwaitResubmission_RaceGuard(t *testing.T) {
 	}
 
 	// Verify reviewer-1 owns the task (reclaimed via RESUBMITTED path).
-	s, readErr = bb.Read()
+	s, readErr := bb.Read()
 	if readErr != nil {
 		t.Fatalf("failed to read state: %v", readErr)
 	}
-	tk = s.FindTask("task-1")
+	tk := s.FindTask("task-1")
 	if tk.ReviewingBy == nil || *tk.ReviewingBy != "reviewer-1" {
 		t.Error("ReviewingBy should be reviewer-1 after reclaim")
 	}
@@ -907,4 +897,23 @@ func TestAwaitResubmission_ReviewLeaseExpires(t *testing.T) {
 	if reclaimLeaseDiff < -5*time.Second || reclaimLeaseDiff > 5*time.Second {
 		t.Errorf("reclaim ReviewLeaseExpires = %v, want ~%v (diff=%v)", tk.ReviewLeaseExpires, expectedReclaimLease, reclaimLeaseDiff)
 	}
+}
+
+func waitForReviewOwnership(t *testing.T, bb *db.Blackboard, taskID, reviewerID string) {
+	t.Helper()
+
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		state, err := bb.Read()
+		if err != nil {
+			t.Fatalf("failed to read state while waiting for review ownership: %v", err)
+		}
+		task := state.FindTask(taskID)
+		if task != nil && task.ReviewingBy != nil && *task.ReviewingBy == reviewerID {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	t.Fatalf("timed out waiting for %s to acquire review ownership of %s", reviewerID, taskID)
 }

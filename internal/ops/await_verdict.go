@@ -49,6 +49,18 @@ type AwaitVerdictResult struct {
 	SafeAction      string            `json:"safe_action,omitempty"`      // revise or stop, when Liza can determine it
 }
 
+type awaitVerdictWatcher interface {
+	Events() <-chan struct{}
+	Errors() <-chan error
+	Close() error
+}
+
+var newAwaitVerdictWatcher = func(bb *db.Blackboard) (awaitVerdictWatcher, error) {
+	return bb.WatchForChanges()
+}
+
+var awaitVerdictTickInterval = time.Second
+
 // AwaitVerdict blocks until a review verdict arrives for a submitted task.
 // It validates preconditions, acquires ownership (agent status=WAITING,
 // CurrentTask=taskID), checks budget, then blocks on an event loop until
@@ -159,7 +171,7 @@ func AwaitVerdict(ctx context.Context, projectRoot, taskID, agentID string, time
 	// --- Event loop: block until verdict arrives ---
 	rolePair := task.RolePair
 
-	watcher, watchErr := bb.WatchForChanges()
+	watcher, watchErr := newAwaitVerdictWatcher(bb)
 	if watchErr != nil {
 		return awaitVerdictPolling(ctx, bb, taskID, agentID, timeout, resolver, rolePair, projectRoot)
 	}
@@ -169,7 +181,7 @@ func AwaitVerdict(ctx context.Context, projectRoot, taskID, agentID string, time
 	deadlineTimer := time.NewTimer(time.Until(deadline))
 	defer deadlineTimer.Stop()
 
-	abortTicker := time.NewTicker(1 * time.Second)
+	abortTicker := time.NewTicker(awaitVerdictTickInterval)
 	defer abortTicker.Stop()
 
 	for {
@@ -186,6 +198,14 @@ func AwaitVerdict(ctx context.Context, projectRoot, taskID, agentID string, time
 			if abortState.Config.Mode == models.SystemModeStopped {
 				releaseOwnership(bb, agentID)
 				return &AwaitVerdictResult{Verdict: VerdictAborted, TaskStatus: task.Status}, nil
+			}
+			currentTask := abortState.FindTask(taskID)
+			if currentTask == nil {
+				releaseOwnership(bb, agentID)
+				return disappearedVerdictResult(), nil
+			}
+			if vc := checkVerdictStatus(currentTask, resolver, rolePair); vc != nil {
+				return handleVerdictResult(bb, currentTask, agentID, projectRoot, resolver, rolePair)
 			}
 
 		case <-watcher.Events():
