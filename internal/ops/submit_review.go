@@ -133,7 +133,11 @@ func SubmitForReview(projectRoot, taskID, commitRef, agentID string) (*SubmitFor
 
 	// TDD enforcement: code tasks must include test files (doer roles only).
 	roleType, _ := resolver.RoleType(runtimeRole)
-	if roleType == "doer" && task.EffectiveType() == models.TaskTypeCoding && task.BaseCommit != nil {
+	requiresTDD, err := taskRequiresTDD(task, resolver)
+	if err != nil {
+		return nil, err
+	}
+	if roleType == "doer" && requiresTDD && task.BaseCommit != nil {
 		testDiagnostics, err := AnalyzeTestFiles(g, taskID, *task.BaseCommit, preRebaseCommit)
 		if err != nil {
 			return nil, &OperationalError{Message: "failed to check for test files", Err: err}
@@ -258,6 +262,17 @@ func SubmitForReview(projectRoot, taskID, commitRef, agentID string) (*SubmitFor
 		ReviewCommit: postRebaseCommit,
 		AgentID:      agentID,
 	}, nil
+}
+
+func taskRequiresTDD(task *models.Task, resolver models.PipelineResolver) (bool, error) {
+	if task.RolePair != "" {
+		doerRole, err := resolver.DoerRole(task.RolePair)
+		if err != nil {
+			return false, &PreconditionError{Reason: fmt.Sprintf("task %s has invalid role_pair %q: %v", task.ID, task.RolePair, err)}
+		}
+		return models.TaskTypeForRole(doerRole) == models.TaskTypeCoding, nil
+	}
+	return task.EffectiveType() == models.TaskTypeCoding, nil
 }
 
 func rebaseFailureDetails(err error, integrationBranch, rebaseBase, preRebaseCommit string) map[string]any {

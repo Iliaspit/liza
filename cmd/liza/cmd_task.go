@@ -87,6 +87,7 @@ Example YAML file format:
   spec_ref: specs/vision.md
   done_when: Feature X is implemented and tested
   scope: Add feature X to the codebase
+  role_pair: coding-pair
   priority: 1
   depends_on:
     - task-0`,
@@ -160,6 +161,9 @@ Example YAML file format:
 		}
 		if cmd.Flags().Changed("type") {
 			input.Type, _ = cmd.Flags().GetString("type")
+		}
+		if cmd.Flags().Changed("role-pair") {
+			input.RolePair, _ = cmd.Flags().GetString("role-pair")
 		}
 
 		if input.Priority == 0 {
@@ -1070,7 +1074,8 @@ func init() {
 	addTaskCmd.Flags().String("scope", "", "task scope (required unless using --file)")
 	addTaskCmd.Flags().Int("priority", 0, "task priority (default: 1, overrides file value)")
 	addTaskCmd.Flags().String("depends", "", "comma-separated list of task IDs this task depends on (overrides file value)")
-	addTaskCmd.Flags().String("type", "", "task type determining role workflow (default: coding)")
+	addTaskCmd.Flags().String("type", "", "optional task type override (default: derived from --role-pair or file role_pair)")
+	addTaskCmd.Flags().String("role-pair", "", "task role-pair used for pipeline state and default type (required unless provided by --file)")
 	addTaskCmd.Flags().String("state", "", "path to state.yaml (default: .liza/state.yaml)")
 	addTaskCmd.Flags().String("log", "", "path to log.yaml (default: .liza/log.yaml)")
 

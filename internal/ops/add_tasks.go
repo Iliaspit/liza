@@ -82,14 +82,13 @@ func AddTask(statePath, logPath string, input *AddTaskInput, orchestratorID stri
 		return nil, &PreconditionError{Reason: fmt.Sprintf("priority must be positive, got %d", input.Priority)}
 	}
 
-	if input.Type == "" {
-		input.Type = string(models.TaskTypeCoding)
-	}
-
-	taskType := models.TaskType(input.Type)
-	if !taskType.IsValid() {
-		return nil, &PreconditionError{Reason: fmt.Sprintf("unknown task type %q; valid types: %s",
-			input.Type, strings.Join(models.ValidTaskTypeNames(), ", "))}
+	var taskType models.TaskType
+	if input.Type != "" {
+		taskType = models.TaskType(input.Type)
+		if !taskType.IsValid() {
+			return nil, &PreconditionError{Reason: fmt.Sprintf("unknown task type %q; valid types: %s",
+				input.Type, strings.Join(models.ValidTaskTypeNames(), ", "))}
+		}
 	}
 
 	// Derive project root from state path (.liza/state.yaml → project root)
@@ -105,11 +104,21 @@ func AddTask(statePath, logPath string, input *AddTaskInput, orchestratorID stri
 				strings.Join(resolver.RolePairNames(), ", ")),
 		}
 	}
-	if _, rpErr := resolver.RolePair(input.RolePair); rpErr != nil {
+	rp, rpErr := resolver.RolePair(input.RolePair)
+	if rpErr != nil {
 		return nil, &PreconditionError{
 			Reason: fmt.Sprintf("unknown role_pair %q; available role_pairs: %s",
 				input.RolePair, strings.Join(resolver.RolePairNames(), ", ")),
 		}
+	}
+
+	expectedTaskType := models.TaskTypeForRole(rp.Doer)
+	if input.Type == "" {
+		taskType = expectedTaskType
+		input.Type = string(taskType)
+	} else if taskType != expectedTaskType {
+		return nil, &PreconditionError{Reason: fmt.Sprintf("task type %q conflicts with role_pair %q (expected %q)",
+			input.Type, input.RolePair, expectedTaskType)}
 	}
 
 	normalizedDeps := []string{}

@@ -14,19 +14,20 @@ For state diagrams and valid transitions, see [State Machines](../architecture/s
 > config for claimability and state resolution. The `type` field may remain as a human-readable
 > category but will no longer drive role dispatch.
 
-Each task has a `type` field that determines which roles participate in its lifecycle. The type maps to an ordered role workflow via a static registry:
+For pipeline-configured goals, `role_pair` determines which roles participate in a task lifecycle. When `type` is omitted during task creation, Liza derives it from the selected `role_pair`'s doer role. For legacy/non-pipeline data, the `type` field maps to an ordered role workflow via a static registry:
 
 | Type | Workflow | Description |
 |------|----------|-------------|
-| `coding` (default) | coder → code-reviewer | Standard code implementation with review |
+| `coding` | coder → code-reviewer | Standard code implementation with review |
 | `planning` | code-planner → code-plan-reviewer | Code plan creation with review. TDD gate exempt. |
+| `epic-planning` | epic-planner → epic-plan-reviewer | Epic/spec planning with review. TDD gate exempt. |
+| `us-writing` | us-writer → us-reviewer | User-story writing with review. TDD gate exempt. |
 | `integration` | integration-analyst → integration-reviewer | Branch-wide integration analysis. TDD gate exempt. Analyst produces fix-task definitions as `output[]`; approved findings auto-transition to coding-pair fix tasks. |
+| `architecture` | architect → architecture-reviewer | Architecture planning with review. TDD gate exempt. |
 
-When the `type` field is empty, it defaults to `"coding"` for backward compatibility. Unknown types are rejected by `liza validate`.
+When the `type` field is empty and no `role_pair` is available, it defaults to `"coding"` for backward compatibility. Unknown types are rejected by `liza validate`. New task creation rejects explicit `type` values that conflict with the selected `role_pair`.
 
-> **Limitation:** The `planning` workflow currently lists only code-planner roles. Epic-planning and us-writing pairs use `coding` as their type until the registry is extended.
-
-The task type is set by the Planner during task creation (via `liza_add_tasks` or `liza add-task --type`). Coders and Code Reviewers can only claim tasks whose type includes their role in the workflow.
+The task type is normally derived during task creation from the Planner's selected `role_pair`; `liza add-task --type` is an explicit override only when it matches that role-pair. Pipeline-aware claiming uses `role_pair` for role eligibility.
 
 See [State Machines — Type-Aware Claimability](../architecture/state-machines.md#type-aware-claimability) for the formal claimability rule.
 

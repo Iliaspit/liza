@@ -214,6 +214,12 @@ const minimalPipelineYAML = `pipeline:
     code-reviewer:
       type: reviewer
       display-name: "Code Reviewer"
+    us-writer:
+      type: doer
+      display-name: "US Writer"
+    us-reviewer:
+      type: reviewer
+      display-name: "US Reviewer"
   role-pairs:
     code-planning-pair:
       doer: code-planner
@@ -235,6 +241,16 @@ const minimalPipelineYAML = `pipeline:
         reviewing: REVIEWING_CODE
         approved: CODE_APPROVED
         rejected: CODE_REJECTED
+    us-writing-pair:
+      doer: us-writer
+      reviewer: us-reviewer
+      states:
+        initial: DRAFT_US
+        executing: WRITING_US
+        submitted: US_READY_FOR_REVIEW
+        reviewing: REVIEWING_US
+        approved: US_APPROVED
+        rejected: US_REJECTED
   sub-pipelines:
     coding-subpipeline:
       steps:
@@ -307,6 +323,15 @@ func TestAddTask_RolePairValidation(t *testing.T) {
 			},
 			errContains: []string{"unknown task type", "bogus"},
 		},
+		{
+			name: "task type must match role_pair",
+			input: AddTaskInput{
+				ID: "t4", Description: "d", SpecRef: "specs/feature.md",
+				DoneWhen: "w", Scope: "sc", Priority: 1,
+				Type: "coding", RolePair: "us-writing-pair",
+			},
+			errContains: []string{"conflicts with role_pair", "us-writing-pair", "us-writing"},
+		},
 	}
 
 	for _, tt := range tests {
@@ -367,6 +392,42 @@ func TestAddTask_PipelineSuccess(t *testing.T) {
 	}
 	if task.RolePair != "code-planning-pair" {
 		t.Errorf("RolePair = %q, want %q", task.RolePair, "code-planning-pair")
+	}
+}
+
+func TestAddTask_DerivesTypeFromRolePair(t *testing.T) {
+	stateFile, logFile := setupPipelineProject(t)
+
+	input := &AddTaskInput{
+		ID:          "us-story-task",
+		Description: "Write user stories",
+		SpecRef:     "specs/feature.md",
+		DoneWhen:    "Stories are reviewable",
+		Scope:       "specs/stories",
+		Priority:    1,
+		RolePair:    "us-writing-pair",
+	}
+
+	_, err := AddTask(stateFile, logFile, input, "orchestrator-1")
+	if err != nil {
+		t.Fatalf("AddTask() error: %v", err)
+	}
+
+	bb := db.New(stateFile)
+	readState, err := bb.Read()
+	if err != nil {
+		t.Fatalf("Failed to read state: %v", err)
+	}
+
+	task := readState.FindTask("us-story-task")
+	if task == nil {
+		t.Fatal("Task not found in state")
+	}
+	if task.Type != models.TaskTypeUSWriting {
+		t.Errorf("Type = %v, want %v", task.Type, models.TaskTypeUSWriting)
+	}
+	if task.Status != "DRAFT_US" {
+		t.Errorf("Status = %v, want DRAFT_US", task.Status)
 	}
 }
 

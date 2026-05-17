@@ -851,6 +851,88 @@ func TestSubmitForReview_TDDFailure_IncludesDiagnosticDetails(t *testing.T) {
 	}
 }
 
+func TestSubmitForReview_TDDEnforcement_UsesRolePairOverStaleCodingType(t *testing.T) {
+	tmpDir := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, tmpDir)
+	statePath, _ := testhelpers.SetupLizaDir(t, tmpDir)
+
+	testhelpers.MustGit(t, tmpDir, "checkout", "integration")
+
+	g := git.New(tmpDir)
+	taskID := "task-us-writing-stale-coding-type"
+	baseCommit, err := g.CreateWorktree(taskID, "integration")
+	if err != nil {
+		t.Fatalf("CreateWorktree() error = %v", err)
+	}
+	wtPath := g.GetWorktreePath(taskID)
+
+	storyDir := filepath.Join(wtPath, "specs", "stories")
+	if err := os.MkdirAll(storyDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(storyDir, "cli-routing.md"), []byte("# CLI routing story\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	testhelpers.MustGit(t, wtPath, "add", "specs/stories/cli-routing.md")
+	testhelpers.MustGit(t, wtPath, "commit", "-m", "Add CLI routing story")
+	wtCommit := testhelpers.MustGit(t, wtPath, "rev-parse", "HEAD")
+
+	agentID := "us-writer-1"
+	leaseExpires := time.Now().UTC().Add(30 * time.Minute)
+	worktree := g.GetWorktreeRelPath(taskID)
+	initialState := &models.State{
+		Config: models.Config{
+			IntegrationBranch: "integration",
+			LeaseDuration:     1800,
+		},
+		Tasks: []models.Task{
+			{
+				ID:           taskID,
+				Type:         models.TaskTypeCoding,
+				Description:  "US writing task with stale coding type",
+				Status:       "WRITING_US",
+				RolePair:     "us-writing-pair",
+				AssignedTo:   &agentID,
+				LeaseExpires: &leaseExpires,
+				Worktree:     &worktree,
+				BaseCommit:   &baseCommit,
+				Iteration:    1,
+				Created:      time.Now().UTC(),
+				History: []models.TaskHistoryEntry{
+					{
+						Time:  time.Now().UTC(),
+						Event: models.TaskEventPreExecutionCheckpoint,
+						Agent: &agentID,
+						Extra: map[string]any{
+							"intent":          "write docs-only user story",
+							"validation_plan": "verify story markdown exists and submit for review",
+							"files_to_modify": []string{"specs/stories/cli-routing.md"},
+						},
+					},
+				},
+			},
+		},
+		Agents: map[string]models.Agent{
+			agentID: {Role: "us-writer", Status: models.AgentStatusWorking, CurrentTask: &taskID},
+		},
+	}
+	bb := testhelpers.WriteInitialState(t, statePath, initialState)
+
+	if _, err := SubmitForReview(tmpDir, taskID, wtCommit, agentID); err != nil {
+		t.Fatalf("SubmitForReview() unexpected error: %v", err)
+	}
+
+	state, err := bb.Read()
+	testhelpers.AssertNoError(t, err)
+	task := state.FindTask(taskID)
+	if task == nil {
+		t.Fatal("task not found after submission")
+	}
+	if task.Status != "US_READY_FOR_REVIEW" {
+		t.Errorf("Status = %v, want US_READY_FOR_REVIEW", task.Status)
+	}
+}
+
 func TestSubmitForReview_NonConflictRebaseDetailsIncludeRecoveryContext(t *testing.T) {
 	err := &git.RebaseError{
 		Command: []string{"git", "rebase", "FETCH_HEAD"},

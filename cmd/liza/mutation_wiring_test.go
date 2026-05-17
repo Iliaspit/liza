@@ -260,6 +260,47 @@ func TestMutationCommandWiring(t *testing.T) {
 		}
 	})
 
+	t.Run("add-task accepts role-pair from direct flags", func(t *testing.T) {
+		projectRoot, statePath := setupMutationTestProject(t, nil)
+		testhelpers.CreateSpecFile(t, projectRoot, "vision.md", "# Vision\n")
+		testhelpers.CreateSpecFile(t, projectRoot, "feature.md", "# Feature\n")
+
+		err := executeRootCommand(
+			t,
+			projectRoot,
+			"add-task",
+			"--id",
+			"planning-task",
+			"--desc",
+			"Plan the change",
+			"--spec",
+			"specs/feature.md",
+			"--done",
+			"Plan reviewed",
+			"--scope",
+			"internal/ops",
+			"--role-pair",
+			"code-planning-pair",
+			"--agent-id",
+			"orchestrator-1",
+		)
+		if err != nil {
+			t.Fatalf("add-task execute failed: %v", err)
+		}
+
+		state := readState(t, statePath)
+		task := mustFindTask(t, state, "planning-task")
+		if task.RolePair != "code-planning-pair" {
+			t.Fatalf("task role_pair = %s, want code-planning-pair", task.RolePair)
+		}
+		if task.Type != models.TaskTypePlanning {
+			t.Fatalf("task type = %s, want %s", task.Type, models.TaskTypePlanning)
+		}
+		if task.Status != models.TaskStatusDraftCodingPlan {
+			t.Fatalf("task status = %s, want %s", task.Status, models.TaskStatusDraftCodingPlan)
+		}
+	})
+
 	t.Run("unblock-task rejects non-orchestrator via allowed-operation RBAC", func(t *testing.T) {
 		projectRoot, _ := setupMutationTestProject(t, func(state *models.State) {
 			now := time.Now().UTC()

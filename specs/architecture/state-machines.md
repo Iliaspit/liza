@@ -82,20 +82,28 @@ Note: REVIEWING → READY_FOR_REVIEW (stale lease recovery, not shown)
 
 ### Type-Aware Claimability
 
-Each task has a `type` field (default: `"coding"`) that determines which roles participate in its lifecycle. The workflow registry maps each type to an ordered role sequence:
+For pipeline-configured goals, `role_pair` determines which roles participate in a task lifecycle and which statuses are claimable. When `type` is omitted during task creation, Liza derives it from the selected `role_pair`'s doer role; only legacy/no-role-pair data falls back to `"coding"`. The static workflow registry maps each type to an ordered role sequence; claimable statuses come from the selected pipeline config. The status names below show embedded defaults:
 
-| Type | Role Workflow | Doer Claims | Reviewer Claims |
+| Type | Role Workflow | Default Doer Claims | Default Reviewer Claims |
 |------|--------------|-------------|-----------------|
-| `coding` (default) | coder → code-reviewer | DRAFT_CODE, CODE_REJECTED, INTEGRATION_FAILED | CODE_READY_FOR_REVIEW |
+| `coding` | coder → code-reviewer | DRAFT_CODE, CODE_REJECTED, INTEGRATION_FAILED | CODE_READY_FOR_REVIEW |
 | `planning` | code-planner → code-plan-reviewer | DRAFT_CODING_PLAN, CODING_PLAN_REJECTED | CODING_PLAN_TO_REVIEW |
+| `epic-planning` | epic-planner → epic-plan-reviewer | DRAFT_EPIC_PLAN, EPIC_PLAN_REJECTED | EPIC_PLAN_TO_REVIEW |
+| `us-writing` | us-writer → us-reviewer | DRAFT_US, US_REJECTED | US_READY_FOR_REVIEW |
 | `integration` | integration-analyst → integration-reviewer | DRAFT_INTEGRATION_ANALYSIS, INTEGRATION_ANALYSIS_REJECTED | INTEGRATION_ANALYSIS_TO_REVIEW |
+| `architecture` | architect → architecture-reviewer | DRAFT_ARCHITECTURE, ARCHITECTURE_REJECTED | ARCHITECTURE_TO_REVIEW |
 
 Claimability rule:
 ```
 claimable(task, role) =
-    task.effective_type().has_role(role)
-    AND status in claimable_statuses_for(role)
-    AND (depends_on is empty OR all depends_on are MERGED)
+    if task.role_pair is set:
+        role is doer_for(task.role_pair) OR reviewer_for(task.role_pair)
+        AND status in claimable_statuses_for(task.role_pair, role)
+        AND dependencies_satisfied(task)
+    else:
+        task.effective_type().has_role(role)
+        AND status in claimable_statuses_for(role)
+        AND dependencies_satisfied(task)
 ```
 
 > **Note:** The `depends_on` terminal condition (`all depends_on are MERGED`) applies to the current
