@@ -513,6 +513,8 @@ MANDATORY: For implementation planning, architectural evaluation, or structural 
 **Subagent Delegation Protocol**
 MANDATORY: When considering delegation, read and comply with `~/.liza/skills/generic-subagent/SKILL.md`.
 
+**Precondition:** Requires the subagent delegation tool (e.g. Task). If unavailable or disabled, skip this protocol — handle work inline.
+
 **Triggers:**
 
 | Trigger | Threshold |

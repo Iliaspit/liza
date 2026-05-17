@@ -555,6 +555,18 @@ func (d *DefaultCLIExecutor) Execute(ctx context.Context, cliName string, agentI
 		actualCLI = "vibe"
 	}
 
+	cmdEnv := append(os.Environ(), "LIZA_AGENT_ID="+agentID)
+	if actualCLI == "claude" {
+		envFile := filepath.Join(projectRoot, "claude.env")
+		if extra := loadEnvFile(envFile); len(extra) > 0 {
+			cmdEnv = append(cmdEnv, extra...)
+			// Extend masker so secrets from claude.env are redacted in saved output.
+			if d.masker != nil {
+				d.masker.AddEntries(extra)
+			}
+		}
+	}
+
 	// Build command based on CLI.
 	// Structured output flags (stream-json, --json, etc.) are only added when logging is
 	// active (outputsDir != ""), so --no-log runs keep human-readable terminal output.
@@ -566,13 +578,8 @@ func (d *DefaultCLIExecutor) Execute(ctx context.Context, cliName string, agentI
 	var cmd *exec.Cmd
 	switch actualCLI {
 	case "claude":
-		args := []string{"-p"}
-		if !useStdin {
-			args = append(args, prompt)
-		}
-		if d.outputsDir != "" {
-			args = append(args, "--verbose", "--output-format", "stream-json")
-		}
+		disableSubagents := envValue(cmdEnv, "LIZA_DISABLE_CLAUDE_SUBAGENTS") == "1"
+		args := buildClaudeArgs(prompt, useStdin, d.outputsDir, disableSubagents)
 		cmd = exec.CommandContext(ctx, "claude", args...)
 	case "codex":
 		args := buildCodexArgs(projectRoot, prompt, useStdin, d.outputsDir, additionalDirs)
@@ -617,22 +624,7 @@ func (d *DefaultCLIExecutor) Execute(ctx context.Context, cliName string, agentI
 		cmd.Stdin = nil
 	}
 
-	// Ensure LIZA_AGENT_ID is available to child processes (hooks).
-	// The agent ID may have been resolved from --agent-id flag rather than the
-	// env var, so we set it explicitly to guarantee availability.
-	cmd.Env = append(os.Environ(), "LIZA_AGENT_ID="+agentID)
-
-	// Load project-level env overrides for Claude CLI (e.g. claude.env).
-	if actualCLI == "claude" {
-		envFile := filepath.Join(projectRoot, "claude.env")
-		if extra := loadEnvFile(envFile); len(extra) > 0 {
-			cmd.Env = append(cmd.Env, extra...)
-			// Extend masker so secrets from claude.env are redacted in saved output.
-			if d.masker != nil {
-				d.masker.AddEntries(extra)
-			}
-		}
-	}
+	cmd.Env = cmdEnv
 
 	// Handle output: either save to file or stream to stdout/stderr.
 	// Separate buffers avoid the concurrency issue: exec.Cmd drains each pipe
@@ -694,6 +686,30 @@ func (d *DefaultCLIExecutor) Execute(ctx context.Context, cliName string, agentI
 	}
 
 	return CLIExecutionResult{ExitCode: 0, Output: output}, nil
+}
+
+func buildClaudeArgs(prompt string, useStdin bool, outputsDir string, disableSubagents bool) []string {
+	args := []string{"-p"}
+	if !useStdin {
+		args = append(args, prompt)
+	}
+	if disableSubagents {
+		args = append(args, "--disallowedTools", "Task")
+	}
+	if outputsDir != "" {
+		args = append(args, "--verbose", "--output-format", "stream-json")
+	}
+	return args
+}
+
+func envValue(env []string, key string) string {
+	prefix := key + "="
+	for i := len(env) - 1; i >= 0; i-- {
+		if val, ok := strings.CutPrefix(env[i], prefix); ok {
+			return val
+		}
+	}
+	return ""
 }
 
 func (d *DefaultCLIExecutor) ExecuteInteractive(ctx context.Context, cliName string, projectRoot string, additionalDirs []string) (int, error) {

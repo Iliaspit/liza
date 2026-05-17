@@ -345,6 +345,43 @@ printf 'stderr-before sk-test-secret-value stderr-after\n' >&2
 	}
 }
 
+func TestDefaultCLIExecutorDisallowsClaudeSubagentToolsWhenEnvEnabled(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake CLI shell script test requires /bin/sh")
+	}
+
+	projectRoot := t.TempDir()
+	outputsDir := filepath.Join(projectRoot, ".liza", "agent-outputs")
+	binDir := t.TempDir()
+	fakeClaude := filepath.Join(binDir, "claude")
+	script := `#!/bin/sh
+for arg in "$@"; do
+  printf 'arg:%s\n' "$arg"
+done
+`
+	if err := os.WriteFile(fakeClaude, []byte(script), 0755); err != nil {
+		t.Fatalf("write fake claude: %v", err)
+	}
+
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("LIZA_DISABLE_CLAUDE_SUBAGENTS", "1")
+
+	executor := NewDefaultCLIExecutor(outputsDir)
+	result, err := executor.Execute(context.Background(), "claude", "coder-1", "prompt body", projectRoot, nil)
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0", result.ExitCode)
+	}
+	if !strings.Contains(result.Output, "arg:--disallowedTools\narg:Task\n") {
+		t.Fatalf("result output missing subagent disallow args: %q", result.Output)
+	}
+	if strings.Contains(result.Output, "prompt body") {
+		t.Fatalf("prompt should be passed via stdin, not argv: %q", result.Output)
+	}
+}
+
 func TestSupervisor_Exit0ProviderAuditDegradedContinuesPostExecution(t *testing.T) {
 	projectRoot := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, projectRoot)
@@ -914,6 +951,42 @@ func TestCLISupportsStdin(t *testing.T) {
 				t.Errorf("cliSupportsStdin(%q) = %v, want %v", tc.cli, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestBuildClaudeArgsDisallowsSubagentToolsWhenEnvEnabled(t *testing.T) {
+	args := buildClaudeArgs("ignored", true, "", true)
+
+	if !containsAdjacent(args, "--disallowedTools", "Task") {
+		t.Fatalf("args = %v, want subagent tools disallowed", args)
+	}
+	if slices.Contains(args, "ignored") {
+		t.Fatalf("args = %v, did not expect prompt arg when stdin is used", args)
+	}
+}
+
+func TestBuildClaudeArgsAllowsTaskByDefault(t *testing.T) {
+	args := buildClaudeArgs("do the thing", false, "/tmp/logs", false)
+
+	if containsAdjacent(args, "--disallowedTools", "Task") {
+		t.Fatalf("args = %v, did not expect subagent tools disallowed by default", args)
+	}
+	if !slices.Contains(args, "do the thing") {
+		t.Fatalf("args = %v, want prompt arg when stdin is disabled", args)
+	}
+	if !containsAdjacent(args, "--output-format", "stream-json") {
+		t.Fatalf("args = %v, want stream-json logging flags", args)
+	}
+}
+
+func TestEnvValueUsesLastEnvValue(t *testing.T) {
+	got := envValue([]string{
+		"LIZA_DISABLE_CLAUDE_SUBAGENTS=0",
+		"LIZA_DISABLE_CLAUDE_SUBAGENTS=1",
+	}, "LIZA_DISABLE_CLAUDE_SUBAGENTS")
+
+	if got != "1" {
+		t.Fatalf("envValue() = %q, want later env value", got)
 	}
 }
 

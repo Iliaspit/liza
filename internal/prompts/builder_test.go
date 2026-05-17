@@ -584,7 +584,8 @@ func TestBasePromptRegressionGuard(t *testing.T) {
 		"mark BLOCKED rather than mutating the host environment",
 		`NEVER use "git add -A" or "git add ."`,
 		"stage specific files by name",
-		"exclude node_modules from Glob/rg traversals",
+		"generated dependency/cache directories from broad Glob/rg traversals",
+		"exclude node_modules with",
 		`--glob '!**/node_modules/**'`,
 		"sed/awk for file editing",
 	})

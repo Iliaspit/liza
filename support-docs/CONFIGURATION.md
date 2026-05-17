@@ -257,6 +257,7 @@ The `--agent-id` flag takes precedence over `LIZA_AGENT_ID`.
 | Variable | Required | Default | Purpose |
 |----------|----------|---------|---------|
 | `LIZA_AGENT_ID` | For agent commands | -- | Agent identifier (format: `{role}-{number}`) |
+| `LIZA_DISABLE_CLAUDE_SUBAGENTS` | No | unset | Set to `1` to launch Claude Code agents with `--disallowedTools Task`, disabling Claude subagent delegation. Use only when intentionally waiving Claude subagent delegation; agents may be unable to satisfy contract delegation triggers while this is set. |
 | `LIZA_SPECS` | No | `specs/` | Path to specs directory (relative to project root) |
 | `LIZA_LOG_LEVEL` | No | `INFO` | Logging verbosity: DEBUG, INFO, WARN, ERROR |
 
