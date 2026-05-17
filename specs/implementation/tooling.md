@@ -518,6 +518,7 @@ Agents must read `human_notes` relevant to their task before starting/resuming w
 |-----------|-----------|-------|
 | Expired coder lease | lease_expires in past | `⚠️ LEASE EXPIRED: {agent} on {task}` |
 | Expired review lease | review_lease_expires in past | `⚠️ REVIEW LEASE EXPIRED: {code_reviewer} on {task} — review can be reclaimed` |
+| Running task without live process | Executing or reviewing task owner PID is missing or stopped | `🚨 DEAD AGENT PROCESS: {task} — status {status} has {owner_kind} {agent} but no live process (pid {pid})` |
 | Task blocked | Any | `⚠️ BLOCKED: {task} — {reason}` |
 | Orphaned rejected | REJECTED task, assignee not WORKING (30s grace) | `🚨 ORPHANED REJECTED: {task} — assigned to {agent} but agent is {status}` |
 | Same task reassigned | 2nd coder | `⚠️ REASSIGNED: {task} — hypothesis exhaustion risk` |

@@ -1,6 +1,7 @@
 package ops
 
 import (
+	stderrors "errors"
 	"fmt"
 	"os"
 	"strings"
@@ -74,7 +75,7 @@ func IsProcessAlive(pid int) bool {
 	}
 
 	err = process.Signal(syscall.Signal(0))
-	return err == nil
+	return err == nil || stderrors.Is(err, syscall.EPERM)
 }
 
 // validateAgentDeletion checks whether an agent can be safely deleted based on

@@ -92,6 +92,9 @@ func UnblockTask(projectRoot, taskID, assignTo, reason, agentID string) (*Unbloc
 		if agent.Role != expectedDoer {
 			return &PreconditionError{Reason: fmt.Sprintf("assign-to agent %s has role %q, want %q", assignTo, agent.Role, expectedDoer)}
 		}
+		if !IsProcessAlive(agent.PID) {
+			return &PreconditionError{Reason: fmt.Sprintf("assign-to agent %s has no live process (pid %d)", assignTo, agent.PID)}
+		}
 		if agent.CurrentTask != nil && *agent.CurrentTask != "" && *agent.CurrentTask != taskID {
 			return &PreconditionError{Reason: fmt.Sprintf("agent %s is already working on task %s", assignTo, *agent.CurrentTask)}
 		}

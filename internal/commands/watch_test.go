@@ -1976,6 +1976,245 @@ func TestRunChecksWithState_BlockedTask(t *testing.T) {
 	}
 }
 
+func TestRunChecksWithState_RunningTaskWithoutLiveProcess(t *testing.T) {
+	now := time.Now().UTC()
+
+	tmpDir := t.TempDir()
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	testhelpers.SetupPipelineConfig(t, tmpDir)
+
+	taskID := "task-us-writing"
+	agentID := "us-writer-1"
+	state := testhelpers.CreateValidState()
+	state.Tasks = []models.Task{
+		buildPipelineTask(taskID, "us-writing-pair", models.TaskStatus("WRITING_US"), now, func(task *models.Task) {
+			task.AssignedTo = &agentID
+		}),
+	}
+	state.Agents = map[string]models.Agent{
+		agentID: {
+			Role:         "us-writer",
+			Status:       models.AgentStatusWorking,
+			CurrentTask:  &taskID,
+			LeaseExpires: testhelpers.TimePtr(now.Add(30 * time.Minute)),
+			Heartbeat:    now,
+			PID:          0,
+		},
+	}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	config := WatchConfig{
+		ProjectRoot: tmpDir,
+		AlertsLog:   paths.New(tmpDir).AlertsLogPath(),
+		StateCache:  make(map[string]time.Time),
+	}
+
+	alerts := RunChecksWithState(state, config)
+	if got := countAlertsByCategory(alerts, "DEAD AGENT PROCESS"); got != 1 {
+		t.Fatalf("DEAD AGENT PROCESS alerts = %d, want 1; alerts: %v", got, alerts)
+	}
+	if !strings.Contains(alerts[0].Message, taskID) || !strings.Contains(alerts[0].Message, agentID) || !strings.Contains(alerts[0].Message, "WRITING_US") {
+		t.Fatalf("alert message = %q, want task, agent, and WRITING_US", alerts[0].Message)
+	}
+}
+
+func TestRunChecksWithState_LiveDoerProcessNoAlert(t *testing.T) {
+	now := time.Now().UTC()
+
+	tmpDir := t.TempDir()
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	testhelpers.SetupPipelineConfig(t, tmpDir)
+
+	taskID := "task-us-writing"
+	agentID := "us-writer-1"
+	state := testhelpers.CreateValidState()
+	state.Tasks = []models.Task{
+		buildPipelineTask(taskID, "us-writing-pair", models.TaskStatus("WRITING_US"), now, func(task *models.Task) {
+			task.AssignedTo = &agentID
+		}),
+	}
+	state.Agents = map[string]models.Agent{
+		agentID: {
+			Role:         "us-writer",
+			Status:       models.AgentStatusWorking,
+			CurrentTask:  &taskID,
+			LeaseExpires: testhelpers.TimePtr(now.Add(30 * time.Minute)),
+			Heartbeat:    now,
+			PID:          os.Getpid(),
+		},
+	}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	config := WatchConfig{
+		ProjectRoot: tmpDir,
+		AlertsLog:   paths.New(tmpDir).AlertsLogPath(),
+		StateCache:  make(map[string]time.Time),
+	}
+
+	alerts := RunChecksWithState(state, config)
+	if got := countAlertsByCategory(alerts, "DEAD AGENT PROCESS"); got != 0 {
+		t.Fatalf("DEAD AGENT PROCESS alerts = %d, want 0; alerts: %v", got, alerts)
+	}
+}
+
+func TestRunChecksWithState_ExecutingSentinelNoDeadProcessAlert(t *testing.T) {
+	now := time.Now().UTC()
+
+	tmpDir := t.TempDir()
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	testhelpers.SetupPipelineConfig(t, tmpDir)
+
+	sentinel := "$transitioning"
+	state := testhelpers.CreateValidState()
+	state.Tasks = []models.Task{
+		buildPipelineTask("task-us-writing", "us-writing-pair", models.TaskStatus("WRITING_US"), now, func(task *models.Task) {
+			task.AssignedTo = &sentinel
+		}),
+	}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	config := WatchConfig{
+		ProjectRoot: tmpDir,
+		AlertsLog:   paths.New(tmpDir).AlertsLogPath(),
+		StateCache:  make(map[string]time.Time),
+	}
+
+	alerts := RunChecksWithState(state, config)
+	if got := countAlertsByCategory(alerts, "DEAD AGENT PROCESS"); got != 0 {
+		t.Fatalf("DEAD AGENT PROCESS alerts = %d, want 0; alerts: %v", got, alerts)
+	}
+}
+
+func TestRunChecksWithState_ReviewerWithoutLiveProcess(t *testing.T) {
+	now := time.Now().UTC()
+
+	tmpDir := t.TempDir()
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	testhelpers.SetupPipelineConfig(t, tmpDir)
+
+	taskID := "task-us-review"
+	reviewerID := "us-reviewer-1"
+	state := testhelpers.CreateValidState()
+	state.Tasks = []models.Task{
+		buildPipelineTask(taskID, "us-writing-pair", models.TaskStatus("REVIEWING_US"), now, func(task *models.Task) {
+			task.ReviewingBy = &reviewerID
+			task.ReviewLeaseExpires = testhelpers.TimePtr(now.Add(30 * time.Minute))
+			task.ReviewCommit = testhelpers.StringPtr("review123")
+		}),
+	}
+	state.Agents = map[string]models.Agent{
+		reviewerID: {
+			Role:         "us-reviewer",
+			Status:       models.AgentStatusReviewing,
+			CurrentTask:  &taskID,
+			LeaseExpires: testhelpers.TimePtr(now.Add(30 * time.Minute)),
+			Heartbeat:    now,
+			PID:          0,
+		},
+	}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	config := WatchConfig{
+		ProjectRoot: tmpDir,
+		AlertsLog:   paths.New(tmpDir).AlertsLogPath(),
+		StateCache:  make(map[string]time.Time),
+	}
+
+	alerts := RunChecksWithState(state, config)
+	if got := countAlertsByCategory(alerts, "DEAD AGENT PROCESS"); got != 1 {
+		t.Fatalf("DEAD AGENT PROCESS alerts = %d, want 1; alerts: %v", got, alerts)
+	}
+	if !strings.Contains(alerts[0].Message, "REVIEWING_US") {
+		t.Fatalf("alert message = %q, want REVIEWING_US", alerts[0].Message)
+	}
+}
+
+func TestRunChecksWithState_Reviewing2WithoutLiveProcess(t *testing.T) {
+	now := time.Now().UTC()
+
+	tmpDir := t.TempDir()
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	testhelpers.SetupPipelineConfig(t, tmpDir)
+
+	taskID := "task-reviewing-2"
+	reviewerID := "code-reviewer-2"
+	state := testhelpers.CreateValidState()
+	state.Tasks = []models.Task{
+		buildPipelineTask(taskID, "coding-pair", models.TaskStatus("REVIEWING_CODE_2"), now, func(task *models.Task) {
+			task.AssignedTo = testhelpers.StringPtr("coder-1")
+			task.ReviewingBy = &reviewerID
+			task.ReviewLeaseExpires = testhelpers.TimePtr(now.Add(30 * time.Minute))
+			task.ReviewCommit = testhelpers.StringPtr("review123")
+		}),
+	}
+	state.Agents = map[string]models.Agent{
+		reviewerID: {
+			Role:         "code-reviewer",
+			Status:       models.AgentStatusReviewing,
+			CurrentTask:  &taskID,
+			LeaseExpires: testhelpers.TimePtr(now.Add(30 * time.Minute)),
+			Heartbeat:    now,
+			PID:          0,
+		},
+	}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	config := WatchConfig{
+		ProjectRoot: tmpDir,
+		AlertsLog:   paths.New(tmpDir).AlertsLogPath(),
+		StateCache:  make(map[string]time.Time),
+	}
+
+	alerts := RunChecksWithState(state, config)
+	if got := countAlertsByCategory(alerts, "DEAD AGENT PROCESS"); got != 1 {
+		t.Fatalf("DEAD AGENT PROCESS alerts = %d, want 1; alerts: %v", got, alerts)
+	}
+	if !strings.Contains(alerts[0].Message, "REVIEWING_CODE_2") {
+		t.Fatalf("alert message = %q, want REVIEWING_CODE_2", alerts[0].Message)
+	}
+}
+
+func TestRunChecksWithState_LiveReviewerProcessNoAlert(t *testing.T) {
+	now := time.Now().UTC()
+
+	tmpDir := t.TempDir()
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	testhelpers.SetupPipelineConfig(t, tmpDir)
+
+	taskID := "task-us-review"
+	reviewerID := "us-reviewer-1"
+	state := testhelpers.CreateValidState()
+	state.Tasks = []models.Task{
+		buildPipelineTask(taskID, "us-writing-pair", models.TaskStatus("REVIEWING_US"), now, func(task *models.Task) {
+			task.ReviewingBy = &reviewerID
+			task.ReviewLeaseExpires = testhelpers.TimePtr(now.Add(30 * time.Minute))
+			task.ReviewCommit = testhelpers.StringPtr("review123")
+		}),
+	}
+	state.Agents = map[string]models.Agent{
+		reviewerID: {
+			Role:         "us-reviewer",
+			Status:       models.AgentStatusReviewing,
+			CurrentTask:  &taskID,
+			LeaseExpires: testhelpers.TimePtr(now.Add(30 * time.Minute)),
+			Heartbeat:    now,
+			PID:          os.Getpid(),
+		},
+	}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	config := WatchConfig{
+		ProjectRoot: tmpDir,
+		AlertsLog:   paths.New(tmpDir).AlertsLogPath(),
+		StateCache:  make(map[string]time.Time),
+	}
+
+	alerts := RunChecksWithState(state, config)
+	if got := countAlertsByCategory(alerts, "DEAD AGENT PROCESS"); got != 0 {
+		t.Fatalf("DEAD AGENT PROCESS alerts = %d, want 0; alerts: %v", got, alerts)
+	}
+}
+
 func TestRunChecksWithState_StuckAlertsDedupedAndRealertAfterClear(t *testing.T) {
 	now := time.Now().UTC()
 
@@ -2119,6 +2358,79 @@ func TestRunChecksWithStateSnapshot_ReportsActiveKeysForLeaseExpired(t *testing.
 	t.Fatal("missing LEASE EXPIRED alert")
 }
 
+func TestRunChecksWithStateSnapshot_ReportsActiveKeysForDeadAgentProcess(t *testing.T) {
+	now := time.Now().UTC()
+
+	tmpDir := t.TempDir()
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	testhelpers.SetupPipelineConfig(t, tmpDir)
+
+	taskID := "task-us-writing"
+	agentID := "us-writer-1"
+	state := testhelpers.CreateValidState()
+	state.Tasks = []models.Task{
+		buildPipelineTask(taskID, "us-writing-pair", models.TaskStatus("WRITING_US"), now, func(task *models.Task) {
+			task.AssignedTo = &agentID
+		}),
+	}
+	state.Agents = map[string]models.Agent{
+		agentID: {
+			Role:         "us-writer",
+			Status:       models.AgentStatusWorking,
+			CurrentTask:  &taskID,
+			LeaseExpires: testhelpers.TimePtr(now.Add(30 * time.Minute)),
+			Heartbeat:    now,
+			PID:          0,
+		},
+	}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	config := WatchConfig{
+		ProjectRoot: tmpDir,
+		AlertsLog:   paths.New(tmpDir).AlertsLogPath(),
+		StateCache:  make(map[string]time.Time),
+	}
+
+	first := RunChecksWithStateSnapshot(state, config)
+	if got := countAlertsByCategory(first.Alerts, "DEAD AGENT PROCESS"); got != 1 {
+		t.Fatalf("first poll emitted alerts = %d, want 1; alerts: %v", got, first.Alerts)
+	}
+	var alertKey string
+	for _, alert := range first.Alerts {
+		if alert.Category == "DEAD AGENT PROCESS" {
+			alertKey = AlertKey(alert)
+			break
+		}
+	}
+	if alertKey == "" {
+		t.Fatal("missing DEAD AGENT PROCESS alert")
+	}
+	if !first.ActiveKeys[alertKey] {
+		t.Fatalf("first poll active key %q missing", alertKey)
+	}
+
+	second := RunChecksWithStateSnapshot(state, config)
+	if got := countAlertsByCategory(second.Alerts, "DEAD AGENT PROCESS"); got != 0 {
+		t.Fatalf("second poll emitted alerts = %d, want 0; alerts: %v", got, second.Alerts)
+	}
+	if !second.ActiveKeys[alertKey] {
+		t.Fatalf("second poll active key %q missing despite throttling", alertKey)
+	}
+
+	state.Agents[agentID] = models.Agent{
+		Role:         "us-writer",
+		Status:       models.AgentStatusWorking,
+		CurrentTask:  &taskID,
+		LeaseExpires: testhelpers.TimePtr(now.Add(30 * time.Minute)),
+		Heartbeat:    now,
+		PID:          os.Getpid(),
+	}
+	cleared := RunChecksWithStateSnapshot(state, config)
+	if cleared.ActiveKeys[alertKey] {
+		t.Fatalf("cleared poll still reports inactive key %q active", alertKey)
+	}
+}
+
 func countAlertsByCategory(alerts []Alert, category string) int {
 	count := 0
 	for _, alert := range alerts {
@@ -2127,6 +2439,31 @@ func countAlertsByCategory(alerts []Alert, category string) int {
 		}
 	}
 	return count
+}
+
+func buildPipelineTask(taskID, rolePair string, status models.TaskStatus, now time.Time, mutate func(*models.Task)) models.Task {
+	task := models.Task{
+		ID:          taskID,
+		Type:        models.TaskTypeCoding,
+		RolePair:    rolePair,
+		Description: "Test task",
+		Status:      status,
+		Priority:    1,
+		Created:     now,
+		SpecRef:     "README.md",
+		DoneWhen:    "Task is complete",
+		Scope:       "Test scope",
+		BaseCommit:  testhelpers.StringPtr("abc1234"),
+		Worktree:    testhelpers.StringPtr(".worktrees/" + taskID),
+		History:     []models.TaskHistoryEntry{},
+	}
+	if mutate != nil {
+		mutate(&task)
+	}
+	if task.AssignedTo != nil && task.LeaseExpires == nil {
+		task.LeaseExpires = testhelpers.TimePtr(now.Add(30 * time.Minute))
+	}
+	return task
 }
 
 func TestParseAlertLine_RoundTrip(t *testing.T) {

@@ -1,6 +1,7 @@
 package ops
 
 import (
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -34,6 +35,7 @@ func TestUnblockTask_RestoresExecutingStateAndAssignment(t *testing.T) {
 
 	bb := db.New(stateFile)
 	testhelpers.RegisterTestAgent(t, bb, "code-planner-1", "code-planner")
+	setAgentPID(t, bb, "code-planner-1", os.Getpid())
 
 	result, err := UnblockTask(tmpDir, "task-1", "code-planner-1", "git metadata repair verified", "orchestrator-1")
 	if err != nil {
@@ -93,6 +95,32 @@ func TestUnblockTask_RestoresExecutingStateAndAssignment(t *testing.T) {
 	}
 }
 
+func TestUnblockTask_RejectsAssignToWithoutLiveProcess(t *testing.T) {
+	tmpDir := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, tmpDir)
+	testhelpers.SetupPipelineConfig(t, tmpDir)
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+
+	now := time.Now().UTC()
+	state := testhelpers.CreateValidState()
+	task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusBlocked, now)
+	task.RolePair = "code-planning-pair"
+	task.Worktree = testhelpers.StringPtr(".worktrees/task-1")
+	state.Tasks = []models.Task{task}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	bb := db.New(stateFile)
+	testhelpers.RegisterTestAgent(t, bb, "code-planner-1", "code-planner")
+
+	_, err := UnblockTask(tmpDir, "task-1", "code-planner-1", "repair verified", "orchestrator-1")
+	if err == nil {
+		t.Fatal("Expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "has no live process") {
+		t.Fatalf("Error = %q, want no live process", err.Error())
+	}
+}
+
 func TestUnblockTask_RejectsUnknownAssignTo(t *testing.T) {
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
@@ -139,5 +167,18 @@ func TestUnblockTask_RejectsWrongDoerRole(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "does not match task doer role") {
 		t.Fatalf("Error = %q, want doer role mismatch", err.Error())
+	}
+}
+
+func setAgentPID(t *testing.T, bb *db.Blackboard, agentID string, pid int) {
+	t.Helper()
+	err := bb.Modify(func(state *models.State) error {
+		agent := state.Agents[agentID]
+		agent.PID = pid
+		state.Agents[agentID] = agent
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("set agent PID: %v", err)
 	}
 }

@@ -213,6 +213,7 @@ func RunChecksWithStateSnapshot(state *models.State, config WatchConfig) AlertSn
 	lizaPaths := paths.New(config.ProjectRoot)
 	checks := []func() []Alert{
 		func() []Alert { return checkExpiredLeases(state) },
+		func() []Alert { return checkRunningTasksWithoutLiveProcess(state, pr) },
 		func() []Alert { return checkBlockedTasks(state, config.StateCache) },
 		func() []Alert { return checkOrphanedRejected(state, config.StateCache) },
 		func() []Alert { return checkReviewLoops(state) },
@@ -317,7 +318,7 @@ func reconcileStuckAlerts(alerts []Alert, cache map[string]time.Time) []Alert {
 
 func isStuckAlertCategory(category string) bool {
 	switch category {
-	case "HYPOTHESIS EXHAUSTION", "INTEGRATION FAILED", "INVALID STATE":
+	case "HYPOTHESIS EXHAUSTION", "INTEGRATION FAILED", "INVALID STATE", "DEAD AGENT PROCESS":
 		return true
 	default:
 		return false
@@ -454,6 +455,79 @@ func checkExpiredLeases(state *models.State) []Alert {
 	}
 
 	return alerts
+}
+
+func checkRunningTasksWithoutLiveProcess(state *models.State, pr models.PipelineResolver) []Alert {
+	if pr == nil {
+		return nil
+	}
+
+	var alerts []Alert
+	now := time.Now().UTC()
+
+	for i := range state.Tasks {
+		task := &state.Tasks[i]
+		ownerID, ownerKind, ok := runningTaskOwner(task, pr)
+		if !ok {
+			continue
+		}
+
+		agent, exists := state.Agents[ownerID]
+		if !exists {
+			alerts = append(alerts, Alert{
+				Timestamp: now,
+				Level:     AlertLevelCritical,
+				Category:  "DEAD AGENT PROCESS",
+				Message: fmt.Sprintf("%s — status %s has %s %s but no registered agent",
+					task.ID, task.Status, ownerKind, ownerID),
+			})
+			continue
+		}
+		if ops.IsProcessAlive(agent.PID) {
+			continue
+		}
+
+		alerts = append(alerts, Alert{
+			Timestamp: now,
+			Level:     AlertLevelCritical,
+			Category:  "DEAD AGENT PROCESS",
+			Message: fmt.Sprintf("%s — status %s has %s %s but no live process (pid %d)",
+				task.ID, task.Status, ownerKind, ownerID, agent.PID),
+		})
+	}
+
+	return alerts
+}
+
+func runningTaskOwner(task *models.Task, pr models.PipelineResolver) (string, string, bool) {
+	if models.IsExecutingStatus(task, pr) {
+		if task.AssignedTo == nil || *task.AssignedTo == "" {
+			return "", "", false
+		}
+		if strings.HasPrefix(*task.AssignedTo, "$") {
+			return "", "", false
+		}
+		return *task.AssignedTo, "doer", true
+	}
+	if isReviewerActiveStatus(task, pr) {
+		if task.ReviewingBy == nil || *task.ReviewingBy == "" {
+			return "", "", false
+		}
+		return *task.ReviewingBy, "reviewer", true
+	}
+	return "", "", false
+}
+
+func isReviewerActiveStatus(task *models.Task, pr models.PipelineResolver) bool {
+	if task.RolePair == "" || pr == nil {
+		return false
+	}
+	reviewing, err := pr.ReviewingStatus(task.RolePair)
+	if err == nil && task.Status == reviewing {
+		return true
+	}
+	reviewing2, err := pr.Reviewing2Status(task.RolePair)
+	return err == nil && task.Status == reviewing2
 }
 
 func checkBlockedTasks(state *models.State, cache map[string]time.Time) []Alert {
