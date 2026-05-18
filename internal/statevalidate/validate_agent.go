@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/liza-mas/liza/internal/models"
+	"github.com/liza-mas/liza/internal/pipeline"
 )
 
 // validateAgentInvariants checks that every WORKING agent has a current_task
@@ -13,7 +14,7 @@ import (
 // expired past the grace period, which may indicate a long-running operation
 // rather than a stuck agent. Prevents orphaned agents that consume capacity
 // without making progress.
-func validateAgentInvariants(state *models.State, projectRoot string, skipSpecFileCheck bool, warnWriter io.Writer) error {
+func validateAgentInvariants(state *models.State, projectRoot string, skipSpecFileCheck bool, warnWriter io.Writer, resolver *pipeline.Resolver) error {
 	now := time.Now().UTC()
 	graceDeadline := now.Add(-models.LeaseExpiryGracePeriod)
 
@@ -50,5 +51,67 @@ func validateAgentInvariants(state *models.State, projectRoot string, skipSpecFi
 		}
 	}
 
+	if err := validateActiveReviewOwnership(state, resolver); err != nil {
+		return err
+	}
+
 	return nil
+}
+
+func validateActiveReviewOwnership(state *models.State, resolver *pipeline.Resolver) error {
+	if resolver == nil {
+		return nil
+	}
+
+	for i := range state.Tasks {
+		task := &state.Tasks[i]
+		if !isActiveReviewingTask(task, resolver) {
+			continue
+		}
+		if task.ReviewingBy == nil || *task.ReviewingBy == "" {
+			continue
+		}
+		reviewerID := *task.ReviewingBy
+		agent, exists := state.Agents[reviewerID]
+		if !exists {
+			return fmt.Errorf("%s task %s reviewing_by %s has no matching agent", task.Status, task.ID, reviewerID)
+		}
+
+		expectedRole, err := resolver.ReviewerRole(task.RolePair)
+		if err != nil {
+			return fmt.Errorf("task %s cannot resolve reviewer role for role_pair %q: %w", task.ID, task.RolePair, err)
+		}
+		if agent.Role != expectedRole {
+			return fmt.Errorf("%s task %s reviewing_by %s has role %q, want %q", task.Status, task.ID, reviewerID, agent.Role, expectedRole)
+		}
+		if agent.Status != models.AgentStatusReviewing {
+			return fmt.Errorf("%s task %s reviewing_by %s has agent status %s, want REVIEWING", task.Status, task.ID, reviewerID, agent.Status)
+		}
+		if agent.CurrentTask == nil || *agent.CurrentTask != task.ID {
+			return fmt.Errorf("%s task %s reviewing_by %s has mismatched current_task", task.Status, task.ID, reviewerID)
+		}
+		if task.ReviewLeaseExpires == nil {
+			return fmt.Errorf("%s task %s without review_lease_expires", task.Status, task.ID)
+		}
+		if agent.LeaseExpires == nil {
+			return fmt.Errorf("%s task %s reviewing_by %s has agent without lease_expires", task.Status, task.ID, reviewerID)
+		}
+		if agent.PID <= 0 {
+			return fmt.Errorf("%s task %s reviewing_by %s has agent without pid", task.Status, task.ID, reviewerID)
+		}
+	}
+
+	return nil
+}
+
+func isActiveReviewingTask(task *models.Task, resolver *pipeline.Resolver) bool {
+	if task.RolePair == "" {
+		return false
+	}
+	reviewing, err := resolver.ReviewingStatus(task.RolePair)
+	if err == nil && task.Status == reviewing {
+		return true
+	}
+	reviewing2, err := resolver.Reviewing2Status(task.RolePair)
+	return err == nil && task.Status == reviewing2
 }

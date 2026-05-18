@@ -130,7 +130,7 @@ func ValidateState(state *models.State, projectRoot string, skipSpecFileCheck bo
 			return validateDependencies(state, projectRoot, skipSpecFileCheck, resolver, cfg)
 		},
 		func(state *models.State, projectRoot string, skipSpecFileCheck bool) error {
-			return validateAgentInvariants(state, projectRoot, skipSpecFileCheck, warnWriter)
+			return validateAgentInvariants(state, projectRoot, skipSpecFileCheck, warnWriter, resolver)
 		},
 		validateDiscovered,
 		validateAnomalies,
@@ -152,7 +152,7 @@ func ValidateAgentInvariants(state *models.State, projectRoot string, skipSpecFi
 	if warnWriter == nil {
 		warnWriter = io.Discard
 	}
-	return validateAgentInvariants(state, projectRoot, skipSpecFileCheck, warnWriter)
+	return validateAgentInvariants(state, projectRoot, skipSpecFileCheck, warnWriter, nil)
 }
 
 // ValidateAnomalies exposes anomaly validation for package-level tests.

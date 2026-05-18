@@ -109,7 +109,7 @@ Tasks with `integration_fix: true` must have `INTEGRATION_FAILED` event in histo
 | Orchestrator singularity: at most one orchestrator active at any time | Concurrent planning conflicts | spec (`roles.md`), code (`registration.go`) |
 | Per-role-key instance limits: max N instances per role (configurable) | Resource contention | code (`resolver.MaxInstances()`) |
 | WORKING agent must have `current_task` and valid `lease_expires` | Ghost agents, phantom work | spec, code (`validate_agent.go`) |
-| Active review ownership: tasks in a pipeline reviewing state (`ReviewingStatus` or `Reviewing2Status`) must have `reviewing_by` pointing to an agent with the exact reviewer role for the task's `role_pair`, status `REVIEWING`, matching `current_task`, and valid review lease | Dead reviewers holding review work, cross-role review claims | spec (code planned) |
+| Active review ownership: tasks in a pipeline reviewing state (`ReviewingStatus` or `Reviewing2Status`) must have `reviewing_by` pointing to an agent with the exact reviewer role for the task's `role_pair`, status `REVIEWING`, matching `current_task`, and valid review lease | Dead reviewers holding review work, cross-role review claims | spec, code |
 | No two agents assigned to same executing task | Ownership collisions | spec, code (`validate_task.go`) |
 | Agent ID format: `{role}-{number}` (e.g., `coder-1`) | Identity spoofing, cross-role execution | code (registration validation) |
 | Registration collision: active-lease agent blocks duplicate registration → immediate exit | Ghost agents holding claims | spec, code (`AgentCollisionError`) |
