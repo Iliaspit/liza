@@ -6,12 +6,15 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/liza-mas/liza/internal/ops"
 )
 
-// DeleteAgentCommand removes an agent from the state database and prints the result.
-// Delegates business logic to ops.DeleteAgent.
+var terminateAgent = ops.TerminateAgent
+
+// DeleteAgentCommand stops the agent process, removes it from the state
+// database, and prints the result. Delegates business logic to ops.TerminateAgent.
 // The stdin parameter allows for injected input in tests; pass os.Stdin for CLI usage.
 func DeleteAgentCommand(projectRoot, agentID string, force bool, reason string, stdin io.Reader) error {
 	if stdin == nil {
@@ -27,12 +30,10 @@ func DeleteAgentCommand(projectRoot, agentID string, force bool, reason string, 
 		pidConfirmed = confirmed
 	}
 
-	result, err := ops.DeleteAgent(projectRoot, agentID, force, pidConfirmed, reason)
+	result, err := terminateAgent(projectRoot, agentID, force, pidConfirmed, reason, 5*time.Second)
 	if err != nil {
 		return fmt.Errorf("delete agent: %w", err)
 	}
-
-	result.SignalProcess()
 
 	fmt.Printf("Deleted agent %s\n", result.AgentID)
 	return nil

@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -442,4 +443,20 @@ func TestDeleteAgentCommand_InteractivePrompt(t *testing.T) {
 			t.Error("Agent should have been deleted when user confirmed")
 		}
 	})
+}
+
+func TestDeleteAgentCommand_ReportsTerminationFailure(t *testing.T) {
+	original := terminateAgent
+	terminateAgent = func(projectRoot, agentID string, force, allowRunningPID bool, reason string, grace time.Duration) (*ops.TerminateAgentResult, error) {
+		return nil, errors.New("process still running")
+	}
+	t.Cleanup(func() { terminateAgent = original })
+
+	err := DeleteAgentCommand(t.TempDir(), "coder-1", true, "test", nil)
+	if err == nil {
+		t.Fatal("DeleteAgentCommand() error = nil, want process failure")
+	}
+	if !strings.Contains(err.Error(), "process still running") {
+		t.Fatalf("error = %q, want process failure detail", err.Error())
+	}
 }

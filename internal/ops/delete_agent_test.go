@@ -284,6 +284,218 @@ func TestSignalProcess_CurrentProcess(t *testing.T) {
 	}
 }
 
+func TestTerminateProcess_GracefulExit(t *testing.T) {
+	original := agentProcesses
+	signalCalls := 0
+	killCalls := 0
+	agentProcesses = agentProcessOps{
+		isLizaAgent: func(pid int) bool { return pid == 123 },
+		isAlive:     func(int) bool { return false },
+		signalTree: func(pid int) error {
+			signalCalls++
+			return nil
+		},
+		killTree: func(pid int) error {
+			killCalls++
+			return nil
+		},
+		waitForExit: func(pid int, grace time.Duration) bool { return true },
+	}
+	t.Cleanup(func() { agentProcesses = original })
+
+	result, err := terminateProcess(123, time.Second)
+	if err != nil {
+		t.Fatalf("terminateProcess() error = %v", err)
+	}
+	if signalCalls != 1 {
+		t.Fatalf("signal calls = %d, want 1", signalCalls)
+	}
+	if killCalls != 0 {
+		t.Fatalf("kill calls = %d, want 0", killCalls)
+	}
+	if !result.Signaled || !result.Exited || result.Killed {
+		t.Fatalf("result = %+v, want signaled/exited without killed", result)
+	}
+}
+
+func TestTerminateProcess_EscalatesToKill(t *testing.T) {
+	original := agentProcesses
+	waitCalls := 0
+	killCalls := 0
+	agentProcesses = agentProcessOps{
+		isLizaAgent: func(pid int) bool { return pid == 123 },
+		isAlive:     func(int) bool { return true },
+		signalTree:  func(pid int) error { return nil },
+		killTree: func(pid int) error {
+			killCalls++
+			return nil
+		},
+		waitForExit: func(pid int, grace time.Duration) bool {
+			waitCalls++
+			return waitCalls > 1
+		},
+	}
+	t.Cleanup(func() { agentProcesses = original })
+
+	result, err := terminateProcess(123, time.Second)
+	if err != nil {
+		t.Fatalf("terminateProcess() error = %v", err)
+	}
+	if killCalls != 1 {
+		t.Fatalf("kill calls = %d, want 1", killCalls)
+	}
+	if !result.Signaled || !result.Killed || !result.Exited {
+		t.Fatalf("result = %+v, want signaled/killed/exited", result)
+	}
+}
+
+func TestTerminateProcess_ReportsStillRunningAfterKill(t *testing.T) {
+	original := agentProcesses
+	agentProcesses = agentProcessOps{
+		isLizaAgent: func(pid int) bool { return pid == 123 },
+		isAlive:     func(int) bool { return true },
+		signalTree:  func(pid int) error { return nil },
+		killTree:    func(pid int) error { return nil },
+		waitForExit: func(pid int, grace time.Duration) bool { return false },
+	}
+	t.Cleanup(func() { agentProcesses = original })
+
+	result, err := terminateProcess(123, time.Second)
+	if err == nil {
+		t.Fatal("terminateProcess() error = nil, want still-running error")
+	}
+	if !strings.Contains(err.Error(), "still running") {
+		t.Fatalf("error = %q, want still running", err.Error())
+	}
+	if !result.Signaled || !result.Killed || result.Exited {
+		t.Fatalf("result = %+v, want signaled/killed without exited", result)
+	}
+}
+
+func TestTerminateAgent_DoesNotDeleteStateWhenProcessSurvives(t *testing.T) {
+	tmpDir := t.TempDir()
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+
+	state := testhelpers.CreateValidState()
+	state.Agents["coder-1"] = models.Agent{
+		Role:   "coder",
+		Status: models.AgentStatusIdle,
+		PID:    123,
+	}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	original := agentProcesses
+	agentProcesses = agentProcessOps{
+		isLizaAgent: func(pid int) bool { return pid == 123 },
+		isAlive:     func(int) bool { return true },
+		signalTree:  func(pid int) error { return nil },
+		killTree:    func(pid int) error { return nil },
+		waitForExit: func(pid int, grace time.Duration) bool { return false },
+	}
+	t.Cleanup(func() { agentProcesses = original })
+
+	_, err := TerminateAgent(tmpDir, "coder-1", true, true, "test", time.Second)
+	if err == nil {
+		t.Fatal("TerminateAgent() error = nil, want still-running error")
+	}
+
+	readState, err := db.New(stateFile).Read()
+	if err != nil {
+		t.Fatalf("read state: %v", err)
+	}
+	if _, exists := readState.Agents["coder-1"]; !exists {
+		t.Fatal("agent should remain registered when process termination fails")
+	}
+}
+
+func TestTerminateAgent_DeletesAfterProcessExit(t *testing.T) {
+	tmpDir := t.TempDir()
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+
+	state := testhelpers.CreateValidState()
+	state.Agents["coder-1"] = models.Agent{
+		Role:   "coder",
+		Status: models.AgentStatusIdle,
+		PID:    123,
+	}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	original := agentProcesses
+	agentProcesses = agentProcessOps{
+		isLizaAgent: func(pid int) bool { return pid == 123 },
+		isAlive:     func(int) bool { return true },
+		signalTree:  func(pid int) error { return nil },
+		killTree:    func(pid int) error { return nil },
+		waitForExit: func(pid int, grace time.Duration) bool {
+			readState, err := db.New(stateFile).Read()
+			if err != nil {
+				t.Fatalf("read state during wait: %v", err)
+			}
+			if _, exists := readState.Agents["coder-1"]; !exists {
+				t.Fatal("agent was deleted before process exit")
+			}
+			return true
+		},
+	}
+	t.Cleanup(func() { agentProcesses = original })
+
+	result, err := TerminateAgent(tmpDir, "coder-1", true, true, "test", time.Second)
+	if err != nil {
+		t.Fatalf("TerminateAgent() error = %v", err)
+	}
+	if !result.StateDeleted {
+		t.Fatal("StateDeleted = false, want true")
+	}
+
+	readState, err := db.New(stateFile).Read()
+	if err != nil {
+		t.Fatalf("read state: %v", err)
+	}
+	if _, exists := readState.Agents["coder-1"]; exists {
+		t.Fatal("agent should be deleted after process exit")
+	}
+}
+
+func TestTerminateAgent_SucceedsWhenSupervisorUnregistersDuringShutdown(t *testing.T) {
+	tmpDir := t.TempDir()
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+
+	state := testhelpers.CreateValidState()
+	state.Agents["coder-1"] = models.Agent{
+		Role:   "coder",
+		Status: models.AgentStatusIdle,
+		PID:    123,
+	}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	original := agentProcesses
+	agentProcesses = agentProcessOps{
+		isLizaAgent: func(pid int) bool { return pid == 123 },
+		isAlive:     func(int) bool { return true },
+		signalTree:  func(pid int) error { return nil },
+		killTree:    func(pid int) error { return nil },
+		waitForExit: func(pid int, grace time.Duration) bool {
+			err := db.New(stateFile).Modify(func(state *models.State) error {
+				delete(state.Agents, "coder-1")
+				return nil
+			})
+			if err != nil {
+				t.Fatalf("self-unregister setup failed: %v", err)
+			}
+			return true
+		},
+	}
+	t.Cleanup(func() { agentProcesses = original })
+
+	result, err := TerminateAgent(tmpDir, "coder-1", true, true, "test", time.Second)
+	if err != nil {
+		t.Fatalf("TerminateAgent() error = %v", err)
+	}
+	if !result.StateDeleted {
+		t.Fatal("StateDeleted = false, want true")
+	}
+}
+
 func TestDeleteAgent_ReturnsPID(t *testing.T) {
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)

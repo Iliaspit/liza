@@ -22,6 +22,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+var terminateAgent = ops.TerminateAgent
+
 // watchStateCmd blocks on the watcher's Events channel and returns
 // stateChangedMsg when the state file is modified. Returns watcherClosedMsg
 // if the channel closes. Returns errMsg on watcher errors.
@@ -273,18 +275,15 @@ func stopSystemCmd(projectRoot string) tea.Cmd {
 	}
 }
 
-// terminateAgentCmd force-deletes an agent via ops.DeleteAgent, then kills the
-// process if it was running. The kill happens after state removal so the agent
-// cannot re-register before the state entry is gone.
+// terminateAgentCmd stops an agent process before removing its state entry.
 // Uses force=true and allowRunningPID=true since the TUI is an interactive context.
 // Returns CmdResultMsg with result.
 func terminateAgentCmd(projectRoot, agentID string) tea.Cmd {
 	return func() tea.Msg {
-		result, err := ops.DeleteAgent(projectRoot, agentID, true, true, "terminated via TUI")
+		_, err := terminateAgent(projectRoot, agentID, true, true, "terminated via TUI", 5*time.Second)
 		if err != nil {
 			return CmdResultMsg{Success: false, Message: fmt.Sprintf("terminate %s: %v", agentID, err)}
 		}
-		result.SignalProcess()
 		return CmdResultMsg{Success: true, Message: "Terminated " + agentID}
 	}
 }

@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	"github.com/liza-mas/liza/internal/embedded"
 	"github.com/liza-mas/liza/internal/log"
 	"github.com/liza-mas/liza/internal/models"
+	"github.com/liza-mas/liza/internal/ops"
 	"github.com/liza-mas/liza/internal/testhelpers"
 	"gopkg.in/yaml.v3"
 )
@@ -374,6 +376,26 @@ func TestResumeSystemCmd_FailurePreservesQuotaSignals(t *testing.T) {
 	// Quota signal file should still exist (cleanup skipped on failure)
 	if _, err := os.Stat(signalPath); os.IsNotExist(err) {
 		t.Error("quota signal file should be preserved when resume fails")
+	}
+}
+
+func TestTerminateAgentCmdReportsProcessTerminationFailure(t *testing.T) {
+	original := terminateAgent
+	terminateAgent = func(projectRoot, agentID string, force, allowRunningPID bool, reason string, grace time.Duration) (*ops.TerminateAgentResult, error) {
+		return nil, errors.New("process still running")
+	}
+	t.Cleanup(func() { terminateAgent = original })
+
+	msg := terminateAgentCmd(t.TempDir(), "coder-1")()
+	result, ok := msg.(CmdResultMsg)
+	if !ok {
+		t.Fatalf("message = %T, want CmdResultMsg", msg)
+	}
+	if result.Success {
+		t.Fatal("Success = true, want false")
+	}
+	if !strings.Contains(result.Message, "process still running") {
+		t.Fatalf("Message = %q, want process failure detail", result.Message)
 	}
 }
 

@@ -20,6 +20,38 @@ type DeleteAgentResult struct {
 	PID     int // PID of the deleted agent's process (0 if unknown).
 }
 
+// TerminateAgentResult contains the outcome of terminating and deleting an agent.
+type TerminateAgentResult struct {
+	AgentID      string
+	PID          int
+	Process      ProcessTerminationResult
+	StateDeleted bool
+}
+
+// ProcessTerminationResult describes how a registered agent process was stopped.
+type ProcessTerminationResult struct {
+	PID      int
+	Signaled bool
+	Exited   bool
+	Killed   bool
+}
+
+type agentProcessOps struct {
+	isLizaAgent func(pid int) bool
+	isAlive     func(pid int) bool
+	signalTree  func(pid int) error
+	killTree    func(pid int) error
+	waitForExit func(pid int, grace time.Duration) bool
+}
+
+var agentProcesses = agentProcessOps{
+	isLizaAgent: isLizaAgentProcess,
+	isAlive:     IsProcessAlive,
+	signalTree:  signalAgentProcessTree,
+	killTree:    killAgentProcessTree,
+	waitForExit: waitForAgentProcessExit,
+}
+
 // SignalProcess sends SIGTERM to the deleted agent's process if it had a known PID.
 // Verifies the process is a liza agent via /proc/<pid>/cmdline before signaling,
 // preventing accidental kills from PID reuse. Safe to call unconditionally.
@@ -27,7 +59,7 @@ func (r *DeleteAgentResult) SignalProcess() bool {
 	if r.PID <= 0 {
 		return false
 	}
-	if !isLizaAgentProcess(r.PID) {
+	if !agentProcesses.isLizaAgent(r.PID) {
 		return false
 	}
 	proc, err := os.FindProcess(r.PID)
@@ -35,6 +67,126 @@ func (r *DeleteAgentResult) SignalProcess() bool {
 		return false
 	}
 	return proc.Signal(syscall.SIGTERM) == nil
+}
+
+// TerminateAgent stops the registered liza agent process before removing it
+// from state. If the process exits cleanly and unregisters itself first, the
+// missing state entry is treated as success.
+func TerminateAgent(projectRoot, agentID string, force, allowRunningPID bool, reason string, grace time.Duration) (*TerminateAgentResult, error) {
+	if agentID == "" {
+		return nil, fmt.Errorf("agent ID required")
+	}
+
+	agent, err := readAgentForDeletion(projectRoot, agentID)
+	if err != nil {
+		return nil, err
+	}
+
+	if !force {
+		if err := validateAgentDeletion(agent, agentID); err != nil {
+			return nil, err
+		}
+		if !allowRunningPID && agent.PID != 0 && agentProcesses.isAlive(agent.PID) {
+			return nil, fmt.Errorf("agent %s is still running with PID %d, use --force to delete or confirm interactively via CLI", agentID, agent.PID)
+		}
+	}
+
+	processResult, err := terminateProcess(agent.PID, grace)
+	if err != nil {
+		return nil, err
+	}
+
+	deleteResult, err := DeleteAgent(projectRoot, agentID, force, allowRunningPID, reason)
+	if err != nil {
+		if errors.IsNotFound(err) {
+			return &TerminateAgentResult{
+				AgentID:      agentID,
+				PID:          agent.PID,
+				Process:      processResult,
+				StateDeleted: true,
+			}, nil
+		}
+		return nil, err
+	}
+
+	return &TerminateAgentResult{
+		AgentID:      deleteResult.AgentID,
+		PID:          deleteResult.PID,
+		Process:      processResult,
+		StateDeleted: true,
+	}, nil
+}
+
+func readAgentForDeletion(projectRoot, agentID string) (models.Agent, error) {
+	lp := paths.New(projectRoot)
+	bb := db.For(lp.StatePath())
+
+	state, err := bb.Read()
+	if err != nil {
+		return models.Agent{}, fmt.Errorf("failed to read state: %w", err)
+	}
+
+	agent, exists := state.Agents[agentID]
+	if !exists {
+		return models.Agent{}, &errors.NotFoundError{Entity: "agent", ID: agentID}
+	}
+	return agent, nil
+}
+
+func terminateProcess(pid int, grace time.Duration) (ProcessTerminationResult, error) {
+	result := ProcessTerminationResult{PID: pid}
+	if pid <= 0 || !agentProcesses.isLizaAgent(pid) {
+		return result, nil
+	}
+
+	// PID identity can still race between /proc verification and signal delivery,
+	// but checking argv avoids intentionally signaling unrelated processes.
+	if err := agentProcesses.signalTree(pid); err != nil {
+		return result, fmt.Errorf("signal liza agent process %d: %w", pid, err)
+	}
+	result.Signaled = true
+
+	if grace > 0 && agentProcesses.waitForExit(pid, grace) {
+		result.Exited = true
+		return result, nil
+	}
+	if grace <= 0 {
+		return result, nil
+	}
+
+	if err := agentProcesses.killTree(pid); err != nil {
+		return result, fmt.Errorf("kill liza agent process %d: %w", pid, err)
+	}
+	result.Killed = true
+	if agentProcesses.waitForExit(pid, grace) {
+		result.Exited = true
+		return result, nil
+	}
+
+	return result, fmt.Errorf("liza agent process %d still running after termination", pid)
+}
+
+func waitForAgentProcessExit(pid int, grace time.Duration) bool {
+	if !IsProcessAlive(pid) {
+		return true
+	}
+	if grace <= 0 {
+		return false
+	}
+
+	deadline := time.Now().Add(grace)
+	for time.Now().Before(deadline) {
+		remaining := time.Until(deadline)
+		delay := 50 * time.Millisecond
+		if remaining < delay {
+			delay = remaining
+		}
+		time.Sleep(delay)
+		if !IsProcessAlive(pid) {
+			return true
+		}
+	}
+	return !IsProcessAlive(pid)
 }
 
 // isLizaAgentProcess checks if the process with the given PID is a liza agent
