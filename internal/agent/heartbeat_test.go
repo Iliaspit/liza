@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/liza-mas/liza/internal/db"
+	lizaerrors "github.com/liza-mas/liza/internal/errors"
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/testhelpers"
 )
@@ -175,12 +176,9 @@ func TestHeartbeatWithInvalidAgent(t *testing.T) {
 
 	hb := NewHeartbeat(config)
 
-	// Start heartbeat - should handle missing agent gracefully
 	err := hb.Start(ctx)
-
-	// Should complete without error (errors are logged but not returned)
-	if err != nil && err != context.DeadlineExceeded {
-		t.Errorf("Start() unexpected error = %v", err)
+	if !lizaerrors.IsNotFound(err) {
+		t.Fatalf("Start() error = %v, want NotFound", err)
 	}
 }
 

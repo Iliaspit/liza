@@ -82,6 +82,7 @@ func TestJSON_ClaimTask_Success(t *testing.T) {
 		state.Tasks = []models.Task{
 			testhelpers.BuildTaskByStatus("task-json-claim", models.TaskStatusReady, now),
 		}
+		state.Agents["coder-1"] = testhelpers.RegisteredTestAgent("coder")
 	})
 
 	stdout, err := executeRootCommandCapture(t, projectRoot, "claim-task", "task-json-claim", "coder-1", "--json")

@@ -125,8 +125,11 @@ func ClaimTask(projectRoot, taskID, agentID string) (*ClaimResult, error) {
 	}
 	pipelineTransitions = BuildPipelineTransitions(resolver)
 
-	agent, exists := state.Agents[agentID]
-	if exists && agent.CurrentTask != nil && *agent.CurrentTask != "" && *agent.CurrentTask != taskID {
+	agent, err := requireRegisteredClaimAgent(state, agentID, runtimeRole)
+	if err != nil {
+		return nil, err
+	}
+	if agent.CurrentTask != nil && *agent.CurrentTask != "" && *agent.CurrentTask != taskID {
 		return nil, &PreconditionError{Reason: fmt.Sprintf("agent %s is already working on task %s", agentID, *agent.CurrentTask)}
 	}
 
@@ -249,8 +252,11 @@ func ClaimTask(projectRoot, taskID, agentID string) (*ClaimResult, error) {
 		}
 
 		// Re-check agent availability
-		agent, exists := state.Agents[agentID]
-		if exists && agent.CurrentTask != nil && *agent.CurrentTask != "" && *agent.CurrentTask != taskID {
+		agent, err := requireRegisteredClaimAgent(state, agentID, runtimeRole)
+		if err != nil {
+			return err
+		}
+		if agent.CurrentTask != nil && *agent.CurrentTask != "" && *agent.CurrentTask != taskID {
 			return fmt.Errorf("race condition: agent %s became busy with %s", agentID, *agent.CurrentTask)
 		}
 
@@ -268,10 +274,6 @@ func ClaimTask(projectRoot, taskID, agentID string) (*ClaimResult, error) {
 		task.History = append(task.History, strategy.historyEntry(now, &claimCtx))
 
 		// Update agent
-		if !exists {
-			state.Agents[agentID] = models.Agent{}
-		}
-		agent = state.Agents[agentID]
 		agent.Status = models.AgentStatusWorking
 		agent.CurrentTask = &taskID
 		agent.LeaseExpires = &leaseExpires

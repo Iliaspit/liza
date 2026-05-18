@@ -169,6 +169,7 @@ func TestClaimTask_PipelineCodingPair(t *testing.T) {
 
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()
+	state.Agents["coder-1"] = testhelpers.RegisteredTestAgent("coder")
 	state.PipelineVersion = 2
 	task := models.Task{
 		ID:          "task-1",
@@ -215,6 +216,7 @@ func TestClaimTask_PipelineCodePlanningPair(t *testing.T) {
 
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()
+	state.Agents["code-planner-1"] = testhelpers.RegisteredTestAgent("code-planner")
 	state.PipelineVersion = 2
 	task := models.Task{
 		ID:          "plan-1",
@@ -276,6 +278,7 @@ func TestClaimTask_PipelineRejectedReclaim(t *testing.T) {
 
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()
+	state.Agents["coder-2"] = testhelpers.RegisteredTestAgent("coder")
 	state.PipelineVersion = 2
 
 	// Create a CODE_REJECTED task with no assigned coder (recovered state)
@@ -324,6 +327,7 @@ func TestClaimTask_PipelineRejectedIterationLimit(t *testing.T) {
 
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()
+	state.Agents["coder-1"] = testhelpers.RegisteredTestAgent("coder")
 	state.PipelineVersion = 2
 	state.Config.MaxCoderIterations = 3
 

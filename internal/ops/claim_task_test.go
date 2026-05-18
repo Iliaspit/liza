@@ -59,6 +59,7 @@ func TestClaimTask_ReadyTask(t *testing.T) {
 
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()
+	registerClaimTaskTestAgents(state)
 	state.Tasks = []models.Task{
 		testhelpers.BuildTaskByStatus("task-1", models.TaskStatusReady, now),
 	}
@@ -124,12 +125,105 @@ func TestClaimTask_ReadyTask(t *testing.T) {
 	}
 }
 
+func TestClaimTask_MissingRegisteredAgentDoesNotCreateGhost(t *testing.T) {
+	tmpDir := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, tmpDir)
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+
+	now := time.Now().UTC()
+	state := testhelpers.CreateValidState()
+	state.Tasks = []models.Task{
+		testhelpers.BuildTaskByStatus("task-1", models.TaskStatusReady, now),
+	}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	_, err := ClaimTask(tmpDir, "task-1", "coder-1")
+	if err == nil {
+		t.Fatal("Expected error for missing registered agent")
+	}
+	if !strings.Contains(err.Error(), "agent coder-1 is not registered") {
+		t.Errorf("Error = %q, want missing registered agent", err.Error())
+	}
+
+	readState := readClaimStateForTest(t, stateFile)
+	if _, exists := readState.Agents["coder-1"]; exists {
+		t.Fatal("ClaimTask created a ghost agent row")
+	}
+	task := readState.FindTask("task-1")
+	if task == nil {
+		t.Fatal("Task not found in state")
+	}
+	if task.AssignedTo != nil {
+		t.Fatal("Task should not be assigned after rejected claim")
+	}
+}
+
+func TestClaimTask_CorruptRegisteredAgentRejected(t *testing.T) {
+	tests := []struct {
+		name        string
+		mutate      func(*models.Agent)
+		errContains string
+	}{
+		{
+			name:        "empty role",
+			mutate:      func(agent *models.Agent) { agent.Role = "" },
+			errContains: "has no registered role",
+		},
+		{
+			name:        "empty provider",
+			mutate:      func(agent *models.Agent) { agent.Provider = "" },
+			errContains: "has no registered provider",
+		},
+		{
+			name:        "zero pid",
+			mutate:      func(agent *models.Agent) { agent.PID = 0 },
+			errContains: "has no registered process PID",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			testhelpers.SetupTestGitRepo(t, tmpDir)
+			stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+
+			now := time.Now().UTC()
+			state := testhelpers.CreateValidState()
+			agent := testhelpers.RegisteredTestAgent("coder")
+			tt.mutate(&agent)
+			state.Agents["coder-1"] = agent
+			state.Tasks = []models.Task{
+				testhelpers.BuildTaskByStatus("task-1", models.TaskStatusReady, now),
+			}
+			testhelpers.WriteInitialState(t, stateFile, state)
+
+			_, err := ClaimTask(tmpDir, "task-1", "coder-1")
+			if err == nil {
+				t.Fatal("Expected error for corrupt registered agent")
+			}
+			if !strings.Contains(err.Error(), tt.errContains) {
+				t.Errorf("Error = %q, want to contain %q", err.Error(), tt.errContains)
+			}
+
+			readState := readClaimStateForTest(t, stateFile)
+			task := readState.FindTask("task-1")
+			if task == nil {
+				t.Fatal("Task not found in state")
+			}
+			if task.AssignedTo != nil {
+				t.Fatal("Task should not be assigned after rejected claim")
+			}
+		})
+	}
+}
+
 func TestClaimTask_TaskNotFound(t *testing.T) {
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
 	state := testhelpers.CreateValidState()
+	registerClaimTaskTestAgents(state)
 	testhelpers.WriteInitialState(t, stateFile, state)
 
 	_, err := ClaimTask(tmpDir, "nonexistent", "coder-1")
@@ -148,6 +242,7 @@ func TestClaimTask_WrongStatus(t *testing.T) {
 
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()
+	registerClaimTaskTestAgents(state)
 	state.Tasks = []models.Task{
 		testhelpers.BuildTaskByStatus("task-1", models.TaskStatusImplementing, now),
 	}
@@ -169,15 +264,16 @@ func TestClaimTask_AgentBusy(t *testing.T) {
 
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()
+	registerClaimTaskTestAgents(state)
 	state.Tasks = []models.Task{
 		testhelpers.BuildTaskByStatus("task-1", models.TaskStatusReady, now),
 	}
 	// Agent is busy with another task
 	otherTask := "task-other"
-	state.Agents["coder-1"] = models.Agent{
-		Status:      models.AgentStatusWorking,
-		CurrentTask: &otherTask,
-	}
+	busyAgent := testhelpers.RegisteredTestAgent("coder")
+	busyAgent.Status = models.AgentStatusWorking
+	busyAgent.CurrentTask = &otherTask
+	state.Agents["coder-1"] = busyAgent
 	testhelpers.WriteInitialState(t, stateFile, state)
 
 	_, err := ClaimTask(tmpDir, "task-1", "coder-1")
@@ -196,6 +292,7 @@ func TestClaimTask_UnmetDependencies(t *testing.T) {
 
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()
+	registerClaimTaskTestAgents(state)
 	depTask := testhelpers.BuildTaskByStatus("dep-1", models.TaskStatusReady, now)
 	mainTask := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusReady, now)
 	mainTask.DependsOn = []string{"dep-1"}
@@ -218,6 +315,7 @@ func TestClaimTask_MetDependencies(t *testing.T) {
 
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()
+	registerClaimTaskTestAgents(state)
 	depTask := testhelpers.BuildTaskByStatus("dep-1", models.TaskStatusMerged, now)
 	mainTask := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusReady, now)
 	mainTask.DependsOn = []string{"dep-1"}
@@ -271,6 +369,7 @@ func TestUnmetDependencies(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			state := testhelpers.CreateValidState()
+			registerClaimTaskTestAgents(state)
 			state.Tasks = append([]models.Task(nil), tt.tasks...)
 
 			task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusReady, now)
@@ -291,6 +390,7 @@ func TestClaimTask_IntegrationFailed(t *testing.T) {
 
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()
+	registerClaimTaskTestAgents(state)
 	task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusIntegrationFailed, now)
 	state.Tasks = []models.Task{task}
 	testhelpers.WriteInitialState(t, stateFile, state)
@@ -331,6 +431,7 @@ func TestClaimTask_RejectedWorktreePresent_Preserved(t *testing.T) {
 
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()
+	registerClaimTaskTestAgents(state)
 	task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusRejected, now)
 	// task.AssignedTo is "coder-1" from BuildTaskByStatus
 	state.Tasks = []models.Task{task}
@@ -401,6 +502,7 @@ func TestClaimTask_RejectedWorktreeMissing_Recreated(t *testing.T) {
 
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()
+	registerClaimTaskTestAgents(state)
 	task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusRejected, now)
 	state.Tasks = []models.Task{task}
 	testhelpers.WriteInitialState(t, stateFile, state)
@@ -446,6 +548,7 @@ func TestClaimTask_RejectedWorktreeDirExistsBranchMissing_Recreated(t *testing.T
 
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()
+	registerClaimTaskTestAgents(state)
 	task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusRejected, now)
 	state.Tasks = []models.Task{task}
 	testhelpers.WriteInitialState(t, stateFile, state)
@@ -516,6 +619,7 @@ func TestClaimTask_RejectedMutateTask_NoCounterReset(t *testing.T) {
 
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()
+	registerClaimTaskTestAgents(state)
 	task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusRejected, now)
 	task.ReviewCyclesCurrent = 3 // Non-zero — should be preserved on different-coder claim.
 	state.Tasks = []models.Task{task}
@@ -552,6 +656,7 @@ func TestClaimTask_RejectedAtIterationLimitTransitionsToBlocked(t *testing.T) {
 
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()
+	registerClaimTaskTestAgents(state)
 	state.Config.MaxCoderIterations = 3
 
 	task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusRejected, now)
@@ -560,11 +665,9 @@ func TestClaimTask_RejectedAtIterationLimitTransitionsToBlocked(t *testing.T) {
 	state.Tasks = []models.Task{task}
 
 	taskRef := "task-1"
-	state.Agents["coder-1"] = models.Agent{
-		Role:        "coder",
-		Status:      models.AgentStatusWaiting,
-		CurrentTask: &taskRef,
-	}
+	agent := testhelpers.RegisteredTestAgent("coder")
+	agent.CurrentTask = &taskRef
+	state.Agents["coder-1"] = agent
 
 	testhelpers.WriteInitialState(t, stateFile, state)
 
@@ -594,7 +697,7 @@ func TestClaimTask_RejectedAtIterationLimitTransitionsToBlocked(t *testing.T) {
 		t.Error("BlockedQuestions should be populated")
 	}
 
-	agent := readState.Agents["coder-1"]
+	agent = readState.Agents["coder-1"]
 	if agent.Status != models.AgentStatusIdle {
 		t.Errorf("Agent status = %v, want IDLE", agent.Status)
 	}
@@ -610,6 +713,7 @@ func TestClaimTask_ReadyWithStaleBranchAndWorktree(t *testing.T) {
 
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()
+	registerClaimTaskTestAgents(state)
 	state.Tasks = []models.Task{
 		testhelpers.BuildTaskByStatus("task-1", models.TaskStatusReady, now),
 	}
@@ -674,6 +778,7 @@ func TestClaimTask_ReadyWithPrunableWorktreeRegistration_RecreatesCleanWorktree(
 
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()
+	registerClaimTaskTestAgents(state)
 	state.Tasks = []models.Task{
 		testhelpers.BuildTaskByStatus("task-1", models.TaskStatusReady, now),
 	}
@@ -731,6 +836,7 @@ func TestHandleReadyClaimWorktree_ConcurrentWinnerDoesNotDeleteWorktree(t *testi
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
 	state := testhelpers.CreateValidState()
+	registerClaimTaskTestAgents(state)
 	testhelpers.WriteInitialState(t, stateFile, state)
 	bb := db.New(stateFile)
 
@@ -780,6 +886,7 @@ func TestHandleReadyClaimWorktree_CleanupAbortedWhenTaskClaimedConcurrently(t *t
 	// Write state with task already in IMPLEMENTING (simulates concurrent winner).
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()
+	registerClaimTaskTestAgents(state)
 	task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusImplementing, now)
 	state.Tasks = []models.Task{task}
 	testhelpers.WriteInitialState(t, stateFile, state)
@@ -825,6 +932,7 @@ func TestClaimTask_PostWorktreeCmdRunsOnFreshClaim(t *testing.T) {
 
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()
+	registerClaimTaskTestAgents(state)
 
 	// Configure a post-worktree command that creates a marker file.
 	postCmd := "touch .post-worktree-ran"
@@ -858,6 +966,7 @@ func TestClaimTask_PostWorktreeCmdFailureProducesWarning(t *testing.T) {
 
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()
+	registerClaimTaskTestAgents(state)
 
 	// Configure a post-worktree command that will fail.
 	postCmd := "exit 1"
@@ -887,6 +996,7 @@ func TestClaimTask_PostWorktreeCmdRunsOnSameCoderReclaim(t *testing.T) {
 
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()
+	registerClaimTaskTestAgents(state)
 
 	// Configure a post-worktree command that creates a marker file.
 	postCmd := "touch .post-worktree-ran"
@@ -927,6 +1037,7 @@ func TestClaimTask_IterationLimitDoesNotReleaseCoder_WhenCoderMovedOn(t *testing
 
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()
+	registerClaimTaskTestAgents(state)
 	state.Config.MaxCoderIterations = 3
 
 	task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusRejected, now)
@@ -937,11 +1048,10 @@ func TestClaimTask_IterationLimitDoesNotReleaseCoder_WhenCoderMovedOn(t *testing
 
 	// Coder has moved on: CurrentTask = "task-2", status = WORKING.
 	task2ID := "task-2"
-	state.Agents["coder-1"] = models.Agent{
-		Role:        "coder",
-		Status:      models.AgentStatusWorking,
-		CurrentTask: &task2ID,
-	}
+	movedAgent := testhelpers.RegisteredTestAgent("coder")
+	movedAgent.Status = models.AgentStatusWorking
+	movedAgent.CurrentTask = &task2ID
+	state.Agents["coder-1"] = movedAgent
 
 	testhelpers.WriteInitialState(t, stateFile, state)
 
@@ -983,6 +1093,7 @@ func TestClaimTask_IterationCapAttempt1_TriggersNewAttempt(t *testing.T) {
 
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()
+	registerClaimTaskTestAgents(state)
 	state.Config.MaxCoderIterations = 3
 
 	task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusRejected, now)
@@ -991,12 +1102,11 @@ func TestClaimTask_IterationCapAttempt1_TriggersNewAttempt(t *testing.T) {
 	state.Tasks = []models.Task{task}
 
 	taskRef := "task-1"
-	state.Agents["coder-1"] = models.Agent{
-		Role:        "coder",
-		Status:      models.AgentStatusWorking,
-		CurrentTask: &taskRef,
-		Heartbeat:   now,
-	}
+	agent := testhelpers.RegisteredTestAgent("coder")
+	agent.Status = models.AgentStatusWorking
+	agent.CurrentTask = &taskRef
+	agent.Heartbeat = now
+	state.Agents["coder-1"] = agent
 
 	testhelpers.WriteInitialState(t, stateFile, state)
 
@@ -1038,6 +1148,7 @@ func TestClaimTask_IterationCapAttempt2_TriggersBlocked(t *testing.T) {
 
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()
+	registerClaimTaskTestAgents(state)
 	state.Config.MaxCoderIterations = 3
 
 	task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusRejected, now)
@@ -1046,11 +1157,9 @@ func TestClaimTask_IterationCapAttempt2_TriggersBlocked(t *testing.T) {
 	state.Tasks = []models.Task{task}
 
 	taskRef := "task-1"
-	state.Agents["coder-1"] = models.Agent{
-		Role:        "coder",
-		Status:      models.AgentStatusWaiting,
-		CurrentTask: &taskRef,
-	}
+	agent := testhelpers.RegisteredTestAgent("coder")
+	agent.CurrentTask = &taskRef
+	state.Agents["coder-1"] = agent
 
 	testhelpers.WriteInitialState(t, stateFile, state)
 
@@ -1083,6 +1192,7 @@ func TestClaimTask_ReviewCapAttempt2_TriggersBlocked(t *testing.T) {
 
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()
+	registerClaimTaskTestAgents(state)
 	state.Config.MaxCoderIterations = 10
 	state.Config.MaxReviewCycles = 3
 
@@ -1093,11 +1203,9 @@ func TestClaimTask_ReviewCapAttempt2_TriggersBlocked(t *testing.T) {
 	state.Tasks = []models.Task{task}
 
 	taskRef := "task-1"
-	state.Agents["coder-1"] = models.Agent{
-		Role:        "coder",
-		Status:      models.AgentStatusWaiting,
-		CurrentTask: &taskRef,
-	}
+	agent := testhelpers.RegisteredTestAgent("coder")
+	agent.CurrentTask = &taskRef
+	state.Agents["coder-1"] = agent
 
 	testhelpers.WriteInitialState(t, stateFile, state)
 
@@ -1132,7 +1240,7 @@ func TestClaimTask_ReviewCapAttempt2_TriggersBlocked(t *testing.T) {
 		t.Error("BlockedQuestions should be populated")
 	}
 
-	agent := readState.Agents["coder-1"]
+	agent = readState.Agents["coder-1"]
 	if agent.Status != models.AgentStatusIdle {
 		t.Errorf("Agent status = %v, want IDLE", agent.Status)
 	}
@@ -1148,6 +1256,7 @@ func TestClaimTask_SentinelAssignedTo_Rejected(t *testing.T) {
 
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()
+	registerClaimTaskTestAgents(state)
 	task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusRejected, now)
 	sentinel := "$transitioning"
 	task.AssignedTo = &sentinel
@@ -1176,4 +1285,10 @@ func readClaimStateForTest(t *testing.T, stateFile string) *models.State {
 		t.Fatalf("Failed to read state: %v", err)
 	}
 	return state
+}
+
+func registerClaimTaskTestAgents(state *models.State) {
+	state.Agents["coder-1"] = testhelpers.RegisteredTestAgent("coder")
+	state.Agents["coder-2"] = testhelpers.RegisteredTestAgent("coder")
+	state.Agents["code-planner-1"] = testhelpers.RegisteredTestAgent("code-planner")
 }

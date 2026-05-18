@@ -440,6 +440,57 @@ func TestUnregisterAgent(t *testing.T) {
 	}
 }
 
+func TestUnregisterAgent_ReleasesTaskSideClaimWhenCurrentTaskMissing(t *testing.T) {
+	tmpDir := t.TempDir()
+	statePath, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	testhelpers.SetupPipelineConfig(t, tmpDir)
+
+	now := time.Now().UTC()
+	leaseExpires := now.Add(30 * time.Minute)
+	state := testhelpers.CreateValidState()
+	agentID := "coder-1"
+	state.Agents[agentID] = models.Agent{
+		Status:       models.AgentStatusIdle,
+		LeaseExpires: &leaseExpires,
+	}
+	state.Tasks = []models.Task{
+		{
+			ID:           "task-1",
+			Status:       models.TaskStatusImplementing,
+			RolePair:     "coding-pair",
+			Priority:     1,
+			AssignedTo:   &agentID,
+			LeaseExpires: &leaseExpires,
+			Created:      now,
+			Description:  "orphaned claim",
+			DoneWhen:     "done",
+			Scope:        "scope",
+			SpecRef:      "README.md",
+		},
+	}
+	bb := testhelpers.WriteInitialState(t, statePath, state)
+
+	unregisterAgent(bb, agentID, tmpDir)
+
+	readState, err := bb.Read()
+	if err != nil {
+		t.Fatalf("Failed to read state: %v", err)
+	}
+	if _, exists := readState.Agents[agentID]; exists {
+		t.Fatal("Agent should be removed")
+	}
+	task := readState.FindTask("task-1")
+	if task == nil {
+		t.Fatal("Task not found")
+	}
+	if task.AssignedTo != nil || task.LeaseExpires != nil {
+		t.Fatalf("Task claim still present: assigned=%v lease=%v", task.AssignedTo, task.LeaseExpires)
+	}
+	if task.Status != models.TaskStatusReady {
+		t.Fatalf("Task status = %s, want READY", task.Status)
+	}
+}
+
 // TestRegisterAgentStoresPID tests that agent registration stores the process PID
 func TestRegisterAgentStoresPID(t *testing.T) {
 	tmpDir := t.TempDir()

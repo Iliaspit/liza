@@ -19,6 +19,7 @@ func TestClaimCoderTask_BasicPrioritySelection(t *testing.T) {
 
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()
+	state.Agents["coder-1"] = testhelpers.RegisteredTestAgent("coder")
 
 	// Create two claimable tasks with different priorities
 	taskLow := testhelpers.BuildTaskByStatus("task-low", models.TaskStatusReady, now)
@@ -54,6 +55,7 @@ func TestClaimCoderTask_SamePriorityRandomSelection(t *testing.T) {
 
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()
+	state.Agents["coder-1"] = testhelpers.RegisteredTestAgent("coder")
 
 	// Create three tasks with same priority but different creation times
 	taskOldest := testhelpers.BuildTaskByStatus("task-oldest", models.TaskStatusReady, now)
@@ -94,6 +96,7 @@ func TestClaimCoderTask_RespectsClaimability(t *testing.T) {
 
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()
+	state.Agents["coder-1"] = testhelpers.RegisteredTestAgent("coder")
 
 	// Create a dependency task that blocks the high-priority task
 	taskDep := testhelpers.BuildTaskByStatus("task-dep", models.TaskStatusReady, now)
@@ -137,6 +140,7 @@ func TestClaimCoderTask_RejectedTasksPriority(t *testing.T) {
 
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()
+	state.Agents["coder-1"] = testhelpers.RegisteredTestAgent("coder")
 
 	// Create a high-priority rejected task
 	taskRejectedHigh := testhelpers.BuildTaskByStatus("task-rejected-high", models.TaskStatusRejected, now)
@@ -174,6 +178,7 @@ func TestClaimCoderTask_IntegrationFailedPriority(t *testing.T) {
 
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()
+	state.Agents["coder-1"] = testhelpers.RegisteredTestAgent("coder")
 
 	// Create a high-priority integration failed task
 	taskFailedHigh := testhelpers.BuildTaskByStatus("task-failed-high", models.TaskStatusIntegrationFailed, now)
@@ -214,6 +219,7 @@ func TestClaimCoderTask_AllSamePriority(t *testing.T) {
 
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()
+	state.Agents["coder-1"] = testhelpers.RegisteredTestAgent("coder")
 
 	// Create three tasks with same priority
 	task1 := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusReady, now)
@@ -253,6 +259,7 @@ func TestClaimCoderTask_MixedPriorities(t *testing.T) {
 
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()
+	state.Agents["coder-1"] = testhelpers.RegisteredTestAgent("coder")
 
 	// Create tasks with all priority levels (1-5)
 	priorities := []struct {
@@ -297,6 +304,7 @@ func TestClaimCoderTask_NoClaimableTasks(t *testing.T) {
 
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()
+	state.Agents["coder-1"] = testhelpers.RegisteredTestAgent("coder")
 
 	// Create only non-claimable tasks
 	taskClaimed := testhelpers.BuildTaskByStatus("task-claimed", models.TaskStatusImplementing, now)
@@ -327,6 +335,7 @@ func TestClaimCoderTask_EmptyTaskList(t *testing.T) {
 	testhelpers.SetupPipelineConfig(t, tmpDir)
 
 	state := testhelpers.CreateValidState()
+	state.Agents["coder-1"] = testhelpers.RegisteredTestAgent("coder")
 	state.Tasks = []models.Task{} // Empty
 	bb := testhelpers.WriteInitialState(t, statePath, state)
 
@@ -351,6 +360,7 @@ func TestClaimReviewerTask_BasicPrioritySelection(t *testing.T) {
 
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()
+	state.Agents["code-reviewer-1"] = testhelpers.RegisteredTestAgent("code-reviewer")
 
 	// Create two reviewable tasks with different priorities
 	taskLow := testhelpers.BuildTaskByStatus("task-low", models.TaskStatusReadyForReview, now)
@@ -386,6 +396,7 @@ func TestClaimReviewerTask_SamePriorityRandomSelection(t *testing.T) {
 
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()
+	state.Agents["code-reviewer-1"] = testhelpers.RegisteredTestAgent("code-reviewer")
 
 	// Create three reviewable tasks with same priority
 	taskOldest := testhelpers.BuildTaskByStatus("task-oldest", models.TaskStatusReadyForReview, now)
@@ -426,6 +437,7 @@ func TestClaimReviewerTask_SkipsClaimedReviewTasks(t *testing.T) {
 
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()
+	state.Agents["code-reviewer-1"] = testhelpers.RegisteredTestAgent("code-reviewer")
 
 	// High-priority task already being reviewed (REVIEWING state — not a candidate for claimReviewerTask)
 	taskHighClaimed := testhelpers.BuildTaskByStatus("task-high-claimed", models.TaskStatusReviewing, now)
@@ -462,6 +474,7 @@ func TestClaimReviewerTask_ReclaimsExpiredLease(t *testing.T) {
 
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()
+	state.Agents["code-reviewer-1"] = testhelpers.RegisteredTestAgent("code-reviewer")
 
 	// High-priority task with expired lease
 	taskHighExpired := testhelpers.BuildTaskByStatus("task-high-expired", models.TaskStatusReadyForReview, now)
@@ -502,6 +515,7 @@ func TestClaimReviewerTask_NoReviewableTasks(t *testing.T) {
 
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()
+	state.Agents["code-reviewer-1"] = testhelpers.RegisteredTestAgent("code-reviewer")
 
 	// Only create tasks in non-reviewable states
 	taskUnclaimed := testhelpers.BuildTaskByStatus("task-unclaimed", models.TaskStatusReady, now)
@@ -573,6 +587,7 @@ func TestClaimDoerTask_RetriesOnFailure(t *testing.T) {
 
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()
+	state.Agents["coder-1"] = testhelpers.RegisteredTestAgent("coder")
 
 	// Create two same-priority tasks: one REJECTED (needs worktree but has none)
 	// and one READY (will get a fresh worktree via ClaimTask).

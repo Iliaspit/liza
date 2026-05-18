@@ -179,9 +179,19 @@ func unregisterAgent(bb *db.Blackboard, agentID, projectRoot string) {
 			return nil
 		}
 
-		// Release task claim if agent held one
+		// Release task claims from both agent-side and task-side ownership.
+		taskIDs := make(map[string]bool)
 		if agent.CurrentTask != nil {
-			taskID := *agent.CurrentTask
+			taskIDs[*agent.CurrentTask] = true
+		}
+		doerTaskIDs, reviewerTaskIDs := ops.TaskClaimsForAgent(state, agentID)
+		for _, taskID := range doerTaskIDs {
+			taskIDs[taskID] = true
+		}
+		for _, taskID := range reviewerTaskIDs {
+			taskIDs[taskID] = true
+		}
+		for taskID := range taskIDs {
 			if task := state.FindTask(taskID); task != nil {
 				releaseTaskClaim(state, task, agent.Role, agentID, pipelineTransitions, resolver, now)
 			}
@@ -242,7 +252,21 @@ func releaseTaskClaim(state *models.State, task *models.Task, role, agentID stri
 		task.ReviewLeaseExpires = nil
 
 	default:
-		return
+		if task.AssignedTo != nil && *task.AssignedTo == agentID {
+			if task.Status == activeExecuting {
+				transitionTask(releasedInitial)
+			}
+			task.AssignedTo = nil
+			task.LeaseExpires = nil
+		} else if task.ReviewingBy != nil && *task.ReviewingBy == agentID {
+			if task.Status == activeReviewing {
+				transitionTask(releasedSubmitted)
+			}
+			task.ReviewingBy = nil
+			task.ReviewLeaseExpires = nil
+		} else {
+			return
+		}
 	}
 
 	state.ReleaseAgent(agentID)

@@ -47,6 +47,7 @@ func TestClaimReviewerTask_DefaultLeaseDuration(t *testing.T) {
 
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()
+	registerClaimReviewerTaskTestAgents(state)
 	worktree := ".worktrees/task-1"
 	reviewCommit := "abc123"
 	state.Tasks = []models.Task{
@@ -80,12 +81,143 @@ func TestClaimReviewerTask_DefaultLeaseDuration(t *testing.T) {
 	}
 }
 
+func TestClaimReviewerTask_MissingRegisteredAgentDoesNotCreateGhost(t *testing.T) {
+	tmpDir := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, tmpDir)
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+
+	now := time.Now().UTC()
+	state := testhelpers.CreateValidState()
+	worktree := ".worktrees/task-1"
+	reviewCommit := "abc123"
+	state.Tasks = []models.Task{
+		{
+			ID:           "task-1",
+			Status:       models.TaskStatusReadyForReview,
+			RolePair:     "coding-pair",
+			Priority:     1,
+			Worktree:     &worktree,
+			ReviewCommit: &reviewCommit,
+			History:      []models.TaskHistoryEntry{},
+			Created:      now,
+		},
+	}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	_, err := ClaimReviewerTask(ClaimReviewerTaskInput{
+		ProjectRoot:   tmpDir,
+		AgentID:       "code-reviewer-1",
+		LeaseDuration: 1800,
+	})
+	if err == nil {
+		t.Fatal("Expected error for missing registered reviewer")
+	}
+	if !strings.Contains(err.Error(), "agent code-reviewer-1 is not registered") {
+		t.Errorf("Error = %q, want missing registered agent", err.Error())
+	}
+
+	bb := db.New(stateFile)
+	readState, err := bb.Read()
+	if err != nil {
+		t.Fatalf("Failed to read state: %v", err)
+	}
+	if _, exists := readState.Agents["code-reviewer-1"]; exists {
+		t.Fatal("ClaimReviewerTask created a ghost agent row")
+	}
+	task := readState.FindTask("task-1")
+	if task == nil {
+		t.Fatal("Task not found")
+	}
+	if task.ReviewingBy != nil {
+		t.Fatal("Task should not be review-assigned after rejected claim")
+	}
+}
+
+func TestClaimReviewerTask_CorruptRegisteredAgentRejected(t *testing.T) {
+	tests := []struct {
+		name        string
+		mutate      func(*models.Agent)
+		errContains string
+	}{
+		{
+			name:        "empty role",
+			mutate:      func(agent *models.Agent) { agent.Role = "" },
+			errContains: "has no registered role",
+		},
+		{
+			name:        "empty provider",
+			mutate:      func(agent *models.Agent) { agent.Provider = "" },
+			errContains: "has no registered provider",
+		},
+		{
+			name:        "zero pid",
+			mutate:      func(agent *models.Agent) { agent.PID = 0 },
+			errContains: "has no registered process PID",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			testhelpers.SetupTestGitRepo(t, tmpDir)
+			stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+
+			now := time.Now().UTC()
+			state := testhelpers.CreateValidState()
+			agent := testhelpers.RegisteredTestAgent("code-reviewer")
+			tt.mutate(&agent)
+			state.Agents["code-reviewer-1"] = agent
+			worktree := ".worktrees/task-1"
+			reviewCommit := "abc123"
+			state.Tasks = []models.Task{
+				{
+					ID:           "task-1",
+					Status:       models.TaskStatusReadyForReview,
+					RolePair:     "coding-pair",
+					Priority:     1,
+					Worktree:     &worktree,
+					ReviewCommit: &reviewCommit,
+					History:      []models.TaskHistoryEntry{},
+					Created:      now,
+				},
+			}
+			testhelpers.WriteInitialState(t, stateFile, state)
+
+			_, err := ClaimReviewerTask(ClaimReviewerTaskInput{
+				ProjectRoot:   tmpDir,
+				AgentID:       "code-reviewer-1",
+				LeaseDuration: 1800,
+			})
+			if err == nil {
+				t.Fatal("Expected error for corrupt registered reviewer")
+			}
+			if !strings.Contains(err.Error(), tt.errContains) {
+				t.Errorf("Error = %q, want to contain %q", err.Error(), tt.errContains)
+			}
+
+			bb := db.New(stateFile)
+			readState, err := bb.Read()
+			if err != nil {
+				t.Fatalf("Failed to read state: %v", err)
+			}
+			task := readState.FindTask("task-1")
+			if task == nil {
+				t.Fatal("Task not found")
+			}
+			if task.ReviewingBy != nil {
+				t.Fatal("Task should not be review-assigned after rejected claim")
+			}
+		})
+	}
+}
+
 func TestClaimReviewerTask_NoReviewableTasks(t *testing.T) {
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()
+	registerClaimReviewerTaskTestAgents(state)
 	// Only create tasks in non-reviewable states
 	state.Tasks = []models.Task{
 		testhelpers.BuildTaskByStatus("task-ready", models.TaskStatusReady, now),
@@ -114,6 +246,7 @@ func TestClaimReviewerTask_Success(t *testing.T) {
 
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()
+	registerClaimReviewerTaskTestAgents(state)
 	worktree := ".worktrees/task-1"
 	reviewCommit := "abc123"
 	state.Tasks = []models.Task{
@@ -128,10 +261,7 @@ func TestClaimReviewerTask_Success(t *testing.T) {
 			Created:      now,
 		},
 	}
-	state.Agents["code-reviewer-1"] = models.Agent{
-		Role:   models.RoleCodeReviewer,
-		Status: models.AgentStatusIdle,
-	}
+	state.Agents["code-reviewer-1"] = testhelpers.RegisteredTestAgent(models.RoleCodeReviewer)
 	testhelpers.WriteInitialState(t, stateFile, state)
 
 	result, err := ClaimReviewerTask(ClaimReviewerTaskInput{
@@ -196,6 +326,7 @@ func TestClaimReviewerTask_PrioritySelection(t *testing.T) {
 
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()
+	registerClaimReviewerTaskTestAgents(state)
 	worktree1 := ".worktrees/task-low"
 	worktree2 := ".worktrees/task-high"
 	reviewCommit1 := "abc123"
@@ -244,6 +375,7 @@ func TestClaimReviewerTask_TieBreaking(t *testing.T) {
 
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()
+	registerClaimReviewerTaskTestAgents(state)
 	worktree1 := ".worktrees/task-old"
 	worktree2 := ".worktrees/task-new"
 	reviewCommit1 := "abc123"
@@ -293,6 +425,7 @@ func TestClaimReviewerTask_MissingReviewCommit(t *testing.T) {
 
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()
+	registerClaimReviewerTaskTestAgents(state)
 	worktree := ".worktrees/task-1"
 	// Task is READY_FOR_REVIEW but missing ReviewCommit (corrupted state)
 	state.Tasks = []models.Task{
@@ -333,6 +466,7 @@ func TestClaimReviewerTask_CodePlanReviewerExplicitRole(t *testing.T) {
 
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()
+	registerClaimReviewerTaskTestAgents(state)
 	worktree := ".worktrees/plan-task-1"
 	reviewCommit := "abc123"
 	state.Tasks = []models.Task{
@@ -347,10 +481,7 @@ func TestClaimReviewerTask_CodePlanReviewerExplicitRole(t *testing.T) {
 			Created:      now,
 		},
 	}
-	state.Agents["code-plan-reviewer-1"] = models.Agent{
-		Role:   models.RoleCodePlanReviewer,
-		Status: models.AgentStatusIdle,
-	}
+	state.Agents["code-plan-reviewer-1"] = testhelpers.RegisteredTestAgent(models.RoleCodePlanReviewer)
 	testhelpers.WriteInitialState(t, stateFile, state)
 
 	result, err := ClaimReviewerTask(ClaimReviewerTaskInput{
@@ -392,6 +523,7 @@ func TestClaimReviewerTask_SkipsAlreadyReviewing(t *testing.T) {
 
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()
+	registerClaimReviewerTaskTestAgents(state)
 	worktree1 := ".worktrees/task-reviewing"
 	worktree2 := ".worktrees/task-available"
 	reviewer := "code-reviewer-99"
@@ -445,6 +577,7 @@ func TestClaimReviewerTask_PartiallyApproved(t *testing.T) {
 
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()
+	registerClaimReviewerTaskTestAgents(state)
 	worktree := ".worktrees/task-pa"
 	reviewCommit := "abc123"
 	state.Tasks = []models.Task{
@@ -462,10 +595,7 @@ func TestClaimReviewerTask_PartiallyApproved(t *testing.T) {
 			},
 		},
 	}
-	state.Agents["code-reviewer-1"] = models.Agent{
-		Role:   "code-reviewer",
-		Status: models.AgentStatusIdle,
-	}
+	state.Agents["code-reviewer-1"] = testhelpers.RegisteredTestAgent("code-reviewer")
 	testhelpers.WriteInitialState(t, stateFile, state)
 
 	result, err := ClaimReviewerTask(ClaimReviewerTaskInput{
@@ -509,6 +639,7 @@ func TestClaimReviewerTask_ClaimPriority_PartiallyApprovedOverSubmitted(t *testi
 
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()
+	registerClaimReviewerTaskTestAgents(state)
 	wt1 := ".worktrees/task-submitted"
 	wt2 := ".worktrees/task-pa"
 	rc1 := "abc123"
@@ -564,6 +695,7 @@ func TestClaimReviewerTask_DiversityWithApprovals(t *testing.T) {
 
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()
+	registerClaimReviewerTaskTestAgents(state)
 	wt1 := ".worktrees/task-same"
 	wt2 := ".worktrees/task-diverse"
 	rc1 := "abc123"
@@ -597,11 +729,9 @@ func TestClaimReviewerTask_DiversityWithApprovals(t *testing.T) {
 		},
 	}
 	// Claimer is google provider — should prefer task-diverse (approved by anthropic)
-	state.Agents["code-reviewer-1"] = models.Agent{
-		Role:     "code-reviewer",
-		Status:   models.AgentStatusIdle,
-		Provider: "google",
-	}
+	googleReviewer := testhelpers.RegisteredTestAgent("code-reviewer")
+	googleReviewer.Provider = "google"
+	state.Agents["code-reviewer-1"] = googleReviewer
 	testhelpers.WriteInitialState(t, stateFile, state)
 
 	// Run multiple times to verify diversity preference is deterministic
@@ -625,11 +755,9 @@ func TestClaimReviewerTask_DiversityWithApprovals(t *testing.T) {
 		state.Tasks[1].Status = models.TaskStatusPartiallyApproved
 		state.Tasks[1].ReviewingBy = nil
 		state.Tasks[1].ReviewLeaseExpires = nil
-		state.Agents["code-reviewer-1"] = models.Agent{
-			Role:     "code-reviewer",
-			Status:   models.AgentStatusIdle,
-			Provider: "google",
-		}
+		googleReviewer = testhelpers.RegisteredTestAgent("code-reviewer")
+		googleReviewer.Provider = "google"
+		state.Agents["code-reviewer-1"] = googleReviewer
 		testhelpers.WriteInitialState(t, stateFile, state)
 	}
 }
@@ -802,6 +930,12 @@ func TestClaimReviewerTask_DiversityFreshSubmissions(t *testing.T) {
 	})
 }
 
+func registerClaimReviewerTaskTestAgents(state *models.State) {
+	state.Agents["code-reviewer-1"] = testhelpers.RegisteredTestAgent("code-reviewer")
+	state.Agents["code-reviewer-2"] = testhelpers.RegisteredTestAgent("code-reviewer")
+	state.Agents["code-plan-reviewer-1"] = testhelpers.RegisteredTestAgent("code-plan-reviewer")
+}
+
 // diversityPairDef defines a minimal role-pair for diversity testing.
 type diversityPairDef struct {
 	reviewer  string
@@ -866,6 +1000,7 @@ func TestClaimReviewerTask_ReviewClaimCooldown(t *testing.T) {
 
 		now := time.Now().UTC()
 		state := testhelpers.CreateValidState()
+		registerClaimReviewerTaskTestAgents(state)
 		worktree := ".worktrees/task-1"
 		reviewCommit := "abc123"
 		state.Tasks = []models.Task{
@@ -886,10 +1021,7 @@ func TestClaimReviewerTask_ReviewClaimCooldown(t *testing.T) {
 				},
 			},
 		}
-		state.Agents["code-reviewer-1"] = models.Agent{
-			Role:   models.RoleCodeReviewer,
-			Status: models.AgentStatusIdle,
-		}
+		state.Agents["code-reviewer-1"] = testhelpers.RegisteredTestAgent(models.RoleCodeReviewer)
 		testhelpers.WriteInitialState(t, stateFile, state)
 
 		_, err := ClaimReviewerTask(ClaimReviewerTaskInput{
@@ -912,6 +1044,7 @@ func TestClaimReviewerTask_ReviewClaimCooldown(t *testing.T) {
 
 		now := time.Now().UTC()
 		state := testhelpers.CreateValidState()
+		registerClaimReviewerTaskTestAgents(state)
 		worktree := ".worktrees/task-1"
 		reviewCommit := "abc123"
 		state.Tasks = []models.Task{
@@ -932,10 +1065,7 @@ func TestClaimReviewerTask_ReviewClaimCooldown(t *testing.T) {
 				},
 			},
 		}
-		state.Agents["code-reviewer-1"] = models.Agent{
-			Role:   models.RoleCodeReviewer,
-			Status: models.AgentStatusIdle,
-		}
+		state.Agents["code-reviewer-1"] = testhelpers.RegisteredTestAgent(models.RoleCodeReviewer)
 		testhelpers.WriteInitialState(t, stateFile, state)
 
 		_, err := ClaimReviewerTask(ClaimReviewerTaskInput{
@@ -958,6 +1088,7 @@ func TestClaimReviewerTask_ReviewClaimCooldown(t *testing.T) {
 
 		now := time.Now().UTC()
 		state := testhelpers.CreateValidState()
+		registerClaimReviewerTaskTestAgents(state)
 		worktree := ".worktrees/task-1"
 		reviewCommit := "abc123"
 		state.Tasks = []models.Task{
@@ -978,10 +1109,7 @@ func TestClaimReviewerTask_ReviewClaimCooldown(t *testing.T) {
 				},
 			},
 		}
-		state.Agents["code-reviewer-1"] = models.Agent{
-			Role:   models.RoleCodeReviewer,
-			Status: models.AgentStatusIdle,
-		}
+		state.Agents["code-reviewer-1"] = testhelpers.RegisteredTestAgent(models.RoleCodeReviewer)
 		testhelpers.WriteInitialState(t, stateFile, state)
 
 		result, err := ClaimReviewerTask(ClaimReviewerTaskInput{
@@ -1004,6 +1132,7 @@ func TestClaimReviewerTask_ReviewClaimCooldown(t *testing.T) {
 
 		now := time.Now().UTC()
 		state := testhelpers.CreateValidState()
+		registerClaimReviewerTaskTestAgents(state)
 		worktree := ".worktrees/task-1"
 		reviewCommit := "abc123"
 		state.Tasks = []models.Task{
@@ -1024,10 +1153,7 @@ func TestClaimReviewerTask_ReviewClaimCooldown(t *testing.T) {
 				},
 			},
 		}
-		state.Agents["code-reviewer-1"] = models.Agent{
-			Role:   models.RoleCodeReviewer,
-			Status: models.AgentStatusIdle,
-		}
+		state.Agents["code-reviewer-1"] = testhelpers.RegisteredTestAgent(models.RoleCodeReviewer)
 		testhelpers.WriteInitialState(t, stateFile, state)
 
 		result, err := ClaimReviewerTask(ClaimReviewerTaskInput{
@@ -1050,6 +1176,7 @@ func TestClaimReviewerTask_ReviewClaimCooldown(t *testing.T) {
 
 		now := time.Now().UTC()
 		state := testhelpers.CreateValidState()
+		registerClaimReviewerTaskTestAgents(state)
 		wt1 := ".worktrees/task-1"
 		wt2 := ".worktrees/task-2"
 		rc1 := "abc123"
@@ -1088,10 +1215,7 @@ func TestClaimReviewerTask_ReviewClaimCooldown(t *testing.T) {
 				},
 			},
 		}
-		state.Agents["code-reviewer-1"] = models.Agent{
-			Role:   models.RoleCodeReviewer,
-			Status: models.AgentStatusIdle,
-		}
+		state.Agents["code-reviewer-1"] = testhelpers.RegisteredTestAgent(models.RoleCodeReviewer)
 		testhelpers.WriteInitialState(t, stateFile, state)
 
 		_, err := ClaimReviewerTask(ClaimReviewerTaskInput{
@@ -1114,6 +1238,7 @@ func TestClaimReviewerTask_ReviewClaimCooldown(t *testing.T) {
 
 		now := time.Now().UTC()
 		state := testhelpers.CreateValidState()
+		registerClaimReviewerTaskTestAgents(state)
 		wt1 := ".worktrees/task-cooldown"
 		wt2 := ".worktrees/task-available"
 		rc1 := "abc123"
@@ -1146,10 +1271,7 @@ func TestClaimReviewerTask_ReviewClaimCooldown(t *testing.T) {
 				History:      []models.TaskHistoryEntry{},
 			},
 		}
-		state.Agents["code-reviewer-1"] = models.Agent{
-			Role:   models.RoleCodeReviewer,
-			Status: models.AgentStatusIdle,
-		}
+		state.Agents["code-reviewer-1"] = testhelpers.RegisteredTestAgent(models.RoleCodeReviewer)
 		testhelpers.WriteInitialState(t, stateFile, state)
 
 		result, err := ClaimReviewerTask(ClaimReviewerTaskInput{

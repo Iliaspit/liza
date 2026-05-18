@@ -117,10 +117,7 @@ func TestAwaitVerdict_OwnershipAcquired(t *testing.T) {
 		Agent: strPtr("coder-1"),
 	})
 	state.Tasks = []models.Task{task}
-	state.Agents["coder-1"] = models.Agent{
-		Role:   "coder",
-		Status: models.AgentStatusWaiting,
-	}
+	state.Agents["coder-1"] = testhelpers.RegisteredTestAgent("coder")
 	testhelpers.WriteInitialState(t, stateFile, state)
 
 	// Use a pre-cancelled context so the event loop exits immediately
@@ -151,10 +148,7 @@ func TestAwaitVerdict_ReviewingStatus(t *testing.T) {
 		Agent: strPtr("coder-1"),
 	})
 	state.Tasks = []models.Task{task}
-	state.Agents["coder-1"] = models.Agent{
-		Role:   "coder",
-		Status: models.AgentStatusWaiting,
-	}
+	state.Agents["coder-1"] = testhelpers.RegisteredTestAgent("coder")
 	testhelpers.WriteInitialState(t, stateFile, state)
 
 	// REVIEWING is in the awaitable set — should pass preconditions.
@@ -184,10 +178,7 @@ func TestAwaitVerdict_BudgetExhausted_IterationLimit(t *testing.T) {
 	task.Iteration = 4
 	state.Config.MaxCoderIterations = 4
 	state.Tasks = []models.Task{task}
-	state.Agents["coder-1"] = models.Agent{
-		Role:   "coder",
-		Status: models.AgentStatusWaiting,
-	}
+	state.Agents["coder-1"] = testhelpers.RegisteredTestAgent("coder")
 	testhelpers.WriteInitialState(t, stateFile, state)
 
 	_, err := AwaitVerdict(context.Background(), tmpDir, "task-1", "coder-1", 30*time.Second)
@@ -223,10 +214,7 @@ func TestAwaitVerdict_BudgetExhausted_ReviewCycleLimit(t *testing.T) {
 	task.ReviewCyclesCurrent = 5
 	state.Config.MaxReviewCycles = 5
 	state.Tasks = []models.Task{task}
-	state.Agents["coder-1"] = models.Agent{
-		Role:   "coder",
-		Status: models.AgentStatusWaiting,
-	}
+	state.Agents["coder-1"] = testhelpers.RegisteredTestAgent("coder")
 	testhelpers.WriteInitialState(t, stateFile, state)
 
 	_, err := AwaitVerdict(context.Background(), tmpDir, "task-1", "coder-1", 30*time.Second)
@@ -264,10 +252,7 @@ func TestAwaitVerdict_BudgetWithinLimits(t *testing.T) {
 	state.Config.MaxCoderIterations = 10
 	state.Config.MaxReviewCycles = 5
 	state.Tasks = []models.Task{task}
-	state.Agents["coder-1"] = models.Agent{
-		Role:   "coder",
-		Status: models.AgentStatusWaiting,
-	}
+	state.Agents["coder-1"] = testhelpers.RegisteredTestAgent("coder")
 	testhelpers.WriteInitialState(t, stateFile, state)
 
 	// Use pre-cancelled context so event loop exits immediately after budget gate passes.
@@ -298,10 +283,7 @@ func TestAwaitVerdict_Approved(t *testing.T) {
 		Agent: strPtr("coder-1"),
 	})
 	state.Tasks = []models.Task{task}
-	state.Agents["coder-1"] = models.Agent{
-		Role:   "coder",
-		Status: models.AgentStatusWaiting,
-	}
+	state.Agents["coder-1"] = testhelpers.RegisteredTestAgent("coder")
 	bb := testhelpers.WriteInitialState(t, stateFile, state)
 
 	var result *AwaitVerdictResult
@@ -377,10 +359,7 @@ func TestAwaitVerdict_Rejected_SameAttempt(t *testing.T) {
 		Agent: strPtr("coder-1"),
 	})
 	state.Tasks = []models.Task{task}
-	state.Agents["coder-1"] = models.Agent{
-		Role:   "coder",
-		Status: models.AgentStatusWaiting,
-	}
+	state.Agents["coder-1"] = testhelpers.RegisteredTestAgent("coder")
 	bb := testhelpers.WriteInitialState(t, stateFile, state)
 
 	var result *AwaitVerdictResult
@@ -413,7 +392,7 @@ func TestAwaitVerdict_Rejected_SameAttempt(t *testing.T) {
 		t.Fatalf("AwaitVerdict error: %v", awaitErr)
 	}
 	if result.Verdict != VerdictRejected {
-		t.Errorf("Verdict = %q, want REJECTED", result.Verdict)
+		t.Errorf("Verdict = %q, want REJECTED; reason=%q", result.Verdict, result.Reason)
 	}
 	if result.Reason == "" {
 		t.Error("expected non-empty Reason")
@@ -476,10 +455,7 @@ func TestAwaitVerdict_Rejected_ObservedByTickWhenWatcherSilent(t *testing.T) {
 		Agent: strPtr("coder-1"),
 	})
 	state.Tasks = []models.Task{task}
-	state.Agents["coder-1"] = models.Agent{
-		Role:   "coder",
-		Status: models.AgentStatusWaiting,
-	}
+	state.Agents["coder-1"] = testhelpers.RegisteredTestAgent("coder")
 	bb := testhelpers.WriteInitialState(t, stateFile, state)
 
 	var result *AwaitVerdictResult
@@ -521,7 +497,7 @@ func TestAwaitVerdict_Rejected_ObservedByTickWhenWatcherSilent(t *testing.T) {
 		t.Fatalf("AwaitVerdict error: %v", awaitErr)
 	}
 	if result.Verdict != VerdictRejected {
-		t.Errorf("Verdict = %q, want REJECTED", result.Verdict)
+		t.Errorf("Verdict = %q, want REJECTED; reason=%q", result.Verdict, result.Reason)
 	}
 	if result.ReviewerAgent != "code-reviewer-1" {
 		t.Errorf("ReviewerAgent = %q, want code-reviewer-1", result.ReviewerAgent)
@@ -551,10 +527,7 @@ func TestAwaitVerdict_Rejected_NewAttempt(t *testing.T) {
 		Agent: strPtr("coder-1"),
 	})
 	state.Tasks = []models.Task{task}
-	state.Agents["coder-1"] = models.Agent{
-		Role:   "coder",
-		Status: models.AgentStatusWaiting,
-	}
+	state.Agents["coder-1"] = testhelpers.RegisteredTestAgent("coder")
 	bb := testhelpers.WriteInitialState(t, stateFile, state)
 
 	var result *AwaitVerdictResult
@@ -589,7 +562,7 @@ func TestAwaitVerdict_Rejected_NewAttempt(t *testing.T) {
 		t.Fatalf("AwaitVerdict error: %v", awaitErr)
 	}
 	if result.Verdict != VerdictNewAttempt {
-		t.Errorf("Verdict = %q, want NEW_ATTEMPT", result.Verdict)
+		t.Errorf("Verdict = %q, want NEW_ATTEMPT; reason=%q", result.Verdict, result.Reason)
 	}
 
 	// Verify ownership released.
@@ -1085,14 +1058,8 @@ func TestAwaitVerdict_RaceGuard(t *testing.T) {
 		Agent: strPtr("coder-1"),
 	})
 	state.Tasks = []models.Task{task}
-	state.Agents["coder-1"] = models.Agent{
-		Role:   "coder",
-		Status: models.AgentStatusWaiting,
-	}
-	state.Agents["coder-2"] = models.Agent{
-		Role:   "coder",
-		Status: models.AgentStatusIdle,
-	}
+	state.Agents["coder-1"] = testhelpers.RegisteredTestAgent("coder")
+	state.Agents["coder-2"] = testhelpers.RegisteredTestAgent("coder")
 	bb := testhelpers.WriteInitialState(t, stateFile, state)
 
 	var result *AwaitVerdictResult

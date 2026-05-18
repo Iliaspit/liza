@@ -774,6 +774,8 @@ func loadEnvFile(path string) []string {
 func RunSupervisor(ctx context.Context, config SupervisorConfig) error {
 	bb := db.For(config.StatePath)
 	lizaPaths := paths.New(config.ProjectRoot)
+	supervisorCtx, cancelSupervisor := context.WithCancel(ctx)
+	defer cancelSupervisor()
 
 	// Validate identity
 	if err := validateIdentity(config.AgentID, config.Role); err != nil {
@@ -813,8 +815,9 @@ func RunSupervisor(ctx context.Context, config SupervisorConfig) error {
 	// the entire loop (including IDLE wait-for-work periods, not just
 	// during CLI execution). Without this, an IDLE agent's lease can
 	// expire, causing auto-assigned ID collision with new agents.
-	heartbeatCtx, cancelHeartbeat := context.WithCancel(ctx)
+	heartbeatCtx, cancelHeartbeat := context.WithCancel(supervisorCtx)
 	defer cancelHeartbeat()
+	heartbeatErrCh := make(chan error, 1)
 
 	hb := NewHeartbeat(HeartbeatConfig{
 		AgentID:   config.AgentID,
@@ -825,8 +828,38 @@ func RunSupervisor(ctx context.Context, config SupervisorConfig) error {
 	go func() {
 		if err := hb.Start(heartbeatCtx); err != nil && err != context.Canceled {
 			GetLogger().Error("Heartbeat error", "error", err, "agent_id", config.AgentID)
+			select {
+			case heartbeatErrCh <- err:
+			default:
+			}
+			cancelSupervisor()
 		}
 	}()
+	checkHeartbeat := func() error {
+		select {
+		case err := <-heartbeatErrCh:
+			return fmt.Errorf("heartbeat stopped for agent %s: %w", config.AgentID, err)
+		default:
+			return nil
+		}
+	}
+	waitForSupervisorDelay := func(delay time.Duration) error {
+		timer := time.NewTimer(delay)
+		defer timer.Stop()
+
+		select {
+		case <-supervisorCtx.Done():
+			if hbErr := checkHeartbeat(); hbErr != nil {
+				return hbErr
+			}
+			if ctx.Err() != nil {
+				return nil
+			}
+			return supervisorCtx.Err()
+		case <-timer.C:
+			return nil
+		}
+	}
 
 	pollInterval, maxWait := strategy.WaitConfig(state)
 
@@ -843,8 +876,17 @@ func RunSupervisor(ctx context.Context, config SupervisorConfig) error {
 	spinTracker := newSpinningTracker()
 
 	for {
+		if err := checkHeartbeat(); err != nil {
+			return err
+		}
 		// Check context cancellation (signal received)
-		if ctx.Err() != nil {
+		if supervisorCtx.Err() != nil {
+			if hbErr := checkHeartbeat(); hbErr != nil {
+				return hbErr
+			}
+			if ctx.Err() == nil {
+				return supervisorCtx.Err()
+			}
 			GetLogger().Info("Signal received, shutting down")
 			return nil
 		}
@@ -864,7 +906,10 @@ func RunSupervisor(ctx context.Context, config SupervisorConfig) error {
 		}
 
 		// Wait while PAUSE/CHECKPOINT
-		if err := waitWhilePaused(ctx, config.ProjectRoot); err != nil {
+		if err := waitWhilePaused(supervisorCtx, config.ProjectRoot); err != nil {
+			if hbErr := checkHeartbeat(); hbErr != nil {
+				return hbErr
+			}
 			if errors.Is(err, errGoalComplete) {
 				GetLogger().Info("Goal complete, supervisor exiting")
 				return nil
@@ -873,8 +918,11 @@ func RunSupervisor(ctx context.Context, config SupervisorConfig) error {
 		}
 
 		// Pre-work (reviewer: merge handling; others: no-op)
-		shouldContinue, err := strategy.PreWork(ctx, bb, config)
+		shouldContinue, err := strategy.PreWork(supervisorCtx, bb, config)
 		if err != nil {
+			if hbErr := checkHeartbeat(); hbErr != nil {
+				return hbErr
+			}
 			return err
 		}
 		if shouldContinue {
@@ -882,8 +930,11 @@ func RunSupervisor(ctx context.Context, config SupervisorConfig) error {
 		}
 
 		// Wait for work
-		hasWork, err := strategy.WaitForWork(ctx, bb, config, pollInterval, maxWait)
+		hasWork, err := strategy.WaitForWork(supervisorCtx, bb, config, pollInterval, maxWait)
 		if err != nil {
+			if hbErr := checkHeartbeat(); hbErr != nil {
+				return hbErr
+			}
 			return err
 		}
 		if !hasWork {
@@ -894,7 +945,9 @@ func RunSupervisor(ctx context.Context, config SupervisorConfig) error {
 		// Claim task
 		taskID, claimedTaskID, err := strategy.ClaimTask(config, bb)
 		if err != nil {
-			time.Sleep(5 * time.Second)
+			if err := waitForSupervisorDelay(5 * time.Second); err != nil {
+				return err
+			}
 			continue
 		}
 
@@ -981,8 +1034,11 @@ func RunSupervisor(ctx context.Context, config SupervisorConfig) error {
 
 		// Execute agent
 		additionalDirs := codexAdditionalDirs(config.ProjectRoot, stateBefore, taskID)
-		exitCode, currentOutput, err := executeAgent(ctx, config, prompt, additionalDirs, effectiveTask)
+		exitCode, currentOutput, err := executeAgent(supervisorCtx, config, prompt, additionalDirs, effectiveTask)
 		if err != nil {
+			if hbErr := checkHeartbeat(); hbErr != nil {
+				return hbErr
+			}
 			return fmt.Errorf("agent execution error: %w", err)
 		}
 
@@ -1014,7 +1070,9 @@ func RunSupervisor(ctx context.Context, config SupervisorConfig) error {
 				GetLogger().Warn("Exit-42 tracker failed, using default retry delay",
 					"error", trackErr,
 					"task_id", restartTaskID)
-				time.Sleep(2 * time.Second)
+				if err := waitForSupervisorDelay(2 * time.Second); err != nil {
+					return err
+				}
 				break
 			}
 
@@ -1030,7 +1088,9 @@ func RunSupervisor(ctx context.Context, config SupervisorConfig) error {
 				"task_id", restartTaskID,
 				"restart_count", outcome.RestartCount,
 				"delay_seconds", int(outcome.Delay/time.Second))
-			time.Sleep(outcome.Delay)
+			if err := waitForSupervisorDelay(outcome.Delay); err != nil {
+				return err
+			}
 		default:
 			exit42Tracker.reset(taskID)
 
@@ -1067,7 +1127,9 @@ func RunSupervisor(ctx context.Context, config SupervisorConfig) error {
 			}
 
 			GetLogger().Error("Agent crashed, restarting", "exit_code", exitCode, "delay_seconds", 5)
-			time.Sleep(5 * time.Second)
+			if err := waitForSupervisorDelay(5 * time.Second); err != nil {
+				return err
+			}
 		}
 
 		// Clear initial task after first run

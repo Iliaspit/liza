@@ -77,6 +77,11 @@ func ClaimReviewerTask(input ClaimReviewerTaskInput) (*ClaimReviewerTaskResult, 
 	pr := pb.pr
 
 	err = bb.Modify(func(state *models.State) error {
+		claimingAgent, err := requireRegisteredClaimAgent(state, input.AgentID, role)
+		if err != nil {
+			return err
+		}
+
 		// Find reviewable task with highest priority
 		var candidates []*models.Task
 		for i := range state.Tasks {
@@ -96,10 +101,7 @@ func ClaimReviewerTask(input ClaimReviewerTaskInput) (*ClaimReviewerTaskResult, 
 		}
 
 		// Look up claiming reviewer's provider from agent state.
-		claimerProvider := ""
-		if agent, ok := state.Agents[input.AgentID]; ok {
-			claimerProvider = agent.Provider
-		}
+		claimerProvider := claimingAgent.Provider
 
 		// Filter by doer-provider diversity: when provider-diversity is configured,
 		// block reviewers that share the doer's provider if a different-provider
@@ -131,7 +133,7 @@ func ClaimReviewerTask(input ClaimReviewerTaskInput) (*ClaimReviewerTaskResult, 
 		task.ReviewingBy = &input.AgentID
 		task.ReviewLeaseExpires = &leaseExpires
 
-		agent := state.Agents[input.AgentID]
+		agent := claimingAgent
 		agent.Status = models.AgentStatusReviewing
 		currentTask := task.ID
 		agent.CurrentTask = &currentTask

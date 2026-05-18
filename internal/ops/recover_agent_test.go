@@ -41,6 +41,145 @@ func TestRecoverAgent_NotFound_Idempotent(t *testing.T) {
 	}
 }
 
+func TestRecoverAgent_MissingAgentReleasesTaskSideClaims(t *testing.T) {
+	tmpDir := t.TempDir()
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+
+	now := time.Now().UTC()
+	leaseExpires := now.Add(30 * time.Minute)
+	state := testhelpers.CreateValidState()
+	state.Tasks = []models.Task{
+		{
+			ID:           "task-doer",
+			Description:  "orphaned doer claim",
+			Status:       models.TaskStatusImplementing,
+			RolePair:     "coding-pair",
+			Priority:     1,
+			AssignedTo:   strPtr("ghost-1"),
+			LeaseExpires: &leaseExpires,
+			SpecRef:      "spec.md",
+			DoneWhen:     "done",
+			Scope:        "scope",
+			Created:      now,
+		},
+		{
+			ID:                 "task-reviewer",
+			Description:        "orphaned reviewer claim",
+			Status:             models.TaskStatusReviewing,
+			RolePair:           "coding-pair",
+			Priority:           1,
+			AssignedTo:         strPtr("coder-1"),
+			ReviewCommit:       strPtr("abc123"),
+			ReviewingBy:        strPtr("ghost-1"),
+			ReviewLeaseExpires: &leaseExpires,
+			SpecRef:            "spec.md",
+			DoneWhen:           "done",
+			Scope:              "scope",
+			Created:            now,
+		},
+	}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	result, err := RecoverAgent(tmpDir, "ghost-1", true, "missing row cleanup")
+	if err != nil {
+		t.Fatalf("RecoverAgent() error: %v", err)
+	}
+	if result.AlreadyClean {
+		t.Fatal("RecoverAgent should not report clean while task-side claims exist")
+	}
+	if !result.ClaimReleased {
+		t.Fatal("Expected orphaned task-side claims to be released")
+	}
+	if result.AgentDeleted {
+		t.Fatal("AgentDeleted should be false when the row was already missing")
+	}
+
+	readState, err := db.New(stateFile).Read()
+	if err != nil {
+		t.Fatalf("Failed to read state: %v", err)
+	}
+	doerTask := readState.FindTask("task-doer")
+	if doerTask == nil {
+		t.Fatal("task-doer should still exist")
+	}
+	if doerTask.AssignedTo != nil || doerTask.LeaseExpires != nil {
+		t.Fatalf("Doer claim still present: assigned=%v lease=%v", doerTask.AssignedTo, doerTask.LeaseExpires)
+	}
+	if doerTask.Status != models.TaskStatusReady {
+		t.Fatalf("Doer task status = %s, want READY", doerTask.Status)
+	}
+
+	reviewerTask := readState.FindTask("task-reviewer")
+	if reviewerTask == nil {
+		t.Fatal("task-reviewer should still exist")
+	}
+	if reviewerTask.ReviewingBy != nil || reviewerTask.ReviewLeaseExpires != nil {
+		t.Fatalf("Reviewer claim still present: reviewing_by=%v lease=%v", reviewerTask.ReviewingBy, reviewerTask.ReviewLeaseExpires)
+	}
+	if reviewerTask.Status != models.TaskStatusReadyForReview {
+		t.Fatalf("Reviewer task status = %s, want READY_FOR_REVIEW", reviewerTask.Status)
+	}
+}
+
+func TestRecoverAgent_ReleasesTaskSideDoerClaimWhenAgentCurrentTaskMissing(t *testing.T) {
+	tmpDir := t.TempDir()
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+
+	now := time.Now().UTC()
+	leaseExpires := now.Add(30 * time.Minute)
+	state := testhelpers.CreateValidState()
+	state.Agents["coder-1"] = models.Agent{
+		Status:       models.AgentStatusIdle,
+		LeaseExpires: &leaseExpires,
+	}
+	state.Tasks = []models.Task{
+		{
+			ID:           "task-1",
+			Description:  "orphaned claim",
+			Status:       models.TaskStatusImplementing,
+			RolePair:     "coding-pair",
+			Priority:     1,
+			AssignedTo:   strPtr("coder-1"),
+			LeaseExpires: &leaseExpires,
+			SpecRef:      "spec.md",
+			DoneWhen:     "done",
+			Scope:        "scope",
+			Created:      now,
+		},
+	}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	result, err := RecoverAgent(tmpDir, "coder-1", true, "ghost cleanup")
+	if err != nil {
+		t.Fatalf("RecoverAgent() error: %v", err)
+	}
+	if !result.ClaimReleased {
+		t.Fatal("Expected task-side doer claim to be released")
+	}
+	if result.Role != "" {
+		t.Fatalf("Result role = %q, want empty role for ghost agent", result.Role)
+	}
+
+	bb := db.New(stateFile)
+	readState, err := bb.Read()
+	if err != nil {
+		t.Fatalf("Failed to read state: %v", err)
+	}
+	if _, exists := readState.Agents["coder-1"]; exists {
+		t.Fatal("Agent should be deleted")
+	}
+	task := readState.FindTask("task-1")
+	if task == nil {
+		t.Fatal("Task should still exist")
+	}
+	if task.AssignedTo != nil || task.LeaseExpires != nil {
+		t.Fatalf("Task claim still present: assigned=%v lease=%v", task.AssignedTo, task.LeaseExpires)
+	}
+	if task.Status != models.TaskStatusReady {
+		t.Fatalf("Task status = %s, want READY", task.Status)
+	}
+}
+
 func TestRecoverAgent_CoderWithImplementingTask(t *testing.T) {
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)

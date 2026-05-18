@@ -65,6 +65,9 @@ func (h *Heartbeat) Start(ctx context.Context) error {
 			return nil
 		case <-ticker.C:
 			if err := h.beat(); err != nil {
+				if errors.IsNotFound(err) {
+					return err
+				}
 				// Non-fatal: supervisors detect stale agents via watch command
 				logger.Error("Heartbeat update failed", "error", err, "agent_id", h.agentID)
 			}

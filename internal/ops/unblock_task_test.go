@@ -111,6 +111,14 @@ func TestUnblockTask_RejectsAssignToWithoutLiveProcess(t *testing.T) {
 
 	bb := db.New(stateFile)
 	testhelpers.RegisterTestAgent(t, bb, "code-planner-1", "code-planner")
+	if err := bb.Modify(func(s *models.State) error {
+		agent := s.Agents["code-planner-1"]
+		agent.PID = -1
+		s.Agents["code-planner-1"] = agent
+		return nil
+	}); err != nil {
+		t.Fatalf("Failed to corrupt agent PID: %v", err)
+	}
 
 	_, err := UnblockTask(tmpDir, "task-1", "code-planner-1", "repair verified", "orchestrator-1")
 	if err == nil {

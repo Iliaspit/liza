@@ -28,6 +28,7 @@ package testhelpers
 // that satisfies all validation rules from the original bash implementation.
 
 import (
+	"os"
 	"testing"
 	"time"
 
@@ -348,24 +349,31 @@ func TransitionToReviewing(t *testing.T, bb *db.Blackboard, taskID, reviewerID s
 func RegisterTestAgent(t *testing.T, bb *db.Blackboard, agentID, role string) {
 	t.Helper()
 
-	now := time.Now().UTC()
-	leaseExpires := now.Add(30 * time.Minute)
-
 	err := bb.Modify(func(state *models.State) error {
-		state.Agents[agentID] = models.Agent{
-			Role:            role,
-			Status:          models.AgentStatusWaiting,
-			Heartbeat:       now,
-			LeaseExpires:    &leaseExpires,
-			CurrentTask:     nil,
-			Terminal:        "test",
-			IterationsTotal: 0,
-			ContextPercent:  0,
-		}
+		state.Agents[agentID] = RegisteredTestAgent(role)
 		return nil
 	})
 	if err != nil {
 		t.Fatalf("Failed to register agent %s: %v", agentID, err)
+	}
+}
+
+// RegisteredTestAgent returns an agent record equivalent to a live supervisor
+// registration for unit tests that construct state before writing it.
+func RegisteredTestAgent(role string) models.Agent {
+	now := time.Now().UTC()
+	leaseExpires := now.Add(30 * time.Minute)
+	return models.Agent{
+		Role:            role,
+		Status:          models.AgentStatusWaiting,
+		Heartbeat:       now,
+		LeaseExpires:    &leaseExpires,
+		CurrentTask:     nil,
+		Terminal:        "test",
+		Provider:        "test",
+		IterationsTotal: 0,
+		ContextPercent:  0,
+		PID:             os.Getpid(),
 	}
 }
 

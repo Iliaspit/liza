@@ -850,13 +850,21 @@ func TestAwaitResubmission_ReviewLeaseExpires(t *testing.T) {
 	testhelpers.WaitForAsyncSetup()
 
 	// Verify initial lease: should be approximately now + timeout + 5min.
-	s, readErr := bb.Read()
-	if readErr != nil {
-		t.Fatalf("failed to read state: %v", readErr)
-	}
-	tk := s.FindTask("task-1")
-	if tk.ReviewLeaseExpires == nil {
-		t.Fatal("ReviewLeaseExpires should be set on entry")
+	var tk *models.Task
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		s, readErr := bb.Read()
+		if readErr != nil {
+			t.Fatalf("failed to read state: %v", readErr)
+		}
+		tk = s.FindTask("task-1")
+		if tk != nil && tk.ReviewLeaseExpires != nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("ReviewLeaseExpires should be set on entry")
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 	expectedEntryLease := now.Add(timeout + 5*time.Minute)
 	entryLeaseDiff := tk.ReviewLeaseExpires.Sub(expectedEntryLease)
@@ -884,7 +892,7 @@ func TestAwaitResubmission_ReviewLeaseExpires(t *testing.T) {
 	}
 
 	// Verify refreshed lease: should be approximately now + 30min.
-	s, readErr = bb.Read()
+	s, readErr := bb.Read()
 	if readErr != nil {
 		t.Fatalf("failed to read state: %v", readErr)
 	}

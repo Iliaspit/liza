@@ -468,6 +468,55 @@ func TestSupervisor_Exit0ProviderAuditDegradedContinuesPostExecution(t *testing.
 	}
 }
 
+func TestRunSupervisor_HeartbeatMissingAgentStopsSupervisor(t *testing.T) {
+	projectRoot := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, projectRoot)
+	statePath, _ := testhelpers.SetupLizaDir(t, projectRoot)
+
+	now := time.Now().UTC()
+	taskID := "task-heartbeat-missing-agent"
+	state := testhelpers.CreateValidState()
+	state.Config.CoderPollInterval = 1
+	state.Config.DoerMaxWait = 1
+	state.Config.LeaseDuration = 300
+	state.Config.HeartbeatInterval = 1
+	state.Tasks = []models.Task{testhelpers.BuildTaskByStatus(taskID, models.TaskStatusReady, now)}
+	bb := testhelpers.WriteInitialState(t, statePath, state)
+
+	mock := &MockCLIExecutor{ExitCode: 0}
+	mock.OnExecute = func(ctx context.Context, cliName, agentID, prompt, projectRoot string, additionalDirs []string) error {
+		if err := bb.Modify(func(s *models.State) error {
+			delete(s.Agents, agentID)
+			return nil
+		}); err != nil {
+			return err
+		}
+		<-ctx.Done()
+		return ctx.Err()
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	err := RunSupervisor(ctx, SupervisorConfig{
+		AgentID:          "coder-1",
+		Role:             "coder",
+		ProjectRoot:      projectRoot,
+		StatePath:        statePath,
+		LogPath:          filepath.Join(projectRoot, ".liza", "log.yaml"),
+		SpecsDir:         filepath.Join(projectRoot, "specs"),
+		CLIName:          "codex",
+		Executor:         mock,
+		ExecutionTimeout: 5 * time.Second,
+	})
+	if err == nil {
+		t.Fatal("RunSupervisor() error = nil, want heartbeat failure")
+	}
+	if !strings.Contains(err.Error(), "heartbeat stopped for agent coder-1") {
+		t.Fatalf("RunSupervisor() error = %v, want heartbeat stopped", err)
+	}
+}
+
 func TestExit42RestartTracker_ExponentialBackoffAndCap(t *testing.T) {
 	tmpDir := t.TempDir()
 	statePath, _ := testhelpers.SetupLizaDir(t, tmpDir)
@@ -699,6 +748,7 @@ func TestRunAgent_ExtractedOps_Integration(t *testing.T) {
 	now := time.Now().UTC()
 
 	state := testhelpers.CreateValidState()
+	state.Agents["code-reviewer-1"] = testhelpers.RegisteredTestAgent("code-reviewer")
 
 	// Create a task ready for review
 	taskID := "task-1"
@@ -813,6 +863,7 @@ func TestExtractedOps_BehavioralParity(t *testing.T) {
 		now := time.Now().UTC()
 
 		state := testhelpers.CreateValidState()
+		state.Agents["code-reviewer-1"] = testhelpers.RegisteredTestAgent("code-reviewer")
 
 		// Create multiple tasks with different priorities
 		task1 := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusReadyForReview, now)

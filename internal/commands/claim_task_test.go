@@ -323,9 +323,16 @@ func TestClaimTaskCommand(t *testing.T) {
 
 			// Add agent if busy
 			if tt.agentBusy {
-				initialState.Agents[tt.agentID] = models.Agent{
-					Status:      models.AgentStatusWorking,
-					CurrentTask: testhelpers.StringPtr("task-other"),
+				agent := testhelpers.RegisteredTestAgent("coder")
+				agent.Status = models.AgentStatusWorking
+				agent.CurrentTask = testhelpers.StringPtr("task-other")
+				initialState.Agents[tt.agentID] = agent
+			} else if tt.agentID != "" {
+				initialState.Agents[tt.agentID] = testhelpers.RegisteredTestAgent("coder")
+			}
+			if tt.previousAgent != nil {
+				if _, exists := initialState.Agents[*tt.previousAgent]; !exists {
+					initialState.Agents[*tt.previousAgent] = testhelpers.RegisteredTestAgent("coder")
 				}
 			}
 
@@ -520,6 +527,7 @@ func TestClaimTaskCommandIntegration(t *testing.T) {
 			LeaseDuration:      1800,
 		},
 	}
+	initialState.Agents["coder-1"] = testhelpers.RegisteredTestAgent("coder")
 
 	bb := testhelpers.WriteInitialState(t, statePath, initialState)
 

@@ -20,6 +20,7 @@ func TestMutationCommandWiring(t *testing.T) {
 			state.Tasks = []models.Task{
 				testhelpers.BuildTaskByStatus("task-claim-alpha", models.TaskStatusReady, now),
 			}
+			state.Agents["coder-42"] = testhelpers.RegisteredTestAgent("coder")
 		})
 
 		err := executeRootCommand(t, projectRoot, "claim-task", "task-claim-alpha", "coder-42")
@@ -38,7 +39,7 @@ func TestMutationCommandWiring(t *testing.T) {
 
 		agent, ok := state.Agents["coder-42"]
 		if !ok {
-			t.Fatalf("agent coder-42 not created")
+			t.Fatalf("agent coder-42 missing")
 		}
 		if agent.CurrentTask == nil || *agent.CurrentTask != "task-claim-alpha" {
 			t.Fatalf("agent current_task = %v, want task-claim-alpha", agent.CurrentTask)
