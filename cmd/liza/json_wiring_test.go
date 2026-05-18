@@ -1143,6 +1143,49 @@ func TestJSON_Validate_WithWarnings(t *testing.T) {
 	}
 }
 
+func TestJSON_ValidateRepairErrorIncludesRepairWarning(t *testing.T) {
+	projectRoot, _ := setupMutationTestProject(t, func(state *models.State) {
+		now := time.Now().UTC()
+		task := testhelpers.BuildTaskByStatus("task-validate-repair-warning", models.TaskStatusReviewing, now)
+		task.DoneWhen = "" // Keep a validation error after repair clears ownership.
+		state.Tasks = []models.Task{task}
+		state.Agents = map[string]models.Agent{
+			"code-reviewer-1": {
+				Role:         "code-reviewer",
+				Status:       models.AgentStatusIdle,
+				LeaseExpires: testhelpers.TimePtr(now.Add(30 * time.Minute)),
+				Heartbeat:    now,
+				Provider:     "anthropic",
+				PID:          os.Getpid(),
+			},
+		}
+	})
+
+	stdout, err := executeRootCommandCapture(t, projectRoot, "validate", "--json", "--skip-spec-check", "--skip-process-checks", "--repair")
+	if err == nil {
+		t.Fatalf("expected validate --json --repair to fail after repair")
+	}
+
+	env := parseEnvelope(t, stdout)
+	if env["ok"] != false {
+		t.Fatalf("expected ok=false, got %v", env["ok"])
+	}
+	warnings, ok := env["warnings"].([]any)
+	if !ok || len(warnings) == 0 {
+		t.Fatalf("expected repair warnings on error response, got %v", env["warnings"])
+	}
+	found := false
+	for _, warning := range warnings {
+		if s, ok := warning.(string); ok && strings.Contains(s, "REPAIRED: invalid active review ownership cleared for 1 task(s)") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("warnings = %v, want repair warning", warnings)
+	}
+}
+
 func TestJSON_LogSuppression(t *testing.T) {
 	projectRoot, _ := setupMutationTestProject(t, nil)
 

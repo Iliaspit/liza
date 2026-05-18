@@ -83,6 +83,23 @@ func TestWriteResult_Error(t *testing.T) {
 	}
 }
 
+func TestWriteResult_ErrorIncludesWarnings(t *testing.T) {
+	var buf bytes.Buffer
+	warnings := []string{"state repaired before validation failed"}
+	err := WriteResult(&buf, nil, warnings, fmt.Errorf("still invalid"))
+	if !errors.Is(err, ErrAlreadyWritten) {
+		t.Fatalf("err = %v, want ErrAlreadyWritten", err)
+	}
+
+	var env Envelope
+	if err := json.Unmarshal(buf.Bytes(), &env); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	if len(env.Warnings) != 1 || env.Warnings[0] != warnings[0] {
+		t.Fatalf("warnings = %v, want %v", env.Warnings, warnings)
+	}
+}
+
 func TestWriteResult_ErrorWithDetails(t *testing.T) {
 	var buf bytes.Buffer
 	inputErr := &ops.PreconditionError{

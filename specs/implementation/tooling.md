@@ -28,7 +28,7 @@ All system mechanics are provided by the `liza` Go binary (assumed in PATH). See
 |---------|---------|
 | `liza init "goal" --spec spec` | Initialize `.liza/` for new goal |
 | `liza add-task --id X ...` | Add task to blackboard (atomic, with validation) |
-| `liza validate [state] [--skip-process-checks]` | Schema validation plus live zombie-agent detection |
+| `liza validate [state] [--skip-process-checks] [--repair]` | Schema validation plus live zombie-agent detection; `--repair` clears invalid active review ownership before validation |
 | `liza tui` | Alarm monitor daemon |
 | `liza analyze` | Circuit breaker analysis (human-triggered) |
 | `liza sprint-checkpoint` | Create checkpoint and generate sprint summary |
@@ -341,6 +341,7 @@ liza add-task --id TASK_ID --desc DESCRIPTION --spec SPEC_REF \
 ```bash
 liza validate [state.yaml]
 liza validate --skip-process-checks   # Offline/archive validation only
+liza validate --repair                # Clear invalid active review ownership, then validate
 # Returns "VALID" or exits non-zero with the issue description
 ```
 
@@ -351,6 +352,9 @@ goal/project but whose PID is absent from `state.yaml`. Use
 an environment where host process state is intentionally irrelevant. Live process
 scanning currently requires Linux procfs; on hosts without procfs, validation
 emits a warning and skips the live-process check.
+
+`--repair` is intentionally narrow: it only clears task-side active review
+ownership that contradicts the reviewer agent row, then re-runs validation.
 
 **liza tui** — Monitor blackboard and alert
 ```bash

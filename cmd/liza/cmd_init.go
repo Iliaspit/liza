@@ -240,18 +240,19 @@ Returns detailed error messages if validation fails.`,
 	RunE: func(cmd *cobra.Command, args []string) (retErr error) {
 		skipSpecCheck, _ := cmd.Flags().GetBool("skip-spec-check")
 		skipProcessChecks, _ := cmd.Flags().GetBool("skip-process-checks")
+		repair, _ := cmd.Flags().GetBool("repair")
 
 		if isJSON(cmd) {
 			log.SetOutput(io.Discard)
 			defer log.SetOutput(os.Stderr)
+			var warnBuf bytes.Buffer
 			defer func() {
 				if retErr != nil && !errors.Is(retErr, jsonout.ErrAlreadyWritten) {
-					_ = jsonout.WriteResult(os.Stdout, nil, nil, retErr)
+					_ = jsonout.WriteResult(os.Stdout, nil, warningLines(warnBuf.String()), retErr)
 					retErr = jsonout.ErrAlreadyWritten
 				}
 			}()
 
-			var warnBuf bytes.Buffer
 			commands.SetWarnWriter(&warnBuf)
 			defer commands.SetWarnWriter(os.Stderr)
 
@@ -262,15 +263,9 @@ Returns detailed error messages if validation fails.`,
 			err = commands.ValidateCommandWithOptions(statePath, commands.ValidateOptions{
 				SkipSpecFileCheck: skipSpecCheck,
 				SkipProcessChecks: skipProcessChecks,
+				Repair:            repair,
 			})
-			var warnings []string
-			if warnBuf.Len() > 0 {
-				for _, line := range strings.Split(strings.TrimSpace(warnBuf.String()), "\n") {
-					if line != "" {
-						warnings = append(warnings, line)
-					}
-				}
-			}
+			warnings := warningLines(warnBuf.String())
 			if err != nil {
 				return err // deferred guard classifies as validation error
 			}
@@ -284,6 +279,7 @@ Returns detailed error messages if validation fails.`,
 		err = commands.ValidateCommandWithOptions(statePath, commands.ValidateOptions{
 			SkipSpecFileCheck: skipSpecCheck,
 			SkipProcessChecks: skipProcessChecks,
+			Repair:            repair,
 		})
 		if err != nil {
 			return err
@@ -302,6 +298,16 @@ func resolveValidateStatePath(args []string) (string, error) {
 		return "", err
 	}
 	return paths.New(projectRoot).StatePath(), nil
+}
+
+func warningLines(text string) []string {
+	var warnings []string
+	for _, line := range strings.Split(strings.TrimSpace(text), "\n") {
+		if line != "" {
+			warnings = append(warnings, line)
+		}
+	}
+	return warnings
 }
 
 var migrateCmd = &cobra.Command{
@@ -402,6 +408,7 @@ func init() {
 	// Validate command flags
 	validateCmd.Flags().Bool("skip-spec-check", false, "skip spec file existence check")
 	validateCmd.Flags().Bool("skip-process-checks", false, "skip live liza agent process checks for offline or archived state validation")
+	validateCmd.Flags().Bool("repair", false, "repair invalid active review ownership before validating")
 
 	// JSON output flags
 	addJSONFlag(versionCmd)

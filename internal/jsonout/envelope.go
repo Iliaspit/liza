@@ -36,7 +36,8 @@ func WriteResult(w io.Writer, result any, warnings []string, err error) error {
 	if err != nil {
 		code, msg := ClassifyError(err)
 		env := Envelope{
-			OK: false,
+			OK:       false,
+			Warnings: warnings,
 			Error: &ErrorDetail{
 				Code:    code,
 				Message: msg,

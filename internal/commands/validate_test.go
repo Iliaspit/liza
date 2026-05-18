@@ -147,6 +147,163 @@ func TestValidateCommandWithOptions_ProcessScanUnavailableWarns(t *testing.T) {
 	}
 }
 
+func TestValidateCommandWithOptions_RepairInvalidReviewOwnership(t *testing.T) {
+	now := time.Now().UTC()
+
+	tests := []struct {
+		name       string
+		status     models.TaskStatus
+		wantStatus models.TaskStatus
+	}{
+		{
+			name:       "first review reverts to submitted",
+			status:     models.TaskStatusReviewing,
+			wantStatus: models.TaskStatusReadyForReview,
+		},
+		{
+			name:       "second review reverts to partially approved",
+			status:     models.TaskStatus("REVIEWING_CODE_2"),
+			wantStatus: models.TaskStatus("CODE_PARTIALLY_APPROVED"),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			statePath, _ := testhelpers.SetupLizaDir(t, tmpDir)
+			testhelpers.SetupPipelineConfig(t, tmpDir)
+
+			task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusReviewing, now)
+			task.Status = tt.status
+
+			state := testhelpers.CreateValidState()
+			state.Tasks = []models.Task{task}
+			state.Agents = map[string]models.Agent{
+				"code-reviewer-1": {
+					Role:         "code-reviewer",
+					Status:       models.AgentStatusIdle,
+					LeaseExpires: testhelpers.TimePtr(now.Add(30 * time.Minute)),
+					Heartbeat:    now,
+					Provider:     "anthropic",
+					PID:          os.Getpid(),
+				},
+			}
+			bb := testhelpers.WriteInitialState(t, statePath, state)
+
+			err := ValidateCommandWithOptions(statePath, ValidateOptions{
+				SkipSpecFileCheck: true,
+				SkipProcessChecks: true,
+			})
+			if err == nil {
+				t.Fatal("ValidateCommandWithOptions() error = nil, want invalid active review ownership")
+			}
+			testhelpers.AssertErrorContains(t, err, "agent status IDLE, want REVIEWING")
+
+			var warnBuf bytes.Buffer
+			warnWriter = &warnBuf
+			t.Cleanup(func() { warnWriter = os.Stderr })
+
+			err = ValidateCommandWithOptions(statePath, ValidateOptions{
+				SkipSpecFileCheck: true,
+				SkipProcessChecks: true,
+				Repair:            true,
+			})
+			if err != nil {
+				t.Fatalf("ValidateCommandWithOptions() repair error = %v", err)
+			}
+			if !strings.Contains(warnBuf.String(), "REPAIRED: invalid active review ownership cleared for 1 task(s)") {
+				t.Fatalf("repair warning = %q, want repair count", warnBuf.String())
+			}
+
+			repaired, err := bb.Read()
+			if err != nil {
+				t.Fatalf("read repaired state: %v", err)
+			}
+			gotTask := repaired.FindTask("task-1")
+			if gotTask == nil {
+				t.Fatal("task-1 missing after repair")
+			}
+			if gotTask.Status != tt.wantStatus {
+				t.Fatalf("task status = %s, want %s", gotTask.Status, tt.wantStatus)
+			}
+			if gotTask.ReviewingBy != nil {
+				t.Fatalf("reviewing_by = %q, want nil", *gotTask.ReviewingBy)
+			}
+			if gotTask.ReviewLeaseExpires != nil {
+				t.Fatalf("review_lease_expires = %s, want nil", gotTask.ReviewLeaseExpires.Format(time.RFC3339))
+			}
+		})
+	}
+}
+
+func TestValidateCommandWithOptions_RepairUsesExactStatePath(t *testing.T) {
+	now := time.Now().UTC()
+	tmpDir := t.TempDir()
+	statePath, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	testhelpers.SetupPipelineConfig(t, tmpDir)
+	alternateStatePath := filepath.Join(filepath.Dir(statePath), "state-copy.yaml")
+
+	canonicalState := invalidReviewOwnershipState(now)
+	canonicalBB := testhelpers.WriteInitialState(t, statePath, canonicalState)
+
+	alternateState := invalidReviewOwnershipState(now)
+	alternateBB := testhelpers.WriteInitialState(t, alternateStatePath, alternateState)
+
+	var warnBuf bytes.Buffer
+	warnWriter = &warnBuf
+	t.Cleanup(func() { warnWriter = os.Stderr })
+
+	err := ValidateCommandWithOptions(alternateStatePath, ValidateOptions{
+		SkipSpecFileCheck: true,
+		SkipProcessChecks: true,
+		Repair:            true,
+	})
+	if err != nil {
+		t.Fatalf("ValidateCommandWithOptions() repair error = %v", err)
+	}
+
+	repairedAlternate, err := alternateBB.Read()
+	if err != nil {
+		t.Fatalf("read alternate state: %v", err)
+	}
+	alternateTask := repairedAlternate.FindTask("task-1")
+	if alternateTask == nil {
+		t.Fatal("alternate task-1 missing")
+	}
+	if alternateTask.ReviewingBy != nil {
+		t.Fatalf("alternate reviewing_by = %q, want nil", *alternateTask.ReviewingBy)
+	}
+
+	canonicalRead, err := canonicalBB.Read()
+	if err != nil {
+		t.Fatalf("read canonical state: %v", err)
+	}
+	canonicalTask := canonicalRead.FindTask("task-1")
+	if canonicalTask == nil {
+		t.Fatal("canonical task-1 missing")
+	}
+	if canonicalTask.ReviewingBy == nil {
+		t.Fatal("canonical reviewing_by was cleared; repair mutated the wrong state file")
+	}
+}
+
+func invalidReviewOwnershipState(now time.Time) *models.State {
+	state := testhelpers.CreateValidState()
+	task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusReviewing, now)
+	state.Tasks = []models.Task{task}
+	state.Agents = map[string]models.Agent{
+		"code-reviewer-1": {
+			Role:         "code-reviewer",
+			Status:       models.AgentStatusIdle,
+			LeaseExpires: testhelpers.TimePtr(now.Add(30 * time.Minute)),
+			Heartbeat:    now,
+			Provider:     "anthropic",
+			PID:          os.Getpid(),
+		},
+	}
+	return state
+}
+
 func TestValidateCommand_TaskStateInvariants(t *testing.T) {
 	tests := []struct {
 		name        string

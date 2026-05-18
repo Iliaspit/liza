@@ -11,6 +11,7 @@ import (
 	"github.com/liza-mas/liza/internal/db"
 	lizaerrors "github.com/liza-mas/liza/internal/errors"
 	"github.com/liza-mas/liza/internal/models"
+	"github.com/liza-mas/liza/internal/ops"
 	"github.com/liza-mas/liza/internal/procscan"
 	"github.com/liza-mas/liza/internal/statevalidate"
 )
@@ -29,6 +30,7 @@ func SetWarnWriter(w io.Writer) {
 type ValidateOptions struct {
 	SkipSpecFileCheck bool
 	SkipProcessChecks bool
+	Repair            bool
 }
 
 // ValidateCommand validates the state.yaml file against all schema rules.
@@ -43,6 +45,17 @@ func ValidateCommand(statePath string, skipSpecFileCheck bool) error {
 // archived/offline state validation.
 func ValidateCommandWithOptions(statePath string, opts ValidateOptions) error {
 	projectRoot := filepath.Dir(filepath.Dir(statePath))
+	logPath := filepath.Join(filepath.Dir(statePath), "log.yaml")
+	if opts.Repair {
+		repaired, err := ops.RepairInvalidReviewOwnership(statePath, projectRoot, logPath, "validate --repair")
+		if err != nil {
+			return fmt.Errorf("repair invalid review ownership: %w", err)
+		}
+		if repaired > 0 {
+			fmt.Fprintf(warnWriter, "REPAIRED: invalid active review ownership cleared for %d task(s)\n", repaired)
+		}
+	}
+
 	state, err := db.For(statePath).Read()
 	if err != nil {
 		schemaErr := &lizaerrors.StateSchemaError{Operation: "validate", Err: err}
