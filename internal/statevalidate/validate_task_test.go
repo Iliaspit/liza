@@ -528,6 +528,19 @@ func TestValidateTaskInvariants_RejectsBrokenReferencesAndOutput(t *testing.T) {
 	}
 }
 
+func TestValidateStateRejectsDuplicateTaskIDs(t *testing.T) {
+	tmpDir := t.TempDir()
+	testhelpers.SetupPipelineConfig(t, tmpDir)
+	now := time.Now().UTC()
+	state := stateWithTasks(
+		testhelpers.BuildTaskByStatus("task-1", models.TaskStatusReady, now),
+		testhelpers.BuildTaskByStatus("task-1", models.TaskStatusReady, now),
+	)
+
+	err := ValidateState(state, tmpDir, true, nil)
+	assertErrorContains(t, err, `duplicate task ID "task-1" at tasks[0] and tasks[1]`)
+}
+
 func validOutputTask(taskID string) models.Task {
 	task := testhelpers.BuildTaskByStatus(taskID, models.TaskStatusMerged, time.Now().UTC())
 	task.Output = []models.OutputEntry{

@@ -120,6 +120,7 @@ func ValidateState(state *models.State, projectRoot string, skipSpecFileCheck bo
 	validators := []func(*models.State, string, bool) error{
 		validateRoleNames,
 		validateRequiredFields,
+		validateUniqueTaskIDs,
 		func(state *models.State, projectRoot string, skipSpecFileCheck bool) error {
 			return validateTaskStates(state, projectRoot, skipSpecFileCheck, resolver)
 		},
@@ -144,6 +145,21 @@ func ValidateState(state *models.State, projectRoot string, skipSpecFileCheck bo
 		}
 	}
 
+	return nil
+}
+
+func validateUniqueTaskIDs(state *models.State, projectRoot string, skipSpecFileCheck bool) error {
+	firstIndexByID := make(map[string]int, len(state.Tasks))
+	for i, task := range state.Tasks {
+		if task.ID == "" {
+			continue
+		}
+		firstIndex, exists := firstIndexByID[task.ID]
+		if exists {
+			return fmt.Errorf("duplicate task ID %q at tasks[%d] and tasks[%d]", task.ID, firstIndex, i)
+		}
+		firstIndexByID[task.ID] = i
+	}
 	return nil
 }
 

@@ -100,6 +100,14 @@ Tasks with `integration_fix: true` must have `INTEGRATION_FAILED` event in histo
 
 **Enforced:** code (`validate_task.go`, `wt_merge.go` via `appendUniqueAgentID`)
 
+### 3.6 Task ID Uniqueness
+
+Every non-empty task ID must identify exactly one task in `state.yaml`.
+
+**Protects against:** Ambiguous task lookup, inconsistent list/get behavior, duplicate claimable work.
+
+**Enforced:** code (`validate.go`)
+
 ---
 
 ## 4. Agent Identity & Ownership
