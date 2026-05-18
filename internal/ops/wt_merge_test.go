@@ -188,6 +188,7 @@ func setupMergeTestRepo(t *testing.T, taskID, agentID string) (string, string) {
 	now := time.Now().UTC()
 	initialState := testhelpers.CreateValidState()
 	initialState.Config.IntegrationBranch = "integration"
+	initialState.Goal.SpecRef = "README.md"
 
 	// Create worktree
 	wtDir := filepath.Join(tmpDir, ".worktrees", taskID)
@@ -548,6 +549,141 @@ func TestMergeWorktree_SyncsDeletedFiles(t *testing.T) {
 	}
 }
 
+func TestMergeWorktree_RejectsDeletingReferencedArtifact(t *testing.T) {
+	taskID := "merge-delete-arch-ref"
+	reviewerID := "code-reviewer-1"
+	coderID := "coder-1"
+	artifactRef := "specs/arch-plan/readme/architecture.md"
+	tmpDir := t.TempDir()
+
+	testhelpers.SetupTestGitRepo(t, tmpDir)
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+
+	branchFile := "branch-owned.txt"
+	branchFilePath := filepath.Join(tmpDir, branchFile)
+	testhelpers.MustGit(t, tmpDir, "checkout", "main")
+	if err := os.WriteFile(branchFilePath, []byte("main\n"), 0644); err != nil {
+		t.Fatalf("Failed to write main branch file: %v", err)
+	}
+	testhelpers.MustGit(t, tmpDir, "add", branchFile)
+	testhelpers.MustGit(t, tmpDir, "commit", "-m", "Add main branch file")
+
+	testhelpers.MustGit(t, tmpDir, "checkout", "integration")
+	artifactPath := filepath.Join(tmpDir, artifactRef)
+	if err := os.MkdirAll(filepath.Dir(artifactPath), 0755); err != nil {
+		t.Fatalf("Failed to create artifact directory: %v", err)
+	}
+	if err := os.WriteFile(artifactPath, []byte("# Architecture\n"), 0644); err != nil {
+		t.Fatalf("Failed to write artifact: %v", err)
+	}
+	if err := os.WriteFile(branchFilePath, []byte("integration\n"), 0644); err != nil {
+		t.Fatalf("Failed to write integration branch file: %v", err)
+	}
+	testhelpers.MustGit(t, tmpDir, "add", artifactRef, branchFile)
+	testhelpers.MustGit(t, tmpDir, "commit", "-m", "Add architecture artifact")
+	preMergeHEAD := testhelpers.MustGit(t, tmpDir, "rev-parse", "integration")
+
+	wtDir := filepath.Join(tmpDir, ".worktrees", taskID)
+	testhelpers.MustGit(t, tmpDir, "worktree", "add", wtDir, "integration", "-b", "task/"+taskID)
+	testhelpers.MustGit(t, wtDir, "rm", artifactRef)
+	if err := os.WriteFile(filepath.Join(wtDir, branchFile), []byte("task\n"), 0644); err != nil {
+		t.Fatalf("Failed to write task branch file: %v", err)
+	}
+	testhelpers.MustGit(t, wtDir, "add", branchFile)
+	testhelpers.MustGit(t, wtDir, "commit", "-m", "Delete unrelated architecture artifact")
+	reviewCommit := testhelpers.MustGit(t, wtDir, "rev-parse", "HEAD")
+	testhelpers.MustGit(t, tmpDir, "checkout", "main")
+
+	now := time.Now().UTC()
+	worktreePath := filepath.Join(".worktrees", taskID)
+	baseCommit := preMergeHEAD
+	approvedBy := reviewerID
+	state := testhelpers.CreateValidState()
+	state.Config.IntegrationBranch = "integration"
+	state.Goal.SpecRef = "README.md"
+	state.Tasks = []models.Task{
+		{
+			ID:           taskID,
+			Description:  "Delete unrelated artifact",
+			Status:       models.TaskStatusApproved,
+			Priority:     1,
+			Created:      now,
+			SpecRef:      "README.md",
+			DoneWhen:     "Cleanup approved",
+			Scope:        "cleanup",
+			RolePair:     "coding-pair",
+			Worktree:     &worktreePath,
+			AssignedTo:   &coderID,
+			BaseCommit:   &baseCommit,
+			ReviewCommit: &reviewCommit,
+			ApprovedBy:   &approvedBy,
+			History:      []models.TaskHistoryEntry{},
+		},
+		{
+			ID:          "downstream-code-plan",
+			Description: "Needs architecture artifact",
+			Status:      models.TaskStatusDraftCodingPlan,
+			Priority:    1,
+			Created:     now,
+			SpecRef:     "README.md",
+			DoneWhen:    "Plan work",
+			Scope:       "planning",
+			RolePair:    "code-planning-pair",
+			ArchRef:     artifactRef,
+		},
+	}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	_, err := MergeWorktree(tmpDir, taskID, reviewerID)
+	if err == nil {
+		t.Fatal("Expected post-merge state validation failure, got nil")
+	}
+
+	var intErr *IntegrationFailedError
+	if !errors.As(err, &intErr) {
+		t.Fatalf("Expected *IntegrationFailedError, got %T: %v", err, err)
+	}
+	if intErr.Reason != IntegrationReasonStateInvalid {
+		t.Fatalf("Reason = %q, want %q", intErr.Reason, IntegrationReasonStateInvalid)
+	}
+	if intErr.RollbackError != nil {
+		t.Fatalf("RollbackError = %v, want nil", intErr.RollbackError)
+	}
+
+	integrationHEAD := testhelpers.MustGit(t, tmpDir, "rev-parse", "integration")
+	if integrationHEAD != preMergeHEAD {
+		t.Fatalf("integration HEAD = %s, want rollback to %s", integrationHEAD, preMergeHEAD)
+	}
+	if _, statErr := os.Stat(artifactPath); !os.IsNotExist(statErr) {
+		t.Fatalf("artifact should match checked-out main branch after rollback and be absent, Stat: %v", statErr)
+	}
+	if content, readErr := os.ReadFile(branchFilePath); readErr != nil {
+		t.Fatalf("branch file should exist after rollback: %v", readErr)
+	} else if string(content) != "main\n" {
+		t.Fatalf("branch file content = %q, want main branch content", string(content))
+	}
+	if err := exec.Command("git", "-C", tmpDir, "cat-file", "-e", "integration:"+artifactRef).Run(); err != nil {
+		t.Fatalf("artifact should still exist on rolled-back integration branch: %v", err)
+	}
+
+	afterState := readStateForTest(t, stateFile)
+	task := afterState.FindTask(taskID)
+	if task == nil {
+		t.Fatal("Task not found after failed merge")
+	}
+	if task.Status != models.TaskStatusIntegrationFailed {
+		t.Fatalf("Task status = %v, want INTEGRATION_FAILED", task.Status)
+	}
+	diagnostic := latestIntegrationFailureDiagnostic(t, task)
+	if diagnostic["reason"] != IntegrationReasonStateInvalid {
+		t.Errorf("diagnostic reason = %v, want %q", diagnostic["reason"], IntegrationReasonStateInvalid)
+	}
+	detail, _ := diagnostic["detail"].(string)
+	if !strings.Contains(detail, "arch_ref file not found") || !strings.Contains(detail, "downstream-code-plan") {
+		t.Errorf("diagnostic detail = %q, want missing arch_ref task detail", detail)
+	}
+}
+
 func TestMergeWorktree_RollbackSyncsRenamedFiles(t *testing.T) {
 	taskID := "merge-rename-rollback"
 	agentID := "coder-1"
@@ -628,6 +764,7 @@ func TestMergeWorktree_CodingPlanApproved(t *testing.T) {
 	now := time.Now().UTC()
 	initialState := testhelpers.CreateValidState()
 	initialState.Config.IntegrationBranch = "integration"
+	initialState.Goal.SpecRef = "README.md"
 
 	// Create worktree
 	wtDir := filepath.Join(tmpDir, ".worktrees", taskID)
@@ -728,6 +865,7 @@ func TestMergeWorktree_PipelineCodingPairApproved(t *testing.T) {
 	now := time.Now().UTC()
 	initialState := testhelpers.CreateValidState()
 	initialState.Config.IntegrationBranch = "integration"
+	initialState.Goal.SpecRef = "README.md"
 
 	// Create worktree
 	wtDir := filepath.Join(tmpDir, ".worktrees", taskID)

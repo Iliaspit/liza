@@ -40,6 +40,9 @@ func printIntegrationFailure(taskID string, intErr *ops.IntegrationFailedError) 
 		if intErr.TestOutput != "" {
 			fmt.Fprintf(os.Stderr, "Test output:\n%s", intErr.TestOutput)
 		}
+	case ops.IntegrationReasonStateInvalid:
+		fmt.Fprintf(os.Stderr, "⚠️  Post-merge state validation failed\n")
+		fmt.Fprintf(os.Stderr, "Task %s marked as INTEGRATION_FAILED\n", taskID)
 	default:
 		fmt.Fprintf(os.Stderr, "⚠️  Integration failed: %s\n", intErr.Reason)
 		fmt.Fprintf(os.Stderr, "Task %s marked as INTEGRATION_FAILED\n", taskID)

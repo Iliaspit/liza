@@ -154,6 +154,7 @@ func TestWtMergeCommand(t *testing.T) {
 			now := time.Now().UTC()
 			initialState := testhelpers.CreateValidState()
 			initialState.Config.IntegrationBranch = "integration"
+			initialState.Goal.SpecRef = "README.md"
 
 			// Add task if not testing nonexistent task
 			if tt.taskID != "nonexistent" && tt.taskID != "" {
@@ -435,6 +436,7 @@ func TestWtMergeCommand_PreventsDuplicateFailedBy(t *testing.T) {
 	now := time.Now().UTC()
 	initialState := testhelpers.CreateValidState()
 	initialState.Config.IntegrationBranch = "integration"
+	initialState.Goal.SpecRef = "README.md"
 
 	taskID := "duplicate-test"
 	agentID := "agent-1"

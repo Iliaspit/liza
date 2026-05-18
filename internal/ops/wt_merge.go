@@ -22,6 +22,7 @@ import (
 	"github.com/liza-mas/liza/internal/paths"
 	"github.com/liza-mas/liza/internal/projectdetect"
 	"github.com/liza-mas/liza/internal/secretmask"
+	"github.com/liza-mas/liza/internal/statevalidate"
 )
 
 // maxMergeRetries is the maximum number of CAS retry attempts for the merge loop.
@@ -53,6 +54,7 @@ const (
 	IntegrationReasonHEADMismatch  = "worktree HEAD mismatch"
 	IntegrationReasonMergeConflict = "merge conflict"
 	IntegrationReasonTestsFailed   = "integration tests failed"
+	IntegrationReasonStateInvalid  = "post-merge state validation failed"
 )
 
 const (
@@ -243,9 +245,34 @@ func integrationFailureRecoveryHint(reason string) string {
 		return "resolve the integration conflict in the task worktree, resubmit, and retry merge"
 	case IntegrationReasonTestsFailed:
 		return "inspect the integration test output, fix the task branch, resubmit, and retry merge"
+	case IntegrationReasonStateInvalid:
+		return "restore or preserve referenced artifacts, resubmit, and retry merge"
 	default:
 		return "inspect the integration failure details before retrying merge"
 	}
+}
+
+func rollbackMergedCommit(gitWrapper *git.Git, integrationRef, preMergeHEAD, mergeCommit, restoreRef, taskID string) error {
+	if err := gitWrapper.UpdateRef(integrationRef, preMergeHEAD, mergeCommit); err != nil {
+		var casErr *git.RefConflictError
+		if errors.As(err, &casErr) {
+			log.Printf("wt-merge %s: skipping rollback — another merge landed on top of %s", taskID, shortSHA(mergeCommit))
+			return nil
+		}
+		return err
+	}
+
+	// Ref rolled back — sync working tree to match pre-merge state. This
+	// reverse sync undoes the forward SyncMergedFiles step.
+	if syncErr := gitWrapper.SyncMergedFiles(mergeCommit, preMergeHEAD); syncErr != nil {
+		log.Printf("wt-merge %s: WARNING — failed to sync working tree after rollback: %v", taskID, syncErr)
+	}
+	if restoreRef != "" {
+		if restoreErr := gitWrapper.RestoreSyncedFiles(preMergeHEAD, mergeCommit, restoreRef); restoreErr != nil {
+			return fmt.Errorf("failed to restore working tree after rollback: %w", restoreErr)
+		}
+	}
+	return nil
 }
 
 // shortSHA truncates a SHA to 7 characters for log messages.
@@ -472,6 +499,26 @@ func MergeWorktree(projectRoot, taskID, agentID string, mergeExtra ...map[string
 	if branchErr != nil {
 		warnings = append(warnings, fmt.Sprintf("skipped working tree restore (branch detection failed: %v)", branchErr))
 	}
+	rollbackRestoreRef := ""
+	if branchErr == nil && currentBranch != integrationBranch {
+		rollbackRestoreRef = "HEAD"
+	}
+
+	currentState, err := bb.Read()
+	if err != nil {
+		return nil, fmt.Errorf("failed to read state for post-merge artifact validation: %w", err)
+	}
+	if err := statevalidate.ValidateArtifactRefs(currentState, projectRoot); err != nil {
+		rollbackErr := rollbackMergedCommit(gitWrapper, integrationRef, preMergeHEAD, mergeCommit, rollbackRestoreRef, taskID)
+		diagnostic := integrationFailureDiagnosticWithDetail(IntegrationReasonStateInvalid, err.Error(), mergeCommit, "", rollbackErr)
+		if updateErr := markIntegrationFailedWithDiagnostic(bb, taskID, agentID, IntegrationReasonStateInvalid, mergeCommit, pb, diagnostic); updateErr != nil {
+			return nil, fmt.Errorf("failed to update state to INTEGRATION_FAILED: %w", updateErr)
+		}
+		return nil, &IntegrationFailedError{
+			Reason:        IntegrationReasonStateInvalid,
+			RollbackError: rollbackErr,
+		}
+	}
 
 	// Run integration tests if they exist
 	var testsRan bool
@@ -501,23 +548,7 @@ func MergeWorktree(projectRoot, taskID, agentID string, mergeExtra ...map[string
 
 			// CAS rollback: only rewind if ref still points to our merge commit.
 			// If someone else merged on top, rewinding would drop their work.
-			var rollbackErr error
-			if err := gitWrapper.UpdateRef(integrationRef, preMergeHEAD, mergeCommit); err != nil {
-				var casErr *git.RefConflictError
-				if errors.As(err, &casErr) {
-					log.Printf("wt-merge %s: skipping rollback — another merge landed on top of %s", taskID, shortSHA(mergeCommit))
-				} else {
-					rollbackErr = err
-				}
-			} else {
-				// Ref rolled back — sync working tree to match pre-merge state.
-				// This reverse sync undoes the forward SyncMergedFiles, returning
-				// the tree to its pre-MergeWorktree state. No additional restore
-				// is needed even when checked out on a non-integration branch.
-				if syncErr := gitWrapper.SyncMergedFiles(mergeCommit, preMergeHEAD); syncErr != nil {
-					log.Printf("wt-merge %s: WARNING — failed to sync working tree after rollback: %v", taskID, syncErr)
-				}
-			}
+			rollbackErr := rollbackMergedCommit(gitWrapper, integrationRef, preMergeHEAD, mergeCommit, rollbackRestoreRef, taskID)
 
 			diagnostic := integrationFailureDiagnostic(IntegrationReasonTestsFailed, mergeCommit, testOutput, rollbackErr)
 			if updateErr := markIntegrationFailedWithDiagnostic(bb, taskID, agentID, IntegrationReasonTestsFailed, mergeCommit, pb, diagnostic); updateErr != nil {

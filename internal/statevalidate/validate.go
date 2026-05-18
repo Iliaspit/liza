@@ -168,6 +168,62 @@ func checkSpecFileExists(projectRoot, specRef, integrationBranch string) error {
 	return checkArtifactRefFileExists(projectRoot, "spec_ref", specRef, integrationBranch, "")
 }
 
+// ValidateArtifactRefs verifies that every artifact reference stored in state
+// points to a reachable repo file in the project working tree or integration
+// branch. It intentionally does not enforce lifecycle/audit invariants; merge
+// gates use it after a candidate integration update to catch commits that delete
+// durable artifacts still referenced by the blackboard.
+func ValidateArtifactRefs(state *models.State, projectRoot string) error {
+	if state == nil {
+		return fmt.Errorf("state is nil")
+	}
+	integrationBranch := state.Config.IntegrationBranch
+	if state.Goal.SpecRef != "" {
+		if err := checkArtifactRefFileExists(projectRoot, "goal spec_ref", state.Goal.SpecRef, integrationBranch, ""); err != nil {
+			return err
+		}
+	}
+	for _, task := range state.Tasks {
+		refs := []struct {
+			field string
+			value string
+		}{
+			{field: "spec_ref", value: task.SpecRef},
+			{field: "epic_ref", value: task.EpicRef},
+			{field: "plan_ref", value: task.PlanRef},
+			{field: "arch_ref", value: task.ArchRef},
+		}
+		for _, ref := range refs {
+			if ref.value == "" {
+				continue
+			}
+			if err := checkArtifactRefFileExists(projectRoot, ref.field, ref.value, integrationBranch, task.ID); err != nil {
+				return err
+			}
+		}
+		for i, entry := range task.Output {
+			outputRefs := []struct {
+				field string
+				value string
+			}{
+				{field: fmt.Sprintf("output[%d].spec_ref", i), value: entry.SpecRef},
+				{field: fmt.Sprintf("output[%d].epic_ref", i), value: entry.EpicRef},
+				{field: fmt.Sprintf("output[%d].plan_ref", i), value: entry.PlanRef},
+				{field: fmt.Sprintf("output[%d].arch_ref", i), value: entry.ArchRef},
+			}
+			for _, ref := range outputRefs {
+				if ref.value == "" {
+					continue
+				}
+				if err := checkArtifactRefFileExists(projectRoot, ref.field, ref.value, integrationBranch, task.ID); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return nil
+}
+
 func checkArtifactRefFileExists(projectRoot, field, ref, integrationBranch, taskID string) error {
 	if err := ValidateArtifactRefScalar(field, ref, taskID); err != nil {
 		return err

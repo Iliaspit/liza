@@ -159,6 +159,7 @@ Agent registration/unregistration, heartbeat, post-exit IDLE reset, orchestrator
 | Merge uses working-tree-less operations (merge-tree, commit-tree, update-ref) | Race conditions, checkout conflicts | spec, code (`wt_merge.go`) |
 | If merge conflict detected → INTEGRATION_FAILED (must be reclaimed) | Silent conflict resolution | spec, code |
 | If integration tests fail → rollback via `update-ref` to pre-merge HEAD | Failed integrations propagating | spec, code |
+| If post-merge artifact-reference validation fails → rollback via `update-ref` to pre-merge HEAD | Broken blackboard artifact refs propagating | spec, code (`wt_merge.go`, `validate.go`) |
 | Worktree path is deterministic: `.worktrees/{taskID}` | Directory traversal, path confusion | code (`claim_task.go`, `wt_create.go`) |
 | BLOCKED/ABANDONED/SUPERSEDED/MERGED tasks: worktree must be deleted | Stale worktrees, resource leaks | spec (`worktree-management.md`) |
 | Different coder reclaiming REJECTED task → delete and recreate fresh worktree | Context contamination from failed work | spec |

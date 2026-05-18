@@ -214,6 +214,19 @@ func (m *SmartMockCLIExecutor) executeDoer(ctx context.Context, projectRoot, age
 
 	// Use a unique filename per task to avoid merge conflicts when
 	// multiple worktrees merge to the same integration branch.
+	filesToAdd := []string{}
+	if role == "epic-planner" {
+		epicDocRel := filepath.Join("specs", "epics", "ep-001-auth.md")
+		epicDoc := filepath.Join(wtPath, epicDocRel)
+		if err := os.MkdirAll(filepath.Dir(epicDoc), 0755); err != nil {
+			return fmt.Errorf("create epic doc directory: %w", err)
+		}
+		if err := os.WriteFile(epicDoc, []byte("# Authentication Epic\n"), 0644); err != nil {
+			return fmt.Errorf("write epic doc: %w", err)
+		}
+		filesToAdd = append(filesToAdd, filepath.ToSlash(epicDocRel))
+	}
+
 	mockFileName := fmt.Sprintf("mock-%s.txt", taskID)
 	mockFile := filepath.Join(wtPath, mockFileName)
 	content := fmt.Sprintf("Work by %s on %s at %s\n", agentID, taskID, time.Now().Format(time.RFC3339Nano))
@@ -221,7 +234,9 @@ func (m *SmartMockCLIExecutor) executeDoer(ctx context.Context, projectRoot, age
 		return fmt.Errorf("write mock file: %w", err)
 	}
 
-	if err := exec.CommandContext(ctx, "git", "-C", wtPath, "add", mockFileName).Run(); err != nil {
+	filesToAdd = append(filesToAdd, mockFileName)
+	gitAddArgs := append([]string{"-C", wtPath, "add"}, filesToAdd...)
+	if err := exec.CommandContext(ctx, "git", gitAddArgs...).Run(); err != nil {
 		return fmt.Errorf("git add in worktree %s: %w", wtPath, err)
 	}
 	if err := exec.CommandContext(ctx, "git", "-C", wtPath, "commit", "-m", fmt.Sprintf("Mock work by %s", agentID)).Run(); err != nil {
