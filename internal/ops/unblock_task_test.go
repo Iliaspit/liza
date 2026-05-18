@@ -129,6 +129,61 @@ func TestUnblockTask_RejectsAssignToWithoutLiveProcess(t *testing.T) {
 	}
 }
 
+func TestUnblockTask_RejectsUnmetDependencies(t *testing.T) {
+	tmpDir := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, tmpDir)
+	testhelpers.SetupPipelineConfig(t, tmpDir)
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+
+	now := time.Now().UTC()
+	state := testhelpers.CreateValidState()
+	task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusBlocked, now)
+	task.RolePair = "code-planning-pair"
+	task.Worktree = testhelpers.StringPtr(".worktrees/task-1")
+	task.DependsOn = []string{"dep-1"}
+	dep := testhelpers.BuildTaskByStatus("dep-1", models.TaskStatusImplementing, now)
+	state.Tasks = []models.Task{task, dep}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	bb := db.New(stateFile)
+	testhelpers.RegisterTestAgent(t, bb, "code-planner-1", "code-planner")
+	setAgentPID(t, bb, "code-planner-1", os.Getpid())
+
+	_, err := UnblockTask(tmpDir, "task-1", "code-planner-1", "repair verified", "orchestrator-1")
+	if err == nil {
+		t.Fatal("Expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "unmet dependencies: dep-1") {
+		t.Fatalf("Error = %q, want unmet dependencies", err.Error())
+	}
+}
+
+func TestUnblockTask_AllowsMergedDependency(t *testing.T) {
+	tmpDir := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, tmpDir)
+	testhelpers.SetupPipelineConfig(t, tmpDir)
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+
+	now := time.Now().UTC()
+	state := testhelpers.CreateValidState()
+	task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusBlocked, now)
+	task.RolePair = "code-planning-pair"
+	task.Worktree = testhelpers.StringPtr(".worktrees/task-1")
+	task.DependsOn = []string{"dep-1"}
+	dep := testhelpers.BuildTaskByStatus("dep-1", models.TaskStatusMerged, now)
+	state.Tasks = []models.Task{task, dep}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	bb := db.New(stateFile)
+	testhelpers.RegisterTestAgent(t, bb, "code-planner-1", "code-planner")
+	setAgentPID(t, bb, "code-planner-1", os.Getpid())
+
+	_, err := UnblockTask(tmpDir, "task-1", "code-planner-1", "repair verified", "orchestrator-1")
+	if err != nil {
+		t.Fatalf("UnblockTask() error: %v", err)
+	}
+}
+
 func TestUnblockTask_RejectsUnknownAssignTo(t *testing.T) {
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)

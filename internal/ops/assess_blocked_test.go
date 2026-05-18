@@ -1,6 +1,7 @@
 package ops
 
 import (
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -8,6 +9,7 @@ import (
 	"github.com/liza-mas/liza/internal/db"
 	"github.com/liza-mas/liza/internal/errors"
 	"github.com/liza-mas/liza/internal/models"
+	"github.com/liza-mas/liza/internal/paths"
 	"github.com/liza-mas/liza/internal/testhelpers"
 )
 
@@ -136,6 +138,14 @@ func TestAssessBlocked_Success(t *testing.T) {
 	}
 	if lastHistory.Note == nil || *lastHistory.Note != "Cannot resolve without external API" {
 		t.Errorf("Expected note in history, got %v", lastHistory.Note)
+	}
+
+	data, err := os.ReadFile(paths.New(tmpDir).AlertsLogPath())
+	if err != nil {
+		t.Fatalf("Read alerts.log: %v", err)
+	}
+	if !strings.Contains(string(data), "UNRESOLVED BLOCKED: task-1 — Cannot resolve without external API") {
+		t.Fatalf("alerts.log missing unresolved alert:\n%s", string(data))
 	}
 }
 

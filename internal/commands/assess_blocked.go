@@ -2,6 +2,7 @@ package commands
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/liza-mas/liza/internal/ops"
 )
@@ -15,5 +16,8 @@ func AssessBlockedCommand(projectRoot, taskID, note, agentID string) error {
 	}
 
 	fmt.Printf("Task %s assessed by orchestrator\n", result.TaskID)
+	for _, warning := range result.Warnings {
+		fmt.Fprintf(os.Stderr, "warning: %s\n", warning)
+	}
 	return nil
 }

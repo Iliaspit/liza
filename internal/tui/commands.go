@@ -11,6 +11,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/liza-mas/liza/internal/agent"
+	"github.com/liza-mas/liza/internal/alerts"
 	"github.com/liza-mas/liza/internal/commands"
 	"github.com/liza-mas/liza/internal/db"
 	"github.com/liza-mas/liza/internal/log"
@@ -127,7 +128,7 @@ func runChecksCmd(projectRoot, alertsLogPath string, state *models.State, cache 
 		// Write each alert to alerts.log
 		var writeErr error
 		for _, a := range snapshot.Alerts {
-			if err := commands.WriteAlert(alertsLogPath, a); err != nil && writeErr == nil {
+			if err := alerts.Write(alertsLogPath, a); err != nil && writeErr == nil {
 				writeErr = err
 			}
 		}
@@ -135,7 +136,7 @@ func runChecksCmd(projectRoot, alertsLogPath string, state *models.State, cache 
 		// Convert to TUI AlertMsg types
 		alertMsgs := make([]AlertMsg, len(snapshot.Alerts))
 		for i, a := range snapshot.Alerts {
-			key := commands.AlertKey(a)
+			key := alerts.Key(a)
 			if !snapshot.ActiveKeys[key] {
 				key = ""
 			}

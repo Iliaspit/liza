@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/liza-mas/liza/internal/alerts"
 	"github.com/liza-mas/liza/internal/db"
 	"github.com/liza-mas/liza/internal/errors"
 	"github.com/liza-mas/liza/internal/identity"
@@ -14,7 +15,15 @@ import (
 
 // AssessBlockedResult contains the outcome of recording an orchestrator assessment.
 type AssessBlockedResult struct {
-	TaskID string `json:"task_id"`
+	TaskID   string   `json:"task_id"`
+	Warnings []string `json:"warnings,omitempty"`
+}
+
+func (r *AssessBlockedResult) GetWarnings() []string {
+	if r == nil {
+		return nil
+	}
+	return r.Warnings
 }
 
 // AssessBlocked records that the orchestrator has assessed a BLOCKED task.
@@ -65,5 +74,19 @@ func AssessBlocked(projectRoot, taskID, note, agentID string) (*AssessBlockedRes
 		return nil, fmt.Errorf("failed to assess blocked task: %w", err)
 	}
 
-	return &AssessBlockedResult{TaskID: taskID}, nil
+	message := taskID
+	if note != "" {
+		message = fmt.Sprintf("%s — %s", taskID, note)
+	}
+	var warnings []string
+	if err := alerts.Write(lp.AlertsLogPath(), alerts.Alert{
+		Timestamp: now,
+		Level:     alerts.AlertLevelCritical,
+		Category:  "UNRESOLVED BLOCKED",
+		Message:   message,
+	}); err != nil {
+		warnings = append(warnings, fmt.Sprintf("alert write failed: %v", err))
+	}
+
+	return &AssessBlockedResult{TaskID: taskID, Warnings: warnings}, nil
 }

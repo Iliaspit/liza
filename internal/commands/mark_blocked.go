@@ -2,6 +2,7 @@ package commands
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/liza-mas/liza/internal/ops"
 )
@@ -21,8 +22,14 @@ func MarkBlockedWithOptionsCommand(projectRoot, taskID, reason string, questions
 	}
 
 	fmt.Printf("Task %s marked as BLOCKED\nReason: %s\n", result.TaskID, result.Reason)
+	if len(result.DependsOn) > 0 {
+		fmt.Printf("Depends on: %v\n", result.DependsOn)
+	}
 	if result.RepairRequest != nil {
 		fmt.Printf("Repair request: %s\n", result.RepairRequest.Operation)
+	}
+	for _, warning := range result.Warnings {
+		fmt.Fprintf(os.Stderr, "warning: %s\n", warning)
 	}
 	return nil
 }

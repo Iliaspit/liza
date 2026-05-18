@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/liza-mas/liza/internal/alerts"
 	"github.com/liza-mas/liza/internal/db"
 	"github.com/liza-mas/liza/internal/errors"
 	"github.com/liza-mas/liza/internal/models"
@@ -15,12 +16,22 @@ import (
 type MarkBlockedResult struct {
 	TaskID        string                `json:"task_id"`
 	Reason        string                `json:"reason"`
+	DependsOn     []string              `json:"depends_on,omitempty"`
 	RepairRequest *models.RepairRequest `json:"repair_request,omitempty"`
+	Warnings      []string              `json:"warnings,omitempty"`
+}
+
+func (r *MarkBlockedResult) GetWarnings() []string {
+	if r == nil {
+		return nil
+	}
+	return r.Warnings
 }
 
 // MarkBlockedOptions contains optional metadata for a block transition.
 type MarkBlockedOptions struct {
 	RepairRequest *models.RepairRequest
+	DependsOn     []string
 }
 
 // MarkBlocked transitions a task from an executing status to BLOCKED. Only the
@@ -52,10 +63,15 @@ func MarkBlockedWithOptions(projectRoot, taskID, reason string, questions []stri
 	if err != nil {
 		return nil, err
 	}
+	dependsOn, err := normalizeDependsOn(opts.DependsOn)
+	if err != nil {
+		return nil, err
+	}
 
 	lp := paths.New(projectRoot)
 	bb := db.For(lp.StatePath())
 	now := time.Now().UTC()
+	var resultDependsOn []string
 
 	// Load pipeline config for status checks and transitions.
 	resolver, _, err := loadResolver(projectRoot)
@@ -83,6 +99,9 @@ func MarkBlockedWithOptions(projectRoot, taskID, reason string, questions []stri
 		if task.AssignedTo == nil || *task.AssignedTo != agentID {
 			return &PreconditionError{Reason: "only the assigned agent can mark task as blocked"}
 		}
+		if err := validateDependsOnForBlockedTask(state, task, dependsOn); err != nil {
+			return err
+		}
 
 		if err := task.TransitionWith(models.TaskStatusBlocked, pipelineTransitions); err != nil {
 			return err
@@ -90,6 +109,10 @@ func MarkBlockedWithOptions(projectRoot, taskID, reason string, questions []stri
 		task.BlockedReason = &reason
 		task.BlockedQuestions = questions
 		task.RepairRequest = repairRequest
+		if len(dependsOn) > 0 {
+			task.DependsOn = append(task.DependsOn, dependsOn...)
+		}
+		resultDependsOn = append([]string(nil), task.DependsOn...)
 		releaseAgentsForTask(state, taskID)
 		task.AssignedTo = nil
 		task.LeaseExpires = nil
@@ -108,11 +131,94 @@ func MarkBlockedWithOptions(projectRoot, taskID, reason string, questions []stri
 		return nil, fmt.Errorf("failed to mark task as blocked: %w", err)
 	}
 
+	var warnings []string
+	if err := alerts.Write(lp.AlertsLogPath(), alerts.Alert{
+		Timestamp: now,
+		Level:     alerts.AlertLevelWarning,
+		Category:  "BLOCKED",
+		Message:   fmt.Sprintf("%s — %s", taskID, reason),
+	}); err != nil {
+		warnings = append(warnings, fmt.Sprintf("alert write failed: %v", err))
+	}
+
 	return &MarkBlockedResult{
 		TaskID:        taskID,
 		Reason:        reason,
+		DependsOn:     resultDependsOn,
 		RepairRequest: repairRequest,
+		Warnings:      warnings,
 	}, nil
+}
+
+func normalizeDependsOn(values []string) ([]string, error) {
+	var normalized []string
+	seen := make(map[string]bool)
+	for _, value := range values {
+		for _, part := range strings.Split(value, ",") {
+			depID := strings.TrimSpace(part)
+			if depID == "" {
+				return nil, &PreconditionError{Reason: "depends-on entries cannot be empty"}
+			}
+			if seen[depID] {
+				return nil, &PreconditionError{Reason: fmt.Sprintf("duplicate depends-on entry %q", depID)}
+			}
+			seen[depID] = true
+			normalized = append(normalized, depID)
+		}
+	}
+	return normalized, nil
+}
+
+func validateDependsOnForBlockedTask(state *models.State, task *models.Task, deps []string) error {
+	if len(deps) == 0 {
+		return nil
+	}
+	existing := make(map[string]bool, len(task.DependsOn))
+	for _, depID := range task.DependsOn {
+		trimmed := strings.TrimSpace(depID)
+		if trimmed == "" {
+			return &PreconditionError{Reason: fmt.Sprintf("task %s has empty existing depends_on entry", task.ID)}
+		}
+		if existing[trimmed] {
+			return &PreconditionError{Reason: fmt.Sprintf("task %s has duplicate existing depends_on entry %q", task.ID, trimmed)}
+		}
+		existing[trimmed] = true
+	}
+	for _, depID := range deps {
+		if depID == task.ID {
+			return &PreconditionError{Reason: fmt.Sprintf("task %s cannot depend on itself", task.ID)}
+		}
+		if existing[depID] {
+			return &PreconditionError{Reason: fmt.Sprintf("depends-on entry %q already exists on task %s", depID, task.ID)}
+		}
+		if state.FindTask(depID) == nil {
+			return &PreconditionError{Reason: fmt.Sprintf("depends-on references non-existent task %q", depID)}
+		}
+		if dependencyReachesTask(state, depID, task.ID, map[string]bool{}) {
+			return &PreconditionError{Reason: fmt.Sprintf("depends-on entry %q would create a dependency cycle for task %s", depID, task.ID)}
+		}
+	}
+	return nil
+}
+
+func dependencyReachesTask(state *models.State, currentID, targetID string, visited map[string]bool) bool {
+	if currentID == targetID {
+		return true
+	}
+	if visited[currentID] {
+		return false
+	}
+	visited[currentID] = true
+	current := state.FindTask(currentID)
+	if current == nil {
+		return false
+	}
+	for _, depID := range current.DependsOn {
+		if dependencyReachesTask(state, depID, targetID, visited) {
+			return true
+		}
+	}
+	return false
 }
 
 func normalizeRepairRequest(request *models.RepairRequest) (*models.RepairRequest, error) {

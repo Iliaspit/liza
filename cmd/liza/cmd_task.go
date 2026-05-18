@@ -337,7 +337,7 @@ Effects:
 
 		if isJSON(cmd) {
 			result, err := ops.MarkBlockedWithOptions(projectRoot, taskID, reason, questions, agentID, opts)
-			return jsonout.WriteResult(os.Stdout, result, nil, err)
+			return jsonout.WriteResult(os.Stdout, result, resultWarnings(result), err)
 		}
 		return commands.MarkBlockedWithOptionsCommand(projectRoot, taskID, reason, questions, agentID, opts)
 	},
@@ -400,6 +400,8 @@ func markBlockedOptionsFromFlags(cmd *cobra.Command) (ops.MarkBlockedOptions, er
 	command, _ := cmd.Flags().GetString("repair-command")
 	evidence, _ := cmd.Flags().GetStringArray("repair-evidence")
 	validation, _ := cmd.Flags().GetStringArray("repair-validation")
+	dependsOn, _ := cmd.Flags().GetStringSlice("depends-on")
+	opts := ops.MarkBlockedOptions{DependsOn: dependsOn}
 
 	hasRepairRequest := strings.TrimSpace(operation) != "" ||
 		strings.TrimSpace(target) != "" ||
@@ -407,7 +409,7 @@ func markBlockedOptionsFromFlags(cmd *cobra.Command) (ops.MarkBlockedOptions, er
 		hasNonEmptyValue(evidence) ||
 		hasNonEmptyValue(validation)
 	if !hasRepairRequest {
-		return ops.MarkBlockedOptions{}, nil
+		return opts, nil
 	}
 	if strings.TrimSpace(operation) == "" {
 		return ops.MarkBlockedOptions{}, cliValidationError("--repair-operation is required when repair request fields are provided")
@@ -424,15 +426,14 @@ func markBlockedOptionsFromFlags(cmd *cobra.Command) (ops.MarkBlockedOptions, er
 	if !hasNonEmptyValue(validation) {
 		return ops.MarkBlockedOptions{}, cliValidationError("--repair-validation is required when repair request fields are provided")
 	}
-	return ops.MarkBlockedOptions{
-		RepairRequest: &models.RepairRequest{
-			Operation:  operation,
-			Target:     target,
-			Command:    command,
-			Evidence:   evidence,
-			Validation: validation,
-		},
-	}, nil
+	opts.RepairRequest = &models.RepairRequest{
+		Operation:  operation,
+		Target:     target,
+		Command:    command,
+		Evidence:   evidence,
+		Validation: validation,
+	}
+	return opts, nil
 }
 
 func hasNonEmptyValue(values []string) bool {
@@ -442,6 +443,13 @@ func hasNonEmptyValue(values []string) bool {
 		}
 	}
 	return false
+}
+
+func resultWarnings(result interface{ GetWarnings() []string }) []string {
+	if result == nil {
+		return nil
+	}
+	return result.GetWarnings()
 }
 
 var assessBlockedCmd = &cobra.Command{
@@ -495,7 +503,7 @@ Requirements:
 
 		if isJSON(cmd) {
 			result, err := ops.AssessBlocked(projectRoot, taskID, note, agentID)
-			return jsonout.WriteResult(os.Stdout, result, nil, err)
+			return jsonout.WriteResult(os.Stdout, result, resultWarnings(result), err)
 		}
 		return commands.AssessBlockedCommand(projectRoot, taskID, note, agentID)
 	},
@@ -1046,6 +1054,7 @@ func init() {
 	markBlockedCmd.Flags().String("repair-command", "", "exact command the orchestrator should run or adapt")
 	markBlockedCmd.Flags().StringArray("repair-evidence", nil, "evidence gathered before requesting orchestrator repair")
 	markBlockedCmd.Flags().StringArray("repair-validation", nil, "validation already run or required after orchestrator repair")
+	markBlockedCmd.Flags().StringSlice("depends-on", nil, "task IDs blocking this task; also used as the orchestrator re-wake signal")
 	markBlockedCmd.Flags().String("agent-id", "", "agent ID marking the task as blocked")
 	markBlockedCmd.MarkFlagRequired("reason")
 	markBlockedCmd.MarkFlagRequired("questions")

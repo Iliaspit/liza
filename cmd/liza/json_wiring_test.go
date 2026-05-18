@@ -408,6 +408,44 @@ func TestJSON_MarkBlocked_IncompleteRepairRequestReportsActionableValidation(t *
 	assertJSONError(t, stdout, "validation", "--repair-target is required")
 }
 
+func TestJSON_MarkBlocked_AlertWriteFailureReturnsWarning(t *testing.T) {
+	projectRoot, _ := setupMutationTestProject(t, func(state *models.State) {
+		now := time.Now().UTC()
+		state.Tasks = []models.Task{
+			testhelpers.BuildTaskByStatus("task-alert-warning", models.TaskStatusImplementing, now),
+		}
+	})
+	alertsPath := filepath.Join(projectRoot, ".liza", "alerts.log")
+	if err := os.RemoveAll(alertsPath); err != nil {
+		t.Fatalf("remove alerts.log path: %v", err)
+	}
+	if err := os.Mkdir(alertsPath, 0o755); err != nil {
+		t.Fatalf("mkdir alerts.log path: %v", err)
+	}
+
+	stdout, err := executeRootCommandCapture(t, projectRoot,
+		"mark-blocked", "task-alert-warning",
+		"--agent-id", "coder-1",
+		"--reason", "Spec ambiguity",
+		"--questions", "What should happen?",
+		"--json",
+	)
+	if err != nil {
+		t.Fatalf("mark-blocked --json error: %v\n%s", err, stdout)
+	}
+	env := parseEnvelope(t, stdout)
+	if env["ok"] != true {
+		t.Fatalf("expected ok=true, got %v\n%s", env["ok"], stdout)
+	}
+	warnings, ok := env["warnings"].([]any)
+	if !ok || len(warnings) != 1 {
+		t.Fatalf("warnings = %#v, want one warning", env["warnings"])
+	}
+	if !strings.Contains(warnings[0].(string), "alert write failed") {
+		t.Fatalf("warning = %q, want alert write failure", warnings[0])
+	}
+}
+
 func TestJSON_Status_WithWarnings(t *testing.T) {
 	// Set up project with corrupted pipeline config so resolver load fails.
 	projectRoot, _ := setupMutationTestProject(t, nil)

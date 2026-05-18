@@ -387,9 +387,9 @@ The `liza` binary provides all system operations. Key commands:
 | `liza claim-task <task-id> <agent-id>` | Atomically claim a task for a doer agent (creates worktree, updates state)                                           |
 | `liza submit-for-review <task-id> [commit-ref]` | Submit a task for review (doer agents; defaults to worktree `HEAD`)                                                  |
 | `liza submit-verdict <task-id> <APPROVED\|REJECTED> [--reason "<reason>"]` | Submit a review verdict (reviewer agents; `--reason` required for REJECTED)                                          |
-| `liza mark-blocked <task-id>` | Mark a task as BLOCKED with reason/questions; optional `--repair-*` flags request orchestrator-only state repair     |
-| `liza assess-blocked <task-id>` | Record orchestrator assessment of a BLOCKED task (prevents re-wake loops)                                            |
-| `liza unblock-task <task-id> --assign-to <agent-id> --reason "..."` | Restore a repaired BLOCKED task to its executing state and assign it back to a doer                                  |
+| `liza mark-blocked <task-id>` | Mark a task as BLOCKED with reason/questions; optional `--depends-on` records blocking task IDs for scheduling and orchestrator re-wake; optional `--repair-*` flags request orchestrator-only state repair |
+| `liza assess-blocked <task-id>` | Record orchestrator assessment of a BLOCKED task and raise an `UNRESOLVED BLOCKED` alert when it cannot be resolved now |
+| `liza unblock-task <task-id> --assign-to <agent-id> --reason "..."` | Restore a repaired BLOCKED task to its executing state and assign it back to a doer; fails while any `depends_on` target is not MERGED or SUPERSEDED |
 | `liza assess-hypothesis-exhausted <task-id>` | Record orchestrator assessment of a hypothesis-exhausted task (2+ coders failed)                                     |
 | `liza cancel-task <task-id> --reason "..."` | Cancel a task (transition to ABANDONED with audit trail)                                                             |
 | `liza handoff <task-id> <summary> <next-action>` | Context-exhaustion handoff for a doer agent's claimed task                                                           |

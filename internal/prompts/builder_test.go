@@ -1140,6 +1140,7 @@ func TestBuildRoleContext_AllRoles(t *testing.T) {
 			"liza submit-for-review",
 			"liza handoff",
 			"liza mark-blocked",
+			"--depends-on",
 			"ANOMALY LOGGING:",
 			"BLOCKING PROTOCOL:",
 			"WORKTREE RULES:",

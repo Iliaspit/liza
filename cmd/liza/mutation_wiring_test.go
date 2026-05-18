@@ -383,6 +383,40 @@ func TestMutationCommandWiring(t *testing.T) {
 		}
 	})
 
+	t.Run("mark-blocked persists depends-on", func(t *testing.T) {
+		projectRoot, statePath := setupMutationTestProject(t, func(state *models.State) {
+			now := time.Now().UTC()
+			state.Tasks = []models.Task{
+				testhelpers.BuildTaskByStatus("task-blocked-on-dep", models.TaskStatusImplementing, now),
+				testhelpers.BuildTaskByStatus("dep-task", models.TaskStatusImplementing, now),
+			}
+		})
+
+		err := executeRootCommand(
+			t,
+			projectRoot,
+			"mark-blocked",
+			"task-blocked-on-dep",
+			"--agent-id",
+			"coder-1",
+			"--reason",
+			"Waiting on dep-task",
+			"--questions",
+			"Should dep-task merge first?",
+			"--depends-on",
+			"dep-task",
+		)
+		if err != nil {
+			t.Fatalf("mark-blocked execute failed: %v", err)
+		}
+
+		state := readState(t, statePath)
+		task := mustFindTask(t, state, "task-blocked-on-dep")
+		if len(task.DependsOn) != 1 || task.DependsOn[0] != "dep-task" {
+			t.Fatalf("task DependsOn = %v, want [dep-task]", task.DependsOn)
+		}
+	})
+
 	t.Run("mark-blocked validates incomplete repair request flags", func(t *testing.T) {
 		projectRoot, _ := setupMutationTestProject(t, func(state *models.State) {
 			now := time.Now().UTC()

@@ -2,6 +2,8 @@ package statevalidate
 
 import (
 	"fmt"
+	"io"
+	"slices"
 	"strings"
 
 	"github.com/liza-mas/liza/internal/models"
@@ -23,8 +25,19 @@ func validateDependencies(state *models.State, projectRoot string, skipSpecFileC
 			continue
 		}
 
+		seenDeps := make(map[string]bool, len(task.DependsOn))
 		// All dependencies must reference existing tasks
 		for _, depID := range task.DependsOn {
+			if strings.TrimSpace(depID) != depID || depID == "" {
+				return fmt.Errorf("task %s has invalid depends_on entry %q (must be non-empty and trimmed)", task.ID, depID)
+			}
+			if depID == task.ID {
+				return fmt.Errorf("task %s has depends_on referencing itself", task.ID)
+			}
+			if seenDeps[depID] {
+				return fmt.Errorf("task %s has duplicate depends_on entry %q", task.ID, depID)
+			}
+			seenDeps[depID] = true
 			if !taskIDs[depID] {
 				return fmt.Errorf("task %s has depends_on referencing non-existent task '%s'", task.ID, depID)
 			}
@@ -57,6 +70,69 @@ func validateDependencies(state *models.State, projectRoot string, skipSpecFileC
 	}
 
 	return nil
+}
+
+func warnBlockedReasonMissingDependsOn(state *models.State, warnWriter io.Writer) {
+	if warnWriter == nil {
+		return
+	}
+	var taskIDs []string
+	for _, task := range state.Tasks {
+		if task.ID != "" {
+			taskIDs = append(taskIDs, task.ID)
+		}
+	}
+	slices.Sort(taskIDs)
+	for _, task := range state.Tasks {
+		if task.Status != models.TaskStatusBlocked || len(task.DependsOn) > 0 || task.BlockedReason == nil {
+			continue
+		}
+		reason := *task.BlockedReason
+		for _, id := range taskIDs {
+			if id == "" || id == task.ID {
+				continue
+			}
+			if containsTaskID(reason, id) {
+				fmt.Fprintf(warnWriter, "WARNING: BLOCKED task %s blocked_reason references task %s but depends_on is empty; add depends_on so orchestrator can re-wake when the blocker changes\n", task.ID, id)
+				break
+			}
+		}
+	}
+}
+
+func containsTaskID(text, id string) bool {
+	if id == "" {
+		return false
+	}
+	start := 0
+	for {
+		idx := strings.Index(text[start:], id)
+		if idx < 0 {
+			return false
+		}
+		matchStart := start + idx
+		matchEnd := matchStart + len(id)
+		if hasTaskIDBoundary(text, matchStart-1) && hasTaskIDBoundary(text, matchEnd) {
+			return true
+		}
+		start = matchStart + 1
+	}
+}
+
+func hasTaskIDBoundary(text string, index int) bool {
+	if index < 0 || index >= len(text) {
+		return true
+	}
+	return !isTaskIDChar(text[index])
+}
+
+func isTaskIDChar(ch byte) bool {
+	return ch >= 'a' && ch <= 'z' ||
+		ch >= 'A' && ch <= 'Z' ||
+		ch >= '0' && ch <= '9' ||
+		ch == '.' ||
+		ch == '_' ||
+		ch == '-'
 }
 
 // checkCircular performs a depth-first traversal of the dependency graph

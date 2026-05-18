@@ -1,6 +1,7 @@
 package ops
 
 import (
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -8,6 +9,7 @@ import (
 	"github.com/liza-mas/liza/internal/db"
 	"github.com/liza-mas/liza/internal/errors"
 	"github.com/liza-mas/liza/internal/models"
+	"github.com/liza-mas/liza/internal/paths"
 	"github.com/liza-mas/liza/internal/testhelpers"
 )
 
@@ -116,6 +118,108 @@ func TestMarkBlocked_Success(t *testing.T) {
 	lastHistory := task.History[len(task.History)-1]
 	if lastHistory.Event != models.TaskEventBlocked {
 		t.Errorf("History event = %q, want %q", lastHistory.Event, models.TaskEventBlocked)
+	}
+}
+
+func TestMarkBlockedWithOptions_DependsOnAndImmediateAlert(t *testing.T) {
+	tmpDir := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, tmpDir)
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+
+	now := time.Now().UTC()
+	state := testhelpers.CreateValidState()
+	state.Tasks = []models.Task{
+		testhelpers.BuildTaskByStatus("task-1", models.TaskStatusImplementing, now),
+		testhelpers.BuildTaskByStatus("dep-1", models.TaskStatusImplementing, now),
+	}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	result, err := MarkBlockedWithOptions(
+		tmpDir,
+		"task-1",
+		"Waiting on dep-1",
+		[]string{"Should dep-1 merge first?"},
+		"coder-1",
+		MarkBlockedOptions{DependsOn: []string{" dep-1 "}},
+	)
+	if err != nil {
+		t.Fatalf("MarkBlockedWithOptions() error: %v", err)
+	}
+	if len(result.Warnings) != 0 {
+		t.Fatalf("Warnings = %v, want none", result.Warnings)
+	}
+	if len(result.DependsOn) != 1 || result.DependsOn[0] != "dep-1" {
+		t.Fatalf("DependsOn = %v, want [dep-1]", result.DependsOn)
+	}
+
+	bb := db.New(stateFile)
+	readState, err := bb.Read()
+	if err != nil {
+		t.Fatalf("Failed to read state: %v", err)
+	}
+	task := readState.FindTask("task-1")
+	if task == nil {
+		t.Fatal("Task not found")
+	}
+	if len(task.DependsOn) != 1 || task.DependsOn[0] != "dep-1" {
+		t.Fatalf("task.DependsOn = %v, want [dep-1]", task.DependsOn)
+	}
+
+	data, err := os.ReadFile(paths.New(tmpDir).AlertsLogPath())
+	if err != nil {
+		t.Fatalf("Read alerts.log: %v", err)
+	}
+	if !strings.Contains(string(data), "BLOCKED: task-1 — Waiting on dep-1") {
+		t.Fatalf("alerts.log missing BLOCKED alert:\n%s", string(data))
+	}
+}
+
+func TestMarkBlockedWithOptions_DependsOnValidation(t *testing.T) {
+	now := time.Now().UTC()
+
+	setupState := func(t *testing.T) string {
+		t.Helper()
+
+		tmpDir := t.TempDir()
+		testhelpers.SetupTestGitRepo(t, tmpDir)
+		stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+
+		state := testhelpers.CreateValidState()
+		dep := testhelpers.BuildTaskByStatus("dep-1", models.TaskStatusReady, now)
+		dep.DependsOn = []string{"task-1"}
+		state.Tasks = []models.Task{
+			testhelpers.BuildTaskByStatus("task-1", models.TaskStatusImplementing, now),
+			dep,
+		}
+		testhelpers.WriteInitialState(t, stateFile, state)
+
+		return tmpDir
+	}
+
+	tests := []struct {
+		name    string
+		deps    []string
+		wantErr string
+	}{
+		{name: "empty", deps: []string{" "}, wantErr: "depends-on entries cannot be empty"},
+		{name: "duplicate", deps: []string{"dep-1", "dep-1"}, wantErr: "duplicate depends-on entry"},
+		{name: "self", deps: []string{"task-1"}, wantErr: "cannot depend on itself"},
+		{name: "missing", deps: []string{"missing"}, wantErr: "non-existent task"},
+		{name: "cycle", deps: []string{"dep-1"}, wantErr: "dependency cycle"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := setupState(t)
+
+			_, err := MarkBlockedWithOptions(tmpDir, "task-1", "blocked", []string{"q1"}, "coder-1", MarkBlockedOptions{DependsOn: tt.deps})
+			if err == nil {
+				t.Fatal("Expected error, got nil")
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("Error = %q, want %q", err.Error(), tt.wantErr)
+			}
+		})
 	}
 }
 

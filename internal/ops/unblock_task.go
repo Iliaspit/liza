@@ -2,6 +2,7 @@ package ops
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/liza-mas/liza/internal/db"
@@ -83,6 +84,19 @@ func UnblockTask(projectRoot, taskID, assignTo, reason, agentID string) (*Unbloc
 		}
 		if task.Worktree == nil {
 			return &PreconditionError{Reason: fmt.Sprintf("task %s has no worktree to resume", taskID)}
+		}
+		var unmet []string
+		for _, depID := range task.DependsOn {
+			dep := state.FindTask(depID)
+			if dep == nil {
+				return &PreconditionError{Reason: fmt.Sprintf("task %s depends_on references non-existent task %q", taskID, depID)}
+			}
+			if dep.Status != models.TaskStatusMerged && dep.Status != models.TaskStatusSuperseded {
+				unmet = append(unmet, depID)
+			}
+		}
+		if len(unmet) > 0 {
+			return &PreconditionError{Reason: fmt.Sprintf("task %s has unmet dependencies: %s (must be MERGED or SUPERSEDED)", taskID, strings.Join(unmet, ", "))}
 		}
 
 		agent, exists := state.Agents[assignTo]

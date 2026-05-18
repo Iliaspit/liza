@@ -139,7 +139,6 @@ func TestCheckBlockedTasks(t *testing.T) {
 		tasks      []models.Task
 		cache      map[string]time.Time
 		wantAlerts int
-		wantCached bool
 	}{
 		{
 			name: "blocked task - first time",
@@ -151,10 +150,9 @@ func TestCheckBlockedTasks(t *testing.T) {
 			},
 			cache:      make(map[string]time.Time),
 			wantAlerts: 1,
-			wantCached: true,
 		},
 		{
-			name: "blocked task - already seen",
+			name: "blocked task - emitted for active-key tracking even when cache has old blocked entry",
 			tasks: []models.Task{
 				func() models.Task {
 					task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusBlocked, now)
@@ -164,8 +162,7 @@ func TestCheckBlockedTasks(t *testing.T) {
 			cache: map[string]time.Time{
 				"blocked:task-1": now.Add(-5 * time.Minute),
 			},
-			wantAlerts: 0,
-			wantCached: true,
+			wantAlerts: 1,
 		},
 		{
 			name: "no blocked tasks",
@@ -174,7 +171,6 @@ func TestCheckBlockedTasks(t *testing.T) {
 			},
 			cache:      make(map[string]time.Time),
 			wantAlerts: 0,
-			wantCached: false,
 		},
 	}
 
@@ -186,13 +182,57 @@ func TestCheckBlockedTasks(t *testing.T) {
 			if len(alerts) != tt.wantAlerts {
 				t.Errorf("len(alerts) = %d, want %d", len(alerts), tt.wantAlerts)
 			}
-
-			if tt.wantCached {
-				if _, cached := tt.cache["blocked:task-1"]; !cached {
-					t.Error("Expected task to be cached but it wasn't")
-				}
-			}
 		})
+	}
+}
+
+func TestRunChecksWithState_BlockedAlertDedupesAndRealertsAfterClear(t *testing.T) {
+	now := time.Now().UTC()
+	tmpDir := t.TempDir()
+	testhelpers.SetupLizaDir(t, tmpDir)
+	testhelpers.SetupPipelineConfig(t, tmpDir)
+
+	reason := "spec ambiguity"
+	blockedState := testhelpers.CreateValidState()
+	blockedState.Tasks = []models.Task{
+		func() models.Task {
+			task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusBlocked, now)
+			task.BlockedReason = &reason
+			return task
+		}(),
+	}
+	clearState := testhelpers.CreateValidState()
+	clearState.Tasks = []models.Task{
+		testhelpers.BuildTaskByStatus("task-1", models.TaskStatusReady, now),
+	}
+
+	cache := make(map[string]time.Time)
+	config := WatchConfig{ProjectRoot: tmpDir, StateCache: cache}
+	first := RunChecksWithStateSnapshot(blockedState, config)
+	if got := countAlertsByCategory(first.Alerts, "BLOCKED"); got != 1 {
+		t.Fatalf("first BLOCKED alerts = %d, want 1; alerts: %v", got, first.Alerts)
+	}
+	blockedKey := AlertKey(firstAlertByCategory(t, first.Alerts, "BLOCKED"))
+	if !first.ActiveKeys[blockedKey] {
+		t.Fatalf("first active keys missing %q", blockedKey)
+	}
+
+	second := RunChecksWithStateSnapshot(blockedState, config)
+	if got := countAlertsByCategory(second.Alerts, "BLOCKED"); got != 0 {
+		t.Fatalf("second BLOCKED alerts = %d, want 0; alerts: %v", got, second.Alerts)
+	}
+	if !second.ActiveKeys[blockedKey] {
+		t.Fatalf("second active keys missing throttled BLOCKED key %q", blockedKey)
+	}
+
+	cleared := RunChecksWithStateSnapshot(clearState, config)
+	if cleared.ActiveKeys[blockedKey] {
+		t.Fatalf("cleared active keys still contain %q", blockedKey)
+	}
+
+	reblocked := RunChecksWithStateSnapshot(blockedState, config)
+	if got := countAlertsByCategory(reblocked.Alerts, "BLOCKED"); got != 1 {
+		t.Fatalf("reblocked BLOCKED alerts = %d, want 1; alerts: %v", got, reblocked.Alerts)
 	}
 }
 

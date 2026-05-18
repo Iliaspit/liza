@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/liza-mas/liza/internal/alerts"
 	"github.com/liza-mas/liza/internal/analysis"
 	"github.com/liza-mas/liza/internal/db"
 	"github.com/liza-mas/liza/internal/models"
@@ -31,21 +32,14 @@ const (
 
 const stuckAlertCachePrefix = "stuck-alert:"
 
-// AlertLevel is the severity of a watch alert.
-type AlertLevel string
+type AlertLevel = alerts.AlertLevel
 
 const (
-	AlertLevelWarning  AlertLevel = "⚠️"
-	AlertLevelCritical AlertLevel = "🚨"
+	AlertLevelWarning  = alerts.AlertLevelWarning
+	AlertLevelCritical = alerts.AlertLevelCritical
 )
 
-// Alert represents a single anomaly alert from watch checks.
-type Alert struct {
-	Timestamp time.Time
-	Level     AlertLevel
-	Category  string
-	Message   string
-}
+type Alert = alerts.Alert
 
 // AlertSnapshot contains both newly emitted alerts and the complete set of
 // currently active alert identities for consumers that need freshness state.
@@ -54,55 +48,13 @@ type AlertSnapshot struct {
 	ActiveKeys map[string]bool
 }
 
-func (a Alert) String() string {
-	return fmt.Sprintf("[%s] %s %s: %s",
-		a.Timestamp.UTC().Format(time.RFC3339),
-		a.Level,
-		a.Category,
-		a.Message)
-}
-
 // ParseAlertLine parses a line written by Alert.String() back into an Alert.
 // Returns the parsed alert and true on success, or zero value and false on
 // malformed input.
 //
 // Format: [<RFC3339>] <level> <CATEGORY>: <message>
 func ParseAlertLine(line string) (Alert, bool) {
-	if !strings.HasPrefix(line, "[") {
-		return Alert{}, false
-	}
-	closeBracket := strings.IndexByte(line, ']')
-	if closeBracket < 0 {
-		return Alert{}, false
-	}
-	ts, err := time.Parse(time.RFC3339, line[1:closeBracket])
-	if err != nil {
-		return Alert{}, false
-	}
-
-	rest := strings.TrimLeft(line[closeBracket+1:], " ")
-
-	// Split "<level> <CATEGORY>: <message>" on first ": ".
-	colonIdx := strings.Index(rest, ": ")
-	if colonIdx < 0 {
-		return Alert{}, false
-	}
-	levelAndCategory := rest[:colonIdx]
-	message := rest[colonIdx+2:]
-
-	spaceIdx := strings.IndexByte(levelAndCategory, ' ')
-	if spaceIdx < 0 {
-		return Alert{}, false
-	}
-	level := AlertLevel(levelAndCategory[:spaceIdx])
-	category := strings.TrimSpace(levelAndCategory[spaceIdx+1:])
-
-	return Alert{
-		Timestamp: ts,
-		Level:     level,
-		Category:  category,
-		Message:   message,
-	}, true
+	return alerts.ParseLine(line)
 }
 
 type WatchConfig struct {
@@ -264,7 +216,7 @@ func activeAlertKeys(alerts []Alert) map[string]bool {
 
 // AlertKey returns a stable identity for an alert condition.
 func AlertKey(alert Alert) string {
-	return alert.Category + ":" + alert.Message
+	return alerts.Key(alert)
 }
 
 func isFreshnessTrackedAlertCategory(category string) bool {
@@ -276,7 +228,7 @@ func isFreshnessTrackedAlertCategory(category string) bool {
 		return true
 	}
 	switch category {
-	case "LEASE EXPIRED", "REVIEW LEASE EXPIRED":
+	case "BLOCKED", "LEASE EXPIRED", "REVIEW LEASE EXPIRED":
 		return true
 	default:
 		return false
@@ -318,7 +270,7 @@ func reconcileStuckAlerts(alerts []Alert, cache map[string]time.Time) []Alert {
 
 func isStuckAlertCategory(category string) bool {
 	switch category {
-	case "HYPOTHESIS EXHAUSTION", "INTEGRATION FAILED", "INVALID STATE", "DEAD AGENT PROCESS":
+	case "BLOCKED", "HYPOTHESIS EXHAUSTION", "INTEGRATION FAILED", "INVALID STATE", "DEAD AGENT PROCESS":
 		return true
 	case "INVALID AGENT OWNERSHIP":
 		return true
@@ -659,25 +611,30 @@ func checkBlockedTasks(state *models.State, cache map[string]time.Time) []Alert 
 	var alerts []Alert
 	now := time.Now().UTC()
 
+	// BLOCKED alerts are emitted every check so RunChecksWithStateSnapshot can
+	// compute active freshness keys before reconcileStuckAlerts dedupes log writes.
+	// Clear legacy cache keys from the previous one-shot implementation.
+	for key := range cache {
+		if strings.HasPrefix(key, "blocked:") {
+			delete(cache, key)
+		}
+	}
+
 	for _, task := range state.Tasks {
 		if task.Status != models.TaskStatusBlocked {
 			continue
 		}
 
-		cacheKey := "blocked:" + task.ID
-		if _, seen := cache[cacheKey]; !seen {
-			reason := "no reason"
-			if task.BlockedReason != nil {
-				reason = *task.BlockedReason
-			}
-			alerts = append(alerts, Alert{
-				Timestamp: now,
-				Level:     AlertLevelWarning,
-				Category:  "BLOCKED",
-				Message:   fmt.Sprintf("%s — %s", task.ID, reason),
-			})
-			cache[cacheKey] = now
+		reason := "no reason"
+		if task.BlockedReason != nil {
+			reason = *task.BlockedReason
 		}
+		alerts = append(alerts, Alert{
+			Timestamp: now,
+			Level:     AlertLevelWarning,
+			Category:  "BLOCKED",
+			Message:   fmt.Sprintf("%s — %s", task.ID, reason),
+		})
 	}
 
 	return alerts
@@ -1090,16 +1047,5 @@ func checkMissingRoles(state *models.State, pr models.PipelineResolver, cache ma
 
 // WriteAlert appends an alert to the alerts log file.
 func WriteAlert(alertsLog string, a Alert) error {
-	f, err := os.OpenFile(alertsLog, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		return fmt.Errorf("failed to open alerts log: %w", err)
-	}
-	defer f.Close()
-
-	_, err = fmt.Fprintln(f, a.String())
-	if err != nil {
-		return fmt.Errorf("failed to write alert: %w", err)
-	}
-
-	return nil
+	return alerts.Write(alertsLog, a)
 }

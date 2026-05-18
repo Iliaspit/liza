@@ -131,6 +131,10 @@ func ValidateState(state *models.State, projectRoot string, skipSpecFileCheck bo
 			return validateDependencies(state, projectRoot, skipSpecFileCheck, resolver, cfg)
 		},
 		func(state *models.State, projectRoot string, skipSpecFileCheck bool) error {
+			warnBlockedReasonMissingDependsOn(state, warnWriter)
+			return nil
+		},
+		func(state *models.State, projectRoot string, skipSpecFileCheck bool) error {
 			return validateAgentInvariants(state, projectRoot, skipSpecFileCheck, warnWriter, resolver)
 		},
 		validateDiscovered,
