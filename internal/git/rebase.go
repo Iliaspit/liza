@@ -31,16 +31,6 @@ func (e *RebaseError) Unwrap() error {
 	return e.Err
 }
 
-// FetchFromLocal fetches latest commits for a branch from the project root
-// Used in worktrees to sync with integration branch
-func (g *Git) FetchFromLocal(wtPath string, branch string) error {
-	_, err := g.execInDir(wtPath, "fetch", g.projectRoot, branch)
-	if err != nil {
-		return fmt.Errorf("failed to fetch branch %s from project root: %w", branch, err)
-	}
-	return nil
-}
-
 // RebaseOnto rebases the current branch in a worktree onto the specified base branch.
 // Must be called from within a worktree context.
 // Returns *RebaseConflictError for merge conflicts, generic error for other failures.

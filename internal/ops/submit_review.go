@@ -151,19 +151,12 @@ func SubmitForReview(projectRoot, taskID, commitRef, agentID string) (*SubmitFor
 	}
 
 	integrationBranch := state.Config.IntegrationBranch
-	if err := g.FetchFromLocal(wtPath, integrationBranch); err != nil {
-		return nil, &OperationalError{Message: fmt.Sprintf("failed to fetch integration branch %s", integrationBranch), Err: err}
-	}
-
-	// Capture integration HEAD immediately after fetch — this is the exact ref
-	// the rebase targets. Must be before rebase to avoid TOCTOU if integration
-	// advances between fetch and rebase completion.
 	rebaseBase, err := g.GetCommitSHA(integrationBranch)
 	if err != nil {
 		return nil, &OperationalError{Message: "failed to resolve integration branch HEAD", Err: err}
 	}
 
-	if err := g.RebaseOnto(wtPath, "FETCH_HEAD"); err != nil {
+	if err := g.RebaseOnto(wtPath, rebaseBase); err != nil {
 		// Abort rebase to restore clean worktree state — don't leave agents
 		// in a mid-rebase state where they struggle with --continue/--abort.
 		if abortErr := g.AbortRebase(wtPath); abortErr != nil {
@@ -277,7 +270,8 @@ func taskRequiresTDD(task *models.Task, resolver models.PipelineResolver) (bool,
 
 func rebaseFailureDetails(err error, integrationBranch, rebaseBase, preRebaseCommit string) map[string]any {
 	details := map[string]any{
-		"rebase_base_ref":       "FETCH_HEAD",
+		"rebase_base_ref":       integrationBranch,
+		"rebase_base_commit":    rebaseBase,
 		"integration_branch":    integrationBranch,
 		"integration_head":      rebaseBase,
 		"pre_rebase_head":       preRebaseCommit,

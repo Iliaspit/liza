@@ -410,7 +410,7 @@ func TestSubmitForReview_RebaseConflict(t *testing.T) {
 	}
 }
 
-func TestSubmitForReview_FetchFailure(t *testing.T) {
+func TestSubmitForReview_ResolveIntegrationBranchFailure(t *testing.T) {
 	// Setup test git repository
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
@@ -445,7 +445,7 @@ func TestSubmitForReview_FetchFailure(t *testing.T) {
 	worktree := g.GetWorktreeRelPath(taskID)
 	initialState := &models.State{
 		Config: models.Config{
-			IntegrationBranch: "nonexistent-branch", // This will cause fetch to fail
+			IntegrationBranch: "nonexistent-branch", // This will fail integration branch resolution
 			LeaseDuration:     1800,
 		},
 		Tasks: []models.Task{
@@ -475,15 +475,15 @@ func TestSubmitForReview_FetchFailure(t *testing.T) {
 
 	bb := testhelpers.WriteInitialState(t, statePath, initialState)
 
-	// Execute submit command (should fail at fetch stage)
+	// Execute submit command (should fail before rebase)
 	err = SubmitForReviewCommand(tmpDir, taskID, wtCommit, agentID)
 	if err == nil {
-		t.Fatal("expected error due to fetch failure, got nil")
+		t.Fatal("expected error due to missing integration branch, got nil")
 	}
 
-	// Verify error message mentions fetch
-	if !strings.Contains(err.Error(), "failed to fetch") {
-		t.Errorf("expected error to mention fetch failure, got: %v", err)
+	// Verify error message mentions integration branch resolution
+	if !strings.Contains(err.Error(), "failed to resolve integration branch HEAD") {
+		t.Errorf("expected error to mention integration branch resolution failure, got: %v", err)
 	}
 
 	// Verify task remains in IMPLEMENTING status

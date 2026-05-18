@@ -10,56 +10,6 @@ import (
 	"github.com/liza-mas/liza/internal/testhelpers"
 )
 
-func TestFetchFromLocal_Success(t *testing.T) {
-	repoDir := setupTestRepo(t)
-	git := New(repoDir)
-
-	// Create a worktree
-	taskID := "task-fetch-test"
-	if _, err := git.CreateWorktree(taskID, "integration"); err != nil {
-		t.Fatalf("CreateWorktree() error = %v", err)
-	}
-	wtPath := git.GetWorktreePath(taskID)
-
-	// Add a commit to integration in project root
-	testFile := filepath.Join(repoDir, "new-file.txt")
-	if err := os.WriteFile(testFile, []byte("new content\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	testhelpers.MustGit(t, repoDir, "add", "new-file.txt")
-	testhelpers.MustGit(t, repoDir, "commit", "-m", "New commit on integration")
-
-	// Fetch integration from project root into worktree
-	err := git.FetchFromLocal(wtPath, "integration")
-	if err != nil {
-		t.Fatalf("FetchFromLocal() error = %v", err)
-	}
-
-	// Verify FETCH_HEAD exists in worktree
-	fetchHeadPath := filepath.Join(wtPath, ".git", "FETCH_HEAD")
-	if _, err := os.Stat(fetchHeadPath); os.IsNotExist(err) {
-		t.Error("FETCH_HEAD was not created after fetch")
-	}
-}
-
-func TestFetchFromLocal_InvalidBranch(t *testing.T) {
-	repoDir := setupTestRepo(t)
-	git := New(repoDir)
-
-	// Create a worktree
-	taskID := "task-invalid-fetch"
-	if _, err := git.CreateWorktree(taskID, "integration"); err != nil {
-		t.Fatalf("CreateWorktree() error = %v", err)
-	}
-	wtPath := git.GetWorktreePath(taskID)
-
-	// Try to fetch a non-existent branch
-	err := git.FetchFromLocal(wtPath, "nonexistent-branch")
-	if err == nil {
-		t.Error("Expected error when fetching non-existent branch, got nil")
-	}
-}
-
 func TestRebaseOnto_Success(t *testing.T) {
 	repoDir := setupTestRepo(t)
 	git := New(repoDir)
@@ -86,14 +36,10 @@ func TestRebaseOnto_Success(t *testing.T) {
 	}
 	testhelpers.MustGit(t, repoDir, "add", "integration-file.txt")
 	testhelpers.MustGit(t, repoDir, "commit", "-m", "Integration commit")
+	integrationSHA := testhelpers.MustGit(t, repoDir, "rev-parse", "integration")
 
-	// Fetch latest integration into worktree
-	if err := git.FetchFromLocal(wtPath, "integration"); err != nil {
-		t.Fatalf("FetchFromLocal() error = %v", err)
-	}
-
-	// Rebase worktree onto FETCH_HEAD
-	err := git.RebaseOnto(wtPath, "FETCH_HEAD")
+	// Rebase worktree directly onto the resolved integration commit.
+	err := git.RebaseOnto(wtPath, integrationSHA)
 	if err != nil {
 		t.Fatalf("RebaseOnto() error = %v", err)
 	}
@@ -133,14 +79,10 @@ func TestRebaseOnto_Conflict(t *testing.T) {
 	}
 	testhelpers.MustGit(t, repoDir, "add", "README.md")
 	testhelpers.MustGit(t, repoDir, "commit", "-m", "Integration README")
-
-	// Fetch latest integration into worktree
-	if err := git.FetchFromLocal(wtPath, "integration"); err != nil {
-		t.Fatalf("FetchFromLocal() error = %v", err)
-	}
+	integrationSHA := testhelpers.MustGit(t, repoDir, "rev-parse", "integration")
 
 	// Try to rebase - should detect conflict and return typed error
-	err := git.RebaseOnto(wtPath, "FETCH_HEAD")
+	err := git.RebaseOnto(wtPath, integrationSHA)
 	if err == nil {
 		t.Fatal("Expected rebase conflict error, got nil")
 	}
@@ -186,12 +128,9 @@ func TestAbortRebase_Success(t *testing.T) {
 	}
 	testhelpers.MustGit(t, repoDir, "add", "README.md")
 	testhelpers.MustGit(t, repoDir, "commit", "-m", "Integration README")
+	integrationSHA := testhelpers.MustGit(t, repoDir, "rev-parse", "integration")
 
-	// Fetch and attempt rebase (will conflict)
-	if err := git.FetchFromLocal(wtPath, "integration"); err != nil {
-		t.Fatalf("FetchFromLocal() error = %v", err)
-	}
-	_ = git.RebaseOnto(wtPath, "FETCH_HEAD") // Expected to fail
+	_ = git.RebaseOnto(wtPath, integrationSHA) // Expected to fail
 
 	// Abort the rebase
 	err := git.AbortRebase(wtPath)
@@ -232,16 +171,13 @@ func TestRebaseOnto_AlreadyInProgress(t *testing.T) {
 	}
 	testhelpers.MustGit(t, repoDir, "add", "README.md")
 	testhelpers.MustGit(t, repoDir, "commit", "-m", "Integration README")
+	integrationSHA := testhelpers.MustGit(t, repoDir, "rev-parse", "integration")
 
-	// Fetch and attempt rebase (will conflict)
-	if err := git.FetchFromLocal(wtPath, "integration"); err != nil {
-		t.Fatalf("FetchFromLocal() error = %v", err)
-	}
-	_ = git.RebaseOnto(wtPath, "FETCH_HEAD") // Expected to fail
+	_ = git.RebaseOnto(wtPath, integrationSHA) // Expected to fail
 
 	// Try another rebase while one is in progress — this is a generic failure,
 	// NOT a merge conflict, so it must NOT return *RebaseConflictError.
-	err := git.RebaseOnto(wtPath, "FETCH_HEAD")
+	err := git.RebaseOnto(wtPath, integrationSHA)
 	if err == nil {
 		t.Fatal("Expected error when rebase already in progress, got nil")
 	}
@@ -254,8 +190,9 @@ func TestRebaseOnto_AlreadyInProgress(t *testing.T) {
 	if !stderrors.As(err, &rebaseErr) {
 		t.Fatalf("Expected *RebaseError, got %T: %v", err, err)
 	}
-	if strings.Join(rebaseErr.Command, " ") != "git rebase FETCH_HEAD" {
-		t.Errorf("Command = %v, want [git rebase FETCH_HEAD]", rebaseErr.Command)
+	wantCommand := "git rebase " + integrationSHA
+	if strings.Join(rebaseErr.Command, " ") != wantCommand {
+		t.Errorf("Command = %v, want %q", rebaseErr.Command, wantCommand)
 	}
 	if rebaseErr.Output == "" {
 		t.Error("Expected RebaseError.Output to include git stdout/stderr")

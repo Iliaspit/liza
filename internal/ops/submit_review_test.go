@@ -3,6 +3,7 @@ package ops
 import (
 	stderrors "errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -538,6 +539,57 @@ func TestSubmitForReview_WritesHandoffEvent(t *testing.T) {
 	}
 }
 
+func TestSubmitForReview_DoesNotFetchIntegrationBeforeRebase(t *testing.T) {
+	tmpDir, taskID, wtCommit, agentID, bb := setupSuccessfulSubmitScenario(t)
+	installGitShimFailingFetch(t)
+
+	result, err := SubmitForReview(tmpDir, taskID, wtCommit, agentID)
+	if err != nil {
+		t.Fatalf("SubmitForReview() unexpected error: %v", err)
+	}
+	if result == nil {
+		t.Fatal("SubmitForReview() returned nil result")
+	}
+
+	state, err := bb.Read()
+	if err != nil {
+		t.Fatalf("bb.Read() error: %v", err)
+	}
+	task := state.FindTask(taskID)
+	if task == nil {
+		t.Fatal("task not found after submission")
+	}
+	if task.BaseCommit == nil || *task.BaseCommit == "" {
+		t.Fatal("expected task.BaseCommit to be updated to resolved integration commit")
+	}
+	if *task.BaseCommit != testhelpers.MustGit(t, tmpDir, "rev-parse", "integration") {
+		t.Fatalf("task.BaseCommit = %s, want integration HEAD", *task.BaseCommit)
+	}
+}
+
+func installGitShimFailingFetch(t *testing.T) {
+	t.Helper()
+
+	realGit, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatalf("find real git: %v", err)
+	}
+
+	binDir := t.TempDir()
+	shimPath := filepath.Join(binDir, "git")
+	escapedRealGit := strings.ReplaceAll(realGit, `"`, `\"`)
+	script := "#!/bin/sh\n" +
+		"if [ \"$1\" = \"fetch\" ]; then\n" +
+		"  echo \"shim blocked git fetch\" >&2\n" +
+		"  exit 42\n" +
+		"fi\n" +
+		"exec \"" + escapedRealGit + "\" \"$@\"\n"
+	if err := os.WriteFile(shimPath, []byte(script), 0755); err != nil {
+		t.Fatalf("write git shim: %v", err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
 func TestSubmitForReview_TDDEnforcement_AcceptsNestedPythonTestFile(t *testing.T) {
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
@@ -935,14 +987,14 @@ func TestSubmitForReview_TDDEnforcement_UsesRolePairOverStaleCodingType(t *testi
 
 func TestSubmitForReview_NonConflictRebaseDetailsIncludeRecoveryContext(t *testing.T) {
 	err := &git.RebaseError{
-		Command: []string{"git", "rebase", "FETCH_HEAD"},
+		Command: []string{"git", "rebase", "abc123"},
 		Output:  "fatal: It seems that there is already a rebase-merge directory.",
 		Err:     stderrors.New("exit status 128"),
 	}
 
 	details := rebaseFailureDetails(err, "integration", "abc123", "def456")
-	if details["command"] != "git rebase FETCH_HEAD" {
-		t.Errorf("command = %v, want git rebase FETCH_HEAD", details["command"])
+	if details["command"] != "git rebase abc123" {
+		t.Errorf("command = %v, want git rebase abc123", details["command"])
 	}
 	if details["integration_branch"] != "integration" {
 		t.Errorf("integration_branch = %v, want integration", details["integration_branch"])
@@ -950,11 +1002,14 @@ func TestSubmitForReview_NonConflictRebaseDetailsIncludeRecoveryContext(t *testi
 	if details["integration_head"] != "abc123" {
 		t.Errorf("integration_head = %v, want abc123", details["integration_head"])
 	}
+	if details["rebase_base_commit"] != "abc123" {
+		t.Errorf("rebase_base_commit = %v, want abc123", details["rebase_base_commit"])
+	}
 	if details["pre_rebase_head"] != "def456" {
 		t.Errorf("pre_rebase_head = %v, want def456", details["pre_rebase_head"])
 	}
-	if details["rebase_base_ref"] != "FETCH_HEAD" {
-		t.Errorf("rebase_base_ref = %v, want FETCH_HEAD", details["rebase_base_ref"])
+	if details["rebase_base_ref"] != "integration" {
+		t.Errorf("rebase_base_ref = %v, want integration", details["rebase_base_ref"])
 	}
 	if !strings.Contains(details["stdout_stderr_excerpt"].(string), "rebase-merge") {
 		t.Errorf("stdout_stderr_excerpt = %v, want rebase output excerpt", details["stdout_stderr_excerpt"])
