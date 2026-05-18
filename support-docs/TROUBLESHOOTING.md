@@ -81,7 +81,7 @@ Liza uses file-based locking with classified error types for targeted diagnostic
 | Type | Meaning |
 |------|---------|
 | `lock error (timeout)` | Failed to acquire lock within timeout |
-| `lock error (stale)` | Lock held by dead process |
+| `lock error (stale)` | Diagnostic owner metadata references a dead process |
 | `lock error (disk_full)` | No space left on device |
 | `lock error (permission)` | Permission denied on lock file |
 | `lock error (filesystem)` | I/O error or filesystem issue |
@@ -91,29 +91,27 @@ Liza uses file-based locking with classified error types for targeted diagnostic
 **Diagnosis:**
 ```bash
 ps aux | grep liza                     # Running processes
-cat .liza/.state.yaml.lock.pid         # PID of lock holder
-ps -p $(cat .liza/.state.yaml.lock.pid)  # Is holder alive?
+lsof .liza/state.yaml.lock             # Process holding the kernel flock, if visible
+cat .liza/state.yaml.lock.owner.json   # Best-effort diagnostic owner metadata
 ```
 
 **Common causes:** Long-running operation under lock, many agents competing, hung process, slow filesystem (network mount).
 
 **Solutions:**
 - If holder is alive and working → wait 30-60s, retry
-- If holder is hung → `kill $(cat .liza/.state.yaml.lock.pid)`, lock auto-cleans on next access
+- If holder is hung → stop the owning `liza` process; do not delete lock files based on PID metadata alone
 - If high contention → reduce parallel agents (1-3 per role)
 - If slow filesystem → `df -T .liza/`, move to local SSD
 
-### stale — lock held by dead process
+### owner metadata is diagnostic
 
-**Automatic cleanup:** Liza detects stale locks via PID tracking — checks if lock holder process exists, removes lock files if dead, then retries.
+Liza uses `flock` for mutual exclusion. The `.lock` file and
+`.lock.owner.json` metadata may remain after a successful operation; their
+presence alone does not mean a lock is held. Owner metadata can be stale or
+ambiguous across process namespaces, so Liza does not use it to release locks.
 
-**Manual cleanup** (if auto-cleanup fails):
-```bash
-ps aux | grep liza                    # Verify NO liza processes running
-rm .liza/.state.yaml.lock .liza/.state.yaml.lock.pid
-```
-
-**Common causes:** `kill -9` (SIGKILL), system crash, OOM killer. **Prevention:** Use `kill` or Ctrl+C for graceful shutdown.
+**Manual cleanup is rarely appropriate:** only remove lock metadata after
+confirming no `liza` process is running and no process holds the flock.
 
 ### disk_full — no space left on device
 
@@ -128,7 +126,7 @@ du -sh .worktrees/* # Find large worktrees
 ### permission — permission denied
 
 ```bash
-ls -la .liza/.state.yaml.lock*   # Check lock file permissions
+ls -la .liza/state.yaml.lock*    # Check lock file permissions
 ls -ld .liza/                     # Check directory permissions
 stat .liza/state.yaml             # Check ownership
 ```
@@ -431,9 +429,9 @@ cat .liza/agent-prompts/coder-1-*.txt  # What the agent was told
 ### Monitor locks
 
 ```bash
-ls -la .liza/.state.yaml.lock*   # Lock file exists?
-lsof .liza/.state.yaml.lock      # Who holds it?
-cat .liza/.state.yaml.lock.pid   # Lock holder PID
+ls -la .liza/state.yaml.lock*       # Lock and diagnostic metadata files
+lsof .liza/state.yaml.lock          # Process holding the kernel flock, if visible
+cat .liza/state.yaml.lock.owner.json # Best-effort owner metadata
 ```
 
 ### Watch real-time
@@ -457,7 +455,7 @@ Agents: $(liza get agents --format table 2>&1)
 Worktrees: $(git worktree list)
 Recent Alerts: $(tail -50 .liza/alerts.log 2>/dev/null)
 Processes: $(ps aux | grep liza)
-Lock Status: $(ls -la .liza/.state.yaml.lock* 2>&1)
+Lock Status: $(ls -la .liza/state.yaml.lock* 2>&1)
 EOF
 ```
 

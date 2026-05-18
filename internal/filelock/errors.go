@@ -19,7 +19,8 @@ const (
 	LockErrorDiskFull
 	// LockErrorFilesystem indicates a filesystem error (I/O, read-only, etc.).
 	LockErrorFilesystem
-	// LockErrorStale indicates the lock is held by a dead process.
+	// LockErrorStale indicates diagnostic metadata points to a dead process.
+	// Normal lock acquisition returns LockErrorTimeout when flock is unavailable.
 	LockErrorStale
 )
 
@@ -148,11 +149,11 @@ func NewLockTimeout(err error) *LockError {
 	}
 }
 
-// NewLockStale creates a stale lock LockError.
+// NewLockStale creates a diagnostic stale-owner LockError.
 func NewLockStale(pid int) *LockError {
 	return &LockError{
 		Type:    LockErrorStale,
-		Message: fmt.Sprintf("lock held by dead process (PID %d)", pid),
+		Message: fmt.Sprintf("owner metadata references dead process (PID %d)", pid),
 		Err:     nil,
 	}
 }

@@ -2,6 +2,7 @@ package log
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -486,17 +487,13 @@ func TestLoggerReadCorruptedFile(t *testing.T) {
 	}
 }
 
-// TestLoggerStaleLockRecovery verifies the logger recovers when a stale lock
-// (left by a dead process) is present. Zero timeout bypasses the polling loop
-// and goes straight to stale detection, where the dead PID triggers cleanup
-// and successful re-acquisition.
-func TestLoggerStaleLockRecovery(t *testing.T) {
+func TestLoggerIgnoresLegacyPIDMetadataWhenLockFree(t *testing.T) {
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "log.yaml")
 	lockPath := logPath + ".lock"
 	pidPath := logPath + ".lock.pid"
+	ownerPath := logPath + ".lock.owner.json"
 
-	// Simulate stale lock: lock file exists + PID file with non-existent process
 	if err := os.WriteFile(lockPath, []byte{}, 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -504,17 +501,16 @@ func TestLoggerStaleLockRecovery(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Zero timeout skips polling loop → straight to stale detection
-	logger := New(logPath).WithLockTimeout(0)
+	logger := New(logPath).WithLockTimeout(2 * time.Second)
 
 	entry := Entry{
 		Agent:  "test-agent",
-		Action: "stale_recovery",
-		Detail: "entry after stale lock recovery",
+		Action: "legacy_metadata",
+		Detail: "entry after legacy metadata was ignored",
 	}
 
 	if err := logger.Append(entry); err != nil {
-		t.Fatalf("Append() should succeed after stale lock recovery, got: %v", err)
+		t.Fatalf("Append() should succeed when flock is free: %v", err)
 	}
 
 	// Verify entry was written
@@ -529,13 +525,30 @@ func TestLoggerStaleLockRecovery(t *testing.T) {
 		t.Errorf("Agent = %q, want %q", entries[0].Agent, "test-agent")
 	}
 
-	// Verify stale PID was replaced (acquireLockWithPID writes current PID)
-	pidData, err := os.ReadFile(pidPath)
+	legacyPID, err := os.ReadFile(pidPath)
 	if err != nil {
-		t.Fatalf("PID file should exist after recovery, got: %v", err)
+		t.Fatalf("legacy PID metadata should remain available for diagnostics: %v", err)
 	}
-	if string(pidData) == "99999999" {
-		t.Error("PID file still contains stale PID, expected current process PID")
+	if string(legacyPID) != "99999999" {
+		t.Errorf("legacy PID metadata = %q, want unchanged", legacyPID)
+	}
+
+	metadataData, err := os.ReadFile(ownerPath)
+	if err != nil {
+		t.Fatalf("owner metadata was not written: %v", err)
+	}
+	var metadata struct {
+		PID       int    `json:"pid"`
+		Operation string `json:"operation"`
+	}
+	if err := json.Unmarshal(metadataData, &metadata); err != nil {
+		t.Fatalf("owner metadata is invalid JSON: %v", err)
+	}
+	if metadata.PID != os.Getpid() {
+		t.Errorf("owner metadata PID = %d, want %d", metadata.PID, os.Getpid())
+	}
+	if metadata.Operation != "append" {
+		t.Errorf("owner metadata operation = %q, want append", metadata.Operation)
 	}
 }
 

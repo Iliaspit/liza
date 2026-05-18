@@ -1,6 +1,8 @@
 package filelock
 
 import (
+	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"sync/atomic"
@@ -123,10 +125,10 @@ func TestFileLockCreatesLockFile(t *testing.T) {
 			t.Error("lock file does not exist during operation")
 		}
 
-		// PID file should exist during operation
-		pidPath := protectedPath + ".lock.pid"
-		if _, err := os.Stat(pidPath); os.IsNotExist(err) {
-			t.Error("PID file does not exist during operation")
+		// Owner metadata is diagnostic and should be written best-effort.
+		ownerPath := protectedPath + ".lock.owner.json"
+		if _, err := os.Stat(ownerPath); os.IsNotExist(err) {
+			t.Error("owner metadata file does not exist during operation")
 		}
 
 		return nil
@@ -187,8 +189,8 @@ func TestFileLockPaths(t *testing.T) {
 	if fl.lockPath != "/tmp/test/state.yaml.lock" {
 		t.Errorf("lockPath = %q, want %q", fl.lockPath, "/tmp/test/state.yaml.lock")
 	}
-	if fl.pidPath != "/tmp/test/state.yaml.lock.pid" {
-		t.Errorf("pidPath = %q, want %q", fl.pidPath, "/tmp/test/state.yaml.lock.pid")
+	if fl.ownerPath != "/tmp/test/state.yaml.lock.owner.json" {
+		t.Errorf("ownerPath = %q, want %q", fl.ownerPath, "/tmp/test/state.yaml.lock.owner.json")
 	}
 }
 
@@ -200,25 +202,46 @@ func TestFileLockDefaults(t *testing.T) {
 	}
 }
 
-// TestCleanupStaleLockFailure verifies that cleanupStaleLock returns an error
-// when the lock file does not exist (simulating a filesystem issue).
-func TestCleanupStaleLockFailure(t *testing.T) {
+func TestWithLockIgnoresLegacyPIDMetadataWhenLockFree(t *testing.T) {
 	dir := t.TempDir()
-	protectedPath := filepath.Join(dir, "nonexistent", "data.yaml")
+	protectedPath := filepath.Join(dir, "data.yaml")
 
 	fl := New(protectedPath)
 
-	// cleanupStaleLock should succeed even if lock file doesn't exist
-	// (it only returns error on actual filesystem errors, not on ENOENT)
-	err := fl.cleanupStaleLock()
+	legacyPIDPath := protectedPath + ".lock.pid"
+	if err := os.WriteFile(legacyPIDPath, []byte("99999999"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	executed := false
+	err := fl.WithLockOperation("legacy-metadata", func() error {
+		executed = true
+		return nil
+	})
 	if err != nil {
-		t.Errorf("cleanupStaleLock() expected nil for non-existent lock file, got %v", err)
+		t.Fatalf("WithLockOperation() error = %v", err)
+	}
+	if !executed {
+		t.Fatal("function was not executed")
+	}
+
+	data, err := os.ReadFile(fl.ownerPath)
+	if err != nil {
+		t.Fatalf("owner metadata was not written: %v", err)
+	}
+	var metadata ownerMetadata
+	if err := json.Unmarshal(data, &metadata); err != nil {
+		t.Fatalf("owner metadata is not JSON: %v", err)
+	}
+	if metadata.PID != os.Getpid() {
+		t.Errorf("owner metadata PID = %d, want %d", metadata.PID, os.Getpid())
+	}
+	if metadata.Operation != "legacy-metadata" {
+		t.Errorf("owner metadata operation = %q, want legacy-metadata", metadata.Operation)
 	}
 }
 
-// TestWithLockStaleLockRecovery verifies that when a stale lock is detected,
-// cleanup is attempted and if successful, the lock is acquired.
-func TestWithLockStaleLockRecovery(t *testing.T) {
+func TestWithLockTimesOutWhenHeldEvenWithDeadLegacyPIDMetadata(t *testing.T) {
 	dir := t.TempDir()
 	protectedPath := filepath.Join(dir, "data.yaml")
 
@@ -226,15 +249,6 @@ func TestWithLockStaleLockRecovery(t *testing.T) {
 	if err := os.WriteFile(protectedPath, []byte("test"), 0644); err != nil {
 		t.Fatalf("Failed to create protected file: %v", err)
 	}
-
-	// First, acquire the lock in a subprocess that will exit, leaving a stale lock
-	// We can't easily fork in a test, so we'll simulate by:
-	// 1. Creating a lock file
-	// 2. Creating a PID file with our own PID (so it's considered "live")
-	// 3. Using a very short timeout and acquiring another lock instance
-
-	// Actually, the simplest approach is to have this process hold the lock,
-	// and try to acquire it again with a different FileLock instance with a short timeout
 
 	lock1 := New(protectedPath)
 	lock1 = lock1.WithTimeout(5 * time.Second)
@@ -260,11 +274,14 @@ func TestWithLockStaleLockRecovery(t *testing.T) {
 		t.Fatal("lock1 was not acquired")
 	}
 
-	// Now try to acquire with lock2 using a short timeout
-	lock2 := New(protectedPath)
-	lock2 = lock2.WithTimeout(50 * time.Millisecond)
+	legacyPIDPath := protectedPath + ".lock.pid"
+	if err := os.WriteFile(legacyPIDPath, []byte("99999999"), 0644); err != nil {
+		t.Fatal(err)
+	}
 
-	// This should timeout because lock1 is held
+	lock2 := New(protectedPath)
+	lock2 = lock2.WithTimeout(100 * time.Millisecond)
+
 	errChan := make(chan error, 1)
 	go func() {
 		err := lock2.WithLock(func() error {
@@ -279,7 +296,13 @@ func TestWithLockStaleLockRecovery(t *testing.T) {
 		if err == nil {
 			t.Fatal("lock2 should have timed out")
 		}
-		// Expected - lock2 timed out
+		var lockErr *LockError
+		if !errors.As(err, &lockErr) {
+			t.Fatalf("error = %T %v, want *LockError", err, err)
+		}
+		if lockErr.Type != LockErrorTimeout {
+			t.Fatalf("lock error type = %v, want %v", lockErr.Type, LockErrorTimeout)
+		}
 	case <-time.After(1 * time.Second):
 		t.Fatal("lock2 should have timed out quickly")
 	}
@@ -293,49 +316,33 @@ func TestWithLockStaleLockRecovery(t *testing.T) {
 		t.Fatal("lock1 was not released")
 	}
 
-	// Now test stale lock detection by simulating a stale lock
-	// Create a lock file and a PID file with a non-existent PID
-	pidPath := protectedPath + ".lock.pid"
-	lockPath := protectedPath + ".lock"
-
-	// The lock file may still exist from lock1 - that's fine
-	// But we need to replace the PID with a non-existent one
-	if err := os.WriteFile(pidPath, []byte("99999"), 0644); err != nil {
-		t.Fatalf("Failed to create stale PID file: %v", err)
+	legacyPID, err := os.ReadFile(legacyPIDPath)
+	if err != nil {
+		t.Fatalf("legacy PID metadata should remain diagnostic-only: %v", err)
 	}
-
-	// Ensure lock file exists (flock needs an actual file)
-	if _, err := os.Stat(lockPath); os.IsNotExist(err) {
-		if err := os.WriteFile(lockPath, []byte(""), 0644); err != nil {
-			t.Fatalf("Failed to create lock file: %v", err)
-		}
+	if string(legacyPID) != "99999999" {
+		t.Errorf("legacy PID metadata = %q, want unchanged", legacyPID)
 	}
+}
 
-	// Now try to acquire with a new lock instance with a short timeout
-	// It should detect the stale lock, clean it up, and acquire successfully
-	lock3 := New(protectedPath)
-	lock3 = lock3.WithTimeout(100 * time.Millisecond)
+func TestOwnerMetadataWriteFailureDoesNotBlockLock(t *testing.T) {
+	dir := t.TempDir()
+	protectedPath := filepath.Join(dir, "data.yaml")
+
+	fl := New(protectedPath)
+	if err := os.Mkdir(fl.ownerPath, 0755); err != nil {
+		t.Fatal(err)
+	}
 
 	executed := false
-	err := lock3.WithLock(func() error {
+	err := fl.WithLock(func() error {
 		executed = true
 		return nil
 	})
-
 	if err != nil {
-		t.Fatalf("WithLock() expected success after stale lock cleanup, got error: %v", err)
+		t.Fatalf("WithLock() error = %v", err)
 	}
-
 	if !executed {
-		t.Error("function should have executed after stale lock cleanup")
-	}
-
-	// Verify the PID file was updated (new PID written by acquireLockWithPID)
-	pidData, err := os.ReadFile(pidPath)
-	if err != nil {
-		t.Fatalf("Failed to read PID file: %v", err)
-	}
-	if string(pidData) == "99999" {
-		t.Error("PID file should have been updated with new PID, not the stale one")
+		t.Error("function should run even when diagnostic metadata cannot be written")
 	}
 }

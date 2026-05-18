@@ -280,7 +280,7 @@ source of truth for roles, responsibility, observability, and auditability:
   enabling the MCP middleware to validate every tool call against the caller's identity
 
 Concurrency guarantees protect this central structure: atomic writes (flock → temp-write →
-fsync → rename), PID-based stale lock detection, and a three-phase claim pattern that
+fsync → rename), diagnostic lock-owner metadata, and a three-phase claim pattern that
 prevents TOCTOU races during task assignment.
 
 ### Agent Supervisor

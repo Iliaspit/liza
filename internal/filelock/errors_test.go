@@ -51,11 +51,11 @@ func TestLockErrorType(t *testing.T) {
 			wantType: LockErrorFilesystem,
 		},
 		{
-			name: "stale lock error",
+			name: "stale owner metadata error",
 			lockErr: &LockError{
 				Type:    LockErrorStale,
-				Message: "lock held by dead process",
-				Err:     errors.New("stale lock"),
+				Message: "owner metadata references dead process",
+				Err:     errors.New("stale owner metadata"),
 			},
 			wantType: LockErrorStale,
 		},
@@ -289,7 +289,7 @@ func TestNewLockStale(t *testing.T) {
 		t.Errorf("NewLockStale().Type = %v, want %v", lockErr.Type, LockErrorStale)
 	}
 
-	expectedMsg := fmt.Sprintf("lock held by dead process (PID %d)", pid)
+	expectedMsg := fmt.Sprintf("owner metadata references dead process (PID %d)", pid)
 	if lockErr.Message != expectedMsg {
 		t.Errorf("NewLockStale().Message = %q, want %q", lockErr.Message, expectedMsg)
 	}

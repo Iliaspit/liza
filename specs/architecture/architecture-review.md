@@ -254,7 +254,7 @@ Agents now interact via CLI `--json` mode instead of MCP JSON-RPC. All MCP findi
 #### Other leaf packages
 
 - `log/` (~210 LOC): YAML append log with flock (via shared `filelock` package). Now uses append-only writes (no O(n) rewrite) and bounded tail-window `GetLastTimestamp()` for sub-linear reads *(perf: `fe8de6b`)*
-- `filelock/` (~490 LOC): Shared file-locking with flock, PID-based stale detection, error classification, metrics
+- `filelock/` (~490 LOC): Shared file-locking with flock, diagnostic owner metadata, error classification, metrics
 - `analysis/` (~224 LOC): Circuit breaker pattern detection (6 patterns)
 - `identity/` (~123 LOC): Agent ID resolution and validation *(health check: was ~108)*
 - `errors/` (~70 LOC): Exit codes and `NotFoundError` type (with `Entity`, `ID`, `Field` fields) *(health check: was ~45)*

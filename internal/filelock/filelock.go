@@ -1,11 +1,11 @@
 package filelock
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
-	"strconv"
-	"syscall"
+	"path/filepath"
 	"time"
 
 	"github.com/gofrs/flock"
@@ -18,13 +18,13 @@ const (
 	LockCheckInterval = 100 * time.Millisecond
 )
 
-// FileLock provides file-based mutual exclusion with stale lock detection.
+// FileLock provides file-based mutual exclusion with diagnostic owner metadata.
 //
-// It wraps flock(2) with a polling acquisition loop, PID-based stale lock
-// recovery, classified error types, and optional metrics collection.
+// It wraps flock(2) with a polling acquisition loop, best-effort owner metadata,
+// classified error types, and optional metrics collection.
 type FileLock struct {
 	lockPath    string
-	pidPath     string
+	ownerPath   string
 	lockTimeout time.Duration
 
 	// Metrics collection (optional)
@@ -33,11 +33,11 @@ type FileLock struct {
 }
 
 // New creates a FileLock that protects the given file path.
-// Lock file: protectedPath + ".lock", PID file: protectedPath + ".lock.pid".
+// Lock file: protectedPath + ".lock", owner metadata: protectedPath + ".lock.owner.json".
 func New(protectedPath string) *FileLock {
 	return &FileLock{
 		lockPath:    protectedPath + ".lock",
-		pidPath:     protectedPath + ".lock.pid",
+		ownerPath:   protectedPath + ".lock.owner.json",
 		lockTimeout: DefaultLockTimeout,
 	}
 }
@@ -47,7 +47,7 @@ func New(protectedPath string) *FileLock {
 func (fl *FileLock) WithTimeout(timeout time.Duration) *FileLock {
 	return &FileLock{
 		lockPath:    fl.lockPath,
-		pidPath:     fl.pidPath,
+		ownerPath:   fl.ownerPath,
 		lockTimeout: timeout,
 	}
 }
@@ -70,7 +70,15 @@ func (fl *FileLock) GetMetricsRecorder() *MetricsRecorder {
 	return fl.metricsRecorder
 }
 
-func (fl *FileLock) acquireLockWithPID() (*flock.Flock, error) {
+type ownerMetadata struct {
+	Version    int    `json:"version"`
+	PID        int    `json:"pid"`
+	Hostname   string `json:"hostname,omitempty"`
+	Operation  string `json:"operation"`
+	AcquiredAt string `json:"acquired_at"`
+}
+
+func (fl *FileLock) acquireLock(operation string) (*flock.Flock, error) {
 	lock := flock.New(fl.lockPath)
 	acquired, err := lock.TryLock()
 	if err != nil {
@@ -80,55 +88,42 @@ func (fl *FileLock) acquireLockWithPID() (*flock.Flock, error) {
 		return nil, fmt.Errorf("lock not acquired")
 	}
 
-	pid := os.Getpid()
-	pidData := []byte(strconv.Itoa(pid))
-	if err := os.WriteFile(fl.pidPath, pidData, 0644); err != nil {
-		lock.Unlock()
-		return nil, ClassifyLockError(err)
-	}
+	fl.writeOwnerMetadata(operation)
 
 	return lock, nil
 }
 
-func isProcessAlive(pid int) bool {
-	process, err := os.FindProcess(pid)
+func (fl *FileLock) writeOwnerMetadata(operation string) {
+	hostname, _ := os.Hostname()
+	metadata := ownerMetadata{
+		Version:    1,
+		PID:        os.Getpid(),
+		Hostname:   hostname,
+		Operation:  operation,
+		AcquiredAt: time.Now().UTC().Format(time.RFC3339Nano),
+	}
+	data, err := json.MarshalIndent(metadata, "", "  ")
 	if err != nil {
-		return false
+		return
 	}
+	data = append(data, '\n')
 
-	// Send signal 0 to check if process exists (Unix-specific).
-	// On Unix, this checks process existence without actually sending a signal.
-	err = process.Signal(syscall.Signal(0))
-	return err == nil
-}
-
-func (fl *FileLock) isLockStale() (bool, int) {
-	pidData, err := os.ReadFile(fl.pidPath)
+	dir := filepath.Dir(fl.ownerPath)
+	base := filepath.Base(fl.ownerPath)
+	tmp, err := os.CreateTemp(dir, base+".tmp-*")
 	if err != nil {
-		// No PID file or can't read it - assume not stale
-		return false, 0
+		return
 	}
-
-	pid, err := strconv.Atoi(string(pidData))
-	if err != nil {
-		// Invalid PID format - assume not stale
-		return false, 0
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return
 	}
-
-	return !isProcessAlive(pid), pid
-}
-
-// cleanupStaleLock cleans up after a dead process's lock.
-// Only the PID file is removed. The lock file is truncated but preserved
-// to maintain inode identity — deleting it would re-introduce the flock
-// race described in WithLock's defer block.
-func (fl *FileLock) cleanupStaleLock() error {
-	os.Remove(fl.pidPath)
-	// Truncate lock file (release flock state) without deleting the inode
-	if err := os.Truncate(fl.lockPath, 0); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("failed to truncate stale lock file: %w", err)
+	if err := tmp.Close(); err != nil {
+		return
 	}
-	return nil
+	_ = os.Rename(tmpPath, fl.ownerPath)
 }
 
 // WithLock executes fn while holding an exclusive file lock.
@@ -148,7 +143,7 @@ func (fl *FileLock) WithLockOperation(operation string, fn func() error) error {
 	locked := false
 
 	for time.Now().Before(deadline) {
-		lock, err = fl.acquireLockWithPID()
+		lock, err = fl.acquireLock(operation)
 		if err == nil {
 			locked = true
 			break
@@ -165,36 +160,19 @@ func (fl *FileLock) WithLockOperation(operation string, fn func() error) error {
 	}
 
 	if !locked {
-		isStale, stalePID := fl.isLockStale()
-		if isStale {
-			// Propagate cleanup failure as a lock/filesystem error before retry
-			if cleanupErr := fl.cleanupStaleLock(); cleanupErr != nil {
-				return &LockError{
-					Type:    LockErrorFilesystem,
-					Message: fmt.Sprintf("failed to cleanup stale lock held by dead process (PID %d)", stalePID),
-					Err:     cleanupErr,
-				}
-			}
-			lock, err = fl.acquireLockWithPID()
-			if err != nil {
-				return NewLockStale(stalePID)
-			}
-			locked = true
-		} else {
-			return NewLockTimeout(fmt.Errorf("lock held by live process after %v", fl.lockTimeout))
-		}
+		return NewLockTimeout(fmt.Errorf("lock unavailable after %v", fl.lockTimeout))
 	}
 
 	acquisitionTime := time.Since(acquireStart)
 	holdStart := time.Now()
 
-	// We intentionally do NOT remove the lock file or PID file here.
+	// We intentionally do NOT remove the lock file or owner metadata here.
 	// Removing the lock file after unlock creates a race: another process can
 	// create a new file (different inode) and acquire flock on it, then this
 	// process deletes that file, allowing a third process to create yet another
 	// file — resulting in two processes holding flock on different inodes
 	// simultaneously. Leaving the file in place ensures all processes flock
-	// the same inode. Stale lock cleanup happens only in cleanupStaleLock().
+	// the same inode.
 	defer func() {
 		lock.Unlock()
 

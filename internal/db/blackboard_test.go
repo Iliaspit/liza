@@ -1,10 +1,10 @@
 package db
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -851,8 +851,8 @@ func TestBlackboardWriteReadOnlyDir(t *testing.T) {
 	}
 }
 
-// TestBlackboardPIDTracking tests that PID is written to lock file
-func TestBlackboardPIDTracking(t *testing.T) {
+// TestBlackboardOwnerMetadataTracking tests that diagnostic owner metadata is written.
+func TestBlackboardOwnerMetadataTracking(t *testing.T) {
 	dir := t.TempDir()
 	statePath := filepath.Join(dir, "state.yaml")
 
@@ -870,11 +870,9 @@ func TestBlackboardPIDTracking(t *testing.T) {
 		t.Fatalf("Write failed: %v", err)
 	}
 
-	// PID file persists after lock release (lock files are not deleted to
-	// prevent flock inode races — see withLockOperation comment)
-	pidPath := statePath + ".lock.pid"
+	ownerPath := statePath + ".lock.owner.json"
 
-	// Verify PID file exists DURING lock hold
+	// Verify owner metadata exists during lock hold.
 	lockHeld := make(chan bool)
 	done := make(chan bool)
 	finished := make(chan error, 1)
@@ -892,22 +890,28 @@ func TestBlackboardPIDTracking(t *testing.T) {
 	// Wait for lock to be acquired
 	<-lockHeld
 
-	// PID file should exist while lock is held
-	if _, err := os.Stat(pidPath); err != nil {
-		t.Errorf("PID file should exist while lock is held, got error: %v", err)
+	// Owner metadata should exist while lock is held.
+	if _, err := os.Stat(ownerPath); err != nil {
+		t.Errorf("owner metadata should exist while lock is held, got error: %v", err)
 	}
 
-	// Read PID and verify it matches current process
-	pidData, err := os.ReadFile(pidPath)
+	// Read owner metadata and verify it records the current process.
+	metadataData, err := os.ReadFile(ownerPath)
 	if err != nil {
-		t.Fatalf("Failed to read PID file: %v", err)
+		t.Fatalf("Failed to read owner metadata: %v", err)
 	}
-	pid, err := strconv.Atoi(string(pidData))
-	if err != nil {
-		t.Fatalf("Failed to parse PID: %v", err)
+	var metadata struct {
+		PID       int    `json:"pid"`
+		Operation string `json:"operation"`
 	}
-	if pid != os.Getpid() {
-		t.Errorf("PID mismatch: got %d, want %d", pid, os.Getpid())
+	if err := json.Unmarshal(metadataData, &metadata); err != nil {
+		t.Fatalf("Failed to parse owner metadata: %v", err)
+	}
+	if metadata.PID != os.Getpid() {
+		t.Errorf("owner PID mismatch: got %d, want %d", metadata.PID, os.Getpid())
+	}
+	if metadata.Operation != "modify" {
+		t.Errorf("owner operation = %q, want modify", metadata.Operation)
 	}
 
 	// Signal goroutine to finish and wait for it
@@ -917,16 +921,18 @@ func TestBlackboardPIDTracking(t *testing.T) {
 	}
 }
 
-// TestBlackboardStaleLockDetection tests cleanup of stale locks
-func TestBlackboardStaleLockDetection(t *testing.T) {
+// TestBlackboardLegacyPIDMetadataDoesNotControlAcquisition verifies leftover
+// legacy PID metadata is diagnostic-only when the flock itself is free.
+func TestBlackboardLegacyPIDMetadataDoesNotControlAcquisition(t *testing.T) {
 	if testing.Short() {
-		t.Skip("Skipping stale lock test in short mode")
+		t.Skip("Skipping legacy lock metadata test in short mode")
 	}
 
 	dir := t.TempDir()
 	statePath := filepath.Join(dir, "state.yaml")
 	lockPath := statePath + ".lock"
 	pidPath := statePath + ".lock.pid"
+	ownerPath := statePath + ".lock.owner.json"
 
 	now := time.Now().UTC()
 	state := &models.State{
@@ -942,17 +948,15 @@ func TestBlackboardStaleLockDetection(t *testing.T) {
 		t.Fatalf("Initial write failed: %v", err)
 	}
 
-	// Create a stale lock with a non-existent PID
-	stalePID := 999999 // Very unlikely to exist
 	if err := os.WriteFile(lockPath, []byte{}, 0644); err != nil {
 		t.Fatalf("Failed to create lock file: %v", err)
 	}
-	pidData := strconv.Itoa(stalePID)
-	if err := os.WriteFile(pidPath, []byte(pidData), 0644); err != nil {
+	if err := os.WriteFile(pidPath, []byte("999999"), 0644); err != nil {
 		t.Fatalf("Failed to create PID file: %v", err)
 	}
 
-	// Try to acquire lock with short timeout - should clean up stale lock and succeed
+	// Try to acquire with short timeout. Since the flock is free, acquisition
+	// succeeds and writes fresh owner metadata without interpreting .lock.pid.
 	bb2 := New(statePath).WithLockTimeout(2 * time.Second)
 	err := bb2.Modify(func(s *models.State) error {
 		s.Version = 2
@@ -960,7 +964,7 @@ func TestBlackboardStaleLockDetection(t *testing.T) {
 	})
 
 	if err != nil {
-		t.Fatalf("Should successfully acquire lock after stale cleanup, got error: %v", err)
+		t.Fatalf("Should successfully acquire free lock despite legacy PID metadata, got error: %v", err)
 	}
 
 	// Verify state was modified (lock was acquired)
@@ -972,22 +976,26 @@ func TestBlackboardStaleLockDetection(t *testing.T) {
 		t.Errorf("Version should be 2 after modification, got %d", readState.Version)
 	}
 
-	// After stale lock recovery and successful Modify, lock and PID files
-	// persist (lock files are not deleted on unlock). Verify PID now
-	// reflects the current process, not the stale PID.
-	recoveredPID, readErr := os.ReadFile(pidPath)
-	if readErr != nil {
-		t.Fatalf("PID file should exist after lock recovery: %v", readErr)
+	legacyPID, err := os.ReadFile(pidPath)
+	if err != nil {
+		t.Fatalf("legacy PID metadata should remain available for diagnostics: %v", err)
 	}
-	currentPID, parseErr := strconv.Atoi(string(recoveredPID))
-	if parseErr != nil {
-		t.Fatalf("Invalid PID format: %v", parseErr)
+	if string(legacyPID) != "999999" {
+		t.Errorf("legacy PID metadata = %q, want unchanged", legacyPID)
 	}
-	if currentPID == stalePID {
-		t.Error("PID file should no longer contain stale PID")
+
+	metadataData, err := os.ReadFile(ownerPath)
+	if err != nil {
+		t.Fatalf("owner metadata was not written: %v", err)
 	}
-	if currentPID != os.Getpid() {
-		t.Errorf("PID should be current process: got %d, want %d", currentPID, os.Getpid())
+	var metadata struct {
+		PID int `json:"pid"`
+	}
+	if err := json.Unmarshal(metadataData, &metadata); err != nil {
+		t.Fatalf("owner metadata is invalid JSON: %v", err)
+	}
+	if metadata.PID != os.Getpid() {
+		t.Errorf("owner metadata PID = %d, want %d", metadata.PID, os.Getpid())
 	}
 }
 
@@ -1048,11 +1056,11 @@ func TestBlackboardLiveLockNotCleaned(t *testing.T) {
 	}
 }
 
-// TestBlackboardPIDFileConsistency tests that PID file tracks the lock holder
-func TestBlackboardPIDFileConsistency(t *testing.T) {
+// TestBlackboardOwnerMetadataConsistency tests that owner metadata tracks the lock holder.
+func TestBlackboardOwnerMetadataConsistency(t *testing.T) {
 	dir := t.TempDir()
 	statePath := filepath.Join(dir, "state.yaml")
-	pidPath := statePath + ".lock.pid"
+	ownerPath := statePath + ".lock.owner.json"
 
 	now := time.Now().UTC()
 	state := &models.State{
@@ -1065,23 +1073,25 @@ func TestBlackboardPIDFileConsistency(t *testing.T) {
 
 	bb := New(statePath)
 
-	// Multiple operations — PID file persists and contains current PID
+	// Multiple operations update owner metadata with the current PID.
 	for i := range 3 {
 		if err := bb.Write(state); err != nil {
 			t.Fatalf("Write %d failed: %v", i, err)
 		}
 
-		// PID file should exist with current process PID
-		pidData, err := os.ReadFile(pidPath)
+		// Owner metadata should exist with current process PID.
+		metadataData, err := os.ReadFile(ownerPath)
 		if err != nil {
-			t.Fatalf("Iteration %d: PID file should exist after operation: %v", i, err)
+			t.Fatalf("Iteration %d: owner metadata should exist after operation: %v", i, err)
 		}
-		pid, err := strconv.Atoi(string(pidData))
-		if err != nil {
-			t.Fatalf("Iteration %d: invalid PID format: %v", i, err)
+		var metadata struct {
+			PID int `json:"pid"`
 		}
-		if pid != os.Getpid() {
-			t.Errorf("Iteration %d: PID mismatch: got %d, want %d", i, pid, os.Getpid())
+		if err := json.Unmarshal(metadataData, &metadata); err != nil {
+			t.Fatalf("Iteration %d: invalid owner metadata: %v", i, err)
+		}
+		if metadata.PID != os.Getpid() {
+			t.Errorf("Iteration %d: owner PID mismatch: got %d, want %d", i, metadata.PID, os.Getpid())
 		}
 	}
 }
