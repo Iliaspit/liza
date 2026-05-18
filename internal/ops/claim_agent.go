@@ -2,8 +2,21 @@ package ops
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/liza-mas/liza/internal/models"
+)
+
+type reviewerCapacityInvalidReason string
+
+const (
+	reviewerCapacityMissingRole     reviewerCapacityInvalidReason = "missing_role"
+	reviewerCapacityWrongRole       reviewerCapacityInvalidReason = "wrong_role"
+	reviewerCapacityMissingProvider reviewerCapacityInvalidReason = "missing_provider"
+	reviewerCapacityMissingPID      reviewerCapacityInvalidReason = "missing_pid"
+	reviewerCapacityDeadPID         reviewerCapacityInvalidReason = "dead_pid"
+	reviewerCapacityMissingLease    reviewerCapacityInvalidReason = "missing_lease"
+	reviewerCapacityExpiredLease    reviewerCapacityInvalidReason = "expired_lease"
 )
 
 func requireRegisteredClaimAgent(state *models.State, agentID, expectedRole string) (models.Agent, error) {
@@ -27,6 +40,35 @@ func requireRegisteredClaimAgent(state *models.State, agentID, expectedRole stri
 		return models.Agent{}, &PreconditionError{Reason: fmt.Sprintf("agent %s registered process PID %d is not running", agentID, agent.PID)}
 	}
 	return agent, nil
+}
+
+func reviewerCapacityInvalidReasons(agent models.Agent, expectedRole string, now time.Time) []reviewerCapacityInvalidReason {
+	var reasons []reviewerCapacityInvalidReason
+	if agent.Role == "" {
+		reasons = append(reasons, reviewerCapacityMissingRole)
+	} else if expectedRole != "" && agent.Role != expectedRole {
+		reasons = append(reasons, reviewerCapacityWrongRole)
+	}
+	if agent.Provider == "" {
+		reasons = append(reasons, reviewerCapacityMissingProvider)
+	}
+	if agent.PID <= 0 {
+		reasons = append(reasons, reviewerCapacityMissingPID)
+	} else if !IsProcessAlive(agent.PID) {
+		reasons = append(reasons, reviewerCapacityDeadPID)
+	}
+	if agent.LeaseExpires == nil {
+		reasons = append(reasons, reviewerCapacityMissingLease)
+	} else if agent.LeaseExpires.Before(now.Add(-models.LeaseExpiryGracePeriod)) {
+		// Capacity follows the same grace model as validation/watch: a lease
+		// that just expired may still represent a long-running live supervisor.
+		reasons = append(reasons, reviewerCapacityExpiredLease)
+	}
+	return reasons
+}
+
+func hasReviewerCapacity(agent models.Agent, expectedRole string, now time.Time) bool {
+	return len(reviewerCapacityInvalidReasons(agent, expectedRole, now)) == 0
 }
 
 // TaskClaimsForAgent returns task-side ownership fields that point at agentID.

@@ -790,8 +790,8 @@ func TestClaimReviewerTask_DiversityFreshSubmissions(t *testing.T) {
 		}
 		state := &models.State{
 			Agents: map[string]models.Agent{
-				"rv-diverse-2": {Role: "rv-diverse", Provider: "anthropic"}, // different from claimer
-				"rv-uniform-2": {Role: "rv-uniform", Provider: "google"},    // same as claimer
+				"rv-diverse-2": reviewerCapacityTestAgent("rv-diverse", "anthropic"), // different from claimer
+				"rv-uniform-2": reviewerCapacityTestAgent("rv-uniform", "google"),    // same as claimer
 			},
 		}
 		taskDiverse := &models.Task{
@@ -828,7 +828,7 @@ func TestClaimReviewerTask_DiversityFreshSubmissions(t *testing.T) {
 		}
 		state := &models.State{
 			Agents: map[string]models.Agent{
-				"rv-a-other": {Role: "rv-a", Provider: "anthropic"}, // diverse
+				"rv-a-other": reviewerCapacityTestAgent("rv-a", "anthropic"), // diverse
 				// No rv-b agent → not satisfiable
 			},
 		}
@@ -845,6 +845,24 @@ func TestClaimReviewerTask_DiversityFreshSubmissions(t *testing.T) {
 		}
 	})
 
+	t.Run("invalid alternate reviewer does not satisfy diversity", func(t *testing.T) {
+		pr := &diversityTestResolver{
+			pairs: map[string]diversityPairDef{
+				"pair-a": {reviewer: "rv-a", submitted: "SUBMITTED_A"},
+			},
+		}
+		state := &models.State{
+			Agents: map[string]models.Agent{
+				"rv-a-ghost": {Role: "rv-a", Provider: "anthropic", PID: 0}, // missing PID and lease
+			},
+		}
+		task := &models.Task{ID: "task-a", RolePair: "pair-a", Priority: 1, Status: "SUBMITTED_A"}
+
+		if isDiversitySatisfiable(task, "google", "claimer-1", pr, state) {
+			t.Fatal("invalid alternate reviewer should not satisfy diversity")
+		}
+	})
+
 	t.Run("b: single alternate reviewer same provider - no preference", func(t *testing.T) {
 		pr := &diversityTestResolver{
 			pairs: map[string]diversityPairDef{
@@ -854,8 +872,8 @@ func TestClaimReviewerTask_DiversityFreshSubmissions(t *testing.T) {
 		}
 		state := &models.State{
 			Agents: map[string]models.Agent{
-				"rv-a-other": {Role: "rv-a", Provider: "google"}, // same provider
-				"rv-b-other": {Role: "rv-b", Provider: "google"}, // same provider
+				"rv-a-other": reviewerCapacityTestAgent("rv-a", "google"), // same provider
+				"rv-b-other": reviewerCapacityTestAgent("rv-b", "google"), // same provider
 			},
 		}
 		taskA := &models.Task{ID: "task-a", RolePair: "pair-a", Priority: 1, Status: "SUBMITTED_A"}
@@ -884,9 +902,9 @@ func TestClaimReviewerTask_DiversityFreshSubmissions(t *testing.T) {
 		}
 		state := &models.State{
 			Agents: map[string]models.Agent{
-				"rv-a-2": {Role: "rv-a", Provider: "google"},    // same
-				"rv-a-3": {Role: "rv-a", Provider: "anthropic"}, // different → pair-a diverse
-				"rv-b-2": {Role: "rv-b", Provider: "google"},    // same only
+				"rv-a-2": reviewerCapacityTestAgent("rv-a", "google"),    // same
+				"rv-a-3": reviewerCapacityTestAgent("rv-a", "anthropic"), // different → pair-a diverse
+				"rv-b-2": reviewerCapacityTestAgent("rv-b", "google"),    // same only
 			},
 		}
 		taskA := &models.Task{ID: "task-a", RolePair: "pair-a", Priority: 1, Status: "SUBMITTED_A"}
@@ -911,9 +929,9 @@ func TestClaimReviewerTask_DiversityFreshSubmissions(t *testing.T) {
 		}
 		state := &models.State{
 			Agents: map[string]models.Agent{
-				"rv-a-2": {Role: "rv-a", Provider: "anthropic"}, // different → diverse
-				"rv-a-3": {Role: "rv-a", Provider: "openai"},    // different → diverse
-				"rv-b-2": {Role: "rv-b", Provider: "google"},    // same only
+				"rv-a-2": reviewerCapacityTestAgent("rv-a", "anthropic"), // different → diverse
+				"rv-a-3": reviewerCapacityTestAgent("rv-a", "openai"),    // different → diverse
+				"rv-b-2": reviewerCapacityTestAgent("rv-b", "google"),    // same only
 			},
 		}
 		taskA := &models.Task{ID: "task-a", RolePair: "pair-a", Priority: 1, Status: "SUBMITTED_A"}
@@ -934,6 +952,29 @@ func registerClaimReviewerTaskTestAgents(state *models.State) {
 	state.Agents["code-reviewer-1"] = testhelpers.RegisteredTestAgent("code-reviewer")
 	state.Agents["code-reviewer-2"] = testhelpers.RegisteredTestAgent("code-reviewer")
 	state.Agents["code-plan-reviewer-1"] = testhelpers.RegisteredTestAgent("code-plan-reviewer")
+}
+
+func reviewerCapacityTestAgent(role, provider string) models.Agent {
+	agent := testhelpers.RegisteredTestAgent(role)
+	agent.Provider = provider
+	return agent
+}
+
+func TestReviewerCapacityLeaseGrace(t *testing.T) {
+	now := time.Now().UTC()
+	agent := reviewerCapacityTestAgent("code-reviewer", "anthropic")
+
+	withinGrace := now.Add(-(models.LeaseExpiryGracePeriod - time.Second))
+	agent.LeaseExpires = &withinGrace
+	if !hasReviewerCapacity(agent, "code-reviewer", now) {
+		t.Fatal("lease expired within grace should still count as reviewer capacity")
+	}
+
+	beyondGrace := now.Add(-(models.LeaseExpiryGracePeriod + time.Second))
+	agent.LeaseExpires = &beyondGrace
+	if hasReviewerCapacity(agent, "code-reviewer", now) {
+		t.Fatal("lease expired beyond grace should not count as reviewer capacity")
+	}
 }
 
 // diversityPairDef defines a minimal role-pair for diversity testing.
@@ -1317,8 +1358,8 @@ func TestIsBlockedByDoerDiversity(t *testing.T) {
 		state := &models.State{
 			Agents: map[string]models.Agent{
 				"coder-1":         {Role: "coder", Provider: "anthropic"},
-				"code-reviewer-1": {Role: "code-reviewer", Provider: "anthropic"}, // claimer
-				"code-reviewer-2": {Role: "code-reviewer", Provider: "google"},    // diverse
+				"code-reviewer-1": {Role: "code-reviewer", Provider: "anthropic"},       // claimer
+				"code-reviewer-2": reviewerCapacityTestAgent("code-reviewer", "google"), // diverse
 			},
 		}
 		resolver := &doerDiversityResolver{diversity: "preferred", reviewerRole: "code-reviewer"}
@@ -1361,13 +1402,30 @@ func TestIsBlockedByDoerDiversity(t *testing.T) {
 		}
 	})
 
+	t.Run("not blocked when only diverse reviewer is invalid", func(t *testing.T) {
+		task := &models.Task{ID: "task-1", RolePair: "coding-pair", AssignedTo: &doerID}
+		state := &models.State{
+			Agents: map[string]models.Agent{
+				"coder-1":         {Role: "coder", Provider: "anthropic"},
+				"code-reviewer-1": {Role: "code-reviewer", Provider: "anthropic"},
+				"code-reviewer-2": {Role: "code-reviewer", Provider: "google", PID: 0}, // missing PID and lease
+			},
+		}
+		resolver := &doerDiversityResolver{diversity: "preferred", reviewerRole: "code-reviewer"}
+
+		blocked := isBlockedByDoerDiversity(task, "anthropic", "code-reviewer-1", state, resolver)
+		if blocked {
+			t.Error("should not block: invalid diverse reviewer does not count as capacity")
+		}
+	})
+
 	t.Run("not blocked when diversity not configured", func(t *testing.T) {
 		task := &models.Task{ID: "task-1", RolePair: "coding-pair", AssignedTo: &doerID}
 		state := &models.State{
 			Agents: map[string]models.Agent{
 				"coder-1":         {Role: "coder", Provider: "anthropic"},
 				"code-reviewer-1": {Role: "code-reviewer", Provider: "anthropic"},
-				"code-reviewer-2": {Role: "code-reviewer", Provider: "google"},
+				"code-reviewer-2": reviewerCapacityTestAgent("code-reviewer", "google"),
 			},
 		}
 		resolver := &doerDiversityResolver{diversity: "", reviewerRole: "code-reviewer"}
@@ -1383,8 +1441,8 @@ func TestIsBlockedByDoerDiversity(t *testing.T) {
 		task := &models.Task{ID: "task-1", RolePair: "coding-pair", AssignedTo: &missingDoer}
 		state := &models.State{
 			Agents: map[string]models.Agent{
-				"code-reviewer-1": {Role: "code-reviewer", Provider: "anthropic"},
-				"code-reviewer-2": {Role: "code-reviewer", Provider: "google"},
+				"code-reviewer-1": reviewerCapacityTestAgent("code-reviewer", "anthropic"),
+				"code-reviewer-2": reviewerCapacityTestAgent("code-reviewer", "google"),
 			},
 		}
 		resolver := &doerDiversityResolver{diversity: "preferred", reviewerRole: "code-reviewer"}
@@ -1399,8 +1457,8 @@ func TestIsBlockedByDoerDiversity(t *testing.T) {
 		task := &models.Task{ID: "task-1", RolePair: "coding-pair", AssignedTo: nil}
 		state := &models.State{
 			Agents: map[string]models.Agent{
-				"code-reviewer-1": {Role: "code-reviewer", Provider: "anthropic"},
-				"code-reviewer-2": {Role: "code-reviewer", Provider: "google"},
+				"code-reviewer-1": reviewerCapacityTestAgent("code-reviewer", "anthropic"),
+				"code-reviewer-2": reviewerCapacityTestAgent("code-reviewer", "google"),
 			},
 		}
 		resolver := &doerDiversityResolver{diversity: "preferred", reviewerRole: "code-reviewer"}
@@ -1418,7 +1476,12 @@ func TestIsBlockedByDoerDiversity(t *testing.T) {
 			Agents: map[string]models.Agent{
 				"coder-1":         {Role: "coder", Provider: "anthropic"},
 				"code-reviewer-1": {Role: "code-reviewer", Provider: "anthropic"},
-				"code-reviewer-2": {Role: "code-reviewer", Provider: "google", Status: models.AgentStatusReviewing, CurrentTask: &busyTask},
+				"code-reviewer-2": func() models.Agent {
+					agent := reviewerCapacityTestAgent("code-reviewer", "google")
+					agent.Status = models.AgentStatusReviewing
+					agent.CurrentTask = &busyTask
+					return agent
+				}(),
 			},
 		}
 		resolver := &doerDiversityResolver{diversity: "preferred", reviewerRole: "code-reviewer"}
@@ -1442,7 +1505,7 @@ func TestFilterDoerProviderDiversity(t *testing.T) {
 			Agents: map[string]models.Agent{
 				"coder-1":         {Role: "coder", Provider: "anthropic"},
 				"code-reviewer-1": {Role: "code-reviewer", Provider: "anthropic"},
-				"code-reviewer-2": {Role: "code-reviewer", Provider: "google"},
+				"code-reviewer-2": reviewerCapacityTestAgent("code-reviewer", "google"),
 			},
 		}
 		resolver := &doerDiversityResolver{diversity: "preferred", reviewerRole: "code-reviewer"}
@@ -1464,7 +1527,7 @@ func TestFilterDoerProviderDiversity(t *testing.T) {
 				"coder-1":         {Role: "coder", Provider: "anthropic"},
 				"coder-2":         {Role: "coder", Provider: "google"},
 				"code-reviewer-1": {Role: "code-reviewer", Provider: "anthropic"},
-				"code-reviewer-2": {Role: "code-reviewer", Provider: "google"},
+				"code-reviewer-2": reviewerCapacityTestAgent("code-reviewer", "google"),
 			},
 		}
 		resolver := &doerDiversityResolver{diversity: "preferred", reviewerRole: "code-reviewer"}
@@ -1485,7 +1548,7 @@ func TestFilterDoerProviderDiversity(t *testing.T) {
 		state := &models.State{
 			Agents: map[string]models.Agent{
 				"coder-1":         {Role: "coder", Provider: "anthropic"},
-				"code-reviewer-2": {Role: "code-reviewer", Provider: "google"},
+				"code-reviewer-2": reviewerCapacityTestAgent("code-reviewer", "google"),
 			},
 		}
 		resolver := &doerDiversityResolver{diversity: "preferred", reviewerRole: "code-reviewer"}
@@ -1520,7 +1583,7 @@ func TestFilterDoerProviderDiversity(t *testing.T) {
 			Agents: map[string]models.Agent{
 				"coder-1":         {Role: "coder", Provider: "anthropic"},
 				"code-reviewer-1": {Role: "code-reviewer", Provider: "anthropic"},
-				"code-reviewer-2": {Role: "code-reviewer", Provider: "google"},
+				"code-reviewer-2": reviewerCapacityTestAgent("code-reviewer", "google"),
 			},
 		}
 		// No base-level diversity; only "significant" has it.
@@ -1552,7 +1615,7 @@ func TestFilterDoerProviderDiversity(t *testing.T) {
 			Agents: map[string]models.Agent{
 				"coder-1":         {Role: "coder", Provider: "anthropic"},
 				"code-reviewer-1": {Role: "code-reviewer", Provider: "anthropic"},
-				"code-reviewer-2": {Role: "code-reviewer", Provider: "google"},
+				"code-reviewer-2": reviewerCapacityTestAgent("code-reviewer", "google"),
 			},
 		}
 		resolver := &doerDiversityResolver{

@@ -284,8 +284,8 @@ func pickWithFreshDiversity(
 	return pickRandom(rest)
 }
 
-// isDiversitySatisfiable checks if at least one other registered reviewer for
-// the task's role-pair has a provider different from the claiming reviewer's provider.
+// isDiversitySatisfiable checks if at least one other valid registered reviewer
+// for the task's role-pair has a provider different from the claiming reviewer.
 func isDiversitySatisfiable(
 	task *models.Task,
 	claimerProvider string,
@@ -298,6 +298,7 @@ func isDiversitySatisfiable(
 		return false
 	}
 
+	now := time.Now().UTC()
 	for agentID, agent := range state.Agents {
 		if agentID == claimerAgentID {
 			continue
@@ -305,7 +306,7 @@ func isDiversitySatisfiable(
 		// Check if this agent is a reviewer for the same role-pair.
 		// agent.Role stores the runtime role name (e.g., "code-reviewer"),
 		// which matches the format returned by pr.ReviewerRole().
-		if agent.Role != reviewerRole {
+		if !hasReviewerCapacity(agent, reviewerRole, now) {
 			continue
 		}
 		if agent.Provider != claimerProvider {
@@ -411,17 +412,18 @@ func isBlockedByDoerDiversity(
 		return false
 	}
 
-	// Claimer shares the doer's provider. Block only if a different-provider
-	// reviewer is registered for this role-pair (even if busy).
+	// Claimer shares the doer's provider. Block only if a valid
+	// different-provider reviewer is registered for this role-pair (even if busy).
 	reviewerRole, err := resolver.ReviewerRole(task.RolePair)
 	if err != nil {
 		return false
 	}
+	now := time.Now().UTC()
 	for agentID, agent := range state.Agents {
 		if agentID == claimerAgentID {
 			continue
 		}
-		if agent.Role != reviewerRole {
+		if !hasReviewerCapacity(agent, reviewerRole, now) {
 			continue
 		}
 		if agent.Provider != doerAgent.Provider {
