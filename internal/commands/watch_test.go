@@ -2213,6 +2213,126 @@ func TestRunChecksWithState_LiveReviewerProcessNoAlert(t *testing.T) {
 	if got := countAlertsByCategory(alerts, "DEAD AGENT PROCESS"); got != 0 {
 		t.Fatalf("DEAD AGENT PROCESS alerts = %d, want 0; alerts: %v", got, alerts)
 	}
+	if got := countAlertsByCategory(alerts, "INVALID AGENT OWNERSHIP"); got != 0 {
+		t.Fatalf("INVALID AGENT OWNERSHIP alerts = %d, want 0; alerts: %v", got, alerts)
+	}
+}
+
+func TestCheckRunningTasksWithoutLiveProcess_LiveReviewerInvalidOwnership(t *testing.T) {
+	now := time.Now().UTC()
+	pr := loadPipelineResolverForWatchTest(t)
+
+	tests := []struct {
+		name    string
+		agent   models.Agent
+		wantMsg string
+	}{
+		{
+			name: "idle reviewer",
+			agent: models.Agent{
+				Role:         "us-reviewer",
+				Status:       models.AgentStatusIdle,
+				LeaseExpires: testhelpers.TimePtr(now.Add(30 * time.Minute)),
+				Heartbeat:    now,
+				PID:          os.Getpid(),
+			},
+			wantMsg: "agent status IDLE, want REVIEWING",
+		},
+		{
+			name: "wrong exact reviewer role",
+			agent: models.Agent{
+				Role:         "code-reviewer",
+				Status:       models.AgentStatusReviewing,
+				CurrentTask:  testhelpers.StringPtr("task-us-review"),
+				LeaseExpires: testhelpers.TimePtr(now.Add(30 * time.Minute)),
+				Heartbeat:    now,
+				PID:          os.Getpid(),
+			},
+			wantMsg: `agent role "code-reviewer", want "us-reviewer"`,
+		},
+		{
+			name: "mismatched current task",
+			agent: models.Agent{
+				Role:         "us-reviewer",
+				Status:       models.AgentStatusReviewing,
+				CurrentTask:  testhelpers.StringPtr("other-task"),
+				LeaseExpires: testhelpers.TimePtr(now.Add(30 * time.Minute)),
+				Heartbeat:    now,
+				PID:          os.Getpid(),
+			},
+			wantMsg: `current_task "other-task", want "task-us-review"`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			reviewerID := "us-reviewer-1"
+			state := testhelpers.CreateValidState()
+			state.Tasks = []models.Task{
+				buildPipelineTask("task-us-review", "us-writing-pair", models.TaskStatus("REVIEWING_US"), now, func(task *models.Task) {
+					task.ReviewingBy = &reviewerID
+					task.ReviewLeaseExpires = testhelpers.TimePtr(now.Add(30 * time.Minute))
+					task.ReviewCommit = testhelpers.StringPtr("review123")
+				}),
+			}
+			state.Agents = map[string]models.Agent{reviewerID: tt.agent}
+
+			alerts := checkRunningTasksWithoutLiveProcess(state, pr)
+			if got := countAlertsByCategory(alerts, "INVALID AGENT OWNERSHIP"); got != 1 {
+				t.Fatalf("INVALID AGENT OWNERSHIP alerts = %d, want 1; alerts: %v", got, alerts)
+			}
+			if !strings.Contains(alerts[0].Message, tt.wantMsg) {
+				t.Fatalf("alert message = %q, want %q", alerts[0].Message, tt.wantMsg)
+			}
+		})
+	}
+}
+
+func TestCheckRunningTasksWithoutLiveProcess_ReviewerReverseOwnershipMismatch(t *testing.T) {
+	now := time.Now().UTC()
+	pr := loadPipelineResolverForWatchTest(t)
+
+	taskID := "task-us-review"
+	reviewerID := "us-reviewer-1"
+	otherReviewerID := "us-reviewer-2"
+	state := testhelpers.CreateValidState()
+	state.Tasks = []models.Task{
+		buildPipelineTask(taskID, "us-writing-pair", models.TaskStatus("REVIEWING_US"), now, func(task *models.Task) {
+			task.ReviewingBy = &otherReviewerID
+			task.ReviewLeaseExpires = testhelpers.TimePtr(now.Add(30 * time.Minute))
+			task.ReviewCommit = testhelpers.StringPtr("review123")
+		}),
+	}
+	state.Agents = map[string]models.Agent{
+		reviewerID: {
+			Role:         "us-reviewer",
+			Status:       models.AgentStatusReviewing,
+			CurrentTask:  &taskID,
+			LeaseExpires: testhelpers.TimePtr(now.Add(30 * time.Minute)),
+			Heartbeat:    now,
+			PID:          os.Getpid(),
+		},
+		otherReviewerID: {
+			Role:         "us-reviewer",
+			Status:       models.AgentStatusReviewing,
+			CurrentTask:  &taskID,
+			LeaseExpires: testhelpers.TimePtr(now.Add(30 * time.Minute)),
+			Heartbeat:    now,
+			PID:          os.Getpid(),
+		},
+	}
+
+	alerts := checkRunningTasksWithoutLiveProcess(state, pr)
+	if got := countAlertsByCategory(alerts, "INVALID AGENT OWNERSHIP"); got != 1 {
+		t.Fatalf("INVALID AGENT OWNERSHIP alerts = %d, want 1; alerts: %v", got, alerts)
+	}
+	alert := firstAlertByCategory(t, alerts, "INVALID AGENT OWNERSHIP")
+	if !strings.Contains(alert.Message, "agent us-reviewer-1 says REVIEWING task-us-review") {
+		t.Fatalf("alert message = %q, want reverse ownership mismatch", alert.Message)
+	}
+	if !strings.Contains(alert.Message, "task has reviewer us-reviewer-2") {
+		t.Fatalf("alert message = %q, want task reviewer", alert.Message)
+	}
 }
 
 func TestRunChecksWithState_StuckAlertsDedupedAndRealertAfterClear(t *testing.T) {
@@ -2439,6 +2559,28 @@ func countAlertsByCategory(alerts []Alert, category string) int {
 		}
 	}
 	return count
+}
+
+func firstAlertByCategory(t *testing.T, alerts []Alert, category string) Alert {
+	t.Helper()
+	for _, alert := range alerts {
+		if alert.Category == category {
+			return alert
+		}
+	}
+	t.Fatalf("missing alert category %q; alerts: %v", category, alerts)
+	return Alert{}
+}
+
+func loadPipelineResolverForWatchTest(t *testing.T) models.PipelineResolver {
+	t.Helper()
+	tmpDir := t.TempDir()
+	testhelpers.SetupPipelineConfig(t, tmpDir)
+	pr, err := ops.LoadResolverForModels(tmpDir)
+	if err != nil {
+		t.Fatalf("failed to load resolver: %v", err)
+	}
+	return pr
 }
 
 func buildPipelineTask(taskID, rolePair string, status models.TaskStatus, now time.Time, mutate func(*models.Task)) models.Task {

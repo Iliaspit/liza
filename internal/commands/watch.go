@@ -320,6 +320,8 @@ func isStuckAlertCategory(category string) bool {
 	switch category {
 	case "HYPOTHESIS EXHAUSTION", "INTEGRATION FAILED", "INVALID STATE", "DEAD AGENT PROCESS":
 		return true
+	case "INVALID AGENT OWNERSHIP":
+		return true
 	default:
 		return false
 	}
@@ -464,6 +466,7 @@ func checkRunningTasksWithoutLiveProcess(state *models.State, pr models.Pipeline
 
 	var alerts []Alert
 	now := time.Now().UTC()
+	skipReverseAgentIDs := make(map[string]bool)
 
 	for i := range state.Tasks {
 		task := &state.Tasks[i]
@@ -483,6 +486,16 @@ func checkRunningTasksWithoutLiveProcess(state *models.State, pr models.Pipeline
 			})
 			continue
 		}
+		if reason := activeTaskOwnerMismatch(task, ownerKind, agent, pr); reason != "" {
+			skipReverseAgentIDs[ownerID] = true
+			alerts = append(alerts, Alert{
+				Timestamp: now,
+				Level:     AlertLevelCritical,
+				Category:  "INVALID AGENT OWNERSHIP",
+				Message: fmt.Sprintf("%s — status %s has %s %s with invalid agent row: %s",
+					task.ID, task.Status, ownerKind, ownerID, reason),
+			})
+		}
 		if ops.IsProcessAlive(agent.PID) {
 			continue
 		}
@@ -496,7 +509,119 @@ func checkRunningTasksWithoutLiveProcess(state *models.State, pr models.Pipeline
 		})
 	}
 
+	alerts = append(alerts, checkReverseActiveAgentOwnership(state, pr, now, skipReverseAgentIDs)...)
+
 	return alerts
+}
+
+func activeTaskOwnerMismatch(task *models.Task, ownerKind string, agent models.Agent, pr models.PipelineResolver) string {
+	expectedRole, ok := expectedOwnerRole(task, ownerKind, pr)
+	if ok && agent.Role != expectedRole {
+		return fmt.Sprintf("agent role %q, want %q", agent.Role, expectedRole)
+	}
+
+	expectedStatus, ok := expectedOwnerStatus(ownerKind)
+	if ok && agent.Status != expectedStatus {
+		return fmt.Sprintf("agent status %s, want %s", agent.Status, expectedStatus)
+	}
+
+	if agent.CurrentTask == nil {
+		return fmt.Sprintf("current_task <none>, want %q", task.ID)
+	}
+	if *agent.CurrentTask != task.ID {
+		return fmt.Sprintf("current_task %q, want %q", *agent.CurrentTask, task.ID)
+	}
+
+	return ""
+}
+
+func expectedOwnerRole(task *models.Task, ownerKind string, pr models.PipelineResolver) (string, bool) {
+	switch ownerKind {
+	case "doer":
+		role, err := pr.DoerRole(task.RolePair)
+		return role, err == nil
+	case "reviewer":
+		role, err := pr.ReviewerRole(task.RolePair)
+		return role, err == nil
+	default:
+		return "", false
+	}
+}
+
+func expectedOwnerStatus(ownerKind string) (models.AgentStatus, bool) {
+	switch ownerKind {
+	case "doer":
+		return models.AgentStatusWorking, true
+	case "reviewer":
+		return models.AgentStatusReviewing, true
+	default:
+		return "", false
+	}
+}
+
+func checkReverseActiveAgentOwnership(state *models.State, pr models.PipelineResolver, now time.Time, skipAgentIDs map[string]bool) []Alert {
+	tasksByID := make(map[string]*models.Task, len(state.Tasks))
+	for i := range state.Tasks {
+		task := &state.Tasks[i]
+		tasksByID[task.ID] = task
+	}
+
+	var alerts []Alert
+	for agentID, agent := range state.Agents {
+		if skipAgentIDs[agentID] {
+			continue
+		}
+		if agent.CurrentTask == nil || *agent.CurrentTask == "" {
+			continue
+		}
+		taskID := *agent.CurrentTask
+		task, exists := tasksByID[taskID]
+		if !exists {
+			alerts = append(alerts, invalidReverseOwnershipAlert(now, agentID, agent.Status, taskID, "task is missing"))
+			continue
+		}
+
+		switch agent.Status {
+		case models.AgentStatusWorking:
+			if !models.IsExecutingStatus(task, pr) {
+				alerts = append(alerts, invalidReverseOwnershipAlert(now, agentID, agent.Status, taskID,
+					fmt.Sprintf("task status %s is not executing", task.Status)))
+				continue
+			}
+			if task.AssignedTo == nil || *task.AssignedTo != agentID {
+				alerts = append(alerts, invalidReverseOwnershipAlert(now, agentID, agent.Status, taskID,
+					fmt.Sprintf("task has doer %s", ownerValue(task.AssignedTo))))
+			}
+		case models.AgentStatusReviewing:
+			if !isReviewerActiveStatus(task, pr) {
+				alerts = append(alerts, invalidReverseOwnershipAlert(now, agentID, agent.Status, taskID,
+					fmt.Sprintf("task status %s is not active review", task.Status)))
+				continue
+			}
+			if task.ReviewingBy == nil || *task.ReviewingBy != agentID {
+				alerts = append(alerts, invalidReverseOwnershipAlert(now, agentID, agent.Status, taskID,
+					fmt.Sprintf("task has reviewer %s", ownerValue(task.ReviewingBy))))
+			}
+		}
+	}
+
+	return alerts
+}
+
+func invalidReverseOwnershipAlert(now time.Time, agentID string, status models.AgentStatus, taskID string, reason string) Alert {
+	return Alert{
+		Timestamp: now,
+		Level:     AlertLevelCritical,
+		Category:  "INVALID AGENT OWNERSHIP",
+		Message:   fmt.Sprintf("agent %s says %s %s, but %s", agentID, status, taskID, reason),
+	}
+}
+
+func ownerValue(owner *string) string {
+	if owner == nil || *owner == "" {
+		return "<none>"
+	}
+	return *owner
 }
 
 func runningTaskOwner(task *models.Task, pr models.PipelineResolver) (string, string, bool) {

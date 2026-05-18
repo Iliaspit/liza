@@ -532,6 +532,7 @@ Agents must read `human_notes` relevant to their task before starting/resuming w
 | Expired coder lease | lease_expires in past | `⚠️ LEASE EXPIRED: {agent} on {task}` |
 | Expired review lease | review_lease_expires in past | `⚠️ REVIEW LEASE EXPIRED: {code_reviewer} on {task} — review can be reclaimed` |
 | Running task without live process | Executing or reviewing task owner PID is missing or stopped | `🚨 DEAD AGENT PROCESS: {task} — status {status} has {owner_kind} {agent} but no live process (pid {pid})` |
+| Invalid active owner row | Executing or reviewing task owner row has the wrong role, status, or current_task; or an active agent row points at a task that does not point back | `🚨 INVALID AGENT OWNERSHIP: {task} — status {status} has {owner_kind} {agent} with invalid agent row: {reason}` |
 | Live supervisor missing from state | `liza validate` or `liza get agents --zombies` finds a current-goal `liza agent` PID absent from `state.yaml` | `zombie liza agent process detected: pid {pid} role {role}` |
 | Task blocked | Any | `⚠️ BLOCKED: {task} — {reason}` |
 | Orphaned rejected | REJECTED task, assignee not WORKING (30s grace) | `🚨 ORPHANED REJECTED: {task} — assigned to {agent} but agent is {status}` |
