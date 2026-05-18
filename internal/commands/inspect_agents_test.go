@@ -10,6 +10,7 @@ import (
 	"github.com/liza-mas/liza/internal/errors"
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/ops"
+	"github.com/liza-mas/liza/internal/procscan"
 	"github.com/liza-mas/liza/internal/render"
 	"gopkg.in/yaml.v3"
 )
@@ -358,6 +359,73 @@ func TestInspectAgent(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestInspectAgents_Zombies(t *testing.T) {
+	originalFind := findZombieAgents
+	t.Cleanup(func() { findZombieAgents = originalFind })
+
+	findZombieAgents = func(opts procscan.ZombieScanOptions) ([]procscan.ZombieProcess, error) {
+		if opts.ProjectRoot != "/tmp/project" {
+			t.Fatalf("ProjectRoot = %q, want /tmp/project", opts.ProjectRoot)
+		}
+		if opts.GoalID != "goal-1" {
+			t.Fatalf("GoalID = %q, want goal-1", opts.GoalID)
+		}
+		if !opts.RegisteredPIDs[111] {
+			t.Fatalf("registered pid 111 missing: %+v", opts.RegisteredPIDs)
+		}
+		return []procscan.ZombieProcess{{
+			PID:     222,
+			Role:    "coder",
+			CLI:     "codex",
+			GoalID:  "goal-1",
+			CWD:     "/tmp/project",
+			Cmdline: []string{"liza", "agent", "coder", "--cli", "codex", "--goal-id", "goal-1"},
+			Reason:  "not_registered_in_state",
+		}}, nil
+	}
+
+	state := &models.State{
+		Goal: models.Goal{ID: "goal-1"},
+		Agents: map[string]models.Agent{
+			"coder-1": {PID: 111},
+		},
+	}
+
+	result, err := inspectAgents(state, inspectAgentsOptions{ProjectRoot: "/tmp/project", Zombies: true})
+	if err != nil {
+		t.Fatalf("inspectAgents() error = %v", err)
+	}
+	output := result.(string)
+	for _, want := range []string{"222", "coder", "codex", "not_registered_in_state", "liza agent coder"} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("zombie output missing %q:\n%s", want, output)
+		}
+	}
+}
+
+func TestInspectAgents_ZombiesJSON(t *testing.T) {
+	originalFind := findZombieAgents
+	t.Cleanup(func() { findZombieAgents = originalFind })
+
+	findZombieAgents = func(procscan.ZombieScanOptions) ([]procscan.ZombieProcess, error) {
+		return []procscan.ZombieProcess{{PID: 222, Role: "coder", Reason: "not_registered_in_state"}}, nil
+	}
+
+	state := &models.State{Agents: map[string]models.Agent{}}
+	result, err := inspectAgents(state, inspectAgentsOptions{Format: "json", Zombies: true})
+	if err != nil {
+		t.Fatalf("inspectAgents() error = %v", err)
+	}
+
+	var parsed []procscan.ZombieProcess
+	if err := json.Unmarshal([]byte(result.(string)), &parsed); err != nil {
+		t.Fatalf("zombie JSON invalid: %v\n%s", err, result)
+	}
+	if len(parsed) != 1 || parsed[0].PID != 222 {
+		t.Fatalf("parsed zombies = %+v, want pid 222", parsed)
 	}
 }
 

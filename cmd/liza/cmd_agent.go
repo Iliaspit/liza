@@ -110,24 +110,32 @@ Example:
 		}
 
 		cliName, _ := cmd.Flags().GetString("cli")
+		goalID, _ := cmd.Flags().GetString("goal-id")
 		interactive, _ := cmd.Flags().GetBool("interactive")
 		noLog, _ := cmd.Flags().GetBool("no-log")
 
 		statePath := filepath.Join(projectRoot, ".liza", "state.yaml")
+		bb := db.For(statePath)
+		state, stateErr := bb.Read()
+		if stateErr != nil {
+			fmt.Fprintf(os.Stderr, "Warning: could not read state for agent metadata: %v\n", stateErr)
+		} else {
+			stateGoalID := state.Goal.ID
+			if goalID != "" && stateGoalID != "" && goalID != stateGoalID {
+				return fmt.Errorf("--goal-id %q does not match state goal.id %q", goalID, stateGoalID)
+			}
+		}
 
 		// Resolve default CLI from state config when --cli is not explicitly set
 		flagChanged := cmd.Flags().Changed("cli")
 		var cliConfig agent.CLIResolutionConfig
 		if !flagChanged {
-			bb := db.For(statePath)
-			if state, err := bb.Read(); err == nil {
+			if state != nil {
 				cliConfig = agent.CLIResolutionConfig{
 					DefaultCLI:         state.Config.DefaultCLI,
 					DefaultDoerCLI:     state.Config.DefaultDoerCLI,
 					DefaultReviewerCLI: state.Config.DefaultReviewerCLI,
 				}
-			} else {
-				fmt.Fprintf(os.Stderr, "Warning: could not read state for default CLI: %v\n", err)
 			}
 		}
 		cliName = agent.ResolveCLIFromStateForRole(flagChanged, cliName, roleType, cliConfig)
@@ -321,6 +329,7 @@ func init() {
 	// Agent command flags
 	addAgentIDFlag(agentCmd)
 	agentCmd.Flags().String("cli", "", "CLI to use; defaults by role-specific then global config/env; see docs ("+strings.Join(agent.ValidCLIs(), ", ")+")")
+	agentCmd.Flags().String("goal-id", "", "goal identifier marker for process diagnostics (must match state goal.id when supplied)")
 	agentCmd.Flags().BoolP("interactive", "i", false, "Print prompt location, don't execute CLI")
 	agentCmd.Flags().Bool("no-log", false, "Disable saving agent output to .liza/agent-outputs/")
 

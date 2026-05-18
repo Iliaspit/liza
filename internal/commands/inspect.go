@@ -20,6 +20,7 @@ type InspectOptions struct {
 	Internal    bool   // If true, return structured data for composition (not formatted string)
 	Summary     bool   // If true, return compact entity summaries
 	Active      bool   // If true, return only non-terminal tasks
+	Zombies     bool   // If true, return live liza agent processes missing from state
 }
 
 // Validate checks if the inspect options are valid
@@ -127,6 +128,9 @@ func handleEntityQuery(state *models.State, entity string, args []string, opts I
 	if entity != "tasks" && (opts.Summary || opts.Active) {
 		return "", fmt.Errorf("--summary and --active are only supported for tasks")
 	}
+	if entity != "agents" && opts.Zombies {
+		return "", fmt.Errorf("--zombies is only supported for agents")
+	}
 
 	switch entity {
 	case "config":
@@ -145,8 +149,15 @@ func handleEntityQuery(state *models.State, entity string, args []string, opts I
 		}
 		return asString(inspectTasks(state, taskOpts))
 	case "agents":
-		agentOpts := inspectAgentsOptions{Format: opts.Format}
+		agentOpts := inspectAgentsOptions{
+			Format:      opts.Format,
+			Zombies:     opts.Zombies,
+			ProjectRoot: opts.ProjectRoot,
+		}
 		if len(args) > 0 {
+			if opts.Zombies {
+				return "", fmt.Errorf("--zombies does not support a specific agent ID")
+			}
 			return asString(inspectAgent(state, args[0], agentOpts))
 		}
 		return asString(inspectAgents(state, agentOpts))

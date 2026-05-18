@@ -7,12 +7,18 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 
 	"github.com/liza-mas/liza/internal/agent"
+	"github.com/liza-mas/liza/internal/db"
+	"github.com/liza-mas/liza/internal/paths"
 )
 
 func buildSpawnCommand(projectRoot, role, cli string, extraArgs ...string) (*exec.Cmd, *os.File, error) {
 	args := []string{"agent", role, "--cli", cli}
+	if goalID := readGoalID(projectRoot); goalID != "" && !hasFlag(extraArgs, "--goal-id") {
+		args = append(args, "--goal-id", goalID)
+	}
 	args = append(args, extraArgs...)
 
 	cmd := exec.Command("liza", args...)
@@ -28,6 +34,26 @@ func buildSpawnCommand(projectRoot, role, cli string, extraArgs ...string) (*exe
 	cmd.Stderr = devNull
 
 	return cmd, devNull, nil
+}
+
+func readGoalID(projectRoot string) string {
+	if projectRoot == "" {
+		return ""
+	}
+	state, err := db.For(paths.New(projectRoot).StatePath()).Read()
+	if err != nil {
+		return ""
+	}
+	return state.Goal.ID
+}
+
+func hasFlag(args []string, name string) bool {
+	for _, arg := range args {
+		if arg == name || strings.HasPrefix(arg, name+"=") {
+			return true
+		}
+	}
+	return false
 }
 
 // SpawnAgent starts a detached `liza agent` subprocess with stdout/stderr

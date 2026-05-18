@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/liza-mas/liza/internal/models"
+	"github.com/liza-mas/liza/internal/procscan"
 	"github.com/liza-mas/liza/internal/statevalidate"
 	"github.com/liza-mas/liza/internal/testhelpers"
 )
@@ -58,6 +59,91 @@ func TestValidateCommand_RequiredFields(t *testing.T) {
 				testhelpers.AssertErrorContains(t, err, tt.errContains)
 			}
 		})
+	}
+}
+
+func TestValidateCommandWithOptions_FailsOnZombieAgent(t *testing.T) {
+	originalFind := findZombieAgents
+	t.Cleanup(func() { findZombieAgents = originalFind })
+
+	findZombieAgents = func(opts procscan.ZombieScanOptions) ([]procscan.ZombieProcess, error) {
+		if opts.GoalID != "goal-1" {
+			t.Fatalf("GoalID = %q, want goal-1", opts.GoalID)
+		}
+		return []procscan.ZombieProcess{{
+			PID:    222,
+			Role:   "coder",
+			Reason: "not_registered_in_state",
+		}}, nil
+	}
+
+	tmpDir := t.TempDir()
+	statePath, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	testhelpers.SetupPipelineConfig(t, tmpDir)
+	state := testhelpers.CreateValidState()
+	state.Goal.ID = "goal-1"
+	state.Sprint.GoalRef = "goal-1"
+	testhelpers.WriteInitialState(t, statePath, state)
+
+	err := ValidateCommandWithOptions(statePath, ValidateOptions{SkipSpecFileCheck: true})
+	if err == nil {
+		t.Fatal("ValidateCommandWithOptions() error = nil, want zombie validation failure")
+	}
+	testhelpers.AssertErrorContains(t, err, "zombie liza agent process detected")
+	testhelpers.AssertErrorContains(t, err, "pid 222 role coder")
+	testhelpers.AssertErrorContains(t, err, "liza get agents --zombies")
+}
+
+func TestValidateCommandWithOptions_SkipProcessChecks(t *testing.T) {
+	originalFind := findZombieAgents
+	t.Cleanup(func() { findZombieAgents = originalFind })
+
+	called := false
+	findZombieAgents = func(procscan.ZombieScanOptions) ([]procscan.ZombieProcess, error) {
+		called = true
+		return []procscan.ZombieProcess{{PID: 222, Role: "coder"}}, nil
+	}
+
+	tmpDir := t.TempDir()
+	statePath, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	testhelpers.SetupPipelineConfig(t, tmpDir)
+	testhelpers.WriteInitialState(t, statePath, testhelpers.CreateValidState())
+
+	err := ValidateCommandWithOptions(statePath, ValidateOptions{
+		SkipSpecFileCheck: true,
+		SkipProcessChecks: true,
+	})
+	if err != nil {
+		t.Fatalf("ValidateCommandWithOptions() error = %v, want nil", err)
+	}
+	if called {
+		t.Fatal("process scanner called despite SkipProcessChecks")
+	}
+}
+
+func TestValidateCommandWithOptions_ProcessScanUnavailableWarns(t *testing.T) {
+	originalFind := findZombieAgents
+	t.Cleanup(func() { findZombieAgents = originalFind })
+
+	findZombieAgents = func(procscan.ZombieScanOptions) ([]procscan.ZombieProcess, error) {
+		return nil, procscan.ErrProcessScanUnavailable
+	}
+
+	var warnBuf bytes.Buffer
+	SetWarnWriter(&warnBuf)
+	t.Cleanup(func() { SetWarnWriter(os.Stderr) })
+
+	tmpDir := t.TempDir()
+	statePath, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	testhelpers.SetupPipelineConfig(t, tmpDir)
+	testhelpers.WriteInitialState(t, statePath, testhelpers.CreateValidState())
+
+	err := ValidateCommandWithOptions(statePath, ValidateOptions{SkipSpecFileCheck: true})
+	if err != nil {
+		t.Fatalf("ValidateCommandWithOptions() error = %v, want nil warning", err)
+	}
+	if !strings.Contains(warnBuf.String(), "process scan skipped") {
+		t.Fatalf("warning = %q, want process scan skipped", warnBuf.String())
 	}
 }
 

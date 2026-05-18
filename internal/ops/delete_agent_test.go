@@ -9,6 +9,7 @@ import (
 	"github.com/liza-mas/liza/internal/db"
 	"github.com/liza-mas/liza/internal/errors"
 	"github.com/liza-mas/liza/internal/models"
+	"github.com/liza-mas/liza/internal/procscan"
 	"github.com/liza-mas/liza/internal/testhelpers"
 )
 
@@ -260,9 +261,9 @@ func TestMatchLizaAgentCmdline(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := matchLizaAgentCmdline(tt.cmdline)
+			got := procscan.IsLizaAgentArgv(procscan.ParseCmdlineBytes([]byte(tt.cmdline)))
 			if got != tt.expected {
-				t.Errorf("matchLizaAgentCmdline(%q) = %v, want %v", tt.cmdline, got, tt.expected)
+				t.Errorf("IsLizaAgentArgv(ParseCmdlineBytes(%q)) = %v, want %v", tt.cmdline, got, tt.expected)
 			}
 		})
 	}

@@ -4,7 +4,6 @@ import (
 	stderrors "errors"
 	"fmt"
 	"os"
-	"strings"
 	"syscall"
 	"time"
 
@@ -12,6 +11,7 @@ import (
 	"github.com/liza-mas/liza/internal/errors"
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/paths"
+	"github.com/liza-mas/liza/internal/procscan"
 )
 
 // DeleteAgentResult contains the outcome of deleting an agent.
@@ -46,21 +46,7 @@ func isLizaAgentProcess(pid int) bool {
 	if err != nil {
 		return false
 	}
-	return matchLizaAgentCmdline(string(data))
-}
-
-// matchLizaAgentCmdline checks if a null-separated cmdline string matches
-// a liza agent process (argv[0] basename == "liza", argv[1] == "agent").
-func matchLizaAgentCmdline(cmdline string) bool {
-	args := strings.Split(cmdline, "\x00")
-	if len(args) < 2 {
-		return false
-	}
-	base := args[0]
-	if i := strings.LastIndex(base, "/"); i >= 0 {
-		base = base[i+1:]
-	}
-	return base == "liza" && args[1] == "agent"
+	return procscan.IsLizaAgentArgv(procscan.ParseCmdlineBytes(data))
 }
 
 // IsProcessAlive checks if a process with the given PID is running.

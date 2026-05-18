@@ -28,11 +28,11 @@ All system mechanics are provided by the `liza` Go binary (assumed in PATH). See
 |---------|---------|
 | `liza init "goal" --spec spec` | Initialize `.liza/` for new goal |
 | `liza add-task --id X ...` | Add task to blackboard (atomic, with validation) |
-| `liza validate [state]` | Schema validation |
+| `liza validate [state] [--skip-process-checks]` | Schema validation plus live zombie-agent detection |
 | `liza tui` | Alarm monitor daemon |
 | `liza analyze` | Circuit breaker analysis (human-triggered) |
 | `liza sprint-checkpoint` | Create checkpoint and generate sprint summary |
-| `liza agent <role> --agent-id x [--cli C]` | Agent supervisor (`--cli`: claude, codex, gemini, mistral, kimi) |
+| `liza agent <role> --agent-id x [--cli C] [--goal-id G]` | Agent supervisor (`--cli`: claude, codex, gemini, mistral, kimi; `--goal-id` marks the process for diagnostics) |
 | `liza claim-task <task> <agent>` | Claim task with two-phase commit (called by supervisor) |
 | `liza submit-for-review <task> [commit-ref]` | Resolve `[commit-ref]` in the task worktree (default `HEAD`), validate it matches pre-rebase worktree HEAD, then set READY_FOR_REVIEW + post-rebase `review_commit` + history |
 | `liza submit-verdict <task> <V> [--reason "<reason>"]` | Atomically set APPROVED/REJECTED + review fields + history |
@@ -340,8 +340,17 @@ liza add-task --id TASK_ID --desc DESCRIPTION --spec SPEC_REF \
 **liza validate** — Validate blackboard state
 ```bash
 liza validate [state.yaml]
-# Returns "VALID" or "INVALID: [issue description]"
+liza validate --skip-process-checks   # Offline/archive validation only
+# Returns "VALID" or exits non-zero with the issue description
 ```
+
+By default, `liza validate` is a live-system assertion: after schema checks pass,
+it scans local processes for `liza agent` supervisors that belong to the current
+goal/project but whose PID is absent from `state.yaml`. Use
+`--skip-process-checks` only when validating an archived state file or running in
+an environment where host process state is intentionally irrelevant. Live process
+scanning currently requires Linux procfs; on hosts without procfs, validation
+emits a warning and skips the live-process check.
 
 **liza tui** — Monitor blackboard and alert
 ```bash
@@ -366,6 +375,10 @@ liza sprint-checkpoint
 liza agent coder --agent-id coder-1
 # Runs agent in loop, handles exit codes, respects config.mode and sprint.status
 ```
+
+Agents spawned by Liza include `--goal-id` in their command line so live-process
+diagnostics can display the goal marker. Legacy/manual agents without
+`--goal-id` are still scoped by process cwd.
 
 **liza claim-task** — Claim task (supervisor-only)
 ```bash
@@ -519,6 +532,7 @@ Agents must read `human_notes` relevant to their task before starting/resuming w
 | Expired coder lease | lease_expires in past | `⚠️ LEASE EXPIRED: {agent} on {task}` |
 | Expired review lease | review_lease_expires in past | `⚠️ REVIEW LEASE EXPIRED: {code_reviewer} on {task} — review can be reclaimed` |
 | Running task without live process | Executing or reviewing task owner PID is missing or stopped | `🚨 DEAD AGENT PROCESS: {task} — status {status} has {owner_kind} {agent} but no live process (pid {pid})` |
+| Live supervisor missing from state | `liza validate` or `liza get agents --zombies` finds a current-goal `liza agent` PID absent from `state.yaml` | `zombie liza agent process detected: pid {pid} role {role}` |
 | Task blocked | Any | `⚠️ BLOCKED: {task} — {reason}` |
 | Orphaned rejected | REJECTED task, assignee not WORKING (30s grace) | `🚨 ORPHANED REJECTED: {task} — assigned to {agent} but agent is {status}` |
 | Same task reassigned | 2nd coder | `⚠️ REASSIGNED: {task} — hypothesis exhaustion risk` |

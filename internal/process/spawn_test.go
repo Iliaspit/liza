@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/liza-mas/liza/internal/agent"
+	"github.com/liza-mas/liza/internal/testhelpers"
 )
 
 func TestBuildSpawnCommand_PassesExpectedArgs(t *testing.T) {
@@ -28,6 +29,44 @@ func TestBuildSpawnCommand_PassesExpectedArgs(t *testing.T) {
 
 	if cmd.Dir != "/tmp/project" {
 		t.Fatalf("Dir = %q, want %q", cmd.Dir, "/tmp/project")
+	}
+}
+
+func TestBuildSpawnCommand_AddsGoalIDFromState(t *testing.T) {
+	projectRoot := t.TempDir()
+	statePath, _ := testhelpers.SetupLizaDir(t, projectRoot)
+	state := testhelpers.CreateValidState()
+	state.Goal.ID = "goal-xyz"
+	testhelpers.WriteInitialState(t, statePath, state)
+
+	cmd, devNull, err := buildSpawnCommand(projectRoot, "coder", "codex")
+	if err != nil {
+		t.Fatalf("buildSpawnCommand() error = %v", err)
+	}
+	defer devNull.Close()
+
+	wantArgs := []string{"liza", "agent", "coder", "--cli", "codex", "--goal-id", "goal-xyz"}
+	if strings.Join(cmd.Args, " ") != strings.Join(wantArgs, " ") {
+		t.Fatalf("args = %v, want %v", cmd.Args, wantArgs)
+	}
+}
+
+func TestBuildSpawnCommand_DoesNotOverrideExplicitGoalID(t *testing.T) {
+	projectRoot := t.TempDir()
+	statePath, _ := testhelpers.SetupLizaDir(t, projectRoot)
+	state := testhelpers.CreateValidState()
+	state.Goal.ID = "goal-xyz"
+	testhelpers.WriteInitialState(t, statePath, state)
+
+	cmd, devNull, err := buildSpawnCommand(projectRoot, "coder", "codex", "--goal-id", "manual-goal")
+	if err != nil {
+		t.Fatalf("buildSpawnCommand() error = %v", err)
+	}
+	defer devNull.Close()
+
+	wantArgs := []string{"liza", "agent", "coder", "--cli", "codex", "--goal-id", "manual-goal"}
+	if strings.Join(cmd.Args, " ") != strings.Join(wantArgs, " ") {
+		t.Fatalf("args = %v, want %v", cmd.Args, wantArgs)
 	}
 }
 

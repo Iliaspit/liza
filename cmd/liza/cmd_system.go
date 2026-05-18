@@ -506,6 +506,7 @@ Examples:
   liza get fix-auth-bug            # Shorthand for tasks fix-auth-bug (any task ID)
   liza get coder-1                 # Shorthand for agents coder-1
   liza get code-reviewer-1         # Shorthand for agents code-reviewer-1
+  liza get agents --zombies        # Show live liza agent processes missing from state
   liza get agents --format yaml
   liza get metrics
   liza get anomalies`,
@@ -525,6 +526,7 @@ Examples:
 		format, _ := cmd.Flags().GetString("format")
 		summary, _ := cmd.Flags().GetBool("summary")
 		active, _ := cmd.Flags().GetBool("active")
+		zombies, _ := cmd.Flags().GetBool("zombies")
 
 		projectRoot, err := requireProjectRoot()
 		if err != nil {
@@ -537,6 +539,7 @@ Examples:
 				ProjectRoot: projectRoot,
 				Summary:     summary,
 				Active:      active,
+				Zombies:     zombies,
 			}
 			resultStr, err := commands.InspectCommand(args, opts)
 			if err != nil {
@@ -552,6 +555,7 @@ Examples:
 			ProjectRoot: projectRoot,
 			Summary:     summary,
 			Active:      active,
+			Zombies:     zombies,
 		}
 
 		result, err := commands.InspectCommand(args, opts)
@@ -673,6 +677,7 @@ func init() {
 	getCmd.Flags().String("format", "", "output format: json, yaml, table, value (default varies by query type)")
 	getCmd.Flags().Bool("summary", false, "return compact task summaries")
 	getCmd.Flags().Bool("active", false, "return only non-terminal tasks")
+	getCmd.Flags().Bool("zombies", false, "return live liza agent processes for this goal that are missing from state")
 
 	// Status command flags
 	statusCmd.Flags().String("format", "", "output format: json, yaml, or dashboard (default)")

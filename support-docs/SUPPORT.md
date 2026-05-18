@@ -10,11 +10,14 @@ liza status                        # Dashboard: goal, sprint, agents, task summa
 liza get tasks                     # All tasks with current state
 liza get tasks --format table      # Tabular view
 liza get agents                    # Registered agents and lease status
+liza get agents --zombies          # Live liza agent supervisors missing from state
 liza validate                      # Check blackboard against invariants
+liza validate --skip-process-checks # Offline/archive validation only
 liza analyze                       # Circuit breaker pattern detection
 ```
 
 `liza status --format json` includes `process_status_source` and `process_status_detail` for agents and phase-handoff blockers. Use these fields when a task appears assigned but the process state is ambiguous.
+Live zombie-agent detection currently requires Linux procfs. On hosts without procfs, `liza validate` warns and skips the live-process check, while `liza get agents --zombies` reports that scanning is unavailable.
 
 ## Recovery Commands
 
@@ -311,6 +314,11 @@ Exit 42 with `handoff_pending: true` on the task means context exhaustion — th
 **Symptom**: Agent registered in state.yaml but process is dead.
 **Diagnosis**: `liza get agents` — check lease expiry.
 **Fix**: `liza recover-agent <agent-id>` or `liza delete agent <id>`.
+
+### Zombie agent process
+**Symptom**: A live `liza agent` process is not registered in `state.yaml` and can collide with registered agents claiming the same work.
+**Diagnosis**: `liza get agents --zombies` or `liza validate`.
+**Fix**: Inspect the PID and stop the stale process. `liza validate --skip-process-checks` is only for archived/offline state validation where host process state is irrelevant.
 
 ### Provider quota exhausted
 **Symptom**: All agents using a provider (e.g. Claude) have stopped. System mode is still RUNNING, sprint still IN_PROGRESS. Signal file `.liza/provider-quota-exhausted-<provider>` exists.

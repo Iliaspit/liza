@@ -1,13 +1,16 @@
 package commands
 
 import (
+	stderrors "errors"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/liza-mas/liza/internal/errors"
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/ops"
+	"github.com/liza-mas/liza/internal/procscan"
 	"github.com/liza-mas/liza/internal/render"
 )
 
@@ -17,6 +20,8 @@ type inspectAgentsOptions struct {
 	RoleFilter   string // Filter by role
 	StatusFilter string // Filter by status
 	Internal     bool   // Return structured data for composition
+	Zombies      bool   // Return live liza agent processes missing from state
+	ProjectRoot  string // Project root for live process scope checks
 }
 
 // agentInfo represents agent information with computed fields
@@ -36,8 +41,14 @@ type agentInfo struct {
 	ContextPercent     int     `json:"context_percent" yaml:"context_percent"`
 }
 
+var findZombieAgents = procscan.FindZombieAgents
+
 // inspectAgents lists all agents or filters by criteria
 func inspectAgents(state *models.State, opts inspectAgentsOptions) (any, error) {
+	if opts.Zombies {
+		return inspectZombieAgents(state, opts)
+	}
+
 	// Get all agents as a slice (agents are stored in a map)
 	agents := make([]agentInfo, 0, len(state.Agents))
 	for agentID, agent := range state.Agents {
@@ -72,6 +83,39 @@ func inspectAgents(state *models.State, opts inspectAgentsOptions) (any, error) 
 
 	// Otherwise, format for output
 	return formatAgentsOutput(agents, opts.Format)
+}
+
+func inspectZombieAgents(state *models.State, opts inspectAgentsOptions) (any, error) {
+	zombies, err := findZombieAgents(procscan.ZombieScanOptions{
+		ProjectRoot:    opts.ProjectRoot,
+		GoalID:         state.Goal.ID,
+		RegisteredPIDs: registeredAgentPIDs(state),
+	})
+	if stderrors.Is(err, procscan.ErrProcessScanUnavailable) {
+		return nil, fmt.Errorf("zombie agent process scanning unavailable: procfs not found on this host")
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	sort.Slice(zombies, func(i, j int) bool {
+		return zombies[i].PID < zombies[j].PID
+	})
+
+	if opts.Internal {
+		return zombies, nil
+	}
+	return formatZombieAgentsOutput(zombies, opts.Format)
+}
+
+func registeredAgentPIDs(state *models.State) map[int]bool {
+	pids := make(map[int]bool, len(state.Agents))
+	for _, agent := range state.Agents {
+		if agent.PID > 0 {
+			pids[agent.PID] = true
+		}
+	}
+	return pids
 }
 
 // inspectAgent shows details for a single agent
@@ -163,6 +207,53 @@ func formatAgentsOutput(agents []agentInfo, format string) (string, error) {
 	default:
 		return "", fmt.Errorf("invalid format: %s", format)
 	}
+}
+
+func formatZombieAgentsOutput(zombies []procscan.ZombieProcess, format string) (string, error) {
+	if format == "" {
+		format = "table"
+	}
+
+	switch format {
+	case "json":
+		return render.FormatJSON(zombies)
+	case "yaml":
+		return render.FormatYAML(zombies)
+	case "table":
+		return formatZombieAgentsTable(zombies), nil
+	case "value":
+		return "", fmt.Errorf("value format not supported for zombie agent lists (use json, yaml, or table)")
+	default:
+		return "", fmt.Errorf("invalid format: %s", format)
+	}
+}
+
+func formatZombieAgentsTable(zombies []procscan.ZombieProcess) string {
+	if len(zombies) == 0 {
+		return "No zombie agents found"
+	}
+
+	headers := []string{"PID", "ROLE", "CLI", "GOAL", "CWD", "REASON"}
+	rows := make([][]string, 0, len(zombies))
+	for _, zombie := range zombies {
+		rows = append(rows, []string{
+			fmt.Sprintf("%d", zombie.PID),
+			zombie.Role,
+			zombie.CLI,
+			zombie.GoalID,
+			zombie.CWD,
+			zombie.Reason,
+		})
+	}
+	return render.FormatTable(headers, rows) + "\n\nCMDLINE:\n" + formatZombieCmdlines(zombies)
+}
+
+func formatZombieCmdlines(zombies []procscan.ZombieProcess) string {
+	lines := make([]string, 0, len(zombies))
+	for _, zombie := range zombies {
+		lines = append(lines, fmt.Sprintf("%d: %s", zombie.PID, strings.Join(zombie.Cmdline, " ")))
+	}
+	return strings.Join(lines, "\n")
 }
 
 // formatAgentOutput formats a single agent for output

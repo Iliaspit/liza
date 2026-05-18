@@ -239,6 +239,7 @@ Returns detailed error messages if validation fails.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) (retErr error) {
 		skipSpecCheck, _ := cmd.Flags().GetBool("skip-spec-check")
+		skipProcessChecks, _ := cmd.Flags().GetBool("skip-process-checks")
 
 		if isJSON(cmd) {
 			log.SetOutput(io.Discard)
@@ -258,7 +259,10 @@ Returns detailed error messages if validation fails.`,
 			if err != nil {
 				return err
 			}
-			err = commands.ValidateCommand(statePath, skipSpecCheck)
+			err = commands.ValidateCommandWithOptions(statePath, commands.ValidateOptions{
+				SkipSpecFileCheck: skipSpecCheck,
+				SkipProcessChecks: skipProcessChecks,
+			})
 			var warnings []string
 			if warnBuf.Len() > 0 {
 				for _, line := range strings.Split(strings.TrimSpace(warnBuf.String()), "\n") {
@@ -277,7 +281,10 @@ Returns detailed error messages if validation fails.`,
 		if err != nil {
 			return err
 		}
-		err = commands.ValidateCommand(statePath, skipSpecCheck)
+		err = commands.ValidateCommandWithOptions(statePath, commands.ValidateOptions{
+			SkipSpecFileCheck: skipSpecCheck,
+			SkipProcessChecks: skipProcessChecks,
+		})
 		if err != nil {
 			return err
 		}
@@ -394,6 +401,7 @@ func init() {
 
 	// Validate command flags
 	validateCmd.Flags().Bool("skip-spec-check", false, "skip spec file existence check")
+	validateCmd.Flags().Bool("skip-process-checks", false, "skip live liza agent process checks for offline or archived state validation")
 
 	// JSON output flags
 	addJSONFlag(versionCmd)
