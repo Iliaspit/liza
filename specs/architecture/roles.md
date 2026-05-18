@@ -322,6 +322,13 @@ The supervisor sets:
 - Agent status to `REVIEWING`
 - Agent `current_task` and lease
 
+For tasks in a pipeline reviewing state, including second-review states, review
+ownership is a bidirectional invariant: `reviewing_by` must point to an agent
+whose role is the exact reviewer role resolved from the task's `role_pair`, and
+that agent must be `REVIEWING` with `current_task` set to the same task.
+`reviewing_by` on a non-reviewing task is not active ownership; it is stale or
+orphaned state to clear through recovery.
+
 | Condition | Review Claimable? |
 |-----------|-------------------|
 | `reviewing_by` is null | Yes |

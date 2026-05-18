@@ -780,6 +780,13 @@ agents:
 
 Code Reviewer lease prevents two Code Reviewers examining same task simultaneously and enables recovery from Code Reviewer crash.
 
+When a task is in the pipeline reviewing state or reviewing-2 state,
+`reviewing_by` is active ownership only if it matches the agent-side row: the
+agent must have the exact reviewer role resolved from the task's `role_pair`,
+status `REVIEWING`, `current_task` equal to the task ID, and a valid review
+lease. A `reviewing_by` value on non-reviewing states is stale/orphaned state,
+not an active claim.
+
 **Heartbeat interval:** 60 seconds
 **Lease duration:** 1800 seconds (30 minutes)
 **Stale threshold:** lease_expires in the past

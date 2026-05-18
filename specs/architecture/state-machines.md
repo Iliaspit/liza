@@ -293,11 +293,18 @@ READY_FOR_REVIEW
 
 **Key invariants:**
 - Supervisor claims review before spawning Code Reviewer (prevents duplicate reviews)
+- Active review ownership applies only while the task is in the pipeline
+  reviewing state or reviewing-2 state. In those states, `reviewing_by` must
+  point to an agent whose role is the exact reviewer role resolved from the
+  task's `role_pair`, and that agent must be `REVIEWING` with matching
+  `current_task`.
 - Code Reviewer must extend lease with heartbeats during long reviews
 - On verdict: clear `reviewing_by` and `review_lease_expires`
 - On approval: set `approved_by` to Code Reviewer agent ID
 - On merge: set `merge_commit` to integration commit SHA
 - Stale review lease allows supervisor to reassign (Code Reviewer crash recovery)
+- `reviewing_by` on non-reviewing states is stale/orphaned ownership, not an
+  active review claim.
 
 See [Blackboard Schema — Lease Model](blackboard-schema.md#lease-model) for field details.
 
