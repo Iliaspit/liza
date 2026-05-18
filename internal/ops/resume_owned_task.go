@@ -38,37 +38,11 @@ var validateOwnedResumeWorktreeHealth = func(g *git.Git, taskID string) error {
 func CountResumableOwnedTasks(state *models.State, agentID string, pr models.PipelineResolver) int {
 	count := 0
 	for i := range state.Tasks {
-		if IsResumableOwnedTask(state, &state.Tasks[i], agentID, pr) {
+		if models.IsResumableOwnedTask(state, &state.Tasks[i], agentID, pr) {
 			count++
 		}
 	}
 	return count
-}
-
-// IsResumableOwnedTask is the shared state predicate for wait detection and
-// claim-time recovery.
-func IsResumableOwnedTask(state *models.State, task *models.Task, agentID string, pr models.PipelineResolver) bool {
-	if state == nil || task == nil || agentID == "" || pr == nil {
-		return false
-	}
-	if !models.IsExecutingStatus(task, pr) || task.HandoffPending {
-		return false
-	}
-	if task.AssignedTo == nil || *task.AssignedTo != agentID {
-		return false
-	}
-
-	agent, ok := state.Agents[agentID]
-	if !ok {
-		return false
-	}
-
-	doerRole, err := pr.DoerRole(task.RolePair)
-	if err != nil || agent.Role != doerRole {
-		return false
-	}
-
-	return agent.CurrentTask == nil || *agent.CurrentTask == "" || *agent.CurrentTask == task.ID
 }
 
 // ResumeOwnedTask resumes an executing task that is already assigned to the
@@ -96,7 +70,7 @@ func ResumeOwnedTask(input ResumeOwnedTaskInput) (*ResumeOwnedTaskResult, error)
 
 	for i := range state.Tasks {
 		task := &state.Tasks[i]
-		if !IsResumableOwnedTask(state, task, input.AgentID, resolver) {
+		if !models.IsResumableOwnedTask(state, task, input.AgentID, resolver) {
 			continue
 		}
 
@@ -145,7 +119,7 @@ func resumeOwnedCandidate(bb *db.Blackboard, taskID, agentID string, pr models.P
 		if task == nil {
 			return &lizaerrors.NotFoundError{Entity: "task", ID: taskID}
 		}
-		if !IsResumableOwnedTask(state, task, agentID, pr) {
+		if !models.IsResumableOwnedTask(state, task, agentID, pr) {
 			return nil
 		}
 		if task.Worktree == nil || *task.Worktree == "" {
@@ -198,7 +172,7 @@ func blockOwnedResumeCandidate(
 		if task == nil {
 			return &lizaerrors.NotFoundError{Entity: "task", ID: taskID}
 		}
-		if !IsResumableOwnedTask(state, task, agentID, pr) {
+		if !models.IsResumableOwnedTask(state, task, agentID, pr) {
 			return nil
 		}
 		if err := task.TransitionWith(models.TaskStatusBlocked, pipelineTransitions); err != nil {

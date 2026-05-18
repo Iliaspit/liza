@@ -41,12 +41,7 @@ func TestResumeOwnedTask_SuccessRepairsRestartedAgentCurrentTask(t *testing.T) {
 	task.AssignedTo = &agentID
 	task.HandoffPending = false
 	state.Tasks = []models.Task{task}
-	state.Agents[agentID] = models.Agent{
-		Role:      models.RoleCoder,
-		Status:    models.AgentStatusIdle,
-		Heartbeat: now,
-		Terminal:  "test",
-	}
+	state.Agents[agentID] = resumableOwnedAgent(models.RoleCoder, models.AgentStatusIdle, nil, now)
 	testhelpers.WriteInitialState(t, stateFile, state)
 
 	callStart := time.Now().UTC()
@@ -108,12 +103,7 @@ func TestResumeOwnedTask_CodePlannerWithoutCurrentTask(t *testing.T) {
 	worktree := ".worktrees/plan-1"
 	task.Worktree = &worktree
 	state.Tasks = []models.Task{task}
-	state.Agents[agentID] = models.Agent{
-		Role:      models.RoleCodePlanner,
-		Status:    models.AgentStatusIdle,
-		Heartbeat: now,
-		Terminal:  "test",
-	}
+	state.Agents[agentID] = resumableOwnedAgent(models.RoleCodePlanner, models.AgentStatusIdle, nil, now)
 	testhelpers.WriteInitialState(t, stateFile, state)
 
 	result, err := ResumeOwnedTask(ResumeOwnedTaskInput{
@@ -148,7 +138,7 @@ func TestResumeOwnedTask_BlocksMissingWorktreeMetadata(t *testing.T) {
 	task.AssignedTo = &agentID
 	task.Worktree = nil
 	state.Tasks = []models.Task{task}
-	state.Agents[agentID] = models.Agent{Role: models.RoleCoder, Status: models.AgentStatusWorking, CurrentTask: &task.ID}
+	state.Agents[agentID] = resumableOwnedAgent(models.RoleCoder, models.AgentStatusWorking, &task.ID, now)
 	testhelpers.WriteInitialState(t, stateFile, state)
 
 	result, err := ResumeOwnedTask(ResumeOwnedTaskInput{
@@ -175,7 +165,7 @@ func TestResumeOwnedTask_BlocksMissingWorktreeOnDisk(t *testing.T) {
 	task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusImplementing, now)
 	task.AssignedTo = &agentID
 	state.Tasks = []models.Task{task}
-	state.Agents[agentID] = models.Agent{Role: models.RoleCoder, Status: models.AgentStatusWorking, CurrentTask: &task.ID}
+	state.Agents[agentID] = resumableOwnedAgent(models.RoleCoder, models.AgentStatusWorking, &task.ID, now)
 	testhelpers.WriteInitialState(t, stateFile, state)
 
 	result, err := ResumeOwnedTask(ResumeOwnedTaskInput{
@@ -202,7 +192,7 @@ func TestResumeOwnedTask_BlocksOrphanedWorktreeWithoutGitLink(t *testing.T) {
 	task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusImplementing, now)
 	task.AssignedTo = &agentID
 	state.Tasks = []models.Task{task}
-	state.Agents[agentID] = models.Agent{Role: models.RoleCoder, Status: models.AgentStatusWorking, CurrentTask: &task.ID}
+	state.Agents[agentID] = resumableOwnedAgent(models.RoleCoder, models.AgentStatusWorking, &task.ID, now)
 	testhelpers.WriteInitialState(t, stateFile, state)
 
 	if err := os.MkdirAll(filepath.Join(tmpDir, ".worktrees", "task-1"), 0755); err != nil {
@@ -234,8 +224,8 @@ func TestResumeOwnedTask_DoesNotBlockOrResumeIfOwnershipChangesDuringValidation(
 	task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusImplementing, now)
 	task.AssignedTo = &agentID
 	state.Tasks = []models.Task{task}
-	state.Agents[agentID] = models.Agent{Role: models.RoleCoder, Status: models.AgentStatusWorking, CurrentTask: &task.ID}
-	state.Agents[otherAgentID] = models.Agent{Role: models.RoleCoder, Status: models.AgentStatusIdle}
+	state.Agents[agentID] = resumableOwnedAgent(models.RoleCoder, models.AgentStatusWorking, &task.ID, now)
+	state.Agents[otherAgentID] = resumableOwnedAgent(models.RoleCoder, models.AgentStatusIdle, nil, now)
 	testhelpers.WriteInitialState(t, stateFile, state)
 
 	oldValidate := validateOwnedResumeWorktreeHealth
@@ -298,19 +288,33 @@ func TestResumeOwnedTask_PredicateGuardsRoleAndCurrentTask(t *testing.T) {
 
 	state := testhelpers.CreateValidState()
 	state.Tasks = []models.Task{task}
-	state.Agents[agentID] = models.Agent{Role: models.RoleCodePlanner}
-	if IsResumableOwnedTask(state, &state.Tasks[0], agentID, pr) {
+	state.Agents[agentID] = resumableOwnedAgent(models.RoleCodePlanner, models.AgentStatusIdle, nil, now)
+	if models.IsResumableOwnedTask(state, &state.Tasks[0], agentID, pr) {
 		t.Fatal("wrong role should not be resumable")
 	}
 
-	state.Agents[agentID] = models.Agent{Role: models.RoleCoder, CurrentTask: &otherTask}
-	if IsResumableOwnedTask(state, &state.Tasks[0], agentID, pr) {
+	state.Agents[agentID] = resumableOwnedAgent(models.RoleCoder, models.AgentStatusIdle, &otherTask, now)
+	if models.IsResumableOwnedTask(state, &state.Tasks[0], agentID, pr) {
 		t.Fatal("agent already working another task should not be resumable")
 	}
 
-	state.Agents[agentID] = models.Agent{Role: models.RoleCoder}
-	if !IsResumableOwnedTask(state, &state.Tasks[0], agentID, pr) {
+	state.Agents[agentID] = resumableOwnedAgent(models.RoleCoder, models.AgentStatusIdle, nil, now)
+	if !models.IsResumableOwnedTask(state, &state.Tasks[0], agentID, pr) {
 		t.Fatal("owned executing task with compatible agent should be resumable")
+	}
+}
+
+func resumableOwnedAgent(role string, status models.AgentStatus, currentTask *string, now time.Time) models.Agent {
+	leaseExpires := now.Add(30 * time.Minute)
+	return models.Agent{
+		Role:         role,
+		Status:       status,
+		CurrentTask:  currentTask,
+		LeaseExpires: &leaseExpires,
+		Heartbeat:    now,
+		Terminal:     "test",
+		Provider:     "test",
+		PID:          os.Getpid(),
 	}
 }
 

@@ -261,11 +261,15 @@ func TestWaitForCodePlannerWork_OwnedExecutingTaskWakesAfterRestart(t *testing.T
 
 	state := testhelpers.CreateValidState()
 	state.Tasks = []models.Task{task}
+	leaseExpires := now.Add(30 * time.Minute)
 	state.Agents[agentID] = models.Agent{
-		Role:      models.RoleCodePlanner,
-		Status:    models.AgentStatusIdle,
-		Heartbeat: now,
-		Terminal:  "test",
+		Role:         models.RoleCodePlanner,
+		Status:       models.AgentStatusIdle,
+		LeaseExpires: &leaseExpires,
+		Heartbeat:    now,
+		Terminal:     "test",
+		Provider:     "test",
+		PID:          os.Getpid(),
 	}
 	testhelpers.WriteInitialState(t, statePath, state)
 

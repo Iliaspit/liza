@@ -526,9 +526,18 @@ Before claiming fresh work, doer supervisors also look for executing tasks alrea
 - task is in the role-pair executing status
 - `assigned_to` equals the supervisor's agent ID
 - registered agent role equals the role-pair doer role
+- agent has registered provider, PID, and lease metadata
+- agent status is `WORKING` or `IDLE`
 - agent `current_task` is empty or points at this task
 
 Resume then validates the task's worktree metadata and on-disk health. Healthy worktrees are resumed with an `owned_task_resumed` history event and a renewed lease. Missing or unhealthy worktrees transition the task to `BLOCKED` with a diagnostic instead of spawning a child process that would fail immediately.
+
+`liza validate --repair` may clear invalid or dead doer ownership back to the
+role-pair initial status when process checks are available and the assigned PID
+is not live. It leaves the physical worktree on disk for inspection, but a later
+fresh claim of that task may remove stale worktree resources before recreating
+them. If the assigned PID is live, repair refuses and requires explicit recovery
+tooling.
 
 ---
 

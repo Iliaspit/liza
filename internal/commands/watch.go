@@ -438,7 +438,7 @@ func checkRunningTasksWithoutLiveProcess(state *models.State, pr models.Pipeline
 			})
 			continue
 		}
-		if reason := activeTaskOwnerMismatch(task, ownerKind, agent, pr); reason != "" {
+		if reason := activeTaskOwnerMismatch(state, task, ownerID, ownerKind, agent, pr); reason != "" {
 			skipReverseAgentIDs[ownerID] = true
 			alerts = append(alerts, Alert{
 				Timestamp: now,
@@ -466,7 +466,11 @@ func checkRunningTasksWithoutLiveProcess(state *models.State, pr models.Pipeline
 	return alerts
 }
 
-func activeTaskOwnerMismatch(task *models.Task, ownerKind string, agent models.Agent, pr models.PipelineResolver) string {
+func activeTaskOwnerMismatch(state *models.State, task *models.Task, ownerID string, ownerKind string, agent models.Agent, pr models.PipelineResolver) string {
+	if ownerKind == "doer" {
+		return models.ActiveDoerOwnershipReason(state, task, ownerID, pr)
+	}
+
 	expectedRole, ok := expectedOwnerRole(task, ownerKind, pr)
 	if ok && agent.Role != expectedRole {
 		return fmt.Sprintf("agent role %q, want %q", agent.Role, expectedRole)

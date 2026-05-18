@@ -26,12 +26,16 @@ func TestClaimDoerTask_ResumesOwnedTaskBeforeFreshClaim(t *testing.T) {
 
 	state := testhelpers.CreateValidState()
 	state.Tasks = []models.Task{fresh, owned}
+	leaseExpires := now.Add(30 * time.Minute)
 	state.Agents[agentID] = models.Agent{
-		Role:        models.RoleCoder,
-		Status:      models.AgentStatusIdle,
-		CurrentTask: nil,
-		Heartbeat:   now,
-		Terminal:    "test",
+		Role:         models.RoleCoder,
+		Status:       models.AgentStatusIdle,
+		CurrentTask:  nil,
+		LeaseExpires: &leaseExpires,
+		Heartbeat:    now,
+		Terminal:     "test",
+		Provider:     "test",
+		PID:          os.Getpid(),
 	}
 	testhelpers.WriteInitialState(t, statePath, state)
 

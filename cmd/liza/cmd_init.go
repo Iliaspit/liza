@@ -408,7 +408,7 @@ func init() {
 	// Validate command flags
 	validateCmd.Flags().Bool("skip-spec-check", false, "skip spec file existence check")
 	validateCmd.Flags().Bool("skip-process-checks", false, "skip live liza agent process checks for offline or archived state validation")
-	validateCmd.Flags().Bool("repair", false, "repair invalid active review ownership before validating")
+	validateCmd.Flags().Bool("repair", false, "repair invalid active ownership before validating")
 
 	// JSON output flags
 	addJSONFlag(versionCmd)

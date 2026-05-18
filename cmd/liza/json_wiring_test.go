@@ -1089,6 +1089,8 @@ func TestJSON_VoidSuccess(t *testing.T) {
 				CurrentTask:  &task.ID,
 				LeaseExpires: timePtr(now.Add(30 * time.Minute)),
 				Heartbeat:    now,
+				Provider:     "test",
+				PID:          os.Getpid(),
 			},
 		}
 	})
@@ -1143,6 +1145,8 @@ func TestJSON_Validate_WithWarnings(t *testing.T) {
 				CurrentTask:  &taskID,
 				LeaseExpires: &expiredLease,
 				Heartbeat:    now,
+				Provider:     "test",
+				PID:          os.Getpid(),
 			},
 		}
 	})

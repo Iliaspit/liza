@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/liza-mas/liza/internal/models"
+	"github.com/liza-mas/liza/internal/ops"
 	"github.com/liza-mas/liza/internal/procscan"
 	"github.com/liza-mas/liza/internal/statevalidate"
 	"github.com/liza-mas/liza/internal/testhelpers"
@@ -236,6 +237,241 @@ func TestValidateCommandWithOptions_RepairInvalidReviewOwnership(t *testing.T) {
 	}
 }
 
+func TestValidateCommandWithOptions_RepairInvalidDoerOwnershipDeadOrMissingPID(t *testing.T) {
+	now := time.Now().UTC()
+
+	tests := []struct {
+		name string
+		pid  int
+	}{
+		{name: "missing pid", pid: 0},
+		{name: "dead pid with future lease", pid: deadPIDForTest(t)},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			statePath, _ := testhelpers.SetupLizaDir(t, tmpDir)
+			testhelpers.SetupPipelineConfig(t, tmpDir)
+			state := invalidDoerOwnershipState(t, tmpDir, now)
+			agent := state.Agents["coder-1"]
+			agent.PID = tt.pid
+			state.Agents["coder-1"] = agent
+			bb := testhelpers.WriteInitialState(t, statePath, state)
+
+			var warnBuf bytes.Buffer
+			SetWarnWriter(&warnBuf)
+			t.Cleanup(func() { SetWarnWriter(os.Stderr) })
+
+			err := ValidateCommandWithOptions(statePath, ValidateOptions{
+				SkipSpecFileCheck: true,
+				Repair:            true,
+			})
+			if err != nil {
+				t.Fatalf("ValidateCommandWithOptions() repair error = %v", err)
+			}
+			if !strings.Contains(warnBuf.String(), "REPAIRED: invalid active doer ownership cleared for 1 task(s)") {
+				t.Fatalf("repair warning = %q, want doer repair count", warnBuf.String())
+			}
+
+			repaired, err := bb.Read()
+			if err != nil {
+				t.Fatalf("read repaired state: %v", err)
+			}
+			task := repaired.FindTask("task-1")
+			if task == nil {
+				t.Fatal("task-1 missing after repair")
+			}
+			if task.Status != models.TaskStatusReady {
+				t.Fatalf("task status = %s, want READY", task.Status)
+			}
+			if task.AssignedTo != nil || task.LeaseExpires != nil || task.Worktree != nil || task.BaseCommit != nil {
+				t.Fatalf("doer claim fields not cleared: assigned=%v lease=%v worktree=%v base=%v", task.AssignedTo, task.LeaseExpires, task.Worktree, task.BaseCommit)
+			}
+			if task.Iteration != 0 {
+				t.Fatalf("task iteration = %d, want 0", task.Iteration)
+			}
+		})
+	}
+}
+
+func TestValidateCommandWithOptions_RepairInvalidDoerOwnershipSkipsSentinel(t *testing.T) {
+	now := time.Now().UTC()
+	tmpDir := t.TempDir()
+	statePath, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	testhelpers.SetupPipelineConfig(t, tmpDir)
+	state := invalidDoerOwnershipState(t, tmpDir, now)
+	sentinel := "$transitioning"
+	task := state.FindTask("task-1")
+	if task == nil {
+		t.Fatal("task-1 missing")
+	}
+	task.AssignedTo = &sentinel
+	task.Iteration = 4
+	delete(state.Agents, "coder-1")
+	bb := testhelpers.WriteInitialState(t, statePath, state)
+
+	var warnBuf bytes.Buffer
+	SetWarnWriter(&warnBuf)
+	t.Cleanup(func() { SetWarnWriter(os.Stderr) })
+
+	err := ValidateCommandWithOptions(statePath, ValidateOptions{
+		SkipSpecFileCheck: true,
+		Repair:            true,
+	})
+	if err != nil {
+		t.Fatalf("ValidateCommandWithOptions() repair error = %v", err)
+	}
+	if strings.Contains(warnBuf.String(), "invalid active doer ownership cleared") {
+		t.Fatalf("repair warning = %q, want no doer repair", warnBuf.String())
+	}
+
+	readState, readErr := bb.Read()
+	if readErr != nil {
+		t.Fatalf("read state after repair: %v", readErr)
+	}
+	readTask := readState.FindTask("task-1")
+	if readTask == nil {
+		t.Fatal("task-1 missing after repair")
+	}
+	if readTask.Status != models.TaskStatusImplementing {
+		t.Fatalf("task status = %s, want IMPLEMENTING_CODE", readTask.Status)
+	}
+	if readTask.AssignedTo == nil || *readTask.AssignedTo != sentinel {
+		t.Fatalf("assigned_to = %v, want sentinel %s", readTask.AssignedTo, sentinel)
+	}
+	if readTask.Worktree == nil || *readTask.Worktree == "" || readTask.BaseCommit == nil || *readTask.BaseCommit == "" || readTask.LeaseExpires == nil {
+		t.Fatalf("sentinel task claim fields were cleared: worktree=%v base=%v lease=%v", readTask.Worktree, readTask.BaseCommit, readTask.LeaseExpires)
+	}
+	if readTask.Iteration != 4 {
+		t.Fatalf("iteration = %d, want 4", readTask.Iteration)
+	}
+}
+
+func TestValidateCommandWithOptions_RepairInvalidDoerOwnershipRepairsDeadAndReportsLive(t *testing.T) {
+	now := time.Now().UTC()
+	tmpDir := t.TempDir()
+	statePath, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	testhelpers.SetupPipelineConfig(t, tmpDir)
+	state := invalidDoerOwnershipState(t, tmpDir, now)
+	deadAgent := state.Agents["coder-1"]
+	deadAgent.PID = deadPIDForTest(t)
+	state.Agents["coder-1"] = deadAgent
+
+	liveDoerID := "coder-2"
+	liveTask := testhelpers.BuildTaskByStatus("task-2", models.TaskStatusImplementing, now)
+	liveTask.AssignedTo = testhelpers.StringPtr(liveDoerID)
+	liveTask.Iteration = 2
+	if liveTask.Worktree == nil {
+		t.Fatal("live test task missing worktree")
+	}
+	if err := os.MkdirAll(filepath.Join(tmpDir, *liveTask.Worktree), 0o755); err != nil {
+		t.Fatalf("create live task worktree: %v", err)
+	}
+	state.Tasks = append(state.Tasks, liveTask)
+	state.Sprint.Scope.Planned = append(state.Sprint.Scope.Planned, liveTask.ID)
+	liveAgent := deadAgent
+	liveAgent.PID = os.Getpid()
+	liveAgent.CurrentTask = testhelpers.StringPtr(liveTask.ID)
+	state.Agents[liveDoerID] = liveAgent
+
+	bb := testhelpers.WriteInitialState(t, statePath, state)
+
+	var warnBuf bytes.Buffer
+	SetWarnWriter(&warnBuf)
+	t.Cleanup(func() { SetWarnWriter(os.Stderr) })
+
+	err := ValidateCommandWithOptions(statePath, ValidateOptions{
+		SkipSpecFileCheck: true,
+		Repair:            true,
+	})
+	if err == nil {
+		t.Fatal("ValidateCommandWithOptions() repair error = nil, want validation failure after live PID refusal")
+	}
+	testhelpers.AssertErrorContains(t, err, "task-2")
+	testhelpers.AssertErrorContains(t, err, "has agent status WAITING")
+	if !strings.Contains(warnBuf.String(), "REPAIRED: invalid active doer ownership cleared for 1 task(s)") {
+		t.Fatalf("repair warning = %q, want dead task repair count", warnBuf.String())
+	}
+	if !strings.Contains(warnBuf.String(), "assigned agent coder-2 has live PID") {
+		t.Fatalf("repair warning = %q, want live PID refusal", warnBuf.String())
+	}
+
+	repaired, readErr := bb.Read()
+	if readErr != nil {
+		t.Fatalf("read repaired state: %v", readErr)
+	}
+	deadTask := repaired.FindTask("task-1")
+	if deadTask == nil {
+		t.Fatal("task-1 missing after repair")
+	}
+	if deadTask.Status != models.TaskStatusReady || deadTask.AssignedTo != nil {
+		t.Fatalf("dead task repair = status %s assigned %v, want READY/unassigned", deadTask.Status, deadTask.AssignedTo)
+	}
+	refusedTask := repaired.FindTask("task-2")
+	if refusedTask == nil {
+		t.Fatal("task-2 missing after refused repair")
+	}
+	if refusedTask.Status != models.TaskStatusImplementing || refusedTask.AssignedTo == nil || *refusedTask.AssignedTo != liveDoerID {
+		t.Fatalf("live task changed despite refusal: status=%s assigned=%v", refusedTask.Status, refusedTask.AssignedTo)
+	}
+}
+
+func TestValidateCommandWithOptions_RepairInvalidDoerOwnershipLivePIDRefuses(t *testing.T) {
+	now := time.Now().UTC()
+	tmpDir := t.TempDir()
+	statePath, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	testhelpers.SetupPipelineConfig(t, tmpDir)
+	state := invalidDoerOwnershipState(t, tmpDir, now)
+	agent := state.Agents["coder-1"]
+	agent.PID = os.Getpid()
+	state.Agents["coder-1"] = agent
+	bb := testhelpers.WriteInitialState(t, statePath, state)
+
+	var warnBuf bytes.Buffer
+	SetWarnWriter(&warnBuf)
+	t.Cleanup(func() { SetWarnWriter(os.Stderr) })
+
+	err := ValidateCommandWithOptions(statePath, ValidateOptions{
+		SkipSpecFileCheck: true,
+		Repair:            true,
+	})
+	if err == nil {
+		t.Fatal("ValidateCommandWithOptions() repair error = nil, want validation failure after live PID refusal")
+	}
+	testhelpers.AssertErrorContains(t, err, "has agent status WAITING")
+	if !strings.Contains(warnBuf.String(), "assigned agent coder-1 has live PID") {
+		t.Fatalf("repair warning = %q, want live PID refusal", warnBuf.String())
+	}
+	if !strings.Contains(warnBuf.String(), "use liza recover-agent coder-1 --force or liza release-claim task-1 --role doer --force") {
+		t.Fatalf("repair warning = %q, want recovery commands", warnBuf.String())
+	}
+
+	readState, readErr := bb.Read()
+	if readErr != nil {
+		t.Fatalf("read state after refused repair: %v", readErr)
+	}
+	task := readState.FindTask("task-1")
+	if task == nil {
+		t.Fatal("task-1 missing after refused repair")
+	}
+	if task.Status != models.TaskStatusImplementing || task.AssignedTo == nil || *task.AssignedTo != "coder-1" {
+		t.Fatalf("task ownership changed despite live PID refusal: status=%s assigned=%v", task.Status, task.AssignedTo)
+	}
+}
+
+func deadPIDForTest(t *testing.T) int {
+	t.Helper()
+
+	for pid := os.Getpid() + 100000; pid < os.Getpid()+101000; pid++ {
+		if !ops.IsProcessAlive(pid) {
+			return pid
+		}
+	}
+	t.Fatal("could not find a dead PID for test")
+	return 0
+}
+
 func TestValidateCommandWithOptions_RepairUsesExactStatePath(t *testing.T) {
 	now := time.Now().UTC()
 	tmpDir := t.TempDir()
@@ -299,6 +535,34 @@ func invalidReviewOwnershipState(now time.Time) *models.State {
 			Heartbeat:    now,
 			Provider:     "anthropic",
 			PID:          os.Getpid(),
+		},
+	}
+	return state
+}
+
+func invalidDoerOwnershipState(t *testing.T, projectRoot string, now time.Time) *models.State {
+	t.Helper()
+
+	state := testhelpers.CreateValidState()
+	task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusImplementing, now)
+	task.Iteration = 3
+	state.Tasks = []models.Task{task}
+	state.Sprint.Scope.Planned = []string{task.ID}
+	if task.Worktree == nil {
+		t.Fatal("test task missing worktree")
+	}
+	if err := os.MkdirAll(filepath.Join(projectRoot, *task.Worktree), 0o755); err != nil {
+		t.Fatalf("create task worktree: %v", err)
+	}
+
+	state.Agents = map[string]models.Agent{
+		"coder-1": {
+			Role:         "coder",
+			Status:       models.AgentStatusWaiting,
+			CurrentTask:  testhelpers.StringPtr(task.ID),
+			LeaseExpires: testhelpers.TimePtr(now.Add(30 * time.Minute)),
+			Heartbeat:    now,
+			Provider:     "anthropic",
 		},
 	}
 	return state
@@ -589,6 +853,22 @@ func TestValidateCommand_AgentInvariants(t *testing.T) {
 			wantErr:     true,
 			errContains: "WORKING but no current_task",
 		},
+		{
+			name: "WORKING agent with empty current_task",
+			setupAgent: func() map[string]models.Agent {
+				return map[string]models.Agent{
+					"coder-1": {
+						Role:        "coder",
+						Status:      models.AgentStatusWorking,
+						CurrentTask: testhelpers.StringPtr(""),
+						Heartbeat:   time.Now().UTC(),
+						Terminal:    "term-1",
+					},
+				}
+			},
+			wantErr:     true,
+			errContains: "WORKING but no current_task",
+		},
 	}
 
 	for _, tt := range tests {
@@ -680,6 +960,7 @@ func TestValidateCommand_DuplicateAssignments(t *testing.T) {
 	tests := []struct {
 		name        string
 		setupTasks  func() []models.Task
+		setupState  func(*models.State)
 		wantErr     bool
 		errContains string
 	}{
@@ -766,6 +1047,19 @@ func TestValidateCommand_DuplicateAssignments(t *testing.T) {
 					},
 				}
 			},
+			setupState: func(state *models.State) {
+				now := time.Now().UTC()
+				state.Agents["coder-1"] = models.Agent{
+					Role:         models.RoleCoder,
+					Status:       models.AgentStatusWorking,
+					CurrentTask:  testhelpers.StringPtr("task-2"),
+					LeaseExpires: testhelpers.TimePtr(now.Add(30 * time.Minute)),
+					Heartbeat:    now,
+					Terminal:     "test",
+					Provider:     "test",
+					PID:          os.Getpid(),
+				}
+			},
 			wantErr: false,
 		},
 	}
@@ -778,6 +1072,9 @@ func TestValidateCommand_DuplicateAssignments(t *testing.T) {
 
 			state := testhelpers.CreateValidState()
 			state.Tasks = tt.setupTasks()
+			if tt.setupState != nil {
+				tt.setupState(state)
+			}
 
 			// Create worktree directories if tasks have them
 			for _, task := range state.Tasks {

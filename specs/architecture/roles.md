@@ -284,6 +284,36 @@ Coder MUST log to anomalies section:
 
 **Logging happens at time of occurrence, not end of task.**
 
+### Doer Assignment
+
+The supervisor (`liza agent`) assigns executing tasks to doers before spawning
+the child agent process.
+
+The supervisor sets:
+- `assigned_to` field on the task
+- `lease_expires` timestamp on the task
+- Agent status to `WORKING`
+- Agent `current_task` and lease
+
+For tasks in a pipeline executing state, doer ownership is a bidirectional
+invariant: `assigned_to` must point to an agent whose role is the exact doer
+role resolved from the task's `role_pair`, and the owner row must have
+registered provider, PID, and lease metadata. A `WORKING` doer agent with
+`current_task` must point back to an executing task assigned to that same agent.
+During explicit context handoff, `handoff_pending: true` with a `HANDOFF` agent
+and matching `current_task` is also valid active ownership.
+
+One recovery state is valid: an executing task assigned to the correct doer
+agent may be resumed when that agent row is registered, has live-process
+metadata, is `IDLE`, and has empty `current_task` or `current_task` already set
+to the same task. This covers supervisor restart and child CLI exit windows
+without losing owned work.
+
+Repair is more conservative for doers than for reviewers. Reviewer repair is a
+state-only correction, but doer worktrees may contain unsubmitted work; therefore
+`liza validate --repair` refuses to clear invalid doer ownership while the
+assigned PID is live and points the operator at explicit recovery tooling.
+
 ---
 
 ## Code Reviewer

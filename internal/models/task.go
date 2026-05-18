@@ -573,6 +573,100 @@ func IsExecutingStatus(task *Task, pr PipelineResolver) bool {
 	return err == nil && task.Status == executing
 }
 
+// IsResumableOwnedTask is the shared state predicate for a doer supervisor
+// resuming an executing task already assigned to its agent ID after a child CLI
+// exits or the supervisor restarts.
+func IsResumableOwnedTask(state *State, task *Task, agentID string, pr PipelineResolver) bool {
+	return ResumableOwnedTaskReason(state, task, agentID, pr) == ""
+}
+
+// ActiveDoerOwnershipReason returns "" when an executing task's assigned doer
+// row is a valid active owner. It accepts both ordinary WORKING ownership and
+// the explicit HANDOFF window.
+func ActiveDoerOwnershipReason(state *State, task *Task, agentID string, pr PipelineResolver) string {
+	if state == nil {
+		return "missing state"
+	}
+	if task == nil {
+		return "missing task"
+	}
+	if agentID == "" {
+		return "missing agent ID"
+	}
+	if pr == nil {
+		return "missing pipeline resolver"
+	}
+	if !IsExecutingStatus(task, pr) {
+		return fmt.Sprintf("task status %s is not executing", task.Status)
+	}
+	if task.AssignedTo == nil || *task.AssignedTo == "" {
+		return "missing assigned_to"
+	}
+	if *task.AssignedTo != agentID {
+		return fmt.Sprintf("assigned_to %s, want %s", *task.AssignedTo, agentID)
+	}
+	if task.LeaseExpires == nil {
+		return "without lease_expires"
+	}
+
+	agent, ok := state.Agents[agentID]
+	if !ok {
+		return fmt.Sprintf("assigned_to %s has no matching agent", agentID)
+	}
+
+	doerRole, err := pr.DoerRole(task.RolePair)
+	if err != nil {
+		return fmt.Sprintf("doer role resolution failed for role_pair %q: %v", task.RolePair, err)
+	}
+	if agent.Role != doerRole {
+		return fmt.Sprintf("assigned_to %s has role %q, want %q", agentID, agent.Role, doerRole)
+	}
+	if agent.Provider == "" {
+		return fmt.Sprintf("assigned_to %s has agent without provider", agentID)
+	}
+	if agent.PID <= 0 {
+		return fmt.Sprintf("assigned_to %s has agent without pid", agentID)
+	}
+	if agent.LeaseExpires == nil {
+		return fmt.Sprintf("assigned_to %s has agent without lease_expires", agentID)
+	}
+
+	if task.HandoffPending {
+		if agent.Status != AgentStatusHandoff {
+			return fmt.Sprintf("assigned_to %s has agent status %s, want HANDOFF", agentID, agent.Status)
+		}
+		if agent.CurrentTask == nil || *agent.CurrentTask != task.ID {
+			return fmt.Sprintf("assigned_to %s has mismatched current_task", agentID)
+		}
+		return ""
+	}
+
+	switch agent.Status {
+	case AgentStatusWorking:
+		if agent.CurrentTask == nil || *agent.CurrentTask != task.ID {
+			return fmt.Sprintf("assigned_to %s has mismatched current_task", agentID)
+		}
+	case AgentStatusIdle:
+		if agent.CurrentTask != nil && *agent.CurrentTask != "" && *agent.CurrentTask != task.ID {
+			return fmt.Sprintf("assigned_to %s has mismatched current_task", agentID)
+		}
+	default:
+		return fmt.Sprintf("assigned_to %s has agent status %s, want WORKING or resumable IDLE", agentID, agent.Status)
+	}
+
+	return ""
+}
+
+// ResumableOwnedTaskReason returns "" when IsResumableOwnedTask would return
+// true, otherwise it returns the structural reason the owned task cannot be
+// resumed.
+func ResumableOwnedTaskReason(state *State, task *Task, agentID string, pr PipelineResolver) string {
+	if task != nil && task.HandoffPending {
+		return "task has handoff_pending true"
+	}
+	return ActiveDoerOwnershipReason(state, task, agentID, pr)
+}
+
 // checkDependencies returns true if all dependencies of the task are satisfied
 // (MERGED or SUPERSEDED). ABANDONED is terminal but not satisfying — the work
 // was dropped, not completed or replaced.

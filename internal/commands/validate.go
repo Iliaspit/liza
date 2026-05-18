@@ -47,6 +47,20 @@ func ValidateCommandWithOptions(statePath string, opts ValidateOptions) error {
 	projectRoot := filepath.Dir(filepath.Dir(statePath))
 	logPath := filepath.Join(filepath.Dir(statePath), "log.yaml")
 	if opts.Repair {
+		if !opts.SkipProcessChecks {
+			repaired, err := ops.RepairInvalidDoerOwnership(statePath, projectRoot, logPath, "validate --repair")
+			if repaired > 0 {
+				fmt.Fprintf(warnWriter, "REPAIRED: invalid active doer ownership cleared for %d task(s); worktrees remain on disk for inspection but may be removed by a later reclaim\n", repaired)
+			}
+			if err != nil {
+				var refused *ops.DoerRepairRefusedError
+				if stderrors.As(err, &refused) {
+					fmt.Fprintf(warnWriter, "WARNING: invalid active doer ownership not repaired: %s\n", refused.Error())
+				} else {
+					return fmt.Errorf("repair invalid doer ownership: %w", err)
+				}
+			}
+		}
 		repaired, err := ops.RepairInvalidReviewOwnership(statePath, projectRoot, logPath, "validate --repair")
 		if err != nil {
 			return fmt.Errorf("repair invalid review ownership: %w", err)

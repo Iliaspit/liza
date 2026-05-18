@@ -3,6 +3,7 @@ package statevalidate
 import (
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	"github.com/liza-mas/liza/internal/models"
@@ -32,7 +33,7 @@ func validateAgentInvariants(state *models.State, projectRoot string, skipSpecFi
 		}
 
 		// WORKING agent must have current_task
-		if agent.Status == models.AgentStatusWorking && agent.CurrentTask == nil {
+		if agent.Status == models.AgentStatusWorking && (agent.CurrentTask == nil || *agent.CurrentTask == "") {
 			return fmt.Errorf("agent %s has status WORKING but no current_task assigned", agentID)
 		}
 
@@ -53,6 +54,34 @@ func validateAgentInvariants(state *models.State, projectRoot string, skipSpecFi
 
 	if err := validateActiveReviewOwnership(state, resolver); err != nil {
 		return err
+	}
+	if err := validateActiveDoerOwnership(state, resolver); err != nil {
+		return err
+	}
+	if err := validateReverseActiveOwnership(state, resolver); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func validateActiveDoerOwnership(state *models.State, resolver *pipeline.Resolver) error {
+	if resolver == nil {
+		return nil
+	}
+
+	for i := range state.Tasks {
+		task := &state.Tasks[i]
+		if !models.IsExecutingStatus(task, resolver) {
+			continue
+		}
+		if task.AssignedTo == nil || *task.AssignedTo == "" || strings.HasPrefix(*task.AssignedTo, "$") {
+			continue
+		}
+		doerID := *task.AssignedTo
+		if reason := models.ActiveDoerOwnershipReason(state, task, doerID, resolver); reason != "" {
+			return fmt.Errorf("%s task %s %s", task.Status, task.ID, reason)
+		}
 	}
 
 	return nil
@@ -114,4 +143,60 @@ func isActiveReviewingTask(task *models.Task, resolver *pipeline.Resolver) bool 
 	}
 	reviewing2, err := resolver.Reviewing2Status(task.RolePair)
 	return err == nil && task.Status == reviewing2
+}
+
+func validateReverseActiveOwnership(state *models.State, resolver *pipeline.Resolver) error {
+	if resolver == nil {
+		return nil
+	}
+
+	for agentID, agent := range state.Agents {
+		if agent.CurrentTask == nil || *agent.CurrentTask == "" {
+			continue
+		}
+		task := state.FindTask(*agent.CurrentTask)
+		if task == nil {
+			return fmt.Errorf("agent %s says %s %s, but task is missing", agentID, agent.Status, *agent.CurrentTask)
+		}
+
+		switch agent.Status {
+		case models.AgentStatusWorking:
+			if !models.IsExecutingStatus(task, resolver) {
+				return fmt.Errorf("agent %s says WORKING %s, but task status %s is not executing", agentID, task.ID, task.Status)
+			}
+			if task.AssignedTo == nil || *task.AssignedTo != agentID {
+				return fmt.Errorf("agent %s says WORKING %s, but task assigned_to is %s", agentID, task.ID, ownerValue(task.AssignedTo))
+			}
+			expectedRole, err := resolver.DoerRole(task.RolePair)
+			if err != nil {
+				return fmt.Errorf("agent %s says WORKING %s, but doer role resolution failed for role_pair %q: %w", agentID, task.ID, task.RolePair, err)
+			}
+			if agent.Role != expectedRole {
+				return fmt.Errorf("agent %s says WORKING %s, but agent role %q, want %q", agentID, task.ID, agent.Role, expectedRole)
+			}
+		case models.AgentStatusReviewing:
+			if !isActiveReviewingTask(task, resolver) {
+				return fmt.Errorf("agent %s says REVIEWING %s, but task status %s is not active review", agentID, task.ID, task.Status)
+			}
+			if task.ReviewingBy == nil || *task.ReviewingBy != agentID {
+				return fmt.Errorf("agent %s says REVIEWING %s, but task reviewing_by is %s", agentID, task.ID, ownerValue(task.ReviewingBy))
+			}
+			expectedRole, err := resolver.ReviewerRole(task.RolePair)
+			if err != nil {
+				return fmt.Errorf("agent %s says REVIEWING %s, but reviewer role resolution failed for role_pair %q: %w", agentID, task.ID, task.RolePair, err)
+			}
+			if agent.Role != expectedRole {
+				return fmt.Errorf("agent %s says REVIEWING %s, but agent role %q, want %q", agentID, task.ID, agent.Role, expectedRole)
+			}
+		}
+	}
+
+	return nil
+}
+
+func ownerValue(owner *string) string {
+	if owner == nil || *owner == "" {
+		return "<none>"
+	}
+	return *owner
 }

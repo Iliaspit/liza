@@ -2097,6 +2097,92 @@ func TestRunChecksWithState_LiveDoerProcessNoAlert(t *testing.T) {
 	}
 }
 
+func TestRunChecksWithState_OwnedExecutingRecoveryNoInvalidOwnership(t *testing.T) {
+	now := time.Now().UTC()
+
+	tmpDir := t.TempDir()
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	testhelpers.SetupPipelineConfig(t, tmpDir)
+
+	taskID := "task-us-writing"
+	agentID := "us-writer-1"
+	state := testhelpers.CreateValidState()
+	state.Tasks = []models.Task{
+		buildPipelineTask(taskID, "us-writing-pair", models.TaskStatus("WRITING_US"), now, func(task *models.Task) {
+			task.AssignedTo = &agentID
+		}),
+	}
+	state.Agents = map[string]models.Agent{
+		agentID: {
+			Role:         "us-writer",
+			Status:       models.AgentStatusIdle,
+			LeaseExpires: testhelpers.TimePtr(now.Add(30 * time.Minute)),
+			Heartbeat:    now,
+			Provider:     "test",
+			PID:          os.Getpid(),
+		},
+	}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	config := WatchConfig{
+		ProjectRoot: tmpDir,
+		AlertsLog:   paths.New(tmpDir).AlertsLogPath(),
+		StateCache:  make(map[string]time.Time),
+	}
+
+	alerts := RunChecksWithState(state, config)
+	if got := countAlertsByCategory(alerts, "DEAD AGENT PROCESS"); got != 0 {
+		t.Fatalf("DEAD AGENT PROCESS alerts = %d, want 0; alerts: %v", got, alerts)
+	}
+	if got := countAlertsByCategory(alerts, "INVALID AGENT OWNERSHIP"); got != 0 {
+		t.Fatalf("INVALID AGENT OWNERSHIP alerts = %d, want 0; alerts: %v", got, alerts)
+	}
+}
+
+func TestRunChecksWithState_HandoffOwnershipNoInvalidOwnership(t *testing.T) {
+	now := time.Now().UTC()
+
+	tmpDir := t.TempDir()
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	testhelpers.SetupPipelineConfig(t, tmpDir)
+
+	taskID := "task-us-writing"
+	agentID := "us-writer-1"
+	state := testhelpers.CreateValidState()
+	state.Tasks = []models.Task{
+		buildPipelineTask(taskID, "us-writing-pair", models.TaskStatus("WRITING_US"), now, func(task *models.Task) {
+			task.AssignedTo = &agentID
+			task.HandoffPending = true
+		}),
+	}
+	state.Agents = map[string]models.Agent{
+		agentID: {
+			Role:         "us-writer",
+			Status:       models.AgentStatusHandoff,
+			CurrentTask:  &taskID,
+			LeaseExpires: testhelpers.TimePtr(now.Add(30 * time.Minute)),
+			Heartbeat:    now,
+			Provider:     "test",
+			PID:          os.Getpid(),
+		},
+	}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	config := WatchConfig{
+		ProjectRoot: tmpDir,
+		AlertsLog:   paths.New(tmpDir).AlertsLogPath(),
+		StateCache:  make(map[string]time.Time),
+	}
+
+	alerts := RunChecksWithState(state, config)
+	if got := countAlertsByCategory(alerts, "DEAD AGENT PROCESS"); got != 0 {
+		t.Fatalf("DEAD AGENT PROCESS alerts = %d, want 0; alerts: %v", got, alerts)
+	}
+	if got := countAlertsByCategory(alerts, "INVALID AGENT OWNERSHIP"); got != 0 {
+		t.Fatalf("INVALID AGENT OWNERSHIP alerts = %d, want 0; alerts: %v", got, alerts)
+	}
+}
+
 func TestRunChecksWithState_ExecutingSentinelNoDeadProcessAlert(t *testing.T) {
 	now := time.Now().UTC()
 
