@@ -213,9 +213,7 @@ func handleApprovedMerges(projectRoot, agentID string, bb *db.Blackboard, pr mod
 
 	for i := range state.Tasks {
 		task := &state.Tasks[i]
-		if models.IsApprovedForMerge(task, pr) &&
-			task.LastApprover() == agentID &&
-			task.MergeCommit == nil {
+		if approvedMergePending(task, agentID, pr) {
 
 			// Resolve effective impact and quorum for merge gate
 			effectiveImpact := ops.ResolveEffectiveImpact(task.History)
@@ -301,13 +299,18 @@ func hasPendingMerges(bb *db.Blackboard, agentID string, pr models.PipelineResol
 
 	for i := range state.Tasks {
 		task := &state.Tasks[i]
-		if models.IsApprovedForMerge(task, pr) &&
-			task.LastApprover() == agentID &&
-			task.MergeCommit == nil {
+		if approvedMergePending(task, agentID, pr) {
 			return true
 		}
 	}
 	return false
+}
+
+func approvedMergePending(task *models.Task, agentID string, pr models.PipelineResolver) bool {
+	if !models.IsApprovedForMerge(task, pr) || task.LastApprover() != agentID {
+		return false
+	}
+	return task.MergeCommit == nil || len(task.IntegrationFailure) > 0
 }
 
 // handleAvailableTransitions creates child tasks from pipeline transitions

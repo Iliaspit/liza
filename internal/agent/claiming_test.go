@@ -155,31 +155,6 @@ func TestHasPendingMerges(t *testing.T) {
 			expected: false,
 		},
 		{
-			name: "approved task with merge_commit set returns false",
-			tasks: []models.Task{
-				{
-					ID:          "task-1",
-					Status:      models.TaskStatusApproved,
-					Approvals:   []models.Approval{{Agent: "code-reviewer-1", Provider: "claude"}},
-					MergeCommit: testhelpers.StringPtr("abc123"),
-				},
-			},
-			agentID:  "code-reviewer-1",
-			expected: false,
-		},
-		{
-			name: "approved task by different agent returns false",
-			tasks: []models.Task{
-				{
-					ID:        "task-1",
-					Status:    models.TaskStatusApproved,
-					Approvals: []models.Approval{{Agent: "code-reviewer-2", Provider: "codex"}},
-				},
-			},
-			agentID:  "code-reviewer-1",
-			expected: false,
-		},
-		{
 			name: "approved task by this agent without merge_commit returns true",
 			tasks: []models.Task{
 				{
@@ -191,6 +166,63 @@ func TestHasPendingMerges(t *testing.T) {
 			},
 			agentID:  "code-reviewer-1",
 			expected: true,
+		},
+		{
+			name: "approved task with merge_commit set returns false",
+			tasks: []models.Task{
+				{
+					ID:          "task-1",
+					Status:      models.TaskStatusApproved,
+					RolePair:    "coding-pair",
+					Approvals:   []models.Approval{{Agent: "code-reviewer-1", Provider: "claude"}},
+					MergeCommit: testhelpers.StringPtr("abc123"),
+				},
+			},
+			agentID:  "code-reviewer-1",
+			expected: false,
+		},
+		{
+			name: "approved task with merge_commit and integration_failure returns true",
+			tasks: []models.Task{
+				{
+					ID:                 "task-1",
+					Status:             models.TaskStatusApproved,
+					RolePair:           "coding-pair",
+					Approvals:          []models.Approval{{Agent: "code-reviewer-1", Provider: "claude"}},
+					MergeCommit:        testhelpers.StringPtr("abc123"),
+					IntegrationFailure: map[string]any{"reason": "post-merge state validation failed"},
+				},
+			},
+			agentID:  "code-reviewer-1",
+			expected: true,
+		},
+		{
+			name: "approved task with merge_commit and empty integration_failure returns false",
+			tasks: []models.Task{
+				{
+					ID:                 "task-1",
+					Status:             models.TaskStatusApproved,
+					RolePair:           "coding-pair",
+					Approvals:          []models.Approval{{Agent: "code-reviewer-1", Provider: "claude"}},
+					MergeCommit:        testhelpers.StringPtr("abc123"),
+					IntegrationFailure: map[string]any{},
+				},
+			},
+			agentID:  "code-reviewer-1",
+			expected: false,
+		},
+		{
+			name: "approved task by different agent returns false",
+			tasks: []models.Task{
+				{
+					ID:        "task-1",
+					Status:    models.TaskStatusApproved,
+					RolePair:  "coding-pair",
+					Approvals: []models.Approval{{Agent: "code-reviewer-2", Provider: "codex"}},
+				},
+			},
+			agentID:  "code-reviewer-1",
+			expected: false,
 		},
 		{
 			name: "multiple tasks, one pending returns true",
