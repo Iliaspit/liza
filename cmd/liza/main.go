@@ -43,7 +43,35 @@ func requireProjectRoot() (string, error) {
 	if err != nil {
 		return "", &lizaerrors.ProjectRootError{Operation: rootCmd.CommandPath(), Err: err}
 	}
+	currentDir, err := os.Getwd()
+	if err != nil {
+		return "", &lizaerrors.ProjectRootError{Operation: rootCmd.CommandPath(), Err: err}
+	}
+	canonicalProjectRoot, err := canonicalDir(projectRoot)
+	if err != nil {
+		return "", &lizaerrors.ProjectRootError{Operation: rootCmd.CommandPath(), Err: err}
+	}
+	canonicalCurrentDir, err := canonicalDir(currentDir)
+	if err != nil {
+		return "", &lizaerrors.ProjectRootError{Operation: rootCmd.CommandPath(), Err: err}
+	}
+	if canonicalCurrentDir != canonicalProjectRoot {
+		return "", &lizaerrors.ProjectRootError{
+			Operation:    rootCmd.CommandPath(),
+			CurrentDir:   currentDir,
+			ExpectedRoot: projectRoot,
+			Err:          fmt.Errorf("current directory is not project root"),
+		}
+	}
 	return projectRoot, nil
+}
+
+func canonicalDir(path string) (string, error) {
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	return filepath.EvalSymlinks(absPath)
 }
 
 func requireAgentID(cmd *cobra.Command) (string, error) {

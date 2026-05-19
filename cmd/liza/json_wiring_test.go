@@ -644,28 +644,82 @@ func TestJSON_Validate_Valid(t *testing.T) {
 	}
 }
 
-func TestJSON_Validate_DefaultStatePathWorksFromTaskWorktree(t *testing.T) {
+func TestJSON_Validate_DefaultStatePathRequiresProjectRootFromTaskWorktree(t *testing.T) {
 	projectRoot, _ := setupMutationTestProject(t, nil)
 	taskID := "task-validate-worktree"
 	testhelpers.CreateTestWorktree(t, projectRoot, taskID)
 	worktreeDir := filepath.Join(projectRoot, ".worktrees", taskID)
 
 	stdout, err := executeRootCommandCapture(t, worktreeDir, "validate", "--json", "--skip-spec-check")
-	if err != nil {
-		t.Fatalf("validate --json from task worktree failed: %v", err)
+	if err == nil {
+		t.Fatalf("expected project root error from task worktree, got nil")
 	}
 
 	env := parseEnvelope(t, stdout)
-	if env["ok"] != true {
-		t.Fatalf("expected ok=true, got %v", env["ok"])
+	if env["ok"] != false {
+		t.Fatalf("expected ok=false, got %v", env["ok"])
 	}
 
-	result, ok := env["result"].(map[string]any)
+	errObj, ok := env["error"].(map[string]any)
 	if !ok {
-		t.Fatalf("expected result to be object, got %T", env["result"])
+		t.Fatalf("expected error to be object, got %T", env["error"])
 	}
-	if result["valid"] != true {
-		t.Errorf("expected valid=true, got %v", result["valid"])
+	if errObj["code"] != "project_root" {
+		t.Fatalf("error.code = %v, want project_root", errObj["code"])
+	}
+	msg, _ := errObj["message"].(string)
+	if msg == "" || msg == "internal error" || !strings.Contains(msg, "must be run from project root") {
+		t.Fatalf("error.message = %q, want project-root cwd guidance", msg)
+	}
+	details, ok := errObj["details"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected error.details to be object, got %T", errObj["details"])
+	}
+	if details["current_dir"] != worktreeDir {
+		t.Fatalf("details.current_dir = %v, want %s", details["current_dir"], worktreeDir)
+	}
+	if details["project_root"] != projectRoot {
+		t.Fatalf("details.project_root = %v, want %s", details["project_root"], projectRoot)
+	}
+}
+
+func TestJSON_Validate_DefaultStatePathRequiresProjectRootFromSubdirectory(t *testing.T) {
+	projectRoot, _ := setupMutationTestProject(t, nil)
+	subdir := filepath.Join(projectRoot, "docs")
+	if err := os.Mkdir(subdir, 0755); err != nil {
+		t.Fatalf("failed to create subdirectory: %v", err)
+	}
+
+	stdout, err := executeRootCommandCapture(t, subdir, "validate", "--json", "--skip-spec-check")
+	if err == nil {
+		t.Fatalf("expected project root error from project subdirectory, got nil")
+	}
+
+	env := parseEnvelope(t, stdout)
+	if env["ok"] != false {
+		t.Fatalf("expected ok=false, got %v", env["ok"])
+	}
+
+	errObj, ok := env["error"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected error to be object, got %T", env["error"])
+	}
+	if errObj["code"] != "project_root" {
+		t.Fatalf("error.code = %v, want project_root", errObj["code"])
+	}
+	msg, _ := errObj["message"].(string)
+	if msg == "" || msg == "internal error" || !strings.Contains(msg, "must be run from project root") {
+		t.Fatalf("error.message = %q, want project-root cwd guidance", msg)
+	}
+	details, ok := errObj["details"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected error.details to be object, got %T", errObj["details"])
+	}
+	if details["current_dir"] != subdir {
+		t.Fatalf("details.current_dir = %v, want %s", details["current_dir"], subdir)
+	}
+	if details["project_root"] != projectRoot {
+		t.Fatalf("details.project_root = %v, want %s", details["project_root"], projectRoot)
 	}
 }
 
@@ -1011,7 +1065,7 @@ func TestJSON_WorktreeContextErrorReportsActionableContext(t *testing.T) {
 	}
 }
 
-func TestJSON_SubmitForReviewFromTaskWorktreeReportsOperationalFailure(t *testing.T) {
+func TestJSON_SubmitForReviewFromTaskWorktreeRequiresProjectRoot(t *testing.T) {
 	projectRoot, statePath, taskID, agentID := setupSubmitForReviewCLIProject(t)
 	state := readState(t, statePath)
 	state.Config.IntegrationBranch = "missing-integration"
@@ -1021,7 +1075,7 @@ func TestJSON_SubmitForReviewFromTaskWorktreeReportsOperationalFailure(t *testin
 	stdout, err := executeRootCommandCapture(t, worktreeDir,
 		"submit-for-review", taskID, "HEAD", "--agent-id", agentID, "--json")
 	if err == nil {
-		t.Fatalf("expected submit-for-review operational error, got nil")
+		t.Fatalf("expected project root error from task worktree, got nil")
 	}
 
 	env := parseEnvelope(t, stdout)
@@ -1032,25 +1086,22 @@ func TestJSON_SubmitForReviewFromTaskWorktreeReportsOperationalFailure(t *testin
 	if !ok {
 		t.Fatalf("expected error to be object, got %T", env["error"])
 	}
-	if errObj["code"] != "git_operation" {
-		t.Fatalf("error.code = %v, want git_operation", errObj["code"])
+	if errObj["code"] != "project_root" {
+		t.Fatalf("error.code = %v, want project_root", errObj["code"])
 	}
 	msg, _ := errObj["message"].(string)
-	if msg == "" || msg == "internal error" || !strings.Contains(msg, "integration branch HEAD") {
-		t.Fatalf("error.message = %q, want actionable git operation details", msg)
+	if msg == "" || msg == "internal error" || !strings.Contains(msg, "must be run from project root") {
+		t.Fatalf("error.message = %q, want project-root cwd guidance", msg)
 	}
 	details, ok := errObj["details"].(map[string]any)
 	if !ok {
 		t.Fatalf("expected error.details to be object, got %T", errObj["details"])
 	}
-	if details["phase"] != "resolve-integration-head" {
-		t.Fatalf("details.phase = %v, want resolve-integration-head", details["phase"])
+	if details["current_dir"] != worktreeDir {
+		t.Fatalf("details.current_dir = %v, want %s", details["current_dir"], worktreeDir)
 	}
-	if details["operation"] != "submit-for-review" {
-		t.Fatalf("details.operation = %v, want submit-for-review", details["operation"])
-	}
-	if details["task_id"] != taskID {
-		t.Fatalf("details.task_id = %v, want %s", details["task_id"], taskID)
+	if details["project_root"] != projectRoot {
+		t.Fatalf("details.project_root = %v, want %s", details["project_root"], projectRoot)
 	}
 }
 
