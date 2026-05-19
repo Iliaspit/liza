@@ -103,10 +103,12 @@ func ClassifyError(err error) (code string, message string) {
 
 	var opErr *ops.OperationalError
 	if errors.As(err, &opErr) {
-		// Check if the underlying cause has a more specific classification
-		// (e.g. lock_timeout, race_condition) before defaulting to the
-		// OperationalError's safe message. This preserves transient error
-		// semantics that agents use to decide whether to retry.
+		// Explicit operation codes are trusted classifications. If no code was
+		// supplied, preserve transient semantics from recognizable inner errors
+		// before defaulting to the OperationalError's safe message.
+		if opErr.Code != "" {
+			return opErr.Code, opErr.Message
+		}
 		if inner := opErr.Unwrap(); inner != nil {
 			if innerCode, innerMsg := classifyUntyped(inner); innerCode != "internal" {
 				return innerCode, innerMsg

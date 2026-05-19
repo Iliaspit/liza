@@ -148,6 +148,68 @@ func TestClassifyError_OperationalError(t *testing.T) {
 	}
 }
 
+func TestClassifyError_OperationalErrorWithCode(t *testing.T) {
+	err := &ops.OperationalError{
+		Code:    "git_operation",
+		Phase:   "resolve-integration-head",
+		Message: "failed to resolve integration branch HEAD",
+		Details: map[string]any{
+			"operation": "submit-for-review",
+		},
+		Err: fmt.Errorf("exit status 128"),
+	}
+
+	code, msg := ClassifyError(err)
+	if code != "git_operation" {
+		t.Errorf("code = %q, want %q", code, "git_operation")
+	}
+	if msg != "failed to resolve integration branch HEAD" {
+		t.Errorf("message = %q, want actionable operational message", msg)
+	}
+
+	details := ErrorDetails(err)
+	if details["phase"] != "resolve-integration-head" {
+		t.Errorf("phase = %v, want resolve-integration-head", details["phase"])
+	}
+	if details["operation"] != "submit-for-review" {
+		t.Errorf("operation = %v, want submit-for-review", details["operation"])
+	}
+}
+
+func TestClassifyError_OperationalErrorPreservesTypedInnerError(t *testing.T) {
+	err := &ops.OperationalError{
+		Code:    "state_write",
+		Phase:   "write-state",
+		Message: "failed to submit task for review",
+		Err:     &ops.PreconditionError{Reason: "task task-1 is not IMPLEMENTING"},
+	}
+
+	code, msg := ClassifyError(err)
+	if code != "validation" {
+		t.Errorf("code = %q, want validation", code)
+	}
+	if msg != "task task-1 is not IMPLEMENTING" {
+		t.Errorf("message = %q, want wrapped precondition reason", msg)
+	}
+}
+
+func TestClassifyError_OperationalErrorCodeBeatsUntypedInnerHeuristics(t *testing.T) {
+	err := &ops.OperationalError{
+		Code:    "state_write",
+		Phase:   "write-state",
+		Message: "failed to submit task for review",
+		Err:     fmt.Errorf("task task-1 not found"),
+	}
+
+	code, msg := ClassifyError(err)
+	if code != "state_write" {
+		t.Errorf("code = %q, want state_write", code)
+	}
+	if msg != "failed to submit task for review" {
+		t.Errorf("message = %q, want operational message", msg)
+	}
+}
+
 func TestClassifyError_IntegrationFailedError(t *testing.T) {
 	err := &ops.IntegrationFailedError{Reason: "merge conflict"}
 	code, msg := ClassifyError(err)

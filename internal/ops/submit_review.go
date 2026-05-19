@@ -108,7 +108,17 @@ func SubmitForReview(projectRoot, taskID, commitRef, agentID string) (*SubmitFor
 
 	wtBranch, err := g.GetWorktreeBranch(wtPath)
 	if err != nil {
-		return nil, &OperationalError{Message: "failed to determine worktree branch", Err: err}
+		return nil, &OperationalError{
+			Code:    "git_operation",
+			Phase:   "resolve-worktree-branch",
+			Message: "failed to determine worktree branch",
+			Details: map[string]any{
+				"operation":     integrationOperationSubmitForReview,
+				"task_id":       taskID,
+				"recovery_hint": "Inspect the task worktree git metadata, ensure the branch resolves, then retry submit-for-review.",
+			},
+			Err: err,
+		}
 	}
 
 	expectedBranch := paths.TaskBranchPrefix + taskID
@@ -121,7 +131,17 @@ func SubmitForReview(projectRoot, taskID, commitRef, agentID string) (*SubmitFor
 
 	preRebaseCommit, err := g.GetWorktreeHEAD(taskID)
 	if err != nil {
-		return nil, &OperationalError{Message: "failed to read worktree HEAD", Err: err}
+		return nil, &OperationalError{
+			Code:    "git_operation",
+			Phase:   "pre-rebase-head",
+			Message: "failed to read worktree HEAD",
+			Details: map[string]any{
+				"operation":     integrationOperationSubmitForReview,
+				"task_id":       taskID,
+				"recovery_hint": "Inspect the task worktree git state, ensure HEAD resolves, then retry submit-for-review.",
+			},
+			Err: err,
+		}
 	}
 	resolvedCommit, err := g.ResolveWorktreeCommit(taskID, commitRef)
 	if err != nil {
@@ -140,7 +160,17 @@ func SubmitForReview(projectRoot, taskID, commitRef, agentID string) (*SubmitFor
 	if roleType == "doer" && requiresTDD && task.BaseCommit != nil {
 		testDiagnostics, err := AnalyzeTestFiles(g, taskID, *task.BaseCommit, preRebaseCommit)
 		if err != nil {
-			return nil, &OperationalError{Message: "failed to check for test files", Err: err}
+			return nil, &OperationalError{
+				Code:    "git_operation",
+				Phase:   "check-test-files",
+				Message: "failed to check for test files",
+				Details: map[string]any{
+					"operation":     integrationOperationSubmitForReview,
+					"task_id":       taskID,
+					"recovery_hint": "Inspect the task worktree git history and retry submit-for-review after the diff range can be analyzed.",
+				},
+				Err: err,
+			}
 		}
 		if len(testDiagnostics.TestFilesMatched) == 0 && GetTDDWaiver(task.History, agentID) == "" {
 			return nil, &PreconditionError{
@@ -153,7 +183,18 @@ func SubmitForReview(projectRoot, taskID, commitRef, agentID string) (*SubmitFor
 	integrationBranch := state.Config.IntegrationBranch
 	rebaseBase, err := g.GetCommitSHA(integrationBranch)
 	if err != nil {
-		return nil, &OperationalError{Message: "failed to resolve integration branch HEAD", Err: err}
+		return nil, &OperationalError{
+			Code:    "git_operation",
+			Phase:   "resolve-integration-head",
+			Message: "failed to resolve integration branch HEAD",
+			Details: map[string]any{
+				"operation":          integrationOperationSubmitForReview,
+				"task_id":            taskID,
+				"integration_branch": integrationBranch,
+				"recovery_hint":      "Ensure the configured integration branch exists and is fetchable, then retry submit-for-review.",
+			},
+			Err: err,
+		}
 	}
 
 	if err := g.RebaseOnto(wtPath, rebaseBase); err != nil {
@@ -169,6 +210,8 @@ func SubmitForReview(projectRoot, taskID, commitRef, agentID string) (*SubmitFor
 		var rebaseConflict *gitpkg.RebaseConflictError
 		if !stderrors.As(err, &rebaseConflict) {
 			return nil, &OperationalError{
+				Code:    "git_operation",
+				Phase:   "rebase",
 				Message: "rebase failed (not a merge conflict)",
 				Details: rebaseFailureDetails(err, integrationBranch, rebaseBase, preRebaseCommit),
 				Err:     err,
@@ -181,8 +224,15 @@ func SubmitForReview(projectRoot, taskID, commitRef, agentID string) (*SubmitFor
 		markErr := markSubmitRebaseConflict(bb, taskID, agentID, pipelineTransitions)
 		if markErr != nil {
 			return nil, &OperationalError{
+				Code:    "state_write",
+				Phase:   "mark-integration-failed",
 				Message: fmt.Sprintf("rebase conflict on %s: transition to INTEGRATION_FAILED also failed — worktree is intact (rebase aborted), check task state with liza_get tasks/%s before retrying", taskID, taskID),
-				Err:     markErr,
+				Details: map[string]any{
+					"operation":     integrationOperationSubmitForReview,
+					"task_id":       taskID,
+					"recovery_hint": "Re-read task state, resolve the state transition failure, then retry or mark the task blocked with the captured failure.",
+				},
+				Err: markErr,
 			}
 		}
 		return nil, &IntegrationFailedError{Reason: IntegrationReasonMergeConflict}
@@ -190,7 +240,17 @@ func SubmitForReview(projectRoot, taskID, commitRef, agentID string) (*SubmitFor
 
 	postRebaseCommit, err := g.GetWorktreeHEAD(taskID)
 	if err != nil {
-		return nil, &OperationalError{Message: "failed to read worktree HEAD after rebase", Err: err}
+		return nil, &OperationalError{
+			Code:    "git_operation",
+			Phase:   "post-rebase-head",
+			Message: "failed to read worktree HEAD after rebase",
+			Details: map[string]any{
+				"operation":     integrationOperationSubmitForReview,
+				"task_id":       taskID,
+				"recovery_hint": "Inspect the task worktree git state, ensure HEAD resolves, then retry submit-for-review.",
+			},
+			Err: err,
+		}
 	}
 	if err := validateReviewBoundaryCommit(projectRoot, task, postRebaseCommit); err != nil {
 		return nil, err
@@ -250,7 +310,17 @@ func SubmitForReview(projectRoot, taskID, commitRef, agentID string) (*SubmitFor
 	})
 
 	if err != nil {
-		return nil, fmt.Errorf("failed to submit task for review: %w", err)
+		return nil, &OperationalError{
+			Code:    "state_write",
+			Phase:   "write-state",
+			Message: "failed to submit task for review",
+			Details: map[string]any{
+				"operation":     integrationOperationSubmitForReview,
+				"task_id":       taskID,
+				"recovery_hint": "Re-read task state, resolve any concurrent state change or validation issue, then retry submit-for-review.",
+			},
+			Err: err,
+		}
 	}
 
 	return &SubmitForReviewResult{

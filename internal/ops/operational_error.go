@@ -10,6 +10,8 @@ import "fmt"
 // context without leaking internal paths or error chains. The Err field holds the
 // underlying cause for logging/CLI but is NOT exposed over MCP.
 type OperationalError struct {
+	Code    string         // optional stable JSON error code for expected operational failures
+	Phase   string         // optional operation phase for recovery diagnostics
 	Message string         // safe-to-expose description (shown to agents via MCP)
 	Details map[string]any // bounded, safe diagnostics for agent recovery
 	Err     error          // underlying cause (NOT exposed to agents, only in logs/CLI)
@@ -27,5 +29,17 @@ func (e *OperationalError) Unwrap() error {
 }
 
 func (e *OperationalError) SafeDetails() map[string]any {
-	return e.Details
+	if e.Details == nil && e.Code == "" && e.Phase == "" {
+		return nil
+	}
+	details := make(map[string]any, len(e.Details)+1)
+	for k, v := range e.Details {
+		details[k] = v
+	}
+	if e.Phase != "" {
+		if _, exists := details["phase"]; !exists {
+			details["phase"] = e.Phase
+		}
+	}
+	return details
 }

@@ -39,12 +39,32 @@ func validateReviewBoundaryCommit(projectRoot string, task *models.Task, reviewC
 				Err:       err,
 			}
 		}
-		return fmt.Errorf("failed to stat worktree %s: %w", wtPath, err)
+		return &OperationalError{
+			Code:    "worktree_context",
+			Phase:   "review-boundary",
+			Message: "failed to stat task worktree",
+			Details: map[string]any{
+				"operation":     reviewBoundaryOperationAssignment,
+				"task_id":       task.ID,
+				"recovery_hint": "Inspect the task worktree path and filesystem permissions, then retry the review operation.",
+			},
+			Err: err,
+		}
 	}
 
 	wtHEAD, err := g.GetWorktreeHEAD(task.ID)
 	if err != nil {
-		return fmt.Errorf("failed to get worktree HEAD for task %s: %w", task.ID, err)
+		return &OperationalError{
+			Code:    "git_operation",
+			Phase:   "review-boundary",
+			Message: "failed to get task worktree HEAD",
+			Details: map[string]any{
+				"operation":     reviewBoundaryOperationAssignment,
+				"task_id":       task.ID,
+				"recovery_hint": "Inspect the task worktree git metadata, ensure HEAD resolves, then retry the review operation.",
+			},
+			Err: err,
+		}
 	}
 	if reviewCommit != wtHEAD {
 		return &PreconditionError{Reason: fmt.Sprintf("review_commit %s does not match worktree HEAD %s — cannot assign task %s for review", reviewCommit, wtHEAD, task.ID)}

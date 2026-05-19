@@ -1011,6 +1011,49 @@ func TestJSON_WorktreeContextErrorReportsActionableContext(t *testing.T) {
 	}
 }
 
+func TestJSON_SubmitForReviewFromTaskWorktreeReportsOperationalFailure(t *testing.T) {
+	projectRoot, statePath, taskID, agentID := setupSubmitForReviewCLIProject(t)
+	state := readState(t, statePath)
+	state.Config.IntegrationBranch = "missing-integration"
+	testhelpers.WriteInitialState(t, statePath, state)
+
+	worktreeDir := filepath.Join(projectRoot, ".worktrees", taskID)
+	stdout, err := executeRootCommandCapture(t, worktreeDir,
+		"submit-for-review", taskID, "HEAD", "--agent-id", agentID, "--json")
+	if err == nil {
+		t.Fatalf("expected submit-for-review operational error, got nil")
+	}
+
+	env := parseEnvelope(t, stdout)
+	if env["ok"] != false {
+		t.Fatalf("expected ok=false, got %v", env["ok"])
+	}
+	errObj, ok := env["error"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected error to be object, got %T", env["error"])
+	}
+	if errObj["code"] != "git_operation" {
+		t.Fatalf("error.code = %v, want git_operation", errObj["code"])
+	}
+	msg, _ := errObj["message"].(string)
+	if msg == "" || msg == "internal error" || !strings.Contains(msg, "integration branch HEAD") {
+		t.Fatalf("error.message = %q, want actionable git operation details", msg)
+	}
+	details, ok := errObj["details"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected error.details to be object, got %T", errObj["details"])
+	}
+	if details["phase"] != "resolve-integration-head" {
+		t.Fatalf("details.phase = %v, want resolve-integration-head", details["phase"])
+	}
+	if details["operation"] != "submit-for-review" {
+		t.Fatalf("details.operation = %v, want submit-for-review", details["operation"])
+	}
+	if details["task_id"] != taskID {
+		t.Fatalf("details.task_id = %v, want %s", details["task_id"], taskID)
+	}
+}
+
 func TestJSON_GetWrapsExisting(t *testing.T) {
 	projectRoot, _ := setupMutationTestProject(t, nil)
 
