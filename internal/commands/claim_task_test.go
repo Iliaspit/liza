@@ -61,15 +61,15 @@ func TestClaimTaskCommand(t *testing.T) {
 			wantWorktree:  true,
 		},
 		{
-			name:          "claim READY task with superseded dependency",
+			name:          "claim READY task with superseded dependency without replacement",
 			taskID:        "task-3",
 			agentID:       "coder-1",
 			taskStatus:    models.TaskStatusReady,
 			hasWorktree:   false,
 			hasDependency: true,
 			depStatus:     models.TaskStatusSuperseded,
-			wantErr:       false,
-			wantWorktree:  true,
+			wantErr:       true,
+			errContains:   "unmet dependencies",
 		},
 		{
 			name:          "claim REJECTED task by same coder",

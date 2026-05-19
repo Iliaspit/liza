@@ -344,7 +344,7 @@ func buildRelevantTaskGraph(state *models.State, current *models.Task) prompts.T
 			digest.BlockedRelatedTasks = append(digest.BlockedRelatedTasks, entry)
 			seenBlocked[dep.ID] = true
 		}
-		if isCompletedForDigest(dep) && hasArtifactRefs(entry) && !seenArtifacts[dep.ID] {
+		if isCompletedForDigest(state, dep) && hasArtifactRefs(entry) && !seenArtifacts[dep.ID] {
 			digest.CompletedArtifacts = append(digest.CompletedArtifacts, entry)
 			seenArtifacts[dep.ID] = true
 		}
@@ -360,7 +360,7 @@ func buildRelevantTaskGraph(state *models.State, current *models.Task) prompts.T
 			digest.BlockedRelatedTasks = append(digest.BlockedRelatedTasks, entry)
 			seenBlocked[sibling.ID] = true
 		}
-		if isCompletedForDigest(sibling) && hasArtifactRefs(entry) && !seenArtifacts[sibling.ID] {
+		if isCompletedForDigest(state, sibling) && hasArtifactRefs(entry) && !seenArtifacts[sibling.ID] {
 			digest.CompletedArtifacts = append(digest.CompletedArtifacts, entry)
 			seenArtifacts[sibling.ID] = true
 		}
@@ -479,8 +479,11 @@ func intersectRefs(left, right []string) []string {
 	return shared
 }
 
-func isCompletedForDigest(task *models.Task) bool {
-	return task.Status == models.TaskStatusMerged || task.Status == models.TaskStatusSuperseded
+func isCompletedForDigest(state *models.State, task *models.Task) bool {
+	if state == nil || task == nil {
+		return false
+	}
+	return state.ResolveDependency(task.ID).Satisfied()
 }
 
 func hasArtifactRefs(entry prompts.TaskGraphEntry) bool {

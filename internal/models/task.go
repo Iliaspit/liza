@@ -667,25 +667,15 @@ func ResumableOwnedTaskReason(state *State, task *Task, agentID string, pr Pipel
 	return ActiveDoerOwnershipReason(state, task, agentID, pr)
 }
 
-// checkDependencies returns true if all dependencies of the task are satisfied
-// (MERGED or SUPERSEDED). ABANDONED is terminal but not satisfying — the work
-// was dropped, not completed or replaced.
+// checkDependencies returns true if all dependencies of the task are satisfied.
+// MERGED satisfies directly. SUPERSEDED satisfies only through recursively
+// satisfied replacement tasks.
 func checkDependencies(t *Task, allTasks []Task) bool {
-	if allTasks != nil && len(t.DependsOn) > 0 {
-		for _, depID := range t.DependsOn {
-			depSatisfied := false
-			for _, task := range allTasks {
-				if task.ID == depID && (task.Status == TaskStatusMerged || task.Status == TaskStatusSuperseded) {
-					depSatisfied = true
-					break
-				}
-			}
-			if !depSatisfied {
-				return false
-			}
-		}
+	if allTasks == nil || len(t.DependsOn) == 0 {
+		return true
 	}
-	return true
+	state := &State{Tasks: allTasks}
+	return state.DependenciesSatisfied(t)
 }
 
 // TopPriorityTier returns all candidates that share the highest priority

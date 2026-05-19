@@ -12,13 +12,14 @@ import (
 
 // validateDependencies checks referential integrity and ordering constraints
 // for task dependencies: every depends_on entry must reference an existing task,
-// executing tasks must have all dependencies in MERGED or SUPERSEDED status, and
-// the dependency graph must be acyclic. Prevents agents from starting work on
-// tasks whose prerequisites are incomplete and detects dependency cycles that
-// would deadlock the scheduler.
-func validateDependencies(state *models.State, projectRoot string, skipSpecFileCheck bool, resolver *pipeline.Resolver, cfg *pipeline.PipelineConfig) error {
+// executing tasks must have all dependencies satisfied, and the dependency graph
+// must be acyclic. Prevents agents from starting work on tasks whose
+// prerequisites are incomplete and detects dependency cycles that would
+// deadlock the scheduler.
+func validateDependencies(state *models.State, projectRoot string, skipSpecFileCheck bool, resolver *pipeline.Resolver, cfg *pipeline.PipelineConfig, warnWriter io.Writer) error {
 	taskIDs := buildTaskIDSet(state.Tasks)
 	sc := newStatusClassifier(resolver, cfg)
+	depResolver := models.NewDependencyResolver(state)
 
 	for _, task := range state.Tasks {
 		if len(task.DependsOn) == 0 {
@@ -43,17 +44,28 @@ func validateDependencies(state *models.State, projectRoot string, skipSpecFileC
 			}
 		}
 
-		// Executing tasks must have all dependencies satisfied (MERGED or SUPERSEDED)
-		if sc.IsExecuting(task.Status) {
-			var unmet []string
-			for _, depID := range task.DependsOn {
-				depTask := state.FindTask(depID)
-				if depTask != nil && depTask.Status != models.TaskStatusMerged && depTask.Status != models.TaskStatusSuperseded {
-					unmet = append(unmet, depID)
+		var unmet []string
+		for _, depID := range task.DependsOn {
+			result := depResolver.Resolve(depID)
+			if result.Invalid() {
+				return fmt.Errorf("task %s has invalid dependency %s", task.ID, result.Summary())
+			}
+			if result.Kind == models.DependencySatisfiedViaSupersession && warnWriter != nil {
+				fmt.Fprintf(warnWriter, "WARNING: task %s dependency %s satisfied via supersession path: %s\n", task.ID, depID, strings.Join(result.Path, " -> "))
+			}
+			if !result.Satisfied() {
+				unmet = append(unmet, result.Summary())
+				if !sc.IsExecuting(task.Status) && warnWriter != nil && result.ViaSupersession() {
+					fmt.Fprintf(warnWriter, "WARNING: task %s dependency %s is not satisfied via supersession path: %s; blocking: %s\n",
+						task.ID, depID, strings.Join(result.Path, " -> "), strings.Join(result.BlockingIDs, ", "))
 				}
 			}
+		}
+
+		// Executing tasks must have all dependencies satisfied.
+		if sc.IsExecuting(task.Status) {
 			if len(unmet) > 0 {
-				return fmt.Errorf("executing task %s has unmet dependencies: %s (must be MERGED or SUPERSEDED)", task.ID, strings.Join(unmet, ", "))
+				return fmt.Errorf("executing task %s has unmet dependencies: %s", task.ID, strings.Join(unmet, ", "))
 			}
 		}
 	}

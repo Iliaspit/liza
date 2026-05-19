@@ -97,7 +97,7 @@ func TestCountClaimableTasks(t *testing.T) {
 			want: 1,
 		},
 		{
-			name: "superseded dependency satisfied",
+			name: "superseded dependency without replacement blocked",
 			state: &State{
 				Tasks: []Task{
 					{ID: "t1", Status: TaskStatusReady, Type: TaskTypeCoding, RolePair: "coding-pair", DependsOn: []string{"t2"}},
@@ -105,7 +105,7 @@ func TestCountClaimableTasks(t *testing.T) {
 				},
 			},
 			role: RoleCoder,
-			want: 1,
+			want: 0,
 		},
 	}
 
@@ -250,11 +250,22 @@ func TestGetCoderWorkDiagnostics(t *testing.T) {
 			wantContains: []string{"No claimable tasks", "2 in progress"},
 		},
 		{
-			name: "superseded dependency not counted as blocked",
+			name: "superseded dependency without replacement counted as blocked",
 			state: &State{
 				Tasks: []Task{
 					{ID: "t1", Status: TaskStatusReady, Type: TaskTypeCoding, RolePair: "coding-pair", DependsOn: []string{"t2"}},
 					{ID: "t2", Status: TaskStatusSuperseded, Type: TaskTypeCoding, RolePair: "coding-pair"},
+				},
+			},
+			wantContains: []string{"No claimable tasks", "1 blocked by dependencies"},
+		},
+		{
+			name: "superseded dependency with merged replacement not counted as blocked",
+			state: &State{
+				Tasks: []Task{
+					{ID: "t1", Status: TaskStatusReady, Type: TaskTypeCoding, RolePair: "coding-pair", DependsOn: []string{"t2"}},
+					{ID: "t2", Status: TaskStatusSuperseded, Type: TaskTypeCoding, RolePair: "coding-pair", SupersededBy: []string{"t3"}},
+					{ID: "t3", Status: TaskStatusMerged, Type: TaskTypeCoding, RolePair: "coding-pair"},
 				},
 			},
 			wantContains: []string{"Found 1 claimable task(s)"},

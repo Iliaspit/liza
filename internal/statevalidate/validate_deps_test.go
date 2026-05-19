@@ -53,7 +53,7 @@ func TestValidateDependencies_RejectsMalformedDependsOn(t *testing.T) {
 			dep := testhelpers.BuildTaskByStatus("dep-1", models.TaskStatusMerged, now)
 			state.Tasks = []models.Task{tt.task, dep}
 
-			err := validateDependencies(state, "", true, nil, nil)
+			err := validateDependencies(state, "", true, nil, nil, nil)
 			if err == nil {
 				t.Fatal("Expected error, got nil")
 			}
@@ -61,6 +61,40 @@ func TestValidateDependencies_RejectsMalformedDependsOn(t *testing.T) {
 				t.Fatalf("Error = %q, want %q", err.Error(), tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestValidateDependencies_WarnsForNonExecutingUnsatisfiedSupersession(t *testing.T) {
+	now := time.Now().UTC()
+	state := testhelpers.CreateValidState()
+	task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusReady, now)
+	task.DependsOn = []string{"dep-1"}
+	dep := models.Task{ID: "dep-1", Status: models.TaskStatusSuperseded}
+	state.Tasks = []models.Task{task, dep}
+
+	var warnings bytes.Buffer
+	if err := validateDependencies(state, "", true, nil, nil, &warnings); err != nil {
+		t.Fatalf("validateDependencies() error = %v", err)
+	}
+	if !strings.Contains(warnings.String(), "dependency dep-1 is not satisfied via supersession path") {
+		t.Fatalf("warnings = %q, want unsatisfied supersession warning", warnings.String())
+	}
+}
+
+func TestValidateDependencies_DoesNotWarnForNonExecutingDirectPendingDependency(t *testing.T) {
+	now := time.Now().UTC()
+	state := testhelpers.CreateValidState()
+	task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusReady, now)
+	task.DependsOn = []string{"dep-1"}
+	dep := testhelpers.BuildTaskByStatus("dep-1", models.TaskStatusReady, now)
+	state.Tasks = []models.Task{task, dep}
+
+	var warnings bytes.Buffer
+	if err := validateDependencies(state, "", true, nil, nil, &warnings); err != nil {
+		t.Fatalf("validateDependencies() error = %v", err)
+	}
+	if warnings.Len() != 0 {
+		t.Fatalf("warnings = %q, want none for ordinary pending dependency", warnings.String())
 	}
 }
 

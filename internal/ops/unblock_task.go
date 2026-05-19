@@ -86,17 +86,14 @@ func UnblockTask(projectRoot, taskID, assignTo, reason, agentID string) (*Unbloc
 			return &PreconditionError{Reason: fmt.Sprintf("task %s has no worktree to resume", taskID)}
 		}
 		var unmet []string
-		for _, depID := range task.DependsOn {
-			dep := state.FindTask(depID)
-			if dep == nil {
-				return &PreconditionError{Reason: fmt.Sprintf("task %s depends_on references non-existent task %q", taskID, depID)}
+		for _, dep := range state.UnmetDependencies(task) {
+			if dep.Invalid() {
+				return &PreconditionError{Reason: fmt.Sprintf("task %s has invalid dependency: %s", taskID, dep.Summary())}
 			}
-			if dep.Status != models.TaskStatusMerged && dep.Status != models.TaskStatusSuperseded {
-				unmet = append(unmet, depID)
-			}
+			unmet = append(unmet, dep.Summary())
 		}
 		if len(unmet) > 0 {
-			return &PreconditionError{Reason: fmt.Sprintf("task %s has unmet dependencies: %s (must be MERGED or SUPERSEDED)", taskID, strings.Join(unmet, ", "))}
+			return &PreconditionError{Reason: fmt.Sprintf("task %s has unmet dependencies: %s", taskID, strings.Join(unmet, ", "))}
 		}
 
 		agent, exists := state.Agents[assignTo]

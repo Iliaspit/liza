@@ -128,7 +128,7 @@ func ValidateState(state *models.State, projectRoot string, skipSpecFileCheck bo
 			return validateTaskInvariants(state, projectRoot, skipSpecFileCheck, resolver, cfg)
 		},
 		func(state *models.State, projectRoot string, skipSpecFileCheck bool) error {
-			return validateDependencies(state, projectRoot, skipSpecFileCheck, resolver, cfg)
+			return validateDependencies(state, projectRoot, skipSpecFileCheck, resolver, cfg, warnWriter)
 		},
 		func(state *models.State, projectRoot string, skipSpecFileCheck bool) error {
 			warnBlockedReasonMissingDependsOn(state, warnWriter)

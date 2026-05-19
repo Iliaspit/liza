@@ -362,7 +362,10 @@ func TestUnmetDependencies(t *testing.T) {
 				testhelpers.BuildTaskByStatus("dep-1", models.TaskStatusMerged, now),
 				testhelpers.BuildTaskByStatus("dep-2", models.TaskStatusReady, now),
 			},
-			want: []string{"dep-missing", "dep-2"},
+			want: []string{
+				"dep-missing (invalid_missing via dep-missing); blocking: dep-missing",
+				"dep-2 (unsatisfied_pending via dep-2); blocking: dep-2",
+			},
 		},
 	}
 
@@ -376,8 +379,12 @@ func TestUnmetDependencies(t *testing.T) {
 			task.DependsOn = tt.dependsOn
 
 			got := unmetDependencies(&task, state)
-			if !slices.Equal(got, tt.want) {
-				t.Errorf("unmetDependencies() = %v, want %v", got, tt.want)
+			gotSummaries := make([]string, 0, len(got))
+			for _, dep := range got {
+				gotSummaries = append(gotSummaries, dep.Summary())
+			}
+			if !slices.Equal(gotSummaries, tt.want) {
+				t.Errorf("unmetDependencies() = %v, want %v", gotSummaries, tt.want)
 			}
 		})
 	}

@@ -245,7 +245,7 @@ func TestValidateDependencies_PipelineExecutingUnmetDeps(t *testing.T) {
 	}
 	state.Sprint.Scope.Planned = []string{"dep-task", "task-exec"}
 
-	err := validateDependencies(state, "", true, resolver, cfg)
+	err := validateDependencies(state, "", true, resolver, cfg, nil)
 	if err == nil {
 		t.Fatal("Expected error for pipeline executing task with unmet dependencies")
 	}
@@ -293,7 +293,7 @@ func TestValidateDependencies_PipelineExecutingMetDeps(t *testing.T) {
 	}
 	state.Sprint.Scope.Planned = []string{"dep-task", "task-exec"}
 
-	err := validateDependencies(state, "", true, resolver, cfg)
+	err := validateDependencies(state, "", true, resolver, cfg, nil)
 	if err != nil {
 		t.Fatalf("Unexpected error for pipeline executing task with met dependencies: %v", err)
 	}
@@ -334,7 +334,7 @@ func TestValidateDependencies_ExecutingUnmetDeps(t *testing.T) {
 	}
 	state.Sprint.Scope.Planned = []string{"dep-task", "task-impl"}
 
-	err := validateDependencies(state, "", true, resolver, cfg)
+	err := validateDependencies(state, "", true, resolver, cfg, nil)
 	if err == nil {
 		t.Fatal("Expected error for IMPLEMENTING task with unmet dependencies")
 	}
@@ -343,7 +343,7 @@ func TestValidateDependencies_ExecutingUnmetDeps(t *testing.T) {
 	}
 }
 
-func TestValidateDependencies_SupersededDepSatisfied(t *testing.T) {
+func TestValidateDependencies_SupersededDepWithMergedReplacementSatisfied(t *testing.T) {
 	cfg := loadTestConfig(t)
 	resolver := pipeline.NewResolver(cfg)
 	state := testhelpers.CreateValidState()
@@ -353,12 +353,23 @@ func TestValidateDependencies_SupersededDepSatisfied(t *testing.T) {
 	baseCommit := "abc123"
 	leaseExpires := now.Add(30 * time.Minute)
 
-	// dep-task is SUPERSEDED — should satisfy dependency
+	// dep-task is SUPERSEDED and its replacement is MERGED — should satisfy dependency.
 	state.Tasks = []models.Task{
 		{
 			ID:          "dep-task",
 			Description: "Superseded dependency task",
 			Status:      models.TaskStatusSuperseded,
+			SupersededBy: []string{
+				"replacement-task",
+			},
+			Priority: 1,
+			Created:  now,
+			RolePair: "coding-pair",
+		},
+		{
+			ID:          "replacement-task",
+			Description: "Replacement dependency task",
+			Status:      models.TaskStatusMerged,
 			Priority:    1,
 			Created:     now,
 			RolePair:    "coding-pair",
@@ -377,10 +388,10 @@ func TestValidateDependencies_SupersededDepSatisfied(t *testing.T) {
 			DependsOn:    []string{"dep-task"},
 		},
 	}
-	state.Sprint.Scope.Planned = []string{"dep-task", "task-exec"}
+	state.Sprint.Scope.Planned = []string{"dep-task", "replacement-task", "task-exec"}
 
-	err := validateDependencies(state, "", true, resolver, cfg)
+	err := validateDependencies(state, "", true, resolver, cfg, nil)
 	if err != nil {
-		t.Fatalf("SUPERSEDED dependency should satisfy requirement, got: %v", err)
+		t.Fatalf("SUPERSEDED dependency with merged replacement should satisfy requirement, got: %v", err)
 	}
 }

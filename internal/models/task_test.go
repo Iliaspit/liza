@@ -228,7 +228,7 @@ func TestIsClaimable(t *testing.T) {
 		}
 	})
 
-	t.Run("superseded dependency satisfies claim", func(t *testing.T) {
+	t.Run("superseded dependency without replacement blocks claim", func(t *testing.T) {
 		allTasks := []Task{
 			{ID: "dep-1", Status: TaskStatusSuperseded},
 		}
@@ -237,8 +237,23 @@ func TestIsClaimable(t *testing.T) {
 			Status:    "DRAFT_CODE",
 			DependsOn: []string{"dep-1"},
 		}
+		if task.IsClaimable("coder", allTasks, pr) {
+			t.Error("superseded dependency without replacement should block claim")
+		}
+	})
+
+	t.Run("superseded dependency with merged replacement allows claim", func(t *testing.T) {
+		allTasks := []Task{
+			{ID: "dep-1", Status: TaskStatusSuperseded, SupersededBy: []string{"dep-2"}},
+			{ID: "dep-2", Status: TaskStatusMerged},
+		}
+		task := &Task{
+			RolePair:  "coding-pair",
+			Status:    "DRAFT_CODE",
+			DependsOn: []string{"dep-1"},
+		}
 		if !task.IsClaimable("coder", allTasks, pr) {
-			t.Error("superseded dependency should allow claim")
+			t.Error("superseded dependency with merged replacement should allow claim")
 		}
 	})
 }

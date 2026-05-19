@@ -39,7 +39,7 @@ func (freshClaimStrategy) validate(task *models.Task, state *models.State, runti
 		return fmt.Errorf("task %s is %s (not claimable by %s)", task.ID, task.Status, runtimeRole)
 	}
 	if unmet := unmetDependencies(task, state); len(unmet) > 0 {
-		return fmt.Errorf("task has unmet dependencies: %v", unmet)
+		return fmt.Errorf("task has unmet dependencies: %s", formatDependencyResults(unmet))
 	}
 	return nil
 }

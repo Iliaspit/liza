@@ -247,7 +247,7 @@ func ClaimTask(projectRoot, taskID, agentID string) (*ClaimResult, error) {
 		// Re-check dependencies under lock for strategies that require it
 		if strategy.requiresDependencyRecheck() {
 			if unmet := unmetDependencies(task, state); len(unmet) > 0 {
-				return fmt.Errorf("race condition: dependencies changed: %v", unmet)
+				return fmt.Errorf("race condition: dependencies changed: %s", formatDependencyResults(unmet))
 			}
 		}
 
@@ -325,15 +325,16 @@ func ClaimTask(projectRoot, taskID, agentID string) (*ClaimResult, error) {
 	}, nil
 }
 
-func unmetDependencies(task *models.Task, state *models.State) []string {
-	var unmet []string
-	for _, depID := range task.DependsOn {
-		depTask := state.FindTask(depID)
-		if depTask == nil || (depTask.Status != models.TaskStatusMerged && depTask.Status != models.TaskStatusSuperseded) {
-			unmet = append(unmet, depID)
-		}
+func unmetDependencies(task *models.Task, state *models.State) []models.DependencySatisfaction {
+	return state.UnmetDependencies(task)
+}
+
+func formatDependencyResults(results []models.DependencySatisfaction) string {
+	var summaries []string
+	for _, result := range results {
+		summaries = append(summaries, result.Summary())
 	}
-	return unmet
+	return strings.Join(summaries, ", ")
 }
 
 func handleClaimTaskWorktreePhase(
