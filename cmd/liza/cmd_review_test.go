@@ -58,6 +58,10 @@ func setupSubmitForReviewCLIProject(t *testing.T) (projectRoot, statePath, taskI
 	t.Helper()
 
 	projectRoot = t.TempDir()
+	projectRoot, err := filepath.EvalSymlinks(projectRoot)
+	if err != nil {
+		t.Fatalf("failed to resolve temp project root: %v", err)
+	}
 	testhelpers.SetupTestGitRepo(t, projectRoot)
 	statePath, _ = testhelpers.SetupLizaDir(t, projectRoot)
 	testhelpers.SetupPipelineConfig(t, projectRoot)
