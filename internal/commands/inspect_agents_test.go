@@ -566,6 +566,12 @@ func TestIsAgentProcessAlive_InspectAgents(t *testing.T) {
 // TestAgentInfo_PIDAndProcessStatus tests that buildAgentInfo populates PID and ProcessStatus
 func TestAgentInfo_PIDAndProcessStatus(t *testing.T) {
 	now := time.Now()
+	oldProcRoot := processStatusProcRoot
+	processStatusProcRoot = t.TempDir()
+	t.Cleanup(func() { processStatusProcRoot = oldProcRoot })
+
+	mismatchedPID := 999998
+	writeStatusProcCmdline(t, processStatusProcRoot, mismatchedPID, []string{"go", "test"})
 
 	tests := []struct {
 		name              string
@@ -578,8 +584,8 @@ func TestAgentInfo_PIDAndProcessStatus(t *testing.T) {
 			wantProcessStatus: "unknown",
 		},
 		{
-			name:              "current non-agent process shows mismatched",
-			agentPID:          os.Getpid(),
+			name:              "procfs non-agent process shows mismatched",
+			agentPID:          mismatchedPID,
 			wantProcessStatus: "mismatched",
 		},
 		{
