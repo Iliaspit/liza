@@ -242,6 +242,9 @@ func TestLoadRolesCmd_WithPipelineConfig(t *testing.T) {
 		if len(v.Roles) == 0 {
 			t.Fatal("expected non-empty Roles from pipeline config")
 		}
+		if len(v.SprintTerminals) == 0 {
+			t.Fatal("expected non-empty SprintTerminals from pipeline config")
+		}
 		if v.RoleTypes["coder"] != "doer" {
 			t.Fatalf("RoleTypes[coder] = %q, want doer", v.RoleTypes["coder"])
 		}
@@ -268,6 +271,9 @@ func TestLoadRolesCmd_MissingPipelineConfig(t *testing.T) {
 	}
 	if roles.Roles != nil {
 		t.Fatalf("expected nil Roles for missing pipeline config, got %v", roles.Roles)
+	}
+	if roles.SprintTerminals != nil {
+		t.Fatalf("expected nil SprintTerminals for missing pipeline config, got %v", roles.SprintTerminals)
 	}
 }
 

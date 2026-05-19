@@ -1,6 +1,8 @@
 package ops
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -10,7 +12,7 @@ import (
 
 func TestComputeSprintMetrics_Empty(t *testing.T) {
 	state := testhelpers.CreateValidState()
-	metrics := ComputeSprintMetrics(state)
+	metrics := state.ComputeSprintMetrics()
 
 	if metrics.TasksDone != 0 {
 		t.Errorf("TasksDone = %d, want 0", metrics.TasksDone)
@@ -39,7 +41,7 @@ func TestComputeSprintMetrics_TaskCounting(t *testing.T) {
 		testhelpers.BuildTaskByStatus("t8", models.TaskStatusReady, now),        // neither
 	}
 
-	metrics := ComputeSprintMetrics(state)
+	metrics := state.ComputeSprintMetrics()
 
 	if metrics.TasksDone != 3 {
 		t.Errorf("TasksDone = %d, want 3", metrics.TasksDone)
@@ -89,7 +91,7 @@ func TestComputeSprintMetrics_ReviewVerdicts(t *testing.T) {
 		},
 	}
 
-	metrics := ComputeSprintMetrics(state)
+	metrics := state.ComputeSprintMetrics()
 
 	if metrics.ReviewVerdictCount != 3 {
 		t.Errorf("ReviewVerdictCount = %d, want 3", metrics.ReviewVerdictCount)
@@ -131,7 +133,7 @@ func TestComputeSprintMetrics_TaskOutcomeApprovalRate(t *testing.T) {
 		},
 	}
 
-	metrics := ComputeSprintMetrics(state)
+	metrics := state.ComputeSprintMetrics()
 
 	// 2 out of 3 submitted tasks are approved/merged = 66%
 	if metrics.TaskOutcomeApprovalRatePercent != 66 {
@@ -144,7 +146,7 @@ func TestComputeSprintMetrics_AgentIterations(t *testing.T) {
 	state.Agents["agent-1"] = models.Agent{IterationsTotal: 5}
 	state.Agents["agent-2"] = models.Agent{IterationsTotal: 3}
 
-	metrics := ComputeSprintMetrics(state)
+	metrics := state.ComputeSprintMetrics()
 
 	if metrics.IterationsTotal != 8 {
 		t.Errorf("IterationsTotal = %d, want 8", metrics.IterationsTotal)
@@ -168,7 +170,7 @@ func TestComputeSprintMetrics_ReviewCyclesAggregated(t *testing.T) {
 		},
 	}
 
-	metrics := ComputeSprintMetrics(state)
+	metrics := state.ComputeSprintMetrics()
 
 	if metrics.ReviewCyclesTotal != 5 {
 		t.Errorf("ReviewCyclesTotal = %d, want 5", metrics.ReviewCyclesTotal)
@@ -303,6 +305,38 @@ func TestUpdateSprintMetrics(t *testing.T) {
 	readState := readStateForTest(t, stateFile)
 	if readState.Sprint.Metrics.TasksDone != 1 {
 		t.Errorf("Persisted TasksDone = %d, want 1", readState.Sprint.Metrics.TasksDone)
+	}
+}
+
+func TestUpdateSprintMetrics_CountsPipelineCleanStatusAsDone(t *testing.T) {
+	now := time.Now().UTC()
+	tmpDir := t.TempDir()
+
+	testhelpers.SetupTestGitRepo(t, tmpDir)
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+
+	pipelinePath := filepath.Join(testhelpers.FindRepoRoot(t), "internal", "pipeline", "testdata", "valid-with-clean.yaml")
+	pipelineData, err := os.ReadFile(pipelinePath)
+	if err != nil {
+		t.Fatalf("read pipeline fixture: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, ".liza", "pipeline.yaml"), pipelineData, 0o644); err != nil {
+		t.Fatalf("write pipeline fixture: %v", err)
+	}
+
+	state := testhelpers.CreateValidState()
+	state.Tasks = []models.Task{
+		testhelpers.BuildTaskByStatus("integration-clean", models.TaskStatus("INTEGRATION_ANALYSIS_CLEAN"), now),
+	}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	metrics, err := UpdateSprintMetrics(tmpDir)
+	if err != nil {
+		t.Fatalf("UpdateSprintMetrics() error: %v", err)
+	}
+
+	if metrics.TasksDone != 1 {
+		t.Errorf("TasksDone = %d, want 1", metrics.TasksDone)
 	}
 }
 

@@ -1,11 +1,13 @@
 package ops
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/liza-mas/liza/internal/db"
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/paths"
+	"github.com/liza-mas/liza/internal/pipeline"
 )
 
 // UpdateSprintMetrics recomputes sprint metrics from current task and agent state.
@@ -19,7 +21,11 @@ func UpdateSprintMetrics(projectRoot string) (models.SprintMetrics, error) {
 		return models.SprintMetrics{}, fmt.Errorf("failed to read state: %w", err)
 	}
 
-	metrics := ComputeSprintMetrics(state)
+	terminalStates, err := sprintTerminalStatesForMetrics(projectRoot)
+	if err != nil {
+		return models.SprintMetrics{}, err
+	}
+	metrics := state.ComputeSprintMetricsWithTerminalStates(terminalStates)
 
 	err = blackboard.Modify(func(s *models.State) error {
 		s.Sprint.Metrics = metrics
@@ -33,67 +39,15 @@ func UpdateSprintMetrics(projectRoot string) (models.SprintMetrics, error) {
 	return metrics, nil
 }
 
-// ComputeSprintMetrics calculates all sprint metrics from current state.
-func ComputeSprintMetrics(state *models.State) models.SprintMetrics {
-	metrics := models.SprintMetrics{}
-	approvedOrMerged := 0
-
-	for _, task := range state.Tasks {
-		if task.Status.IsTerminal() {
-			metrics.TasksDone++
+func sprintTerminalStatesForMetrics(projectRoot string) ([]models.TaskStatus, error) {
+	terminalStates, err := SprintTerminalStates(projectRoot)
+	if err != nil {
+		if errors.Is(err, pipeline.ErrConfigNotFound) {
+			return nil, nil
 		}
-
-		if task.Status == models.TaskStatusImplementing ||
-			task.Status == models.TaskStatusReadyForReview ||
-			task.Status == models.TaskStatusReviewing ||
-			task.Status == models.TaskStatusRejected ||
-			task.Status == models.TaskStatusIntegrationFailed {
-			metrics.TasksInProgress++
-		}
-
-		if task.Status == models.TaskStatusBlocked {
-			metrics.TasksBlocked++
-		}
-
-		metrics.ReviewCyclesTotal += task.ReviewCyclesTotal
-
-		hasSubmitted := false
-		for _, entry := range task.History {
-			switch entry.Event {
-			case models.TaskEventSubmittedForReview:
-				hasSubmitted = true
-			case models.TaskEventApproved:
-				metrics.ReviewVerdictApprovals++
-				metrics.ReviewVerdictCount++
-			case models.TaskEventRejected:
-				metrics.ReviewVerdictRejections++
-				metrics.ReviewVerdictCount++
-			}
-		}
-
-		if hasSubmitted {
-			metrics.TaskSubmittedForReviewCount++
-			if task.Status == models.TaskStatusApproved || task.Status == models.TaskStatusMerged {
-				approvedOrMerged++
-			}
-		}
+		return nil, fmt.Errorf("pipeline config failed to load: %w", err)
 	}
-
-	// Aggregate iterations from agents
-	for _, agent := range state.Agents {
-		metrics.IterationsTotal += agent.IterationsTotal
-	}
-
-	if metrics.ReviewVerdictCount > 0 {
-		metrics.ReviewVerdictApprovalRatePercent = (metrics.ReviewVerdictApprovals * 100) / metrics.ReviewVerdictCount
-	}
-
-	// Task outcome approval rate: submitted tasks that ended up approved or merged
-	if metrics.TaskSubmittedForReviewCount > 0 {
-		metrics.TaskOutcomeApprovalRatePercent = (approvedOrMerged * 100) / metrics.TaskSubmittedForReviewCount
-	}
-
-	return metrics
+	return terminalStates, nil
 }
 
 // CheckSuspiciousRates returns warnings if approval rates are suspiciously high (>95%).

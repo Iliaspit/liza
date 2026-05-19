@@ -486,18 +486,21 @@ func TestRenderTaskPanel_HasTitle(t *testing.T) {
 	assertContains(t, out, "✔ TASKS", "expected '✔ TASKS' title")
 }
 
-func TestRenderTaskPanel_SprintMetrics(t *testing.T) {
+func TestRenderTaskPanel_SprintMetricsUseCurrentTasks(t *testing.T) {
 	m := Model{
 		width:      120,
 		height:     40,
 		columnTier: ColumnTierWide,
 		styles:     NewStyles(120),
 		state: &models.State{
-			Tasks: []models.Task{makeTask("task-1", models.TaskStatusImplementing, 1)},
+			Tasks: []models.Task{
+				makeTask("task-1", models.TaskStatusMerged, 1),
+				makeTask("task-2", models.TaskStatusSuperseded, 1),
+			},
 			Sprint: models.Sprint{
-				Scope: models.SprintScope{Planned: []string{"a", "b", "c", "d", "e"}},
+				Scope: models.SprintScope{Planned: []string{"task-1", "task-2"}},
 				Metrics: models.SprintMetrics{
-					TasksDone:                      3,
+					TasksDone:                      1,
 					TasksBlocked:                   1,
 					TaskOutcomeApprovalRatePercent: 72,
 				},
@@ -506,9 +509,32 @@ func TestRenderTaskPanel_SprintMetrics(t *testing.T) {
 	}
 
 	out := m.renderTaskPanel(10)
-	assertContains(t, out, "3/5 done", "sprint metrics should show done count")
-	assertContains(t, out, "1 blocked", "sprint metrics should show blocked count")
-	assertContains(t, out, "72% approval", "sprint metrics should show approval rate")
+	assertContains(t, out, "2/2 done", "sprint metrics should be derived from current tasks")
+	assertContains(t, out, "0 blocked", "sprint metrics should ignore stale persisted blocked count")
+	if strings.Contains(out, "1/2 done") || strings.Contains(out, "1 blocked") {
+		t.Fatalf("task panel should not render stale persisted metrics, got:\n%s", out)
+	}
+}
+
+func TestRenderTaskPanel_SprintMetricsUsePipelineTerminals(t *testing.T) {
+	m := Model{
+		width:           120,
+		height:          40,
+		columnTier:      ColumnTierWide,
+		styles:          NewStyles(120),
+		sprintTerminals: []models.TaskStatus{"INTEGRATION_ANALYSIS_CLEAN"},
+		state: &models.State{
+			Tasks: []models.Task{
+				makeTask("integration-clean", models.TaskStatus("INTEGRATION_ANALYSIS_CLEAN"), 1),
+			},
+			Sprint: models.Sprint{
+				Scope: models.SprintScope{Planned: []string{"integration-clean"}},
+			},
+		},
+	}
+
+	out := m.renderTaskPanel(10)
+	assertContains(t, out, "1/1 done", "pipeline clean terminal status should count as done")
 }
 
 func TestRenderTaskPanel_ColumnTierMinimal(t *testing.T) {

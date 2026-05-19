@@ -284,7 +284,7 @@ func (m Model) renderTaskPanel(budget int) string {
 		if total == 0 {
 			total = len(m.state.Tasks)
 		}
-		sm := m.state.Sprint.Metrics
+		sm := m.state.ComputeSprintMetricsWithTerminalStates(m.sprintTerminals)
 		metrics = fmt.Sprintf("%d/%d done │ %d blocked │ %d%% approval",
 			sm.TasksDone, total, sm.TasksBlocked, sm.TaskOutcomeApprovalRatePercent)
 	}

@@ -37,9 +37,10 @@ const (
 
 // rolesMsg carries loaded role and role-pair names from pipeline config.
 type rolesMsg struct {
-	Roles     []string
-	RoleTypes map[string]string
-	RolePairs []string
+	Roles           []string
+	RoleTypes       map[string]string
+	RolePairs       []string
+	SprintTerminals []models.TaskStatus
 }
 
 // stopDoneMsg signals that StopCommand completed and the TUI should quit.
@@ -179,11 +180,12 @@ type Model struct {
 	roleCompletions  []string          // cached role names from pipeline config for tab-completion
 	roleTypes        map[string]string // cached role name to role type from pipeline config
 	rolePairNames    []string          // cached role-pair names from pipeline config for add-task form
-	agentCompletions []string          // snapshot of agent IDs for tab-completion (built on 't' press)
-	completionIdx    int               // current position in tab-completion cycle
-	completionPrefix string            // text prefix when Tab was first pressed (filters completions)
-	spawnRole        string            // role name pending CLI selection (S flow)
-	terminateTarget  string            // agent ID pending termination confirmation
+	sprintTerminals  []models.TaskStatus
+	agentCompletions []string // snapshot of agent IDs for tab-completion (built on 't' press)
+	completionIdx    int      // current position in tab-completion cycle
+	completionPrefix string   // text prefix when Tab was first pressed (filters completions)
+	spawnRole        string   // role name pending CLI selection (S flow)
+	terminateTarget  string   // agent ID pending termination confirmation
 
 	// Visual
 	styles Styles // Lipgloss styles (adapted to width)

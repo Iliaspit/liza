@@ -76,6 +76,23 @@ func TestTaskTerminalStates(t *testing.T) {
 	}
 }
 
+func TestComputeSprintMetricsWithTerminalStates_CountsPipelineCleanAsDone(t *testing.T) {
+	state := &State{
+		Tasks: []Task{
+			{ID: "integration-clean", Status: TaskStatus("INTEGRATION_ANALYSIS_CLEAN")},
+		},
+	}
+
+	metrics := state.ComputeSprintMetricsWithTerminalStates([]TaskStatus{"INTEGRATION_ANALYSIS_CLEAN"})
+
+	if metrics.TasksDone != 1 {
+		t.Errorf("TasksDone = %d, want 1", metrics.TasksDone)
+	}
+	if metrics.TasksBlocked != 0 {
+		t.Errorf("TasksBlocked = %d, want 0", metrics.TasksBlocked)
+	}
+}
+
 func TestAgentStatusConstants(t *testing.T) {
 	validStatuses := []AgentStatus{
 		AgentStatusStarting,

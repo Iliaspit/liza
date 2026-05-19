@@ -1,6 +1,9 @@
 package models
 
-import "time"
+import (
+	"slices"
+	"time"
+)
 
 // SprintStatus represents the state of a sprint
 type SprintStatus string
@@ -90,6 +93,79 @@ type SprintMetrics struct {
 	TaskSubmittedForReviewCount      int            `yaml:"task_submitted_for_review_count" json:"task_submitted_for_review_count"`
 	TaskOutcomeApprovalRatePercent   int            `yaml:"task_outcome_approval_rate_percent" json:"task_outcome_approval_rate_percent"`
 	Extra                            map[string]any `yaml:",inline" json:"-"`
+}
+
+// ComputeSprintMetrics calculates sprint metrics from the current state snapshot.
+func (s *State) ComputeSprintMetrics() SprintMetrics {
+	return s.ComputeSprintMetricsWithTerminalStates(nil)
+}
+
+// ComputeSprintMetricsWithTerminalStates calculates sprint metrics from the
+// current state snapshot, treating pipeline terminal states as done.
+func (s *State) ComputeSprintMetricsWithTerminalStates(terminalStates []TaskStatus) SprintMetrics {
+	if s == nil {
+		return SprintMetrics{}
+	}
+
+	metrics := SprintMetrics{}
+	approvedOrMerged := 0
+
+	for _, task := range s.Tasks {
+		if task.Status.IsPipelineSprintTerminal(terminalStates) {
+			metrics.TasksDone++
+		}
+
+		if task.Status == TaskStatusImplementing ||
+			task.Status == TaskStatusReadyForReview ||
+			task.Status == TaskStatusReviewing ||
+			task.Status == TaskStatusRejected ||
+			task.Status == TaskStatusIntegrationFailed {
+			metrics.TasksInProgress++
+		}
+
+		if task.Status == TaskStatusBlocked {
+			metrics.TasksBlocked++
+		}
+
+		metrics.ReviewCyclesTotal += task.ReviewCyclesTotal
+
+		hasSubmitted := false
+		for _, entry := range task.History {
+			switch entry.Event {
+			case TaskEventSubmittedForReview:
+				hasSubmitted = true
+			case TaskEventApproved:
+				metrics.ReviewVerdictApprovals++
+				metrics.ReviewVerdictCount++
+			case TaskEventRejected:
+				metrics.ReviewVerdictRejections++
+				metrics.ReviewVerdictCount++
+			}
+		}
+
+		if hasSubmitted {
+			metrics.TaskSubmittedForReviewCount++
+			if task.Status == TaskStatusApproved ||
+				task.Status == TaskStatusMerged ||
+				slices.Contains(terminalStates, task.Status) {
+				approvedOrMerged++
+			}
+		}
+	}
+
+	for _, agent := range s.Agents {
+		metrics.IterationsTotal += agent.IterationsTotal
+	}
+
+	if metrics.ReviewVerdictCount > 0 {
+		metrics.ReviewVerdictApprovalRatePercent = (metrics.ReviewVerdictApprovals * 100) / metrics.ReviewVerdictCount
+	}
+
+	if metrics.TaskSubmittedForReviewCount > 0 {
+		metrics.TaskOutcomeApprovalRatePercent = (approvedOrMerged * 100) / metrics.TaskSubmittedForReviewCount
+	}
+
+	return metrics
 }
 
 // AllPlannedTasksTerminal returns true if the sprint has planned tasks and all of
