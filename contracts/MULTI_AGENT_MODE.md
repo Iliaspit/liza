@@ -151,8 +151,10 @@ Each criterion is a test. All must pass. No more, no less.
 Example: `app greet` prints "Hello, World!", `app greet --name Alice` prints "Hello, Alice!"
 
 **TDD Enforcement:** Code tasks must include tests. Submission is rejected without test files
-unless the checkpoint declares `tdd_not_required` with justification (e.g. cosmetic-only change).
+unless the checkpoint declares `tdd_not_required` with justification (e.g. non-behavioral
+documentation/config/spec-only or cosmetic change).
 The reviewer verifies the justification.
+If a later checkpoint is written before submission, repeat the waiver if it still applies.
 
 **scope Defines Boundaries:**
 IN-scope items specify what may be touched. Touching OUT-scope files is a violation.

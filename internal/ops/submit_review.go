@@ -174,7 +174,7 @@ func SubmitForReview(projectRoot, taskID, commitRef, agentID string) (*SubmitFor
 		}
 		if len(testDiagnostics.TestFilesMatched) == 0 && GetTDDWaiver(task.History, agentID) == "" {
 			return nil, &PreconditionError{
-				Reason:  fmt.Sprintf("task %s: code tasks must include test files (e.g. *_test.go, *.test.ts, test_*.py) — TDD is mandatory", taskID),
+				Reason:  fmt.Sprintf("task %s: code tasks must include test files (e.g. *_test.go, *.test.ts, test_*.py) — TDD is mandatory. For non-behavioral documentation/config/spec-only work, submit a pre-execution checkpoint with --tdd-not-required <justification>; reviewers verify the justification.", taskID),
 				Details: testDiagnostics.Details(),
 			}
 		}

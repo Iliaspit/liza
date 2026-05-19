@@ -918,6 +918,8 @@ func TestSubmitForReview_TDDEnforcement_CustomDoerRole(t *testing.T) {
 		t.Fatal("Expected TDD enforcement error for custom doer role, got nil")
 	}
 	testhelpers.RequireErrorContains(t, err, "code tasks must include test files")
+	testhelpers.RequireErrorContains(t, err, "--tdd-not-required")
+	testhelpers.RequireErrorContains(t, err, "documentation/config/spec-only")
 }
 
 func TestSubmitForReview_TDDFailure_IncludesDiagnosticDetails(t *testing.T) {
