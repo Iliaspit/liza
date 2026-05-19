@@ -753,6 +753,7 @@ func TestRunAgent_ExtractedOps_Integration(t *testing.T) {
 	// Create a task ready for review
 	taskID := "task-1"
 	task := testhelpers.BuildTaskByStatus(taskID, models.TaskStatusReadyForReview, now)
+	task.Worktree = nil
 	state.Tasks = []models.Task{task}
 
 	testhelpers.WriteInitialState(t, statePath, state)
@@ -868,8 +869,10 @@ func TestExtractedOps_BehavioralParity(t *testing.T) {
 		// Create multiple tasks with different priorities
 		task1 := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusReadyForReview, now)
 		task1.Priority = 2
+		task1.Worktree = nil
 		task2 := testhelpers.BuildTaskByStatus("task-2", models.TaskStatusReadyForReview, now)
 		task2.Priority = 1 // Higher priority (lower number)
+		task2.Worktree = nil
 
 		state.Tasks = []models.Task{task1, task2}
 

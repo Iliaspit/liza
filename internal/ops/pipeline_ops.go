@@ -79,6 +79,7 @@ func BuildPipelineTransitions(r *pipeline.Resolver) map[models.TaskStatus][]mode
 		// Cross-cutting additions per lifecycle phase:
 		tm[ls.initial] = append(tm[ls.initial], models.TaskStatusAbandoned, models.TaskStatusBlocked, models.TaskStatusSuperseded)
 		tm[ls.executing] = append(tm[ls.executing], models.TaskStatusBlocked, ls.initial, models.TaskStatusIntegrationFailed)
+		tm[ls.submitted] = append(tm[ls.submitted], models.TaskStatusIntegrationFailed)
 		tm[ls.reviewing] = append(tm[ls.reviewing], ls.submitted, models.TaskStatusBlocked)
 		tm[ls.rejected] = append(tm[ls.rejected], ls.executing, models.TaskStatusBlocked, models.TaskStatusSuperseded, models.TaskStatusAbandoned)
 		tm[ls.approved] = append(tm[ls.approved], models.TaskStatusMerged, models.TaskStatusIntegrationFailed)
@@ -94,7 +95,7 @@ func BuildPipelineTransitions(r *pipeline.Resolver) map[models.TaskStatus][]mode
 		reviewing2, r2Err := r.Reviewing2Status(rpName)
 		if paErr == nil && r2Err == nil {
 			tm[reviewing2] = append(tm[reviewing2], partiallyApproved) // stale revert
-			tm[partiallyApproved] = append(tm[partiallyApproved], models.TaskStatusAbandoned, models.TaskStatusSuperseded)
+			tm[partiallyApproved] = append(tm[partiallyApproved], models.TaskStatusAbandoned, models.TaskStatusSuperseded, models.TaskStatusIntegrationFailed)
 		}
 	}
 

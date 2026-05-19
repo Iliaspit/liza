@@ -366,10 +366,12 @@ func TestClaimReviewerTask_BasicPrioritySelection(t *testing.T) {
 	taskLow := testhelpers.BuildTaskByStatus("task-low", models.TaskStatusReadyForReview, now)
 	taskLow.Priority = 4
 	taskLow.Created = now.Add(-2 * time.Minute)
+	taskLow.Worktree = nil
 
 	taskHigh := testhelpers.BuildTaskByStatus("task-high", models.TaskStatusReadyForReview, now)
 	taskHigh.Priority = 2
 	taskHigh.Created = now.Add(-1 * time.Minute)
+	taskHigh.Worktree = nil
 
 	state.Tasks = []models.Task{taskLow, taskHigh}
 	bb := testhelpers.WriteInitialState(t, statePath, state)
@@ -402,14 +404,17 @@ func TestClaimReviewerTask_SamePriorityRandomSelection(t *testing.T) {
 	taskOldest := testhelpers.BuildTaskByStatus("task-oldest", models.TaskStatusReadyForReview, now)
 	taskOldest.Priority = 3
 	taskOldest.Created = now.Add(-3 * time.Minute)
+	taskOldest.Worktree = nil
 
 	taskMiddle := testhelpers.BuildTaskByStatus("task-middle", models.TaskStatusReadyForReview, now)
 	taskMiddle.Priority = 3
 	taskMiddle.Created = now.Add(-2 * time.Minute)
+	taskMiddle.Worktree = nil
 
 	taskNewest := testhelpers.BuildTaskByStatus("task-newest", models.TaskStatusReadyForReview, now)
 	taskNewest.Priority = 3
 	taskNewest.Created = now.Add(-1 * time.Minute)
+	taskNewest.Worktree = nil
 
 	state.Tasks = []models.Task{taskNewest, taskMiddle, taskOldest}
 	bb := testhelpers.WriteInitialState(t, statePath, state)
@@ -443,11 +448,13 @@ func TestClaimReviewerTask_SkipsClaimedReviewTasks(t *testing.T) {
 	taskHighClaimed := testhelpers.BuildTaskByStatus("task-high-claimed", models.TaskStatusReviewing, now)
 	taskHighClaimed.Priority = 1
 	taskHighClaimed.Created = now.Add(-3 * time.Minute)
+	taskHighClaimed.Worktree = nil
 
 	// Lower-priority task available for review
 	taskLowAvailable := testhelpers.BuildTaskByStatus("task-low-available", models.TaskStatusReadyForReview, now)
 	taskLowAvailable.Priority = 3
 	taskLowAvailable.Created = now.Add(-2 * time.Minute)
+	taskLowAvailable.Worktree = nil
 
 	state.Tasks = []models.Task{taskHighClaimed, taskLowAvailable}
 	bb := testhelpers.WriteInitialState(t, statePath, state)
@@ -480,6 +487,7 @@ func TestClaimReviewerTask_ReclaimsExpiredLease(t *testing.T) {
 	taskHighExpired := testhelpers.BuildTaskByStatus("task-high-expired", models.TaskStatusReadyForReview, now)
 	taskHighExpired.Priority = 1
 	taskHighExpired.Created = now.Add(-3 * time.Minute)
+	taskHighExpired.Worktree = nil
 	reviewer := "code-reviewer-99"
 	taskHighExpired.ReviewingBy = &reviewer
 	expiredLease := now.Add(-5 * time.Minute) // Expired
@@ -489,6 +497,7 @@ func TestClaimReviewerTask_ReclaimsExpiredLease(t *testing.T) {
 	taskLowAvailable := testhelpers.BuildTaskByStatus("task-low-available", models.TaskStatusReadyForReview, now)
 	taskLowAvailable.Priority = 4
 	taskLowAvailable.Created = now.Add(-2 * time.Minute)
+	taskLowAvailable.Worktree = nil
 
 	state.Tasks = []models.Task{taskLowAvailable, taskHighExpired}
 	bb := testhelpers.WriteInitialState(t, statePath, state)

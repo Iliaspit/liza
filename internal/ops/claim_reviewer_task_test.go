@@ -2,11 +2,14 @@ package ops
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/liza-mas/liza/internal/db"
+	"github.com/liza-mas/liza/internal/git"
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/testhelpers"
 )
@@ -48,14 +51,12 @@ func TestClaimReviewerTask_DefaultLeaseDuration(t *testing.T) {
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()
 	registerClaimReviewerTaskTestAgents(state)
-	worktree := ".worktrees/task-1"
 	reviewCommit := "abc123"
 	state.Tasks = []models.Task{
 		{
 			ID:           "task-1",
 			Status:       models.TaskStatusReadyForReview,
 			RolePair:     "coding-pair",
-			Worktree:     &worktree,
 			ReviewCommit: &reviewCommit,
 			Created:      now,
 		},
@@ -88,7 +89,6 @@ func TestClaimReviewerTask_MissingRegisteredAgentDoesNotCreateGhost(t *testing.T
 
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()
-	worktree := ".worktrees/task-1"
 	reviewCommit := "abc123"
 	state.Tasks = []models.Task{
 		{
@@ -96,7 +96,6 @@ func TestClaimReviewerTask_MissingRegisteredAgentDoesNotCreateGhost(t *testing.T
 			Status:       models.TaskStatusReadyForReview,
 			RolePair:     "coding-pair",
 			Priority:     1,
-			Worktree:     &worktree,
 			ReviewCommit: &reviewCommit,
 			History:      []models.TaskHistoryEntry{},
 			Created:      now,
@@ -167,7 +166,6 @@ func TestClaimReviewerTask_CorruptRegisteredAgentRejected(t *testing.T) {
 			agent := testhelpers.RegisteredTestAgent("code-reviewer")
 			tt.mutate(&agent)
 			state.Agents["code-reviewer-1"] = agent
-			worktree := ".worktrees/task-1"
 			reviewCommit := "abc123"
 			state.Tasks = []models.Task{
 				{
@@ -175,7 +173,6 @@ func TestClaimReviewerTask_CorruptRegisteredAgentRejected(t *testing.T) {
 					Status:       models.TaskStatusReadyForReview,
 					RolePair:     "coding-pair",
 					Priority:     1,
-					Worktree:     &worktree,
 					ReviewCommit: &reviewCommit,
 					History:      []models.TaskHistoryEntry{},
 					Created:      now,
@@ -247,8 +244,7 @@ func TestClaimReviewerTask_Success(t *testing.T) {
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()
 	registerClaimReviewerTaskTestAgents(state)
-	worktree := ".worktrees/task-1"
-	reviewCommit := "abc123"
+	worktree, reviewCommit := createClaimReviewWorktree(t, tmpDir, "task-1")
 	state.Tasks = []models.Task{
 		{
 			ID:           "task-1",
@@ -319,6 +315,227 @@ func TestClaimReviewerTask_Success(t *testing.T) {
 	}
 }
 
+func TestClaimReviewerTask_RejectsReviewCommitMismatch(t *testing.T) {
+	tmpDir := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, tmpDir)
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+
+	worktree, headCommit := createClaimReviewWorktree(t, tmpDir, "task-1")
+	staleCommit := testhelpers.MustGit(t, tmpDir, "rev-parse", "integration")
+	if staleCommit == headCommit {
+		t.Fatal("test setup failed: stale commit matches worktree HEAD")
+	}
+
+	now := time.Now().UTC()
+	state := testhelpers.CreateValidState()
+	registerClaimReviewerTaskTestAgents(state)
+	coderID := "coder-1"
+	otherTaskID := "other-task"
+	state.Agents[coderID] = models.Agent{
+		Role:        models.RoleCoder,
+		Status:      models.AgentStatusWorking,
+		CurrentTask: &otherTaskID,
+	}
+	state.Tasks = []models.Task{
+		{
+			ID:           "task-1",
+			Status:       models.TaskStatusReadyForReview,
+			RolePair:     "coding-pair",
+			Priority:     1,
+			AssignedTo:   &coderID,
+			Worktree:     &worktree,
+			ReviewCommit: &staleCommit,
+			Created:      now,
+		},
+	}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	_, err := ClaimReviewerTask(ClaimReviewerTaskInput{
+		ProjectRoot:   tmpDir,
+		AgentID:       "code-reviewer-1",
+		LeaseDuration: 1800,
+	})
+	if err == nil {
+		t.Fatal("Expected error for review_commit/worktree HEAD mismatch")
+	}
+	if !strings.Contains(err.Error(), IntegrationReasonReviewBoundaryMismatch) {
+		t.Errorf("Error = %q, want review boundary mismatch", err.Error())
+	}
+
+	readState, readErr := db.New(stateFile).Read()
+	if readErr != nil {
+		t.Fatalf("Failed to read state: %v", readErr)
+	}
+	task := readState.FindTask("task-1")
+	if task == nil {
+		t.Fatal("Task not found")
+	}
+	if task.Status != models.TaskStatusIntegrationFailed {
+		t.Errorf("Task status = %v, want INTEGRATION_FAILED", task.Status)
+	}
+	if task.ReviewingBy != nil {
+		t.Fatal("Task should not be review-assigned after boundary mismatch")
+	}
+	if task.AssignedTo != nil {
+		t.Fatal("Task AssignedTo should be cleared after boundary mismatch")
+	}
+	if task.IntegrationFailure == nil {
+		t.Fatal("IntegrationFailure should be recorded after boundary mismatch")
+	}
+	if task.IntegrationFailure["reason"] != IntegrationReasonReviewBoundaryMismatch {
+		t.Errorf("IntegrationFailure reason = %v, want %q", task.IntegrationFailure["reason"], IntegrationReasonReviewBoundaryMismatch)
+	}
+	if task.IntegrationFailure["operation"] != reviewBoundaryOperationAssignment {
+		t.Errorf("IntegrationFailure operation = %v, want %q", task.IntegrationFailure["operation"], reviewBoundaryOperationAssignment)
+	}
+	coder := readState.Agents[coderID]
+	if coder.Status != models.AgentStatusWorking {
+		t.Errorf("coder status = %q, want WORKING", coder.Status)
+	}
+	if coder.CurrentTask == nil || *coder.CurrentTask != otherTaskID {
+		t.Fatalf("coder CurrentTask = %v, want %s", coder.CurrentTask, otherTaskID)
+	}
+}
+
+func TestClaimReviewerTask_ReleasesSameTaskAssignedAgentOnBoundaryMismatch(t *testing.T) {
+	tmpDir := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, tmpDir)
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+
+	worktree, headCommit := createClaimReviewWorktree(t, tmpDir, "task-1")
+	staleCommit := testhelpers.MustGit(t, tmpDir, "rev-parse", "integration")
+	if staleCommit == headCommit {
+		t.Fatal("test setup failed: stale commit matches worktree HEAD")
+	}
+
+	now := time.Now().UTC()
+	state := testhelpers.CreateValidState()
+	registerClaimReviewerTaskTestAgents(state)
+	coderID := "coder-1"
+	taskID := "task-1"
+	state.Agents[coderID] = models.Agent{
+		Role:        models.RoleCoder,
+		Status:      models.AgentStatusWorking,
+		CurrentTask: &taskID,
+	}
+	state.Tasks = []models.Task{
+		{
+			ID:           taskID,
+			Status:       models.TaskStatusReadyForReview,
+			RolePair:     "coding-pair",
+			Priority:     1,
+			AssignedTo:   &coderID,
+			Worktree:     &worktree,
+			ReviewCommit: &staleCommit,
+			Created:      now,
+		},
+	}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	_, err := ClaimReviewerTask(ClaimReviewerTaskInput{
+		ProjectRoot:   tmpDir,
+		AgentID:       "code-reviewer-1",
+		LeaseDuration: 1800,
+	})
+	if err == nil {
+		t.Fatal("Expected error for review_commit/worktree HEAD mismatch")
+	}
+
+	readState, readErr := db.New(stateFile).Read()
+	if readErr != nil {
+		t.Fatalf("Failed to read state: %v", readErr)
+	}
+	task := readState.FindTask(taskID)
+	if task == nil {
+		t.Fatal("Task not found")
+	}
+	if task.Status != models.TaskStatusIntegrationFailed {
+		t.Errorf("Task status = %v, want INTEGRATION_FAILED", task.Status)
+	}
+	if task.AssignedTo != nil {
+		t.Fatal("Task AssignedTo should be cleared after boundary mismatch")
+	}
+	coder := readState.Agents[coderID]
+	if coder.Status != models.AgentStatusIdle {
+		t.Errorf("coder status = %q, want IDLE", coder.Status)
+	}
+	if coder.CurrentTask != nil {
+		t.Fatalf("coder CurrentTask = %v, want nil", *coder.CurrentTask)
+	}
+}
+
+func TestClaimReviewerTask_SkipsStaleReviewBoundaryCandidate(t *testing.T) {
+	tmpDir := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, tmpDir)
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+
+	staleWorktree, staleHead := createClaimReviewWorktree(t, tmpDir, "task-stale")
+	validWorktree, validHead := createClaimReviewWorktree(t, tmpDir, "task-valid")
+	staleCommit := testhelpers.MustGit(t, tmpDir, "rev-parse", "integration")
+	if staleCommit == staleHead {
+		t.Fatal("test setup failed: stale commit matches stale worktree HEAD")
+	}
+
+	now := time.Now().UTC()
+	state := testhelpers.CreateValidState()
+	registerClaimReviewerTaskTestAgents(state)
+	state.Tasks = []models.Task{
+		{
+			ID:           "task-stale",
+			Status:       models.TaskStatusReadyForReview,
+			RolePair:     "coding-pair",
+			Priority:     1,
+			Worktree:     &staleWorktree,
+			ReviewCommit: &staleCommit,
+			Created:      now.Add(-time.Minute),
+		},
+		{
+			ID:           "task-valid",
+			Status:       models.TaskStatusReadyForReview,
+			RolePair:     "coding-pair",
+			Priority:     2,
+			Worktree:     &validWorktree,
+			ReviewCommit: &validHead,
+			Created:      now,
+		},
+	}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	result, err := ClaimReviewerTask(ClaimReviewerTaskInput{
+		ProjectRoot:   tmpDir,
+		AgentID:       "code-reviewer-1",
+		LeaseDuration: 1800,
+	})
+	if err != nil {
+		t.Fatalf("ClaimReviewerTask() error = %v", err)
+	}
+	if result.TaskID != "task-valid" {
+		t.Fatalf("claimed task = %q, want task-valid", result.TaskID)
+	}
+
+	readState, readErr := db.New(stateFile).Read()
+	if readErr != nil {
+		t.Fatalf("Failed to read state: %v", readErr)
+	}
+	staleTask := readState.FindTask("task-stale")
+	if staleTask == nil {
+		t.Fatal("stale task not found")
+	}
+	if staleTask.Status != models.TaskStatusIntegrationFailed {
+		t.Errorf("stale task status = %v, want INTEGRATION_FAILED", staleTask.Status)
+	}
+	validTask := readState.FindTask("task-valid")
+	if validTask == nil {
+		t.Fatal("valid task not found")
+	}
+	if validTask.Status != models.TaskStatusReviewing {
+		t.Errorf("valid task status = %v, want REVIEWING_CODE", validTask.Status)
+	}
+	if validTask.ReviewingBy == nil || *validTask.ReviewingBy != "code-reviewer-1" {
+		t.Fatalf("valid task ReviewingBy = %v, want code-reviewer-1", validTask.ReviewingBy)
+	}
+}
+
 func TestClaimReviewerTask_PrioritySelection(t *testing.T) {
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
@@ -327,8 +544,6 @@ func TestClaimReviewerTask_PrioritySelection(t *testing.T) {
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()
 	registerClaimReviewerTaskTestAgents(state)
-	worktree1 := ".worktrees/task-low"
-	worktree2 := ".worktrees/task-high"
 	reviewCommit1 := "abc123"
 	reviewCommit2 := "def456"
 	state.Tasks = []models.Task{
@@ -337,7 +552,6 @@ func TestClaimReviewerTask_PrioritySelection(t *testing.T) {
 			Status:       models.TaskStatusReadyForReview,
 			RolePair:     "coding-pair",
 			Priority:     3,
-			Worktree:     &worktree1,
 			ReviewCommit: &reviewCommit1,
 			Created:      now.Add(-1 * time.Minute),
 		},
@@ -346,7 +560,6 @@ func TestClaimReviewerTask_PrioritySelection(t *testing.T) {
 			Status:       models.TaskStatusReadyForReview,
 			RolePair:     "coding-pair",
 			Priority:     1,
-			Worktree:     &worktree2,
 			ReviewCommit: &reviewCommit2,
 			Created:      now,
 		},
@@ -376,8 +589,6 @@ func TestClaimReviewerTask_TieBreaking(t *testing.T) {
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()
 	registerClaimReviewerTaskTestAgents(state)
-	worktree1 := ".worktrees/task-old"
-	worktree2 := ".worktrees/task-new"
 	reviewCommit1 := "abc123"
 	reviewCommit2 := "def456"
 	state.Tasks = []models.Task{
@@ -386,7 +597,6 @@ func TestClaimReviewerTask_TieBreaking(t *testing.T) {
 			Status:       models.TaskStatusReadyForReview,
 			RolePair:     "coding-pair",
 			Priority:     2,
-			Worktree:     &worktree2,
 			ReviewCommit: &reviewCommit2,
 			Created:      now,
 		},
@@ -395,7 +605,6 @@ func TestClaimReviewerTask_TieBreaking(t *testing.T) {
 			Status:       models.TaskStatusReadyForReview,
 			RolePair:     "coding-pair",
 			Priority:     2,
-			Worktree:     &worktree1,
 			ReviewCommit: &reviewCommit1,
 			Created:      now.Add(-1 * time.Minute),
 		},
@@ -426,7 +635,6 @@ func TestClaimReviewerTask_MissingReviewCommit(t *testing.T) {
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()
 	registerClaimReviewerTaskTestAgents(state)
-	worktree := ".worktrees/task-1"
 	// Task is READY_FOR_REVIEW but missing ReviewCommit (corrupted state)
 	state.Tasks = []models.Task{
 		{
@@ -434,7 +642,6 @@ func TestClaimReviewerTask_MissingReviewCommit(t *testing.T) {
 			Status:   models.TaskStatusReadyForReview,
 			RolePair: "coding-pair",
 			Priority: 1,
-			Worktree: &worktree,
 			// ReviewCommit intentionally nil
 			History: []models.TaskHistoryEntry{},
 			Created: now,
@@ -467,7 +674,6 @@ func TestClaimReviewerTask_CodePlanReviewerExplicitRole(t *testing.T) {
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()
 	registerClaimReviewerTaskTestAgents(state)
-	worktree := ".worktrees/plan-task-1"
 	reviewCommit := "abc123"
 	state.Tasks = []models.Task{
 		{
@@ -475,7 +681,6 @@ func TestClaimReviewerTask_CodePlanReviewerExplicitRole(t *testing.T) {
 			Status:       models.TaskStatusCodingPlanToReview,
 			RolePair:     "code-planning-pair",
 			Priority:     1,
-			Worktree:     &worktree,
 			ReviewCommit: &reviewCommit,
 			History:      []models.TaskHistoryEntry{},
 			Created:      now,
@@ -524,8 +729,6 @@ func TestClaimReviewerTask_SkipsAlreadyReviewing(t *testing.T) {
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()
 	registerClaimReviewerTaskTestAgents(state)
-	worktree1 := ".worktrees/task-reviewing"
-	worktree2 := ".worktrees/task-available"
 	reviewer := "code-reviewer-99"
 	leaseExpires := now.Add(1 * time.Hour)
 	reviewCommit1 := "abc123"
@@ -536,7 +739,6 @@ func TestClaimReviewerTask_SkipsAlreadyReviewing(t *testing.T) {
 			Status:             models.TaskStatusReviewing,
 			RolePair:           "coding-pair",
 			Priority:           1, // High priority but already claimed
-			Worktree:           &worktree1,
 			ReviewCommit:       &reviewCommit1,
 			ReviewingBy:        &reviewer,
 			ReviewLeaseExpires: &leaseExpires,
@@ -547,7 +749,6 @@ func TestClaimReviewerTask_SkipsAlreadyReviewing(t *testing.T) {
 			Status:       models.TaskStatusReadyForReview,
 			RolePair:     "coding-pair",
 			Priority:     3, // Lower priority but available
-			Worktree:     &worktree2,
 			ReviewCommit: &reviewCommit2,
 			Created:      now,
 		},
@@ -578,7 +779,6 @@ func TestClaimReviewerTask_PartiallyApproved(t *testing.T) {
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()
 	registerClaimReviewerTaskTestAgents(state)
-	worktree := ".worktrees/task-pa"
 	reviewCommit := "abc123"
 	state.Tasks = []models.Task{
 		{
@@ -586,7 +786,6 @@ func TestClaimReviewerTask_PartiallyApproved(t *testing.T) {
 			Status:       models.TaskStatusPartiallyApproved,
 			RolePair:     "coding-pair",
 			Priority:     1,
-			Worktree:     &worktree,
 			ReviewCommit: &reviewCommit,
 			History:      []models.TaskHistoryEntry{},
 			Created:      now,
@@ -640,8 +839,6 @@ func TestClaimReviewerTask_ClaimPriority_PartiallyApprovedOverSubmitted(t *testi
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()
 	registerClaimReviewerTaskTestAgents(state)
-	wt1 := ".worktrees/task-submitted"
-	wt2 := ".worktrees/task-pa"
 	rc1 := "abc123"
 	rc2 := "def456"
 	state.Tasks = []models.Task{
@@ -650,7 +847,6 @@ func TestClaimReviewerTask_ClaimPriority_PartiallyApprovedOverSubmitted(t *testi
 			Status:       models.TaskStatusReadyForReview,
 			RolePair:     "coding-pair",
 			Priority:     1, // Same priority
-			Worktree:     &wt1,
 			ReviewCommit: &rc1,
 			History:      []models.TaskHistoryEntry{},
 			Created:      now.Add(-1 * time.Minute),
@@ -660,7 +856,6 @@ func TestClaimReviewerTask_ClaimPriority_PartiallyApprovedOverSubmitted(t *testi
 			Status:       models.TaskStatusPartiallyApproved,
 			RolePair:     "coding-pair",
 			Priority:     1, // Same priority
-			Worktree:     &wt2,
 			ReviewCommit: &rc2,
 			History:      []models.TaskHistoryEntry{},
 			Created:      now,
@@ -696,8 +891,6 @@ func TestClaimReviewerTask_DiversityWithApprovals(t *testing.T) {
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()
 	registerClaimReviewerTaskTestAgents(state)
-	wt1 := ".worktrees/task-same"
-	wt2 := ".worktrees/task-diverse"
 	rc1 := "abc123"
 	rc2 := "def456"
 	state.Tasks = []models.Task{
@@ -706,7 +899,6 @@ func TestClaimReviewerTask_DiversityWithApprovals(t *testing.T) {
 			Status:       models.TaskStatusPartiallyApproved,
 			RolePair:     "coding-pair",
 			Priority:     1,
-			Worktree:     &wt1,
 			ReviewCommit: &rc1,
 			History:      []models.TaskHistoryEntry{},
 			Created:      now,
@@ -719,7 +911,6 @@ func TestClaimReviewerTask_DiversityWithApprovals(t *testing.T) {
 			Status:       models.TaskStatusPartiallyApproved,
 			RolePair:     "coding-pair",
 			Priority:     1,
-			Worktree:     &wt2,
 			ReviewCommit: &rc2,
 			History:      []models.TaskHistoryEntry{},
 			Created:      now,
@@ -954,6 +1145,23 @@ func registerClaimReviewerTaskTestAgents(state *models.State) {
 	state.Agents["code-plan-reviewer-1"] = testhelpers.RegisteredTestAgent("code-plan-reviewer")
 }
 
+func createClaimReviewWorktree(t *testing.T, projectRoot, taskID string) (string, string) {
+	t.Helper()
+
+	testhelpers.MustGit(t, projectRoot, "checkout", "integration")
+	g := git.New(projectRoot)
+	if _, err := g.CreateWorktree(taskID, "integration"); err != nil {
+		t.Fatalf("CreateWorktree() error = %v", err)
+	}
+	wtPath := g.GetWorktreePath(taskID)
+	if err := os.WriteFile(filepath.Join(wtPath, "review.txt"), []byte("reviewable work\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	testhelpers.MustGit(t, wtPath, "add", "review.txt")
+	testhelpers.MustGit(t, wtPath, "commit", "-m", "Add reviewable work")
+	return g.GetWorktreeRelPath(taskID), testhelpers.MustGit(t, wtPath, "rev-parse", "HEAD")
+}
+
 func reviewerCapacityTestAgent(role, provider string) models.Agent {
 	agent := testhelpers.RegisteredTestAgent(role)
 	agent.Provider = provider
@@ -1042,7 +1250,6 @@ func TestClaimReviewerTask_ReviewClaimCooldown(t *testing.T) {
 		now := time.Now().UTC()
 		state := testhelpers.CreateValidState()
 		registerClaimReviewerTaskTestAgents(state)
-		worktree := ".worktrees/task-1"
 		reviewCommit := "abc123"
 		state.Tasks = []models.Task{
 			{
@@ -1050,7 +1257,6 @@ func TestClaimReviewerTask_ReviewClaimCooldown(t *testing.T) {
 				Status:       models.TaskStatusReadyForReview,
 				RolePair:     "coding-pair",
 				Priority:     1,
-				Worktree:     &worktree,
 				ReviewCommit: &reviewCommit,
 				Created:      now,
 				History: []models.TaskHistoryEntry{
@@ -1086,7 +1292,6 @@ func TestClaimReviewerTask_ReviewClaimCooldown(t *testing.T) {
 		now := time.Now().UTC()
 		state := testhelpers.CreateValidState()
 		registerClaimReviewerTaskTestAgents(state)
-		worktree := ".worktrees/task-1"
 		reviewCommit := "abc123"
 		state.Tasks = []models.Task{
 			{
@@ -1094,7 +1299,6 @@ func TestClaimReviewerTask_ReviewClaimCooldown(t *testing.T) {
 				Status:       models.TaskStatusReadyForReview,
 				RolePair:     "coding-pair",
 				Priority:     1,
-				Worktree:     &worktree,
 				ReviewCommit: &reviewCommit,
 				Created:      now,
 				History: []models.TaskHistoryEntry{
@@ -1130,7 +1334,6 @@ func TestClaimReviewerTask_ReviewClaimCooldown(t *testing.T) {
 		now := time.Now().UTC()
 		state := testhelpers.CreateValidState()
 		registerClaimReviewerTaskTestAgents(state)
-		worktree := ".worktrees/task-1"
 		reviewCommit := "abc123"
 		state.Tasks = []models.Task{
 			{
@@ -1138,7 +1341,6 @@ func TestClaimReviewerTask_ReviewClaimCooldown(t *testing.T) {
 				Status:       models.TaskStatusReadyForReview,
 				RolePair:     "coding-pair",
 				Priority:     1,
-				Worktree:     &worktree,
 				ReviewCommit: &reviewCommit,
 				Created:      now,
 				History: []models.TaskHistoryEntry{
@@ -1174,7 +1376,6 @@ func TestClaimReviewerTask_ReviewClaimCooldown(t *testing.T) {
 		now := time.Now().UTC()
 		state := testhelpers.CreateValidState()
 		registerClaimReviewerTaskTestAgents(state)
-		worktree := ".worktrees/task-1"
 		reviewCommit := "abc123"
 		state.Tasks = []models.Task{
 			{
@@ -1182,7 +1383,6 @@ func TestClaimReviewerTask_ReviewClaimCooldown(t *testing.T) {
 				Status:       models.TaskStatusReadyForReview,
 				RolePair:     "coding-pair",
 				Priority:     1,
-				Worktree:     &worktree,
 				ReviewCommit: &reviewCommit,
 				Created:      now,
 				History: []models.TaskHistoryEntry{
@@ -1218,8 +1418,6 @@ func TestClaimReviewerTask_ReviewClaimCooldown(t *testing.T) {
 		now := time.Now().UTC()
 		state := testhelpers.CreateValidState()
 		registerClaimReviewerTaskTestAgents(state)
-		wt1 := ".worktrees/task-1"
-		wt2 := ".worktrees/task-2"
 		rc1 := "abc123"
 		rc2 := "def456"
 		state.Tasks = []models.Task{
@@ -1228,7 +1426,6 @@ func TestClaimReviewerTask_ReviewClaimCooldown(t *testing.T) {
 				Status:       models.TaskStatusReadyForReview,
 				RolePair:     "coding-pair",
 				Priority:     1,
-				Worktree:     &wt1,
 				ReviewCommit: &rc1,
 				Created:      now,
 				History: []models.TaskHistoryEntry{
@@ -1244,7 +1441,6 @@ func TestClaimReviewerTask_ReviewClaimCooldown(t *testing.T) {
 				Status:       models.TaskStatusReadyForReview,
 				RolePair:     "coding-pair",
 				Priority:     1,
-				Worktree:     &wt2,
 				ReviewCommit: &rc2,
 				Created:      now,
 				History: []models.TaskHistoryEntry{
@@ -1280,8 +1476,6 @@ func TestClaimReviewerTask_ReviewClaimCooldown(t *testing.T) {
 		now := time.Now().UTC()
 		state := testhelpers.CreateValidState()
 		registerClaimReviewerTaskTestAgents(state)
-		wt1 := ".worktrees/task-cooldown"
-		wt2 := ".worktrees/task-available"
 		rc1 := "abc123"
 		rc2 := "def456"
 		state.Tasks = []models.Task{
@@ -1290,7 +1484,6 @@ func TestClaimReviewerTask_ReviewClaimCooldown(t *testing.T) {
 				Status:       models.TaskStatusReadyForReview,
 				RolePair:     "coding-pair",
 				Priority:     1,
-				Worktree:     &wt1,
 				ReviewCommit: &rc1,
 				Created:      now,
 				History: []models.TaskHistoryEntry{
@@ -1306,7 +1499,6 @@ func TestClaimReviewerTask_ReviewClaimCooldown(t *testing.T) {
 				Status:       models.TaskStatusReadyForReview,
 				RolePair:     "coding-pair",
 				Priority:     1,
-				Worktree:     &wt2,
 				ReviewCommit: &rc2,
 				Created:      now,
 				History:      []models.TaskHistoryEntry{},

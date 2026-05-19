@@ -68,6 +68,7 @@ func ClaimReviewerTask(input ClaimReviewerTaskInput) (*ClaimReviewerTaskResult, 
 	leaseExpires := now.Add(time.Duration(input.LeaseDuration) * time.Second)
 
 	var result ClaimReviewerTaskResult
+	var reviewBoundaryErr error
 
 	// Load pipeline config once for both IsClaimable and transition.
 	pb, err := loadPipelineBundle(input.ProjectRoot)
@@ -111,44 +112,55 @@ func ClaimReviewerTask(input ClaimReviewerTaskInput) (*ClaimReviewerTaskResult, 
 			return &PreconditionError{Reason: "no reviewable tasks found"}
 		}
 
-		task := selectBestCandidate(candidates, pr, claimerProvider, input.AgentID, state)
+		for len(candidates) > 0 {
+			task := selectBestCandidate(candidates, pr, claimerProvider, input.AgentID, state)
+			if task == nil {
+				break
+			}
 
-		// Invariant: task must have review_commit before it can be claimed for review
-		if task.ReviewCommit == nil {
-			return &PreconditionError{Reason: fmt.Sprintf("task %s has no review_commit — cannot claim for review", task.ID)}
-		}
+			if err := validateReviewBoundaryForAssignment(input.ProjectRoot, task); err != nil {
+				reviewBoundaryErr = err
+				if markErr := markReviewBoundaryIntegrationFailed(state, task, input.AgentID, pb.transitions, err); markErr != nil {
+					return markErr
+				}
+				candidates = removeCandidate(candidates, task)
+				continue
+			}
 
-		if task.RolePair == "" {
-			return &PreconditionError{Reason: fmt.Sprintf("task %s has no role_pair set", task.ID)}
-		}
+			if task.RolePair == "" {
+				return &PreconditionError{Reason: fmt.Sprintf("task %s has no role_pair set", task.ID)}
+			}
 
-		// Determine target reviewing status based on task's current state.
-		targetStatus, err := resolveReviewingTarget(task, pr)
-		if err != nil {
-			return err
-		}
-		if err := task.TransitionWith(targetStatus, pb.transitions); err != nil {
-			return err
-		}
-		task.ReviewingBy = &input.AgentID
-		task.ReviewLeaseExpires = &leaseExpires
+			// Determine target reviewing status based on task's current state.
+			targetStatus, err := resolveReviewingTarget(task, pr)
+			if err != nil {
+				return err
+			}
+			if err := task.TransitionWith(targetStatus, pb.transitions); err != nil {
+				return err
+			}
+			task.ReviewingBy = &input.AgentID
+			task.ReviewLeaseExpires = &leaseExpires
 
-		agent := claimingAgent
-		agent.Status = models.AgentStatusReviewing
-		currentTask := task.ID
-		agent.CurrentTask = &currentTask
-		agent.Heartbeat = now
-		agent.LeaseExpires = &leaseExpires
-		state.Agents[input.AgentID] = agent
+			agent := claimingAgent
+			agent.Status = models.AgentStatusReviewing
+			currentTask := task.ID
+			agent.CurrentTask = &currentTask
+			agent.Heartbeat = now
+			agent.LeaseExpires = &leaseExpires
+			state.Agents[input.AgentID] = agent
 
-		result.TaskID = task.ID
-		if task.Worktree != nil {
-			result.Worktree = *task.Worktree
+			result.TaskID = task.ID
+			if task.Worktree != nil {
+				result.Worktree = *task.Worktree
+			}
+			if task.ReviewCommit != nil {
+				result.ReviewCommit = *task.ReviewCommit
+			}
+			result.LeaseExpires = leaseExpires
+
+			return nil
 		}
-		if task.ReviewCommit != nil {
-			result.ReviewCommit = *task.ReviewCommit
-		}
-		result.LeaseExpires = leaseExpires
 
 		return nil
 	})
@@ -156,8 +168,20 @@ func ClaimReviewerTask(input ClaimReviewerTaskInput) (*ClaimReviewerTaskResult, 
 	if err != nil {
 		return nil, err
 	}
+	if reviewBoundaryErr != nil && result.TaskID == "" {
+		return nil, &IntegrationFailedError{Reason: IntegrationReasonReviewBoundaryMismatch}
+	}
 
 	return &result, nil
+}
+
+func removeCandidate(candidates []*models.Task, candidate *models.Task) []*models.Task {
+	for i, task := range candidates {
+		if task == candidate {
+			return append(candidates[:i], candidates[i+1:]...)
+		}
+	}
+	return candidates
 }
 
 // resolveReviewingTarget returns the appropriate reviewing status for the task:

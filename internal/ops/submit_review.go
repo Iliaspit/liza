@@ -192,6 +192,9 @@ func SubmitForReview(projectRoot, taskID, commitRef, agentID string) (*SubmitFor
 	if err != nil {
 		return nil, &OperationalError{Message: "failed to read worktree HEAD after rebase", Err: err}
 	}
+	if err := validateReviewBoundaryCommit(projectRoot, task, postRebaseCommit); err != nil {
+		return nil, err
+	}
 
 	// Phase 3: Atomic update with new commit SHA
 	now := time.Now().UTC()

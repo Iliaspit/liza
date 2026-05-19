@@ -51,10 +51,11 @@ var mergeCASRetryTestHook func(attempt int, integrationRef, preMergeHEAD string)
 
 // Integration failure reason constants.
 const (
-	IntegrationReasonHEADMismatch  = "worktree HEAD mismatch"
-	IntegrationReasonMergeConflict = "merge conflict"
-	IntegrationReasonTestsFailed   = "integration tests failed"
-	IntegrationReasonStateInvalid  = "post-merge state validation failed"
+	IntegrationReasonHEADMismatch           = "worktree HEAD mismatch"
+	IntegrationReasonMergeConflict          = "merge conflict"
+	IntegrationReasonReviewBoundaryMismatch = "review boundary mismatch"
+	IntegrationReasonTestsFailed            = "integration tests failed"
+	IntegrationReasonStateInvalid           = "post-merge state validation failed"
 )
 
 const (

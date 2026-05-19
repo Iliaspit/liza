@@ -3,11 +3,15 @@ package ops
 import (
 	"context"
 	stderrors "errors"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/liza-mas/liza/internal/db"
 	"github.com/liza-mas/liza/internal/errors"
+	"github.com/liza-mas/liza/internal/git"
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/testhelpers"
 )
@@ -191,6 +195,7 @@ func TestAwaitResubmission_Resubmitted(t *testing.T) {
 		tk := s.FindTask("task-1")
 		tk.Status = models.TaskStatusReadyForReview
 		tk.ReviewCommit = &newCommit
+		tk.Worktree = nil
 		tk.ReviewCyclesCurrent = 2
 		return nil
 	}); err != nil {
@@ -705,6 +710,7 @@ func TestAwaitResubmission_EarlyResubmission(t *testing.T) {
 	})
 	newCommit := "earlycommit789"
 	task.ReviewCommit = &newCommit
+	task.Worktree = nil
 	task.ReviewCyclesCurrent = 3
 	state.Tasks = []models.Task{task}
 	state.Agents["reviewer-1"] = models.Agent{
@@ -743,6 +749,90 @@ func TestAwaitResubmission_EarlyResubmission(t *testing.T) {
 	}
 	if tk.ReviewingBy == nil || *tk.ReviewingBy != "reviewer-1" {
 		t.Error("ReviewingBy should be reviewer-1 after early reclaim")
+	}
+}
+
+func TestAwaitResubmission_RejectsReviewCommitMismatchOnReclaim(t *testing.T) {
+	tmpDir := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, tmpDir)
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+
+	testhelpers.MustGit(t, tmpDir, "checkout", "integration")
+	g := git.New(tmpDir)
+	taskID := "task-resubmit-stale-review"
+	baseCommit, err := g.CreateWorktree(taskID, "integration")
+	if err != nil {
+		t.Fatalf("CreateWorktree() error = %v", err)
+	}
+	wtPath := g.GetWorktreePath(taskID)
+	if err := os.WriteFile(filepath.Join(wtPath, "resubmitted.txt"), []byte("resubmitted work\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	testhelpers.MustGit(t, wtPath, "add", "resubmitted.txt")
+	testhelpers.MustGit(t, wtPath, "commit", "-m", "Resubmit work")
+	wtHead := testhelpers.MustGit(t, wtPath, "rev-parse", "HEAD")
+	if baseCommit == wtHead {
+		t.Fatal("test setup failed: base commit matches worktree HEAD")
+	}
+
+	now := time.Now().UTC()
+	worktree := g.GetWorktreeRelPath(taskID)
+	state := testhelpers.CreateValidState()
+	state.Tasks = []models.Task{
+		{
+			ID:                  taskID,
+			Status:              models.TaskStatusReadyForReview,
+			RolePair:            "coding-pair",
+			Worktree:            &worktree,
+			ReviewCommit:        &baseCommit,
+			ReviewCyclesCurrent: 2,
+			History: []models.TaskHistoryEntry{
+				{
+					Time:  now.Add(-time.Minute),
+					Event: models.TaskEventRejected,
+					Agent: strPtr("reviewer-1"),
+				},
+			},
+			Created: now,
+		},
+	}
+	state.Agents["reviewer-1"] = models.Agent{
+		Role:   "code-reviewer",
+		Status: models.AgentStatusIdle,
+	}
+	bb := testhelpers.WriteInitialState(t, stateFile, state)
+
+	_, err = AwaitResubmission(context.Background(), tmpDir, taskID, "reviewer-1", 10*time.Second)
+	if err == nil {
+		t.Fatal("Expected review boundary mismatch error")
+	}
+	if !strings.Contains(err.Error(), IntegrationReasonReviewBoundaryMismatch) {
+		t.Errorf("Error = %q, want review boundary mismatch", err.Error())
+	}
+
+	readState, readErr := bb.Read()
+	if readErr != nil {
+		t.Fatalf("failed to read state: %v", readErr)
+	}
+	task := readState.FindTask(taskID)
+	if task == nil {
+		t.Fatal("task not found")
+	}
+	if task.Status != models.TaskStatusIntegrationFailed {
+		t.Errorf("task status = %q, want INTEGRATION_FAILED", task.Status)
+	}
+	if task.ReviewingBy != nil {
+		t.Fatal("ReviewingBy should be released after reclaim boundary mismatch")
+	}
+	if task.IntegrationFailure == nil {
+		t.Fatal("IntegrationFailure should be recorded after reclaim boundary mismatch")
+	}
+	if task.IntegrationFailure["reason"] != IntegrationReasonReviewBoundaryMismatch {
+		t.Errorf("IntegrationFailure reason = %v, want %q", task.IntegrationFailure["reason"], IntegrationReasonReviewBoundaryMismatch)
+	}
+	agent := readState.Agents["reviewer-1"]
+	if agent.CurrentTask != nil {
+		t.Fatalf("reviewer CurrentTask = %v, want nil", *agent.CurrentTask)
 	}
 }
 
@@ -787,6 +877,7 @@ func TestAwaitResubmission_RaceGuard(t *testing.T) {
 		tk.Status = models.TaskStatusReadyForReview
 		rc := "newcommit"
 		tk.ReviewCommit = &rc
+		tk.Worktree = nil
 		// ReviewingBy stays set from acquireReviewOwnership.
 		return nil
 	}); err != nil {
@@ -878,6 +969,7 @@ func TestAwaitResubmission_ReviewLeaseExpires(t *testing.T) {
 		tk.Status = models.TaskStatusReadyForReview
 		rc := "refreshcommit"
 		tk.ReviewCommit = &rc
+		tk.Worktree = nil
 		return nil
 	}); err != nil {
 		t.Fatalf("failed to modify state: %v", err)

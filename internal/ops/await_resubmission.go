@@ -104,7 +104,7 @@ func AwaitResubmission(ctx context.Context, projectRoot, taskID, agentID string,
 	// wait loop and reclaim immediately.
 	submitted, _ := resolver.SubmittedStatus(task.RolePair)
 	if task.Status == submitted {
-		return reclaimForReview(bb, taskID, agentID, resolver, task.RolePair)
+		return reclaimForReview(projectRoot, bb, taskID, agentID, resolver, task.RolePair)
 	}
 
 	// --- Event loop: block until resubmission or terminal state ---
@@ -112,7 +112,7 @@ func AwaitResubmission(ctx context.Context, projectRoot, taskID, agentID string,
 
 	watcher, watchErr := bb.WatchForChanges()
 	if watchErr != nil {
-		return awaitResubmissionPolling(ctx, bb, taskID, agentID, timeout, resolver, rolePair)
+		return awaitResubmissionPolling(ctx, projectRoot, bb, taskID, agentID, timeout, resolver, rolePair)
 	}
 	defer watcher.Close()
 
@@ -147,7 +147,7 @@ func AwaitResubmission(ctx context.Context, projectRoot, taskID, agentID string,
 				}, nil
 			}
 			if rc := checkResubmissionStatus(currentTask, resolver, rolePair); rc != nil {
-				return handleResubmissionResult(bb, currentTask, agentID, resolver, rolePair)
+				return handleResubmissionResult(projectRoot, bb, currentTask, agentID, resolver, rolePair)
 			}
 
 		case <-watcher.Events():
@@ -168,13 +168,13 @@ func AwaitResubmission(ctx context.Context, projectRoot, taskID, agentID string,
 				}, nil
 			}
 			if rc := checkResubmissionStatus(currentTask, resolver, rolePair); rc != nil {
-				return handleResubmissionResult(bb, currentTask, agentID, resolver, rolePair)
+				return handleResubmissionResult(projectRoot, bb, currentTask, agentID, resolver, rolePair)
 			}
 
 		case watcherErr := <-watcher.Errors():
 			log.Printf("Watcher error, falling back to polling: %v", watcherErr)
 			watcher.Close()
-			return awaitResubmissionPolling(ctx, bb, taskID, agentID, timeout, resolver, rolePair)
+			return awaitResubmissionPolling(ctx, projectRoot, bb, taskID, agentID, timeout, resolver, rolePair)
 
 		case <-deadlineTimer.C:
 			releaseReviewOwnership(bb, agentID, taskID)
@@ -301,11 +301,11 @@ func checkResubmissionStatus(task *models.Task, resolver *pipeline.Resolver, rol
 }
 
 // handleResubmissionResult maps the observed task status to an AwaitResubmissionResult.
-func handleResubmissionResult(bb *db.Blackboard, task *models.Task, agentID string, resolver *pipeline.Resolver, rolePair string) (*AwaitResubmissionResult, error) {
+func handleResubmissionResult(projectRoot string, bb *db.Blackboard, task *models.Task, agentID string, resolver *pipeline.Resolver, rolePair string) (*AwaitResubmissionResult, error) {
 	submitted, _ := resolver.SubmittedStatus(rolePair)
 
 	if task.Status == submitted {
-		return reclaimForReview(bb, task.ID, agentID, resolver, rolePair)
+		return reclaimForReview(projectRoot, bb, task.ID, agentID, resolver, rolePair)
 	}
 
 	// Terminal state — release ownership and report.
@@ -319,7 +319,7 @@ func handleResubmissionResult(bb *db.Blackboard, task *models.Task, agentID stri
 
 // reclaimForReview atomically transitions the task from submitted to reviewing,
 // refreshes the review lease, and sets the agent to reviewing status.
-func reclaimForReview(bb *db.Blackboard, taskID, agentID string, resolver *pipeline.Resolver, rolePair string) (*AwaitResubmissionResult, error) {
+func reclaimForReview(projectRoot string, bb *db.Blackboard, taskID, agentID string, resolver *pipeline.Resolver, rolePair string) (*AwaitResubmissionResult, error) {
 	reviewing, err := resolver.ReviewingStatus(rolePair)
 	if err != nil {
 		releaseReviewOwnership(bb, agentID, taskID)
@@ -331,11 +331,17 @@ func reclaimForReview(bb *db.Blackboard, taskID, agentID string, resolver *pipel
 
 	var reviewCommit string
 	var reviewCycle int
+	var reviewBoundaryErr error
 
 	modErr := bb.Modify(func(s *models.State) error {
 		task := s.FindTask(taskID)
 		if task == nil {
 			return &errors.NotFoundError{Entity: "task", ID: taskID}
+		}
+
+		if err := validateReviewBoundaryForAssignment(projectRoot, task); err != nil {
+			reviewBoundaryErr = err
+			return markReviewBoundaryIntegrationFailed(s, task, agentID, transitions, err)
 		}
 
 		if err := task.TransitionWith(reviewing, transitions); err != nil {
@@ -363,6 +369,9 @@ func reclaimForReview(bb *db.Blackboard, taskID, agentID string, resolver *pipel
 		releaseReviewOwnership(bb, agentID, taskID)
 		return nil, &OperationalError{Message: "failed to reclaim task for review", Err: modErr}
 	}
+	if reviewBoundaryErr != nil {
+		return nil, &IntegrationFailedError{Reason: IntegrationReasonReviewBoundaryMismatch}
+	}
 
 	return &AwaitResubmissionResult{
 		Verdict:      ResubmissionResubmitted,
@@ -374,7 +383,7 @@ func reclaimForReview(bb *db.Blackboard, taskID, agentID string, resolver *pipel
 
 // awaitResubmissionPolling is the polling fallback for when fsnotify is unavailable.
 // It checks state every 5 seconds until a resubmission arrives or the deadline expires.
-func awaitResubmissionPolling(ctx context.Context, bb *db.Blackboard, taskID, agentID string, timeout time.Duration, resolver *pipeline.Resolver, rolePair string) (*AwaitResubmissionResult, error) {
+func awaitResubmissionPolling(ctx context.Context, projectRoot string, bb *db.Blackboard, taskID, agentID string, timeout time.Duration, resolver *pipeline.Resolver, rolePair string) (*AwaitResubmissionResult, error) {
 	deadline := time.Now().Add(timeout)
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
@@ -403,7 +412,7 @@ func awaitResubmissionPolling(ctx context.Context, bb *db.Blackboard, taskID, ag
 				}, nil
 			}
 			if rc := checkResubmissionStatus(currentTask, resolver, rolePair); rc != nil {
-				return handleResubmissionResult(bb, currentTask, agentID, resolver, rolePair)
+				return handleResubmissionResult(projectRoot, bb, currentTask, agentID, resolver, rolePair)
 			}
 			if time.Now().After(deadline) {
 				releaseReviewOwnership(bb, agentID, taskID)

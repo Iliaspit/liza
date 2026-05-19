@@ -539,6 +539,124 @@ func TestSubmitForReview_WritesHandoffEvent(t *testing.T) {
 	}
 }
 
+func TestSubmitForReview_RebaseRewriteUsesPostRebaseHead(t *testing.T) {
+	tmpDir := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, tmpDir)
+	statePath, _ := testhelpers.SetupLizaDir(t, tmpDir)
+
+	testhelpers.MustGit(t, tmpDir, "checkout", "integration")
+	g := git.New(tmpDir)
+	taskID := "task-rebase-rewrite"
+	baseCommit, err := g.CreateWorktree(taskID, "integration")
+	if err != nil {
+		t.Fatalf("CreateWorktree() error = %v", err)
+	}
+	wtPath := g.GetWorktreePath(taskID)
+
+	if err := os.WriteFile(filepath.Join(wtPath, "feature.go"), []byte("package main\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(wtPath, "feature_test.go"), []byte("package main\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	testhelpers.MustGit(t, wtPath, "add", "feature.go", "feature_test.go")
+	testhelpers.MustGit(t, wtPath, "commit", "-m", "Add feature with tests")
+	preRebaseCommit := testhelpers.MustGit(t, wtPath, "rev-parse", "HEAD")
+
+	testhelpers.MustGit(t, tmpDir, "checkout", "integration")
+	if err := os.WriteFile(filepath.Join(tmpDir, "integration.txt"), []byte("integration advanced\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	testhelpers.MustGit(t, tmpDir, "add", "integration.txt")
+	testhelpers.MustGit(t, tmpDir, "commit", "-m", "Advance integration")
+
+	agentID := "coder-1"
+	reviewerID := "code-reviewer-1"
+	leaseExpires := time.Now().UTC().Add(30 * time.Minute)
+	worktree := g.GetWorktreeRelPath(taskID)
+	initialState := &models.State{
+		Config: models.Config{
+			IntegrationBranch: "integration",
+			LeaseDuration:     1800,
+		},
+		Tasks: []models.Task{
+			{
+				ID:           taskID,
+				Type:         models.TaskTypeCoding,
+				Description:  "Task whose rebase rewrites HEAD",
+				Status:       models.TaskStatusImplementing,
+				RolePair:     "coding-pair",
+				AssignedTo:   &agentID,
+				LeaseExpires: &leaseExpires,
+				Worktree:     &worktree,
+				BaseCommit:   &baseCommit,
+				Iteration:    1,
+				Created:      time.Now().UTC(),
+				History: []models.TaskHistoryEntry{
+					{
+						Time:  time.Now().UTC(),
+						Event: models.TaskEventPreExecutionCheckpoint,
+						Agent: &agentID,
+						Extra: map[string]any{
+							"intent":          "exercise rewriting submit rebase",
+							"validation_plan": "review_commit equals post-rebase HEAD",
+							"files_to_modify": []string{"feature.go", "feature_test.go"},
+						},
+					},
+				},
+			},
+		},
+		Agents: map[string]models.Agent{
+			agentID:    {Role: "coder", Status: models.AgentStatusWorking, CurrentTask: &taskID},
+			reviewerID: testhelpers.RegisteredTestAgent(models.RoleCodeReviewer),
+		},
+	}
+	bb := testhelpers.WriteInitialState(t, statePath, initialState)
+
+	result, err := SubmitForReview(tmpDir, taskID, preRebaseCommit, agentID)
+	if err != nil {
+		t.Fatalf("SubmitForReview() unexpected error: %v", err)
+	}
+	postRebaseHead := testhelpers.MustGit(t, wtPath, "rev-parse", "HEAD")
+	if preRebaseCommit == postRebaseHead {
+		t.Fatal("test setup failed: rebase did not rewrite the task commit")
+	}
+	if result.ReviewCommit != postRebaseHead {
+		t.Fatalf("result.ReviewCommit = %s, want post-rebase HEAD %s", result.ReviewCommit, postRebaseHead)
+	}
+
+	state, err := bb.Read()
+	if err != nil {
+		t.Fatalf("bb.Read() error: %v", err)
+	}
+	task := state.FindTask(taskID)
+	if task == nil {
+		t.Fatal("task not found after submission")
+	}
+	if task.ReviewCommit == nil || *task.ReviewCommit != postRebaseHead {
+		t.Fatalf("task.ReviewCommit = %v, want %s", task.ReviewCommit, postRebaseHead)
+	}
+	lastHistory := task.History[len(task.History)-1]
+	if lastHistory.Event != models.TaskEventSubmittedForReview {
+		t.Fatalf("History event = %q, want %q", lastHistory.Event, models.TaskEventSubmittedForReview)
+	}
+	if lastHistory.Commit == nil || *lastHistory.Commit != postRebaseHead {
+		t.Fatalf("History commit = %v, want %s", lastHistory.Commit, postRebaseHead)
+	}
+
+	claimResult, err := ClaimReviewerTask(ClaimReviewerTaskInput{
+		ProjectRoot:   tmpDir,
+		AgentID:       reviewerID,
+		LeaseDuration: 1800,
+	})
+	if err != nil {
+		t.Fatalf("ClaimReviewerTask() error: %v", err)
+	}
+	if claimResult.ReviewCommit != postRebaseHead {
+		t.Fatalf("claim ReviewCommit = %s, want %s", claimResult.ReviewCommit, postRebaseHead)
+	}
+}
+
 func TestSubmitForReview_DoesNotFetchIntegrationBeforeRebase(t *testing.T) {
 	tmpDir, taskID, wtCommit, agentID, bb := setupSuccessfulSubmitScenario(t)
 	installGitShimFailingFetch(t)
