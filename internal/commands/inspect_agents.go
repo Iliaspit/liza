@@ -9,7 +9,6 @@ import (
 
 	"github.com/liza-mas/liza/internal/errors"
 	"github.com/liza-mas/liza/internal/models"
-	"github.com/liza-mas/liza/internal/ops"
 	"github.com/liza-mas/liza/internal/procscan"
 	"github.com/liza-mas/liza/internal/render"
 )
@@ -26,19 +25,21 @@ type inspectAgentsOptions struct {
 
 // agentInfo represents agent information with computed fields
 type agentInfo struct {
-	ID                 string  `json:"id" yaml:"id"`
-	Role               string  `json:"role" yaml:"role"`
-	Status             string  `json:"status" yaml:"status"`
-	Provider           string  `json:"provider,omitempty" yaml:"provider,omitempty"`
-	PID                int     `json:"pid" yaml:"pid"`
-	ProcessStatus      string  `json:"process_status" yaml:"process_status"`
-	CurrentTask        *string `json:"current_task,omitempty" yaml:"current_task,omitempty"`
-	TimeOnTask         string  `json:"time_on_task,omitempty" yaml:"time_on_task,omitempty"`   // Computed
-	TimeSinceHeartbeat string  `json:"time_since_heartbeat" yaml:"time_since_heartbeat"`       // Computed
-	LeaseExpires       *string `json:"lease_expires,omitempty" yaml:"lease_expires,omitempty"` // Computed (formatted)
-	Terminal           string  `json:"terminal" yaml:"terminal"`
-	IterationsTotal    int     `json:"iterations_total" yaml:"iterations_total"`
-	ContextPercent     int     `json:"context_percent" yaml:"context_percent"`
+	ID                  string  `json:"id" yaml:"id"`
+	Role                string  `json:"role" yaml:"role"`
+	Status              string  `json:"status" yaml:"status"`
+	Provider            string  `json:"provider,omitempty" yaml:"provider,omitempty"`
+	PID                 int     `json:"pid" yaml:"pid"`
+	ProcessStatus       string  `json:"process_status" yaml:"process_status"`
+	ProcessStatusSource string  `json:"process_status_source,omitempty" yaml:"process_status_source,omitempty"`
+	ProcessStatusDetail string  `json:"process_status_detail,omitempty" yaml:"process_status_detail,omitempty"`
+	CurrentTask         *string `json:"current_task,omitempty" yaml:"current_task,omitempty"`
+	TimeOnTask          string  `json:"time_on_task,omitempty" yaml:"time_on_task,omitempty"`   // Computed
+	TimeSinceHeartbeat  string  `json:"time_since_heartbeat" yaml:"time_since_heartbeat"`       // Computed
+	LeaseExpires        *string `json:"lease_expires,omitempty" yaml:"lease_expires,omitempty"` // Computed (formatted)
+	Terminal            string  `json:"terminal" yaml:"terminal"`
+	IterationsTotal     int     `json:"iterations_total" yaml:"iterations_total"`
+	ContextPercent      int     `json:"context_percent" yaml:"context_percent"`
 }
 
 var findZombieAgents = procscan.FindZombieAgents
@@ -157,15 +158,12 @@ func buildAgentInfo(agentID string, agent *models.Agent, currentTask *models.Tas
 		ContextPercent:  agent.ContextPercent,
 	}
 
-	// Copy PID and determine process status
+	// Copy PID and determine process status.
 	info.PID = agent.PID
-	if agent.PID == 0 {
-		info.ProcessStatus = "n/a"
-	} else if ops.IsProcessAlive(agent.PID) {
-		info.ProcessStatus = "running"
-	} else {
-		info.ProcessStatus = "not found"
-	}
+	processInfo := getAgentProcessStatusInfo(agentID, *agent)
+	info.ProcessStatus = processInfo.Status
+	info.ProcessStatusSource = processInfo.Source
+	info.ProcessStatusDetail = processInfo.Detail
 
 	// Compute time since last heartbeat
 	timeSinceHeartbeat := calculateTimeSinceHeartbeat(agent)

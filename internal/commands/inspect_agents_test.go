@@ -573,19 +573,19 @@ func TestAgentInfo_PIDAndProcessStatus(t *testing.T) {
 		wantProcessStatus string
 	}{
 		{
-			name:              "PID 0 shows n/a",
+			name:              "PID 0 shows unknown",
 			agentPID:          0,
-			wantProcessStatus: "n/a",
+			wantProcessStatus: "unknown",
 		},
 		{
-			name:              "current process shows running",
+			name:              "current non-agent process shows mismatched",
 			agentPID:          os.Getpid(),
-			wantProcessStatus: "running",
+			wantProcessStatus: "mismatched",
 		},
 		{
-			name:              "dead process shows not found",
+			name:              "dead process shows stopped",
 			agentPID:          999999,
-			wantProcessStatus: "not found",
+			wantProcessStatus: "stopped",
 		},
 	}
 

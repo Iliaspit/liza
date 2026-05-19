@@ -234,10 +234,149 @@ func TestSubmitVerdict_WrongStatus(t *testing.T) {
 	state.Tasks = []models.Task{
 		testhelpers.BuildTaskByStatus("task-1", models.TaskStatusImplementing, now),
 	}
+	taskRef := "task-1"
+	state.Agents["code-reviewer-1"] = models.Agent{
+		Role:        models.RoleCodeReviewer,
+		Status:      models.AgentStatusWaiting,
+		CurrentTask: &taskRef,
+	}
 	testhelpers.WriteInitialState(t, stateFile, state)
 
-	_, err := SubmitVerdict(tmpDir, "task-1", "APPROVED", "", "code-reviewer-1", "")
+	_, err := SubmitVerdict(tmpDir, "task-1", "REJECTED", "late finding", "code-reviewer-1", "")
 	testhelpers.RequireErrorContains(t, err, "not in a reviewing state")
+
+	bb := db.New(stateFile)
+	readState, readErr := bb.Read()
+	if readErr != nil {
+		t.Fatalf("read state error: %v", readErr)
+	}
+	if len(readState.Anomalies) != 1 {
+		t.Fatalf("anomaly count = %d, want 1", len(readState.Anomalies))
+	}
+	anomaly := readState.Anomalies[0]
+	if anomaly.Type != "stale_verdict" || anomaly.Task != "task-1" || anomaly.Reporter != "code-reviewer-1" {
+		t.Fatalf("anomaly = %+v, want stale_verdict for task-1 by code-reviewer-1", anomaly)
+	}
+	if anomaly.Details["attempted_verdict"] != "REJECTED" {
+		t.Fatalf("attempted_verdict = %v, want REJECTED", anomaly.Details["attempted_verdict"])
+	}
+	if anomaly.Details["current_status"] != string(models.TaskStatusImplementing) {
+		t.Fatalf("current_status = %v, want %s", anomaly.Details["current_status"], models.TaskStatusImplementing)
+	}
+	if anomaly.Details["reason"] != "late finding" {
+		t.Fatalf("reason = %v, want late finding", anomaly.Details["reason"])
+	}
+	agent := readState.Agents["code-reviewer-1"]
+	if agent.CurrentTask != nil {
+		t.Fatalf("reviewer CurrentTask = %q, want nil after stale verdict", *agent.CurrentTask)
+	}
+}
+
+func TestSubmitVerdict_RecordsStaleVerdictWhenTaskLeavesReviewBeforeModify(t *testing.T) {
+	tmpDir := t.TempDir()
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+
+	now := time.Now().UTC()
+	state := testhelpers.CreateValidState()
+	state.Tasks = []models.Task{
+		testhelpers.BuildTaskByStatus("task-1", models.TaskStatusReviewing, now),
+	}
+	taskRef := "task-1"
+	state.Agents["code-reviewer-1"] = models.Agent{
+		Role:        models.RoleCodeReviewer,
+		Status:      models.AgentStatusWorking,
+		CurrentTask: &taskRef,
+	}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	bb := db.New(stateFile)
+	testSubmitVerdictHooks = &submitVerdictTestHooks{
+		beforeModify: func() {
+			if err := bb.Modify(func(state *models.State) error {
+				task := state.FindTask("task-1")
+				if task == nil {
+					t.Fatal("task not found")
+				}
+				task.Status = models.TaskStatusImplementing
+				task.ReviewingBy = nil
+				task.ReviewLeaseExpires = nil
+				return nil
+			}); err != nil {
+				t.Fatalf("hook modify state: %v", err)
+			}
+		},
+	}
+	t.Cleanup(func() { testSubmitVerdictHooks = nil })
+
+	_, err := SubmitVerdict(tmpDir, "task-1", "REJECTED", "late finding", "code-reviewer-1", "")
+	testhelpers.RequireErrorContains(t, err, "not in a reviewing state")
+
+	readState, readErr := bb.Read()
+	if readErr != nil {
+		t.Fatalf("read state error: %v", readErr)
+	}
+	if len(readState.Anomalies) != 1 {
+		t.Fatalf("anomaly count = %d, want 1", len(readState.Anomalies))
+	}
+	anomaly := readState.Anomalies[0]
+	if anomaly.Type != "stale_verdict" || anomaly.Task != "task-1" || anomaly.Reporter != "code-reviewer-1" {
+		t.Fatalf("anomaly = %+v, want stale_verdict for task-1 by code-reviewer-1", anomaly)
+	}
+	if anomaly.Details["current_status"] != string(models.TaskStatusImplementing) {
+		t.Fatalf("current_status = %v, want %s", anomaly.Details["current_status"], models.TaskStatusImplementing)
+	}
+	if anomaly.Details["attempted_verdict"] != "REJECTED" {
+		t.Fatalf("attempted_verdict = %v, want REJECTED", anomaly.Details["attempted_verdict"])
+	}
+	agent := readState.Agents["code-reviewer-1"]
+	if agent.CurrentTask != nil {
+		t.Fatalf("reviewer CurrentTask = %q, want nil after stale verdict", *agent.CurrentTask)
+	}
+}
+
+func TestRecordStaleVerdictAnomaly_SkipsReviewingTask(t *testing.T) {
+	tmpDir := t.TempDir()
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+
+	now := time.Now().UTC()
+	state := testhelpers.CreateValidState()
+	state.Tasks = []models.Task{
+		testhelpers.BuildTaskByStatus("task-1", models.TaskStatusReviewing, now),
+	}
+	taskRef := "task-1"
+	state.Agents["code-reviewer-1"] = models.Agent{
+		Role:        models.RoleCodeReviewer,
+		Status:      models.AgentStatusReviewing,
+		CurrentTask: &taskRef,
+	}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	bb := db.New(stateFile)
+	err := recordStaleVerdictAnomaly(
+		bb,
+		"task-1",
+		"code-reviewer-1",
+		"REJECTED",
+		"late finding",
+		"",
+		models.TaskStatusReviewing,
+		models.TaskStatusReviewingCode2,
+	)
+	if err != nil {
+		t.Fatalf("recordStaleVerdictAnomaly() error: %v", err)
+	}
+
+	readState, readErr := bb.Read()
+	if readErr != nil {
+		t.Fatalf("read state error: %v", readErr)
+	}
+	if len(readState.Anomalies) != 0 {
+		t.Fatalf("anomaly count = %d, want 0", len(readState.Anomalies))
+	}
+	agent := readState.Agents["code-reviewer-1"]
+	if agent.CurrentTask == nil || *agent.CurrentTask != "task-1" {
+		t.Fatalf("reviewer CurrentTask = %v, want task-1 preserved", agent.CurrentTask)
+	}
 }
 
 func TestSubmitVerdict_AgentReleased(t *testing.T) {

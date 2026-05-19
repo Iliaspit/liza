@@ -309,6 +309,11 @@ metadata, is `IDLE`, and has empty `current_task` or `current_task` already set
 to the same task. This covers supervisor restart and child CLI exit windows
 without losing owned work.
 
+`WAITING` with `current_task` is passive wait metadata, not active ownership.
+It is valid for a doer only while the assigned task is submitted, reviewing, or
+partially approved and the doer is awaiting a verdict. Other doer `WAITING`
+task references are stale.
+
 Repair is more conservative for doers than for reviewers. Reviewer repair is a
 state-only correction, but doer worktrees may contain unsubmitted work; therefore
 `liza validate --repair` refuses to clear invalid doer ownership while the
@@ -356,8 +361,11 @@ For tasks in a pipeline reviewing state, including second-review states, review
 ownership is a bidirectional invariant: `reviewing_by` must point to an agent
 whose role is the exact reviewer role resolved from the task's `role_pair`, and
 that agent must be `REVIEWING` with `current_task` set to the same task.
-`reviewing_by` on a non-reviewing task is not active ownership; it is stale or
-orphaned state to clear through recovery.
+`reviewing_by` on a non-reviewing task is not active review ownership. It is
+valid only as passive wait metadata when a `WAITING` reviewer is awaiting doer
+resubmission for a rejected/executing task and `review_lease_expires` is still
+in the future; otherwise it is stale or orphaned state to clear through
+recovery.
 
 | Condition | Review Claimable? |
 |-----------|-------------------|
@@ -394,6 +402,7 @@ Code Reviewer MUST log to anomalies section:
 | Spec assumption contradicted by code | `assumption_violated` |
 | Spec changed since task creation | `spec_changed` |
 | Own review stuck in command loop | `reviewer_loop` |
+| Verdict attempt races with task leaving review | CLI records `stale_verdict` |
 
 Code Reviewer MUST include in rejection:
 - Spec reference (if applicable)

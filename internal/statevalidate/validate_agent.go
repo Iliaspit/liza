@@ -188,10 +188,76 @@ func validateReverseActiveOwnership(state *models.State, resolver *pipeline.Reso
 			if agent.Role != expectedRole {
 				return fmt.Errorf("agent %s says REVIEWING %s, but agent role %q, want %q", agentID, task.ID, agent.Role, expectedRole)
 			}
+		case models.AgentStatusWaiting:
+			if err := validateWaitingTaskReference(resolver, agentID, agent, task); err != nil {
+				return err
+			}
 		}
 	}
 
 	return nil
+}
+
+func validateWaitingTaskReference(resolver *pipeline.Resolver, agentID string, agent models.Agent, task *models.Task) error {
+	if task.RolePair == "" {
+		return fmt.Errorf("agent %s says WAITING %s, but task has no role_pair", agentID, task.ID)
+	}
+
+	expectedDoer, doerErr := resolver.DoerRole(task.RolePair)
+	if doerErr != nil {
+		return fmt.Errorf("agent %s says WAITING %s, but doer role resolution failed for role_pair %q: %w", agentID, task.ID, task.RolePair, doerErr)
+	}
+	if agent.Role == expectedDoer {
+		if task.AssignedTo == nil || *task.AssignedTo != agentID {
+			return fmt.Errorf("agent %s says WAITING %s as doer, but task assigned_to is %s", agentID, task.ID, ownerValue(task.AssignedTo))
+		}
+		if !isAwaitingVerdictTask(task, resolver) {
+			return fmt.Errorf("agent %s says WAITING %s as doer, but task status %s is not awaiting review verdict", agentID, task.ID, task.Status)
+		}
+		return nil
+	}
+
+	expectedReviewer, reviewerErr := resolver.ReviewerRole(task.RolePair)
+	if reviewerErr != nil {
+		return fmt.Errorf("agent %s says WAITING %s, but reviewer role resolution failed for role_pair %q: %w", agentID, task.ID, task.RolePair, reviewerErr)
+	}
+	if agent.Role == expectedReviewer {
+		if task.ReviewingBy == nil || *task.ReviewingBy != agentID {
+			return fmt.Errorf("agent %s says WAITING %s as reviewer, but task reviewing_by is %s", agentID, task.ID, ownerValue(task.ReviewingBy))
+		}
+		if task.ReviewLeaseExpires == nil {
+			return fmt.Errorf("agent %s says WAITING %s as reviewer, but task has no review_lease_expires", agentID, task.ID)
+		}
+		if !task.ReviewLeaseExpires.After(time.Now().UTC()) {
+			return fmt.Errorf("agent %s says WAITING %s as reviewer, but review_lease_expires is not in the future", agentID, task.ID)
+		}
+		if !isAwaitingResubmissionTask(task, resolver) {
+			return fmt.Errorf("agent %s says WAITING %s as reviewer, but task status %s is not awaiting resubmission", agentID, task.ID, task.Status)
+		}
+		return nil
+	}
+
+	return fmt.Errorf("agent %s says WAITING %s, but agent role %q is neither doer %q nor reviewer %q", agentID, task.ID, agent.Role, expectedDoer, expectedReviewer)
+}
+
+func isAwaitingVerdictTask(task *models.Task, resolver *pipeline.Resolver) bool {
+	submitted, err := resolver.SubmittedStatus(task.RolePair)
+	if err == nil && task.Status == submitted {
+		return true
+	}
+	if isActiveReviewingTask(task, resolver) {
+		return true
+	}
+	partiallyApproved, err := resolver.PartiallyApprovedStatus(task.RolePair)
+	return err == nil && task.Status == partiallyApproved
+}
+
+func isAwaitingResubmissionTask(task *models.Task, resolver *pipeline.Resolver) bool {
+	rejected, err := resolver.RejectedStatus(task.RolePair)
+	if err == nil && task.Status == rejected {
+		return true
+	}
+	return models.IsExecutingStatus(task, resolver)
 }
 
 func ownerValue(owner *string) string {

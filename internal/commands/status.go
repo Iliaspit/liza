@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -15,6 +17,7 @@ import (
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/ops"
 	"github.com/liza-mas/liza/internal/paths"
+	"github.com/liza-mas/liza/internal/procscan"
 	"github.com/liza-mas/liza/internal/render"
 )
 
@@ -313,7 +316,7 @@ func buildPhaseHandoffStatus(state *models.State, projectRoot string) *phaseHand
 			}
 			if assignedAgent, ok := state.Agents[*task.AssignedTo]; ok {
 				blocker.AgentStatus = string(assignedAgent.Status)
-				processInfo := getProcessStatusInfo(assignedAgent.PID)
+				processInfo := getAgentProcessStatusInfo(*task.AssignedTo, assignedAgent)
 				blocker.AgentProcessStatus = processInfo.Status
 				blocker.ProcessStatusSource = processInfo.Source
 				blocker.ProcessStatusDetail = processInfo.Detail
@@ -387,7 +390,7 @@ func buildAgentStatuses(state *models.State) []agentStatus {
 
 		timeSince := now.Sub(agent.Heartbeat)
 		as.TimeSinceHeartbeat = render.FormatDuration(timeSince)
-		processInfo := getProcessStatusInfo(agent.PID)
+		processInfo := getAgentProcessStatusInfo(id, agent)
 		as.ProcessStatus = processInfo.Status
 		as.ProcessStatusSource = processInfo.Source
 		as.ProcessStatusDetail = processInfo.Detail
@@ -468,15 +471,23 @@ type processStatusInfo struct {
 	Detail string
 }
 
-// getProcessStatusInfo checks process liveness and records how the status was
-// derived so callers can distinguish signal checks from missing PID data.
-func getProcessStatusInfo(pid int) processStatusInfo {
+var processStatusProcRoot = "/proc"
+
+func getAgentProcessStatusInfo(agentID string, agent models.Agent) processStatusInfo {
+	return getProcessStatusInfoForAgent(agent.PID, agent.Role, agentID)
+}
+
+func getProcessStatusInfoForAgent(pid int, role, agentID string) processStatusInfo {
 	if pid == 0 {
 		return processStatusInfo{
 			Status: "unknown",
 			Source: "pid",
 			Detail: "no pid recorded",
 		}
+	}
+
+	if info, ok := getProcfsProcessStatusInfo(pid, role, agentID); ok {
+		return info
 	}
 
 	process, err := os.FindProcess(pid)
@@ -517,6 +528,29 @@ func getProcessStatusInfo(pid int) processStatusInfo {
 		Source: "signal(0)",
 		Detail: err.Error(),
 	}
+}
+
+func getProcfsProcessStatusInfo(pid int, role, agentID string) (processStatusInfo, bool) {
+	cmdlinePath := filepath.Join(processStatusProcRoot, strconv.Itoa(pid), "cmdline")
+	data, err := os.ReadFile(cmdlinePath)
+	if err != nil {
+		return processStatusInfo{}, false
+	}
+
+	argv := procscan.ParseCmdlineBytes(data)
+	if procscan.MatchesLizaAgentIdentity(argv, role, agentID) {
+		return processStatusInfo{
+			Status: "running",
+			Source: "procfs",
+			Detail: "cmdline matches expected liza agent supervisor",
+		}, true
+	}
+
+	return processStatusInfo{
+		Status: "mismatched",
+		Source: "procfs",
+		Detail: "pid exists but cmdline does not match expected liza agent supervisor",
+	}, true
 }
 
 func writeTasksSection(b *strings.Builder, tasks taskStatus) {

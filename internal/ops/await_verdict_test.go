@@ -1408,6 +1408,15 @@ func TestHandleVerdictResult_NonAwaitableStatusRecoversVerdict(t *testing.T) {
 	if result.ReviewCommit != reviewCommit {
 		t.Errorf("ReviewCommit = %q, want %q", result.ReviewCommit, reviewCommit)
 	}
+
+	readState, err := bb.Read()
+	if err != nil {
+		t.Fatalf("read state error: %v", err)
+	}
+	agent := readState.Agents["coder-1"]
+	if agent.CurrentTask != nil {
+		t.Fatalf("coder-1 CurrentTask = %q, want nil after recovered verdict", *agent.CurrentTask)
+	}
 }
 
 type silentAwaitVerdictWatcher struct{}

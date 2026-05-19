@@ -785,7 +785,8 @@ When a task is in the pipeline reviewing state or reviewing-2 state,
 agent must have the exact reviewer role resolved from the task's `role_pair`,
 status `REVIEWING`, `current_task` equal to the task ID, and a valid review
 lease. A `reviewing_by` value on non-reviewing states is stale/orphaned state,
-not an active claim.
+not an active claim, except while a `WAITING` reviewer is passively awaiting
+resubmission for a rejected/executing task with an unexpired review lease.
 
 **Heartbeat interval:** 60 seconds
 **Lease duration:** 1800 seconds (30 minutes)
@@ -878,6 +879,7 @@ For detailed definition including edge cases (submodules, untracked files), see 
 | `review_budget_exhausted` | Orchestrator | Coder-Code Reviewer reached max cycles without approval |
 | `review_exhaustion` | Orchestrator | Two reviewers failed to issue verdict on same task |
 | `reviewer_loop` | Code Reviewer | Reviewer stuck in command loop, self-aborted |
+| `stale_verdict` | CLI | Reviewer attempted verdict after task already left review |
 | `system_ambiguity` | Any role | Liza protocol or role definition unclear, escalated to Orchestrator |
 | `provider_audit_degraded` | Supervisor | Provider ran but transcript/rollout persistence is suspect |
 
@@ -891,6 +893,7 @@ For detailed definition including edge cases (submodules, untracked files), see 
 | `assumption_violated` | `assumption`, `reality` | Assumption cascade detection |
 | `reviewer_loop` | `count`, `command_pattern` | Reviewer self-abort on repetitive commands |
 | `review_exhaustion` | `reviewers_failed`, `common_blocker` | Two reviewers failed to complete review |
+| `stale_verdict` | `attempted_verdict`, `current_status` | Preserve reviewer findings lost to review-transition race |
 | `system_ambiguity` | `protocol_section`, `question` | Track Liza system gaps for human clarification |
 | `provider_audit_degraded` | `provider`, `agent_id`, `message` | Aggregate provider audit degradation across agents |
 
@@ -966,7 +969,7 @@ invariants:
   - "Task arch_ref must reference an existing file (checked via checkSpecFileExists against project root then integration branch)"
   - "Task output entry arch_ref must not contain worktree prefix (.worktrees/) — must be repo-relative"
   # Note: output entry arch_ref does NOT have file-existence validation (entries are set before merge)
-  - "Anomaly type must be one of: retry_loop, trade_off, spec_ambiguity, external_blocker, assumption_violated, scope_deviation, workaround, debt_created, spec_changed, hypothesis_exhaustion, spec_gap, review_budget_exhausted, review_exhaustion, reviewer_loop, system_ambiguity, provider_audit_degraded"
+  - "Anomaly type must be one of: retry_loop, trade_off, spec_ambiguity, external_blocker, assumption_violated, scope_deviation, workaround, debt_created, spec_changed, hypothesis_exhaustion, spec_gap, review_budget_exhausted, review_exhaustion, reviewer_loop, stale_verdict, system_ambiguity, provider_audit_degraded"
   # Transition invariants (runtime-enforced, not statically validated)
   # These are enforced by agent behavior and atomic operations during state transitions.
   # `liza validate` validates static state invariants; these require history analysis.

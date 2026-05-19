@@ -384,6 +384,7 @@ func handleVerdictResult(bb *db.Blackboard, task *models.Task, agentID, projectR
 				}
 				// Blocked or other limit exhaustion.
 				if result, ok := recoveredVerdictAfterReclaimFailure(bb, task.ID, agentID, rejected); ok {
+					releaseOwnership(bb, agentID)
 					return result, nil
 				}
 				releaseOwnership(bb, agentID)
@@ -398,6 +399,7 @@ func handleVerdictResult(bb *db.Blackboard, task *models.Task, agentID, projectR
 			}
 			// Infrastructure error during reclaim.
 			if result, ok := recoveredVerdictAfterReclaimFailure(bb, task.ID, agentID, rejected); ok {
+				releaseOwnership(bb, agentID)
 				return result, nil
 			}
 			releaseOwnership(bb, agentID)

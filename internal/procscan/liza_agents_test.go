@@ -155,6 +155,32 @@ func TestIsLizaAgentArgv(t *testing.T) {
 	}
 }
 
+func TestMatchesLizaAgentIdentity(t *testing.T) {
+	argv := []string{"/home/me/bin/liza", "agent", "coder", "--agent-id", "coder-1", "--cli", "codex"}
+
+	tests := []struct {
+		name    string
+		role    string
+		agentID string
+		want    bool
+	}{
+		{name: "exact match", role: "coder", agentID: "coder-1", want: true},
+		{name: "role wildcard", agentID: "coder-1", want: true},
+		{name: "agent wildcard", role: "coder", want: true},
+		{name: "wrong role", role: "code-reviewer", agentID: "coder-1", want: false},
+		{name: "wrong agent", role: "coder", agentID: "coder-2", want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := MatchesLizaAgentIdentity(argv, tt.role, tt.agentID)
+			if got != tt.want {
+				t.Fatalf("MatchesLizaAgentIdentity() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func writeProc(t *testing.T, procRoot string, pid int, cwd string, argv []string) {
 	t.Helper()
 	procDir := writeProcCmdline(t, procRoot, pid, argv)

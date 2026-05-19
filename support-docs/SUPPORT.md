@@ -16,7 +16,7 @@ liza validate --skip-process-checks # Offline/archive validation only
 liza analyze                       # Circuit breaker pattern detection
 ```
 
-`liza status --format json` includes `process_status_source` and `process_status_detail` for agents and phase-handoff blockers. Use these fields when a task appears assigned but the process state is ambiguous.
+`liza status --format json` and `liza get agents --format json` include `process_status_source` and `process_status_detail` for agents; status also includes them for phase-handoff blockers. Use these fields when a task appears assigned but the process state is ambiguous.
 Live zombie-agent detection currently requires Linux procfs. On hosts without procfs, `liza validate` warns and skips the live-process check, while `liza get agents --zombies` reports that scanning is unavailable.
 
 ## Recovery Commands

@@ -98,6 +98,21 @@ func IsLizaAgentArgv(argv []string) bool {
 	return filepath.Base(argv[0]) == "liza" && argv[1] == "agent"
 }
 
+// MatchesLizaAgentIdentity reports whether argv identifies the expected liza
+// agent supervisor. Empty role or agentID inputs are treated as wildcards.
+func MatchesLizaAgentIdentity(argv []string, role, agentID string) bool {
+	if !IsLizaAgentArgv(argv) {
+		return false
+	}
+	if role != "" && roleFromArgv(argv) != role {
+		return false
+	}
+	if agentID != "" && flagValue(argv, "--agent-id") != agentID {
+		return false
+	}
+	return true
+}
+
 func readCmdline(path string) ([]string, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {

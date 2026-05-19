@@ -1178,6 +1178,14 @@ func TestValidateAnomalies_RequiredDetailsByType(t *testing.T) {
 			},
 			errContains: "provider_audit_degraded anomaly",
 		},
+		{
+			name: "stale_verdict missing required details fails",
+			anomaly: models.Anomaly{
+				Type:    "stale_verdict",
+				Details: map[string]any{"attempted_verdict": "REJECTED"},
+			},
+			errContains: "stale_verdict anomaly",
+		},
 	}
 
 	for _, tt := range tests {
@@ -1243,6 +1251,13 @@ func TestValidateAnomalies_RequestedTypeBranchesPassWithValidDetails(t *testing.
 			anomaly: models.Anomaly{
 				Type:    "provider_audit_degraded",
 				Details: map[string]any{"provider": "codex", "agent_id": "coder-1", "message": "failed to record rollout items"},
+			},
+		},
+		{
+			name: "stale_verdict branch",
+			anomaly: models.Anomaly{
+				Type:    "stale_verdict",
+				Details: map[string]any{"attempted_verdict": "REJECTED", "current_status": "IMPLEMENTING_CODE"},
 			},
 		},
 	}

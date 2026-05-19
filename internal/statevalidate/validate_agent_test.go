@@ -255,6 +255,119 @@ func TestValidateAgentInvariants_ReverseActiveOwnership(t *testing.T) {
 		assertErrorContains(t, err, "agent code-reviewer-1 says REVIEWING task-1, but task status CODE_READY_FOR_REVIEW is not active review")
 
 	})
+
+	t.Run("waiting doer is valid while awaiting verdict", func(t *testing.T) {
+		state, doerID := activeDoerOwnershipState(now)
+		state.Tasks[0].Status = models.TaskStatusReadyForReview
+		agent := state.Agents[doerID]
+		agent.Status = models.AgentStatusWaiting
+		agent.CurrentTask = testhelpers.StringPtr(state.Tasks[0].ID)
+		agent.LeaseExpires = nil
+		state.Agents[doerID] = agent
+
+		err := validateAgentInvariants(state, "", true, io.Discard, resolver)
+		if err != nil {
+			t.Fatalf("validateAgentInvariants() error = %v, want nil", err)
+		}
+	})
+
+	t.Run("waiting doer pointing at another active owner is stale", func(t *testing.T) {
+		state, doerID := activeDoerOwnershipState(now)
+		state.Tasks[0].AssignedTo = testhelpers.StringPtr("coder-2")
+		agent := state.Agents[doerID]
+		agent.Status = models.AgentStatusWaiting
+		agent.CurrentTask = testhelpers.StringPtr(state.Tasks[0].ID)
+		agent.LeaseExpires = nil
+		state.Agents[doerID] = agent
+		state.Agents["coder-2"] = models.Agent{
+			Role:         models.RoleCoder,
+			Status:       models.AgentStatusWorking,
+			CurrentTask:  testhelpers.StringPtr(state.Tasks[0].ID),
+			LeaseExpires: testhelpers.TimePtr(now.Add(30 * time.Minute)),
+			Heartbeat:    now,
+			Terminal:     "test",
+			Provider:     "test",
+			PID:          os.Getpid(),
+		}
+
+		err := validateAgentInvariants(state, "", true, io.Discard, resolver)
+		assertErrorContains(t, err, "agent coder-1 says WAITING task-1 as doer, but task assigned_to is coder-2")
+	})
+
+	t.Run("waiting reviewer is valid while awaiting resubmission", func(t *testing.T) {
+		state, _ := activeDoerOwnershipState(now)
+		reviewerID := "code-reviewer-1"
+		state.Tasks[0].ReviewingBy = testhelpers.StringPtr(reviewerID)
+		state.Tasks[0].ReviewLeaseExpires = testhelpers.TimePtr(now.Add(30 * time.Minute))
+		state.Agents[reviewerID] = models.Agent{
+			Role:        models.RoleCodeReviewer,
+			Status:      models.AgentStatusWaiting,
+			CurrentTask: testhelpers.StringPtr(state.Tasks[0].ID),
+			Heartbeat:   now,
+			Terminal:    "test",
+			Provider:    "test",
+			PID:         os.Getpid(),
+		}
+
+		err := validateAgentInvariants(state, "", true, io.Discard, resolver)
+		if err != nil {
+			t.Fatalf("validateAgentInvariants() error = %v, want nil", err)
+		}
+	})
+
+	t.Run("waiting reviewer without review lease is stale", func(t *testing.T) {
+		state, _ := activeDoerOwnershipState(now)
+		reviewerID := "code-reviewer-1"
+		state.Tasks[0].ReviewingBy = testhelpers.StringPtr(reviewerID)
+		state.Agents[reviewerID] = models.Agent{
+			Role:        models.RoleCodeReviewer,
+			Status:      models.AgentStatusWaiting,
+			CurrentTask: testhelpers.StringPtr(state.Tasks[0].ID),
+			Heartbeat:   now,
+			Terminal:    "test",
+			Provider:    "test",
+			PID:         os.Getpid(),
+		}
+
+		err := validateAgentInvariants(state, "", true, io.Discard, resolver)
+		assertErrorContains(t, err, "agent code-reviewer-1 says WAITING task-1 as reviewer, but task has no review_lease_expires")
+	})
+
+	t.Run("waiting reviewer with expired review lease is stale", func(t *testing.T) {
+		state, _ := activeDoerOwnershipState(now)
+		reviewerID := "code-reviewer-1"
+		state.Tasks[0].ReviewingBy = testhelpers.StringPtr(reviewerID)
+		state.Tasks[0].ReviewLeaseExpires = testhelpers.TimePtr(now.Add(-time.Minute))
+		state.Agents[reviewerID] = models.Agent{
+			Role:        models.RoleCodeReviewer,
+			Status:      models.AgentStatusWaiting,
+			CurrentTask: testhelpers.StringPtr(state.Tasks[0].ID),
+			Heartbeat:   now,
+			Terminal:    "test",
+			Provider:    "test",
+			PID:         os.Getpid(),
+		}
+
+		err := validateAgentInvariants(state, "", true, io.Discard, resolver)
+		assertErrorContains(t, err, "agent code-reviewer-1 says WAITING task-1 as reviewer, but review_lease_expires is not in the future")
+	})
+
+	t.Run("waiting reviewer without reviewing_by is stale", func(t *testing.T) {
+		state, _ := activeDoerOwnershipState(now)
+		reviewerID := "code-reviewer-1"
+		state.Agents[reviewerID] = models.Agent{
+			Role:        models.RoleCodeReviewer,
+			Status:      models.AgentStatusWaiting,
+			CurrentTask: testhelpers.StringPtr(state.Tasks[0].ID),
+			Heartbeat:   now,
+			Terminal:    "test",
+			Provider:    "test",
+			PID:         os.Getpid(),
+		}
+
+		err := validateAgentInvariants(state, "", true, io.Discard, resolver)
+		assertErrorContains(t, err, "agent code-reviewer-1 says WAITING task-1 as reviewer, but task reviewing_by is <none>")
+	})
 }
 
 func activeReviewOwnershipState(now time.Time) (*models.State, string) {

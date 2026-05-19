@@ -859,6 +859,7 @@ func TestAnomalyTypes(t *testing.T) {
 		"review_budget_exhausted",
 		"review_exhaustion",
 		"reviewer_loop",
+		"stale_verdict",
 		"system_ambiguity",
 		"provider_audit_degraded",
 	}

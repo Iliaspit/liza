@@ -1,6 +1,9 @@
 package commands
 
 import (
+	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -528,6 +531,38 @@ func TestBuildStatusData_AgentProcessStatus(t *testing.T) {
 	// Should mention seconds since it's 30 seconds ago
 	if !strings.Contains(agent.TimeSinceHeartbeat, "s") {
 		t.Errorf("expected TimeSinceHeartbeat to contain time unit, got %s", agent.TimeSinceHeartbeat)
+	}
+}
+
+func TestGetProcessStatusInfo_ProcfsFallback(t *testing.T) {
+	oldProcRoot := processStatusProcRoot
+	processStatusProcRoot = t.TempDir()
+	t.Cleanup(func() { processStatusProcRoot = oldProcRoot })
+
+	pid := 999999
+	writeStatusProcCmdline(t, processStatusProcRoot, pid, []string{"liza", "agent", "coder", "--agent-id", "coder-1", "--cli", "codex"})
+
+	info := getProcessStatusInfoForAgent(pid, "coder", "coder-1")
+	if info.Status != "running" || info.Source != "procfs" {
+		t.Fatalf("process status = %+v, want running from procfs", info)
+	}
+
+	mismatch := getProcessStatusInfoForAgent(pid, "code-reviewer", "code-reviewer-1")
+	if mismatch.Status != "mismatched" || mismatch.Source != "procfs" {
+		t.Fatalf("mismatched process status = %+v, want mismatched from procfs", mismatch)
+	}
+}
+
+func writeStatusProcCmdline(t *testing.T, procRoot string, pid int, argv []string) {
+	t.Helper()
+
+	procDir := filepath.Join(procRoot, strconv.Itoa(pid))
+	if err := os.MkdirAll(procDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	cmdline := strings.Join(argv, "\x00") + "\x00"
+	if err := os.WriteFile(filepath.Join(procDir, "cmdline"), []byte(cmdline), 0644); err != nil {
+		t.Fatal(err)
 	}
 }
 

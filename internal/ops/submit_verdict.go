@@ -33,6 +33,12 @@ var impactOrder = map[string]int{
 	"architecture": 2,
 }
 
+type submitVerdictTestHooks struct {
+	beforeModify func()
+}
+
+var testSubmitVerdictHooks *submitVerdictTestHooks
+
 // IsValidImpact returns whether v is a recognized impact classification.
 // Empty string is valid (means "not specified").
 func IsValidImpact(v string) bool {
@@ -148,9 +154,10 @@ func SubmitVerdict(projectRoot, taskID, verdict, reason, agentID, impact string)
 	pipelineTransitions := BuildPipelineTransitions(resolver)
 
 	// Fast-fail before git operations; re-checked authoritatively inside Modify.
-	isReviewing := task.Status == expectedReviewingStatus ||
-		(expectedReviewing2Status != "" && task.Status == expectedReviewing2Status)
-	if !isReviewing {
+	if !isReviewingStatus(task.Status, expectedReviewingStatus, expectedReviewing2Status) {
+		if recordErr := recordStaleVerdictAnomaly(bb, taskID, agentID, verdict, reason, impact, expectedReviewingStatus, expectedReviewing2Status); recordErr != nil {
+			return nil, fmt.Errorf("failed to record stale verdict anomaly: %w", recordErr)
+		}
 		return nil, &PreconditionError{Reason: fmt.Sprintf("task %s is not in a reviewing state (current status: %s)", taskID, task.Status)}
 	}
 
@@ -191,6 +198,11 @@ func SubmitVerdict(projectRoot, taskID, verdict, reason, agentID, impact string)
 	blockedReasonOut := ""
 	newAttemptNeeded := false
 	newAttemptReason := ""
+	var staleVerdictErr *PreconditionError
+
+	if testSubmitVerdictHooks != nil && testSubmitVerdictHooks.beforeModify != nil {
+		testSubmitVerdictHooks.beforeModify()
+	}
 
 	err = bb.Modify(func(state *models.State) error {
 		task := state.FindTask(taskID)
@@ -198,10 +210,10 @@ func SubmitVerdict(projectRoot, taskID, verdict, reason, agentID, impact string)
 			return &errors.NotFoundError{Entity: "task", ID: taskID}
 		}
 
-		isReviewingAuth := task.Status == expectedReviewingStatus ||
-			(expectedReviewing2Status != "" && task.Status == expectedReviewing2Status)
-		if !isReviewingAuth {
-			return &PreconditionError{Reason: fmt.Sprintf("task %s is not in a reviewing state (current status: %s)", taskID, task.Status)}
+		if !isReviewingStatus(task.Status, expectedReviewingStatus, expectedReviewing2Status) {
+			appendStaleVerdictAnomaly(state, task, taskID, agentID, verdict, reason, impact, now)
+			staleVerdictErr = &PreconditionError{Reason: fmt.Sprintf("task %s is not in a reviewing state (current status: %s)", taskID, task.Status)}
+			return nil
 		}
 
 		transitionTask := func(to models.TaskStatus) error {
@@ -345,6 +357,9 @@ func SubmitVerdict(projectRoot, taskID, verdict, reason, agentID, impact string)
 	if err != nil {
 		return nil, fmt.Errorf("failed to submit verdict: %w", err)
 	}
+	if staleVerdictErr != nil {
+		return nil, staleVerdictErr
+	}
 
 	if newAttemptNeeded {
 		_, taErr := TransitionToNewAttempt(projectRoot, taskID, newAttemptReason)
@@ -362,4 +377,54 @@ func SubmitVerdict(projectRoot, taskID, verdict, reason, agentID, impact string)
 		BlockedReason:       blockedReasonOut,
 		NewAttemptTriggered: !escalatedToBlocked && newAttemptNeeded,
 	}, nil
+}
+
+func isReviewingStatus(status, expectedReviewingStatus, expectedReviewing2Status models.TaskStatus) bool {
+	return status == expectedReviewingStatus ||
+		(expectedReviewing2Status != "" && status == expectedReviewing2Status)
+}
+
+func recordStaleVerdictAnomaly(bb *db.Blackboard, taskID, agentID, verdict, reason, impact string, expectedReviewingStatus, expectedReviewing2Status models.TaskStatus) error {
+	now := time.Now().UTC()
+	return bb.Modify(func(state *models.State) error {
+		task := state.FindTask(taskID)
+		if task == nil {
+			return &errors.NotFoundError{Entity: "task", ID: taskID}
+		}
+		if isReviewingStatus(task.Status, expectedReviewingStatus, expectedReviewing2Status) {
+			return nil
+		}
+
+		appendStaleVerdictAnomaly(state, task, taskID, agentID, verdict, reason, impact, now)
+
+		return nil
+	})
+}
+
+func appendStaleVerdictAnomaly(state *models.State, task *models.Task, taskID, agentID, verdict, reason, impact string, now time.Time) {
+	details := map[string]any{
+		"attempted_verdict": verdict,
+		"current_status":    string(task.Status),
+	}
+	if reason != "" {
+		details["reason"] = reason
+	}
+	if impact != "" {
+		details["impact"] = impact
+	}
+	if task.ReviewCommit != nil {
+		details["review_commit"] = *task.ReviewCommit
+	}
+
+	state.Anomalies = append(state.Anomalies, models.Anomaly{
+		Timestamp: now,
+		Task:      taskID,
+		Reporter:  agentID,
+		Type:      "stale_verdict",
+		Details:   details,
+	})
+
+	if agent, ok := state.Agents[agentID]; ok && agent.CurrentTask != nil && *agent.CurrentTask == taskID {
+		state.ReleaseAgent(agentID)
+	}
 }
