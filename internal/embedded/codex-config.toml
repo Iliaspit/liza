@@ -7,12 +7,6 @@ default_permissions = "workspace"
 "/tmp" = "write"
 # {{WORKSPACE_SUPPORT_ROOTS}}
 
-[permissions.workspace.filesystem.":project_roots"]
-"." = "write"
-".git" = "write"
-".agents" = "read"
-".codex" = "read"
-
 [permissions.workspace.network]
 enabled = true
 

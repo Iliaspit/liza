@@ -42,10 +42,13 @@ readable or writable in the active `permissions.workspace.filesystem` profile:
 npm cache roots are writable. If the file already exists, Liza prompts before
 merging those entries and preserves unrelated settings.
 
-When launching Codex for a claimed task, Liza passes both the task worktree and
-the project `.git` directory as explicit `--add-dir` entries. This is required
-because Git worktrees write the task index under the main repo metadata path
-(`.git/worktrees/<task>/index.lock`), not under the worktree directory itself.
+When launching Codex, Liza also passes launch-time `-c` overrides granting
+write access to the active project root and project `.git` directory, plus
+read access to project `.codex`. For claimed tasks, Liza also passes both the
+task worktree and the project `.git` directory as explicit `--add-dir` entries.
+This is required because Git worktrees write the task index under the main repo
+metadata path (`.git/worktrees/<task>/index.lock`), not under the worktree
+directory itself.
 
 This is not the full Codex baseline. Users still own broader settings such as
 interactive `approval_policy` and MCP server configuration. See

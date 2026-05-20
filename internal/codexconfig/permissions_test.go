@@ -45,7 +45,6 @@ func TestWorkspaceFilesystemInlineTableIncludesSupportRoots(t *testing.T) {
 		`":tmpdir"="write"`,
 		tomlQuotedKey(lizaRoot) + `="read"`,
 		tomlQuotedKey(cache) + `="write"`,
-		`":project_roots"={"."="write", ".git"="write", ".agents"="read", ".codex"="read"}`,
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("WorkspaceFilesystemInlineTable() missing %q:\n%s", want, got)

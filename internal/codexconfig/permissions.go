@@ -52,7 +52,6 @@ func WorkspaceFilesystemInlineTable(readRoots, writeRoots []string) string {
 	for _, root := range UniqueNonEmptyStrings(writeRoots) {
 		entries = append(entries, tomlQuotedKey(root)+`="write"`)
 	}
-	entries = append(entries, `":project_roots"={"."="write", ".git"="write", ".agents"="read", ".codex"="read"}`)
 	return "{" + strings.Join(entries, ", ") + "}"
 }
 

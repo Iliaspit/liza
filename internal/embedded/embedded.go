@@ -657,10 +657,6 @@ func mergeCodexWorkspacePermissionBaseline(content string) (string, bool) {
 		{"permissions.workspace.filesystem", `":root"`, `"read"`},
 		{"permissions.workspace.filesystem", `":tmpdir"`, `"write"`},
 		{"permissions.workspace.filesystem", `"/tmp"`, `"write"`},
-		{`permissions.workspace.filesystem.":project_roots"`, `"."`, `"write"`},
-		{`permissions.workspace.filesystem.":project_roots"`, `".git"`, `"write"`},
-		{`permissions.workspace.filesystem.":project_roots"`, `".agents"`, `"read"`},
-		{`permissions.workspace.filesystem.":project_roots"`, `".codex"`, `"read"`},
 		{"permissions.workspace.network", "enabled", "true"},
 	}
 

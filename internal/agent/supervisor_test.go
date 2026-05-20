@@ -1046,7 +1046,9 @@ func TestEnvValueUsesLastEnvValue(t *testing.T) {
 
 func TestBuildCodexArgs(t *testing.T) {
 	t.Run("stdin without logging disables approval prompts", func(t *testing.T) {
-		args := buildCodexArgs("/tmp/project", "ignored", true, "", []string{"/tmp", "/tmp/project/.worktrees/task-1"})
+		projectRoot := "/tmp/project"
+		additionalDirs := []string{"/tmp", "/tmp/project/.worktrees/task-1"}
+		args := buildCodexArgs(projectRoot, "ignored", true, "", additionalDirs)
 
 		if slices.Contains(args, "--full-auto") {
 			t.Fatalf("args = %v, did not expect --full-auto flag", args)
@@ -1054,7 +1056,7 @@ func TestBuildCodexArgs(t *testing.T) {
 		if !containsAdjacent(args, "-c", `approval_policy="never"`) {
 			t.Fatalf("args = %v, want noninteractive approval policy", args)
 		}
-		for _, override := range codexWorkspacePermissionOverrides() {
+		for _, override := range codexWorkspacePermissionOverrides(projectRoot, additionalDirs) {
 			if !containsAdjacent(args, "-c", override) {
 				t.Fatalf("args = %v, missing Codex config override %q", args, override)
 			}
@@ -1078,7 +1080,8 @@ func TestBuildCodexArgs(t *testing.T) {
 	})
 
 	t.Run("prompt with logging emits json", func(t *testing.T) {
-		args := buildCodexArgs("/tmp/project", "do the thing", false, "/tmp/logs", nil)
+		projectRoot := "/tmp/project"
+		args := buildCodexArgs(projectRoot, "do the thing", false, "/tmp/logs", nil)
 
 		if !slices.Contains(args, "do the thing") {
 			t.Fatalf("args = %v, want prompt argument", args)
@@ -1092,7 +1095,7 @@ func TestBuildCodexArgs(t *testing.T) {
 		if !containsAdjacent(args, "-c", `approval_policy="never"`) {
 			t.Fatalf("args = %v, want noninteractive approval policy", args)
 		}
-		for _, override := range codexWorkspacePermissionOverrides() {
+		for _, override := range codexWorkspacePermissionOverrides(projectRoot, nil) {
 			if !containsAdjacent(args, "-c", override) {
 				t.Fatalf("args = %v, missing Codex config override %q", args, override)
 			}
@@ -1113,22 +1116,20 @@ func TestCodexWorkspacePermissionOverridesIncludesSupportRoots(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UserCacheDir() error: %v", err)
 	}
+	projectRoot := "/tmp/project"
+	additionalDirs := []string{"/tmp/project/.worktrees/task-1"}
 
-	var filesystemOverride string
-	for _, override := range codexWorkspacePermissionOverrides() {
-		if strings.HasPrefix(override, "permissions.workspace.filesystem=") {
-			filesystemOverride = override
-			break
-		}
-	}
-	if filesystemOverride == "" {
-		t.Fatal("missing permissions.workspace.filesystem override")
-	}
+	overrides := codexWorkspacePermissionOverrides(projectRoot, additionalDirs)
+	filesystemOverride := findCodexOverride(t, overrides, "permissions.workspace.filesystem=")
 	for _, want := range []string{
 		strconv.Quote(filepath.Join(fakeHome, ".codex")) + `="write"`,
 		strconv.Quote(filepath.Join(fakeHome, ".npm")) + `="write"`,
 		strconv.Quote(cacheDir) + `="write"`,
 		strconv.Quote(filepath.Join(fakeHome, ".liza")) + `="read"`,
+		strconv.Quote(projectRoot) + `="write"`,
+		strconv.Quote(filepath.Join(projectRoot, ".git")) + `="write"`,
+		strconv.Quote(filepath.Join(projectRoot, ".codex")) + `="read"`,
+		strconv.Quote(additionalDirs[0]) + `="write"`,
 	} {
 		if !strings.Contains(filesystemOverride, want) {
 			t.Fatalf("override missing %q:\n%s", want, filesystemOverride)
@@ -1137,6 +1138,17 @@ func TestCodexWorkspacePermissionOverridesIncludesSupportRoots(t *testing.T) {
 	if strings.Contains(filesystemOverride, strconv.Quote(filepath.Join(fakeHome, ".liza"))+`="write"`) {
 		t.Fatalf("override should not make ~/.liza writable:\n%s", filesystemOverride)
 	}
+}
+
+func findCodexOverride(t *testing.T, overrides []string, prefix string) string {
+	t.Helper()
+	for _, override := range overrides {
+		if strings.HasPrefix(override, prefix) {
+			return override
+		}
+	}
+	t.Fatalf("missing Codex override prefix %q in %v", prefix, overrides)
+	return ""
 }
 
 func containsAdjacent(values []string, first, second string) bool {

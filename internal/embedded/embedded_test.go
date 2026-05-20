@@ -1126,11 +1126,6 @@ func expectedCodexPermissionSnippets() []string {
 		`":root" = "read"`,
 		`":tmpdir" = "write"`,
 		`"/tmp" = "write"`,
-		`[permissions.workspace.filesystem.":project_roots"]`,
-		`"." = "write"`,
-		`".git" = "write"`,
-		`".agents" = "read"`,
-		`".codex" = "read"`,
 		`[permissions.workspace.network]`,
 		`enabled = true`,
 	}
@@ -1177,12 +1172,6 @@ default_permissions = "workspace"
 "/tmp" = "write"
 ` + strings.TrimSuffix(codexconfig.RenderWorkspaceFilesystemSupportAssignments(readRoots, writeRoots), "\n") + `
 
-[permissions.workspace.filesystem.":project_roots"]
-"." = "write"
-".git" = "write"
-".agents" = "read"
-".codex" = "read"
-
 [permissions.workspace.network]
 enabled = true
 
@@ -1220,12 +1209,6 @@ default_permissions = "workspace"
 ":tmpdir" = "write"
 "/tmp" = "write"
 ` + strings.TrimSuffix(codexconfig.RenderWorkspaceFilesystemSupportAssignments(readRoots, writeRoots), "\n") + `
-
-[permissions.workspace.filesystem.":project_roots"]
-"." = "write"
-".git" = "write"
-".agents" = "read"
-".codex" = "read"
 
 [permissions.workspace.network]
 enabled = true
@@ -1392,9 +1375,6 @@ func TestWriteCodexProjectPermissions_ReplacesInsufficientPermissionWithoutDupli
 default_permissions = "read-only"
 model = "gpt-5"
 
-[permissions.workspace.filesystem.":project_roots"]
-".git" = "read"
-
 [permissions.workspace.network]
 enabled = false
 `
@@ -1422,16 +1402,12 @@ enabled = false
 	if count := strings.Count(text, "sandbox_mode"); count != 1 {
 		t.Fatalf("sandbox_mode count = %d, want 1:\n%s", count, text)
 	}
-	if count := strings.Count(text, `".git"`); count != 1 {
-		t.Fatalf(".git project root count = %d, want 1:\n%s", count, text)
-	}
 	if count := strings.Count(text, "enabled"); count != 1 {
 		t.Fatalf("network enabled count = %d, want 1:\n%s", count, text)
 	}
 	for _, want := range []string{
 		`sandbox_mode = "workspace-write"`,
 		`default_permissions = "workspace"`,
-		`".git" = "write"`,
 		`enabled = true`,
 	} {
 		if !strings.Contains(text, want) {

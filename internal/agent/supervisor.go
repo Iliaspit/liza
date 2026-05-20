@@ -445,7 +445,7 @@ func buildCodexArgs(projectRoot, prompt string, useStdin bool, outputsDir string
 	} else {
 		args = append(args, "exec", prompt)
 	}
-	for _, override := range codexWorkspacePermissionOverrides() {
+	for _, override := range codexWorkspacePermissionOverrides(projectRoot, additionalDirs) {
 		args = append(args, "-c", override)
 	}
 	for _, dir := range additionalDirs {
@@ -460,7 +460,9 @@ func buildCodexArgs(projectRoot, prompt string, useStdin bool, outputsDir string
 	return args
 }
 
-func codexWorkspacePermissionOverrides() []string {
+func codexWorkspacePermissionOverrides(projectRoot string, additionalDirs []string) []string {
+	readRoots := codexSessionReadableRoots(projectRoot)
+	writeRoots := codexSessionWritableRoots(projectRoot, additionalDirs)
 	return []string{
 		`sandbox_mode="workspace-write"`,
 		`approval_policy="never"`,
@@ -468,9 +470,27 @@ func codexWorkspacePermissionOverrides() []string {
 		// Codex accepts one TOML assignment per -c override. Keep the nested
 		// filesystem profile as one inline table so the quoted pseudo-root keys
 		// stay grouped under permissions.workspace.filesystem.
-		`permissions.workspace.filesystem=` + codexconfig.WorkspaceFilesystemInlineTable(codexSupportReadableRoots(), codexSupportWritableRoots()),
+		`permissions.workspace.filesystem=` + codexconfig.WorkspaceFilesystemInlineTable(readRoots, writeRoots),
 		`permissions.workspace.network.enabled=true`,
 	}
+}
+
+func codexSessionReadableRoots(projectRoot string) []string {
+	roots := codexSupportReadableRoots()
+	if projectRoot != "" {
+		roots = append(roots, filepath.Join(projectRoot, ".codex"))
+	}
+	return codexconfig.UniqueNonEmptyStrings(roots)
+}
+
+func codexSessionWritableRoots(projectRoot string, additionalDirs []string) []string {
+	var roots []string
+	if projectRoot != "" {
+		roots = append(roots, projectRoot, filepath.Join(projectRoot, ".git"))
+	}
+	roots = append(roots, additionalDirs...)
+	roots = append(roots, codexSupportWritableRoots()...)
+	return codexconfig.UniqueNonEmptyStrings(roots)
 }
 
 func codexInteractiveArgs(additionalDirs []string) []string {

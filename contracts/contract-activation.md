@@ -64,12 +64,6 @@ default_permissions = "workspace"
 "/home/<USER>/.cache" = "write"
 "/home/<USER>/.npm" = "write"
 
-[permissions.workspace.filesystem.":project_roots"]
-"." = "write"
-".git" = "write"
-".agents" = "read"
-".codex" = "read"
-
 [permissions.workspace.network]
 enabled = true
 
@@ -92,7 +86,7 @@ args = ["-y", "@modelcontextprotocol/server-filesystem", "/home/<USER>/.claude",
 # Codex agents access Liza via `liza` CLI commands through Bash — no MCP server needed.
 ```
 
-If Codex agents must run `git add`, `git commit`, `git worktree`, or Liza review submission flows from a repo worktree, the active project root and its `.git` directory must both be listed in `writable_roots`. `liza init --codex` manages these project-specific entries and `/tmp` for scratch files. Liza also passes the task worktree and project `.git` directory as explicit `--add-dir` entries when launching Codex for a claimed task. Without writable access to `.git`, Codex may mount git metadata read-only even when the worktree files themselves are writable, which blocks creation of `index.lock` under `.git/worktrees/...`.
+If Codex agents must run `git add`, `git commit`, `git worktree`, or Liza review submission flows from a repo worktree, the active project root and its `.git` directory must both be listed in `writable_roots`. `liza init --codex` manages these project-specific entries and `/tmp` for scratch files. Liza also passes launch-time `-c` overrides granting write access to the active project root and project `.git`, plus read access to project `.codex`. For claimed tasks, it also passes the task worktree and project `.git` directory as explicit `--add-dir` entries. Without writable access to `.git`, Codex may mount git metadata read-only even when the worktree files themselves are writable, which blocks creation of `index.lock` under `.git/worktrees/...`.
 
 Liza launches Codex supervisors with `codex exec -` plus `-c` overrides for
 `sandbox_mode="workspace-write"`, `approval_policy="never"`,
