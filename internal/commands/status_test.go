@@ -547,9 +547,22 @@ func TestGetProcessStatusInfo_ProcfsFallback(t *testing.T) {
 		t.Fatalf("process status = %+v, want running from procfs", info)
 	}
 
+	autoAssignedPID := 999998
+	writeStatusProcCmdline(t, processStatusProcRoot, autoAssignedPID, []string{"liza", "agent", "coder", "--cli", "codex"})
+
+	autoAssigned := getProcessStatusInfoForAgent(autoAssignedPID, "coder", "coder-1")
+	if autoAssigned.Status != "running" || autoAssigned.Source != "procfs" {
+		t.Fatalf("auto-assigned process status = %+v, want running from procfs", autoAssigned)
+	}
+
 	mismatch := getProcessStatusInfoForAgent(pid, "code-reviewer", "code-reviewer-1")
 	if mismatch.Status != "mismatched" || mismatch.Source != "procfs" {
 		t.Fatalf("mismatched process status = %+v, want mismatched from procfs", mismatch)
+	}
+
+	wrongExplicitID := getProcessStatusInfoForAgent(pid, "coder", "coder-2")
+	if wrongExplicitID.Status != "mismatched" || wrongExplicitID.Source != "procfs" {
+		t.Fatalf("wrong explicit ID status = %+v, want mismatched from procfs", wrongExplicitID)
 	}
 }
 

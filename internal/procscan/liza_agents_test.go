@@ -156,24 +156,58 @@ func TestIsLizaAgentArgv(t *testing.T) {
 }
 
 func TestMatchesLizaAgentIdentity(t *testing.T) {
-	argv := []string{"/home/me/bin/liza", "agent", "coder", "--agent-id", "coder-1", "--cli", "codex"}
-
 	tests := []struct {
 		name    string
+		argv    []string
 		role    string
 		agentID string
 		want    bool
 	}{
-		{name: "exact match", role: "coder", agentID: "coder-1", want: true},
-		{name: "role wildcard", agentID: "coder-1", want: true},
-		{name: "agent wildcard", role: "coder", want: true},
-		{name: "wrong role", role: "code-reviewer", agentID: "coder-1", want: false},
-		{name: "wrong agent", role: "coder", agentID: "coder-2", want: false},
+		{
+			name:    "exact match",
+			argv:    []string{"/home/me/bin/liza", "agent", "coder", "--agent-id", "coder-1", "--cli", "codex"},
+			role:    "coder",
+			agentID: "coder-1",
+			want:    true,
+		},
+		{
+			name:    "auto assigned agent ID",
+			argv:    []string{"/home/me/bin/liza", "agent", "coder", "--cli", "codex"},
+			role:    "coder",
+			agentID: "coder-1",
+			want:    true,
+		},
+		{
+			name:    "role wildcard",
+			argv:    []string{"/home/me/bin/liza", "agent", "coder", "--agent-id", "coder-1", "--cli", "codex"},
+			agentID: "coder-1",
+			want:    true,
+		},
+		{
+			name: "agent wildcard",
+			argv: []string{"/home/me/bin/liza", "agent", "coder", "--agent-id", "coder-1", "--cli", "codex"},
+			role: "coder",
+			want: true,
+		},
+		{
+			name:    "wrong role",
+			argv:    []string{"/home/me/bin/liza", "agent", "coder", "--agent-id", "coder-1", "--cli", "codex"},
+			role:    "code-reviewer",
+			agentID: "coder-1",
+			want:    false,
+		},
+		{
+			name:    "wrong explicit agent",
+			argv:    []string{"/home/me/bin/liza", "agent", "coder", "--agent-id", "coder-1", "--cli", "codex"},
+			role:    "coder",
+			agentID: "coder-2",
+			want:    false,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := MatchesLizaAgentIdentity(argv, tt.role, tt.agentID)
+			got := MatchesLizaAgentIdentity(tt.argv, tt.role, tt.agentID)
 			if got != tt.want {
 				t.Fatalf("MatchesLizaAgentIdentity() = %v, want %v", got, tt.want)
 			}

@@ -100,6 +100,8 @@ func IsLizaAgentArgv(argv []string) bool {
 
 // MatchesLizaAgentIdentity reports whether argv identifies the expected liza
 // agent supervisor. Empty role or agentID inputs are treated as wildcards.
+// Omitted --agent-id is valid because liza agent auto-assigns an ID when the
+// flag is not provided; explicit --agent-id values must still match.
 func MatchesLizaAgentIdentity(argv []string, role, agentID string) bool {
 	if !IsLizaAgentArgv(argv) {
 		return false
@@ -107,7 +109,11 @@ func MatchesLizaAgentIdentity(argv []string, role, agentID string) bool {
 	if role != "" && roleFromArgv(argv) != role {
 		return false
 	}
-	if agentID != "" && flagValue(argv, "--agent-id") != agentID {
+	if agentID == "" {
+		return true
+	}
+	argvAgentID := flagValue(argv, "--agent-id")
+	if argvAgentID != "" && argvAgentID != agentID {
 		return false
 	}
 	return true
