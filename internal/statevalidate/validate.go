@@ -9,7 +9,7 @@ import (
 
 	"github.com/liza-mas/liza/internal/db"
 	lizaerrors "github.com/liza-mas/liza/internal/errors"
-	"github.com/liza-mas/liza/internal/gitenv"
+	"github.com/liza-mas/liza/internal/git"
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/pipeline"
 	"github.com/liza-mas/liza/internal/statehygiene"
@@ -17,13 +17,20 @@ import (
 
 const artifactRefMultipleRefsCause = "multiple_refs_not_supported"
 const artifactRefNotFoundCause = "file_not_found"
+const artifactRefInvalidModeCause = "invalid_artifact_mode"
+const artifactRefEmptyPathCause = "empty_ref_path"
+const artifactRefPathTraversalCause = "path_traversal_outside_repo"
+const artifactRefAbsoluteOutsideRepoCause = "absolute_path_outside_repo"
 
 // ArtifactRefError carries safe diagnostics for invalid artifact references.
 type ArtifactRefError struct {
-	Field  string
-	Value  string
-	TaskID string
-	Cause  string
+	Field       string
+	Value       string
+	Path        string
+	Mode        string
+	TaskID      string
+	OutputIndex *int
+	Cause       string
 }
 
 func (e *ArtifactRefError) Error() string {
@@ -33,9 +40,29 @@ func (e *ArtifactRefError) Error() string {
 	}
 	switch e.Cause {
 	case artifactRefMultipleRefsCause:
-		return formatArtifactRefError(field, "contains multiple refs; use one repo-relative ref", e.Value, e.TaskID)
+		return formatArtifactRefError(field, "contains multiple refs; use one repo-relative ref", e.Value, e.TaskID, e.OutputIndex)
+	case artifactRefEmptyPathCause:
+		return formatArtifactRefError(field, "has empty path after fragment stripping", e.Value, e.TaskID, e.OutputIndex)
+	case artifactRefPathTraversalCause:
+		return formatArtifactRefError(field, "points outside repository", e.Value, e.TaskID, e.OutputIndex)
+	case artifactRefAbsoluteOutsideRepoCause:
+		return formatArtifactRefError(field, "absolute path outside repository", e.Value, e.TaskID, e.OutputIndex)
+	case artifactRefInvalidModeCause:
+		value := e.Value
+		if e.Path != "" {
+			value = e.Path
+		}
+		reason := "is not a regular file"
+		if e.Mode != "" {
+			reason += fmt.Sprintf(" (mode %s)", e.Mode)
+		}
+		return formatArtifactRefError(field, reason, value, e.TaskID, e.OutputIndex)
 	default:
-		return formatArtifactRefError(field, "file not found", e.Value, e.TaskID)
+		value := e.Value
+		if e.Path != "" {
+			value = e.Path
+		}
+		return formatArtifactRefError(field, "file not found", value, e.TaskID, e.OutputIndex)
 	}
 }
 
@@ -48,14 +75,35 @@ func (e *ArtifactRefError) SafeDetails() map[string]any {
 	if e.TaskID != "" {
 		details["task_id"] = e.TaskID
 	}
+	if e.Path != "" {
+		details["path"] = e.Path
+	}
+	if e.Mode != "" {
+		details["mode"] = e.Mode
+	}
+	if e.OutputIndex != nil {
+		details["output_index"] = *e.OutputIndex
+	}
 	return details
 }
 
-func formatArtifactRefError(field, reason, value, taskID string) string {
+func formatArtifactRefError(field, reason, value, taskID string, outputIndex *int) string {
+	suffix := ""
 	if taskID != "" {
-		return fmt.Sprintf("%s %s: %s (task: %s)", field, reason, value, taskID)
+		suffix = fmt.Sprintf(" (task: %s", taskID)
 	}
-	return fmt.Sprintf("%s %s: %s", field, reason, value)
+	if outputIndex != nil {
+		if suffix == "" {
+			suffix = " ("
+		} else {
+			suffix += ", "
+		}
+		suffix += fmt.Sprintf("output: %d", *outputIndex)
+	}
+	if suffix != "" {
+		suffix += ")"
+	}
+	return fmt.Sprintf("%s %s: %s%s", field, reason, value, suffix)
 }
 
 // ValidateArtifactRefScalar rejects delimiter-joined refs. Artifact ref fields
@@ -194,57 +242,41 @@ func checkSpecFileExists(projectRoot, specRef, integrationBranch string) error {
 // gates use it after a candidate integration update to catch commits that delete
 // durable artifacts still referenced by the blackboard.
 func ValidateArtifactRefs(state *models.State, projectRoot string) error {
-	if state == nil {
-		return fmt.Errorf("state is nil")
+	refs, err := CollectArtifactRefs(state, projectRoot)
+	if err != nil {
+		return err
 	}
 	integrationBranch := state.Config.IntegrationBranch
-	if state.Goal.SpecRef != "" {
-		if err := checkArtifactRefFileExists(projectRoot, "goal spec_ref", state.Goal.SpecRef, integrationBranch, ""); err != nil {
+	for _, ref := range refs {
+		if err := checkCollectedArtifactRefFileExists(projectRoot, ref, integrationBranch); err != nil {
 			return err
 		}
 	}
-	for _, task := range state.Tasks {
-		if artifactRefsRetired(task) {
-			continue
-		}
-		refs := []struct {
-			field string
-			value string
-		}{
-			{field: "spec_ref", value: task.SpecRef},
-			{field: "epic_ref", value: task.EpicRef},
-			{field: "plan_ref", value: task.PlanRef},
-			{field: "arch_ref", value: task.ArchRef},
-		}
-		for _, ref := range refs {
-			if ref.value == "" {
-				continue
-			}
-			if err := checkArtifactRefFileExists(projectRoot, ref.field, ref.value, integrationBranch, task.ID); err != nil {
-				return err
-			}
-		}
-		for i, entry := range task.Output {
-			outputRefs := []struct {
-				field string
-				value string
-			}{
-				{field: fmt.Sprintf("output[%d].spec_ref", i), value: entry.SpecRef},
-				{field: fmt.Sprintf("output[%d].epic_ref", i), value: entry.EpicRef},
-				{field: fmt.Sprintf("output[%d].plan_ref", i), value: entry.PlanRef},
-				{field: fmt.Sprintf("output[%d].arch_ref", i), value: entry.ArchRef},
-			}
-			for _, ref := range outputRefs {
-				if ref.value == "" {
-					continue
-				}
-				if err := checkArtifactRefFileExists(projectRoot, ref.field, ref.value, integrationBranch, task.ID); err != nil {
-					return err
-				}
-			}
+	return nil
+}
+
+func checkCollectedArtifactRefFileExists(projectRoot string, ref ArtifactRef, integrationBranch string) error {
+	if exists, invalidMode := artifactRefFileExists(projectRoot, ref.Path, integrationBranch); exists {
+		return nil
+	} else if invalidMode != "" {
+		return &ArtifactRefError{
+			Field:       ref.Owner.Field,
+			Value:       ref.Raw,
+			Path:        ref.Path,
+			Mode:        invalidMode,
+			TaskID:      ref.Owner.TaskID,
+			OutputIndex: cloneInt(ref.Owner.OutputIndex),
+			Cause:       artifactRefInvalidModeCause,
 		}
 	}
-	return nil
+	return &ArtifactRefError{
+		Field:       ref.Owner.Field,
+		Value:       ref.Raw,
+		Path:        ref.Path,
+		TaskID:      ref.Owner.TaskID,
+		OutputIndex: cloneInt(ref.Owner.OutputIndex),
+		Cause:       artifactRefNotFoundCause,
+	}
 }
 
 func artifactRefsRetired(task models.Task) bool {
@@ -263,24 +295,80 @@ func checkArtifactRefFileExists(projectRoot, field, ref, integrationBranch, task
 	if !filepath.IsAbs(refPath) {
 		refPath = filepath.Join(projectRoot, refFile)
 	}
-	if _, err := os.Stat(refPath); err == nil {
+	if exists, invalidMode := artifactRefWorkingTreeFileExists(refPath); exists {
 		return nil
+	} else if invalidMode != "" {
+		return &ArtifactRefError{
+			Field:  field,
+			Value:  ref,
+			Path:   refFile,
+			Mode:   invalidMode,
+			TaskID: taskID,
+			Cause:  artifactRefInvalidModeCause,
+		}
 	}
-	// Fallback: file may exist on integration branch but not on the repo-root
-	// filesystem (e.g. merged by a sibling worktree). Try git cat-file -e.
-	// If git is not on PATH or the branch doesn't exist, this falls through
-	// gracefully to the "file not found" error below.
 	if integrationBranch != "" && projectRoot != "" && !filepath.IsAbs(refFile) {
-		if _, err := gitenv.CombinedOutput(projectRoot, "cat-file", "-e", integrationBranch+":"+refFile); err == nil {
+		if exists, invalidMode := artifactRefIntegrationFileExists(projectRoot, integrationBranch, refFile); exists {
 			return nil
+		} else if invalidMode != "" {
+			return &ArtifactRefError{
+				Field:  field,
+				Value:  ref,
+				Path:   refFile,
+				Mode:   invalidMode,
+				TaskID: taskID,
+				Cause:  artifactRefInvalidModeCause,
+			}
 		}
 	}
 	return &ArtifactRefError{
 		Field:  field,
 		Value:  ref,
+		Path:   refFile,
 		TaskID: taskID,
 		Cause:  artifactRefNotFoundCause,
 	}
+}
+
+func artifactRefFileExists(projectRoot, repoRelativePath, integrationBranch string) (exists bool, invalidMode string) {
+	var workingTreeMode string
+	if projectRoot != "" {
+		refPath := filepath.Join(projectRoot, filepath.FromSlash(repoRelativePath))
+		if exists, invalidMode := artifactRefWorkingTreeFileExists(refPath); exists {
+			return true, ""
+		} else if invalidMode != "" {
+			workingTreeMode = invalidMode
+		}
+	}
+	if integrationBranch != "" && projectRoot != "" {
+		if exists, invalidMode := artifactRefIntegrationFileExists(projectRoot, integrationBranch, repoRelativePath); exists {
+			return true, ""
+		} else if invalidMode != "" {
+			return false, invalidMode
+		}
+	}
+	return false, workingTreeMode
+}
+
+func artifactRefWorkingTreeFileExists(path string) (exists bool, invalidMode string) {
+	if info, err := os.Lstat(path); err == nil {
+		if info.Mode().IsRegular() {
+			return true, ""
+		}
+		return false, info.Mode().String()
+	}
+	return false, ""
+}
+
+func artifactRefIntegrationFileExists(projectRoot, integrationBranch, repoRelativePath string) (exists bool, invalidMode string) {
+	mode, present, err := git.New(projectRoot).TreePathMode(integrationBranch, repoRelativePath)
+	if err != nil || !present {
+		return false, ""
+	}
+	if isRegularArtifactGitMode(mode) {
+		return true, ""
+	}
+	return false, mode
 }
 
 // buildTaskIDSet creates a lookup set of all task IDs for O(1) existence

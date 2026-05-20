@@ -49,6 +49,11 @@ var DefaultIntegrationTestTimeout = 10 * time.Minute
 // Production code leaves this nil.
 var mergeCASRetryTestHook func(attempt int, integrationRef, preMergeHEAD string) error
 
+// artifactGuardPostUpdateTestHook is a test-only hook invoked after a successful
+// CAS merge and before the retained post-merge artifact validation backstop.
+// Production code leaves this nil.
+var artifactGuardPostUpdateTestHook func() error
+
 // Integration failure reason constants.
 const (
 	IntegrationReasonHEADMismatch           = "worktree HEAD mismatch"
@@ -68,13 +73,22 @@ type IntegrationFailedError struct {
 	Reason        string
 	TestOutput    string // non-empty when failure is from integration tests
 	RollbackError error  // non-nil if rollback (ResetHard) also failed — integration branch may contain failing code
+	Cause         error  // non-nil when the integration failure wraps an underlying cause
 }
 
 func (e *IntegrationFailedError) Error() string {
-	if e.RollbackError != nil {
-		return fmt.Sprintf("integration failed: %s (rollback also failed: %v)", e.Reason, e.RollbackError)
+	msg := fmt.Sprintf("integration failed: %s", e.Reason)
+	if e.Cause != nil {
+		msg = fmt.Sprintf("%s: %v", msg, e.Cause)
 	}
-	return fmt.Sprintf("integration failed: %s", e.Reason)
+	if e.RollbackError != nil {
+		return fmt.Sprintf("%s (rollback also failed: %v)", msg, e.RollbackError)
+	}
+	return msg
+}
+
+func (e *IntegrationFailedError) Unwrap() error {
+	return e.Cause
 }
 
 // MergeResult contains the outcome of a successful worktree merge.
@@ -276,6 +290,55 @@ func rollbackMergedCommit(gitWrapper *git.Git, integrationRef, preMergeHEAD, mer
 	return nil
 }
 
+func buildArtifactGuardHook(bb *db.Blackboard, projectRoot string, gitWrapper *git.Git) func(candidateTreeish string) error {
+	return func(candidateTreeish string) error {
+		if err := validateCandidateArtifactRefsWithFreshState(bb.Read, projectRoot, gitWrapper, candidateTreeish); err != nil {
+			return &candidateArtifactGuardError{err: err}
+		}
+		return nil
+	}
+}
+
+type candidateArtifactGuardError struct {
+	err error
+}
+
+func (e *candidateArtifactGuardError) Error() string {
+	return e.err.Error()
+}
+
+func (e *candidateArtifactGuardError) Unwrap() error {
+	return e.err
+}
+
+func validateCandidateArtifactRefsWithFreshState(
+	readState func() (*models.State, error),
+	projectRoot string,
+	lookup statevalidate.CandidateTreeLookup,
+	candidateTreeish string,
+) error {
+	state, err := readState()
+	if err != nil {
+		return fmt.Errorf("candidate artifact guard failed to read state: %w", err)
+	}
+
+	firstErr := statevalidate.ValidateCandidateStateArtifactRefs(candidateTreeish, state, projectRoot, lookup)
+	if firstErr == nil {
+		return nil
+	}
+
+	confirmationState, confirmationReadErr := readState()
+	if confirmationReadErr != nil {
+		freshnessErr := fmt.Errorf("failed to re-read state for candidate artifact guard freshness: %w", confirmationReadErr)
+		return fmt.Errorf("candidate artifact guard failed and state freshness could not be verified: %w", errors.Join(firstErr, freshnessErr))
+	}
+
+	if confirmationErr := statevalidate.ValidateCandidateStateArtifactRefs(candidateTreeish, confirmationState, projectRoot, lookup); confirmationErr != nil {
+		return confirmationErr
+	}
+	return nil
+}
+
 // shortSHA truncates a SHA to 7 characters for log messages.
 func shortSHA(s string) string {
 	if len(s) > 7 {
@@ -295,7 +358,7 @@ type casMergeOutcome struct {
 // performCASMerge merges expectedCommit into integrationRef using a compare-and-swap
 // retry loop to handle concurrent merges. Returns conflict=true when merge-tree
 // detects conflicts (caller is responsible for the INTEGRATION_FAILED transition).
-func performCASMerge(gw *git.Git, integrationRef, expectedCommit, taskID string) (*casMergeOutcome, error) {
+func performCASMerge(gw *git.Git, integrationRef, expectedCommit, taskID string, preUpdateHook func(candidateTreeish string) error) (*casMergeOutcome, error) {
 	var mergeCommit, preMergeHEAD string
 	var fastForward bool
 
@@ -335,6 +398,15 @@ func performCASMerge(gw *git.Git, integrationRef, expectedCommit, taskID string)
 			return nil, fmt.Errorf("failed to check fast-forward: %w", err)
 		}
 		if isFF {
+			if preUpdateHook != nil {
+				if err := preUpdateHook(expectedCommit); err != nil {
+					retry, hookErr := handlePreUpdateHookFailure(gw, integrationRef, preMergeHEAD, err)
+					if retry {
+						continue
+					}
+					return nil, hookErr
+				}
+			}
 			if err := gw.UpdateRef(integrationRef, expectedCommit, preMergeHEAD); err != nil {
 				var casErr *git.RefConflictError
 				if errors.As(err, &casErr) {
@@ -368,6 +440,15 @@ func performCASMerge(gw *git.Git, integrationRef, expectedCommit, taskID string)
 		}
 		fastForward = false
 
+		if preUpdateHook != nil {
+			if err := preUpdateHook(mergeCommit); err != nil {
+				retry, hookErr := handlePreUpdateHookFailure(gw, integrationRef, preMergeHEAD, err)
+				if retry {
+					continue
+				}
+				return nil, hookErr
+			}
+		}
 		if err := gw.UpdateRef(integrationRef, mergeCommit, preMergeHEAD); err != nil {
 			var casErr *git.RefConflictError
 			if errors.As(err, &casErr) {
@@ -386,6 +467,18 @@ func performCASMerge(gw *git.Git, integrationRef, expectedCommit, taskID string)
 		preMergeHEAD: preMergeHEAD,
 		fastForward:  fastForward,
 	}, nil
+}
+
+func handlePreUpdateHookFailure(gw *git.Git, integrationRef, preMergeHEAD string, hookErr error) (bool, error) {
+	currentHEAD, err := gw.GetCommitSHA(integrationRef)
+	if err != nil {
+		stalenessErr := fmt.Errorf("failed to re-read integration HEAD: %w", err)
+		return false, fmt.Errorf("pre-update hook failed and staleness could not be verified: %w", errors.Join(hookErr, stalenessErr))
+	}
+	if currentHEAD != preMergeHEAD {
+		return true, nil
+	}
+	return false, hookErr
 }
 
 // MergeWorktree merges an approved task into the integration branch.
@@ -467,8 +560,17 @@ func MergeWorktree(projectRoot, taskID, agentID string, mergeExtra ...map[string
 
 	integrationRef := "refs/heads/" + integrationBranch
 
-	outcome, err := performCASMerge(gitWrapper, integrationRef, expectedCommit, taskID)
+	artifactGuardHook := buildArtifactGuardHook(bb, projectRoot, gitWrapper)
+	outcome, err := performCASMerge(gitWrapper, integrationRef, expectedCommit, taskID, artifactGuardHook)
 	if err != nil {
+		var artifactErr *candidateArtifactGuardError
+		if errors.As(err, &artifactErr) {
+			diagnostic := integrationFailureDiagnosticWithDetail(IntegrationReasonStateInvalid, err.Error(), "", "", nil)
+			if updateErr := markIntegrationFailedWithDiagnostic(bb, taskID, agentID, IntegrationReasonStateInvalid, "", pb, diagnostic); updateErr != nil {
+				return nil, fmt.Errorf("failed to update state to INTEGRATION_FAILED: %w", updateErr)
+			}
+			return nil, &IntegrationFailedError{Reason: IntegrationReasonStateInvalid, Cause: err}
+		}
 		return nil, err
 	}
 	if outcome.conflict {
@@ -503,6 +605,12 @@ func MergeWorktree(projectRoot, taskID, agentID string, mergeExtra ...map[string
 	rollbackRestoreRef := ""
 	if branchErr == nil && currentBranch != integrationBranch {
 		rollbackRestoreRef = "HEAD"
+	}
+
+	if artifactGuardPostUpdateTestHook != nil {
+		if err := artifactGuardPostUpdateTestHook(); err != nil {
+			return nil, fmt.Errorf("artifact guard post-update test hook failed: %w", err)
+		}
 	}
 
 	currentState, err := bb.Read()
