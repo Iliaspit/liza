@@ -56,7 +56,7 @@ repos:
       - id: jscpd  # a useful one to counter the tendency of coding agents to duplicate code
         name: jscpd (duplicate code detection)
         # write cache to a universally-writable location
-        entry: bash -c 'NPM_CONFIG_CACHE=/tmp/.npm-cache npx jscpd . --min-lines 10 --min-tokens 50 --threshold 5 --noSymlinks --ignore "**/tests/**,**/*_test.go,**/.venv/**,**/_archive/**,**/.idea/**,**/internal/embedded/**,**/.liza/**,**/.worktrees/**,**/.claude/**,claude-settings.json"'
+        entry: bash -c 'unset npm_config_package NPM_CONFIG_PACKAGE; NPM_CONFIG_CACHE=/tmp/.npm-cache npx jscpd . --min-lines 10 --min-tokens 50 --threshold 5 --noSymlinks --ignore "**/tests/**,**/*_test.go,**/.venv/**,**/_archive/**,**/.idea/**,**/internal/embedded/**,**/.liza/**,**/.worktrees/**,**/.claude/**,claude-settings.json"'
         language: system
         files: \.(py|go)$  # trigger when Python or Go files are staged
         pass_filenames: false  # but scan full directory (dupes are cross-file)
@@ -70,7 +70,7 @@ repos:
 
       - id: goimports
         name: goimports (format + imports)
-        entry: bash -c 'export PATH="/usr/local/go/bin:$PATH"; export GOPATH="${HOME}/.cache/go" GOMODCACHE="${HOME}/.cache/go/pkg/mod" GOCACHE="${HOME}/.cache/go/build"; mkdir -p "$GOPATH" "$GOMODCACHE" "$GOCACHE"; go run golang.org/x/tools/cmd/goimports@latest -w "$@"' --
+        entry: bash -c 'export PATH="/usr/local/go/bin:$PATH"; export GOPATH="${HOME}/.cache/go" GOMODCACHE="${HOME}/.cache/go/pkg/mod" GOCACHE="${HOME}/.cache/go/build" GOPROXY="file://${HOME}/.cache/go/pkg/mod/cache/download,off" GOSUMDB=off; mkdir -p "$GOPATH" "$GOMODCACHE" "$GOCACHE"; go run golang.org/x/tools/cmd/goimports@v0.45.0 -w "$@"' --
         language: system
         files: \.go$
 
@@ -83,7 +83,7 @@ repos:
 
       - id: staticcheck
         name: staticcheck (advanced static analysis)
-        entry: bash -c 'export PATH="/usr/local/go/bin:$PATH"; export GOPATH="${HOME}/.cache/go" GOMODCACHE="${HOME}/.cache/go/pkg/mod" GOCACHE="${HOME}/.cache/go/build"; mkdir -p "$GOPATH" "$GOMODCACHE" "$GOCACHE"; make sync-embedded && go run honnef.co/go/tools/cmd/staticcheck@latest ./...'
+        entry: bash -c 'export PATH="/usr/local/go/bin:$PATH"; export GOPATH="${HOME}/.cache/go" GOMODCACHE="${HOME}/.cache/go/pkg/mod" GOCACHE="${HOME}/.cache/go/build" GOPROXY="file://${HOME}/.cache/go/pkg/mod/cache/download,off" GOSUMDB=off; mkdir -p "$GOPATH" "$GOMODCACHE" "$GOCACHE"; make sync-embedded && go run honnef.co/go/tools/cmd/staticcheck@v0.7.0 ./...'
         language: system
         files: \.go$
         pass_filenames: false
@@ -97,7 +97,7 @@ repos:
 
       - id: go-mod-tidy
         name: go mod tidy (dependency cleanup)
-        entry: bash -c 'export PATH="/usr/local/go/bin:$PATH"; export GOPATH="${HOME}/.cache/go" GOMODCACHE="${HOME}/.cache/go/pkg/mod" GOCACHE="${HOME}/.cache/go/build"; mkdir -p "$GOPATH" "$GOMODCACHE" "$GOCACHE"; make sync-embedded && go mod tidy'
+        entry: bash -c 'export PATH="/usr/local/go/bin:$PATH"; export GOPATH="${HOME}/.cache/go" GOMODCACHE="${HOME}/.cache/go/pkg/mod" GOCACHE="${HOME}/.cache/go/build" GOPROXY="file://${HOME}/.cache/go/pkg/mod/cache/download,off" GOSUMDB=off; mkdir -p "$GOPATH" "$GOMODCACHE" "$GOCACHE"; make sync-embedded && go mod tidy'
         language: system
         files: ^(go\.mod|go\.sum|.*\.go)$
         pass_filenames: false
