@@ -188,7 +188,7 @@ func checkSpecFileExists(projectRoot, specRef, integrationBranch string) error {
 	return checkArtifactRefFileExists(projectRoot, "spec_ref", specRef, integrationBranch, "")
 }
 
-// ValidateArtifactRefs verifies that every artifact reference stored in state
+// ValidateArtifactRefs verifies that every active artifact reference stored in state
 // points to a reachable repo file in the project working tree or integration
 // branch. It intentionally does not enforce lifecycle/audit invariants; merge
 // gates use it after a candidate integration update to catch commits that delete
@@ -204,6 +204,9 @@ func ValidateArtifactRefs(state *models.State, projectRoot string) error {
 		}
 	}
 	for _, task := range state.Tasks {
+		if artifactRefsRetired(task) {
+			continue
+		}
 		refs := []struct {
 			field string
 			value string
@@ -242,6 +245,10 @@ func ValidateArtifactRefs(state *models.State, projectRoot string) error {
 		}
 	}
 	return nil
+}
+
+func artifactRefsRetired(task models.Task) bool {
+	return task.Status == models.TaskStatusSuperseded || task.Status == models.TaskStatusAbandoned
 }
 
 func checkArtifactRefFileExists(projectRoot, field, ref, integrationBranch, taskID string) error {

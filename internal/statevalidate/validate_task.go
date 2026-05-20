@@ -197,36 +197,39 @@ func validateTaskInvariants(state *models.State, projectRoot string, skipSpecFil
 			}
 		}
 
-		if task.SpecRef != "" && strings.Contains(task.SpecRef, ".worktrees/") {
-			return fmt.Errorf("task %s spec_ref contains worktree prefix (must be repo-relative): %s", task.ID, task.SpecRef)
-		}
-		if !skipSpecFileCheck && task.SpecRef != "" {
-			if err := checkArtifactRefFileExists(projectRoot, "spec_ref", task.SpecRef, state.Config.IntegrationBranch, task.ID); err != nil {
-				return err
+		validateArtifactRefs := !artifactRefsRetired(task)
+		if validateArtifactRefs {
+			if task.SpecRef != "" && strings.Contains(task.SpecRef, ".worktrees/") {
+				return fmt.Errorf("task %s spec_ref contains worktree prefix (must be repo-relative): %s", task.ID, task.SpecRef)
 			}
-		}
-		if task.EpicRef != "" && strings.Contains(task.EpicRef, ".worktrees/") {
-			return fmt.Errorf("task %s epic_ref contains worktree prefix (must be repo-relative): %s", task.ID, task.EpicRef)
-		}
-		if !skipSpecFileCheck && task.EpicRef != "" {
-			if err := checkArtifactRefFileExists(projectRoot, "epic_ref", task.EpicRef, state.Config.IntegrationBranch, task.ID); err != nil {
-				return err
+			if !skipSpecFileCheck && task.SpecRef != "" {
+				if err := checkArtifactRefFileExists(projectRoot, "spec_ref", task.SpecRef, state.Config.IntegrationBranch, task.ID); err != nil {
+					return err
+				}
 			}
-		}
-		if task.PlanRef != "" && strings.Contains(task.PlanRef, ".worktrees/") {
-			return fmt.Errorf("task %s plan_ref contains worktree prefix (must be repo-relative): %s", task.ID, task.PlanRef)
-		}
-		if !skipSpecFileCheck && task.PlanRef != "" {
-			if err := checkArtifactRefFileExists(projectRoot, "plan_ref", task.PlanRef, state.Config.IntegrationBranch, task.ID); err != nil {
-				return err
+			if task.EpicRef != "" && strings.Contains(task.EpicRef, ".worktrees/") {
+				return fmt.Errorf("task %s epic_ref contains worktree prefix (must be repo-relative): %s", task.ID, task.EpicRef)
 			}
-		}
-		if task.ArchRef != "" && strings.Contains(task.ArchRef, ".worktrees/") {
-			return fmt.Errorf("task %s arch_ref contains worktree prefix (must be repo-relative): %s", task.ID, task.ArchRef)
-		}
-		if !skipSpecFileCheck && task.ArchRef != "" {
-			if err := checkArtifactRefFileExists(projectRoot, "arch_ref", task.ArchRef, state.Config.IntegrationBranch, task.ID); err != nil {
-				return err
+			if !skipSpecFileCheck && task.EpicRef != "" {
+				if err := checkArtifactRefFileExists(projectRoot, "epic_ref", task.EpicRef, state.Config.IntegrationBranch, task.ID); err != nil {
+					return err
+				}
+			}
+			if task.PlanRef != "" && strings.Contains(task.PlanRef, ".worktrees/") {
+				return fmt.Errorf("task %s plan_ref contains worktree prefix (must be repo-relative): %s", task.ID, task.PlanRef)
+			}
+			if !skipSpecFileCheck && task.PlanRef != "" {
+				if err := checkArtifactRefFileExists(projectRoot, "plan_ref", task.PlanRef, state.Config.IntegrationBranch, task.ID); err != nil {
+					return err
+				}
+			}
+			if task.ArchRef != "" && strings.Contains(task.ArchRef, ".worktrees/") {
+				return fmt.Errorf("task %s arch_ref contains worktree prefix (must be repo-relative): %s", task.ID, task.ArchRef)
+			}
+			if !skipSpecFileCheck && task.ArchRef != "" {
+				if err := checkArtifactRefFileExists(projectRoot, "arch_ref", task.ArchRef, state.Config.IntegrationBranch, task.ID); err != nil {
+					return err
+				}
 			}
 		}
 
@@ -262,7 +265,7 @@ func validateTaskInvariants(state *models.State, projectRoot string, skipSpecFil
 			}
 		}
 
-		if err := validateTaskOutput(&task); err != nil {
+		if err := validateTaskOutput(&task, validateArtifactRefs); err != nil {
 			return err
 		}
 
@@ -392,7 +395,7 @@ func nonEmptyStrings(values []string) []string {
 // (desc, done_when, scope, spec_ref) and that spec_ref values are
 // repo-relative (not worktree-prefixed). Prevents downstream coding tasks
 // from being created with incomplete or unreachable specifications.
-func validateTaskOutput(task *models.Task) error {
+func validateTaskOutput(task *models.Task, validateArtifactRefs bool) error {
 	for i, entry := range task.Output {
 		if entry.Desc == "" {
 			return fmt.Errorf("task %s output[%d] missing desc", task.ID, i)
@@ -405,6 +408,9 @@ func validateTaskOutput(task *models.Task) error {
 		}
 		if entry.SpecRef == "" {
 			return fmt.Errorf("task %s output[%d] missing spec_ref", task.ID, i)
+		}
+		if !validateArtifactRefs {
+			continue
 		}
 		if strings.Contains(entry.SpecRef, ".worktrees/") {
 			return fmt.Errorf("task %s output[%d] spec_ref contains worktree prefix (must be repo-relative): %s", task.ID, i, entry.SpecRef)

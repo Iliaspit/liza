@@ -147,7 +147,7 @@ After APPROVED, **Code Reviewer** executes:
    - For true merge: compute tree via `git merge-tree`, create commit via `git commit-tree`, update ref via `git update-ref`
    - Working tree files are transiently synced for integration test correctness, then restored if checked-out branch differs from integration
 4. If conflict: task → INTEGRATION_FAILED, Code Reviewer reports
-5. Validate post-merge blackboard artifact references against the synced tree and integration branch
+5. Validate post-merge blackboard artifact references against the synced tree and integration branch. Retired task refs (`SUPERSEDED`, `ABANDONED`) are non-blocking until supersede-time artifact retirement is implemented; active and `MERGED` refs remain protected.
 6. If validation fails: rollback via `git update-ref` to pre-merge HEAD, task → INTEGRATION_FAILED
 7. If integration tests fail: rollback via `git update-ref` to pre-merge HEAD, task → INTEGRATION_FAILED
 8. On success: working tree restored to checked-out branch HEAD (unless on integration, where no restore needed), task → MERGED, worktree deleted

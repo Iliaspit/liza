@@ -278,6 +278,78 @@ func TestCheckArtifactRefFileExists_FieldSpecificDetails(t *testing.T) {
 	}
 }
 
+func TestValidateArtifactRefs_IgnoresRetiredTaskRefs(t *testing.T) {
+	repoDir := initGitRepo(t, "integration", "specs/auth.md", "# Auth spec")
+
+	state := &models.State{
+		Config: models.Config{IntegrationBranch: "integration"},
+		Tasks: []models.Task{
+			{
+				ID:      "superseded-plan",
+				Status:  models.TaskStatusSuperseded,
+				PlanRef: "specs/plans/missing-superseded.md",
+			},
+			{
+				ID:     "abandoned-output",
+				Status: models.TaskStatusAbandoned,
+				Output: []models.OutputEntry{
+					{
+						ArchRef: "specs/arch-plan/missing-abandoned.md",
+					},
+				},
+			},
+		},
+	}
+
+	if err := ValidateArtifactRefs(state, repoDir); err != nil {
+		t.Fatalf("ValidateArtifactRefs() retired refs error = %v", err)
+	}
+}
+
+func TestValidateArtifactRefs_MergedTaskMissingRefStillFails(t *testing.T) {
+	repoDir := initGitRepo(t, "integration", "specs/auth.md", "# Auth spec")
+
+	state := &models.State{
+		Config: models.Config{IntegrationBranch: "integration"},
+		Tasks: []models.Task{
+			{
+				ID:      "merged-plan",
+				Status:  models.TaskStatusMerged,
+				PlanRef: "specs/plans/missing-merged.md",
+			},
+		},
+	}
+
+	err := ValidateArtifactRefs(state, repoDir)
+	if err == nil {
+		t.Fatal("Expected merged task missing plan_ref to fail")
+	}
+	if !strings.Contains(err.Error(), "plan_ref file not found") || !strings.Contains(err.Error(), "merged-plan") {
+		t.Fatalf("error = %q, want merged task plan_ref failure", err.Error())
+	}
+}
+
+func TestValidateTaskInvariants_IgnoresRetiredTaskArtifactRefs(t *testing.T) {
+	repoDir := initGitRepo(t, "integration", "specs/auth.md", "# Auth spec")
+	now := time.Now().UTC()
+	task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusSuperseded, now)
+	task.RescopeReason = testhelpers.StringPtr("replaced by self-contained successor")
+	task.PlanRef = "specs/plans/missing-superseded.md"
+	task.Output = []models.OutputEntry{
+		{
+			Desc:     "Retired output",
+			DoneWhen: "No longer consumed",
+			Scope:    "docs",
+			SpecRef:  "specs/auth.md",
+			ArchRef:  "specs/arch-plan/missing.md",
+		},
+	}
+
+	if err := validateTaskInvariants(stateWithTasks(task), repoDir, false, nil, nil); err != nil {
+		t.Fatalf("validateTaskInvariants() retired refs error = %v", err)
+	}
+}
+
 func TestValidateArtifactRefScalarRejectsSemicolonJoinedRefs(t *testing.T) {
 	err := ValidateArtifactRefScalar("spec_ref", "specs/a.md; specs/b.md#section", "task-1")
 	if err == nil {

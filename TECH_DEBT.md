@@ -2,6 +2,14 @@
 
 Deliberate debt with payback triggers. See CORE.md Rule 3 (DoD) for policy.
 
+## Retired task artifact refs are non-blocking during merge validation
+
+**What:** `ValidateArtifactRefs` and task invariant artifact-ref checks ignore refs on `SUPERSEDED` and `ABANDONED` tasks. This prevents stale superseded/WIP artifacts from blocking unrelated merges, but it also means retired task artifact loss is not enforced by global validation.
+
+**Why deferred:** The correct lifecycle fix is to require superseded replacements to be self-contained or artifact-backed, and to retire stale refs explicitly when they are no longer protected. The current change is a narrow unblock for cross-task contamination while candidate-scoped validation and supersede invariants are still being implemented.
+
+**Payback trigger:** When the supersede invariant and candidate/lifecycle-scoped artifact validation are implemented, remove the retired-task skip and enforce either artifact presence or explicit ref retirement at supersede time.
+
 ## ParentTask (singular) field deprecation
 
 **What:** `models.Task.ParentTask *string` coexists with `ParentTasks []string`. `EffectiveParentTasks()` bridges both, and `buildChildTask` writes only `ParentTasks`. But `ParentTask` remains in the struct and is populated by existing YAML state files.
