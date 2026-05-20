@@ -29,7 +29,7 @@ INSTRUCTIONS:
 7. Test discovery (e.g. pytest, python -m unittest discover) finding 0 tests is a blocker — tests must be discoverable, not just runnable when explicitly named
 8. Verify the done_when criteria are met AND tests exercise those criteria (for code tasks)
 {{- if or .ArchRef .PlanRef}}
-Artifact refs below are repo-relative. Read {{.Worktree}}/<ref> first; if absent, use `git -C {{.Worktree}} show {{.IntegrationBranch}}:<file-ref>` where <file-ref> is the part before #.
+{{template "artifact-ref-fallback" .}}
 {{- end}}
 {{- if ne .ArchRef ""}}
 - Architecture document: {{.ArchRef}} — verify implementation aligns with architectural decisions
@@ -77,7 +77,7 @@ REVIEW CHECKLIST:
 | e2e/doc coverage | Spec compliance matrix missing mandatory E2E or DOC impact rows, or rows marked N/A without justification, or feature adds user-visible behavior but no e2e test or doc update task planned |
 {{- if ne .ArchRef ""}}
 
-Artifact refs below are repo-relative. Read {{.Worktree}}/<ref> first; if absent, use `git -C {{.Worktree}} show {{.IntegrationBranch}}:<file-ref>` where <file-ref> is the part before #.
+{{template "artifact-ref-fallback" .}}
 
 ARCHITECTURE REFERENCE: {{.ArchRef}}
 Verify the code plan is consistent with the architecture document: component boundaries, interfaces, and structural decisions align with the architect's decomposition.

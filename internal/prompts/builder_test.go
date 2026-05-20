@@ -972,7 +972,10 @@ func TestBlockSkillsAffinity_EmptySlice(t *testing.T) {
 }
 
 func TestBlockParentTasksContext_WithEntries(t *testing.T) {
-	tmpl := template.Must(template.ParseFiles("templates/blocks/parent_tasks_context.tmpl"))
+	tmpl := template.Must(template.ParseFiles(
+		"templates/blocks/artifact_ref_fallback.tmpl",
+		"templates/blocks/parent_tasks_context.tmpl",
+	))
 
 	data := RoleContextData{
 		ParentTaskContexts: []ParentTaskContext{
@@ -1024,7 +1027,10 @@ func TestBlockParentTasksContext_WithEntries(t *testing.T) {
 }
 
 func TestBlockParentTasksContext_Empty(t *testing.T) {
-	tmpl := template.Must(template.ParseFiles("templates/blocks/parent_tasks_context.tmpl"))
+	tmpl := template.Must(template.ParseFiles(
+		"templates/blocks/artifact_ref_fallback.tmpl",
+		"templates/blocks/parent_tasks_context.tmpl",
+	))
 
 	data := RoleContextData{
 		ParentTaskContexts: nil,
@@ -1042,7 +1048,10 @@ func TestBlockParentTasksContext_Empty(t *testing.T) {
 }
 
 func TestBlockParentTasksContext_EmptySlice(t *testing.T) {
-	tmpl := template.Must(template.ParseFiles("templates/blocks/parent_tasks_context.tmpl"))
+	tmpl := template.Must(template.ParseFiles(
+		"templates/blocks/artifact_ref_fallback.tmpl",
+		"templates/blocks/parent_tasks_context.tmpl",
+	))
 
 	data := RoleContextData{
 		ParentTaskContexts: []ParentTaskContext{},

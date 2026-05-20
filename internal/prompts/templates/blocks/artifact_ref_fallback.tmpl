@@ -1,0 +1,3 @@
+{{- define "artifact-ref-fallback" -}}
+Artifact refs below are repo-relative. Read {{.Worktree}}/<ref> first; if absent, use `git -C {{.Worktree}} show {{.IntegrationBranch}}:<file-ref>` where <file-ref> is the part before #.
+{{- end -}}

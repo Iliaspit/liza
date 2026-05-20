@@ -3,7 +3,7 @@
 
 --- IMPLEMENTATION PHASE ---
 {{- if or .PlanRef .ArchRef .EpicRef}}
-Artifact refs below are repo-relative. Read {{.Worktree}}/<ref> first; if absent, use `git -C {{.Worktree}} show {{.IntegrationBranch}}:<file-ref>` where <file-ref> is the part before #.
+{{template "artifact-ref-fallback" .}}
 {{- end}}
 {{- if ne .PlanRef ""}}
 Read the implementation plan at {{.PlanRef}} for task decomposition context.
@@ -32,7 +32,7 @@ Read the epic at {{.EpicRef}} for requirement context and user stories at specs/
 
 IMPLEMENTATION PHASE:
 {{- if or .ArchRef .EpicRef}}
-Artifact refs below are repo-relative. Read {{.Worktree}}/<ref> first; if absent, use `git -C {{.Worktree}} show {{.IntegrationBranch}}:<file-ref>` where <file-ref> is the part before #.
+{{template "artifact-ref-fallback" .}}
 {{- end}}
 {{- if ne .ArchRef ""}}
 ARCHITECTURE REFERENCE: {{.ArchRef}}

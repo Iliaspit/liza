@@ -3,7 +3,7 @@
 
 === PARENT TASKS ({{len .ParentTaskContexts}}) ===
 This task consolidates {{len .ParentTaskContexts}} approved upstream task(s):
-Parent artifact refs are repo-relative. Read {{.Worktree}}/<ref> first; if absent, use `git -C {{.Worktree}} show {{.IntegrationBranch}}:<file-ref>` where <file-ref> is the part before #.
+{{template "artifact-ref-fallback" .}}
 {{- range .ParentTaskContexts}}
 
 --- {{.ID}} ---
