@@ -1467,6 +1467,94 @@ func TestRunChecks_NoCircuitBreakerAlertBelowThreshold(t *testing.T) {
 	}
 }
 
+func TestRunChecks_SuppressesAcknowledgedCircuitBreakerPattern(t *testing.T) {
+	tmpDir := t.TempDir()
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	testhelpers.SetupPipelineConfig(t, tmpDir)
+	lizaPaths := paths.New(tmpDir)
+
+	watermark := time.Date(2026, 5, 20, 11, 0, 0, 0, time.UTC)
+	pattern := "provider_audit_degradation"
+	severity := "OBSERVABILITY_DEGRADED"
+	state := testhelpers.CreateValidState()
+	state.CircuitBreaker = models.CircuitBreaker{
+		Status: "OK",
+		History: []models.CircuitBreakerHistory{
+			{Timestamp: watermark, Pattern: &pattern, Severity: &severity, Result: "TRIGGERED"},
+		},
+	}
+	state.Anomalies = []models.Anomaly{
+		watchProviderAuditAnomaly(watermark.Add(-time.Minute), "old-coder-1"),
+		watchProviderAuditAnomaly(watermark, "old-coder-2"),
+		watchProviderAuditAnomaly(watermark.Add(-2*time.Minute), "old-coder-3"),
+	}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	config := WatchConfig{
+		ProjectRoot: tmpDir,
+		AlertsLog:   lizaPaths.AlertsLogPath(),
+		StateCache:  make(map[string]time.Time),
+	}
+
+	if err := runChecks(context.Background(), config); err != nil {
+		t.Fatalf("runChecks() error: %v", err)
+	}
+
+	alertsLogPath := lizaPaths.AlertsLogPath()
+	if _, err := os.Stat(alertsLogPath); os.IsNotExist(err) {
+		return
+	}
+	alertLogData, err := os.ReadFile(alertsLogPath)
+	if err != nil {
+		t.Fatalf("failed to read alerts log: %v", err)
+	}
+	if strings.Contains(string(alertLogData), "CIRCUIT BREAKER") {
+		t.Fatalf("unexpected CIRCUIT BREAKER alert for acknowledged pattern:\n%s", string(alertLogData))
+	}
+}
+
+func TestRunChecks_AlertsOnUnacknowledgedCircuitBreakerPattern(t *testing.T) {
+	tmpDir := t.TempDir()
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	testhelpers.SetupPipelineConfig(t, tmpDir)
+	lizaPaths := paths.New(tmpDir)
+
+	watermark := time.Date(2026, 5, 20, 11, 0, 0, 0, time.UTC)
+	pattern := "provider_audit_degradation"
+	severity := "OBSERVABILITY_DEGRADED"
+	state := testhelpers.CreateValidState()
+	state.CircuitBreaker = models.CircuitBreaker{
+		Status: "OK",
+		History: []models.CircuitBreakerHistory{
+			{Timestamp: watermark, Pattern: &pattern, Severity: &severity, Result: "TRIGGERED"},
+		},
+	}
+	state.Anomalies = []models.Anomaly{
+		watchProviderAuditAnomaly(watermark.Add(-time.Minute), "old-coder"),
+		watchProviderAuditAnomaly(watermark.Add(time.Minute), "new-coder-1"),
+		watchProviderAuditAnomaly(watermark.Add(2*time.Minute), "new-coder-2"),
+	}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	config := WatchConfig{
+		ProjectRoot: tmpDir,
+		AlertsLog:   lizaPaths.AlertsLogPath(),
+		StateCache:  make(map[string]time.Time),
+	}
+
+	if err := runChecks(context.Background(), config); err != nil {
+		t.Fatalf("runChecks() error: %v", err)
+	}
+
+	alertLogData, err := os.ReadFile(lizaPaths.AlertsLogPath())
+	if err != nil {
+		t.Fatalf("failed to read alerts log: %v", err)
+	}
+	if !strings.Contains(string(alertLogData), "CIRCUIT BREAKER") {
+		t.Fatalf("expected CIRCUIT BREAKER alert for unacknowledged pattern:\n%s", string(alertLogData))
+	}
+}
+
 func TestRunChecks_CircuitBreakerAlertCoexistsWithOtherAlerts(t *testing.T) {
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
@@ -1546,6 +1634,19 @@ func TestRunChecks_CircuitBreakerAlertCoexistsWithOtherAlerts(t *testing.T) {
 	}
 	if updatedState.Sprint.Status != models.SprintStatusInProgress {
 		t.Errorf("sprint.status = %s, want %s (watch must not mutate)", updatedState.Sprint.Status, models.SprintStatusInProgress)
+	}
+}
+
+func watchProviderAuditAnomaly(timestamp time.Time, agentID string) models.Anomaly {
+	return models.Anomaly{
+		Timestamp: timestamp,
+		Reporter:  agentID,
+		Type:      "provider_audit_degraded",
+		Details: map[string]any{
+			"provider": "codex",
+			"agent_id": agentID,
+			"message":  "failed to record rollout items",
+		},
 	}
 }
 

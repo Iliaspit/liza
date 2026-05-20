@@ -335,6 +335,7 @@ Exit 42 with `handoff_pending: true` on the task means context exhaustion — th
 **Impact**: Treat task state and explicit task outputs as the source of truth. The provider transcript or rollout audit trail may be incomplete for the affected session.
 **Diagnosis**: Upgrade or retest the provider CLI first. Then inspect `.liza/agent-outputs/*.err`, `.liza/alerts.log`, task state, and blackboard outputs before relying on the session transcript.
 **Fix**: A single occurrence does not stop workers. Repeated occurrences across agents are recorded as `provider_audit_degraded` anomalies and can trip `liza analyze` as systemic observability degradation. Raw provider events are not stored in `state.yaml`; inspect `.liza/agent-outputs/` for full transcript evidence. If an older state contains raw provider JSON in anomaly messages, run `liza migrate` to scrub those fields while keeping the anomaly record.
+After a circuit-breaker trigger is reviewed and `liza resume` clears it (`status: OK` and `current_trigger: null`), those historical anomalies are acknowledged. Future `liza analyze` and `liza tui` checks only count anomalies with timestamps after the latest cleared `TRIGGERED` history entry; reports include a suppressed-count line instead of mixing acknowledged anomalies into current evidence.
 
 ### Circuit breaker
 

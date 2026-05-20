@@ -152,6 +152,24 @@ The pattern conditions use pseudo-functions for matching:
 
 **v2 Implementation:** Requires defining similarity thresholds and normalization rules. Defer until v1 proves which patterns are valuable.
 
+### Acknowledgement Watermark
+
+Circuit-breaker detection normally evaluates durable `state.anomalies`.
+When a prior trigger has been cleared, old anomalies must not re-alert by
+themselves. A trigger is considered cleared only when:
+
+- `circuit_breaker.status == OK`
+- `circuit_breaker.current_trigger == null`
+
+In that cleared state, the latest `TRIGGERED` entry in
+`circuit_breaker.history` becomes the acknowledgement watermark. Pattern
+detection considers only anomalies with `anomaly.timestamp` strictly after that
+history timestamp. Anomalies at or before the watermark are suppressed for
+detection and report evidence, and the report records their suppressed count.
+
+If `status == TRIGGERED` or `current_trigger` is non-null, no watermark applies:
+the trigger is still active or stale and all anomalies remain eligible.
+
 ---
 
 ## Severity Classification
@@ -291,6 +309,11 @@ When circuit breaker is triggered:
 5. **Optional audit enrichment:** Human may annotate history entries with `resolution` and `resolved_at`
 6. **Human resumes:** `liza resume` (sets mode to RUNNING, clears `current_trigger`, sets status to OK)
 7. **Agents resume**
+
+After step 6, the latest `TRIGGERED` history timestamp acts as an
+acknowledgement watermark for future `liza analyze` and `liza tui` checks. Only
+anomalies with timestamps after that watermark can cause a new trigger. Later
+`OK` history entries do not move the watermark.
 
 **Note:** A subsequent clean ``liza analyze`` run also sets status to `OK` and clears `CIRCUIT_BREAKER_TRIPPED` mode. This does not clear sprint `CHECKPOINT`; checkpoint resume still requires `liza resume`.
 

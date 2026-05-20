@@ -668,6 +668,14 @@ config:
   escalation_webhook: null      # Optional: URL for external notifications
 ```
 
+**Circuit-breaker acknowledgement watermark:** When
+`circuit_breaker.status == OK` and `current_trigger == null`, the latest
+history entry with `result: TRIGGERED` is the acknowledgement watermark for
+future circuit-breaker checks. `liza analyze` and `liza tui` consider only
+anomalies with `timestamp` strictly after that watermark. Later `OK` entries do
+not move the watermark. If `status == TRIGGERED` or `current_trigger` is
+non-null, no watermark applies.
+
 **Config Scope:**
 - Config values are **goal-level defaults** (apply to all tasks in current goal)
 - Agent CLI defaults resolve in this order: explicit `--cli`, role-specific config

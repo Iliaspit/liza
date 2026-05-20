@@ -428,6 +428,134 @@ func TestDetectPatterns(t *testing.T) {
 	}
 }
 
+func TestDetectUnacknowledgedPatterns(t *testing.T) {
+	watermark1 := time.Date(2026, 5, 20, 10, 0, 0, 0, time.UTC)
+	watermark2 := time.Date(2026, 5, 20, 11, 0, 0, 0, time.UTC)
+	afterWatermark := watermark2.Add(time.Minute)
+	okPattern := "retry_cluster"
+	triggerPattern := "provider_audit_degradation"
+	trigger := &models.CircuitBreakerTrigger{
+		Timestamp:  watermark2,
+		Pattern:    triggerPattern,
+		Severity:   "OBSERVABILITY_DEGRADED",
+		ReportFile: ".liza/circuit_breaker_report.md",
+	}
+
+	tests := []struct {
+		name                string
+		state               *models.State
+		wantTriggered       bool
+		wantSuppressedCount int
+		wantConsideredCount int
+	}{
+		{
+			name: "cleared trigger suppresses anomalies at or before latest triggered history timestamp",
+			state: &models.State{
+				Anomalies: []models.Anomaly{
+					providerAuditAnomaly(watermark1, "coder-1"),
+					providerAuditAnomaly(watermark2, "coder-2"),
+					providerAuditAnomaly(afterWatermark, "coder-1"),
+				},
+				CircuitBreaker: models.CircuitBreaker{
+					Status: "OK",
+					History: []models.CircuitBreakerHistory{
+						{Timestamp: watermark2, Pattern: &triggerPattern, Severity: stringPtr("OBSERVABILITY_DEGRADED"), Result: "TRIGGERED"},
+					},
+				},
+			},
+			wantTriggered:       false,
+			wantSuppressedCount: 2,
+			wantConsideredCount: 1,
+		},
+		{
+			name: "latest triggered history wins and later OK entries do not move watermark",
+			state: &models.State{
+				Anomalies: []models.Anomaly{
+					providerAuditAnomaly(watermark1.Add(time.Minute), "old-coder"),
+					providerAuditAnomaly(afterWatermark, "coder-1"),
+					providerAuditAnomaly(afterWatermark.Add(time.Minute), "coder-2"),
+				},
+				CircuitBreaker: models.CircuitBreaker{
+					Status: "OK",
+					History: []models.CircuitBreakerHistory{
+						{Timestamp: watermark1, Pattern: &okPattern, Severity: stringPtr("ARCHITECTURE_FLAW"), Result: "TRIGGERED"},
+						{Timestamp: watermark2.Add(2 * time.Hour), Result: "OK"},
+						{Timestamp: watermark2, Pattern: &triggerPattern, Severity: stringPtr("OBSERVABILITY_DEGRADED"), Result: "TRIGGERED"},
+					},
+				},
+			},
+			wantTriggered:       true,
+			wantSuppressedCount: 1,
+			wantConsideredCount: 2,
+		},
+		{
+			name: "active triggered status does not use acknowledgement watermark",
+			state: &models.State{
+				Anomalies: []models.Anomaly{
+					providerAuditAnomaly(watermark1, "coder-1"),
+					providerAuditAnomaly(watermark1.Add(time.Minute), "coder-2"),
+				},
+				CircuitBreaker: models.CircuitBreaker{
+					Status: "TRIGGERED",
+					History: []models.CircuitBreakerHistory{
+						{Timestamp: watermark2, Pattern: &triggerPattern, Severity: stringPtr("OBSERVABILITY_DEGRADED"), Result: "TRIGGERED"},
+					},
+				},
+			},
+			wantTriggered:       true,
+			wantSuppressedCount: 0,
+			wantConsideredCount: 2,
+		},
+		{
+			name: "non-nil current trigger does not use acknowledgement watermark",
+			state: &models.State{
+				Anomalies: []models.Anomaly{
+					providerAuditAnomaly(watermark1, "coder-1"),
+					providerAuditAnomaly(watermark1.Add(time.Minute), "coder-2"),
+				},
+				CircuitBreaker: models.CircuitBreaker{
+					Status:         "OK",
+					CurrentTrigger: trigger,
+					History: []models.CircuitBreakerHistory{
+						{Timestamp: watermark2, Pattern: &triggerPattern, Severity: stringPtr("OBSERVABILITY_DEGRADED"), Result: "TRIGGERED"},
+					},
+				},
+			},
+			wantTriggered:       true,
+			wantSuppressedCount: 0,
+			wantConsideredCount: 2,
+		},
+		{
+			name: "no trigger history preserves existing detection behavior",
+			state: &models.State{
+				Anomalies: []models.Anomaly{
+					providerAuditAnomaly(watermark1, "coder-1"),
+					providerAuditAnomaly(watermark1.Add(time.Minute), "coder-2"),
+				},
+				CircuitBreaker: models.CircuitBreaker{Status: "OK"},
+			},
+			wantTriggered:       true,
+			wantSuppressedCount: 0,
+			wantConsideredCount: 2,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, considered, suppressedCount := DetectUnacknowledgedPatterns(tt.state)
+			if result.Triggered != tt.wantTriggered {
+				t.Errorf("Triggered = %v, want %v", result.Triggered, tt.wantTriggered)
+			}
+			if suppressedCount != tt.wantSuppressedCount {
+				t.Errorf("suppressedCount = %d, want %d", suppressedCount, tt.wantSuppressedCount)
+			}
+			if len(considered) != tt.wantConsideredCount {
+				t.Errorf("considered count = %d, want %d", len(considered), tt.wantConsideredCount)
+			}
+		})
+	}
+}
+
 func TestGenerateReport(t *testing.T) {
 	now := time.Date(2025, 1, 18, 17, 30, 0, 0, time.UTC)
 
@@ -461,7 +589,7 @@ func TestGenerateReport(t *testing.T) {
 		Evidence:  "3 retry_loop anomalies with similar error patterns",
 	}
 
-	report := GenerateReport(result, anomalies, now)
+	report := GenerateReport(result, anomalies, now, 0)
 
 	// Verify report contains key sections
 	if report == "" {
@@ -514,7 +642,7 @@ func TestGenerateReportTrimsProviderAuditMessages(t *testing.T) {
 		Pattern:   "provider_audit_degradation",
 		Severity:  "OBSERVABILITY_DEGRADED",
 		Evidence:  "1 provider_audit_degraded anomaly",
-	}, anomalies, now)
+	}, anomalies, now, 0)
 
 	trimmedStart := strings.Index(report, "## Anomalies (trimmed)")
 	rawStart := strings.Index(report, "## Anomalies (raw)")
@@ -548,6 +676,40 @@ func TestGenerateReportTrimsProviderAuditMessages(t *testing.T) {
 	if !strings.Contains(report[rawStart:], "SUPPORT_FULL_TEXT") {
 		t.Fatal("raw section should preserve full anomaly payload")
 	}
+}
+
+func TestGenerateReportIncludesSuppressedAcknowledgedAnomalyCount(t *testing.T) {
+	now := time.Date(2026, 5, 20, 12, 0, 0, 0, time.UTC)
+	report := GenerateReport(PatternResult{
+		Triggered: true,
+		Pattern:   "provider_audit_degradation",
+		Severity:  "OBSERVABILITY_DEGRADED",
+		Evidence:  "2 provider_audit_degraded anomalies for provider codex across 2 agents",
+	}, []models.Anomaly{
+		providerAuditAnomaly(now, "coder-1"),
+		providerAuditAnomaly(now.Add(time.Minute), "coder-2"),
+	}, now, 4)
+
+	if !strings.Contains(report, "**Acknowledged anomalies suppressed:** 4") {
+		t.Fatalf("report missing suppressed anomaly count:\n%s", report)
+	}
+}
+
+func providerAuditAnomaly(timestamp time.Time, agentID string) models.Anomaly {
+	return models.Anomaly{
+		Timestamp: timestamp,
+		Reporter:  agentID,
+		Type:      "provider_audit_degraded",
+		Details: map[string]any{
+			"provider": "codex",
+			"agent_id": agentID,
+			"message":  "failed to record rollout items",
+		},
+	}
+}
+
+func stringPtr(value string) *string {
+	return &value
 }
 
 func contains(s, substr string) bool {

@@ -38,6 +38,64 @@ func DetectPatterns(anomalies []models.Anomaly) PatternResult {
 	return PatternResult{Triggered: false}
 }
 
+// DetectUnacknowledgedPatterns runs circuit-breaker detection on anomalies that
+// have not already been acknowledged by a cleared circuit-breaker trigger.
+//
+// "Cleared" means circuit_breaker.status == OK and current_trigger == nil.
+// In any active or partially stale triggered state, all anomalies are considered.
+// When cleared, the latest TRIGGERED history timestamp is the acknowledgement
+// watermark; only anomalies strictly after that timestamp are considered new.
+func DetectUnacknowledgedPatterns(state *models.State) (PatternResult, []models.Anomaly, int) {
+	if state == nil {
+		return DetectPatterns(nil), nil, 0
+	}
+
+	considered, suppressedCount := UnacknowledgedAnomalies(state)
+	return DetectPatterns(considered), considered, suppressedCount
+}
+
+// UnacknowledgedAnomalies returns the anomaly slice eligible for current
+// circuit-breaker detection plus the number suppressed by the cleared-trigger
+// acknowledgement watermark.
+func UnacknowledgedAnomalies(state *models.State) ([]models.Anomaly, int) {
+	if state == nil {
+		return nil, 0
+	}
+
+	watermark, ok := latestClearedTriggerWatermark(state)
+	if !ok {
+		return state.Anomalies, 0
+	}
+
+	considered := make([]models.Anomaly, 0, len(state.Anomalies))
+	for _, anomaly := range state.Anomalies {
+		if anomaly.Timestamp.After(watermark) {
+			considered = append(considered, anomaly)
+		}
+	}
+	return considered, len(state.Anomalies) - len(considered)
+}
+
+func latestClearedTriggerWatermark(state *models.State) (time.Time, bool) {
+	if state.CircuitBreaker.Status != "OK" || state.CircuitBreaker.CurrentTrigger != nil {
+		return time.Time{}, false
+	}
+
+	var latest time.Time
+	for _, entry := range state.CircuitBreaker.History {
+		if entry.Result != "TRIGGERED" {
+			continue
+		}
+		if latest.IsZero() || entry.Timestamp.After(latest) {
+			latest = entry.Timestamp
+		}
+	}
+	if latest.IsZero() {
+		return time.Time{}, false
+	}
+	return latest, true
+}
+
 func checkRetryCluster(anomalies []models.Anomaly) PatternResult {
 	retryLoops := filterByType(anomalies, "retry_loop")
 	if len(retryLoops) < 3 {
@@ -214,14 +272,18 @@ func groupByField(anomalies []models.Anomaly, field string) map[string][]models.
 	return groups
 }
 
-// GenerateReport creates a markdown report for a triggered circuit breaker
-func GenerateReport(result PatternResult, anomalies []models.Anomaly, timestamp time.Time) string {
+// GenerateReport creates a markdown report for a triggered circuit breaker.
+// The anomalies slice must be the exact anomaly set considered for detection.
+func GenerateReport(result PatternResult, anomalies []models.Anomaly, timestamp time.Time, suppressedCount int) string {
 	var sb strings.Builder
 
 	sb.WriteString("# Circuit Breaker Report\n\n")
 	fmt.Fprintf(&sb, "**Triggered:** %s\n", timestamp.Format(time.RFC3339))
 	fmt.Fprintf(&sb, "**Pattern:** %s\n", result.Pattern)
 	fmt.Fprintf(&sb, "**Severity:** %s\n\n", result.Severity)
+	if suppressedCount > 0 {
+		fmt.Fprintf(&sb, "**Acknowledged anomalies suppressed:** %d\n\n", suppressedCount)
+	}
 
 	sb.WriteString("## Trigger Evidence\n\n")
 	sb.WriteString(result.Evidence)

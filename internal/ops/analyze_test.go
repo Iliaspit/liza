@@ -134,6 +134,52 @@ func TestAnalyze_BelowThreshold(t *testing.T) {
 	}
 }
 
+func TestAnalyze_ReportsOnlyUnacknowledgedAnomalies(t *testing.T) {
+	tmpDir := t.TempDir()
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+
+	watermark := time.Date(2026, 5, 20, 11, 0, 0, 0, time.UTC)
+	pattern := "provider_audit_degradation"
+	severity := "OBSERVABILITY_DEGRADED"
+	state := testhelpers.CreateValidState()
+	state.CircuitBreaker = models.CircuitBreaker{
+		Status: "OK",
+		History: []models.CircuitBreakerHistory{
+			{Timestamp: watermark, Pattern: &pattern, Severity: &severity, Result: "TRIGGERED"},
+		},
+	}
+	state.Anomalies = []models.Anomaly{
+		providerAuditAnomaly(watermark.Add(-time.Minute), "old-coder"),
+		providerAuditAnomaly(watermark, "equal-coder"),
+		providerAuditAnomaly(watermark.Add(time.Minute), "new-coder-1"),
+		providerAuditAnomaly(watermark.Add(2*time.Minute), "new-coder-2"),
+	}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	result, err := Analyze(tmpDir)
+	if err != nil {
+		t.Fatalf("Analyze() error: %v", err)
+	}
+	if !result.Triggered {
+		t.Fatal("Analyze() should trigger on post-watermark anomalies")
+	}
+
+	reportData, err := os.ReadFile(result.ReportPath)
+	if err != nil {
+		t.Fatalf("failed to read report: %v", err)
+	}
+	report := string(reportData)
+	if !strings.Contains(report, "**Acknowledged anomalies suppressed:** 2") {
+		t.Fatalf("report missing suppressed anomaly count:\n%s", report)
+	}
+	if strings.Contains(report, "old-coder") || strings.Contains(report, "equal-coder") {
+		t.Fatalf("report includes acknowledged anomalies:\n%s", report)
+	}
+	if !strings.Contains(report, "new-coder-1") || !strings.Contains(report, "new-coder-2") {
+		t.Fatalf("report missing unacknowledged anomalies:\n%s", report)
+	}
+}
+
 func TestAnalyze_InvalidStatePath(t *testing.T) {
 	_, err := Analyze("/nonexistent/path")
 	if err == nil {
@@ -141,5 +187,18 @@ func TestAnalyze_InvalidStatePath(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "failed to read state") {
 		t.Errorf("Error = %q, want to contain 'failed to read state'", err.Error())
+	}
+}
+
+func providerAuditAnomaly(timestamp time.Time, agentID string) models.Anomaly {
+	return models.Anomaly{
+		Timestamp: timestamp,
+		Reporter:  agentID,
+		Type:      "provider_audit_degraded",
+		Details: map[string]any{
+			"provider": "codex",
+			"agent_id": agentID,
+			"message":  "failed to record rollout items",
+		},
 	}
 }

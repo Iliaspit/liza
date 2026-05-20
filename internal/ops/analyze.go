@@ -36,7 +36,7 @@ func Analyze(projectRoot string) (*AnalyzeResult, error) {
 	}
 	timestamp := time.Now()
 
-	result := analysis.DetectPatterns(state.Anomalies)
+	result, consideredAnomalies, suppressedCount := analysis.DetectUnacknowledgedPatterns(state)
 
 	if !result.Triggered {
 		err := blackboard.Modify(func(s *models.State) error {
@@ -69,7 +69,7 @@ func Analyze(projectRoot string) (*AnalyzeResult, error) {
 	}
 
 	// Pattern triggered — generate report
-	report := analysis.GenerateReport(result, state.Anomalies, timestamp)
+	report := analysis.GenerateReport(result, consideredAnomalies, timestamp, suppressedCount)
 
 	err = os.WriteFile(reportPath, []byte(report), 0644)
 	if err != nil {
