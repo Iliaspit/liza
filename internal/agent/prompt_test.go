@@ -368,7 +368,7 @@ func TestBuildPrompt_RelevantTaskGraphDigest(t *testing.T) {
 	}
 
 	for _, want := range []string{
-		"Artifact refs in this section are repo-relative.",
+		"Artifact refs below are repo-relative.",
 		"git -C " + filepath.Join(tmpDir, worktree) + " show main:<file-ref>",
 		"RELEVANT TASK GRAPH DIGEST",
 		"Direct dependencies:",
@@ -2461,7 +2461,7 @@ func TestBuildPromptWithContext_Architect(t *testing.T) {
 	// Architect prompt must include parent tasks context, tools, state transitions, and implementation phase
 	mustContain := []string{
 		"PARENT TASKS (2)",
-		"Parent artifact refs are repo-relative.",
+		"Artifact refs below are repo-relative.",
 		"Read " + filepath.Join(tmpDir, worktree) + "/<ref> first",
 		"git -C " + filepath.Join(tmpDir, worktree) + " show main:<file-ref>",
 		"User can sign up with email",

@@ -29,7 +29,8 @@ func TestSleepUsageBudget(t *testing.T) {
 			return err
 		}
 		if d.IsDir() {
-			if filepath.Base(path) == ".git" {
+			switch filepath.Base(path) {
+			case ".git", ".worktrees":
 				return filepath.SkipDir
 			}
 			return nil
