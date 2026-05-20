@@ -1,8 +1,10 @@
 package commands
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"testing"
@@ -12,6 +14,7 @@ import (
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/ops"
 	"github.com/liza-mas/liza/internal/paths"
+	"github.com/liza-mas/liza/internal/procscan"
 	"github.com/liza-mas/liza/internal/testhelpers"
 )
 
@@ -1180,6 +1183,34 @@ func TestWatchCommand(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestRunChecksWithStateSnapshotUsesConfiguredWarnWriterForProcessScanWarnings(t *testing.T) {
+	originalFind := findZombieAgents
+	t.Cleanup(func() { findZombieAgents = originalFind })
+
+	findZombieAgents = func(procscan.ZombieScanOptions) ([]procscan.ZombieProcess, error) {
+		return nil, procscan.ErrProcessScanUnavailable
+	}
+
+	var globalWarnings bytes.Buffer
+	SetWarnWriter(&globalWarnings)
+	t.Cleanup(func() { SetWarnWriter(os.Stderr) })
+
+	tmpDir := t.TempDir()
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	state := testhelpers.CreateValidState()
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	RunChecksWithStateSnapshot(state, WatchConfig{
+		ProjectRoot: tmpDir,
+		WarnWriter:  io.Discard,
+		StateCache:  make(map[string]time.Time),
+	})
+
+	if strings.Contains(globalWarnings.String(), "process scan skipped") {
+		t.Fatalf("run checks leaked process scan warning to global warn writer:\n%s", globalWarnings.String())
 	}
 }
 

@@ -120,6 +120,7 @@ func runChecksCmd(projectRoot, alertsLogPath string, state *models.State, cache 
 		config := commands.WatchConfig{
 			ProjectRoot: projectRoot,
 			AlertsLog:   alertsLogPath,
+			WarnWriter:  io.Discard,
 			StateCache:  cacheCopy,
 		}
 

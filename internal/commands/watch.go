@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"time"
@@ -61,6 +62,7 @@ type WatchConfig struct {
 	ProjectRoot   string
 	CheckInterval time.Duration
 	AlertsLog     string
+	WarnWriter    io.Writer
 	// StateCache is used to track seen alerts across checks
 	StateCache map[string]time.Time
 }
@@ -75,6 +77,9 @@ func WatchCommand(ctx context.Context, config WatchConfig) error {
 	}
 	if config.StateCache == nil {
 		config.StateCache = make(map[string]time.Time)
+	}
+	if config.WarnWriter == nil {
+		config.WarnWriter = os.Stderr
 	}
 
 	fmt.Printf("[%s] Watching %s\n",
@@ -187,7 +192,10 @@ func RunChecksWithStateSnapshot(state *models.State, config WatchConfig) AlertSn
 	alerts = append(alerts, checkSprintStalled(state, config.StateCache)...)
 
 	statePath := lizaPaths.StatePath()
-	if err := ValidateCommand(statePath, true); err != nil {
+	if err := ValidateCommandWithOptions(statePath, ValidateOptions{
+		SkipSpecFileCheck: true,
+		WarnWriter:        config.WarnWriter,
+	}); err != nil {
 		alerts = append(alerts, Alert{
 			Timestamp: time.Now().UTC(),
 			Level:     AlertLevelCritical,

@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"bytes"
 	"errors"
 	"os"
 	"path/filepath"
@@ -554,5 +555,45 @@ func TestRunChecksCmdCacheCopy(t *testing.T) {
 	}
 	if _, exists := result.StateCache["new_key"]; exists {
 		t.Error("returned cache should not contain 'new_key' added after Cmd creation")
+	}
+}
+
+func TestRunChecksCmdDoesNotWriteValidationWarningsToCommandWarnWriter(t *testing.T) {
+	tmpDir := t.TempDir()
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	now := time.Now().UTC()
+
+	dep := testhelpers.BuildTaskByStatus("dep-task", models.TaskStatusSuperseded, now)
+	dep.SupersededBy = nil
+	dep.RescopeReason = testhelpers.StringPtr("No replacement task")
+	dep.RolePair = "coding-pair"
+	dependent := testhelpers.BuildTaskByStatus("dependent-task", models.TaskStatusReady, now)
+	dependent.DependsOn = []string{"dep-task"}
+
+	state := testhelpers.CreateValidState()
+	state.Tasks = []models.Task{dep, dependent}
+	state.Sprint.Scope.Planned = []string{dep.ID, dependent.ID}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	var warnings bytes.Buffer
+	commands.SetWarnWriter(&warnings)
+	t.Cleanup(func() { commands.SetWarnWriter(os.Stderr) })
+
+	if err := commands.ValidateCommand(stateFile, true); err != nil {
+		t.Fatalf("ValidateCommand() error = %v", err)
+	}
+	if !strings.Contains(warnings.String(), "not satisfied via supersession path") {
+		t.Fatalf("test fixture did not reproduce validation warning, got:\n%s", warnings.String())
+	}
+	warnings.Reset()
+
+	cmd := runChecksCmd(tmpDir, filepath.Join(tmpDir, ".liza", "alerts.log"), state, make(map[string]time.Time))
+	msg := cmd()
+	if _, ok := msg.(alertsMsg); !ok {
+		t.Fatalf("runChecksCmd() message = %T, want alertsMsg", msg)
+	}
+
+	if strings.Contains(warnings.String(), "not satisfied via supersession path") {
+		t.Fatalf("TUI check leaked validation warning to command warn writer:\n%s", warnings.String())
 	}
 }
