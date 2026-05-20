@@ -49,6 +49,7 @@ BASH CONSTRAINTS (all roles — CLI sandboxes may block these patterns):
 QUERY TOOLS (all roles):
 - Query targeted state: liza get <id> --json, liza get agents --json, liza get metrics --json
 - Prefer task IDs rendered in this prompt's relevant task graph digest. Use `liza get tasks --active --summary --json` only for an orchestrator-level refresh when the prompt dashboard is stale.
+- For downstream task references without full parent context, use `liza get <id> --output-summary --json`.
 - Avoid `liza get tasks --json` unless targeted task reads and active summaries are insufficient; state why before using it.
 - liza status --json — Dashboard overview
 - liza validate --json — Validate state consistency (--skip-spec-check)

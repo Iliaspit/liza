@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"text/template"
@@ -647,6 +648,7 @@ func TestBasePromptRegressionGuard(t *testing.T) {
 	assertSection("query-tools", []string{
 		"QUERY TOOLS",
 		"liza get --json",
+		"liza get <id> --output-summary --json",
 		"liza status --json",
 		"liza validate --json",
 	})
@@ -1974,6 +1976,36 @@ func TestCollectivePlanScoping_PhaseConsistencyRule(t *testing.T) {
 			t.Error("expected epic-plan-reviewer scope verification language")
 		}
 	})
+
+	t.Run("output refs add compact output hint without replacing full load", func(t *testing.T) {
+		data := &RoleContextData{
+			Role:        "code-planner",
+			RoleType:    "doer",
+			GoalSpecRef: "specs/goal.md",
+			TaskGraph: TaskGraphDigest{
+				CompletedArtifacts: []TaskGraphEntry{
+					{
+						ID:          "plan-1",
+						Description: "Completed plan",
+						Status:      "MERGED",
+						OutputRefs:  []string{"specs/plans/plan-1.md"},
+					},
+				},
+			},
+		}
+
+		output, err := BuildRoleContext("code-planner", []string{"collective-plan-scoping"}, data)
+		if err != nil {
+			t.Fatalf("BuildRoleContext: %v", err)
+		}
+
+		if !strings.Contains(output, "load: liza get plan-1 --json") {
+			t.Error("expected generic full task load to remain available")
+		}
+		if !strings.Contains(output, "output context: liza get plan-1 --output-summary --json") {
+			t.Error("expected compact output hint for entries with output refs")
+		}
+	})
 }
 
 func TestBlockBranchIntegrationContext_Populated(t *testing.T) {
@@ -2101,6 +2133,39 @@ func TestBlockReviewInstructions_IntegrationReviewer(t *testing.T) {
 	}
 	if !strings.Contains(result, "output[]") {
 		t.Error("expected output[] references")
+	}
+}
+
+func TestReviewInstructions_OutputReviewersUseFullTaskJSON(t *testing.T) {
+	tmpl := template.Must(template.ParseFiles("templates/blocks/review_instructions.tmpl"))
+
+	for _, role := range []string{"code-plan-reviewer", "epic-plan-reviewer", "architecture-reviewer", "integration-reviewer"} {
+		t.Run(role, func(t *testing.T) {
+			data := RoleContextData{
+				Role:           role,
+				TaskID:         "task-review",
+				AgentID:        "reviewer-1",
+				Worktree:       "/tmp/worktree",
+				BaseCommit:     "base123",
+				ReviewCommit:   "review123",
+				GoalBaseCommit: "goalbase123",
+				GoalSlug:       "goal-slug",
+			}
+
+			var buf bytes.Buffer
+			if err := tmpl.ExecuteTemplate(&buf, "review-instructions", &data); err != nil {
+				t.Fatalf("failed to execute review-instructions template: %v", err)
+			}
+
+			output := buf.String()
+			if !strings.Contains(output, "liza get task-review --json") {
+				t.Fatalf("expected full task JSON command, got:\n%s", output)
+			}
+			outputSummaryCommand := regexp.MustCompile(`liza get[^\n]*--output-summary`)
+			if outputSummaryCommand.MatchString(output) {
+				t.Fatalf("reviewer prompt should not use output-summary, got:\n%s", output)
+			}
+		})
 	}
 }
 

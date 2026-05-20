@@ -18,6 +18,7 @@ type inspectTasksOptions struct {
 	BlockedFilter    bool   // Show only blocked tasks
 	Internal         bool   // Return structured data for composition
 	Summary          bool   // Return compact task summaries
+	OutputSummary    bool   // Return compact output entry summaries
 	Active           bool   // Show only non-terminal tasks
 	ProjectRoot      string // Project root, used for filesystem-aware diagnostics
 }
@@ -72,9 +73,40 @@ type taskSummaryInfo struct {
 	OutputKinds      []string              `json:"output_kinds,omitempty" yaml:"output_kinds,omitempty"`
 }
 
+// taskOutputSummaryInfo is a compact projection of output[] for downstream orientation.
+type taskOutputSummaryInfo struct {
+	ID       string                   `json:"id" yaml:"id"`
+	Status   string                   `json:"status" yaml:"status"`
+	RolePair string                   `json:"role_pair,omitempty" yaml:"role_pair,omitempty"`
+	Output   []outputEntrySummaryInfo `json:"output" yaml:"output"`
+}
+
+type outputEntrySummaryInfo struct {
+	Index         int      `json:"index" yaml:"index"`
+	Desc          string   `json:"desc,omitempty" yaml:"desc,omitempty"`
+	Kind          string   `json:"kind,omitempty" yaml:"kind,omitempty"`
+	SpecRef       string   `json:"spec_ref,omitempty" yaml:"spec_ref,omitempty"`
+	EpicRef       string   `json:"epic_ref,omitempty" yaml:"epic_ref,omitempty"`
+	PlanRef       string   `json:"plan_ref,omitempty" yaml:"plan_ref,omitempty"`
+	ArchRef       string   `json:"arch_ref,omitempty" yaml:"arch_ref,omitempty"`
+	DependsOn     []string `json:"depends_on,omitempty" yaml:"depends_on,omitempty"`
+	TaskDependsOn []string `json:"task_depends_on,omitempty" yaml:"task_depends_on,omitempty"`
+}
+
 // inspectTasks lists all tasks or filters by criteria
 func inspectTasks(state *models.State, opts inspectTasksOptions) (any, error) {
 	filtered := filterTasks(state.Tasks, opts)
+
+	if opts.OutputSummary {
+		summaries := make([]taskOutputSummaryInfo, len(filtered))
+		for i, task := range filtered {
+			summaries[i] = buildTaskOutputSummaryInfo(&task)
+		}
+		if opts.Internal {
+			return summaries, nil
+		}
+		return formatTaskOutputSummariesOutput(summaries, opts.Format)
+	}
 
 	if opts.Summary {
 		summaries := make([]taskSummaryInfo, len(filtered))
@@ -111,6 +143,14 @@ func inspectTask(state *models.State, taskID string, opts inspectTasksOptions) (
 			return info, nil
 		}
 		return formatTaskSummaryOutput(info, opts.Format)
+	}
+
+	if opts.OutputSummary {
+		info := buildTaskOutputSummaryInfo(foundTask)
+		if opts.Internal {
+			return info, nil
+		}
+		return formatTaskOutputSummaryOutput(info, opts.Format)
 	}
 
 	info := buildTaskInfo(foundTask, opts.ProjectRoot)
@@ -183,6 +223,31 @@ func buildTaskSummaryInfo(task *models.Task) taskSummaryInfo {
 		remaining := time.Until(*task.LeaseExpires)
 		formatted := render.FormatDuration(remaining)
 		info.LeaseExpires = &formatted
+	}
+
+	return info
+}
+
+func buildTaskOutputSummaryInfo(task *models.Task) taskOutputSummaryInfo {
+	info := taskOutputSummaryInfo{
+		ID:       task.ID,
+		Status:   string(task.Status),
+		RolePair: task.RolePair,
+		Output:   make([]outputEntrySummaryInfo, 0, len(task.Output)),
+	}
+
+	for i, entry := range task.Output {
+		info.Output = append(info.Output, outputEntrySummaryInfo{
+			Index:         i,
+			Desc:          entry.Desc,
+			Kind:          entry.Kind,
+			SpecRef:       entry.SpecRef,
+			EpicRef:       entry.EpicRef,
+			PlanRef:       entry.PlanRef,
+			ArchRef:       entry.ArchRef,
+			DependsOn:     entry.DependsOn,
+			TaskDependsOn: entry.TaskDependsOn,
+		})
 	}
 
 	return info
@@ -262,6 +327,25 @@ func formatTasksSummaryOutput(tasks []taskSummaryInfo, format string) (string, e
 	}
 }
 
+func formatTaskOutputSummariesOutput(tasks []taskOutputSummaryInfo, format string) (string, error) {
+	if format == "" {
+		format = "table"
+	}
+
+	switch format {
+	case "json":
+		return render.FormatJSON(tasks)
+	case "yaml":
+		return render.FormatYAML(tasks)
+	case "table":
+		return formatTaskOutputSummariesTable(tasks), nil
+	case "value":
+		return "", fmt.Errorf("value format not supported for task output summaries (use json, yaml, or table)")
+	default:
+		return "", fmt.Errorf("invalid format: %s", format)
+	}
+}
+
 func formatTaskSummaryOutput(task taskSummaryInfo, format string) (string, error) {
 	if format == "" {
 		format = "value"
@@ -276,6 +360,25 @@ func formatTaskSummaryOutput(task taskSummaryInfo, format string) (string, error
 		return formatTaskSummaryValue(task), nil
 	case "table":
 		return formatTaskSummariesTable([]taskSummaryInfo{task}), nil
+	default:
+		return "", fmt.Errorf("invalid format: %s", format)
+	}
+}
+
+func formatTaskOutputSummaryOutput(task taskOutputSummaryInfo, format string) (string, error) {
+	if format == "" {
+		format = "value"
+	}
+
+	switch format {
+	case "json":
+		return render.FormatJSON(task)
+	case "yaml":
+		return render.FormatYAML(task)
+	case "value":
+		return formatTaskOutputSummaryValue(task), nil
+	case "table":
+		return formatTaskOutputSummariesTable([]taskOutputSummaryInfo{task}), nil
 	default:
 		return "", fmt.Errorf("invalid format: %s", format)
 	}
@@ -325,6 +428,38 @@ func formatTaskSummariesTable(tasks []taskSummaryInfo) string {
 	return render.FormatTable(headers, rows)
 }
 
+func formatTaskOutputSummariesTable(tasks []taskOutputSummaryInfo) string {
+	if len(tasks) == 0 {
+		return "No tasks found"
+	}
+
+	headers := []string{"ID", "STATUS", "ROLE_PAIR", "INDEX", "KIND", "SPEC_REF", "DESC"}
+	var rows [][]string
+	for _, task := range tasks {
+		if len(task.Output) == 0 {
+			rows = append(rows, []string{task.ID, task.Status, task.RolePair, "-", "-", "-", "-"})
+			continue
+		}
+		for _, output := range task.Output {
+			desc := output.Desc
+			if len(desc) > 50 {
+				desc = desc[:47] + "..."
+			}
+			rows = append(rows, []string{
+				task.ID,
+				task.Status,
+				task.RolePair,
+				fmt.Sprintf("%d", output.Index),
+				output.Kind,
+				output.SpecRef,
+				desc,
+			})
+		}
+	}
+
+	return render.FormatTable(headers, rows)
+}
+
 func formatTaskSummaryValue(task taskSummaryInfo) string {
 	lines := []string{
 		fmt.Sprintf("ID: %s", task.ID),
@@ -358,6 +493,51 @@ func formatTaskSummaryValue(task taskSummaryInfo) string {
 	}
 	if task.OutputCount > 0 {
 		lines = append(lines, fmt.Sprintf("Output Count: %d", task.OutputCount))
+	}
+
+	return strings.Join(lines, "\n")
+}
+
+func formatTaskOutputSummaryValue(task taskOutputSummaryInfo) string {
+	lines := []string{
+		fmt.Sprintf("ID: %s", task.ID),
+		fmt.Sprintf("Status: %s", task.Status),
+		fmt.Sprintf("Role Pair: %s", task.RolePair),
+	}
+
+	if len(task.Output) == 0 {
+		lines = append(lines, "Output: none")
+		return strings.Join(lines, "\n")
+	}
+
+	lines = append(lines, "Output:")
+	for _, output := range task.Output {
+		parts := []string{fmt.Sprintf("[%d]", output.Index)}
+		if output.Kind != "" {
+			parts = append(parts, fmt.Sprintf("kind=%s", output.Kind))
+		}
+		if output.SpecRef != "" {
+			parts = append(parts, fmt.Sprintf("spec_ref=%s", output.SpecRef))
+		}
+		if output.EpicRef != "" {
+			parts = append(parts, fmt.Sprintf("epic_ref=%s", output.EpicRef))
+		}
+		if output.PlanRef != "" {
+			parts = append(parts, fmt.Sprintf("plan_ref=%s", output.PlanRef))
+		}
+		if output.ArchRef != "" {
+			parts = append(parts, fmt.Sprintf("arch_ref=%s", output.ArchRef))
+		}
+		if len(output.DependsOn) > 0 {
+			parts = append(parts, fmt.Sprintf("depends_on=%s", strings.Join(output.DependsOn, ",")))
+		}
+		if len(output.TaskDependsOn) > 0 {
+			parts = append(parts, fmt.Sprintf("task_depends_on=%s", strings.Join(output.TaskDependsOn, ",")))
+		}
+		if output.Desc != "" {
+			parts = append(parts, output.Desc)
+		}
+		lines = append(lines, "- "+strings.Join(parts, " "))
 	}
 
 	return strings.Join(lines, "\n")

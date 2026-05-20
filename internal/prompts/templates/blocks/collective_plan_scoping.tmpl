@@ -88,6 +88,9 @@ If your plan CANNOT be made consistent with those prior plans:
 {{- define "task-graph-entry" -}}
 - {{.ID}} [{{.Status}}{{if ne .RolePair ""}}, {{.RolePair}}{{end}}]: {{.Description}}
   load: liza get {{.ID}} --json
+{{- if .OutputRefs}}
+  output context: liza get {{.ID}} --output-summary --json
+{{- end}}
 {{- if .SharedRefs}}
   shared refs:
 {{- range .SharedRefs}}

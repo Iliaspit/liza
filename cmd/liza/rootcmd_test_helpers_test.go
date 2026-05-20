@@ -113,6 +113,7 @@ func resetRootCmdForTest(t *testing.T) {
 		resetFlagIfPresent(child, "changed-by")
 		resetFlagIfPresent(child, "json")
 		resetFlagIfPresent(child, "summary")
+		resetFlagIfPresent(child, "output-summary")
 		resetFlagIfPresent(child, "active")
 		for _, name := range []string{"reason", "questions", "repair-operation", "repair-target", "repair-command", "repair-evidence", "repair-validation"} {
 			resetFlagIfPresent(child, name)

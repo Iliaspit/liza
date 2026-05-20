@@ -312,6 +312,167 @@ func TestInspectTasksSummaryActive(t *testing.T) {
 	}
 }
 
+func TestInspectTasksOutputSummary(t *testing.T) {
+	now := time.Now()
+	worktree := "/tmp/worktree"
+	mergeCommit := "abc123"
+
+	state := &models.State{
+		Tasks: []models.Task{
+			{
+				ID:          "task-with-output",
+				Description: "Parent description should not appear",
+				RolePair:    "planning-pair",
+				Status:      models.TaskStatusMerged,
+				Priority:    1,
+				Created:     now,
+				DoneWhen:    "Parent done_when should not appear",
+				Scope:       "Parent scope should not appear",
+				SpecRef:     "specs/parent.md",
+				Worktree:    &worktree,
+				MergeCommit: &mergeCommit,
+				IntegrationFailure: map[string]any{
+					"stderr": "verbose failure should not appear",
+				},
+				Output: []models.OutputEntry{
+					{
+						Desc:    "Prepare API foundation",
+						SpecRef: "specs/foundation.md",
+						Kind:    "code-task",
+					},
+					{
+						Desc:          "Implement API",
+						DoneWhen:      "Child done_when should not appear",
+						Scope:         "Child scope should not appear",
+						SpecRef:       "specs/api.md",
+						EpicRef:       "specs/epics/api.md#api",
+						PlanRef:       "specs/plans/api.md",
+						ArchRef:       "specs/arch-plan/api.md",
+						Kind:          "code-task",
+						DependsOn:     []string{"0"},
+						TaskDependsOn: []string{"existing-task"},
+					},
+				},
+			},
+		},
+	}
+
+	result, err := inspectTasks(state, inspectTasksOptions{
+		Format:        "json",
+		OutputSummary: true,
+	})
+	if err != nil {
+		t.Fatalf("inspectTasks() error = %v", err)
+	}
+
+	output := result.(string)
+	var summaries []map[string]any
+	if err := json.Unmarshal([]byte(output), &summaries); err != nil {
+		t.Fatalf("output summary JSON invalid: %v", err)
+	}
+	if len(summaries) != 1 {
+		t.Fatalf("summary count = %d, want 1", len(summaries))
+	}
+
+	task := summaries[0]
+	for _, key := range []string{"description", "done_when", "scope", "spec_ref", "worktree", "merge_commit", "integration_failure"} {
+		if _, exists := task[key]; exists {
+			t.Fatalf("output summary includes parent blob %q: %v", key, task)
+		}
+	}
+	if task["id"] != "task-with-output" || task["status"] != string(models.TaskStatusMerged) || task["role_pair"] != "planning-pair" {
+		t.Fatalf("unexpected task envelope: %v", task)
+	}
+
+	entries, ok := task["output"].([]any)
+	if !ok || len(entries) != 2 {
+		t.Fatalf("output entries = %T %v, want two entries", task["output"], task["output"])
+	}
+	entry, ok := entries[1].(map[string]any)
+	if !ok {
+		t.Fatalf("output entry = %T, want object", entries[1])
+	}
+	if entry["index"] != float64(1) {
+		t.Errorf("index = %v, want 1", entry["index"])
+	}
+	for key, want := range map[string]string{
+		"desc":     "Implement API",
+		"kind":     "code-task",
+		"spec_ref": "specs/api.md",
+		"epic_ref": "specs/epics/api.md#api",
+		"plan_ref": "specs/plans/api.md",
+		"arch_ref": "specs/arch-plan/api.md",
+	} {
+		if entry[key] != want {
+			t.Errorf("%s = %v, want %q", key, entry[key], want)
+		}
+	}
+	if _, exists := entry["done_when"]; exists {
+		t.Fatalf("output summary includes child done_when: %v", entry)
+	}
+	if _, exists := entry["scope"]; exists {
+		t.Fatalf("output summary includes child scope: %v", entry)
+	}
+	if got := entry["depends_on"].([]any); len(got) != 1 || got[0] != "0" {
+		t.Errorf("depends_on = %v, want [0]", got)
+	}
+	if got := entry["task_depends_on"].([]any); len(got) != 1 || got[0] != "existing-task" {
+		t.Errorf("task_depends_on = %v, want [existing-task]", got)
+	}
+	if strings.Contains(output, "Parent done_when") || strings.Contains(output, "Parent scope") ||
+		strings.Contains(output, "Child done_when") || strings.Contains(output, "Child scope") {
+		t.Fatalf("output summary leaked verbose blobs:\n%s", output)
+	}
+}
+
+func TestInspectTasksOutputSummaryEmptyOutput(t *testing.T) {
+	state := &models.State{
+		Tasks: []models.Task{{
+			ID:          "task-without-output",
+			Description: "No output yet",
+			Status:      models.TaskStatusMerged,
+			Created:     time.Now(),
+		}},
+	}
+
+	result, err := inspectTask(state, "task-without-output", inspectTasksOptions{
+		Format:        "json",
+		OutputSummary: true,
+	})
+	if err != nil {
+		t.Fatalf("inspectTask() error = %v", err)
+	}
+
+	output := result.(string)
+	var summary map[string]any
+	if err := json.Unmarshal([]byte(output), &summary); err != nil {
+		t.Fatalf("output summary JSON invalid: %v", err)
+	}
+	entries, ok := summary["output"].([]any)
+	if !ok {
+		t.Fatalf("output field = %T, want empty array", summary["output"])
+	}
+	if len(entries) != 0 {
+		t.Fatalf("output entries = %v, want empty array", entries)
+	}
+
+	listResult, err := inspectTasks(state, inspectTasksOptions{
+		Format:        "json",
+		OutputSummary: true,
+	})
+	if err != nil {
+		t.Fatalf("inspectTasks() error = %v", err)
+	}
+	var listSummary []map[string]any
+	if err := json.Unmarshal([]byte(listResult.(string)), &listSummary); err != nil {
+		t.Fatalf("list output summary JSON invalid: %v", err)
+	}
+	listEntries, ok := listSummary[0]["output"].([]any)
+	if !ok || len(listEntries) != 0 {
+		t.Fatalf("list output entries = %T %v, want empty array", listSummary[0]["output"], listSummary[0]["output"])
+	}
+}
+
 func TestInspectTask(t *testing.T) {
 	now := time.Now()
 	assignedTo := "coder-1"

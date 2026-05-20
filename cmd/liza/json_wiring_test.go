@@ -1169,6 +1169,95 @@ func TestJSON_GetTasksSummaryActive(t *testing.T) {
 	}
 }
 
+func TestJSON_GetTaskOutputSummary(t *testing.T) {
+	projectRoot, _ := setupMutationTestProject(t, func(state *models.State) {
+		now := time.Now().UTC()
+		worktree := "/tmp/task-output-summary"
+		task := testhelpers.BuildTaskByStatus("task-output-summary", models.TaskStatusMerged, now)
+		task.RolePair = "code-planning-pair"
+		task.Worktree = &worktree
+		task.DoneWhen = "verbose parent done_when should not appear"
+		task.Scope = "verbose parent scope should not appear"
+		task.Output = []models.OutputEntry{
+			{
+				Desc:    "Prepare downstream task",
+				SpecRef: "specs/foundation.md",
+				Kind:    "code-task",
+			},
+			{
+				Desc:          "Implement downstream task",
+				DoneWhen:      "verbose child done_when should not appear",
+				Scope:         "verbose child scope should not appear",
+				SpecRef:       "specs/downstream.md",
+				PlanRef:       "specs/plans/downstream.md",
+				ArchRef:       "specs/arch-plan/downstream.md",
+				Kind:          "code-task",
+				DependsOn:     []string{"0"},
+				TaskDependsOn: []string{"task-existing"},
+			},
+		}
+		state.Tasks = []models.Task{task}
+	})
+
+	stdout, err := executeRootCommandCapture(t, projectRoot, "get", "task-output-summary", "--output-summary", "--json")
+	if err != nil {
+		t.Fatalf("get task --output-summary --json failed: %v", err)
+	}
+
+	env := parseEnvelope(t, stdout)
+	if env["ok"] != true {
+		t.Fatalf("expected ok=true, got %v", env["ok"])
+	}
+	result, ok := env["result"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected result object, got %T", env["result"])
+	}
+	if result["id"] != "task-output-summary" || result["role_pair"] != "code-planning-pair" {
+		t.Fatalf("unexpected result envelope: %v", result)
+	}
+	for _, key := range []string{"description", "done_when", "scope", "worktree"} {
+		if _, exists := result[key]; exists {
+			t.Fatalf("output summary includes parent %q: %v", key, result)
+		}
+	}
+	entries, ok := result["output"].([]any)
+	if !ok || len(entries) != 2 {
+		t.Fatalf("result.output = %T %v, want two entries", result["output"], result["output"])
+	}
+	entry := entries[1].(map[string]any)
+	if entry["index"] != float64(1) || entry["desc"] != "Implement downstream task" {
+		t.Fatalf("unexpected output entry: %v", entry)
+	}
+	if _, exists := entry["done_when"]; exists {
+		t.Fatalf("output summary includes child done_when: %v", entry)
+	}
+	if _, exists := entry["scope"]; exists {
+		t.Fatalf("output summary includes child scope: %v", entry)
+	}
+}
+
+func TestJSON_GetRejectsSummaryAndOutputSummaryTogether(t *testing.T) {
+	projectRoot, _ := setupMutationTestProject(t, nil)
+
+	stdout, err := executeRootCommandCapture(t, projectRoot, "get", "tasks", "--summary", "--output-summary", "--json")
+	if err == nil {
+		t.Fatal("expected get tasks --summary --output-summary --json to fail")
+	}
+
+	env := parseEnvelope(t, stdout)
+	if env["ok"] != false {
+		t.Fatalf("expected ok=false, got %v", env["ok"])
+	}
+	errObj, ok := env["error"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected error object, got %T", env["error"])
+	}
+	msg, _ := errObj["message"].(string)
+	if !strings.Contains(msg, "--summary and --output-summary are mutually exclusive") {
+		t.Fatalf("error.message = %q, want mutual exclusion message", msg)
+	}
+}
+
 func TestJSON_VoidSuccess(t *testing.T) {
 	projectRoot, _ := setupMutationTestProject(t, func(state *models.State) {
 		now := time.Now().UTC()

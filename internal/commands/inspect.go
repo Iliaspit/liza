@@ -15,12 +15,13 @@ import (
 
 // InspectOptions contains options for the inspect command
 type InspectOptions struct {
-	Format      string // Output format: json, yaml, table, value
-	ProjectRoot string // Project root directory
-	Internal    bool   // If true, return structured data for composition (not formatted string)
-	Summary     bool   // If true, return compact entity summaries
-	Active      bool   // If true, return only non-terminal tasks
-	Zombies     bool   // If true, return live liza agent processes missing from state
+	Format        string // Output format: json, yaml, table, value
+	ProjectRoot   string // Project root directory
+	Internal      bool   // If true, return structured data for composition (not formatted string)
+	Summary       bool   // If true, return compact entity summaries
+	OutputSummary bool   // If true, return compact task output entries
+	Active        bool   // If true, return only non-terminal tasks
+	Zombies       bool   // If true, return live liza agent processes missing from state
 }
 
 // Validate checks if the inspect options are valid
@@ -28,6 +29,9 @@ func (opts *InspectOptions) Validate() error {
 	validFormats := []string{"json", "yaml", "table", "value", ""}
 	if !slices.Contains(validFormats, opts.Format) {
 		return fmt.Errorf("invalid format: %s (must be json, yaml, table, or value)", opts.Format)
+	}
+	if opts.Summary && opts.OutputSummary {
+		return &errors.ValidationError{Message: "--summary and --output-summary are mutually exclusive"}
 	}
 	return nil
 }
@@ -125,8 +129,8 @@ func handleFieldQuery(state *models.State, fieldPath string, opts InspectOptions
 
 // handleEntityQuery handles queries for entities (tasks, agents, etc.)
 func handleEntityQuery(state *models.State, entity string, args []string, opts InspectOptions) (string, error) {
-	if entity != "tasks" && (opts.Summary || opts.Active) {
-		return "", fmt.Errorf("--summary and --active are only supported for tasks")
+	if entity != "tasks" && (opts.Summary || opts.OutputSummary || opts.Active) {
+		return "", fmt.Errorf("--summary, --output-summary, and --active are only supported for tasks")
 	}
 	if entity != "agents" && opts.Zombies {
 		return "", fmt.Errorf("--zombies is only supported for agents")
@@ -139,10 +143,11 @@ func handleEntityQuery(state *models.State, entity string, args []string, opts I
 		return formatOutput(state.Sprint, opts.Format)
 	case "tasks":
 		taskOpts := inspectTasksOptions{
-			Format:      opts.Format,
-			Summary:     opts.Summary,
-			Active:      opts.Active,
-			ProjectRoot: opts.ProjectRoot,
+			Format:        opts.Format,
+			Summary:       opts.Summary,
+			OutputSummary: opts.OutputSummary,
+			Active:        opts.Active,
+			ProjectRoot:   opts.ProjectRoot,
 		}
 		if len(args) > 0 {
 			return asString(inspectTask(state, args[0], taskOpts))

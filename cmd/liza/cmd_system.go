@@ -501,6 +501,7 @@ Examples:
   liza get sprint.elapsed
   liza get tasks --format table
   liza get tasks --active --summary --json
+  liza get tasks task-1 --output-summary --json
   liza get tasks task-1 --format json
   liza get task-1                  # Shorthand for tasks task-1
   liza get fix-auth-bug            # Shorthand for tasks fix-auth-bug (any task ID)
@@ -527,6 +528,7 @@ Examples:
 		summary, _ := cmd.Flags().GetBool("summary")
 		active, _ := cmd.Flags().GetBool("active")
 		zombies, _ := cmd.Flags().GetBool("zombies")
+		outputSummary, _ := cmd.Flags().GetBool("output-summary")
 
 		projectRoot, err := requireProjectRoot()
 		if err != nil {
@@ -535,11 +537,12 @@ Examples:
 
 		if isJSON(cmd) {
 			opts := commands.InspectOptions{
-				Format:      "json",
-				ProjectRoot: projectRoot,
-				Summary:     summary,
-				Active:      active,
-				Zombies:     zombies,
+				Format:        "json",
+				ProjectRoot:   projectRoot,
+				Summary:       summary,
+				OutputSummary: outputSummary,
+				Active:        active,
+				Zombies:       zombies,
 			}
 			resultStr, err := commands.InspectCommand(args, opts)
 			if err != nil {
@@ -551,11 +554,12 @@ Examples:
 		}
 
 		opts := commands.InspectOptions{
-			Format:      format,
-			ProjectRoot: projectRoot,
-			Summary:     summary,
-			Active:      active,
-			Zombies:     zombies,
+			Format:        format,
+			ProjectRoot:   projectRoot,
+			Summary:       summary,
+			OutputSummary: outputSummary,
+			Active:        active,
+			Zombies:       zombies,
 		}
 
 		result, err := commands.InspectCommand(args, opts)
@@ -676,6 +680,7 @@ func init() {
 	// Get command flags
 	getCmd.Flags().String("format", "", "output format: json, yaml, table, value (default varies by query type)")
 	getCmd.Flags().Bool("summary", false, "return compact task summaries")
+	getCmd.Flags().Bool("output-summary", false, "return compact task output summaries")
 	getCmd.Flags().Bool("active", false, "return only non-terminal tasks")
 	getCmd.Flags().Bool("zombies", false, "return live liza agent processes for this goal that are missing from state")
 
