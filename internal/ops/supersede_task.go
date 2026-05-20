@@ -88,6 +88,10 @@ func SupersedeTask(projectRoot, taskID string, replacementIDs []string, reason, 
 			return &PreconditionError{Reason: fmt.Sprintf("cannot supersede task %s: status changed from %s to %s", taskID, originalStatus, currentTask.Status)}
 		}
 
+		if err := validateDependencyDirection(state, pb.resolver, currentTask.ID, currentTask.RolePair, replacementIDs); err != nil {
+			return err
+		}
+
 		if err := currentTask.TransitionWith(models.TaskStatusSuperseded, pb.transitions); err != nil {
 			return err
 		}

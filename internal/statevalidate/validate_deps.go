@@ -50,6 +50,9 @@ func validateDependencies(state *models.State, projectRoot string, skipSpecFileC
 			if result.Invalid() {
 				return fmt.Errorf("task %s has invalid dependency %s", task.ID, result.Summary())
 			}
+			if err := validateDependencyDirection(state, resolver, &task, depID, result); err != nil {
+				return err
+			}
 			if result.Kind == models.DependencySatisfiedViaSupersession && warnWriter != nil {
 				fmt.Fprintf(warnWriter, "WARNING: task %s dependency %s satisfied via supersession path: %s\n", task.ID, depID, strings.Join(result.Path, " -> "))
 			}
@@ -81,6 +84,35 @@ func validateDependencies(state *models.State, projectRoot string, skipSpecFileC
 		}
 	}
 
+	return nil
+}
+
+func validateDependencyDirection(state *models.State, resolver *pipeline.Resolver, task *models.Task, depID string, result models.DependencySatisfaction) error {
+	if state == nil || resolver == nil || task == nil || task.RolePair == "" {
+		return nil
+	}
+	path := result.Path
+	if len(path) == 0 {
+		path = []string{depID}
+	}
+	for _, pathID := range path {
+		depTask := state.FindTask(pathID)
+		if depTask == nil || depTask.RolePair == "" {
+			continue
+		}
+		downstream, err := resolver.IsRolePairDownstream(task.RolePair, depTask.RolePair)
+		if err != nil {
+			return err
+		}
+		if downstream {
+			if len(path) > 1 {
+				return fmt.Errorf("task %s dependency %s resolves through downstream task %s: role_pair %s is downstream of %s (path: %s)",
+					task.ID, depID, depTask.ID, depTask.RolePair, task.RolePair, strings.Join(path, " -> "))
+			}
+			return fmt.Errorf("task %s has downstream dependency %s: role_pair %s is downstream of %s",
+				task.ID, depTask.ID, depTask.RolePair, task.RolePair)
+		}
+	}
 	return nil
 }
 

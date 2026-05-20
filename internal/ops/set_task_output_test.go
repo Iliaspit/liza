@@ -564,6 +564,67 @@ func TestSetTaskOutput_TaskDependsOnRejectsMissingTask(t *testing.T) {
 	testhelpers.RequireErrorContains(t, err, `output[0].task_depends_on references non-existent task "missing-task"`)
 }
 
+func TestSetTaskOutput_TaskDependsOnRejectsDownstreamRolePair(t *testing.T) {
+	tmpDir := t.TempDir()
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	now := time.Now().UTC()
+
+	architect := "architect-1"
+	architectureTask := testhelpers.BuildTaskByStatus("architecture-1", models.TaskStatus("ARCHITECTING"), now)
+	architectureTask.RolePair = "architecture-pair"
+	architectureTask.AssignedTo = &architect
+	codingTask := testhelpers.BuildTaskByStatus("coding-1", models.TaskStatusMerged, now)
+	codingTask.RolePair = "coding-pair"
+
+	state := testhelpers.CreateValidState()
+	state.Tasks = []models.Task{architectureTask, codingTask}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	err := SetTaskOutput(tmpDir, &SetTaskOutputInput{
+		TaskID:  "architecture-1",
+		AgentID: "architect-1",
+		Output: []models.OutputEntry{{
+			Desc:          "Plan work",
+			DoneWhen:      "plan exists",
+			Scope:         "specs/plan",
+			SpecRef:       "specs/plan.md",
+			TaskDependsOn: []string{"coding-1"},
+		}},
+	})
+	testhelpers.RequireErrorContains(t, err, "role_pair coding-pair is downstream of code-planning-pair")
+}
+
+func TestSetTaskOutput_TaskDependsOnAllowsTargetRolePairPeer(t *testing.T) {
+	tmpDir := t.TempDir()
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	now := time.Now().UTC()
+
+	planner := "code-planner-1"
+	planningTask := testhelpers.BuildTaskByStatus("plan-1", models.TaskStatusCodePlanning, now)
+	planningTask.AssignedTo = &planner
+	codingTask := testhelpers.BuildTaskByStatus("coding-1", models.TaskStatusMerged, now)
+	codingTask.RolePair = "coding-pair"
+
+	state := testhelpers.CreateValidState()
+	state.Tasks = []models.Task{planningTask, codingTask}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	err := SetTaskOutput(tmpDir, &SetTaskOutputInput{
+		TaskID:  "plan-1",
+		AgentID: "code-planner-1",
+		Output: []models.OutputEntry{{
+			Desc:          "Continue coding work",
+			DoneWhen:      "work is linked",
+			Scope:         "internal/ops",
+			SpecRef:       "specs/work.md",
+			TaskDependsOn: []string{"coding-1"},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("SetTaskOutput() unexpected error: %v", err)
+	}
+}
+
 func TestSetTaskOutput_CodePlanningStatus(t *testing.T) {
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)

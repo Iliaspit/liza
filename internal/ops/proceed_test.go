@@ -658,6 +658,249 @@ func TestProceed_PipelineCreatesChildTasksWithRolePair(t *testing.T) {
 	}
 }
 
+func TestProceed_RejectsChildDownstreamDependency(t *testing.T) {
+	tmpDir, stateFile := setupPipelineProceedTest(t)
+
+	state := testhelpers.CreateValidState()
+	state.PipelineVersion = 2
+	state.Sprint.Status = models.SprintStatusCompleted
+
+	now := time.Now().UTC()
+	architectureTask := models.Task{
+		ID:          "architecture-1",
+		Type:        models.TaskTypeArchitecture,
+		RolePair:    "architecture-pair",
+		Description: "Architecture",
+		Status:      models.TaskStatus("ARCHITECTURE_APPROVED"),
+		Priority:    1,
+		Created:     now,
+		SpecRef:     "README.md",
+		DoneWhen:    "Approved",
+		Scope:       "system",
+		Output: []models.OutputEntry{{
+			Desc:          "Plan implementation",
+			DoneWhen:      "coding plan exists",
+			Scope:         "internal/ops",
+			SpecRef:       "specs/plan.md",
+			TaskDependsOn: []string{"coding-1"},
+		}},
+		History: []models.TaskHistoryEntry{},
+	}
+	codingTask := testhelpers.BuildTaskByStatus("coding-1", models.TaskStatusMerged, now)
+	codingTask.RolePair = "coding-pair"
+	state.Tasks = []models.Task{architectureTask, codingTask}
+	state.Sprint.Scope.Planned = []string{"architecture-1"}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	_, err := Proceed(tmpDir, "architecture-1", "architecture-to-code-plan")
+	testhelpers.RequireErrorContains(t, err, "role_pair coding-pair is downstream of code-planning-pair")
+}
+
+func TestExecuteAvailableTransitions_DownstreamDependencyDoesNotMarkExecuted(t *testing.T) {
+	tmpDir, stateFile := setupPipelineProceedTest(t)
+
+	state := testhelpers.CreateValidState()
+	state.PipelineVersion = 2
+
+	now := time.Now().UTC()
+	architectureTask := models.Task{
+		ID:          "architecture-1",
+		Type:        models.TaskTypeArchitecture,
+		RolePair:    "architecture-pair",
+		Description: "Architecture",
+		Status:      models.TaskStatusMerged,
+		Priority:    1,
+		Created:     now,
+		SpecRef:     "README.md",
+		DoneWhen:    "Approved",
+		Scope:       "system",
+		Output: []models.OutputEntry{{
+			Desc:          "Plan implementation",
+			DoneWhen:      "coding plan exists",
+			Scope:         "internal/ops",
+			SpecRef:       "specs/plan.md",
+			TaskDependsOn: []string{"coding-1"},
+		}},
+		History: []models.TaskHistoryEntry{},
+	}
+	codingTask := testhelpers.BuildTaskByStatus("coding-1", models.TaskStatusMerged, now)
+	codingTask.RolePair = "coding-pair"
+	state.Tasks = []models.Task{architectureTask, codingTask}
+	state.Sprint.Scope.Planned = []string{"architecture-1", "coding-1"}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	results, err := ExecuteAvailableTransitions(tmpDir, "manual")
+	if err != nil {
+		t.Fatalf("ExecuteAvailableTransitions() error: %v", err)
+	}
+	if len(results) != 0 {
+		t.Fatalf("ExecuteAvailableTransitions() results = %v, want none", results)
+	}
+
+	bb := db.New(stateFile)
+	readState, err := bb.Read()
+	if err != nil {
+		t.Fatalf("Failed to read state: %v", err)
+	}
+	source := readState.FindTask("architecture-1")
+	if source == nil {
+		t.Fatal("architecture-1 not found")
+	}
+	if source.TransitionsExecuted["architecture-to-code-plan"] {
+		t.Fatal("transition was marked executed despite dependency-direction rejection")
+	}
+	if child := readState.FindTask("architecture-1-architecture-to-code-plan-0"); child != nil {
+		t.Fatalf("child was created despite dependency-direction rejection: %+v", child)
+	}
+}
+
+func TestExecuteAvailableTransitions_CrashRecoveryInvalidMissingChildDoesNotPatchExistingChild(t *testing.T) {
+	tmpDir, stateFile := setupPipelineProceedTest(t)
+
+	state := testhelpers.CreateValidState()
+	state.PipelineVersion = 2
+
+	now := time.Now().UTC()
+	upstream := models.Task{
+		ID:                  "upstream-architecture",
+		Type:                models.TaskTypeArchitecture,
+		RolePair:            "architecture-pair",
+		Description:         "Upstream architecture",
+		Status:              models.TaskStatusMerged,
+		Priority:            1,
+		Created:             now,
+		SpecRef:             "README.md",
+		DoneWhen:            "Approved",
+		Scope:               "system",
+		Output:              []models.OutputEntry{{Desc: "Upstream plan", DoneWhen: "done", Scope: "internal/ops", SpecRef: "specs/upstream.md"}},
+		TransitionsExecuted: map[string]bool{"architecture-to-code-plan": true},
+		History:             []models.TaskHistoryEntry{},
+	}
+	upstreamChild := models.Task{
+		ID:          "upstream-architecture-architecture-to-code-plan-0",
+		Type:        models.TaskTypePlanning,
+		RolePair:    "code-planning-pair",
+		Description: "Upstream child",
+		Status:      models.TaskStatusMerged,
+		ParentTasks: []string{"upstream-architecture"},
+		SpecRef:     "specs/upstream.md",
+		DoneWhen:    "done",
+		Scope:       "internal/ops",
+		Created:     now,
+		History:     []models.TaskHistoryEntry{},
+	}
+	architectureTask := models.Task{
+		ID:          "architecture-1",
+		Type:        models.TaskTypeArchitecture,
+		RolePair:    "architecture-pair",
+		Description: "Architecture",
+		Status:      models.TaskStatusMerged,
+		Priority:    1,
+		Created:     now,
+		SpecRef:     "README.md",
+		DoneWhen:    "Approved",
+		Scope:       "system",
+		DependsOn:   []string{"upstream-architecture"},
+		Output: []models.OutputEntry{
+			{Desc: "Existing child", DoneWhen: "done", Scope: "internal/ops", SpecRef: "specs/plan-0.md"},
+			{Desc: "Missing invalid child", DoneWhen: "done", Scope: "internal/ops", SpecRef: "specs/plan-1.md", TaskDependsOn: []string{"coding-1"}},
+		},
+		TransitionsExecuted: map[string]bool{"architecture-to-code-plan": true},
+		History:             []models.TaskHistoryEntry{},
+	}
+	existingChildID := "architecture-1-architecture-to-code-plan-0"
+	existingChild := models.Task{
+		ID:          existingChildID,
+		Type:        models.TaskTypePlanning,
+		RolePair:    "code-planning-pair",
+		Description: "Existing child",
+		Status:      models.TaskStatus("DRAFT_CODING_PLAN"),
+		ParentTasks: []string{"architecture-1"},
+		SpecRef:     "specs/plan-0.md",
+		DoneWhen:    "done",
+		Scope:       "internal/ops",
+		Created:     now,
+		History:     []models.TaskHistoryEntry{},
+	}
+	codingTask := testhelpers.BuildTaskByStatus("coding-1", models.TaskStatusMerged, now)
+	codingTask.RolePair = "coding-pair"
+	state.Tasks = []models.Task{upstream, upstreamChild, architectureTask, existingChild, codingTask}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	results, err := ExecuteAvailableTransitions(tmpDir, "manual")
+	if err != nil {
+		t.Fatalf("ExecuteAvailableTransitions() error: %v", err)
+	}
+	if len(results) != 0 {
+		t.Fatalf("ExecuteAvailableTransitions() results = %v, want none", results)
+	}
+
+	bb := db.New(stateFile)
+	readState, err := bb.Read()
+	if err != nil {
+		t.Fatalf("Failed to read state: %v", err)
+	}
+	if got := readState.FindTask(existingChildID).DependsOn; len(got) != 0 {
+		t.Fatalf("existing child DependsOn mutated on rejected recovery: %v", got)
+	}
+	if child := readState.FindTask("architecture-1-architecture-to-code-plan-1"); child != nil {
+		t.Fatalf("missing child was created despite dependency-direction rejection: %+v", child)
+	}
+}
+
+func TestProceed_RecoverCrashedTransitionRejectsPatchedDownstreamDependency(t *testing.T) {
+	tmpDir, _ := setupPipelineProceedTest(t)
+	resolver, _, err := loadResolver(tmpDir)
+	if err != nil {
+		t.Fatalf("loadResolver: %v", err)
+	}
+	tDef, err := buildTransitionDefFromPipeline(resolver, "architecture-to-code-plan")
+	if err != nil {
+		t.Fatalf("buildTransitionDefFromPipeline: %v", err)
+	}
+
+	now := time.Now().UTC()
+	architectureTask := models.Task{
+		ID:                  "architecture-1",
+		Type:                models.TaskTypeArchitecture,
+		RolePair:            "architecture-pair",
+		Description:         "Architecture",
+		Status:              models.TaskStatus("ARCHITECTURE_APPROVED"),
+		Priority:            1,
+		Created:             now,
+		SpecRef:             "README.md",
+		DoneWhen:            "Approved",
+		Scope:               "system",
+		Output:              []models.OutputEntry{{Desc: "Plan implementation", DoneWhen: "coding plan exists", Scope: "internal/ops", SpecRef: "specs/plan.md"}},
+		TransitionsExecuted: map[string]bool{"architecture-to-code-plan": true},
+		History:             []models.TaskHistoryEntry{},
+	}
+	childID := perSubtaskChildID("architecture-1", "architecture-to-code-plan", 0)
+	existingChild := models.Task{
+		ID:          childID,
+		Type:        models.TaskTypePlanning,
+		RolePair:    "code-planning-pair",
+		Description: "Existing child",
+		Status:      models.TaskStatus("DRAFT_CODING_PLAN"),
+		ParentTasks: []string{"architecture-1"},
+		SpecRef:     "specs/plan.md",
+		DoneWhen:    "coding plan exists",
+		Scope:       "internal/ops",
+		Created:     now,
+		History:     []models.TaskHistoryEntry{},
+	}
+	codingTask := testhelpers.BuildTaskByStatus("coding-1", models.TaskStatusMerged, now)
+	codingTask.RolePair = "coding-pair"
+	state := &models.State{Tasks: []models.Task{architectureTask, existingChild, codingTask}}
+
+	result := &ProceedResult{SourceTaskID: "architecture-1", TransitionName: "architecture-to-code-plan"}
+	err = proceedInner(state, "architecture-1", "architecture-to-code-plan", tDef, []string{"coding-1"}, resolver, now, result)
+	testhelpers.RequireErrorContains(t, err, "role_pair coding-pair is downstream of code-planning-pair")
+	if got := state.FindTask(childID).DependsOn; len(got) != 0 {
+		t.Fatalf("existing child DependsOn mutated on rejection: %v", got)
+	}
+}
+
 func TestAvailableManualTransitions_PipelineTask(t *testing.T) {
 	tmpDir, stateFile := setupPipelineProceedTest(t)
 
@@ -2982,7 +3225,7 @@ func TestProceedInner_InheritedDepsAppendedAfterSiblingDeps(t *testing.T) {
 	inheritedDeps := []string{"upstream-child-0", "upstream-child-1"}
 	result := &ProceedResult{SourceTaskID: "plan-1", TransitionName: "code-plan-to-coding"}
 
-	err := proceedInner(s, "plan-1", "code-plan-to-coding", tDef, inheritedDeps, now, result)
+	err := proceedInner(s, "plan-1", "code-plan-to-coding", tDef, inheritedDeps, nil, now, result)
 	if err != nil {
 		t.Fatalf("proceedInner: %v", err)
 	}
@@ -3945,7 +4188,7 @@ func TestProceedManyToOne_CrashRecovery_ChildExists(t *testing.T) {
 
 	now := time.Now().UTC()
 	result := &ProceedResult{}
-	err = proceedInner(state, cohort[0].ID, "us-to-coding", tDef, nil, now, result)
+	err = proceedInner(state, cohort[0].ID, "us-to-coding", tDef, nil, resolver, now, result)
 
 	// Should return errTransitionAlreadyExecuted
 	if err == nil {
@@ -3961,6 +4204,46 @@ func TestProceedManyToOne_CrashRecovery_ChildExists(t *testing.T) {
 		if !member.TransitionsExecuted["us-to-coding"] {
 			t.Errorf("Task %s: transitions_executed should be repaired", cohort[i].ID)
 		}
+	}
+}
+
+func TestProceedManyToOne_CrashRecoveryRejectsPatchedDownstreamDependency(t *testing.T) {
+	tmpDir, _ := setupPhase2PipelineProceedTest(t)
+
+	resolver, _, err := loadResolver(tmpDir)
+	if err != nil {
+		t.Fatalf("loadResolver: %v", err)
+	}
+	tDef, err := buildTransitionDefFromPipeline(resolver, "us-to-coding")
+	if err != nil {
+		t.Fatalf("buildTransitionDefFromPipeline: %v", err)
+	}
+
+	parentID := "epic-plan-1"
+	cohort := makeManyToOneCohort(parentID, "us-writing-pair", models.TaskStatusMerged, "specs/goal.md", 3)
+	cohort[0].TransitionsExecuted = map[string]bool{"us-to-coding": true}
+	cohort[1].TransitionsExecuted = map[string]bool{"us-to-coding": true}
+
+	childID := "epic-plan-1-us-to-coding"
+	codingTask := testhelpers.BuildTaskByStatus("coding-1", models.TaskStatusMerged, time.Now().UTC())
+	codingTask.RolePair = "coding-pair"
+	state := &models.State{Tasks: append(cohort, models.Task{
+		ID:          childID,
+		Type:        models.TaskTypeArchitecture,
+		RolePair:    "architecture-pair",
+		Description: "Existing child",
+		Status:      models.TaskStatus("DRAFT_ARCHITECTURE"),
+		ParentTasks: []string{cohort[0].ID, cohort[1].ID, cohort[2].ID},
+		Created:     time.Now().UTC(),
+		History:     []models.TaskHistoryEntry{},
+	}, codingTask)}
+
+	now := time.Now().UTC()
+	result := &ProceedResult{}
+	err = proceedInner(state, cohort[0].ID, "us-to-coding", tDef, []string{"coding-1"}, resolver, now, result)
+	testhelpers.RequireErrorContains(t, err, "role_pair coding-pair is downstream of architecture-pair")
+	if got := state.FindTask(childID).DependsOn; len(got) != 0 {
+		t.Fatalf("existing child DependsOn mutated on rejection: %v", got)
 	}
 }
 
@@ -4960,14 +5243,14 @@ func TestProceed_PerSubtask_KindDedup_CrashRecovery(t *testing.T) {
 
 	// SAFETY INVARIANT: the foreign incumbent's DependsOn must be byte-equal
 	// before and after recovery. This witnesses the skipped? → existing? →
-	// create? precedence: a swap would call patchInheritedDeps on the foreign
+	// create? precedence: a swap would patch inherited deps on the foreign
 	// task and append inheritedDeps into its DependsOn list.
 	gotForeign := readState.FindTask("foreign-boot")
 	if gotForeign == nil {
 		t.Fatal("foreign bootstrap vanished")
 	}
 	if !slices.Equal(gotForeign.DependsOn, foreignDeps) {
-		t.Errorf("foreign.DependsOn mutated by recovery: got %v, want %v (patchInheritedDeps was called on foreign incumbent)", gotForeign.DependsOn, foreignDeps)
+		t.Errorf("foreign.DependsOn mutated by recovery: got %v, want %v (foreign incumbent was patched)", gotForeign.DependsOn, foreignDeps)
 	}
 
 	// History has TransitionCrashRecov with recovered_children == 1.

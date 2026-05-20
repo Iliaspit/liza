@@ -155,6 +155,24 @@ func TestSupersedeTask_NoReplacements(t *testing.T) {
 	}
 }
 
+func TestSupersedeTask_RejectsDownstreamReplacement(t *testing.T) {
+	tmpDir := t.TempDir()
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+
+	now := time.Now().UTC()
+	planningTask := testhelpers.BuildTaskByStatus("plan-1", models.TaskStatusBlocked, now)
+	planningTask.RolePair = "code-planning-pair"
+	codingTask := testhelpers.BuildTaskByStatus("coding-1", models.TaskStatusMerged, now)
+	codingTask.RolePair = "coding-pair"
+
+	state := testhelpers.CreateValidState()
+	state.Tasks = []models.Task{planningTask, codingTask}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	_, err := SupersedeTask(tmpDir, "plan-1", []string{"coding-1"}, "Coding work already exists", "orchestrator-1")
+	testhelpers.RequireErrorContains(t, err, "role_pair coding-pair is downstream of code-planning-pair")
+}
+
 func TestSupersedeTask_NoReplacements_DeletesBranch(t *testing.T) {
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)

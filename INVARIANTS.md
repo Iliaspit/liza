@@ -88,19 +88,29 @@ Agent cannot claim if already assigned to another executing task.
 
 **Enforced:** spec, code (`claim_task.go`)
 
-### 3.4 Integration Fix History
+### 3.4 Dependency Direction
+
+Task dependencies cannot point downstream in the configured pipeline topology. A task may depend on work from the same role-pair or an upstream/unrelated role-pair, but must not depend on a task whose `role_pair` is reachable downstream from the dependent task's `role_pair` through configured sub-pipeline transitions or `pipeline-transitions`.
+
+Supersession paths count as dependency paths: if `depends_on: old-task` resolves through `old-task.superseded_by` to a downstream task, the dependency is invalid. `output[].task_depends_on` is validated against every per-subtask outgoing transition target that can consume that output, and crash recovery validates the final child `depends_on` set before patching or appending child tasks.
+
+**Protects against:** Earlier pipeline phases waiting on later phases, deadlocked planning tasks, hidden cross-phase blockers.
+
+**Enforced:** code (`pipeline.Resolver` topology helpers, `set_task_output.go`, `proceed.go`, `supersede_task.go`, `validate_deps.go`)
+
+### 3.5 Integration Fix History
 
 Tasks with `integration_fix: true` must have `INTEGRATION_FAILED` event in history.
 
 **Enforced:** code (`validate_task.go`)
 
-### 3.5 Failure Attribution Uniqueness
+### 3.6 Failure Attribution Uniqueness
 
 `failed_by` array cannot have duplicate agent IDs.
 
 **Enforced:** code (`validate_task.go`, `wt_merge.go` via `appendUniqueAgentID`)
 
-### 3.6 Task ID Uniqueness
+### 3.7 Task ID Uniqueness
 
 Every non-empty task ID must identify exactly one task in `state.yaml`.
 

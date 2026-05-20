@@ -185,6 +185,58 @@ func TestResolver_TransitionSourcePairs_Phase2(t *testing.T) {
 	}
 }
 
+func TestResolver_DownstreamRolePairs(t *testing.T) {
+	r := NewResolver(loadPhase2Config(t))
+
+	got, err := r.DownstreamRolePairs("architecture-pair")
+	if err != nil {
+		t.Fatalf("DownstreamRolePairs: %v", err)
+	}
+	for _, want := range []string{"code-planning-pair", "coding-pair"} {
+		if !got[want] {
+			t.Errorf("architecture-pair downstream missing %q: %v", want, got)
+		}
+	}
+	if got["architecture-pair"] {
+		t.Errorf("architecture-pair should not be downstream of itself: %v", got)
+	}
+
+	got, err = r.DownstreamRolePairs("us-writing-pair")
+	if err != nil {
+		t.Fatalf("DownstreamRolePairs: %v", err)
+	}
+	for _, want := range []string{"architecture-pair", "code-planning-pair", "coding-pair"} {
+		if !got[want] {
+			t.Errorf("us-writing-pair downstream missing %q: %v", want, got)
+		}
+	}
+}
+
+func TestResolver_OutputConsumerRolePairs(t *testing.T) {
+	r := NewResolver(loadPhase2Config(t))
+
+	tests := []struct {
+		rolePair string
+		want     []string
+	}{
+		{rolePair: "architecture-pair", want: []string{"code-planning-pair"}},
+		{rolePair: "code-planning-pair", want: []string{"coding-pair"}},
+		{rolePair: "us-writing-pair", want: nil},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.rolePair, func(t *testing.T) {
+			got, err := r.OutputConsumerRolePairs(tt.rolePair)
+			if err != nil {
+				t.Fatalf("OutputConsumerRolePairs: %v", err)
+			}
+			if !slices.Equal(got, tt.want) {
+				t.Fatalf("OutputConsumerRolePairs(%q) = %v, want %v", tt.rolePair, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestResolver_IsTransitionSourcePair_Phase2(t *testing.T) {
 	r := NewResolver(loadPhase2Config(t))
 

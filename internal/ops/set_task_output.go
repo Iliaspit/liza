@@ -112,6 +112,18 @@ func SetTaskOutput(projectRoot string, input *SetTaskOutputInput) error {
 			}
 		}
 
+		consumerRolePairs, err := resolver.OutputConsumerRolePairs(task.RolePair)
+		if err != nil {
+			return err
+		}
+		for _, consumerRolePair := range consumerRolePairs {
+			for i, entry := range input.Output {
+				if err := validateDependencyDirection(state, resolver, fmt.Sprintf("%s output[%d]", task.ID, i), consumerRolePair, entry.TaskDependsOn); err != nil {
+					return err
+				}
+			}
+		}
+
 		task.Output = input.Output
 		return nil
 	})

@@ -276,6 +276,8 @@ Optional:
 - `arch_ref` (`string`): Path to the architecture document (repo-relative). Set by architect via `set-task-output`. Normalized by `NormalizeSpecRef` (worktree prefixes stripped). Propagated to child tasks by `proceed.go` during transitions.
 - `task_depends_on` (`[]string`): Existing concrete task IDs outside this `output[]`. Set by doer via `set-task-output`; copied to generated child tasks as scheduler-facing `depends_on`.
 
+`task_depends_on` must be legal for every per-subtask transition target that can consume the output. A dependency is illegal when the referenced task's `role_pair` is downstream of the generated child's `role_pair` in the configured transition graph; same-role-pair dependencies are allowed. Supersession chains are checked as dependency paths, so a dependency that resolves through `superseded_by` to a downstream role-pair is also invalid.
+
 Artifact reference fields are scalar repo-relative refs, optionally with a
 `#fragment` anchor. Delimiter-joined multi-refs such as `specs/a.md; specs/b.md`
 are invalid; use scope text or a future structured multi-ref field instead.
@@ -333,6 +335,8 @@ additional `depends_on` entries. Dependency composition order is:
 1. Sibling deps from `output[].depends_on` index references, resolved to generated child task IDs
 2. Concrete task deps from `output[].task_depends_on`
 3. Inherited phase-gate deps from upstream parents' children
+
+Before creating or crash-recovery patching a child task, the final composed `depends_on` set is validated against pipeline direction. The dependency task's `role_pair` must not be reachable downstream from the child task's `role_pair` through sub-pipeline transitions or top-level `pipeline-transitions`.
 
 **`transition_cycle_blocked` history event:** Added by `ExecuteAvailableTransitions` when
 circular `depends_on` prevents topological ordering. Semantics:
@@ -450,6 +454,7 @@ The `depends_on` field declares explicit dependencies between tasks:
 
 **Semantics:**
 - `depends_on` is an array of task IDs that must reach MERGED status before this task can be claimed
+- `depends_on` must not point to a downstream pipeline role-pair. Same-role-pair and upstream dependencies are valid; supersession-resolved replacements are checked by the same rule.
 - Empty array or missing field means no dependencies — task is immediately claimable
 - Coders can only claim tasks where ALL dependencies are satisfied
 - Orchestrator sets dependencies during task creation based on logical ordering
@@ -963,6 +968,7 @@ invariants:
   - "MERGED task must not have worktree"
   - "Task type must be a known type (currently: 'coding', 'planning'); empty defaults to 'coding'"
   - "depends_on must reference existing task IDs"
+  - "depends_on must not reference a task whose role_pair is downstream of the dependent task's role_pair, including through superseded_by resolution paths"
   - "depends_on must not create circular dependencies"
   - "IMPLEMENTING task must have all depends_on tasks in MERGED or SUPERSEDED status"
   - "Agent WORKING must have task"

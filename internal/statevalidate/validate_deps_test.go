@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/liza-mas/liza/internal/models"
+	"github.com/liza-mas/liza/internal/pipeline"
 	"github.com/liza-mas/liza/internal/testhelpers"
 )
 
@@ -96,6 +97,60 @@ func TestValidateDependencies_DoesNotWarnForNonExecutingDirectPendingDependency(
 	if warnings.Len() != 0 {
 		t.Fatalf("warnings = %q, want none for ordinary pending dependency", warnings.String())
 	}
+}
+
+func TestValidateDependencies_RejectsDownstreamDependency(t *testing.T) {
+	now := time.Now().UTC()
+	resolver, cfg := dependencyDirectionResolver(t)
+
+	task := testhelpers.BuildTaskByStatus("plan-1", models.TaskStatusDraftCodingPlan, now)
+	task.RolePair = "code-planning-pair"
+	task.DependsOn = []string{"coding-1"}
+	dep := testhelpers.BuildTaskByStatus("coding-1", models.TaskStatusMerged, now)
+	dep.RolePair = "coding-pair"
+	state := &models.State{Tasks: []models.Task{task, dep}}
+
+	err := validateDependencies(state, "", true, resolver, cfg, nil)
+	if err == nil {
+		t.Fatal("validateDependencies() error = nil, want downstream dependency error")
+	}
+	if !strings.Contains(err.Error(), "role_pair coding-pair is downstream of code-planning-pair") {
+		t.Fatalf("error = %q, want downstream role-pair error", err.Error())
+	}
+}
+
+func TestValidateDependencies_RejectsDownstreamSupersessionPath(t *testing.T) {
+	now := time.Now().UTC()
+	resolver, cfg := dependencyDirectionResolver(t)
+
+	task := testhelpers.BuildTaskByStatus("plan-1", models.TaskStatusDraftCodingPlan, now)
+	task.RolePair = "code-planning-pair"
+	task.DependsOn = []string{"old-plan"}
+	oldPlan := testhelpers.BuildTaskByStatus("old-plan", models.TaskStatusSuperseded, now)
+	oldPlan.RolePair = "code-planning-pair"
+	oldPlan.SupersededBy = []string{"coding-1"}
+	coding := testhelpers.BuildTaskByStatus("coding-1", models.TaskStatusMerged, now)
+	coding.RolePair = "coding-pair"
+	state := &models.State{Tasks: []models.Task{task, oldPlan, coding}}
+
+	err := validateDependencies(state, "", true, resolver, cfg, nil)
+	if err == nil {
+		t.Fatal("validateDependencies() error = nil, want downstream supersession error")
+	}
+	if !strings.Contains(err.Error(), "resolves through downstream task coding-1") {
+		t.Fatalf("error = %q, want supersession downstream error", err.Error())
+	}
+}
+
+func dependencyDirectionResolver(t *testing.T) (*pipeline.Resolver, *pipeline.PipelineConfig) {
+	t.Helper()
+	tmpDir := t.TempDir()
+	testhelpers.SetupPipelineConfig(t, tmpDir)
+	cfg, err := pipeline.LoadFrozen(tmpDir)
+	if err != nil {
+		t.Fatalf("LoadFrozen: %v", err)
+	}
+	return pipeline.NewResolver(cfg), cfg
 }
 
 func TestValidateState_WarnsBlockedReasonReferencesTaskWithoutDependsOn(t *testing.T) {

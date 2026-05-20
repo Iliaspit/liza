@@ -10,8 +10,9 @@ import (
 
 // Resolver wraps a PipelineConfig for state resolution queries.
 type Resolver struct {
-	config            *PipelineConfig
-	transitionSources map[string]bool // lazy-init cache for TransitionSourcePairs
+	config              *PipelineConfig
+	transitionSources   map[string]bool            // lazy-init cache for TransitionSourcePairs
+	downstreamRolePairs map[string]map[string]bool // lazy-init cache for DownstreamRolePairs
 }
 
 // NewResolver creates a Resolver from a validated PipelineConfig.
@@ -530,6 +531,119 @@ func (r *Resolver) TransitionTargetRolePair(transitionName string) (string, erro
 		return "", fmt.Errorf("transition %q: invalid to reference: %w", transitionName, err2)
 	}
 	return toPair2, nil
+}
+
+// OutputConsumerRolePairs returns role-pairs that can consume output[] entries
+// from sourceRolePair through an outgoing per-subtask transition.
+func (r *Resolver) OutputConsumerRolePairs(sourceRolePair string) ([]string, error) {
+	if _, ok := r.config.Pipeline.RolePairs[sourceRolePair]; !ok {
+		return nil, fmt.Errorf("unknown role-pair %q", sourceRolePair)
+	}
+	var consumers []string
+	for _, t := range r.AllTransitions() {
+		if t.Cardinality != "per-subtask" {
+			continue
+		}
+		fromPair, err := transitionFromRolePair(t)
+		if err != nil || fromPair != sourceRolePair {
+			continue
+		}
+		toPair, err := transitionToRolePair(t)
+		if err != nil {
+			return nil, fmt.Errorf("transition %q: invalid to reference: %w", t.Name, err)
+		}
+		if !slices.Contains(consumers, toPair) {
+			consumers = append(consumers, toPair)
+		}
+	}
+	slices.Sort(consumers)
+	return consumers, nil
+}
+
+// DownstreamRolePairs returns every role-pair reachable from sourceRolePair by
+// following configured pipeline transitions. The source role-pair itself is not
+// included, even if a cycle exists.
+func (r *Resolver) DownstreamRolePairs(sourceRolePair string) (map[string]bool, error) {
+	if _, ok := r.config.Pipeline.RolePairs[sourceRolePair]; !ok {
+		return nil, fmt.Errorf("unknown role-pair %q", sourceRolePair)
+	}
+	if r.downstreamRolePairs == nil {
+		if err := r.buildDownstreamRolePairCache(); err != nil {
+			return nil, err
+		}
+	}
+	result := make(map[string]bool, len(r.downstreamRolePairs[sourceRolePair]))
+	for rolePair := range r.downstreamRolePairs[sourceRolePair] {
+		result[rolePair] = true
+	}
+	return result, nil
+}
+
+// IsRolePairDownstream reports whether dependencyRolePair is downstream of
+// sourceRolePair in the configured transition graph.
+func (r *Resolver) IsRolePairDownstream(sourceRolePair, dependencyRolePair string) (bool, error) {
+	downstream, err := r.DownstreamRolePairs(sourceRolePair)
+	if err != nil {
+		return false, err
+	}
+	if _, ok := r.config.Pipeline.RolePairs[dependencyRolePair]; !ok {
+		return false, fmt.Errorf("unknown role-pair %q", dependencyRolePair)
+	}
+	return downstream[dependencyRolePair], nil
+}
+
+func (r *Resolver) buildDownstreamRolePairCache() error {
+	adjacency := make(map[string][]string)
+	for rolePair := range r.config.Pipeline.RolePairs {
+		adjacency[rolePair] = nil
+	}
+	for _, t := range r.AllTransitions() {
+		fromPair, err := transitionFromRolePair(t)
+		if err != nil {
+			return fmt.Errorf("transition %q: invalid from reference: %w", t.Name, err)
+		}
+		toPair, err := transitionToRolePair(t)
+		if err != nil {
+			return fmt.Errorf("transition %q: invalid to reference: %w", t.Name, err)
+		}
+		if !slices.Contains(adjacency[fromPair], toPair) {
+			adjacency[fromPair] = append(adjacency[fromPair], toPair)
+		}
+	}
+
+	r.downstreamRolePairs = make(map[string]map[string]bool, len(adjacency))
+	for source := range adjacency {
+		seen := make(map[string]bool)
+		var visit func(string)
+		visit = func(current string) {
+			for _, next := range adjacency[current] {
+				if next == source || seen[next] {
+					continue
+				}
+				seen[next] = true
+				visit(next)
+			}
+		}
+		visit(source)
+		r.downstreamRolePairs[source] = seen
+	}
+	return nil
+}
+
+func transitionFromRolePair(t TransitionDef) (string, error) {
+	if _, rolePair, _, err := parse3PartRef(t.From); err == nil {
+		return rolePair, nil
+	}
+	rolePair, _, err := parseRef(t.From)
+	return rolePair, err
+}
+
+func transitionToRolePair(t TransitionDef) (string, error) {
+	if _, rolePair, _, err := parse3PartRef(t.To); err == nil {
+		return rolePair, nil
+	}
+	rolePair, _, err := parseRef(t.To)
+	return rolePair, err
 }
 
 // resolvePhase returns the concrete status for a role-pair + phase combination.
