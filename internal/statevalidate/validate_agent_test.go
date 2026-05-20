@@ -3,10 +3,12 @@ package statevalidate
 import (
 	"io"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/liza-mas/liza/internal/models"
+	"github.com/liza-mas/liza/internal/pipeline"
 	"github.com/liza-mas/liza/internal/testhelpers"
 )
 
@@ -229,6 +231,26 @@ func TestValidateAgentInvariants_ReverseActiveOwnership(t *testing.T) {
 	resolver := loadTestResolver(t)
 	now := time.Now().UTC()
 
+	t.Run("planning orchestrator current task is not task ownership", func(t *testing.T) {
+		fullResolver := loadFullPipelineResolver(t)
+		state := stateWithTasks()
+		state.Agents["orchestrator-1"] = models.Agent{
+			Role:         "orchestrator",
+			Status:       models.AgentStatusPlanning,
+			CurrentTask:  testhelpers.StringPtr("planning"),
+			LeaseExpires: testhelpers.TimePtr(now.Add(30 * time.Minute)),
+			Heartbeat:    now,
+			Terminal:     "test",
+			Provider:     "test",
+			PID:          os.Getpid(),
+		}
+
+		err := validateAgentInvariants(state, "", true, io.Discard, fullResolver)
+		if err != nil {
+			t.Fatalf("validateAgentInvariants() error = %v, want nil", err)
+		}
+	})
+
 	t.Run("working agent points at task that does not point back", func(t *testing.T) {
 		state, _ := activeDoerOwnershipState(now)
 		state.Tasks[0].AssignedTo = testhelpers.StringPtr("coder-2")
@@ -386,6 +408,17 @@ func activeReviewOwnershipState(now time.Time) (*models.State, string) {
 		PID:          os.Getpid(),
 	}
 	return state, reviewerID
+}
+
+func loadFullPipelineResolver(t *testing.T) *pipeline.Resolver {
+	t.Helper()
+	repoRoot := testhelpers.FindRepoRoot(t)
+	yamlPath := filepath.Join(repoRoot, "internal", "pipeline", "testdata", "valid-phase2-full.yaml")
+	cfg, err := pipeline.Load(yamlPath)
+	if err != nil {
+		t.Fatalf("Failed to load full pipeline config: %v", err)
+	}
+	return pipeline.NewResolver(cfg)
 }
 
 func activeDoerOwnershipState(now time.Time) (*models.State, string) {

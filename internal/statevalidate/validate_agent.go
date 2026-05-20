@@ -154,6 +154,10 @@ func validateReverseActiveOwnership(state *models.State, resolver *pipeline.Reso
 		if agent.CurrentTask == nil || *agent.CurrentTask == "" {
 			continue
 		}
+		roleType, err := resolver.RoleType(agent.Role)
+		if err == nil && roleType == "orchestrator" {
+			continue
+		}
 		task := state.FindTask(*agent.CurrentTask)
 		if task == nil {
 			return fmt.Errorf("agent %s says %s %s, but task is missing", agentID, agent.Status, *agent.CurrentTask)
