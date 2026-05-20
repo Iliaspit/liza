@@ -573,6 +573,16 @@ func IsExecutingStatus(task *Task, pr PipelineResolver) bool {
 	return err == nil && task.Status == executing
 }
 
+// IsOrchestratorAgent reports whether the agent's configured role resolves to
+// the pipeline orchestrator type.
+func IsOrchestratorAgent(agent Agent, pr PipelineResolver) bool {
+	if pr == nil {
+		return false
+	}
+	roleType, err := pr.RoleType(agent.Role)
+	return err == nil && roleType == "orchestrator"
+}
+
 // IsResumableOwnedTask is the shared state predicate for a doer supervisor
 // resuming an executing task already assigned to its agent ID after a child CLI
 // exits or the supervisor restarts.

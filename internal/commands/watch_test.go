@@ -2461,6 +2461,31 @@ func TestCheckRunningTasksWithoutLiveProcess_ReviewerReverseOwnershipMismatch(t 
 	}
 }
 
+func TestCheckReverseActiveAgentOwnership_OrchestratorPlanningCurrentTaskIsNotOwnership(t *testing.T) {
+	now := time.Now().UTC()
+	pr := loadPipelineResolverForWatchTest(t)
+	planning := "planning"
+
+	state := testhelpers.CreateValidState()
+	state.Tasks = nil
+	state.Agents = map[string]models.Agent{
+		"orchestrator-1": {
+			Role:         "orchestrator",
+			Status:       models.AgentStatusPlanning,
+			CurrentTask:  &planning,
+			LeaseExpires: testhelpers.TimePtr(now.Add(30 * time.Minute)),
+			Heartbeat:    now,
+			Provider:     "test",
+			PID:          os.Getpid(),
+		},
+	}
+
+	alerts := checkRunningTasksWithoutLiveProcess(state, pr)
+	if got := countAlertsByCategory(alerts, "INVALID AGENT OWNERSHIP"); got != 0 {
+		t.Fatalf("INVALID AGENT OWNERSHIP alerts = %d, want 0; alerts: %v", got, alerts)
+	}
+}
+
 func TestRunChecksWithState_StuckAlertsDedupedAndRealertAfterClear(t *testing.T) {
 	now := time.Now().UTC()
 

@@ -530,6 +530,9 @@ func checkReverseActiveAgentOwnership(state *models.State, pr models.PipelineRes
 		if agent.CurrentTask == nil || *agent.CurrentTask == "" {
 			continue
 		}
+		if models.IsOrchestratorAgent(agent, pr) {
+			continue
+		}
 		taskID := *agent.CurrentTask
 		task, exists := tasksByID[taskID]
 		if !exists {

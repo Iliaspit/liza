@@ -154,8 +154,7 @@ func validateReverseActiveOwnership(state *models.State, resolver *pipeline.Reso
 		if agent.CurrentTask == nil || *agent.CurrentTask == "" {
 			continue
 		}
-		roleType, err := resolver.RoleType(agent.Role)
-		if err == nil && roleType == "orchestrator" {
+		if models.IsOrchestratorAgent(agent, resolver) {
 			continue
 		}
 		task := state.FindTask(*agent.CurrentTask)
