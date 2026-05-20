@@ -132,7 +132,7 @@ func waitWhilePaused(ctx context.Context, projectRoot string) error {
 }
 
 // executeAgent executes the CLI with timeout.
-func executeAgent(ctx context.Context, config SupervisorConfig, prompt string, additionalDirs []string, taskID string) (int, string, error) {
+func executeAgent(ctx context.Context, config SupervisorConfig, prompt string, additionalDirs []string, taskID string, runtimeConfig models.Config) (int, string, error) {
 	logger := GetLogger()
 	// Interactive mode: launch CLI without -p so user can paste the prompt
 	if config.Interactive {
@@ -160,7 +160,7 @@ func executeAgent(ctx context.Context, config SupervisorConfig, prompt string, a
 	// so we don't start one here.
 
 	// Execute CLI with timeout
-	result, err := config.Executor.Execute(execCtx, config.CLIName, config.AgentID, prompt, config.ProjectRoot, additionalDirs)
+	result, err := config.Executor.Execute(execCtx, config.CLIName, config.AgentID, prompt, config.ProjectRoot, additionalDirs, runtimeConfig)
 	watchdogResult := stopWatchdog()
 	if watchdogResult.Blocked {
 		blockTaskFromSupervisor(db.For(config.StatePath), config.ProjectRoot, taskID, config.AgentID, watchdogResult.Reason)

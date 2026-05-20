@@ -34,13 +34,13 @@ Verification: Run `claude` and prompt `hello`.
 ## Codex
 
 `liza init --codex` performs project activation. In `~/.codex/config.toml`, it
-adds Liza's noninteractive workspace permission baseline, including
-`sandbox_mode = "workspace-write"`, plus the active project root, its `.git`
-directory, `/tmp`, and Codex/Liza support/cache roots under the workspace-write
-permission profile. In `<project>/.codex/`, it enables Codex hooks in
-`config.toml`, writes `hooks.json`, and deploys hook scripts to `hooks/`. If a
-config file already exists, Liza prompts before merging and preserves unrelated
-settings. It does not install the full baseline below.
+adds Liza's pairing-friendly `workspace` permission baseline, including
+workspace-write mode, writable roots for the active project root, its `.git`
+directory, `/tmp`, and Codex/Liza support/cache roots. In `<project>/.codex/`,
+it enables Codex hooks in `config.toml`, writes `hooks.json`, and deploys hook
+scripts to `hooks/`. If a config file already exists, Liza prompts before
+merging and preserves unrelated settings. It does not install the full baseline
+below.
 
 The session-init hook allows the mandatory startup documents to be read through
 Codex MCP filesystem read tools, or through simple Bash read commands such as
@@ -86,14 +86,39 @@ args = ["-y", "@modelcontextprotocol/server-filesystem", "/home/<USER>/.claude",
 # Codex agents access Liza via `liza` CLI commands through Bash — no MCP server needed.
 ```
 
-If Codex agents must run `git add`, `git commit`, `git worktree`, or Liza review submission flows from a repo worktree, the active project root and its `.git` directory must both be listed in `writable_roots`. `liza init --codex` manages these project-specific entries and `/tmp` for scratch files. Liza also passes launch-time `-c` overrides granting write access to the active project root and project `.git`, plus read access to project `.codex`. For claimed tasks, it also passes the task worktree and project `.git` directory as explicit `--add-dir` entries. Without writable access to `.git`, Codex may mount git metadata read-only even when the worktree files themselves are writable, which blocks creation of `index.lock` under `.git/worktrees/...`.
+Liza launches Codex supervisors with `codex exec -` plus `workspace` permission
+overrides, `approval_policy="never"`, and explicit `--add-dir` entries for the
+task worktree and project `.git` directory. Git linked worktrees write their
+index lock under the main repo metadata path
+(`.git/worktrees/<task>/index.lock`), not under the worktree directory itself.
 
-Liza launches Codex supervisors with `codex exec -` plus `-c` overrides for
-`sandbox_mode="workspace-write"`, `approval_policy="never"`,
-`default_permissions="workspace"`, the workspace filesystem profile above, and
-workspace network access. It does not use `--full-auto`; that mode can still
-leave linked worktree Git metadata read-only in some Codex sandbox
-configurations.
+Codex versions 0.126.0-alpha.17 through 0.132.0 keep that linked-worktree
+metadata read-only under `workspace-write`. Until upstream fixes this, MAS
+supervisors can be pinned to the last tested working Codex path with these
+durable project config keys:
+
+```yaml
+config:
+  codex_package_version: "0.125.0"
+  codex_legacy_landlock: true
+```
+
+For a temporary process-local fallback when those config fields are unset, set
+these before running `liza agent`:
+
+```bash
+export LIZA_CODEX_VERSION=0.125.0
+export LIZA_CODEX_LEGACY_LANDLOCK=1
+```
+
+With `codex_package_version` or `LIZA_CODEX_VERSION` set, Liza launches
+headless Codex agents through
+`npm exec --yes --package @openai/codex@<version> -- codex`. With
+`codex_legacy_landlock: true` or `LIZA_CODEX_LEGACY_LANDLOCK=1`, Liza also
+passes `--enable use_legacy_landlock --sandbox workspace-write`. The state
+config version takes precedence over the environment fallback. This
+compatibility path is for headless MAS agents only; interactive `liza agent -i`
+keeps using the installed Codex binary and normal pairing configuration.
 
 After editing `~/.codex/config.toml`, restart Codex completely before testing.
 

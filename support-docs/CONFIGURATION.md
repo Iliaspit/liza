@@ -32,23 +32,48 @@ For global settings setup and provider-specific config (Claude, Codex, Gemini), 
 **`~/.codex/config.toml`** — global Codex CLI settings.
 
 `liza init --codex` manages the Codex permissions Liza needs for unattended
-supervisor tasks. It adds or corrects workspace permission baseline entries,
-including `sandbox_mode = "workspace-write"`, and adds the active project root
-plus the active project `.git` directory to the Codex workspace-write roots so
-Codex can edit project files and write git metadata for commits, worktrees, and
-review flows. It also marks Codex/Liza support directories and user cache roots
-readable or writable in the active `permissions.workspace.filesystem` profile:
-`~/.liza` is readable for contracts and skills, while Codex state, Go cache, and
-npm cache roots are writable. If the file already exists, Liza prompts before
-merging those entries and preserves unrelated settings.
+supervisor tasks without breaking pairing mode. It adds or corrects the global
+`workspace` permission baseline and adds the active project root plus the active
+project `.git` directory to `sandbox_workspace_write.writable_roots` so
+interactive Codex can edit project files. It also marks Codex/Liza support
+directories and user cache roots readable or writable in
+`permissions.workspace.filesystem`: `~/.liza` is readable for contracts and
+skills, while Codex state, Go cache, and npm cache roots are writable. If the
+file already exists, Liza prompts before merging those entries and preserves
+unrelated settings.
 
-When launching Codex, Liza also passes launch-time `-c` overrides granting
-write access to the active project root and project `.git` directory, plus
-read access to project `.codex`. For claimed tasks, Liza also passes both the
-task worktree and the project `.git` directory as explicit `--add-dir` entries.
-This is required because Git worktrees write the task index under the main repo
-metadata path (`.git/worktrees/<task>/index.lock`), not under the worktree
-directory itself.
+When launching headless MAS agents, Liza passes launch-time `workspace`
+permission overrides and explicit `--add-dir` entries for both the task worktree
+and the project `.git` directory. This is required because Git worktrees write
+the task index under the main repo metadata path
+(`.git/worktrees/<task>/index.lock`), not under the worktree directory itself.
+
+Codex versions 0.126.0-alpha.17 through 0.132.0 keep linked-worktree metadata
+read-only under `workspace-write`. Until upstream fixes this, pin MAS Codex
+agents to the last tested working compatibility path with these durable project
+config keys:
+
+```yaml
+config:
+  codex_package_version: "0.125.0"
+  codex_legacy_landlock: true
+```
+
+For a temporary process-local fallback when those config fields are unset, set
+these before running `liza agent`:
+
+```bash
+export LIZA_CODEX_VERSION=0.125.0
+export LIZA_CODEX_LEGACY_LANDLOCK=1
+```
+
+`codex_package_version` or `LIZA_CODEX_VERSION` makes Liza launch headless
+Codex agents through
+`npm exec --yes --package @openai/codex@<version> -- codex`.
+`codex_legacy_landlock: true` or `LIZA_CODEX_LEGACY_LANDLOCK=1` adds
+`--enable use_legacy_landlock --sandbox workspace-write`. The state config
+version takes precedence over the environment fallback. Interactive
+`liza agent -i` keeps using the installed Codex binary.
 
 This is not the full Codex baseline. Users still own broader settings such as
 interactive `approval_policy` and MCP server configuration. See
@@ -60,6 +85,16 @@ recommended complete setup.
 **State file errors:**
 - Verify project initialized: `liza validate`
 - Check: `ls -la .liza/state.yaml`
+
+**Codex `.git` read-only in linked worktrees:**
+- Use `config.codex_package_version: "0.125.0"` with
+  `config.codex_legacy_landlock: true` for MAS agents that must stage or commit
+  from linked worktrees.
+- If you need a temporary process-local test before changing durable project
+  config, use
+  `LIZA_CODEX_VERSION=0.125.0` with `LIZA_CODEX_LEGACY_LANDLOCK=1`.
+- Treat this as a temporary local workaround. `use_legacy_landlock` is a
+  deprecated Codex compatibility feature.
 
 ## Configuration Matrix
 
@@ -81,6 +116,8 @@ All configuration lives in `.liza/state.yaml` under the `config` section.
 | `default_cli` | (none) | — | — | CLI name | Global default coding agent CLI |
 | `default_doer_cli` | (none) | — | — | CLI name | Default coding agent CLI for doers and orchestrators |
 | `default_reviewer_cli` | (none) | — | — | CLI name | Default coding agent CLI for reviewers |
+| `codex_package_version` | (none) | — | — | npm package version | Pins headless Codex agents to `@openai/codex@<version>` |
+| `codex_legacy_landlock` | false | — | — | boolean | Adds Codex `use_legacy_landlock` and `workspace-write` flags for headless MAS agents |
 | `post_worktree_cmd` | (none) | — | — | shell cmd | Command run after worktree creation (e.g. `npm install`) |
 
 ### Agent Execution Timeouts
@@ -257,18 +294,24 @@ The `--agent-id` flag takes precedence over `LIZA_AGENT_ID`.
 
 ## Environment Variables
 
+Environment variables are process-local fallbacks or identity inputs. Durable
+project configuration belongs in `.liza/state.yaml`.
+
 | Variable | Required | Default | Purpose |
 |----------|----------|---------|---------|
 | `LIZA_AGENT_ID` | For agent commands | -- | Agent identifier (format: `{role}-{number}`) |
 | `LIZA_DISABLE_CLAUDE_SUBAGENTS` | No | unset | Set to `1` to launch Claude Code agents with `--disallowedTools Task`, disabling Claude subagent delegation. Use only when intentionally waiving Claude subagent delegation; agents may be unable to satisfy contract delegation triggers while this is set. |
+| `LIZA_CODEX_VERSION` | No | unset | Process-local fallback for `config.codex_package_version` when launching headless Codex agents |
+| `LIZA_CODEX_LEGACY_LANDLOCK` | No | unset | Process-local fallback enabling legacy Landlock for headless Codex agents when `config.codex_legacy_landlock` is false |
 | `LIZA_SPECS` | No | `specs/` | Path to specs directory (relative to project root) |
 | `LIZA_LOG_LEVEL` | No | `INFO` | Logging verbosity: DEBUG, INFO, WARN, ERROR |
 
 ## Making Configuration Changes
 
 1. `liza pause --reason "config update"`
-2. Edit `state.yaml` (or use commands)
+2. Use a Liza command for the config change when one exists. Manual state
+   changes are support operations, not the normal config path.
 3. `liza validate`
 4. `liza resume`
 
-**Never edit state.yaml while agents are running** without pausing first.
+**Never change state while agents are running** without pausing first.

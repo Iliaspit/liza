@@ -438,15 +438,36 @@ func cliSupportsStdin(cliName string) bool {
 	return cliName != "vibe"
 }
 
-func buildCodexArgs(projectRoot, prompt string, useStdin bool, outputsDir string, additionalDirs []string) []string {
-	var args []string
-	if useStdin {
-		args = append(args, "exec", "-")
-	} else {
-		args = append(args, "exec", prompt)
+const (
+	envLizaCodexVersion        = "LIZA_CODEX_VERSION"
+	envLizaCodexLegacyLandlock = "LIZA_CODEX_LEGACY_LANDLOCK"
+)
+
+type codexLaunchConfig struct {
+	PackageVersion string
+	LegacyLandlock bool
+}
+
+func resolveCodexLaunchConfig(config models.Config, env []string) codexLaunchConfig {
+	version := strings.TrimSpace(config.CodexPackageVersion)
+	if version == "" {
+		version = strings.TrimSpace(envValue(env, envLizaCodexVersion))
 	}
-	for _, override := range codexWorkspacePermissionOverrides(projectRoot, additionalDirs) {
-		args = append(args, "-c", override)
+	return codexLaunchConfig{
+		PackageVersion: version,
+		LegacyLandlock: config.CodexLegacyLandlock || codexLegacyLandlockEnabled(env),
+	}
+}
+
+func buildCodexArgs(projectRoot, prompt string, useStdin bool, outputsDir string, additionalDirs []string, legacyLandlock bool) []string {
+	args := []string{"exec"}
+	if legacyLandlock {
+		args = append(args, "--enable", "use_legacy_landlock", "--sandbox", "workspace-write")
+		args = append(args, "-c", `approval_policy="never"`)
+	} else {
+		for _, override := range codexWorkspacePermissionOverrides(projectRoot, additionalDirs) {
+			args = append(args, "-c", override)
+		}
 	}
 	for _, dir := range additionalDirs {
 		if dir == "" {
@@ -456,6 +477,11 @@ func buildCodexArgs(projectRoot, prompt string, useStdin bool, outputsDir string
 	}
 	if outputsDir != "" {
 		args = append(args, "--json")
+	}
+	if useStdin {
+		args = append(args, "-")
+	} else {
+		args = append(args, prompt)
 	}
 	return args
 }
@@ -493,8 +519,11 @@ func codexSessionWritableRoots(projectRoot string, additionalDirs []string) []st
 	return codexconfig.UniqueNonEmptyStrings(roots)
 }
 
-func codexInteractiveArgs(additionalDirs []string) []string {
+func codexInteractiveArgs(additionalDirs []string, legacyLandlock bool) []string {
 	var args []string
+	if legacyLandlock {
+		args = append(args, "--enable", "use_legacy_landlock", "--sandbox", "workspace-write")
+	}
 	for _, dir := range additionalDirs {
 		if dir == "" {
 			continue
@@ -542,9 +571,37 @@ func uniqueNonEmptyStrings(values []string) []string {
 	return unique
 }
 
+func codexLegacyLandlockEnabled(env []string) bool {
+	return truthyEnvValue(envValue(env, envLizaCodexLegacyLandlock))
+}
+
+func truthyEnvValue(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
+}
+
+func codexCommandContext(ctx context.Context, version string, args []string) (*exec.Cmd, error) {
+	version = strings.TrimSpace(version)
+	if version == "" {
+		return exec.CommandContext(ctx, "codex", args...), nil
+	}
+	if strings.ContainsAny(version, " \t\r\n") {
+		return nil, fmt.Errorf("codex package version must not contain whitespace: %q", version)
+	}
+	// The version is passed as one argv element; exec.CommandContext does not
+	// invoke a shell, so shell metacharacters are not command injection.
+	npmArgs := []string{"exec", "--yes", "--package", "@openai/codex@" + version, "--", "codex"}
+	npmArgs = append(npmArgs, args...)
+	return exec.CommandContext(ctx, "npm", npmArgs...), nil
+}
+
 // CLIExecutor interface for testing (mock vs real CLI)
 type CLIExecutor interface {
-	Execute(ctx context.Context, cliName string, agentID string, prompt string, projectRoot string, additionalDirs []string) (CLIExecutionResult, error)
+	Execute(ctx context.Context, cliName string, agentID string, prompt string, projectRoot string, additionalDirs []string, runtimeConfig models.Config) (CLIExecutionResult, error)
 	// ExecuteInteractive launches the CLI without a prompt arg, with stdin connected,
 	// so the user can paste the prompt manually. Used by -i (interactive) mode.
 	ExecuteInteractive(ctx context.Context, cliName string, projectRoot string, additionalDirs []string) (exitCode int, err error)
@@ -568,7 +625,7 @@ func NewDefaultCLIExecutor(outputsDir string) *DefaultCLIExecutor {
 	return &DefaultCLIExecutor{outputsDir: outputsDir, masker: masker}
 }
 
-func (d *DefaultCLIExecutor) Execute(ctx context.Context, cliName string, agentID string, prompt string, projectRoot string, additionalDirs []string) (CLIExecutionResult, error) {
+func (d *DefaultCLIExecutor) Execute(ctx context.Context, cliName string, agentID string, prompt string, projectRoot string, additionalDirs []string, runtimeConfig models.Config) (CLIExecutionResult, error) {
 	// Map CLI names (mistral -> vibe)
 	actualCLI := cliName
 	if cliName == "mistral" {
@@ -602,8 +659,13 @@ func (d *DefaultCLIExecutor) Execute(ctx context.Context, cliName string, agentI
 		args := buildClaudeArgs(prompt, useStdin, d.outputsDir, disableSubagents)
 		cmd = exec.CommandContext(ctx, "claude", args...)
 	case "codex":
-		args := buildCodexArgs(projectRoot, prompt, useStdin, d.outputsDir, additionalDirs)
-		cmd = exec.CommandContext(ctx, "codex", args...)
+		codexConfig := resolveCodexLaunchConfig(runtimeConfig, cmdEnv)
+		args := buildCodexArgs(projectRoot, prompt, useStdin, d.outputsDir, additionalDirs, codexConfig.LegacyLandlock)
+		var err error
+		cmd, err = codexCommandContext(ctx, codexConfig.PackageVersion, args)
+		if err != nil {
+			return CLIExecutionResult{}, err
+		}
 	case "gemini":
 		args := []string{"-p"}
 		if !useStdin {
@@ -740,11 +802,18 @@ func (d *DefaultCLIExecutor) ExecuteInteractive(ctx context.Context, cliName str
 	}
 
 	// Launch CLI without prompt arg — user pastes prompt manually
+	cmdEnv := os.Environ()
 	var cmd *exec.Cmd
 	switch actualCLI {
 	case "codex":
-		args := codexInteractiveArgs(additionalDirs)
-		cmd = exec.CommandContext(ctx, "codex", args...)
+		// Interactive Codex is pairing mode: use the installed binary and do not
+		// apply headless MAS compatibility pinning or legacy Landlock flags.
+		args := codexInteractiveArgs(additionalDirs, false)
+		var err error
+		cmd, err = codexCommandContext(ctx, "", args)
+		if err != nil {
+			return 0, err
+		}
 	default:
 		cmd = exec.CommandContext(ctx, actualCLI)
 	}
@@ -753,6 +822,7 @@ func (d *DefaultCLIExecutor) ExecuteInteractive(ctx context.Context, cliName str
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
+	cmd.Env = cmdEnv
 
 	err := cmd.Run()
 	if err != nil {
@@ -1054,7 +1124,7 @@ func RunSupervisor(ctx context.Context, config SupervisorConfig) error {
 
 		// Execute agent
 		additionalDirs := codexAdditionalDirs(config.ProjectRoot, stateBefore, taskID)
-		exitCode, currentOutput, err := executeAgent(supervisorCtx, config, prompt, additionalDirs, effectiveTask)
+		exitCode, currentOutput, err := executeAgent(supervisorCtx, config, prompt, additionalDirs, effectiveTask, stateBefore.Config)
 		if err != nil {
 			if hbErr := checkHeartbeat(); hbErr != nil {
 				return hbErr

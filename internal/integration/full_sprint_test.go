@@ -52,7 +52,7 @@ type SmartMockCLIExecutor struct {
 	calls []MockExecution
 }
 
-func (m *SmartMockCLIExecutor) Execute(ctx context.Context, cliName, agentID, prompt, projectRoot string, _ []string) (agent.CLIExecutionResult, error) {
+func (m *SmartMockCLIExecutor) Execute(ctx context.Context, cliName, agentID, prompt, projectRoot string, _ []string, _ models.Config) (agent.CLIExecutionResult, error) {
 	runtimeRole, err := identity.ExtractRole(agentID)
 	if err != nil {
 		return agent.CLIExecutionResult{ExitCode: 1}, fmt.Errorf("extract role from %s: %w", agentID, err)

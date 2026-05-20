@@ -42,7 +42,7 @@ type MockCLICall struct {
 	AdditionalDirs []string
 }
 
-func (m *MockCLIExecutor) Execute(ctx context.Context, cliName string, agentID string, prompt string, projectRoot string, additionalDirs []string) (CLIExecutionResult, error) {
+func (m *MockCLIExecutor) Execute(ctx context.Context, cliName string, agentID string, prompt string, projectRoot string, additionalDirs []string, _ models.Config) (CLIExecutionResult, error) {
 	m.mu.Lock()
 	m.Calls = append(m.Calls, MockCLICall{CLIName: cliName, AgentID: agentID, Prompt: prompt, ProjectRoot: projectRoot, AdditionalDirs: slices.Clone(additionalDirs)})
 	m.mu.Unlock()
@@ -86,7 +86,7 @@ func TestMockCLIExecution(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	result, err := mock.Execute(ctx, "claude", "claude-1", "test prompt", "/tmp/test-project", nil)
+	result, err := mock.Execute(ctx, "claude", "claude-1", "test prompt", "/tmp/test-project", nil, models.Config{})
 
 	if err != nil {
 		t.Errorf("Execute() error = %v", err)
@@ -159,7 +159,7 @@ func TestExecuteAgentBlocksTaskAfterProgressTimeout(t *testing.T) {
 		ExecutionProgressTimeout: 150 * time.Millisecond,
 	}
 
-	exitCode, _, err := executeAgent(context.Background(), config, "prompt", nil, taskID)
+	exitCode, _, err := executeAgent(context.Background(), config, "prompt", nil, taskID, state.Config)
 	if err != nil {
 		t.Fatalf("executeAgent error: %v", err)
 	}
@@ -248,7 +248,7 @@ func TestExecuteAgentOutputProgressPreventsProgressTimeout(t *testing.T) {
 		ExecutionProgressTimeout: 120 * time.Millisecond,
 	}
 
-	exitCode, _, err := executeAgent(context.Background(), config, "prompt", nil, taskID)
+	exitCode, _, err := executeAgent(context.Background(), config, "prompt", nil, taskID, state.Config)
 	if err != nil {
 		t.Fatalf("executeAgent error: %v", err)
 	}
@@ -291,7 +291,7 @@ printf 'stderr-before sk-test-secret-value stderr-after\n' >&2
 	t.Setenv("ANTHROPIC_API_KEY", "sk-test-secret-value")
 
 	executor := NewDefaultCLIExecutor(outputsDir)
-	result, err := executor.Execute(context.Background(), "claude", "coder-1", "prompt body", projectRoot, nil)
+	result, err := executor.Execute(context.Background(), "claude", "coder-1", "prompt body", projectRoot, nil, models.Config{})
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
 	}
@@ -367,7 +367,7 @@ done
 	t.Setenv("LIZA_DISABLE_CLAUDE_SUBAGENTS", "1")
 
 	executor := NewDefaultCLIExecutor(outputsDir)
-	result, err := executor.Execute(context.Background(), "claude", "coder-1", "prompt body", projectRoot, nil)
+	result, err := executor.Execute(context.Background(), "claude", "coder-1", "prompt body", projectRoot, nil, models.Config{})
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
 	}
@@ -1044,11 +1044,87 @@ func TestEnvValueUsesLastEnvValue(t *testing.T) {
 	}
 }
 
+func TestCodexCommandContextUsesPinnedNpmPackage(t *testing.T) {
+	cmd, err := codexCommandContext(context.Background(), "0.125.0", []string{"exec", "-"})
+	if err != nil {
+		t.Fatalf("codexCommandContext() error = %v", err)
+	}
+
+	want := []string{"npm", "exec", "--yes", "--package", "@openai/codex@0.125.0", "--", "codex", "exec", "-"}
+	if !slices.Equal(cmd.Args, want) {
+		t.Fatalf("cmd.Args = %v, want %v", cmd.Args, want)
+	}
+}
+
+func TestCodexCommandContextDefaultsToCodexBinary(t *testing.T) {
+	cmd, err := codexCommandContext(context.Background(), "", []string{"exec", "-"})
+	if err != nil {
+		t.Fatalf("codexCommandContext() error = %v", err)
+	}
+
+	want := []string{"codex", "exec", "-"}
+	if !slices.Equal(cmd.Args, want) {
+		t.Fatalf("cmd.Args = %v, want %v", cmd.Args, want)
+	}
+}
+
+func TestCodexCommandContextRejectsWhitespaceVersion(t *testing.T) {
+	_, err := codexCommandContext(context.Background(), "0.125.0 --bad", []string{"exec", "-"})
+	if err == nil || !strings.Contains(err.Error(), "codex package version") {
+		t.Fatalf("codexCommandContext() error = %v, want package version validation error", err)
+	}
+}
+
+func TestResolveCodexLaunchConfig(t *testing.T) {
+	t.Run("state config wins for version and can enable legacy landlock", func(t *testing.T) {
+		got := resolveCodexLaunchConfig(models.Config{
+			CodexPackageVersion: "0.125.0",
+			CodexLegacyLandlock: true,
+		}, []string{
+			envLizaCodexVersion + "=0.132.0",
+		})
+
+		if got.PackageVersion != "0.125.0" {
+			t.Fatalf("PackageVersion = %q, want state value", got.PackageVersion)
+		}
+		if !got.LegacyLandlock {
+			t.Fatalf("LegacyLandlock = false, want true")
+		}
+	})
+
+	t.Run("environment supplies process-local fallback", func(t *testing.T) {
+		got := resolveCodexLaunchConfig(models.Config{}, []string{
+			envLizaCodexVersion + "=0.125.0",
+			envLizaCodexLegacyLandlock + "=1",
+		})
+
+		if got.PackageVersion != "0.125.0" {
+			t.Fatalf("PackageVersion = %q, want env value", got.PackageVersion)
+		}
+		if !got.LegacyLandlock {
+			t.Fatalf("LegacyLandlock = false, want true")
+		}
+	})
+}
+
+func TestCodexLegacyLandlockEnabled(t *testing.T) {
+	for _, value := range []string{"1", "true", "TRUE", "yes", "on"} {
+		if !codexLegacyLandlockEnabled([]string{envLizaCodexLegacyLandlock + "=" + value}) {
+			t.Fatalf("codexLegacyLandlockEnabled(%q) = false, want true", value)
+		}
+	}
+	for _, value := range []string{"", "0", "false", "no", "off", "maybe"} {
+		if codexLegacyLandlockEnabled([]string{envLizaCodexLegacyLandlock + "=" + value}) {
+			t.Fatalf("codexLegacyLandlockEnabled(%q) = true, want false", value)
+		}
+	}
+}
+
 func TestBuildCodexArgs(t *testing.T) {
 	t.Run("stdin without logging disables approval prompts", func(t *testing.T) {
 		projectRoot := "/tmp/project"
 		additionalDirs := []string{"/tmp", "/tmp/project/.worktrees/task-1"}
-		args := buildCodexArgs(projectRoot, "ignored", true, "", additionalDirs)
+		args := buildCodexArgs(projectRoot, "ignored", true, "", additionalDirs, false)
 
 		if slices.Contains(args, "--full-auto") {
 			t.Fatalf("args = %v, did not expect --full-auto flag", args)
@@ -1081,7 +1157,7 @@ func TestBuildCodexArgs(t *testing.T) {
 
 	t.Run("prompt with logging emits json", func(t *testing.T) {
 		projectRoot := "/tmp/project"
-		args := buildCodexArgs(projectRoot, "do the thing", false, "/tmp/logs", nil)
+		args := buildCodexArgs(projectRoot, "do the thing", false, "/tmp/logs", nil, false)
 
 		if !slices.Contains(args, "do the thing") {
 			t.Fatalf("args = %v, want prompt argument", args)
@@ -1104,6 +1180,46 @@ func TestBuildCodexArgs(t *testing.T) {
 			if strings.Contains(a, "mcp_servers") {
 				t.Fatalf("args = %v, did not expect mcp_servers config", args)
 			}
+		}
+	})
+
+	t.Run("non-legacy includes workspace permission profile", func(t *testing.T) {
+		args := buildCodexArgs("/tmp/project", "ignored", true, "", nil, false)
+
+		if !containsAdjacent(args, "-c", `sandbox_mode="workspace-write"`) {
+			t.Fatalf("args = %v, want workspace-write sandbox override", args)
+		}
+		if !containsAdjacent(args, "-c", `default_permissions="workspace"`) {
+			t.Fatalf("args = %v, want workspace permission profile", args)
+		}
+		if !containsPrefix(args, "permissions.workspace.filesystem=") {
+			t.Fatalf("args = %v, want workspace filesystem permissions override", args)
+		}
+	})
+
+	t.Run("legacy landlock uses tested workspace-write path without permission profile overrides", func(t *testing.T) {
+		projectRoot := "/tmp/project"
+		additionalDirs := []string{"/tmp/project/.git", "/tmp/project/.worktrees/task-1"}
+		args := buildCodexArgs(projectRoot, "ignored", true, "", additionalDirs, true)
+
+		if !containsAdjacent(args, "--enable", "use_legacy_landlock") {
+			t.Fatalf("args = %v, want legacy landlock feature flag", args)
+		}
+		if !containsAdjacent(args, "--sandbox", "workspace-write") {
+			t.Fatalf("args = %v, want workspace-write sandbox flag", args)
+		}
+		if !containsAdjacent(args, "-c", `approval_policy="never"`) {
+			t.Fatalf("args = %v, want noninteractive approval policy", args)
+		}
+		for _, arg := range args {
+			if strings.Contains(arg, "permissions.workspace") || strings.Contains(arg, "default_permissions") || strings.Contains(arg, "sandbox_mode") {
+				t.Fatalf("legacy landlock args should not include permission profile overrides: %v", args)
+			}
+		}
+		assertCodexAddDir(t, args, "/tmp/project/.git")
+		assertCodexAddDir(t, args, "/tmp/project/.worktrees/task-1")
+		if args[len(args)-1] != "-" {
+			t.Fatalf("args = %v, want stdin prompt marker last", args)
 		}
 	})
 }
@@ -1138,6 +1254,9 @@ func TestCodexWorkspacePermissionOverridesIncludesSupportRoots(t *testing.T) {
 	if strings.Contains(filesystemOverride, strconv.Quote(filepath.Join(fakeHome, ".liza"))+`="write"`) {
 		t.Fatalf("override should not make ~/.liza writable:\n%s", filesystemOverride)
 	}
+	if !containsInOrder(overrides, `default_permissions="workspace"`, filesystemOverride) {
+		t.Fatalf("overrides should select workspace profile before defining filesystem permissions: %v", overrides)
+	}
 }
 
 func findCodexOverride(t *testing.T, overrides []string, prefix string) string {
@@ -1160,14 +1279,49 @@ func containsAdjacent(values []string, first, second string) bool {
 	return false
 }
 
+func containsInOrder(values []string, first, second string) bool {
+	foundFirst := false
+	for _, value := range values {
+		if value == first {
+			foundFirst = true
+			continue
+		}
+		if foundFirst && value == second {
+			return true
+		}
+	}
+	return false
+}
+
+func containsPrefix(values []string, prefix string) bool {
+	for _, value := range values {
+		if strings.HasPrefix(value, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
 func TestCodexInteractiveArgs(t *testing.T) {
-	args := codexInteractiveArgs([]string{"/tmp", "", "/tmp/project/.worktrees/task-1"})
+	args := codexInteractiveArgs([]string{"/tmp", "", "/tmp/project/.worktrees/task-1"}, false)
 
 	assertCodexAddDir(t, args, "/tmp")
 	assertCodexAddDir(t, args, "/tmp/project/.worktrees/task-1")
 	if slices.Contains(args, "") {
 		t.Fatalf("args = %v, did not expect empty argument", args)
 	}
+}
+
+func TestCodexInteractiveArgsLegacyLandlock(t *testing.T) {
+	args := codexInteractiveArgs([]string{"/tmp/project/.git"}, true)
+
+	if !containsAdjacent(args, "--enable", "use_legacy_landlock") {
+		t.Fatalf("args = %v, want legacy landlock feature flag", args)
+	}
+	if !containsAdjacent(args, "--sandbox", "workspace-write") {
+		t.Fatalf("args = %v, want workspace-write sandbox flag", args)
+	}
+	assertCodexAddDir(t, args, "/tmp/project/.git")
 }
 
 func TestCodexAdditionalDirs(t *testing.T) {
