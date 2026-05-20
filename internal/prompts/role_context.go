@@ -103,10 +103,12 @@ type RoleContextData struct {
 	GoalBaseCommit string
 	CompletedTasks []CompletedTaskSummary
 
-	// Coder-specific
+	// Task artifact / integration context
 	IntegrationBranch string
-	IntegrationFix    bool // whether task is in integration fix mode
-	HandoffNote       *models.HandoffEvent
+
+	// Coder-specific
+	IntegrationFix bool // whether task is in integration fix mode
+	HandoffNote    *models.HandoffEvent
 
 	// Orchestrator-specific (pre-rendered content strings)
 	DashboardOutput   string

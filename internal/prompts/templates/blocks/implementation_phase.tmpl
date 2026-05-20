@@ -2,6 +2,9 @@
 {{- if eq .Role "coder"}}
 
 --- IMPLEMENTATION PHASE ---
+{{- if or .PlanRef .ArchRef .EpicRef}}
+Artifact refs below are repo-relative. Read {{.Worktree}}/<ref> first; if absent, use `git -C {{.Worktree}} show {{.IntegrationBranch}}:<file-ref>` where <file-ref> is the part before #.
+{{- end}}
 {{- if ne .PlanRef ""}}
 Read the implementation plan at {{.PlanRef}} for task decomposition context.
 {{- end}}
@@ -28,6 +31,9 @@ Read the epic at {{.EpicRef}} for requirement context and user stories at specs/
 {{- else if eq .Role "code-planner"}}
 
 IMPLEMENTATION PHASE:
+{{- if or .ArchRef .EpicRef}}
+Artifact refs below are repo-relative. Read {{.Worktree}}/<ref> first; if absent, use `git -C {{.Worktree}} show {{.IntegrationBranch}}:<file-ref>` where <file-ref> is the part before #.
+{{- end}}
 {{- if ne .ArchRef ""}}
 ARCHITECTURE REFERENCE: {{.ArchRef}}
 Read the architecture document for structural context before planning.
@@ -143,7 +149,7 @@ IMPLEMENTATION PHASE:
 IMPLEMENTATION PHASE:
 1. Work ONLY in the worktree directory. Use git -C {{.Worktree}} for all git commands.
 2. Invoke skill: user-story-writing FIRST.
-3. Read the epic at {{.EpicRef}}.{{- if ne .EpicSection ""}} Your capability section is anchored at #{{.EpicSection}}.{{- end}}
+3. Artifact refs are repo-relative. Read {{.Worktree}}/{{.EpicRef}} first; if absent, use `git -C {{.Worktree}} show {{.IntegrationBranch}}:{{.EpicRef}}`.{{- if ne .EpicSection ""}} Then use section #{{.EpicSection}}.{{- end}}
    Locate your assigned capability by matching task SCOPE.
    Read only Personas + General Information + that capability section.
 4. Follow the skill protocol: Parse → Write → Self-Review.

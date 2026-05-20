@@ -3,6 +3,7 @@
 {{- if or (gt .TotalPlanTasks 1) $hasGraph}}
 
 === COLLECTIVE PLAN SCOPING ===
+Artifact refs in this section are repo-relative. Read {{.Worktree}}/<ref> first; if absent, use `git -C {{.Worktree}} show {{.IntegrationBranch}}:<file-ref>` where <file-ref> is the part before #.
 {{- if gt .TotalPlanTasks 1}}
 This task is {{.TaskOrdinal}} of {{.TotalPlanTasks}} in the current sprint plan.
 Read the full goal spec ({{.GoalSpecRef}}) to understand {{- if eq .RoleType "reviewer"}} the complete picture.

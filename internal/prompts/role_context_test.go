@@ -39,9 +39,11 @@ func TestRoleContextData_CoderPopulation(t *testing.T) {
 		TotalPlanTasks: 5,
 		TaskOrdinal:    2,
 
-		// Coder-specific
+		// Task artifact / integration context
 		IntegrationBranch: "integration",
-		HandoffNote:       handoff,
+
+		// Coder-specific
+		HandoffNote: handoff,
 
 		// Config/state
 		ProjectRoot: "/project",
@@ -171,6 +173,9 @@ func TestRoleContextData_CodeReviewerPopulation(t *testing.T) {
 		TotalPlanTasks: 5,
 		TaskOrdinal:    2,
 
+		// Task artifact / integration context
+		IntegrationBranch: "integration",
+
 		// Config/state
 		ProjectRoot: "/project",
 		StatePath:   "/project/.liza/state.yaml",
@@ -206,9 +211,14 @@ func TestRoleContextData_CodeReviewerPopulation(t *testing.T) {
 		t.Errorf("SiblingTasks length = %d, want 2", len(data.SiblingTasks))
 	}
 
+	// Verify task artifact / integration context
+	if data.IntegrationBranch != "integration" {
+		t.Errorf("IntegrationBranch = %q, want %q", data.IntegrationBranch, "integration")
+	}
+
 	// Verify coder-specific fields are zero-valued for reviewer
-	if data.IntegrationBranch != "" {
-		t.Errorf("IntegrationBranch should be empty for reviewer, got %q", data.IntegrationBranch)
+	if data.IntegrationFix {
+		t.Error("IntegrationFix should be false for reviewer")
 	}
 	if data.HandoffNote != nil {
 		t.Errorf("HandoffNote should be nil for reviewer, got %v", data.HandoffNote)
@@ -336,7 +346,7 @@ func TestRoleContextData_Architect(t *testing.T) {
 		Worktree:    "/project/.worktrees/arch-task-1",
 
 		// Architecture-specific
-		ArchRef: "/project/.worktrees/arch-task-1/specs/arch-plan/feature-x.md",
+		ArchRef: "specs/arch-plan/feature-x.md",
 		ParentTaskContexts: []ParentTaskContext{
 			{
 				ID:          "us-1",
@@ -362,8 +372,8 @@ func TestRoleContextData_Architect(t *testing.T) {
 	}
 
 	// Verify ArchRef is populated
-	if data.ArchRef != "/project/.worktrees/arch-task-1/specs/arch-plan/feature-x.md" {
-		t.Errorf("ArchRef = %q, want %q", data.ArchRef, "/project/.worktrees/arch-task-1/specs/arch-plan/feature-x.md")
+	if data.ArchRef != "specs/arch-plan/feature-x.md" {
+		t.Errorf("ArchRef = %q, want %q", data.ArchRef, "specs/arch-plan/feature-x.md")
 	}
 
 	// Verify ParentTaskContexts populated with 2 entries

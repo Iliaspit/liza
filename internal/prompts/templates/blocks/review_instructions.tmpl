@@ -28,6 +28,9 @@ INSTRUCTIONS:
    structural refactoring are NOT behavioral test changes — do not reject for these.
 7. Test discovery (e.g. pytest, python -m unittest discover) finding 0 tests is a blocker — tests must be discoverable, not just runnable when explicitly named
 8. Verify the done_when criteria are met AND tests exercise those criteria (for code tasks)
+{{- if or .ArchRef .PlanRef}}
+Artifact refs below are repo-relative. Read {{.Worktree}}/<ref> first; if absent, use `git -C {{.Worktree}} show {{.IntegrationBranch}}:<file-ref>` where <file-ref> is the part before #.
+{{- end}}
 {{- if ne .ArchRef ""}}
 - Architecture document: {{.ArchRef}} — verify implementation aligns with architectural decisions
 {{- end}}
@@ -73,6 +76,8 @@ REVIEW CHECKLIST:
 | Cross-reference consistency | For every cross-reference in the plan ("owned by CPx", "depends on CPx", "out of scope for CPx"), the referenced task must explicitly state that responsibility, dependency, or exclusion. Reject if any dangling reference. |
 | e2e/doc coverage | Spec compliance matrix missing mandatory E2E or DOC impact rows, or rows marked N/A without justification, or feature adds user-visible behavior but no e2e test or doc update task planned |
 {{- if ne .ArchRef ""}}
+
+Artifact refs below are repo-relative. Read {{.Worktree}}/<ref> first; if absent, use `git -C {{.Worktree}} show {{.IntegrationBranch}}:<file-ref>` where <file-ref> is the part before #.
 
 ARCHITECTURE REFERENCE: {{.ArchRef}}
 Verify the code plan is consistent with the architecture document: component boundaries, interfaces, and structural decisions align with the architect's decomposition.
@@ -193,7 +198,7 @@ Include this assessment in your rejection reason if rejecting.
 
 CAPABILITY SCOPING:
 This task covers ONE capability from the parent epic.
-{{- if ne .EpicRef ""}} The epic is at {{.EpicRef}}.{{- if ne .EpicSection ""}} Your capability section: #{{.EpicSection}}.{{- end}}{{- end}}
+{{- if ne .EpicRef ""}} The epic ref is {{.EpicRef}}. Read {{.Worktree}}/{{.EpicRef}} first; if absent, use `git -C {{.Worktree}} show {{.IntegrationBranch}}:{{.EpicRef}}`.{{- if ne .EpicSection ""}} Then use section #{{.EpicSection}}.{{- end}}{{- end}}
 Sibling US Writer tasks cover the other capabilities. Verify stories only address
 the assigned capability (match by task SCOPE). Stories covering other capabilities in the
 same epic are Scope Absorption — reject.
@@ -202,7 +207,7 @@ REVIEW PHASE:
 1. Early drift check: git -C {{.Worktree}} rev-parse HEAD — if it doesn't match REVIEW_COMMIT ({{.ReviewCommit}}), stop early (verdict submission will reject the mismatch).
 2. Inspect worktree changes: git -C {{.Worktree}} diff {{.BaseCommit}}..{{.ReviewCommit}}
 3. Invoke both skills before evaluating: spec-review and user-story-writing.
-4. Read the epic at {{.EpicRef}}. Locate the assigned capability by matching task SCOPE.
+4. Read the epic ref above. Locate the assigned capability by matching task SCOPE.
    Verify stories only cover that capability section — not others in the same epic.
 5. Validate done_when criteria are satisfied.
 6. Check each user story against the anti-pattern checklist above.

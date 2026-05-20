@@ -2,7 +2,6 @@ package agent
 
 import (
 	"fmt"
-	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -133,12 +132,12 @@ func buildTaskRoleContextData(task *models.Task, state *models.State, config Sup
 		DoneWhen:     task.DoneWhen,
 		Scope:        task.Scope,
 		SpecRef:      task.SpecRef,
-		EpicRef:      worktreeRelPath(paths.SplitRefFile(task.EpicRef), resolveWorktreePath(config.ProjectRoot, task.Worktree)),
+		EpicRef:      paths.SplitRefFile(task.EpicRef),
 		EpicSection:  paths.SplitRefFragment(task.EpicRef),
 		EpicSlug:     paths.GoalSlug(paths.SplitRefFile(task.EpicRef)),
-		PlanRef:      worktreeRelPath(paths.SplitRefFile(task.PlanRef), resolveWorktreePath(config.ProjectRoot, task.Worktree)),
+		PlanRef:      paths.SplitRefFile(task.PlanRef),
 		PlanSection:  paths.SplitRefFragment(task.PlanRef),
-		ArchRef:      worktreeRelPath(task.ArchRef, resolveWorktreePath(config.ProjectRoot, task.Worktree)),
+		ArchRef:      paths.SplitRefFile(task.ArchRef),
 		Worktree:     resolveWorktreePath(config.ProjectRoot, task.Worktree),
 		IterationNum: task.Iteration,
 		AttemptNum:   task.EffectiveAttempt(),
@@ -158,6 +157,8 @@ func buildTaskRoleContextData(task *models.Task, state *models.State, config Sup
 		SpecsDir:    config.SpecsDir,
 		GoalDesc:    state.Goal.Description,
 		GoalSlug:    paths.GoalSlug(state.Goal.SpecRef),
+
+		IntegrationBranch: state.Config.IntegrationBranch,
 	}
 
 	// Prior rejection
@@ -180,7 +181,6 @@ func buildTaskRoleContextData(task *models.Task, state *models.State, config Sup
 
 	// Doer-specific: coder fields
 	if roleType == "doer" && config.Role == "coder" {
-		data.IntegrationBranch = state.Config.IntegrationBranch
 		data.IntegrationFix = task.IntegrationFix
 		// Find the last context_exhaustion HandoffEvent for resume context
 		for i := len(task.HandoffEvents) - 1; i >= 0; i-- {
@@ -508,15 +508,6 @@ func appendUniqueString(refs []string, candidate string) []string {
 		}
 	}
 	return append(refs, candidate)
-}
-
-// worktreeRelPath prefixes a relative path with the worktree path so agents
-// resolve it inside the worktree rather than the main repo.
-func worktreeRelPath(relPath, worktree string) string {
-	if worktree == "" || relPath == "" {
-		return relPath
-	}
-	return filepath.Join(worktree, relPath)
 }
 
 func savePrompt(promptDir, agentID, prompt string) (string, error) {

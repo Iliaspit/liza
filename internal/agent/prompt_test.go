@@ -283,6 +283,7 @@ func TestBuildPrompt_CollectiveScoping(t *testing.T) {
 func TestBuildPrompt_RelevantTaskGraphDigest(t *testing.T) {
 	now := time.Now().UTC()
 	blockedReason := "waiting for migration plan"
+	worktree := ".worktrees/task-current"
 	state := &models.State{
 		Version: 1,
 		Goal: models.Goal{
@@ -303,6 +304,7 @@ func TestBuildPrompt_RelevantTaskGraphDigest(t *testing.T) {
 				SpecRef:     "specs/vision.md",
 				DoneWhen:    "internal/repository.go behavior is validated",
 				Scope:       "In scope: `internal/repository.go` and tests/repository_test.go",
+				Worktree:    &worktree,
 				Created:     now,
 			},
 			{
@@ -366,6 +368,8 @@ func TestBuildPrompt_RelevantTaskGraphDigest(t *testing.T) {
 	}
 
 	for _, want := range []string{
+		"Artifact refs in this section are repo-relative.",
+		"git -C " + filepath.Join(tmpDir, worktree) + " show main:<file-ref>",
 		"RELEVANT TASK GRAPH DIGEST",
 		"Direct dependencies:",
 		"task-dep [BLOCKED, code-planning-pair]: Prepare migration contract",
@@ -386,6 +390,200 @@ func TestBuildPrompt_RelevantTaskGraphDigest(t *testing.T) {
 		if !strings.Contains(prompt, want) {
 			t.Errorf("buildPrompt() missing task graph digest content: %q", want)
 		}
+	}
+}
+
+func TestBuildPrompt_ArtifactRefsUseRepoRelativeFallback(t *testing.T) {
+	now := time.Now().UTC()
+	worktree := ".worktrees/task-1"
+	state := &models.State{
+		Version: 1,
+		Goal: models.Goal{
+			ID:          "goal-1",
+			Description: "Test goal",
+			SpecRef:     "specs/vision.md",
+			Status:      models.GoalStatusInProgress,
+			Created:     now,
+		},
+		Tasks: []models.Task{
+			{
+				ID:          "task-1",
+				Description: "Implement feature",
+				Status:      models.TaskStatusImplementing,
+				RolePair:    "coding-pair",
+				Priority:    1,
+				SpecRef:     "specs/vision.md",
+				EpicRef:     "specs/epics/feature.md#capability-signup",
+				PlanRef:     "specs/plans/feature.md#task-1",
+				ArchRef:     "specs/arch-plan/feature.md",
+				Worktree:    &worktree,
+				DoneWhen:    "Feature works",
+				Created:     now,
+			},
+		},
+		Agents: make(map[string]models.Agent),
+		Config: models.Config{IntegrationBranch: "integration"},
+	}
+	tmpDir := t.TempDir()
+	absWorktree := filepath.Join(tmpDir, worktree)
+	config := SupervisorConfig{
+		Role:        "coder",
+		AgentID:     "coder-1",
+		ProjectRoot: tmpDir,
+		SpecsDir:    filepath.Join(tmpDir, "specs"),
+		StatePath:   filepath.Join(tmpDir, "state.yaml"),
+	}
+
+	prompt, err := testBuildPrompt(t, state, config, "task-1")
+	if err != nil {
+		t.Fatalf("buildPrompt: %v", err)
+	}
+
+	for _, want := range []string{
+		"Artifact refs below are repo-relative.",
+		"Read " + absWorktree + "/<ref> first",
+		"git -C " + absWorktree + " show integration:<file-ref>",
+		"Read the implementation plan at specs/plans/feature.md for task decomposition context.",
+		"Read the architecture document at specs/arch-plan/feature.md for structural context and component boundaries.",
+		"Read the epic at specs/epics/feature.md for requirement context",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("prompt missing %q", want)
+		}
+	}
+	for _, notWant := range []string{
+		filepath.Join(absWorktree, "specs/plans/feature.md"),
+		filepath.Join(absWorktree, "specs/arch-plan/feature.md"),
+		filepath.Join(absWorktree, "specs/epics/feature.md"),
+		"specs/plans/feature.md#task-1",
+		"specs/epics/feature.md#capability-signup for requirement context",
+	} {
+		if strings.Contains(prompt, notWant) {
+			t.Errorf("prompt contains stale artifact rendering %q", notWant)
+		}
+	}
+}
+
+func TestBuildPrompt_ReviewerArtifactRefsUseIntegrationFallback(t *testing.T) {
+	now := time.Now().UTC()
+	worktree := ".worktrees/task-1"
+	state := &models.State{
+		Version: 1,
+		Goal: models.Goal{
+			ID:          "goal-1",
+			Description: "Test goal",
+			SpecRef:     "specs/vision.md",
+			Status:      models.GoalStatusInProgress,
+			Created:     now,
+		},
+		Tasks: []models.Task{
+			{
+				ID:           "task-1",
+				Description:  "Review feature",
+				Status:       models.TaskStatusReviewing,
+				RolePair:     "coding-pair",
+				Priority:     1,
+				SpecRef:      "specs/vision.md",
+				PlanRef:      "specs/plans/feature.md#task-1",
+				ArchRef:      "specs/arch-plan/feature.md",
+				Worktree:     &worktree,
+				DoneWhen:     "Feature works",
+				BaseCommit:   testhelpers.StringPtr("base"),
+				ReviewCommit: testhelpers.StringPtr("review"),
+				Created:      now,
+			},
+		},
+		Agents: make(map[string]models.Agent),
+		Config: models.Config{IntegrationBranch: "integration"},
+	}
+	tmpDir := t.TempDir()
+	absWorktree := filepath.Join(tmpDir, worktree)
+	config := SupervisorConfig{
+		Role:        "code-reviewer",
+		AgentID:     "code-reviewer-1",
+		ProjectRoot: tmpDir,
+		SpecsDir:    filepath.Join(tmpDir, "specs"),
+		StatePath:   filepath.Join(tmpDir, "state.yaml"),
+	}
+
+	prompt, err := testBuildPrompt(t, state, config, "task-1")
+	if err != nil {
+		t.Fatalf("buildPrompt: %v", err)
+	}
+
+	for _, want := range []string{
+		"Artifact refs below are repo-relative.",
+		"Read " + absWorktree + "/<ref> first",
+		"git -C " + absWorktree + " show integration:<file-ref>",
+		"- Architecture document: specs/arch-plan/feature.md",
+		"- Implementation plan: specs/plans/feature.md",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("prompt missing %q", want)
+		}
+	}
+	if strings.Contains(prompt, filepath.Join(absWorktree, "specs/plans/feature.md")) {
+		t.Errorf("prompt contains worktree-prefixed plan ref")
+	}
+}
+
+func TestBuildPrompt_USWriterEpicRefFallbackPreservesFragment(t *testing.T) {
+	now := time.Now().UTC()
+	worktree := ".worktrees/us-1"
+	state := &models.State{
+		Version: 1,
+		Goal: models.Goal{
+			ID:          "goal-1",
+			Description: "Test goal",
+			SpecRef:     "specs/vision.md",
+			Status:      models.GoalStatusInProgress,
+			Created:     now,
+		},
+		Tasks: []models.Task{
+			{
+				ID:          "us-1",
+				Description: "Write signup stories",
+				Status:      models.TaskStatus("WRITING_USER_STORIES"),
+				RolePair:    "us-writing-pair",
+				Priority:    1,
+				SpecRef:     "specs/vision.md",
+				EpicRef:     "specs/epics/feature.md#capability-signup",
+				Worktree:    &worktree,
+				DoneWhen:    "Stories are written",
+				Scope:       "capability signup",
+				Created:     now,
+			},
+		},
+		Agents: make(map[string]models.Agent),
+		Config: models.Config{IntegrationBranch: "integration"},
+	}
+	tmpDir := t.TempDir()
+	absWorktree := filepath.Join(tmpDir, worktree)
+	config := SupervisorConfig{
+		Role:        "us-writer",
+		AgentID:     "us-writer-1",
+		ProjectRoot: tmpDir,
+		SpecsDir:    filepath.Join(tmpDir, "specs"),
+		StatePath:   filepath.Join(tmpDir, "state.yaml"),
+	}
+
+	prompt, err := testBuildPrompt(t, state, config, "us-1")
+	if err != nil {
+		t.Fatalf("buildPrompt: %v", err)
+	}
+
+	for _, want := range []string{
+		"The parent epic ref is specs/epics/feature.md.",
+		"Read " + absWorktree + "/specs/epics/feature.md first",
+		"git -C " + absWorktree + " show integration:specs/epics/feature.md",
+		"Then use section #capability-signup.",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("prompt missing %q", want)
+		}
+	}
+	if strings.Contains(prompt, "show integration:specs/epics/feature.md#capability-signup") {
+		t.Error("fallback command must use file ref without fragment")
 	}
 }
 
@@ -1929,6 +2127,8 @@ func TestBuildTaskRoleContextData_ArchRef(t *testing.T) {
 				Priority:    1,
 				Iteration:   1,
 				DoneWhen:    "Architecture document produced",
+				EpicRef:     "specs/epics/feature-x.md#capability-auth",
+				PlanRef:     "specs/plans/feature-x.md#task-breakdown",
 				ArchRef:     "specs/arch-plan/feature-x.md",
 				Created:     now,
 			},
@@ -1953,10 +2153,26 @@ func TestBuildTaskRoleContextData_ArchRef(t *testing.T) {
 		t.Fatalf("buildTaskRoleContextData: %v", err)
 	}
 
-	// ArchRef should be worktree-prefixed
-	want := tmpDir + "/.worktrees/arch-task-1/specs/arch-plan/feature-x.md"
-	if data.ArchRef != want {
-		t.Errorf("ArchRef = %q, want %q", data.ArchRef, want)
+	if data.EpicRef != "specs/epics/feature-x.md" {
+		t.Errorf("EpicRef = %q, want repo-relative file ref", data.EpicRef)
+	}
+	if data.EpicSection != "capability-auth" {
+		t.Errorf("EpicSection = %q, want capability-auth", data.EpicSection)
+	}
+	if data.PlanRef != "specs/plans/feature-x.md" {
+		t.Errorf("PlanRef = %q, want repo-relative file ref", data.PlanRef)
+	}
+	if data.PlanSection != "task-breakdown" {
+		t.Errorf("PlanSection = %q, want task-breakdown", data.PlanSection)
+	}
+	if data.ArchRef != "specs/arch-plan/feature-x.md" {
+		t.Errorf("ArchRef = %q, want repo-relative file ref", data.ArchRef)
+	}
+	if data.IntegrationBranch != "main" {
+		t.Errorf("IntegrationBranch = %q, want main", data.IntegrationBranch)
+	}
+	if strings.Contains(data.ArchRef, tmpDir) || strings.Contains(data.PlanRef, ".worktrees/") {
+		t.Errorf("artifact refs should not be worktree-prefixed: plan=%q arch=%q", data.PlanRef, data.ArchRef)
 	}
 }
 
@@ -2245,6 +2461,9 @@ func TestBuildPromptWithContext_Architect(t *testing.T) {
 	// Architect prompt must include parent tasks context, tools, state transitions, and implementation phase
 	mustContain := []string{
 		"PARENT TASKS (2)",
+		"Parent artifact refs are repo-relative.",
+		"Read " + filepath.Join(tmpDir, worktree) + "/<ref> first",
+		"git -C " + filepath.Join(tmpDir, worktree) + " show main:<file-ref>",
 		"User can sign up with email",
 		"User can reset password",
 		"ARCHITECT TOOLS",

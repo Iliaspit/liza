@@ -52,7 +52,7 @@ Anti-patterns to avoid:
 CAPABILITY SCOPING:
 The parent epic document contains multiple capabilities. Your task covers ONE capability only.
 {{- if ne .EpicRef ""}}
-The parent epic is at {{.EpicRef}}.{{- if ne .EpicSection ""}} Your capability section: #{{.EpicSection}}.{{- end}}
+The parent epic ref is {{.EpicRef}}. Read {{.Worktree}}/{{.EpicRef}} first; if absent, use `git -C {{.Worktree}} show {{.IntegrationBranch}}:{{.EpicRef}}`.{{- if ne .EpicSection ""}} Then use section #{{.EpicSection}}.{{- end}}
 {{- end}}
 When reading the epic, use only these sections as input:
 - Personas and General Information (shared context for all capabilities)
