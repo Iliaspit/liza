@@ -18,6 +18,7 @@ import (
 	"github.com/liza-mas/liza/internal/paths"
 	"github.com/liza-mas/liza/internal/pipeline"
 	"github.com/liza-mas/liza/internal/projectdetect"
+	"github.com/liza-mas/liza/internal/scipsearch"
 )
 
 // InitParams holds the parameters for InitCommand.
@@ -32,6 +33,7 @@ type InitParams struct {
 	DefaultCLI         string   // --default-cli: default CLI for agent spawning
 	DefaultDoerCLI     string   // --default-doer-cli: default CLI for doer and orchestrator agent spawning
 	DefaultReviewerCLI string   // --default-reviewer-cli: default CLI for reviewer agent spawning
+	ScipSearch         []string // --scip-search: enabled SCIP languages
 	Agents             []string // --claude, --codex, --gemini, --mistral
 	Stdin              io.Reader
 	ForceInteractive   bool   // bypass TTY check (for testing)
@@ -562,6 +564,21 @@ func InitCommandWithConfig(params InitParams) error {
 		return fmt.Errorf("failed to create integration branch %q: %w", branch, err)
 	}
 
+	scipSearchConfig, err := scipsearch.ResolveInitConfig(scipsearch.InitOptions{
+		ProjectRoot:       lizaPaths.ProjectRoot(),
+		ExplicitLanguages: params.ScipSearch,
+		EnvValue:          os.Getenv(scipsearch.EnvEnableScipSearch),
+	})
+	if err != nil {
+		return err
+	}
+	for _, diagnostic := range scipSearchConfig.Diagnostics {
+		fmt.Fprintf(os.Stderr, "scip-search: %s\n", diagnostic)
+	}
+	for _, warning := range scipSearchConfig.Warnings {
+		fmt.Fprintf(os.Stderr, "Warning: %s\n", warning)
+	}
+
 	// Create directory structure
 	if err := os.MkdirAll(lizaPaths.LizaDir(), 0755); err != nil {
 		return fmt.Errorf("failed to create .liza directory: %w", err)
@@ -748,6 +765,7 @@ func InitCommandWithConfig(params InitParams) error {
 			DefaultCLI:               params.DefaultCLI,
 			DefaultDoerCLI:           params.DefaultDoerCLI,
 			DefaultReviewerCLI:       params.DefaultReviewerCLI,
+			ScipSearch:               scipSearchConfig.Languages,
 			IntegrationBranch:        branch,
 			EscalationWebhook:        nil,
 			Mode:                     models.SystemModeRunning,

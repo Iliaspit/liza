@@ -14,6 +14,7 @@ import (
 	"github.com/liza-mas/liza/internal/paths"
 	"github.com/liza-mas/liza/internal/pipeline"
 	"github.com/liza-mas/liza/internal/precommit"
+	"github.com/liza-mas/liza/internal/scipsearch"
 	"github.com/liza-mas/liza/internal/testhelpers"
 )
 
@@ -185,6 +186,347 @@ func TestBuildPrompt(t *testing.T) {
 				t.Error("buildPrompt() returned empty prompt")
 			}
 		})
+	}
+}
+
+func TestBuildOrchestratorRoleContextDataScipIndexesUseProjectRoot(t *testing.T) {
+	tmpDir := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, tmpDir)
+	testhelpers.SetupPipelineConfig(t, tmpDir)
+	t.Setenv(scipsearch.EnvEnableScipSearch, "true")
+
+	writePromptTestFile(t, filepath.Join(tmpDir, "go.mod"), "module example.com/project\n")
+	writePromptTestFile(t, filepath.Join(tmpDir, "web.ts"), "export const value = 1\n")
+	writePromptTestFile(t, filepath.Join(tmpDir, "tool.py"), "value = 1\n")
+	testhelpers.MustGit(t, tmpDir, "add", "go.mod", "web.ts", "tool.py")
+	testhelpers.MustGit(t, tmpDir, "commit", "-m", "Add language fixtures")
+
+	projectGoIndex := filepath.Join(tmpDir, ".liza", "scip", "go.scip")
+	writePromptTestFile(t, projectGoIndex, "go index")
+	taskTypescriptIndex := filepath.Join(tmpDir, ".worktrees", "task-1", ".liza", "scip", "typescript.scip")
+	writePromptTestFile(t, taskTypescriptIndex, "task typescript index")
+
+	state := &models.State{
+		Goal: models.Goal{
+			Description: "Test goal",
+			SpecRef:     "specs/goal.md",
+		},
+		Config: models.Config{
+			ScipSearch: []string{"go", "typescript", "python"},
+		},
+	}
+	config := SupervisorConfig{
+		Role:        "orchestrator",
+		AgentID:     "orchestrator-1",
+		ProjectRoot: tmpDir,
+		SpecsDir:    filepath.Join(tmpDir, "specs"),
+		StatePath:   filepath.Join(tmpDir, ".liza", "state.yaml"),
+	}
+
+	data, err := buildOrchestratorRoleContextData(state, config, testResolver(t))
+	if err != nil {
+		t.Fatalf("buildOrchestratorRoleContextData() error = %v", err)
+	}
+
+	if len(data.ScipIndexes) != 1 {
+		t.Fatalf("ScipIndexes length = %d, want 1: %#v", len(data.ScipIndexes), data.ScipIndexes)
+	}
+	got := data.ScipIndexes[0]
+	if got.Language != "go" {
+		t.Errorf("ScipIndexes[0].Language = %q, want go", got.Language)
+	}
+	if got.Path != projectGoIndex {
+		t.Errorf("ScipIndexes[0].Path = %q, want project-root index %q", got.Path, projectGoIndex)
+	}
+	if !filepath.IsAbs(got.Path) {
+		t.Errorf("ScipIndexes[0].Path = %q, want absolute path", got.Path)
+	}
+	if strings.Contains(got.Path, filepath.Join(".worktrees", "task-1")) {
+		t.Errorf("ScipIndexes[0].Path = %q, must not use task worktree index %q", got.Path, taskTypescriptIndex)
+	}
+}
+
+func TestBuildPromptWithContextScipIndexesUseTaskWorktree(t *testing.T) {
+	projectRoot := t.TempDir()
+	testhelpers.SetupPipelineConfig(t, projectRoot)
+	taskWorktree := filepath.Join(projectRoot, ".worktrees", "task-1")
+	if err := os.MkdirAll(taskWorktree, 0o755); err != nil {
+		t.Fatalf("MkdirAll(%q): %v", taskWorktree, err)
+	}
+	testhelpers.SetupTestGitRepo(t, taskWorktree)
+	t.Setenv(scipsearch.EnvEnableScipSearch, "true")
+
+	writePromptTestFile(t, filepath.Join(taskWorktree, "go.mod"), "module example.com/task\n")
+	writePromptTestFile(t, filepath.Join(taskWorktree, "web.ts"), "export const value = 1\n")
+	writePromptTestFile(t, filepath.Join(taskWorktree, "tool.py"), "value = 1\n")
+	testhelpers.MustGit(t, taskWorktree, "add", "go.mod", "web.ts", "tool.py")
+	testhelpers.MustGit(t, taskWorktree, "commit", "-m", "Add task language fixtures")
+
+	taskGoIndex := filepath.Join(taskWorktree, ".liza", "scip", "go.scip")
+	writePromptTestFile(t, taskGoIndex, "task go index")
+	taskPythonIndex := filepath.Join(taskWorktree, ".liza", "scip", "python.scip")
+	writePromptTestFile(t, taskPythonIndex, "task python index")
+	taskTypescriptIndex := filepath.Join(taskWorktree, ".liza", "scip", "typescript.scip")
+	projectGoIndex := filepath.Join(projectRoot, ".liza", "scip", "go.scip")
+	writePromptTestFile(t, projectGoIndex, "project go index")
+
+	worktree := ".worktrees/task-1"
+	state := &models.State{
+		Goal: models.Goal{
+			Description: "Test goal",
+			SpecRef:     "specs/goal.md",
+		},
+		Tasks: []models.Task{
+			{
+				ID:          "task-1",
+				Description: "Test task",
+				Status:      models.TaskStatusImplementing,
+				DoneWhen:    "Task is complete",
+				Worktree:    &worktree,
+			},
+		},
+		Config: models.Config{
+			ScipSearch:        []string{"go", "typescript", "python"},
+			IntegrationBranch: "main",
+		},
+	}
+	config := SupervisorConfig{
+		Role:        "coder",
+		AgentID:     "coder-1",
+		ProjectRoot: projectRoot,
+		SpecsDir:    filepath.Join(projectRoot, "specs"),
+		StatePath:   filepath.Join(projectRoot, ".liza", "state.yaml"),
+	}
+
+	prompt, err := buildPromptWithContext(state, config, "task-1", testResolver(t))
+	if err != nil {
+		t.Fatalf("buildPromptWithContext() error = %v", err)
+	}
+
+	if !strings.Contains(prompt, taskGoIndex) {
+		t.Fatalf("prompt missing task worktree SCIP index path %q", taskGoIndex)
+	}
+	if !strings.Contains(prompt, taskPythonIndex) {
+		t.Fatalf("prompt missing task worktree Python SCIP index path %q", taskPythonIndex)
+	}
+	if strings.Contains(prompt, projectGoIndex) {
+		t.Fatalf("prompt contains project-root SCIP index path %q for task prompt", projectGoIndex)
+	}
+	if strings.Contains(prompt, taskTypescriptIndex) {
+		t.Fatalf("prompt contains missing task typescript SCIP index path %q", taskTypescriptIndex)
+	}
+	if !strings.Contains(prompt, "Go symbols, references, and implementations are supported.") {
+		t.Fatalf("prompt missing Go capability metadata")
+	}
+	if !strings.Contains(prompt, "scip-search implementations is not supported for Python.") {
+		t.Fatalf("prompt missing Python capability metadata")
+	}
+	if strings.Contains(prompt, "scip-search implementations --index "+taskPythonIndex) {
+		t.Fatalf("prompt contains unsupported Python implementations command")
+	}
+}
+
+func TestBuildPromptWithContextScipSearchGateOmitsStaleIndexes(t *testing.T) {
+	tests := []struct {
+		name       string
+		envValue   string
+		configured []string
+	}{
+		{
+			name:       "disabled environment",
+			envValue:   "false",
+			configured: []string{"go"},
+		},
+		{
+			name:       "empty config",
+			envValue:   "true",
+			configured: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			projectRoot := t.TempDir()
+			testhelpers.SetupPipelineConfig(t, projectRoot)
+			taskWorktree := filepath.Join(projectRoot, ".worktrees", "task-1")
+			writePromptTestFile(t, filepath.Join(taskWorktree, ".liza", "scip", "go.scip"), "stale go index")
+			t.Setenv(scipsearch.EnvEnableScipSearch, tt.envValue)
+
+			worktree := ".worktrees/task-1"
+			state := &models.State{
+				Goal: models.Goal{
+					Description: "Test goal",
+					SpecRef:     "specs/goal.md",
+				},
+				Tasks: []models.Task{
+					{
+						ID:          "task-1",
+						Description: "Test task",
+						Status:      models.TaskStatusImplementing,
+						DoneWhen:    "Task is complete",
+						Worktree:    &worktree,
+					},
+				},
+				Config: models.Config{
+					ScipSearch:        tt.configured,
+					IntegrationBranch: "main",
+				},
+			}
+			config := SupervisorConfig{
+				Role:        "coder",
+				AgentID:     "coder-1",
+				ProjectRoot: projectRoot,
+				SpecsDir:    filepath.Join(projectRoot, "specs"),
+				StatePath:   filepath.Join(projectRoot, ".liza", "state.yaml"),
+			}
+
+			prompt, err := buildPromptWithContext(state, config, "task-1", testResolver(t))
+			if err != nil {
+				t.Fatalf("buildPromptWithContext() error = %v", err)
+			}
+			if strings.Contains(prompt, "scip-search") {
+				t.Fatalf("prompt contains scip-search section despite inactive gate:\n%s", prompt)
+			}
+		})
+	}
+}
+
+func TestBuildPromptWithContextScipSearchOmitsEmptyAvailableIndexes(t *testing.T) {
+	projectRoot := t.TempDir()
+	testhelpers.SetupPipelineConfig(t, projectRoot)
+	taskWorktree := filepath.Join(projectRoot, ".worktrees", "task-1")
+	if err := os.MkdirAll(taskWorktree, 0o755); err != nil {
+		t.Fatalf("MkdirAll(%q): %v", taskWorktree, err)
+	}
+	testhelpers.SetupTestGitRepo(t, taskWorktree)
+	t.Setenv(scipsearch.EnvEnableScipSearch, "true")
+
+	writePromptTestFile(t, filepath.Join(taskWorktree, "go.mod"), "module example.com/task\n")
+	testhelpers.MustGit(t, taskWorktree, "add", "go.mod")
+	testhelpers.MustGit(t, taskWorktree, "commit", "-m", "Add go module")
+
+	worktree := ".worktrees/task-1"
+	state := &models.State{
+		Goal: models.Goal{
+			Description: "Test goal",
+			SpecRef:     "specs/goal.md",
+		},
+		Tasks: []models.Task{
+			{
+				ID:          "task-1",
+				Description: "Test task",
+				Status:      models.TaskStatusImplementing,
+				DoneWhen:    "Task is complete",
+				Worktree:    &worktree,
+			},
+		},
+		Config: models.Config{
+			ScipSearch:        []string{"go"},
+			IntegrationBranch: "main",
+		},
+	}
+	config := SupervisorConfig{
+		Role:        "coder",
+		AgentID:     "coder-1",
+		ProjectRoot: projectRoot,
+		SpecsDir:    filepath.Join(projectRoot, "specs"),
+		StatePath:   filepath.Join(projectRoot, ".liza", "state.yaml"),
+	}
+
+	prompt, err := buildPromptWithContext(state, config, "task-1", testResolver(t))
+	if err != nil {
+		t.Fatalf("buildPromptWithContext() error = %v", err)
+	}
+	if strings.Contains(prompt, "=== SCIP-SEARCH INDEXES ===") {
+		t.Fatalf("prompt contains scip-search section with no available indexes")
+	}
+}
+
+func TestBuildPromptWithContextScipAvailableIndexErrorPropagates(t *testing.T) {
+	projectRoot := t.TempDir()
+	testhelpers.SetupPipelineConfig(t, projectRoot)
+	t.Setenv(scipsearch.EnvEnableScipSearch, "true")
+
+	worktree := ".worktrees/missing-task"
+	state := &models.State{
+		Goal: models.Goal{
+			Description: "Test goal",
+			SpecRef:     "specs/goal.md",
+		},
+		Tasks: []models.Task{
+			{
+				ID:          "task-1",
+				Description: "Test task",
+				Status:      models.TaskStatusImplementing,
+				DoneWhen:    "Task is complete",
+				Worktree:    &worktree,
+			},
+		},
+		Config: models.Config{
+			ScipSearch:        []string{"go"},
+			IntegrationBranch: "main",
+		},
+	}
+	config := SupervisorConfig{
+		Role:        "coder",
+		AgentID:     "coder-1",
+		ProjectRoot: projectRoot,
+		SpecsDir:    filepath.Join(projectRoot, "specs"),
+		StatePath:   filepath.Join(projectRoot, ".liza", "state.yaml"),
+	}
+
+	_, err := buildPromptWithContext(state, config, "task-1", testResolver(t))
+	if err == nil {
+		t.Fatalf("buildPromptWithContext() error = nil, want available-index error")
+	}
+	if !strings.Contains(err.Error(), "available scip-search indexes") {
+		t.Fatalf("buildPromptWithContext() error = %q, want available-index context", err)
+	}
+}
+
+func TestBuildOrchestratorPromptContextScipIndexesRenderFromProjectRoot(t *testing.T) {
+	tmpDir := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, tmpDir)
+	testhelpers.SetupPipelineConfig(t, tmpDir)
+	t.Setenv(scipsearch.EnvEnableScipSearch, "true")
+
+	writePromptTestFile(t, filepath.Join(tmpDir, "go.mod"), "module example.com/project\n")
+	testhelpers.MustGit(t, tmpDir, "add", "go.mod")
+	testhelpers.MustGit(t, tmpDir, "commit", "-m", "Add go module")
+
+	projectGoIndex := filepath.Join(tmpDir, ".liza", "scip", "go.scip")
+	writePromptTestFile(t, projectGoIndex, "go index")
+
+	state := &models.State{
+		Goal: models.Goal{
+			Description: "Test goal",
+			SpecRef:     "specs/goal.md",
+		},
+		Config: models.Config{
+			ScipSearch: []string{"go"},
+		},
+	}
+	config := SupervisorConfig{
+		Role:        "orchestrator",
+		AgentID:     "orchestrator-1",
+		ProjectRoot: tmpDir,
+		SpecsDir:    filepath.Join(tmpDir, "specs"),
+		StatePath:   filepath.Join(tmpDir, ".liza", "state.yaml"),
+	}
+
+	prompt, err := buildOrchestratorPromptContext(state, config, testResolver(t))
+	if err != nil {
+		t.Fatalf("buildOrchestratorPromptContext() error = %v", err)
+	}
+
+	if !strings.Contains(prompt, projectGoIndex) {
+		t.Fatalf("prompt missing project-root SCIP index path %q", projectGoIndex)
+	}
+	if !strings.Contains(prompt, "scip-search symbols --index '"+projectGoIndex+"' --name Foo --name Bar") {
+		t.Fatalf("prompt missing scip-search symbols command for project-root index")
+	}
+	if !strings.Contains(prompt, "Go symbols, references, and implementations are supported.") {
+		t.Fatalf("prompt missing Go capability metadata")
 	}
 }
 
@@ -2820,6 +3162,16 @@ func TestBuildTaskRoleContextData_PreCommitFields_HelperError(t *testing.T) {
 	}
 	if !strings.Contains(msg, "integration branch") {
 		t.Errorf("error message %q missing inner %q phrase", msg, "integration branch")
+	}
+}
+
+func writePromptTestFile(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("MkdirAll(%q): %v", filepath.Dir(path), err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("WriteFile(%q): %v", path, err)
 	}
 }
 
