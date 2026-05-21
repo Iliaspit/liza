@@ -98,7 +98,12 @@ FIRST ACTIONS:
    Query specific tasks with liza get <task-id> --json.
    Refresh active summaries only if the prompt context appears stale.
 {{- end}}
-3. Read the goal spec: {{.GoalSpecRef}}
+3. Read the current spec reference:
+{{- if .TaskID}}
+   Use the assigned task JSON from step 2. Read its `spec_ref`; if it is repo-relative and the task has a worktree, read it from that worktree. If `spec_ref` is empty, run `liza get goal.spec_ref --json` and read that returned ref.
+{{- else}}
+   Run `liza get goal.spec_ref --json`, then read the returned ref from the project root.
+{{- end}}
 4. Execute your role's protocol
 
 {{- if .ScipSearchIndexes }}
