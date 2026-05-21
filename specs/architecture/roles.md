@@ -418,7 +418,9 @@ Code Reviewer evaluates:
 - Does commit SHA match READY_FOR_REVIEW state?
 
 **Review Scope on Iteration Cycles:**
-Review covers **all changes in the worktree** (`base_commit` → `review_commit`), not just changes since last rejection. Each review is a fresh evaluation of whether the full implementation meets the spec. This catches regressions introduced by fixes and keeps the mental model simple: "does this worktree satisfy the task?"
+Review covers **all changes in the scope/workmanship diff** (`base_commit` → `review_commit`), not just changes since last rejection. Each review is a fresh evaluation of whether the full implementation meets the spec. This catches regressions introduced by fixes and keeps the mental model simple: "does this worktree satisfy the task?"
+
+For code reviews, current integration drift is checked separately immediately before verdict with `integration_branch` → `review_commit`. Scope findings come exclusively from the scope/workmanship diff. If current-integration drift makes approval unsafe or ambiguous while the scope diff is clean, reject with verdict text saying review-range drift / rebase needed instead of logging `scope_deviation`.
 
 **Spec Currency:** Code Reviewer always validates against the **current** spec version (at review time), not the version when task was created. If spec changed materially since task creation:
 - Reject if implementation no longer matches current spec

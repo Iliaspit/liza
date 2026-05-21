@@ -1186,7 +1186,7 @@ func TestBuildRoleContext_AllRoles(t *testing.T) {
 			DoneWhen: "Feature X works correctly", Scope: "internal/feature",
 			Worktree:     projectRoot + "/.worktrees/task-reviewer",
 			IterationNum: 2, PriorRejection: "Missing error handling",
-			BaseCommit: "abc1234", ReviewCommit: "def5678", AssignedTo: "coder-1",
+			BaseCommit: "abc1234", ReviewCommit: "def5678", IntegrationBranch: "integration", AssignedTo: "coder-1",
 			GoalSpecRef: "specs/goal.md", SiblingTasks: siblings,
 			TotalPlanTasks: 3, TaskOrdinal: 2, ProjectRoot: projectRoot,
 		}
@@ -1203,6 +1203,7 @@ func TestBuildRoleContext_AllRoles(t *testing.T) {
 			"=== REVIEW TASK ===",
 			"TASK ID: task-reviewer",
 			"BASE COMMIT: abc1234",
+			"INTEGRATION BRANCH: integration",
 			"REVIEW COMMIT: def5678",
 			"AUTHOR: coder-1",
 			"REVIEWER STATE TRANSITIONS:",
@@ -1216,6 +1217,10 @@ func TestBuildRoleContext_AllRoles(t *testing.T) {
 			"First, run: test -d " + data.Worktree,
 			"Run tests from the worktree without `cd &&`",
 			"REVIEW SCOPE:",
+			"git -C " + data.Worktree + " diff integration..def5678",
+			"Scope findings come exclusively from this scope/workmanship diff",
+			"review-range drift / rebase needed",
+			"Do not invent or log a new anomaly type for review-range drift",
 			"REJECTION FORMAT",
 			"VERDICT SUBMISSION",
 			"COLLECTIVE PLAN SCOPING",
@@ -2133,6 +2138,71 @@ func TestBlockReviewInstructions_IntegrationReviewer(t *testing.T) {
 	}
 	if !strings.Contains(result, "output[]") {
 		t.Error("expected output[] references")
+	}
+}
+
+func TestReviewInstructions_CodeReviewerSkipsIntegrationDriftWhenBranchMissing(t *testing.T) {
+	tmpl := template.Must(template.ParseFiles("templates/blocks/review_instructions.tmpl"))
+
+	data := RoleContextData{
+		Role:         "code-reviewer",
+		Worktree:     "/tmp/worktree",
+		BaseCommit:   "base123",
+		ReviewCommit: "review123",
+	}
+
+	var buf bytes.Buffer
+	if err := tmpl.ExecuteTemplate(&buf, "review-instructions", &data); err != nil {
+		t.Fatalf("failed to execute review-instructions template: %v", err)
+	}
+
+	output := buf.String()
+	if strings.Contains(output, "diff ..review123") {
+		t.Fatalf("reviewer prompt rendered malformed integration drift command:\n%s", output)
+	}
+	if strings.Contains(output, "current integration drift check") {
+		t.Fatalf("reviewer prompt rendered integration drift check without IntegrationBranch:\n%s", output)
+	}
+	if !strings.Contains(output, "git -C /tmp/worktree diff base123..review123") {
+		t.Fatalf("reviewer prompt missing scope/workmanship diff:\n%s", output)
+	}
+}
+
+func TestReviewTask_RendersIntegrationBranchOnlyForCodeReviewer(t *testing.T) {
+	tmpl := template.Must(template.ParseFiles("templates/blocks/review_task.tmpl"))
+
+	for _, tc := range []struct {
+		role string
+		want bool
+	}{
+		{role: "code-reviewer", want: true},
+		{role: "code-plan-reviewer", want: false},
+		{role: "epic-plan-reviewer", want: false},
+		{role: "us-reviewer", want: false},
+		{role: "architecture-reviewer", want: false},
+	} {
+		t.Run(tc.role, func(t *testing.T) {
+			data := RoleContextData{
+				Role:              tc.role,
+				TaskID:            "task-review",
+				Worktree:          "/tmp/worktree",
+				BaseCommit:        "base123",
+				ReviewCommit:      "review123",
+				IntegrationBranch: "integration",
+				AssignedTo:        "coder-1",
+			}
+
+			var buf bytes.Buffer
+			if err := tmpl.ExecuteTemplate(&buf, "review-task", &data); err != nil {
+				t.Fatalf("failed to execute review-task template: %v", err)
+			}
+
+			output := buf.String()
+			got := strings.Contains(output, "INTEGRATION BRANCH: integration")
+			if got != tc.want {
+				t.Fatalf("INTEGRATION BRANCH rendered = %v, want %v; output:\n%s", got, tc.want, output)
+			}
+		})
 	}
 }
 
