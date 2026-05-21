@@ -21,21 +21,25 @@ def as_lines(*events: dict[str, Any]) -> list[str]:
     return [json.dumps(event) for event in events]
 
 
+def command_completed_event(item_id: str, command: str, output: str = "", exit_code: int = 0) -> dict[str, Any]:
+    return {
+        "type": "item.completed",
+        "item": {
+            "id": item_id,
+            "type": "command_execution",
+            "status": "completed",
+            "command": command,
+            "aggregated_output": output,
+            "exit_code": exit_code,
+        },
+    }
+
+
 def sparse_command_lines() -> list[str]:
     return as_lines(
         {"type": "thread.started", "thread_id": "t"},
         {"type": "turn.started"},
-        {
-            "type": "item.completed",
-            "item": {
-                "id": "item_1",
-                "type": "command_execution",
-                "status": "completed",
-                "command": "echo ok",
-                "aggregated_output": "ok\n",
-                "exit_code": 0,
-            },
-        },
+        command_completed_event("item_1", "echo ok", "ok\n"),
         {"type": "turn.completed", "usage": {"input_tokens": 1, "cached_input_tokens": 0, "output_tokens": 1}},
     )
 
@@ -51,17 +55,7 @@ def test_sparse_message_and_command_in_one_turn_counts_as_tool_turn() -> None:
                 "type": "item.completed",
                 "item": {"id": "item_1", "type": "agent_message", "status": "completed", "text": "thinking aloud"},
             },
-            {
-                "type": "item.completed",
-                "item": {
-                    "id": "item_2",
-                    "type": "command_execution",
-                    "status": "completed",
-                    "command": "echo ok",
-                    "aggregated_output": "ok\n",
-                    "exit_code": 0,
-                },
-            },
+            command_completed_event("item_2", "echo ok", "ok\n"),
             {"type": "turn.completed", "usage": {"input_tokens": 1, "cached_input_tokens": 0, "output_tokens": 1}},
         )
     )
@@ -79,17 +73,7 @@ def test_sparse_failed_turn_after_tool_item_does_not_add_empty_turn() -> None:
         as_lines(
             {"type": "thread.started", "thread_id": "t"},
             {"type": "turn.started"},
-            {
-                "type": "item.completed",
-                "item": {
-                    "id": "item_1",
-                    "type": "command_execution",
-                    "status": "failed",
-                    "command": "false",
-                    "aggregated_output": "",
-                    "exit_code": 1,
-                },
-            },
+            command_completed_event("item_1", "false", exit_code=1),
             {"type": "turn.failed", "error": {"message": "command failed"}},
         )
     )
@@ -126,28 +110,8 @@ def test_sparse_tool_actions_keep_codex_turn_numbers() -> None:
         as_lines(
             {"type": "thread.started", "thread_id": "t"},
             {"type": "turn.started"},
-            {
-                "type": "item.completed",
-                "item": {
-                    "id": "item_1",
-                    "type": "command_execution",
-                    "status": "completed",
-                    "command": "echo one",
-                    "aggregated_output": "one\n",
-                    "exit_code": 0,
-                },
-            },
-            {
-                "type": "item.completed",
-                "item": {
-                    "id": "item_2",
-                    "type": "command_execution",
-                    "status": "completed",
-                    "command": "echo two",
-                    "aggregated_output": "two\n",
-                    "exit_code": 0,
-                },
-            },
+            command_completed_event("item_1", "echo one", "one\n"),
+            command_completed_event("item_2", "echo two", "two\n"),
             {"type": "turn.completed", "usage": {"input_tokens": 2, "cached_input_tokens": 0, "output_tokens": 2}},
         )
     )
@@ -168,20 +132,7 @@ def test_sparse_single_outer_turn_counts_each_action_item_as_turn() -> None:
             "item": {"id": "item_0", "type": "agent_message", "status": "completed", "text": "starting"},
         },
     ]
-    events.extend(
-        {
-            "type": "item.completed",
-            "item": {
-                "id": f"item_{i}",
-                "type": "command_execution",
-                "status": "completed",
-                "command": f"echo {i}",
-                "aggregated_output": f"{i}\n",
-                "exit_code": 0,
-            },
-        }
-        for i in range(1, 43)
-    )
+    events.extend(command_completed_event(f"item_{i}", f"echo {i}", f"{i}\n") for i in range(1, 43))
     events.append(
         {"type": "turn.completed", "usage": {"input_tokens": 1, "cached_input_tokens": 0, "output_tokens": 1}}
     )
@@ -221,3 +172,27 @@ def test_sparse_turn_timeline_omits_unavailable_duration_column() -> None:
     assert "TURN TIMELINE" in rendered
     assert "Duration" not in rendered
     assert "0.0s" not in rendered
+
+
+def test_sparse_rtk_command_shows_wrapped_command_in_tool_name() -> None:
+    analyzer = load_analyzer()
+
+    report = analyzer.parse_sparse(
+        as_lines(
+            {"type": "thread.started", "thread_id": "t"},
+            {"type": "turn.started"},
+            command_completed_event("item_1", "rtk git status --short"),
+            command_completed_event("item_2", "/usr/bin/zsh -lc 'rtk pytest -q'"),
+            {"type": "turn.completed", "usage": {"input_tokens": 1, "cached_input_tokens": 0, "output_tokens": 1}},
+        )
+    )
+
+    assert report.tool_calls == {"rtk git": 1, "rtk pytest": 1}
+    assert report.actions[0].tool_name == "rtk git"
+    assert report.actions[1].tool_name == "rtk pytest"
+
+    rendered = analyzer.render_turn_timeline(report)
+
+    assert "rtk git" in rendered
+    assert "rtk pytest" in rendered
+    assert "rtk                  " not in rendered

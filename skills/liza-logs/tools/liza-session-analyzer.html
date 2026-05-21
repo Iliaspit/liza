@@ -253,6 +253,14 @@ function extractCommandName(cmd) {
   return cmd.split(/\s+/)[0] || cmd;
 }
 
+function displayCommandName(name, cmd) {
+  if (name === "rtk") {
+    const parts = (cmd || "").trim().split(/\s+/);
+    if (parts.length > 1) return `rtk ${parts[1]}`;
+  }
+  return name;
+}
+
 function extractCommandDetail(cmd) {
   if (!cmd) return "";
   const prefixes = ["/usr/bin/zsh -lc ", "/bin/bash -lc ", "/bin/sh -c "];
@@ -476,10 +484,12 @@ function analyzeCodex(parsed) {
     for (const item of turn.items || []) {
       if (item.type === "command_execution") {
         const cmdName = extractCommandName(item.command);
+        const detail = extractCommandDetail(item.command);
+        const displayName = displayCommandName(cmdName, detail);
         const exitCode = item.exitCode;
         timeline.push({
-          turnNum: turn.turnNum, toolName: cmdName,
-          detail: extractCommandDetail(item.command),
+          turnNum: turn.turnNum, toolName: displayName,
+          detail,
           resultChars: item.outputLen || 0,
           isError: exitCode != null && exitCode !== 0 && !isBenignExit(cmdName, exitCode),
           preview: item.outputPreview || "",

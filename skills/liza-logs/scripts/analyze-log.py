@@ -554,6 +554,15 @@ def _extract_command_name(cmd: str) -> str:
     return cmd.split()[0] if cmd.split() else cmd
 
 
+def _display_command_name(name: str, cmd: str) -> str:
+    """Return the command label used in reports."""
+    if name == "rtk":
+        parts = cmd.split()
+        if len(parts) > 1:
+            return f"rtk {parts[1]}"
+    return name
+
+
 def parse_sparse(lines: list[str]) -> SessionReport:
     """Parse a sparse-format (Format B) log file."""
     report = SessionReport()
@@ -606,20 +615,21 @@ def parse_sparse(lines: list[str]) -> SessionReport:
                     current_outer_turn_has_action = True
                     turn_num = count_action_turn()
                     cmd = item.get("command", "")
-                    name = _extract_command_name(cmd)
-                    report.tool_calls[name] = report.tool_calls.get(name, 0) + 1
                     # Strip shell wrapper for detail
                     detail = cmd
                     for prefix in ("/usr/bin/zsh -lc ", "/bin/bash -lc ", "/bin/sh -c "):
                         if cmd.startswith(prefix):
                             detail = cmd[len(prefix) :].strip().strip("'\"")
                             break
+                    name = _extract_command_name(cmd)
+                    display_name = _display_command_name(name, detail)
+                    report.tool_calls[display_name] = report.tool_calls.get(display_name, 0) + 1
                     output = item.get("aggregated_output", "") or ""
                     exit_code = item.get("exit_code", 0)
                     report.actions.append(
                         TurnAction(
                             turn_num=turn_num,
-                            tool_name=name,
+                            tool_name=display_name,
                             detail=detail[:80],
                             result_chars=len(output),
                             is_error=exit_code != 0 and not _is_benign_exit(name, exit_code),
