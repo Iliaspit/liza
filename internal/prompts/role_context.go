@@ -91,13 +91,14 @@ type RoleContextData struct {
 	ScopeExtensions []map[string]string
 
 	// Plan scoping (populated for task-aware roles)
-	GoalSpecRef    string
-	SiblingTasks   []SiblingTaskSummary
-	TotalPlanTasks int
-	TaskOrdinal    int // 1-based position in sprint plan
-	DependsOn      []string
-	TaskRolePair   string
-	TaskGraph      TaskGraphDigest
+	GoalSpecRef          string
+	SiblingTasks         []SiblingTaskSummary
+	TotalPlanTasks       int
+	TaskOrdinal          int // 1-based position in visible sprint plan
+	DependsOn            []string
+	TaskRolePair         string
+	PhaseDependencyTasks []SiblingTaskSummary
+	TaskGraph            TaskGraphDigest
 
 	// Architecture-specific (populated for architect role)
 	ParentTaskContexts         []ParentTaskContext

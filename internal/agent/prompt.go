@@ -203,13 +203,14 @@ func buildTaskRoleContextData(task *models.Task, state *models.State, config Sup
 		AttemptNum:   task.EffectiveAttempt(),
 
 		// Plan scoping
-		GoalSpecRef:    state.Goal.SpecRef,
-		SiblingTasks:   siblingTasks,
-		TotalPlanTasks: totalPlanTasks,
-		TaskOrdinal:    taskOrdinal,
-		DependsOn:      task.DependsOn,
-		TaskRolePair:   task.RolePair,
-		TaskGraph:      buildRelevantTaskGraph(state, task),
+		GoalSpecRef:          state.Goal.SpecRef,
+		SiblingTasks:         siblingTasks,
+		TotalPlanTasks:       totalPlanTasks,
+		TaskOrdinal:          taskOrdinal,
+		DependsOn:            task.DependsOn,
+		TaskRolePair:         task.RolePair,
+		PhaseDependencyTasks: collectPhaseDependencyTasks(state, task),
+		TaskGraph:            buildRelevantTaskGraph(state, task),
 
 		// Config/state
 		ProjectRoot: config.ProjectRoot,
@@ -345,8 +346,8 @@ func derefString(s *string) string {
 	return *s
 }
 
-// collectSiblingTasks returns summaries of sibling tasks in the sprint plan (excluding currentTaskID),
-// the total count of planned tasks, and the 1-based ordinal position of currentTaskID in the plan.
+// collectSiblingTasks returns summaries of visible sibling tasks in the sprint plan (excluding currentTaskID),
+// the visible count of planned tasks, and the 1-based ordinal position of currentTaskID in the visible plan.
 // Returns nil, 0, 0 if no planned tasks or if currentTaskID is not in the planned list
 // (e.g. mid-sprint replacement tasks created outside the original plan).
 //
@@ -360,21 +361,22 @@ func collectSiblingTasks(state *models.State, currentTaskID string) ([]prompts.S
 
 	ordinal := 0
 	var siblings []prompts.SiblingTaskSummary
-	for i, id := range planned {
-		if id == currentTaskID {
-			ordinal = i + 1 // 1-based
+	visibleTotal := 0
+	for _, id := range planned {
+		task := state.FindTask(id)
+		if task == nil {
 			continue
 		}
-		task := state.FindTask(id)
-		if task != nil {
-			siblings = append(siblings, prompts.SiblingTaskSummary{
-				ID:          task.ID,
-				Description: prompts.TruncateText(task.Description, 200),
-				Status:      string(task.Status),
-				PlanRef:     task.PlanRef,
-				RolePair:    task.RolePair,
-			})
+		if id == currentTaskID {
+			visibleTotal++
+			ordinal = visibleTotal
+			continue
 		}
+		if isDeadPathPlanSibling(task.Status) {
+			continue
+		}
+		visibleTotal++
+		siblings = append(siblings, siblingTaskSummary(task))
 	}
 
 	// Suppress scoping for tasks not in the plan (mid-sprint replacements).
@@ -383,7 +385,39 @@ func collectSiblingTasks(state *models.State, currentTaskID string) ([]prompts.S
 		return nil, 0, 0
 	}
 
-	return siblings, len(planned), ordinal
+	return siblings, visibleTotal, ordinal
+}
+
+func isDeadPathPlanSibling(status models.TaskStatus) bool {
+	return status == models.TaskStatusAbandoned || status == models.TaskStatusSuperseded
+}
+
+func siblingTaskSummary(task *models.Task) prompts.SiblingTaskSummary {
+	return prompts.SiblingTaskSummary{
+		ID:          task.ID,
+		Description: prompts.TruncateText(task.Description, 200),
+		Status:      string(task.Status),
+		PlanRef:     task.PlanRef,
+		RolePair:    task.RolePair,
+	}
+}
+
+func collectPhaseDependencyTasks(state *models.State, current *models.Task) []prompts.SiblingTaskSummary {
+	if len(current.DependsOn) == 0 {
+		return nil
+	}
+
+	seen := make(map[string]bool)
+	var dependencies []prompts.SiblingTaskSummary
+	for _, depID := range current.DependsOn {
+		dep := state.FindTask(depID)
+		if dep == nil || dep.RolePair != current.RolePair || seen[dep.ID] {
+			continue
+		}
+		dependencies = append(dependencies, siblingTaskSummary(dep))
+		seen[dep.ID] = true
+	}
+	return dependencies
 }
 
 var (
@@ -417,10 +451,9 @@ func buildRelevantTaskGraph(state *models.State, current *models.Task) prompts.T
 	}
 
 	for _, sibling := range plannedSiblings(state, current.ID) {
-		sharedRefs := intersectRefs(currentRefs, taskScopeRefs(sibling))
-		entry := taskGraphEntry(sibling, sharedRefs)
-		if len(sharedRefs) > 0 {
-			digest.SiblingsSharingRefs = append(digest.SiblingsSharingRefs, entry)
+		entry := taskGraphEntry(sibling, nil)
+		if !sibling.Status.IsTerminal() {
+			entry.SharedRefs = intersectRefs(currentRefs, taskScopeRefs(sibling))
 		}
 		if sibling.Status == models.TaskStatusBlocked && !seenBlocked[sibling.ID] {
 			digest.BlockedRelatedTasks = append(digest.BlockedRelatedTasks, entry)
@@ -429,6 +462,12 @@ func buildRelevantTaskGraph(state *models.State, current *models.Task) prompts.T
 		if isCompletedForDigest(state, sibling) && hasArtifactRefs(entry) && !seenArtifacts[sibling.ID] {
 			digest.CompletedArtifacts = append(digest.CompletedArtifacts, entry)
 			seenArtifacts[sibling.ID] = true
+		}
+		if sibling.Status.IsTerminal() {
+			continue
+		}
+		if len(entry.SharedRefs) > 0 {
+			digest.SiblingsSharingRefs = append(digest.SiblingsSharingRefs, entry)
 		}
 	}
 

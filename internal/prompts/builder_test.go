@@ -1978,15 +1978,16 @@ func TestRenderOrchestratorDashboard_CycleBlocked(t *testing.T) {
 }
 
 func TestCollectivePlanScoping_PhaseConsistencyRule(t *testing.T) {
-	t.Run("with DependsOn matching same-role-pair sibling → renders phase-consistency rule", func(t *testing.T) {
+	t.Run("with phase dependency task → renders phase-consistency rule", func(t *testing.T) {
 		data := &RoleContextData{
-			Role:           "code-planner",
-			RoleType:       "doer",
-			TotalPlanTasks: 2,
-			TaskOrdinal:    2,
-			GoalSpecRef:    "specs/goal.md",
-			TaskRolePair:   "code-planning-pair",
-			DependsOn:      []string{"plan-1"},
+			Role:                 "code-planner",
+			RoleType:             "doer",
+			TotalPlanTasks:       2,
+			TaskOrdinal:          2,
+			GoalSpecRef:          "specs/goal.md",
+			TaskRolePair:         "code-planning-pair",
+			DependsOn:            []string{"plan-1"},
+			PhaseDependencyTasks: []SiblingTaskSummary{{ID: "plan-1", Description: "Phase 1 planning", Status: "MERGED", PlanRef: "specs/plan-phase1.md", RolePair: "code-planning-pair"}},
 			SiblingTasks: []SiblingTaskSummary{
 				{ID: "plan-1", Description: "Phase 1 planning", Status: "MERGED", PlanRef: "specs/plan-phase1.md", RolePair: "code-planning-pair"},
 			},
@@ -2000,7 +2001,7 @@ func TestCollectivePlanScoping_PhaseConsistencyRule(t *testing.T) {
 		if !strings.Contains(output, "SIBLING CONSISTENCY RULE") {
 			t.Error("expected sibling-consistency rule to render")
 		}
-		if !strings.Contains(output, "plan-1") {
+		if !strings.Contains(output, "plan-1 [MERGED]") {
 			t.Error("expected prior task ID in rule")
 		}
 		if !strings.Contains(output, "specs/plan-phase1.md") {
@@ -2014,7 +2015,7 @@ func TestCollectivePlanScoping_PhaseConsistencyRule(t *testing.T) {
 		}
 	})
 
-	t.Run("without DependsOn → no sibling-consistency rule", func(t *testing.T) {
+	t.Run("without phase dependency tasks → no sibling-consistency rule", func(t *testing.T) {
 		data := &RoleContextData{
 			Role:           "code-planner",
 			RoleType:       "doer",
@@ -2032,11 +2033,11 @@ func TestCollectivePlanScoping_PhaseConsistencyRule(t *testing.T) {
 		}
 
 		if strings.Contains(output, "SIBLING CONSISTENCY RULE") {
-			t.Error("should NOT render sibling-consistency rule without DependsOn")
+			t.Error("should NOT render sibling-consistency rule without phase dependency tasks")
 		}
 	})
 
-	t.Run("DependsOn on different-role-pair sibling → no sibling-consistency rule", func(t *testing.T) {
+	t.Run("matching visible sibling without phase dependency task → no sibling-consistency rule", func(t *testing.T) {
 		data := &RoleContextData{
 			Role:           "code-planner",
 			RoleType:       "doer",
@@ -2044,9 +2045,9 @@ func TestCollectivePlanScoping_PhaseConsistencyRule(t *testing.T) {
 			TaskOrdinal:    2,
 			GoalSpecRef:    "specs/goal.md",
 			TaskRolePair:   "code-planning-pair",
-			DependsOn:      []string{"coding-task-1"},
+			DependsOn:      []string{"plan-1"},
 			SiblingTasks: []SiblingTaskSummary{
-				{ID: "coding-task-1", Description: "Implement feature", Status: "MERGED", RolePair: "coding-pair"},
+				{ID: "plan-1", Description: "Phase 1 planning", Status: "MERGED", RolePair: "code-planning-pair"},
 			},
 		}
 
@@ -2056,7 +2057,38 @@ func TestCollectivePlanScoping_PhaseConsistencyRule(t *testing.T) {
 		}
 
 		if strings.Contains(output, "SIBLING CONSISTENCY RULE") {
-			t.Error("should NOT render sibling-consistency rule for different-role-pair dependency")
+			t.Error("should NOT infer sibling-consistency rule from visible siblings alone")
+		}
+	})
+
+	t.Run("superseded phase dependency hidden from siblings still renders rule", func(t *testing.T) {
+		data := &RoleContextData{
+			Role:                 "code-planner",
+			RoleType:             "doer",
+			TotalPlanTasks:       2,
+			TaskOrdinal:          1,
+			GoalSpecRef:          "specs/goal.md",
+			TaskRolePair:         "code-planning-pair",
+			DependsOn:            []string{"plan-old"},
+			PhaseDependencyTasks: []SiblingTaskSummary{{ID: "plan-old", Description: "Old phase planning", Status: "SUPERSEDED", PlanRef: "specs/plan-old.md", RolePair: "code-planning-pair"}},
+			SiblingTasks: []SiblingTaskSummary{
+				{ID: "plan-new", Description: "Replacement phase planning", Status: "DRAFT_CODING_PLAN", PlanRef: "specs/plan-new.md", RolePair: "code-planning-pair"},
+			},
+		}
+
+		output, err := BuildRoleContext("code-planner", []string{"collective-plan-scoping"}, data)
+		if err != nil {
+			t.Fatalf("BuildRoleContext: %v", err)
+		}
+
+		if !strings.Contains(output, "SIBLING CONSISTENCY RULE") {
+			t.Error("expected sibling-consistency rule to render for hidden phase dependency")
+		}
+		if !strings.Contains(output, "plan-old [SUPERSEDED]") {
+			t.Error("expected superseded phase dependency in rule")
+		}
+		if strings.Contains(output, "plan-old [SUPERSEDED]: Old phase planning") {
+			t.Error("superseded phase dependency should not render as a plan sibling")
 		}
 	})
 

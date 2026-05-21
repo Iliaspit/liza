@@ -65,18 +65,14 @@ Plan siblings (scope boundary only):
 {{- if ne .PlanRef ""}}
 PLAN ARTIFACT: {{.PlanRef}}
 {{- end}}
-{{- /* Sibling-consistency rule: rendered when task depends on same-role-pair siblings */ -}}
-{{- $hasPhaseDeps := false -}}
-{{- $siblings := .SiblingTasks -}}
-{{- $rolePair := .TaskRolePair -}}
-{{- range .DependsOn}}{{$depID := .}}{{range $siblings}}{{if and (eq .ID $depID) (eq .RolePair $rolePair)}}{{$hasPhaseDeps = true}}{{end}}{{end}}{{end -}}
-{{- if $hasPhaseDeps}}
+{{- /* Sibling-consistency rule: rendered when task depends on same-role-pair phase dependencies */ -}}
+{{- if .PhaseDependencyTasks}}
 
 SIBLING CONSISTENCY RULE:
 This task depends on prior planning task(s):
-{{- range .DependsOn}}{{$depID := .}}{{range $siblings}}{{if and (eq .ID $depID) (eq .RolePair $rolePair)}}
-- {{.ID}}{{if ne .PlanRef ""}} — plan: {{.PlanRef}}{{end}}
-{{- end}}{{end}}{{end}}
+{{- range .PhaseDependencyTasks}}
+- {{.ID}} [{{.Status}}]{{if ne .PlanRef ""}} — plan: {{.PlanRef}}{{end}}
+{{- end}}
 If your plan CANNOT be made consistent with those prior plans:
 - Do NOT iterate with the reviewer — mark BLOCKED immediately via liza mark-blocked --json.
 - blocked_reason: which prior task constraint conflicts and why.
