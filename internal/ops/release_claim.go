@@ -92,7 +92,15 @@ func ResolveReleaseStatuses(task *models.Task, resolver *pipeline.Resolver) (doe
 func resolveClaimReleaseStatuses(task *models.Task, resolver *pipeline.Resolver) (doer claimRelease, reviewer claimRelease) {
 	doer = doerRelease
 	reviewer = reviewerRelease
-	doer.activeStatus, doer.releasedStatus, reviewer.activeStatus, reviewer.releasedStatus = ResolveReleaseStatuses(task, resolver)
+	doerActive, doerReleased, reviewerActive, reviewerReleased := ResolveReleaseStatuses(task, resolver)
+	if doerActive != "" && doerReleased != "" {
+		doer.activeStatus = doerActive
+		doer.releasedStatus = doerReleased
+	}
+	if reviewerActive != "" && reviewerReleased != "" {
+		reviewer.activeStatus = reviewerActive
+		reviewer.releasedStatus = reviewerReleased
+	}
 	return doer, reviewer
 }
 

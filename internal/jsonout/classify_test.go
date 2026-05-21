@@ -262,6 +262,7 @@ func TestClassifyError_ValidationPatterns(t *testing.T) {
 		"task is not REVIEWING",
 		"task is not READY_FOR_REVIEW",
 		"task is not CODE_READY_FOR_REVIEW",
+		"task is not CODE_TO_REVIEW",
 		"task is not CODE_APPROVED",
 		"task is not APPROVED",
 		"field must be non-empty",

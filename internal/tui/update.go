@@ -76,6 +76,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.roleTypes = msg.RoleTypes
 		m.rolePairNames = msg.RolePairs
 		m.sprintTerminals = msg.SprintTerminals
+		m.stateCategories = msg.StateCategories
 		return m, nil
 
 	case stopDoneMsg:

@@ -72,7 +72,7 @@ func TestValidateTaskInvariants_EnforcesStatusSpecificRequiredFields(t *testing.
 				task.ReviewCommit = nil
 				return task
 			},
-			wantErr: "CODE_READY_FOR_REVIEW task without review_commit: task-1",
+			wantErr: "CODE_TO_REVIEW task without review_commit: task-1",
 		},
 		{
 			name: "reviewing status requires reviewing_by",

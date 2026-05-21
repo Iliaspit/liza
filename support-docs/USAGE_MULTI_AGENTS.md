@@ -232,7 +232,7 @@ liza sprint-checkpoint
 cat .liza/log.yaml
 ```
 
-**Signal handling:** Agents cleanly exit on `Ctrl+C` (SIGINT) or `kill` (SIGTERM). On exit, the agent unregisters and atomically releases any active task claim — the task returns to its initial state (doer, e.g. DRAFT_CODE) or submitted state (reviewer, e.g. CODE_READY_FOR_REVIEW) — so no orphaned claims are left behind.
+**Signal handling:** Agents cleanly exit on `Ctrl+C` (SIGINT) or `kill` (SIGTERM). On exit, the agent unregisters and atomically releases any active task claim — the task returns to its initial state (doer, e.g. DRAFT_CODE) or submitted state (reviewer, e.g. CODE_TO_REVIEW; legacy configs may use CODE_READY_FOR_REVIEW) — so no orphaned claims are left behind.
 
 **4. Review Results**
 ```bash

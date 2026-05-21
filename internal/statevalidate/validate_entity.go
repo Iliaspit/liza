@@ -123,8 +123,11 @@ func hasHandoffTrigger(events []models.HandoffEvent, trigger models.HandoffTrigg
 // isPostSubmissionStatus returns true if the task status implies the task has
 // been through the submission flow at least once.
 func isPostSubmissionStatus(status models.TaskStatus) bool {
+	if status.IsReadyForReviewStatus() {
+		return true
+	}
 	switch status {
-	case models.TaskStatusReadyForReview, models.TaskStatusReviewing,
+	case models.TaskStatusReviewing,
 		models.TaskStatusRejected, models.TaskStatusApproved,
 		models.TaskStatusMerged, models.TaskStatusIntegrationFailed,
 		models.TaskStatusPartiallyApproved, models.TaskStatusReviewingCode2,

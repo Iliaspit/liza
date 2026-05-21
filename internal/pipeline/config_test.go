@@ -721,7 +721,7 @@ func TestResolver_AllStatusMethods(t *testing.T) {
 	}{
 		{"Initial", "coding-pair", "DRAFT_CODE"},
 		{"Executing", "coding-pair", "IMPLEMENTING_CODE"},
-		{"Submitted", "coding-pair", "CODE_READY_FOR_REVIEW"},
+		{"Submitted", "coding-pair", "CODE_TO_REVIEW"},
 		{"Reviewing", "coding-pair", "REVIEWING_CODE"},
 		{"Approved", "coding-pair", "CODE_APPROVED"},
 		{"Rejected", "coding-pair", "CODE_REJECTED"},
@@ -781,8 +781,8 @@ func TestResolver_TransitionMap(t *testing.T) {
 
 	// Check coding-pair transitions (base + quorum states).
 	assertTransitions(t, tm, "DRAFT_CODE", []string{"IMPLEMENTING_CODE"})
-	assertTransitions(t, tm, "IMPLEMENTING_CODE", []string{"CODE_READY_FOR_REVIEW"})
-	assertTransitions(t, tm, "CODE_READY_FOR_REVIEW", []string{"REVIEWING_CODE"})
+	assertTransitions(t, tm, "IMPLEMENTING_CODE", []string{"CODE_TO_REVIEW"})
+	assertTransitions(t, tm, "CODE_TO_REVIEW", []string{"REVIEWING_CODE"})
 	assertTransitions(t, tm, "REVIEWING_CODE", []string{"CODE_APPROVED", "CODE_PARTIALLY_APPROVED", "CODE_REJECTED"})
 	assertTransitions(t, tm, "CODE_REJECTED", []string{"DRAFT_CODE"})
 	assertTransitions(t, tm, "CODE_APPROVED", []string{})
@@ -804,7 +804,7 @@ func TestResolver_AllDeclaredStates(t *testing.T) {
 		"REVIEWING_ARCHITECTURE", "ARCHITECTURE_APPROVED", "ARCHITECTURE_REJECTED",
 		"DRAFT_CODING_PLAN", "CODE_PLANNING", "CODING_PLAN_TO_REVIEW",
 		"REVIEWING_CODING_PLAN", "CODING_PLAN_APPROVED", "CODING_PLAN_REJECTED",
-		"DRAFT_CODE", "IMPLEMENTING_CODE", "CODE_READY_FOR_REVIEW",
+		"DRAFT_CODE", "IMPLEMENTING_CODE", "CODE_TO_REVIEW",
 		"REVIEWING_CODE", "CODE_APPROVED", "CODE_REJECTED",
 		"CODE_PARTIALLY_APPROVED", "REVIEWING_CODE_2",
 	}
@@ -812,6 +812,36 @@ func TestResolver_AllDeclaredStates(t *testing.T) {
 		if !slices.Contains(states, e) {
 			t.Errorf("missing declared state %q", e)
 		}
+	}
+}
+
+func TestResolver_StateCategories(t *testing.T) {
+	r := NewResolver(loadTestConfig(t))
+	categories := r.StateCategories()
+	tests := []struct {
+		status string
+		want   StateCategory
+	}{
+		{"DRAFT_CODE", StateCategoryInitial},
+		{"IMPLEMENTING_CODE", StateCategoryExecuting},
+		{"CODE_TO_REVIEW", StateCategorySubmitted},
+		{"REVIEWING_CODE", StateCategoryReviewing},
+		{"CODE_APPROVED", StateCategoryApproved},
+		{"CODE_REJECTED", StateCategoryRejected},
+		{"CODE_PARTIALLY_APPROVED", StateCategoryPartiallyApproved},
+		{"REVIEWING_CODE_2", StateCategoryReviewing2},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.status, func(t *testing.T) {
+			got, ok := categories[models.TaskStatus(tt.status)]
+			if !ok {
+				t.Fatalf("StateCategories missing %s", tt.status)
+			}
+			if got != tt.want {
+				t.Errorf("StateCategories[%s] = %q, want %q", tt.status, got, tt.want)
+			}
+		})
 	}
 }
 
@@ -1580,7 +1610,7 @@ pipeline:
       states:
         initial: DRAFT_CODE
         executing: IMPLEMENTING_CODE
-        submitted: CODE_READY_FOR_REVIEW
+        submitted: CODE_TO_REVIEW
         reviewing: REVIEWING_CODE
         approved: CODE_APPROVED
         rejected: CODE_REJECTED

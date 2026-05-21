@@ -232,7 +232,7 @@ When `liza tui` triggers the circuit breaker, it also sets `sprint.status` to `C
 | DRAFT | No | No | No |
 | DRAFT_CODE | Yes | No | No |
 | IMPLEMENTING_CODE | No | No | No |
-| CODE_READY_FOR_REVIEW | No | Yes | No |
+| CODE_TO_REVIEW | No | Yes | No |
 | CODE_REJECTED | Yes | No | No |
 | CODE_APPROVED | No | No | No |
 | MERGED | No | No | **Yes** |

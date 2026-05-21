@@ -10,6 +10,7 @@ import (
 	"github.com/liza-mas/liza/internal/log"
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/paths"
+	"github.com/liza-mas/liza/internal/pipeline"
 )
 
 // InputMode represents the current input mode of the TUI.
@@ -41,6 +42,7 @@ type rolesMsg struct {
 	RoleTypes       map[string]string
 	RolePairs       []string
 	SprintTerminals []models.TaskStatus
+	StateCategories map[models.TaskStatus]pipeline.StateCategory
 }
 
 // stopDoneMsg signals that StopCommand completed and the TUI should quit.
@@ -181,6 +183,7 @@ type Model struct {
 	roleTypes        map[string]string // cached role name to role type from pipeline config
 	rolePairNames    []string          // cached role-pair names from pipeline config for add-task form
 	sprintTerminals  []models.TaskStatus
+	stateCategories  map[models.TaskStatus]pipeline.StateCategory
 	agentCompletions []string // snapshot of agent IDs for tab-completion (built on 't' press)
 	completionIdx    int      // current position in tab-completion cycle
 	completionPrefix string   // text prefix when Tab was first pressed (filters completions)

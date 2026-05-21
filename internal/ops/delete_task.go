@@ -32,7 +32,7 @@ func validateDeletePreconditions(task *models.Task, taskID string) error {
 	if task.Status == models.TaskStatusImplementing && task.LeaseExpires != nil && task.LeaseExpires.After(time.Now().UTC()) {
 		return fmt.Errorf("cannot delete task %s in status %s (actively being worked on)", taskID, task.Status)
 	}
-	if task.Status == models.TaskStatusReadyForReview || task.Status == models.TaskStatusReviewing {
+	if task.Status.IsReadyForReviewStatus() || task.Status == models.TaskStatusReviewing {
 		return fmt.Errorf("cannot delete task %s in status %s (under review)", taskID, task.Status)
 	}
 	return nil

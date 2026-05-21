@@ -6,7 +6,7 @@ After implementation and tests pass, you MUST submit for review:
 2. Create the submission commit for this task using the required git commit workflow for this environment.
 3. Verify the worktree is clean: git -C {{.Worktree}} status --short
 4. Execute: liza submit-for-review {{.TaskID}} HEAD --agent-id {{.AgentID}} --json
-5. Verify confirmation: status changed to CODE_READY_FOR_REVIEW
+5. Verify confirmation: status changed to CODE_TO_REVIEW
 6. Run liza await-verdict (see your TOOLS section above for loop semantics).
    On REJECTED: task is already reclaimed — read the rejection reason, fix, and resubmit.
 

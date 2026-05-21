@@ -100,18 +100,19 @@ func TaskTypeForRole(role string) TaskType {
 type TaskStatus string
 
 const (
-	TaskStatusDraft             TaskStatus = "DRAFT"
-	TaskStatusReady             TaskStatus = "DRAFT_CODE"
-	TaskStatusImplementing      TaskStatus = "IMPLEMENTING_CODE"
-	TaskStatusReadyForReview    TaskStatus = "CODE_READY_FOR_REVIEW"
-	TaskStatusReviewing         TaskStatus = "REVIEWING_CODE"
-	TaskStatusRejected          TaskStatus = "CODE_REJECTED"
-	TaskStatusApproved          TaskStatus = "CODE_APPROVED"
-	TaskStatusMerged            TaskStatus = "MERGED"
-	TaskStatusBlocked           TaskStatus = "BLOCKED"
-	TaskStatusAbandoned         TaskStatus = "ABANDONED"
-	TaskStatusSuperseded        TaskStatus = "SUPERSEDED"
-	TaskStatusIntegrationFailed TaskStatus = "INTEGRATION_FAILED"
+	TaskStatusDraft                TaskStatus = "DRAFT"
+	TaskStatusReady                TaskStatus = "DRAFT_CODE"
+	TaskStatusImplementing         TaskStatus = "IMPLEMENTING_CODE"
+	TaskStatusReadyForReview       TaskStatus = "CODE_TO_REVIEW"
+	TaskStatusLegacyReadyForReview TaskStatus = "CODE_READY_FOR_REVIEW"
+	TaskStatusReviewing            TaskStatus = "REVIEWING_CODE"
+	TaskStatusRejected             TaskStatus = "CODE_REJECTED"
+	TaskStatusApproved             TaskStatus = "CODE_APPROVED"
+	TaskStatusMerged               TaskStatus = "MERGED"
+	TaskStatusBlocked              TaskStatus = "BLOCKED"
+	TaskStatusAbandoned            TaskStatus = "ABANDONED"
+	TaskStatusSuperseded           TaskStatus = "SUPERSEDED"
+	TaskStatusIntegrationFailed    TaskStatus = "INTEGRATION_FAILED"
 
 	// Code-planning pair states
 	TaskStatusDraftCodingPlan     TaskStatus = "DRAFT_CODING_PLAN"
@@ -130,7 +131,7 @@ const (
 func (ts TaskStatus) IsValid() bool {
 	switch ts {
 	case TaskStatusDraft, TaskStatusReady, TaskStatusImplementing,
-		TaskStatusReadyForReview, TaskStatusReviewing, TaskStatusRejected,
+		TaskStatusReadyForReview, TaskStatusLegacyReadyForReview, TaskStatusReviewing, TaskStatusRejected,
 		TaskStatusApproved, TaskStatusMerged, TaskStatusBlocked,
 		TaskStatusAbandoned, TaskStatusSuperseded, TaskStatusIntegrationFailed,
 		TaskStatusDraftCodingPlan, TaskStatusCodePlanning,
@@ -151,6 +152,12 @@ func (ts TaskStatus) IsTerminal() bool {
 // MERGED is the universal sprint-terminal state for all role-pairs.
 func (ts TaskStatus) IsSprintTerminal() bool {
 	return ts.IsTerminal()
+}
+
+// IsReadyForReviewStatus reports whether the status is a submitted-for-review
+// coding status, including the legacy value used by older frozen pipelines.
+func (ts TaskStatus) IsReadyForReviewStatus() bool {
+	return ts == TaskStatusReadyForReview || ts == TaskStatusLegacyReadyForReview
 }
 
 // IsPipelineValid checks if the status is valid in a pipeline context.

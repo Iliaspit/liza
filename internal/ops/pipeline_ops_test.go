@@ -499,8 +499,8 @@ func TestSubmitForReview_PipelineCodingPairTransition(t *testing.T) {
 	if readTask == nil {
 		t.Fatal("Task not found")
 	}
-	if readTask.Status != models.TaskStatus("CODE_READY_FOR_REVIEW") {
-		t.Errorf("Task status = %v, want CODE_READY_FOR_REVIEW", readTask.Status)
+	if readTask.Status != models.TaskStatusReadyForReview {
+		t.Errorf("Task status = %v, want %s", readTask.Status, models.TaskStatusReadyForReview)
 	}
 }
 

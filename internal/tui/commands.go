@@ -349,6 +349,7 @@ func loadRolesCmd(projectRoot string) tea.Cmd {
 			RoleTypes:       roleTypes,
 			RolePairs:       pr.RolePairNames(),
 			SprintTerminals: pr.SprintTerminalStates(),
+			StateCategories: pr.StateCategories(),
 		}
 	}
 }

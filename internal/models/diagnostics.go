@@ -62,7 +62,7 @@ func GetCoderWorkDiagnostics(state *State, pr PipelineResolver) string {
 		}
 
 		if task.Status == TaskStatusImplementing ||
-			task.Status == TaskStatusReadyForReview ||
+			task.Status.IsReadyForReviewStatus() ||
 			task.Status == TaskStatusReviewing ||
 			task.Status == TaskStatusApproved {
 			inProgress++
@@ -192,7 +192,7 @@ func GetReviewerWorkDiagnostics(state *State, pr PipelineResolver) string {
 		}
 
 		// Fallback: hardcoded status checks when resolver is unavailable.
-		if task.Status == TaskStatusReadyForReview && task.EffectiveType().HasRole(RoleCodeReviewer) && task.ReviewCommit != nil {
+		if task.Status.IsReadyForReviewStatus() && task.EffectiveType().HasRole(RoleCodeReviewer) && task.ReviewCommit != nil {
 			unassigned++
 		}
 		if task.Status == TaskStatusReviewing && task.EffectiveType().HasRole(RoleCodeReviewer) {

@@ -974,7 +974,7 @@ The `ValidateTransition` map in config.go and the `Resume()` function in mode_ch
 
 1. **§3.2** attributes the transition map to "`models/task.go` transition map." In reality, `task.go` only has `TransitionWith()` (line 309-318) which validates against a **provided** map. The actual map is built by `BuildPipelineTransitions()` in `ops/pipeline_ops.go:67-103` from pipeline config via `resolver.TransitionMap()`. No hardcoded transition map exists in task.go since commit `581d377`.
 
-2. **§3.1** uses legacy status names (DRAFT, IMPLEMENTING, READY_FOR_REVIEW, REVIEWING, APPROVED, REJECTED). The code uses pipeline-prefixed names: DRAFT_CODE, IMPLEMENTING_CODE, CODE_READY_FOR_REVIEW, REVIEWING_CODE, CODE_APPROVED, CODE_REJECTED. The coding-plan pair uses DRAFT_CODING_PLAN, CODE_PLANNING, etc. The legacy constants in `task.go:79-103` still exist but are mapped from pipeline-declared names via the resolver.
+2. **§3.1** uses legacy status names (DRAFT, IMPLEMENTING, READY_FOR_REVIEW, REVIEWING, APPROVED, REJECTED). The code uses pipeline-prefixed names: DRAFT_CODE, IMPLEMENTING_CODE, CODE_TO_REVIEW, REVIEWING_CODE, CODE_APPROVED, CODE_REJECTED. The coding-plan pair uses DRAFT_CODING_PLAN, CODE_PLANNING, etc. The legacy constants in `task.go:79-103` still exist but are mapped from pipeline-declared names via the resolver.
 
 **Impact:** Low. The invariants are conceptually correct — the enforcement exists, just at different locations and with different naming than documented. A developer using INVARIANTS.md to navigate the code would look in the wrong file.
 
