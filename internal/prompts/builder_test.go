@@ -1317,6 +1317,9 @@ func TestBuildRoleContext_AllRoles(t *testing.T) {
 			"First, run: /usr/bin/test -d " + data.Worktree,
 			"Run tests from the worktree without `cd &&`",
 			"REVIEW SCOPE:",
+			"Changed-file map first:",
+			"git -C " + data.Worktree + " diff --name-only abc1234..def5678",
+			"supporting rg/glob only after",
 			"git -C " + data.Worktree + " diff integration..def5678",
 			"Scope findings come exclusively from this scope/workmanship diff",
 			"review-range drift / rebase needed",
@@ -1452,6 +1455,9 @@ func TestBuildRoleContext_AllRoles(t *testing.T) {
 			"Plan artifact not in diff at", // gate condition wording
 			"Task-output JSON location",
 			"any committed task-output JSON appears under .liza/agent-outputs/",
+			"Changed-file map first:",
+			"git -C " + data.Worktree + " diff --name-only abc1234..def5678",
+			"supporting rg/glob only after",
 			"VERDICT SUBMISSION",
 		} {
 			if !strings.Contains(output, key) {
@@ -1528,6 +1534,9 @@ func TestBuildRoleContext_AllRoles(t *testing.T) {
 			"liza await-resubmission",
 			"EPIC-WRITING SKILL:",
 			"REVIEW CHECKLIST:",
+			"Changed-file map first:",
+			"git -C " + data.Worktree + " diff --name-only abc1234..def5678",
+			"supporting rg/glob only after",
 			"VERDICT SUBMISSION",
 		} {
 			if !strings.Contains(output, key) {
@@ -1619,6 +1628,9 @@ func TestBuildRoleContext_AllRoles(t *testing.T) {
 			"USER-STORY ANTI-PATTERNS",
 			"QUALITY GATES:",
 			"CAPABILITY SCOPING:",
+			"Changed-file map first:",
+			"git -C " + data.Worktree + " diff --name-only abc1234..def5678",
+			"supporting rg/glob only after",
 			"VERDICT SUBMISSION",
 			"specs/epics/ep-001.md",
 			"#capability-cap-001---task-creation",
@@ -1705,6 +1717,9 @@ func TestBuildRoleContext_AllRoles(t *testing.T) {
 			"REVIEW CHECKLIST:",
 			"Decomposition completeness",
 			"Composability",
+			"Changed-file map first:",
+			"git -C " + data.Worktree + " diff --name-only abc1234..def5678",
+			"supporting rg/glob only after",
 			"VERDICT SUBMISSION",
 		} {
 			if !strings.Contains(output, key) {
@@ -2263,8 +2278,16 @@ func TestReviewInstructions_CodeReviewerSkipsIntegrationDriftWhenBranchMissing(t
 	if strings.Contains(output, "current integration drift check") {
 		t.Fatalf("reviewer prompt rendered integration drift check without IntegrationBranch:\n%s", output)
 	}
+	nameOnlyDiff := "git -C /tmp/worktree diff --name-only base123..review123"
+	if !strings.Contains(output, nameOnlyDiff) {
+		t.Fatalf("reviewer prompt missing changed-file map diff:\n%s", output)
+	}
+	fullDiff := "git -C /tmp/worktree diff base123..review123"
 	if !strings.Contains(output, "git -C /tmp/worktree diff base123..review123") {
 		t.Fatalf("reviewer prompt missing scope/workmanship diff:\n%s", output)
+	}
+	if strings.Index(output, nameOnlyDiff) > strings.Index(output, fullDiff) {
+		t.Fatalf("changed-file map should appear before scope/workmanship diff:\n%s", output)
 	}
 }
 
@@ -2334,6 +2357,23 @@ func TestReviewInstructions_OutputReviewersUseFullTaskJSON(t *testing.T) {
 			outputSummaryCommand := regexp.MustCompile(`liza get[^\n]*--output-summary`)
 			if outputSummaryCommand.MatchString(output) {
 				t.Fatalf("reviewer prompt should not use output-summary, got:\n%s", output)
+			}
+			nameOnlyRange := "base123..review123"
+			fullDiffRange := "base123..review123"
+			if role == "integration-reviewer" {
+				nameOnlyRange = "goalbase123..HEAD"
+				fullDiffRange = "goalbase123..HEAD"
+			}
+			nameOnlyDiff := "git -C /tmp/worktree diff --name-only " + nameOnlyRange
+			fullDiff := "git -C /tmp/worktree diff " + fullDiffRange
+			if !strings.Contains(output, nameOnlyDiff) {
+				t.Fatalf("reviewer prompt missing changed-file map diff %q, got:\n%s", nameOnlyDiff, output)
+			}
+			if !strings.Contains(output, "supporting rg/glob only after") {
+				t.Fatalf("reviewer prompt missing changed-file map search guidance, got:\n%s", output)
+			}
+			if strings.Index(output, nameOnlyDiff) > strings.Index(output, fullDiff) {
+				t.Fatalf("changed-file map should appear before full diff for %s:\n%s", role, output)
 			}
 		})
 	}
