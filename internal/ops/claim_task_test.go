@@ -308,6 +308,31 @@ func TestClaimTask_UnmetDependencies(t *testing.T) {
 	}
 }
 
+func TestClaimTask_RejectsStaleSupersededDependencyEvenWithMergedReplacement(t *testing.T) {
+	tmpDir := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, tmpDir)
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+
+	now := time.Now().UTC()
+	state := testhelpers.CreateValidState()
+	registerClaimTaskTestAgents(state)
+	depTask := testhelpers.BuildTaskByStatus("dep-1", models.TaskStatusSuperseded, now)
+	depTask.SupersededBy = []string{"dep-2"}
+	replacement := testhelpers.BuildTaskByStatus("dep-2", models.TaskStatusMerged, now)
+	mainTask := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusReady, now)
+	mainTask.DependsOn = []string{"dep-1"}
+	state.Tasks = []models.Task{depTask, replacement, mainTask}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	_, err := ClaimTask(tmpDir, "task-1", "coder-1")
+	if err == nil {
+		t.Fatal("Expected error for stale superseded dependency")
+	}
+	if !strings.Contains(err.Error(), "unsatisfied_superseded") {
+		t.Errorf("Error = %q, want unsatisfied_superseded", err.Error())
+	}
+}
+
 func TestClaimTask_MetDependencies(t *testing.T) {
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
@@ -365,6 +390,21 @@ func TestUnmetDependencies(t *testing.T) {
 			want: []string{
 				"dep-missing (invalid_missing via dep-missing); blocking: dep-missing",
 				"dep-2 (unsatisfied_pending via dep-2); blocking: dep-2",
+			},
+		},
+		{
+			name:      "superseded dependency with merged replacement remains unmet until edge is rewritten",
+			dependsOn: []string{"dep-1"},
+			tasks: []models.Task{
+				func() models.Task {
+					task := testhelpers.BuildTaskByStatus("dep-1", models.TaskStatusSuperseded, now)
+					task.SupersededBy = []string{"dep-2"}
+					return task
+				}(),
+				testhelpers.BuildTaskByStatus("dep-2", models.TaskStatusMerged, now),
+			},
+			want: []string{
+				"dep-1 (unsatisfied_superseded via dep-1); blocking: dep-1",
 			},
 		},
 	}

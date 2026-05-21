@@ -89,6 +89,9 @@ func BlockedByDependencies(task *Task, pr PipelineResolver, depResolver *Depende
 	if task == nil || depResolver == nil {
 		return false
 	}
+	if depResolver.state == nil {
+		return false
+	}
 	if task.RolePair != "" && pr != nil {
 		return isBlockedByDepsPipeline(task, pr, depResolver)
 	}
@@ -97,7 +100,7 @@ func BlockedByDependencies(task *Task, pr PipelineResolver, depResolver *Depende
 		task.Status != TaskStatusIntegrationFailed {
 		return false
 	}
-	return len(depResolver.UnmetDependencies(task)) > 0
+	return !checkDependencies(task, depResolver.state.Tasks)
 }
 
 // isBlockedByDepsPipeline checks if a pipeline task is in an initial/rejected status
@@ -114,12 +117,7 @@ func isBlockedByDepsPipeline(task *Task, pr PipelineResolver, depResolver *Depen
 	if task.Status != initial && task.Status != rejected && task.Status != TaskStatusIntegrationFailed {
 		return false
 	}
-	for _, depID := range task.DependsOn {
-		if !depResolver.Resolve(depID).Satisfied() {
-			return true
-		}
-	}
-	return false
+	return !checkDependencies(task, depResolver.state.Tasks)
 }
 
 // isInProgressPipeline checks if a pipeline task is in a pipeline-defined in-progress state.

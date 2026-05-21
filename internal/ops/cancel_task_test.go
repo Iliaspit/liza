@@ -3,6 +3,7 @@ package ops
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -109,6 +110,50 @@ func TestCancelTask_FromBlocked(t *testing.T) {
 	}
 	if lastHistory.Reason == nil || *lastHistory.Reason != "No longer needed" {
 		t.Errorf("History reason = %v, want 'No longer needed'", lastHistory.Reason)
+	}
+}
+
+func TestCancelTask_RemovesActiveDependentDependencies(t *testing.T) {
+	tmpDir := t.TempDir()
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+
+	now := time.Now().UTC()
+	state := testhelpers.CreateValidState()
+	active := testhelpers.BuildTaskByStatus("active-dependent", models.TaskStatusReady, now)
+	active.DependsOn = []string{"prep", "task-1"}
+	terminal := testhelpers.BuildTaskByStatus("terminal-dependent", models.TaskStatusMerged, now)
+	terminal.DependsOn = []string{"task-1"}
+	state.Tasks = []models.Task{
+		testhelpers.BuildTaskByStatus("task-1", models.TaskStatusBlocked, now),
+		testhelpers.BuildTaskByStatus("prep", models.TaskStatusMerged, now),
+		active,
+		terminal,
+	}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	_, err := CancelTask(tmpDir, "task-1", "No longer needed", "orchestrator-1")
+	if err != nil {
+		t.Fatalf("CancelTask() error: %v", err)
+	}
+
+	bb := db.New(stateFile)
+	readState, err := bb.Read()
+	if err != nil {
+		t.Fatalf("Failed to read state: %v", err)
+	}
+
+	active = *readState.FindTask("active-dependent")
+	if !slices.Equal(active.DependsOn, []string{"prep"}) {
+		t.Fatalf("active depends_on = %v, want [prep]", active.DependsOn)
+	}
+	lastHistory := active.History[len(active.History)-1]
+	if lastHistory.Event != models.TaskEventDependenciesRewritten {
+		t.Fatalf("active last history event = %q, want %q", lastHistory.Event, models.TaskEventDependenciesRewritten)
+	}
+
+	terminal = *readState.FindTask("terminal-dependent")
+	if !slices.Equal(terminal.DependsOn, []string{"task-1"}) {
+		t.Fatalf("terminal depends_on = %v, want historical dependency preserved", terminal.DependsOn)
 	}
 }
 

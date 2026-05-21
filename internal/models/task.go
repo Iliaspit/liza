@@ -678,14 +678,29 @@ func ResumableOwnedTaskReason(state *State, task *Task, agentID string, pr Pipel
 }
 
 // checkDependencies returns true if all dependencies of the task are satisfied.
-// MERGED satisfies directly. SUPERSEDED satisfies only through recursively
-// satisfied replacement tasks.
+// Dependency edges are canonicalized by state-mutating operations, so readers
+// only need direct MERGED checks.
 func checkDependencies(t *Task, allTasks []Task) bool {
 	if allTasks == nil || len(t.DependsOn) == 0 {
 		return true
 	}
-	state := &State{Tasks: allTasks}
-	return state.DependenciesSatisfied(t)
+	for _, depID := range t.DependsOn {
+		found := false
+		for i := range allTasks {
+			if allTasks[i].ID != depID {
+				continue
+			}
+			found = true
+			if allTasks[i].Status != TaskStatusMerged {
+				return false
+			}
+			break
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
 }
 
 // TopPriorityTier returns all candidates that share the highest priority

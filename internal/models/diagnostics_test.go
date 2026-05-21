@@ -270,7 +270,7 @@ func TestGetCoderWorkDiagnostics(t *testing.T) {
 			wantContains: []string{"No claimable tasks", "1 blocked by dependencies"},
 		},
 		{
-			name: "superseded dependency with merged replacement not counted as blocked",
+			name: "superseded dependency with merged replacement still counted as blocked until edge is rewritten",
 			state: &State{
 				Tasks: []Task{
 					{ID: "t1", Status: TaskStatusReady, Type: TaskTypeCoding, RolePair: "coding-pair", DependsOn: []string{"t2"}},
@@ -278,7 +278,7 @@ func TestGetCoderWorkDiagnostics(t *testing.T) {
 					{ID: "t3", Status: TaskStatusMerged, Type: TaskTypeCoding, RolePair: "coding-pair"},
 				},
 			},
-			wantContains: []string{"Found 1 claimable task(s)"},
+			wantContains: []string{"No claimable tasks", "1 blocked by dependencies"},
 		},
 		{
 			name: "blocked by dependencies, explicit blocked, and in-progress reported",

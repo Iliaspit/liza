@@ -293,7 +293,8 @@ Exit 42 with `handoff_pending: true` on the task means context exhaustion — th
 ### BLOCKED task
 **Symptom**: Task in BLOCKED state, agents skip it.
 **Diagnosis**: Read `blocked_reason`, `blocked_questions`, `depends_on`, and optional `repair_request` in state.yaml. A `BLOCKED` alert is raised when a task blocks; if the orchestrator assesses but cannot resolve it, an `UNRESOLVED BLOCKED` alert is raised.
-**Fix**: If the blocker was another task, the blocked task should list it in `depends_on` so the orchestrator wakes when that task changes. If the blocker was repaired and every `depends_on` target is MERGED or SUPERSEDED, use `liza unblock-task <id> --assign-to <doer-agent-id> --reason "..."`. Otherwise use `liza supersede-task <id> [replacements] --reason "..."` (replace with new tasks or mark completed externally) or `liza recover-task <id>` to reset.
+**Fix**: If the blocker was another task, the blocked task should list it in `depends_on` so the orchestrator wakes when that task changes. If the blocker was repaired and every `depends_on` target is directly MERGED, use `liza unblock-task <id> --assign-to <doer-agent-id> --reason "..."`.
+Supersede/cancel operations rewrite active downstream dependencies first; stale edges to SUPERSEDED or ABANDONED tasks must not remain on active tasks. Otherwise use `liza supersede-task <id> [replacements] --reason "..."` (replace with new tasks or mark completed externally) or `liza recover-task <id>` to reset.
 
 ### Integration failure
 **Symptom**: Task in INTEGRATION_FAILED state.

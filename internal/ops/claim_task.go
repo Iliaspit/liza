@@ -326,7 +326,36 @@ func ClaimTask(projectRoot, taskID, agentID string) (*ClaimResult, error) {
 }
 
 func unmetDependencies(task *models.Task, state *models.State) []models.DependencySatisfaction {
-	return state.UnmetDependencies(task)
+	if task == nil || state == nil {
+		return nil
+	}
+	var unmet []models.DependencySatisfaction
+	for _, depID := range task.DependsOn {
+		depTask := state.FindTask(depID)
+		if depTask == nil {
+			unmet = append(unmet, models.DependencySatisfaction{
+				DependencyID: depID,
+				Kind:         models.DependencyInvalidMissing,
+				Path:         []string{depID},
+				BlockingIDs:  []string{depID},
+			})
+			continue
+		}
+		if depTask.Status == models.TaskStatusMerged {
+			continue
+		}
+		kind := models.DependencyUnsatisfiedPending
+		if depTask.Status == models.TaskStatusSuperseded {
+			kind = models.DependencyUnsatisfiedSuperseded
+		}
+		unmet = append(unmet, models.DependencySatisfaction{
+			DependencyID: depID,
+			Kind:         kind,
+			Path:         []string{depID},
+			BlockingIDs:  []string{depID},
+		})
+	}
+	return unmet
 }
 
 func formatDependencyResults(results []models.DependencySatisfaction) string {

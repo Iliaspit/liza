@@ -389,7 +389,7 @@ The `liza` binary provides all system operations. Key commands:
 | `liza submit-verdict <task-id> <APPROVED\|REJECTED> [--reason "<reason>"]` | Submit a review verdict (reviewer agents; `--reason` required for REJECTED)                                          |
 | `liza mark-blocked <task-id>` | Mark a task as BLOCKED with reason/questions; optional `--depends-on` records blocking task IDs for scheduling and orchestrator re-wake; optional `--repair-*` flags request orchestrator-only state repair |
 | `liza assess-blocked <task-id>` | Record orchestrator assessment of a BLOCKED task and raise an `UNRESOLVED BLOCKED` alert when it cannot be resolved now |
-| `liza unblock-task <task-id> --assign-to <agent-id> --reason "..."` | Restore a repaired BLOCKED task to its executing state and assign it back to a doer; fails while any `depends_on` target is not MERGED or SUPERSEDED |
+| `liza unblock-task <task-id> --assign-to <agent-id> --reason "..."` | Restore a repaired BLOCKED task to its executing state and assign it back to a doer; fails while any `depends_on` target is not directly MERGED. Supersede/cancel operations rewrite active downstream dependencies first. |
 | `liza assess-hypothesis-exhausted <task-id>` | Record orchestrator assessment of a hypothesis-exhausted task (2+ coders failed)                                     |
 | `liza cancel-task <task-id> --reason "..."` | Cancel a task (transition to ABANDONED with audit trail)                                                             |
 | `liza handoff <task-id> <summary> <next-action>` | Context-exhaustion handoff for a doer agent's claimed task                                                           |

@@ -3,6 +3,7 @@ package ops
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -102,6 +103,53 @@ func TestSupersedeTask_FromBlocked(t *testing.T) {
 	lastHistory := task.History[len(task.History)-1]
 	if lastHistory.Event != models.TaskEventSuperseded {
 		t.Errorf("History event = %q, want %q", lastHistory.Event, models.TaskEventSuperseded)
+	}
+}
+
+func TestSupersedeTask_RewritesActiveDependentDependencies(t *testing.T) {
+	tmpDir := t.TempDir()
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+
+	now := time.Now().UTC()
+	state := testhelpers.CreateValidState()
+	active := testhelpers.BuildTaskByStatus("active-dependent", models.TaskStatusReady, now)
+	active.DependsOn = []string{"prep", "task-1", "replacement-a"}
+	terminal := testhelpers.BuildTaskByStatus("terminal-dependent", models.TaskStatusMerged, now)
+	terminal.DependsOn = []string{"task-1"}
+	state.Tasks = []models.Task{
+		testhelpers.BuildTaskByStatus("task-1", models.TaskStatusBlocked, now),
+		testhelpers.BuildTaskByStatus("prep", models.TaskStatusMerged, now),
+		testhelpers.BuildTaskByStatus("replacement-a", models.TaskStatusMerged, now),
+		testhelpers.BuildTaskByStatus("replacement-b", models.TaskStatusMerged, now),
+		active,
+		terminal,
+	}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	_, err := SupersedeTask(tmpDir, "task-1", []string{"replacement-a", "replacement-b"}, "Split into replacements", "orchestrator-1")
+	if err != nil {
+		t.Fatalf("SupersedeTask() error: %v", err)
+	}
+
+	bb := db.New(stateFile)
+	readState, err := bb.Read()
+	if err != nil {
+		t.Fatalf("Failed to read state: %v", err)
+	}
+
+	active = *readState.FindTask("active-dependent")
+	wantDeps := []string{"prep", "replacement-a", "replacement-b"}
+	if !slices.Equal(active.DependsOn, wantDeps) {
+		t.Fatalf("active depends_on = %v, want %v", active.DependsOn, wantDeps)
+	}
+	lastHistory := active.History[len(active.History)-1]
+	if lastHistory.Event != models.TaskEventDependenciesRewritten {
+		t.Fatalf("active last history event = %q, want %q", lastHistory.Event, models.TaskEventDependenciesRewritten)
+	}
+
+	terminal = *readState.FindTask("terminal-dependent")
+	if !slices.Equal(terminal.DependsOn, []string{"task-1"}) {
+		t.Fatalf("terminal depends_on = %v, want historical dependency preserved", terminal.DependsOn)
 	}
 }
 

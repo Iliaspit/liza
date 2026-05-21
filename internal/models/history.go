@@ -79,6 +79,7 @@ const (
 	TaskEventTransitionCycleBlocked   TaskEventName = "transition_cycle_blocked"
 	TaskEventNewAttempt               TaskEventName = "new_attempt"
 	TaskEventReviewCommitUpdated      TaskEventName = "review_commit_updated"
+	TaskEventDependenciesRewritten    TaskEventName = "dependencies_rewritten"
 )
 
 // TaskHistoryEntry represents a single event in a task's history
