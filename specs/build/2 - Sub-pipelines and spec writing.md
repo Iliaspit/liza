@@ -205,7 +205,7 @@ Phase 1 prepares Phase 2 (the adding of a new US Writing Sub-pipeline) by:
            states:
              initial: DRAFT_CODE
              executing: IMPLEMENTING_CODE
-             submitted: CODE_READY_FOR_REVIEW
+             submitted: CODE_TO_REVIEW
              reviewing: REVIEWING_CODE
              approved: CODE_APPROVED
              rejected: CODE_REJECTED
@@ -242,7 +242,7 @@ Phase 1 prepares Phase 2 (the adding of a new US Writing Sub-pipeline) by:
    `BuildPipelineTransitions()` in `pipeline_ops.go`.
 
    **State name migration:** The coding-pair YAML uses new state names (e.g., DRAFT_CODE instead
-   of DRAFT, CODE_READY_FOR_REVIEW instead of READY_FOR_REVIEW). This is a breaking change for
+   of DRAFT, CODE_TO_REVIEW instead of READY_FOR_REVIEW). This is a breaking change for
    existing blackboard state. Phase 1 applies to **new goals only** (`liza init`). Existing
    in-progress goals continue using the hardcoded state machine until completed. No migration
    of active blackboard state is needed.
@@ -435,7 +435,7 @@ Phase 1 prepares Phase 2 (the adding of a new US Writing Sub-pipeline) by:
          states:
            initial: DRAFT_US
            executing: WRITING_US
-           submitted: US_READY_FOR_REVIEW
+           submitted: US_TO_REVIEW
            reviewing: REVIEWING_US
            approved: US_APPROVED
            rejected: US_REJECTED
@@ -457,7 +457,7 @@ Phase 1 prepares Phase 2 (the adding of a new US Writing Sub-pipeline) by:
          states:
            initial: DRAFT_CODE
            executing: IMPLEMENTING_CODE
-           submitted: CODE_READY_FOR_REVIEW
+           submitted: CODE_TO_REVIEW
            reviewing: REVIEWING_CODE
            approved: CODE_APPROVED
            rejected: CODE_REJECTED

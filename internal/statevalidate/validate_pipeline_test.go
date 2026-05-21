@@ -343,7 +343,7 @@ func TestValidateDependencies_ExecutingUnmetDeps(t *testing.T) {
 	}
 }
 
-func TestValidateDependencies_SupersededDepWithMergedReplacementSatisfied(t *testing.T) {
+func TestValidateDependencies_SupersededDepWithMergedReplacementRejectedForActiveTask(t *testing.T) {
 	cfg := loadTestConfig(t)
 	resolver := pipeline.NewResolver(cfg)
 	state := testhelpers.CreateValidState()
@@ -353,7 +353,8 @@ func TestValidateDependencies_SupersededDepWithMergedReplacementSatisfied(t *tes
 	baseCommit := "abc123"
 	leaseExpires := now.Add(30 * time.Minute)
 
-	// dep-task is SUPERSEDED and its replacement is MERGED — should satisfy dependency.
+	// Active tasks must not keep stale edges to SUPERSEDED tasks; supersede
+	// rewrites active downstream depends_on entries structurally.
 	state.Tasks = []models.Task{
 		{
 			ID:          "dep-task",
@@ -391,7 +392,10 @@ func TestValidateDependencies_SupersededDepWithMergedReplacementSatisfied(t *tes
 	state.Sprint.Scope.Planned = []string{"dep-task", "replacement-task", "task-exec"}
 
 	err := validateDependencies(state, "", true, resolver, cfg, nil)
-	if err != nil {
-		t.Fatalf("SUPERSEDED dependency with merged replacement should satisfy requirement, got: %v", err)
+	if err == nil {
+		t.Fatal("validateDependencies() error = nil, want terminal dependency error")
+	}
+	if !strings.Contains(err.Error(), "non-terminal task task-exec depends on terminal non-merged task dep-task") {
+		t.Fatalf("error = %q, want terminal dependency error", err.Error())
 	}
 }

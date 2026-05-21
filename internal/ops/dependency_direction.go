@@ -17,22 +17,16 @@ func validateDependencyDirection(state *models.State, resolver *pipeline.Resolve
 	depResolver := models.NewDependencyResolver(state)
 	for _, depID := range deps {
 		result := depResolver.Resolve(depID)
-		path := result.Path
-		if len(path) == 0 {
-			path = []string{depID}
+		depTask := state.FindTask(depID)
+		if depTask == nil || depTask.RolePair == "" {
+			continue
 		}
-		for _, pathID := range path {
-			depTask := state.FindTask(pathID)
-			if depTask == nil || depTask.RolePair == "" {
-				continue
-			}
-			downstream, err := resolver.IsRolePairDownstream(dependentRolePair, depTask.RolePair)
-			if err != nil {
-				return err
-			}
-			if downstream {
-				return &PreconditionError{Reason: dependencyDirectionError(dependentID, dependentRolePair, depID, path, depTask)}
-			}
+		downstream, err := resolver.IsRolePairDownstream(dependentRolePair, depTask.RolePair)
+		if err != nil {
+			return err
+		}
+		if downstream {
+			return &PreconditionError{Reason: dependencyDirectionError(dependentID, dependentRolePair, depID, result.Path, depTask)}
 		}
 	}
 	return nil

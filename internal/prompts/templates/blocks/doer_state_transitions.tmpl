@@ -2,7 +2,7 @@
 {{- if eq .Role "coder"}}
 
 CODER STATE TRANSITIONS:
-- IMPLEMENTING_CODE → CODE_READY_FOR_REVIEW (submit for review)
+- IMPLEMENTING_CODE → CODE_TO_REVIEW (submit for review)
 - IMPLEMENTING_CODE → BLOCKED (spec ambiguity, assumption budget exceeded)
 - CODE_REJECTED → IMPLEMENTING_CODE (address reviewer feedback, re-submit)
 - INTEGRATION_FAILED → IMPLEMENTING_CODE (fix merge conflicts, re-submit)
@@ -25,7 +25,7 @@ EPIC PLANNER STATE TRANSITIONS:
 {{- else if eq .Role "us-writer"}}
 
 US WRITER STATE TRANSITIONS:
-- WRITING_US → US_READY_FOR_REVIEW (submit for review)
+- WRITING_US → US_TO_REVIEW (submit for review)
 - WRITING_US → BLOCKED (spec ambiguity or dependency blocker)
 - US_REJECTED → DRAFT_US (supervisor re-claims for revision)
 - INTEGRATION_FAILED → WRITING_US (fix merge conflicts, re-submit)

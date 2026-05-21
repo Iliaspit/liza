@@ -4,6 +4,8 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/liza-mas/liza/internal/models"
+	"github.com/liza-mas/liza/internal/pipeline"
 )
 
 func TestStatusColor_ExactMatch(t *testing.T) {
@@ -62,13 +64,13 @@ func TestStatusColor_SuffixMatch(t *testing.T) {
 		{"PLAN_APPROVED", ColorApproved},
 		// *_PARTIALLY_APPROVED → green dim
 		{"CODE_PARTIALLY_APPROVED", ColorPartialApproved},
-		// *_PLANNING → yellow
-		{"CODE_PLANNING", ColorPlanning},
-		{"US_PLANNING", ColorPlanning},
+		// *_PLANNING → cyan (active work)
+		{"CODE_PLANNING", ColorActive},
+		{"US_PLANNING", ColorActive},
 		// *_TO_REVIEW → blue
-		{"CODE_TO_REVIEW", ColorReview},
-		// *_READY_FOR_REVIEW → blue
-		{"CODE_READY_FOR_REVIEW", ColorReview},
+		{"CODE_TO_REVIEW", ColorToReview},
+		// *_READY_FOR_REVIEW → dim blue (legacy compatibility)
+		{"CODE_READY_FOR_REVIEW", ColorToReview},
 	}
 
 	for _, tt := range tests {
@@ -92,10 +94,10 @@ func TestStatusColor_PrefixMatch(t *testing.T) {
 		// REVIEWING_* → blue
 		{"REVIEWING_CODE", ColorReview},
 		{"REVIEWING_PLAN", ColorReview},
-		// DRAFT_* (qualified) → yellow
-		{"DRAFT_CODING_PLAN", ColorPlanning},
-		{"DRAFT_EPIC_PLAN", ColorPlanning},
-		{"DRAFT_CODE", ColorPlanning},
+		// DRAFT_* (qualified) → dim white
+		{"DRAFT_CODING_PLAN", ColorBareDraft},
+		{"DRAFT_EPIC_PLAN", ColorBareDraft},
+		{"DRAFT_CODE", ColorBareDraft},
 	}
 
 	for _, tt := range tests {
@@ -115,10 +117,10 @@ func TestStatusColor_QualifiedDraftVsBareDraft(t *testing.T) {
 		t.Errorf("StatusColor(\"DRAFT\") = %q, want %q (bare draft / dim white)", got, ColorBareDraft)
 	}
 
-	// DRAFT_CODING_PLAN (qualified) → yellow
+	// DRAFT_CODING_PLAN (qualified) → dim white
 	got = StatusColor("DRAFT_CODING_PLAN")
-	if got != ColorPlanning {
-		t.Errorf("StatusColor(\"DRAFT_CODING_PLAN\") = %q, want %q (planning / yellow)", got, ColorPlanning)
+	if got != ColorBareDraft {
+		t.Errorf("StatusColor(\"DRAFT_CODING_PLAN\") = %q, want %q (bare draft / dim white)", got, ColorBareDraft)
 	}
 }
 
@@ -131,6 +133,40 @@ func TestStatusColor_Fallback(t *testing.T) {
 	got = StatusColor("")
 	if got != ColorFallback {
 		t.Errorf("StatusColor(\"\") = %q, want %q (fallback / white)", got, ColorFallback)
+	}
+}
+
+func TestTaskStatusColor_PipelineCategoriesOverrideNamePatterns(t *testing.T) {
+	tests := []struct {
+		status   models.TaskStatus
+		category pipeline.StateCategory
+		want     lipgloss.Color
+	}{
+		{"DRAFT_ARCHITECTURE", pipeline.StateCategoryInitial, ColorBareDraft},
+		{"ARCHITECTING", pipeline.StateCategoryExecuting, ColorActive},
+		{"CODE_PLANNING", pipeline.StateCategoryExecuting, ColorActive},
+		{"WRITING_US", pipeline.StateCategoryExecuting, ColorActive},
+		{"ANALYZING_INTEGRATION", pipeline.StateCategoryExecuting, ColorActive},
+		{"ARCHITECTURE_TO_REVIEW", pipeline.StateCategorySubmitted, ColorToReview},
+		{"REVIEWING_CODE_2", pipeline.StateCategoryReviewing2, ColorReview},
+		{"CODE_PARTIALLY_APPROVED", pipeline.StateCategoryPartiallyApproved, ColorPartialApproved},
+		{"INTEGRATION_ANALYSIS_CLEAN", pipeline.StateCategoryClean, ColorApproved},
+	}
+
+	for _, tt := range tests {
+		t.Run(string(tt.status), func(t *testing.T) {
+			got := TaskStatusColor(tt.status, map[models.TaskStatus]pipeline.StateCategory{tt.status: tt.category})
+			if got != tt.want {
+				t.Errorf("TaskStatusColor(%q, %q) = %q, want %q", tt.status, tt.category, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestTaskStatusColor_FallbackKeepsLegacyReadyForReview(t *testing.T) {
+	got := TaskStatusColor(models.TaskStatus("CODE_READY_FOR_REVIEW"), nil)
+	if got != ColorToReview {
+		t.Errorf("TaskStatusColor(CODE_READY_FOR_REVIEW, nil) = %q, want %q", got, ColorToReview)
 	}
 }
 
@@ -189,11 +225,12 @@ func TestNewStyles_AdaptsToWidth(t *testing.T) {
 }
 
 func TestColorConstants_AllDefined(t *testing.T) {
-	// Verify all 11 semantic color constants are non-empty
+	// Verify all 12 semantic color constants are non-empty
 	colors := map[string]lipgloss.Color{
 		"ColorActive":          ColorActive,
 		"ColorPlanning":        ColorPlanning,
 		"ColorReview":          ColorReview,
+		"ColorToReview":        ColorToReview,
 		"ColorIdle":            ColorIdle,
 		"ColorHandoff":         ColorHandoff,
 		"ColorApproved":        ColorApproved,
@@ -210,7 +247,7 @@ func TestColorConstants_AllDefined(t *testing.T) {
 		}
 	}
 
-	if len(colors) != 11 {
-		t.Errorf("expected 11 color constants, got %d", len(colors))
+	if len(colors) != 12 {
+		t.Errorf("expected 12 color constants, got %d", len(colors))
 	}
 }

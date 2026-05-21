@@ -86,10 +86,10 @@ For pipeline-configured goals, `role_pair` determines which roles participate in
 
 | Type | Role Workflow | Default Doer Claims | Default Reviewer Claims |
 |------|--------------|-------------|-----------------|
-| `coding` | coder → code-reviewer | DRAFT_CODE, CODE_REJECTED, INTEGRATION_FAILED | CODE_READY_FOR_REVIEW |
+| `coding` | coder → code-reviewer | DRAFT_CODE, CODE_REJECTED, INTEGRATION_FAILED | CODE_TO_REVIEW |
 | `planning` | code-planner → code-plan-reviewer | DRAFT_CODING_PLAN, CODING_PLAN_REJECTED | CODING_PLAN_TO_REVIEW |
 | `epic-planning` | epic-planner → epic-plan-reviewer | DRAFT_EPIC_PLAN, EPIC_PLAN_REJECTED | EPIC_PLAN_TO_REVIEW |
-| `us-writing` | us-writer → us-reviewer | DRAFT_US, US_REJECTED | US_READY_FOR_REVIEW |
+| `us-writing` | us-writer → us-reviewer | DRAFT_US, US_REJECTED | US_TO_REVIEW |
 | `integration` | integration-analyst → integration-reviewer | DRAFT_INTEGRATION_ANALYSIS, INTEGRATION_ANALYSIS_REJECTED | INTEGRATION_ANALYSIS_TO_REVIEW |
 | `architecture` | architect → architecture-reviewer | DRAFT_ARCHITECTURE, ARCHITECTURE_REJECTED | ARCHITECTURE_TO_REVIEW |
 

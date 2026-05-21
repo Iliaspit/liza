@@ -80,18 +80,6 @@ func (s *State) ResolveDependency(depID string) DependencySatisfaction {
 	return NewDependencyResolver(s).Resolve(depID)
 }
 
-// DependenciesSatisfied reports whether all dependencies for task are satisfied.
-// Use NewDependencyResolver when checking many tasks in one pass.
-func (s *State) DependenciesSatisfied(task *Task) bool {
-	return len(s.UnmetDependencies(task)) == 0
-}
-
-// UnmetDependencies returns every dependency that is not satisfied. Use
-// NewDependencyResolver when checking many tasks in one pass.
-func (s *State) UnmetDependencies(task *Task) []DependencySatisfaction {
-	return NewDependencyResolver(s).UnmetDependencies(task)
-}
-
 // Resolve resolves one task ID as a dependency target.
 func (r *DependencyResolver) Resolve(depID string) DependencySatisfaction {
 	return r.resolve(depID, nil, nil)

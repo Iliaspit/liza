@@ -149,6 +149,106 @@ func TestBuildBasePrompt(t *testing.T) {
 	}
 }
 
+func TestBuildBasePromptScipSearchOmittedWhenNoIndexes(t *testing.T) {
+	config := BasePromptConfig{
+		Role:        "code-coder",
+		AgentID:     "coder-1",
+		TaskID:      "task-1",
+		SpecsDir:    "/project/specs",
+		ProjectRoot: "/project",
+		StatePath:   "/project/.liza/state.yaml",
+		GoalDesc:    "Build a web API",
+		GoalSpecRef: "specs/vision.md",
+	}
+
+	prompt, err := BuildBasePrompt(config)
+	if err != nil {
+		t.Fatalf("BuildBasePrompt() error: %v", err)
+	}
+
+	for _, notWant := range []string{
+		"=== SCIP-SEARCH INDEXES ===",
+		"scip-search symbols",
+		"scip-search references",
+		"Generated SCIP indexes are snapshots",
+	} {
+		if strings.Contains(prompt, notWant) {
+			t.Fatalf("BuildBasePrompt() rendered scip-search content %q with no supplied indexes", notWant)
+		}
+	}
+}
+
+func TestBuildBasePromptScipSearchRendersSuppliedIndexes(t *testing.T) {
+	goPath := "/abs/worktree with spaces/.liza/scip/go.scip"
+	tsPath := "/abs/worktree/.liza/scip/typescript.scip"
+	pythonPath := "/abs/worktree/.liza/scip/python.scip"
+	quotedGoPath := "'/abs/worktree with spaces/.liza/scip/go.scip'"
+	quotedTSPath := "'/abs/worktree/.liza/scip/typescript.scip'"
+	quotedPythonPath := "'/abs/worktree/.liza/scip/python.scip'"
+	config := BasePromptConfig{
+		Role:        "code-coder",
+		AgentID:     "coder-1",
+		TaskID:      "task-1",
+		SpecsDir:    "/project/specs",
+		ProjectRoot: "/project",
+		StatePath:   "/project/.liza/state.yaml",
+		GoalDesc:    "Build a web API",
+		GoalSpecRef: "specs/vision.md",
+		ScipSearchIndexes: []ScipSearchIndex{
+			{Language: "python", IndexPath: pythonPath},
+			{Language: "go", IndexPath: goPath},
+			{Language: "typescript", IndexPath: tsPath},
+		},
+	}
+
+	prompt, err := BuildBasePrompt(config)
+	if err != nil {
+		t.Fatalf("BuildBasePrompt() error: %v", err)
+	}
+
+	assertContains := func(want string) {
+		t.Helper()
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("BuildBasePrompt() missing expected scip-search content:\n%q", want)
+		}
+	}
+
+	assertContains("=== SCIP-SEARCH INDEXES ===")
+	assertContains("Generated SCIP indexes were refreshed before this prompt was built and reflect the current target tree at prompt construction time; they will not reflect subsequent agent edits.")
+	assertContains("scip-search symbols")
+	assertContains("scip-search references --index")
+	assertContains("scip-search references --index " + quotedGoPath + " --symbol '<exact-foo>' --symbol '<exact-bar>' --location-only")
+	assertContains("nl -ba <result-path> | sed -n '<first-line>,<last-line>p'")
+	assertContains("Go symbols, references, and implementations are supported.")
+	assertContains("TypeScript implementations are upstream-supported by scip-search but not locally verified; verify results in files before relying on them.")
+	assertContains("Python symbols are supported and references may be incomplete.")
+	assertContains("scip-search implementations is not supported for Python.")
+
+	for _, path := range []string{quotedGoPath, quotedTSPath, quotedPythonPath} {
+		assertContains("scip-search symbols --index " + path + " --name Foo --name Bar")
+		assertContains("scip-search references --index " + path + " --symbol '<exact-foo>' --symbol '<exact-bar>' --location-only")
+	}
+	assertContains("scip-search implementations --index " + quotedGoPath + " --symbol '<exact-symbol>'")
+	assertContains("scip-search implementations --index " + quotedTSPath + " --symbol '<exact-symbol>'")
+
+	if strings.Contains(prompt, "scip-search implementations --index "+quotedPythonPath) {
+		t.Fatalf("BuildBasePrompt() rendered a Python implementations command:\n%s", prompt)
+	}
+	if strings.Contains(prompt, "--index <") {
+		t.Fatalf("BuildBasePrompt() rendered placeholder index paths:\n%s", prompt)
+	}
+
+	goPosition := strings.Index(prompt, "Go index: "+goPath)
+	tsPosition := strings.Index(prompt, "TypeScript index: "+tsPath)
+	pythonPosition := strings.Index(prompt, "Python index: "+pythonPath)
+	if goPosition == -1 || tsPosition == -1 || pythonPosition == -1 {
+		t.Fatalf("BuildBasePrompt() did not render every index label; positions go=%d ts=%d python=%d", goPosition, tsPosition, pythonPosition)
+	}
+	if !(goPosition < tsPosition && tsPosition < pythonPosition) {
+		t.Fatalf("BuildBasePrompt() rendered indexes out of order: go=%d ts=%d python=%d", goPosition, tsPosition, pythonPosition)
+	}
+}
+
 func TestRenderOrchestratorDashboard(t *testing.T) {
 	now := time.Now().UTC()
 	projectRoot := setupPipelineConfig(t)
@@ -1186,7 +1286,7 @@ func TestBuildRoleContext_AllRoles(t *testing.T) {
 			DoneWhen: "Feature X works correctly", Scope: "internal/feature",
 			Worktree:     projectRoot + "/.worktrees/task-reviewer",
 			IterationNum: 2, PriorRejection: "Missing error handling",
-			BaseCommit: "abc1234", ReviewCommit: "def5678", AssignedTo: "coder-1",
+			BaseCommit: "abc1234", ReviewCommit: "def5678", IntegrationBranch: "integration", AssignedTo: "coder-1",
 			GoalSpecRef: "specs/goal.md", SiblingTasks: siblings,
 			TotalPlanTasks: 3, TaskOrdinal: 2, ProjectRoot: projectRoot,
 		}
@@ -1203,6 +1303,7 @@ func TestBuildRoleContext_AllRoles(t *testing.T) {
 			"=== REVIEW TASK ===",
 			"TASK ID: task-reviewer",
 			"BASE COMMIT: abc1234",
+			"INTEGRATION BRANCH: integration",
 			"REVIEW COMMIT: def5678",
 			"AUTHOR: coder-1",
 			"REVIEWER STATE TRANSITIONS:",
@@ -1216,6 +1317,10 @@ func TestBuildRoleContext_AllRoles(t *testing.T) {
 			"First, run: test -d " + data.Worktree,
 			"Run tests from the worktree without `cd &&`",
 			"REVIEW SCOPE:",
+			"git -C " + data.Worktree + " diff integration..def5678",
+			"Scope findings come exclusively from this scope/workmanship diff",
+			"review-range drift / rebase needed",
+			"Do not invent or log a new anomaly type for review-range drift",
 			"REJECTION FORMAT",
 			"VERDICT SUBMISSION",
 			"COLLECTIVE PLAN SCOPING",
@@ -2133,6 +2238,71 @@ func TestBlockReviewInstructions_IntegrationReviewer(t *testing.T) {
 	}
 	if !strings.Contains(result, "output[]") {
 		t.Error("expected output[] references")
+	}
+}
+
+func TestReviewInstructions_CodeReviewerSkipsIntegrationDriftWhenBranchMissing(t *testing.T) {
+	tmpl := template.Must(template.ParseFiles("templates/blocks/review_instructions.tmpl"))
+
+	data := RoleContextData{
+		Role:         "code-reviewer",
+		Worktree:     "/tmp/worktree",
+		BaseCommit:   "base123",
+		ReviewCommit: "review123",
+	}
+
+	var buf bytes.Buffer
+	if err := tmpl.ExecuteTemplate(&buf, "review-instructions", &data); err != nil {
+		t.Fatalf("failed to execute review-instructions template: %v", err)
+	}
+
+	output := buf.String()
+	if strings.Contains(output, "diff ..review123") {
+		t.Fatalf("reviewer prompt rendered malformed integration drift command:\n%s", output)
+	}
+	if strings.Contains(output, "current integration drift check") {
+		t.Fatalf("reviewer prompt rendered integration drift check without IntegrationBranch:\n%s", output)
+	}
+	if !strings.Contains(output, "git -C /tmp/worktree diff base123..review123") {
+		t.Fatalf("reviewer prompt missing scope/workmanship diff:\n%s", output)
+	}
+}
+
+func TestReviewTask_RendersIntegrationBranchOnlyForCodeReviewer(t *testing.T) {
+	tmpl := template.Must(template.ParseFiles("templates/blocks/review_task.tmpl"))
+
+	for _, tc := range []struct {
+		role string
+		want bool
+	}{
+		{role: "code-reviewer", want: true},
+		{role: "code-plan-reviewer", want: false},
+		{role: "epic-plan-reviewer", want: false},
+		{role: "us-reviewer", want: false},
+		{role: "architecture-reviewer", want: false},
+	} {
+		t.Run(tc.role, func(t *testing.T) {
+			data := RoleContextData{
+				Role:              tc.role,
+				TaskID:            "task-review",
+				Worktree:          "/tmp/worktree",
+				BaseCommit:        "base123",
+				ReviewCommit:      "review123",
+				IntegrationBranch: "integration",
+				AssignedTo:        "coder-1",
+			}
+
+			var buf bytes.Buffer
+			if err := tmpl.ExecuteTemplate(&buf, "review-task", &data); err != nil {
+				t.Fatalf("failed to execute review-task template: %v", err)
+			}
+
+			output := buf.String()
+			got := strings.Contains(output, "INTEGRATION BRANCH: integration")
+			if got != tc.want {
+				t.Fatalf("INTEGRATION BRANCH rendered = %v, want %v; output:\n%s", got, tc.want, output)
+			}
+		})
 	}
 }
 

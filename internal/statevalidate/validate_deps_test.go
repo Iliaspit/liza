@@ -65,7 +65,7 @@ func TestValidateDependencies_RejectsMalformedDependsOn(t *testing.T) {
 	}
 }
 
-func TestValidateDependencies_WarnsForNonExecutingUnsatisfiedSupersession(t *testing.T) {
+func TestValidateDependencies_RejectsNonTerminalSupersededDependency(t *testing.T) {
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()
 	task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusReady, now)
@@ -73,12 +73,12 @@ func TestValidateDependencies_WarnsForNonExecutingUnsatisfiedSupersession(t *tes
 	dep := models.Task{ID: "dep-1", Status: models.TaskStatusSuperseded}
 	state.Tasks = []models.Task{task, dep}
 
-	var warnings bytes.Buffer
-	if err := validateDependencies(state, "", true, nil, nil, &warnings); err != nil {
-		t.Fatalf("validateDependencies() error = %v", err)
+	err := validateDependencies(state, "", true, nil, nil, nil)
+	if err == nil {
+		t.Fatal("validateDependencies() error = nil, want terminal dependency error")
 	}
-	if !strings.Contains(warnings.String(), "dependency dep-1 is not satisfied via supersession path") {
-		t.Fatalf("warnings = %q, want unsatisfied supersession warning", warnings.String())
+	if !strings.Contains(err.Error(), "non-terminal task task-1 depends on terminal non-merged task dep-1") {
+		t.Fatalf("error = %q, want terminal dependency error", err.Error())
 	}
 }
 
@@ -119,7 +119,7 @@ func TestValidateDependencies_RejectsDownstreamDependency(t *testing.T) {
 	}
 }
 
-func TestValidateDependencies_RejectsDownstreamSupersessionPath(t *testing.T) {
+func TestValidateDependencies_RejectsNonTerminalSupersededDependencyWithReplacement(t *testing.T) {
 	now := time.Now().UTC()
 	resolver, cfg := dependencyDirectionResolver(t)
 
@@ -135,10 +135,10 @@ func TestValidateDependencies_RejectsDownstreamSupersessionPath(t *testing.T) {
 
 	err := validateDependencies(state, "", true, resolver, cfg, nil)
 	if err == nil {
-		t.Fatal("validateDependencies() error = nil, want downstream supersession error")
+		t.Fatal("validateDependencies() error = nil, want terminal dependency error")
 	}
-	if !strings.Contains(err.Error(), "resolves through downstream task coding-1") {
-		t.Fatalf("error = %q, want supersession downstream error", err.Error())
+	if !strings.Contains(err.Error(), "non-terminal task plan-1 depends on terminal non-merged task old-plan") {
+		t.Fatalf("error = %q, want terminal dependency error", err.Error())
 	}
 }
 

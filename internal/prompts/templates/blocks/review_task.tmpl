@@ -21,6 +21,9 @@ WORKTREE: {{.Worktree}}
 {{- if ne .BaseCommit ""}}
 BASE COMMIT: {{.BaseCommit}}
 {{- end}}
+{{- if and (eq .Role "code-reviewer") (ne .IntegrationBranch "")}}
+INTEGRATION BRANCH: {{.IntegrationBranch}}
+{{- end}}
 REVIEW COMMIT: {{.ReviewCommit}}
 AUTHOR: {{.AssignedTo}}
 ITERATION: {{.IterationNum}}

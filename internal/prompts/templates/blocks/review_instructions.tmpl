@@ -5,7 +5,8 @@ REVIEW SCOPE:
 Evaluate: matches task def, matches spec, tests validate behavior, obvious defects, commit SHA.
 Do NOT evaluate: style preferences, alternative approaches (unless defective), scope expansion.
 Do NOT investigate: build system internals, packaging backends, or CI tooling. Flag build concerns as findings — don't probe them.
-Review full worktree (base_commit → review_commit), not just latest changes.
+Review full scope/workmanship diff (base_commit → review_commit), not just latest changes.
+Treat current integration comparison as a separate late drift check.
 Spec currency: validate against current spec version, not version at task creation.
 Approval = meets requirements + spec + tests + no defects. Not: perfect or production-ready.
 
@@ -21,6 +22,7 @@ INSTRUCTIONS:
      If unclear after reading the diff and base version → REJECT citing the test failure. Do not investigate further.
 3. Review ALL changes: git -C {{.Worktree}} diff {{.BaseCommit}}..{{.ReviewCommit}}
    Each review is a fresh evaluation: "does this worktree satisfy the task?"
+   Scope findings come exclusively from this scope/workmanship diff. Do not log `scope_deviation` unless the issue appears in this diff.
 4. Invoke skill: code-review, then apply it to the full diff
 5. If change touches specs/, introduces new abstractions, adds state/lifecycle, or spans 3+ modules: also invoke skill: systemic-thinking
 6. TDD QUALITY (code tasks): Tests must cover done_when criteria — REJECT if tests are superficial or don't exercise the actual requirements
@@ -28,6 +30,12 @@ INSTRUCTIONS:
    structural refactoring are NOT behavioral test changes — do not reject for these.
 7. Test discovery (e.g. pytest, python -m unittest discover) finding 0 tests is a blocker — tests must be discoverable, not just runnable when explicitly named
 8. Verify the done_when criteria are met AND tests exercise those criteria (for code tasks)
+{{- if ne .IntegrationBranch ""}}
+9. Before verdict, run current integration drift check: git -C {{.Worktree}} diff {{.IntegrationBranch}}..{{.ReviewCommit}}
+   This detects drift against current integration; it is not the authority for scope findings and not a synthetic merge result.
+   If the scope/workmanship diff is clean but this drift check makes approval unsafe or ambiguous, REJECT with verdict text saying review-range drift / rebase needed.
+   Do not invent or log a new anomaly type for review-range drift; keep anomaly logging to the existing taxonomy.
+{{- end}}
 {{- if or .ArchRef .PlanRef}}
 {{template "artifact-ref-fallback" .}}
 {{- end}}

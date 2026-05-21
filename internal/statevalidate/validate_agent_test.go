@@ -274,7 +274,7 @@ func TestValidateAgentInvariants_ReverseActiveOwnership(t *testing.T) {
 		state.Tasks[0].Status = models.TaskStatusReadyForReview
 
 		err := validateAgentInvariants(state, "", true, io.Discard, resolver)
-		assertErrorContains(t, err, "agent code-reviewer-1 says REVIEWING task-1, but task status CODE_READY_FOR_REVIEW is not active review")
+		assertErrorContains(t, err, "agent code-reviewer-1 says REVIEWING task-1, but task status CODE_TO_REVIEW is not active review")
 
 	})
 

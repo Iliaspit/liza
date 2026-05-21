@@ -3,6 +3,7 @@ package ops
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -204,7 +205,7 @@ func TestReleaseClaim_ReviewerClaim(t *testing.T) {
 		t.Fatal("Task not found")
 	}
 	if readTask.Status != models.TaskStatusReadyForReview {
-		t.Errorf("Status = %v, want CODE_READY_FOR_REVIEW", readTask.Status)
+		t.Errorf("Status = %v, want %s", readTask.Status, models.TaskStatusReadyForReview)
 	}
 	if readTask.ReviewingBy != nil {
 		t.Error("ReviewingBy should be nil")
@@ -404,11 +405,52 @@ func TestReleaseClaim_PipelineReviewerClaim(t *testing.T) {
 	if readTask == nil {
 		t.Fatal("Task not found")
 	}
-	// Pipeline reviewer release: REVIEWING_CODE → CODE_READY_FOR_REVIEW
-	if readTask.Status != "CODE_READY_FOR_REVIEW" {
-		t.Errorf("Status = %v, want CODE_READY_FOR_REVIEW", readTask.Status)
+	// Pipeline reviewer release: REVIEWING_CODE -> CODE_TO_REVIEW
+	if readTask.Status != models.TaskStatusReadyForReview {
+		t.Errorf("Status = %v, want %s", readTask.Status, models.TaskStatusReadyForReview)
 	}
 	if readTask.ReviewingBy != nil {
 		t.Error("ReviewingBy should be nil")
+	}
+}
+
+func TestReleaseClaim_PipelineReviewerClaim_LegacySubmittedStatus(t *testing.T) {
+	tmpDir, stateFile := setupPipelineTest(t)
+	pipelinePath := filepath.Join(tmpDir, ".liza", "pipeline.yaml")
+	data, err := os.ReadFile(pipelinePath)
+	if err != nil {
+		t.Fatalf("read pipeline config: %v", err)
+	}
+	data = []byte(strings.ReplaceAll(string(data), "CODE_TO_REVIEW", "CODE_READY_FOR_REVIEW"))
+	if err := os.WriteFile(pipelinePath, data, 0644); err != nil {
+		t.Fatalf("write legacy pipeline config: %v", err)
+	}
+
+	now := time.Now().UTC()
+	state := testhelpers.CreateValidState()
+	task := testhelpers.BuildTaskByStatus("task-1", "REVIEWING_CODE", now)
+	task.RolePair = "coding-pair"
+	reviewer := "code-reviewer-1"
+	task.ReviewingBy = &reviewer
+	reviewLease := now.Add(30 * time.Minute)
+	task.ReviewLeaseExpires = &reviewLease
+	state.Tasks = []models.Task{task}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	_, err = ReleaseClaim(tmpDir, "task-1", "reviewer", true, "pipeline test", "human")
+	if err != nil {
+		t.Fatalf("ReleaseClaim() error: %v", err)
+	}
+
+	readState, err := db.New(stateFile).Read()
+	if err != nil {
+		t.Fatalf("Failed to read state: %v", err)
+	}
+	readTask := readState.FindTask("task-1")
+	if readTask == nil {
+		t.Fatal("Task not found")
+	}
+	if readTask.Status != models.TaskStatusLegacyReadyForReview {
+		t.Errorf("Status = %v, want %s", readTask.Status, models.TaskStatusLegacyReadyForReview)
 	}
 }

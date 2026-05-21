@@ -16,6 +16,7 @@ import (
 	"github.com/liza-mas/liza/internal/log"
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/ops"
+	"github.com/liza-mas/liza/internal/pipeline"
 	"github.com/liza-mas/liza/internal/testhelpers"
 	"gopkg.in/yaml.v3"
 )
@@ -246,6 +247,12 @@ func TestLoadRolesCmd_WithPipelineConfig(t *testing.T) {
 		if len(v.SprintTerminals) == 0 {
 			t.Fatal("expected non-empty SprintTerminals from pipeline config")
 		}
+		if len(v.StateCategories) == 0 {
+			t.Fatal("expected non-empty StateCategories from pipeline config")
+		}
+		if v.StateCategories["ARCHITECTING"] != pipeline.StateCategoryExecuting {
+			t.Fatalf("StateCategories[ARCHITECTING] = %q, want executing", v.StateCategories["ARCHITECTING"])
+		}
 		if v.RoleTypes["coder"] != "doer" {
 			t.Fatalf("RoleTypes[coder] = %q, want doer", v.RoleTypes["coder"])
 		}
@@ -275,6 +282,9 @@ func TestLoadRolesCmd_MissingPipelineConfig(t *testing.T) {
 	}
 	if roles.SprintTerminals != nil {
 		t.Fatalf("expected nil SprintTerminals for missing pipeline config, got %v", roles.SprintTerminals)
+	}
+	if roles.StateCategories != nil {
+		t.Fatalf("expected nil StateCategories for missing pipeline config, got %v", roles.StateCategories)
 	}
 }
 
@@ -567,7 +577,8 @@ func TestRunChecksCmdDoesNotWriteValidationWarningsToCommandWarnWriter(t *testin
 	dep.SupersededBy = nil
 	dep.RescopeReason = testhelpers.StringPtr("No replacement task")
 	dep.RolePair = "coding-pair"
-	dependent := testhelpers.BuildTaskByStatus("dependent-task", models.TaskStatusReady, now)
+	dependent := testhelpers.BuildTaskByStatus("dependent-task", models.TaskStatusAbandoned, now)
+	dependent.RolePair = "coding-pair"
 	dependent.DependsOn = []string{"dep-task"}
 
 	state := testhelpers.CreateValidState()

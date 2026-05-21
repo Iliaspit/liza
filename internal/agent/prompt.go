@@ -13,43 +13,45 @@ import (
 	"github.com/liza-mas/liza/internal/precommit"
 	"github.com/liza-mas/liza/internal/prompts"
 	"github.com/liza-mas/liza/internal/roles"
+	"github.com/liza-mas/liza/internal/scipsearch"
 )
 
 // baseConfigFrom constructs the BasePromptConfig shared by all roles.
-func baseConfigFrom(state *models.State, config SupervisorConfig, taskID string) prompts.BasePromptConfig {
+func baseConfigFrom(state *models.State, config SupervisorConfig, taskID string, scipIndexes []prompts.ScipSearchIndex) prompts.BasePromptConfig {
 	return prompts.BasePromptConfig{
-		Role:        config.Role,
-		AgentID:     config.AgentID,
-		TaskID:      taskID,
-		SpecsDir:    config.SpecsDir,
-		ProjectRoot: config.ProjectRoot,
-		StatePath:   config.StatePath,
-		GoalDesc:    state.Goal.Description,
-		GoalSpecRef: state.Goal.SpecRef,
+		Role:              config.Role,
+		AgentID:           config.AgentID,
+		TaskID:            taskID,
+		SpecsDir:          config.SpecsDir,
+		ProjectRoot:       config.ProjectRoot,
+		StatePath:         config.StatePath,
+		GoalDesc:          state.Goal.Description,
+		GoalSpecRef:       state.Goal.SpecRef,
+		ScipSearchIndexes: scipIndexes,
 	}
 }
 
 // buildPromptWithContext builds a complete prompt for any task-based role:
 // base prompt + task lookup + role-specific context via BuildRoleContext + InitialTask suffix.
 func buildPromptWithContext(state *models.State, config SupervisorConfig, taskID string, resolver *pipeline.Resolver) (string, error) {
-	prompt, err := prompts.BuildBasePrompt(baseConfigFrom(state, config, taskID))
-	if err != nil {
-		return "", fmt.Errorf("building base prompt: %w", err)
-	}
-
 	task := state.FindTask(taskID)
 	if task == nil {
 		return "", &errors.NotFoundError{Entity: "task", ID: taskID}
 	}
 
-	sections, err := resolver.ContextSections(config.Role)
-	if err != nil {
-		return "", fmt.Errorf("context sections for role %q: %w", config.Role, err)
-	}
-
 	data, err := buildTaskRoleContextData(task, state, config, resolver)
 	if err != nil {
 		return "", err
+	}
+
+	prompt, err := prompts.BuildBasePrompt(baseConfigFrom(state, config, taskID, toBasePromptScipSearchIndexes(data.ScipIndexes)))
+	if err != nil {
+		return "", fmt.Errorf("building base prompt: %w", err)
+	}
+
+	sections, err := resolver.ContextSections(config.Role)
+	if err != nil {
+		return "", fmt.Errorf("context sections for role %q: %w", config.Role, err)
 	}
 
 	context, err := prompts.BuildRoleContext(config.Role, sections, data)
@@ -69,7 +71,12 @@ func buildPromptWithContext(state *models.State, config SupervisorConfig, taskID
 // Unlike task-based roles, the orchestrator has no task to look up. Dashboard and wake
 // instruction content is pre-rendered and passed through block templates.
 func buildOrchestratorPromptContext(state *models.State, config SupervisorConfig, resolver *pipeline.Resolver) (string, error) {
-	prompt, err := prompts.BuildBasePrompt(baseConfigFrom(state, config, ""))
+	data, err := buildOrchestratorRoleContextData(state, config, resolver)
+	if err != nil {
+		return "", err
+	}
+
+	prompt, err := prompts.BuildBasePrompt(baseConfigFrom(state, config, "", toBasePromptScipSearchIndexes(data.ScipIndexes)))
 	if err != nil {
 		return "", fmt.Errorf("building base prompt: %w", err)
 	}
@@ -77,28 +84,6 @@ func buildOrchestratorPromptContext(state *models.State, config SupervisorConfig
 	sections, err := resolver.ContextSections(config.Role)
 	if err != nil {
 		return "", fmt.Errorf("context sections for role %q: %w", config.Role, err)
-	}
-
-	dashboard, wakeInstruction, err := prompts.RenderOrchestratorDashboard(state, config.ProjectRoot, config.AgentID)
-	if err != nil {
-		return "", err
-	}
-
-	skills, _ := resolver.Skills(config.Role)
-	mandatoryDocs, _ := resolver.MandatoryDocs(config.Role)
-
-	data := &prompts.RoleContextData{
-		Role:            config.Role,
-		AgentID:         config.AgentID,
-		RoleType:        "orchestrator",
-		DashboardOutput: dashboard,
-		WakeInstruction: wakeInstruction,
-		ProjectRoot:     config.ProjectRoot,
-		StatePath:       config.StatePath,
-		SpecsDir:        config.SpecsDir,
-		GoalDesc:        state.Goal.Description,
-		Skills:          skills,
-		MandatoryDocs:   mandatoryDocs,
 	}
 
 	context, err := prompts.BuildRoleContext(config.Role, sections, data)
@@ -112,6 +97,81 @@ func buildOrchestratorPromptContext(state *models.State, config SupervisorConfig
 	}
 
 	return prompt, nil
+}
+
+func buildOrchestratorRoleContextData(state *models.State, config SupervisorConfig, resolver *pipeline.Resolver) (*prompts.RoleContextData, error) {
+	dashboard, wakeInstruction, err := prompts.RenderOrchestratorDashboard(state, config.ProjectRoot, config.AgentID)
+	if err != nil {
+		return nil, err
+	}
+
+	availableIndexes, err := scipsearch.AvailableIndexes(scipsearch.RuntimePlanOptions{
+		TargetRoot:          config.ProjectRoot,
+		ConfiguredLanguages: state.Config.ScipSearch,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("available scip-search indexes: %w", err)
+	}
+
+	skills, _ := resolver.Skills(config.Role)
+	mandatoryDocs, _ := resolver.MandatoryDocs(config.Role)
+
+	return &prompts.RoleContextData{
+		Role:            config.Role,
+		AgentID:         config.AgentID,
+		RoleType:        "orchestrator",
+		DashboardOutput: dashboard,
+		WakeInstruction: wakeInstruction,
+		ScipIndexes:     toPromptScipIndexRefs(availableIndexes),
+		ProjectRoot:     config.ProjectRoot,
+		StatePath:       config.StatePath,
+		SpecsDir:        config.SpecsDir,
+		GoalDesc:        state.Goal.Description,
+		Skills:          skills,
+		MandatoryDocs:   mandatoryDocs,
+	}, nil
+}
+
+func toPromptScipIndexRefs(indexes []scipsearch.IndexRef) []prompts.ScipIndexRef {
+	if len(indexes) == 0 {
+		return nil
+	}
+	refs := make([]prompts.ScipIndexRef, 0, len(indexes))
+	for _, index := range indexes {
+		refs = append(refs, prompts.ScipIndexRef{
+			Language: index.Language,
+			Path:     index.Path,
+		})
+	}
+	return refs
+}
+
+func toBasePromptScipSearchIndexes(indexes []prompts.ScipIndexRef) []prompts.ScipSearchIndex {
+	if len(indexes) == 0 {
+		return nil
+	}
+	refs := make([]prompts.ScipSearchIndex, 0, len(indexes))
+	for _, index := range indexes {
+		refs = append(refs, prompts.ScipSearchIndex{
+			Language:  index.Language,
+			IndexPath: index.Path,
+		})
+	}
+	return refs
+}
+
+func availablePromptScipIndexRefs(state *models.State, targetRoot string) ([]prompts.ScipIndexRef, error) {
+	if targetRoot == "" || !scipsearch.RuntimeEnabled(state.Config.ScipSearch) {
+		return nil, nil
+	}
+	availableIndexes, err := scipsearch.AvailableIndexes(scipsearch.RuntimePlanOptions{
+		TargetRoot:          targetRoot,
+		ConfiguredLanguages: state.Config.ScipSearch,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("available scip-search indexes: %w", err)
+	}
+	return toPromptScipIndexRefs(availableIndexes), nil
 }
 
 // buildTaskRoleContextData constructs RoleContextData for task-based roles (doers and reviewers).
@@ -160,6 +220,12 @@ func buildTaskRoleContextData(task *models.Task, state *models.State, config Sup
 
 		IntegrationBranch: state.Config.IntegrationBranch,
 	}
+
+	scipIndexes, err := availablePromptScipIndexRefs(state, data.Worktree)
+	if err != nil {
+		return nil, err
+	}
+	data.ScipIndexes = scipIndexes
 
 	// Prior rejection
 	if task.Iteration > 1 && task.RejectionReason != nil && *task.RejectionReason != "" && *task.RejectionReason != "null" {

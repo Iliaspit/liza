@@ -635,7 +635,7 @@ func TestValidateCommand_TaskStateInvariants(t *testing.T) {
 			errContains: "IMPLEMENTING_CODE task without worktree",
 		},
 		{
-			name: "READY_FOR_REVIEW without review_commit",
+			name: "TO_REVIEW without review_commit",
 			setupTask: func() models.Task {
 				return models.Task{
 					ID:          "task-1",
@@ -649,7 +649,7 @@ func TestValidateCommand_TaskStateInvariants(t *testing.T) {
 				}
 			},
 			wantErr:     true,
-			errContains: "READY_FOR_REVIEW task without review_commit",
+			errContains: "CODE_TO_REVIEW task without review_commit",
 		},
 		{
 			name: "APPROVED without review_commit",

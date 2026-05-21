@@ -338,7 +338,7 @@ func (m Model) renderTaskPanel(budget int) string {
 
 	statusVal := func(t models.Task) string {
 		dot := StatusDot(string(t.Status))
-		color := StatusColor(string(t.Status))
+		color := TaskStatusColor(t.Status, m.stateCategories)
 		return lipgloss.NewStyle().Foreground(color).Render(dot + " " + string(t.Status))
 	}
 

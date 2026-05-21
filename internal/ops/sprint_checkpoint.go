@@ -142,7 +142,13 @@ func taskStatusSection(tasks []models.Task) string {
 	s += "|--------|-------|\n"
 	s += fmt.Sprintf("| MERGED | %d |\n", tasksByStatus[models.TaskStatusMerged])
 	s += fmt.Sprintf("| APPROVED | %d |\n", tasksByStatus[models.TaskStatusApproved])
-	s += fmt.Sprintf("| READY_FOR_REVIEW | %d |\n", tasksByStatus[models.TaskStatusReadyForReview])
+	readyForReviewCount := 0
+	for status, count := range tasksByStatus {
+		if status.IsReadyForReviewStatus() {
+			readyForReviewCount += count
+		}
+	}
+	s += fmt.Sprintf("| CODE_TO_REVIEW | %d |\n", readyForReviewCount)
 	s += fmt.Sprintf("| IMPLEMENTING | %d |\n", tasksByStatus[models.TaskStatusImplementing])
 	s += fmt.Sprintf("| REJECTED | %d |\n", tasksByStatus[models.TaskStatusRejected])
 	s += fmt.Sprintf("| BLOCKED | %d |\n", tasksByStatus[models.TaskStatusBlocked])

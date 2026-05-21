@@ -606,7 +606,7 @@ pipeline:
       states:
         initial: DRAFT_CODE
         executing: IMPLEMENTING_CODE
-        submitted: CODE_READY_FOR_REVIEW
+        submitted: CODE_TO_REVIEW
         reviewing: REVIEWING_CODE
         approved: CODE_APPROVED
         rejected: CODE_REJECTED
@@ -679,7 +679,7 @@ pipeline:
       states:
         initial: DRAFT_CODE
         executing: IMPLEMENTING_CODE
-        submitted: CODE_READY_FOR_REVIEW
+        submitted: CODE_TO_REVIEW
         reviewing: REVIEWING_CODE
         approved: CODE_APPROVED
         rejected: CODE_REJECTED
@@ -738,7 +738,7 @@ pipeline:
       states:
         initial: DRAFT_CODE
         executing: IMPLEMENTING_CODE
-        submitted: CODE_READY_FOR_REVIEW
+        submitted: CODE_TO_REVIEW
         reviewing: REVIEWING_CODE
         approved: CODE_APPROVED
         rejected: CODE_REJECTED
@@ -804,7 +804,7 @@ pipeline:
       states:
         initial: DRAFT_CODE
         executing: IMPLEMENTING_CODE
-        submitted: CODE_READY_FOR_REVIEW
+        submitted: CODE_TO_REVIEW
         reviewing: REVIEWING_CODE
         approved: CODE_APPROVED
         rejected: CODE_REJECTED
@@ -945,7 +945,7 @@ pipeline:
       states:
         initial: DRAFT_CODE
         executing: IMPLEMENTING_CODE
-        submitted: CODE_READY_FOR_REVIEW
+        submitted: CODE_TO_REVIEW
         reviewing: REVIEWING_CODE
         approved: CODE_APPROVED
         rejected: CODE_REJECTED
@@ -1008,7 +1008,7 @@ pipeline:
       states:
         initial: DRAFT_CODE
         executing: IMPLEMENTING_CODE
-        submitted: CODE_READY_FOR_REVIEW
+        submitted: CODE_TO_REVIEW
         reviewing: REVIEWING_CODE
         approved: CODE_APPROVED
         rejected: CODE_REJECTED
@@ -1070,7 +1070,7 @@ pipeline:
       states:
         initial: DRAFT_CODE
         executing: IMPLEMENTING_CODE
-        submitted: CODE_READY_FOR_REVIEW
+        submitted: CODE_TO_REVIEW
         reviewing: REVIEWING_CODE
         approved: CODE_APPROVED
         rejected: CODE_REJECTED

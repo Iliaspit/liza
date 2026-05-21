@@ -469,7 +469,8 @@ The `depends_on` field declares explicit dependencies between tasks:
 
 **Semantics:**
 - `depends_on` is an array of task IDs that must reach MERGED status before this task can be claimed
-- `depends_on` must not point to a downstream pipeline role-pair. Same-role-pair and upstream dependencies are valid; supersession-resolved replacements are checked by the same rule.
+- `depends_on` must not point to a downstream pipeline role-pair. Same-role-pair and upstream dependencies are valid.
+- Active tasks must not depend on terminal non-MERGED tasks. When a task is superseded, active downstream `depends_on` entries are rewritten to its replacements; when a task is cancelled, active downstream `depends_on` entries pointing at it are removed. Terminal tasks keep historical dependency edges for audit.
 - Empty array or missing field means no dependencies — task is immediately claimable
 - Coders can only claim tasks where ALL dependencies are satisfied
 - Orchestrator sets dependencies during task creation based on logical ordering
@@ -983,9 +984,10 @@ invariants:
   - "MERGED task must not have worktree"
   - "Task type must be a known type (currently: 'coding', 'planning'); empty defaults to 'coding'"
   - "depends_on must reference existing task IDs"
-  - "depends_on must not reference a task whose role_pair is downstream of the dependent task's role_pair, including through superseded_by resolution paths"
+  - "depends_on must not reference a task whose role_pair is downstream of the dependent task's role_pair"
   - "depends_on must not create circular dependencies"
-  - "IMPLEMENTING task must have all depends_on tasks in MERGED or SUPERSEDED status"
+  - "Non-terminal tasks must not depend on terminal non-MERGED tasks"
+  - "IMPLEMENTING task must have all depends_on tasks directly MERGED"
   - "Agent WORKING must have task"
   - "Agent WORKING should have lease_expires in future (warning if expired beyond grace period of 60s — may indicate long-running operation)"
   - "No two agents assigned to same task"

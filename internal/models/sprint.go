@@ -116,7 +116,7 @@ func (s *State) ComputeSprintMetricsWithTerminalStates(terminalStates []TaskStat
 		}
 
 		if task.Status == TaskStatusImplementing ||
-			task.Status == TaskStatusReadyForReview ||
+			task.Status.IsReadyForReviewStatus() ||
 			task.Status == TaskStatusReviewing ||
 			task.Status == TaskStatusRejected ||
 			task.Status == TaskStatusIntegrationFailed {

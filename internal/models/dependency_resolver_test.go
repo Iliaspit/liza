@@ -149,18 +149,6 @@ func TestDependencySatisfactionViaSupersession(t *testing.T) {
 	}
 }
 
-func TestDependenciesSatisfiedUsesSupersessionResolver(t *testing.T) {
-	task := &Task{ID: "task", DependsOn: []string{"dep"}}
-	state := &State{Tasks: []Task{
-		{ID: "dep", Status: TaskStatusSuperseded, SupersededBy: []string{"replacement"}},
-		{ID: "replacement", Status: TaskStatusReady},
-	}}
-
-	if state.DependenciesSatisfied(task) {
-		t.Fatal("DependenciesSatisfied() = true, want false while replacement is pending")
-	}
-}
-
 func assertStringSliceEqual(t *testing.T, name string, got, want []string) {
 	t.Helper()
 	if len(got) != len(want) {

@@ -65,7 +65,8 @@ func TestCheckDeleteTask_StatusBlocked(t *testing.T) {
 	}{
 		{"MERGED", models.TaskStatusMerged, nil, "cannot delete MERGED task"},
 		{"IMPLEMENTING_CODE with active lease", models.TaskStatusImplementing, &validLease, "actively being worked on"},
-		{"CODE_READY_FOR_REVIEW", models.TaskStatusReadyForReview, nil, "under review"},
+		{"CODE_TO_REVIEW", models.TaskStatusReadyForReview, nil, "under review"},
+		{"legacy CODE_READY_FOR_REVIEW", models.TaskStatusLegacyReadyForReview, nil, "under review"},
 		{"REVIEWING_CODE", models.TaskStatusReviewing, nil, "under review"},
 	}
 	for _, tt := range tests {
@@ -338,7 +339,8 @@ func TestDeleteTask_StatusBlocked(t *testing.T) {
 	}{
 		{"MERGED", models.TaskStatusMerged, nil, "cannot delete MERGED task"},
 		{"IMPLEMENTING_CODE with active lease", models.TaskStatusImplementing, &validLease, "actively being worked on"},
-		{"CODE_READY_FOR_REVIEW", models.TaskStatusReadyForReview, nil, "under review"},
+		{"CODE_TO_REVIEW", models.TaskStatusReadyForReview, nil, "under review"},
+		{"legacy CODE_READY_FOR_REVIEW", models.TaskStatusLegacyReadyForReview, nil, "under review"},
 		{"REVIEWING_CODE", models.TaskStatusReviewing, nil, "under review"},
 	}
 	for _, tt := range tests {

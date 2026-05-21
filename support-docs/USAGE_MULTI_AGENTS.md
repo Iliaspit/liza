@@ -101,6 +101,14 @@ liza setup --agent-tools ~/my-agent-tools.md  # use custom AGENT_TOOLS.md
 > before your first run. If needed, install your own version directly with
 > `liza setup --agent-tools ~/my-agent-tools.md`.
 
+> **Optional but highly recommended:** enable `scip-search` for
+> repository-navigation-heavy MAS runs. `LIZA_ENABLE_SCIP_SEARCH` is the MAS
+> activation gate; use repeated `--scip-search <language>` init options when you
+> want an explicit allowlist. See [Configuration Reference](CONFIGURATION.md) for
+> the canonical details on `config.scip_search`, repeated
+> `--scip-search <language>` values, indexer prerequisites, and `.liza/scip/`
+> snapshot index locations.
+
 **2. Initialize Project**
 
 > **Commit your spec file before running `liza init`.** Worktrees are created from the current branch — uncommitted files won't be visible to agents.
@@ -232,7 +240,7 @@ liza sprint-checkpoint
 cat .liza/log.yaml
 ```
 
-**Signal handling:** Agents cleanly exit on `Ctrl+C` (SIGINT) or `kill` (SIGTERM). On exit, the agent unregisters and atomically releases any active task claim — the task returns to its initial state (doer, e.g. DRAFT_CODE) or submitted state (reviewer, e.g. CODE_READY_FOR_REVIEW) — so no orphaned claims are left behind.
+**Signal handling:** Agents cleanly exit on `Ctrl+C` (SIGINT) or `kill` (SIGTERM). On exit, the agent unregisters and atomically releases any active task claim — the task returns to its initial state (doer, e.g. DRAFT_CODE) or submitted state (reviewer, e.g. CODE_TO_REVIEW; legacy configs may use CODE_READY_FOR_REVIEW) — so no orphaned claims are left behind.
 
 **4. Review Results**
 ```bash
@@ -389,7 +397,7 @@ The `liza` binary provides all system operations. Key commands:
 | `liza submit-verdict <task-id> <APPROVED\|REJECTED> [--reason "<reason>"]` | Submit a review verdict (reviewer agents; `--reason` required for REJECTED)                                          |
 | `liza mark-blocked <task-id>` | Mark a task as BLOCKED with reason/questions; optional `--depends-on` records blocking task IDs for scheduling and orchestrator re-wake; optional `--repair-*` flags request orchestrator-only state repair |
 | `liza assess-blocked <task-id>` | Record orchestrator assessment of a BLOCKED task and raise an `UNRESOLVED BLOCKED` alert when it cannot be resolved now |
-| `liza unblock-task <task-id> --assign-to <agent-id> --reason "..."` | Restore a repaired BLOCKED task to its executing state and assign it back to a doer; fails while any `depends_on` target is not MERGED or SUPERSEDED |
+| `liza unblock-task <task-id> --assign-to <agent-id> --reason "..."` | Restore a repaired BLOCKED task to its executing state and assign it back to a doer; fails while any `depends_on` target is not directly MERGED. Supersede/cancel operations rewrite active downstream dependencies first. |
 | `liza assess-hypothesis-exhausted <task-id>` | Record orchestrator assessment of a hypothesis-exhausted task (2+ coders failed)                                     |
 | `liza cancel-task <task-id> --reason "..."` | Cancel a task (transition to ABANDONED with audit trail)                                                             |
 | `liza handoff <task-id> <summary> <next-action>` | Context-exhaustion handoff for a doer agent's claimed task                                                           |

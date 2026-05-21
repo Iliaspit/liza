@@ -50,6 +50,12 @@ func validateDependencies(state *models.State, projectRoot string, skipSpecFileC
 			if result.Invalid() {
 				return fmt.Errorf("task %s has invalid dependency %s", task.ID, result.Summary())
 			}
+			if !task.Status.IsTerminal() {
+				depTask := state.FindTask(depID)
+				if depTask != nil && depTask.Status.IsTerminal() && depTask.Status != models.TaskStatusMerged {
+					return fmt.Errorf("non-terminal task %s depends on terminal non-merged task %s (%s)", task.ID, depID, depTask.Status)
+				}
+			}
 			if err := validateDependencyDirection(state, resolver, &task, depID, result); err != nil {
 				return err
 			}
@@ -91,27 +97,17 @@ func validateDependencyDirection(state *models.State, resolver *pipeline.Resolve
 	if state == nil || resolver == nil || task == nil || task.RolePair == "" {
 		return nil
 	}
-	path := result.Path
-	if len(path) == 0 {
-		path = []string{depID}
+	depTask := state.FindTask(depID)
+	if depTask == nil || depTask.RolePair == "" {
+		return nil
 	}
-	for _, pathID := range path {
-		depTask := state.FindTask(pathID)
-		if depTask == nil || depTask.RolePair == "" {
-			continue
-		}
-		downstream, err := resolver.IsRolePairDownstream(task.RolePair, depTask.RolePair)
-		if err != nil {
-			return err
-		}
-		if downstream {
-			if len(path) > 1 {
-				return fmt.Errorf("task %s dependency %s resolves through downstream task %s: role_pair %s is downstream of %s (path: %s)",
-					task.ID, depID, depTask.ID, depTask.RolePair, task.RolePair, strings.Join(path, " -> "))
-			}
-			return fmt.Errorf("task %s has downstream dependency %s: role_pair %s is downstream of %s",
-				task.ID, depTask.ID, depTask.RolePair, task.RolePair)
-		}
+	downstream, err := resolver.IsRolePairDownstream(task.RolePair, depTask.RolePair)
+	if err != nil {
+		return err
+	}
+	if downstream {
+		return fmt.Errorf("task %s has downstream dependency %s: role_pair %s is downstream of %s",
+			task.ID, depTask.ID, depTask.RolePair, task.RolePair)
 	}
 	return nil
 }

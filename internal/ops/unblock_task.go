@@ -86,7 +86,7 @@ func UnblockTask(projectRoot, taskID, assignTo, reason, agentID string) (*Unbloc
 			return &PreconditionError{Reason: fmt.Sprintf("task %s has no worktree to resume", taskID)}
 		}
 		var unmet []string
-		for _, dep := range state.UnmetDependencies(task) {
+		for _, dep := range unmetDependencies(task, state) {
 			if dep.Invalid() {
 				return &PreconditionError{Reason: fmt.Sprintf("task %s has invalid dependency: %s", taskID, dep.Summary())}
 			}

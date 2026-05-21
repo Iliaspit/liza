@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"github.com/liza-mas/liza/internal/db"
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/paths"
+	"github.com/liza-mas/liza/internal/scipsearch"
 	"github.com/liza-mas/liza/internal/testhelpers"
 )
 
@@ -1181,7 +1183,7 @@ const validPipelineYAML = `pipeline:
       states:
         initial: DRAFT_CODE
         executing: IMPLEMENTING_CODE
-        submitted: CODE_READY_FOR_REVIEW
+        submitted: CODE_TO_REVIEW
         reviewing: REVIEWING_CODE
         approved: CODE_APPROVED
         rejected: CODE_REJECTED
@@ -1450,6 +1452,166 @@ func TestInitCommandWithConfig_PostWorktreeCmd(t *testing.T) {
 	}
 	if *state.Config.PostWorktreeCmd != "make sync-embedded" {
 		t.Errorf("state.Config.PostWorktreeCmd = %q, want %q", *state.Config.PostWorktreeCmd, "make sync-embedded")
+	}
+}
+
+func TestInitCommandWithConfig_ScipSearchPersistsConfig(t *testing.T) {
+	tmpDir := setupGitRepo(t)
+	defer os.RemoveAll(tmpDir)
+	setupGlobalLiza(t)
+
+	originalDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(originalDir)
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatal(err)
+	}
+
+	testhelpers.CreateCommittedSpecFile(t, tmpDir, "vision.md", "# Vision\n")
+
+	var calls []string
+	restore := scipsearch.SetCommandRunnerForTest(func(name string, args ...string) (string, error) {
+		calls = append(calls, name+" "+strings.Join(args, " "))
+		return "ok\n", nil
+	})
+	defer restore()
+
+	err = InitCommandWithConfig(InitParams{
+		Description: "Goal with scip-search config",
+		SpecRef:     "specs/vision.md",
+		ScipSearch:  []string{"go", "typescript"},
+	})
+	if err != nil {
+		t.Fatalf("InitCommandWithConfig() error = %v", err)
+	}
+
+	statePath := filepath.Join(tmpDir, ".liza", "state.yaml")
+	bb := db.New(statePath)
+	state, err := bb.Read()
+	if err != nil {
+		t.Fatalf("Failed to read state: %v", err)
+	}
+	want := []string{"go", "typescript"}
+	if !slices.Equal(state.Config.ScipSearch, want) {
+		t.Errorf("state.Config.ScipSearch = %v, want %v", state.Config.ScipSearch, want)
+	}
+	wantCalls := []string{
+		"scip-search --help",
+		"scip-search --version",
+		"scip-go --help",
+		"scip-typescript --help",
+	}
+	if !slices.Equal(calls, wantCalls) {
+		t.Fatalf("calls = %v, want %v", calls, wantCalls)
+	}
+
+	data, err := os.ReadFile(statePath)
+	if err != nil {
+		t.Fatalf("Failed to read state.yaml: %v", err)
+	}
+	content := string(data)
+	for _, want := range []string{"scip_search:\n", "- go\n", "- typescript\n"} {
+		if !strings.Contains(content, want) {
+			t.Errorf("state.yaml missing %q in config.scip_search serialization; content:\n%s", want, content)
+		}
+	}
+}
+
+func TestInitCommandWithConfig_AutodetectsAndPersistsValidatedScipSearchLanguages(t *testing.T) {
+	tmpDir := setupGitRepo(t)
+	defer os.RemoveAll(tmpDir)
+	setupGlobalLiza(t)
+	t.Setenv("LIZA_ENABLE_SCIP_SEARCH", " TRUE ")
+
+	originalDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(originalDir)
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatal(err)
+	}
+
+	testhelpers.CreateCommittedSpecFile(t, tmpDir, "vision.md", "# Vision\n")
+	writeTrackedFile(t, tmpDir, "go.mod", "module example.com/project\n")
+	writeTrackedFile(t, tmpDir, "web/app.tsx", "export const App = () => null\n")
+	writeTrackedFile(t, tmpDir, "api/app_test.py", "def test_app():\n    assert True\n")
+	testhelpers.MustGit(t, tmpDir, "add", "go.mod", "web/app.tsx", "api/app_test.py")
+	testhelpers.MustGit(t, tmpDir, "commit", "-m", "Add tracked code")
+
+	var calls []string
+	restore := scipsearch.SetCommandRunnerForTest(func(name string, args ...string) (string, error) {
+		calls = append(calls, name+" "+strings.Join(args, " "))
+		if name == "scip-typescript" {
+			return "", os.ErrNotExist
+		}
+		if name == "scip-search" && strings.Join(args, " ") == "--version" {
+			return "scip-search 1.2.3\n", nil
+		}
+		return "ok\n", nil
+	})
+	defer restore()
+
+	stderrReader, stderrWriter, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	originalStderr := os.Stderr
+	os.Stderr = stderrWriter
+	defer func() { os.Stderr = originalStderr }()
+	err = InitCommandWithConfig(InitParams{
+		Description: "Goal with autodetected scip-search config",
+		SpecRef:     "specs/vision.md",
+	})
+	if closeErr := stderrWriter.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	stderrBytes, readErr := io.ReadAll(stderrReader)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if err != nil {
+		t.Fatalf("InitCommandWithConfig() error = %v", err)
+	}
+	stderr := string(stderrBytes)
+	if !strings.Contains(stderr, "scip-search --version: scip-search 1.2.3") {
+		t.Fatalf("stderr = %q, want scip-search version diagnostic", stderr)
+	}
+	if !strings.Contains(stderr, "dropping scip-search language \"typescript\"") {
+		t.Fatalf("stderr = %q, want dropped typescript warning", stderr)
+	}
+
+	statePath := filepath.Join(tmpDir, ".liza", "state.yaml")
+	state, err := db.New(statePath).Read()
+	if err != nil {
+		t.Fatalf("Failed to read state: %v", err)
+	}
+	want := []string{"go", "python"}
+	if !slices.Equal(state.Config.ScipSearch, want) {
+		t.Fatalf("state.Config.ScipSearch = %v, want %v", state.Config.ScipSearch, want)
+	}
+	wantCalls := []string{
+		"scip-search --help",
+		"scip-search --version",
+		"scip-go --help",
+		"scip-typescript --help",
+		"scip-python --help",
+	}
+	if !slices.Equal(calls, wantCalls) {
+		t.Fatalf("calls = %v, want %v", calls, wantCalls)
+	}
+}
+
+func writeTrackedFile(t *testing.T, root, rel, content string) {
+	t.Helper()
+	path := filepath.Join(root, rel)
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		t.Fatalf("failed to create parent for %s: %v", rel, err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatalf("failed to write %s: %v", rel, err)
 	}
 }
 

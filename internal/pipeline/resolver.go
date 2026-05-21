@@ -15,6 +15,21 @@ type Resolver struct {
 	downstreamRolePairs map[string]map[string]bool // lazy-init cache for DownstreamRolePairs
 }
 
+// StateCategory identifies the lifecycle category for a declared role-pair state.
+type StateCategory string
+
+const (
+	StateCategoryInitial           StateCategory = "initial"
+	StateCategoryExecuting         StateCategory = "executing"
+	StateCategorySubmitted         StateCategory = "submitted"
+	StateCategoryReviewing         StateCategory = "reviewing"
+	StateCategoryApproved          StateCategory = "approved"
+	StateCategoryRejected          StateCategory = "rejected"
+	StateCategoryPartiallyApproved StateCategory = "partially-approved"
+	StateCategoryReviewing2        StateCategory = "reviewing-2"
+	StateCategoryClean             StateCategory = "clean"
+)
+
 // NewResolver creates a Resolver from a validated PipelineConfig.
 func NewResolver(config *PipelineConfig) *Resolver {
 	return &Resolver{config: config}
@@ -384,6 +399,30 @@ func (r *Resolver) AllDeclaredStates() []models.TaskStatus {
 		}
 	}
 	return states
+}
+
+// StateCategories returns all declared role-pair states keyed by lifecycle category.
+func (r *Resolver) StateCategories() map[models.TaskStatus]StateCategory {
+	categories := make(map[models.TaskStatus]StateCategory)
+	for _, rp := range r.config.Pipeline.RolePairs {
+		s := rp.States
+		categories[models.TaskStatus(s.Initial)] = StateCategoryInitial
+		categories[models.TaskStatus(s.Executing)] = StateCategoryExecuting
+		categories[models.TaskStatus(s.Submitted)] = StateCategorySubmitted
+		categories[models.TaskStatus(s.Reviewing)] = StateCategoryReviewing
+		categories[models.TaskStatus(s.Approved)] = StateCategoryApproved
+		categories[models.TaskStatus(s.Rejected)] = StateCategoryRejected
+		if s.PartiallyApproved != "" {
+			categories[models.TaskStatus(s.PartiallyApproved)] = StateCategoryPartiallyApproved
+		}
+		if s.Reviewing2 != "" {
+			categories[models.TaskStatus(s.Reviewing2)] = StateCategoryReviewing2
+		}
+		if s.Clean != "" {
+			categories[models.TaskStatus(s.Clean)] = StateCategoryClean
+		}
+	}
+	return categories
 }
 
 // SprintTerminalStates returns the states at which a task is considered complete

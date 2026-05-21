@@ -79,6 +79,10 @@ func CancelTask(projectRoot, taskID, reason, agentID string) (*CancelResult, err
 			Reason: &reason,
 		})
 
+		if err := rewriteActiveDependents(state, pb.resolver, taskID, nil, agentID, now); err != nil {
+			return err
+		}
+
 		return nil
 	})
 

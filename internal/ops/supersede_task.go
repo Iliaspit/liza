@@ -121,6 +121,10 @@ func SupersedeTask(projectRoot, taskID string, replacementIDs []string, reason, 
 			Note:   &note,
 		})
 
+		if err := rewriteActiveDependents(state, pb.resolver, taskID, replacementIDs, agentID, now); err != nil {
+			return err
+		}
+
 		return nil
 	})
 

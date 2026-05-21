@@ -68,9 +68,11 @@ repos:
         language: system
         files: \.go$
 
+      # Codex sandbox cannot write the normal Go caches or use normal module
+      # resolution here; use the writable local module cache intentionally.
       - id: goimports
         name: goimports (format + imports)
-        entry: bash -c 'export PATH="/usr/local/go/bin:$PATH"; export GOPATH="${HOME}/.cache/go" GOMODCACHE="${HOME}/.cache/go/pkg/mod" GOCACHE="${HOME}/.cache/go/build" GOPROXY="file://${HOME}/.cache/go/pkg/mod/cache/download,off" GOSUMDB=off; mkdir -p "$GOPATH" "$GOMODCACHE" "$GOCACHE"; go run golang.org/x/tools/cmd/goimports@v0.45.0 -w "$@"' --
+        entry: bash -c 'export PATH="/usr/local/go/bin:$PATH"; export GOPATH="${HOME}/.cache/go" GOMODCACHE="${HOME}/.cache/go/pkg/mod" GOCACHE="${HOME}/.cache/go/build" GOPROXY="file://${HOME}/.cache/go/pkg/mod/cache/download,off" GOSUMDB=off; mkdir -p "$GOPATH" "$GOMODCACHE" "$GOCACHE"; go run golang.org/x/tools/cmd/goimports@latest -w "$@"' --
         language: system
         files: \.go$
 
@@ -83,7 +85,7 @@ repos:
 
       - id: staticcheck
         name: staticcheck (advanced static analysis)
-        entry: bash -c 'export PATH="/usr/local/go/bin:$PATH"; export GOPATH="${HOME}/.cache/go" GOMODCACHE="${HOME}/.cache/go/pkg/mod" GOCACHE="${HOME}/.cache/go/build" GOPROXY="file://${HOME}/.cache/go/pkg/mod/cache/download,off" GOSUMDB=off; mkdir -p "$GOPATH" "$GOMODCACHE" "$GOCACHE"; make sync-embedded && go run honnef.co/go/tools/cmd/staticcheck@v0.7.0 ./...'
+        entry: bash -c 'export PATH="/usr/local/go/bin:$PATH"; export GOPATH="${HOME}/.cache/go" GOMODCACHE="${HOME}/.cache/go/pkg/mod" GOCACHE="${HOME}/.cache/go/build" GOPROXY="file://${HOME}/.cache/go/pkg/mod/cache/download,off" GOSUMDB=off; mkdir -p "$GOPATH" "$GOMODCACHE" "$GOCACHE"; make sync-embedded && go run honnef.co/go/tools/cmd/staticcheck@latest ./...'
         language: system
         files: \.go$
         pass_filenames: false

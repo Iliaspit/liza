@@ -4,6 +4,8 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/liza-mas/liza/internal/models"
+	"github.com/liza-mas/liza/internal/pipeline"
 )
 
 // Semantic color constants from the unified status color palette.
@@ -12,6 +14,7 @@ var (
 	ColorActive          = lipgloss.Color("6")   // Cyan — active work
 	ColorPlanning        = lipgloss.Color("3")   // Yellow — planning/draft
 	ColorReview          = lipgloss.Color("4")   // Blue — review
+	ColorToReview        = lipgloss.Color("12")  // Dim blue — submitted / awaiting review
 	ColorIdle            = lipgloss.Color("8")   // Gray — idle/waiting
 	ColorHandoff         = lipgloss.Color("5")   // Magenta — handoff
 	ColorApproved        = lipgloss.Color("2")   // Green — approved/done
@@ -76,6 +79,37 @@ func StatusColor(status string) lipgloss.Color {
 	return ColorFallback
 }
 
+// TaskStatusColor returns the color for a task status, preferring pipeline
+// lifecycle categories over legacy status-name pattern matching.
+func TaskStatusColor(status models.TaskStatus, categories map[models.TaskStatus]pipeline.StateCategory) lipgloss.Color {
+	if category, ok := categories[status]; ok {
+		return CategoryColor(category)
+	}
+	return StatusColor(string(status))
+}
+
+// CategoryColor returns the TUI color for a pipeline lifecycle category.
+func CategoryColor(category pipeline.StateCategory) lipgloss.Color {
+	switch category {
+	case pipeline.StateCategoryInitial:
+		return ColorBareDraft
+	case pipeline.StateCategoryExecuting:
+		return ColorActive
+	case pipeline.StateCategorySubmitted:
+		return ColorToReview
+	case pipeline.StateCategoryReviewing, pipeline.StateCategoryReviewing2:
+		return ColorReview
+	case pipeline.StateCategoryApproved, pipeline.StateCategoryClean:
+		return ColorApproved
+	case pipeline.StateCategoryRejected:
+		return ColorRejected
+	case pipeline.StateCategoryPartiallyApproved:
+		return ColorPartialApproved
+	default:
+		return ColorFallback
+	}
+}
+
 func matchSuffix(status string) (lipgloss.Color, bool) {
 	switch {
 	case strings.HasSuffix(status, "_PARTIALLY_APPROVED"):
@@ -85,11 +119,11 @@ func matchSuffix(status string) (lipgloss.Color, bool) {
 	case strings.HasSuffix(status, "_REJECTED"):
 		return ColorRejected, true
 	case strings.HasSuffix(status, "_PLANNING"):
-		return ColorPlanning, true
+		return ColorActive, true
 	case strings.HasSuffix(status, "_TO_REVIEW"):
-		return ColorReview, true
+		return ColorToReview, true
 	case strings.HasSuffix(status, "_READY_FOR_REVIEW"):
-		return ColorReview, true
+		return ColorToReview, true
 	default:
 		return "", false
 	}
@@ -102,7 +136,7 @@ func matchPrefix(status string) (lipgloss.Color, bool) {
 	case strings.HasPrefix(status, "REVIEWING_"):
 		return ColorReview, true
 	case strings.HasPrefix(status, "DRAFT_"):
-		return ColorPlanning, true
+		return ColorBareDraft, true
 	default:
 		return "", false
 	}
@@ -154,6 +188,7 @@ type Styles struct {
 	StatusActive    lipgloss.Style
 	StatusPlanning  lipgloss.Style
 	StatusReview    lipgloss.Style
+	StatusToReview  lipgloss.Style
 	StatusIdle      lipgloss.Style
 	StatusHandoff   lipgloss.Style
 	StatusApproved  lipgloss.Style
@@ -237,6 +272,7 @@ func NewStyles(width int) Styles {
 		StatusActive:    lipgloss.NewStyle().Foreground(ColorActive),
 		StatusPlanning:  lipgloss.NewStyle().Foreground(ColorPlanning),
 		StatusReview:    lipgloss.NewStyle().Foreground(ColorReview),
+		StatusToReview:  lipgloss.NewStyle().Foreground(ColorToReview),
 		StatusIdle:      lipgloss.NewStyle().Foreground(ColorIdle),
 		StatusHandoff:   lipgloss.NewStyle().Foreground(ColorHandoff),
 		StatusApproved:  lipgloss.NewStyle().Foreground(ColorApproved),
