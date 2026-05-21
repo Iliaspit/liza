@@ -126,6 +126,12 @@ nl -ba <result-path> | sed -n '<first-line>,<last-line>p'
 {{ .ImplementationGuidance }}
 {{- end }}
 
-Use `--name` for symbol substring search and `--symbol` for exact symbols. That's the full file-open loop for code exploration.
+`--name` matches symbol substrings; `--symbol` matches exact SCIP symbols from prior results.
+
+Query routing (when indexes are available):
+- scip-search: symbol definitions, references, callers/callees, implementations, package structure
+- ast-grep: syntactic shapes — call patterns, signatures, structural matching across files
+- rg: literal strings, config values, comments, CLI command names, filenames
+Decompose broad queries — resolve symbols via scip-search first, then narrow rg for remaining text matches.
 {{- end }}
 {{- end -}}
