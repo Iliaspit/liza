@@ -1,7 +1,7 @@
 {{- define "worktree-rules" -}}
 
 WORKTREE RULES:
-First, run: test -d {{.Worktree}}
+First, run: /usr/bin/test -d {{.Worktree}}
 Then:
 - ALL file operations use {{.Worktree}}/ prefix (Read, Edit, Glob, Grep tools)
 - All git commands MUST use: git -C {{.Worktree}}
