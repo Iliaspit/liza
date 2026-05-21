@@ -752,6 +752,9 @@ func TestBasePromptRegressionGuard(t *testing.T) {
 	// --- QUERY TOOLS: available to all roles ---
 	assertSection("query-tools", []string{
 		"QUERY TOOLS",
+		"Always invoke liza CLI commands with /project as the working directory",
+		"never from a task worktree",
+		"task worktree only for file, git, build, and test operations",
 		"liza get --json",
 		"liza get <id> --output-summary --json",
 		"liza status --json",
