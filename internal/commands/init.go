@@ -30,6 +30,7 @@ type InitParams struct {
 	Branch             string   // --branch: integration branch name (default: "integration")
 	PostWorktreeCmd    string   // --post-worktree-cmd: shell command to run after worktree creation
 	AutoResume         bool     // --auto-resume: automatically resume at checkpoint and sprint completion
+	NoFollowUp         bool     // --no-follow-up: suppress top-level pipeline-transitions after the entry subpipeline
 	DefaultCLI         string   // --default-cli: default CLI for agent spawning
 	DefaultDoerCLI     string   // --default-doer-cli: default CLI for doer and orchestrator agent spawning
 	DefaultReviewerCLI string   // --default-reviewer-cli: default CLI for reviewer agent spawning
@@ -770,6 +771,7 @@ func InitCommandWithConfig(params InitParams) error {
 			EscalationWebhook:        nil,
 			Mode:                     models.SystemModeRunning,
 			AutoResume:               params.AutoResume,
+			NoFollowUp:               params.NoFollowUp,
 			PostWorktreeCmd:          stringPtrOrNil(postWorktreeCmd),
 		},
 	}

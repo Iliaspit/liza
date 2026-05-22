@@ -1148,6 +1148,37 @@ func TestProceed_OneToOne_CreatesSingleChild(t *testing.T) {
 	}
 }
 
+func TestProceed_NoFollowUpRejectsPipelineTransition(t *testing.T) {
+	tmpDir, stateFile := setupPhase2PipelineProceedTest(t)
+
+	state := testhelpers.CreateValidState()
+	state.PipelineVersion = 2
+	state.Config.NoFollowUp = true
+	state.Sprint.Status = models.SprintStatusCompleted
+
+	now := time.Now().UTC()
+	task := models.Task{
+		ID:          "us-task-1",
+		Type:        models.TaskTypePlanning,
+		RolePair:    "us-writing-pair",
+		Description: "User authentication story",
+		Status:      models.TaskStatus("US_APPROVED"),
+		Priority:    1,
+		Created:     now,
+		ParentTasks: []string{"epic-plan-1"},
+		SpecRef:     "specs/auth.md",
+		DoneWhen:    "US approved",
+		Scope:       "auth module",
+		History:     []models.TaskHistoryEntry{},
+	}
+	state.Tasks = append(state.Tasks, task)
+	state.Sprint.Scope.Planned = []string{task.ID}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	_, err := Proceed(tmpDir, task.ID, "us-to-coding")
+	testhelpers.RequireErrorContains(t, err, `transition "us-to-coding" is a pipeline-transition disabled by config.no_follow_up`)
+}
+
 func TestProceed_EpicToUS_ChildRetainsCodingType(t *testing.T) {
 	tmpDir, stateFile := setupPhase2PipelineProceedTest(t)
 
@@ -1487,6 +1518,53 @@ func TestAvailableManualTransitions_PipelineTransition_USApproved(t *testing.T) 
 	}
 }
 
+func TestAvailableManualTransitions_NoFollowUpSuppressesPipelineTransition(t *testing.T) {
+	tmpDir, stateFile := setupPhase2PipelineProceedTest(t)
+
+	state := testhelpers.CreateValidState()
+	state.PipelineVersion = 2
+	state.Config.NoFollowUp = true
+	now := time.Now().UTC()
+	usTask := models.Task{
+		ID:          "us-1",
+		Type:        models.TaskTypePlanning,
+		RolePair:    "us-writing-pair",
+		Description: "US task",
+		Status:      models.TaskStatus("US_APPROVED"),
+		Priority:    1,
+		Created:     now,
+		SpecRef:     "README.md",
+		DoneWhen:    "Done",
+		Scope:       "scope",
+		History:     []models.TaskHistoryEntry{},
+	}
+	codePlanTask := models.Task{
+		ID:          "plan-1",
+		Type:        models.TaskTypePlanning,
+		RolePair:    "code-planning-pair",
+		Description: "Plan task",
+		Status:      models.TaskStatus("CODING_PLAN_APPROVED"),
+		Priority:    1,
+		Created:     now,
+		SpecRef:     "README.md",
+		DoneWhen:    "Done",
+		Scope:       "scope",
+		History:     []models.TaskHistoryEntry{},
+	}
+	state.Tasks = append(state.Tasks, usTask, codePlanTask)
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	avail := AvailableManualTransitions(&state.Tasks[len(state.Tasks)-2], tmpDir)
+	if len(avail) != 0 {
+		t.Errorf("AvailableTransitions for pipeline transition = %v, want []", avail)
+	}
+
+	avail = AvailableManualTransitions(&state.Tasks[len(state.Tasks)-1], tmpDir)
+	if len(avail) != 1 || avail[0] != "code-plan-to-coding" {
+		t.Errorf("AvailableTransitions for subpipeline transition = %v, want [code-plan-to-coding]", avail)
+	}
+}
+
 func TestAvailableManualTransitions_PipelineExcludesExecuted(t *testing.T) {
 	tmpDir, stateFile := setupPipelineProceedTest(t)
 
@@ -1597,6 +1675,74 @@ func TestExecuteAvailableTransitions_CreatesChildrenForMergedTasks(t *testing.T)
 	srcTask := readState.FindTask(taskID)
 	if !srcTask.TransitionsExecuted["us-to-coding"] {
 		t.Error("transitions_executed should contain us-to-coding")
+	}
+}
+
+func TestExecuteAvailableTransitions_NoFollowUpSuppressesPipelineTransitions(t *testing.T) {
+	tmpDir, stateFile := setupPhase2PipelineProceedTest(t)
+
+	state := testhelpers.CreateValidState()
+	state.PipelineVersion = 2
+	state.Config.NoFollowUp = true
+	state.Sprint.Status = models.SprintStatusInProgress
+
+	now := time.Now().UTC()
+	usTask := models.Task{
+		ID:          "us-task-1",
+		Type:        models.TaskTypePlanning,
+		RolePair:    "us-writing-pair",
+		Description: "User authentication story",
+		Status:      models.TaskStatusMerged,
+		Priority:    1,
+		Created:     now,
+		ParentTasks: []string{"epic-plan-1"},
+		SpecRef:     "specs/auth.md",
+		DoneWhen:    "US approved",
+		Scope:       "auth module",
+		History:     []models.TaskHistoryEntry{},
+	}
+	codePlanTask := models.Task{
+		ID:          "plan-task-1",
+		Type:        models.TaskTypePlanning,
+		RolePair:    "code-planning-pair",
+		Description: "Coding plan",
+		Status:      models.TaskStatusMerged,
+		Priority:    1,
+		Created:     now,
+		SpecRef:     "specs/auth.md",
+		DoneWhen:    "Plan approved",
+		Scope:       "auth module",
+		Output: []models.OutputEntry{
+			{Desc: "Implement login", DoneWhen: "Login works", Scope: "auth", SpecRef: "specs/auth.md#login"},
+		},
+		History: []models.TaskHistoryEntry{},
+	}
+	state.Tasks = append(state.Tasks, usTask, codePlanTask)
+	state.Sprint.Scope.Planned = []string{usTask.ID, codePlanTask.ID}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	results, err := ExecuteAvailableTransitions(tmpDir, "manual")
+	if err != nil {
+		t.Fatalf("ExecuteAvailableTransitions() error: %v", err)
+	}
+
+	if len(results) != 1 {
+		t.Fatalf("results count = %d, want 1", len(results))
+	}
+	if results[0].TransitionName != "code-plan-to-coding" {
+		t.Fatalf("TransitionName = %q, want code-plan-to-coding", results[0].TransitionName)
+	}
+
+	bb := db.New(stateFile)
+	readState, err := bb.Read()
+	if err != nil {
+		t.Fatalf("Failed to read state: %v", err)
+	}
+	if task := readState.FindTask(usTask.ID); task == nil || task.TransitionsExecuted["us-to-coding"] {
+		t.Fatalf("us-to-coding should not be executed when no_follow_up is enabled")
+	}
+	if child := readState.FindTask("epic-plan-1-us-to-coding"); child != nil {
+		t.Fatalf("pipeline-transition child should not be created: %+v", child)
 	}
 }
 

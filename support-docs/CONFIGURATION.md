@@ -247,6 +247,13 @@ When enabled, agents automatically resume the system at CHECKPOINT and COMPLETED
 
 Use `liza pause` (or `p` in TUI) for a hard stop — pause is never auto-resumed.
 
+### No Follow-Up (`no_follow_up`)
+
+When enabled, Liza suppresses top-level `pipeline-transitions` (cross-sub-pipeline transitions). Subpipeline-local transitions still run normally, but cross-sub-pipeline follow-up transitions are not shown in status, auto-executed, or allowed through `liza proceed`. Defaults to `false`.
+
+- **At init time:** `liza init --no-follow-up "Goal"`
+- **State config:** `no_follow_up: true`
+
 ### Worktree Setup (`post_worktree_cmd`)
 
 Worktrees are bare checkouts — they lack build artifacts like `node_modules/`, `vendor/`, or compiled outputs. The `post_worktree_cmd` config field specifies a shell command that runs after every worktree creation, ensuring agents have a build-ready workspace.

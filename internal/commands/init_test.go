@@ -1299,6 +1299,41 @@ func TestInitCommandWithConfig_EntryPoint(t *testing.T) {
 	}
 }
 
+func TestInitCommandWithConfig_NoFollowUp(t *testing.T) {
+	tmpDir := setupGitRepo(t)
+	defer os.RemoveAll(tmpDir)
+	setupGlobalLiza(t)
+
+	originalDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(originalDir)
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatal(err)
+	}
+
+	testhelpers.CreateCommittedSpecFile(t, tmpDir, "vision.md", "# Vision\n")
+
+	err = InitCommandWithConfig(InitParams{
+		Description: "Pipeline goal",
+		SpecRef:     "specs/vision.md",
+		NoFollowUp:  true,
+	})
+	if err != nil {
+		t.Fatalf("InitCommandWithConfig() error = %v", err)
+	}
+
+	bb := db.New(filepath.Join(tmpDir, ".liza", "state.yaml"))
+	state, err := bb.Read()
+	if err != nil {
+		t.Fatalf("Failed to read state: %v", err)
+	}
+	if !state.Config.NoFollowUp {
+		t.Error("state.Config.NoFollowUp = false, want true")
+	}
+}
+
 func TestInitCommandWithConfig_NewDefaultEntryPoints(t *testing.T) {
 	for _, entryPoint := range []string{"functional-spec", "technical-spec"} {
 		t.Run(entryPoint, func(t *testing.T) {

@@ -501,6 +501,41 @@ func TestBuildStatusData(t *testing.T) {
 	}
 }
 
+func TestBuildStatusData_NoFollowUpHidesPipelineTransitions(t *testing.T) {
+	now := time.Now().UTC()
+	projectRoot := setupPipelineRoot(t)
+	statePath := filepath.Join(projectRoot, ".liza", "state.yaml")
+
+	state := testhelpers.CreateValidState()
+	state.Config.NoFollowUp = true
+	state.Tasks = []models.Task{
+		{
+			ID:          "us-1",
+			Type:        models.TaskTypePlanning,
+			RolePair:    "us-writing-pair",
+			Description: "US task",
+			Status:      models.TaskStatus("US_APPROVED"),
+			Priority:    1,
+			Created:     now,
+			SpecRef:     "README.md",
+			DoneWhen:    "Done",
+			Scope:       "scope",
+			History:     []models.TaskHistoryEntry{},
+		},
+	}
+	testhelpers.WriteInitialState(t, statePath, state)
+
+	// Pending transitions are populated via ops.AvailableManualTransitions,
+	// which applies the runtime no_follow_up policy from state.yaml. The
+	// PipelineResolver passed here is used for lifecycle/status rendering only.
+	pr, _ := ops.LoadResolverForModels(projectRoot)
+	data := BuildStatusData(state, false, projectRoot, pr, nil)
+
+	if len(data.PendingTransitions) != 0 {
+		t.Fatalf("PendingTransitions = %v, want none", data.PendingTransitions)
+	}
+}
+
 func TestBuildStatusData_ByStatusMap(t *testing.T) {
 	now := time.Now().UTC()
 

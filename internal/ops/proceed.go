@@ -159,7 +159,7 @@ type transitionDef struct {
 // Crash recovery: if the transition key is already set but some children
 // are missing, only the missing children are created.
 func Proceed(projectRoot, taskID, transitionName string) (*ProceedResult, error) {
-	resolver, cfg, err := loadResolver(projectRoot)
+	resolver, cfg, err := loadResolverWithRuntimePolicy(projectRoot)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load pipeline config: %w", err)
 	}
@@ -909,7 +909,7 @@ func extraToStringSlice(v any) []string {
 // and are skipped from execution. Tasks downstream of those cycles are skipped
 // until the upstream cycle is resolved.
 func ExecuteAvailableTransitions(projectRoot string, triggerFilter string) ([]ProceedResult, error) {
-	resolver, _, err := loadResolver(projectRoot)
+	resolver, _, err := loadResolverWithRuntimePolicy(projectRoot)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load pipeline config: %w", err)
 	}
@@ -1329,7 +1329,7 @@ func computeInheritedDeps(s *models.State, task *models.Task, transitionName str
 // Transitions are read from the frozen pipeline config.
 // Returns nil if no transitions are available.
 func AvailableManualTransitions(task *models.Task, projectRoot string) []string {
-	resolver, _, err := loadResolver(projectRoot)
+	resolver, _, err := loadResolverWithRuntimePolicy(projectRoot)
 	if err != nil {
 		return nil
 	}
@@ -1339,6 +1339,10 @@ func AvailableManualTransitions(task *models.Task, projectRoot string) []string 
 // resolveTransitionDefFrom validates and resolves a manual transition definition
 // from an already-loaded resolver, avoiding double-loading in Proceed.
 func resolveTransitionDefFrom(resolver *pipeline.Resolver, cfg *pipeline.PipelineConfig, transitionName string) (transitionDef, error) {
+	if resolver.PipelineTransitionsSuppressed() && resolver.IsPipelineTransition(transitionName) {
+		return transitionDef{}, fmt.Errorf("transition %q is a pipeline-transition disabled by config.no_follow_up", transitionName)
+	}
+
 	td, err := resolver.Transition(transitionName)
 	if err != nil {
 		names := allTransitionNames(cfg)

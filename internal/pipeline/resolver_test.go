@@ -121,6 +121,43 @@ func TestResolver_AvailableManualTransitions_PipelineTransition(t *testing.T) {
 	}
 }
 
+func TestResolver_AvailableManualTransitions_NoFollowUpSuppressesPipelineTransitions(t *testing.T) {
+	r := NewResolver(loadPhase2Config(t), WithNoFollowUp())
+
+	got := r.AvailableManualTransitions("US_APPROVED", nil)
+	if len(got) != 0 {
+		t.Errorf("AvailableTransitions(US_APPROVED, nil) = %v, want []", got)
+	}
+
+	got = r.AvailableManualTransitions("ARCHITECTURE_APPROVED", nil)
+	if len(got) != 0 {
+		t.Errorf("AvailableTransitions(ARCHITECTURE_APPROVED, nil) = %v, want []", got)
+	}
+
+	got = r.AvailableManualTransitions("EPIC_PLAN_APPROVED", nil)
+	want := []string{"epic-to-us"}
+	if !slices.Equal(got, want) {
+		t.Errorf("AvailableTransitions(EPIC_PLAN_APPROVED, nil) = %v, want %v", got, want)
+	}
+
+	got = r.AvailableManualTransitions("CODING_PLAN_APPROVED", nil)
+	want = []string{"code-plan-to-coding"}
+	if !slices.Equal(got, want) {
+		t.Errorf("AvailableTransitions(CODING_PLAN_APPROVED, nil) = %v, want %v", got, want)
+	}
+
+	if !r.IsPipelineTransition("us-to-coding") {
+		t.Error("IsPipelineTransition(us-to-coding) = false, want true")
+	}
+	if r.IsPipelineTransition("epic-to-us") {
+		t.Error("IsPipelineTransition(epic-to-us) = true, want false")
+	}
+
+	if _, err := r.Transition("us-to-coding"); err != nil {
+		t.Fatalf("Transition(us-to-coding) should still see full topology: %v", err)
+	}
+}
+
 func TestResolver_SprintTerminalStates_Phase2(t *testing.T) {
 	r := NewResolver(loadPhase2Config(t))
 	got := r.SprintTerminalStates()

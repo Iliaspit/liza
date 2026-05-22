@@ -103,6 +103,7 @@ symlinks needed for pairing (no .liza/ workspace):
 	RunE: func(cmd *cobra.Command, args []string) error {
 		agents := collectAgentFlags(cmd)
 		autoResume, _ := cmd.Flags().GetBool("auto-resume")
+		noFollowUp, _ := cmd.Flags().GetBool("no-follow-up")
 		defaultCLI, _ := cmd.Flags().GetString("default-cli")
 		defaultDoerCLI, _ := cmd.Flags().GetString("default-doer-cli")
 		defaultReviewerCLI, _ := cmd.Flags().GetString("default-reviewer-cli")
@@ -147,6 +148,9 @@ symlinks needed for pairing (no .liza/ workspace):
 				if autoResume {
 					return fmt.Errorf("--auto-resume requires full workspace init (provide a description)")
 				}
+				if noFollowUp {
+					return fmt.Errorf("--no-follow-up requires full workspace init (provide a description)")
+				}
 				if err := commands.InitPairingCommand(commands.InitPairingParams{
 					Agents:         result.Agents,
 					Stdin:          os.Stdin,
@@ -165,6 +169,7 @@ symlinks needed for pairing (no .liza/ workspace):
 				Branch:             branch,
 				PostWorktreeCmd:    postWorktreeCmd,
 				AutoResume:         autoResume,
+				NoFollowUp:         noFollowUp,
 				DefaultCLI:         defaultCLI,
 				DefaultDoerCLI:     defaultDoerCLI,
 				DefaultReviewerCLI: defaultReviewerCLI,
@@ -186,6 +191,9 @@ symlinks needed for pairing (no .liza/ workspace):
 			}
 			if autoResume {
 				return fmt.Errorf("--auto-resume requires full workspace init (provide a description)")
+			}
+			if noFollowUp {
+				return fmt.Errorf("--no-follow-up requires full workspace init (provide a description)")
 			}
 			if hasExplicitInitFlags(cmd) {
 				return fmt.Errorf("workspace flags (--branch, --config, --spec, --entry-point, --post-worktree-cmd, --default-cli, --default-doer-cli, --default-reviewer-cli) require a description argument for full workspace init")
@@ -215,6 +223,7 @@ symlinks needed for pairing (no .liza/ workspace):
 			Branch:             branch,
 			PostWorktreeCmd:    postCreateCmd,
 			AutoResume:         autoResume,
+			NoFollowUp:         noFollowUp,
 			DefaultCLI:         defaultCLI,
 			DefaultDoerCLI:     defaultDoerCLI,
 			DefaultReviewerCLI: defaultReviewerCLI,
@@ -400,6 +409,7 @@ func init() {
 	initCmd.Flags().String("branch", "integration", "integration branch name")
 	initCmd.Flags().String("post-worktree-cmd", "", "shell command to run after worktree creation (e.g. 'make setup')")
 	initCmd.Flags().Bool("auto-resume", false, "automatically resume at checkpoint and sprint completion")
+	initCmd.Flags().Bool("no-follow-up", false, "run only the entry-point subpipeline by suppressing top-level pipeline transitions")
 	initCmd.Flags().String("default-cli", "", "default CLI for agent spawning ("+strings.Join(agent.ValidCLIs(), ", ")+")")
 	initCmd.Flags().String("default-doer-cli", "", "default CLI for doer and orchestrator agent spawning ("+strings.Join(agent.ValidCLIs(), ", ")+")")
 	initCmd.Flags().String("default-reviewer-cli", "", "default CLI for reviewer agent spawning ("+strings.Join(agent.ValidCLIs(), ", ")+")")

@@ -143,6 +143,7 @@ type Config struct {
 	ModeChangedBy            *string        `yaml:"mode_changed_by,omitempty"`
 	DiagnosticLogging        bool           `yaml:"diagnostic_logging,omitempty"`
 	AutoResume               bool           `yaml:"auto_resume,omitempty"`
+	NoFollowUp               bool           `yaml:"no_follow_up,omitempty"`
 	PostWorktreeCmd          *string        `yaml:"post_worktree_cmd,omitempty"`
 	Extra                    map[string]any `yaml:",inline"`
 }

@@ -3,8 +3,10 @@ package ops
 import (
 	"log"
 
+	"github.com/liza-mas/liza/internal/db"
 	lizaerrors "github.com/liza-mas/liza/internal/errors"
 	"github.com/liza-mas/liza/internal/models"
+	"github.com/liza-mas/liza/internal/paths"
 	"github.com/liza-mas/liza/internal/pipeline"
 )
 
@@ -15,6 +17,28 @@ func loadResolver(projectRoot string) (*pipeline.Resolver, *pipeline.PipelineCon
 		return nil, nil, &lizaerrors.PipelineConfigError{Operation: "load resolver", Err: err}
 	}
 	return pipeline.NewResolver(cfg), cfg, nil
+}
+
+// loadResolverWithRuntimePolicy loads the frozen pipeline config with runtime
+// transition policies from state.yaml applied. Structural topology methods still
+// see the full frozen pipeline; policies only affect runtime availability.
+func loadResolverWithRuntimePolicy(projectRoot string) (*pipeline.Resolver, *pipeline.PipelineConfig, error) {
+	cfg, err := pipeline.LoadFrozen(projectRoot)
+	if err != nil {
+		return nil, nil, &lizaerrors.PipelineConfigError{Operation: "load resolver", Err: err}
+	}
+	return pipeline.NewResolver(cfg, resolverOptionsFromState(projectRoot)...), cfg, nil
+}
+
+func resolverOptionsFromState(projectRoot string) []pipeline.ResolverOption {
+	state, err := db.For(paths.New(projectRoot).StatePath()).Read()
+	if err != nil {
+		return nil
+	}
+	if state.Config.NoFollowUp {
+		return []pipeline.ResolverOption{pipeline.WithNoFollowUp()}
+	}
+	return nil
 }
 
 // warnSkipRolePair logs a warning when a role-pair is skipped due to a resolver

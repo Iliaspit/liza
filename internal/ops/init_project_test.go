@@ -372,6 +372,29 @@ func TestInitProject_AutoResumeFlag(t *testing.T) {
 	}
 }
 
+func TestInitProject_NoFollowUpFlag(t *testing.T) {
+	projectRoot, specFile := setupInitTestDir(t)
+
+	err := InitProject(projectRoot, InitProjectParams{
+		Description: "Test project",
+		SpecRef:     specFile,
+		NoFollowUp:  true,
+	})
+	if err != nil {
+		t.Fatalf("InitProject() error: %v", err)
+	}
+
+	statePath := filepath.Join(projectRoot, ".liza", "state.yaml")
+	bb := db.For(statePath)
+	state, err := bb.Read()
+	if err != nil {
+		t.Fatalf("Failed to read state: %v", err)
+	}
+	if !state.Config.NoFollowUp {
+		t.Error("NoFollowUp = false, want true")
+	}
+}
+
 func TestInitProject_DefaultCLI(t *testing.T) {
 	projectRoot, specFile := setupInitTestDir(t)
 

@@ -257,7 +257,7 @@ analyzing before acting, presenting approval requests at every state change, val
 Or you may choose to make it your Socratic colleague, your rubber duck, or your challenger.
 
 **Multi-agent mode** — autonomous spec-to-code pipeline:
-1. `liza init "[Goal description]" --spec vision.md` (this file needs to be committed). Use `--entry-point functional-spec` to skip the epic/user-story spec phase and start at architecture, or `--entry-point technical-spec` to start at code planning when architecture is already settled. `detailed-spec` remains as a legacy alias for `functional-spec`.
+1. `liza init "[Goal description]" --spec vision.md` (this file needs to be committed). Use `--entry-point functional-spec` to skip the epic/user-story spec phase and start at architecture, or `--entry-point technical-spec` to start at code planning when architecture is already settled. Add `--no-follow-up` to run only the entry-point sub-pipeline. `detailed-spec` remains as a legacy alias for `functional-spec`.
 2. `liza tui` — the TUI shows live system state (agents, tasks, alerts, sprint metrics). From it you can spawn agents with role autocompletion (`s` uses configured default CLI, `S` lets you pick). Pause/resume the system, add tasks, and trigger sprint checkpoints.
    Check [Quick Start](support-docs/USAGE_MULTI_AGENTS.md#quick-start-target-usage) for required roles and options (configuring default CLI, logging).
 
@@ -269,6 +269,7 @@ Refer to [How to Produce a Goal Document For Liza](support-docs/how-to-produce-a
 liza setup                                          # One-time global setup
 liza setup --agent-tools ~/my-tools.md              # Custom AGENT_TOOLS.md
 liza init "Project goal" --spec specs/vision.md     # Initialize blackboard
+liza init "Goal" --no-follow-up                     # Run only entry-point subpipeline
 liza init "Goal" --spec s.md \
   --config pipeline.yaml --entry-point epic-planning # Pipeline-configured init
 liza add-task --id t1 --desc "..." --spec "..." \

@@ -13,6 +13,18 @@ type Resolver struct {
 	config              *PipelineConfig
 	transitionSources   map[string]bool            // lazy-init cache for TransitionSourcePairs
 	downstreamRolePairs map[string]map[string]bool // lazy-init cache for DownstreamRolePairs
+	noFollowUp          bool
+}
+
+// ResolverOption configures runtime resolver behavior.
+type ResolverOption func(*Resolver)
+
+// WithNoFollowUp suppresses top-level pipeline-transitions from runtime
+// availability checks while keeping structural topology queries intact.
+func WithNoFollowUp() ResolverOption {
+	return func(r *Resolver) {
+		r.noFollowUp = true
+	}
 }
 
 // StateCategory identifies the lifecycle category for a declared role-pair state.
@@ -31,8 +43,12 @@ const (
 )
 
 // NewResolver creates a Resolver from a validated PipelineConfig.
-func NewResolver(config *PipelineConfig) *Resolver {
-	return &Resolver{config: config}
+func NewResolver(config *PipelineConfig, opts ...ResolverOption) *Resolver {
+	r := &Resolver{config: config}
+	for _, opt := range opts {
+		opt(r)
+	}
+	return r
 }
 
 func (r *Resolver) lookupStates(rolePair string) (*RolePairStates, error) {
@@ -504,6 +520,22 @@ func (r *Resolver) Transition(name string) (*TransitionDef, error) {
 	return nil, fmt.Errorf("unknown transition %q", name)
 }
 
+// IsPipelineTransition reports whether name is a top-level pipeline-transition.
+func (r *Resolver) IsPipelineTransition(name string) bool {
+	for i := range r.config.Pipeline.PipelineTransitions {
+		if r.config.Pipeline.PipelineTransitions[i].Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+// PipelineTransitionsSuppressed reports whether runtime availability should skip
+// top-level pipeline-transitions.
+func (r *Resolver) PipelineTransitionsSuppressed() bool {
+	return r.noFollowUp
+}
+
 // AvailableManualTransitions returns manual transition names available for a task at
 // the given status, excluding transitions already executed.
 func (r *Resolver) AvailableManualTransitions(status models.TaskStatus, transitionsExecuted map[string]bool) []string {
@@ -537,15 +569,17 @@ func (r *Resolver) availableTransitionsByTrigger(trigger string, status models.T
 			}
 		}
 	}
-	for _, t := range r.config.Pipeline.PipelineTransitions {
-		if t.Trigger != trigger {
-			continue
-		}
-		if transitionsExecuted[t.Name] {
-			continue
-		}
-		if r.resolve3PartPhase(t.From) == status {
-			available = append(available, t.Name)
+	if !r.noFollowUp {
+		for _, t := range r.config.Pipeline.PipelineTransitions {
+			if t.Trigger != trigger {
+				continue
+			}
+			if transitionsExecuted[t.Name] {
+				continue
+			}
+			if r.resolve3PartPhase(t.From) == status {
+				available = append(available, t.Name)
+			}
 		}
 	}
 	slices.Sort(available)

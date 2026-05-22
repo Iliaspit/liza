@@ -744,6 +744,73 @@ func TestResume_FromCompleted_AllTerminal_EmptyCarriedTasks(t *testing.T) {
 	}
 }
 
+func TestResume_NoFollowUpSkipsPipelineTransitionsAfterSprintAdvance(t *testing.T) {
+	tmpDir, stateFile := setupPhase2PipelineProceedTest(t)
+
+	state := testhelpers.CreateValidState()
+	state.Config.Mode = models.SystemModeRunning
+	state.Config.NoFollowUp = true
+	state.Sprint.Status = models.SprintStatusCompleted
+
+	now := time.Now().UTC()
+	pipelineTask := models.Task{
+		ID:          "us-task-1",
+		Type:        models.TaskTypePlanning,
+		RolePair:    "us-writing-pair",
+		Description: "Done task",
+		Status:      models.TaskStatusMerged,
+		Priority:    1,
+		Created:     now,
+		ParentTasks: []string{"epic-plan-1"},
+		SpecRef:     "README.md",
+		DoneWhen:    "Done",
+		Scope:       "scope",
+		History:     []models.TaskHistoryEntry{},
+	}
+	subpipelineTask := models.Task{
+		ID:          "plan-task-1",
+		Type:        models.TaskTypePlanning,
+		RolePair:    "code-planning-pair",
+		Description: "Done plan task",
+		Status:      models.TaskStatusMerged,
+		Priority:    1,
+		Created:     now,
+		SpecRef:     "README.md",
+		DoneWhen:    "Done",
+		Scope:       "scope",
+		Output: []models.OutputEntry{
+			{Desc: "Implement login", DoneWhen: "Login works", Scope: "auth", SpecRef: "specs/auth.md#login"},
+		},
+		History: []models.TaskHistoryEntry{},
+	}
+	state.Tasks = append(state.Tasks, pipelineTask, subpipelineTask)
+	state.Sprint.Scope.Planned = []string{pipelineTask.ID, subpipelineTask.ID}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	result, err := Resume(tmpDir, "auto-resume")
+	if err != nil {
+		t.Fatalf("Resume() error: %v", err)
+	}
+
+	if result.SprintAdvanced == nil {
+		t.Fatal("Expected sprint advance")
+	}
+	if result.TransitionsExecuted != 1 {
+		t.Errorf("TransitionsExecuted = %d, want 1", result.TransitionsExecuted)
+	}
+
+	readState, err := db.New(stateFile).Read()
+	if err != nil {
+		t.Fatalf("Failed to read state: %v", err)
+	}
+	if child := readState.FindTask("epic-plan-1-us-to-coding"); child != nil {
+		t.Fatalf("pipeline-transition child should not be created: %+v", child)
+	}
+	if child := readState.FindTask("plan-task-1-code-plan-to-coding-0"); child == nil {
+		t.Fatal("subpipeline transition child should be created")
+	}
+}
+
 func TestResume_FromStopped(t *testing.T) {
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)

@@ -54,6 +54,11 @@ func TestInitDispatch_WorkspaceFlagsRequireDescription(t *testing.T) {
 			wantErr: "--auto-resume requires full workspace init",
 		},
 		{
+			name:    "no-follow-up without description gets specific error",
+			args:    []string{"init", "--claude", "--no-follow-up"},
+			wantErr: "--no-follow-up requires full workspace init",
+		},
+		{
 			name:    "agent flag with workspace flag and no description errors",
 			args:    []string{"init", "--claude", "--branch", "foo"},
 			wantErr: "workspace flags",
@@ -89,6 +94,11 @@ func TestInitDispatch_WorkspaceFlagsRequireDescription(t *testing.T) {
 			wantErr: "workspace flags",
 		},
 		{
+			name:    "agent flag with no-follow-up and no description errors",
+			args:    []string{"init", "--codex", "--no-follow-up"},
+			wantErr: "--no-follow-up requires full workspace init",
+		},
+		{
 			name:    "invalid default-cli value errors",
 			args:    []string{"init", "--default-cli", "invalid", "Goal"},
 			wantErr: "invalid --default-cli",
@@ -118,6 +128,18 @@ func TestInitDispatch_WorkspaceFlagsRequireDescription(t *testing.T) {
 				t.Fatalf("error %q does not contain %q", err.Error(), tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestHasExplicitInitFlags_NoFollowUpDoesNotBypassWizard(t *testing.T) {
+	resetRootCmdForTest(t)
+	defer resetRootCmdForTest(t)
+
+	if err := initCmd.Flags().Set("no-follow-up", "true"); err != nil {
+		t.Fatalf("set no-follow-up: %v", err)
+	}
+	if hasExplicitInitFlags(initCmd) {
+		t.Fatal("hasExplicitInitFlags() = true for --no-follow-up, want false so the wizard path can pass it through")
 	}
 }
 

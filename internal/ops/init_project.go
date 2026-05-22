@@ -29,6 +29,7 @@ type InitProjectParams struct {
 	DefaultDoerCLI     string // optional; default CLI for doer and orchestrator agent spawning
 	DefaultReviewerCLI string // optional; default CLI for reviewer agent spawning
 	AutoResume         bool
+	NoFollowUp         bool
 	PipelineConfig     []byte // optional raw YAML; nil = use embedded default
 }
 
@@ -209,6 +210,7 @@ func InitProject(projectRoot string, params InitProjectParams) error {
 			EscalationWebhook:        nil,
 			Mode:                     models.SystemModeRunning,
 			AutoResume:               params.AutoResume,
+			NoFollowUp:               params.NoFollowUp,
 			PostWorktreeCmd:          postWorktreeCmd,
 		},
 	}

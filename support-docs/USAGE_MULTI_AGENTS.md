@@ -145,6 +145,7 @@ liza init "[Goal description]" --spec [spec_ref]
 #   liza init "Implement from functional spec" --entry-point functional-spec  # architecture → code-plan → code
 #   liza init "Implement from technical spec" --entry-point technical-spec    # code-plan → code
 #   # detailed-spec is a legacy alias for functional-spec.
+#   # Add --no-follow-up to execute only the entry-point sub-pipeline.
 #   # New entry-point names require a newly initialized workspace or manually updated .liza/pipeline.yaml.
 #   # If omitted, the orchestrator auto-classifies from the spec content.
 
@@ -301,6 +302,8 @@ integration sub-pipeline (post-coding, orchestrator-triggered):
 ```
 
 Each transition between pairs is a **human gate** (unless auto-resume is enabled): the sprint completes, the human reviews, then runs `liza proceed <task-id> <transition>` followed by `liza resume`. With auto-resume, these transitions happen automatically.
+
+Use `liza init --no-follow-up` to suppress top-level `pipeline-transitions`. The selected entry-point sub-pipeline still runs normally, but Liza will not show, auto-execute, or allow manual `liza proceed` for cross-sub-pipeline follow-up transitions.
 
 The `integration-to-fix` transition is an exception — it uses `trigger: auto`, meaning fix tasks are created automatically when the integration reviewer approves findings, without a human gate.
 
