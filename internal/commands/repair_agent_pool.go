@@ -2,8 +2,10 @@ package commands
 
 import (
 	"fmt"
+	"os"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -20,6 +22,7 @@ type RepairAgentPoolOptions struct {
 	Missing     bool
 	CLI         string
 	DryRun      bool
+	Roles       []string
 }
 
 type MissingRoleWork struct {
@@ -64,6 +67,31 @@ var repairAgentPoolSpawn = func(projectRoot, role, cli string) (int, error) {
 	return cmd.Process.Pid, nil
 }
 
+const EnvAutoRepairAgentPool = "LIZA_AUTO_REPAIR_AGENT_POOL"
+
+func AutoRepairAgentPoolEnabledFromEnv() (bool, string) {
+	value, ok := os.LookupEnv(EnvAutoRepairAgentPool)
+	return parseAutoRepairAgentPoolEnv(value, ok)
+}
+
+func parseAutoRepairAgentPoolEnv(value string, ok bool) (bool, string) {
+	if !ok {
+		return true, ""
+	}
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return true, ""
+	}
+	if strings.EqualFold(trimmed, "no") {
+		return false, ""
+	}
+	enabled, err := strconv.ParseBool(trimmed)
+	if err == nil {
+		return enabled, ""
+	}
+	return true, fmt.Sprintf("%s=%q is not a recognized boolean; auto repair remains enabled", EnvAutoRepairAgentPool, value)
+}
+
 func RepairAgentPoolCommand(opts RepairAgentPoolOptions) error {
 	result, err := RepairAgentPool(opts)
 	if result != nil {
@@ -88,7 +116,7 @@ func RepairAgentPool(opts RepairAgentPoolOptions) (*RepairAgentPoolResult, error
 		return nil, fmt.Errorf("invalid CLI: %s (must be %s)", opts.CLI, strings.Join(agent.ValidCLIs(), ", "))
 	}
 
-	missing := FindMissingRolesWithClaimableWork(state, pr)
+	missing := filterMissingRoleWork(FindMissingRolesWithClaimableWork(state, pr), opts.Roles)
 	result := &RepairAgentPoolResult{
 		CLI:     opts.CLI,
 		DryRun:  opts.DryRun,
@@ -149,6 +177,23 @@ func RepairAgentPool(opts RepairAgentPoolOptions) (*RepairAgentPoolResult, error
 	}
 
 	return result, nil
+}
+
+func filterMissingRoleWork(missing []MissingRoleWork, roles []string) []MissingRoleWork {
+	if len(roles) == 0 {
+		return missing
+	}
+	allowed := make(map[string]bool, len(roles))
+	for _, role := range roles {
+		allowed[role] = true
+	}
+	filtered := make([]MissingRoleWork, 0, len(missing))
+	for _, roleWork := range missing {
+		if allowed[roleWork.Role] {
+			filtered = append(filtered, roleWork)
+		}
+	}
+	return filtered
 }
 
 func resolveRepairCLI(explicitCLI, role string, state *models.State, pr models.PipelineResolver) (string, error) {

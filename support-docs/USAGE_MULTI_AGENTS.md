@@ -171,7 +171,9 @@ The TUI (`liza tui`) is the primary way to spawn and monitor agents. Press `s` t
 
 Alternatively, spawn agents from the CLI: `liza agent <role>`. Agent identity defaults to the first `{role}-N` not already registered with a valid lease (e.g., `coder-1`, or `coder-2` if `coder-1` is active). Override with `--agent-id` or the `LIZA_AGENT_ID` environment variable.
 
-If claimable work is stuck because no live agent is registered for the required role, run `liza repair-agent-pool`. Add `--cli <name>` to choose the backend for newly spawned agents, or `--dry-run` to print the exact spawn commands without launching them.
+Headless watch (`liza tui --headless`) automatically repairs claimable work that is stuck because no live agent is registered for the required role. Disable this with `LIZA_AUTO_REPAIR_AGENT_POOL=0` (or `false`/`no`). To repair manually, run `liza repair-agent-pool`. Add `--cli <name>` to choose the backend for newly spawned agents, or `--dry-run` to print the exact spawn commands without launching them.
+
+Avoid running multiple headless watchers for the same project. Auto-repair backoff is per watcher process. Liza's agent registration and `max-instances` guards prevent invalid ownership, but two watchers can briefly observe the same missing-role gap before a newly spawned agent registers.
 
 Roles are organized into four sub-pipelines (specification, architecture, coding, integration). Which agents you need depends on your entry point:
 

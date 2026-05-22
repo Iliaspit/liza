@@ -333,6 +333,8 @@ When `liza tui` triggers the circuit breaker, it also sets `sprint.status` to `C
 
 The `--cli` flag on `liza agent` and `liza repair-agent-pool` selects which coding agent to invoke. When omitted, the default is resolved from role-specific config (`config.default_doer_cli` for doers and orchestrators, `config.default_reviewer_cli` for reviewers), then role-specific env (`LIZA_DEFAULT_DOER_CLI` for doers and orchestrators, `LIZA_DEFAULT_REVIEWER_CLI` for reviewers), then `config.default_cli`, then `LIZA_DEFAULT_CLI`, then `claude`. Set defaults at init time with `liza init --default-cli <cli>`, `liza init --default-doer-cli <cli>`, or `liza init --default-reviewer-cli <cli>`.
 
+Headless watch automatically runs the repair-agent-pool behavior when a task is immediately claimable but no live agent is registered for the required role. This is enabled by default. Set `LIZA_AUTO_REPAIR_AGENT_POOL=0`, `false`, or `no` to disable it. Unset or empty values enable it; other invalid non-empty values also leave it enabled and emit a warning.
+
 | CLI | Notes |
 |-----|-------|
 | `claude` | Claude Code (fallback default when no config is set) |

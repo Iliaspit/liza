@@ -3,6 +3,7 @@ package commands
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -17,6 +18,22 @@ import (
 	"github.com/liza-mas/liza/internal/procscan"
 	"github.com/liza-mas/liza/internal/testhelpers"
 )
+
+func unsetAutoRepairAgentPoolEnv(t *testing.T) {
+	t.Helper()
+
+	previous, ok := os.LookupEnv(EnvAutoRepairAgentPool)
+	if err := os.Unsetenv(EnvAutoRepairAgentPool); err != nil {
+		t.Fatalf("unset %s: %v", EnvAutoRepairAgentPool, err)
+	}
+	t.Cleanup(func() {
+		if ok {
+			_ = os.Setenv(EnvAutoRepairAgentPool, previous)
+			return
+		}
+		_ = os.Unsetenv(EnvAutoRepairAgentPool)
+	})
+}
 
 func TestCheckExpiredLeases(t *testing.T) {
 	now := time.Now().UTC()
@@ -1121,6 +1138,7 @@ func TestCheckImmediateDiscoveries(t *testing.T) {
 }
 
 func TestWatchCommand(t *testing.T) {
+	t.Setenv(EnvAutoRepairAgentPool, "0")
 	now := time.Now().UTC()
 
 	tests := []struct {
@@ -1183,6 +1201,297 @@ func TestWatchCommand(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestRunChecks_AutoRepairAgentPoolDefaultEnabled(t *testing.T) {
+	unsetAutoRepairAgentPoolEnv(t)
+
+	tmpDir := t.TempDir()
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	testhelpers.SetupPipelineConfig(t, tmpDir)
+	state := testhelpers.CreateValidState()
+	state.Tasks = []models.Task{
+		testhelpers.BuildTaskByStatus("task-1", models.TaskStatusReady, time.Now().UTC()),
+	}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	var calls []spawnedAgentCall
+	withFakeRepairSpawner(t, &calls, nil)
+
+	config := WatchConfig{
+		ProjectRoot: tmpDir,
+		AlertsLog:   paths.New(tmpDir).AlertsLogPath(),
+		StateCache:  make(map[string]time.Time),
+		WarnWriter:  io.Discard,
+	}
+	if err := runChecks(context.Background(), config); err != nil {
+		t.Fatalf("runChecks() error = %v", err)
+	}
+	if len(calls) != 1 {
+		t.Fatalf("spawn calls = %+v, want one", calls)
+	}
+	if calls[0].role != "coder" {
+		t.Fatalf("spawned role = %q, want coder", calls[0].role)
+	}
+}
+
+func TestRunChecks_AutoRepairAgentPoolDisabled(t *testing.T) {
+	t.Setenv(EnvAutoRepairAgentPool, "no")
+
+	tmpDir := t.TempDir()
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	testhelpers.SetupPipelineConfig(t, tmpDir)
+	state := testhelpers.CreateValidState()
+	state.Tasks = []models.Task{
+		testhelpers.BuildTaskByStatus("task-1", models.TaskStatusReady, time.Now().UTC()),
+	}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	var calls []spawnedAgentCall
+	withFakeRepairSpawner(t, &calls, nil)
+
+	config := WatchConfig{
+		ProjectRoot: tmpDir,
+		AlertsLog:   paths.New(tmpDir).AlertsLogPath(),
+		StateCache:  make(map[string]time.Time),
+		WarnWriter:  io.Discard,
+	}
+	if err := runChecks(context.Background(), config); err != nil {
+		t.Fatalf("runChecks() error = %v", err)
+	}
+	if len(calls) != 0 {
+		t.Fatalf("spawn calls = %+v, want none", calls)
+	}
+}
+
+func TestRunChecks_AutoRepairAgentPoolNoMissingRoles(t *testing.T) {
+	unsetAutoRepairAgentPoolEnv(t)
+
+	tmpDir := t.TempDir()
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	testhelpers.SetupPipelineConfig(t, tmpDir)
+	state := testhelpers.CreateValidState()
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	var calls []spawnedAgentCall
+	withFakeRepairSpawner(t, &calls, nil)
+
+	config := WatchConfig{
+		ProjectRoot: tmpDir,
+		AlertsLog:   paths.New(tmpDir).AlertsLogPath(),
+		StateCache:  make(map[string]time.Time),
+		WarnWriter:  io.Discard,
+	}
+	if err := runChecks(context.Background(), config); err != nil {
+		t.Fatalf("runChecks() error = %v", err)
+	}
+	if len(calls) != 0 {
+		t.Fatalf("spawn calls = %+v, want none", calls)
+	}
+}
+
+func TestRunChecks_AutoRepairAgentPoolIndependentFromMissingRoleAlertThrottle(t *testing.T) {
+	unsetAutoRepairAgentPoolEnv(t)
+
+	tmpDir := t.TempDir()
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	testhelpers.SetupPipelineConfig(t, tmpDir)
+	state := testhelpers.CreateValidState()
+	state.Tasks = []models.Task{
+		testhelpers.BuildTaskByStatus("task-1", models.TaskStatusReady, time.Now().UTC()),
+	}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	var calls []spawnedAgentCall
+	withFakeRepairSpawner(t, &calls, nil)
+
+	cache := map[string]time.Time{
+		"missing-role:coder": time.Now().UTC(),
+	}
+	config := WatchConfig{
+		ProjectRoot: tmpDir,
+		AlertsLog:   paths.New(tmpDir).AlertsLogPath(),
+		StateCache:  cache,
+		WarnWriter:  io.Discard,
+	}
+	if err := runChecks(context.Background(), config); err != nil {
+		t.Fatalf("first runChecks() error = %v", err)
+	}
+	if len(calls) != 1 {
+		t.Fatalf("first spawn calls = %+v, want one despite missing-role alert throttle", calls)
+	}
+
+	if err := runChecks(context.Background(), config); err != nil {
+		t.Fatalf("second runChecks() error = %v", err)
+	}
+	if len(calls) != 1 {
+		t.Fatalf("second spawn calls = %+v, want auto-repair backoff to suppress retry", calls)
+	}
+
+	cache[autoRepairAgentPoolCachePrefix+"coder"] = time.Now().UTC().Add(-AutoRepairAgentPoolBackoff - time.Second)
+	if err := runChecks(context.Background(), config); err != nil {
+		t.Fatalf("third runChecks() error = %v", err)
+	}
+	if len(calls) != 2 {
+		t.Fatalf("third spawn calls = %+v, want retry after auto-repair backoff", calls)
+	}
+}
+
+func TestRunChecks_AutoRepairAgentPoolBackoffIsPerProcess(t *testing.T) {
+	unsetAutoRepairAgentPoolEnv(t)
+
+	tmpDir := t.TempDir()
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	testhelpers.SetupPipelineConfig(t, tmpDir)
+	state := testhelpers.CreateValidState()
+	state.Tasks = []models.Task{
+		testhelpers.BuildTaskByStatus("task-1", models.TaskStatusReady, time.Now().UTC()),
+	}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	var calls []spawnedAgentCall
+	withFakeRepairSpawner(t, &calls, nil)
+
+	configA := WatchConfig{
+		ProjectRoot: tmpDir,
+		AlertsLog:   paths.New(tmpDir).AlertsLogPath(),
+		StateCache:  make(map[string]time.Time),
+		WarnWriter:  io.Discard,
+	}
+	configB := WatchConfig{
+		ProjectRoot: tmpDir,
+		AlertsLog:   paths.New(tmpDir).AlertsLogPath(),
+		StateCache:  make(map[string]time.Time),
+		WarnWriter:  io.Discard,
+	}
+	if err := runChecks(context.Background(), configA); err != nil {
+		t.Fatalf("configA runChecks() error = %v", err)
+	}
+	if err := runChecks(context.Background(), configB); err != nil {
+		t.Fatalf("configB runChecks() error = %v", err)
+	}
+	if len(calls) != 2 {
+		t.Fatalf("spawn calls = %+v, want one call per independent watch cache", calls)
+	}
+}
+
+func TestRunChecks_AutoRepairAgentPoolFailureWritesWarningAndAlert(t *testing.T) {
+	unsetAutoRepairAgentPoolEnv(t)
+
+	tmpDir := t.TempDir()
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	testhelpers.SetupPipelineConfig(t, tmpDir)
+	lizaPaths := paths.New(tmpDir)
+	state := testhelpers.CreateValidState()
+	state.Tasks = []models.Task{
+		testhelpers.BuildTaskByStatus("task-1", models.TaskStatusReady, time.Now().UTC()),
+	}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	var calls []spawnedAgentCall
+	withFakeRepairSpawner(t, &calls, errors.New("boom"))
+
+	var warnings bytes.Buffer
+	config := WatchConfig{
+		ProjectRoot: tmpDir,
+		AlertsLog:   lizaPaths.AlertsLogPath(),
+		StateCache:  make(map[string]time.Time),
+		WarnWriter:  &warnings,
+	}
+	if err := runChecks(context.Background(), config); err != nil {
+		t.Fatalf("runChecks() error = %v", err)
+	}
+	if len(calls) != 1 {
+		t.Fatalf("spawn calls = %+v, want one", calls)
+	}
+	if !strings.Contains(warnings.String(), "auto repair agent pool failed") {
+		t.Fatalf("warnings = %q, want auto repair failure", warnings.String())
+	}
+	alertLogData, err := os.ReadFile(lizaPaths.AlertsLogPath())
+	if err != nil {
+		t.Fatalf("read alerts log: %v", err)
+	}
+	if !strings.Contains(string(alertLogData), "AUTO REPAIR FAILED") {
+		t.Fatalf("alerts log missing AUTO REPAIR FAILED:\n%s", string(alertLogData))
+	}
+}
+
+func TestRunChecks_AutoRepairAgentPoolPartialFailureReportsFailedAndSpawnedRoles(t *testing.T) {
+	unsetAutoRepairAgentPoolEnv(t)
+
+	tmpDir := t.TempDir()
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	testhelpers.SetupPipelineConfig(t, tmpDir)
+	state := testhelpers.CreateValidState()
+	now := time.Now().UTC()
+	state.Tasks = []models.Task{
+		testhelpers.BuildTaskByStatus("task-1", models.TaskStatusReady, now),
+		testhelpers.BuildTaskByStatus("plan-1", models.TaskStatusDraftCodingPlan, now),
+		testhelpers.BuildTaskByStatus("review-1", models.TaskStatusReadyForReview, now),
+	}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	var calls []spawnedAgentCall
+	withFakeRepairSpawnerByRole(t, &calls, func(role string) error {
+		if role == "code-reviewer" {
+			return errors.New("boom")
+		}
+		return nil
+	})
+
+	var warnings bytes.Buffer
+	config := WatchConfig{
+		ProjectRoot: tmpDir,
+		AlertsLog:   paths.New(tmpDir).AlertsLogPath(),
+		StateCache:  make(map[string]time.Time),
+		WarnWriter:  &warnings,
+	}
+	if err := runChecks(context.Background(), config); err != nil {
+		t.Fatalf("runChecks() error = %v", err)
+	}
+	if len(calls) != 3 {
+		t.Fatalf("spawn calls = %+v, want three", calls)
+	}
+	warning := warnings.String()
+	if !strings.Contains(warning, "code-reviewer: boom") {
+		t.Fatalf("warning = %q, want failed reviewer role", warning)
+	}
+	if !strings.Contains(warning, "already started role(s):") {
+		t.Fatalf("warning = %q, want successful spawned roles", warning)
+	}
+}
+
+func TestRunChecks_AutoRepairAgentPoolInvalidEnvWarnsAndStaysEnabled(t *testing.T) {
+	t.Setenv(EnvAutoRepairAgentPool, "maybe")
+
+	tmpDir := t.TempDir()
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	testhelpers.SetupPipelineConfig(t, tmpDir)
+	state := testhelpers.CreateValidState()
+	state.Tasks = []models.Task{
+		testhelpers.BuildTaskByStatus("task-1", models.TaskStatusReady, time.Now().UTC()),
+	}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	var calls []spawnedAgentCall
+	withFakeRepairSpawner(t, &calls, nil)
+
+	var warnings bytes.Buffer
+	config := WatchConfig{
+		ProjectRoot: tmpDir,
+		AlertsLog:   paths.New(tmpDir).AlertsLogPath(),
+		StateCache:  make(map[string]time.Time),
+		WarnWriter:  &warnings,
+	}
+	if err := runChecks(context.Background(), config); err != nil {
+		t.Fatalf("runChecks() error = %v", err)
+	}
+	if len(calls) != 1 {
+		t.Fatalf("spawn calls = %+v, want one", calls)
+	}
+	if !strings.Contains(warnings.String(), "not a recognized boolean") {
+		t.Fatalf("warnings = %q, want invalid env warning", warnings.String())
 	}
 }
 
@@ -1587,6 +1896,7 @@ func TestRunChecks_AlertsOnUnacknowledgedCircuitBreakerPattern(t *testing.T) {
 }
 
 func TestRunChecks_CircuitBreakerAlertCoexistsWithOtherAlerts(t *testing.T) {
+	t.Setenv(EnvAutoRepairAgentPool, "0")
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 	testhelpers.SetupPipelineConfig(t, tmpDir)

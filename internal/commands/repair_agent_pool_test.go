@@ -56,6 +56,37 @@ func writeRepairAgentPoolState(t *testing.T, state *models.State) string {
 	return tmpDir
 }
 
+func TestParseAutoRepairAgentPoolEnv(t *testing.T) {
+	tests := []struct {
+		name        string
+		value       string
+		ok          bool
+		wantEnabled bool
+		wantWarning bool
+	}{
+		{name: "unset defaults enabled", ok: false, wantEnabled: true},
+		{name: "explicit empty defaults enabled", value: "", ok: true, wantEnabled: true},
+		{name: "one enables", value: "1", ok: true, wantEnabled: true},
+		{name: "true enables", value: "TRUE", ok: true, wantEnabled: true},
+		{name: "zero disables", value: "0", ok: true, wantEnabled: false},
+		{name: "false disables", value: "False", ok: true, wantEnabled: false},
+		{name: "no disables", value: "no", ok: true, wantEnabled: false},
+		{name: "invalid enables with warning", value: "maybe", ok: true, wantEnabled: true, wantWarning: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotEnabled, warning := parseAutoRepairAgentPoolEnv(tt.value, tt.ok)
+			if gotEnabled != tt.wantEnabled {
+				t.Fatalf("enabled = %v, want %v", gotEnabled, tt.wantEnabled)
+			}
+			if (warning != "") != tt.wantWarning {
+				t.Fatalf("warning = %q, wantWarning %v", warning, tt.wantWarning)
+			}
+		})
+	}
+}
+
 func TestRepairAgentPool_DryRunUsesConfiguredDefaultCLI(t *testing.T) {
 	t.Setenv("LIZA_DEFAULT_CLI", "")
 	t.Setenv("LIZA_DEFAULT_DOER_CLI", "")
@@ -171,6 +202,37 @@ func TestRepairAgentPool_ExplicitCLISpawnsOneAgentPerMissingRole(t *testing.T) {
 	}
 	if result.Missing[0].TaskCount != 2 {
 		t.Errorf("TaskCount = %d, want 2", result.Missing[0].TaskCount)
+	}
+}
+
+func TestRepairAgentPool_RolesFiltersMissingWork(t *testing.T) {
+	state := testhelpers.CreateValidState()
+	now := time.Now().UTC()
+	state.Tasks = []models.Task{
+		testhelpers.BuildTaskByStatus("task-1", models.TaskStatusReady, now),
+		testhelpers.BuildTaskByStatus("review-1", models.TaskStatusReadyForReview, now),
+	}
+	projectRoot := writeRepairAgentPoolState(t, state)
+
+	var calls []spawnedAgentCall
+	withFakeRepairSpawner(t, &calls, nil)
+
+	result, err := RepairAgentPool(RepairAgentPoolOptions{
+		ProjectRoot: projectRoot,
+		CLI:         "claude",
+		Roles:       []string{"code-reviewer"},
+	})
+	if err != nil {
+		t.Fatalf("RepairAgentPool() error = %v", err)
+	}
+	if len(calls) != 1 {
+		t.Fatalf("spawn calls = %+v, want one", calls)
+	}
+	if calls[0].role != "code-reviewer" {
+		t.Fatalf("spawned role = %q, want code-reviewer", calls[0].role)
+	}
+	if len(result.Missing) != 1 || result.Missing[0].Role != "code-reviewer" {
+		t.Fatalf("missing = %+v, want only code-reviewer", result.Missing)
 	}
 }
 
