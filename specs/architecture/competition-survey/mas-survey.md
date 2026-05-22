@@ -3,7 +3,7 @@
 ## Landscape Overview
 
 The multi-agent coding space has evolved rapidly since Liza's first release. The field now splits into
-six distinct categories, each solving a different problem. Liza sits in a category of one.
+seven distinct categories, each solving a different problem. Liza sits in a category of one.
 
 **General-purpose agent orchestration frameworks** (CrewAI, LangGraph, AutoGen, Semantic Kernel) provide
 building blocks for assembling multi-agent workflows across any domain. They optimize for flexibility and
@@ -28,11 +28,16 @@ PRD interview, architecture, stories, and code review. Each workflow runs in a f
 comes from structured process, context engineering, and a three-layer adversarial code review — all at the
 prompt level, with no mechanical merge gate.
 
+**AI engineering workflow suites** (gstack) install broad specialist skill packs and power tools into
+AI coding assistants. They optimize for solo-builder leverage across product discovery, design, code
+review, QA, security, browser automation, and release. Trust comes from expert prompt depth, outside
+voices, and selected host hooks, not from supervisor-owned task state or merge authority.
+
 **Behavioral enforcement systems** (Liza). One entry. A hybrid hardened architecture: deterministic
 Go supervisors enforce state transitions, role boundaries, merge authority, and TDD gates mechanically,
 while LLM agents handle judgment under a behavioral contract addressing 55+ failure modes. One orchestrator
 plus 12 other roles span three pipeline phases (specification → coding → integration), organized as adversarial doer/reviewer pairs
-with configurable review quorum and provider-diversity enforcement. Declarative YAML pipeline schema
+with configurable review quorum and provider-diversity preference/gates. Declarative YAML pipeline schema
 drives role context, skills, permissions, and prompt construction. Checkpoint-gated phase transitions
 ensure human review of planning output before coding begins. Optimizes for trust through mechanical
 constraint of agent failure modes.
@@ -66,6 +71,54 @@ constraint of agent failure modes.
 - Scale-adaptive tracks (Quick Flow / BMad Method / Enterprise) match planning depth to project complexity
 
 **Market position**: Closest philosophical neighbour. Same domain (software engineering with multi-agent coordination), opposite architectural bet. BMAD trusts agents when given good methodology; Liza mechanically constrains them. Liza's README acknowledges BMAD for "role templates and workflow patterns." Octo Technology places both at L4 maturity. Architecturally complementary — BMAD's upstream methodology (analysis, PRD, architecture, UX) feeds naturally into Liza's downstream execution (spec decomposition, adversarial coding, mechanical review, supervised merges). [Full comparison](liza-vs-bmad-comparison.md).
+
+---
+
+### gstack
+
+**What it is**: Garry Tan's AI engineering workflow suite: 52 generated slash-command skills plus
+Bun/TypeScript helper tools and a persistent Chromium browser daemon. It installs into Claude Code,
+Codex CLI, OpenCode, Cursor, Factory Droid, Slate, Kiro, Hermes, GBrain, and related hosts. MIT
+licensed, ~100.7k stars / ~15k forks as of 2026-05-22, v1.43.2.0 in the local shallow clone.
+
+**Current state (May 2026)**: Extremely high adoption velocity, helped by Garry Tan's distribution
+as YC CEO. The repo ships product/planning skills (`/office-hours`, `/plan-ceo-review`,
+`/plan-eng-review`, `/autoplan`), implementation and review skills (`/review`, `/codex`,
+`/investigate`), browser and QA workflows (`/browse`, `/qa`, `/qa-only`), design workflows
+(`/design-shotgun`, `/design-html`, `/design-review`), release/deploy workflows (`/ship`,
+`/land-and-deploy`, `/canary`), memory (`/learn`), and safety guards (`/careful`, `/freeze`,
+`/guard`). The browser daemon is the most substantial hard subsystem.
+
+**Philosophy**: "A single person with AI can now build what used to take a team of twenty." gstack's
+ETHOS.md centers on Boil the Lake, Search Before Building, and User Sovereignty. Quality comes from
+giving one active human a large bench of specialist workflows and fast feedback loops.
+
+**Trust model**: Prompt-level methodology plus selected mechanical hooks. `/freeze` blocks Edit/Write
+outside a directory, `/careful` warns on destructive Bash patterns, the browser daemon has token and
+tunnel isolation, and review skills dispatch specialist subagents / Codex outside voices. But there is
+no blackboard, lease, supervisor-owned task state, or mechanical merge gate.
+
+**Where it falls short vs Liza**:
+- No code-enforced role boundaries across task lifecycle
+- No supervisor-owned task state, leases, or crash recovery
+- No isolated worktrees or merge authority separated from the active session
+- No binding doer/reviewer state machine; review is advisory even when rigorous
+- Subagents and Codex outside voices contribute findings, but the parent session decides
+- Safety hooks are host/tool-surface dependent (`/freeze` does not constrain Bash writes)
+
+**What's interesting about it**:
+- Best-in-class browser/QA substrate among surveyed systems
+- Generated skill docs (`SKILL.md.tmpl` -> `SKILL.md`) reduce drift between tool commands and agent instructions
+- Declarative host adapter configs are a clean pattern for multi-host prompt/tool adaptation
+- Product/design/DX/release workflow breadth reaches above and below Liza's current MAS pipeline
+- Per-project learnings and design taste memory are pragmatic, if subordinate to durable specs
+
+**Market position**: High-traction adjacent/direct competitor. Like BMAD, gstack is prompt/workflow-first,
+but broader and more tool-heavy; unlike GSD, it optimizes human-in-the-loop solo leverage rather than
+context-budgeted autonomous execution. Architecturally complementary: gstack's browser, QA, design, and
+release capabilities could sit behind Liza's supervisor gates. [Full comparison](liza-vs-gstack.md).
+
+---
 
 ### MetaGPT / MGX
 
@@ -469,22 +522,22 @@ operates at architecture-selection level, not behavioral enforcement level. The 
 
 ## Competitive Dimensions Matrix
 
-| Dimension | Liza | BMAD | CrewAI | Ruflo | GSD | Symphony | Paperclip |
-|-----------|------|------|--------|-------|-----|----------|-----------|
-| **Spec input level** | High-level goal doc (product decisions only) → orchestrator decomposes. Human owns spec via pairing (Coach/Challenger). | Full lifecycle (brainstorming → PRFAQ → PRD → Architecture → Epics → Stories); PM agent interviews human | None (task descriptions) | None (task descriptions) | Detailed spec required → plan → execute → verify | Issue tracker (Linear) | Goal → delegated tasks |
-| **Domain** | Software engineering (13 roles, 3 phases, declarative pipeline) | Software engineering + product discovery (6 named agents, 4 phases + Quick Flow track) | General-purpose | Software engineering (60+ agent types) | Software engineering (15 agents, 4 phases) | Task scheduling | Business operations |
-| **Trust approach** | Behavioral contract (55+ failure modes) + review quorum + provider diversity | Structured process + context engineering; prompt-level discipline | Post-hoc output validation | Track-record based (Q-learning) | Spec-driven + deviation rules | Implementation-dependent | Budget/approval governance |
-| **Role enforcement** | Code-enforced (CLI-native Go supervisor, YAML-driven permissions) | Prompt-level (6 named personas, skill and workflow step files) | Prompt suggestion | Claude hooks (provider-specific) | Prompt-level (least-privilege tooling) | None (single-agent) | Org chart hierarchy |
-| **Review loop** | Adversarial doer/reviewer pairs with quorum + provider diversity gate | 3 parallel reviewers (Blind Hunter / Edge Case Hunter / Acceptance Auditor) → triage buckets; advisory (no merge gate) | Optional manager mode (broken) | None (single-pass) | Checker + verifier (separate, not adversarial) | None | None |
-| **Failure handling** | Structural prevention + escalation + checkpoint-gated transitions | `bmad-correct-course`, retrospective, readiness gate (PASS/CONCERNS/FAIL) | Retry on output failure | Pattern matching from past successes | 3 retries + document + move on | Implementation-dependent | Budget auto-pause |
-| **Provider compliance** | Empirical matrix (5 providers), provider-diversity enforcement | IDE-agnostic (Claude Code, Cursor, Codex, Copilot); no compliance testing | None published | Claude-only | Multi-runtime (6), no compliance testing | Codex-only | Agent-agnostic (no testing) |
-| **Context management** | Tiered degradation, structured HandoffEvents, prompt templates | Fresh chat per workflow; markdown artifact re-reads | Memory (short/long/entity) | HNSW-indexed persistent memory | Fresh subagent contexts, context budget enforcement | Per-issue workspace | Persistent sessions |
-| **Crash recovery** | recover-agent, recover-task | None (fresh-chat architecture) | None | None | File-based state, session resume, state reconstruction | BEAM supervision trees | Session persistence |
-| **Cost tracking** | Planned (token-level) | None documented | None native | None | Model profiles (quality/balanced/budget), proxy metrics | None | Per-agent/task/project budgets |
-| **Multi-sprint** | Yes (numbering, checkpoints, archive, replan) | `sprint-status.yaml` per sprint; no cross-sprint continuity | No | No | No (session/phase-scoped) | Per-issue runs | Heartbeat-based scheduling |
-| **Maturity** | Alpha MAS (three phases shipped), battle-tested pairing | Production (V6.3.0, April 2026) | Production (v1.9.0) | Active development | Production (v1.25+) | Engineering preview | Just launched |
-| **Stars** | Early | ~45.2k | 45k | Growing | 37k | New | 14k |
-| **License** | Apache 2.0 | MIT (trademarked) | MIT | MIT | MIT | Apache 2.0 | MIT |
+| Dimension | Liza | BMAD | gstack | CrewAI | Ruflo | GSD | Symphony | Paperclip |
+|-----------|------|------|--------|--------|-------|-----|----------|-----------|
+| **Spec input level** | High-level goal doc (product decisions only) → orchestrator decomposes. Human owns spec via pairing (Coach/Challenger). | Full lifecycle (brainstorming → PRFAQ → PRD → Architecture → Epics → Stories); PM agent interviews human | Product idea / plan / live app depending on skill; human sequences workflows | None (task descriptions) | None (task descriptions) | Detailed spec required → plan → execute → verify | Issue tracker (Linear) | Goal → delegated tasks |
+| **Domain** | Software engineering (13 roles, 3 phases, declarative pipeline) | Software engineering + product discovery (6 named agents, 4 phases + Quick Flow track) | Software engineering + product/design/QA/release workflow suite | General-purpose | Software engineering (60+ agent types) | Software engineering (15 agents, 4 phases) | Task scheduling | Business operations |
+| **Trust approach** | Behavioral contract (55+ failure modes) + review quorum + provider-diversity preference/gates | Structured process + context engineering; prompt-level discipline | Expert prompt workflows + outside voices + selected hooks | Post-hoc output validation | Track-record based (Q-learning) | Spec-driven + deviation rules | Implementation-dependent | Budget/approval governance |
+| **Role enforcement** | Code-enforced (CLI-native Go supervisor, YAML-driven permissions) | Prompt-level (6 named personas, skill and workflow step files) | Prompt-level personas plus host hooks; no supervisor state | Prompt suggestion | Claude hooks (provider-specific) | Prompt-level (least-privilege tooling) | None (single-agent) | Org chart hierarchy |
+| **Review loop** | Adversarial doer/reviewer pairs with quorum + provider-diversity gate/preference | 3 parallel reviewers (Blind Hunter / Edge Case Hunter / Acceptance Auditor) → triage buckets; advisory (no merge gate) | `/review` specialists + Claude/Codex outside voices; advisory | Optional manager mode (broken) | None (single-pass) | Checker + verifier (separate, not adversarial) | None | None |
+| **Failure handling** | Structural prevention + escalation + checkpoint-gated transitions | `bmad-correct-course`, retrospective, readiness gate (PASS/CONCERNS/FAIL) | STOP points, 3-strike debugging, context-save/restore, local learnings | Retry on output failure | Pattern matching from past successes | 3 retries + document + move on | Implementation-dependent | Budget auto-pause |
+| **Provider compliance** | Empirical matrix (5 providers), provider-diversity preference/gates | IDE-agnostic (Claude Code, Cursor, Codex, Copilot); no compliance testing | 10 host configs, model overlays; no behavioral compliance matrix | None published | Claude-only | Multi-runtime (6), no compliance testing | Codex-only | Agent-agnostic (no testing) |
+| **Context management** | Tiered degradation, structured HandoffEvents, prompt templates | Fresh chat per workflow; markdown artifact re-reads | Per-skill deep context, local learnings, session tracking | Memory (short/long/entity) | HNSW-indexed persistent memory | Fresh subagent contexts, context budget enforcement | Per-issue workspace | Persistent sessions |
+| **Crash recovery** | recover-agent, recover-task | None (fresh-chat architecture) | Manual context-save/restore, optional WIP checkpoints; no task recovery | None | None | File-based state, session resume, state reconstruction | BEAM supervision trees | Session persistence |
+| **Cost tracking** | Planned (token-level) | None documented | Telemetry/model benchmark helpers; no governance budget model | None native | None | Model profiles (quality/balanced/budget), proxy metrics | None | Per-agent/task/project budgets |
+| **Multi-sprint** | Yes (numbering, checkpoints, archive, replan) | `sprint-status.yaml` per sprint; no cross-sprint continuity | No MAS sprint lifecycle; branch/project learnings persist | No | No | No (session/phase-scoped) | Per-issue runs | Heartbeat-based scheduling |
+| **Maturity** | Alpha MAS (three phases shipped), battle-tested pairing | Production (V6.3.0, April 2026) | Fast-moving, high adoption (v1.43.2.0, May 2026) | Production (v1.9.0) | Active development | Production (v1.25+) | Engineering preview | Just launched |
+| **Stars** | Early | ~45.2k | ~100.7k | 45k | Growing | 37k | New | 14k |
+| **License** | Apache 2.0 | MIT (trademarked) | MIT | MIT | MIT | MIT | Apache 2.0 | MIT |
 
 ---
 
@@ -494,6 +547,7 @@ operates at architecture-selection level, not behavioral enforcement level. The 
 |--------|---------------|--------------------------|---------------|-------------------|
 | **Liza** | High-level goal (problem, users, behavior, scope) | Human via pairing (Coach/Challenger) | Orchestrator decomposes into tasks | Doer/reviewer pairs with quorum |
 | **BMAD** | Full lifecycle (brainstorming → PRFAQ → PRD → Architecture → Stories) | Human via conversational PM-agent interview | Phase workflows produce artifacts (PRD → Architecture → Epics → Stories) | Three-layer parallel reviewers at code stage (prompt-level) |
+| **gstack** | Product idea / plan / live app depending on skill | Human via User Sovereignty; AI challenges and recommends | Human sequences skills; `/autoplan` chains reviews into plans | `/review` specialists + Codex/Claude outside voices, advisory |
 | **Spec Kit** | High-level goal → agent-generated spec | Agent generates, human approves | Agent decomposes spec into tasks | None |
 | **OpenSpec** | Detailed delta-specs on existing system | Human (spec assumed pre-decided) | Slash commands structure tasks | None (verify is advisory) |
 | **Kiro** | Interactive 3-doc generation | Agent drives, human confirms | Agent decomposes from spec | None (single-agent) |
@@ -532,6 +586,11 @@ resonates with developers. The insight is real — agent quality does degrade wi
 But context engineering and behavioral enforcement solve different problems. A fresh-context agent can
 still mutate tests, violate scope, or skip review. The complete solution needs both.
 
+**Workflow suites are becoming the adoption wedge.** gstack packages git worktrees, tmux sessions,
+AI CLI orchestration, and review loops into a single operator surface. This suggests a competing route
+to multi-agent adoption: make everyday coding workflows feel coordinated first, then layer deeper
+architectural governance on top.
+
 **Spec-driven development is converging — but at different altitudes.** GitHub Spec Kit, OpenSpec,
 Kiro, Intent, and BMAD-METHOD all position around "spec before code." Most either expect a
 detailed technical spec as input (OpenSpec, GSD) or have the agent generate one (Spec Kit,
@@ -554,7 +613,7 @@ WHAT), then mechanical pipeline execution.
 **Enterprise trust remains unsolved by everyone except Liza.** Every framework survey and comparison
 article mentions guardrails as a desirable feature. Nobody has what Liza has — 55+ documented failure
 modes with mechanical countermeasures, code-enforced role boundaries, adversarial review with
-configurable quorum, provider-diversity enforcement, and checkpoint-gated phase transitions.
+configurable quorum, provider-diversity gates, and checkpoint-gated phase transitions.
 Recent additions (review quorum, provider diversity blocking, structured handoff events, declarative
 pipeline schema) widen this gap further — these are trust mechanisms that require deep architectural
 commitment, not features that can be bolted on.
@@ -563,7 +622,7 @@ commitment, not features that can be bolted on.
 
 ## Code Quality Evidence
 
-Claude Code Opus 4.6 produced a [code quality assessment](code_quality_assessment.md) of the Liza codebase
+Claude Code Opus 4.6 produced a [code quality assessment](../code_quality_assessment.md) of the Liza codebase
 (commit 972d6c26, March 2026). Key findings:
 
 **Overall Rating: A (Excellent)**
