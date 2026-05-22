@@ -12,6 +12,7 @@ require (
 	github.com/mattn/go-runewidth v0.0.16
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.9
+	github.com/tailscale/hujson v0.0.0-20260302212456-ecc657c15afd
 	gopkg.in/yaml.v3 v3.0.1
 )
 

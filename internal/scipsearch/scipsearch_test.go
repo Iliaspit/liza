@@ -334,6 +334,249 @@ func TestRuntimeCommandPlanningBuildsExactCommandPlans(t *testing.T) {
 	}
 }
 
+func TestRuntimeCommandPlanningInfersTypeScriptCwdFromReferencedConfigInclude(t *testing.T) {
+	t.Setenv(EnvEnableScipSearch, "true")
+	target := t.TempDir()
+	writeTestFile(t, target, "apps/web/tsconfig.json", `{
+  "files": [],
+  "references": [
+    { "path": "./tsconfig.node" },
+    { "path": "./tsconfig.app" },
+  ],
+}`)
+	writeTestFile(t, target, "apps/web/tsconfig.app.json", `{
+  "compilerOptions": {
+    /* real tsconfig files are JSONC */
+    "jsx": "react-jsx",
+  },
+  "include": ["src/**/*.ts"]
+}`)
+	writeTestFile(t, target, "apps/web/tsconfig.node.json", `{
+  "files": ["vite.config.ts"]
+}`)
+
+	plans, err := PlanRuntimeCommands(RuntimePlanOptions{
+		TargetRoot:          target,
+		ConfiguredLanguages: []string{"typescript"},
+		GitFiles: func(string) ([]string, error) {
+			return []string{
+				"apps/web/tsconfig.json",
+				"apps/web/tsconfig.app.json",
+				"apps/web/tsconfig.node.json",
+				"apps/web/src/App.tsx",
+				"apps/web/vite.config.ts",
+			}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("PlanRuntimeCommands() error = %v", err)
+	}
+
+	outputPath := filepath.Join(target, ".liza", "scip", "typescript.scip")
+	want := []RuntimeCommandPlan{{
+		Language:   "typescript",
+		Name:       "scip-typescript",
+		Args:       []string{"index", "--cwd", filepath.Join(target, "apps", "web", "src"), "--output", outputPath, filepath.Join(target, "apps", "web")},
+		Dir:        target,
+		OutputPath: outputPath,
+	}}
+	if !reflect.DeepEqual(plans, want) {
+		t.Fatalf("PlanRuntimeCommands() = %#v, want %#v", plans, want)
+	}
+}
+
+func TestRuntimeCommandPlanningInfersTypeScriptCwdFromFilesParent(t *testing.T) {
+	t.Setenv(EnvEnableScipSearch, "true")
+	target := t.TempDir()
+	writeTestFile(t, target, "apps/web/tsconfig.json", `{
+  "files": ["vite.config.ts"]
+}`)
+
+	plans, err := PlanRuntimeCommands(RuntimePlanOptions{
+		TargetRoot:          target,
+		ConfiguredLanguages: []string{"typescript"},
+		GitFiles: func(string) ([]string, error) {
+			return []string{"apps/web/tsconfig.json", "apps/web/vite.config.ts"}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("PlanRuntimeCommands() error = %v", err)
+	}
+
+	outputPath := filepath.Join(target, ".liza", "scip", "typescript.scip")
+	want := []RuntimeCommandPlan{{
+		Language:   "typescript",
+		Name:       "scip-typescript",
+		Args:       []string{"index", "--cwd", filepath.Join(target, "apps", "web"), "--output", outputPath, filepath.Join(target, "apps", "web")},
+		Dir:        target,
+		OutputPath: outputPath,
+	}}
+	if !reflect.DeepEqual(plans, want) {
+		t.Fatalf("PlanRuntimeCommands() = %#v, want %#v", plans, want)
+	}
+}
+
+func TestRuntimeCommandPlanningPreservesDottedTypeScriptIncludeDirectory(t *testing.T) {
+	t.Setenv(EnvEnableScipSearch, "true")
+	target := t.TempDir()
+	writeTestFile(t, target, "apps/web/tsconfig.json", `{
+  "include": [".storybook"]
+}`)
+
+	plans, err := PlanRuntimeCommands(RuntimePlanOptions{
+		TargetRoot:          target,
+		ConfiguredLanguages: []string{"typescript"},
+		GitFiles: func(string) ([]string, error) {
+			return []string{"apps/web/tsconfig.json", "apps/web/.storybook/main.ts"}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("PlanRuntimeCommands() error = %v", err)
+	}
+
+	outputPath := filepath.Join(target, ".liza", "scip", "typescript.scip")
+	wantArgs := []string{"index", "--cwd", filepath.Join(target, "apps", "web", ".storybook"), "--output", outputPath, filepath.Join(target, "apps", "web")}
+	if len(plans) != 1 || !reflect.DeepEqual(plans[0].Args, wantArgs) {
+		t.Fatalf("plans = %#v, want TypeScript args %#v", plans, wantArgs)
+	}
+}
+
+func TestRuntimeCommandPlanningMapsExistingTypeScriptIncludeFileToParent(t *testing.T) {
+	t.Setenv(EnvEnableScipSearch, "true")
+	target := t.TempDir()
+	writeTestFile(t, target, "apps/web/tsconfig.json", `{
+  "include": ["vite.config.ts"]
+}`)
+	writeTestFile(t, target, "apps/web/vite.config.ts", `export default {}`)
+
+	plans, err := PlanRuntimeCommands(RuntimePlanOptions{
+		TargetRoot:          target,
+		ConfiguredLanguages: []string{"typescript"},
+		GitFiles: func(string) ([]string, error) {
+			return []string{"apps/web/tsconfig.json", "apps/web/vite.config.ts"}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("PlanRuntimeCommands() error = %v", err)
+	}
+
+	outputPath := filepath.Join(target, ".liza", "scip", "typescript.scip")
+	wantArgs := []string{"index", "--cwd", filepath.Join(target, "apps", "web"), "--output", outputPath, filepath.Join(target, "apps", "web")}
+	if len(plans) != 1 || !reflect.DeepEqual(plans[0].Args, wantArgs) {
+		t.Fatalf("plans = %#v, want TypeScript args %#v", plans, wantArgs)
+	}
+}
+
+func TestRuntimeCommandPlanningPrefersOmittedReferenceJSONFileOverDirectory(t *testing.T) {
+	t.Setenv(EnvEnableScipSearch, "true")
+	target := t.TempDir()
+	writeTestFile(t, target, "apps/web/tsconfig.json", `{
+  "references": [{ "path": "./tsconfig.app" }]
+}`)
+	writeTestFile(t, target, "apps/web/tsconfig.app.json", `{
+  "include": ["src"]
+}`)
+	writeTestFile(t, target, "apps/web/tsconfig.app/tsconfig.json", `{
+  "include": ["storybook"]
+}`)
+
+	plans, err := PlanRuntimeCommands(RuntimePlanOptions{
+		TargetRoot:          target,
+		ConfiguredLanguages: []string{"typescript"},
+		GitFiles: func(string) ([]string, error) {
+			return []string{
+				"apps/web/tsconfig.json",
+				"apps/web/tsconfig.app.json",
+				"apps/web/tsconfig.app/tsconfig.json",
+				"apps/web/src/App.tsx",
+				"apps/web/tsconfig.app/storybook/main.ts",
+			}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("PlanRuntimeCommands() error = %v", err)
+	}
+
+	outputPath := filepath.Join(target, ".liza", "scip", "typescript.scip")
+	wantArgs := []string{"index", "--cwd", filepath.Join(target, "apps", "web", "src"), "--output", outputPath, filepath.Join(target, "apps", "web")}
+	if len(plans) != 1 || !reflect.DeepEqual(plans[0].Args, wantArgs) {
+		t.Fatalf("plans = %#v, want TypeScript args %#v", plans, wantArgs)
+	}
+}
+
+func TestRuntimeCommandPlanningSkipsInvalidTypeScriptRootAndUsesNextCandidate(t *testing.T) {
+	t.Setenv(EnvEnableScipSearch, "true")
+	target := t.TempDir()
+	writeTestFile(t, target, "apps/a/tsconfig.json", `{ invalid jsonc `)
+	writeTestFile(t, target, "apps/b/tsconfig.json", `{
+  "include": ["src"]
+}`)
+
+	plans, err := PlanRuntimeCommands(RuntimePlanOptions{
+		TargetRoot:          target,
+		ConfiguredLanguages: []string{"typescript"},
+		GitFiles: func(string) ([]string, error) {
+			return []string{
+				"apps/a/tsconfig.json",
+				"apps/a/src/a.ts",
+				"apps/b/tsconfig.json",
+				"apps/b/src/b.ts",
+			}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("PlanRuntimeCommands() error = %v", err)
+	}
+
+	outputPath := filepath.Join(target, ".liza", "scip", "typescript.scip")
+	wantArgs := []string{"index", "--cwd", filepath.Join(target, "apps", "b", "src"), "--output", outputPath, filepath.Join(target, "apps", "b")}
+	if len(plans) != 1 || !reflect.DeepEqual(plans[0].Args, wantArgs) {
+		t.Fatalf("plans = %#v, want TypeScript args %#v", plans, wantArgs)
+	}
+	if plans[0].Dir != target {
+		t.Fatalf("TypeScript plan Dir = %q, want target root %q", plans[0].Dir, target)
+	}
+}
+
+func TestRuntimeCommandPlanningFallsBackWhenTypeScriptConfigCannotInferTargetLocalRoot(t *testing.T) {
+	t.Setenv(EnvEnableScipSearch, "true")
+	target := t.TempDir()
+	parent := filepath.Dir(target)
+	outside := filepath.Join(parent, "outside")
+	if err := os.MkdirAll(outside, 0o755); err != nil {
+		t.Fatalf("MkdirAll(%q) error = %v", outside, err)
+	}
+	if err := os.WriteFile(filepath.Join(outside, "tsconfig.json"), []byte(`{"include":["src"]}`), 0o644); err != nil {
+		t.Fatalf("WriteFile(outside tsconfig) error = %v", err)
+	}
+	writeTestFile(t, target, "tsconfig.json", `{
+  "references": [{ "path": "../outside" }]
+}`)
+
+	plans, err := PlanRuntimeCommands(RuntimePlanOptions{
+		TargetRoot:          target,
+		ConfiguredLanguages: []string{"typescript"},
+		GitFiles: func(string) ([]string, error) {
+			return []string{"tsconfig.json", "src/main.ts"}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("PlanRuntimeCommands() error = %v", err)
+	}
+
+	outputPath := filepath.Join(target, ".liza", "scip", "typescript.scip")
+	want := []RuntimeCommandPlan{{
+		Language:   "typescript",
+		Name:       "scip-typescript",
+		Args:       []string{"index", "--cwd", target, "--output", outputPath, target},
+		Dir:        target,
+		OutputPath: outputPath,
+	}}
+	if !reflect.DeepEqual(plans, want) {
+		t.Fatalf("PlanRuntimeCommands() = %#v, want fallback %#v", plans, want)
+	}
+}
+
 func TestRuntimeRefreshCreatesParentAndRunsExactCommandPlans(t *testing.T) {
 	t.Setenv(EnvEnableScipSearch, "true")
 	target := t.TempDir()
@@ -673,6 +916,18 @@ func failGitFiles(t *testing.T) GitFilesFunc {
 	return func(string) ([]string, error) {
 		t.Fatal("git files must not be consulted")
 		return nil, nil
+	}
+}
+
+func writeTestFile(t *testing.T, root, rel, content string) {
+	t.Helper()
+
+	path := filepath.Join(root, filepath.FromSlash(rel))
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("MkdirAll(%q) error = %v", filepath.Dir(path), err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("WriteFile(%q) error = %v", path, err)
 	}
 }
 

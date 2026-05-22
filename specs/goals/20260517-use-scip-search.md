@@ -254,6 +254,19 @@ Language indexers are separate tools from `scip-search`. Installing
 `scip-go` expects a Go module. Liza should run it from the directory containing
 `go.mod` or pass `--module-root <worktree-path>`.
 
+For TypeScript, Liza must not assume a `src/` layout. Runtime command planning
+should inspect git-tracked `tsconfig.json` files under the target root, rank
+root configs by shallowest path then lexicographic path, parse JSONC
+`tsconfig` content, follow `references` depth-first in sorted order with a
+visited set, and infer `scip-typescript --cwd` from leaf `include`/`files`
+static directory prefixes. `references[].path` may point to a directory, an
+explicit config file, or a config file with the `.json` suffix omitted. Resolved
+referenced configs and inferred source roots must remain under the Liza target
+root. Bad or non-inferable root configs should be skipped; Liza falls back to
+the target-root TypeScript command only after every candidate fails. The
+`RuntimeCommandPlan.Dir` and generated index output path remain scoped to the
+Liza target root.
+
 ## Index Storage
 
 Task-local SCIP indexes should be stored under:
