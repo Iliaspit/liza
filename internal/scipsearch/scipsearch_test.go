@@ -311,7 +311,7 @@ func TestRuntimeCommandPlanningBuildsExactCommandPlans(t *testing.T) {
 		{
 			Language:   "go",
 			Name:       "scip-go",
-			Args:       []string{"index", "--module-root", target, "--skip-tests", "--output", filepath.Join(target, ".liza", "scip", "go.scip")},
+			Args:       []string{"index", "--module-root", target, "--output", filepath.Join(target, ".liza", "scip", "go.scip")},
 			Dir:        target,
 			OutputPath: filepath.Join(target, ".liza", "scip", "go.scip"),
 		},
@@ -817,7 +817,7 @@ func TestRuntimeRefreshCreatesParentAndRunsExactCommandPlans(t *testing.T) {
 		{
 			Language:   "go",
 			Name:       "scip-go",
-			Args:       []string{"index", "--module-root", target, "--skip-tests", "--output", goPath},
+			Args:       []string{"index", "--module-root", target, "--output", goPath},
 			Dir:        target,
 			OutputPath: goPath,
 		},

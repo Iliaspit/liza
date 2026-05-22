@@ -162,7 +162,7 @@ Baseline evidence:
 
 Examples:
 ```bash
-scip-go index --module-root "$(pwd)" --skip-tests --output go.scip
+scip-go index --module-root "$(pwd)" --output go.scip
 scip-typescript index --cwd ~/Workspace/omni/apps/web/src  --output ~/Workspace/omni/typescript.scip  ~/Workspace/omni/apps/web
 scip-python index --cwd ~/Workspace/omni/apps/api --output ~/Workspace/omni/python.scip
 ```

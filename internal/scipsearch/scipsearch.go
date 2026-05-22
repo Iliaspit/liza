@@ -380,7 +380,7 @@ func runtimeCommandPlan(targetRoot, language, outputPath string, files []string)
 	}
 	switch language {
 	case "go":
-		plan.Args = []string{"index", "--module-root", targetRoot, "--skip-tests", "--output", outputPath}
+		plan.Args = []string{"index", "--module-root", targetRoot, "--output", outputPath}
 	case "typescript":
 		cwd := targetRoot
 		projectRoot := targetRoot
