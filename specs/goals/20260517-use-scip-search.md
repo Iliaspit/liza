@@ -267,6 +267,27 @@ the target-root TypeScript command only after every candidate fails. The
 `RuntimeCommandPlan.Dir` and generated index output path remain scoped to the
 Liza target root.
 
+For Python, Liza must not assume the Liza target root is the Python project
+root. Runtime command planning should inspect git-tracked Python project
+markers under the target root (`pyproject.toml`, `setup.cfg`, `setup.py`,
+`requirements.txt`) and tracked `*.py` files. For a candidate root, eligible
+Python files are tracked `*.py` files under that root, excluding files under
+descendant directories that contain their own Python project marker. A candidate
+root is usable only when it has at least one eligible Python file. This prevents
+umbrella roots from swallowing nested Python projects while preserving roots
+that also have their own eligible Python files. Candidates are ranked by
+shallowest path then lexicographic path. If a selected Python project has all
+eligible Python files under `src/`, Liza may pass `--target-only=src`; otherwise
+it should index the whole Python project root. If no usable marker exists but
+tracked Python files exist under the target root, Liza falls back to target-root
+indexing. If Python is detected only by markers and no tracked Python files
+exist, Liza should not run `scip-python` for that target. Python inference is
+deterministic best-effort: the first milestone still emits one `python.scip` per
+target, so sibling Python projects under one target collapse to the first
+selected project root; complete multi-project Python coverage is out of scope
+for this pass. The `RuntimeCommandPlan.Dir` and generated index output path
+remain scoped to the Liza target root.
+
 ## Index Storage
 
 Task-local SCIP indexes should be stored under:

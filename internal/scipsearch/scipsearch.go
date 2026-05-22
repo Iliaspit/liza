@@ -363,12 +363,15 @@ func buildRuntimeCommandPlans(targetRoot string, languages []string, files []str
 	plans := make([]RuntimeCommandPlan, 0, len(languages))
 	for _, language := range languages {
 		outputPath := filepath.Join(targetRoot, ".liza", "scip", language+".scip")
-		plans = append(plans, runtimeCommandPlan(targetRoot, language, outputPath, files))
+		plan, ok := runtimeCommandPlan(targetRoot, language, outputPath, files)
+		if ok {
+			plans = append(plans, plan)
+		}
 	}
 	return plans
 }
 
-func runtimeCommandPlan(targetRoot, language, outputPath string, files []string) RuntimeCommandPlan {
+func runtimeCommandPlan(targetRoot, language, outputPath string, files []string) (RuntimeCommandPlan, bool) {
 	plan := RuntimeCommandPlan{
 		Language:   language,
 		Name:       languageIndexers[language],
@@ -387,9 +390,158 @@ func runtimeCommandPlan(targetRoot, language, outputPath string, files []string)
 		}
 		plan.Args = []string{"index", "--cwd", cwd, "--output", outputPath, projectRoot}
 	case "python":
-		plan.Args = []string{"index", "--cwd", targetRoot, "--output", outputPath}
+		inputs, ok := inferPythonCommandInputs(targetRoot, files)
+		if !ok {
+			return RuntimeCommandPlan{}, false
+		}
+		plan.Args = []string{"index", "--cwd", inputs.Cwd, "--output", outputPath}
+		if inputs.TargetOnly != "" {
+			plan.Args = append(plan.Args, "--target-only="+inputs.TargetOnly)
+		}
 	}
-	return plan
+	return plan, true
+}
+
+type pythonCommandInputs struct {
+	Cwd        string
+	TargetOnly string
+}
+
+var pythonProjectMarkerPriority = map[string]int{
+	"pyproject.toml":   0,
+	"setup.cfg":        1,
+	"setup.py":         2,
+	"requirements.txt": 3,
+}
+
+func inferPythonCommandInputs(targetRoot string, files []string) (pythonCommandInputs, bool) {
+	pythonFiles := pythonTrackedFiles(targetRoot, files)
+	if len(pythonFiles) == 0 {
+		return pythonCommandInputs{}, false
+	}
+
+	roots := pythonProjectRootCandidates(targetRoot, files)
+	for _, root := range roots {
+		eligible := eligiblePythonFilesForRoot(root, roots, pythonFiles)
+		if len(eligible) == 0 {
+			continue
+		}
+		inputs := pythonCommandInputs{Cwd: root}
+		if pythonFilesAllUnderSrc(root, eligible) {
+			inputs.TargetOnly = "src"
+		}
+		return inputs, true
+	}
+
+	return pythonCommandInputs{Cwd: targetRoot}, true
+}
+
+func pythonTrackedFiles(targetRoot string, files []string) []string {
+	var out []string
+	for _, file := range files {
+		if filepath.Ext(file) != ".py" {
+			continue
+		}
+		path, ok := cleanTargetRelativePath(targetRoot, file)
+		if ok {
+			out = append(out, path)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+func pythonProjectRootCandidates(targetRoot string, files []string) []string {
+	seen := map[string]int{}
+	for _, file := range files {
+		base := filepath.Base(file)
+		priority, ok := pythonProjectMarkerPriority[base]
+		if !ok {
+			continue
+		}
+		path, ok := cleanTargetRelativePath(targetRoot, file)
+		if !ok {
+			continue
+		}
+		root := filepath.Dir(path)
+		if previous, exists := seen[root]; !exists || priority < previous {
+			seen[root] = priority
+		}
+	}
+
+	roots := make([]string, 0, len(seen))
+	for root := range seen {
+		roots = append(roots, root)
+	}
+	sort.Slice(roots, func(i, j int) bool {
+		iDepth := pathDepthWithin(targetRoot, roots[i])
+		jDepth := pathDepthWithin(targetRoot, roots[j])
+		if iDepth != jDepth {
+			return iDepth < jDepth
+		}
+		return roots[i] < roots[j]
+	})
+	return roots
+}
+
+func eligiblePythonFilesForRoot(root string, candidateRoots, pythonFiles []string) []string {
+	descendantRoots := make([]string, 0)
+	for _, candidateRoot := range candidateRoots {
+		if candidateRoot != root && pathWithin(root, candidateRoot) {
+			descendantRoots = append(descendantRoots, candidateRoot)
+		}
+	}
+
+	var eligible []string
+	for _, file := range pythonFiles {
+		if !pathWithin(root, file) {
+			continue
+		}
+		if pathWithinAny(descendantRoots, file) {
+			continue
+		}
+		eligible = append(eligible, file)
+	}
+	return eligible
+}
+
+func pythonFilesAllUnderSrc(root string, files []string) bool {
+	srcRoot := filepath.Join(root, "src")
+	for _, file := range files {
+		if !pathWithin(srcRoot, file) {
+			return false
+		}
+	}
+	return len(files) > 0
+}
+
+func pathWithinAny(roots []string, path string) bool {
+	for _, root := range roots {
+		if pathWithin(root, path) {
+			return true
+		}
+	}
+	return false
+}
+
+func cleanTargetRelativePath(targetRoot, file string) (string, bool) {
+	file = filepath.Clean(filepath.FromSlash(file))
+	if file == "." || filepath.IsAbs(file) || strings.HasPrefix(file, ".."+string(filepath.Separator)) || file == ".." {
+		return "", false
+	}
+	path := filepath.Join(targetRoot, file)
+	if !pathWithin(targetRoot, path) {
+		return "", false
+	}
+	return filepath.Clean(path), true
+}
+
+func pathDepthWithin(root, path string) int {
+	rel, err := filepath.Rel(filepath.Clean(root), filepath.Clean(path))
+	if err != nil || rel == "." {
+		return 0
+	}
+	return strings.Count(filepath.ToSlash(rel), "/") + 1
 }
 
 type typeScriptCommandInputs struct {

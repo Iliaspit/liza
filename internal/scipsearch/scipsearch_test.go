@@ -251,6 +251,7 @@ func TestRuntimeCommandPlanningFiltersDetectedConfiguredLanguagesInDeterministic
 				"README.md",
 				"cmd/liza/main.go",
 				"pyproject.toml",
+				"scripts/tool.py",
 			}, nil
 		},
 	})
@@ -299,7 +300,7 @@ func TestRuntimeCommandPlanningBuildsExactCommandPlans(t *testing.T) {
 		TargetRoot:          target,
 		ConfiguredLanguages: []string{"go", "typescript", "python"},
 		GitFiles: func(string) ([]string, error) {
-			return []string{"go.mod", "tsconfig.json", "pyproject.toml"}, nil
+			return []string{"go.mod", "tsconfig.json", "pyproject.toml", "pkg/main.py"}, nil
 		},
 	})
 	if err != nil {
@@ -569,6 +570,216 @@ func TestRuntimeCommandPlanningFallsBackWhenTypeScriptConfigCannotInferTargetLoc
 		Language:   "typescript",
 		Name:       "scip-typescript",
 		Args:       []string{"index", "--cwd", target, "--output", outputPath, target},
+		Dir:        target,
+		OutputPath: outputPath,
+	}}
+	if !reflect.DeepEqual(plans, want) {
+		t.Fatalf("PlanRuntimeCommands() = %#v, want fallback %#v", plans, want)
+	}
+}
+
+func TestRuntimeCommandPlanningInfersPythonCwdAndTargetOnlyForSrcLayout(t *testing.T) {
+	t.Setenv(EnvEnableScipSearch, "true")
+	target := t.TempDir()
+
+	plans, err := PlanRuntimeCommands(RuntimePlanOptions{
+		TargetRoot:          target,
+		ConfiguredLanguages: []string{"python"},
+		GitFiles: func(string) ([]string, error) {
+			return []string{
+				"apps/api/pyproject.toml",
+				"apps/api/src/app/__init__.py",
+				"apps/api/src/app/main.py",
+			}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("PlanRuntimeCommands() error = %v", err)
+	}
+
+	outputPath := filepath.Join(target, ".liza", "scip", "python.scip")
+	want := []RuntimeCommandPlan{{
+		Language:   "python",
+		Name:       "scip-python",
+		Args:       []string{"index", "--cwd", filepath.Join(target, "apps", "api"), "--output", outputPath, "--target-only=src"},
+		Dir:        target,
+		OutputPath: outputPath,
+	}}
+	if !reflect.DeepEqual(plans, want) {
+		t.Fatalf("PlanRuntimeCommands() = %#v, want %#v", plans, want)
+	}
+}
+
+func TestRuntimeCommandPlanningPythonFlatProjectOmitsTargetOnly(t *testing.T) {
+	t.Setenv(EnvEnableScipSearch, "true")
+	target := t.TempDir()
+
+	plans, err := PlanRuntimeCommands(RuntimePlanOptions{
+		TargetRoot:          target,
+		ConfiguredLanguages: []string{"python"},
+		GitFiles: func(string) ([]string, error) {
+			return []string{"pyproject.toml", "package/__init__.py", "package/main.py"}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("PlanRuntimeCommands() error = %v", err)
+	}
+
+	outputPath := filepath.Join(target, ".liza", "scip", "python.scip")
+	wantArgs := []string{"index", "--cwd", target, "--output", outputPath}
+	if len(plans) != 1 || !reflect.DeepEqual(plans[0].Args, wantArgs) {
+		t.Fatalf("plans = %#v, want Python args %#v", plans, wantArgs)
+	}
+	if plans[0].Dir != target || plans[0].OutputPath != outputPath {
+		t.Fatalf("plan target scoping = Dir %q OutputPath %q, want %q %q", plans[0].Dir, plans[0].OutputPath, target, outputPath)
+	}
+}
+
+func TestRuntimeCommandPlanningPythonNestedProjectWinsWhenRootIsUmbrella(t *testing.T) {
+	t.Setenv(EnvEnableScipSearch, "true")
+	target := t.TempDir()
+
+	plans, err := PlanRuntimeCommands(RuntimePlanOptions{
+		TargetRoot:          target,
+		ConfiguredLanguages: []string{"python"},
+		GitFiles: func(string) ([]string, error) {
+			return []string{
+				"pyproject.toml",
+				"apps/api/pyproject.toml",
+				"apps/api/src/app/main.py",
+			}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("PlanRuntimeCommands() error = %v", err)
+	}
+
+	outputPath := filepath.Join(target, ".liza", "scip", "python.scip")
+	wantArgs := []string{"index", "--cwd", filepath.Join(target, "apps", "api"), "--output", outputPath, "--target-only=src"}
+	if len(plans) != 1 || !reflect.DeepEqual(plans[0].Args, wantArgs) {
+		t.Fatalf("plans = %#v, want Python args %#v", plans, wantArgs)
+	}
+}
+
+func TestRuntimeCommandPlanningPythonSiblingProjectsChooseFirstDeterministicCandidate(t *testing.T) {
+	t.Setenv(EnvEnableScipSearch, "true")
+	target := t.TempDir()
+
+	plans, err := PlanRuntimeCommands(RuntimePlanOptions{
+		TargetRoot:          target,
+		ConfiguredLanguages: []string{"python"},
+		GitFiles: func(string) ([]string, error) {
+			return []string{
+				"apps/api/pyproject.toml",
+				"apps/api/src/api/main.py",
+				"apps/worker/pyproject.toml",
+				"apps/worker/src/worker/main.py",
+			}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("PlanRuntimeCommands() error = %v", err)
+	}
+
+	outputPath := filepath.Join(target, ".liza", "scip", "python.scip")
+	wantArgs := []string{"index", "--cwd", filepath.Join(target, "apps", "api"), "--output", outputPath, "--target-only=src"}
+	if len(plans) != 1 || !reflect.DeepEqual(plans[0].Args, wantArgs) {
+		t.Fatalf("plans = %#v, want first deterministic Python project args %#v", plans, wantArgs)
+	}
+}
+
+func TestRuntimeCommandPlanningPythonRootRetainedWhenItHasEligibleFilesOutsideNestedProjects(t *testing.T) {
+	t.Setenv(EnvEnableScipSearch, "true")
+	target := t.TempDir()
+
+	plans, err := PlanRuntimeCommands(RuntimePlanOptions{
+		TargetRoot:          target,
+		ConfiguredLanguages: []string{"python"},
+		GitFiles: func(string) ([]string, error) {
+			return []string{
+				"pyproject.toml",
+				"scripts/deploy.py",
+				"apps/api/pyproject.toml",
+				"apps/api/src/app/main.py",
+			}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("PlanRuntimeCommands() error = %v", err)
+	}
+
+	outputPath := filepath.Join(target, ".liza", "scip", "python.scip")
+	wantArgs := []string{"index", "--cwd", target, "--output", outputPath}
+	if len(plans) != 1 || !reflect.DeepEqual(plans[0].Args, wantArgs) {
+		t.Fatalf("plans = %#v, want Python args %#v", plans, wantArgs)
+	}
+}
+
+func TestRuntimeCommandPlanningPythonMixedSrcAndPackageLayoutOmitsTargetOnly(t *testing.T) {
+	t.Setenv(EnvEnableScipSearch, "true")
+	target := t.TempDir()
+
+	plans, err := PlanRuntimeCommands(RuntimePlanOptions{
+		TargetRoot:          target,
+		ConfiguredLanguages: []string{"python"},
+		GitFiles: func(string) ([]string, error) {
+			return []string{
+				"pyproject.toml",
+				"package/__init__.py",
+				"src/tool.py",
+			}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("PlanRuntimeCommands() error = %v", err)
+	}
+
+	outputPath := filepath.Join(target, ".liza", "scip", "python.scip")
+	wantArgs := []string{"index", "--cwd", target, "--output", outputPath}
+	if len(plans) != 1 || !reflect.DeepEqual(plans[0].Args, wantArgs) {
+		t.Fatalf("plans = %#v, want Python args %#v", plans, wantArgs)
+	}
+}
+
+func TestRuntimeCommandPlanningPythonMarkerWithoutTrackedPythonFilesProducesNoPlan(t *testing.T) {
+	t.Setenv(EnvEnableScipSearch, "true")
+	target := t.TempDir()
+
+	plans, err := PlanRuntimeCommands(RuntimePlanOptions{
+		TargetRoot:          target,
+		ConfiguredLanguages: []string{"python"},
+		GitFiles: func(string) ([]string, error) {
+			return []string{"pyproject.toml", "README.md"}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("PlanRuntimeCommands() error = %v", err)
+	}
+	if len(plans) != 0 {
+		t.Fatalf("PlanRuntimeCommands() = %#v, want no Python plan without tracked Python files", plans)
+	}
+}
+
+func TestRuntimeCommandPlanningPythonNoMarkerFallsBackToTargetRootForTrackedPython(t *testing.T) {
+	t.Setenv(EnvEnableScipSearch, "true")
+	target := t.TempDir()
+
+	plans, err := PlanRuntimeCommands(RuntimePlanOptions{
+		TargetRoot:          target,
+		ConfiguredLanguages: []string{"python"},
+		GitFiles: func(string) ([]string, error) {
+			return []string{"scripts/tool.py"}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("PlanRuntimeCommands() error = %v", err)
+	}
+
+	outputPath := filepath.Join(target, ".liza", "scip", "python.scip")
+	want := []RuntimeCommandPlan{{
+		Language:   "python",
+		Name:       "scip-python",
+		Args:       []string{"index", "--cwd", target, "--output", outputPath},
 		Dir:        target,
 		OutputPath: outputPath,
 	}}
