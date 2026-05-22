@@ -57,6 +57,10 @@ func validateAnomalies(state *models.State, projectRoot string, skipSpecFileChec
 			if anomaly.Details["provider"] == nil || anomaly.Details["agent_id"] == nil || anomaly.Details["message"] == nil {
 				return fmt.Errorf("provider_audit_degraded anomaly at index %d missing required details (provider, agent_id, message)", i)
 			}
+		case "agent_degraded":
+			if anomaly.Details["agent_id"] == nil || anomaly.Details["role"] == nil || anomaly.Details["reason"] == nil || anomaly.Details["last_error"] == nil {
+				return fmt.Errorf("agent_degraded anomaly at index %d missing required details (agent_id, role, reason, last_error)", i)
+			}
 		case "stale_verdict":
 			if anomaly.Details["attempted_verdict"] == nil || anomaly.Details["current_status"] == nil {
 				return fmt.Errorf("stale_verdict anomaly at index %d missing required details (attempted_verdict, current_status)", i)

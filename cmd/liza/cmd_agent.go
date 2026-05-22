@@ -298,6 +298,52 @@ Examples:
 	},
 }
 
+var markAgentDegradedCmd = &cobra.Command{
+	Use:   "mark-agent-degraded <agent-id>",
+	Short: "Mark an agent as degraded for role-capacity health",
+	Long: `Mark an agent as degraded for role-capacity health.
+
+This records diagnostic health separate from agent lifecycle status and task
+state. repair-agent-pool ignores current degraded agent epochs when computing
+effective capacity.`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		projectRoot, err := requireProjectRoot()
+		if err != nil {
+			return err
+		}
+		role, _ := cmd.Flags().GetString("role")
+		reason, _ := cmd.Flags().GetString("reason")
+		task, _ := cmd.Flags().GetString("task")
+		candidates, _ := cmd.Flags().GetStringSlice("candidate-task")
+		lastError, _ := cmd.Flags().GetString("error")
+		hint, _ := cmd.Flags().GetString("recover-hint")
+		return commands.MarkAgentDegradedCommand(commands.MarkAgentDegradedOptions{
+			ProjectRoot:    projectRoot,
+			AgentID:        args[0],
+			Role:           role,
+			Reason:         reason,
+			LastTask:       task,
+			CandidateTasks: candidates,
+			LastError:      lastError,
+			RecoverHint:    hint,
+		})
+	},
+}
+
+var clearAgentDegradedCmd = &cobra.Command{
+	Use:   "clear-agent-degraded <agent-id>",
+	Short: "Clear degraded health for an agent",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		projectRoot, err := requireProjectRoot()
+		if err != nil {
+			return err
+		}
+		return commands.ClearAgentDegradedCommand(projectRoot, args[0])
+	},
+}
+
 var deleteAgentCmd = &cobra.Command{
 	Use:   "agent <agent-id>",
 	Short: "Delete an agent from the state database",
@@ -324,6 +370,8 @@ func init() {
 	rootCmd.AddCommand(recoverTaskCmd)
 	rootCmd.AddCommand(recoverAgentCmd)
 	rootCmd.AddCommand(repairAgentPoolCmd)
+	rootCmd.AddCommand(markAgentDegradedCmd)
+	rootCmd.AddCommand(clearAgentDegradedCmd)
 	deleteCmd.AddCommand(deleteAgentCmd)
 
 	// Agent command flags
@@ -346,6 +394,17 @@ func init() {
 	repairAgentPoolCmd.Flags().Bool("missing", false, "spawn roles with claimable work and no registered agent")
 	repairAgentPoolCmd.Flags().String("cli", "", "CLI to use for spawned agents; defaults by role-specific then global config/env; see docs")
 	repairAgentPoolCmd.Flags().Bool("dry-run", false, "print missing roles and spawn commands without launching agents")
+
+	// Agent health command flags
+	markAgentDegradedCmd.Flags().String("role", "", "runtime role whose capacity is degraded")
+	markAgentDegradedCmd.Flags().String("reason", "", "structured degraded reason")
+	markAgentDegradedCmd.Flags().String("task", "", "last task associated with the degraded signal")
+	markAgentDegradedCmd.Flags().StringSlice("candidate-task", nil, "candidate task considered during the degraded signal")
+	markAgentDegradedCmd.Flags().String("error", "", "last observed error")
+	markAgentDegradedCmd.Flags().String("recover-hint", "", "operator recovery hint")
+	markAgentDegradedCmd.MarkFlagRequired("role")
+	markAgentDegradedCmd.MarkFlagRequired("reason")
+	markAgentDegradedCmd.MarkFlagRequired("error")
 
 	// Delete agent command flags
 	deleteAgentCmd.Flags().Bool("force", false, "force deletion even if agent has active lease or current task")

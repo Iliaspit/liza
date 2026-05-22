@@ -11,12 +11,14 @@ liza get tasks                     # All tasks with current state
 liza get tasks --format table      # Tabular view
 liza get agents                    # Registered agents and lease status
 liza get agents --zombies          # Live liza agent supervisors missing from state
+liza clear-agent-degraded <id>     # Clear role-capacity health after manual recovery
 liza validate                      # Check blackboard against invariants
 liza validate --skip-process-checks # Offline/archive validation only
 liza analyze                       # Circuit breaker pattern detection
 ```
 
 `liza status --format json` and `liza get agents --format json` include `process_status_source` and `process_status_detail` for agents; status also includes them for phase-handoff blockers. Use these fields when a task appears assigned but the process state is ambiguous.
+Agent health is separate from lifecycle status. A degraded agent epoch remains visible in status/get-agents health fields and does not count as repair-agent-pool capacity until it is cleared or a newer successful claim proves capacity. If the agent process exits and unregisters, the health marker stays visible as degraded capacity context for repair/status output.
 Live zombie-agent detection currently requires Linux procfs. On hosts without procfs, `liza validate` warns and skips the live-process check, while `liza get agents --zombies` reports that scanning is unavailable.
 
 ## Recovery Commands

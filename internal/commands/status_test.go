@@ -666,6 +666,77 @@ func writeStatusProcCmdline(t *testing.T, procRoot string, pid int, argv []strin
 	}
 }
 
+func TestBuildStatusData_AgentHealth(t *testing.T) {
+	now := time.Now().UTC()
+	state := testhelpers.CreateValidState()
+	state.Agents["coder-1"] = models.Agent{
+		Role:         "coder",
+		Status:       models.AgentStatusIdle,
+		Provider:     "codex",
+		PID:          1234,
+		Heartbeat:    now,
+		RegisteredAt: now,
+	}
+	state.AgentHealth = map[string]models.AgentHealth{
+		"coder-1": {
+			State:        models.AgentHealthDegraded,
+			Role:         "coder",
+			Provider:     "codex",
+			PID:          1234,
+			RegisteredAt: &now,
+			DegradedAt:   now,
+			Reason:       "claim_worktree_create_failed",
+			RecoverHint:  "restart elsewhere",
+		},
+	}
+
+	data := BuildStatusData(state, false, "", nil, nil)
+
+	if data.AgentHealth == nil {
+		t.Fatal("AgentHealth = nil, want current degraded health")
+	}
+	if got := data.AgentHealth["coder-1"].Reason; got != "claim_worktree_create_failed" {
+		t.Fatalf("AgentHealth[coder-1].Reason = %q", got)
+	}
+	if len(data.Agents) != 1 || data.Agents[0].Health != string(models.AgentHealthDegraded) {
+		t.Fatalf("Agents = %+v, want degraded health on coder-1", data.Agents)
+	}
+	if data.WorkQueues.Coder.Degraded != 1 {
+		t.Fatalf("WorkQueues.Coder.Degraded = %d, want 1", data.WorkQueues.Coder.Degraded)
+	}
+}
+
+func TestBuildStatusData_OrphanedAgentHealth(t *testing.T) {
+	now := time.Now().UTC()
+	state := testhelpers.CreateValidState()
+	state.AgentHealth = map[string]models.AgentHealth{
+		"coder-1": {
+			State:       models.AgentHealthDegraded,
+			Role:        "coder",
+			Provider:    "codex",
+			PID:         1234,
+			DegradedAt:  now,
+			Reason:      "claim_worktree_create_failed",
+			RecoverHint: "restart outside sandbox",
+		},
+	}
+
+	data := BuildStatusData(state, false, "", nil, nil)
+
+	if data.AgentHealth == nil {
+		t.Fatal("AgentHealth = nil, want orphaned degraded health")
+	}
+	if got := data.AgentHealth["coder-1"].RecoverHint; got != "restart outside sandbox" {
+		t.Fatalf("AgentHealth[coder-1].RecoverHint = %q", got)
+	}
+	if len(data.Agents) != 0 {
+		t.Fatalf("Agents = %+v, want no active agents", data.Agents)
+	}
+	if data.WorkQueues.Coder.Degraded != 1 {
+		t.Fatalf("WorkQueues.Coder.Degraded = %d, want 1", data.WorkQueues.Coder.Degraded)
+	}
+}
+
 func TestBuildStatusData_WorkQueuesReason(t *testing.T) {
 	now := time.Now().UTC()
 	pipelineRoot := setupPipelineRoot(t)
@@ -1203,8 +1274,8 @@ func TestWriteAgentsSection(t *testing.T) {
 		got := b.String()
 
 		expect := "=== AGENTS ===\n" +
-			"ID   Role   Status   PID  Task  Heartbeat  Process\n" +
-			"c-1  coder  WORKING  123  t-1   30s        running\n\n"
+			"ID   Role   Status   Health  PID  Task  Heartbeat  Process\n" +
+			"c-1  coder  WORKING  -       123  t-1   30s        running\n\n"
 
 		if got != expect {
 			t.Errorf("output mismatch:\n--- got ---\n%q\n--- expect ---\n%q", got, expect)
@@ -1223,11 +1294,33 @@ func TestWriteAgentsSection(t *testing.T) {
 		got := b.String()
 
 		expect := "=== AGENTS ===\n" +
-			"ID   Role   Status  PID  Task  Heartbeat  Process\n" +
-			"c-1  coder  IDLE    -          10s        unknown\n\n"
+			"ID   Role   Status  Health  PID  Task  Heartbeat  Process\n" +
+			"c-1  coder  IDLE    -       -          10s        unknown\n\n"
 
 		if got != expect {
 			t.Errorf("output mismatch:\n--- got ---\n%q\n--- expect ---\n%q", got, expect)
 		}
 	})
+}
+
+func TestWriteAgentHealthSection(t *testing.T) {
+	health := map[string]models.AgentHealth{
+		"coder-1": {
+			State:       models.AgentHealthDegraded,
+			Role:        "coder",
+			Reason:      "claim_worktree_create_failed",
+			RecoverHint: "restart outside sandbox",
+		},
+	}
+
+	var b strings.Builder
+	writeAgentHealthSection(&b, health)
+	got := b.String()
+
+	if !strings.Contains(got, "=== AGENT HEALTH ===") {
+		t.Fatalf("expected health section, got:\n%s", got)
+	}
+	if !strings.Contains(got, "coder-1") || !strings.Contains(got, "restart outside sandbox") {
+		t.Fatalf("expected degraded agent details, got:\n%s", got)
+	}
 }

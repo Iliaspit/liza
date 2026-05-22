@@ -46,14 +46,23 @@ type FailedAgentSpawn struct {
 	Error   string `json:"error"`
 }
 
+type DegradedAgentCapacity struct {
+	AgentID     string `json:"agent_id"`
+	Role        string `json:"role"`
+	Reason      string `json:"reason"`
+	LastError   string `json:"last_error,omitempty"`
+	RecoverHint string `json:"recover_hint,omitempty"`
+}
+
 type RepairAgentPoolResult struct {
-	CLI      string             `json:"cli"`
-	RoleCLIs map[string]string  `json:"role_clis,omitempty"`
-	DryRun   bool               `json:"dry_run"`
-	Missing  []MissingRoleWork  `json:"missing"`
-	Spawned  []SpawnedAgent     `json:"spawned,omitempty"`
-	Failed   []FailedAgentSpawn `json:"failed,omitempty"`
-	Commands []string           `json:"commands,omitempty"`
+	CLI      string                  `json:"cli"`
+	RoleCLIs map[string]string       `json:"role_clis,omitempty"`
+	DryRun   bool                    `json:"dry_run"`
+	Missing  []MissingRoleWork       `json:"missing"`
+	Degraded []DegradedAgentCapacity `json:"degraded,omitempty"`
+	Spawned  []SpawnedAgent          `json:"spawned,omitempty"`
+	Failed   []FailedAgentSpawn      `json:"failed,omitempty"`
+	Commands []string                `json:"commands,omitempty"`
 }
 
 var repairAgentPoolSpawn = func(projectRoot, role, cli string) (int, error) {
@@ -118,9 +127,10 @@ func RepairAgentPool(opts RepairAgentPoolOptions) (*RepairAgentPoolResult, error
 
 	missing := filterMissingRoleWork(FindMissingRolesWithClaimableWork(state, pr), opts.Roles)
 	result := &RepairAgentPoolResult{
-		CLI:     opts.CLI,
-		DryRun:  opts.DryRun,
-		Missing: missing,
+		CLI:      opts.CLI,
+		DryRun:   opts.DryRun,
+		Missing:  missing,
+		Degraded: findCurrentDegradedAgentCapacity(state),
 	}
 
 	commonImplicitCLI := ""
@@ -232,8 +242,11 @@ func FindMissingRolesWithClaimableWork(state *models.State, pr models.PipelineRe
 	registeredRoles := make(map[string]bool)
 	now := time.Now()
 	nilLeaseHeartbeatWindow := models.NormalizeHeartbeatInterval(state.Config.HeartbeatInterval) + models.LeaseExpiryGracePeriod
-	for _, agentState := range state.Agents {
+	for agentID, agentState := range state.Agents {
 		if agentHasLiveRegistration(agentState, now, nilLeaseHeartbeatWindow) {
+			if agentHealthIsCurrentDegraded(state.AgentHealth[agentID], agentState) {
+				continue
+			}
 			registeredRoles[agentState.Role] = true
 		}
 	}
@@ -294,9 +307,64 @@ func agentHasLiveRegistration(agentState models.Agent, now time.Time, nilLeaseHe
 	return agentState.Heartbeat.After(now.Add(-nilLeaseHeartbeatWindow))
 }
 
+func agentHealthIsCurrentDegraded(health models.AgentHealth, agentState models.Agent) bool {
+	return health.IsCurrentDegradedFor(agentState)
+}
+
+func agentHealthIsCurrentOrOrphanedDegraded(health models.AgentHealth, agentState models.Agent, hasAgent bool) bool {
+	if health.State != models.AgentHealthDegraded {
+		return false
+	}
+	if !hasAgent {
+		return true
+	}
+	return health.IsCurrentDegradedFor(agentState)
+}
+
+func findCurrentDegradedAgentCapacity(state *models.State) []DegradedAgentCapacity {
+	if state == nil || len(state.AgentHealth) == 0 {
+		return nil
+	}
+	degraded := make([]DegradedAgentCapacity, 0, len(state.AgentHealth))
+	for agentID, health := range state.AgentHealth {
+		agentState, ok := state.Agents[agentID]
+		if !agentHealthIsCurrentOrOrphanedDegraded(health, agentState, ok) {
+			continue
+		}
+		degraded = append(degraded, DegradedAgentCapacity{
+			AgentID:     agentID,
+			Role:        health.Role,
+			Reason:      health.Reason,
+			LastError:   health.LastError,
+			RecoverHint: health.RecoverHint,
+		})
+	}
+	sort.Slice(degraded, func(i, j int) bool {
+		return degraded[i].AgentID < degraded[j].AgentID
+	})
+	return degraded
+}
+
 func printRepairAgentPoolResult(result *RepairAgentPoolResult) {
-	if len(result.Missing) == 0 {
+	if len(result.Missing) == 0 && len(result.Degraded) == 0 {
 		fmt.Println("No missing roles with claimable work.")
+		return
+	}
+
+	if len(result.Degraded) > 0 {
+		fmt.Println("Degraded agent capacity:")
+		for _, degraded := range result.Degraded {
+			fmt.Printf("  %s (%s): %s\n", degraded.AgentID, degraded.Role, degraded.Reason)
+			if degraded.RecoverHint != "" {
+				fmt.Printf("    hint: %s\n", degraded.RecoverHint)
+			}
+		}
+		if len(result.Missing) > 0 {
+			fmt.Println()
+		}
+	}
+
+	if len(result.Missing) == 0 {
 		return
 	}
 

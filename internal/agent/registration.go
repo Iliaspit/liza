@@ -111,6 +111,7 @@ func registerAgent(bb *db.Blackboard, projectRoot, agentID, role, terminal strin
 			Role:         role,
 			Status:       models.AgentStatusIdle,
 			Heartbeat:    now,
+			RegisteredAt: now,
 			Terminal:     terminal,
 			Provider:     provider,
 			LeaseExpires: &leaseExpires,

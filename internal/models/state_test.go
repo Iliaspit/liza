@@ -879,6 +879,7 @@ func TestAnomalyTypes(t *testing.T) {
 		"stale_verdict",
 		"system_ambiguity",
 		"provider_audit_degraded",
+		"agent_degraded",
 	}
 
 	for _, typ := range validTypes {

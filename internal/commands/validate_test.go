@@ -1179,6 +1179,14 @@ func TestValidateAnomalies_RequiredDetailsByType(t *testing.T) {
 			errContains: "provider_audit_degraded anomaly",
 		},
 		{
+			name: "agent_degraded missing required details fails",
+			anomaly: models.Anomaly{
+				Type:    "agent_degraded",
+				Details: map[string]any{"agent_id": "coder-1", "role": "coder", "reason": "claim_worktree_create_failed"},
+			},
+			errContains: "agent_degraded anomaly",
+		},
+		{
 			name: "stale_verdict missing required details fails",
 			anomaly: models.Anomaly{
 				Type:    "stale_verdict",
@@ -1251,6 +1259,18 @@ func TestValidateAnomalies_RequestedTypeBranchesPassWithValidDetails(t *testing.
 			anomaly: models.Anomaly{
 				Type:    "provider_audit_degraded",
 				Details: map[string]any{"provider": "codex", "agent_id": "coder-1", "message": "failed to record rollout items"},
+			},
+		},
+		{
+			name: "agent_degraded branch",
+			anomaly: models.Anomaly{
+				Type: "agent_degraded",
+				Details: map[string]any{
+					"agent_id":   "coder-1",
+					"role":       "coder",
+					"reason":     "claim_worktree_create_failed",
+					"last_error": "cannot lock ref",
+				},
 			},
 		},
 		{

@@ -171,7 +171,7 @@ The TUI (`liza tui`) is the primary way to spawn and monitor agents. Press `s` t
 
 Alternatively, spawn agents from the CLI: `liza agent <role>`. Agent identity defaults to the first `{role}-N` not already registered with a valid lease (e.g., `coder-1`, or `coder-2` if `coder-1` is active). Override with `--agent-id` or the `LIZA_AGENT_ID` environment variable.
 
-Headless watch (`liza tui --headless`) automatically repairs claimable work that is stuck because no live agent is registered for the required role. Disable this with `LIZA_AUTO_REPAIR_AGENT_POOL=0` (or `false`/`no`). To repair manually, run `liza repair-agent-pool`. Add `--cli <name>` to choose the backend for newly spawned agents, or `--dry-run` to print the exact spawn commands without launching them.
+Headless watch (`liza tui --headless`) automatically repairs claimable work that is stuck because no live usable agent is registered for the required role. Agents marked degraded for the current process epoch do not count as usable role capacity, and their health remains visible after unregister as degraded capacity context. Disable auto-repair with `LIZA_AUTO_REPAIR_AGENT_POOL=0` (or `false`/`no`). To repair manually, run `liza repair-agent-pool`. Add `--cli <name>` to choose the backend for newly spawned agents, or `--dry-run` to print the exact spawn commands without launching them.
 
 Avoid running multiple headless watchers for the same project. Auto-repair backoff is per watcher process. Liza's agent registration and `max-instances` guards prevent invalid ownership, but two watchers can briefly observe the same missing-role gap before a newly spawned agent registers.
 
@@ -399,9 +399,10 @@ The `liza` binary provides all system operations. Key commands:
 | `liza init <goal> --spec <spec_ref> [--branch <name>]` | Initialize `.liza/` directory with blackboard (spec_ref defaults to specs/vision.md, branch defaults to integration) |
 | **Agents & Monitoring** |                                                                                                                      |
 | `liza agent <role> [--agent-id <id>]` | Agent supervisor (start, restart, backoff loop; ID auto-assigned if omitted)                                         |
-| `liza repair-agent-pool [--cli <name>] [--dry-run]` | Spawn one agent for each claimable-work role that has no live registered agent                                      |
+| `liza repair-agent-pool [--cli <name>] [--dry-run]` | Spawn one agent for each claimable-work role that has no live usable agent                                         |
 | `liza tui` | Live TUI: spawn agents, monitor state, manage system                                                                 |
 | `liza status` | Show system and task status at a glance                                                                              |
+| `liza mark-agent-degraded <agent-id>` / `liza clear-agent-degraded <agent-id>` | Record or clear role-capacity health for an agent epoch                                                            |
 | **System Control** |                                                                                                                      |
 | `liza pause` / `liza resume` | Pause/resume system (resume also advances CHECKPOINT → COMPLETED → new sprint)                                       |
 | `liza replan [task-id]` | Amend a planner's output at CHECKPOINT (invalidate old task, create new planning task)                               |

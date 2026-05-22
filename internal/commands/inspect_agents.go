@@ -28,6 +28,9 @@ type agentInfo struct {
 	ID                  string  `json:"id" yaml:"id"`
 	Role                string  `json:"role" yaml:"role"`
 	Status              string  `json:"status" yaml:"status"`
+	Health              string  `json:"health,omitempty" yaml:"health,omitempty"`
+	HealthReason        string  `json:"health_reason,omitempty" yaml:"health_reason,omitempty"`
+	RecoverHint         string  `json:"recover_hint,omitempty" yaml:"recover_hint,omitempty"`
 	Provider            string  `json:"provider,omitempty" yaml:"provider,omitempty"`
 	PID                 int     `json:"pid" yaml:"pid"`
 	ProcessStatus       string  `json:"process_status" yaml:"process_status"`
@@ -68,7 +71,7 @@ func inspectAgents(state *models.State, opts inspectAgentsOptions) (any, error) 
 		}
 
 		// Build agentInfo with computed fields
-		info := buildAgentInfo(agentID, &agent, currentTask)
+		info := buildAgentInfoWithHealth(agentID, &agent, currentTask, state.AgentHealth[agentID])
 		agents = append(agents, info)
 	}
 
@@ -134,7 +137,7 @@ func inspectAgent(state *models.State, agentID string, opts inspectAgentsOptions
 	}
 
 	// Build agentInfo with computed fields
-	info := buildAgentInfo(agentID, &agent, currentTask)
+	info := buildAgentInfoWithHealth(agentID, &agent, currentTask, state.AgentHealth[agentID])
 
 	// If called internally, return structured data
 	if opts.Internal {
@@ -147,6 +150,10 @@ func inspectAgent(state *models.State, agentID string, opts inspectAgentsOptions
 
 // buildAgentInfo converts an Agent to agentInfo with computed fields
 func buildAgentInfo(agentID string, agent *models.Agent, currentTask *models.Task) agentInfo {
+	return buildAgentInfoWithHealth(agentID, agent, currentTask, models.AgentHealth{})
+}
+
+func buildAgentInfoWithHealth(agentID string, agent *models.Agent, currentTask *models.Task, health models.AgentHealth) agentInfo {
 	info := agentInfo{
 		ID:              agentID,
 		Role:            agent.Role,
@@ -156,6 +163,11 @@ func buildAgentInfo(agentID string, agent *models.Agent, currentTask *models.Tas
 		Terminal:        agent.Terminal,
 		IterationsTotal: agent.IterationsTotal,
 		ContextPercent:  agent.ContextPercent,
+	}
+	if agentHealthIsCurrentDegraded(health, *agent) {
+		info.Health = string(health.State)
+		info.HealthReason = health.Reason
+		info.RecoverHint = health.RecoverHint
 	}
 
 	// Copy PID and determine process status.
@@ -282,7 +294,7 @@ func formatAgentsTable(agents []agentInfo) string {
 		return "No agents found"
 	}
 
-	headers := []string{"ID", "ROLE", "STATUS", "PID", "CURRENT_TASK", "TIME_ON_TASK", "HEARTBEAT", "CONTEXT"}
+	headers := []string{"ID", "ROLE", "STATUS", "HEALTH", "PID", "CURRENT_TASK", "TIME_ON_TASK", "HEARTBEAT", "CONTEXT"}
 	var rows [][]string
 
 	for _, agent := range agents {
@@ -310,6 +322,7 @@ func formatAgentsTable(agents []agentInfo) string {
 			agent.ID,
 			agent.Role,
 			agent.Status,
+			formatAgentHealthForTable(agent),
 			pidDisplay,
 			currentTask,
 			timeOnTask,
@@ -319,6 +332,16 @@ func formatAgentsTable(agents []agentInfo) string {
 	}
 
 	return render.FormatTable(headers, rows)
+}
+
+func formatAgentHealthForTable(agent agentInfo) string {
+	if agent.Health == "" {
+		return "-"
+	}
+	if agent.HealthReason == "" {
+		return agent.Health
+	}
+	return agent.Health + ":" + agent.HealthReason
 }
 
 // formatAgentValue formats a single agent as key-value pairs

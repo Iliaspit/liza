@@ -40,6 +40,47 @@ func TestView_Ready_ContainsHeaderAndFooter(t *testing.T) {
 	}
 }
 
+func TestView_DegradedHealthDetailsUseNaturalAgentHeight(t *testing.T) {
+	now := time.Now().UTC()
+	m := newTestModel()
+	m.ready = true
+	m.width = 120
+	m.height = 18
+	m.columnTier = ColumnTierStandard
+	m.styles = NewStyles(120)
+	m.state = &models.State{
+		Goal:   models.Goal{Description: "Test Goal"},
+		Sprint: models.Sprint{ID: "sprint-1"},
+		Config: models.Config{Mode: models.SystemModeRunning},
+		Agents: map[string]models.Agent{
+			"coder-1": {
+				Role:         "coder",
+				Status:       models.AgentStatusIdle,
+				Provider:     "codex",
+				PID:          1234,
+				Heartbeat:    now,
+				RegisteredAt: now,
+			},
+		},
+		AgentHealth: map[string]models.AgentHealth{
+			"coder-1": {
+				State:        models.AgentHealthDegraded,
+				Role:         "coder",
+				Provider:     "codex",
+				PID:          1234,
+				RegisteredAt: &now,
+				DegradedAt:   now,
+				Reason:       "claim_worktree_create_failed",
+				RecoverHint:  "restart outside sandbox",
+			},
+		},
+	}
+
+	got := m.View()
+	assertContains(t, got, "claim_worktree_create_failed", "View should not clip degraded reason")
+	assertContains(t, got, "restart outside sandbox", "View should not clip degraded recovery hint")
+}
+
 func TestRenderHeader_ContainsGoalDescription(t *testing.T) {
 	m := newTestModel()
 	m.width = 120
@@ -216,6 +257,71 @@ func TestRenderAgentPanel_SortedByID(t *testing.T) {
 	}
 }
 
+func TestRenderAgentPanel_DegradedHealth(t *testing.T) {
+	now := time.Now().UTC()
+	m := Model{
+		width:      120,
+		height:     40,
+		columnTier: ColumnTierStandard,
+		styles:     NewStyles(120),
+		state: &models.State{
+			Agents: map[string]models.Agent{
+				"coder-1": {
+					Role:         "coder",
+					Status:       models.AgentStatusIdle,
+					Provider:     "codex",
+					PID:          1234,
+					Heartbeat:    now,
+					RegisteredAt: now,
+				},
+			},
+			AgentHealth: map[string]models.AgentHealth{
+				"coder-1": {
+					State:        models.AgentHealthDegraded,
+					Role:         "coder",
+					Provider:     "codex",
+					PID:          1234,
+					RegisteredAt: &now,
+					DegradedAt:   now,
+					Reason:       "claim_worktree_create_failed",
+					RecoverHint:  "restart outside sandbox",
+				},
+			},
+		},
+	}
+
+	out := m.renderAgentPanel(10)
+	assertContains(t, out, "HEALTH", "agent panel should expose health column")
+	assertContains(t, out, "degraded", "agent panel should expose degraded health")
+	assertContains(t, out, "claim_worktree_create_failed", "agent panel should expose degraded reason")
+	assertContains(t, out, "restart outside sandbox", "agent panel should expose recovery hint")
+}
+
+func TestRenderAgentPanel_OrphanedDegradedHealth(t *testing.T) {
+	m := Model{
+		width:      120,
+		height:     40,
+		columnTier: ColumnTierStandard,
+		styles:     NewStyles(120),
+		state: &models.State{
+			Agents: map[string]models.Agent{},
+			AgentHealth: map[string]models.AgentHealth{
+				"coder-1": {
+					State:       models.AgentHealthDegraded,
+					Role:        "coder",
+					Reason:      "claim_worktree_create_failed",
+					RecoverHint: "restart outside sandbox",
+				},
+			},
+		},
+	}
+
+	out := m.renderAgentPanel(10)
+	assertContains(t, out, "No agents", "agent panel should still report no active lifecycle rows")
+	assertContains(t, out, "Degraded capacity", "agent panel should expose orphaned degraded capacity")
+	assertContains(t, out, "restart outside sandbox", "agent panel should expose recovery hint")
+}
+
 func TestRenderAgentPanel_StatusDots(t *testing.T) {
 	m := Model{
 		width:      60,
@@ -303,11 +409,12 @@ func TestRenderAgentPanel_ColumnTierStandard(t *testing.T) {
 	}
 
 	colCount := countHeaderColumns(header)
-	if colCount != 4 {
-		t.Errorf("expected 4 columns at standard tier, got %d (header: %q)", colCount, header)
+	if colCount != 5 {
+		t.Errorf("expected 5 columns at standard tier, got %d (header: %q)", colCount, header)
 	}
 
 	assertContains(t, header, "ROLE", "header should contain ROLE")
+	assertContains(t, header, "HEALTH", "header should contain HEALTH")
 	assertContains(t, header, "CURRENT_TASK", "header should contain CURRENT_TASK")
 }
 
@@ -331,8 +438,8 @@ func TestRenderAgentPanel_ColumnTierWide(t *testing.T) {
 	}
 
 	colCount := countHeaderColumns(header)
-	if colCount != 5 {
-		t.Errorf("expected 5 columns at wide tier, got %d (header: %q)", colCount, header)
+	if colCount != 6 {
+		t.Errorf("expected 6 columns at wide tier, got %d (header: %q)", colCount, header)
 	}
 
 	assertContains(t, header, "LAST_HEARTBEAT", "header should contain LAST_HEARTBEAT")
@@ -358,8 +465,8 @@ func TestRenderAgentPanel_ColumnTierFull(t *testing.T) {
 	}
 
 	colCount := countHeaderColumns(header)
-	if colCount != 6 {
-		t.Errorf("expected 6 columns at full tier, got %d (header: %q)", colCount, header)
+	if colCount != 7 {
+		t.Errorf("expected 7 columns at full tier, got %d (header: %q)", colCount, header)
 	}
 
 	assertContains(t, header, "PID", "header should contain PID")
@@ -1152,7 +1259,7 @@ func findHeaderLine(output string) string {
 }
 
 func countHeaderColumns(header string) int {
-	columns := []string{"ID", "STATUS", "ROLE", "CURRENT_TASK", "LAST_HEARTBEAT", "PID"}
+	columns := []string{"ID", "STATUS", "ROLE", "HEALTH", "CURRENT_TASK", "LAST_HEARTBEAT", "PID"}
 	count := 0
 	for _, col := range columns {
 		if strings.Contains(header, col) {

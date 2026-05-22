@@ -1035,6 +1035,10 @@ func RunSupervisor(ctx context.Context, config SupervisorConfig) error {
 		// Claim task
 		taskID, claimedTaskID, err := strategy.ClaimTask(config, bb)
 		if err != nil {
+			if errors.Is(err, ErrAgentDegraded) {
+				GetLogger().Error("Agent marked degraded, exiting supervisor", "agent_id", config.AgentID, "role", config.Role, "error", err)
+				return nil
+			}
 			if err := waitForSupervisorDelay(5 * time.Second); err != nil {
 				return err
 			}

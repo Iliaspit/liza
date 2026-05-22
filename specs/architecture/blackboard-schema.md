@@ -522,6 +522,20 @@ agents:
     heartbeat: 2025-01-17T14:51:00Z
     terminal: /dev/pts/1
 
+agent_health:
+  coder-1:
+    state: degraded
+    role: coder
+    provider: codex
+    pid: 12345
+    registered_at: 2025-01-17T14:52:00Z
+    degraded_at: 2025-01-17T14:53:00Z
+    reason: claim_worktree_create_failed
+    last_task: task-2
+    candidate_tasks: [task-2, task-3]
+    last_error: "failed to create worktree: cannot lock ref"
+    recover_hint: "restart the agent from a process context that can write project git refs and .worktrees"
+
 discovered:
   - id: disc-1
     by: coder-1
@@ -911,6 +925,7 @@ For detailed definition including edge cases (submodules, untracked files), see 
 | `stale_verdict` | CLI | Reviewer attempted verdict after task already left review |
 | `system_ambiguity` | Any role | Liza protocol or role definition unclear, escalated to Orchestrator |
 | `provider_audit_degraded` | Supervisor | Provider ran but transcript/rollout persistence is suspect |
+| `agent_degraded` | Supervisor / CLI | Agent epoch cannot provide effective role capacity |
 
 **Required Details Fields (validated by `liza validate`):**
 
@@ -925,6 +940,7 @@ For detailed definition including edge cases (submodules, untracked files), see 
 | `stale_verdict` | `attempted_verdict`, `current_status` | Preserve reviewer findings lost to review-transition race |
 | `system_ambiguity` | `protocol_section`, `question` | Track Liza system gaps for human clarification |
 | `provider_audit_degraded` | `provider`, `agent_id`, `message` | Aggregate provider audit degradation across agents |
+| `agent_degraded` | `agent_id`, `role`, `reason`, `last_error` | Preserve claim-capacity degradation evidence |
 
 Anomalies with malformed details will fail validation. This ensures circuit breaker pattern detection has reliable data.
 The agent should be very specific about the faced issue so this may be reproduced and investigated.
@@ -1004,7 +1020,7 @@ invariants:
   - "Task arch_ref must reference an existing file (checked via checkSpecFileExists against project root then integration branch)"
   - "Task output entry arch_ref must not contain worktree prefix (.worktrees/) — must be repo-relative"
   # Note: output entry arch_ref does NOT have file-existence validation (entries are set before merge)
-  - "Anomaly type must be one of: retry_loop, trade_off, spec_ambiguity, external_blocker, assumption_violated, scope_deviation, workaround, debt_created, spec_changed, hypothesis_exhaustion, spec_gap, review_budget_exhausted, review_exhaustion, reviewer_loop, stale_verdict, system_ambiguity, provider_audit_degraded"
+  - "Anomaly type must be one of: retry_loop, trade_off, spec_ambiguity, external_blocker, assumption_violated, scope_deviation, workaround, debt_created, spec_changed, hypothesis_exhaustion, spec_gap, review_budget_exhausted, review_exhaustion, reviewer_loop, stale_verdict, system_ambiguity, provider_audit_degraded, agent_degraded"
   # Transition invariants (runtime-enforced, not statically validated)
   # These are enforced by agent behavior and atomic operations during state transitions.
   # `liza validate` validates static state invariants; these require history analysis.

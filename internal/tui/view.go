@@ -58,7 +58,7 @@ func (m Model) View() string {
 	const minActivity = 5 // border(2) + title(1) + at least 2 entries
 
 	// Natural (content-fitting) heights
-	agentNatural := agentCount + panelOverhead
+	agentNatural := agentCount + panelOverhead + currentAgentHealthDetailLineCount(m.state)
 	fullTaskNatural := (activeTaskCount + terminalTaskCount) + panelOverhead
 	activeTaskNatural := activeTaskCount + panelOverhead
 
@@ -161,6 +161,9 @@ func (m Model) renderAgentPanel(budget int) string {
 	// Handle empty/nil state
 	if m.state == nil || len(m.state.Agents) == 0 {
 		content := title + "\n  No agents"
+		if m.state != nil && len(m.state.AgentHealth) > 0 {
+			content += "\n" + renderCurrentAgentHealthForState(m.state)
+		}
 		return m.styles.AgentPanel.MaxHeight(budget).Render(content)
 	}
 
@@ -182,6 +185,14 @@ func (m Model) renderAgentPanel(budget int) string {
 		dot := StatusDot(string(a.Status))
 		color := StatusColor(string(a.Status))
 		return lipgloss.NewStyle().Foreground(color).Render(dot + " " + string(a.Status))
+	}
+
+	healthVal := func(id string, a models.Agent) string {
+		health, ok := m.state.AgentHealth[id]
+		if !ok || !health.IsCurrentDegradedFor(a) {
+			return "—"
+		}
+		return string(health.State)
 	}
 
 	currentTaskVal := func(_ string, a models.Agent) string {
@@ -207,14 +218,15 @@ func (m Model) renderAgentPanel(budget int) string {
 
 	// Build column list based on tier
 	cols := []column{
-		{"ID", 24, func(id string, _ models.Agent) string { return id }},
-		{"STATUS", 16, statusVal},
+		{"ID", 20, func(id string, _ models.Agent) string { return id }},
+		{"STATUS", 14, statusVal},
 	}
 
 	if m.columnTier >= ColumnTierStandard {
 		cols = append(cols,
-			column{"ROLE", 24, func(_ string, a models.Agent) string { return a.Role }},
-			column{"CURRENT_TASK", 44, currentTaskVal},
+			column{"ROLE", 16, func(_ string, a models.Agent) string { return a.Role }},
+			column{"HEALTH", 10, healthVal},
+			column{"CURRENT_TASK", 34, currentTaskVal},
 		)
 	}
 
@@ -238,8 +250,12 @@ func (m Model) renderAgentPanel(budget int) string {
 	headerRow := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("8")).
 		Render("  " + strings.Join(headerParts, ""))
 
-	// Build data rows — overhead: border(2) + title(1) + header(1) = 4
-	maxRows := max(budget-4, 0)
+	healthDetails := renderCurrentAgentHealthForState(m.state)
+
+	// Build data rows — overhead: border(2) + title(1) + header(1) = 4.
+	// Reserve room for degraded-capacity details so reason/hint lines survive
+	// the same MaxHeight budget used by the normal dashboard path.
+	maxRows := max(budget-4-lineCount(healthDetails), 0)
 
 	var rows []string
 	for i, id := range ids {
@@ -265,7 +281,73 @@ func (m Model) renderAgentPanel(budget int) string {
 	}
 
 	content := title + "\n" + headerRow + "\n" + strings.Join(rows, "\n")
+	if healthDetails != "" {
+		content += "\n" + healthDetails
+	}
 	return m.styles.AgentPanel.MaxHeight(budget).Render(content)
+}
+
+func currentAgentHealthDetailLineCount(state *models.State) int {
+	details := currentAgentHealthDetails(state)
+	if len(details) == 0 {
+		return 0
+	}
+	return len(details) + 1
+}
+
+func lineCount(s string) int {
+	if s == "" {
+		return 0
+	}
+	return strings.Count(s, "\n") + 1
+}
+
+func renderCurrentAgentHealthForState(state *models.State) string {
+	details := currentAgentHealthDetails(state)
+	if len(details) == 0 {
+		return ""
+	}
+
+	lines := []string{"  Degraded capacity:"}
+	for _, detail := range details {
+		line := fmt.Sprintf("  %s %s %s", detail.agentID, detail.health.Role, detail.health.Reason)
+		if detail.health.RecoverHint != "" {
+			line += " " + detail.health.RecoverHint
+		}
+		lines = append(lines, line)
+	}
+	return strings.Join(lines, "\n")
+}
+
+type currentAgentHealthDetail struct {
+	agentID string
+	health  models.AgentHealth
+}
+
+func currentAgentHealthDetails(state *models.State) []currentAgentHealthDetail {
+	if state == nil || len(state.AgentHealth) == 0 {
+		return nil
+	}
+	ids := make([]string, 0, len(state.AgentHealth))
+	for agentID, health := range state.AgentHealth {
+		if health.State != models.AgentHealthDegraded {
+			continue
+		}
+		if agentState, ok := state.Agents[agentID]; ok && !health.IsCurrentDegradedFor(agentState) {
+			continue
+		}
+		ids = append(ids, agentID)
+	}
+	sort.Strings(ids)
+
+	details := make([]currentAgentHealthDetail, 0, len(ids))
+	for _, agentID := range ids {
+		details = append(details, currentAgentHealthDetail{
+			agentID: agentID,
+			health:  state.AgentHealth[agentID],
+		})
+	}
+	return details
 }
 
 // renderTaskPanel renders the task panel as a bordered table.

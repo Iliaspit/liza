@@ -14,6 +14,8 @@ import (
 	"github.com/liza-mas/liza/internal/roles"
 )
 
+var ErrAgentDegraded = errors.New("agent degraded: infrastructure claim failure")
+
 func claimDoerTask(projectRoot, agentID, role string, bb *db.Blackboard) (taskID, worktree string, err error) {
 	logger := GetLogger()
 
@@ -65,13 +67,21 @@ func claimDoerTask(projectRoot, agentID, role string, bb *db.Blackboard) (taskID
 
 	// Try each candidate in the shuffled tier until one succeeds.
 	var lastErr error
+	candidateIDs := taskIDsFromCandidates(tier)
 	for _, task := range tier {
 		result, claimErr := ops.ClaimTask(projectRoot, task.ID, agentID)
 		if claimErr != nil {
 			logger.Warn("Claim attempt failed, trying next candidate",
 				"task_id", task.ID, "error", claimErr)
+			if classifyErr := markAgentDegradedForInfraClaim(projectRoot, agentID, role, task.ID, candidateIDs, claimErr); classifyErr != nil {
+				return "", "", classifyErr
+			}
 			lastErr = claimErr
 			continue
+		}
+		if clearErr := ops.ClearAgentDegraded(projectRoot, agentID); clearErr != nil {
+			logger.Warn("Failed to clear degraded agent health after successful claim",
+				"agent_id", agentID, "error", clearErr)
 		}
 		for _, w := range result.Warnings {
 			logger.Warn("Claim warning", "task_id", result.TaskID, "warning", w)
@@ -80,6 +90,35 @@ func claimDoerTask(projectRoot, agentID, role string, bb *db.Blackboard) (taskID
 	}
 
 	return "", "", fmt.Errorf("all %d candidates in top priority tier failed to claim: %w", len(tier), lastErr)
+}
+
+func taskIDsFromCandidates(candidates []*models.Task) []string {
+	taskIDs := make([]string, 0, len(candidates))
+	for _, task := range candidates {
+		taskIDs = append(taskIDs, task.ID)
+	}
+	return taskIDs
+}
+
+func markAgentDegradedForInfraClaim(projectRoot, agentID, role, taskID string, candidateTaskIDs []string, err error) error {
+	classification := ops.ClassifyInfraClaimError(err)
+	if !classification.IsInfra {
+		return nil
+	}
+	if markErr := ops.MarkAgentDegraded(ops.MarkAgentDegradedInput{
+		ProjectRoot:    projectRoot,
+		AgentID:        agentID,
+		Role:           role,
+		Reason:         classification.Reason,
+		LastTask:       taskID,
+		CandidateTasks: candidateTaskIDs,
+		LastError:      err.Error(),
+		RecoverHint:    classification.RecoverHint,
+		DegradedBy:     "claim_loop",
+	}); markErr != nil {
+		return fmt.Errorf("failed to mark agent degraded after claim infrastructure failure: %w", markErr)
+	}
+	return ErrAgentDegraded
 }
 
 // claimCoderTask wraps claimDoerTask for backward compatibility.

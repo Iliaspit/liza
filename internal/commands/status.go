@@ -30,17 +30,18 @@ type StatusOptions struct {
 
 // statusData contains all status information
 type statusData struct {
-	Goal               goalStatus            `json:"goal"`
-	Sprint             sprintStatus          `json:"sprint"`
-	Config             configStatus          `json:"config"`
-	Tasks              taskStatus            `json:"tasks"`
-	Agents             []agentStatus         `json:"agents"`
-	OrchestratorState  orchestratorStatus    `json:"orchestrator_state"`
-	WorkQueues         workQueuesStatus      `json:"work_queues"`
-	PendingTransitions []pendingTransition   `json:"pending_transitions,omitempty"`
-	PhaseHandoff       *phaseHandoffStatus   `json:"phase_handoff,omitempty"`
-	Anomalies          *[]string             `json:"anomalies,omitempty"`
-	CircuitBreaker     *circuitBreakerStatus `json:"circuit_breaker,omitempty"`
+	Goal               goalStatus                    `json:"goal"`
+	Sprint             sprintStatus                  `json:"sprint"`
+	Config             configStatus                  `json:"config"`
+	Tasks              taskStatus                    `json:"tasks"`
+	Agents             []agentStatus                 `json:"agents"`
+	AgentHealth        map[string]models.AgentHealth `json:"agent_health,omitempty"`
+	OrchestratorState  orchestratorStatus            `json:"orchestrator_state"`
+	WorkQueues         workQueuesStatus              `json:"work_queues"`
+	PendingTransitions []pendingTransition           `json:"pending_transitions,omitempty"`
+	PhaseHandoff       *phaseHandoffStatus           `json:"phase_handoff,omitempty"`
+	Anomalies          *[]string                     `json:"anomalies,omitempty"`
+	CircuitBreaker     *circuitBreakerStatus         `json:"circuit_breaker,omitempty"`
 }
 
 type pendingTransition struct {
@@ -104,6 +105,9 @@ type agentStatus struct {
 	ID                  string `json:"id"`
 	Role                string `json:"role"`
 	Status              string `json:"status"`
+	Health              string `json:"health,omitempty"`
+	HealthReason        string `json:"health_reason,omitempty"`
+	RecoverHint         string `json:"recover_hint,omitempty"`
 	PID                 int    `json:"pid"`
 	CurrentTask         string `json:"current_task"`
 	TimeSinceHeartbeat  string `json:"time_since_heartbeat"`
@@ -125,6 +129,7 @@ type workQueuesStatus struct {
 
 type queueStatus struct {
 	Available int    `json:"available"`
+	Degraded  int    `json:"degraded,omitempty"`
 	Reason    string `json:"reason"`
 }
 
@@ -189,6 +194,7 @@ func BuildStatusData(state *models.State, detailed bool, projectRoot string, pr 
 
 	data.Tasks = buildTaskStatus(state, pr)
 	data.Agents = buildAgentStatuses(state)
+	data.AgentHealth = currentAgentHealth(state)
 	data.OrchestratorState = buildOrchestratorStatus(state, projectRoot)
 	data.WorkQueues = buildWorkQueuesStatus(state, data.Tasks.Claimable, data.Tasks.Reviewable, pr)
 	data.PhaseHandoff = buildPhaseHandoffStatus(state, projectRoot)
@@ -371,6 +377,11 @@ func buildAgentStatuses(state *models.State) []agentStatus {
 			Status:      string(agent.Status),
 			CurrentTask: "",
 		}
+		if health, ok := state.AgentHealth[id]; ok && agentHealthIsCurrentDegraded(health, agent) {
+			as.Health = string(health.State)
+			as.HealthReason = health.Reason
+			as.RecoverHint = health.RecoverHint
+		}
 
 		if agent.CurrentTask != nil {
 			as.CurrentTask = *agent.CurrentTask
@@ -441,16 +452,45 @@ func buildOrchestratorStatus(state *models.State, projectRoot string) orchestrat
 
 // buildWorkQueuesStatus calculates work queue availability
 func buildWorkQueuesStatus(state *models.State, claimable, reviewable int, pr models.PipelineResolver) workQueuesStatus {
+	degradedByRole := currentDegradedAgentCountByRole(state)
 	return workQueuesStatus{
 		Coder: queueStatus{
 			Available: claimable,
+			Degraded:  degradedByRole[models.RoleCoder],
 			Reason:    models.GetCoderWorkDiagnostics(state, pr),
 		},
 		Reviewer: queueStatus{
 			Available: reviewable,
+			Degraded:  degradedByRole[models.RoleCodeReviewer],
 			Reason:    models.GetReviewerWorkDiagnostics(state, pr),
 		},
 	}
+}
+
+func currentAgentHealth(state *models.State) map[string]models.AgentHealth {
+	if state == nil || len(state.AgentHealth) == 0 {
+		return nil
+	}
+	current := make(map[string]models.AgentHealth)
+	for agentID, health := range state.AgentHealth {
+		agentState, ok := state.Agents[agentID]
+		if !agentHealthIsCurrentOrOrphanedDegraded(health, agentState, ok) {
+			continue
+		}
+		current[agentID] = health
+	}
+	if len(current) == 0 {
+		return nil
+	}
+	return current
+}
+
+func currentDegradedAgentCountByRole(state *models.State) map[string]int {
+	counts := make(map[string]int)
+	for _, health := range currentAgentHealth(state) {
+		counts[health.Role]++
+	}
+	return counts
 }
 
 type processStatusInfo struct {
@@ -575,17 +615,22 @@ func writeAgentsSection(b *strings.Builder, agents []agentStatus) {
 		b.WriteString("No active agents\n\n")
 		return
 	}
-	headers := []string{"ID", "Role", "Status", "PID", "Task", "Heartbeat", "Process"}
+	headers := []string{"ID", "Role", "Status", "Health", "PID", "Task", "Heartbeat", "Process"}
 	rows := make([][]string, len(agents))
 	for i, agent := range agents {
 		pidStr := "-"
 		if agent.PID != 0 {
 			pidStr = fmt.Sprintf("%d", agent.PID)
 		}
+		health := agent.Health
+		if health == "" {
+			health = "-"
+		}
 		rows[i] = []string{
 			agent.ID,
 			agent.Role,
 			agent.Status,
+			health,
 			pidStr,
 			agent.CurrentTask,
 			agent.TimeSinceHeartbeat,
@@ -593,6 +638,32 @@ func writeAgentsSection(b *strings.Builder, agents []agentStatus) {
 		}
 	}
 	b.WriteString(render.FormatTable(headers, rows))
+	b.WriteString("\n\n")
+}
+
+func writeAgentHealthSection(b *strings.Builder, health map[string]models.AgentHealth) {
+	if len(health) == 0 {
+		return
+	}
+	b.WriteString("=== AGENT HEALTH ===\n")
+	ids := make([]string, 0, len(health))
+	for agentID := range health {
+		ids = append(ids, agentID)
+	}
+	slices.Sort(ids)
+
+	rows := make([][]string, 0, len(ids))
+	for _, agentID := range ids {
+		h := health[agentID]
+		rows = append(rows, []string{
+			agentID,
+			h.Role,
+			string(h.State),
+			h.Reason,
+			h.RecoverHint,
+		})
+	}
+	b.WriteString(render.FormatTable([]string{"ID", "Role", "Health", "Reason", "Recover Hint"}, rows))
 	b.WriteString("\n\n")
 }
 
@@ -672,6 +743,7 @@ func formatStatusDashboard(data statusData) (string, error) {
 	var tasksBuf, agentsBuf strings.Builder
 	writeTasksSection(&tasksBuf, data.Tasks)
 	writeAgentsSection(&agentsBuf, data.Agents)
+	writeAgentHealthSection(&agentsBuf, data.AgentHealth)
 	var handoffBuf strings.Builder
 	writePhaseHandoffSection(&handoffBuf, data.PhaseHandoff)
 

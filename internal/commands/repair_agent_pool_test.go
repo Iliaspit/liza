@@ -270,6 +270,135 @@ func TestRepairAgentPool_RegisteredRoleIsNotMissing(t *testing.T) {
 	}
 }
 
+func TestRepairAgentPool_DegradedRegisteredRoleIsMissing(t *testing.T) {
+	now := time.Now().UTC()
+	leaseExpires := now.Add(30 * time.Minute)
+	state := testhelpers.CreateValidState()
+	state.Tasks = []models.Task{
+		testhelpers.BuildTaskByStatus("task-1", models.TaskStatusReady, now),
+	}
+	state.Agents["coder-1"] = models.Agent{
+		Role:         "coder",
+		Status:       models.AgentStatusIdle,
+		Provider:     "codex",
+		PID:          1234,
+		Heartbeat:    now,
+		RegisteredAt: now,
+		LeaseExpires: &leaseExpires,
+	}
+	state.AgentHealth = map[string]models.AgentHealth{
+		"coder-1": {
+			State:        models.AgentHealthDegraded,
+			Role:         "coder",
+			Provider:     "codex",
+			PID:          1234,
+			RegisteredAt: &now,
+			DegradedAt:   now,
+			Reason:       "claim_worktree_create_failed",
+			LastError:    "cannot lock ref",
+			RecoverHint:  "restart elsewhere",
+		},
+	}
+	projectRoot := writeRepairAgentPoolState(t, state)
+
+	result, err := RepairAgentPool(RepairAgentPoolOptions{
+		ProjectRoot: projectRoot,
+		CLI:         "claude",
+		DryRun:      true,
+	})
+	if err != nil {
+		t.Fatalf("RepairAgentPool() error = %v", err)
+	}
+	if len(result.Missing) != 1 || result.Missing[0].Role != "coder" {
+		t.Fatalf("missing roles = %+v, want coder", result.Missing)
+	}
+	if len(result.Degraded) != 1 || result.Degraded[0].AgentID != "coder-1" {
+		t.Fatalf("degraded = %+v, want coder-1", result.Degraded)
+	}
+}
+
+func TestRepairAgentPool_OrphanedDegradedRoleRemainsVisible(t *testing.T) {
+	now := time.Now().UTC()
+	state := testhelpers.CreateValidState()
+	state.Tasks = []models.Task{
+		testhelpers.BuildTaskByStatus("task-1", models.TaskStatusReady, now),
+	}
+	state.AgentHealth = map[string]models.AgentHealth{
+		"coder-1": {
+			State:       models.AgentHealthDegraded,
+			Role:        "coder",
+			Provider:    "codex",
+			PID:         1234,
+			DegradedAt:  now,
+			Reason:      "claim_worktree_create_failed",
+			LastError:   "cannot lock ref",
+			RecoverHint: "restart outside sandbox",
+		},
+	}
+	projectRoot := writeRepairAgentPoolState(t, state)
+
+	result, err := RepairAgentPool(RepairAgentPoolOptions{
+		ProjectRoot: projectRoot,
+		CLI:         "claude",
+		DryRun:      true,
+	})
+	if err != nil {
+		t.Fatalf("RepairAgentPool() error = %v", err)
+	}
+	if len(result.Missing) != 1 || result.Missing[0].Role != "coder" {
+		t.Fatalf("missing roles = %+v, want coder", result.Missing)
+	}
+	if len(result.Degraded) != 1 || result.Degraded[0].AgentID != "coder-1" {
+		t.Fatalf("degraded = %+v, want orphaned coder-1", result.Degraded)
+	}
+}
+
+func TestRepairAgentPool_StaleDegradedEpochDoesNotSuppressCapacity(t *testing.T) {
+	now := time.Now().UTC()
+	oldRegisteredAt := now.Add(-time.Hour)
+	leaseExpires := now.Add(30 * time.Minute)
+	state := testhelpers.CreateValidState()
+	state.Tasks = []models.Task{
+		testhelpers.BuildTaskByStatus("task-1", models.TaskStatusReady, now),
+	}
+	state.Agents["coder-1"] = models.Agent{
+		Role:         "coder",
+		Status:       models.AgentStatusIdle,
+		Provider:     "codex",
+		PID:          5678,
+		Heartbeat:    now,
+		RegisteredAt: now,
+		LeaseExpires: &leaseExpires,
+	}
+	state.AgentHealth = map[string]models.AgentHealth{
+		"coder-1": {
+			State:        models.AgentHealthDegraded,
+			Role:         "coder",
+			Provider:     "codex",
+			PID:          1234,
+			RegisteredAt: &oldRegisteredAt,
+			DegradedAt:   oldRegisteredAt,
+			Reason:       "claim_worktree_create_failed",
+		},
+	}
+	projectRoot := writeRepairAgentPoolState(t, state)
+
+	result, err := RepairAgentPool(RepairAgentPoolOptions{
+		ProjectRoot: projectRoot,
+		CLI:         "claude",
+		DryRun:      true,
+	})
+	if err != nil {
+		t.Fatalf("RepairAgentPool() error = %v", err)
+	}
+	if len(result.Missing) != 0 {
+		t.Fatalf("missing roles = %+v, want none", result.Missing)
+	}
+	if len(result.Degraded) != 0 {
+		t.Fatalf("degraded = %+v, want none for stale epoch", result.Degraded)
+	}
+}
+
 func TestRepairAgentPool_NilLeaseWithRecentHeartbeatIsNotMissing(t *testing.T) {
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()
