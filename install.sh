@@ -32,9 +32,8 @@ detect_platform() {
         Linux*)     os="linux";;
         Darwin*)    os="darwin";;
         MINGW*|MSYS*|CYGWIN*)
-            echo -e "${RED}Error: Windows installation via this script is not supported.${NC}"
-            echo "Please download the binary manually from:"
-            echo "https://github.com/${REPO}/releases"
+            echo -e "${RED}Error: Native Windows is not supported.${NC}"
+            echo "Run liza under WSL2 and run this installer from the WSL2 shell."
             exit 1
             ;;
         *)

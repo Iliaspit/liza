@@ -104,7 +104,6 @@ build-all: sync-embedded
 	GOOS=linux GOARCH=amd64 go build $(LDFLAGS) -o $(BINARY_NAME)-linux-amd64 ./cmd/liza
 	GOOS=darwin GOARCH=amd64 go build $(LDFLAGS) -o $(BINARY_NAME)-darwin-amd64 ./cmd/liza
 	GOOS=darwin GOARCH=arm64 go build $(LDFLAGS) -o $(BINARY_NAME)-darwin-arm64 ./cmd/liza
-	GOOS=windows GOARCH=amd64 go build $(LDFLAGS) -o $(BINARY_NAME)-windows-amd64.exe ./cmd/liza
 
 # Create release artifacts
 release: clean lint test
@@ -115,7 +114,6 @@ release: clean lint test
 	GOOS=linux GOARCH=arm64 go build $(LDFLAGS) -o dist/$(BINARY_NAME)-linux-arm64 ./cmd/liza
 	GOOS=darwin GOARCH=amd64 go build $(LDFLAGS) -o dist/$(BINARY_NAME)-darwin-amd64 ./cmd/liza
 	GOOS=darwin GOARCH=arm64 go build $(LDFLAGS) -o dist/$(BINARY_NAME)-darwin-arm64 ./cmd/liza
-	GOOS=windows GOARCH=amd64 go build $(LDFLAGS) -o dist/$(BINARY_NAME)-windows-amd64.exe ./cmd/liza
 	@# Create checksums
 	@cd dist && sha256sum * > checksums.txt
 	@echo "✓ Release artifacts created in dist/"
@@ -133,10 +131,9 @@ package: release
 		tar -czf $(BINARY_NAME)-$(VERSION)-linux-amd64.tar.gz $(BINARY_NAME)-linux-amd64 && \
 		tar -czf $(BINARY_NAME)-$(VERSION)-linux-arm64.tar.gz $(BINARY_NAME)-linux-arm64 && \
 		tar -czf $(BINARY_NAME)-$(VERSION)-darwin-amd64.tar.gz $(BINARY_NAME)-darwin-amd64 && \
-		tar -czf $(BINARY_NAME)-$(VERSION)-darwin-arm64.tar.gz $(BINARY_NAME)-darwin-arm64 && \
-		zip -q $(BINARY_NAME)-$(VERSION)-windows-amd64.zip $(BINARY_NAME)-windows-amd64.exe
+		tar -czf $(BINARY_NAME)-$(VERSION)-darwin-arm64.tar.gz $(BINARY_NAME)-darwin-arm64
 	@echo "✓ Distribution packages created"
-	@ls -lh dist/*.tar.gz dist/*.zip
+	@ls -lh dist/*.tar.gz
 
 # Help target
 help:
@@ -154,4 +151,4 @@ help:
 	@echo "  run                - Build and run the liza binary"
 	@echo "  build-all          - Build liza for multiple platforms"
 	@echo "  release            - Create release artifacts (run tests, build all platforms, create checksums)"
-	@echo "  package            - Create distribution packages (tarballs and zip files)"
+	@echo "  package            - Create distribution packages (tarballs)"

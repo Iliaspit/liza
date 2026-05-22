@@ -15,7 +15,7 @@ git push origin v1.0.0
 ```
 
 This will automatically:
-1. Build binaries for all supported platforms (liza)
+1. Build binaries for all supported platforms (Linux and macOS)
 2. Create checksums
 3. Generate a changelog
 4. Create a GitHub release with all artifacts
@@ -36,14 +36,13 @@ export VERSION=v1.0.0
 # Create release artifacts (runs tests, builds all platforms, creates checksums)
 make release
 
-# Optionally create distribution packages (tarballs and zip files)
+# Optionally create distribution packages (tarballs)
 make package
 ```
 
 This creates the following in the `dist/` directory:
 - Binaries for Linux (amd64, arm64)
 - Binaries for macOS (amd64, arm64)
-- Binary for Windows (amd64)
 - SHA256 checksums file
 - Compressed archives (if using `make package`)
 
@@ -196,7 +195,7 @@ Cross-compilation issues are rare with Go, but if you encounter one:
 | Linux | arm64 | Yes |
 | macOS | amd64 (Intel) | Yes |
 | macOS | arm64 (Apple Silicon) | Yes |
-| Windows | amd64 | Yes |
+| Windows | amd64 | No - use WSL2 |
 
 ### Go Versions
 

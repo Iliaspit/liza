@@ -150,7 +150,7 @@ The positioning question is not "who starts highest" but "what's the minimum hum
 
 ### Requirements
 
-- Unix-like environment. On Windows, use WSL with `bash`, not Powershell.
+- Unix-like environment. On Windows, use WSL2; native Windows is not supported.
 - A supported coding agent CLI: Claude Code, Codex, Kimi, Mistral, or Gemini (see [Provider Compatibility](#provider-compatibility)).
   Liza runs on top of these CLIs — your provider subscription covers usage, no separate API billing needed.
 - Git 2.38+ (for full worktree support)

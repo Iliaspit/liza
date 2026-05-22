@@ -1,11 +1,35 @@
 package main
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/liza-mas/liza/internal/jsonout"
 	"github.com/spf13/cobra"
 )
+
+func TestCheckSupportedPlatformRejectsWindows(t *testing.T) {
+	err := checkSupportedPlatform("windows")
+	if err == nil {
+		t.Fatal("expected Windows to be rejected")
+	}
+	if !strings.Contains(err.Error(), "native Windows is not supported") {
+		t.Fatalf("error = %q, want native Windows unsupported message", err.Error())
+	}
+	if !strings.Contains(err.Error(), "WSL2") {
+		t.Fatalf("error = %q, want WSL2 guidance", err.Error())
+	}
+}
+
+func TestCheckSupportedPlatformAllowsUnixPlatforms(t *testing.T) {
+	for _, goos := range []string{"linux", "darwin"} {
+		t.Run(goos, func(t *testing.T) {
+			if err := checkSupportedPlatform(goos); err != nil {
+				t.Fatalf("checkSupportedPlatform(%q) = %v, want nil", goos, err)
+			}
+		})
+	}
+}
 
 func TestAddJSONFlag(t *testing.T) {
 	cmd := &cobra.Command{Use: "test"}

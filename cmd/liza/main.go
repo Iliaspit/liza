@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 
 	lizaerrors "github.com/liza-mas/liza/internal/errors"
 	"github.com/liza-mas/liza/internal/identity"
@@ -21,6 +22,8 @@ var (
 	GitCommit = "unknown"
 	BuildDate = "unknown"
 )
+
+const windowsUnsupportedMessage = "native Windows is not supported; run liza under WSL2"
 
 var rootCmd = &cobra.Command{
 	Use:   "liza",
@@ -95,6 +98,13 @@ func cliValidationWrap(message string, err error) error {
 		Message: fmt.Sprintf("%s: %v", message, err),
 		Err:     err,
 	}
+}
+
+func checkSupportedPlatform(goos string) error {
+	if goos == "windows" {
+		return cliValidationError(windowsUnsupportedMessage)
+	}
+	return nil
 }
 
 // resolveOrchestratorID resolves the orchestrator agent ID from flag, env var,
@@ -183,6 +193,10 @@ func addChangedByFlag(cmd *cobra.Command) {
 }
 
 func main() {
+	if err := checkSupportedPlatform(runtime.GOOS); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
 	if err := rootCmd.Execute(); err != nil {
 		if !errors.Is(err, jsonout.ErrAlreadyWritten) {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
