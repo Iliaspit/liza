@@ -485,18 +485,15 @@ pipeline:
           trigger: manual  # human validates epic decomposition
           cardinality: per-subtask  # supervisor creates one downstream task per entry in output[]
 
-    coding-subpipeline:
+    architecture-subpipeline:
       steps:
         - architecture-pair
+
+    coding-subpipeline:
+      steps:
         - code-planning-pair
         - coding-pair
       transitions:
-        - name: architecture-to-code-plan
-          task-slug: code-planning
-          from: architecture-pair.approved
-          to: code-planning-pair.initial
-          trigger: manual  # human validates architectural decomposition
-          cardinality: per-subtask
         - name: code-plan-to-coding
           task-slug: coding
           from: code-planning-pair.approved
@@ -520,12 +517,20 @@ pipeline:
     - name: us-to-coding
       task-slug: architecture
       from: epic-spec-subpipeline.us-writing-pair.approved
-      to: coding-subpipeline.architecture-pair.initial
+      to: architecture-subpipeline.architecture-pair.initial
       trigger: manual
       cardinality: many-to-one  # N approved US → 1 architecture task
+    - name: architecture-to-code-plan
+      task-slug: code-planning
+      from: architecture-subpipeline.architecture-pair.approved
+      to: coding-subpipeline.code-planning-pair.initial
+      trigger: manual  # human validates architectural decomposition
+      cardinality: per-subtask
 
   # Orchestrator is implicit — mandatory, unique, not part of any pipeline.
   # It reads entry-points below to classify input and dispatch to the right sub-pipeline.
   entry-points:
     general-objective: epic-spec-subpipeline.epic-planning-pair
-    detailed-spec: coding-subpipeline.architecture-pair
+    functional-spec: architecture-subpipeline.architecture-pair
+    detailed-spec: architecture-subpipeline.architecture-pair  # legacy alias for functional-spec
+    technical-spec: coding-subpipeline.code-planning-pair

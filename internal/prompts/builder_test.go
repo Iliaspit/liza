@@ -566,7 +566,37 @@ func TestRenderOrchestratorDashboard_EntryPoints(t *testing.T) {
 			},
 		},
 		{
-			name:       "explicit entry-point detailed-spec dispatches to architecture-pair",
+			name:       "explicit entry-point functional-spec dispatches to architecture-pair",
+			entryPoint: "functional-spec",
+			wantContains: []string{
+				"WAKE TRIGGER: INITIAL_PLANNING",
+				"role_pair\": \"architecture-pair\"",
+				"Architect",
+				"\"type\": \"architecture\"",
+			},
+			wantNotContain: []string{
+				"classify",
+				"epic-planning-pair",
+				"\"type\": \"coding\"",
+			},
+		},
+		{
+			name:       "explicit entry-point technical-spec dispatches to code-planning-pair",
+			entryPoint: "technical-spec",
+			wantContains: []string{
+				"WAKE TRIGGER: INITIAL_PLANNING",
+				"role_pair\": \"code-planning-pair\"",
+				"Code Planner",
+				"\"type\": \"planning\"",
+			},
+			wantNotContain: []string{
+				"classify",
+				"architecture-pair",
+				"\"type\": \"architecture\"",
+			},
+		},
+		{
+			name:       "legacy detailed-spec dispatches to architecture-pair",
 			entryPoint: "detailed-spec",
 			wantContains: []string{
 				"WAKE TRIGGER: INITIAL_PLANNING",
@@ -586,9 +616,13 @@ func TestRenderOrchestratorDashboard_EntryPoints(t *testing.T) {
 			wantContains: []string{
 				"WAKE TRIGGER: INITIAL_PLANNING",
 				"general-objective",
+				"functional-spec",
+				"technical-spec",
 				"detailed-spec",
 				"epic-planning-pair",
 				"architecture-pair",
+				"code-planning-pair",
+				"legacy alias",
 			},
 		},
 	}

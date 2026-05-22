@@ -53,7 +53,7 @@ Liza is a **frontier Multi-Agent System**:
   - Multi-sprints: agents are fully autonomous within a sprint, user steers between sprints via Liza CLI - review of produced artifacts, continuous improvement, and steering of the next sprint
   - A TUI (`liza tui`) displays live system state and lets you spawn agents, pause/resume, add tasks, and trigger checkpoints.
 - **Adversarial architecture:**
-  - One Orchestrator role + 12 others across three pipeline phases.
+  - One Orchestrator role + 12 others across four pipeline phases.
   - Every activity is dual — a doer and a reviewer: epic planning, epic writing, US writing, code planning, coding - everything.
   - They interact like on a PR review — submission, feedback comments, verdict, revised submission, etc. — until approval.
 - **Hybrid hardened architecture:**
@@ -257,7 +257,7 @@ analyzing before acting, presenting approval requests at every state change, val
 Or you may choose to make it your Socratic colleague, your rubber duck, or your challenger.
 
 **Multi-agent mode** — autonomous spec-to-code pipeline:
-1. `liza init "[Goal description]" --spec vision.md` (this file needs to be committed) . Use the `--entry-point detailed-spec` option to skip the spec phase and go coding directly.
+1. `liza init "[Goal description]" --spec vision.md` (this file needs to be committed). Use `--entry-point functional-spec` to skip the epic/user-story spec phase and start at architecture, or `--entry-point technical-spec` to start at code planning when architecture is already settled. `detailed-spec` remains as a legacy alias for `functional-spec`.
 2. `liza tui` — the TUI shows live system state (agents, tasks, alerts, sprint metrics). From it you can spawn agents with role autocompletion (`s` uses configured default CLI, `S` lets you pick). Pause/resume the system, add tasks, and trigger sprint checkpoints.
    Check [Quick Start](support-docs/USAGE_MULTI_AGENTS.md#quick-start-target-usage) for required roles and options (configuring default CLI, logging).
 
@@ -398,9 +398,10 @@ and may use any skill they consider relevant to adapt to the situation.
 
 **Liza has the built-in capability to do things right on the first pass.**
 
-Liza has 13 roles organized in three pipeline phases:
+Liza has 13 roles organized in four pipeline phases:
 - **Specification phase**: orchestrator, epic-planner, epic-plan-reviewer, us-writer, us-reviewer
-- **Coding phase**: orchestrator, architect, architecture-reviewer, code-planner, code-plan-reviewer, coder, code-reviewer
+- **Architecture phase**: orchestrator, architect, architecture-reviewer
+- **Coding phase**: orchestrator, code-planner, code-plan-reviewer, coder, code-reviewer
 - **Integration phase**: integration-analyst, integration-reviewer, coder, code-reviewer
 
 ```
@@ -418,10 +419,15 @@ Liza has 13 roles organized in three pipeline phases:
     │                                          │
     └──────────────────┬───────────────────────┘
                        │ liza proceed (us-to-coding, many-to-one)
-    ┌──────────── Coding Phase ────────────────┐
+    ┌─────────── Architecture Phase ───────────┐
     │                                          │
     │  Orchestrator (decomposes & rescopes)    │
     │  Architect    ←→ Architecture Reviewer   │
+    │                                          │
+    └──────────────────┬───────────────────────┘
+                       │ liza proceed (architecture-to-code-plan)
+    ┌──────────── Coding Phase ────────────────┐
+    │                                          │
     │  Code Planner ←→ Code Plan Reviewer      │
     │  Coder        ←→ Code Reviewer           │
     │                                          │
@@ -472,18 +478,15 @@ initial → executing → submitted → reviewing → approved → MERGED
 Inter-pair transitions (`liza proceed`) create downstream tasks between sprints:
 
 ```
-  Spec phase                           Coding phase
+  Spec phase                           Architecture phase                    Coding phase
 
-  Epic Planner ─approved─► MERGED      Architect ─approved─► MERGED
-       │ epic-to-us (per-subtask)           │ arch-to-code-plan (per-subtask)
-       ▼                                    ▼
-  US Writer ─approved─► MERGED         Code Planner ─approved─► MERGED
-       │ us-to-coding (many-to-one)         │ code-plan-to-coding (per-subtask)
-       ▼                                    ▼
-  Architect (coding phase)             Coder ─approved─► MERGED
-                                            │ all tasks merged
-                                            ▼
-                                       Integration Analyst (auto)
+  Epic Planner ─approved─► MERGED      Architect ─approved─► MERGED          Code Planner ─approved─► MERGED
+       │ epic-to-us (per-subtask)           │ arch-to-code-plan (per-subtask)      │ code-plan-to-coding (per-subtask)
+       ▼                                    └───────────────────────────────►      ▼
+  US Writer ─approved─► MERGED                                                Coder ─approved─► MERGED
+       │ us-to-coding (many-to-one)                                                │ all tasks merged
+       ▼                                                                          ▼
+  Architect                                                                  Integration Analyst (auto)
 ```
 
 Example of a task on the blackboard:

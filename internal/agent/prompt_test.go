@@ -2554,18 +2554,22 @@ var architectTestPipelineYAML = `pipeline:
         approved: CODE_APPROVED
         rejected: CODE_REJECTED
   sub-pipelines:
-    coding-subpipeline:
+    architecture-subpipeline:
       steps:
         - architecture-pair
+
+    coding-subpipeline:
+      steps:
         - coding-pair
-      transitions:
-        - name: architecture-to-coding
-          from: architecture-pair.approved
-          to: coding-pair.initial
-          trigger: manual
-          cardinality: per-subtask
+  pipeline-transitions:
+    - name: architecture-to-coding
+      from: architecture-subpipeline.architecture-pair.approved
+      to: coding-subpipeline.coding-pair.initial
+      trigger: manual
+      cardinality: per-subtask
   entry-points:
-    detailed-spec: coding-subpipeline.architecture-pair
+    functional-spec: architecture-subpipeline.architecture-pair
+    detailed-spec: architecture-subpipeline.architecture-pair
 `
 
 func TestBuildTaskRoleContextData_ArchRef(t *testing.T) {
@@ -2832,18 +2836,22 @@ var architectE2EPipelineYAML = `pipeline:
         approved: CODE_APPROVED
         rejected: CODE_REJECTED
   sub-pipelines:
-    coding-subpipeline:
+    architecture-subpipeline:
       steps:
         - architecture-pair
+
+    coding-subpipeline:
+      steps:
         - coding-pair
-      transitions:
-        - name: architecture-to-coding
-          from: architecture-pair.approved
-          to: coding-pair.initial
-          trigger: manual
-          cardinality: per-subtask
+  pipeline-transitions:
+    - name: architecture-to-coding
+      from: architecture-subpipeline.architecture-pair.approved
+      to: coding-subpipeline.coding-pair.initial
+      trigger: manual
+      cardinality: per-subtask
   entry-points:
-    detailed-spec: coding-subpipeline.architecture-pair
+    functional-spec: architecture-subpipeline.architecture-pair
+    detailed-spec: architecture-subpipeline.architecture-pair
 `
 
 func TestBuildPromptWithContext_Architect(t *testing.T) {

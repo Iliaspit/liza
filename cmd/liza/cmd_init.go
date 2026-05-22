@@ -396,7 +396,7 @@ func init() {
 	// Init command flags
 	initCmd.Flags().String("spec", "specs/vision.md", "path to goal spec file")
 	initCmd.Flags().String("config", defaultPipelineConfigPath(), "path to pipeline YAML config file")
-	initCmd.Flags().String("entry-point", "", `entry-point name: "general-objective" or "detailed-spec" in default pipeline (default: auto-classified by orchestrator)`)
+	initCmd.Flags().String("entry-point", "", `entry-point name: "general-objective", "functional-spec", "technical-spec", or legacy "detailed-spec" in default pipeline (default: auto-classified by orchestrator)`)
 	initCmd.Flags().String("branch", "integration", "integration branch name")
 	initCmd.Flags().String("post-worktree-cmd", "", "shell command to run after worktree creation (e.g. 'make setup')")
 	initCmd.Flags().Bool("auto-resume", false, "automatically resume at checkpoint and sprint completion")

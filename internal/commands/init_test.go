@@ -1202,6 +1202,7 @@ const validPipelineYAML = `pipeline:
 
   entry-points:
     detailed-spec: coding-subpipeline.code-planning-pair
+    technical-spec: coding-subpipeline.code-planning-pair
 `
 
 func writePipelineConfig(t *testing.T, dir, content string) string {
@@ -1295,6 +1296,45 @@ func TestInitCommandWithConfig_EntryPoint(t *testing.T) {
 	}
 	if state.Goal.EntryPoint != "detailed-spec" {
 		t.Errorf("state.Goal.EntryPoint = %q, want %q", state.Goal.EntryPoint, "detailed-spec")
+	}
+}
+
+func TestInitCommandWithConfig_NewDefaultEntryPoints(t *testing.T) {
+	for _, entryPoint := range []string{"functional-spec", "technical-spec"} {
+		t.Run(entryPoint, func(t *testing.T) {
+			tmpDir := setupGitRepo(t)
+			defer os.RemoveAll(tmpDir)
+			setupGlobalLiza(t)
+
+			originalDir, err := os.Getwd()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer os.Chdir(originalDir)
+			if err := os.Chdir(tmpDir); err != nil {
+				t.Fatal(err)
+			}
+
+			testhelpers.CreateCommittedSpecFile(t, tmpDir, "vision.md", "# Vision\n")
+
+			err = InitCommandWithConfig(InitParams{
+				Description: "Goal",
+				SpecRef:     "specs/vision.md",
+				EntryPoint:  entryPoint,
+			})
+			if err != nil {
+				t.Fatalf("InitCommandWithConfig() error = %v", err)
+			}
+
+			bb := db.New(filepath.Join(tmpDir, ".liza", "state.yaml"))
+			state, err := bb.Read()
+			if err != nil {
+				t.Fatalf("Failed to read state: %v", err)
+			}
+			if state.Goal.EntryPoint != entryPoint {
+				t.Errorf("state.Goal.EntryPoint = %q, want %q", state.Goal.EntryPoint, entryPoint)
+			}
+		})
 	}
 }
 
@@ -2326,7 +2366,8 @@ func TestInitCommandWithConfig_EntryPointWithoutConfig(t *testing.T) {
 	testhelpers.CreateCommittedSpecFile(t, tmpDir, "vision.md", "# Vision\n")
 
 	// --entry-point without --config now succeeds because embedded pipeline
-	// is auto-loaded and "detailed-spec" exists in the embedded config
+	// is auto-loaded and "detailed-spec" exists in the embedded config as
+	// a legacy alias for functional-spec.
 	err = InitCommandWithConfig(InitParams{
 		Description: "Goal",
 		SpecRef:     "specs/vision.md",

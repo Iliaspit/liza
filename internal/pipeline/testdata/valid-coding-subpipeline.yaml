@@ -58,17 +58,15 @@ pipeline:
         reviewing-2: REVIEWING_CODE_2
 
   sub-pipelines:
-    coding-subpipeline:
+    architecture-subpipeline:
       steps:
         - architecture-pair
+
+    coding-subpipeline:
+      steps:
         - code-planning-pair
         - coding-pair
       transitions:
-        - name: architecture-to-code-plan
-          from: architecture-pair.approved
-          to: code-planning-pair.initial
-          trigger: manual
-          cardinality: per-subtask
         - name: code-plan-to-coding
           from: code-planning-pair.approved
           to: coding-pair.initial
@@ -80,5 +78,14 @@ pipeline:
           trigger: auto
           cardinality: one-to-one
 
+  pipeline-transitions:
+    - name: architecture-to-code-plan
+      from: architecture-subpipeline.architecture-pair.approved
+      to: coding-subpipeline.code-planning-pair.initial
+      trigger: manual
+      cardinality: per-subtask
+
   entry-points:
-    detailed-spec: coding-subpipeline.architecture-pair
+    functional-spec: architecture-subpipeline.architecture-pair
+    detailed-spec: architecture-subpipeline.architecture-pair
+    technical-spec: coding-subpipeline.code-planning-pair

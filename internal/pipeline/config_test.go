@@ -43,18 +43,35 @@ func TestLoad_ValidConfig(t *testing.T) {
 	if !ok {
 		t.Fatal("missing sub-pipeline coding-subpipeline")
 	}
-	if len(sp.Steps) != 3 {
-		t.Fatalf("expected 3 steps, got %d", len(sp.Steps))
+	if len(sp.Steps) != 2 {
+		t.Fatalf("expected 2 coding steps, got %d", len(sp.Steps))
 	}
-	if len(sp.Transitions) != 3 {
-		t.Fatalf("expected 3 transitions, got %d", len(sp.Transitions))
+	if len(sp.Transitions) != 2 {
+		t.Fatalf("expected 2 coding transitions, got %d", len(sp.Transitions))
+	}
+	architectureSP, ok := cfg.Pipeline.SubPipelines["architecture-subpipeline"]
+	if !ok {
+		t.Fatal("missing sub-pipeline architecture-subpipeline")
+	}
+	if !slices.Equal(architectureSP.Steps, []string{"architecture-pair"}) {
+		t.Fatalf("architecture steps = %v, want [architecture-pair]", architectureSP.Steps)
 	}
 
 	// Verify entry-points.
+	if ep, ok := cfg.Pipeline.EntryPoints["functional-spec"]; !ok {
+		t.Error("missing entry-point functional-spec")
+	} else if ep != "architecture-subpipeline.architecture-pair" {
+		t.Errorf("functional-spec entry-point value = %q, want %q", ep, "architecture-subpipeline.architecture-pair")
+	}
 	if ep, ok := cfg.Pipeline.EntryPoints["detailed-spec"]; !ok {
 		t.Error("missing entry-point detailed-spec")
-	} else if ep != "coding-subpipeline.architecture-pair" {
-		t.Errorf("entry-point value = %q, want %q", ep, "coding-subpipeline.architecture-pair")
+	} else if ep != "architecture-subpipeline.architecture-pair" {
+		t.Errorf("detailed-spec entry-point value = %q, want %q", ep, "architecture-subpipeline.architecture-pair")
+	}
+	if ep, ok := cfg.Pipeline.EntryPoints["technical-spec"]; !ok {
+		t.Error("missing entry-point technical-spec")
+	} else if ep != "coding-subpipeline.code-planning-pair" {
+		t.Errorf("technical-spec entry-point value = %q, want %q", ep, "coding-subpipeline.code-planning-pair")
 	}
 }
 
@@ -1159,23 +1176,20 @@ func TestLoad_Phase2ValidConfig(t *testing.T) {
 		t.Fatalf("expected 11 roles, got %d", len(cfg.Pipeline.Roles))
 	}
 
-	// Verify 2 sub-pipelines.
-	if len(cfg.Pipeline.SubPipelines) != 2 {
-		t.Fatalf("expected 2 sub-pipelines, got %d", len(cfg.Pipeline.SubPipelines))
+	// Verify 3 sub-pipelines.
+	if len(cfg.Pipeline.SubPipelines) != 3 {
+		t.Fatalf("expected 3 sub-pipelines, got %d", len(cfg.Pipeline.SubPipelines))
 	}
 
 	// Verify pipeline-transitions parsed.
-	if len(cfg.Pipeline.PipelineTransitions) != 1 {
-		t.Fatalf("expected 1 pipeline-transition, got %d", len(cfg.Pipeline.PipelineTransitions))
+	if len(cfg.Pipeline.PipelineTransitions) != 2 {
+		t.Fatalf("expected 2 pipeline-transitions, got %d", len(cfg.Pipeline.PipelineTransitions))
 	}
-	pt := cfg.Pipeline.PipelineTransitions[0]
-	if pt.Name != "us-to-coding" {
-		t.Errorf("pipeline-transition name = %q, want %q", pt.Name, "us-to-coding")
-	}
+	pt := requirePipelineTransition(t, cfg, "us-to-coding")
 	if pt.From != "epic-spec-subpipeline.us-writing-pair.approved" {
 		t.Errorf("pipeline-transition from = %q, want 3-part ref", pt.From)
 	}
-	if pt.To != "coding-subpipeline.architecture-pair.initial" {
+	if pt.To != "architecture-subpipeline.architecture-pair.initial" {
 		t.Errorf("pipeline-transition to = %q, want 3-part ref", pt.To)
 	}
 	if pt.Trigger != "manual" {
@@ -1185,16 +1199,41 @@ func TestLoad_Phase2ValidConfig(t *testing.T) {
 		t.Errorf("pipeline-transition cardinality = %q, want %q", pt.Cardinality, "many-to-one")
 	}
 
-	// Verify 2 entry-points.
-	if len(cfg.Pipeline.EntryPoints) != 2 {
-		t.Fatalf("expected 2 entry-points, got %d", len(cfg.Pipeline.EntryPoints))
+	archToCode := requirePipelineTransition(t, cfg, "architecture-to-code-plan")
+	if archToCode.From != "architecture-subpipeline.architecture-pair.approved" {
+		t.Errorf("architecture-to-code-plan from = %q, want 3-part ref", archToCode.From)
+	}
+	if archToCode.To != "coding-subpipeline.code-planning-pair.initial" {
+		t.Errorf("architecture-to-code-plan to = %q, want 3-part ref", archToCode.To)
+	}
+
+	// Verify 4 entry-points.
+	if len(cfg.Pipeline.EntryPoints) != 4 {
+		t.Fatalf("expected 4 entry-points, got %d", len(cfg.Pipeline.EntryPoints))
 	}
 	if ep := cfg.Pipeline.EntryPoints["general-objective"]; ep != "epic-spec-subpipeline.epic-planning-pair" {
 		t.Errorf("entry-point general-objective = %q", ep)
 	}
-	if ep := cfg.Pipeline.EntryPoints["detailed-spec"]; ep != "coding-subpipeline.architecture-pair" {
+	if ep := cfg.Pipeline.EntryPoints["functional-spec"]; ep != "architecture-subpipeline.architecture-pair" {
+		t.Errorf("entry-point functional-spec = %q", ep)
+	}
+	if ep := cfg.Pipeline.EntryPoints["detailed-spec"]; ep != "architecture-subpipeline.architecture-pair" {
 		t.Errorf("entry-point detailed-spec = %q", ep)
 	}
+	if ep := cfg.Pipeline.EntryPoints["technical-spec"]; ep != "coding-subpipeline.code-planning-pair" {
+		t.Errorf("entry-point technical-spec = %q", ep)
+	}
+}
+
+func requirePipelineTransition(t *testing.T, cfg *PipelineConfig, name string) TransitionDef {
+	t.Helper()
+	for _, transition := range cfg.Pipeline.PipelineTransitions {
+		if transition.Name == name {
+			return transition
+		}
+	}
+	t.Fatalf("missing pipeline-transition %q", name)
+	return TransitionDef{}
 }
 
 func TestParse3PartRef(t *testing.T) {

@@ -141,8 +141,11 @@ liza init "[Goal description]" --spec [spec_ref]
 #   liza init "Build auth system" --branch develop
 #
 # Entry points (--entry-point selects which sub-pipeline to start from):
-#   liza init "Build auth system" --entry-point general-objective   # full pipeline: epic → US → code-plan → code
-#   liza init "Implement from spec" --entry-point detailed-spec     # coding pipeline: architecture → code-plan → code
+#   liza init "Build auth system" --entry-point general-objective   # full pipeline: epic → US → architecture → code-plan → code
+#   liza init "Implement from functional spec" --entry-point functional-spec  # architecture → code-plan → code
+#   liza init "Implement from technical spec" --entry-point technical-spec    # code-plan → code
+#   # detailed-spec is a legacy alias for functional-spec.
+#   # New entry-point names require a newly initialized workspace or manually updated .liza/pipeline.yaml.
 #   # If omitted, the orchestrator auto-classifies from the spec content.
 
 # Verify
@@ -169,7 +172,7 @@ Alternatively, spawn agents from the CLI: `liza agent <role>`. Agent identity de
 
 If claimable work is stuck because no live agent is registered for the required role, run `liza repair-agent-pool`. Add `--cli <name>` to choose the backend for newly spawned agents, or `--dry-run` to print the exact spawn commands without launching them.
 
-Roles are organized into three sub-pipelines (specification, coding, integration). Which agents you need depends on your entry point:
+Roles are organized into four sub-pipelines (specification, architecture, coding, integration). Which agents you need depends on your entry point:
 
 ```
 Roles:
@@ -181,12 +184,12 @@ Roles:
   us-writer               - Writes user stories from epics
   us-reviewer             - Reviews user stories
 
-  Architecture phase (both entry points):
+  Architecture phase (general-objective, functional-spec, detailed-spec):
   architect               - Defines component boundaries, interfaces, and structural decisions
                             (receives parent task context from upstream US tasks or goal spec)
   architecture-reviewer   - Reviews architectural coherence and structural soundness
 
-  Coding phase (both entry points):
+  Coding phase (all entry points):
   code-planner            - Claims and produces coding plans
   code-plan-reviewer      - Reviews coding plans and submits verdicts
   coder                   - Claims and implements coding tasks
@@ -197,8 +200,11 @@ Roles:
   integration-reviewer    - Validates and enriches integration findings
 ```
 
-**Minimal setup (detailed-spec entry point) — 7 agents:**
+**Functional-spec setup (`functional-spec` or legacy `detailed-spec`) — 7 agents:**
 Spawn from the TUI (`s`): orchestrator, architect, architecture-reviewer, code-planner, code-plan-reviewer, coder, code-reviewer.
+
+**Technical-spec setup (`technical-spec`) — 5 agents:**
+Spawn from the TUI (`s`): orchestrator, code-planner, code-plan-reviewer, coder, code-reviewer.
 
 **Full pipeline (general-objective entry point) — 11 agents:**
 All of the above plus: epic-planner, epic-plan-reviewer, us-writer, us-reviewer.
@@ -281,8 +287,14 @@ The pipeline defines which role-pairs execute and how tasks flow between them:
 general-objective entry point (full pipeline):
   epic-planning-pair → us-writing-pair → architecture-pair → code-planning-pair → coding-pair
 
-detailed-spec entry point (coding pipeline):
+functional-spec entry point (architecture pipeline):
   architecture-pair → code-planning-pair → coding-pair
+
+technical-spec entry point (coding pipeline):
+  code-planning-pair → coding-pair
+
+detailed-spec entry point:
+  legacy alias for functional-spec
 
 integration sub-pipeline (post-coding, orchestrator-triggered):
   integration-pair → coding-pair (fix tasks)

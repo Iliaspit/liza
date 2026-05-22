@@ -120,10 +120,10 @@ git commit -m "Initial commit: vision spec and dev tooling"
 
 ```bash
 liza setup  # one-time: installs contracts + skills to ~/.liza/
-liza init "Build hello CLI" --spec specs/vision.md --entry-point detailed-spec
+liza init "Build hello CLI" --spec specs/vision.md --entry-point functional-spec
 ```
 
-The `--entry-point detailed-spec` skips the specification phase (epic planning, user stories) and goes straight to the coding pipeline: architecture → code planning → coding. For a simple hello-world, this is the right entry point.
+The `--entry-point functional-spec` skips the specification phase (epic planning, user stories) and starts at architecture: architecture → code planning → coding. For a simple hello-world, this is the right entry point. Existing workflows using `--entry-point detailed-spec` still work as a legacy alias.
 
 This creates:
 - `.liza/state.yaml` — the blackboard

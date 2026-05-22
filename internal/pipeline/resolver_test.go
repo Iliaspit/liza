@@ -32,7 +32,7 @@ func TestResolver_Transition_PipelineTransition(t *testing.T) {
 	if tr.From != "epic-spec-subpipeline.us-writing-pair.approved" {
 		t.Errorf("from = %q, want 3-part ref", tr.From)
 	}
-	if tr.To != "coding-subpipeline.architecture-pair.initial" {
+	if tr.To != "architecture-subpipeline.architecture-pair.initial" {
 		t.Errorf("to = %q, want 3-part ref", tr.To)
 	}
 	if tr.Trigger != "manual" {
@@ -43,10 +43,9 @@ func TestResolver_Transition_PipelineTransition(t *testing.T) {
 	}
 }
 
-func TestResolver_Transition_SubPipelineStillWorks(t *testing.T) {
+func TestResolver_Transition_SubPipelineTransition(t *testing.T) {
 	r := NewResolver(loadPhase2Config(t))
 
-	// Sub-pipeline transitions should still be found.
 	tr, err := r.Transition("epic-to-us")
 	if err != nil {
 		t.Fatalf("Transition(epic-to-us): unexpected error: %v", err)
@@ -62,16 +61,19 @@ func TestResolver_Transition_SubPipelineStillWorks(t *testing.T) {
 	if tr.From != "code-planning-pair.approved" {
 		t.Errorf("from = %q, want %q", tr.From, "code-planning-pair.approved")
 	}
+}
 
-	tr, err = r.Transition("architecture-to-code-plan")
+func TestResolver_Transition_ArchitecturePipelineTransition(t *testing.T) {
+	r := NewResolver(loadPhase2Config(t))
+	tr, err := r.Transition("architecture-to-code-plan")
 	if err != nil {
 		t.Fatalf("Transition(architecture-to-code-plan): unexpected error: %v", err)
 	}
-	if tr.From != "architecture-pair.approved" {
-		t.Errorf("from = %q, want %q", tr.From, "architecture-pair.approved")
+	if tr.From != "architecture-subpipeline.architecture-pair.approved" {
+		t.Errorf("from = %q, want %q", tr.From, "architecture-subpipeline.architecture-pair.approved")
 	}
-	if tr.To != "code-planning-pair.initial" {
-		t.Errorf("to = %q, want %q", tr.To, "code-planning-pair.initial")
+	if tr.To != "coding-subpipeline.code-planning-pair.initial" {
+		t.Errorf("to = %q, want %q", tr.To, "coding-subpipeline.code-planning-pair.initial")
 	}
 }
 

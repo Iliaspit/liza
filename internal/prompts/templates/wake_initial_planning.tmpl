@@ -69,8 +69,11 @@ AVAILABLE ENTRY-POINTS:
 {{- end }}
 
 CLASSIFICATION GUIDANCE:
-- Choose "detailed-spec" if the document is already a detailed specification with structured
-  requirements or a list of user stories. The document must be unambiguously implementation-ready.
+- Choose "functional-spec" if the document already defines product/functional requirements,
+  user stories, or acceptance criteria, but still needs architecture consolidation before code planning.
+- Choose "technical-spec" if the document already contains an implementation-ready technical plan
+  with architecture, boundaries, and interfaces settled enough to start code planning directly.
+- "detailed-spec" is a legacy alias for "functional-spec"; prefer "functional-spec" for new work.
 - Choose "general-objective" for vision documents, broad objectives, or when uncertain.
   Default to "general-objective" — skipping the spec phase is riskier than redundant refinement.
 

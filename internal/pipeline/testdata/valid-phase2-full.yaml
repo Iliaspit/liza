@@ -315,17 +315,15 @@ pipeline:
           trigger: manual
           cardinality: per-subtask
 
-    coding-subpipeline:
+    architecture-subpipeline:
       steps:
         - architecture-pair
+
+    coding-subpipeline:
+      steps:
         - code-planning-pair
         - coding-pair
       transitions:
-        - name: architecture-to-code-plan
-          from: architecture-pair.approved
-          to: code-planning-pair.initial
-          trigger: manual
-          cardinality: per-subtask
         - name: code-plan-to-coding
           from: code-planning-pair.approved
           to: coding-pair.initial
@@ -335,10 +333,17 @@ pipeline:
   pipeline-transitions:
     - name: us-to-coding
       from: epic-spec-subpipeline.us-writing-pair.approved
-      to: coding-subpipeline.architecture-pair.initial
+      to: architecture-subpipeline.architecture-pair.initial
       trigger: manual
       cardinality: many-to-one
+    - name: architecture-to-code-plan
+      from: architecture-subpipeline.architecture-pair.approved
+      to: coding-subpipeline.code-planning-pair.initial
+      trigger: manual
+      cardinality: per-subtask
 
   entry-points:
     general-objective: epic-spec-subpipeline.epic-planning-pair
-    detailed-spec: coding-subpipeline.architecture-pair
+    functional-spec: architecture-subpipeline.architecture-pair
+    detailed-spec: architecture-subpipeline.architecture-pair
+    technical-spec: coding-subpipeline.code-planning-pair
