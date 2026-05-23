@@ -300,8 +300,19 @@ liza analyze                                        # Circuit breaker analysis
 > CLAUDE_CODE_EFFORT_LEVEL=high
 > CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING=1
 > CLAUDE_CODE_DISABLE_AUTO_MEMORY=1
+> CLAUDE_CODE_DISABLE_1M_CONTEXT=0
+> CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=30
 > CLAUDE_CODE_SUBAGENT_MODEL=sonnet
+> LIZA_DISABLE_CLAUDE_SUBAGENTS=1
 > ```
+
+Rationale:
+- High is probably the optimal reasoning effort - thoughtfulness without excessive token consumption.
+- The new adaptive thinking contributed to the degradation of Opus performance since March 2026.
+- Auto-memory is investment without return because Claude Code never considers it in practice.
+- 1M context is too much - Claude's performance degrades much before hitting a fraction of it: either disable it or set an aggressive autocompact threshold.
+- Use Sonnet for subagents in pairing.
+- Subagents are great in general to save context on the master session but Liza's contract is heavy, cannot be disabled for subagents and Liza's sessions are task bounded.
 
 ### Diagnosing Issues
 
