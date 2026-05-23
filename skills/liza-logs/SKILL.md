@@ -4,35 +4,64 @@ description: Analyze Liza agents logs
 ---
 
 SCOPE:
-The logs in .liza/agent-outputs (nowhere else unless told otherwise explicitly),
-The prompt may filter more specifically, e.g. a specific role and/or time range.
+The logs in `.liza/agent-outputs/` and task state in `.liza/state.yaml`
+(nowhere else unless told otherwise explicitly).
+The prompt may filter more specifically, e.g. a specific role, task, status,
+or time range.
 
 OBJECTIVE:
-Finding recurring error patterns and proposing fixes.
+Find recurring task, review, integration, tool, context, and setup frictions;
+correlate state symptoms with log evidence; propose fixes.
 
 PROTOCOL:
 1. Start by running the analyzer:
 ```bash
 python3 ~/.liza/skills/liza-logs/scripts/analyze-log.py .liza/agent-outputs/coder-*.txt        # all coder agents
 python3 ~/.liza/skills/liza-logs/scripts/analyze-log.py .liza/agent-outputs/coder-1-*.txt # single agent
+python3 ~/.liza/skills/liza-logs/scripts/analyze-log.py --summary-by-role .liza/agent-outputs/*.txt
 ```
-By default, run the analyzer per role.
+By default, run the analyzer **per role**.
+Use `--summary-by-role` when you need cross-role aggregate token, tool, MCP,
+error, and skill-invocation totals.
 
-Report sections: session header, token summary (fresh/cached/output, cache hit rate), content breakdown by type (chars, estimated tokens, share %), top 10 items by size, tool call frequency, MCP usage (per-server call count + error rate, result volume, top tools). Rich format adds per-turn context growth and cost breakdown.
+2. Inspect `.liza/state.yaml` for task-level frictions before drawing conclusions:
+```bash
+python3 ~/.liza/skills/liza-logs/scripts/analyze-state.py .liza/state.yaml
+```
+   - tasks with `review_cycles_total >= 4`
+   - tasks whose status is `INTEGRATION_FAILED`, `BLOCKED`, `SUPERSEDED`, or `ABANDONED`
+   - if `review_cycles_total` is missing, count task `history` events named
+     `rejected` or `review_verdict_rejected`
 
-2. Refine the analysis using the raw logs.
+Report sections: session header, token summary, content breakdown, top items by
+size, tool usage, empty turns, skill invocations, secret-word/init breadcrumb
+detection, turn timeline, tool result breakdown, MCP usage, efficiency insights,
+and struggle sequences. Rich format adds per-turn context growth, top longest
+turns, cost breakdown with system-prompt replay cost, and MCP server status.
+Sparse logs have aggregate usage only; do not infer exact per-turn growth or cost.
+
+3. Refine the analysis with the bounded query helper, not by manually reading
+   raw log files. Use `query-log.py` to extract trimmed evidence windows for
+   specific questions, for example:
+```bash
+python3 ~/.liza/skills/liza-logs/scripts/query-log.py .liza/agent-outputs/coder-3-*.txt --around-errors 3 --task architecture-4-code-planning-0-b-repair-0-coding-1
+```
+   - Manual raw-log reads are a last resort only when the query helper cannot
+     answer a concrete evidence question; state the gap before doing so.
    - When referring to a specific session in your summary, include the log filename
      (for example `coder-1-20260417-171454.txt`) so the reader can trace the claim
      back to the exact source log quickly.
 
-3. Before proposing a fix, check whether the fix is already implemented (e.g. an instruction already exists but agents ignore it):
+4. Before proposing a fix, check whether the fix is already implemented (e.g. an instruction already exists but agents ignore it):
    - Read one agent prompt of the relevant role in `.liza/agent-prompts/`
    - Check the contract files in `~/.liza/` (CORE.md, AGENT_TOOLS.md, MULTI_AGENT_MODE.md)
 
-4. Propose fixes whenever possible.
+5. Write the final report using `skills/liza-logs/report-format.md`.
+
+6. Propose fixes whenever possible.
 
 FALSE POSITIVES:
-- **Near-duplicate contract reads** (~8KB per session): Agents read AGENT_TOOLS.md, GUARDRAILS.md, etc. during initialization. These appear as "near-duplicate results" in the analyzer but are cache hits — negligible cost. Do not flag as waste.
+- **Repeated contract reads** (~8KB per session): Agents read AGENT_TOOLS.md, GUARDRAILS.md, etc. during initialization. These are usually cache hits — negligible cost. Do not flag as waste unless the same payload is reread for no reason later in the session.
 
 NOTE:
 The skill contains a web tool for humans to inspect logs: ~/.liza/skills/liza-logs/tools/liza-session-analyzer.html

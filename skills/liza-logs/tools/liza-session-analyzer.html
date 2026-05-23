@@ -41,6 +41,23 @@ function measureSparseItem(item) {
   return 0;
 }
 
+function stableResultHash(text) {
+  if (!text) return "";
+  let h = 2166136261;
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return `${text.length}:${(h >>> 0).toString(16)}`;
+}
+
+function toolResultText(result) {
+  if (typeof result === "string") return result;
+  if (Array.isArray(result)) return result.map(part => part?.text || "").join("\n");
+  if (result && typeof result === "object") return JSON.stringify(result);
+  return String(result || "");
+}
+
 function parseCoderLog(lines) {
   const items = [];
   const turns = [];
@@ -90,12 +107,14 @@ function parseCoderLog(lines) {
       if (obj.type === "item.completed" && obj.item) {
         const it = obj.item;
         const output = it.aggregated_output || "";
+        const resultText = it.type === "mcp_tool_call" ? toolResultText(it.result) : output;
         const item = {
           id: it.id, type: it.type,
           status: it.status || "completed",
           command: it.command || null, text: it.text || null,
           outputLen: output.length,
           outputPreview: output.slice(0, 120).replace(/\n/g, " "),
+          resultHash: stableResultHash(resultText),
           chars: measureSparseItem(it),
           exitCode: it.exit_code,
           server: it.server || null, tool: it.tool || null,
@@ -194,13 +213,15 @@ function parseOrchestratorLog(lines) {
             const nested = measureToolResult(part.content);
             const preview = typeof part.content === "string" ? part.content.slice(0, 120).replace(/\n/g, " ") :
               Array.isArray(part.content) ? (part.content[0]?.text || "").slice(0, 120).replace(/\n/g, " ") : "";
+            const resultHash = stableResultHash(toolResultText(part.content));
             if (nested > 0) events.push({
               type: "tool_result", result: part.content, chars: nested,
-              toolUseId: part.tool_use_id || null, isError: !!part.is_error, preview, tsMs
+              toolUseId: part.tool_use_id || null, isError: !!part.is_error, preview, resultHash, tsMs
             });
           } else if (part?.content) {
             const nested = measureToolResult(part.content);
-            if (nested > 0) events.push({ type: "tool_result", result: part.content, chars: nested, tsMs });
+            const resultHash = stableResultHash(toolResultText(part.content));
+            if (nested > 0) events.push({ type: "tool_result", result: part.content, chars: nested, resultHash, tsMs });
           }
         }
       }
@@ -232,8 +253,14 @@ function detectAndParse(text) {
 // Commands where exit code 1 means "no matches/differences found", not an error.
 const BENIGN_EXIT1_COMMANDS = new Set(["rg", "grep", "egrep", "fgrep", "ag", "ack", "diff"]);
 
+function benignExitCommandName(cmdName) {
+  const parts = String(cmdName || "").trim().split(/\s+/);
+  if (parts[0] === "rtk" && parts.length > 1) return parts[1];
+  return parts[0] || "";
+}
+
 function isBenignExit(cmdName, exitCode) {
-  return exitCode === 1 && BENIGN_EXIT1_COMMANDS.has(cmdName);
+  return exitCode === 1 && BENIGN_EXIT1_COMMANDS.has(benignExitCommandName(cmdName));
 }
 
 function extractCommandName(cmd) {
@@ -379,6 +406,27 @@ function computeMcpUsage(timeline) {
     serverStats, topTools: topTools.slice(0, 15) };
 }
 
+function findDuplicateResultEntries(timeline) {
+  const hashMap = {};
+  for (const t of timeline) {
+    if (t.resultChars >= 1024 && t.resultHash) {
+      if (!hashMap[t.resultHash]) hashMap[t.resultHash] = [];
+      hashMap[t.resultHash].push(t);
+    }
+  }
+  let dupeWaste = 0;
+  const dupeEntries = [];
+  for (const group of Object.values(hashMap)) {
+    if (group.length >= 2) {
+      dupeWaste += group.slice(1).reduce((s, t) => s + t.resultChars, 0);
+      const tools = [...new Set(group.map(t => t.toolName))].join(", ");
+      const events = group.map(t => `#${t.turnNum}`).join(", ");
+      dupeEntries.push({ count: group.length, tool: tools, events, preview: group[0].preview.slice(0, 60) });
+    }
+  }
+  return { dupeWaste, dupeEntries };
+}
+
 function buildCodexEmptyTurns(turns) {
   const toolTypes = new Set(["command_execution", "mcp_tool_call", "file_change"]);
   const emptyTurns = [];
@@ -491,8 +539,9 @@ function analyzeCodex(parsed) {
           turnNum: turn.turnNum, toolName: displayName,
           detail,
           resultChars: item.outputLen || 0,
-          isError: exitCode != null && exitCode !== 0 && !isBenignExit(cmdName, exitCode),
+          isError: exitCode != null && exitCode !== 0 && !isBenignExit(displayName, exitCode),
           preview: item.outputPreview || "",
+          resultHash: item.resultHash || "",
         });
       } else if (item.type === "mcp_tool_call") {
         const name = item.server ? `${item.server}/${item.tool}` : item.tool || "mcp";
@@ -508,6 +557,7 @@ function analyzeCodex(parsed) {
           resultChars: resultText.length,
           isError: item.status === "failed",
           preview: resultText.slice(0, 120).replace(/\n/g, " "),
+          resultHash: item.resultHash || stableResultHash(resultText),
         });
       } else if (item.type === "file_change" && item.changes) {
         const paths = item.changes.map(c => (c.path || "").split("/").pop());
@@ -566,24 +616,9 @@ function analyzeCodex(parsed) {
     const bd = Object.entries(toolErrs).sort((a,b) => b[1]-a[1]).map(([t,n]) => `${n}×${t}`).join(", ");
     efficiencyInsights.push({ type: "error", text: `${errorActions.length} error(s): ${bd}` });
   }
-  const previewMap = {};
-  for (const t of timeline) {
-    if (t.resultChars >= 1024 && t.preview) {
-      const key = t.preview.slice(0, 100);
-      if (!previewMap[key]) previewMap[key] = [];
-      previewMap[key].push(t);
-    }
-  }
-  let dupeWaste = 0;
-  const dupeEntries = [];
-  for (const [key, group] of Object.entries(previewMap)) {
-    if (group.length >= 2) {
-      dupeWaste += group.slice(1).reduce((s, t) => s + t.resultChars, 0);
-      dupeEntries.push({ count: group.length, tool: group[0].toolName, preview: key.slice(0, 60) });
-    }
-  }
+  const { dupeWaste, dupeEntries } = findDuplicateResultEntries(timeline);
   if (dupeEntries.length > 0) {
-    efficiencyInsights.push({ type: "duplicate", text: `${dupeEntries.length} near-duplicate result(s) (~${(dupeWaste/1024).toFixed(0)}KB wasted)`, details: dupeEntries.slice(0, 3) });
+    efficiencyInsights.push({ type: "duplicate", text: `${dupeEntries.length} duplicate result(s) (~${(dupeWaste/1024).toFixed(0)}KB repeated)`, details: dupeEntries.slice(0, 3) });
   }
   for (const [name, b] of Object.entries(toolResultBreakdown)) {
     if (b.calls >= 5 && (b.totalChars / b.calls) < 200) {
@@ -678,8 +713,8 @@ function analyzeClaudeCode(parsed) {
       // For Bash commands, check if exit code 1 is benign (rg/grep no matches)
       let effectiveError = !!ev.isError;
       if (effectiveError && pending.name === "Bash" && pending.detail) {
-        const bashCmd = pending.detail.trim().split(/\s+/)[0].split("/").pop();
-        if (BENIGN_EXIT1_COMMANDS.has(bashCmd) && !(ev.preview || "").trim()) {
+        const bashCmd = displayCommandName(pending.detail.trim().split(/\s+/)[0].split("/").pop(), pending.detail);
+        if (isBenignExit(bashCmd, 1) && !(ev.preview || "").trim()) {
           effectiveError = false;
         }
       }
@@ -690,6 +725,7 @@ function analyzeClaudeCode(parsed) {
         resultChars: ev.chars || 0,
         isError: effectiveError,
         preview: ev.preview || "",
+        resultHash: ev.resultHash || stableResultHash(toolResultText(ev.result)),
         durationMs: perMsgUsage[(pending.turnNum || 0) - 1]?.durationMs || 0,
       });
       delete pendingToolUses[ev.toolUseId];
@@ -739,26 +775,10 @@ function analyzeClaudeCode(parsed) {
     const breakdown2 = Object.entries(toolErrs).sort((a,b) => b[1]-a[1]).map(([t,n]) => `${n}×${t}`).join(", ");
     efficiencyInsights.push({ type: "error", text: `${errorActions.length} error(s): ${breakdown2}` });
   }
-  // 3b. Near-duplicates (>1KB, same first 100 chars of preview)
-  const previewMap = {};
-  for (const t of timeline) {
-    if (t.resultChars >= 1024 && t.preview) {
-      const key = t.preview.slice(0, 100);
-      if (!previewMap[key]) previewMap[key] = [];
-      previewMap[key].push(t);
-    }
-  }
-  let dupeWaste = 0;
-  const dupeEntries = [];
-  for (const [key, group] of Object.entries(previewMap)) {
-    if (group.length >= 2) {
-      const waste = group.slice(1).reduce((s, t) => s + t.resultChars, 0);
-      dupeWaste += waste;
-      dupeEntries.push({ count: group.length, tool: group[0].toolName, preview: key.slice(0, 60) });
-    }
-  }
+  // 3b. Exact duplicate results (>1KB with identical output payloads).
+  const { dupeWaste, dupeEntries } = findDuplicateResultEntries(timeline);
   if (dupeEntries.length > 0) {
-    efficiencyInsights.push({ type: "duplicate", text: `${dupeEntries.length} near-duplicate result(s) (~${(dupeWaste/1024).toFixed(0)}KB wasted)`, details: dupeEntries.slice(0, 3) });
+    efficiencyInsights.push({ type: "duplicate", text: `${dupeEntries.length} duplicate result(s) (~${(dupeWaste/1024).toFixed(0)}KB repeated)`, details: dupeEntries.slice(0, 3) });
   }
   // 3c. Repetitive low-value (same tool 5+ times, avg <200 chars)
   for (const [name, b] of Object.entries(toolResultBreakdown)) {
@@ -1146,7 +1166,7 @@ function CodexReport({ parsed }) {
                 <div style={{ color: c.border, fontWeight: 600 }}>{c.icon} {ins.text}</div>
                 {ins.details && ins.details.map((d, j) => (
                   <div key={j} style={{ color: C.textMuted, fontSize: 11, marginTop: 4, paddingLeft: 20 }}>
-                    {d.count}× {d.tool}: {d.preview}...
+                    {d.count}× {d.tool} at {d.events}: {d.preview}...
                   </div>
                 ))}
               </div>
@@ -1394,7 +1414,7 @@ function ClaudeCodeReport({ parsed }) {
                 <div style={{ color: c.border, fontWeight: 600 }}>{c.icon} {ins.text}</div>
                 {ins.details && ins.details.map((d, j) => (
                   <div key={j} style={{ color: C.textMuted, fontSize: 11, marginTop: 4, paddingLeft: 20 }}>
-                    {d.count}× {d.tool}: {d.preview}...
+                    {d.count}× {d.tool} at {d.events}: {d.preview}...
                   </div>
                 ))}
               </div>

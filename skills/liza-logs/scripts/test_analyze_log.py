@@ -196,3 +196,179 @@ def test_sparse_rtk_command_shows_wrapped_command_in_tool_name() -> None:
     assert "rtk git" in rendered
     assert "rtk pytest" in rendered
     assert "rtk                  " not in rendered
+
+
+def test_sparse_rtk_rg_exit_one_is_not_error() -> None:
+    analyzer = load_analyzer()
+
+    report = analyzer.parse_sparse(
+        as_lines(
+            {"type": "thread.started", "thread_id": "t"},
+            {"type": "turn.started"},
+            command_completed_event("item_1", 'rtk rg -n "missing" internal', exit_code=1),
+            command_completed_event("item_2", "rtk go test ./internal/ops", "boom\n", exit_code=1),
+            {"type": "turn.completed", "usage": {"input_tokens": 1, "cached_input_tokens": 0, "output_tokens": 1}},
+        )
+    )
+
+    assert report.actions[0].tool_name == "rtk rg"
+    assert report.actions[0].is_error is False
+    assert report.actions[1].is_error is True
+
+
+def test_rich_bash_rtk_rg_exit_one_empty_result_is_not_error() -> None:
+    analyzer = load_analyzer()
+
+    report = analyzer.parse_rich(
+        as_lines(
+            {"type": "system", "session_id": "s", "model": "claude"},
+            {
+                "type": "assistant",
+                "message": {
+                    "id": "m1",
+                    "usage": {},
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": "toolu_1",
+                            "name": "Bash",
+                            "input": {"command": 'rtk rg -n "missing" internal'},
+                        }
+                    ],
+                },
+            },
+            {
+                "type": "user",
+                "message": {
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": "toolu_1",
+                            "is_error": True,
+                            "content": "",
+                        }
+                    ]
+                },
+            },
+        )
+    )
+
+    assert report.actions[0].is_error is False
+
+
+def test_efficiency_insights_ignore_shared_prefix_non_duplicates() -> None:
+    analyzer = load_analyzer()
+    report = analyzer.SessionReport()
+    shared_prefix = '--- liza_version: "0.2.0" liza_git_commit: "abc" ---\n'
+    first = shared_prefix + "first document\n" + ("a" * 1200)
+    second = shared_prefix + "second document\n" + ("b" * 1200)
+    report.actions = [
+        analyzer.TurnAction(
+            turn_num=1,
+            tool_name="cat",
+            result_chars=len(first),
+            result_preview=first[:120].replace("\n", " "),
+            result_hash=analyzer._hash_result(first),
+        ),
+        analyzer.TurnAction(
+            turn_num=2,
+            tool_name="cat",
+            result_chars=len(second),
+            result_preview=second[:120].replace("\n", " "),
+            result_hash=analyzer._hash_result(second),
+        ),
+    ]
+
+    rendered = analyzer.render_efficiency_insights(report)
+
+    assert "duplicate result" not in rendered
+
+
+def test_efficiency_insights_report_exact_duplicate_events() -> None:
+    analyzer = load_analyzer()
+    report = analyzer.SessionReport()
+    output = "README.md | 28 +++++---\n" + ("diff body\n" * 200)
+    report.actions = [
+        analyzer.TurnAction(
+            turn_num=17,
+            tool_name="rtk git",
+            result_chars=len(output),
+            result_preview=output[:120].replace("\n", " "),
+            result_hash=analyzer._hash_result(output),
+        ),
+        analyzer.TurnAction(
+            turn_num=25,
+            tool_name="rtk git",
+            result_chars=len(output),
+            result_preview=output[:120].replace("\n", " "),
+            result_hash=analyzer._hash_result(output),
+        ),
+    ]
+
+    rendered = analyzer.render_efficiency_insights(report)
+
+    assert "1 duplicate result(s)" in rendered
+    assert "#17, #25" in rendered
+    assert "rtk git" in rendered
+
+
+def test_role_summary_groups_logs_by_agent_role(tmp_path: Path) -> None:
+    analyzer = load_analyzer()
+    coder_log = tmp_path / "coder-1-20260523-140607.txt"
+    reviewer_log = tmp_path / "code-reviewer-2-20260523-154625.txt"
+    coder_log.write_text(
+        "\n".join(
+            sparse_command_lines()
+            + [
+                json.dumps(
+                    command_completed_event(
+                        "item_2",
+                        "rtk go test ./internal/ops",
+                        "boom\n",
+                        exit_code=1,
+                    )
+                )
+            ]
+        ),
+        encoding="utf-8",
+    )
+    reviewer_log.write_text("\n".join(sparse_command_lines()), encoding="utf-8")
+
+    reports = [analyzer.analyze_file(str(coder_log)), analyzer.analyze_file(str(reviewer_log))]
+    rendered = analyzer.render_role_summary([report for report in reports if report])
+
+    assert "ROLE SUMMARY" in rendered
+    assert "coder-1" in rendered
+    assert "code-reviewer-2" in rendered
+    assert "Errors:        1" in rendered
+    assert "TOP TOOL RESULT VOLUME" in rendered
+
+
+def test_role_summary_includes_mcp_usage() -> None:
+    analyzer = load_analyzer()
+    report = analyzer.SessionReport()
+    report.meta.file = "coder-1-20260523-140607.txt"
+    report.meta.format = "sparse"
+    report.actions = [
+        analyzer.TurnAction(tool_name="github/list_issues", result_chars=1200),
+        analyzer.TurnAction(tool_name="github/get_issue", result_chars=300, is_error=True),
+        analyzer.TurnAction(tool_name="liza/get_state", result_chars=999),
+        analyzer.TurnAction(tool_name="rtk git", result_chars=50),
+    ]
+
+    rendered = analyzer.render_role_summary([report])
+
+    assert "MCP USAGE" in rendered
+    assert "MCP calls: 2/4 (50% of all tool calls)" in rendered
+    assert "github" in rendered
+    assert "github/list_issues" in rendered
+    assert "github/get_issue" in rendered
+    mcp_section = rendered.split("MCP USAGE", 1)[1]
+    assert "liza/get_state" not in mcp_section
+
+
+def test_mcp_parser_ignores_slash_in_command_display_name() -> None:
+    analyzer = load_analyzer()
+
+    assert analyzer._parse_mcp_tool_name("rtk /usr/bin/test") is None
+    assert analyzer._parse_mcp_tool_name("github/list_issues") == ("github", "list_issues")

@@ -15,9 +15,12 @@ Usage:
 
 from __future__ import annotations
 
+import argparse
+import hashlib
 import json
 import re
 import sys
+from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -65,6 +68,7 @@ class TurnAction:
     result_chars: int = 0
     is_error: bool = False
     result_preview: str = ""
+    result_hash: str = ""
     duration_ms: int = 0
 
 
@@ -158,13 +162,29 @@ def detect_format(lines: list[str]) -> str:
 _BENIGN_EXIT1_COMMANDS = frozenset({"rg", "grep", "egrep", "fgrep", "ag", "ack", "diff"})
 
 
+def _benign_exit_command_name(cmd_name: str) -> str:
+    """Return the command whose exit semantics should be used.
+
+    RTK is a wrapper; `rtk rg` should inherit `rg`'s normal exit-1 behavior.
+    """
+    parts = cmd_name.split()
+    if parts and parts[0] == "rtk" and len(parts) > 1:
+        return parts[1]
+    return parts[0] if parts else ""
+
+
 def _is_benign_exit(cmd_name: str, exit_code: int) -> bool:
     """Return True if exit code is a normal non-error signal for the command.
 
     Some tools use exit code 1 for "no matches found" (grep, rg) or
     "differences found" (diff), which is expected behavior, not an error.
     """
-    return exit_code == 1 and cmd_name in _BENIGN_EXIT1_COMMANDS
+    return exit_code == 1 and _benign_exit_command_name(cmd_name) in _BENIGN_EXIT1_COMMANDS
+
+
+def _hash_result(text: str) -> str:
+    """Return a stable digest for exact duplicate result detection."""
+    return hashlib.sha256(text.encode("utf-8", errors="replace")).hexdigest() if text else ""
 
 
 def _extract_secret_words_lines(text: str) -> list[str]:
@@ -208,7 +228,7 @@ def _parse_mcp_tool_name(tool_name: str) -> tuple[str, str] | None:
         return None
     if "/" in tool_name and tool_name[0].isalpha():
         server, _, tool = tool_name.partition("/")
-        if server and tool:
+        if re.fullmatch(r"[A-Za-z][A-Za-z0-9_.-]*", server) and tool:
             return (server, tool)
     return None
 
@@ -449,8 +469,11 @@ def parse_rich(lines: list[str]) -> SessionReport:
                         # (e.g., rg/grep with no matches produce empty output)
                         effective_error = is_error
                         if is_error and name == "Bash" and detail:
-                            bash_cmd = detail.strip().split()[0].rsplit("/", 1)[-1]
-                            if bash_cmd in _BENIGN_EXIT1_COMMANDS and not result_preview.strip():
+                            bash_cmd = _display_command_name(
+                                detail.strip().split()[0].rsplit("/", 1)[-1],
+                                detail,
+                            )
+                            if _is_benign_exit(bash_cmd, 1) and not result_preview.strip():
                                 effective_error = False
                         report.actions.append(
                             TurnAction(
@@ -460,6 +483,7 @@ def parse_rich(lines: list[str]) -> SessionReport:
                                 result_chars=result_chars,
                                 is_error=effective_error,
                                 result_preview=result_preview,
+                                result_hash=_hash_result(combined if isinstance(nested, list) else str(nested or "")),
                                 duration_ms=current_turn_duration_ms,
                             )
                         )
@@ -632,8 +656,9 @@ def parse_sparse(lines: list[str]) -> SessionReport:
                             tool_name=display_name,
                             detail=detail[:80],
                             result_chars=len(output),
-                            is_error=exit_code != 0 and not _is_benign_exit(name, exit_code),
+                            is_error=exit_code != 0 and not _is_benign_exit(display_name, exit_code),
                             result_preview=output[:120].replace("\n", " "),
+                            result_hash=_hash_result(output),
                         )
                     )
                 elif itype == "mcp_tool_call":
@@ -666,6 +691,7 @@ def parse_sparse(lines: list[str]) -> SessionReport:
                             result_chars=len(result_text),
                             is_error=item.get("status") == "failed",
                             result_preview=result_text[:120].replace("\n", " "),
+                            result_hash=_hash_result(result_text),
                         )
                     )
                 elif itype == "file_change":
@@ -1289,7 +1315,7 @@ def render_tool_result_breakdown(report: SessionReport) -> str:
 
 
 def render_efficiency_insights(report: SessionReport) -> str:
-    """Detect waste: errors, near-duplicates, repetitive low-value calls."""
+    """Detect waste: errors, exact duplicate results, repetitive low-value calls."""
     if not report.actions:
         return ""
 
@@ -1304,18 +1330,21 @@ def render_efficiency_insights(report: SessionReport) -> str:
         breakdown = ", ".join(f"{n}×{t}" for t, n in sorted(tool_errs.items(), key=lambda x: -x[1]))
         findings.append(f"  🔴 {len(errors)} error(s): {breakdown}")
 
-    # 2. Near-duplicate results (>1KB with same first 100 chars appearing 2+ times)
-    previews: dict[str, list[TurnAction]] = {}
+    # 2. Exact duplicate results (>1KB with identical output payloads).
+    # Prefix-based grouping produces false positives for shared YAML headers and
+    # serialized MCP path prefixes, so use full result hashes instead.
+    result_hashes: dict[str, list[TurnAction]] = {}
     for a in report.actions:
-        if a.result_chars >= 1024 and a.result_preview:
-            key = a.result_preview[:100]
-            previews.setdefault(key, []).append(a)
-    dupes = {k: v for k, v in previews.items() if len(v) >= 2}
+        if a.result_chars >= 1024 and a.result_hash:
+            result_hashes.setdefault(a.result_hash, []).append(a)
+    dupes = {k: v for k, v in result_hashes.items() if len(v) >= 2}
     if dupes:
         total_waste = sum(sum(a.result_chars for a in group[1:]) for group in dupes.values())
-        findings.append(f"  🟠 {len(dupes)} near-duplicate result(s) (~{total_waste / 1024:.0f}KB wasted)")
-        for preview, group in list(dupes.items())[:3]:
-            findings.append(f"      {len(group)}× {group[0].tool_name}: {preview[:60]}...")
+        findings.append(f"  🟠 {len(dupes)} duplicate result(s) (~{total_waste / 1024:.0f}KB repeated)")
+        for _, group in list(dupes.items())[:3]:
+            events = ", ".join(f"#{a.turn_num}" for a in group)
+            tools = ", ".join(dict.fromkeys(a.tool_name for a in group))
+            findings.append(f"      {len(group)}× {tools} at {events}: {group[0].result_preview[:60]}...")
 
     # 3. Repetitive low-value: same tool called 5+ times with avg result <200 chars
     groups: dict[str, list[TurnAction]] = {}
@@ -1533,16 +1562,190 @@ def analyze_file(filepath: str) -> SessionReport | None:
     return report
 
 
+def _role_from_log_path(filepath: str) -> str:
+    """Infer role name from `<role>-YYYYMMDD-HHMMSS.txt` log filenames."""
+    name = Path(filepath).name
+    stem = name[:-4] if name.endswith(".txt") else Path(name).stem
+    parts = stem.rsplit("-", 2)
+    return parts[0] if len(parts) == 3 else stem
+
+
+def _total_input_tokens(report: SessionReport) -> int:
+    return report.total_input_tokens + report.total_cache_creation + report.total_cache_read
+
+
+def _cache_hit_rate(report: SessionReport) -> float:
+    total_input = _total_input_tokens(report)
+    if report.total_cache_creation == 0 and report.total_cache_read > 0 and total_input > 0:
+        return report.total_cache_read / total_input * 100
+    cache_eligible = report.total_cache_creation + report.total_cache_read
+    return report.total_cache_read / cache_eligible * 100 if cache_eligible else 0.0
+
+
+def render_role_summary(reports: list[SessionReport]) -> str:
+    """Render aggregate log metrics grouped by role."""
+    by_role: dict[str, list[SessionReport]] = defaultdict(list)
+    for report in reports:
+        by_role[_role_from_log_path(report.meta.file)].append(report)
+
+    total_logs = sum(len(role_reports) for role_reports in by_role.values())
+    total_input = sum(_total_input_tokens(report) for report in reports)
+    total_fresh = sum(report.total_input_tokens for report in reports)
+    total_cache_create = sum(report.total_cache_creation for report in reports)
+    total_cache_read = sum(report.total_cache_read for report in reports)
+    total_output = sum(report.total_output_tokens for report in reports)
+    total_errors = sum(1 for report in reports for action in report.actions if action.is_error)
+    format_counts = Counter(report.meta.format for report in reports)
+
+    lines = [
+        "=" * 72,
+        "ROLE SUMMARY",
+        "=" * 72,
+        f"  Logs:          {total_logs}",
+        f"  Formats:       {', '.join(f'{name}:{count}' for name, count in sorted(format_counts.items()))}",
+        (
+            f"  Total Input:   {_fmt_tokens(total_input)}"
+            f"  (fresh: {_fmt_tokens(total_fresh)},"
+            f" cache_create: {_fmt_tokens(total_cache_create)},"
+            f" cache_read: {_fmt_tokens(total_cache_read)})"
+        ),
+        f"  Output:        {_fmt_tokens(total_output)}",
+        f"  Errors:        {total_errors}",
+        "",
+        (
+            f"  {'Role':<28s} {'Logs':>5s} {'Input':>9s} {'Fresh':>9s}"
+            f" {'Cache':>9s} {'Output':>8s} {'Hit%':>6s} {'Err':>5s}"
+        ),
+        f"  {'-' * 28} {'-' * 5} {'-' * 9} {'-' * 9} {'-' * 9} {'-' * 8} {'-' * 6} {'-' * 5}",
+    ]
+
+    for role, role_reports in sorted(by_role.items()):
+        role_input = sum(_total_input_tokens(report) for report in role_reports)
+        role_fresh = sum(report.total_input_tokens for report in role_reports)
+        role_cache = sum(report.total_cache_creation + report.total_cache_read for report in role_reports)
+        role_output = sum(report.total_output_tokens for report in role_reports)
+        role_errors = sum(1 for report in role_reports for action in report.actions if action.is_error)
+        weighted_hit = (
+            sum(_cache_hit_rate(report) * _total_input_tokens(report) for report in role_reports) / role_input
+            if role_input
+            else 0.0
+        )
+        lines.append(
+            f"  {role:<28s} {len(role_reports):>5d}"
+            f" {_fmt_tokens(role_input):>9s}"
+            f" {_fmt_tokens(role_fresh):>9s}"
+            f" {_fmt_tokens(role_cache):>9s}"
+            f" {_fmt_tokens(role_output):>8s}"
+            f" {weighted_hit:>5.1f}%"
+            f" {role_errors:>5d}"
+        )
+
+    tool_chars: Counter[str] = Counter()
+    tool_calls: Counter[str] = Counter()
+    mcp_server_calls: Counter[str] = Counter()
+    mcp_server_errors: Counter[str] = Counter()
+    mcp_server_chars: Counter[str] = Counter()
+    mcp_tool_calls: Counter[str] = Counter()
+    mcp_tool_errors: Counter[str] = Counter()
+    mcp_tool_chars: Counter[str] = Counter()
+    skills: Counter[str] = Counter()
+    for report in reports:
+        skills.update(report.skill_invocations)
+        for action in report.actions:
+            tool_chars[action.tool_name] += action.result_chars
+            tool_calls[action.tool_name] += 1
+            parsed = _parse_mcp_tool_name(action.tool_name)
+            if parsed and parsed[0] != "liza":
+                server, tool = parsed
+                server_tool = f"{server}/{tool}"
+                mcp_server_calls[server] += 1
+                mcp_server_chars[server] += action.result_chars
+                mcp_tool_calls[server_tool] += 1
+                mcp_tool_chars[server_tool] += action.result_chars
+                if action.is_error:
+                    mcp_server_errors[server] += 1
+                    mcp_tool_errors[server_tool] += 1
+
+    lines.extend(
+        [
+            "",
+            "TOP TOOL RESULT VOLUME",
+            f"  {'Tool':<25s} {'Calls':>6s} {'Total':>10s}",
+            f"  {'-' * 25} {'-' * 6} {'-' * 10}",
+        ]
+    )
+    for tool, chars in tool_chars.most_common(12):
+        lines.append(f"  {tool:<25s} {tool_calls[tool]:>6d} {_fmt_tokens(chars) + 'c':>10s}")
+
+    if mcp_server_calls:
+        total_actions = sum(tool_calls.values())
+        total_mcp = sum(mcp_server_calls.values())
+        lines.extend(
+            [
+                "",
+                "MCP USAGE",
+                f"  MCP calls: {total_mcp}/{total_actions} ({total_mcp / total_actions * 100:.0f}% of all tool calls)",
+                "",
+                f"  {'Server':<25s} {'Calls':>6s} {'Errors':>7s} {'Total':>10s}",
+                f"  {'-' * 25} {'-' * 6} {'-' * 7} {'-' * 10}",
+            ]
+        )
+        for server, calls in mcp_server_calls.most_common():
+            lines.append(
+                f"  {server:<25s} {calls:>6d}"
+                f" {mcp_server_errors[server]:>7d}"
+                f" {_fmt_tokens(mcp_server_chars[server]) + 'c':>10s}"
+            )
+        lines.extend(
+            [
+                "",
+                f"  {'Server/Tool':<45s} {'Calls':>6s} {'Errors':>7s} {'Total':>10s}",
+                f"  {'-' * 45} {'-' * 6} {'-' * 7} {'-' * 10}",
+            ]
+        )
+        for server_tool, calls in mcp_tool_calls.most_common(15):
+            lines.append(
+                f"  {server_tool:<45s} {calls:>6d}"
+                f" {mcp_tool_errors[server_tool]:>7d}"
+                f" {_fmt_tokens(mcp_tool_chars[server_tool]) + 'c':>10s}"
+            )
+
+    if skills:
+        lines.extend(
+            [
+                "",
+                "SKILL INVOCATIONS",
+                f"  {'Skill':<35s} {'Calls':>6s}",
+                f"  {'-' * 35} {'-' * 6}",
+            ]
+        )
+        for skill, count in skills.most_common():
+            lines.append(f"  {skill:<35s} {count:>6d}")
+
+    return "\n".join(lines) + "\n"
+
+
 def main() -> None:
-    if len(sys.argv) < 2:
-        print(f"Usage: {sys.argv[0]} <logfile> [logfile ...]", file=sys.stderr)
+    parser = argparse.ArgumentParser(description="Analyze Liza agent log files.")
+    parser.add_argument(
+        "--summary-by-role",
+        action="store_true",
+        help="print one aggregate report grouped by inferred agent role instead of per-log reports",
+    )
+    parser.add_argument("logs", nargs="+", help="NDJSON agent log files to analyze")
+    args = parser.parse_args()
+
+    reports = [report for filepath in args.logs if (report := analyze_file(filepath))]
+    if not reports:
         sys.exit(1)
 
-    for filepath in sys.argv[1:]:
-        report = analyze_file(filepath)
-        if report:
-            print(render_report(report))
-            print()
+    if args.summary_by_role:
+        print(render_role_summary(reports))
+        return
+
+    for report in reports:
+        print(render_report(report))
+        print()
 
 
 if __name__ == "__main__":
