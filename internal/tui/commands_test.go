@@ -608,3 +608,21 @@ func TestRunChecksCmdDoesNotWriteValidationWarningsToCommandWarnWriter(t *testin
 		t.Fatalf("TUI check leaked validation warning to command warn writer:\n%s", warnings.String())
 	}
 }
+
+func TestSuppressMissingRoleAlertsAfterRepair(t *testing.T) {
+	alerts := []commands.Alert{
+		{Category: "MISSING ROLE", Message: "no registered agent for role architect"},
+		{Category: "BLOCKED", Message: "task blocked"},
+	}
+
+	filtered := commands.FilterAlertsAfterAutoRepair(alerts, commands.AutoRepairAgentPoolOutcome{
+		AttemptedRoles: []string{"architect"},
+	})
+
+	if len(filtered) != 1 {
+		t.Fatalf("filtered alerts = %d, want 1", len(filtered))
+	}
+	if filtered[0].Category != "BLOCKED" {
+		t.Fatalf("remaining category = %q, want BLOCKED", filtered[0].Category)
+	}
+}

@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"maps"
@@ -124,7 +125,10 @@ func runChecksCmd(projectRoot, alertsLogPath string, state *models.State, cache 
 			StateCache:  cacheCopy,
 		}
 
+		repairOutcome := commands.RunAutoRepairAgentPool(context.Background(), state, config)
 		snapshot := commands.RunChecksWithStateSnapshot(state, config)
+		snapshot.Alerts = commands.FilterAlertsAfterAutoRepair(snapshot.Alerts, repairOutcome)
+		snapshot.Alerts = append(snapshot.Alerts, repairOutcome.Alerts...)
 
 		// Write each alert to alerts.log
 		var writeErr error

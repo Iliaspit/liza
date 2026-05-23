@@ -8,11 +8,17 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 
 	"github.com/liza-mas/liza/internal/agent"
 	"github.com/liza-mas/liza/internal/db"
 	"github.com/liza-mas/liza/internal/paths"
 )
+
+var agentSpawnGuard = struct {
+	sync.Mutex
+	inFlight map[string]bool
+}{inFlight: make(map[string]bool)}
 
 func buildSpawnCommand(projectRoot, role, cli string, extraArgs ...string) (*exec.Cmd, *os.File, error) {
 	args := []string{"agent", role, "--cli", cli}
@@ -63,6 +69,20 @@ func hasFlag(args []string, name string) bool {
 // Returns the started command and an error. The caller owns lifecycle
 // management (the process is already started and will be reaped).
 func SpawnAgent(projectRoot, role, cli string, extraArgs ...string) (*exec.Cmd, error) {
+	guardKey := projectRoot + "\x00" + role
+	agentSpawnGuard.Lock()
+	if agentSpawnGuard.inFlight[guardKey] {
+		agentSpawnGuard.Unlock()
+		return nil, fmt.Errorf("spawn already in progress for role %s", role)
+	}
+	agentSpawnGuard.inFlight[guardKey] = true
+	agentSpawnGuard.Unlock()
+	defer func() {
+		agentSpawnGuard.Lock()
+		delete(agentSpawnGuard.inFlight, guardKey)
+		agentSpawnGuard.Unlock()
+	}()
+
 	if agent.CheckQuotaSignal(projectRoot, cli) {
 		err := fmt.Errorf("provider quota exhausted for %s; refusing to spawn %s", cli, role)
 		if alertErr := agent.LogQuotaSpawnBlockedAlert(projectRoot, cli, role); alertErr != nil {

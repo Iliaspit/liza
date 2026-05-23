@@ -12,6 +12,7 @@ import (
 	"github.com/liza-mas/liza/internal/alerts"
 	"github.com/liza-mas/liza/internal/analysis"
 	"github.com/liza-mas/liza/internal/db"
+	lizalog "github.com/liza-mas/liza/internal/log"
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/ops"
 	"github.com/liza-mas/liza/internal/paths"
@@ -30,10 +31,13 @@ const (
 	OrphanedGracePeriod          = 30 * time.Second
 	StaleSentinelThreshold       = 2 * time.Minute
 	AutoRepairAgentPoolBackoff   = 60 * time.Second
+	AutoRepairAgentPoolMaxStarts = 3
 )
 
 const stuckAlertCachePrefix = "stuck-alert:"
 const autoRepairAgentPoolCachePrefix = "auto-repair-agent-pool:"
+const autoRepairAgentPoolStartCountPrefix = "auto-repair-agent-pool-start-count:"
+const autoRepairAgentPoolSuppressedPrefix = "auto-repair-agent-pool-suppressed:"
 const autoRepairAgentPoolEnvWarningKey = "auto-repair-agent-pool-env-warning"
 
 type AlertLevel = alerts.AlertLevel
@@ -50,6 +54,14 @@ type Alert = alerts.Alert
 type AlertSnapshot struct {
 	Alerts     []Alert
 	ActiveKeys map[string]bool
+}
+
+type AutoRepairAgentPoolOutcome struct {
+	Alerts          []Alert
+	AttemptedRoles  []string
+	SuppressedRoles []string
+	Spawned         []SpawnedAgent
+	Failed          []FailedAgentSpawn
 }
 
 // ParseAlertLine parses a line written by Alert.String() back into an Alert.
@@ -122,7 +134,14 @@ func runChecks(ctx context.Context, config WatchConfig) error {
 		return fmt.Errorf("failed to read state: %w", err)
 	}
 
-	alerts := RunChecksWithState(state, config)
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+
+	repairOutcome := RunAutoRepairAgentPool(ctx, state, config)
+	snapshot := RunChecksWithStateSnapshot(state, config)
+	alerts := FilterAlertsAfterAutoRepair(snapshot.Alerts, repairOutcome)
+	alerts = append(alerts, repairOutcome.Alerts...)
 
 	for _, a := range alerts {
 		if err := WriteAlert(config.AlertsLog, a); err != nil {
@@ -131,24 +150,13 @@ func runChecks(ctx context.Context, config WatchConfig) error {
 		fmt.Fprintln(os.Stderr, a.String())
 	}
 
-	if ctx.Err() != nil {
-		return ctx.Err()
-	}
-
-	repairAlerts := runAutoRepairAgentPool(ctx, state, config)
-	for _, a := range repairAlerts {
-		if err := WriteAlert(config.AlertsLog, a); err != nil {
-			return fmt.Errorf("failed to write auto-repair alert: %w", err)
-		}
-		fmt.Fprintln(os.Stderr, a.String())
-	}
-
 	return nil
 }
 
-func runAutoRepairAgentPool(ctx context.Context, state *models.State, config WatchConfig) []Alert {
+func RunAutoRepairAgentPool(ctx context.Context, state *models.State, config WatchConfig) AutoRepairAgentPoolOutcome {
+	var outcome AutoRepairAgentPoolOutcome
 	if ctx.Err() != nil || state == nil {
-		return nil
+		return outcome
 	}
 	if config.StateCache == nil {
 		config.StateCache = make(map[string]time.Time)
@@ -168,46 +176,62 @@ func runAutoRepairAgentPool(ctx context.Context, state *models.State, config Wat
 	}
 	if !enabled {
 		clearAutoRepairAgentPoolCache(config.StateCache, nil)
-		return nil
+		return outcome
 	}
 
-	// This reparses the pipeline config after RunChecksWithStateSnapshot already
-	// loaded it. The duplicate read keeps auto-repair decoupled from the pure
-	// alert snapshot path used by the TUI.
+	// Keep auto-repair decoupled from the pure alert snapshot path used by
+	// the TUI so successful repairs can suppress MISSING ROLE alerts cleanly.
 	pr, err := ops.LoadResolverForModels(config.ProjectRoot)
 	if err != nil {
-		return nil
+		return outcome
 	}
 
 	missing := FindMissingRolesWithClaimableWork(state, pr)
-	roles := autoRepairDueRoles(missing, config.StateCache, time.Now().UTC())
+	now := time.Now().UTC()
+	suppressedAlerts, suppressedRoles := autoRepairSuppressedAlerts(missing, config.StateCache, now)
+	outcome.Alerts = append(outcome.Alerts, suppressedAlerts...)
+	outcome.SuppressedRoles = append(outcome.SuppressedRoles, suppressedRoles...)
+	roles := autoRepairDueRoles(missing, config.StateCache, now)
 	if len(roles) == 0 {
-		return nil
+		return outcome
 	}
+	outcome.AttemptedRoles = append(outcome.AttemptedRoles, roles...)
 
 	result, err := RepairAgentPool(RepairAgentPoolOptions{
 		ProjectRoot: config.ProjectRoot,
 		Roles:       roles,
 	})
-	now := time.Now().UTC()
+	now = time.Now().UTC()
 	// Stamp every attempted role, including failures, to avoid hammering a
 	// broken spawn path on every watch tick. This cache is process-local; agent
 	// registration and max-instances remain the cross-process safety net.
 	for _, role := range roles {
 		config.StateCache[autoRepairAgentPoolCachePrefix+role] = now
 	}
+	if result != nil {
+		outcome.Spawned = append(outcome.Spawned, result.Spawned...)
+		outcome.Failed = append(outcome.Failed, result.Failed...)
+		for _, spawned := range result.Spawned {
+			count := incrementAutoRepairStartCount(config.StateCache, spawned.Role)
+			config.StateCache[autoRepairAgentPoolStartCountPrefix+spawned.Role] = autoRepairCountTime(count, now)
+		}
+		if logErr := logAutoRepairAgentPoolSpawn(config.ProjectRoot, result.Spawned); logErr != nil {
+			fmt.Fprintf(config.WarnWriter, "WARNING: failed to log auto-repair spawn: %v\n", logErr)
+		}
+	}
 	if err == nil {
-		return nil
+		return outcome
 	}
 
 	message := formatAutoRepairAgentPoolFailure(result, err)
 	fmt.Fprintf(config.WarnWriter, "WARNING: %s\n", message)
-	return []Alert{{
+	outcome.Alerts = append(outcome.Alerts, Alert{
 		Timestamp: now,
 		Level:     AlertLevelWarning,
 		Category:  "AUTO REPAIR FAILED",
 		Message:   message,
-	}}
+	})
+	return outcome
 }
 
 func autoRepairDueRoles(missing []MissingRoleWork, cache map[string]time.Time, now time.Time) []string {
@@ -216,6 +240,9 @@ func autoRepairDueRoles(missing []MissingRoleWork, cache map[string]time.Time, n
 	for _, roleWork := range missing {
 		role := roleWork.Role
 		missingSet[role] = true
+		if autoRepairStartCount(cache, role) >= AutoRepairAgentPoolMaxStarts {
+			continue
+		}
 		lastAttempt, seen := cache[autoRepairAgentPoolCachePrefix+role]
 		if seen && now.Sub(lastAttempt) < AutoRepairAgentPoolBackoff {
 			continue
@@ -226,16 +253,95 @@ func autoRepairDueRoles(missing []MissingRoleWork, cache map[string]time.Time, n
 	return roles
 }
 
-func clearAutoRepairAgentPoolCache(cache map[string]time.Time, missingSet map[string]bool) {
-	for key := range cache {
-		if !strings.HasPrefix(key, autoRepairAgentPoolCachePrefix) {
+func autoRepairSuppressedAlerts(missing []MissingRoleWork, cache map[string]time.Time, now time.Time) ([]Alert, []string) {
+	missingSet := make(map[string]bool, len(missing))
+	var out []Alert
+	var roles []string
+	for _, roleWork := range missing {
+		role := roleWork.Role
+		missingSet[role] = true
+		if autoRepairStartCount(cache, role) < AutoRepairAgentPoolMaxStarts {
+			delete(cache, autoRepairAgentPoolSuppressedPrefix+role)
 			continue
 		}
-		role := strings.TrimPrefix(key, autoRepairAgentPoolCachePrefix)
+		key := autoRepairAgentPoolSuppressedPrefix + role
+		if _, seen := cache[key]; seen {
+			roles = append(roles, role)
+			continue
+		}
+		cache[key] = now
+		roles = append(roles, role)
+		out = append(out, Alert{
+			Timestamp: now,
+			Level:     AlertLevelWarning,
+			Category:  "AUTO REPAIR FAILED",
+			Message: fmt.Sprintf("auto repair suppressed for role %s after %d started agent process(es) did not register; start the role manually or restart the TUI to retry",
+				role, AutoRepairAgentPoolMaxStarts),
+		})
+	}
+	clearAutoRepairAgentPoolCache(cache, missingSet)
+	return out, roles
+}
+
+func clearAutoRepairAgentPoolCache(cache map[string]time.Time, missingSet map[string]bool) {
+	for key := range cache {
+		var role string
+		switch {
+		case strings.HasPrefix(key, autoRepairAgentPoolCachePrefix):
+			role = strings.TrimPrefix(key, autoRepairAgentPoolCachePrefix)
+		case strings.HasPrefix(key, autoRepairAgentPoolStartCountPrefix):
+			role = strings.TrimPrefix(key, autoRepairAgentPoolStartCountPrefix)
+		case strings.HasPrefix(key, autoRepairAgentPoolSuppressedPrefix):
+			role = strings.TrimPrefix(key, autoRepairAgentPoolSuppressedPrefix)
+		default:
+			continue
+		}
 		if missingSet == nil || !missingSet[role] {
 			delete(cache, key)
 		}
 	}
+}
+
+func incrementAutoRepairStartCount(cache map[string]time.Time, role string) int {
+	count := autoRepairStartCount(cache, role)
+	count++
+	return count
+}
+
+func autoRepairStartCount(cache map[string]time.Time, role string) int {
+	if cache == nil {
+		return 0
+	}
+	stamp, ok := cache[autoRepairAgentPoolStartCountPrefix+role]
+	if !ok {
+		return 0
+	}
+	return stamp.Nanosecond()
+}
+
+func autoRepairCountTime(count int, now time.Time) time.Time {
+	return time.Date(now.Year(), now.Month(), now.Day(), now.Hour(), now.Minute(), now.Second(), count, time.UTC)
+}
+
+func logAutoRepairAgentPoolSpawn(projectRoot string, spawned []SpawnedAgent) error {
+	if len(spawned) == 0 {
+		return nil
+	}
+	logger := lizalog.New(paths.New(projectRoot).LogPath())
+	for _, started := range spawned {
+		detail := fmt.Sprintf("%s pid=%d", started.Command, started.PID)
+		if started.PID == 0 {
+			detail = started.Command
+		}
+		if err := logger.Append(lizalog.Entry{
+			Agent:  "system",
+			Action: "auto_repair_agent_spawned",
+			Detail: detail,
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func formatAutoRepairAgentPoolFailure(result *RepairAgentPoolResult, err error) string {
@@ -258,6 +364,60 @@ func formatAutoRepairAgentPoolFailure(result *RepairAgentPoolResult, err error) 
 		message += fmt.Sprintf("; already started role(s): %s", strings.Join(spawned, ", "))
 	}
 	return message
+}
+
+func FilterAlertsAfterAutoRepair(alertsIn []Alert, repairOutcome AutoRepairAgentPoolOutcome) []Alert {
+	handledRoles := make(map[string]bool, len(repairOutcome.AttemptedRoles)+len(repairOutcome.SuppressedRoles))
+	for _, role := range repairOutcome.AttemptedRoles {
+		handledRoles[role] = true
+	}
+	for _, role := range repairOutcome.SuppressedRoles {
+		handledRoles[role] = true
+	}
+	if len(handledRoles) == 0 {
+		return alertsIn
+	}
+
+	filtered := alertsIn[:0]
+	for _, alert := range alertsIn {
+		if alert.Category == "MISSING ROLE" && missingRoleAlertHandled(alert, handledRoles) {
+			continue
+		}
+		filtered = append(filtered, alert)
+	}
+	return filtered
+}
+
+func missingRoleAlertHandled(alert Alert, handledRoles map[string]bool) bool {
+	for role := range handledRoles {
+		if containsRoleToken(alert.Message, role) {
+			return true
+		}
+	}
+	return false
+}
+
+func containsRoleToken(message, role string) bool {
+	needle := "role " + role
+	for offset := 0; offset < len(message); {
+		idx := strings.Index(message[offset:], needle)
+		if idx < 0 {
+			return false
+		}
+		end := offset + idx + len(needle)
+		if end == len(message) || isRoleTokenBoundary(message[end]) {
+			return true
+		}
+		offset = end
+	}
+	return false
+}
+
+func isRoleTokenBoundary(ch byte) bool {
+	return !((ch >= 'a' && ch <= 'z') ||
+		(ch >= 'A' && ch <= 'Z') ||
+		(ch >= '0' && ch <= '9') ||
+		ch == '-' || ch == '_')
 }
 
 // RunChecksWithState runs all 13 anomaly checks plus circuit breaker,
@@ -1160,7 +1320,7 @@ func checkMissingRoles(state *models.State, pr models.PipelineResolver, cache ma
 		if suffix != "" {
 			msg += ", " + suffix
 		}
-		msg += "); headless watch auto-repairs by default; run `liza repair-agent-pool --dry-run` to preview manually"
+		msg += "); the TUI auto-repairs by default; run `liza repair-agent-pool --dry-run` to preview manually"
 
 		alerts = append(alerts, Alert{
 			Timestamp: now,

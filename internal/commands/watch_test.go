@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/liza-mas/liza/internal/db"
+	lizalog "github.com/liza-mas/liza/internal/log"
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/ops"
 	"github.com/liza-mas/liza/internal/paths"
@@ -3142,6 +3143,125 @@ func TestRunChecksWithStateSnapshot_ReportsActiveKeysForDeadAgentProcess(t *test
 	if cleared.ActiveKeys[alertKey] {
 		t.Fatalf("cleared poll still reports inactive key %q active", alertKey)
 	}
+}
+
+func TestRunAutoRepairAgentPool_LogsSuccessfulSpawnWithoutAlert(t *testing.T) {
+	unsetAutoRepairAgentPoolEnv(t)
+	now := time.Now().UTC()
+	projectRoot, state := setupAutoRepairMissingArchitectState(t, now)
+
+	originalSpawn := repairAgentPoolSpawn
+	repairAgentPoolSpawn = func(projectRoot, role, cli string) (int, error) {
+		if role != "architect" {
+			t.Fatalf("role = %q, want architect", role)
+		}
+		return 4242, nil
+	}
+	t.Cleanup(func() { repairAgentPoolSpawn = originalSpawn })
+
+	outcome := RunAutoRepairAgentPool(context.Background(), state, WatchConfig{
+		ProjectRoot: projectRoot,
+		StateCache:  make(map[string]time.Time),
+		WarnWriter:  io.Discard,
+	})
+
+	if len(outcome.Alerts) != 0 {
+		t.Fatalf("alerts = %v, want none", outcome.Alerts)
+	}
+	if len(outcome.Spawned) != 1 || outcome.Spawned[0].Role != "architect" {
+		t.Fatalf("spawned = %+v, want architect spawn", outcome.Spawned)
+	}
+
+	entries, err := lizalog.New(paths.New(projectRoot).LogPath()).Read()
+	if err != nil {
+		t.Fatalf("read log: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("log entries = %d, want 1", len(entries))
+	}
+	if entries[0].Agent != "system" || entries[0].Action != "auto_repair_agent_spawned" {
+		t.Fatalf("log entry = %+v, want system auto_repair_agent_spawned", entries[0])
+	}
+	if !strings.Contains(entries[0].Detail, "liza agent architect --cli") || !strings.Contains(entries[0].Detail, "pid=4242") {
+		t.Fatalf("log detail = %q, want command and pid", entries[0].Detail)
+	}
+}
+
+func TestRunAutoRepairAgentPool_ReportsSpawnFailure(t *testing.T) {
+	unsetAutoRepairAgentPoolEnv(t)
+	now := time.Now().UTC()
+	projectRoot, state := setupAutoRepairMissingArchitectState(t, now)
+
+	originalSpawn := repairAgentPoolSpawn
+	repairAgentPoolSpawn = func(projectRoot, role, cli string) (int, error) {
+		return 0, errors.New("spawn denied")
+	}
+	t.Cleanup(func() { repairAgentPoolSpawn = originalSpawn })
+
+	outcome := RunAutoRepairAgentPool(context.Background(), state, WatchConfig{
+		ProjectRoot: projectRoot,
+		StateCache:  make(map[string]time.Time),
+		WarnWriter:  io.Discard,
+	})
+
+	if len(outcome.Spawned) != 0 {
+		t.Fatalf("spawned = %+v, want none", outcome.Spawned)
+	}
+	if len(outcome.Alerts) != 1 {
+		t.Fatalf("alerts = %v, want one failure alert", outcome.Alerts)
+	}
+	if outcome.Alerts[0].Category != "AUTO REPAIR FAILED" {
+		t.Fatalf("alert category = %q, want AUTO REPAIR FAILED", outcome.Alerts[0].Category)
+	}
+	if !strings.Contains(outcome.Alerts[0].Message, "spawn denied") {
+		t.Fatalf("alert message = %q, want spawn error", outcome.Alerts[0].Message)
+	}
+}
+
+func TestRunAutoRepairAgentPool_SuppressesRepeatedUnregisteredStarts(t *testing.T) {
+	unsetAutoRepairAgentPoolEnv(t)
+	now := time.Now().UTC()
+	projectRoot, state := setupAutoRepairMissingArchitectState(t, now)
+	cache := make(map[string]time.Time)
+	cache[autoRepairAgentPoolStartCountPrefix+"architect"] = autoRepairCountTime(AutoRepairAgentPoolMaxStarts, now)
+
+	originalSpawn := repairAgentPoolSpawn
+	repairAgentPoolSpawn = func(projectRoot, role, cli string) (int, error) {
+		t.Fatalf("spawn should be suppressed after repeated unregistered starts")
+		return 0, nil
+	}
+	t.Cleanup(func() { repairAgentPoolSpawn = originalSpawn })
+
+	outcome := RunAutoRepairAgentPool(context.Background(), state, WatchConfig{
+		ProjectRoot: projectRoot,
+		StateCache:  cache,
+		WarnWriter:  io.Discard,
+	})
+
+	if len(outcome.Spawned) != 0 || len(outcome.AttemptedRoles) != 0 {
+		t.Fatalf("outcome = %+v, want no spawn attempt", outcome)
+	}
+	if len(outcome.Alerts) != 1 || outcome.Alerts[0].Category != "AUTO REPAIR FAILED" {
+		t.Fatalf("alerts = %v, want one AUTO REPAIR FAILED", outcome.Alerts)
+	}
+	if !strings.Contains(outcome.Alerts[0].Message, "auto repair suppressed for role architect") {
+		t.Fatalf("alert message = %q, want suppression detail", outcome.Alerts[0].Message)
+	}
+}
+
+func setupAutoRepairMissingArchitectState(t *testing.T, now time.Time) (string, *models.State) {
+	t.Helper()
+	projectRoot := t.TempDir()
+	stateFile, _ := testhelpers.SetupLizaDir(t, projectRoot)
+	testhelpers.SetupPipelineConfig(t, projectRoot)
+
+	state := testhelpers.CreateValidState()
+	state.Tasks = []models.Task{
+		buildPipelineTask("architecture-1", "architecture-pair", models.TaskStatus("DRAFT_ARCHITECTURE"), now, nil),
+	}
+	state.Agents = map[string]models.Agent{}
+	testhelpers.WriteInitialState(t, stateFile, state)
+	return projectRoot, state
 }
 
 func countAlertsByCategory(alerts []Alert, category string) int {
