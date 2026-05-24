@@ -187,6 +187,9 @@ func Proceed(projectRoot, taskID, transitionName string) (*ProceedResult, error)
 		task := s.FindTask(taskID)
 		var inheritedDeps []string
 		if task != nil {
+			if err := canonicalizeTaskDependsOnForTransition(s, resolver, task); err != nil {
+				return fmt.Errorf("canonicalize dependencies: %w", err)
+			}
 			inheritedDeps, err = computeInheritedDeps(s, task, transitionName, resolver)
 			if err != nil {
 				return fmt.Errorf("inherited deps: %w", err)
@@ -407,12 +410,20 @@ func proceedInner(s *models.State, taskID, transitionName string, tDef transitio
 		return recoverCrashedTransition(s, task, taskID, transitionName, tDef, inheritedDeps, resolver, now, result)
 	}
 
+	outputEntries := task.Output
+	outputChanged := false
 	switch tDef.cardinality {
 	case "per-subtask":
 		if len(task.Output) == 0 {
 			return fmt.Errorf("task %q has no output[] entries for per-subtask transition %q", taskID, transitionName)
 		}
-		for i, entry := range task.Output {
+		canonicalOutput, changed, err := canonicalizedOutputTaskDependsOnForTarget(s, resolver, task, tDef.targetRolePair)
+		if err != nil {
+			return err
+		}
+		outputEntries = canonicalOutput
+		outputChanged = changed
+		for i, entry := range canonicalOutput {
 			if err := validateOutputEntry(entry, i, len(task.Output)); err != nil {
 				return err
 			}
@@ -433,14 +444,14 @@ func proceedInner(s *models.State, taskID, transitionName string, tDef transitio
 	var siblingIDs []string
 	if tDef.cardinality == "per-subtask" {
 		inFlightByKind := collectNonTerminalByKind(s)
-		siblingIDs, skipEntry, remapSibling = resolvePerSubtaskSiblings(task.Output, inFlightByKind, taskID, tDef.taskSlug)
+		siblingIDs, skipEntry, remapSibling = resolvePerSubtaskSiblings(outputEntries, inFlightByKind, taskID, tDef.taskSlug)
 	}
 
 	var children []models.Task
 	var childIDs []string
 	switch tDef.cardinality {
 	case "per-subtask":
-		for i, entry := range task.Output {
+		for i, entry := range outputEntries {
 			if _, dedupd := remapSibling[i]; dedupd {
 				// Dep resolution still needs an ID; point at the incumbent so
 				// that downstream siblings with depends_on: [i] resolve to the
@@ -466,6 +477,9 @@ func proceedInner(s *models.State, taskID, transitionName string, tDef transitio
 	}
 
 	// Set the crash-recovery marker only after child dependency validation.
+	if outputChanged {
+		task.Output = outputEntries
+	}
 	if task.TransitionsExecuted == nil {
 		task.TransitionsExecuted = make(map[string]bool)
 	}
@@ -484,7 +498,7 @@ func proceedInner(s *models.State, taskID, transitionName string, tDef transitio
 		for i, reason := range skipEntry {
 			skipped = append(skipped, map[string]any{
 				"output_index": i,
-				"kind":         task.Output[i].Kind,
+				"kind":         outputEntries[i].Kind,
 				"reason":       reason,
 				"remapped_to":  remapSibling[i],
 			})
@@ -512,14 +526,18 @@ func proceedInner(s *models.State, taskID, transitionName string, tDef transitio
 func recoverCrashedTransition(s *models.State, task *models.Task, taskID, transitionName string, tDef transitionDef, inheritedDeps []string, resolver *pipeline.Resolver, now time.Time, result *ProceedResult) error {
 	switch tDef.cardinality {
 	case "per-subtask":
+		canonicalOutput, outputChanged, err := canonicalizedOutputTaskDependsOnForTarget(s, resolver, task, tDef.targetRolePair)
+		if err != nil {
+			return err
+		}
 		// Re-compute dedup decision against current repo-wide state. For skipped
 		// entries, siblingIDs[i] must point at the foreign incumbent so downstream
 		// dep resolution remaps correctly — mirrors proceedInner's per-subtask path.
 		inFlightByKind := collectNonTerminalByKind(s)
-		siblingIDs, skipEntry, _ := resolvePerSubtaskSiblings(task.Output, inFlightByKind, taskID, tDef.taskSlug)
+		siblingIDs, skipEntry, _ := resolvePerSubtaskSiblings(canonicalOutput, inFlightByKind, taskID, tDef.taskSlug)
 		var missingChildren []int
 		var patches []dependencyPatch
-		for i := range task.Output {
+		for i := range canonicalOutput {
 			// (1) SKIPPED — short-circuit BEFORE any FindTask / dep patching.
 			//     siblingIDs[i] points at a FOREIGN incumbent for skipped entries.
 			//     Touching its DependsOn would corrupt a cross-goal task.
@@ -532,7 +550,11 @@ func recoverCrashedTransition(s *models.State, task *models.Task, taskID, transi
 				// (3) CREATE — flagged for creation below.
 				missingChildren = append(missingChildren, i)
 			} else {
-				mergedDeps := mergeInheritedDeps(existing.DependsOn, inheritedDeps)
+				canonicalDeps, _, err := canonicalizeConcreteDependencyList(s, resolver, existing.ID, existing.RolePair, existing.DependsOn)
+				if err != nil {
+					return err
+				}
+				mergedDeps := mergeInheritedDeps(canonicalDeps, inheritedDeps)
 				if err := validateDependencyDirection(s, resolver, existing.ID, existing.RolePair, mergedDeps); err != nil {
 					return err
 				}
@@ -549,11 +571,14 @@ func recoverCrashedTransition(s *models.State, task *models.Task, taskID, transi
 		}
 		var children []models.Task
 		for _, idx := range missingChildren {
-			child := buildChildTask(siblingIDs[idx], taskID, task.Output[idx], tDef.targetStatus, tDef.targetRolePair, tDef.taskType, siblingIDs, inheritedDeps, task.EpicRef, task.ArchRef, now)
+			child := buildChildTask(siblingIDs[idx], taskID, canonicalOutput[idx], tDef.targetStatus, tDef.targetRolePair, tDef.taskType, siblingIDs, inheritedDeps, task.EpicRef, task.ArchRef, now)
 			if err := validateDependencyDirection(s, resolver, child.ID, child.RolePair, child.DependsOn); err != nil {
 				return err
 			}
 			children = append(children, child)
+		}
+		if outputChanged && len(missingChildren) > 0 {
+			task.Output = canonicalOutput
 		}
 		for _, patch := range patches {
 			if existing := s.FindTask(patch.taskID); existing != nil {
@@ -1070,6 +1095,10 @@ func ExecuteAvailableTransitions(projectRoot string, triggerFilter string) ([]Pr
 			task := s.FindTask(p.taskID)
 			var inheritedDeps []string
 			if task != nil {
+				if err := canonicalizeTaskDependsOnForTransition(s, resolver, task); err != nil {
+					log.Printf("WARNING: ExecuteAvailableTransitions: task %s dependency canonicalization: %v", p.taskID, err)
+					continue
+				}
 				var depErr error
 				inheritedDeps, depErr = computeInheritedDeps(s, task, p.name, resolver)
 				if depErr != nil {

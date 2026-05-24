@@ -153,6 +153,93 @@ func TestSupersedeTask_RewritesActiveDependentDependencies(t *testing.T) {
 	}
 }
 
+func TestSupersedeTask_RewritesOperationalOutputTaskDependsOn(t *testing.T) {
+	tmpDir := t.TempDir()
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+
+	now := time.Now().UTC()
+	state := testhelpers.CreateValidState()
+	parent := testhelpers.BuildTaskByStatus("parent-plan", models.TaskStatusMerged, now)
+	parent.RolePair = "architecture-pair"
+	parent.Output = []models.OutputEntry{{
+		Desc:          "Plan child",
+		DoneWhen:      "child planned",
+		Scope:         "internal/ops",
+		SpecRef:       "specs/plan.md",
+		TaskDependsOn: []string{"old-dep", "replacement-a"},
+	}}
+	oldDep := testhelpers.BuildTaskByStatus("old-dep", models.TaskStatusBlocked, now)
+	oldDep.RolePair = "code-planning-pair"
+	replacementA := testhelpers.BuildTaskByStatus("replacement-a", models.TaskStatusMerged, now)
+	replacementA.RolePair = "code-planning-pair"
+	replacementB := testhelpers.BuildTaskByStatus("replacement-b", models.TaskStatusMerged, now)
+	replacementB.RolePair = "code-planning-pair"
+	state.Tasks = []models.Task{parent, oldDep, replacementA, replacementB}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	_, err := SupersedeTask(tmpDir, "old-dep", []string{"replacement-a", "replacement-b"}, "Split into replacements", "orchestrator-1")
+	if err != nil {
+		t.Fatalf("SupersedeTask() error: %v", err)
+	}
+
+	bb := db.New(stateFile)
+	readState, err := bb.Read()
+	if err != nil {
+		t.Fatalf("Failed to read state: %v", err)
+	}
+
+	parent = *readState.FindTask("parent-plan")
+	wantDeps := []string{"replacement-a", "replacement-b"}
+	if !slices.Equal(parent.Output[0].TaskDependsOn, wantDeps) {
+		t.Fatalf("output task_depends_on = %v, want %v", parent.Output[0].TaskDependsOn, wantDeps)
+	}
+}
+
+func TestSupersedeTask_InvalidOutputReplacementLeavesStateUnchanged(t *testing.T) {
+	tmpDir := t.TempDir()
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+
+	now := time.Now().UTC()
+	state := testhelpers.CreateValidState()
+	parent := testhelpers.BuildTaskByStatus("parent-plan", models.TaskStatusMerged, now)
+	parent.RolePair = "architecture-pair"
+	parent.DependsOn = []string{"old-dep"}
+	parent.Output = []models.OutputEntry{{
+		Desc:          "Plan child",
+		DoneWhen:      "child planned",
+		Scope:         "internal/ops",
+		SpecRef:       "specs/plan.md",
+		TaskDependsOn: []string{"old-dep"},
+	}}
+	oldDep := testhelpers.BuildTaskByStatus("old-dep", models.TaskStatusBlocked, now)
+	oldDep.RolePair = "coding-pair"
+	replacement := testhelpers.BuildTaskByStatus("replacement-coding", models.TaskStatusMerged, now)
+	replacement.RolePair = "coding-pair"
+	state.Tasks = []models.Task{parent, oldDep, replacement}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	_, err := SupersedeTask(tmpDir, "old-dep", []string{"replacement-coding"}, "Replace with coding work", "orchestrator-1")
+	testhelpers.RequireErrorContains(t, err, "downstream dependency")
+
+	bb := db.New(stateFile)
+	readState, readErr := bb.Read()
+	if readErr != nil {
+		t.Fatalf("Failed to read state: %v", readErr)
+	}
+
+	parent = *readState.FindTask("parent-plan")
+	if !slices.Equal(parent.DependsOn, []string{"old-dep"}) {
+		t.Fatalf("parent depends_on = %v, want unchanged [old-dep]", parent.DependsOn)
+	}
+	if !slices.Equal(parent.Output[0].TaskDependsOn, []string{"old-dep"}) {
+		t.Fatalf("output task_depends_on = %v, want unchanged [old-dep]", parent.Output[0].TaskDependsOn)
+	}
+	oldDep = *readState.FindTask("old-dep")
+	if oldDep.Status != models.TaskStatusBlocked {
+		t.Fatalf("old dep status = %s, want BLOCKED", oldDep.Status)
+	}
+}
+
 func TestSupersedeTask_NoReplacements(t *testing.T) {
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)

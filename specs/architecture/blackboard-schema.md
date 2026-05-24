@@ -471,6 +471,7 @@ The `depends_on` field declares explicit dependencies between tasks:
 - `depends_on` is an array of task IDs that must reach MERGED status before this task can be claimed
 - `depends_on` must not point to a downstream pipeline role-pair. Same-role-pair and upstream dependencies are valid.
 - Active tasks must not depend on terminal non-MERGED tasks. When a task is superseded, active downstream `depends_on` entries are rewritten to its replacements; when a task is cancelled, active downstream `depends_on` entries pointing at it are removed. Terminal tasks keep historical dependency edges for audit.
+- Operational `output[].task_depends_on` follows the same canonical dependency rule before it can mint child tasks: superseded entries are rewritten to legal replacements, cancelled or unreplaced retired entries are removed, and illegal replacements fail the state mutation or transition instead of being silently dropped. `SUPERSEDED` and `ABANDONED` task output remains audit history unless crash recovery can still consume it.
 - Empty array or missing field means no dependencies — task is immediately claimable
 - Coders can only claim tasks where ALL dependencies are satisfied
 - Orchestrator sets dependencies during task creation based on logical ordering

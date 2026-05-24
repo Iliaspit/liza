@@ -754,6 +754,152 @@ func TestExecuteAvailableTransitions_DownstreamDependencyDoesNotMarkExecuted(t *
 	}
 }
 
+func TestExecuteAvailableTransitions_CanonicalizesOutputTaskDependsOn(t *testing.T) {
+	tmpDir, stateFile := setupPipelineProceedTest(t)
+
+	state := testhelpers.CreateValidState()
+	state.PipelineVersion = 2
+
+	now := time.Now().UTC()
+	architectureTask := models.Task{
+		ID:          "architecture-1",
+		Type:        models.TaskTypeArchitecture,
+		RolePair:    "architecture-pair",
+		Description: "Architecture",
+		Status:      models.TaskStatusMerged,
+		Priority:    1,
+		Created:     now,
+		SpecRef:     "README.md",
+		DoneWhen:    "Approved",
+		Scope:       "system",
+		Output: []models.OutputEntry{{
+			Desc:          "Plan implementation",
+			DoneWhen:      "coding plan exists",
+			Scope:         "internal/ops",
+			SpecRef:       "specs/plan.md",
+			TaskDependsOn: []string{"old-plan-dep"},
+		}},
+		History: []models.TaskHistoryEntry{},
+	}
+	oldDep := testhelpers.BuildTaskByStatus("old-plan-dep", models.TaskStatusSuperseded, now)
+	oldDep.RolePair = "code-planning-pair"
+	oldDep.SupersededBy = []string{"new-plan-dep"}
+	newDep := testhelpers.BuildTaskByStatus("new-plan-dep", models.TaskStatusMerged, now)
+	newDep.RolePair = "code-planning-pair"
+	state.Tasks = []models.Task{architectureTask, oldDep, newDep}
+	state.Sprint.Scope.Planned = []string{"architecture-1", "old-plan-dep", "new-plan-dep"}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	results, err := ExecuteAvailableTransitions(tmpDir, "manual")
+	if err != nil {
+		t.Fatalf("ExecuteAvailableTransitions() error: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("ExecuteAvailableTransitions() results = %v, want one result", results)
+	}
+
+	bb := db.New(stateFile)
+	readState, err := bb.Read()
+	if err != nil {
+		t.Fatalf("Failed to read state: %v", err)
+	}
+	source := readState.FindTask("architecture-1")
+	if source == nil {
+		t.Fatal("architecture-1 not found")
+	}
+	if !slices.Equal(source.Output[0].TaskDependsOn, []string{"new-plan-dep"}) {
+		t.Fatalf("source output task_depends_on = %v, want [new-plan-dep]", source.Output[0].TaskDependsOn)
+	}
+	child := readState.FindTask("architecture-1-architecture-to-code-plan-0")
+	if child == nil {
+		t.Fatal("child task not found")
+	}
+	if !slices.Equal(child.DependsOn, []string{"new-plan-dep"}) {
+		t.Fatalf("child depends_on = %v, want [new-plan-dep]", child.DependsOn)
+	}
+}
+
+func TestExecuteAvailableTransitions_OutputCanonicalizationFailureLeavesOutputUnchanged(t *testing.T) {
+	tmpDir, stateFile := setupPipelineProceedTest(t)
+
+	state := testhelpers.CreateValidState()
+	state.PipelineVersion = 2
+
+	now := time.Now().UTC()
+	architectureTask := models.Task{
+		ID:          "architecture-1",
+		Type:        models.TaskTypeArchitecture,
+		RolePair:    "architecture-pair",
+		Description: "Architecture",
+		Status:      models.TaskStatusMerged,
+		Priority:    1,
+		Created:     now,
+		SpecRef:     "README.md",
+		DoneWhen:    "Approved",
+		Scope:       "system",
+		Output: []models.OutputEntry{
+			{
+				Desc:          "Valid rewrite",
+				DoneWhen:      "valid child planned",
+				Scope:         "internal/ops",
+				SpecRef:       "specs/plan-0.md",
+				TaskDependsOn: []string{"old-valid-dep"},
+			},
+			{
+				Desc:          "Invalid rewrite",
+				DoneWhen:      "invalid child planned",
+				Scope:         "internal/ops",
+				SpecRef:       "specs/plan-1.md",
+				TaskDependsOn: []string{"old-invalid-dep"},
+			},
+		},
+		History: []models.TaskHistoryEntry{},
+	}
+	oldValid := testhelpers.BuildTaskByStatus("old-valid-dep", models.TaskStatusSuperseded, now)
+	oldValid.RolePair = "code-planning-pair"
+	oldValid.SupersededBy = []string{"new-valid-dep"}
+	newValid := testhelpers.BuildTaskByStatus("new-valid-dep", models.TaskStatusMerged, now)
+	newValid.RolePair = "code-planning-pair"
+	oldInvalid := testhelpers.BuildTaskByStatus("old-invalid-dep", models.TaskStatusSuperseded, now)
+	oldInvalid.RolePair = "code-planning-pair"
+	oldInvalid.SupersededBy = []string{"new-invalid-dep"}
+	newInvalid := testhelpers.BuildTaskByStatus("new-invalid-dep", models.TaskStatusMerged, now)
+	newInvalid.RolePair = "coding-pair"
+	state.Tasks = []models.Task{architectureTask, oldValid, newValid, oldInvalid, newInvalid}
+	state.Sprint.Scope.Planned = []string{"architecture-1", "old-valid-dep", "new-valid-dep", "old-invalid-dep", "new-invalid-dep"}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	results, err := ExecuteAvailableTransitions(tmpDir, "manual")
+	if err != nil {
+		t.Fatalf("ExecuteAvailableTransitions() error: %v", err)
+	}
+	if len(results) != 0 {
+		t.Fatalf("ExecuteAvailableTransitions() results = %v, want none", results)
+	}
+
+	bb := db.New(stateFile)
+	readState, err := bb.Read()
+	if err != nil {
+		t.Fatalf("Failed to read state: %v", err)
+	}
+	source := readState.FindTask("architecture-1")
+	if source == nil {
+		t.Fatal("architecture-1 not found")
+	}
+	if !slices.Equal(source.Output[0].TaskDependsOn, []string{"old-valid-dep"}) {
+		t.Fatalf("output[0].task_depends_on = %v, want unchanged [old-valid-dep]", source.Output[0].TaskDependsOn)
+	}
+	if !slices.Equal(source.Output[1].TaskDependsOn, []string{"old-invalid-dep"}) {
+		t.Fatalf("output[1].task_depends_on = %v, want unchanged [old-invalid-dep]", source.Output[1].TaskDependsOn)
+	}
+	if child := readState.FindTask("architecture-1-architecture-to-code-plan-0"); child != nil {
+		t.Fatalf("child 0 was created despite canonicalization failure: %+v", child)
+	}
+	if child := readState.FindTask("architecture-1-architecture-to-code-plan-1"); child != nil {
+		t.Fatalf("child 1 was created despite canonicalization failure: %+v", child)
+	}
+}
+
 func TestExecuteAvailableTransitions_CrashRecoveryInvalidMissingChildDoesNotPatchExistingChild(t *testing.T) {
 	tmpDir, stateFile := setupPipelineProceedTest(t)
 
@@ -845,6 +991,81 @@ func TestExecuteAvailableTransitions_CrashRecoveryInvalidMissingChildDoesNotPatc
 	}
 	if child := readState.FindTask("architecture-1-architecture-to-code-plan-1"); child != nil {
 		t.Fatalf("missing child was created despite dependency-direction rejection: %+v", child)
+	}
+}
+
+func TestExecuteAvailableTransitions_CrashRecoveryCanonicalizesOutputTaskDependsOn(t *testing.T) {
+	tmpDir, stateFile := setupPipelineProceedTest(t)
+
+	state := testhelpers.CreateValidState()
+	state.PipelineVersion = 2
+
+	now := time.Now().UTC()
+	architectureTask := models.Task{
+		ID:          "architecture-1",
+		Type:        models.TaskTypeArchitecture,
+		RolePair:    "architecture-pair",
+		Description: "Architecture",
+		Status:      models.TaskStatusMerged,
+		Priority:    1,
+		Created:     now,
+		SpecRef:     "README.md",
+		DoneWhen:    "Approved",
+		Scope:       "system",
+		Output: []models.OutputEntry{
+			{Desc: "Existing child", DoneWhen: "done", Scope: "internal/ops", SpecRef: "specs/plan-0.md"},
+			{Desc: "Recovered child", DoneWhen: "done", Scope: "internal/ops", SpecRef: "specs/plan-1.md", TaskDependsOn: []string{"old-plan-dep"}},
+		},
+		TransitionsExecuted: map[string]bool{"architecture-to-code-plan": true},
+		History:             []models.TaskHistoryEntry{},
+	}
+	existingChild := models.Task{
+		ID:          "architecture-1-architecture-to-code-plan-0",
+		Type:        models.TaskTypePlanning,
+		RolePair:    "code-planning-pair",
+		Description: "Existing child",
+		Status:      models.TaskStatus("DRAFT_CODING_PLAN"),
+		ParentTasks: []string{"architecture-1"},
+		SpecRef:     "specs/plan-0.md",
+		DoneWhen:    "done",
+		Scope:       "internal/ops",
+		Created:     now,
+		History:     []models.TaskHistoryEntry{},
+	}
+	oldDep := testhelpers.BuildTaskByStatus("old-plan-dep", models.TaskStatusSuperseded, now)
+	oldDep.RolePair = "code-planning-pair"
+	oldDep.SupersededBy = []string{"new-plan-dep"}
+	newDep := testhelpers.BuildTaskByStatus("new-plan-dep", models.TaskStatusMerged, now)
+	newDep.RolePair = "code-planning-pair"
+	state.Tasks = []models.Task{architectureTask, existingChild, oldDep, newDep}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	results, err := ExecuteAvailableTransitions(tmpDir, "manual")
+	if err != nil {
+		t.Fatalf("ExecuteAvailableTransitions() error: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("ExecuteAvailableTransitions() results = %v, want one result", results)
+	}
+
+	bb := db.New(stateFile)
+	readState, err := bb.Read()
+	if err != nil {
+		t.Fatalf("Failed to read state: %v", err)
+	}
+	source := readState.FindTask("architecture-1")
+	if source == nil {
+		t.Fatal("architecture-1 not found")
+	}
+	if !slices.Equal(source.Output[1].TaskDependsOn, []string{"new-plan-dep"}) {
+		t.Fatalf("source output task_depends_on = %v, want [new-plan-dep]", source.Output[1].TaskDependsOn)
+	}
+	child := readState.FindTask("architecture-1-architecture-to-code-plan-1")
+	if child == nil {
+		t.Fatal("recovered child task not found")
+	}
+	if !slices.Equal(child.DependsOn, []string{"new-plan-dep"}) {
+		t.Fatalf("recovered child depends_on = %v, want [new-plan-dep]", child.DependsOn)
 	}
 }
 

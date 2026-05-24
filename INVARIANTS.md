@@ -92,7 +92,7 @@ Agent cannot claim if already assigned to another executing task.
 
 Task dependencies cannot point downstream in the configured pipeline topology. A task may depend on work from the same role-pair or an upstream/unrelated role-pair, but must not depend on a task whose `role_pair` is reachable downstream from the dependent task's `role_pair` through configured sub-pipeline transitions or `pipeline-transitions`.
 
-Supersession paths count as dependency paths: if `depends_on: old-task` resolves through `old-task.superseded_by` to a downstream task, the dependency is invalid. `output[].task_depends_on` is validated against every per-subtask outgoing transition target that can consume that output, and crash recovery validates the final child `depends_on` set before patching or appending child tasks.
+Supersession paths count as dependency paths: if `depends_on: old-task` resolves through `old-task.superseded_by` to a downstream task, the dependency is invalid. `output[].task_depends_on` is validated against every per-subtask outgoing transition target that can consume that output, and crash recovery validates the final child `depends_on` set before patching or appending child tasks. Operational dependency surfaces are canonicalized at mutation and transition boundaries: superseded dependencies are rewritten to legal replacements, cancelled or unreplaced retired dependencies are removed, and illegal replacements fail the affected mutation or transition before the dependency rewrite is written. Retired `SUPERSEDED` and `ABANDONED` task output remains historical audit data unless it can still drive crash recovery.
 
 **Protects against:** Earlier pipeline phases waiting on later phases, deadlocked planning tasks, hidden cross-phase blockers.
 

@@ -157,6 +157,45 @@ func TestCancelTask_RemovesActiveDependentDependencies(t *testing.T) {
 	}
 }
 
+func TestCancelTask_RemovesOperationalOutputTaskDependsOn(t *testing.T) {
+	tmpDir := t.TempDir()
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+
+	now := time.Now().UTC()
+	state := testhelpers.CreateValidState()
+	parent := testhelpers.BuildTaskByStatus("parent-plan", models.TaskStatusMerged, now)
+	parent.RolePair = "architecture-pair"
+	parent.Output = []models.OutputEntry{{
+		Desc:          "Plan child",
+		DoneWhen:      "child planned",
+		Scope:         "internal/ops",
+		SpecRef:       "specs/plan.md",
+		TaskDependsOn: []string{"task-1", "keep-dep"},
+	}}
+	target := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusBlocked, now)
+	target.RolePair = "code-planning-pair"
+	keep := testhelpers.BuildTaskByStatus("keep-dep", models.TaskStatusMerged, now)
+	keep.RolePair = "code-planning-pair"
+	state.Tasks = []models.Task{parent, target, keep}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	_, err := CancelTask(tmpDir, "task-1", "No longer needed", "orchestrator-1")
+	if err != nil {
+		t.Fatalf("CancelTask() error: %v", err)
+	}
+
+	bb := db.New(stateFile)
+	readState, err := bb.Read()
+	if err != nil {
+		t.Fatalf("Failed to read state: %v", err)
+	}
+
+	parent = *readState.FindTask("parent-plan")
+	if !slices.Equal(parent.Output[0].TaskDependsOn, []string{"keep-dep"}) {
+		t.Fatalf("output task_depends_on = %v, want [keep-dep]", parent.Output[0].TaskDependsOn)
+	}
+}
+
 func TestCancelTask_FromInitialCodingPair(t *testing.T) {
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
