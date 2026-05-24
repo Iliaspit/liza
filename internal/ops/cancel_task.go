@@ -69,7 +69,7 @@ func CancelTask(projectRoot, taskID, reason, agentID string) (*CancelResult, err
 		currentTask.ReviewingBy = nil
 		currentTask.ReviewLeaseExpires = nil
 		currentTask.Worktree = nil
-		currentTask.IntegrationFailure = nil
+		clearAttemptState(currentTask, attemptStateRetire)
 
 		now := time.Now().UTC()
 		currentTask.History = append(currentTask.History, models.TaskHistoryEntry{

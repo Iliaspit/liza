@@ -21,7 +21,7 @@ func TestCollectArtifactRefsNormalizesAndSortsWithOwnerProvenance(t *testing.T) 
 		{
 			ID:          "task-b",
 			Description: "Task B",
-			Status:      models.TaskStatusReady,
+			Status:      models.TaskStatusMerged,
 			Priority:    1,
 			Created:     now,
 			SpecRef:     filepath.Join(projectRoot, "specs", "a-shared.md") + "#absolute",
@@ -293,6 +293,7 @@ func artifactRefTask(id, specRef string) models.Task {
 
 func artifactRefTaskWithOutput(id string, output models.OutputEntry) models.Task {
 	task := artifactRefTask(id, "specs/task.md")
+	task.Status = models.TaskStatusMerged
 	task.Output = []models.OutputEntry{output}
 	return task
 }

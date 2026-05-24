@@ -170,9 +170,9 @@ func TransitionToNewAttempt(projectRoot, taskID, reason string) (*TransitionAtte
 		task.RejectionReason = nil
 		task.Worktree = nil
 		task.BaseCommit = nil
-		task.ReviewCommit = nil
 		task.ReviewingBy = nil
 		task.ReviewLeaseExpires = nil
+		clearAttemptState(task, attemptStateInitialReset)
 
 		return task.TransitionWith(initialStatus, pb.transitions)
 	})

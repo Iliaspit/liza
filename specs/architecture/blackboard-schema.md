@@ -280,18 +280,22 @@ Optional:
 
 Artifact reference fields are scalar repo-relative refs, optionally with a
 `#fragment` anchor. The protected artifact fields are goal `spec_ref`; task
-`spec_ref`, `epic_ref`, `plan_ref`, and `arch_ref`; and `output[]` entry
-`spec_ref`, `epic_ref`, `plan_ref`, and `arch_ref`. Delimiter-joined multi-refs
-such as `specs/a.md; specs/b.md` are invalid; use scope text or a future
-structured multi-ref field instead. Artifact refs also fail closed when fragment
-stripping leaves an empty path, the path traverses outside the repository, or an
-absolute ref cannot be safely normalized to a repo-relative path.
+`spec_ref`, `epic_ref`, `plan_ref`, and `arch_ref`; and durable `output[]` entry
+`spec_ref`, `epic_ref`, `plan_ref`, and `arch_ref`. Output refs become durable
+artifact requirements only after their owning task is MERGED, or while that task
+is the candidate currently being merged. Non-merged `output[]` remains live
+planning/rework context, not a global artifact requirement. Delimiter-joined
+multi-refs such as `specs/a.md; specs/b.md` are invalid; use scope text or a
+future structured multi-ref field instead. Artifact refs also fail closed when
+fragment stripping leaves an empty path, the path traverses outside the
+repository, or an absolute ref cannot be safely normalized to a repo-relative
+path.
 
 Candidate integration validation strips the optional fragment and checks the
 repo-relative path against the candidate Git tree before integration ref
-advancement. It protects goal refs, task-level refs, the merging task's
-`output[]` refs, and already-MERGED tasks' `output[]` refs. It intentionally
-ignores unrelated in-flight task output refs because those artifacts may exist
+advancement. It protects goal refs, task-level refs, already-MERGED tasks'
+`output[]` refs, and the merging task's own `output[]` refs. It intentionally
+ignores unrelated non-merged task output refs because those artifacts may exist
 only in sibling worktrees until those tasks merge. Valid protected artifact refs
 must resolve to regular Git files with mode `100644` or `100755`. Missing
 paths, directories, submodules/gitlinks, symlinks, and other non-regular Git
@@ -300,6 +304,15 @@ path plus owner provenance: field name, task ID when the owner is a task, and
 output index when the owner is an `output[]` entry. Post-merge merge-scoped
 artifact validation still runs after a successful ref update as the rollback
 backstop.
+
+Live attempt metadata represents the current actionable projection, not all
+audit history. Rejection clears stale review metadata (`review_commit`,
+approvals, `merge_commit`, `integration_failure`) but keeps `output[]` for
+rework. Doer claim release clears `output[]` and review metadata while
+preserving `failed_by`. Fresh-attempt reset paths clear `output[]`, review
+metadata, and `failed_by`; retire paths clear review/failure metadata while
+keeping terminal context such as `output[]` and `failed_by`. Historical evidence
+remains in `history[]` entries where those entries recorded it.
 
 **`arch_ref` Propagation:**
 

@@ -168,7 +168,9 @@ Agent registration/unregistration, heartbeat, post-exit IDLE reset, orchestrator
 | Rejection must include structured format: file:line, specific defect, actionable fix; iteration 2+: prior feedback status | Ambiguous feedback, unaddressed rejections | spec (`roles.md`) |
 | Code tasks must include tests (TDD: tests first, then implementation); waiver requires explicit `tdd_not_required` | Untested behavior, post-hoc test addition | spec (`roles.md`), code (`submit_review.go`) |
 
-Integration-fix claims clear active `output[]`, `review_commit`, approvals, `merge_commit`, and structured integration-failure diagnostics from the failed approved attempt before the doer resumes. Merge artifact validation protects the merging task's output refs and already-merged tasks' output refs, but ignores unrelated in-flight output refs whose artifacts may still exist only in sibling worktrees.
+Rejected tasks clear stale live review metadata (`review_commit`, approvals, `merge_commit`, integration-failure diagnostics) while preserving `output[]` as rework context. Doer claim release clears `output[]` and live review metadata while preserving `failed_by` for hypothesis exhaustion. Fresh-attempt reset paths (task recovery reset, new attempt) clear `output[]`, live review metadata, and `failed_by` so the next claim starts from the initial projection. Retired tasks (`SUPERSEDED`, `ABANDONED`) clear live review/failure metadata while preserving terminal audit context such as `output[]` and `failed_by`.
+
+Integration-fix claims clear active `output[]`, `review_commit`, approvals, `merge_commit`, and structured integration-failure diagnostics from the failed approved attempt before the doer resumes, while preserving `failed_by` for hypothesis exhaustion. Global artifact validation protects only already-MERGED task output refs. Merge artifact validation additionally protects the merging task's output refs, but ignores unrelated non-merged output refs whose artifacts may still exist only in sibling worktrees.
 
 ---
 

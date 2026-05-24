@@ -59,6 +59,7 @@ var doerRelease = claimRelease{
 		t.Worktree = nil
 		t.BaseCommit = nil
 		t.Iteration = 0
+		clearAttemptState(t, attemptStateClaimReleaseReset)
 	},
 	missingLeaseMsg: "lease expires missing for task %s, use --force to clear",
 	activeLeaseMsg:  "doer lease still valid until %s, use --force to clear",

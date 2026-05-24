@@ -330,6 +330,62 @@ func TestValidateArtifactRefs_MergedTaskMissingRefStillFails(t *testing.T) {
 	}
 }
 
+func TestValidateArtifactRefs_IgnoresNonMergedOutputRefs(t *testing.T) {
+	repoDir := initGitRepo(t, "integration", "specs/auth.md", "# Auth spec")
+
+	state := &models.State{
+		Config: models.Config{IntegrationBranch: "integration"},
+		Tasks: []models.Task{
+			{
+				ID:      "rejected-plan",
+				Status:  models.TaskStatusCodingPlanRejected,
+				SpecRef: "specs/auth.md",
+				Output: []models.OutputEntry{
+					{
+						Desc:     "stale plan",
+						DoneWhen: "done",
+						Scope:    "scope",
+						SpecRef:  "specs/auth.md",
+						PlanRef:  "specs/plans/missing-rejected.md",
+					},
+				},
+			},
+			{
+				ID:      "blocked-plan",
+				Status:  models.TaskStatusBlocked,
+				SpecRef: "specs/auth.md",
+				Output: []models.OutputEntry{
+					{
+						Desc:     "blocked plan",
+						DoneWhen: "done",
+						Scope:    "scope",
+						SpecRef:  "specs/auth.md",
+						ArchRef:  "specs/arch/missing-blocked.md",
+					},
+				},
+			},
+			{
+				ID:      "implementing-plan",
+				Status:  models.TaskStatusCodePlanning,
+				SpecRef: "specs/auth.md",
+				Output: []models.OutputEntry{
+					{
+						Desc:     "active plan",
+						DoneWhen: "done",
+						Scope:    "scope",
+						SpecRef:  "specs/auth.md",
+						PlanRef:  "specs/plans/missing-active.md",
+					},
+				},
+			},
+		},
+	}
+
+	if err := ValidateArtifactRefs(state, repoDir); err != nil {
+		t.Fatalf("ValidateArtifactRefs() non-merged output refs error = %v", err)
+	}
+}
+
 func TestValidateArtifactRefs_RejectsNonRegularArtifacts(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -502,6 +558,7 @@ func TestValidateArtifactRefs_MissingArtifactsUseCollectorOwnerDiagnostics(t *te
 				state.Tasks = []models.Task{
 					{
 						ID:       "task-2",
+						Status:   models.TaskStatusMerged,
 						Priority: 1,
 						Output: []models.OutputEntry{
 							{

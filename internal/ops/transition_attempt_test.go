@@ -29,6 +29,14 @@ func setupTransitionTest(t *testing.T) (string, string) {
 	task.ReviewCyclesTotal = 5
 	baseCommit := "abc1234"
 	task.BaseCommit = &baseCommit
+	approvedBy := "code-reviewer-1"
+	mergeCommit := "stale-merge"
+	task.ApprovedBy = &approvedBy
+	task.Approvals = []models.Approval{{Agent: approvedBy, Provider: "codex", Timestamp: now}}
+	task.MergeCommit = &mergeCommit
+	task.FailedBy = []string{"coder-1"}
+	task.IntegrationFailure = map[string]any{"detail": "stale"}
+	task.Output = []models.OutputEntry{{Desc: "stale", DoneWhen: "done", Scope: "scope", SpecRef: "README.md"}}
 
 	state.Tasks = []models.Task{task}
 
@@ -96,6 +104,27 @@ func TestTransitionToNewAttempt_Success(t *testing.T) {
 	}
 	if task.RejectionReason != nil {
 		t.Errorf("RejectionReason = %v, want nil", *task.RejectionReason)
+	}
+	if task.ReviewCommit != nil {
+		t.Errorf("ReviewCommit = %v, want nil", *task.ReviewCommit)
+	}
+	if len(task.Output) != 0 {
+		t.Errorf("Output = %v, want cleared", task.Output)
+	}
+	if task.ApprovedBy != nil {
+		t.Errorf("ApprovedBy = %v, want nil", *task.ApprovedBy)
+	}
+	if len(task.Approvals) != 0 {
+		t.Errorf("Approvals = %v, want cleared", task.Approvals)
+	}
+	if task.MergeCommit != nil {
+		t.Errorf("MergeCommit = %v, want nil", *task.MergeCommit)
+	}
+	if task.IntegrationFailure != nil {
+		t.Errorf("IntegrationFailure = %v, want nil", task.IntegrationFailure)
+	}
+	if len(task.FailedBy) != 0 {
+		t.Errorf("FailedBy = %v, want cleared", task.FailedBy)
 	}
 	if task.Status != models.TaskStatusReady {
 		t.Errorf("Status = %q, want %q", task.Status, models.TaskStatusReady)

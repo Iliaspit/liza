@@ -104,7 +104,7 @@ func SupersedeTask(projectRoot, taskID string, replacementIDs []string, reason, 
 		currentTask.ReviewingBy = nil
 		currentTask.ReviewLeaseExpires = nil
 		currentTask.Worktree = nil
-		currentTask.IntegrationFailure = nil
+		clearAttemptState(currentTask, attemptStateRetire)
 
 		now := time.Now().UTC()
 		var note string

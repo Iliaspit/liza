@@ -27,7 +27,9 @@ type ArtifactRefOwner struct {
 // CollectArtifactRefs returns every protected artifact ref in deterministic
 // order, normalized to repo-relative paths with fragments stripped.
 func CollectArtifactRefs(state *models.State, projectRoot string) ([]ArtifactRef, error) {
-	return collectArtifactRefs(state, projectRoot, func(models.Task) bool { return true })
+	return collectArtifactRefs(state, projectRoot, func(task models.Task) bool {
+		return task.Status == models.TaskStatusMerged
+	})
 }
 
 // CollectMergeArtifactRefs returns refs protected by a merge candidate. Output

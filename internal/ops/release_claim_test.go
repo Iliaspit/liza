@@ -109,6 +109,25 @@ func TestReleaseClaim_CoderClaim_ClearsWorktreeFields(t *testing.T) {
 	state := testhelpers.CreateValidState()
 	task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusImplementing, now)
 	// BuildTaskByStatus sets Worktree, BaseCommit, Iteration for IMPLEMENTING
+	reviewCommit := "stale-review"
+	approvedBy := "code-reviewer-1"
+	mergeCommit := "stale-merge"
+	task.Output = []models.OutputEntry{{
+		Desc:     "stale output",
+		DoneWhen: "done",
+		Scope:    "scope",
+		SpecRef:  "README.md",
+	}}
+	task.ReviewCommit = &reviewCommit
+	task.ApprovedBy = &approvedBy
+	task.Approvals = []models.Approval{{
+		Agent:     approvedBy,
+		Provider:  "codex",
+		Timestamp: now,
+	}}
+	task.MergeCommit = &mergeCommit
+	task.IntegrationFailure = map[string]any{"detail": "stale"}
+	task.FailedBy = []string{"coder-1"}
 	state.Tasks = []models.Task{task}
 	state.Agents["coder-1"] = models.Agent{
 		Role:        "coder",
@@ -151,6 +170,27 @@ func TestReleaseClaim_CoderClaim_ClearsWorktreeFields(t *testing.T) {
 	}
 	if readTask.Iteration != 0 {
 		t.Errorf("Iteration = %d, want 0", readTask.Iteration)
+	}
+	if len(readTask.Output) != 0 {
+		t.Errorf("Output = %v, want cleared", readTask.Output)
+	}
+	if readTask.ReviewCommit != nil {
+		t.Errorf("ReviewCommit = %v, want nil", *readTask.ReviewCommit)
+	}
+	if readTask.ApprovedBy != nil {
+		t.Errorf("ApprovedBy = %v, want nil", *readTask.ApprovedBy)
+	}
+	if len(readTask.Approvals) != 0 {
+		t.Errorf("Approvals = %v, want cleared", readTask.Approvals)
+	}
+	if readTask.MergeCommit != nil {
+		t.Errorf("MergeCommit = %v, want nil", *readTask.MergeCommit)
+	}
+	if readTask.IntegrationFailure != nil {
+		t.Errorf("IntegrationFailure = %v, want nil", readTask.IntegrationFailure)
+	}
+	if len(readTask.FailedBy) != 1 || readTask.FailedBy[0] != "coder-1" {
+		t.Errorf("FailedBy = %v, want preserved", readTask.FailedBy)
 	}
 
 	// Worktree and branch persist after release — cleanup is deferred to

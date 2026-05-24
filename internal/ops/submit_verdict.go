@@ -278,9 +278,6 @@ func SubmitVerdict(projectRoot, taskID, verdict, reason, agentID, impact string)
 			}
 
 			// Rejection at any stage clears all approvals (spec: both reviewers re-review)
-			task.ClearApprovals()
-			task.ApprovedBy = nil
-
 			task.RejectionReason = &reason
 			task.ReviewCyclesCurrent++
 			task.ReviewCyclesTotal++
@@ -292,6 +289,7 @@ func SubmitVerdict(projectRoot, taskID, verdict, reason, agentID, impact string)
 				Reason: &reason,
 				Commit: task.ReviewCommit,
 			})
+			clearAttemptState(task, attemptStateReviewRejection)
 
 			// Refresh lease — coder needs time to address rejection.
 			// If escalation triggers below, lease is cleared along with assignment.

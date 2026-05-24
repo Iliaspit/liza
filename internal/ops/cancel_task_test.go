@@ -52,7 +52,17 @@ func TestCancelTask_FromBlocked(t *testing.T) {
 	state := testhelpers.CreateValidState()
 	task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusBlocked, now)
 	assignee := "coder-1"
+	reviewCommit := "stale-review"
+	approvedBy := "code-reviewer-1"
+	mergeCommit := "stale-merge"
 	task.AssignedTo = &assignee
+	task.ReviewCommit = &reviewCommit
+	task.ApprovedBy = &approvedBy
+	task.Approvals = []models.Approval{{Agent: approvedBy, Provider: "codex", Timestamp: now}}
+	task.MergeCommit = &mergeCommit
+	task.IntegrationFailure = map[string]any{"detail": "stale"}
+	task.FailedBy = []string{"coder-1"}
+	task.Output = []models.OutputEntry{{Desc: "retired output", DoneWhen: "done", Scope: "scope", SpecRef: "README.md"}}
 	state.Tasks = []models.Task{task}
 	testhelpers.WriteInitialState(t, stateFile, state)
 
@@ -98,6 +108,27 @@ func TestCancelTask_FromBlocked(t *testing.T) {
 	}
 	if updatedTask.Worktree != nil {
 		t.Error("Worktree should be nil after cancel")
+	}
+	if updatedTask.ReviewCommit != nil {
+		t.Errorf("ReviewCommit = %v, want nil after cancel", *updatedTask.ReviewCommit)
+	}
+	if updatedTask.ApprovedBy != nil {
+		t.Errorf("ApprovedBy = %v, want nil after cancel", *updatedTask.ApprovedBy)
+	}
+	if len(updatedTask.Approvals) != 0 {
+		t.Errorf("Approvals = %v, want cleared after cancel", updatedTask.Approvals)
+	}
+	if updatedTask.MergeCommit != nil {
+		t.Errorf("MergeCommit = %v, want nil after cancel", *updatedTask.MergeCommit)
+	}
+	if updatedTask.IntegrationFailure != nil {
+		t.Errorf("IntegrationFailure = %v, want nil after cancel", updatedTask.IntegrationFailure)
+	}
+	if len(updatedTask.FailedBy) != 1 || updatedTask.FailedBy[0] != "coder-1" {
+		t.Errorf("FailedBy = %v, want preserved", updatedTask.FailedBy)
+	}
+	if len(updatedTask.Output) != 1 || updatedTask.Output[0].Desc != "retired output" {
+		t.Errorf("Output = %v, want preserved as terminal audit context", updatedTask.Output)
 	}
 
 	// Verify history entry

@@ -232,13 +232,13 @@ The integration pair introduces a state cycle for branch-wide integration analys
 |------------|----------|---------------|-------|
 | READY_FOR_REVIEW → REVIEWING | `reviewing_by`, `review_lease_expires`, status=REVIEWING | `review_commit`, `assigned_to`, `worktree` | Supervisor assigns reviewer |
 | REVIEWING → APPROVED | `approved_by`, status=APPROVED | `review_commit` | Clear `reviewing_by`, `review_lease_expires` |
-| REVIEWING → REJECTED | `rejection_reason`, status=REJECTED | `review_commit` | Clear `reviewing_by`, `review_lease_expires`; increment review cycles |
+| REVIEWING → REJECTED | `rejection_reason`, status=REJECTED | `output[]` as rework context | Clear `reviewing_by`, `review_lease_expires`, stale review metadata; increment review cycles. Rejection history records the reviewed commit. |
 | REVIEWING → READY_FOR_REVIEW | status=READY_FOR_REVIEW | `review_commit`, `assigned_to`, `worktree` | Stale lease recovery: clear `reviewing_by`, `review_lease_expires` |
 | REJECTED → IMPLEMENTING (same coder) | `lease_expires` (new) | `worktree`, `review_cycles_current`, `review_cycles_total` | Supervisor reclaims for same coder to address feedback |
 | REJECTED → IMPLEMENTING (different coder) | `lease_expires`, `assigned_to`, `review_cycles_current: 0` | `review_cycles_total` | Worktree reset: delete old, create fresh |
 | INTEGRATION_FAILED → IMPLEMENTING | `lease_expires`, `integration_fix: true` | `worktree` | Any coder may claim; keeps worktree for conflict resolution |
-| BLOCKED → SUPERSEDED | `rescope_reason`, status=SUPERSEDED; `superseded_by` optional | `failed_by` | Orchestrator supersedes task — with replacements or completed externally |
-| BLOCKED → ABANDONED | status=ABANDONED | `failed_by` | Orchestrator abandons blocked task when no viable continuation exists |
+| BLOCKED → SUPERSEDED | `rescope_reason`, status=SUPERSEDED; `superseded_by` optional | `output[]`, `failed_by` as terminal context | Orchestrator supersedes task — with replacements or completed externally; clear live review/failure metadata |
+| BLOCKED → ABANDONED | status=ABANDONED | `output[]`, `failed_by` as terminal context | Orchestrator abandons blocked task when no viable continuation exists; clear live review/failure metadata |
 | READY → IMPLEMENTING (reassignment) | `lease_expires`, `assigned_to`, `review_cycles_current: 0` | `failed_by`, `review_cycles_total` | Fresh worktree created |
 | Any → MERGED | — | — | Must clear `worktree` (cleanup) |
 

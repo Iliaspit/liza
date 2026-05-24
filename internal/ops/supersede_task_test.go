@@ -50,8 +50,19 @@ func TestSupersedeTask_FromBlocked(t *testing.T) {
 
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()
+	task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusBlocked, now)
+	reviewCommit := "stale-review"
+	approvedBy := "code-reviewer-1"
+	mergeCommit := "stale-merge"
+	task.ReviewCommit = &reviewCommit
+	task.ApprovedBy = &approvedBy
+	task.Approvals = []models.Approval{{Agent: approvedBy, Provider: "codex", Timestamp: now}}
+	task.MergeCommit = &mergeCommit
+	task.IntegrationFailure = map[string]any{"detail": "stale"}
+	task.FailedBy = []string{"coder-1"}
+	task.Output = []models.OutputEntry{{Desc: "retired output", DoneWhen: "done", Scope: "scope", SpecRef: "README.md"}}
 	state.Tasks = []models.Task{
-		testhelpers.BuildTaskByStatus("task-1", models.TaskStatusBlocked, now),
+		task,
 	}
 	testhelpers.WriteInitialState(t, stateFile, state)
 
@@ -80,27 +91,48 @@ func TestSupersedeTask_FromBlocked(t *testing.T) {
 		t.Fatalf("Failed to read state: %v", err)
 	}
 
-	task := readState.FindTask("task-1")
-	if task == nil {
+	updatedTask := readState.FindTask("task-1")
+	if updatedTask == nil {
 		t.Fatal("Task not found")
 	}
-	if task.Status != models.TaskStatusSuperseded {
-		t.Errorf("Status = %v, want SUPERSEDED", task.Status)
+	if updatedTask.Status != models.TaskStatusSuperseded {
+		t.Errorf("Status = %v, want SUPERSEDED", updatedTask.Status)
 	}
-	if len(task.SupersededBy) != 2 || task.SupersededBy[0] != "task-2" {
-		t.Errorf("SupersededBy = %v, want [task-2 task-3]", task.SupersededBy)
+	if len(updatedTask.SupersededBy) != 2 || updatedTask.SupersededBy[0] != "task-2" {
+		t.Errorf("SupersededBy = %v, want [task-2 task-3]", updatedTask.SupersededBy)
 	}
-	if task.RescopeReason == nil || *task.RescopeReason != "Split into smaller tasks" {
+	if updatedTask.RescopeReason == nil || *updatedTask.RescopeReason != "Split into smaller tasks" {
 		t.Error("RescopeReason not set correctly")
 	}
-	if task.AssignedTo != nil {
+	if updatedTask.AssignedTo != nil {
 		t.Error("AssignedTo should be nil after superseding")
 	}
-	if task.Worktree != nil {
+	if updatedTask.Worktree != nil {
 		t.Error("Worktree should be nil after superseding")
 	}
+	if updatedTask.ReviewCommit != nil {
+		t.Errorf("ReviewCommit = %v, want nil after superseding", *updatedTask.ReviewCommit)
+	}
+	if updatedTask.ApprovedBy != nil {
+		t.Errorf("ApprovedBy = %v, want nil after superseding", *updatedTask.ApprovedBy)
+	}
+	if len(updatedTask.Approvals) != 0 {
+		t.Errorf("Approvals = %v, want cleared after superseding", updatedTask.Approvals)
+	}
+	if updatedTask.MergeCommit != nil {
+		t.Errorf("MergeCommit = %v, want nil after superseding", *updatedTask.MergeCommit)
+	}
+	if updatedTask.IntegrationFailure != nil {
+		t.Errorf("IntegrationFailure = %v, want nil after superseding", updatedTask.IntegrationFailure)
+	}
+	if len(updatedTask.FailedBy) != 1 || updatedTask.FailedBy[0] != "coder-1" {
+		t.Errorf("FailedBy = %v, want preserved", updatedTask.FailedBy)
+	}
+	if len(updatedTask.Output) != 1 || updatedTask.Output[0].Desc != "retired output" {
+		t.Errorf("Output = %v, want preserved as terminal audit context", updatedTask.Output)
+	}
 
-	lastHistory := task.History[len(task.History)-1]
+	lastHistory := updatedTask.History[len(updatedTask.History)-1]
 	if lastHistory.Event != models.TaskEventSuperseded {
 		t.Errorf("History event = %q, want %q", lastHistory.Event, models.TaskEventSuperseded)
 	}

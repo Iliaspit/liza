@@ -204,8 +204,7 @@ func RecoverTask(projectRoot, taskID string, force bool, reason string) (*Recove
 					task.Status = initial
 					task.ReviewingBy = nil
 					task.ReviewLeaseExpires = nil
-					task.Approvals = nil
-					task.ApprovedBy = nil
+					clearAttemptState(task, attemptStateInitialReset)
 					result.Warnings = append(result.Warnings,
 						fmt.Sprintf("reset %s to %s: missing review_commit", taskID, initial))
 				}

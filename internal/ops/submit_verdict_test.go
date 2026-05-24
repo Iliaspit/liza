@@ -150,9 +150,27 @@ func TestSubmitVerdict_Rejected(t *testing.T) {
 
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()
-	state.Tasks = []models.Task{
-		testhelpers.BuildTaskByStatus("task-1", models.TaskStatusReviewing, now),
+	taskWithStaleAttempt := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusReviewing, now)
+	approvedBy := "code-reviewer-0"
+	mergeCommit := "merge-stale"
+	taskWithStaleAttempt.ApprovedBy = &approvedBy
+	taskWithStaleAttempt.Approvals = []models.Approval{{
+		Agent:     approvedBy,
+		Provider:  "codex",
+		Timestamp: now,
+	}}
+	taskWithStaleAttempt.MergeCommit = &mergeCommit
+	taskWithStaleAttempt.IntegrationFailure = map[string]any{"detail": "stale"}
+	taskWithStaleAttempt.Output = []models.OutputEntry{
+		{
+			Desc:     "plan child",
+			DoneWhen: "child complete",
+			Scope:    "internal/ops",
+			SpecRef:  "README.md",
+			PlanRef:  "specs/plans/stale.md",
+		},
 	}
+	state.Tasks = []models.Task{taskWithStaleAttempt}
 	state.Agents["code-reviewer-1"] = models.Agent{
 		Role:   "code-reviewer",
 		Status: models.AgentStatusWorking,
@@ -201,11 +219,96 @@ func TestSubmitVerdict_Rejected(t *testing.T) {
 	if lastHistory.Event != models.TaskEventRejected {
 		t.Errorf("History event = %q, want %q", lastHistory.Event, models.TaskEventRejected)
 	}
-	if task.ReviewCommit == nil {
-		t.Fatal("ReviewCommit is nil")
+	if task.ReviewCommit != nil {
+		t.Fatalf("ReviewCommit = %v, want nil after rejection", *task.ReviewCommit)
 	}
-	if lastHistory.Commit == nil || *lastHistory.Commit != *task.ReviewCommit {
-		t.Fatalf("History commit = %v, want %s", lastHistory.Commit, *task.ReviewCommit)
+	if lastHistory.Commit == nil || *lastHistory.Commit != "review123" {
+		t.Fatalf("History commit = %v, want review123", lastHistory.Commit)
+	}
+	if task.ApprovedBy != nil {
+		t.Fatalf("ApprovedBy = %v, want nil after rejection", *task.ApprovedBy)
+	}
+	if len(task.Approvals) != 0 {
+		t.Fatalf("Approvals = %v, want cleared after rejection", task.Approvals)
+	}
+	if task.MergeCommit != nil {
+		t.Fatalf("MergeCommit = %v, want nil after rejection", *task.MergeCommit)
+	}
+	if task.IntegrationFailure != nil {
+		t.Fatalf("IntegrationFailure = %v, want nil after rejection", task.IntegrationFailure)
+	}
+	if len(task.Output) != 1 || task.Output[0].PlanRef != "specs/plans/stale.md" {
+		t.Fatalf("Output = %v, want preserved as rework context", task.Output)
+	}
+}
+
+func TestSubmitVerdict_RejectionThenResubmissionUsesFreshReviewMetadata(t *testing.T) {
+	tmpDir := t.TempDir()
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+
+	now := time.Now().UTC()
+	state := testhelpers.CreateValidState()
+	task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusReviewing, now)
+	oldMergeCommit := "old-merge"
+	task.MergeCommit = &oldMergeCommit
+	task.IntegrationFailure = map[string]any{"detail": "old failure"}
+	state.Tasks = []models.Task{task}
+	state.Agents["code-reviewer-1"] = models.Agent{
+		Role:   "code-reviewer",
+		Status: models.AgentStatusWorking,
+	}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	if _, err := SubmitVerdict(tmpDir, "task-1", "REJECTED", "needs changes", "code-reviewer-1", ""); err != nil {
+		t.Fatalf("SubmitVerdict(REJECTED) error: %v", err)
+	}
+
+	bb := db.New(stateFile)
+	newReviewCommit := "fresh-review"
+	reviewLease := now.Add(30 * time.Minute)
+	if err := bb.Modify(func(state *models.State) error {
+		task := state.FindTask("task-1")
+		if task == nil {
+			t.Fatal("task not found")
+		}
+		task.Status = models.TaskStatusReviewing
+		task.ReviewCommit = &newReviewCommit
+		task.ReviewingBy = testhelpers.StringPtr("code-reviewer-1")
+		task.ReviewLeaseExpires = &reviewLease
+		state.Agents["code-reviewer-1"] = models.Agent{
+			Role:        "code-reviewer",
+			Status:      models.AgentStatusReviewing,
+			CurrentTask: testhelpers.StringPtr("task-1"),
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("resubmit test setup error: %v", err)
+	}
+
+	if _, err := SubmitVerdict(tmpDir, "task-1", "APPROVED", "", "code-reviewer-1", ""); err != nil {
+		t.Fatalf("SubmitVerdict(APPROVED) error: %v", err)
+	}
+
+	readState, err := bb.Read()
+	if err != nil {
+		t.Fatalf("read state error: %v", err)
+	}
+	task = *readState.FindTask("task-1")
+	if task.Status != models.TaskStatusApproved {
+		t.Fatalf("Status = %s, want %s", task.Status, models.TaskStatusApproved)
+	}
+	if task.ReviewCommit == nil || *task.ReviewCommit != newReviewCommit {
+		t.Fatalf("ReviewCommit = %v, want %s", task.ReviewCommit, newReviewCommit)
+	}
+	lastHistory := task.History[len(task.History)-1]
+	if lastHistory.Event != models.TaskEventApproved || lastHistory.Commit == nil || *lastHistory.Commit != newReviewCommit {
+		t.Fatalf("last history = %+v, want approval for fresh review commit", lastHistory)
+	}
+	if task.MergeCommit != nil {
+		t.Fatalf("MergeCommit = %v, want nil old merge metadata", *task.MergeCommit)
+	}
+	if task.IntegrationFailure != nil {
+		t.Fatalf("IntegrationFailure = %v, want nil old failure metadata", task.IntegrationFailure)
 	}
 }
 

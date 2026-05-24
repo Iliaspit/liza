@@ -451,6 +451,8 @@ func TestRecoverTask_MissingReviewCommitCorruption(t *testing.T) {
 
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()
+	approvedBy := "code-reviewer-1"
+	mergeCommit := "stale-merge"
 	state.Tasks = []models.Task{
 		{
 			ID:           "task-corrupted",
@@ -459,7 +461,15 @@ func TestRecoverTask_MissingReviewCommitCorruption(t *testing.T) {
 			Priority:     1,
 			Created:      now,
 			ReviewCommit: nil, // corrupted: missing review_commit
+			ApprovedBy:   &approvedBy,
+			Approvals:    []models.Approval{{Agent: approvedBy, Provider: "codex", Timestamp: now}},
+			MergeCommit:  &mergeCommit,
+			FailedBy:     []string{"coder-1"},
+			Output:       []models.OutputEntry{{Desc: "stale", DoneWhen: "done", Scope: "scope", SpecRef: "README.md"}},
 			History:      []models.TaskHistoryEntry{},
+			IntegrationFailure: map[string]any{
+				"detail": "stale",
+			},
 		},
 	}
 	testhelpers.WriteInitialState(t, stateFile, state)
@@ -500,5 +510,20 @@ func TestRecoverTask_MissingReviewCommitCorruption(t *testing.T) {
 	}
 	if task.Approvals != nil {
 		t.Error("Approvals should be nil after reset")
+	}
+	if task.ApprovedBy != nil {
+		t.Error("ApprovedBy should be nil after reset")
+	}
+	if task.MergeCommit != nil {
+		t.Error("MergeCommit should be nil after reset")
+	}
+	if task.IntegrationFailure != nil {
+		t.Error("IntegrationFailure should be nil after reset")
+	}
+	if len(task.Output) != 0 {
+		t.Errorf("Output = %v, want cleared after reset", task.Output)
+	}
+	if len(task.FailedBy) != 0 {
+		t.Errorf("FailedBy = %v, want cleared after reset", task.FailedBy)
 	}
 }
