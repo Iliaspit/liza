@@ -89,7 +89,7 @@ For all MCP-backed default rows, if the tool is unavailable in the current sessi
 
 ### Tool Preferences
 
-- **`mdq` for Markdown querying**: Use `mdq` to extract specific sections, headers, lists, or tables from Markdown files — like `jq` for Markdown. Prefer over `Read` when you only need a specific section from a large `.md` file, reducing context noise. Example: `mdq '# Section | # Subsection' file.md`.
+- **`mdtoc` for Markdown navigation**: For long Markdown specs, plans, and architecture docs, use `rg` only to identify candidate files or exact hits. Do not jump from `rg` hits to guessed `sed` windows unless the hit itself fully answers the question. Once a candidate file is identified, run `mdtoc <file> [<file>...]` to get heading-scoped `FILE:START-END` ranges and mdq selectors, then read the exact relevant section with `sed -n '<start>,<end>p' <file>` or `mdq`. Prefer this `rg` -> `mdtoc` -> `sed`/`mdq` flow because section-scoped reads are more reliable than nearby line windows and reduce repeated reads. Treat line ranges as immediate-session navigation aids; use heading names or selectors to keep repeated reads anchored to the same section. Fallback: `rg '^#{1,6} ' <file>` when `mdtoc` is unavailable.
 - **`jq` / `yq` for structured data**: Use `jq` for JSON and `yq` for YAML/TOML. Prefer over `Read` + manual parsing when extracting specific fields from structured data files.
 - **`gh` (GitHub CLI)**: Use `gh` for GitHub issues, PRs, releases, and GitHub API queries when repository context and authentication are available. Prefer `gh` over raw `curl` calls to GitHub APIs.
 

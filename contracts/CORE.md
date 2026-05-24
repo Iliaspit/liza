@@ -1,3 +1,9 @@
+---
+liza_version: "0.2.0"
+liza_git_commit: "a571dc83"
+liza_build_date: "2026-05-24T16:55:40Z"
+---
+
 # Core Contract
 
 **This file is loaded as system prompt — process it TILL THE END before proceeding.
