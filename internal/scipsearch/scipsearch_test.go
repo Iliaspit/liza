@@ -163,10 +163,14 @@ func TestResolveInitConfigLanguageSelection(t *testing.T) {
 	})
 
 	t.Run("env false skips autodetection", func(t *testing.T) {
+		var calls []string
 		got, err := ResolveInitConfig(InitOptions{
-			ProjectRoot:   t.TempDir(),
-			EnvValue:      "false",
-			CommandRunner: runnerFunc(nil, nil),
+			ProjectRoot: t.TempDir(),
+			EnvValue:    "false",
+			CommandRunner: runnerFunc(&calls, func(name, argString string) (string, error) {
+				t.Fatalf("runner must not be called when scip-search is not selected: %s %s", name, argString)
+				return "", nil
+			}),
 			GitFiles: func(string) ([]string, error) {
 				t.Fatal("git files must not be consulted when env gate is false")
 				return nil, nil
@@ -174,6 +178,9 @@ func TestResolveInitConfigLanguageSelection(t *testing.T) {
 		})
 		if err != nil || len(got.Languages) != 0 {
 			t.Fatalf("ResolveInitConfig() = %+v, %v; want no languages and no error", got, err)
+		}
+		if len(calls) != 0 {
+			t.Fatalf("calls = %v, want none", calls)
 		}
 	})
 }

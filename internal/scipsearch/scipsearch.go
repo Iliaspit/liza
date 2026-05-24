@@ -136,6 +136,14 @@ func ResolveInitConfig(opts InitOptions) (InitResult, error) {
 	}
 
 	var result InitResult
+	selected, err := selectLanguages(opts, gitFiles)
+	if err != nil {
+		return result, err
+	}
+	if len(selected) == 0 {
+		return result, nil
+	}
+
 	if output, err := runner("scip-search", "--help"); err != nil {
 		return result, fmt.Errorf("scip-search setup validation failed: scip-search --help failed: %w%s", err, outputSuffix(output))
 	}
@@ -144,11 +152,6 @@ func ResolveInitConfig(opts InitOptions) (InitResult, error) {
 		if version := strings.TrimSpace(output); version != "" {
 			result.Diagnostics = append(result.Diagnostics, "scip-search --version: "+version)
 		}
-	}
-
-	selected, err := selectLanguages(opts, gitFiles)
-	if err != nil {
-		return result, err
 	}
 
 	result.Languages, result.Warnings = validateIndexers(selected, runner)

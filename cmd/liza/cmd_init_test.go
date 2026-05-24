@@ -192,11 +192,12 @@ func TestInitDispatch_ScipSearchRepeatableFlagPersistsConfig(t *testing.T) {
 	}
 }
 
-func TestInitDispatch_FullInitValidatesScipSearchHelp(t *testing.T) {
+func TestInitDispatch_FullInitSkipsScipSearchWhenEnvDisabled(t *testing.T) {
 	projectRoot := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, projectRoot)
 	testhelpers.SetupGlobalLiza(t)
 	testhelpers.CreateCommittedSpecFile(t, projectRoot, "vision.md", "# Vision\n")
+	t.Setenv(scipsearch.EnvEnableScipSearch, "false")
 
 	var calls []string
 	restore := scipsearch.SetCommandRunnerForTest(func(name string, args ...string) (string, error) {
@@ -213,18 +214,14 @@ func TestInitDispatch_FullInitValidatesScipSearchHelp(t *testing.T) {
 		"specs/vision.md",
 		"Goal with missing scip-search",
 	)
-	if err == nil {
-		t.Fatal("init succeeded, want scip-search setup failure")
+	if err != nil {
+		t.Fatalf("init failed with scip-search disabled: %v", err)
 	}
-	if !strings.Contains(err.Error(), "scip-search --help") {
-		t.Fatalf("error = %v, want scip-search --help context", err)
+	if _, statErr := os.Stat(filepath.Join(projectRoot, ".liza")); statErr != nil {
+		t.Fatalf(".liza missing after init with scip-search disabled: stat err = %v", statErr)
 	}
-	if _, statErr := os.Stat(filepath.Join(projectRoot, ".liza")); !os.IsNotExist(statErr) {
-		t.Fatalf(".liza exists after setup validation failure: stat err = %v", statErr)
-	}
-	wantCalls := []string{"scip-search --help"}
-	if !slices.Equal(calls, wantCalls) {
-		t.Fatalf("calls = %v, want %v", calls, wantCalls)
+	if len(calls) != 0 {
+		t.Fatalf("calls = %v, want no scip-search calls", calls)
 	}
 }
 
