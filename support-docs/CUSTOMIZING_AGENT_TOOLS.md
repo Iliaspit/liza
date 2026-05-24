@@ -87,19 +87,12 @@ the one that does not rely on a centralized index tied to a single project state
 
 If an IDE integration answers from an index that is effectively built for one
 open worktree, it becomes stale for divergent worktrees and is a poor fit for
-multi-agent use. In multi-agent mode, indexed IDE tools should generally fall
-back in worktrees rather than be treated as the default.
+multi-agent use in worktrees.
 
 There is another caveat even when path resolution is correct: IDE-specific MCP
 tools may lag in detecting changes made externally by an agent. If the agent
 edits files outside the IDE's own write path, IDE-backed reads or project-aware
 operations can briefly reflect stale state until refresh or reindex catches up.
-
-Direct-file IDE tools are a separate case. For example, a JetBrains `read_file`
-style tool is generally safer because it reads by path rather than through an
-index. Liza's prompt contract already steers shell and git operations toward the
-worktree explicitly, but IDE-specific MCP tools still need care when they derive
-state from the IDE's project context rather than the current filesystem state.
 
 ### Centralized Indexes
 

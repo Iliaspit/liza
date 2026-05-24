@@ -335,14 +335,12 @@ Liza optimizes cost-to-quality, not cost-to-lets-cross-fingers. These tools redu
 | [jq](https://jqlang.github.io/jq/) / [yq](https://github.com/mikefarah/yq) | Query and extract fields from JSON / YAML / TOML | Avoids reading full structured data files into context |
 | [GitHub CLI](https://cli.github.com/) | GitHub issues, PRs, releases, and API access from the shell | Avoids raw API calls and keeps GitHub workflows authenticated and structured |
 | [filesystem MCP](https://github.com/anthropics/anthropic-quickstarts/tree/main/mcp-filesystem) | Bulk file operations — multi-file reads, recursive directory trees, file metadata | Batch reads in one call instead of sequential Read tool calls |
-| [JetBrains MCP](https://www.jetbrains.com/help/ai-assistant/mcp.html#use_ide_as_an_mcp_server) | IDE-aware indexed search, symbol info, refactoring, and diagnostics | Fast workspace-aware navigation and editing when IDE state is fresh |
 | [perplexity](https://github.com/perplexityai/modelcontextprotocol/) | Current-info web search with synthesis | Lower-context discovery for external libraries, unfamiliar tech, and current information |
 | [context7](https://context7.com/docs/resources/all-clients) | Structured API reference lookup with examples | High-signal library/API docs with consistent formatting |
 | [Ref](https://ref.tools/) | Broad documentation and guide search | Better coverage for tutorials, niche libraries, and how-to material |
 | [fetch MCP](https://github.com/modelcontextprotocol/servers/tree/main/src/fetch) | Exact web page retrieval | Raw HTML, pagination, and precise page content without summarization |
 | [deepwiki](https://docs.devin.ai/work-with-devin/deepwiki-mcp) | Repository architecture and code-structure exploration | Fast high-level orientation on unfamiliar repositories |
 | [postgres](https://github.com/modelcontextprotocol/servers#using-an-mcp-client) | Read-only SQL exploration and validation | Direct schema and data inspection when a database MCP is available |
-| [LSP](https://microsoft.github.io/language-server-protocol/) | Semantic navigation, references, and call hierarchy | Type-aware code understanding when workspace language servers are configured |
 
 These tools are referenced in the default `~/.liza/AGENT_TOOLS.md`; see
 [Customizing AGENT_TOOLS.md](support-docs/CUSTOMIZING_AGENT_TOOLS.md).

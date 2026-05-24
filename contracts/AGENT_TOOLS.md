@@ -1,85 +1,99 @@
 # Agent Tools
 
 Sub-contract for tool usage. Applies to all modes (Pairing, Liza, Subagent).
-When a required tool is unavailable in the current session, fall through to the next option in the fallback chain.
+When a default tool is unavailable in the current session, fall through to the next option in the fallback chain.
+
+## Decision Kernel
+
+1. Prefer filesystem-truth tools tied to the current worktree.
+2. Use `rg` for working-tree text search; use `git grep` for tracked, index, `HEAD`, or historical revision search.
+3. Use `ast-grep` for syntax-shaped code search.
+4. Use direct reads for source-of-truth; use line-numbered reads when discussing edits.
+5. Use `apply_patch` for edits; use `morph-mcp` only for broad, context-heavy, or fast-apply edits.
+6. Use native manifests and language-native commands for project structure and dependencies.
+7. Validate edits with native build/test/lint/typecheck commands plus pre-commit on touched files.
+8. Use `context7` → `Ref` → `deepwiki` → `WebFetch` for docs, repo architecture, and web lookup.
+9. In MAS worktrees, do not use workspace-level or IDE/LSP-backed tools.
 
 ## Forbidden tools
 
 Refer to Security Protocol
 
-## Tool preferences
-
-- **`rg` (ripgrep)**: Use `rg` for all text searches. Faster than grep, respects `.gitignore` by default, cleaner output.
-- **`ast-grep` for structural search**: Use `ast-grep` when the search target is a code structure that regex can't express cleanly — e.g. matching function signatures, call patterns with specific arity, nested expressions, or ignoring whitespace/comments. Patterns use the target language with `$METAVAR` placeholders. Prefer `rg` for simple text/keyword searches; prefer `ast-grep` for structural queries and refactoring.
-- **`mdq` for Markdown querying**: Use `mdq` to extract specific sections, headers, lists, or tables from Markdown files — like `jq` for Markdown. Prefer over `Read` when you only need a specific section from a large `.md` file, reducing context noise. Example: `mdq '# Section > ## Subsection' file.md`.
-- **`jq` / `yq` for structured data**: Use `jq` for JSON and `yq` for YAML/TOML. Prefer over `Read` + manual parsing when extracting specific fields from structured data files.
-- **`gh` (GitHub CLI)**: Use `gh` for GitHub issues, PRs, releases, and GitHub API queries when repository context and authentication are available. Prefer `gh` over raw `curl` calls to GitHub APIs.
-
-**Search routing**: When you'd have to guess the search string, use `codebase_search` (one call replaces multiple `rg` attempts with speculative patterns). Use `rg` when you know the exact string.
-
 ## Other authorized tools
 
 Any non destructive tool by default.
 
-## MCP Server & Plugin Integration
+## Mode Boundary
 
-**Pre-Action Check:** Before file/search/web operations, use the required capability/tool from the table below. Table entries use capability labels, sometimes illustrated with concrete provider-surface examples; if the current session exposes the same capability under a different name, use the equivalent tool.
+All modes: use source-of-truth tools for verification.
+MAS worktree rule: Do not use workspace-level or IDE/LSP-backed tools in Liza multi-agent worktrees, even if the user has configured them for personal use. Use filesystem-truth tools tied to the current worktree instead: `rg`, `ast-grep`, direct reads, filesystem glob/search, native manifests, `git`, language-native commands, `morph-mcp`, and `apply_patch`.
+Pairing mode: user-personal workspace tools may exist, but they do not replace source-of-truth verification.
+
+## Tool Routing
+
+**Pre-Action Check:** Before file/search/web operations, use the default capability/tool from the table below. Table entries use capability labels, sometimes illustrated with concrete provider-surface examples; if the current session exposes the same capability under a different name, use the equivalent tool.
+Default tools are mandatory unless the fallback condition applies or the tool is unavailable, errors, or is unsupported by the provider.
 MCP server/tool names may be normalized differently across providers (for example `-` vs `_`). Treat concrete names below as examples; use the equivalent exposed name in the current session.
-If a required or preferred MCP capability is referenced here but is not currently exposed in the tool list, use your tool-loading mechanism (e.g. `ToolSearch`, `tool_search`) to load that capability before falling back. Fallback is allowed only after the tool cannot be found/loaded, the loaded tool errors, or the result is insufficient.
-Fallback tools are permitted ONLY when the fallback condition is met OR the required tool returns an error.
-For all MCP-required rows, if the tool is unavailable in the current session, errors, or is unsupported by the provider, use the row fallback tool.
-Worktree rule: In divergent or agent-created worktrees, prefer filesystem-truth tools (`rg`, `ast-grep`, exact reads, filesystem glob/search, morph-mcp) over indexed IDE or LSP tools. Treat JetBrains indexed/project-aware rows as pairing-mode defaults unless the IDE state is known-fresh for the current worktree.
+If a default or preferred MCP capability is referenced here but is not currently exposed in the tool list, use your tool-loading mechanism (e.g. `ToolSearch`, `tool_search`) to load that capability before falling back. Fallback is allowed only after the tool cannot be found/loaded, the loaded tool errors, or the result is insufficient.
+Fallback tools are permitted ONLY when the fallback condition is met OR the default tool returns an error.
+For all MCP-backed default rows, if the tool is unavailable in the current session, errors, or is unsupported by the provider, use the row fallback tool.
 
-### Required Tools by Operation
+### Operations
 
-| Operation | Required Tool | Fallback | Use Fallback When | Semantic Assist |
-|-----------|---------------------------------------------------|----------|-------------------|-----------------|
-| Read multiple files | filesystem multi-file read | Read | 2-3 files; batch native reads carefully for larger scopes | — |
-| Single-file read (targeted) | JetBrains targeted read (line/column/block-aware) | Read | Full-file read, source-of-truth verification | — |
-| Directory exploration | filesystem `directory_tree` / `search_files` | Read + manual tree walk | Filesystem tree/search capability unavailable | — |
-| File discovery | filesystem glob / `search_files` | JetBrains `find_files_by_glob` | Need IDE-assisted glob lookup and IDE state is known-fresh | — |
-| Project structure / modules | Native manifest reads + filesystem tree | JetBrains project modules | Need IDE-derived module summary and IDE state is known-fresh | — |
-| Dependency inspection | Native manifest reads | JetBrains project dependencies | Need IDE-derived dependency summary and IDE state is known-fresh | — |
-| Code search | `rg` | — | — | — |
-| Symbol discovery | `rg` pattern search | — | — | LSP workspace symbol (semantic only; use `rg`/direct reads to verify existence when ambiguous) |
-| Symbol lookup | `rg` + direct reads | — | — | LSP `hover` / symbol info (semantic only; use `rg`/direct reads when verifying filesystem truth) |
-| File edit | morph-mcp edit file | JetBrains edit/refactor tools | File >2000 lines (morph-mcp tool reliability limit) | — |
-| File edit (JetBrains fallback) | JetBrains edit/refactor tools | Edit | JetBrains unsuitable for the requested edit, or too many discrete operations | — |
-| Web content | WebFetch | fetch MCP | Need raw HTML, pagination, or blocked | — |
-| Current info / library discovery | perplexity current-info search | WebSearch | Perplexity returns nothing useful | — |
-| Library API docs | context7 query docs | Ref | Unknown/niche library, need tutorials | — |
-| Library tutorials/guides | Ref doc search | WebFetch | Ref returns nothing useful | — |
-| Repo architecture | deepwiki repo architecture | WebFetch | deepwiki insufficient | — |
-| Code quality check (after edits) | JetBrains file diagnostics | Native build/test + direct reads | JetBrains unavailable, stale for the current worktree, or file diagnostics are insufficient | — |
+| Operation | Default Tool | Fallback | Use Fallback When |
+|-----------|---------------------------------------------------|----------|-------------------|
+| Read multiple files | filesystem multi-file read | Read | 2-3 files; batch native reads carefully for larger scopes |
+| Single-file read (targeted) | `nl -ba <file> \| sed -n '<start>,<end>p'` | Read / filesystem read_file | Native read is lower-noise, already available, or line numbers are not needed |
+| Directory exploration | filesystem `directory_tree` / `search_files` | Read + manual tree walk | Filesystem tree/search capability unavailable |
+| File discovery | `rg --files` / filesystem glob / `search_files` | native filename search | Glob/search capability unavailable |
+| Project structure / modules | Native manifest reads + filesystem tree | language-native project metadata commands | Need generated module metadata from the active worktree |
+| Dependency inspection | Native manifest reads + lockfiles | language-native dependency commands | Manifest/lockfile inspection is insufficient |
+| Code search | `rg` | — | — |
+| Symbol discovery | `rg` pattern search | — | — |
+| Symbol lookup | `rg` + direct reads | — | — |
+| File edit | apply_patch | morph-mcp edit_file | Edit is broad, context-heavy, or benefits from fast-apply semantics |
+| Web content | WebFetch | fetch MCP | Need raw HTML, pagination, or blocked |
+| Current info / library discovery | perplexity current-info search | WebSearch | Perplexity returns nothing useful |
+| Library API docs | context7 query docs | Ref | Unknown/niche library, need tutorials |
+| Library tutorials/guides | Ref doc search | WebFetch | Ref returns nothing useful |
+| Repo architecture | deepwiki repo architecture | WebFetch | deepwiki insufficient |
+| Code quality check (after edits) | Native build/test/lint/typecheck + direct reads | pre-commit touched files | No narrower native command exists |
 
 ### Codebase Exploration
 
-| Question Type | Required Tool | Fallback | Use Fallback When | Semantic Assist |
-|-------------------------------------------|--------------|----------|-------------------|-----------------|
-| Exact keyword ("TODO") | `rg` | — | — | — |
-| Structural code pattern (call shape, signature) | `ast-grep` | `rg` with regex approximation | — | — |
-| Find files by name | Glob | `rg --files` / native filename search | Glob unavailable | — |
-| Semantic code search ("how does X work?") | **morph-mcp** codebase_search | `rg` + exact reads (`ast-grep` when structural search helps) | morph-mcp insufficient, rate limited, or errors | — |
-| Symbol info at position | `rg` + direct reads | — | — | LSP `hover` (semantic only; use `rg`/direct reads for verification) |
-| Find references | `rg` | — | — | LSP `findReferences` |
-| Call hierarchy (callers/callees) | `rg` + direct reads | — | — | LSP `incomingCalls` / `outgoingCalls` |
-| Cross-file definitions | `rg` + direct reads | — | — | LSP `goToDefinition` |
-| Multi-file structural analysis | `rg` + direct reads | — | — | — |
-
-Semantic assists are derived workspace state, not filesystem truth.
-Use them when known-good for the active workspace/worktree.
-They do not replace direct reads / `rg` for verification.
+| Question Type | Default Tool | Fallback | Use Fallback When |
+|-------------------------------------------|--------------|----------|-------------------|
+| Exact keyword ("TODO") | `rg` | — | — |
+| Structural code pattern (call shape, signature) | `ast-grep` | `rg` with regex approximation | — |
+| Find files by name | Glob | `rg --files` / native filename search | Glob unavailable |
+| Semantic code search ("how does X work?") | **morph-mcp** codebase_search | `rg` + exact reads (`ast-grep` when structural search helps) | morph-mcp insufficient, rate limited, or errors |
+| Symbol info at position | `rg` + direct reads | — | — |
+| Find references | `rg` | — | — |
+| Call hierarchy (callers/callees) | `rg` + direct reads | — | — |
+| Cross-file definitions | `rg` + direct reads | — | — |
+| Multi-file structural analysis | `rg` + direct reads | — | — |
 
 **Additional caveats:**
 - **morph-mcp codebase_search**: semantic discovery — use when you'd have to guess the search string. If Morph is not exposed, load it with your tool-loading mechanism (e.g. `ToolSearch`, `tool_search`) before broad exploratory `rg`. Fallback to `rg` + exact reads when results are insufficient, rate limited, or error.
-- **JetBrains** (when IDE available): Path-based reads, file diagnostics, and occasional project metadata summaries are useful. IDE-derived results may be stale or incomplete in worktrees. Verify with `rg`/direct reads when results are ambiguous.
-- **LSP**: Semantic/type-aware navigation, references, and call hierarchy. Still derived workspace state, not filesystem truth (requires language server configured).
 
-**LSP prerequisite:** Use LSP-backed workflows only when the language server is actually configured for the workspace. Common examples: Python via Pyright/BasedPyright, Go via gopls.
+### Precedence
+
+- When two tools can answer the same question, prefer the one that minimizes context injection while preserving fidelity. Claude: apply this rule to your native tools — they are not the default when a lower-context alternative exists.
+- **Local First**: Prefer local tools before remote tools when they answer the same question with equal fidelity.
+- **Diff / review / exact file state**: `git` and native shell reads > cached/indexed summaries. Source-of-truth reads beat derived views.
+- **Code search**: `rg` for exact text/regex search; `ast-grep` for syntax-aware structure.
+- **Tracked or historical search**: Use `git grep` when the question is scoped to tracked files, the index, `HEAD`, or another Git revision. Use `rg` for working-tree search, including unstaged and untracked files.
+- **File edits**: apply_patch > morph-mcp edit_file when the edit is broad, context-heavy, or benefits from fast-apply semantics.
+- **Web content**: WebFetch > fetch MCP when you need exact content, raw HTML, or pagination.
+- **Docs**: `context7` (API reference) > `Ref` (tutorials/niche docs) > `deepwiki` (repo architecture) > `WebFetch` (specific URL).
+
+### Tool Preferences
+
+- **`mdq` for Markdown querying**: Use `mdq` to extract specific sections, headers, lists, or tables from Markdown files — like `jq` for Markdown. Prefer over `Read` when you only need a specific section from a large `.md` file, reducing context noise. Example: `mdq '# Section | # Subsection' file.md`.
+- **`jq` / `yq` for structured data**: Use `jq` for JSON and `yq` for YAML/TOML. Prefer over `Read` + manual parsing when extracting specific fields from structured data files.
+- **`gh` (GitHub CLI)**: Use `gh` for GitHub issues, PRs, releases, and GitHub API queries when repository context and authentication are available. Prefer `gh` over raw `curl` calls to GitHub APIs.
 
 ### Tool Details
-
-**JetBrains MCP**: IDE-aware operations via IntelliJ indexes and path-based file tools. Best for targeted reads, file diagnostics, and occasional project metadata summaries. Treat IDE-derived results as assists, not filesystem truth.
 
 **filesystem MCP**: Bulk/batch file operations — multi-file reads, recursive directory trees, file metadata.
 
@@ -100,21 +114,6 @@ They do not replace direct reads / `rg` for verification.
 **deepwiki**: GitHub repo architecture and code structure.
 
 **postgres** (session-dependent): Read-only SQL — schema exploration, data validation, query-based analysis. Available only when a database connection is active.
-
-### Precedence
-
-- When two tools can answer the same question, prefer the one that minimizes context injection while preserving fidelity. Claude: apply this rule to your native tools — they are not the default when a lower-context alternative exists.
-- **Local First**: Prefer local or workspace-aware tools before remote tools when they answer the same question with equal fidelity.
-- **Diff / review / exact file state**: `git` and native shell reads > IDE/MCP indexes. Source-of-truth reads beat cached/indexed views.
-- **Single-file read**: JetBrains `read_file` for targeted reads (line ranges, indentation-aware blocks) to minimize context; native Read for full-file reads, source-of-truth verification, or worktrees.
-- **Project structure / modules / dependencies**: native manifest reads + filesystem tree > JetBrains project-aware summaries in worktrees.
-- **File discovery**: filesystem glob/search > JetBrains glob discovery in worktrees. Use JetBrains `find_files_by_glob` only when IDE state is known-fresh.
-- **Code search**: `rg` for exact text/regex search; `ast-grep` for syntax-aware structure.
-- **Symbol discovery**: `rg`/direct reads first. Use semantic assists only when they are actually exposed and known-good for the current workspace.
-- **Symbol / navigation**: direct reads remain the source of truth. Do not assume richer reference/call-hierarchy support unless those tools are actually exposed in the current session.
-- **File edits**: morph-mcp > JetBrains edit/refactor tools > generic agent-native edit tools, subject to provider-specific constraints above.
-- **Web content**: WebFetch > fetch MCP when you need exact content, raw HTML, or pagination.
-- **Docs**: `context7` (API reference) > `Ref` (tutorials/niche docs) > deepwiki (repo architecture) > WebFetch (specific URL).
 
 ### Batching
 

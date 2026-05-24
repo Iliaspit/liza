@@ -9,7 +9,7 @@ System configuration, tuning parameters, and environment variables.
 `liza init` writes this file automatically from the embedded [`claude-settings.json`](../internal/embedded/claude-settings.json). The master defines all Liza CLI permissions, skills, and the full set of bash permissions agents need. **Do not hand-craft a subset** — agents will be blocked on any missing permission.
 
 **Key elements:**
-- **`enableAllProjectMcpServers`** — enables any project MCP servers (for non-Liza tools like JetBrains, filesystem, etc.)
+- **`enableAllProjectMcpServers`** — enables any project MCP servers (for non-Liza tools like filesystem, etc.)
 - **`Bash(liza:*)`** — grants permission for agents to invoke Liza CLI commands
 - **`Skill(...)`** — contract skills from `~/.liza/skills/` (installed by `liza setup`)
 - **`defaultMode: acceptEdits`** — required for headless agent operation
