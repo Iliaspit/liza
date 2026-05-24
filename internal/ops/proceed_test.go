@@ -11,6 +11,7 @@ import (
 
 	"github.com/liza-mas/liza/internal/db"
 	"github.com/liza-mas/liza/internal/models"
+	"github.com/liza-mas/liza/internal/taskkind"
 	"github.com/liza-mas/liza/internal/testhelpers"
 )
 
@@ -1310,7 +1311,7 @@ func TestProceed_PipelineRejectsAutoTransition(t *testing.T) {
 // --- Phase 2 pipeline test helpers ---
 
 // setupPhase2PipelineProceedTest creates a test dir with the full Phase 2 pipeline config
-// (including pipeline-transitions with us-to-coding one-to-one transition).
+// (including pipeline-transitions with us-to-coding many-to-one transition).
 func setupPhase2PipelineProceedTest(t *testing.T) (string, string) {
 	t.Helper()
 	tmpDir := t.TempDir()
@@ -1389,13 +1390,13 @@ func TestProceed_OneToOne_CreatesSingleChild(t *testing.T) {
 		t.Fatal("Child task not found")
 	}
 
-	// Child has correct status (architecture-pair initial)
-	if child.Status != models.TaskStatus("DRAFT_ARCHITECTURE") {
-		t.Errorf("Child status = %v, want DRAFT_ARCHITECTURE", child.Status)
+	// Child has correct status (architecture-main-pair initial)
+	if child.Status != models.TaskStatus("DRAFT_ARCHITECTURE_MAIN") {
+		t.Errorf("Child status = %v, want DRAFT_ARCHITECTURE_MAIN", child.Status)
 	}
-	// Child has correct role_pair (architecture-pair)
-	if child.RolePair != "architecture-pair" {
-		t.Errorf("Child role_pair = %q, want %q", child.RolePair, "architecture-pair")
+	// Child has correct role_pair (architecture-main-pair)
+	if child.RolePair != "architecture-main-pair" {
+		t.Errorf("Child role_pair = %q, want %q", child.RolePair, "architecture-main-pair")
 	}
 	// Child has parent_tasks set
 	if !slices.Contains(child.ParentTasks, taskID) {
@@ -1935,11 +1936,11 @@ func TestExecuteAvailableTransitions_CreatesChildrenForMergedTasks(t *testing.T)
 	if child == nil {
 		t.Fatal("Child task not found in state.Tasks")
 	}
-	if child.RolePair != "architecture-pair" {
-		t.Errorf("Child role_pair = %q, want %q", child.RolePair, "architecture-pair")
+	if child.RolePair != "architecture-main-pair" {
+		t.Errorf("Child role_pair = %q, want %q", child.RolePair, "architecture-main-pair")
 	}
-	if child.Status != models.TaskStatus("DRAFT_ARCHITECTURE") {
-		t.Errorf("Child status = %v, want DRAFT_ARCHITECTURE", child.Status)
+	if child.Status != models.TaskStatus("DRAFT_ARCHITECTURE_MAIN") {
+		t.Errorf("Child status = %v, want DRAFT_ARCHITECTURE_MAIN", child.Status)
 	}
 
 	// Children MUST be in Sprint.Scope.Planned
@@ -2094,6 +2095,518 @@ func TestExecuteAvailableTransitions_PerSubtask(t *testing.T) {
 		if !childFound {
 			t.Errorf("Child %q should be in Sprint.Scope.Planned", childID)
 		}
+	}
+}
+
+// Master-planning validation matrix: SC3 maps to TestExecuteAvailableTransitions_MasterPlanningAutoDecompose, SC4 to TestProceed_ArchitectureToCodePlanBypassesMasterPlanning, and SC6 to both master decomposition and downstream ref tests.
+
+func TestExecuteAvailableTransitions_MasterPlanningAutoDecompose(t *testing.T) {
+	tests := []struct {
+		name              string
+		parentID          string
+		taskType          models.TaskType
+		sourceRolePair    string
+		sourceStatus      models.TaskStatus
+		transitionName    string
+		targetRolePair    string
+		targetStatus      models.TaskStatus
+		refField          string
+		expectedPlanRef   string
+		expectedArchRef   string
+		expectedChildSlug string
+	}{
+		{
+			name:              "epic master merged to specialized epic planning",
+			parentID:          "epic-master-1",
+			taskType:          models.TaskTypeEpicPlanning,
+			sourceRolePair:    "epic-planning-main-pair",
+			sourceStatus:      models.TaskStatusMerged,
+			transitionName:    "epic-decompose",
+			targetRolePair:    "epic-planning-pair",
+			targetStatus:      models.TaskStatus("DRAFT_EPIC_PLAN"),
+			refField:          "plan",
+			expectedPlanRef:   "specs/plans/master-epic.md",
+			expectedChildSlug: "epic-planning",
+		},
+		{
+			name:              "architecture master merged to specialized architecture planning",
+			parentID:          "architecture-master-1",
+			taskType:          models.TaskTypeArchitecture,
+			sourceRolePair:    "architecture-main-pair",
+			sourceStatus:      models.TaskStatusMerged,
+			transitionName:    "arch-decompose",
+			targetRolePair:    "architecture-pair",
+			targetStatus:      models.TaskStatus("DRAFT_ARCHITECTURE"),
+			refField:          "arch",
+			expectedArchRef:   "specs/arch-plan/master-architecture.md",
+			expectedChildSlug: "architecture",
+		},
+		{
+			name:              "code planning master merged to specialized code planning",
+			parentID:          "code-planning-master-1",
+			taskType:          models.TaskTypeCoding,
+			sourceRolePair:    "code-planning-main-pair",
+			sourceStatus:      models.TaskStatusMerged,
+			transitionName:    "code-plan-decompose",
+			targetRolePair:    "code-planning-pair",
+			targetStatus:      models.TaskStatus("DRAFT_CODING_PLAN"),
+			refField:          "plan",
+			expectedPlanRef:   "specs/plans/master-code-plan.md",
+			expectedChildSlug: "code-planning",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir, stateFile := setupPhase2PipelineProceedTest(t)
+
+			state := testhelpers.CreateValidState()
+			state.PipelineVersion = 2
+			state.Sprint.Status = models.SprintStatusInProgress
+
+			now := time.Now().UTC()
+			reviewCommit := "abc123"
+			mergeCommit := "def456"
+			output := masterPlanningOutputEntries(tt.refField, tt.expectedPlanRef, tt.expectedArchRef)
+			task := models.Task{
+				ID:           tt.parentID,
+				Type:         tt.taskType,
+				RolePair:     tt.sourceRolePair,
+				Description:  "Master planning task",
+				Status:       tt.sourceStatus,
+				Priority:     1,
+				Created:      now,
+				SpecRef:      "specs/goals/master-planning.md",
+				DoneWhen:     "Master decomposition approved",
+				Scope:        "master planning scope",
+				ReviewCommit: &reviewCommit,
+				Output:       output,
+				History:      []models.TaskHistoryEntry{},
+			}
+			if tt.sourceStatus == models.TaskStatusMerged {
+				task.MergeCommit = &mergeCommit
+			}
+
+			state.Tasks = append(state.Tasks,
+				buildExternalDependencyTask("external-foundation-task", tt.targetRolePair, now),
+				buildExternalDependencyTask("external-review-task", tt.targetRolePair, now),
+				task,
+			)
+			state.Sprint.Scope.Planned = []string{"external-foundation-task", "external-review-task", tt.parentID}
+			testhelpers.WriteInitialState(t, stateFile, state)
+
+			results, err := ExecuteAvailableTransitions(tmpDir, "auto")
+			if err != nil {
+				t.Fatalf("ExecuteAvailableTransitions(auto) error: %v", err)
+			}
+
+			if len(results) != 1 {
+				t.Fatalf("results count = %d, want 1", len(results))
+			}
+			if results[0].SourceTaskID != tt.parentID {
+				t.Errorf("SourceTaskID = %q, want %q", results[0].SourceTaskID, tt.parentID)
+			}
+			if results[0].TransitionName != tt.transitionName {
+				t.Errorf("TransitionName = %q, want %q", results[0].TransitionName, tt.transitionName)
+			}
+			if len(results[0].ChildTaskIDs) != len(output) {
+				t.Fatalf("ChildTaskIDs count = %d, want %d", len(results[0].ChildTaskIDs), len(output))
+			}
+
+			bb := db.New(stateFile)
+			readState, err := bb.Read()
+			if err != nil {
+				t.Fatalf("Failed to read state: %v", err)
+			}
+
+			for i, childID := range results[0].ChildTaskIDs {
+				expectedChildID := fmt.Sprintf("%s-%s-%d", tt.parentID, tt.expectedChildSlug, i)
+				if childID != expectedChildID {
+					t.Errorf("ChildTaskIDs[%d] = %q, want %q", i, childID, expectedChildID)
+				}
+
+				child := readState.FindTask(childID)
+				if child == nil {
+					t.Fatalf("Child task %q not found", childID)
+				}
+				assertMasterPlanningChild(t, child, tt.parentID, output[i], tt.targetRolePair, tt.targetStatus, tt.expectedPlanRef, tt.expectedArchRef)
+				if !slices.Contains(readState.Sprint.Scope.Planned, childID) {
+					t.Errorf("Child %q not in Sprint.Scope.Planned", childID)
+				}
+			}
+
+			child0ID := results[0].ChildTaskIDs[0]
+			child1 := readState.FindTask(results[0].ChildTaskIDs[1])
+			if child1 == nil {
+				t.Fatal("second child not found")
+			}
+			if !slices.Contains(child1.DependsOn, child0ID) {
+				t.Errorf("second child DependsOn = %v, want sibling %q", child1.DependsOn, child0ID)
+			}
+
+			parent := readState.FindTask(tt.parentID)
+			if parent == nil {
+				t.Fatal("parent task not found")
+			}
+			if !parent.TransitionsExecuted[tt.transitionName] {
+				t.Errorf("parent transitions_executed missing %q: %v", tt.transitionName, parent.TransitionsExecuted)
+			}
+		})
+	}
+}
+
+func TestProceed_ArchitectureToCodePlanBypassesMasterPlanning(t *testing.T) {
+	tmpDir, stateFile := setupPhase2PipelineProceedTest(t)
+
+	state := testhelpers.CreateValidState()
+	state.PipelineVersion = 2
+	state.Sprint.Status = models.SprintStatusCompleted
+
+	now := time.Now().UTC()
+	parentID := "architecture-specialized-1"
+	reviewCommit := "abc123"
+	output := []models.OutputEntry{
+		{
+			Desc:     "Plan auth persistence implementation",
+			DoneWhen: "Auth persistence code plan is ready",
+			Scope:    "internal/auth/persistence",
+			SpecRef:  "specs/goals/auth.md#persistence",
+			ArchRef:  "specs/arch-plan/auth.md",
+		},
+		{
+			Desc:          "Plan auth API implementation",
+			DoneWhen:      "Auth API code plan is ready",
+			Scope:         "internal/auth/api",
+			SpecRef:       "specs/goals/auth.md#api",
+			ArchRef:       "specs/arch-plan/auth.md",
+			DependsOn:     []string{"0"},
+			TaskDependsOn: []string{"external-contract-task"},
+		},
+	}
+	task := models.Task{
+		ID:           parentID,
+		Type:         models.TaskTypeArchitecture,
+		RolePair:     "architecture-pair",
+		Description:  "Specialized architecture task",
+		Status:       models.TaskStatus("ARCHITECTURE_APPROVED"),
+		Priority:     1,
+		Created:      now,
+		SpecRef:      "specs/goals/auth.md",
+		DoneWhen:     "Architecture approved",
+		Scope:        "auth module",
+		ReviewCommit: &reviewCommit,
+		Output:       output,
+		History:      []models.TaskHistoryEntry{},
+	}
+	state.Tasks = append(state.Tasks,
+		buildExternalDependencyTask("external-contract-task", "code-planning-pair", now),
+		task,
+	)
+	state.Sprint.Scope.Planned = []string{"external-contract-task", parentID}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	result, err := Proceed(tmpDir, parentID, "architecture-to-code-plan")
+	if err != nil {
+		t.Fatalf("Proceed() error: %v", err)
+	}
+	if len(result.ChildTaskIDs) != len(output) {
+		t.Fatalf("ChildTaskIDs count = %d, want %d", len(result.ChildTaskIDs), len(output))
+	}
+
+	bb := db.New(stateFile)
+	readState, err := bb.Read()
+	if err != nil {
+		t.Fatalf("Failed to read state: %v", err)
+	}
+
+	for i, childID := range result.ChildTaskIDs {
+		child := readState.FindTask(childID)
+		if child == nil {
+			t.Fatalf("Child task %q not found", childID)
+		}
+		if child.RolePair != "code-planning-pair" {
+			t.Errorf("Child[%d] role_pair = %q, want code-planning-pair", i, child.RolePair)
+		}
+		if child.RolePair == "code-planning-main-pair" {
+			t.Errorf("Child[%d] unexpectedly routed through code-planning-main-pair", i)
+		}
+		if child.Status != models.TaskStatus("DRAFT_CODING_PLAN") {
+			t.Errorf("Child[%d] status = %q, want DRAFT_CODING_PLAN", i, child.Status)
+		}
+		if child.ArchRef != "specs/arch-plan/auth.md" {
+			t.Errorf("Child[%d] arch_ref = %q, want specs/arch-plan/auth.md", i, child.ArchRef)
+		}
+		if !slices.Equal(child.ParentTasks, []string{parentID}) {
+			t.Errorf("Child[%d] ParentTasks = %v, want [%s]", i, child.ParentTasks, parentID)
+		}
+	}
+
+	if !slices.Contains(readState.FindTask(result.ChildTaskIDs[1]).DependsOn, result.ChildTaskIDs[0]) {
+		t.Errorf("second code-planning child DependsOn = %v, want sibling %q", readState.FindTask(result.ChildTaskIDs[1]).DependsOn, result.ChildTaskIDs[0])
+	}
+	for _, task := range readState.Tasks {
+		if task.RolePair == "code-planning-main-pair" {
+			t.Fatalf("architecture-to-code-plan created code-planning-main-pair task: %+v", task)
+		}
+	}
+}
+
+func TestProceed_MasterPlanningDownstreamRefs(t *testing.T) {
+	t.Run("coding children keep specialized plan ref and inherited arch ref", func(t *testing.T) {
+		tmpDir, stateFile := setupPhase2PipelineProceedTest(t)
+
+		state := testhelpers.CreateValidState()
+		state.PipelineVersion = 2
+		state.Sprint.Status = models.SprintStatusCompleted
+
+		now := time.Now().UTC()
+		parentID := "specialized-code-plan-1"
+		reviewCommit := "abc123"
+		task := models.Task{
+			ID:           parentID,
+			Type:         models.TaskTypeCoding,
+			RolePair:     "code-planning-pair",
+			Description:  "Specialized code plan constrained by master refs",
+			Status:       models.TaskStatus("CODING_PLAN_APPROVED"),
+			Priority:     1,
+			Created:      now,
+			SpecRef:      "specs/goals/auth.md",
+			ArchRef:      "specs/arch-plan/master-auth.md",
+			PlanRef:      "specs/plans/master-code-plan.md",
+			DoneWhen:     "Code plan approved",
+			Scope:        "auth module",
+			ReviewCommit: &reviewCommit,
+			Output: []models.OutputEntry{
+				{
+					Desc:     "Implement auth handler",
+					DoneWhen: "Auth handler works",
+					Scope:    "internal/auth/handler.go",
+					SpecRef:  "specs/goals/auth.md#handler",
+					PlanRef:  "specs/plans/specialized-auth-plan.md",
+				},
+			},
+			History: []models.TaskHistoryEntry{},
+		}
+		state.Tasks = append(state.Tasks, task)
+		state.Sprint.Scope.Planned = []string{parentID}
+		testhelpers.WriteInitialState(t, stateFile, state)
+
+		result, err := Proceed(tmpDir, parentID, "code-plan-to-coding")
+		if err != nil {
+			t.Fatalf("Proceed() error: %v", err)
+		}
+
+		bb := db.New(stateFile)
+		readState, err := bb.Read()
+		if err != nil {
+			t.Fatalf("Failed to read state: %v", err)
+		}
+
+		child := readState.FindTask(result.ChildTaskIDs[0])
+		if child == nil {
+			t.Fatal("coding child not found")
+		}
+		if child.RolePair != "coding-pair" {
+			t.Errorf("child role_pair = %q, want coding-pair", child.RolePair)
+		}
+		if child.PlanRef != "specs/plans/specialized-auth-plan.md" {
+			t.Errorf("child plan_ref = %q, want specs/plans/specialized-auth-plan.md", child.PlanRef)
+		}
+		if child.ArchRef != "specs/arch-plan/master-auth.md" {
+			t.Errorf("child arch_ref = %q, want specs/arch-plan/master-auth.md", child.ArchRef)
+		}
+	})
+
+	t.Run("story-writing children consume specialized epic ref", func(t *testing.T) {
+		tmpDir, stateFile := setupPhase2PipelineProceedTest(t)
+
+		state := testhelpers.CreateValidState()
+		state.PipelineVersion = 2
+		state.Sprint.Status = models.SprintStatusCompleted
+
+		now := time.Now().UTC()
+		parentID := "specialized-epic-plan-1"
+		reviewCommit := "abc123"
+		task := models.Task{
+			ID:           parentID,
+			Type:         models.TaskTypeEpicPlanning,
+			RolePair:     "epic-planning-pair",
+			Description:  "Specialized epic plan constrained by master plan",
+			Status:       models.TaskStatus("EPIC_PLAN_APPROVED"),
+			Priority:     1,
+			Created:      now,
+			SpecRef:      "specs/goals/auth.md",
+			PlanRef:      "specs/plans/master-epic-plan.md",
+			DoneWhen:     "Epic plan approved",
+			Scope:        "auth module",
+			ReviewCommit: &reviewCommit,
+			Output: []models.OutputEntry{
+				{
+					Desc:     "Write login story",
+					DoneWhen: "Login story is ready",
+					Scope:    "auth login story",
+					SpecRef:  "specs/goals/auth.md#login",
+					EpicRef:  "specs/epics/specialized-auth.md",
+				},
+			},
+			History: []models.TaskHistoryEntry{},
+		}
+		state.Tasks = append(state.Tasks, task)
+		state.Sprint.Scope.Planned = []string{parentID}
+		testhelpers.WriteInitialState(t, stateFile, state)
+
+		result, err := Proceed(tmpDir, parentID, "epic-to-us")
+		if err != nil {
+			t.Fatalf("Proceed() error: %v", err)
+		}
+
+		bb := db.New(stateFile)
+		readState, err := bb.Read()
+		if err != nil {
+			t.Fatalf("Failed to read state: %v", err)
+		}
+
+		child := readState.FindTask(result.ChildTaskIDs[0])
+		if child == nil {
+			t.Fatal("story-writing child not found")
+		}
+		if child.RolePair != "us-writing-pair" {
+			t.Errorf("child role_pair = %q, want us-writing-pair", child.RolePair)
+		}
+		if child.EpicRef != "specs/epics/specialized-auth.md" {
+			t.Errorf("child epic_ref = %q, want specs/epics/specialized-auth.md", child.EpicRef)
+		}
+	})
+}
+
+func masterPlanningOutputEntries(refField, planRef, archRef string) []models.OutputEntry {
+	output := []models.OutputEntry{
+		{
+			Desc:          "Plan first specialized scope",
+			DoneWhen:      "First specialized plan is ready",
+			Scope:         "first specialized scope",
+			SpecRef:       "specs/goals/master-planning.md#first",
+			Kind:          taskkind.PreCommitBootstrap,
+			TaskDependsOn: []string{"external-foundation-task"},
+			Decomposition: &models.DecompositionManifest{
+				OwnedFiles:            []string{"internal/first/owned.go"},
+				OwnedModules:          []string{"internal/first"},
+				ReadOnlyTaskDependsOn: []string{"external-foundation-task"},
+				InterfacesOwned:       []string{"FirstContract"},
+				InterfacesConsumed:    []string{"GoalContract"},
+				CoverageNotes:         "First scope owns the foundation boundary.",
+			},
+		},
+		{
+			Desc:          "Plan second specialized scope",
+			DoneWhen:      "Second specialized plan is ready",
+			Scope:         "second specialized scope",
+			SpecRef:       "specs/goals/master-planning.md#second",
+			DependsOn:     []string{"0"},
+			TaskDependsOn: []string{"external-review-task"},
+			Decomposition: &models.DecompositionManifest{
+				OwnedFiles:            []string{"internal/second/owned.go"},
+				OwnedModules:          []string{"internal/second"},
+				ReadOnlyDependsOn:     []int{0},
+				ReadOnlyTaskDependsOn: []string{"external-review-task"},
+				InterfacesOwned:       []string{"SecondContract"},
+				InterfacesConsumed:    []string{"FirstContract"},
+				CoverageNotes:         "Second scope consumes the first boundary.",
+			},
+		},
+	}
+
+	for i := range output {
+		switch refField {
+		case "plan":
+			output[i].PlanRef = planRef
+		case "arch":
+			output[i].ArchRef = archRef
+		}
+	}
+
+	return output
+}
+
+func buildExternalDependencyTask(id, rolePair string, now time.Time) models.Task {
+	task := testhelpers.BuildTaskByStatus(id, models.TaskStatusMerged, now)
+	task.RolePair = rolePair
+	return task
+}
+
+func assertMasterPlanningChild(t *testing.T, child *models.Task, parentID string, entry models.OutputEntry, targetRolePair string, targetStatus models.TaskStatus, expectedPlanRef, expectedArchRef string) {
+	t.Helper()
+
+	if child.RolePair != targetRolePair {
+		t.Errorf("child %q role_pair = %q, want %q", child.ID, child.RolePair, targetRolePair)
+	}
+	if child.Status != targetStatus {
+		t.Errorf("child %q status = %q, want %q", child.ID, child.Status, targetStatus)
+	}
+	if !slices.Equal(child.ParentTasks, []string{parentID}) {
+		t.Errorf("child %q ParentTasks = %v, want [%s]", child.ID, child.ParentTasks, parentID)
+	}
+	if child.ParentTask != nil {
+		t.Errorf("child %q ParentTask = %v, want nil", child.ID, *child.ParentTask)
+	}
+	if child.Description != entry.Desc {
+		t.Errorf("child %q Description = %q, want %q", child.ID, child.Description, entry.Desc)
+	}
+	if child.DoneWhen != entry.DoneWhen {
+		t.Errorf("child %q DoneWhen = %q, want %q", child.ID, child.DoneWhen, entry.DoneWhen)
+	}
+	if child.Scope != entry.Scope {
+		t.Errorf("child %q Scope = %q, want %q", child.ID, child.Scope, entry.Scope)
+	}
+	if child.Kind != entry.Kind {
+		t.Errorf("child %q Kind = %q, want %q", child.ID, child.Kind, entry.Kind)
+	}
+	for _, taskDep := range entry.TaskDependsOn {
+		if !slices.Contains(child.DependsOn, taskDep) {
+			t.Errorf("child %q DependsOn = %v, want external task_depends_on %q", child.ID, child.DependsOn, taskDep)
+		}
+	}
+	if child.PlanRef != expectedPlanRef {
+		t.Errorf("child %q plan_ref = %q, want %q", child.ID, child.PlanRef, expectedPlanRef)
+	}
+	if child.ArchRef != expectedArchRef {
+		t.Errorf("child %q arch_ref = %q, want %q", child.ID, child.ArchRef, expectedArchRef)
+	}
+	assertDecompositionEqual(t, child.ID, child.Decomposition, entry.Decomposition)
+}
+
+func assertDecompositionEqual(t *testing.T, childID string, got, want *models.DecompositionManifest) {
+	t.Helper()
+
+	if want == nil {
+		if got != nil {
+			t.Errorf("child %q Decomposition = %+v, want nil", childID, got)
+		}
+		return
+	}
+	if got == nil {
+		t.Fatalf("child %q Decomposition is nil", childID)
+	}
+	if !slices.Equal(got.OwnedFiles, want.OwnedFiles) {
+		t.Errorf("child %q OwnedFiles = %v, want %v", childID, got.OwnedFiles, want.OwnedFiles)
+	}
+	if !slices.Equal(got.OwnedModules, want.OwnedModules) {
+		t.Errorf("child %q OwnedModules = %v, want %v", childID, got.OwnedModules, want.OwnedModules)
+	}
+	if !slices.Equal(got.ReadOnlyDependsOn, want.ReadOnlyDependsOn) {
+		t.Errorf("child %q ReadOnlyDependsOn = %v, want %v", childID, got.ReadOnlyDependsOn, want.ReadOnlyDependsOn)
+	}
+	if !slices.Equal(got.ReadOnlyTaskDependsOn, want.ReadOnlyTaskDependsOn) {
+		t.Errorf("child %q ReadOnlyTaskDependsOn = %v, want %v", childID, got.ReadOnlyTaskDependsOn, want.ReadOnlyTaskDependsOn)
+	}
+	if !slices.Equal(got.InterfacesOwned, want.InterfacesOwned) {
+		t.Errorf("child %q InterfacesOwned = %v, want %v", childID, got.InterfacesOwned, want.InterfacesOwned)
+	}
+	if !slices.Equal(got.InterfacesConsumed, want.InterfacesConsumed) {
+		t.Errorf("child %q InterfacesConsumed = %v, want %v", childID, got.InterfacesConsumed, want.InterfacesConsumed)
+	}
+	if got.CoverageNotes != want.CoverageNotes {
+		t.Errorf("child %q CoverageNotes = %q, want %q", childID, got.CoverageNotes, want.CoverageNotes)
 	}
 }
 
@@ -2630,6 +3143,164 @@ func TestProceed_ChildTasksGetPlanRefFromOutputEntry(t *testing.T) {
 		}
 		if child.PlanRef != "specs/plans/20260317-plan.md" {
 			t.Errorf("Child %d plan_ref = %q, want %q", i, child.PlanRef, "specs/plans/20260317-plan.md")
+		}
+	}
+}
+
+func TestProceed_PerSubtask_PropagatesDecompositionKindAndDirectRefs(t *testing.T) {
+	tmpDir, stateFile := setupPipelineProceedTest(t)
+
+	state := testhelpers.CreateValidState()
+	state.PipelineVersion = 2
+	state.Sprint.Status = models.SprintStatusCompleted
+
+	now := time.Now().UTC()
+	parentID := "plan-decomposition-1"
+	reviewCommit := "abc123"
+	decomposition := &models.DecompositionManifest{
+		OwnedFiles:            []string{"internal/auth/login.go"},
+		OwnedModules:          []string{"internal/auth"},
+		ReadOnlyDependsOn:     []int{0},
+		ReadOnlyTaskDependsOn: []string{"architecture-4-code-planning-0-b-repair-0-coding-1"},
+		InterfacesOwned:       []string{"LoginHandler"},
+		InterfacesConsumed:    []string{"SessionStore"},
+		CoverageNotes:         "Owns login handler implementation boundary.",
+	}
+	task := models.Task{
+		ID:           parentID,
+		Type:         models.TaskTypeCoding,
+		RolePair:     "code-planning-pair",
+		Description:  "Plan with decomposition metadata",
+		Status:       models.TaskStatus("CODING_PLAN_APPROVED"),
+		Priority:     1,
+		Created:      now,
+		SpecRef:      "README.md",
+		DoneWhen:     "Plan approved",
+		Scope:        "auth module",
+		ReviewCommit: &reviewCommit,
+		Output: []models.OutputEntry{
+			{
+				Desc:          "Implement login",
+				DoneWhen:      "Login works",
+				Scope:         "login",
+				SpecRef:       "specs/auth.md#login",
+				EpicRef:       "specs/epics/auth.md",
+				PlanRef:       "specs/plans/auth-plan.md",
+				ArchRef:       "specs/arch-plan/auth-arch.md",
+				Kind:          taskkind.PreCommitBootstrap,
+				Decomposition: decomposition,
+			},
+		},
+		History: []models.TaskHistoryEntry{},
+	}
+	state.Tasks = append(state.Tasks, task)
+	state.Sprint.Scope.Planned = []string{parentID}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	result, err := Proceed(tmpDir, parentID, "code-plan-to-coding")
+	if err != nil {
+		t.Fatalf("Proceed() error: %v", err)
+	}
+
+	bb := db.New(stateFile)
+	readState, err := bb.Read()
+	if err != nil {
+		t.Fatalf("Failed to read state: %v", err)
+	}
+
+	child := readState.FindTask(result.ChildTaskIDs[0])
+	if child == nil {
+		t.Fatal("Child task not found")
+	}
+	if child.Kind != taskkind.PreCommitBootstrap {
+		t.Errorf("child.Kind = %q, want %q", child.Kind, taskkind.PreCommitBootstrap)
+	}
+	if child.EpicRef != "specs/epics/auth.md" {
+		t.Errorf("child.EpicRef = %q, want specs/epics/auth.md", child.EpicRef)
+	}
+	if child.PlanRef != "specs/plans/auth-plan.md" {
+		t.Errorf("child.PlanRef = %q, want specs/plans/auth-plan.md", child.PlanRef)
+	}
+	if child.ArchRef != "specs/arch-plan/auth-arch.md" {
+		t.Errorf("child.ArchRef = %q, want specs/arch-plan/auth-arch.md", child.ArchRef)
+	}
+	if child.Decomposition == nil {
+		t.Fatal("child.Decomposition is nil")
+	}
+	if !slices.Equal(child.Decomposition.OwnedFiles, decomposition.OwnedFiles) {
+		t.Errorf("OwnedFiles = %v, want %v", child.Decomposition.OwnedFiles, decomposition.OwnedFiles)
+	}
+	if !slices.Equal(child.Decomposition.OwnedModules, decomposition.OwnedModules) {
+		t.Errorf("OwnedModules = %v, want %v", child.Decomposition.OwnedModules, decomposition.OwnedModules)
+	}
+	if !slices.Equal(child.Decomposition.ReadOnlyDependsOn, decomposition.ReadOnlyDependsOn) {
+		t.Errorf("ReadOnlyDependsOn = %v, want %v", child.Decomposition.ReadOnlyDependsOn, decomposition.ReadOnlyDependsOn)
+	}
+	if !slices.Equal(child.Decomposition.ReadOnlyTaskDependsOn, decomposition.ReadOnlyTaskDependsOn) {
+		t.Errorf("ReadOnlyTaskDependsOn = %v, want %v", child.Decomposition.ReadOnlyTaskDependsOn, decomposition.ReadOnlyTaskDependsOn)
+	}
+	if !slices.Equal(child.Decomposition.InterfacesOwned, decomposition.InterfacesOwned) {
+		t.Errorf("InterfacesOwned = %v, want %v", child.Decomposition.InterfacesOwned, decomposition.InterfacesOwned)
+	}
+	if !slices.Equal(child.Decomposition.InterfacesConsumed, decomposition.InterfacesConsumed) {
+		t.Errorf("InterfacesConsumed = %v, want %v", child.Decomposition.InterfacesConsumed, decomposition.InterfacesConsumed)
+	}
+	if child.Decomposition.CoverageNotes != decomposition.CoverageNotes {
+		t.Errorf("CoverageNotes = %q, want %q", child.Decomposition.CoverageNotes, decomposition.CoverageNotes)
+	}
+}
+
+func TestProceed_PerSubtask_DoesNotFallbackToParentPlanRef(t *testing.T) {
+	tmpDir, stateFile := setupPipelineProceedTest(t)
+
+	state := testhelpers.CreateValidState()
+	state.PipelineVersion = 2
+	state.Sprint.Status = models.SprintStatusCompleted
+
+	now := time.Now().UTC()
+	parentID := "plan-no-planref-fallback"
+	reviewCommit := "abc123"
+	task := models.Task{
+		ID:           parentID,
+		Type:         models.TaskTypeCoding,
+		RolePair:     "code-planning-pair",
+		Description:  "Plan with parent plan_ref only",
+		Status:       models.TaskStatus("CODING_PLAN_APPROVED"),
+		Priority:     1,
+		Created:      now,
+		SpecRef:      "README.md",
+		PlanRef:      "specs/plans/parent-plan.md",
+		DoneWhen:     "Plan approved",
+		Scope:        "auth module",
+		ReviewCommit: &reviewCommit,
+		Output: []models.OutputEntry{
+			{Desc: "Task A", DoneWhen: "A works", Scope: "a", SpecRef: "specs/a.md"},
+			{Desc: "Task B", DoneWhen: "B works", Scope: "b", SpecRef: "specs/b.md"},
+		},
+		History: []models.TaskHistoryEntry{},
+	}
+	state.Tasks = append(state.Tasks, task)
+	state.Sprint.Scope.Planned = []string{parentID}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	result, err := Proceed(tmpDir, parentID, "code-plan-to-coding")
+	if err != nil {
+		t.Fatalf("Proceed() error: %v", err)
+	}
+
+	bb := db.New(stateFile)
+	readState, err := bb.Read()
+	if err != nil {
+		t.Fatalf("Failed to read state: %v", err)
+	}
+
+	for _, childID := range result.ChildTaskIDs {
+		child := readState.FindTask(childID)
+		if child == nil {
+			t.Fatalf("Child task %s not found", childID)
+		}
+		if child.PlanRef != "" {
+			t.Errorf("child %s PlanRef = %q, want empty", childID, child.PlanRef)
 		}
 	}
 }
@@ -3671,6 +4342,59 @@ func TestProceedInner_InheritedDepsAppendedAfterSiblingDeps(t *testing.T) {
 	}
 }
 
+func TestProceedInner_PerSubtaskDedupesDependenciesInStableOrder(t *testing.T) {
+	now := time.Now().UTC()
+	siblingID := perSubtaskChildID("plan-1", "code-plan-to-coding", 0)
+
+	s := &models.State{
+		Tasks: []models.Task{
+			{
+				ID:       "plan-1",
+				Status:   models.TaskStatusMerged,
+				RolePair: "code-planning-pair",
+				Output: []models.OutputEntry{
+					{Desc: "a", DoneWhen: "a", Scope: "a", SpecRef: "s.md"},
+					{
+						Desc:          "b",
+						DoneWhen:      "b",
+						Scope:         "b",
+						SpecRef:       "s.md",
+						DependsOn:     []string{"0"},
+						TaskDependsOn: []string{siblingID, "external-task"},
+					},
+				},
+			},
+		},
+	}
+
+	tDef := transitionDef{
+		sourceRolePair: "code-planning-pair",
+		requiredStatus: models.TaskStatusMerged,
+		targetStatus:   models.TaskStatus("DRAFT_CODE"),
+		cardinality:    "per-subtask",
+		targetRolePair: "coding-pair",
+		taskSlug:       "code-plan-to-coding",
+	}
+
+	inheritedDeps := []string{"external-task", "inherited-task", siblingID}
+	result := &ProceedResult{SourceTaskID: "plan-1", TransitionName: "code-plan-to-coding"}
+
+	err := proceedInner(s, "plan-1", "code-plan-to-coding", tDef, inheritedDeps, nil, now, result)
+	if err != nil {
+		t.Fatalf("proceedInner: %v", err)
+	}
+
+	child1 := s.FindTask(result.ChildTaskIDs[1])
+	if child1 == nil {
+		t.Fatal("child 1 not found")
+	}
+
+	want := []string{siblingID, "external-task", "inherited-task"}
+	if !slices.Equal(child1.DependsOn, want) {
+		t.Errorf("child1.DependsOn = %v, want %v", child1.DependsOn, want)
+	}
+}
+
 func TestProceed_InheritedDepsViaManualPath(t *testing.T) {
 	tmpDir, stateFile := setupPipelineProceedTest(t)
 
@@ -4378,14 +5102,14 @@ func TestProceedManyToOne_HappyPath(t *testing.T) {
 		}
 	}
 
-	// Child has correct status (DRAFT_ARCHITECTURE)
-	if child.Status != models.TaskStatus("DRAFT_ARCHITECTURE") {
-		t.Errorf("Child status = %v, want DRAFT_ARCHITECTURE", child.Status)
+	// Child has correct status (DRAFT_ARCHITECTURE_MAIN)
+	if child.Status != models.TaskStatus("DRAFT_ARCHITECTURE_MAIN") {
+		t.Errorf("Child status = %v, want DRAFT_ARCHITECTURE_MAIN", child.Status)
 	}
 
 	// Child has correct role_pair
-	if child.RolePair != "architecture-pair" {
-		t.Errorf("Child role_pair = %q, want %q", child.RolePair, "architecture-pair")
+	if child.RolePair != "architecture-main-pair" {
+		t.Errorf("Child role_pair = %q, want %q", child.RolePair, "architecture-main-pair")
 	}
 
 	// Child has correct task type
@@ -4974,14 +5698,16 @@ func TestExecuteAvailableTransitions_SkipsReplannedTasks(t *testing.T) {
 		t.Fatalf("Failed to read state: %v", err)
 	}
 
-	var archTasks []string
+	var archTasks []models.Task
 	for _, task := range readState.Tasks {
-		if task.RolePair == "architecture-pair" {
-			archTasks = append(archTasks, task.ID)
+		if task.RolePair == "architecture-main-pair" {
+			archTasks = append(archTasks, task)
 		}
 	}
 	if len(archTasks) != 1 {
 		t.Errorf("Expected 1 architecture task, got %d: %v", len(archTasks), archTasks)
+	} else if archTasks[0].Status != models.TaskStatus("DRAFT_ARCHITECTURE_MAIN") {
+		t.Errorf("Architecture task status = %v, want DRAFT_ARCHITECTURE_MAIN", archTasks[0].Status)
 	}
 }
 

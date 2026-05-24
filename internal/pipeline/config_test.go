@@ -696,6 +696,39 @@ func TestLoadFrozen_ValidFile(t *testing.T) {
 	}
 }
 
+func TestLoadFrozen_BackfillsLegacyMasterDecompositionOutputRefs(t *testing.T) {
+	dir := t.TempDir()
+	lizaDir := filepath.Join(dir, ".liza")
+	if err := os.MkdirAll(lizaDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile("testdata/valid-phase2-full.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := strings.ReplaceAll(string(data), "      decomposition-output-ref: plan_ref\n", "")
+	content = strings.ReplaceAll(content, "      decomposition-output-ref: arch_ref\n", "")
+	if err := os.WriteFile(filepath.Join(lizaDir, "pipeline.yaml"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadFrozen(dir)
+	if err != nil {
+		t.Fatalf("LoadFrozen failed: %v", err)
+	}
+
+	tests := map[string]string{
+		"epic-planning-main-pair": "plan_ref",
+		"architecture-main-pair":  "arch_ref",
+		"code-planning-main-pair": "plan_ref",
+	}
+	for rolePair, want := range tests {
+		if got := cfg.Pipeline.RolePairs[rolePair].DecompositionOutputRef; got != want {
+			t.Fatalf("%s DecompositionOutputRef = %q, want %q", rolePair, got, want)
+		}
+	}
+}
+
 // --- Resolver tests ---
 
 func loadTestConfig(t *testing.T) *PipelineConfig {
@@ -1161,15 +1194,25 @@ func TestLoad_Phase2ValidConfig(t *testing.T) {
 		t.Fatal("expected non-nil config")
 	}
 
-	// Verify 5 role-pairs parsed.
-	if len(cfg.Pipeline.RolePairs) != 5 {
-		t.Fatalf("expected 5 role-pairs, got %d", len(cfg.Pipeline.RolePairs))
+	// Verify 8 role-pairs parsed.
+	if len(cfg.Pipeline.RolePairs) != 8 {
+		t.Fatalf("expected 8 role-pairs, got %d", len(cfg.Pipeline.RolePairs))
 	}
-	for _, name := range []string{"epic-planning-pair", "us-writing-pair", "code-planning-pair", "coding-pair", "architecture-pair"} {
+	for _, name := range []string{
+		"epic-planning-main-pair",
+		"epic-planning-pair",
+		"us-writing-pair",
+		"architecture-main-pair",
+		"architecture-pair",
+		"code-planning-main-pair",
+		"code-planning-pair",
+		"coding-pair",
+	} {
 		if _, ok := cfg.Pipeline.RolePairs[name]; !ok {
 			t.Errorf("missing role-pair %s", name)
 		}
 	}
+	assertMasterPlanningTopology(t, cfg)
 
 	// Verify 11 roles (10 agent roles + orchestrator).
 	if len(cfg.Pipeline.Roles) != 11 {
@@ -1189,7 +1232,7 @@ func TestLoad_Phase2ValidConfig(t *testing.T) {
 	if pt.From != "epic-spec-subpipeline.us-writing-pair.approved" {
 		t.Errorf("pipeline-transition from = %q, want 3-part ref", pt.From)
 	}
-	if pt.To != "architecture-subpipeline.architecture-pair.initial" {
+	if pt.To != "architecture-subpipeline.architecture-main-pair.initial" {
 		t.Errorf("pipeline-transition to = %q, want 3-part ref", pt.To)
 	}
 	if pt.Trigger != "manual" {
@@ -1234,6 +1277,134 @@ func requirePipelineTransition(t *testing.T, cfg *PipelineConfig, name string) T
 	}
 	t.Fatalf("missing pipeline-transition %q", name)
 	return TransitionDef{}
+}
+
+func assertMasterPlanningTopology(t *testing.T, cfg *PipelineConfig) {
+	t.Helper()
+	type masterPair struct {
+		name       string
+		doer       string
+		reviewer   string
+		outputRef  string
+		states     RolePairStates
+		sub        string
+		steps      []string
+		transition TransitionDef
+	}
+	masters := []masterPair{
+		{
+			name:      "epic-planning-main-pair",
+			doer:      "epic-planner",
+			reviewer:  "epic-plan-reviewer",
+			outputRef: "plan_ref",
+			states: RolePairStates{
+				Initial: "DRAFT_EPIC_PLAN_MAIN", Executing: "EPIC_PLANNING_MAIN",
+				Submitted: "EPIC_PLAN_MAIN_TO_REVIEW", Reviewing: "REVIEWING_EPIC_PLAN_MAIN",
+				Approved: "EPIC_PLAN_MAIN_APPROVED", Rejected: "EPIC_PLAN_MAIN_REJECTED",
+				PartiallyApproved: "EPIC_PLAN_MAIN_PARTIALLY_APPROVED", Reviewing2: "REVIEWING_EPIC_PLAN_MAIN_2",
+			},
+			sub:   "epic-spec-subpipeline",
+			steps: []string{"epic-planning-main-pair", "epic-planning-pair", "us-writing-pair"},
+			transition: TransitionDef{
+				Name: "epic-decompose", TaskSlug: "epic-planning",
+				From: "epic-planning-main-pair.approved", To: "epic-planning-pair.initial",
+				Trigger: "auto", Cardinality: "per-subtask",
+			},
+		},
+		{
+			name:      "architecture-main-pair",
+			doer:      "architect",
+			reviewer:  "architecture-reviewer",
+			outputRef: "arch_ref",
+			states: RolePairStates{
+				Initial: "DRAFT_ARCHITECTURE_MAIN", Executing: "ARCHITECTING_MAIN",
+				Submitted: "ARCHITECTURE_MAIN_TO_REVIEW", Reviewing: "REVIEWING_ARCHITECTURE_MAIN",
+				Approved: "ARCHITECTURE_MAIN_APPROVED", Rejected: "ARCHITECTURE_MAIN_REJECTED",
+				PartiallyApproved: "ARCHITECTURE_MAIN_PARTIALLY_APPROVED", Reviewing2: "REVIEWING_ARCHITECTURE_MAIN_2",
+			},
+			sub:   "architecture-subpipeline",
+			steps: []string{"architecture-main-pair", "architecture-pair"},
+			transition: TransitionDef{
+				Name: "arch-decompose", TaskSlug: "architecture",
+				From: "architecture-main-pair.approved", To: "architecture-pair.initial",
+				Trigger: "auto", Cardinality: "per-subtask",
+			},
+		},
+		{
+			name:      "code-planning-main-pair",
+			doer:      "code-planner",
+			reviewer:  "code-plan-reviewer",
+			outputRef: "plan_ref",
+			states: RolePairStates{
+				Initial: "DRAFT_CODING_PLAN_MAIN", Executing: "CODE_PLANNING_MAIN",
+				Submitted: "CODING_PLAN_MAIN_TO_REVIEW", Reviewing: "REVIEWING_CODING_PLAN_MAIN",
+				Approved: "CODING_PLAN_MAIN_APPROVED", Rejected: "CODING_PLAN_MAIN_REJECTED",
+				PartiallyApproved: "CODING_PLAN_MAIN_PARTIALLY_APPROVED", Reviewing2: "REVIEWING_CODING_PLAN_MAIN_2",
+			},
+			sub:   "coding-subpipeline",
+			steps: []string{"code-planning-main-pair", "code-planning-pair", "coding-pair"},
+			transition: TransitionDef{
+				Name: "code-plan-decompose", TaskSlug: "code-planning",
+				From: "code-planning-main-pair.approved", To: "code-planning-pair.initial",
+				Trigger: "auto", Cardinality: "per-subtask",
+			},
+		},
+	}
+
+	for _, want := range masters {
+		rp, ok := cfg.Pipeline.RolePairs[want.name]
+		if !ok {
+			t.Errorf("missing role-pair %q", want.name)
+			continue
+		}
+		if rp.Doer != want.doer {
+			t.Errorf("%s doer = %q, want %q", want.name, rp.Doer, want.doer)
+		}
+		if rp.Reviewer != want.reviewer {
+			t.Errorf("%s reviewer = %q, want %q", want.name, rp.Reviewer, want.reviewer)
+		}
+		if !rp.DecompositionRoot {
+			t.Errorf("%s DecompositionRoot = false, want true", want.name)
+		}
+		if rp.DecompositionOutputRef != want.outputRef {
+			t.Errorf("%s DecompositionOutputRef = %q, want %q", want.name, rp.DecompositionOutputRef, want.outputRef)
+		}
+		if rp.ReviewPolicy == nil {
+			t.Errorf("%s ReviewPolicy = nil", want.name)
+		} else {
+			if rp.ReviewPolicy.Quorum != 2 {
+				t.Errorf("%s quorum = %d, want 2", want.name, rp.ReviewPolicy.Quorum)
+			}
+			if rp.ReviewPolicy.ProviderDiversity != "preferred" {
+				t.Errorf("%s provider-diversity = %q, want preferred", want.name, rp.ReviewPolicy.ProviderDiversity)
+			}
+		}
+		if rp.States != want.states {
+			t.Errorf("%s states = %+v, want %+v", want.name, rp.States, want.states)
+		}
+
+		sp, ok := cfg.Pipeline.SubPipelines[want.sub]
+		if !ok {
+			t.Errorf("missing sub-pipeline %q", want.sub)
+			continue
+		}
+		if !slices.Equal(sp.Steps, want.steps) {
+			t.Errorf("%s steps = %v, want %v", want.sub, sp.Steps, want.steps)
+		}
+		var got []TransitionDef
+		for _, transition := range sp.Transitions {
+			if transition.From == want.transition.From {
+				got = append(got, transition)
+			}
+		}
+		if len(got) != 1 {
+			t.Errorf("%s transitions from %s: got %d, want 1", want.sub, want.transition.From, len(got))
+			continue
+		}
+		if got[0] != want.transition {
+			t.Errorf("%s decompose transition = %+v, want %+v", want.sub, got[0], want.transition)
+		}
+	}
 }
 
 func TestParse3PartRef(t *testing.T) {
@@ -1813,6 +1984,7 @@ func TestLoad_EmbeddedPipelineRoles(t *testing.T) {
 	if len(cfg.Pipeline.Roles) != 13 {
 		t.Fatalf("expected 13 roles, got %d", len(cfg.Pipeline.Roles))
 	}
+	assertMasterPlanningTopology(t, cfg)
 
 	expectedRoles := map[string]string{
 		"coder":                 "doer",
@@ -1901,6 +2073,117 @@ func assertContains(t *testing.T, got, want string) {
 	if !strings.Contains(got, want) {
 		t.Errorf("error %q does not contain %q", got, want)
 	}
+}
+
+func decompositionRootYAML(from, trigger, cardinality, extraTransitions string) string {
+	transitionBlock := "      transitions: []"
+	if from != "" {
+		transitionBlock = `
+      transitions:
+        - name: root-to-leaf
+          from: ` + from + `
+          to: leaf-pair.initial
+          trigger: ` + trigger + `
+          cardinality: ` + cardinality + extraTransitions
+	}
+	return `
+pipeline:
+  roles:
+    doer:
+      type: doer
+      display-name: "Doer"
+    reviewer:
+      type: reviewer
+      display-name: "Reviewer"
+  role-pairs:
+    root-pair:
+      doer: doer
+      reviewer: reviewer
+      decomposition-root: true
+      decomposition-output-ref: plan_ref
+      states:
+        initial: ROOT_INITIAL
+        executing: ROOT_EXECUTING
+        submitted: ROOT_SUBMITTED
+        reviewing: ROOT_REVIEWING
+        approved: ROOT_APPROVED
+        rejected: ROOT_REJECTED
+    leaf-pair:
+      doer: doer
+      reviewer: reviewer
+      states:
+        initial: LEAF_INITIAL
+        executing: LEAF_EXECUTING
+        submitted: LEAF_SUBMITTED
+        reviewing: LEAF_REVIEWING
+        approved: LEAF_APPROVED
+        rejected: LEAF_REJECTED
+    extra-pair:
+      doer: doer
+      reviewer: reviewer
+      states:
+        initial: EXTRA_INITIAL
+        executing: EXTRA_EXECUTING
+        submitted: EXTRA_SUBMITTED
+        reviewing: EXTRA_REVIEWING
+        approved: EXTRA_APPROVED
+        rejected: EXTRA_REJECTED
+  sub-pipelines:
+    main:
+      steps: [root-pair, leaf-pair, extra-pair]
+` + transitionBlock + `
+  entry-points: {}
+`
+}
+
+func decompositionRootCrossSubPipelineYAML() string {
+	return `
+pipeline:
+  roles:
+    doer:
+      type: doer
+      display-name: "Doer"
+    reviewer:
+      type: reviewer
+      display-name: "Reviewer"
+  role-pairs:
+    root-pair:
+      doer: doer
+      reviewer: reviewer
+      decomposition-root: true
+      decomposition-output-ref: plan_ref
+      states:
+        initial: ROOT_INITIAL
+        executing: ROOT_EXECUTING
+        submitted: ROOT_SUBMITTED
+        reviewing: ROOT_REVIEWING
+        approved: ROOT_APPROVED
+        rejected: ROOT_REJECTED
+    leaf-pair:
+      doer: doer
+      reviewer: reviewer
+      states:
+        initial: LEAF_INITIAL
+        executing: LEAF_EXECUTING
+        submitted: LEAF_SUBMITTED
+        reviewing: LEAF_REVIEWING
+        approved: LEAF_APPROVED
+        rejected: LEAF_REJECTED
+  sub-pipelines:
+    root-sp:
+      steps: [root-pair]
+      transitions: []
+    leaf-sp:
+      steps: [leaf-pair]
+      transitions: []
+  pipeline-transitions:
+    - name: root-to-leaf
+      from: root-sp.root-pair.approved
+      to: leaf-sp.leaf-pair.initial
+      trigger: auto
+      cardinality: per-subtask
+  entry-points: {}
+`
 }
 
 func TestResolver_PartiallyApprovedStatus(t *testing.T) {
@@ -2119,6 +2402,102 @@ func TestLoad_CleanState_BackwardCompat(t *testing.T) {
 		if rp.States.Clean != "" {
 			t.Errorf("role-pair %q: Clean = %q, want empty", name, rp.States.Clean)
 		}
+	}
+}
+
+func TestLoad_DecompositionRootAbsentBackwardCompat(t *testing.T) {
+	cfg, err := Load("testdata/valid-coding-subpipeline.yaml")
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	for name, rp := range cfg.Pipeline.RolePairs {
+		if rp.DecompositionRoot {
+			t.Errorf("role-pair %q: DecompositionRoot = true, want false", name)
+		}
+	}
+}
+
+func TestLoad_DecompositionRootValidTopology(t *testing.T) {
+	yaml := decompositionRootYAML("root-pair.approved", "auto", "per-subtask", "")
+	cfg, err := LoadFromBytes([]byte(yaml))
+	if err != nil {
+		t.Fatalf("LoadFromBytes failed: %v", err)
+	}
+	if !cfg.Pipeline.RolePairs["root-pair"].DecompositionRoot {
+		t.Fatal("root-pair DecompositionRoot = false, want true")
+	}
+	if cfg.Pipeline.RolePairs["root-pair"].DecompositionOutputRef != "plan_ref" {
+		t.Fatalf("root-pair DecompositionOutputRef = %q, want plan_ref", cfg.Pipeline.RolePairs["root-pair"].DecompositionOutputRef)
+	}
+}
+
+func TestLoad_DecompositionRootRejectsInvalidTopology(t *testing.T) {
+	tests := []struct {
+		name string
+		yaml string
+		want string
+	}{
+		{
+			name: "zero outgoing decomposition transition",
+			yaml: decompositionRootYAML("", "", "", ""),
+			want: "exactly one outgoing decomposition transition",
+		},
+		{
+			name: "missing output ref",
+			yaml: strings.ReplaceAll(decompositionRootYAML("root-pair.approved", "auto", "per-subtask", ""), "      decomposition-output-ref: plan_ref\n", ""),
+			want: "decomposition-output-ref must be one of",
+		},
+		{
+			name: "invalid output ref",
+			yaml: strings.ReplaceAll(decompositionRootYAML("root-pair.approved", "auto", "per-subtask", ""), "decomposition-output-ref: plan_ref", "decomposition-output-ref: bad_ref"),
+			want: "decomposition-output-ref must be one of",
+		},
+		{
+			name: "output ref without root marker",
+			yaml: strings.ReplaceAll(decompositionRootYAML("root-pair.approved", "auto", "per-subtask", ""), "      decomposition-root: true\n", ""),
+			want: "decomposition-output-ref requires decomposition-root",
+		},
+		{
+			name: "multiple outgoing decomposition transitions",
+			yaml: decompositionRootYAML("root-pair.approved", "auto", "per-subtask", `
+        - name: root-to-extra
+          from: root-pair.approved
+          to: extra-pair.initial
+          trigger: auto
+          cardinality: per-subtask`),
+			want: "exactly one outgoing decomposition transition",
+		},
+		{
+			name: "non-auto trigger",
+			yaml: decompositionRootYAML("root-pair.approved", "manual", "per-subtask", ""),
+			want: "trigger must be auto",
+		},
+		{
+			name: "non-per-subtask cardinality",
+			yaml: decompositionRootYAML("root-pair.approved", "auto", "one-to-one", ""),
+			want: "cardinality must be per-subtask",
+		},
+		{
+			name: "cross-subpipeline target",
+			yaml: decompositionRootCrossSubPipelineYAML(),
+			want: "same sub-pipeline",
+		},
+		{
+			name: "non-approved source phase",
+			yaml: decompositionRootYAML("root-pair.submitted", "auto", "per-subtask", ""),
+			want: "from phase must be approved",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := LoadFromBytes([]byte(tt.yaml))
+			if err == nil {
+				t.Fatal("expected validation error")
+			}
+			assertContains(t, err.Error(), "decomposition-root")
+			assertContains(t, err.Error(), tt.want)
+		})
 	}
 }
 

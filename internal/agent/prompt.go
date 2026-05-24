@@ -53,6 +53,10 @@ func buildPromptWithContext(state *models.State, config SupervisorConfig, taskID
 	if err != nil {
 		return "", fmt.Errorf("context sections for role %q: %w", config.Role, err)
 	}
+	sections, err = taskContextSections(sections, task, data, resolver)
+	if err != nil {
+		return "", err
+	}
 
 	context, err := prompts.BuildRoleContext(config.Role, sections, data)
 	if err != nil {
@@ -312,6 +316,35 @@ func buildTaskRoleContextData(task *models.Task, state *models.State, config Sup
 	}
 
 	return data, nil
+}
+
+func taskContextSections(base []string, task *models.Task, data *prompts.RoleContextData, resolver *pipeline.Resolver) ([]string, error) {
+	sections := append([]string(nil), base...)
+	if task.RolePair == "" || (data.RoleType != "doer" && data.RoleType != "reviewer") {
+		return sections, nil
+	}
+
+	isRoot, err := resolver.IsDecompositionRoot(task.RolePair)
+	if err != nil {
+		return nil, err
+	}
+	if !isRoot {
+		return sections, nil
+	}
+
+	refField, err := resolver.DecompositionOutputRef(task.RolePair)
+	if err != nil {
+		return nil, err
+	}
+
+	data.DecompositionRoot = true
+	data.MasterOutputRefField = refField
+	if data.RoleType == "doer" {
+		sections = append(sections, "master-decomposition-mandate")
+	} else {
+		sections = append(sections, "master-decomposition-review")
+	}
+	return sections, nil
 }
 
 // collectCompletedTasks returns summaries of all MERGED tasks for integration context.

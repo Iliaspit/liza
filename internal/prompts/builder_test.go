@@ -295,9 +295,9 @@ func TestRenderOrchestratorDashboard(t *testing.T) {
 				"This is initial planning",
 				"Classify the input document and choose the appropriate entry-point",
 				"AVAILABLE ENTRY-POINTS:",
-				"Tasks must partition the goal",
-				"role-pair-derived prefix with sequential suffixes",
-				"All tasks use the chosen role_pair matching the entry-point",
+				"Create exactly one planning task",
+				"Choose the chosen entry-point's fan-out target for a fan-out or uncertain goal when it is listed.",
+				"Fan-out or uncertain goals use the chosen fan-out role_pair when available.",
 			},
 			wantNotContain: []string{
 				`--replacement-ids`,
@@ -1211,6 +1211,79 @@ func TestBlockParentTasksContext_EmptySlice(t *testing.T) {
 
 	if buf.String() != "" {
 		t.Errorf("expected empty output for empty ParentTaskContexts slice, got %q", buf.String())
+	}
+}
+
+func TestBuildRoleContext_MasterDecompositionMandate(t *testing.T) {
+	data := &RoleContextData{
+		Role:                 "architect",
+		RoleType:             "doer",
+		DecompositionRoot:    true,
+		MasterOutputRefField: "arch_ref",
+	}
+
+	output, err := BuildRoleContext("architect", []string{"master-decomposition-mandate"}, data)
+	if err != nil {
+		t.Fatalf("BuildRoleContext: %v", err)
+	}
+
+	for _, want := range []string{
+		"=== MASTER DECOMPOSITION MANDATE ===",
+		"Master Output Contract properties 1-6",
+		"1. Non-overlapping scopes.",
+		"2. Interface ownership.",
+		"3. Shared-file ownership.",
+		"4. Dependency ordering.",
+		"5. Inherited constraints.",
+		"6. Completeness.",
+		"`arch_ref`",
+		"`Systemic Decomposition Review`",
+		"systemic-thinking",
+		"before `liza set-task-output` or submission",
+		"owned_files",
+		"owned_modules",
+		"read_only_depends_on",
+		"read_only_task_depends_on",
+		"interfaces_owned",
+		"interfaces_consumed",
+		"coverage_notes",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("output missing %q", want)
+		}
+	}
+}
+
+func TestBuildRoleContext_MasterDecompositionReview(t *testing.T) {
+	data := &RoleContextData{
+		Role:                 "architecture-reviewer",
+		RoleType:             "reviewer",
+		DecompositionRoot:    true,
+		MasterOutputRefField: "arch_ref",
+	}
+
+	output, err := BuildRoleContext("architecture-reviewer", []string{"master-decomposition-review"}, data)
+	if err != nil {
+		t.Fatalf("BuildRoleContext: %v", err)
+	}
+
+	for _, want := range []string{
+		"=== MASTER DECOMPOSITION REVIEW ===",
+		"Invoke `systemic-thinking` before submitting a verdict",
+		"missing `arch_ref`",
+		"missing typed decomposition metadata",
+		"missing systemic-thinking evidence",
+		"violates any Master Output Contract property",
+		"1. Non-overlapping scopes.",
+		"2. Interface ownership.",
+		"3. Shared-file ownership.",
+		"4. Dependency ordering.",
+		"5. Inherited constraints.",
+		"6. Completeness.",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("output missing %q", want)
+		}
 	}
 }
 

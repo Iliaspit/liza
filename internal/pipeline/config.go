@@ -81,12 +81,21 @@ var validProviderDiversity = map[string]bool{
 	"preferred": true,
 }
 
+var validDecompositionOutputRefs = map[string]bool{
+	"spec_ref": true,
+	"epic_ref": true,
+	"plan_ref": true,
+	"arch_ref": true,
+}
+
 // RolePairDef defines a doer-reviewer pair and its state names.
 type RolePairDef struct {
-	Doer         string           `yaml:"doer"`
-	Reviewer     string           `yaml:"reviewer"`
-	ReviewPolicy *ReviewPolicyDef `yaml:"review-policy,omitempty"`
-	States       RolePairStates   `yaml:"states"`
+	Doer                   string           `yaml:"doer"`
+	Reviewer               string           `yaml:"reviewer"`
+	DecompositionRoot      bool             `yaml:"decomposition-root,omitempty"`
+	DecompositionOutputRef string           `yaml:"decomposition-output-ref,omitempty"`
+	ReviewPolicy           *ReviewPolicyDef `yaml:"review-policy,omitempty"`
+	States                 RolePairStates   `yaml:"states"`
 }
 
 // RolePairStates holds the state names for a role-pair's lifecycle.
@@ -165,6 +174,7 @@ func LoadFromBytes(data []byte) (*PipelineConfig, error) {
 	if err := dec.Decode(&cfg); err != nil {
 		return nil, fmt.Errorf("parsing pipeline config: %w", err)
 	}
+	applyCompatibilityDefaults(&cfg)
 	if err := validate(&cfg); err != nil {
 		return nil, fmt.Errorf("validating pipeline config: %w", err)
 	}
@@ -183,6 +193,7 @@ func Load(path string) (*PipelineConfig, error) {
 	if err := dec.Decode(&cfg); err != nil {
 		return nil, fmt.Errorf("parsing pipeline config: %w", err)
 	}
+	applyCompatibilityDefaults(&cfg)
 	if err := validate(&cfg); err != nil {
 		return nil, fmt.Errorf("validating pipeline config: %w", err)
 	}
@@ -286,6 +297,10 @@ func validate(cfg *PipelineConfig) error {
 		transitionOwner[t.Name] = "pipeline-transitions"
 	}
 
+	if err := validateDecompositionRoots(p); err != nil {
+		return err
+	}
+
 	for epName, epValue := range p.EntryPoints {
 		if err := validateEntryPoint(epName, epValue, p); err != nil {
 			return err
@@ -293,6 +308,83 @@ func validate(cfg *PipelineConfig) error {
 	}
 
 	return nil
+}
+
+func validateDecompositionRoots(p *Pipeline) error {
+	for rpName, rp := range p.RolePairs {
+		if !rp.DecompositionRoot {
+			if rp.DecompositionOutputRef != "" {
+				return fmt.Errorf("role-pair %q: decomposition-output-ref requires decomposition-root: true", rpName)
+			}
+			continue
+		}
+		if !validDecompositionOutputRefs[rp.DecompositionOutputRef] {
+			return fmt.Errorf("role-pair %q decomposition-root: decomposition-output-ref must be one of spec_ref, epic_ref, plan_ref, or arch_ref, got %q", rpName, rp.DecompositionOutputRef)
+		}
+
+		targets, err := decompositionRootTransitionTargets(p, rpName)
+		if err != nil {
+			return err
+		}
+
+		if len(targets) == 0 {
+			for _, t := range p.PipelineTransitions {
+				_, fromPair, _, err := parse3PartRef(t.From)
+				if err != nil {
+					return fmt.Errorf("role-pair %q decomposition-root pipeline-transition %q: from: %w", rpName, t.Name, err)
+				}
+				if fromPair == rpName {
+					return fmt.Errorf("role-pair %q decomposition-root: decomposition transition must target another role-pair in the same sub-pipeline; pipeline-transition %q crosses sub-pipelines", rpName, t.Name)
+				}
+			}
+			return fmt.Errorf("role-pair %q decomposition-root: expected exactly one outgoing decomposition transition, got 0", rpName)
+		}
+		if len(targets) > 1 {
+			return fmt.Errorf("role-pair %q decomposition-root: expected exactly one outgoing decomposition transition, got %d", rpName, len(targets))
+		}
+	}
+	return nil
+}
+
+func decompositionRootTransitionTargets(p *Pipeline, rootRolePair string) ([]string, error) {
+	var targets []string
+	for spName, sp := range p.SubPipelines {
+		if !slices.Contains(sp.Steps, rootRolePair) {
+			continue
+		}
+		for _, t := range sp.Transitions {
+			fromPair, fromPhase, err := parseRef(t.From)
+			if err != nil {
+				return nil, fmt.Errorf("role-pair %q decomposition-root transition %q: from: %w", rootRolePair, t.Name, err)
+			}
+			if fromPair != rootRolePair {
+				continue
+			}
+			if fromPhase != "approved" {
+				return nil, fmt.Errorf("role-pair %q decomposition-root transition %q: from phase must be approved, got %q", rootRolePair, t.Name, fromPhase)
+			}
+			if t.Trigger != "auto" {
+				return nil, fmt.Errorf("role-pair %q decomposition-root transition %q: trigger must be auto, got %q", rootRolePair, t.Name, t.Trigger)
+			}
+			if t.Cardinality != "per-subtask" {
+				return nil, fmt.Errorf("role-pair %q decomposition-root transition %q: cardinality must be per-subtask, got %q", rootRolePair, t.Name, t.Cardinality)
+			}
+
+			toPair, _, err := parseRef(t.To)
+			if err != nil {
+				return nil, fmt.Errorf("role-pair %q decomposition-root transition %q: to: %w", rootRolePair, t.Name, err)
+			}
+			if toPair == rootRolePair {
+				return nil, fmt.Errorf("role-pair %q decomposition-root transition %q: target role-pair must be another role-pair", rootRolePair, t.Name)
+			}
+			if !slices.Contains(sp.Steps, toPair) {
+				return nil, fmt.Errorf("role-pair %q decomposition-root transition %q: target role-pair %q must be in the same sub-pipeline %q", rootRolePair, t.Name, toPair, spName)
+			}
+
+			targets = append(targets, toPair)
+		}
+	}
+	return targets, nil
 }
 
 // validateReviewPolicy validates a role-pair's review-policy if present.
