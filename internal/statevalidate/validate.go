@@ -243,6 +243,18 @@ func checkSpecFileExists(projectRoot, specRef, integrationBranch string) error {
 // durable artifacts still referenced by the blackboard.
 func ValidateArtifactRefs(state *models.State, projectRoot string) error {
 	refs, err := CollectArtifactRefs(state, projectRoot)
+	return validateCollectedArtifactRefs(state, projectRoot, refs, err)
+}
+
+// ValidateMergeArtifactRefs validates refs protected by a single task merge.
+// Output refs from unrelated in-flight tasks are ignored; they are not durable
+// integration artifacts until those tasks merge.
+func ValidateMergeArtifactRefs(state *models.State, projectRoot, mergingTaskID string) error {
+	refs, err := CollectMergeArtifactRefs(state, projectRoot, mergingTaskID)
+	return validateCollectedArtifactRefs(state, projectRoot, refs, err)
+}
+
+func validateCollectedArtifactRefs(state *models.State, projectRoot string, refs []ArtifactRef, err error) error {
 	if err != nil {
 		return err
 	}

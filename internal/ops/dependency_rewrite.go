@@ -147,6 +147,116 @@ func canonicalizeConcreteDependencyList(state *models.State, resolver *pipeline.
 	return rewritten, true, nil
 }
 
+func canonicalizeChildDependsOn(state *models.State, resolver *pipeline.Resolver, dependentID, dependentRolePair string, deps []string, allowedMissing ...map[string]bool) ([]string, bool, error) {
+	if state == nil || resolver == nil || len(deps) == 0 {
+		return deps, false, nil
+	}
+	var allowedMissingDeps map[string]bool
+	if len(allowedMissing) > 0 {
+		allowedMissingDeps = allowedMissing[0]
+	}
+	rewritten := make([]string, 0, len(deps))
+	changed := false
+	for _, depID := range deps {
+		candidates, depChanged, err := canonicalizeDependencyIDForChild(state, depID, allowedMissingDeps, nil)
+		if err != nil {
+			return nil, false, &PreconditionError{Reason: fmt.Sprintf("cannot rewrite dependency for %s: %v", dependentID, err)}
+		}
+		changed = changed || depChanged
+		if !depChanged {
+			for _, candidate := range candidates {
+				rewritten = append(rewritten, candidate.id)
+			}
+			continue
+		}
+		for _, candidate := range candidates {
+			if err := validateDependencyDirection(state, resolver, dependentID, dependentRolePair, []string{candidate.id}); err != nil {
+				if candidate.satisfied {
+					continue
+				}
+				return nil, false, err
+			}
+			rewritten = append(rewritten, candidate.id)
+		}
+	}
+	rewritten = dedupeStrings(rewritten)
+	if err := validateDependencyDirection(state, resolver, dependentID, dependentRolePair, rewritten); err != nil {
+		return nil, false, err
+	}
+	return rewritten, changed, nil
+}
+
+type childDependencyCandidate struct {
+	id        string
+	satisfied bool
+}
+
+func canonicalizeDependencyIDForChild(state *models.State, depID string, allowedMissing map[string]bool, visiting map[string]bool) ([]childDependencyCandidate, bool, error) {
+	depTask := state.FindTask(depID)
+	if depTask == nil {
+		if allowedMissing[depID] {
+			return []childDependencyCandidate{{id: depID}}, false, nil
+		}
+		return nil, false, fmt.Errorf("dependency %s does not exist", depID)
+	}
+	switch depTask.Status {
+	case models.TaskStatusMerged:
+		return []childDependencyCandidate{{id: depID, satisfied: true}}, false, nil
+	case models.TaskStatusAbandoned:
+		return nil, true, nil
+	case models.TaskStatusSuperseded:
+		if visiting == nil {
+			visiting = make(map[string]bool)
+		}
+		if visiting[depID] {
+			return nil, false, fmt.Errorf("supersession cycle at %s", depID)
+		}
+		if len(depTask.SupersededBy) == 0 {
+			return nil, true, nil
+		}
+		visiting[depID] = true
+		var rewritten []childDependencyCandidate
+		for _, replacementID := range depTask.SupersededBy {
+			if state.FindTask(replacementID) == nil {
+				return nil, false, fmt.Errorf("replacement dependency %s does not exist", replacementID)
+			}
+			canonical, _, err := canonicalizeDependencyIDForChild(state, replacementID, allowedMissing, visiting)
+			if err != nil {
+				return nil, false, err
+			}
+			rewritten = append(rewritten, canonical...)
+		}
+		delete(visiting, depID)
+		return dedupeChildDependencyCandidates(rewritten), true, nil
+	default:
+		return []childDependencyCandidate{{id: depID}}, false, nil
+	}
+}
+
+func stringSet(values []string) map[string]bool {
+	set := make(map[string]bool, len(values))
+	for _, value := range values {
+		set[value] = true
+	}
+	return set
+}
+
+func dedupeChildDependencyCandidates(candidates []childDependencyCandidate) []childDependencyCandidate {
+	if len(candidates) == 0 {
+		return nil
+	}
+	seen := make(map[string]bool, len(candidates))
+	deduped := make([]childDependencyCandidate, 0, len(candidates))
+	for _, candidate := range candidates {
+		if seen[candidate.id] {
+			continue
+		}
+		seen[candidate.id] = true
+		deduped = append(deduped, candidate)
+	}
+	return deduped
+}
+
 func canonicalizeDependencyID(state *models.State, depID string, visiting map[string]bool) ([]string, bool, error) {
 	if state == nil {
 		return []string{depID}, false, nil

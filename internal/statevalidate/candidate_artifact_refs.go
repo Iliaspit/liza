@@ -81,6 +81,18 @@ func (e *CandidateArtifactRefError) SafeDetails() map[string]any {
 // validates them against a candidate Git treeish.
 func ValidateCandidateStateArtifactRefs(candidateTreeish string, state *models.State, projectRoot string, lookup CandidateTreeLookup) error {
 	refs, err := CollectArtifactRefs(state, projectRoot)
+	return validateCandidateCollectedStateArtifactRefs(candidateTreeish, refs, err, lookup)
+}
+
+// ValidateCandidateMergeArtifactRefs validates refs protected by a single merge
+// candidate. It excludes unrelated in-flight output refs so sibling worktree
+// artifacts do not block this merge.
+func ValidateCandidateMergeArtifactRefs(candidateTreeish string, state *models.State, projectRoot, mergingTaskID string, lookup CandidateTreeLookup) error {
+	refs, err := CollectMergeArtifactRefs(state, projectRoot, mergingTaskID)
+	return validateCandidateCollectedStateArtifactRefs(candidateTreeish, refs, err, lookup)
+}
+
+func validateCandidateCollectedStateArtifactRefs(candidateTreeish string, refs []ArtifactRef, err error, lookup CandidateTreeLookup) error {
 	if err != nil {
 		var refErr *ArtifactRefError
 		if errors.As(err, &refErr) {

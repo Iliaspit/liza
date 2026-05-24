@@ -106,8 +106,12 @@ func SetTaskOutput(projectRoot string, input *SetTaskOutputInput) error {
 
 		for i, entry := range input.Output {
 			for _, depID := range entry.TaskDependsOn {
-				if state.FindTask(depID) == nil {
+				depTask := state.FindTask(depID)
+				if depTask == nil {
 					return &PreconditionError{Reason: fmt.Sprintf("output[%d].task_depends_on references non-existent task %q", i, depID)}
+				}
+				if depTask.Status.IsTerminal() && depTask.Status != models.TaskStatusMerged {
+					return &PreconditionError{Reason: fmt.Sprintf("output[%d].task_depends_on references terminal non-MERGED task %q (status: %s)", i, depID, depTask.Status)}
 				}
 			}
 		}

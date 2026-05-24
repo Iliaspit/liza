@@ -564,6 +564,39 @@ func TestSetTaskOutput_TaskDependsOnRejectsMissingTask(t *testing.T) {
 	testhelpers.RequireErrorContains(t, err, `output[0].task_depends_on references non-existent task "missing-task"`)
 }
 
+func TestSetTaskOutput_TaskDependsOnRejectsTerminalNonMergedTask(t *testing.T) {
+	tmpDir := t.TempDir()
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	now := time.Now().UTC()
+
+	architect := "architect-1"
+	architectureTask := testhelpers.BuildTaskByStatus("architecture-1", models.TaskStatus("ARCHITECTING"), now)
+	architectureTask.RolePair = "architecture-pair"
+	architectureTask.AssignedTo = &architect
+	staleDep := testhelpers.BuildTaskByStatus("old-plan-dep", models.TaskStatusSuperseded, now)
+	staleDep.RolePair = "code-planning-pair"
+	staleDep.SupersededBy = []string{"new-plan-dep"}
+	replacement := testhelpers.BuildTaskByStatus("new-plan-dep", models.TaskStatusMerged, now)
+	replacement.RolePair = "code-planning-pair"
+
+	state := testhelpers.CreateValidState()
+	state.Tasks = []models.Task{architectureTask, staleDep, replacement}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	err := SetTaskOutput(tmpDir, &SetTaskOutputInput{
+		TaskID:  "architecture-1",
+		AgentID: "architect-1",
+		Output: []models.OutputEntry{{
+			Desc:          "Plan work",
+			DoneWhen:      "plan exists",
+			Scope:         "specs/plan",
+			SpecRef:       "specs/plan.md",
+			TaskDependsOn: []string{"old-plan-dep"},
+		}},
+	})
+	testhelpers.RequireErrorContains(t, err, `output[0].task_depends_on references terminal non-MERGED task "old-plan-dep"`)
+}
+
 func TestSetTaskOutput_TaskDependsOnRejectsDownstreamRolePair(t *testing.T) {
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)

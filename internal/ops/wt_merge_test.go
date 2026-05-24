@@ -915,7 +915,9 @@ func TestMergeWorktree_RejectsTrueMergeProtectedArtifactDeletionBeforeRefUpdate(
 				trueMerge:   true,
 				configureState: func(state *models.State, taskID, artifactRef string) {
 					if tt.outputMode {
-						state.Tasks = append(state.Tasks, protectedOutputRefTask(tt.ownerTask, tt.field, artifactRef))
+						outputOwner := protectedOutputRefTask(tt.ownerTask, tt.field, artifactRef)
+						outputOwner.Status = models.TaskStatusMerged
+						state.Tasks = append(state.Tasks, outputOwner)
 						return
 					}
 					state.Tasks = append(state.Tasks, protectedRefTask(tt.ownerTask, tt.field, artifactRef))
@@ -1085,7 +1087,7 @@ func TestArtifactGuardHookConfirmsFreshStateBeforeRejecting(t *testing.T) {
 		},
 	}
 
-	err := validateCandidateArtifactRefsWithFreshState(reader.read, t.TempDir(), lookup, "candidate")
+	err := validateCandidateArtifactRefsWithFreshState(reader.read, t.TempDir(), lookup, "candidate", "merge-task")
 	if err != nil {
 		t.Fatalf("validateCandidateArtifactRefsWithFreshState() error = %v, want nil", err)
 	}
@@ -1131,7 +1133,7 @@ func TestArtifactGuardHookFailsClosedWhenConfirmationStateReadFails(t *testing.T
 		},
 	}
 
-	err := validateCandidateArtifactRefsWithFreshState(reader.read, t.TempDir(), lookup, "candidate")
+	err := validateCandidateArtifactRefsWithFreshState(reader.read, t.TempDir(), lookup, "candidate", "merge-task")
 	if err == nil {
 		t.Fatal("validateCandidateArtifactRefsWithFreshState() error = nil, want fail-closed composite error")
 	}
@@ -1164,7 +1166,7 @@ func TestArtifactGuardHookReturnsFreshestValidationDiagnostics(t *testing.T) {
 		},
 	}
 
-	err := validateCandidateArtifactRefsWithFreshState(reader.read, t.TempDir(), lookup, "candidate")
+	err := validateCandidateArtifactRefsWithFreshState(reader.read, t.TempDir(), lookup, "candidate", "merge-task")
 	if err == nil {
 		t.Fatal("validateCandidateArtifactRefsWithFreshState() error = nil, want confirmed validation error")
 	}

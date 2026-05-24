@@ -92,7 +92,7 @@ Agent cannot claim if already assigned to another executing task.
 
 Task dependencies cannot point downstream in the configured pipeline topology. A task may depend on work from the same role-pair or an upstream/unrelated role-pair, but must not depend on a task whose `role_pair` is reachable downstream from the dependent task's `role_pair` through configured sub-pipeline transitions or `pipeline-transitions`.
 
-Supersession paths count as dependency paths: if `depends_on: old-task` resolves through `old-task.superseded_by` to a downstream task, the dependency is invalid. `output[].task_depends_on` is validated against every per-subtask outgoing transition target that can consume that output, and crash recovery validates the final child `depends_on` set before patching or appending child tasks. Operational dependency surfaces are canonicalized at mutation and transition boundaries: superseded dependencies are rewritten to legal replacements, cancelled or unreplaced retired dependencies are removed, and illegal replacements fail the affected mutation or transition before the dependency rewrite is written. Retired `SUPERSEDED` and `ABANDONED` task output remains historical audit data unless it can still drive crash recovery.
+Supersession paths count as dependency paths: if `depends_on: old-task` resolves through `old-task.superseded_by` to a downstream task, the dependency is invalid. `output[].task_depends_on` is validated against every per-subtask outgoing transition target that can consume that output, and explicit writes reject terminal non-MERGED task IDs. Generated child `depends_on` is canonicalized after sibling, concrete `task_depends_on`, and inherited phase-gate dependencies are composed; crash recovery validates the same final child `depends_on` set before patching or appending child tasks. Operational dependency surfaces are canonicalized at mutation and transition boundaries: superseded dependencies are rewritten to legal replacements, cancelled or unreplaced retired dependencies are removed, downstream replacements that are already satisfied are not encoded on children, and illegal pending replacements fail the affected mutation or transition before the dependency rewrite is written. Retired `SUPERSEDED` and `ABANDONED` task output remains historical audit data unless it can still drive crash recovery.
 
 **Protects against:** Earlier pipeline phases waiting on later phases, deadlocked planning tasks, hidden cross-phase blockers.
 
@@ -168,6 +168,8 @@ Agent registration/unregistration, heartbeat, post-exit IDLE reset, orchestrator
 | Rejection must include structured format: file:line, specific defect, actionable fix; iteration 2+: prior feedback status | Ambiguous feedback, unaddressed rejections | spec (`roles.md`) |
 | Code tasks must include tests (TDD: tests first, then implementation); waiver requires explicit `tdd_not_required` | Untested behavior, post-hoc test addition | spec (`roles.md`), code (`submit_review.go`) |
 
+Integration-fix claims clear active `output[]`, `review_commit`, approvals, `merge_commit`, and structured integration-failure diagnostics from the failed approved attempt before the doer resumes. Merge artifact validation protects the merging task's output refs and already-merged tasks' output refs, but ignores unrelated in-flight output refs whose artifacts may still exist only in sibling worktrees.
+
 ---
 
 ## 7. Worktree & Integration
@@ -187,16 +189,19 @@ Agent registration/unregistration, heartbeat, post-exit IDLE reset, orchestrator
 | Rebase onto integration branch before submission; conflict → abort and restore clean state | Merge conflicts discovered late | code (`submit_review.go`) |
 
 The candidate-tree artifact guard protects goal `spec_ref`; task `spec_ref`,
-`epic_ref`, `plan_ref`, and `arch_ref`; and the same fields on `output[]`
-entries. Refs are scalar repo-relative paths with optional `#fragment` anchors
-and must resolve in the candidate tree to regular Git file modes `100644` or
-`100755`. Missing paths, directories, submodules/gitlinks, symlinks, and other
-non-regular object modes are rejected. Invalid artifact refs fail closed,
-including semicolon-joined refs, empty paths after stripping `#fragment`, paths
-that traverse outside the repository, and absolute refs that cannot be safely
-normalized to repo-relative paths. Diagnostics deterministically name the
-invalid path plus owner provenance: field name, task ID when applicable, and
-output index when applicable.
+`epic_ref`, `plan_ref`, and `arch_ref`; and merge-durable output refs. Output
+refs are merge-durable for the task being merged and for already-MERGED tasks;
+unrelated in-flight task output refs are not protected by this merge because
+their artifacts may exist only in sibling worktrees. Protected refs are scalar
+repo-relative paths with optional `#fragment` anchors and must resolve in the
+candidate tree to regular Git file modes `100644` or `100755`. Missing paths,
+directories, submodules/gitlinks, symlinks, and other non-regular object modes
+are rejected. Invalid artifact refs fail closed, including semicolon-joined
+refs, empty paths after stripping `#fragment`, paths that traverse outside the
+repository, and absolute refs that cannot be safely normalized to repo-relative
+paths. Diagnostics deterministically name the invalid path plus owner
+provenance: field name, task ID when applicable, and output index when
+applicable.
 
 ---
 

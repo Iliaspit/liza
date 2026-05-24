@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/testhelpers"
 )
 
@@ -206,6 +208,96 @@ func TestValidateCandidateStateArtifactRefsPropagatesCollectorInvalidRef(t *test
 	if len(lookup.calls) != 0 {
 		t.Fatalf("lookup calls = %v, want none for invalid collector ref", lookup.calls)
 	}
+}
+
+func TestValidateCandidateMergeArtifactRefsIgnoresUnrelatedInFlightOutputRefs(t *testing.T) {
+	state := testhelpers.CreateValidState()
+	state.Goal.SpecRef = "README.md"
+	now := time.Now().UTC()
+	state.Tasks = []models.Task{
+		{
+			ID:          "merge-task",
+			Status:      models.TaskStatusCodingPlanApproved,
+			Priority:    1,
+			Created:     now,
+			Description: "Merge me",
+			DoneWhen:    "done",
+			Scope:       "scope",
+		},
+		{
+			ID:          "sibling-task",
+			Status:      models.TaskStatusCodePlanning,
+			Priority:    1,
+			Created:     now,
+			Description: "In flight",
+			DoneWhen:    "done",
+			Scope:       "scope",
+			Output: []models.OutputEntry{{
+				Desc:     "sibling output",
+				DoneWhen: "done",
+				Scope:    "scope",
+				SpecRef:  "specs/sibling-spec.md",
+				PlanRef:  "specs/sibling-plan.md",
+			}},
+		},
+	}
+	lookup := &fakeCandidateTreeLookup{
+		entries: map[string]fakeCandidateTreeEntry{
+			"README.md": {mode: "100644", present: true},
+		},
+	}
+
+	if err := ValidateCandidateMergeArtifactRefs("candidate", state, t.TempDir(), "merge-task", lookup); err != nil {
+		t.Fatalf("ValidateCandidateMergeArtifactRefs returned error for unrelated in-flight output refs: %v", err)
+	}
+	for _, call := range lookup.calls {
+		if strings.Contains(call, "sibling-plan.md") || strings.Contains(call, "sibling-spec.md") {
+			t.Fatalf("lookup included unrelated in-flight output ref: calls = %v", lookup.calls)
+		}
+	}
+}
+
+func TestValidateCandidateMergeArtifactRefsProtectsMergingTaskOutputRefs(t *testing.T) {
+	state := testhelpers.CreateValidState()
+	state.Goal.SpecRef = "README.md"
+	now := time.Now().UTC()
+	state.Tasks = []models.Task{
+		{
+			ID:          "merge-task",
+			Status:      models.TaskStatusCodingPlanApproved,
+			Priority:    1,
+			Created:     now,
+			Description: "Merge me",
+			DoneWhen:    "done",
+			Scope:       "scope",
+			Output: []models.OutputEntry{{
+				Desc:     "merge output",
+				DoneWhen: "done",
+				Scope:    "scope",
+				SpecRef:  "specs/merge-spec.md",
+				PlanRef:  "specs/merge-plan.md",
+			}},
+		},
+	}
+	lookup := &fakeCandidateTreeLookup{
+		entries: map[string]fakeCandidateTreeEntry{
+			"README.md":           {mode: "100644", present: true},
+			"specs/merge-spec.md": {mode: "100644", present: true},
+		},
+	}
+
+	err := ValidateCandidateMergeArtifactRefs("candidate", state, t.TempDir(), "merge-task", lookup)
+	assertCandidateArtifactRefError(t, err, candidateErrorWant{
+		cause:       candidateArtifactRefMissingCause,
+		path:        "specs/merge-plan.md",
+		text:        []string{"specs/merge-plan.md", "output[0].plan_ref", "merge-task"},
+		requirement: "merge task output refs remain protected",
+		owners: []ownerWant{{
+			field:       "output[0].plan_ref",
+			taskID:      "merge-task",
+			outputIndex: intPtr(0),
+		}},
+	})
 }
 
 func TestValidateCandidateArtifactRefsPropagatesLookupErrors(t *testing.T) {

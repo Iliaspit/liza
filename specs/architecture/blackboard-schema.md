@@ -289,13 +289,17 @@ absolute ref cannot be safely normalized to a repo-relative path.
 
 Candidate integration validation strips the optional fragment and checks the
 repo-relative path against the candidate Git tree before integration ref
-advancement. Valid protected artifact refs must resolve to regular Git files
-with mode `100644` or `100755`. Missing paths, directories,
-submodules/gitlinks, symlinks, and other non-regular Git object modes are
-rejected. Diagnostics are deterministic and include the invalid path plus owner
-provenance: field name, task ID when the owner is a task, and output index when
-the owner is an `output[]` entry. Post-merge `ValidateArtifactRefs` still runs
-after a successful ref update as the rollback backstop.
+advancement. It protects goal refs, task-level refs, the merging task's
+`output[]` refs, and already-MERGED tasks' `output[]` refs. It intentionally
+ignores unrelated in-flight task output refs because those artifacts may exist
+only in sibling worktrees until those tasks merge. Valid protected artifact refs
+must resolve to regular Git files with mode `100644` or `100755`. Missing
+paths, directories, submodules/gitlinks, symlinks, and other non-regular Git
+object modes are rejected. Diagnostics are deterministic and include the invalid
+path plus owner provenance: field name, task ID when the owner is a task, and
+output index when the owner is an `output[]` entry. Post-merge merge-scoped
+artifact validation still runs after a successful ref update as the rollback
+backstop.
 
 **`arch_ref` Propagation:**
 
@@ -351,7 +355,7 @@ additional `depends_on` entries. Dependency composition order is:
 2. Concrete task deps from `output[].task_depends_on`
 3. Inherited phase-gate deps from upstream parents' children
 
-Before creating or crash-recovery patching a child task, the final composed `depends_on` set is validated against pipeline direction. The dependency task's `role_pair` must not be reachable downstream from the child task's `role_pair` through sub-pipeline transitions or top-level `pipeline-transitions`.
+Before creating or crash-recovery patching a child task, the final composed `depends_on` set is canonicalized and validated against pipeline direction. Superseded inherited children are rewritten to replacements when the replacements can be legally encoded; downstream replacements that are already MERGED are treated as satisfied and omitted; pending downstream replacements fail the affected transition. The dependency task's `role_pair` must not be reachable downstream from the child task's `role_pair` through sub-pipeline transitions or top-level `pipeline-transitions`.
 
 **`transition_cycle_blocked` history event:** Added by `ExecuteAvailableTransitions` when
 circular `depends_on` prevents topological ordering. Semantics:
@@ -471,7 +475,7 @@ The `depends_on` field declares explicit dependencies between tasks:
 - `depends_on` is an array of task IDs that must reach MERGED status before this task can be claimed
 - `depends_on` must not point to a downstream pipeline role-pair. Same-role-pair and upstream dependencies are valid.
 - Active tasks must not depend on terminal non-MERGED tasks. When a task is superseded, active downstream `depends_on` entries are rewritten to its replacements; when a task is cancelled, active downstream `depends_on` entries pointing at it are removed. Terminal tasks keep historical dependency edges for audit.
-- Operational `output[].task_depends_on` follows the same canonical dependency rule before it can mint child tasks: superseded entries are rewritten to legal replacements, cancelled or unreplaced retired entries are removed, and illegal replacements fail the state mutation or transition instead of being silently dropped. `SUPERSEDED` and `ABANDONED` task output remains audit history unless crash recovery can still consume it.
+- Explicit `output[].task_depends_on` writes reject terminal non-MERGED task IDs. Operational output and generated child `depends_on` follow the canonical dependency rule before they can mint or patch child tasks: superseded entries are rewritten to legal replacements, cancelled or unreplaced retired entries are removed, downstream replacements that are already MERGED are treated as satisfied and omitted from child dependencies, and illegal pending replacements fail the affected mutation or transition instead of being silently dropped. `SUPERSEDED` and `ABANDONED` task output remains audit history unless crash recovery can still consume it.
 - Empty array or missing field means no dependencies — task is immediately claimable
 - Coders can only claim tasks where ALL dependencies are satisfied
 - Orchestrator sets dependencies during task creation based on logical ordering

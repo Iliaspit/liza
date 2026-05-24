@@ -188,6 +188,13 @@ func (integrationFixClaimStrategy) shouldRunPostWorktreeCmd(claimWorktreePhaseRe
 }
 
 func (integrationFixClaimStrategy) mutateTask(task *models.Task, _ *claimContext) {
+	task.Output = nil
+	task.ReviewCommit = nil
+	task.ApprovedBy = nil
+	task.ClearApprovals()
+	task.MergeCommit = nil
+	task.IntegrationFailure = nil
+	// FailedBy is audit/escalation history, not stale attempt state.
 	task.IntegrationFix = true
 }
 

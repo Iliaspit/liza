@@ -290,9 +290,9 @@ func rollbackMergedCommit(gitWrapper *git.Git, integrationRef, preMergeHEAD, mer
 	return nil
 }
 
-func buildArtifactGuardHook(bb *db.Blackboard, projectRoot string, gitWrapper *git.Git) func(candidateTreeish string) error {
+func buildArtifactGuardHook(bb *db.Blackboard, projectRoot string, gitWrapper *git.Git, taskID string) func(candidateTreeish string) error {
 	return func(candidateTreeish string) error {
-		if err := validateCandidateArtifactRefsWithFreshState(bb.Read, projectRoot, gitWrapper, candidateTreeish); err != nil {
+		if err := validateCandidateArtifactRefsWithFreshState(bb.Read, projectRoot, gitWrapper, candidateTreeish, taskID); err != nil {
 			return &candidateArtifactGuardError{err: err}
 		}
 		return nil
@@ -316,13 +316,14 @@ func validateCandidateArtifactRefsWithFreshState(
 	projectRoot string,
 	lookup statevalidate.CandidateTreeLookup,
 	candidateTreeish string,
+	taskID string,
 ) error {
 	state, err := readState()
 	if err != nil {
 		return fmt.Errorf("candidate artifact guard failed to read state: %w", err)
 	}
 
-	firstErr := statevalidate.ValidateCandidateStateArtifactRefs(candidateTreeish, state, projectRoot, lookup)
+	firstErr := statevalidate.ValidateCandidateMergeArtifactRefs(candidateTreeish, state, projectRoot, taskID, lookup)
 	if firstErr == nil {
 		return nil
 	}
@@ -333,7 +334,7 @@ func validateCandidateArtifactRefsWithFreshState(
 		return fmt.Errorf("candidate artifact guard failed and state freshness could not be verified: %w", errors.Join(firstErr, freshnessErr))
 	}
 
-	if confirmationErr := statevalidate.ValidateCandidateStateArtifactRefs(candidateTreeish, confirmationState, projectRoot, lookup); confirmationErr != nil {
+	if confirmationErr := statevalidate.ValidateCandidateMergeArtifactRefs(candidateTreeish, confirmationState, projectRoot, taskID, lookup); confirmationErr != nil {
 		return confirmationErr
 	}
 	return nil
@@ -560,7 +561,7 @@ func MergeWorktree(projectRoot, taskID, agentID string, mergeExtra ...map[string
 
 	integrationRef := "refs/heads/" + integrationBranch
 
-	artifactGuardHook := buildArtifactGuardHook(bb, projectRoot, gitWrapper)
+	artifactGuardHook := buildArtifactGuardHook(bb, projectRoot, gitWrapper, taskID)
 	outcome, err := performCASMerge(gitWrapper, integrationRef, expectedCommit, taskID, artifactGuardHook)
 	if err != nil {
 		var artifactErr *candidateArtifactGuardError
@@ -617,7 +618,7 @@ func MergeWorktree(projectRoot, taskID, agentID string, mergeExtra ...map[string
 	if err != nil {
 		return nil, fmt.Errorf("failed to read state for post-merge artifact validation: %w", err)
 	}
-	if err := statevalidate.ValidateArtifactRefs(currentState, projectRoot); err != nil {
+	if err := statevalidate.ValidateMergeArtifactRefs(currentState, projectRoot, taskID); err != nil {
 		rollbackErr := rollbackMergedCommit(gitWrapper, integrationRef, preMergeHEAD, mergeCommit, rollbackRestoreRef, taskID)
 		diagnostic := integrationFailureDiagnosticWithDetail(IntegrationReasonStateInvalid, err.Error(), mergeCommit, "", rollbackErr)
 		if updateErr := markIntegrationFailedWithDiagnostic(bb, taskID, agentID, IntegrationReasonStateInvalid, mergeCommit, pb, diagnostic); updateErr != nil {

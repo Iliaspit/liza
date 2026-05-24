@@ -27,6 +27,19 @@ type ArtifactRefOwner struct {
 // CollectArtifactRefs returns every protected artifact ref in deterministic
 // order, normalized to repo-relative paths with fragments stripped.
 func CollectArtifactRefs(state *models.State, projectRoot string) ([]ArtifactRef, error) {
+	return collectArtifactRefs(state, projectRoot, func(models.Task) bool { return true })
+}
+
+// CollectMergeArtifactRefs returns refs protected by a merge candidate. Output
+// refs from unrelated in-flight tasks are excluded because their artifacts may
+// exist only in their own worktrees until those tasks merge.
+func CollectMergeArtifactRefs(state *models.State, projectRoot, mergingTaskID string) ([]ArtifactRef, error) {
+	return collectArtifactRefs(state, projectRoot, func(task models.Task) bool {
+		return task.Status == models.TaskStatusMerged || task.ID == mergingTaskID
+	})
+}
+
+func collectArtifactRefs(state *models.State, projectRoot string, includeOutputRefs func(models.Task) bool) ([]ArtifactRef, error) {
 	if state == nil {
 		return nil, fmt.Errorf("state is nil")
 	}
@@ -50,6 +63,9 @@ func CollectArtifactRefs(state *models.State, projectRoot string) ([]ArtifactRef
 		}
 		if err := collector.add("arch_ref", task.ArchRef, task.ID, nil); err != nil {
 			return nil, err
+		}
+		if !includeOutputRefs(task) {
+			continue
 		}
 		for i, entry := range task.Output {
 			outputIndex := i

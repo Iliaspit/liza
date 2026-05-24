@@ -326,6 +326,11 @@ func proceedManyToOneInner(s *models.State, taskID, transitionName string, tDef 
 		// Crash recovery: check if child exists
 		if existing := s.FindTask(childID); existing != nil {
 			mergedDeps := mergeInheritedDeps(existing.DependsOn, inheritedDeps)
+			canonicalDeps, _, err := canonicalizeChildDependsOn(s, resolver, existing.ID, existing.RolePair, mergedDeps)
+			if err != nil {
+				return err
+			}
+			mergedDeps = canonicalDeps
 			if err := validateDependencyDirection(s, resolver, existing.ID, existing.RolePair, mergedDeps); err != nil {
 				return err
 			}
@@ -343,6 +348,11 @@ func proceedManyToOneInner(s *models.State, taskID, transitionName string, tDef 
 	}
 
 	child := buildManyToOneChild(childID, cohort, sharedParentID, tDef, inheritedDeps, now)
+	canonicalDeps, _, err := canonicalizeChildDependsOn(s, resolver, child.ID, child.RolePair, child.DependsOn)
+	if err != nil {
+		return err
+	}
+	child.DependsOn = canonicalDeps
 	if err := validateDependencyDirection(s, resolver, child.ID, child.RolePair, child.DependsOn); err != nil {
 		return err
 	}
@@ -451,6 +461,7 @@ func proceedInner(s *models.State, taskID, transitionName string, tDef transitio
 	var childIDs []string
 	switch tDef.cardinality {
 	case "per-subtask":
+		allowedMissingDeps := stringSet(siblingIDs)
 		for i, entry := range outputEntries {
 			if _, dedupd := remapSibling[i]; dedupd {
 				// Dep resolution still needs an ID; point at the incumbent so
@@ -460,6 +471,11 @@ func proceedInner(s *models.State, taskID, transitionName string, tDef transitio
 				continue
 			}
 			child := buildChildTask(siblingIDs[i], taskID, entry, tDef.targetStatus, tDef.targetRolePair, tDef.taskType, siblingIDs, inheritedDeps, task.EpicRef, task.ArchRef, now)
+			canonicalDeps, _, err := canonicalizeChildDependsOn(s, resolver, child.ID, child.RolePair, child.DependsOn, allowedMissingDeps)
+			if err != nil {
+				return err
+			}
+			child.DependsOn = canonicalDeps
 			if err := validateDependencyDirection(s, resolver, child.ID, child.RolePair, child.DependsOn); err != nil {
 				return err
 			}
@@ -469,6 +485,11 @@ func proceedInner(s *models.State, taskID, transitionName string, tDef transitio
 	case "one-to-one":
 		childID := oneToOneChildID(taskID, tDef.taskSlug)
 		child := buildOneToOneChild(childID, taskID, task, tDef, inheritedDeps, now)
+		canonicalDeps, _, err := canonicalizeChildDependsOn(s, resolver, child.ID, child.RolePair, child.DependsOn)
+		if err != nil {
+			return err
+		}
+		child.DependsOn = canonicalDeps
 		if err := validateDependencyDirection(s, resolver, child.ID, child.RolePair, child.DependsOn); err != nil {
 			return err
 		}
@@ -535,6 +556,7 @@ func recoverCrashedTransition(s *models.State, task *models.Task, taskID, transi
 		// dep resolution remaps correctly — mirrors proceedInner's per-subtask path.
 		inFlightByKind := collectNonTerminalByKind(s)
 		siblingIDs, skipEntry, _ := resolvePerSubtaskSiblings(canonicalOutput, inFlightByKind, taskID, tDef.taskSlug)
+		allowedMissingDeps := stringSet(siblingIDs)
 		var missingChildren []int
 		var patches []dependencyPatch
 		for i := range canonicalOutput {
@@ -555,6 +577,10 @@ func recoverCrashedTransition(s *models.State, task *models.Task, taskID, transi
 					return err
 				}
 				mergedDeps := mergeInheritedDeps(canonicalDeps, inheritedDeps)
+				mergedDeps, _, err = canonicalizeChildDependsOn(s, resolver, existing.ID, existing.RolePair, mergedDeps, allowedMissingDeps)
+				if err != nil {
+					return err
+				}
 				if err := validateDependencyDirection(s, resolver, existing.ID, existing.RolePair, mergedDeps); err != nil {
 					return err
 				}
@@ -572,6 +598,11 @@ func recoverCrashedTransition(s *models.State, task *models.Task, taskID, transi
 		var children []models.Task
 		for _, idx := range missingChildren {
 			child := buildChildTask(siblingIDs[idx], taskID, canonicalOutput[idx], tDef.targetStatus, tDef.targetRolePair, tDef.taskType, siblingIDs, inheritedDeps, task.EpicRef, task.ArchRef, now)
+			canonicalDeps, _, err := canonicalizeChildDependsOn(s, resolver, child.ID, child.RolePair, child.DependsOn, allowedMissingDeps)
+			if err != nil {
+				return err
+			}
+			child.DependsOn = canonicalDeps
 			if err := validateDependencyDirection(s, resolver, child.ID, child.RolePair, child.DependsOn); err != nil {
 				return err
 			}
@@ -606,6 +637,11 @@ func recoverCrashedTransition(s *models.State, task *models.Task, taskID, transi
 		childID := oneToOneChildID(taskID, tDef.taskSlug)
 		if existing := s.FindTask(childID); existing != nil {
 			mergedDeps := mergeInheritedDeps(existing.DependsOn, inheritedDeps)
+			canonicalDeps, _, err := canonicalizeChildDependsOn(s, resolver, existing.ID, existing.RolePair, mergedDeps)
+			if err != nil {
+				return err
+			}
+			mergedDeps = canonicalDeps
 			if err := validateDependencyDirection(s, resolver, existing.ID, existing.RolePair, mergedDeps); err != nil {
 				return err
 			}
@@ -613,6 +649,11 @@ func recoverCrashedTransition(s *models.State, task *models.Task, taskID, transi
 			return fmt.Errorf("%w: %q on task %q", errTransitionAlreadyExecuted, transitionName, taskID)
 		}
 		child := buildOneToOneChild(childID, taskID, task, tDef, inheritedDeps, now)
+		canonicalDeps, _, err := canonicalizeChildDependsOn(s, resolver, child.ID, child.RolePair, child.DependsOn)
+		if err != nil {
+			return err
+		}
+		child.DependsOn = canonicalDeps
 		if err := validateDependencyDirection(s, resolver, child.ID, child.RolePair, child.DependsOn); err != nil {
 			return err
 		}
@@ -636,6 +677,11 @@ func recoverCrashedTransition(s *models.State, task *models.Task, taskID, transi
 		childID := manyToOneChildID(sharedParentID, tDef.taskSlug)
 		if existing := s.FindTask(childID); existing != nil {
 			mergedDeps := mergeInheritedDeps(existing.DependsOn, inheritedDeps)
+			canonicalDeps, _, err := canonicalizeChildDependsOn(s, resolver, existing.ID, existing.RolePair, mergedDeps)
+			if err != nil {
+				return err
+			}
+			mergedDeps = canonicalDeps
 			if err := validateDependencyDirection(s, resolver, existing.ID, existing.RolePair, mergedDeps); err != nil {
 				return err
 			}
@@ -649,6 +695,11 @@ func recoverCrashedTransition(s *models.State, task *models.Task, taskID, transi
 			return fmt.Errorf("%w: %q on cohort (parent %s)", errTransitionAlreadyExecuted, transitionName, sharedParentID)
 		}
 		child := buildManyToOneChild(childID, cohort, sharedParentID, tDef, inheritedDeps, now)
+		canonicalDeps, _, err := canonicalizeChildDependsOn(s, resolver, child.ID, child.RolePair, child.DependsOn)
+		if err != nil {
+			return err
+		}
+		child.DependsOn = canonicalDeps
 		if err := validateDependencyDirection(s, resolver, child.ID, child.RolePair, child.DependsOn); err != nil {
 			return err
 		}

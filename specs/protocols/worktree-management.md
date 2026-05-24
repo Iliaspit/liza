@@ -149,16 +149,17 @@ After APPROVED, **Code Reviewer** executes:
    - Working tree files are transiently synced for integration test correctness, then restored if checked-out branch differs from integration
 4. If conflict: task → INTEGRATION_FAILED, Code Reviewer reports
 5. If candidate artifact validation fails: reject before integration ref advancement, task → INTEGRATION_FAILED
-6. Validate post-merge blackboard artifact references with `ValidateArtifactRefs` against the synced tree and integration branch. Retired task refs (`SUPERSEDED`, `ABANDONED`) are non-blocking until supersede-time artifact retirement is implemented; active and `MERGED` refs remain protected.
+6. Validate post-merge blackboard artifact references with merge-scoped artifact validation against the synced tree and integration branch. Retired task refs (`SUPERSEDED`, `ABANDONED`) are non-blocking; goal refs, task-level refs, the merging task's output refs, and already-MERGED tasks' output refs remain protected. Unrelated in-flight task output refs are ignored because their artifacts may still exist only in sibling worktrees.
 7. If post-merge artifact validation fails: rollback via `git update-ref` to pre-merge HEAD, task → INTEGRATION_FAILED
 8. If integration tests fail: rollback via `git update-ref` to pre-merge HEAD, task → INTEGRATION_FAILED
 9. On success: working tree restored to checked-out branch HEAD (unless on integration, where no restore needed), task → MERGED, worktree deleted
 
 Candidate artifact validation protects goal `spec_ref`; task `spec_ref`,
-`epic_ref`, `plan_ref`, and `arch_ref`; and the same fields on `output[]`
-entries. Each protected ref is a scalar repo-relative path with an optional
-`#fragment` anchor; validation strips the fragment before checking the Git tree.
-The candidate tree must contain the path as a regular Git file mode `100644` or
+`epic_ref`, `plan_ref`, and `arch_ref`; and merge-durable output refs. Output
+refs are merge-durable for the task being merged and for already-MERGED tasks.
+Each protected ref is a scalar repo-relative path with an optional `#fragment`
+anchor; validation strips the fragment before checking the Git tree. The
+candidate tree must contain the path as a regular Git file mode `100644` or
 `100755`. Missing paths, directories, submodules/gitlinks, symlinks, and other
 non-regular object modes are rejected. Invalid artifact refs fail closed,
 including semicolon-joined refs, empty paths after stripping `#fragment`, paths
@@ -167,8 +168,8 @@ normalized to repo-relative paths. Diagnostics are deterministic and name the
 invalid path plus owner provenance: field name, task ID when the owner is a
 task, and output index when the owner is an `output[]` entry.
 
-Post-merge `ValidateArtifactRefs` remains a rollback backstop after successful
-ref advancement; it is not replaced by the candidate-tree guard.
+Post-merge merge-scoped artifact validation remains a rollback backstop after
+successful ref advancement; it is not replaced by the candidate-tree guard.
 
 ---
 

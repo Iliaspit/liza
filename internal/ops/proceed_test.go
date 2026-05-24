@@ -900,6 +900,61 @@ func TestExecuteAvailableTransitions_OutputCanonicalizationFailureLeavesOutputUn
 	}
 }
 
+func TestExecuteAvailableTransitions_MissingOutputTaskDependsOnDoesNotCreateChild(t *testing.T) {
+	tmpDir, stateFile := setupPipelineProceedTest(t)
+
+	state := testhelpers.CreateValidState()
+	state.PipelineVersion = 2
+
+	now := time.Now().UTC()
+	architectureTask := models.Task{
+		ID:          "architecture-1",
+		Type:        models.TaskTypeArchitecture,
+		RolePair:    "architecture-pair",
+		Description: "Architecture",
+		Status:      models.TaskStatusMerged,
+		Priority:    1,
+		Created:     now,
+		SpecRef:     "README.md",
+		DoneWhen:    "Approved",
+		Scope:       "system",
+		Output: []models.OutputEntry{{
+			Desc:          "Plan implementation",
+			DoneWhen:      "coding plan exists",
+			Scope:         "internal/ops",
+			SpecRef:       "specs/plan.md",
+			TaskDependsOn: []string{"missing-plan-dep"},
+		}},
+		History: []models.TaskHistoryEntry{},
+	}
+	state.Tasks = []models.Task{architectureTask}
+	state.Sprint.Scope.Planned = []string{"architecture-1"}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	results, err := ExecuteAvailableTransitions(tmpDir, "manual")
+	if err != nil {
+		t.Fatalf("ExecuteAvailableTransitions() error: %v", err)
+	}
+	if len(results) != 0 {
+		t.Fatalf("ExecuteAvailableTransitions() results = %v, want none", results)
+	}
+
+	readState, err := db.New(stateFile).Read()
+	if err != nil {
+		t.Fatalf("Failed to read state: %v", err)
+	}
+	source := readState.FindTask("architecture-1")
+	if source == nil {
+		t.Fatal("architecture-1 not found")
+	}
+	if source.TransitionsExecuted["architecture-to-code-plan"] {
+		t.Fatal("transition was marked executed despite missing output task_depends_on")
+	}
+	if child := readState.FindTask("architecture-1-architecture-to-code-plan-0"); child != nil {
+		t.Fatalf("child was created despite missing output task_depends_on: %+v", child)
+	}
+}
+
 func TestExecuteAvailableTransitions_CrashRecoveryInvalidMissingChildDoesNotPatchExistingChild(t *testing.T) {
 	tmpDir, stateFile := setupPipelineProceedTest(t)
 
@@ -3674,6 +3729,181 @@ func TestProceed_InheritedDepsViaManualPath(t *testing.T) {
 		if !slices.Contains(child.DependsOn, expectedDep) {
 			t.Errorf("child missing inherited dep %s; DependsOn = %v", expectedDep, child.DependsOn)
 		}
+	}
+}
+
+func TestExecuteAvailableTransitions_DropsSatisfiedDownstreamSupersededInheritedDep(t *testing.T) {
+	tmpDir, stateFile := setupPipelineProceedTest(t)
+
+	now := time.Now().UTC()
+	state := testhelpers.CreateValidState()
+	state.PipelineVersion = 2
+	state.Sprint.Status = models.SprintStatusInProgress
+
+	upstream := testhelpers.BuildTaskByStatus("architecture-1", models.TaskStatusMerged, now)
+	upstream.RolePair = "architecture-pair"
+	upstream.Type = models.TaskTypeArchitecture
+	upstream.Output = []models.OutputEntry{{Desc: "upstream plan", DoneWhen: "done", Scope: "internal/ops", SpecRef: "specs/upstream.md"}}
+	upstream.TransitionsExecuted = map[string]bool{"architecture-to-code-plan": true}
+
+	staleChildID := perSubtaskChildID("architecture-1", "architecture-to-code-plan", 0)
+	staleChild := testhelpers.BuildTaskByStatus(staleChildID, models.TaskStatusSuperseded, now)
+	staleChild.RolePair = "code-planning-pair"
+	staleChild.SupersededBy = []string{"replacement-coding-0"}
+
+	replacement := testhelpers.BuildTaskByStatus("replacement-coding-0", models.TaskStatusMerged, now)
+	replacement.RolePair = "coding-pair"
+
+	downstream := testhelpers.BuildTaskByStatus("architecture-2", models.TaskStatusMerged, now)
+	downstream.RolePair = "architecture-pair"
+	downstream.Type = models.TaskTypeArchitecture
+	downstream.DependsOn = []string{"architecture-1"}
+	downstream.Output = []models.OutputEntry{{Desc: "downstream plan", DoneWhen: "done", Scope: "internal/ops", SpecRef: "specs/downstream.md"}}
+
+	state.Tasks = append(state.Tasks, upstream, staleChild, replacement, downstream)
+	state.Sprint.Scope.Planned = []string{"architecture-1", staleChildID, "replacement-coding-0", "architecture-2"}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	results, err := ExecuteAvailableTransitions(tmpDir, "manual")
+	if err != nil {
+		t.Fatalf("ExecuteAvailableTransitions: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("results count = %d, want 1: %+v", len(results), results)
+	}
+
+	bb := db.New(stateFile)
+	readState, err := bb.Read()
+	if err != nil {
+		t.Fatalf("read state: %v", err)
+	}
+	child := readState.FindTask(perSubtaskChildID("architecture-2", "architecture-to-code-plan", 0))
+	if child == nil {
+		t.Fatal("downstream child not found")
+	}
+	if slices.Contains(child.DependsOn, staleChildID) {
+		t.Fatalf("child retained stale superseded inherited dep: %v", child.DependsOn)
+	}
+	if slices.Contains(child.DependsOn, "replacement-coding-0") {
+		t.Fatalf("child encoded downstream satisfied replacement dep: %v", child.DependsOn)
+	}
+}
+
+func TestExecuteAvailableTransitions_KeepsLegalPendingReplacementAndDropsSatisfiedDownstreamInheritedDep(t *testing.T) {
+	tmpDir, stateFile := setupPipelineProceedTest(t)
+
+	now := time.Now().UTC()
+	state := testhelpers.CreateValidState()
+	state.PipelineVersion = 2
+	state.Sprint.Status = models.SprintStatusInProgress
+
+	upstream := testhelpers.BuildTaskByStatus("architecture-1", models.TaskStatusMerged, now)
+	upstream.RolePair = "architecture-pair"
+	upstream.Type = models.TaskTypeArchitecture
+	upstream.Output = []models.OutputEntry{{Desc: "upstream plan", DoneWhen: "done", Scope: "internal/ops", SpecRef: "specs/upstream.md"}}
+	upstream.TransitionsExecuted = map[string]bool{"architecture-to-code-plan": true}
+
+	staleChildID := perSubtaskChildID("architecture-1", "architecture-to-code-plan", 0)
+	staleChild := testhelpers.BuildTaskByStatus(staleChildID, models.TaskStatusSuperseded, now)
+	staleChild.RolePair = "code-planning-pair"
+	staleChild.SupersededBy = []string{"replacement-coding-0", "replacement-plan-0"}
+
+	satisfiedDownstream := testhelpers.BuildTaskByStatus("replacement-coding-0", models.TaskStatusMerged, now)
+	satisfiedDownstream.RolePair = "coding-pair"
+	pendingPeer := testhelpers.BuildTaskByStatus("replacement-plan-0", models.TaskStatusDraftCodingPlan, now)
+	pendingPeer.RolePair = "code-planning-pair"
+
+	downstream := testhelpers.BuildTaskByStatus("architecture-2", models.TaskStatusMerged, now)
+	downstream.RolePair = "architecture-pair"
+	downstream.Type = models.TaskTypeArchitecture
+	downstream.DependsOn = []string{"architecture-1"}
+	downstream.Output = []models.OutputEntry{{Desc: "downstream plan", DoneWhen: "done", Scope: "internal/ops", SpecRef: "specs/downstream.md"}}
+
+	state.Tasks = append(state.Tasks, upstream, staleChild, satisfiedDownstream, pendingPeer, downstream)
+	state.Sprint.Scope.Planned = []string{"architecture-1", staleChildID, "replacement-coding-0", "replacement-plan-0", "architecture-2"}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	results, err := ExecuteAvailableTransitions(tmpDir, "manual")
+	if err != nil {
+		t.Fatalf("ExecuteAvailableTransitions: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("results count = %d, want 1: %+v", len(results), results)
+	}
+
+	readState, err := db.New(stateFile).Read()
+	if err != nil {
+		t.Fatalf("read state: %v", err)
+	}
+	child := readState.FindTask(perSubtaskChildID("architecture-2", "architecture-to-code-plan", 0))
+	if child == nil {
+		t.Fatal("downstream child not found")
+	}
+	if slices.Contains(child.DependsOn, staleChildID) {
+		t.Fatalf("child retained stale superseded inherited dep: %v", child.DependsOn)
+	}
+	if slices.Contains(child.DependsOn, "replacement-coding-0") {
+		t.Fatalf("child encoded downstream satisfied replacement dep: %v", child.DependsOn)
+	}
+	if !slices.Contains(child.DependsOn, "replacement-plan-0") {
+		t.Fatalf("child DependsOn = %v, want legal pending peer replacement", child.DependsOn)
+	}
+}
+
+func TestExecuteAvailableTransitions_RejectsPendingDownstreamSupersededInheritedDep(t *testing.T) {
+	tmpDir, stateFile := setupPipelineProceedTest(t)
+
+	now := time.Now().UTC()
+	state := testhelpers.CreateValidState()
+	state.PipelineVersion = 2
+	state.Sprint.Status = models.SprintStatusInProgress
+
+	upstream := testhelpers.BuildTaskByStatus("architecture-1", models.TaskStatusMerged, now)
+	upstream.RolePair = "architecture-pair"
+	upstream.Type = models.TaskTypeArchitecture
+	upstream.Output = []models.OutputEntry{{Desc: "upstream plan", DoneWhen: "done", Scope: "internal/ops", SpecRef: "specs/upstream.md"}}
+	upstream.TransitionsExecuted = map[string]bool{"architecture-to-code-plan": true}
+
+	staleChildID := perSubtaskChildID("architecture-1", "architecture-to-code-plan", 0)
+	staleChild := testhelpers.BuildTaskByStatus(staleChildID, models.TaskStatusSuperseded, now)
+	staleChild.RolePair = "code-planning-pair"
+	staleChild.SupersededBy = []string{"replacement-coding-0"}
+
+	replacement := testhelpers.BuildTaskByStatus("replacement-coding-0", models.TaskStatus("DRAFT_CODE"), now)
+	replacement.RolePair = "coding-pair"
+
+	downstream := testhelpers.BuildTaskByStatus("architecture-2", models.TaskStatusMerged, now)
+	downstream.RolePair = "architecture-pair"
+	downstream.Type = models.TaskTypeArchitecture
+	downstream.DependsOn = []string{"architecture-1"}
+	downstream.Output = []models.OutputEntry{{Desc: "downstream plan", DoneWhen: "done", Scope: "internal/ops", SpecRef: "specs/downstream.md"}}
+
+	state.Tasks = append(state.Tasks, upstream, staleChild, replacement, downstream)
+	state.Sprint.Scope.Planned = []string{"architecture-1", staleChildID, "replacement-coding-0", "architecture-2"}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	results, err := ExecuteAvailableTransitions(tmpDir, "manual")
+	if err != nil {
+		t.Fatalf("ExecuteAvailableTransitions: %v", err)
+	}
+	if len(results) != 0 {
+		t.Fatalf("results count = %d, want 0: %+v", len(results), results)
+	}
+
+	bb := db.New(stateFile)
+	readState, err := bb.Read()
+	if err != nil {
+		t.Fatalf("read state: %v", err)
+	}
+	source := readState.FindTask("architecture-2")
+	if source == nil {
+		t.Fatal("architecture-2 not found")
+	}
+	if source.TransitionsExecuted["architecture-to-code-plan"] {
+		t.Fatal("transition marked executed despite pending downstream replacement")
+	}
+	if child := readState.FindTask(perSubtaskChildID("architecture-2", "architecture-to-code-plan", 0)); child != nil {
+		t.Fatalf("child created despite pending downstream replacement: %+v", child)
 	}
 }
 
