@@ -1541,9 +1541,11 @@ func TestBuildRoleContext_AllRoles(t *testing.T) {
 			"First, run: /usr/bin/test -d " + data.Worktree,
 			"Run tests from the worktree without `cd &&`",
 			"REVIEW SCOPE:",
-			"Changed-file map first:",
+			"Changed-file map and stat first:",
 			"git -C " + data.Worktree + " diff --name-only abc1234..def5678",
+			"git -C " + data.Worktree + " diff --stat abc1234..def5678",
 			"supporting rg/glob only after",
+			"Review ALL changes by targeted path/hunk",
 			"git -C " + data.Worktree + " diff integration..def5678",
 			"Scope findings come exclusively from this scope/workmanship diff",
 			"review-range drift / rebase needed",
@@ -1679,9 +1681,12 @@ func TestBuildRoleContext_AllRoles(t *testing.T) {
 			"Plan artifact not in diff at", // gate condition wording
 			"Task-output JSON location",
 			"any committed task-output JSON appears under .liza/agent-outputs/",
-			"Changed-file map first:",
+			"Changed-file map and stat first:",
 			"git -C " + data.Worktree + " diff --name-only abc1234..def5678",
+			"git -C " + data.Worktree + " diff --stat abc1234..def5678",
 			"supporting rg/glob only after",
+			"Inspect worktree changes by targeted path/hunk",
+			"git -C " + data.Worktree + " diff abc1234..def5678 -- <path>",
 			"VERDICT SUBMISSION",
 		} {
 			if !strings.Contains(output, key) {
@@ -1758,9 +1763,12 @@ func TestBuildRoleContext_AllRoles(t *testing.T) {
 			"liza await-resubmission",
 			"EPIC-WRITING SKILL:",
 			"REVIEW CHECKLIST:",
-			"Changed-file map first:",
+			"Changed-file map and stat first:",
 			"git -C " + data.Worktree + " diff --name-only abc1234..def5678",
+			"git -C " + data.Worktree + " diff --stat abc1234..def5678",
 			"supporting rg/glob only after",
+			"Inspect worktree changes by targeted path/hunk",
+			"git -C " + data.Worktree + " diff abc1234..def5678 -- <path>",
 			"VERDICT SUBMISSION",
 		} {
 			if !strings.Contains(output, key) {
@@ -1852,9 +1860,12 @@ func TestBuildRoleContext_AllRoles(t *testing.T) {
 			"USER-STORY ANTI-PATTERNS",
 			"QUALITY GATES:",
 			"CAPABILITY SCOPING:",
-			"Changed-file map first:",
+			"Changed-file map and stat first:",
 			"git -C " + data.Worktree + " diff --name-only abc1234..def5678",
+			"git -C " + data.Worktree + " diff --stat abc1234..def5678",
 			"supporting rg/glob only after",
+			"Inspect worktree changes by targeted path/hunk",
+			"git -C " + data.Worktree + " diff abc1234..def5678 -- <path>",
 			"VERDICT SUBMISSION",
 			"specs/epics/ep-001.md",
 			"#capability-cap-001---task-creation",
@@ -1941,9 +1952,12 @@ func TestBuildRoleContext_AllRoles(t *testing.T) {
 			"REVIEW CHECKLIST:",
 			"Decomposition completeness",
 			"Composability",
-			"Changed-file map first:",
+			"Changed-file map and stat first:",
 			"git -C " + data.Worktree + " diff --name-only abc1234..def5678",
+			"git -C " + data.Worktree + " diff --stat abc1234..def5678",
 			"supporting rg/glob only after",
+			"Inspect worktree changes by targeted path/hunk",
+			"git -C " + data.Worktree + " diff abc1234..def5678 -- <path>",
 			"VERDICT SUBMISSION",
 		} {
 			if !strings.Contains(output, key) {
@@ -2538,12 +2552,19 @@ func TestReviewInstructions_CodeReviewerSkipsIntegrationDriftWhenBranchMissing(t
 	if !strings.Contains(output, nameOnlyDiff) {
 		t.Fatalf("reviewer prompt missing changed-file map diff:\n%s", output)
 	}
-	fullDiff := "git -C /tmp/worktree diff base123..review123"
-	if !strings.Contains(output, "git -C /tmp/worktree diff base123..review123") {
-		t.Fatalf("reviewer prompt missing scope/workmanship diff:\n%s", output)
+	statDiff := "git -C /tmp/worktree diff --stat base123..review123"
+	if !strings.Contains(output, statDiff) {
+		t.Fatalf("reviewer prompt missing changed-file stat diff:\n%s", output)
 	}
-	if strings.Index(output, nameOnlyDiff) > strings.Index(output, fullDiff) {
-		t.Fatalf("changed-file map should appear before scope/workmanship diff:\n%s", output)
+	targetedDiff := "git -C /tmp/worktree diff base123..review123 -- <path>"
+	if !strings.Contains(output, targetedDiff) {
+		t.Fatalf("reviewer prompt missing targeted scope/workmanship diff:\n%s", output)
+	}
+	if strings.Contains(output, "Review ALL changes: git -C /tmp/worktree diff base123..review123") {
+		t.Fatalf("reviewer prompt reintroduced unbounded full diff:\n%s", output)
+	}
+	if strings.Index(output, nameOnlyDiff) > strings.Index(output, targetedDiff) {
+		t.Fatalf("changed-file map should appear before targeted scope/workmanship diff:\n%s", output)
 	}
 }
 
@@ -2621,15 +2642,31 @@ func TestReviewInstructions_OutputReviewersUseFullTaskJSON(t *testing.T) {
 				fullDiffRange = "goalbase123..HEAD"
 			}
 			nameOnlyDiff := "git -C /tmp/worktree diff --name-only " + nameOnlyRange
-			fullDiff := "git -C /tmp/worktree diff " + fullDiffRange
+			statDiff := "git -C /tmp/worktree diff --stat " + nameOnlyRange
+			targetedDiff := "git -C /tmp/worktree diff " + fullDiffRange + " -- <path>"
 			if !strings.Contains(output, nameOnlyDiff) {
 				t.Fatalf("reviewer prompt missing changed-file map diff %q, got:\n%s", nameOnlyDiff, output)
+			}
+			if !strings.Contains(output, statDiff) {
+				t.Fatalf("reviewer prompt missing changed-file stat diff %q, got:\n%s", statDiff, output)
 			}
 			if !strings.Contains(output, "supporting rg/glob only after") {
 				t.Fatalf("reviewer prompt missing changed-file map search guidance, got:\n%s", output)
 			}
-			if strings.Index(output, nameOnlyDiff) > strings.Index(output, fullDiff) {
-				t.Fatalf("changed-file map should appear before full diff for %s:\n%s", role, output)
+			if !strings.Contains(output, targetedDiff) {
+				t.Fatalf("reviewer prompt missing targeted diff %q, got:\n%s", targetedDiff, output)
+			}
+			if strings.Index(output, nameOnlyDiff) > strings.Index(output, targetedDiff) {
+				t.Fatalf("changed-file map should appear before targeted diff for %s:\n%s", role, output)
+			}
+			unboundedDiffs := []string{
+				"Inspect worktree changes: git -C /tmp/worktree diff " + fullDiffRange,
+				"Read the branch diff: git -C /tmp/worktree diff " + fullDiffRange,
+			}
+			for _, unbounded := range unboundedDiffs {
+				if strings.Contains(output, unbounded) {
+					t.Fatalf("reviewer prompt should not instruct unbounded full diff %q, got:\n%s", unbounded, output)
+				}
 			}
 		})
 	}

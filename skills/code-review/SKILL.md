@@ -9,13 +9,13 @@ The goal is catching issues the author couldn't see — and occasionally sharing
 # Review Context
 
 Before reviewing, establish context:
-- **Scope:** Default to staged files (`git diff --cached`). For PRs, use the PR diff. For commits, use `git show <SHA>`. Only broaden if explicitly asked.
+- **Scope:** Default to staged files (`git diff --cached --name-only`, then `git diff --cached --stat`, then targeted path diffs). For PRs or commits, inspect changed files and stats before reading targeted hunks. Only broaden if explicitly asked.
 - **Intent:** Check ticket/description (PRs) or ask the author (pending). If unclear, clarify before reviewing.
 - **Timing:** Is now the right time for this functionality? Half-baked or premature additions warrant a `[question]`.
 - **Approach:** For complex changes, was the approach discussed before implementation? Catch architectural misalignment early — complete rewrites are painful.
-- **Diff-first:** Read the diff before source files. Only read source when a finding needs surrounding context. Never pre-read the entire codebase.
+- **Diff-first:** Read bounded diff context before source files. Prefer name-only/stat first, then targeted path or hunk diffs. Only read source when a finding needs surrounding context. Never pre-read the entire codebase.
 - **Size:** If >800 lines or >20 files, consider suggesting a split (PR) or incremental commits (pending). Large diffs hide bugs.
-- **Large diffs:** If truncated or >800 lines, verify critical findings against source before tagging `[blocker]` or `[concern]`.
+- **Large diffs:** If truncated, >800 lines, >20 files, >80K chars total, or >20K chars in one file, avoid unbounded full-diff reads; classify files and inspect targeted paths/hunks. Verify critical findings against source before tagging `[blocker]` or `[concern]`.
 - **Reviewer limits:** If reviewing outside your expertise, say so. Make assumptions explicit.
 
 # Review Modes
@@ -23,8 +23,8 @@ Before reviewing, establish context:
 | Mode | Scope | When |
 |------|-------|------|
 | **Sanity** | Skim diff, obvious issues | Trivial changes, config, docs, low-risk |
-| **Standard** | Full diff, P0-P3 checklist, spot-check tests | Most changes — balanced cost/coverage |
-| **Deep** | Full diff + context, all priorities, trace data flow | Security-sensitive, core architecture, unfamiliar domain |
+| **Standard** | Full change set via targeted diffs, P0-P3 checklist, spot-check tests | Most changes — balanced cost/coverage |
+| **Deep** | Targeted diffs + source context, all priorities, trace data flow | Security-sensitive, core architecture, unfamiliar domain |
 
 Announce mode: `"Reviewing in [mode] because [reason]. Adjust?"`
 

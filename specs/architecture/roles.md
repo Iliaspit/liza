@@ -30,6 +30,8 @@ from the YAML at load time — no hardcoded role constants.
 - **Agent IDs:** Use prefix form (`code-reviewer-1`, `coder-2`)
 - **Single name form:** The YAML key is the canonical identifier — used in pipeline YAML, task model, agent IDs, and CLI. There is no separate "workflow" form.
 
+**Reviewer Diff Context Protocol:** Reviewer roles inspect the changed-file map and diff stat before reading hunks. Coverage still spans the full review range, but reviewers should use targeted per-file diffs and source line ranges instead of loading an unbounded raw full diff. Reviewers classify changed files by review relevance before reading hunks: lockfiles, generated files, snapshots, and vendored outputs are skimmed or excluded from detailed review unless they are the primary artifact. If total diff output would exceed about 80K characters, or any single-file diff would exceed about 20K characters, reviewers must avoid unbounded full-diff reads and use targeted paths/hunks instead.
+
 **ID Validation Regex:** `^(orchestrator|epic-planner|epic-plan-reviewer|us-writer|us-reviewer|architect|architecture-reviewer|code-planner|code-plan-reviewer|coder|code-reviewer|integration-analyst|integration-reviewer)-[0-9]+$`
 
 ## Multiple Agents Per Role
@@ -449,6 +451,8 @@ Code Reviewer evaluates:
 
 **Review Scope on Iteration Cycles:**
 Review covers **all changes in the scope/workmanship diff** (`base_commit` → `review_commit`), not just changes since last rejection. Each review is a fresh evaluation of whether the full implementation meets the spec. This catches regressions introduced by fixes and keeps the mental model simple: "does this worktree satisfy the task?"
+
+Coverage does not require loading the raw full diff into context. Code Reviewer follows the Reviewer Diff Context Protocol above.
 
 For code reviews, current integration drift is checked separately immediately before verdict with `integration_branch` → `review_commit`. Scope findings come exclusively from the scope/workmanship diff. If current-integration drift makes approval unsafe or ambiguous while the scope diff is clean, reject with verdict text saying review-range drift / rebase needed instead of logging `scope_deviation`.
 

@@ -12,7 +12,9 @@ Approval = meets requirements + spec + tests + no defects. Not: perfect or produ
 
 INSTRUCTIONS:
 1. Early drift check: git -C {{.Worktree}} rev-parse HEAD — if it doesn't match REVIEW_COMMIT ({{.ReviewCommit}}), stop early (verdict submission will reject the mismatch).
-2. Changed-file map first: git -C {{.Worktree}} diff --name-only {{.BaseCommit}}..{{.ReviewCommit}}
+2. Changed-file map and stat first:
+   git -C {{.Worktree}} diff --name-only {{.BaseCommit}}..{{.ReviewCommit}}
+   git -C {{.Worktree}} diff --stat {{.BaseCommit}}..{{.ReviewCommit}}
    Read touched files/artifacts from this list before any broad repository search; use supporting rg/glob only after the changed-file map gives you a specific question.
 3. Run tests from the worktree without `cd &&`: use the test runner's directory flag or the execution tool's working-directory option. Examples: go -C {{.Worktree}} test ./..., make -C {{.Worktree}} test, npm --prefix {{.Worktree}} test, cargo test --manifest-path {{.Worktree}}/Cargo.toml.
    If tests fail, TRIAGE ONLY — do not debug:
@@ -22,10 +24,13 @@ INSTRUCTIONS:
    - Yes → potential regression. Compare with base: git -C {{.Worktree}} show {{.BaseCommit}}:<path>
      If the change plausibly caused the failure → REJECT with the test name and failure output
      If unclear after reading the diff and base version → REJECT citing the test failure. Do not investigate further.
-4. Review ALL changes: git -C {{.Worktree}} diff {{.BaseCommit}}..{{.ReviewCommit}}
+4. Review ALL changes by targeted path/hunk, not by unbounded full diff:
+   - Classify changed files before reading hunks: review fully (source, tests, migrations, behavior docs); skim or exclude from detailed review (lockfiles, generated files, snapshots, vendored outputs) unless they are the primary artifact.
+   - Use targeted diffs: git -C {{.Worktree}} diff {{.BaseCommit}}..{{.ReviewCommit}} -- <path>
+   - If total diff output would exceed ~80K chars or any single-file diff would exceed ~20K chars, do not read the full diff; inspect targeted paths, stats, and source line ranges instead.
    Each review is a fresh evaluation: "does this worktree satisfy the task?"
    Scope findings come exclusively from this scope/workmanship diff. Do not log `scope_deviation` unless the issue appears in this diff.
-5. Invoke skill: code-review, then apply it to the full diff
+5. Invoke skill: code-review, then apply it to the full scope/workmanship change set using the bounded review context from step 4
 6. If change touches specs/, introduces new abstractions, adds state/lifecycle, or spans 3+ modules: also invoke skill: systemic-thinking
 7. TDD QUALITY (code tasks): Tests must cover done_when criteria — REJECT if tests are superficial or don't exercise the actual requirements
    Exception: mechanical test updates (file-path strings, import paths) caused by
@@ -108,9 +113,13 @@ Include this assessment in your rejection reason if rejecting.
 
 REVIEW PHASE:
 1. Early drift check: git -C {{.Worktree}} rev-parse HEAD — if it doesn't match REVIEW_COMMIT ({{.ReviewCommit}}), stop early (verdict submission will reject the mismatch).
-2. Changed-file map first: git -C {{.Worktree}} diff --name-only {{.BaseCommit}}..{{.ReviewCommit}}
+2. Changed-file map and stat first:
+   git -C {{.Worktree}} diff --name-only {{.BaseCommit}}..{{.ReviewCommit}}
+   git -C {{.Worktree}} diff --stat {{.BaseCommit}}..{{.ReviewCommit}}
    Read touched files/artifacts from this list before any broad repository search; use supporting rg/glob only after the changed-file map gives you a specific question.
-3. Inspect worktree changes: git -C {{.Worktree}} diff {{.BaseCommit}}..{{.ReviewCommit}}
+3. Inspect worktree changes by targeted path/hunk, not by unbounded full diff:
+   git -C {{.Worktree}} diff {{.BaseCommit}}..{{.ReviewCommit}} -- <path>
+   If total diff output would exceed ~80K chars or any single-file diff would exceed ~20K chars, do not read the full diff; inspect targeted paths, stats, and source line ranges instead.
 4. Validate spec compliance matrix: read the spec, then the plan's
    "## Spec Compliance Matrix" section. Verify:
    a. Matrix exists in the plan file.
@@ -160,10 +169,14 @@ Include this assessment in your rejection reason if rejecting.
 
 REVIEW PHASE:
 1. Early drift check: git -C {{.Worktree}} rev-parse HEAD — if it doesn't match REVIEW_COMMIT ({{.ReviewCommit}}), stop early (verdict submission will reject the mismatch).
-2. Changed-file map first: git -C {{.Worktree}} diff --name-only {{.BaseCommit}}..{{.ReviewCommit}}
+2. Changed-file map and stat first:
+   git -C {{.Worktree}} diff --name-only {{.BaseCommit}}..{{.ReviewCommit}}
+   git -C {{.Worktree}} diff --stat {{.BaseCommit}}..{{.ReviewCommit}}
    Read touched files/artifacts from this list before any broad repository search; use supporting rg/glob only after the changed-file map gives you a specific question.
 3. Invoke skill: epic-writing for reviewing specifications.
-4. Inspect worktree changes: git -C {{.Worktree}} diff {{.BaseCommit}}..{{.ReviewCommit}}
+4. Inspect worktree changes by targeted path/hunk, not by unbounded full diff:
+   git -C {{.Worktree}} diff {{.BaseCommit}}..{{.ReviewCommit}} -- <path>
+   If total diff output would exceed ~80K chars or any single-file diff would exceed ~20K chars, do not read the full diff; inspect targeted paths, stats, and source line ranges instead.
 5. Validate done_when criteria are satisfied.
 6. Verify output[] entries: run liza get {{.TaskID}} --json and confirm
    output[] has one entry per capability with valid desc, done_when, scope, spec_ref, epic_ref, and any declared task_depends_on.
@@ -219,9 +232,13 @@ same epic are Scope Absorption — reject.
 
 REVIEW PHASE:
 1. Early drift check: git -C {{.Worktree}} rev-parse HEAD — if it doesn't match REVIEW_COMMIT ({{.ReviewCommit}}), stop early (verdict submission will reject the mismatch).
-2. Changed-file map first: git -C {{.Worktree}} diff --name-only {{.BaseCommit}}..{{.ReviewCommit}}
+2. Changed-file map and stat first:
+   git -C {{.Worktree}} diff --name-only {{.BaseCommit}}..{{.ReviewCommit}}
+   git -C {{.Worktree}} diff --stat {{.BaseCommit}}..{{.ReviewCommit}}
    Read touched files/artifacts from this list before any broad repository search; use supporting rg/glob only after the changed-file map gives you a specific question.
-3. Inspect worktree changes: git -C {{.Worktree}} diff {{.BaseCommit}}..{{.ReviewCommit}}
+3. Inspect worktree changes by targeted path/hunk, not by unbounded full diff:
+   git -C {{.Worktree}} diff {{.BaseCommit}}..{{.ReviewCommit}} -- <path>
+   If total diff output would exceed ~80K chars or any single-file diff would exceed ~20K chars, do not read the full diff; inspect targeted paths, stats, and source line ranges instead.
 4. Invoke both skills before evaluating: spec-review and user-story-writing.
 5. Read the epic ref above. Locate the assigned capability by matching task SCOPE.
    Verify stories only cover that capability section — not others in the same epic.
@@ -267,10 +284,14 @@ Include this assessment in your rejection reason if rejecting.
 
 REVIEW PHASE:
 1. Early drift check: git -C {{.Worktree}} rev-parse HEAD — if it doesn't match REVIEW_COMMIT ({{.ReviewCommit}}), stop early (verdict submission will reject the mismatch).
-2. Changed-file map first: git -C {{.Worktree}} diff --name-only {{.BaseCommit}}..{{.ReviewCommit}}
+2. Changed-file map and stat first:
+   git -C {{.Worktree}} diff --name-only {{.BaseCommit}}..{{.ReviewCommit}}
+   git -C {{.Worktree}} diff --stat {{.BaseCommit}}..{{.ReviewCommit}}
    Read touched files/artifacts from this list before any broad repository search; use supporting rg/glob only after the changed-file map gives you a specific question.
 3. Invoke skill: systemic-thinking for cross-cutting coherence analysis.
-4. Inspect worktree changes: git -C {{.Worktree}} diff {{.BaseCommit}}..{{.ReviewCommit}}
+4. Inspect worktree changes by targeted path/hunk, not by unbounded full diff:
+   git -C {{.Worktree}} diff {{.BaseCommit}}..{{.ReviewCommit}} -- <path>
+   If total diff output would exceed ~80K chars or any single-file diff would exceed ~20K chars, do not read the full diff; inspect targeted paths, stats, and source line ranges instead.
 5. Read the architecture document in the worktree (look for the arch doc in specs/arch-plan/{{.GoalSlug}}/).
 6. Validate the decomposition: does it cover the full scope of the goal spec?
 7. Verify output[] entries: run liza get {{.TaskID}} --json and confirm
@@ -285,10 +306,14 @@ Each fix-task must be well-formed (single intent, falsifiable done_when, correct
 Enrich with systemic analysis: interaction effects across fixes, architectural drift, emergent risks.
 
 INSTRUCTIONS:
-1. Changed-file map first: git -C {{.Worktree}} diff --name-only {{.GoalBaseCommit}}..HEAD
+1. Changed-file map and stat first:
+   git -C {{.Worktree}} diff --name-only {{.GoalBaseCommit}}..HEAD
+   git -C {{.Worktree}} diff --stat {{.GoalBaseCommit}}..HEAD
    Read touched files/artifacts from this list before any broad repository search; use supporting rg/glob only after the changed-file map gives you a specific question.
 2. Invoke skill: systemic-thinking for systemic analysis framing.
-3. Read the branch diff: git -C {{.Worktree}} diff {{.GoalBaseCommit}}..HEAD
+3. Read the branch diff by targeted path/hunk, not by unbounded full diff:
+   git -C {{.Worktree}} diff {{.GoalBaseCommit}}..HEAD -- <path>
+   If total diff output would exceed ~80K chars or any single-file diff would exceed ~20K chars, do not read the full diff; inspect targeted paths, stats, and source line ranges instead.
 4. Review the analyst's output[]: liza get {{.TaskID}} --json
    For each proposed fix-task:
    a. Verify the finding is real (confirmed by the diff, not fabricated)
