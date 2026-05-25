@@ -322,6 +322,45 @@ func TestBuildBasePromptStacklitRendersSuppliedIndex(t *testing.T) {
 	}
 }
 
+func TestBuildBasePromptStacklitAndScipUnifiedQueryRouting(t *testing.T) {
+	stacklitPath := "/project/.worktrees/task-1/stacklit.json"
+	scipPath := "/project/.worktrees/task-1/index.scip"
+	config := BasePromptConfig{
+		Role:        "code-coder",
+		AgentID:     "coder-1",
+		TaskID:      "task-1",
+		SpecsDir:    "/project/specs",
+		ProjectRoot: "/project",
+		StatePath:   "/project/.liza/state.yaml",
+		GoalDesc:    "Build a web API",
+		GoalSpecRef: "specs/vision.md",
+		StacklitIndexes: []StacklitIndex{
+			{IndexPath: stacklitPath},
+		},
+		ScipSearchIndexes: []ScipSearchIndex{
+			{Language: "Go", IndexPath: scipPath},
+		},
+	}
+
+	prompt, err := BuildBasePrompt(config)
+	if err != nil {
+		t.Fatalf("BuildBasePrompt() error: %v", err)
+	}
+
+	if strings.Count(prompt, "=== QUERY ROUTING ===") != 1 {
+		t.Fatal("expected exactly one unified QUERY ROUTING section")
+	}
+	if !strings.Contains(prompt, "Orient with Stacklit (modules, dependencies, symbol names), then trace precisely with scip-search") {
+		t.Fatal("missing unified pipeline guidance when both tools present")
+	}
+	if strings.Contains(prompt, "Decompose broad queries") {
+		t.Fatal("scip-only routing text should not appear when Stacklit is also present")
+	}
+	if strings.Contains(prompt, "Use Stacklit for orientation and impact analysis, then verify") {
+		t.Fatal("stacklit-only routing text should not appear when scip-search is also present")
+	}
+}
+
 func TestRenderOrchestratorDashboard(t *testing.T) {
 	now := time.Now().UTC()
 	projectRoot := setupPipelineConfig(t)

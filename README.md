@@ -334,12 +334,11 @@ Liza optimizes cost-to-quality, not cost-to-lets-cross-fingers. These tools redu
 | Tool | What it does | Impact |
 |------|-------------|--------|
 | [RTK](https://github.com/rtk-ai/rtk) | CLI proxy that compresses tool output (git, go, pytest, ...) — ~90% token savings on command results | Fewer tokens per tool call, more budget for reasoning |
-| [MorphLLM MCP](https://www.morphllm.com/) (WarpGrep) | Fast Apply edits via `// ... existing code ...` placeholders + semantic codebase search | Avoids reading full files into context for edits |
-| [claude-usage](https://github.com/phuryn/claude-usage) | Tracks Claude subscription usage with cost breakdown | Visibility into where tokens go — essential for optimizing agent configurations |
-| [scip-search](https://github.com/liza-mas/scip-search/) | Highly recommended for MAS repository navigation with explicit SCIP indexes | Saves agent tokens on symbol, package, reference, and implementation lookups in worktrees |
-| [stacklit-cli](https://github.com/liza-mas/stacklit-cli) | Generates and queries a compact codebase index (`stacklit.json`) for module, dependency, hot-file, and workflow-hint navigation | Gives agents a low-token repo map before targeted source reads |
+| [scip-search](https://github.com/liza-mas/scip-search/) | Precise symbol navigation — definitions, references, callers/callees, implementations via SCIP indexes | Saves agent tokens on symbol lookups in worktrees; pairs with Stacklit for orient-then-trace workflows |
+| [stacklit-cli](https://github.com/liza-mas/stacklit-cli) | Compact codebase index — modules, dependencies, hot files, workflow hints | Low-token repo map before targeted reads; surfaces symbol names that scip-search can trace precisely |
 | [ast-grep](https://ast-grep.github.io/) | Complementary AST-aware structural pattern search/rewrite — matches code structure, not text | Finds patterns indexes cannot express (function signatures, call shapes, nested expressions) |
 | [mdtoc](https://github.com/liza-mas/mdtoc) | Highly recommended for MAS Markdown navigation: prints per-file section line ranges and `mdq` selectors | Saves agent tokens by mapping long specs/plans before reading only the relevant section |
+| [MorphLLM MCP](https://www.morphllm.com/) (WarpGrep) | Fast Apply edits via `// ... existing code ...` placeholders + semantic codebase search | Avoids reading full files into context for edits |
 | [jq](https://jqlang.github.io/jq/) / [yq](https://github.com/mikefarah/yq) | Query and extract fields from JSON / YAML / TOML | Avoids reading full structured data files into context |
 | [GitHub CLI](https://cli.github.com/) | GitHub issues, PRs, releases, and API access from the shell | Avoids raw API calls and keeps GitHub workflows authenticated and structured |
 | [filesystem MCP](https://github.com/anthropics/anthropic-quickstarts/tree/main/mcp-filesystem) | Bulk file operations — multi-file reads, recursive directory trees, file metadata | Batch reads in one call instead of sequential Read tool calls |
@@ -349,6 +348,7 @@ Liza optimizes cost-to-quality, not cost-to-lets-cross-fingers. These tools redu
 | [fetch MCP](https://github.com/modelcontextprotocol/servers/tree/main/src/fetch) | Exact web page retrieval | Raw HTML, pagination, and precise page content without summarization |
 | [deepwiki](https://docs.devin.ai/work-with-devin/deepwiki-mcp) | Repository architecture and code-structure exploration | Fast high-level orientation on unfamiliar repositories |
 | [postgres](https://github.com/modelcontextprotocol/servers#using-an-mcp-client) | Read-only SQL exploration and validation | Direct schema and data inspection when a database MCP is available |
+| [claude-usage](https://github.com/phuryn/claude-usage) | Tracks Claude subscription usage with cost breakdown | Visibility into where tokens go — essential for optimizing agent configurations |
 
 These tools are referenced in the default `~/.liza/AGENT_TOOLS.md`; see
 [Customizing AGENT_TOOLS.md](support-docs/CUSTOMIZING_AGENT_TOOLS.md).
