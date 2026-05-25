@@ -1020,6 +1020,71 @@ func TestSubmitForReview_ResolvesHeadInWorktree(t *testing.T) {
 	}
 }
 
+func TestSubmitForReview_RejectsStaleMalformedOutputArtifactRef(t *testing.T) {
+	tmpDir, taskID, wtCommit, agentID, bb := setupSuccessfulSubmitScenario(t)
+	g := git.New(tmpDir)
+	wtHeadBefore, err := g.GetWorktreeHEAD(taskID)
+	if err != nil {
+		t.Fatalf("GetWorktreeHEAD() before submit error: %v", err)
+	}
+
+	// Make integration move ahead of the task branch so an uncaught validation
+	// error would rebase the worktree before failing submission.
+	testhelpers.MustGit(t, tmpDir, "checkout", "integration")
+	if err := os.WriteFile(filepath.Join(tmpDir, "integration-new.txt"), []byte("new\n"), 0644); err != nil {
+		t.Fatalf("write integration file: %v", err)
+	}
+	testhelpers.MustGit(t, tmpDir, "add", "integration-new.txt")
+	testhelpers.MustGit(t, tmpDir, "commit", "-m", "Advance integration")
+
+	if err := bb.Modify(func(state *models.State) error {
+		task := state.FindTask(taskID)
+		if task == nil {
+			t.Fatalf("task %s not found", taskID)
+		}
+		task.Output = []models.OutputEntry{{
+			Desc:     "child",
+			DoneWhen: "done",
+			Scope:    "internal/ops",
+			SpecRef:  "specs/feature.md (R2, R4, R6)",
+		}}
+		return nil
+	}); err != nil {
+		t.Fatalf("failed to seed malformed output ref: %v", err)
+	}
+
+	result, err := SubmitForReview(tmpDir, taskID, wtCommit, agentID)
+	if err == nil {
+		t.Fatal("SubmitForReview() error = nil, want malformed output ref rejection")
+	}
+	if result != nil {
+		t.Fatalf("SubmitForReview() result = %#v, want nil", result)
+	}
+	testhelpers.RequireErrorContains(t, err, "invalid path syntax")
+
+	state, readErr := bb.Read()
+	if readErr != nil {
+		t.Fatalf("bb.Read() error: %v", readErr)
+	}
+	task := state.FindTask(taskID)
+	if task == nil {
+		t.Fatal("task not found after failed submission")
+	}
+	if task.Status != models.TaskStatusImplementing {
+		t.Fatalf("task.Status = %s, want %s", task.Status, models.TaskStatusImplementing)
+	}
+	if task.ReviewCommit != nil {
+		t.Fatalf("task.ReviewCommit = %s, want nil", *task.ReviewCommit)
+	}
+	wtHeadAfter, err := g.GetWorktreeHEAD(taskID)
+	if err != nil {
+		t.Fatalf("GetWorktreeHEAD() after submit error: %v", err)
+	}
+	if wtHeadAfter != wtHeadBefore {
+		t.Fatalf("worktree HEAD changed before validation failure: before %s after %s", wtHeadBefore, wtHeadAfter)
+	}
+}
+
 // TestSubmitForReview_TDDEnforcement_CustomDoerRole verifies that TDD enforcement
 // applies to any doer role (not just the literal "coder" role) by using a custom
 // pipeline config with a custom doer role name.

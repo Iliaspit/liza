@@ -506,6 +506,47 @@ func TestValidateArtifactRefScalarRejectsSemicolonJoinedRefs(t *testing.T) {
 	}
 }
 
+func TestValidateArtifactRefScalarRejectsAnnotatedPathSuffixes(t *testing.T) {
+	validRefs := []string{
+		"specs/build/0 - Vision.md",
+		"docs/setup (v2).md",
+		"specs/foo.md#R2",
+		"specs/foo.v2.md",
+		"specs/foo.md.bak",
+	}
+	for _, ref := range validRefs {
+		t.Run("valid "+ref, func(t *testing.T) {
+			if err := ValidateArtifactRefScalar("spec_ref", ref, "task-1"); err != nil {
+				t.Fatalf("ValidateArtifactRefScalar(%q) error = %v, want nil", ref, err)
+			}
+		})
+	}
+
+	invalidRefs := []string{
+		"specs/foo.md (R2, R4)",
+		"specs/foo.md R2, R4",
+		"specs/foo.md - R2",
+	}
+	for _, ref := range invalidRefs {
+		t.Run("invalid "+ref, func(t *testing.T) {
+			err := ValidateArtifactRefScalar("spec_ref", ref, "task-1")
+			if err == nil {
+				t.Fatalf("ValidateArtifactRefScalar(%q) error = nil, want invalid syntax", ref)
+			}
+			refErr, ok := err.(*ArtifactRefError)
+			if !ok {
+				t.Fatalf("error type = %T, want *ArtifactRefError", err)
+			}
+			if refErr.Cause != artifactRefInvalidPathSyntaxCause {
+				t.Fatalf("Cause = %q, want %q", refErr.Cause, artifactRefInvalidPathSyntaxCause)
+			}
+			if !strings.Contains(err.Error(), "invalid path syntax") {
+				t.Fatalf("Error = %q, want invalid path syntax message", err.Error())
+			}
+		})
+	}
+}
+
 func TestValidateArtifactRefs_NormalizesCollectedRefsBeforeGitFallback(t *testing.T) {
 	repoDir := initGitRepo(t, "integration", "specs/auth.md", "# Auth spec")
 	state := testhelpers.CreateValidState()

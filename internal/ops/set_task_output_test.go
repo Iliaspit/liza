@@ -54,6 +54,20 @@ func TestSetTaskOutput_Validation(t *testing.T) {
 			},
 			errContains: "multiple refs",
 		},
+		{
+			name: "output entry annotated spec_ref suffix",
+			input: SetTaskOutputInput{
+				TaskID:  "t1",
+				AgentID: "coder-1",
+				Output: []models.OutputEntry{{
+					Desc:     "d",
+					DoneWhen: "dw",
+					Scope:    "s",
+					SpecRef:  "specs/feature.md (R2, R4, R6)",
+				}},
+			},
+			errContains: "invalid path syntax",
+		},
 	}
 
 	for _, tt := range tests {

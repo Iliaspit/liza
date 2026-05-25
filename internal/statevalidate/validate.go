@@ -6,11 +6,13 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode"
 
 	"github.com/liza-mas/liza/internal/db"
 	lizaerrors "github.com/liza-mas/liza/internal/errors"
 	"github.com/liza-mas/liza/internal/git"
 	"github.com/liza-mas/liza/internal/models"
+	"github.com/liza-mas/liza/internal/paths"
 	"github.com/liza-mas/liza/internal/pipeline"
 	"github.com/liza-mas/liza/internal/statehygiene"
 )
@@ -21,6 +23,7 @@ const artifactRefInvalidModeCause = "invalid_artifact_mode"
 const artifactRefEmptyPathCause = "empty_ref_path"
 const artifactRefPathTraversalCause = "path_traversal_outside_repo"
 const artifactRefAbsoluteOutsideRepoCause = "absolute_path_outside_repo"
+const artifactRefInvalidPathSyntaxCause = "invalid_path_syntax"
 
 // ArtifactRefError carries safe diagnostics for invalid artifact references.
 type ArtifactRefError struct {
@@ -47,6 +50,8 @@ func (e *ArtifactRefError) Error() string {
 		return formatArtifactRefError(field, "points outside repository", e.Value, e.TaskID, e.OutputIndex)
 	case artifactRefAbsoluteOutsideRepoCause:
 		return formatArtifactRefError(field, "absolute path outside repository", e.Value, e.TaskID, e.OutputIndex)
+	case artifactRefInvalidPathSyntaxCause:
+		return formatArtifactRefError(field, "has invalid path syntax; use a clean path and put annotations outside artifact-ref fields", e.Value, e.TaskID, e.OutputIndex)
 	case artifactRefInvalidModeCause:
 		value := e.Value
 		if e.Path != "" {
@@ -112,15 +117,33 @@ func ValidateArtifactRefScalar(field, value, taskID string) error {
 	if value == "" {
 		return nil
 	}
-	if strings.Contains(value, ";") {
+	if cause := validateArtifactRefSyntax(value); cause != "" {
 		return &ArtifactRefError{
 			Field:  field,
 			Value:  value,
 			TaskID: taskID,
-			Cause:  artifactRefMultipleRefsCause,
+			Cause:  cause,
 		}
 	}
 	return nil
+}
+
+func validateArtifactRefSyntax(value string) string {
+	if strings.Contains(value, ";") {
+		return artifactRefMultipleRefsCause
+	}
+	refFile := paths.SplitRefFile(value)
+	if refFile == "" {
+		return artifactRefEmptyPathCause
+	}
+	ext := filepath.Ext(filepath.Base(refFile))
+	if ext == "" {
+		return ""
+	}
+	if strings.ContainsAny(ext, "()[]{} ,") || strings.IndexFunc(ext, unicode.IsSpace) >= 0 {
+		return artifactRefInvalidPathSyntaxCause
+	}
+	return ""
 }
 
 // ValidateStateFile validates the state.yaml file against all schema rules.

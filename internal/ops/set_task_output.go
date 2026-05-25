@@ -47,19 +47,9 @@ func SetTaskOutput(projectRoot string, input *SetTaskOutputInput) error {
 		if err := validateTaskDependsOn(entry.TaskDependsOn, i); err != nil {
 			return &PreconditionError{Reason: err.Error()}
 		}
-		for _, ref := range []struct {
-			field string
-			value string
-		}{
-			{field: "spec_ref", value: entry.SpecRef},
-			{field: "epic_ref", value: entry.EpicRef},
-			{field: "plan_ref", value: entry.PlanRef},
-			{field: "arch_ref", value: entry.ArchRef},
-		} {
-			if err := statevalidate.ValidateArtifactRefScalar(fmt.Sprintf("output[%d].%s", i, ref.field), ref.value, input.TaskID); err != nil {
-				return &PreconditionError{Reason: err.Error()}
-			}
-		}
+	}
+	if err := validateOutputArtifactRefScalars(input.TaskID, input.Output); err != nil {
+		return err
 	}
 
 	// Normalize spec_ref and plan_ref on each output entry to strip worktree prefixes.
@@ -136,6 +126,25 @@ func SetTaskOutput(projectRoot string, input *SetTaskOutputInput) error {
 		task.Output = input.Output
 		return nil
 	})
+}
+
+func validateOutputArtifactRefScalars(taskID string, output []models.OutputEntry) error {
+	for i, entry := range output {
+		for _, ref := range []struct {
+			field string
+			value string
+		}{
+			{field: "spec_ref", value: entry.SpecRef},
+			{field: "epic_ref", value: entry.EpicRef},
+			{field: "plan_ref", value: entry.PlanRef},
+			{field: "arch_ref", value: entry.ArchRef},
+		} {
+			if err := statevalidate.ValidateArtifactRefScalar(fmt.Sprintf("output[%d].%s", i, ref.field), ref.value, taskID); err != nil {
+				return &PreconditionError{Reason: err.Error()}
+			}
+		}
+	}
+	return nil
 }
 
 func validateDecompositionRootOutput(state *models.State, resolver decompositionRootResolver, rolePair string, output []models.OutputEntry) error {

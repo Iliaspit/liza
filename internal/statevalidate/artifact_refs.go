@@ -132,14 +132,10 @@ type artifactRefNormalizeError struct {
 }
 
 func normalizeArtifactRefPath(raw, projectRoot string) (string, *artifactRefNormalizeError) {
-	if strings.Contains(raw, ";") {
-		return "", &artifactRefNormalizeError{cause: artifactRefMultipleRefsCause}
+	if cause := validateArtifactRefSyntax(raw); cause != "" {
+		return "", &artifactRefNormalizeError{cause: cause}
 	}
-
 	refFile := paths.SplitRefFile(raw)
-	if refFile == "" {
-		return "", &artifactRefNormalizeError{cause: artifactRefEmptyPathCause}
-	}
 	if isAbsAnyPlatform(refFile) {
 		return normalizeAbsoluteArtifactRefPath(refFile, projectRoot)
 	}

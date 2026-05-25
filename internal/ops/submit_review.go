@@ -100,6 +100,9 @@ func SubmitForReview(projectRoot, taskID, commitRef, agentID string) (*SubmitFor
 	if !HasCheckpoint(task.History, agentID) {
 		return nil, &PreconditionError{Reason: fmt.Sprintf("task %s: pre-execution checkpoint required before submission (use liza_write_checkpoint)", taskID)}
 	}
+	if err := validateOutputArtifactRefScalars(taskID, task.Output); err != nil {
+		return nil, err
+	}
 
 	// Phase 2: Execute git operations outside the lock
 	g := gitpkg.New(projectRoot)
@@ -286,6 +289,9 @@ func SubmitForReview(projectRoot, taskID, commitRef, agentID string) (*SubmitFor
 				currentAgent = *task.AssignedTo
 			}
 			return &PreconditionError{Reason: fmt.Sprintf("task %s is not assigned to agent %s (currently assigned to: %s)", taskID, agentID, currentAgent)}
+		}
+		if err := validateOutputArtifactRefScalars(taskID, task.Output); err != nil {
+			return err
 		}
 
 		if err := task.TransitionWith(targetSubmittedStatus, pipelineTransitions); err != nil {
