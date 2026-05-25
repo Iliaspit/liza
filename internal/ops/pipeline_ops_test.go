@@ -89,6 +89,45 @@ func TestBuildPipelineTransitions_BlockedCanReturnToExecutingStatuses(t *testing
 	}
 }
 
+func TestBuildPipelineTransitions_AllowsOperatorCancelBeforeApproval(t *testing.T) {
+	tmpDir, _ := setupPipelineTest(t)
+
+	resolver, _, err := loadResolver(tmpDir)
+	if err != nil {
+		t.Fatalf("loadResolver() error: %v", err)
+	}
+
+	transitions := BuildPipelineTransitions(resolver)
+	for _, tt := range []struct {
+		from models.TaskStatus
+	}{
+		{from: models.TaskStatusImplementing},
+		{from: models.TaskStatusReadyForReview},
+		{from: models.TaskStatusReviewing},
+		{from: models.TaskStatusReviewingCode2},
+	} {
+		t.Run(string(tt.from), func(t *testing.T) {
+			if !testContainsStatus(transitions[tt.from], models.TaskStatusAbandoned) {
+				t.Fatalf("%s transitions = %v, want ABANDONED", tt.from, transitions[tt.from])
+			}
+		})
+	}
+}
+
+func TestBuildPipelineTransitions_DoesNotCancelApprovedState(t *testing.T) {
+	tmpDir, _ := setupPipelineTest(t)
+
+	resolver, _, err := loadResolver(tmpDir)
+	if err != nil {
+		t.Fatalf("loadResolver() error: %v", err)
+	}
+
+	transitions := BuildPipelineTransitions(resolver)
+	if testContainsStatus(transitions[models.TaskStatusApproved], models.TaskStatusAbandoned) {
+		t.Fatalf("CODE_APPROVED transitions = %v, want no ABANDONED edge", transitions[models.TaskStatusApproved])
+	}
+}
+
 func testContainsStatus(values []models.TaskStatus, want models.TaskStatus) bool {
 	for _, value := range values {
 		if value == want {

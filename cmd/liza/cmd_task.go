@@ -577,10 +577,14 @@ cancel-task simply stops the task while preserving full audit trail.
 
 Cancellable states are determined by the pipeline transition map. Generally:
   - Initial states: DRAFT_CODE, DRAFT_CODING_PLAN, DRAFT_EPIC_PLAN, DRAFT_US
+  - Active states: executing, submitted, and reviewing states before approval
   - Rejected states: CODE_REJECTED, CODING_PLAN_REJECTED, etc.
   - BLOCKED, INTEGRATION_FAILED
 
-Not cancellable: executing, submitted, reviewing, approved, or terminal states.
+Not cancellable: approved or terminal states. Cancelling releases Liza's state
+claims and removes the task worktree/branch best-effort; it does not kill a
+live provider process. Stale agent commands fail once they observe the
+ABANDONED task state or missing worktree.
 
 Example:
   liza cancel-task task-3 "Requirements no longer valid"`,

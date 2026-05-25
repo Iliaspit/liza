@@ -313,20 +313,170 @@ func TestCancelTask_FromIntegrationFailed(t *testing.T) {
 	}
 }
 
-func TestCancelTask_RejectFromImplementing(t *testing.T) {
+func TestCancelTask_FromActiveStates(t *testing.T) {
+	for _, tt := range []struct {
+		name       string
+		status     models.TaskStatus
+		reviewerID string
+	}{
+		{name: "executing", status: models.TaskStatusImplementing},
+		{name: "submitted", status: models.TaskStatusReadyForReview},
+		{name: "reviewing", status: models.TaskStatusReviewing, reviewerID: "code-reviewer-1"},
+		{name: "reviewing-2", status: models.TaskStatusReviewingCode2, reviewerID: "code-reviewer-2"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+
+			now := time.Now().UTC()
+			state := testhelpers.CreateValidState()
+			task := testhelpers.BuildTaskByStatus("task-1", tt.status, now)
+			coderID := "coder-1"
+			worktree := ".worktrees/task-1"
+			reviewCommit := "stale-review"
+			task.AssignedTo = &coderID
+			task.Worktree = &worktree
+			task.ReviewCommit = &reviewCommit
+			task.LeaseExpires = testhelpers.TimePtr(now.Add(30 * time.Minute))
+			state.Agents = map[string]models.Agent{
+				coderID: {
+					Role:         "coder",
+					Status:       models.AgentStatusWorking,
+					CurrentTask:  &task.ID,
+					LeaseExpires: task.LeaseExpires,
+					Heartbeat:    now,
+				},
+			}
+			if tt.reviewerID != "" {
+				task.ReviewingBy = &tt.reviewerID
+				task.ReviewLeaseExpires = testhelpers.TimePtr(now.Add(30 * time.Minute))
+				state.Agents[tt.reviewerID] = models.Agent{
+					Role:        "code-reviewer",
+					Status:      models.AgentStatusReviewing,
+					CurrentTask: &task.ID,
+					Heartbeat:   now,
+				}
+			}
+			state.Tasks = []models.Task{task}
+			testhelpers.WriteInitialState(t, stateFile, state)
+
+			result, err := CancelTask(tmpDir, "task-1", "Mis-framed task", "orchestrator-1")
+			if err != nil {
+				t.Fatalf("CancelTask() error: %v", err)
+			}
+			if result.OriginalStatus != tt.status {
+				t.Fatalf("OriginalStatus = %v, want %v", result.OriginalStatus, tt.status)
+			}
+
+			bb := db.New(stateFile)
+			readState, err := bb.Read()
+			if err != nil {
+				t.Fatalf("Failed to read state: %v", err)
+			}
+			updatedTask := readState.FindTask("task-1")
+			if updatedTask.Status != models.TaskStatusAbandoned {
+				t.Fatalf("Status = %v, want ABANDONED", updatedTask.Status)
+			}
+			if updatedTask.AssignedTo != nil || updatedTask.LeaseExpires != nil {
+				t.Fatalf("doer claim not cleared: assigned_to=%v lease=%v", updatedTask.AssignedTo, updatedTask.LeaseExpires)
+			}
+			if updatedTask.ReviewingBy != nil || updatedTask.ReviewLeaseExpires != nil {
+				t.Fatalf("review claim not cleared: reviewing_by=%v lease=%v", updatedTask.ReviewingBy, updatedTask.ReviewLeaseExpires)
+			}
+			if updatedTask.Worktree != nil {
+				t.Fatalf("Worktree = %v, want nil", *updatedTask.Worktree)
+			}
+			if updatedTask.ReviewCommit != nil {
+				t.Fatalf("ReviewCommit = %v, want nil", *updatedTask.ReviewCommit)
+			}
+			if agent := readState.Agents[coderID]; agent.CurrentTask != nil || agent.Status != models.AgentStatusIdle {
+				t.Fatalf("coder agent not released: status=%s current_task=%v", agent.Status, agent.CurrentTask)
+			}
+			if tt.reviewerID != "" {
+				if agent := readState.Agents[tt.reviewerID]; agent.CurrentTask != nil || agent.Status != models.AgentStatusIdle {
+					t.Fatalf("reviewer agent not released: status=%s current_task=%v", agent.Status, agent.CurrentTask)
+				}
+			}
+		})
+	}
+}
+
+func TestCancelTask_StaleOperationsFailAfterActiveCancel(t *testing.T) {
+	t.Run("doer submit-for-review", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+
+		now := time.Now().UTC()
+		state := testhelpers.CreateValidState()
+		coderID := "coder-1"
+		task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusImplementing, now)
+		task.AssignedTo = &coderID
+		task.LeaseExpires = testhelpers.TimePtr(now.Add(30 * time.Minute))
+		state.Tasks = []models.Task{task}
+		state.Agents = map[string]models.Agent{
+			coderID: {
+				Role:        "coder",
+				Status:      models.AgentStatusWorking,
+				CurrentTask: &task.ID,
+				Heartbeat:   now,
+			},
+		}
+		testhelpers.WriteInitialState(t, stateFile, state)
+
+		if _, err := CancelTask(tmpDir, "task-1", "Mis-framed task", "orchestrator-1"); err != nil {
+			t.Fatalf("CancelTask() error: %v", err)
+		}
+
+		_, err := SubmitForReview(tmpDir, "task-1", "HEAD", coderID)
+		testhelpers.RequireErrorContains(t, err, "not IMPLEMENTING_CODE")
+	})
+
+	t.Run("reviewer submit-verdict", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+
+		now := time.Now().UTC()
+		state := testhelpers.CreateValidState()
+		reviewerID := "code-reviewer-1"
+		reviewCommit := "stale-review"
+		task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusReviewing, now)
+		task.ReviewingBy = &reviewerID
+		task.ReviewLeaseExpires = testhelpers.TimePtr(now.Add(30 * time.Minute))
+		task.ReviewCommit = &reviewCommit
+		state.Tasks = []models.Task{task}
+		state.Agents = map[string]models.Agent{
+			reviewerID: {
+				Role:        "code-reviewer",
+				Status:      models.AgentStatusReviewing,
+				CurrentTask: &task.ID,
+				Heartbeat:   now,
+			},
+		}
+		testhelpers.WriteInitialState(t, stateFile, state)
+
+		if _, err := CancelTask(tmpDir, "task-1", "Mis-framed task", "orchestrator-1"); err != nil {
+			t.Fatalf("CancelTask() error: %v", err)
+		}
+
+		_, err := SubmitVerdict(tmpDir, "task-1", "APPROVED", "", reviewerID, "")
+		testhelpers.RequireErrorContains(t, err, "not in a reviewing state")
+	})
+}
+
+func TestCancelTask_RejectFromApproved(t *testing.T) {
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()
 	state.Tasks = []models.Task{
-		testhelpers.BuildTaskByStatus("task-1", models.TaskStatusImplementing, now),
+		testhelpers.BuildTaskByStatus("task-1", models.TaskStatusApproved, now),
 	}
 	testhelpers.WriteInitialState(t, stateFile, state)
 
 	_, err := CancelTask(tmpDir, "task-1", "reason", "orchestrator-1")
 	if err == nil {
-		t.Fatal("Expected error for IMPLEMENTING task")
+		t.Fatal("Expected error for APPROVED task")
 	}
 	testhelpers.AssertErrorContains(t, err, "transition")
 }

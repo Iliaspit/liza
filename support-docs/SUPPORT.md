@@ -223,7 +223,7 @@ Key agent fields:
 
 **Safe mutation methods (preference order):**
 
-1. **CLI commands** — `liza unblock-task`, `liza supersede-task`, `liza release-claim`, `liza recover-task`, etc. Always prefer these.
+1. **CLI commands** — `liza unblock-task`, `liza cancel-task`, `liza supersede-task`, `liza release-claim`, `liza recover-task`, etc. Always prefer these.
 2. **Line-level text edits** — For changes the CLI doesn't support (e.g., fixing `depends_on`, setting a status the CLI rejects). Use `liza pause` first to stop heartbeat updates, then back up before touching anything:
 
 ```bash
