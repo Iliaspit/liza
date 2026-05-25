@@ -180,6 +180,7 @@
       "Bash(head:*)",
       "Bash(tail:*)",
       "Bash(test:*)",
+      "Bash(/usr/bin/test:*)",
       "Bash(wc:*)",
       "Bash(date:*)",
       "Bash(find:*)",

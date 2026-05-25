@@ -1210,6 +1210,9 @@ func assertClaudeSettingsToolPermissions(t *testing.T, allow []string) {
 	if count := counts["Bash(stacklit:*)"]; count != 1 {
 		t.Errorf("Bash(stacklit:*) count = %d, want 1", count)
 	}
+	if count := counts["Bash(/usr/bin/test:*)"]; count != 1 {
+		t.Errorf("Bash(/usr/bin/test:*) count = %d, want 1", count)
+	}
 }
 
 func TestWriteCodexProjectPermissions_NewFile(t *testing.T) {
