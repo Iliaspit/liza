@@ -6,14 +6,16 @@ When a default tool is unavailable in the current session, fall through to the n
 ## Decision Kernel
 
 1. Prefer filesystem-truth tools tied to the current worktree.
-2. Use `rg` for working-tree text search; use `git grep` for tracked, index, `HEAD`, or historical revision search.
-3. Use `ast-grep` for syntax-shaped code search.
-4. Use direct reads for source-of-truth; use line-numbered reads when discussing edits.
-5. Use `apply_patch` for edits; use `morph-mcp` only for broad, context-heavy, or fast-apply edits.
-6. Use native manifests and language-native commands for project structure and dependencies.
-7. Validate edits with native build/test/lint/typecheck commands plus pre-commit on touched files.
-8. Use `context7` → `Ref` → `deepwiki` → `WebFetch` for docs, repo architecture, and web lookup.
-9. In MAS worktrees, do not use workspace-level or IDE/LSP-backed tools.
+2. When Liza supplies an explicit Stacklit index path, use `stacklit derive -i <path>` for first-pass repo orientation and `stacklit get-module` / `get-dependencies` for module impact before opening files.
+3. When Liza supplies explicit SCIP index paths, use `scip-search` for indexed symbol/package/reference/implementation navigation.
+4. Use `rg` for working-tree text search; use `git grep` for tracked, index, `HEAD`, or historical revision search.
+5. Use `ast-grep` for syntax-shaped code search.
+6. Use direct reads for source-of-truth; use line-numbered reads when discussing edits.
+7. Use `apply_patch` for edits; use `morph-mcp` only for broad, context-heavy, or fast-apply edits.
+8. Use native manifests and language-native commands for project structure and dependencies.
+9. Validate edits with native build/test/lint/typecheck commands plus pre-commit on touched files.
+10. Use `context7` → `Ref` → `deepwiki` → `WebFetch` for docs, repo architecture, and web lookup.
+11. In MAS worktrees, do not use workspace-level or IDE/LSP-backed tools.
 
 ## Forbidden tools
 
@@ -26,7 +28,7 @@ Any non destructive tool by default.
 ## Mode Boundary
 
 All modes: use source-of-truth tools for verification.
-MAS worktree rule: Do not use workspace-level or IDE/LSP-backed tools in Liza multi-agent worktrees, even if the user has configured them for personal use. Use filesystem-truth tools tied to the current worktree instead: `rg`, `ast-grep`, direct reads, filesystem glob/search, native manifests, `git`, language-native commands, `morph-mcp`, and `apply_patch`.
+MAS worktree rule: Do not use workspace-level or IDE/LSP-backed tools in Liza multi-agent worktrees, even if the user has configured them for personal use. Use filesystem-truth tools tied to the current worktree instead: `stacklit` with explicit `-i` paths supplied by Liza, `scip-search` with explicit `--index` paths supplied by Liza, `rg`, `ast-grep`, direct reads, filesystem glob/search, native manifests, `git`, language-native commands, `morph-mcp`, and `apply_patch`.
 Pairing mode: user-personal workspace tools may exist, but they do not replace source-of-truth verification.
 
 ## Tool Routing
@@ -66,6 +68,7 @@ For all MCP-backed default rows, if the tool is unavailable in the current sessi
 | Exact keyword ("TODO") | `rg` | — | — |
 | Structural code pattern (call shape, signature) | `ast-grep` | `rg` with regex approximation | — |
 | Find files by name | Glob | `rg --files` / native filename search | Glob unavailable |
+| Repo orientation and module impact | `stacklit derive/get-module/get-dependencies -i <supplied-index>` | `rg` + manifest reads + exact source reads | No Stacklit index path supplied, Stacklit unavailable, or index result insufficient |
 | Semantic code search ("how does X work?") | **morph-mcp** codebase_search | `rg` + exact reads (`ast-grep` when structural search helps) | morph-mcp insufficient, rate limited, or errors |
 | Symbol info at position | `rg` + direct reads | — | — |
 | Find references | `rg` | — | — |
@@ -74,6 +77,8 @@ For all MCP-backed default rows, if the tool is unavailable in the current sessi
 | Multi-file structural analysis | `rg` + direct reads | — | — |
 
 **Additional caveats:**
+- **stacklit**: use only explicit `-i <path>` values supplied in the prompt. Do not infer index locations, regenerate Stacklit indexes, run `stacklit view`, or mutate `stacklit-insights.json` / `.stacklitrc.json` from an agent task. Stacklit is for orientation and impact analysis; verify behavior against source files before editing.
+- **scip-search**: use only explicit `--index <path>` values supplied in the prompt. Do not search for default SCIP indexes or rely on daemon/global/cache behavior.
 - **morph-mcp codebase_search**: semantic discovery — use when you'd have to guess the search string. If Morph is not exposed, load it with your tool-loading mechanism (e.g. `ToolSearch`, `tool_search`) before broad exploratory `rg`. Fallback to `rg` + exact reads when results are insufficient, rate limited, or error.
 
 ### Precedence

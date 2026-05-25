@@ -15,6 +15,7 @@ import (
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/paths"
 	"github.com/liza-mas/liza/internal/scipsearch"
+	"github.com/liza-mas/liza/internal/stacklit"
 )
 
 const integrationOperationSubmitForReview = "submit-for-review"
@@ -27,7 +28,10 @@ type SubmitForReviewResult struct {
 	Warnings     []string `json:"warnings,omitempty"`
 }
 
-var submitReviewRefreshIndexes = scipsearch.RefreshIndexes
+var (
+	submitReviewRefreshIndexes       = scipsearch.RefreshIndexes
+	submitReviewRefreshStacklitIndex = stacklit.RefreshIndex
+)
 
 // SubmitForReview validates that commitRef resolves to the worktree HEAD before rebase,
 // rebases the task branch onto the integration branch to catch conflicts early,
@@ -261,6 +265,7 @@ func SubmitForReview(projectRoot, taskID, commitRef, agentID string) (*SubmitFor
 	}
 
 	indexWarnings := refreshSubmitReviewScipIndexes(wtPath, state.Config.ScipSearch)
+	indexWarnings = append(indexWarnings, refreshSubmitReviewStacklitIndex(wtPath)...)
 
 	// Phase 3: Atomic update with new commit SHA
 	now := time.Now().UTC()
@@ -346,6 +351,18 @@ func refreshSubmitReviewScipIndexes(worktreePath string, configuredLanguages []s
 	warnings := scipRefreshWarnings(result)
 	if err != nil {
 		warnings = append(warnings, fmt.Sprintf("scip-search: %v", err))
+	}
+	return warnings
+}
+
+func refreshSubmitReviewStacklitIndex(worktreePath string) []string {
+	result, err := submitReviewRefreshStacklitIndex(stacklit.RefreshOptions{
+		TargetRoot: worktreePath,
+		TargetKind: stacklit.TargetKindTaskWorktree,
+	})
+	warnings := stacklitRefreshWarnings(result)
+	if err != nil {
+		warnings = append(warnings, fmt.Sprintf("stacklit: %v", err))
 	}
 	return warnings
 }

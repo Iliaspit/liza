@@ -11,6 +11,7 @@ import (
 	"github.com/liza-mas/liza/internal/ops"
 	"github.com/liza-mas/liza/internal/pipeline"
 	"github.com/liza-mas/liza/internal/scipsearch"
+	"github.com/liza-mas/liza/internal/stacklit"
 )
 
 // orchestratorStrategy handles the orchestrator role.
@@ -21,7 +22,10 @@ type orchestratorStrategy struct {
 	yamlMaxWaitSec   int                // from YAML; 0 = use type default
 }
 
-var orchestratorScipRefresh = scipsearch.RefreshIndexes
+var (
+	orchestratorScipRefresh     = scipsearch.RefreshIndexes
+	orchestratorStacklitRefresh = stacklit.RefreshIndex
+)
 
 const defaultOrchestratorTimeout = 4 * time.Hour
 
@@ -111,6 +115,7 @@ func (s *orchestratorStrategy) PreExecution(bb *db.Blackboard, config Supervisor
 		return err
 	}
 	refreshOrchestratorProjectRootScipIndexes(bb, config)
+	refreshOrchestratorProjectRootStacklitIndex(config)
 	return nil
 }
 
@@ -204,6 +209,26 @@ func refreshOrchestratorProjectRootScipIndexes(bb *db.Blackboard, config Supervi
 	for _, failure := range result.Failures {
 		logger.Warn("Orchestrator SCIP indexer failed",
 			"language", failure.Language,
+			"diagnostic", failure.Diagnostic)
+	}
+}
+
+func refreshOrchestratorProjectRootStacklitIndex(config SupervisorConfig) {
+	if !stacklit.RuntimeEnabled() {
+		return
+	}
+
+	logger := GetLogger()
+	result, err := orchestratorStacklitRefresh(stacklit.RefreshOptions{
+		TargetRoot: config.ProjectRoot,
+		TargetKind: stacklit.TargetKindProjectRoot,
+	})
+	if err != nil {
+		logger.Warn("Orchestrator Stacklit refresh failed", "error", err)
+		return
+	}
+	for _, failure := range result.Failures {
+		logger.Warn("Orchestrator Stacklit indexer failed",
 			"diagnostic", failure.Diagnostic)
 	}
 }

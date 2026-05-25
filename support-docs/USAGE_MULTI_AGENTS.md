@@ -109,6 +109,14 @@ liza setup --agent-tools ~/my-agent-tools.md  # use custom AGENT_TOOLS.md
 > `--scip-search <language>` values, indexer prerequisites, and `.liza/scip/`
 > snapshot index locations.
 
+> **Optional:** enable `stacklit-cli` for low-token repository maps in MAS
+> prompts. `LIZA_ENABLE_STACKLIT` is the activation gate. Commit
+> `stacklit.json`, and optionally `stacklit-insights.json` plus
+> `.stacklitrc.json`, at the repo root for the baseline project index. Liza
+> refreshes task-local `stacklit.json` files in worktrees for prompt context
+> without adding them to task diffs. See [Configuration Reference](CONFIGURATION.md)
+> for the runtime contract and non-goals.
+
 **2. Initialize Project**
 
 > **Commit your spec file before running `liza init`.** Worktrees are created from the current branch — uncommitted files won't be visible to agents.

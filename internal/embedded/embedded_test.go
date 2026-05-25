@@ -1207,6 +1207,9 @@ func assertClaudeSettingsToolPermissions(t *testing.T, allow []string) {
 	if count := counts["Bash(scip-search:*)"]; count != 1 {
 		t.Errorf("Bash(scip-search:*) count = %d, want 1", count)
 	}
+	if count := counts["Bash(stacklit:*)"]; count != 1 {
+		t.Errorf("Bash(stacklit:*) count = %d, want 1", count)
+	}
 }
 
 func TestWriteCodexProjectPermissions_NewFile(t *testing.T) {

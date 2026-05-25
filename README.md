@@ -237,6 +237,13 @@ LIZA_ENABLE_SCIP_SEARCH=1 liza init "Project goal" --spec specs/vision.md \
 See [Configuration](support-docs/CONFIGURATION.md) for supported languages,
 indexer prerequisites, auto-detection behavior, and detailed opt-in setup.
 
+`stacklit-cli` is also optional for MAS runs. Commit `stacklit.json`, and
+optionally `stacklit-insights.json` plus `.stacklitrc.json`, at the repo root
+for the baseline project map. Set `LIZA_ENABLE_STACKLIT=1` for the MAS process
+when you want Liza to refresh root/worktree `stacklit.json` files and inject
+Stacklit prompt guidance. Liza does not install Stacklit or mutate curated
+insights/config files; see [Configuration](support-docs/CONFIGURATION.md).
+
 ### Pairing and MAS Modes
 
 > **New to Liza?** Start with Pairing mode — it's the fastest way to experience how the behavioral contract changes agent behavior. The trust you build watching agents pause at gates, surface assumptions, and validate before claiming done is what makes letting them run autonomously in Multi-Agent mode a comfortable next step.<br>
@@ -330,6 +337,7 @@ Liza optimizes cost-to-quality, not cost-to-lets-cross-fingers. These tools redu
 | [MorphLLM MCP](https://www.morphllm.com/) (WarpGrep) | Fast Apply edits via `// ... existing code ...` placeholders + semantic codebase search | Avoids reading full files into context for edits |
 | [claude-usage](https://github.com/phuryn/claude-usage) | Tracks Claude subscription usage with cost breakdown | Visibility into where tokens go — essential for optimizing agent configurations |
 | [scip-search](https://github.com/liza-mas/scip-search/) | Highly recommended for MAS repository navigation with explicit SCIP indexes | Saves agent tokens on symbol, package, reference, and implementation lookups in worktrees |
+| [stacklit-cli](https://github.com/liza-mas/stacklit-cli) | Generates and queries a compact codebase index (`stacklit.json`) for module, dependency, hot-file, and workflow-hint navigation | Gives agents a low-token repo map before targeted source reads |
 | [ast-grep](https://ast-grep.github.io/) | Complementary AST-aware structural pattern search/rewrite — matches code structure, not text | Finds patterns indexes cannot express (function signatures, call shapes, nested expressions) |
 | [mdtoc](https://github.com/liza-mas/mdtoc) | Highly recommended for MAS Markdown navigation: prints per-file section line ranges and `mdq` selectors | Saves agent tokens by mapping long specs/plans before reading only the relevant section |
 | [jq](https://jqlang.github.io/jq/) / [yq](https://github.com/mikefarah/yq) | Query and extract fields from JSON / YAML / TOML | Avoids reading full structured data files into context |

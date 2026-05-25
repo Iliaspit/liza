@@ -14,10 +14,11 @@ import (
 	"github.com/liza-mas/liza/internal/prompts"
 	"github.com/liza-mas/liza/internal/roles"
 	"github.com/liza-mas/liza/internal/scipsearch"
+	"github.com/liza-mas/liza/internal/stacklit"
 )
 
 // baseConfigFrom constructs the BasePromptConfig shared by all roles.
-func baseConfigFrom(state *models.State, config SupervisorConfig, taskID string, scipIndexes []prompts.ScipSearchIndex) prompts.BasePromptConfig {
+func baseConfigFrom(state *models.State, config SupervisorConfig, taskID string, scipIndexes []prompts.ScipSearchIndex, stacklitIndexes []prompts.StacklitIndex) prompts.BasePromptConfig {
 	return prompts.BasePromptConfig{
 		Role:              config.Role,
 		AgentID:           config.AgentID,
@@ -28,6 +29,7 @@ func baseConfigFrom(state *models.State, config SupervisorConfig, taskID string,
 		GoalDesc:          state.Goal.Description,
 		GoalSpecRef:       state.Goal.SpecRef,
 		ScipSearchIndexes: scipIndexes,
+		StacklitIndexes:   stacklitIndexes,
 	}
 }
 
@@ -44,7 +46,13 @@ func buildPromptWithContext(state *models.State, config SupervisorConfig, taskID
 		return "", err
 	}
 
-	prompt, err := prompts.BuildBasePrompt(baseConfigFrom(state, config, taskID, toBasePromptScipSearchIndexes(data.ScipIndexes)))
+	prompt, err := prompts.BuildBasePrompt(baseConfigFrom(
+		state,
+		config,
+		taskID,
+		toBasePromptScipSearchIndexes(data.ScipIndexes),
+		toBasePromptStacklitIndexes(data.StacklitIndexes),
+	))
 	if err != nil {
 		return "", fmt.Errorf("building base prompt: %w", err)
 	}
@@ -80,7 +88,13 @@ func buildOrchestratorPromptContext(state *models.State, config SupervisorConfig
 		return "", err
 	}
 
-	prompt, err := prompts.BuildBasePrompt(baseConfigFrom(state, config, "", toBasePromptScipSearchIndexes(data.ScipIndexes)))
+	prompt, err := prompts.BuildBasePrompt(baseConfigFrom(
+		state,
+		config,
+		"",
+		toBasePromptScipSearchIndexes(data.ScipIndexes),
+		toBasePromptStacklitIndexes(data.StacklitIndexes),
+	))
 	if err != nil {
 		return "", fmt.Errorf("building base prompt: %w", err)
 	}
@@ -116,6 +130,12 @@ func buildOrchestratorRoleContextData(state *models.State, config SupervisorConf
 	if err != nil {
 		return nil, fmt.Errorf("available scip-search indexes: %w", err)
 	}
+	availableStacklitIndexes, err := stacklit.AvailableIndexes(stacklit.RuntimePlanOptions{
+		TargetRoot: config.ProjectRoot,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("available stacklit indexes: %w", err)
+	}
 
 	skills, _ := resolver.Skills(config.Role)
 	mandatoryDocs, _ := resolver.MandatoryDocs(config.Role)
@@ -127,6 +147,7 @@ func buildOrchestratorRoleContextData(state *models.State, config SupervisorConf
 		DashboardOutput: dashboard,
 		WakeInstruction: wakeInstruction,
 		ScipIndexes:     toPromptScipIndexRefs(availableIndexes),
+		StacklitIndexes: toPromptStacklitIndexRefs(availableStacklitIndexes),
 		ProjectRoot:     config.ProjectRoot,
 		StatePath:       config.StatePath,
 		SpecsDir:        config.SpecsDir,
@@ -134,6 +155,17 @@ func buildOrchestratorRoleContextData(state *models.State, config SupervisorConf
 		Skills:          skills,
 		MandatoryDocs:   mandatoryDocs,
 	}, nil
+}
+
+func toPromptStacklitIndexRefs(indexes []stacklit.IndexRef) []prompts.StacklitIndexRef {
+	if len(indexes) == 0 {
+		return nil
+	}
+	refs := make([]prompts.StacklitIndexRef, 0, len(indexes))
+	for _, index := range indexes {
+		refs = append(refs, prompts.StacklitIndexRef{Path: index.Path})
+	}
+	return refs
 }
 
 func toPromptScipIndexRefs(indexes []scipsearch.IndexRef) []prompts.ScipIndexRef {
@@ -164,6 +196,19 @@ func toBasePromptScipSearchIndexes(indexes []prompts.ScipIndexRef) []prompts.Sci
 	return refs
 }
 
+func toBasePromptStacklitIndexes(indexes []prompts.StacklitIndexRef) []prompts.StacklitIndex {
+	if len(indexes) == 0 {
+		return nil
+	}
+	refs := make([]prompts.StacklitIndex, 0, len(indexes))
+	for _, index := range indexes {
+		refs = append(refs, prompts.StacklitIndex{
+			IndexPath: index.Path,
+		})
+	}
+	return refs
+}
+
 func availablePromptScipIndexRefs(state *models.State, targetRoot string) ([]prompts.ScipIndexRef, error) {
 	if targetRoot == "" || !scipsearch.RuntimeEnabled(state.Config.ScipSearch) {
 		return nil, nil
@@ -176,6 +221,19 @@ func availablePromptScipIndexRefs(state *models.State, targetRoot string) ([]pro
 		return nil, fmt.Errorf("available scip-search indexes: %w", err)
 	}
 	return toPromptScipIndexRefs(availableIndexes), nil
+}
+
+func availablePromptStacklitIndexRefs(targetRoot string) ([]prompts.StacklitIndexRef, error) {
+	if targetRoot == "" || !stacklit.RuntimeEnabled() {
+		return nil, nil
+	}
+	availableIndexes, err := stacklit.AvailableIndexes(stacklit.RuntimePlanOptions{
+		TargetRoot: targetRoot,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("available stacklit indexes: %w", err)
+	}
+	return toPromptStacklitIndexRefs(availableIndexes), nil
 }
 
 // buildTaskRoleContextData constructs RoleContextData for task-based roles (doers and reviewers).
@@ -231,6 +289,11 @@ func buildTaskRoleContextData(task *models.Task, state *models.State, config Sup
 		return nil, err
 	}
 	data.ScipIndexes = scipIndexes
+	stacklitIndexes, err := availablePromptStacklitIndexRefs(data.Worktree)
+	if err != nil {
+		return nil, err
+	}
+	data.StacklitIndexes = stacklitIndexes
 
 	// Prior rejection
 	if task.Iteration > 1 && task.RejectionReason != nil && *task.RejectionReason != "" && *task.RejectionReason != "null" {

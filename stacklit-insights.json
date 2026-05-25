@@ -1,0 +1,62 @@
+{
+  "purpose": {
+    "cmd/liza": "CLI entrypoint and command dispatch bootstrap",
+    "internal/agent": "Agent supervision, prompt construction, provider execution, heartbeat, and role strategy runtime",
+    "internal/alerts": "Structured anomaly and alert reporting for orchestration state",
+    "internal/analysis": "Project and task analysis helpers used by orchestration operations",
+    "internal/codexconfig": "Codex configuration rendering and provider-specific launch settings",
+    "internal/commands": "Cobra command handlers for the liza CLI surface",
+    "internal/db": "Database access layer",
+    "internal/errors": "Shared typed errors and user-facing failure classification",
+    "internal/filelock": "Cross-process file locking for serialized state access",
+    "internal/git": "Git integration",
+    "internal/gitenv": "Git command execution helpers with controlled environment handling",
+    "internal/identity": "Agent and operator identity resolution",
+    "internal/initcheck": "Repository initialization and runtime preflight checks",
+    "internal/integration": "Integration branch and merge-flow coordination",
+    "internal/interactive": "Interactive terminal prompts and confirmation flows",
+    "internal/jsonout": "Structured JSON command output helpers",
+    "internal/log": "Runtime logging setup and log path management",
+    "internal/models": "Data models and types",
+    "internal/ops": "Blackboard mutations and lifecycle operations for tasks, worktrees, reviews, merges, and indexing",
+    "internal/paths": "Canonical project, state, worktree, and artifact path construction",
+    "internal/pipeline": "Role pipeline loading, validation, and prompt section resolution",
+    "internal/precommit": "Pre-commit integration and touched-file hook execution",
+    "internal/process": "Process launching, tracking, and termination helpers",
+    "internal/procscan": "Process discovery used by runtime health and cleanup checks",
+    "internal/projectdetect": "Project language and toolchain detection for optional indexers",
+    "internal/prompts": "Base prompt, role context, wake prompt, and dashboard rendering templates",
+    "internal/render": "Reusable text rendering helpers for CLI and prompt output",
+    "internal/roles": "Role definitions, role types, and role-specific behavior metadata",
+    "internal/scipsearch": "Optional SCIP index generation and prompt-safe scip-search discovery",
+    "internal/secretmask": "Secret redaction for logs, prompts, and command output",
+    "internal/stacklit": "Optional Stacklit index generation and prompt-safe repository map discovery",
+    "internal/statehygiene": "State cleanup and invariant maintenance for stale runtime records",
+    "internal/statevalidate": "Blackboard schema and invariant validation",
+    "internal/taskkind": "Task type and role-pair classification helpers",
+    "internal/testguard": "Test-change guardrails and test file analysis",
+    "internal/testhelpers": "Shared helpers for Go unit and integration tests",
+    "internal/tui": "Terminal UI components for monitoring and operator interaction",
+    "root": "Repository-level Go module, embedded assets, docs, specs, and build configuration",
+    "scripts/repro": "Reproduction scripts for debugging specific operational failures",
+    "skills/context-engineering/scripts": "Skill support scripts for prompt and context analysis",
+    "skills/liza-logs/scripts": "Skill support scripts for Liza log inspection",
+    "skills/spec-backfill/scripts": "Skill support scripts for specification backfill workflows",
+    "skills/white-box-red-testing/scripts": "Skill support scripts for white-box red-test generation"
+  },
+  "hints": {
+    "add_feature": "Start from entrypoint cmd/liza/main.go",
+    "test_command": "make test",
+    "env_vars": [
+      "LIZA_AGENT_ID",
+      "LIZA_DEFAULT_CLI",
+      "LIZA_DEFAULT_DOER_CLI",
+      "LIZA_DEFAULT_REVIEWER_CLI",
+      "LIZA_SPECS"
+    ],
+    "do_not_touch": [
+      ".github/"
+    ]
+  },
+  "architecture": {}
+}

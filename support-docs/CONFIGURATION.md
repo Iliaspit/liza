@@ -121,6 +121,58 @@ All configuration lives in `.liza/state.yaml` under the `config` section.
 | `post_worktree_cmd` | (none) | — | — | shell cmd | Command run after worktree creation (e.g. `npm install`) |
 | `scip_search` | (none) | — | — | language list | Durable allowlist of SCIP languages Liza may index when `LIZA_ENABLE_SCIP_SEARCH` is truthy |
 
+### Stacklit (`LIZA_ENABLE_STACKLIT`)
+
+`stacklit-cli` is an optional external repository-navigation tool for MAS
+worktrees. It is strict opt-in: Liza refreshes `stacklit.json` and injects
+Stacklit prompt guidance only when `LIZA_ENABLE_STACKLIT` is truthy.
+
+`LIZA_ENABLE_STACKLIT` is process-local activation, not durable project state.
+Values are trimmed and compared case-insensitively:
+
+| Value | Meaning |
+|-------|---------|
+| `1`, `true` | Enable MAS Stacklit index refresh and prompt guidance |
+| unset, empty, `0`, `false` | Disable MAS Stacklit index refresh and prompt guidance |
+
+Repository-level Stacklit files are operator-owned and should be committed when
+used:
+
+```text
+<project_root>/stacklit.json
+<project_root>/stacklit-insights.json
+<project_root>/.stacklitrc.json
+```
+
+Liza does not create or mutate `stacklit-insights.json` or `.stacklitrc.json`.
+When those files exist, `stacklit generate-json` consumes them naturally while
+refreshing `stacklit.json`.
+
+At runtime, Liza runs `stacklit generate-json -o stacklit.json` at controlled
+lifecycle points:
+
+- Orchestrator refreshes `<project_root>/stacklit.json`.
+- Task worktree creation, reviewer worktree recovery, and submit-for-review
+  refresh `<worktree>/stacklit.json`.
+
+Task-local `stacklit.json` is generated for prompt context only. Liza requires
+`stacklit.json` to be tracked before task-local generation; when it is tracked,
+Liza marks only that task worktree copy as skip-worktree before regenerating it
+so it does not enter the task diff. This preserves the clean task-review
+invariant without adding Stacklit-specific per-worktree git configuration.
+
+Stacklit generation failures degrade gracefully at runtime. Liza still spawns
+the agent and omits Stacklit prompt guidance when no task-local or project-root
+`stacklit.json` is available. If a previously committed project-root index is
+available after a failed root refresh, prompts may still include it as an
+available repository snapshot; agents are instructed to verify behavior against
+source files before editing.
+
+Explicit non-goals: Liza does not install `stacklit-cli`, run `stacklit view`,
+generate `stacklit.html`, run `stacklit init-insights`, run `stacklit
+ai-summary`, or curate Stacklit insights. Operators install Stacklit and commit
+their chosen Stacklit inputs.
+
 ### SCIP Search (`config.scip_search`)
 
 `scip-search` is an optional external repository-navigation tool for MAS
@@ -379,6 +431,7 @@ project configuration belongs in `.liza/state.yaml`.
 | `LIZA_AGENT_ID` | For agent commands | -- | Agent identifier (format: `{role}-{number}`) |
 | `LIZA_DISABLE_CLAUDE_SUBAGENTS` | No | unset | Set to `1` to launch Claude Code agents with `--disallowedTools Task`, disabling Claude subagent delegation. Use only when intentionally waiving Claude subagent delegation; agents may be unable to satisfy contract delegation triggers while this is set. |
 | `LIZA_ENABLE_SCIP_SEARCH` | No | unset | Strict opt-in MAS activation gate for SCIP indexing and `scip-search` prompt guidance. Truthy values are `1` and `true`; unset, empty, `0`, and `false` disable it. Values are trimmed and parsed case-insensitively. |
+| `LIZA_ENABLE_STACKLIT` | No | unset | Strict opt-in MAS activation gate for Stacklit `stacklit.json` refresh and prompt guidance. Truthy values are `1` and `true`; unset, empty, `0`, and `false` disable it. Values are trimmed and parsed case-insensitively. |
 | `LIZA_CODEX_VERSION` | No | unset | Process-local fallback for `config.codex_package_version` when launching headless Codex agents |
 | `LIZA_CODEX_LEGACY_LANDLOCK` | No | unset | Process-local fallback enabling legacy Landlock for headless Codex agents when `config.codex_legacy_landlock` is false |
 | `LIZA_SPECS` | No | `specs/` | Path to specs directory (relative to project root) |

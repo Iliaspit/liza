@@ -15,6 +15,7 @@ import (
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/paths"
 	"github.com/liza-mas/liza/internal/scipsearch"
+	"github.com/liza-mas/liza/internal/stacklit"
 	"github.com/liza-mas/liza/internal/testhelpers"
 )
 
@@ -254,6 +255,54 @@ func TestCreateWorktree_ScipDisabledActivationNoop(t *testing.T) {
 	}
 	if indexes := availableCreateWorktreeScipIndexes(t, result.WorktreeDir, []string{"go"}); len(indexes) != 0 {
 		t.Fatalf("AvailableIndexes() = %#v, want none", indexes)
+	}
+}
+
+func TestCreateWorktree_StacklitIndexesEnabledNewWorktreeAfterSetup(t *testing.T) {
+	tmpDir := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, tmpDir)
+	addTrackedGoSourceForCreateWorktreeScipTest(t, tmpDir)
+	commitTrackedStacklitForCreateWorktreeTest(t, tmpDir)
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	t.Setenv(stacklit.EnvEnableStacklit, "true")
+
+	state := testhelpers.CreateValidState()
+	state.Tasks = []models.Task{
+		testhelpers.BuildTaskByStatus("task-1", models.TaskStatusImplementing, time.Now().UTC()),
+	}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	var calls []stacklit.RuntimeCommandPlan
+	withCreateWorktreeStacklitRuntimeRunner(t, func(plan stacklit.RuntimeCommandPlan) (string, error) {
+		calls = append(calls, plan)
+		if err := os.WriteFile(plan.OutputPath, []byte(plan.Dir), 0o644); err != nil {
+			return "", err
+		}
+		return "", nil
+	})
+
+	result, err := CreateWorktree(tmpDir, "task-1", false)
+	if err != nil {
+		t.Fatalf("CreateWorktree() error: %v", err)
+	}
+	if len(result.Warnings) != 0 {
+		t.Fatalf("CreateWorktree() warnings = %v, want none", result.Warnings)
+	}
+	if len(calls) != 1 {
+		t.Fatalf("stacklit calls = %#v, want one call", calls)
+	}
+	wantIndexPath := filepath.Join(result.WorktreeDir, "stacklit.json")
+	if calls[0].OutputPath != wantIndexPath {
+		t.Fatalf("stacklit output path = %q, want %q", calls[0].OutputPath, wantIndexPath)
+	}
+	if got := string(readCreateWorktreeFile(t, wantIndexPath)); got != result.WorktreeDir {
+		t.Fatalf("stacklit.json content = %q, want worktree dir", got)
+	}
+	if status := runGitInDir(t, result.WorktreeDir, "status", "--porcelain"); status != "" {
+		t.Fatalf("git status --porcelain = %q, want clean", status)
+	}
+	if ls := runGitInDir(t, result.WorktreeDir, "ls-files", "-v", "stacklit.json"); !strings.HasPrefix(ls, "S ") {
+		t.Fatalf("git ls-files -v stacklit.json = %q, want skip-worktree marker", ls)
 	}
 }
 
@@ -834,6 +883,20 @@ func withCreateWorktreeScipRuntimeRunner(t *testing.T, runner scipsearch.Runtime
 	})
 }
 
+func withCreateWorktreeStacklitRuntimeRunner(t *testing.T, runner stacklit.RuntimeRunner) {
+	t.Helper()
+	stacklitRuntimeRunnerMu.Lock()
+	previous := stacklitRuntimeRunner
+	stacklitRuntimeRunner = runner
+	stacklitRuntimeRunnerMu.Unlock()
+
+	t.Cleanup(func() {
+		stacklitRuntimeRunnerMu.Lock()
+		stacklitRuntimeRunner = previous
+		stacklitRuntimeRunnerMu.Unlock()
+	})
+}
+
 func addTrackedGoSourceForCreateWorktreeScipTest(t *testing.T, projectRoot string) {
 	t.Helper()
 	if err := os.WriteFile(filepath.Join(projectRoot, ".gitignore"), []byte(".claude/\n.liza-hooks/\n"), 0o644); err != nil {
@@ -850,6 +913,16 @@ func addTrackedGoSourceForCreateWorktreeScipTest(t *testing.T, projectRoot strin
 	testhelpers.MustGit(t, projectRoot, "branch", "-f", "integration", "HEAD")
 }
 
+func commitTrackedStacklitForCreateWorktreeTest(t *testing.T, projectRoot string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(projectRoot, "stacklit.json"), []byte(`{"project":{"name":"test"}}`+"\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(stacklit.json) error: %v", err)
+	}
+	testhelpers.MustGit(t, projectRoot, "add", "stacklit.json")
+	testhelpers.MustGit(t, projectRoot, "commit", "-m", "Add stacklit index")
+	testhelpers.MustGit(t, projectRoot, "branch", "-f", "integration", "HEAD")
+}
+
 func writeClaudeSettingsForCreateWorktreeScipTest(t *testing.T, projectRoot string) {
 	t.Helper()
 	settingsDir := filepath.Join(projectRoot, ".claude")
@@ -859,6 +932,15 @@ func writeClaudeSettingsForCreateWorktreeScipTest(t *testing.T, projectRoot stri
 	if err := os.WriteFile(filepath.Join(settingsDir, "settings.json"), []byte("{}\n"), 0o644); err != nil {
 		t.Fatalf("WriteFile(.claude/settings.json) error: %v", err)
 	}
+}
+
+func readCreateWorktreeFile(t *testing.T, path string) []byte {
+	t.Helper()
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(%s) error: %v", path, err)
+	}
+	return content
 }
 
 func writeCreateWorktreeScipIndex(plan scipsearch.RuntimeCommandPlan, content []byte) (string, error) {

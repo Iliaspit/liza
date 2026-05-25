@@ -227,6 +227,10 @@ func ClaimTask(projectRoot, taskID, agentID string) (*ClaimResult, error) {
 	for _, warning := range scipWarnings {
 		log.Printf("WARNING: claim-task %s: %s", taskID, warning)
 	}
+	stacklitWarnings := refreshTaskWorktreeStacklitIndex(worktreeDir)
+	for _, warning := range stacklitWarnings {
+		log.Printf("WARNING: claim-task %s: %s", taskID, warning)
+	}
 
 	// --- Phase 3: Re-validate and Commit ---
 	now := time.Now().UTC()
@@ -327,7 +331,7 @@ func ClaimTask(projectRoot, taskID, agentID string) (*ClaimResult, error) {
 		IntegrationFix:    taskStatus == models.TaskStatusIntegrationFailed,
 		PreviousAssignee:  claimCtx.previousAssignee,
 		WorktreeRecreated: worktreeDeleted && worktreeCreated,
-		Warnings:          append(postCmdWarnings, scipWarnings...),
+		Warnings:          append(append(postCmdWarnings, scipWarnings...), stacklitWarnings...),
 	}, nil
 }
 

@@ -16,6 +16,7 @@ import (
 	"github.com/liza-mas/liza/internal/pipeline"
 	"github.com/liza-mas/liza/internal/precommit"
 	"github.com/liza-mas/liza/internal/scipsearch"
+	"github.com/liza-mas/liza/internal/stacklit"
 	"github.com/liza-mas/liza/internal/testhelpers"
 )
 
@@ -389,6 +390,58 @@ func TestBuildPromptWithContextScipSearchGateOmitsStaleIndexes(t *testing.T) {
 				t.Fatalf("prompt contains scip-search section despite inactive gate:\n%s", prompt)
 			}
 		})
+	}
+}
+
+func TestBuildPromptWithContextStacklitIndexUsesTaskWorktree(t *testing.T) {
+	projectRoot := t.TempDir()
+	testhelpers.SetupPipelineConfig(t, projectRoot)
+	taskWorktree := filepath.Join(projectRoot, ".worktrees", "task-1")
+	if err := os.MkdirAll(taskWorktree, 0o755); err != nil {
+		t.Fatalf("MkdirAll(%q): %v", taskWorktree, err)
+	}
+	t.Setenv(stacklit.EnvEnableStacklit, "true")
+
+	taskStacklitIndex := filepath.Join(taskWorktree, "stacklit.json")
+	projectStacklitIndex := filepath.Join(projectRoot, "stacklit.json")
+	writePromptTestFile(t, taskStacklitIndex, `{"project":{"name":"task"}}`)
+	writePromptTestFile(t, projectStacklitIndex, `{"project":{"name":"project"}}`)
+
+	worktree := ".worktrees/task-1"
+	state := &models.State{
+		Goal: models.Goal{
+			Description: "Test goal",
+			SpecRef:     "specs/goal.md",
+		},
+		Tasks: []models.Task{
+			{
+				ID:          "task-1",
+				Description: "Test task",
+				Status:      models.TaskStatusImplementing,
+				DoneWhen:    "Task is complete",
+				Worktree:    &worktree,
+			},
+		},
+		Config: models.Config{IntegrationBranch: "main"},
+	}
+	config := SupervisorConfig{
+		Role:        "coder",
+		AgentID:     "coder-1",
+		ProjectRoot: projectRoot,
+		SpecsDir:    filepath.Join(projectRoot, "specs"),
+		StatePath:   filepath.Join(projectRoot, ".liza", "state.yaml"),
+	}
+
+	prompt, err := buildPromptWithContext(state, config, "task-1", testResolver(t))
+	if err != nil {
+		t.Fatalf("buildPromptWithContext() error = %v", err)
+	}
+
+	if !strings.Contains(prompt, "stacklit derive -i '"+taskStacklitIndex+"'") {
+		t.Fatalf("prompt missing task worktree Stacklit command for %q", taskStacklitIndex)
+	}
+	if strings.Contains(prompt, projectStacklitIndex) {
+		t.Fatalf("prompt contains project-root Stacklit index path %q for task prompt", projectStacklitIndex)
 	}
 }
 
@@ -917,6 +970,43 @@ func TestBuildOrchestratorPromptContextScipIndexesRenderFromProjectRoot(t *testi
 	}
 	if !strings.Contains(prompt, "Go symbols, references, and implementations are supported.") {
 		t.Fatalf("prompt missing Go capability metadata")
+	}
+}
+
+func TestBuildOrchestratorPromptContextStacklitIndexRendersFromProjectRoot(t *testing.T) {
+	tmpDir := t.TempDir()
+	testhelpers.SetupPipelineConfig(t, tmpDir)
+	t.Setenv(stacklit.EnvEnableStacklit, "true")
+
+	projectStacklitIndex := filepath.Join(tmpDir, "stacklit.json")
+	writePromptTestFile(t, projectStacklitIndex, `{"project":{"name":"project"}}`)
+	taskStacklitIndex := filepath.Join(tmpDir, ".worktrees", "task-1", "stacklit.json")
+	writePromptTestFile(t, taskStacklitIndex, `{"project":{"name":"task"}}`)
+
+	state := &models.State{
+		Goal: models.Goal{
+			Description: "Test goal",
+			SpecRef:     "specs/goal.md",
+		},
+	}
+	config := SupervisorConfig{
+		Role:        "orchestrator",
+		AgentID:     "orchestrator-1",
+		ProjectRoot: tmpDir,
+		SpecsDir:    filepath.Join(tmpDir, "specs"),
+		StatePath:   filepath.Join(tmpDir, ".liza", "state.yaml"),
+	}
+
+	prompt, err := buildOrchestratorPromptContext(state, config, testResolver(t))
+	if err != nil {
+		t.Fatalf("buildOrchestratorPromptContext() error = %v", err)
+	}
+
+	if !strings.Contains(prompt, "stacklit derive -i '"+projectStacklitIndex+"'") {
+		t.Fatalf("prompt missing project-root Stacklit command for %q", projectStacklitIndex)
+	}
+	if strings.Contains(prompt, taskStacklitIndex) {
+		t.Fatalf("prompt contains task worktree Stacklit index path %q for orchestrator prompt", taskStacklitIndex)
 	}
 }
 

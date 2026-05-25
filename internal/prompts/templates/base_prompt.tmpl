@@ -135,4 +135,33 @@ Query routing (when indexes are available):
 - rg: literal strings, config values, comments, CLI command names, filenames
 Decompose broad queries — resolve symbols via scip-search first, then narrow rg for remaining text matches.
 {{- end }}
+
+{{- if .StacklitIndexes }}
+
+=== STACKLIT INDEX ===
+Stacklit index files are available for this target. They are repository snapshots that may lag behind current edits or failed refresh attempts; use them for orientation, then verify against source files before editing.
+
+{{- range .StacklitIndexes }}
+
+Stacklit index: {{ .IndexPath }}
+```bash
+stacklit derive -i {{ .ShellIndexPath }}
+stacklit find-module <query> -i {{ .ShellIndexPath }}
+stacklit get-module <module> -i {{ .ShellIndexPath }}
+stacklit get-dependencies <module> -i {{ .ShellIndexPath }}
+stacklit get-hints -i {{ .ShellIndexPath }}
+stacklit get-hot-files -i {{ .ShellIndexPath }}
+```
+{{- end }}
+
+Query routing (when the Stacklit index is available):
+- stacklit derive: first-pass repository map before opening files
+- stacklit find-module/get-module: module ownership, files, exports, type definitions, and activity
+- stacklit get-dependencies: module impact and dependency direction
+- stacklit get-hints/get-hot-files: workflow commands and churn hotspots
+- scip-search: symbol definitions, references, callers/callees, implementations, package structure when SCIP indexes are also available
+- ast-grep: syntactic shapes — call patterns, signatures, structural matching across files
+- rg: literal strings, config values, comments, CLI command names, filenames
+Use Stacklit for orientation and impact analysis, then verify behavior against source files before editing.
+{{- end }}
 {{- end -}}

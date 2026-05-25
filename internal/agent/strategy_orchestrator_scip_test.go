@@ -14,6 +14,7 @@ import (
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/ops"
 	"github.com/liza-mas/liza/internal/scipsearch"
+	"github.com/liza-mas/liza/internal/stacklit"
 	"github.com/liza-mas/liza/internal/testhelpers"
 )
 
@@ -280,6 +281,47 @@ func TestOrchestratorPreExecutionScipRefreshUsesProjectRootNotTaskWorktree(t *te
 	}
 }
 
+func TestOrchestratorPreExecutionStacklitRefreshUsesProjectRoot(t *testing.T) {
+	projectRoot := t.TempDir()
+	taskWorktree := filepath.Join(projectRoot, ".worktrees", "task-1")
+	if err := os.MkdirAll(taskWorktree, 0o755); err != nil {
+		t.Fatalf("MkdirAll(task worktree) error = %v", err)
+	}
+	bb := newOrchestratorScipTestBlackboard(t, projectRoot, nil)
+	t.Setenv(stacklit.EnvEnableStacklit, "true")
+
+	var called bool
+	restore := replaceOrchestratorStacklitRefreshForTest(t, func(opts stacklit.RefreshOptions) (stacklit.RefreshResult, error) {
+		called = true
+		if opts.TargetRoot != projectRoot {
+			t.Fatalf("TargetRoot = %q, want project root %q", opts.TargetRoot, projectRoot)
+		}
+		if opts.TargetKind != stacklit.TargetKindProjectRoot {
+			t.Fatalf("TargetKind = %q, want %q", opts.TargetKind, stacklit.TargetKindProjectRoot)
+		}
+		indexPath := filepath.Join(opts.TargetRoot, "stacklit.json")
+		if err := os.WriteFile(indexPath, []byte(`{"project":{"name":"root"}}`), 0o644); err != nil {
+			t.Fatalf("WriteFile(stacklit.json) error = %v", err)
+		}
+		return stacklit.RefreshResult{Successes: []stacklit.IndexRef{{Path: indexPath}}}, nil
+	})
+	defer restore()
+
+	strategy := &orchestratorStrategy{}
+	if err := strategy.PreExecution(bb, SupervisorConfig{AgentID: "orchestrator-1", ProjectRoot: projectRoot}); err != nil {
+		t.Fatalf("PreExecution() error = %v", err)
+	}
+	if !called {
+		t.Fatal("orchestrator Stacklit refresh was not called")
+	}
+	if _, err := os.Stat(filepath.Join(projectRoot, "stacklit.json")); err != nil {
+		t.Fatalf("project stacklit.json stat error = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(taskWorktree, "stacklit.json")); !os.IsNotExist(err) {
+		t.Fatalf("task worktree stacklit.json stat error = %v, want not exist", err)
+	}
+}
+
 func newOrchestratorScipTestBlackboard(t *testing.T, projectRoot string, mutate func(*models.State)) *db.Blackboard {
 	t.Helper()
 
@@ -328,6 +370,16 @@ func replaceOrchestratorScipRefreshForTest(t *testing.T, refresh func(scipsearch
 	orchestratorScipRefresh = refresh
 	return func() {
 		orchestratorScipRefresh = previous
+	}
+}
+
+func replaceOrchestratorStacklitRefreshForTest(t *testing.T, refresh func(stacklit.RefreshOptions) (stacklit.RefreshResult, error)) func() {
+	t.Helper()
+
+	previous := orchestratorStacklitRefresh
+	orchestratorStacklitRefresh = refresh
+	return func() {
+		orchestratorStacklitRefresh = previous
 	}
 }
 

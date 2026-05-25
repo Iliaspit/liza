@@ -22,6 +22,7 @@ type BasePromptConfig struct {
 	GoalSpecRef string
 
 	ScipSearchIndexes []ScipSearchIndex
+	StacklitIndexes   []StacklitIndex
 }
 
 // ScipSearchIndex is prompt-safe metadata for one successful generated SCIP index.
@@ -30,9 +31,15 @@ type ScipSearchIndex struct {
 	IndexPath string
 }
 
+// StacklitIndex is prompt-safe metadata for one generated Stacklit index.
+type StacklitIndex struct {
+	IndexPath string
+}
+
 type basePromptTemplateData struct {
 	BasePromptConfig
 	ScipSearchIndexes []scipSearchPromptIndex
+	StacklitIndexes   []stacklitPromptIndex
 }
 
 type scipSearchPromptIndex struct {
@@ -42,6 +49,11 @@ type scipSearchPromptIndex struct {
 	CapabilitySummary         string
 	ImplementationGuidance    string
 	ShowImplementationCommand bool
+}
+
+type stacklitPromptIndex struct {
+	IndexPath      string
+	ShellIndexPath string
 }
 
 // SiblingTaskSummary provides minimal context about sibling tasks in the same sprint
@@ -58,8 +70,23 @@ func BuildBasePrompt(config BasePromptConfig) (string, error) {
 	data := basePromptTemplateData{
 		BasePromptConfig:  config,
 		ScipSearchIndexes: buildScipSearchPromptIndexes(config.ScipSearchIndexes),
+		StacklitIndexes:   buildStacklitPromptIndexes(config.StacklitIndexes),
 	}
 	return executeTemplate("base_prompt", data)
+}
+
+func buildStacklitPromptIndexes(indexes []StacklitIndex) []stacklitPromptIndex {
+	promptIndexes := make([]stacklitPromptIndex, 0, len(indexes))
+	for _, index := range indexes {
+		if index.IndexPath == "" {
+			continue
+		}
+		promptIndexes = append(promptIndexes, stacklitPromptIndex{
+			IndexPath:      index.IndexPath,
+			ShellIndexPath: shellQuote(index.IndexPath),
+		})
+	}
+	return promptIndexes
 }
 
 func buildScipSearchPromptIndexes(indexes []ScipSearchIndex) []scipSearchPromptIndex {

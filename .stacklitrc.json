@@ -1,0 +1,10 @@
+{
+  "ignore": [
+    ".liza/",
+    ".worktrees/",
+    "stacklit.html"
+  ],
+  "output": {
+    "json": "stacklit.json"
+  }
+}

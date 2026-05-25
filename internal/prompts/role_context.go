@@ -54,6 +54,11 @@ type ScipIndexRef struct {
 	Path     string
 }
 
+// StacklitIndexRef carries prompt-safe metadata for one available Stacklit index.
+type StacklitIndexRef struct {
+	Path string
+}
+
 // RoleContextData is the unified template data type for all role template blocks.
 // Each field group is populated as appropriate for the role being rendered.
 // Fields not relevant to a particular role remain at their zero value.
@@ -129,6 +134,7 @@ type RoleContextData struct {
 	CheckpointSummary string
 	PipelineConfig    string
 	ScipIndexes       []ScipIndexRef
+	StacklitIndexes   []StacklitIndexRef
 
 	// Config/state
 	ProjectRoot string

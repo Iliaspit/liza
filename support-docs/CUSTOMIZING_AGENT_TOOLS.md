@@ -61,6 +61,25 @@ auto-discovery behavior. Treat the explicit `--index <path>` supplied by Liza as
 the authority. If no explicit index path is available, fall back to `rg`,
 `ast-grep`, exact reads, and other worktree-safe tools.
 
+### Worktree-Local Stacklit Indexes
+
+When Liza supplies an explicit Stacklit index path in an agent prompt, use
+`stacklit` for low-token repository orientation before opening files:
+
+- `stacklit derive -i <path>` for a compact module/dependency/hints map
+- `stacklit find-module <query> -i <path>` to locate likely ownership
+- `stacklit get-module <module> -i <path>` for files, exports, type
+  definitions, dependencies, and activity
+- `stacklit get-dependencies <module> -i <path>` for impact checks
+- `stacklit get-hints -i <path>` and `stacklit get-hot-files -i <path>` for
+  workflow commands and churn hotspots
+
+This is the MAS-safe path for broad codebase navigation because the query is
+tied to a caller-supplied worktree or project-root index. Agents should not
+infer index locations, regenerate insights, run `stacklit view`, or mutate
+`stacklit-insights.json` / `.stacklitrc.json`. Treat the explicit `-i <path>`
+supplied by Liza as the authority.
+
 ### Per-Worktree Servers
 
 Language servers are tied to a specific worktree. In multi-agent mode, Liza may

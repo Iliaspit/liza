@@ -13,6 +13,7 @@ import (
 	"github.com/liza-mas/liza/internal/ops"
 	"github.com/liza-mas/liza/internal/paths"
 	"github.com/liza-mas/liza/internal/scipsearch"
+	"github.com/liza-mas/liza/internal/stacklit"
 )
 
 // errTaskBlocked is a sentinel indicating that blockReviewerTask already
@@ -20,7 +21,10 @@ import (
 // call releaseReviewerClaimQuietly when this error is returned.
 var errTaskBlocked = errors.New("task blocked")
 
-var reviewerWorktreeRefreshIndexes = scipsearch.RefreshIndexes
+var (
+	reviewerWorktreeRefreshIndexes       = scipsearch.RefreshIndexes
+	reviewerWorktreeRefreshStacklitIndex = stacklit.RefreshIndex
+)
 
 // ensureReviewerWorktree verifies the worktree exists for a reviewer task.
 // Returns (true, nil) if the worktree was recovered from an existing branch.
@@ -92,6 +96,20 @@ func ensureReviewerWorktree(projectRoot string, bb *db.Blackboard, taskID, agent
 			"scip-search indexer failed after worktree recovery",
 			"task_id", taskID,
 			"language", failure.Language,
+			"diagnostic", failure.Diagnostic,
+		)
+	}
+	stacklitResult, stacklitErr := reviewerWorktreeRefreshStacklitIndex(stacklit.RefreshOptions{
+		TargetRoot: wtPath,
+		TargetKind: stacklit.TargetKindTaskWorktree,
+	})
+	if stacklitErr != nil {
+		logger.Warn("stacklit refresh failed after worktree recovery", "task_id", taskID, "error", stacklitErr)
+	}
+	for _, failure := range stacklitResult.Failures {
+		logger.Warn(
+			"stacklit indexer failed after worktree recovery",
+			"task_id", taskID,
 			"diagnostic", failure.Diagnostic,
 		)
 	}

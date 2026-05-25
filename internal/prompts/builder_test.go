@@ -254,6 +254,74 @@ func TestBuildBasePromptScipSearchRendersSuppliedIndexes(t *testing.T) {
 	}
 }
 
+func TestBuildBasePromptStacklitOmittedWhenNoIndexes(t *testing.T) {
+	config := BasePromptConfig{
+		Role:        "code-coder",
+		AgentID:     "coder-1",
+		TaskID:      "task-1",
+		SpecsDir:    "/project/specs",
+		ProjectRoot: "/project",
+		StatePath:   "/project/.liza/state.yaml",
+		GoalDesc:    "Build a web API",
+		GoalSpecRef: "specs/vision.md",
+	}
+
+	prompt, err := BuildBasePrompt(config)
+	if err != nil {
+		t.Fatalf("BuildBasePrompt() error: %v", err)
+	}
+
+	for _, notWant := range []string{
+		"=== STACKLIT INDEX ===",
+		"stacklit derive",
+		"stacklit get-module",
+	} {
+		if strings.Contains(prompt, notWant) {
+			t.Fatalf("BuildBasePrompt() rendered stacklit content %q with no supplied indexes", notWant)
+		}
+	}
+}
+
+func TestBuildBasePromptStacklitRendersSuppliedIndex(t *testing.T) {
+	indexPath := "/abs/worktree with spaces/stacklit.json"
+	quotedPath := "'/abs/worktree with spaces/stacklit.json'"
+	config := BasePromptConfig{
+		Role:        "code-coder",
+		AgentID:     "coder-1",
+		TaskID:      "task-1",
+		SpecsDir:    "/project/specs",
+		ProjectRoot: "/project",
+		StatePath:   "/project/.liza/state.yaml",
+		GoalDesc:    "Build a web API",
+		GoalSpecRef: "specs/vision.md",
+		StacklitIndexes: []StacklitIndex{
+			{IndexPath: indexPath},
+		},
+	}
+
+	prompt, err := BuildBasePrompt(config)
+	if err != nil {
+		t.Fatalf("BuildBasePrompt() error: %v", err)
+	}
+
+	for _, want := range []string{
+		"=== STACKLIT INDEX ===",
+		"Stacklit index: " + indexPath,
+		"Stacklit index files are available for this target. They are repository snapshots that may lag behind current edits or failed refresh attempts; use them for orientation, then verify against source files before editing.",
+		"stacklit derive -i " + quotedPath,
+		"stacklit find-module <query> -i " + quotedPath,
+		"stacklit get-module <module> -i " + quotedPath,
+		"stacklit get-dependencies <module> -i " + quotedPath,
+		"stacklit get-hints -i " + quotedPath,
+		"stacklit get-hot-files -i " + quotedPath,
+		"Use Stacklit for orientation and impact analysis, then verify behavior against source files before editing.",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("BuildBasePrompt() missing expected stacklit content:\n%q", want)
+		}
+	}
+}
+
 func TestRenderOrchestratorDashboard(t *testing.T) {
 	now := time.Now().UTC()
 	projectRoot := setupPipelineConfig(t)

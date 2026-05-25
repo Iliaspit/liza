@@ -1,0 +1,2155 @@
+{
+  "$schema": "https://stacklit.dev/schema/v1.json",
+  "version": "1",
+  "generated_at": "2026-05-25T13:29:37Z",
+  "stacklit_version": "dev",
+  "merkle_hash": "d7a247c32050b2d3733d51d87df32f45eff384401487d08c48d58d10bdd37304",
+  "project": {
+    "name": "liza",
+    "root": ".",
+    "type": "single"
+  },
+  "tech": {
+    "primary_language": "go",
+    "languages": {
+      "go": {
+        "files": 440,
+        "lines": 166470
+      },
+      "python": {
+        "files": 8,
+        "lines": 4147
+      },
+      "shell": {
+        "files": 4,
+        "lines": 776
+      }
+    },
+    "frameworks": [
+      "GitHub Actions"
+    ]
+  },
+  "structure": {
+    "entrypoints": [
+      "cmd/liza/main.go"
+    ],
+    "total_files": 452,
+    "total_lines": 171393
+  },
+  "modules": {
+    "cmd/liza": {
+      "purpose": "CLI entrypoint and command dispatch bootstrap",
+      "language": "go",
+      "files": 20,
+      "lines": 7867,
+      "file_list": [
+        "agent_help_test.go",
+        "cmd_agent.go",
+        "cmd_agent_cli_test.go",
+        "cmd_check.go",
+        "cmd_init.go",
+        "cmd_init_test.go",
+        "cmd_review.go",
+        "cmd_review_test.go",
+        "cmd_system.go",
+        "cmd_system_test.go",
+        "cmd_task.go",
+        "cmd_worktree.go",
+        "get_test.go",
+        "json_wiring_test.go",
+        "main.go",
+        "main_test.go",
+        "mutation_wiring_test.go",
+        "rbac.go",
+        "rbac_test.go",
+        "rootcmd_test_helpers_test.go"
+      ],
+      "exports": [
+        "BuildDate",
+        "GitCommit",
+        "Version"
+      ],
+      "depends_on": [
+        "internal/agent",
+        "internal/commands",
+        "internal/db",
+        "internal/errors",
+        "internal/identity",
+        "internal/interactive",
+        "internal/jsonout",
+        "internal/models",
+        "internal/ops",
+        "internal/paths",
+        "internal/pipeline",
+        "internal/roles",
+        "internal/tui"
+      ],
+      "activity": "low"
+    },
+    "internal/agent": {
+      "purpose": "Agent supervision, prompt construction, provider execution, heartbeat, and role strategy runtime",
+      "language": "go",
+      "files": 42,
+      "lines": 21443,
+      "file_list": [
+        "claiming.go",
+        "claiming_priority_test.go",
+        "claiming_test.go",
+        "cli.go",
+        "cli_test.go",
+        "envfile_test.go",
+        "heartbeat.go",
+        "heartbeat_test.go",
+        "logging.go",
+        "masker.go",
+        "masker_test.go",
+        "merge_gate_test.go",
+        "output.go",
+        "output_test.go",
+        "progress_watchdog.go",
+        "prompt.go",
+        "prompt_test.go",
+        "provider_audit.go",
+        "provider_audit_test.go",
+        "provider_unavailable.go"
+      ],
+      "exports": [
+        "ApplyYAMLTimeouts(s RoleStrategy, execution time.Duration, pollInterval time.Dur",
+        "AutoAssignAgentID(bb *db.Blackboard, role string, maxRetries int, tryFn any) (st",
+        "BuildPrompt(state *models.State, config SupervisorConfig, _ string) (string, err",
+        "BuildPrompt(state *models.State, config SupervisorConfig, taskID string) (string",
+        "CheckProviderUnavailableSignal(projectRoot string, provider string) bool",
+        "CheckQuotaSignal(projectRoot string, provider string) bool",
+        "ClaimTask(_ SupervisorConfig, _ *db.Blackboard) (string, string, error)",
+        "ClaimTask(config SupervisorConfig, bb *db.Blackboard) (string, string, error)",
+        "ClearProviderUnavailableSignal(projectRoot string, provider string) error",
+        "ClearQuotaSignal(projectRoot string, provider string) error"
+      ],
+      "type_defs": {
+        "CLIExecutionResult": "ExitCode int, Output string",
+        "CLIExecutor": "interface{Execute(), ExecuteInteractive()}",
+        "CLIResolutionConfig": "DefaultCLI string, DefaultDoerCLI string, DefaultReviewerCLI string",
+        "HeartbeatConfig": "AgentID string, StatePath string, Interval time.Duration, LeaseDuration time.Duration, State *models.State",
+        "OrchestratorWakeResult": "Trigger OrchestratorWakeTrigger, Count int",
+        "ProviderAuditDegraded": "Provider string, Message string",
+        "ProviderUnavailable": "Provider string, Message string",
+        "QuotaExhaustion": "Provider string, Message string",
+        "RoleStrategy": "interface{DefaultTimeout(), WaitConfig(), PreWork(), WaitForWork(), ClaimTask(), PreExecution(), BuildPrompt(), PostExecution()}",
+        "SupervisorConfig": "AgentID string, Role string, ProjectRoot string, StatePath string, LogPath string, SpecsDir string, CLIName string, Interactive bool, InitialTask string, Executor CLIExecutor, ExecutionTimeout time..."
+      },
+      "depends_on": [
+        "internal/codexconfig",
+        "internal/db",
+        "internal/errors",
+        "internal/git",
+        "internal/identity",
+        "internal/models",
+        "internal/ops",
+        "internal/paths",
+        "internal/pipeline",
+        "internal/precommit",
+        "internal/prompts",
+        "internal/roles",
+        "internal/scipsearch",
+        "internal/secretmask",
+        "internal/stacklit"
+      ],
+      "depended_by": [
+        "cmd/liza",
+        "internal/commands",
+        "internal/process",
+        "internal/tui"
+      ],
+      "activity": "high"
+    },
+    "internal/alerts": {
+      "purpose": "Structured anomaly and alert reporting for orchestration state",
+      "language": "go",
+      "files": 1,
+      "lines": 88,
+      "file_list": [
+        "alerts.go"
+      ],
+      "exports": [
+        "AlertLevelCritical",
+        "AlertLevelWarning",
+        "Key(alert Alert) string",
+        "ParseLine(line string) (Alert, bool)",
+        "String() string",
+        "Write(alertsLog string, alert Alert) error",
+        "type Alert",
+        "type AlertLevel"
+      ],
+      "type_defs": {
+        "Alert": "Timestamp time.Time, Level AlertLevel, Category string, Message string"
+      },
+      "depended_by": [
+        "internal/commands",
+        "internal/ops",
+        "internal/tui"
+      ],
+      "activity": "low"
+    },
+    "internal/analysis": {
+      "purpose": "Project and task analysis helpers used by orchestration operations",
+      "language": "go",
+      "files": 2,
+      "lines": 1120,
+      "file_list": [
+        "patterns.go",
+        "patterns_test.go"
+      ],
+      "exports": [
+        "DetectPatterns(anomalies []models.Anomaly) PatternResult",
+        "DetectUnacknowledgedPatterns(state *models.State) (PatternResult, []models.Anoma",
+        "GenerateReport(result PatternResult, anomalies []models.Anomaly, timestamp time.",
+        "UnacknowledgedAnomalies(state *models.State) ([]models.Anomaly, int)",
+        "type PatternResult"
+      ],
+      "type_defs": {
+        "PatternResult": "Triggered bool, Pattern string, Severity string, Evidence string"
+      },
+      "depends_on": [
+        "internal/models"
+      ],
+      "depended_by": [
+        "internal/commands",
+        "internal/ops"
+      ],
+      "activity": "low"
+    },
+    "internal/codexconfig": {
+      "purpose": "Codex configuration rendering and provider-specific launch settings",
+      "language": "go",
+      "files": 2,
+      "lines": 143,
+      "file_list": [
+        "permissions.go",
+        "permissions_test.go"
+      ],
+      "exports": [
+        "RenderWorkspaceFilesystemSupportAssignments(readRoots []string, writeRoots []str",
+        "SupportReadableRoots(homeDir string) []string",
+        "SupportWritableRoots(homeDir string, cacheDir string) []string",
+        "UniqueNonEmptyStrings(values []string) []string",
+        "WorkspaceFilesystemInlineTable(readRoots []string, writeRoots []string) string"
+      ],
+      "depended_by": [
+        "internal/agent"
+      ],
+      "activity": "low"
+    },
+    "internal/commands": {
+      "purpose": "Cobra command handlers for the liza CLI surface",
+      "language": "go",
+      "files": 95,
+      "lines": 31647,
+      "file_list": [
+        "add_task.go",
+        "add_task_test.go",
+        "add_tasks.go",
+        "agent_health.go",
+        "analyze.go",
+        "analyze_test.go",
+        "assess_blocked.go",
+        "assess_blocked_test.go",
+        "assess_hypothesis_exhausted.go",
+        "await_resubmission.go",
+        "await_verdict.go",
+        "cancel_task.go",
+        "cancel_task_test.go",
+        "claim_task.go",
+        "claim_task_test.go",
+        "clear_stale_review_claims.go",
+        "clear_stale_review_claims_test.go",
+        "delete_agent.go",
+        "delete_agent_test.go",
+        "delete_task.go"
+      ],
+      "exports": [
+        "AddTaskCommand(statePath string, logPath string, input *TaskInput, orchestratorI",
+        "AddTasksCommand(statePath string, logPath string, input *ops.AddTasksInput) erro",
+        "AlertKey(alert Alert) string",
+        "AlertLevelCritical",
+        "AlertLevelWarning",
+        "AnalyzeCommand(projectRoot string) error",
+        "AssessBlockedCommand(projectRoot string, taskID string, note string, agentID str",
+        "AssessHypothesisExhaustedCommand(projectRoot string, taskID string, note string,",
+        "AutoRepairAgentPoolBackoff",
+        "AutoRepairAgentPoolEnabledFromEnv() (bool, string)"
+      ],
+      "type_defs": {
+        "AgentMetricsInfo": "AgentID string, Role string, TasksCompleted int, TasksInProgress int, TasksFailed int, TotalIterations int, SuccessRatePercent int",
+        "AlertSnapshot": "Alerts []Alert, ActiveKeys map[string]bool",
+        "AutoRepairAgentPoolOutcome": "Alerts []Alert, AttemptedRoles []string, SuppressedRoles []string, Spawned []SpawnedAgent, Failed []FailedAgentSpawn",
+        "DegradedAgentCapacity": "AgentID string, Role string, Reason string, LastError string, RecoverHint string",
+        "FailedAgentSpawn": "Role string, CLI string, Command string, Error string",
+        "InitPairingParams": "Agents []string, Stdin io.Reader, ContractAction string",
+        "InitParams": "Description string, SpecRef string, ConfigPath string, EntryPoint string, Branch string, PostWorktreeCmd string, AutoResume bool, NoFollowUp bool, DefaultCLI string, DefaultDoerCLI string, DefaultR...",
+        "InspectOptions": "Format string, ProjectRoot string, Internal bool, Summary bool, OutputSummary bool, Active bool, Zombies bool",
+        "MarkAgentDegradedOptions": "ProjectRoot string, AgentID string, Role string, Reason string, LastTask string, CandidateTasks []string, LastError string, RecoverHint string",
+        "MissingRoleWork": "Role string, TaskIDs []string, TaskCount int, CLI string"
+      },
+      "depends_on": [
+        "internal/agent",
+        "internal/alerts",
+        "internal/analysis",
+        "internal/db",
+        "internal/errors",
+        "internal/gitenv",
+        "internal/initcheck",
+        "internal/log",
+        "internal/models",
+        "internal/ops",
+        "internal/paths",
+        "internal/pipeline",
+        "internal/process",
+        "internal/procscan",
+        "internal/projectdetect",
+        "internal/render",
+        "internal/roles",
+        "internal/scipsearch",
+        "internal/statehygiene",
+        "internal/statevalidate"
+      ],
+      "depended_by": [
+        "cmd/liza",
+        "internal/interactive",
+        "internal/tui"
+      ],
+      "activity": "high"
+    },
+    "internal/db": {
+      "purpose": "Database access layer",
+      "language": "go",
+      "files": 6,
+      "lines": 3345,
+      "file_list": [
+        "blackboard.go",
+        "blackboard_test.go",
+        "doc.go",
+        "metrics_test.go",
+        "watcher.go",
+        "watcher_test.go"
+      ],
+      "exports": [
+        "Close() error",
+        "DisableMetrics()",
+        "EnableMetrics()",
+        "Errors() any",
+        "Events() any",
+        "For(statePath string) *Blackboard",
+        "GetAgent(agentID string) (*models.Agent, error)",
+        "GetMetricsRecorder() *filelock.MetricsRecorder",
+        "GetStatePath() string",
+        "GetTask(taskID string) (*models.Task, error)"
+      ],
+      "depends_on": [
+        "internal/errors",
+        "internal/filelock",
+        "internal/models",
+        "internal/roles",
+        "internal/statehygiene"
+      ],
+      "depended_by": [
+        "cmd/liza",
+        "internal/agent",
+        "internal/commands",
+        "internal/ops",
+        "internal/process",
+        "internal/statevalidate",
+        "internal/testhelpers",
+        "internal/tui"
+      ],
+      "activity": "low"
+    },
+    "internal/errors": {
+      "purpose": "Shared typed errors and user-facing failure classification",
+      "language": "go",
+      "files": 3,
+      "lines": 356,
+      "file_list": [
+        "doc.go",
+        "errors.go",
+        "errors_test.go"
+      ],
+      "exports": [
+        "Error() string",
+        "ExitError",
+        "ExitLock",
+        "ExitNotFound",
+        "ExitRestart",
+        "ExitSuccess",
+        "IsAgentCollision(err error) bool",
+        "IsNotFound(err error) bool",
+        "SafeDetails() map[string]any",
+        "Unwrap() error"
+      ],
+      "type_defs": {
+        "AgentCollisionError": "AgentID string",
+        "CLIInputError": "Message string, Err error",
+        "NotFoundError": "Entity string, ID string, Field string",
+        "PermissionError": "Operation string, AgentID string, Role string, Reason string, Err error",
+        "PipelineConfigError": "Operation string, Err error",
+        "ProjectRootError": "Operation string, CurrentDir string, ExpectedRoot string, Err error",
+        "StateSchemaError": "Operation string, Err error",
+        "ValidationError": "Message string, Err error",
+        "WorktreeContextError": "Operation string, TaskID string, Reason string, Err error"
+      },
+      "depended_by": [
+        "cmd/liza",
+        "internal/agent",
+        "internal/commands",
+        "internal/db",
+        "internal/jsonout",
+        "internal/ops",
+        "internal/statevalidate"
+      ],
+      "activity": "low"
+    },
+    "internal/filelock": {
+      "purpose": "Cross-process file locking for serialized state access",
+      "language": "go",
+      "files": 7,
+      "lines": 1359,
+      "file_list": [
+        "doc.go",
+        "errors.go",
+        "errors_test.go",
+        "filelock.go",
+        "filelock_test.go",
+        "metrics.go",
+        "metrics_test.go"
+      ],
+      "exports": [
+        "ClassifyLockError(err error) *LockError",
+        "Clear()",
+        "DefaultLockTimeout",
+        "DisableMetrics()",
+        "EnableMetrics()",
+        "Error() string",
+        "GetMetrics() []*Metrics",
+        "GetMetricsRecorder() *MetricsRecorder",
+        "GetStats() MetricsStats",
+        "IsLockErrorType(err error, errType LockErrorType) bool"
+      ],
+      "type_defs": {
+        "LockError": "Type LockErrorType, Message string, Err error",
+        "Metrics": "Operation string, AcquisitionTime time.Duration, HoldTime time.Duration",
+        "MetricsStats": "Count int, AvgAcquisitionTime time.Duration, AvgHoldTime time.Duration, MaxAcquisitionTime time.Duration, MaxHoldTime time.Duration"
+      },
+      "depended_by": [
+        "internal/db",
+        "internal/log"
+      ],
+      "activity": "low"
+    },
+    "internal/git": {
+      "purpose": "Git integration",
+      "language": "go",
+      "files": 10,
+      "lines": 2360,
+      "file_list": [
+        "git.go",
+        "git_test.go",
+        "merge.go",
+        "merge_test.go",
+        "query.go",
+        "query_test.go",
+        "rebase.go",
+        "rebase_test.go",
+        "worktree.go",
+        "worktree_test.go"
+      ],
+      "exports": [
+        "AbortMerge() error",
+        "AbortRebase(wtPath string) error",
+        "AttachWorktree(taskID string, existingBranch string) error",
+        "BranchExists(branch string) (bool, error)",
+        "CalculateDrift(baseCommit string, targetBranch string) (int, error)",
+        "CheckoutBranch(branch string) error",
+        "CreateBranch(branch string) error",
+        "CreateCommitFromTree(treeSHA string, parents []string, message string) (string, ",
+        "CreateWorktree(taskID string, fromBranch string) (string, error)",
+        "CreateWorktreeFresh(taskID string, fromBranch string) (string, error)"
+      ],
+      "type_defs": {
+        "RebaseConflictError": "Output string",
+        "RebaseError": "Command []string, Output string, Err error",
+        "RefConflictError": "Ref string, Expected string, Actual string",
+        "Worktree": "Path string, Commit string, Branch string"
+      },
+      "depends_on": [
+        "internal/gitenv",
+        "internal/paths"
+      ],
+      "depended_by": [
+        "internal/agent",
+        "internal/ops",
+        "internal/statevalidate"
+      ],
+      "activity": "low"
+    },
+    "internal/gitenv": {
+      "purpose": "Git command execution helpers with controlled environment handling",
+      "language": "go",
+      "files": 2,
+      "lines": 192,
+      "file_list": [
+        "gitenv.go",
+        "gitenv_test.go"
+      ],
+      "exports": [
+        "CombinedOutput(dir string, args ...string) ([]byte, error)",
+        "CombinedOutputWithTimeout(timeout time.Duration, dir string, args ...string) ([]",
+        "Command(args ...string) *exec.Cmd",
+        "DefaultCommandTimeout",
+        "DefaultCommandWaitDelay",
+        "Env() []string",
+        "Error() string",
+        "Output(dir string, args ...string) ([]byte, error)",
+        "OutputWithTimeout(timeout time.Duration, dir string, args ...string) ([]byte, er",
+        "type TimeoutError"
+      ],
+      "type_defs": {
+        "TimeoutError": "Args []string, Dir string, Timeout time.Duration, Output []byte"
+      },
+      "depended_by": [
+        "internal/commands",
+        "internal/git",
+        "internal/initcheck",
+        "internal/paths",
+        "internal/precommit",
+        "internal/scipsearch",
+        "internal/stacklit",
+        "internal/testhelpers"
+      ],
+      "activity": "low"
+    },
+    "internal/identity": {
+      "purpose": "Agent and operator identity resolution",
+      "language": "go",
+      "files": 2,
+      "lines": 596,
+      "file_list": [
+        "resolver.go",
+        "resolver_test.go"
+      ],
+      "exports": [
+        "ExtractNumber(agentID string) (int, error)",
+        "ExtractRole(agentID string) (string, error)",
+        "NextAvailableID(role string, registeredIDs []string) string",
+        "Resolve(config Config) (string, error)",
+        "ValidateFormat(agentID string) error",
+        "ValidateRole(agentID string, expectedRole string) error",
+        "type Config"
+      ],
+      "type_defs": {
+        "Config": "FlagValue string, DefaultValue string, Required bool"
+      },
+      "depended_by": [
+        "cmd/liza",
+        "internal/agent",
+        "internal/ops"
+      ],
+      "activity": "low"
+    },
+    "internal/initcheck": {
+      "purpose": "Repository initialization and runtime preflight checks",
+      "language": "go",
+      "files": 2,
+      "lines": 263,
+      "file_list": [
+        "spec.go",
+        "spec_test.go"
+      ],
+      "exports": [
+        "EnsureSpecCommittedClean(projectRoot string, specPath string) (string, error)"
+      ],
+      "depends_on": [
+        "internal/gitenv"
+      ],
+      "depended_by": [
+        "internal/commands",
+        "internal/ops"
+      ],
+      "activity": "low"
+    },
+    "internal/integration": {
+      "purpose": "Integration branch and merge-flow coordination",
+      "language": "go",
+      "files": 7,
+      "lines": 4645,
+      "file_list": [
+        "await_resubmission_test.go",
+        "await_verdict_test.go",
+        "concurrent_operations_test.go",
+        "e2e_workflow_test.go",
+        "full_sprint_test.go",
+        "lease_expiry_test.go",
+        "sprint_and_merge_test.go"
+      ],
+      "activity": "low"
+    },
+    "internal/interactive": {
+      "purpose": "Interactive terminal prompts and confirmation flows",
+      "language": "go",
+      "files": 4,
+      "lines": 351,
+      "file_list": [
+        "init_wizard.go",
+        "init_wizard_test.go",
+        "post_init.go",
+        "tty.go"
+      ],
+      "exports": [
+        "DetectContractConflict(projectRoot string, agents []string, contractTarget strin",
+        "IsInteractive() bool",
+        "PrintPostInitSummary(mode string, agents []string)",
+        "RunInitWizard(projectRoot string) (*InitWizardResult, error)",
+        "type InitWizardResult"
+      ],
+      "type_defs": {
+        "InitWizardResult": "Mode string, Agents []string, Description string, SpecRef string, EntryPoint string, ContractAction string"
+      },
+      "depends_on": [
+        "internal/commands"
+      ],
+      "depended_by": [
+        "cmd/liza"
+      ],
+      "activity": "low"
+    },
+    "internal/jsonout": {
+      "purpose": "Structured JSON command output helpers",
+      "language": "go",
+      "files": 4,
+      "lines": 743,
+      "file_list": [
+        "classify.go",
+        "classify_test.go",
+        "envelope.go",
+        "envelope_test.go"
+      ],
+      "exports": [
+        "ClassifyError(err error) (string, string)",
+        "ErrAlreadyWritten",
+        "ErrorDetails(err error) map[string]any",
+        "WriteResult(w io.Writer, result any, warnings []string, err error) error",
+        "type Envelope",
+        "type ErrorDetail"
+      ],
+      "type_defs": {
+        "Envelope": "OK bool, Result any, Warnings []string, Error *ErrorDetail",
+        "ErrorDetail": "Code string, Message string, Details map[string]any"
+      },
+      "depends_on": [
+        "internal/errors",
+        "internal/ops"
+      ],
+      "depended_by": [
+        "cmd/liza"
+      ],
+      "activity": "low"
+    },
+    "internal/log": {
+      "purpose": "Runtime logging setup and log path management",
+      "language": "go",
+      "files": 3,
+      "lines": 902,
+      "file_list": [
+        "doc.go",
+        "logger.go",
+        "logger_test.go"
+      ],
+      "exports": [
+        "Append(entry Entry) error",
+        "GetLastTimestamp() (time.Time, error)",
+        "New(logPath string) *Logger",
+        "Read() ([]Entry, error)",
+        "Validate() error",
+        "WithLockTimeout(timeout time.Duration) *Logger",
+        "type Entry",
+        "type Logger"
+      ],
+      "type_defs": {
+        "Entry": "Timestamp time.Time, Agent string, Action string, Task *string, Detail string"
+      },
+      "depends_on": [
+        "internal/filelock"
+      ],
+      "depended_by": [
+        "internal/commands",
+        "internal/ops",
+        "internal/tui"
+      ],
+      "activity": "low"
+    },
+    "internal/models": {
+      "purpose": "Data models and types",
+      "language": "go",
+      "files": 15,
+      "lines": 6109,
+      "file_list": [
+        "agent.go",
+        "config.go",
+        "dependency_resolver.go",
+        "dependency_resolver_test.go",
+        "diagnostics.go",
+        "diagnostics_test.go",
+        "doc.go",
+        "history.go",
+        "history_test.go",
+        "lease.go",
+        "sprint.go",
+        "state.go",
+        "state_test.go",
+        "task.go",
+        "task_test.go"
+      ],
+      "exports": [
+        "ActiveDoerOwnershipReason(state *State, task *Task, agentID string, pr PipelineR",
+        "AgentHealthDegraded",
+        "AgentHealthOK",
+        "AgentStatusHandoff",
+        "AgentStatusIdle",
+        "AgentStatusPlanning",
+        "AgentStatusReviewing",
+        "AgentStatusStarting",
+        "AgentStatusWaiting",
+        "AgentStatusWorking"
+      ],
+      "type_defs": {
+        "Agent": "Role string, Status AgentStatus, CurrentTask *string, LeaseExpires *time.Time, Heartbeat time.Time, RegisteredAt time.Time, Terminal string, Provider string, IterationsTotal int, ContextPercent int...",
+        "AgentHealth": "State AgentHealthState, Role string, Provider string, PID int, RegisteredAt *time.Time, DegradedAt time.Time, Reason string, LastTask string, CandidateTasks []string, LastError string, RecoverHint ...",
+        "AlignmentHistory": "Timestamp time.Time, Event string, Summary string, Extra map[string]any",
+        "Anomaly": "Timestamp time.Time, Task string, Reporter string, Type string, Details map[string]any, Extra map[string]any",
+        "Approval": "Agent string, Provider string, Timestamp time.Time",
+        "CircuitBreaker": "LastCheck time.Time, Status string, CurrentTrigger *CircuitBreakerTrigger, History []CircuitBreakerHistory, Extra map[string]any",
+        "CircuitBreakerHistory": "Timestamp time.Time, Pattern *string, Severity *string, Result string, Resolution *string, ResolvedAt *time.Time, Extra map[string]any",
+        "CircuitBreakerTrigger": "Timestamp time.Time, Pattern string, Severity string, ReportFile string, Extra map[string]any",
+        "Config": "MaxCoderIterations int, MaxReviewCycles int, HeartbeatInterval int, LeaseDuration int, CoderPollInterval int, DoerMaxWait int, DeprecatedCoderMaxWait int, OrchestratorPollInterval int, Orchestrator...",
+        "DecompositionManifest": "OwnedFiles []string, OwnedModules []string, ReadOnlyDependsOn []int, ReadOnlyTaskDependsOn []string, InterfacesOwned []string, InterfacesConsumed []string, CoverageNotes string"
+      },
+      "depends_on": [
+        "internal/roles",
+        "internal/taskkind"
+      ],
+      "depended_by": [
+        "cmd/liza",
+        "internal/agent",
+        "internal/analysis",
+        "internal/commands",
+        "internal/db",
+        "internal/ops",
+        "internal/pipeline",
+        "internal/precommit",
+        "internal/prompts",
+        "internal/statehygiene",
+        "internal/statevalidate",
+        "internal/testhelpers",
+        "internal/tui"
+      ],
+      "activity": "high"
+    },
+    "internal/ops": {
+      "purpose": "Blackboard mutations and lifecycle operations for tasks, worktrees, reviews, merges, and indexing",
+      "language": "go",
+      "files": 119,
+      "lines": 50917,
+      "file_list": [
+        "add_tasks.go",
+        "add_tasks_test.go",
+        "advance_sprint.go",
+        "advance_sprint_test.go",
+        "agent_health.go",
+        "agent_health_test.go",
+        "analyze.go",
+        "analyze_test.go",
+        "assess_blocked.go",
+        "assess_blocked_test.go",
+        "assess_hypothesis_exhausted.go",
+        "assess_hypothesis_exhausted_test.go",
+        "await_resubmission.go",
+        "await_resubmission_test.go",
+        "await_verdict.go",
+        "await_verdict_test.go",
+        "cancel_task.go",
+        "cancel_task_test.go",
+        "check_commit_allowed.go",
+        "check_commit_allowed_test.go"
+      ],
+      "exports": [
+        "AddTask(statePath string, logPath string, input *AddTaskInput, orchestratorID st",
+        "AddTasks(statePath string, logPath string, input *AddTasksInput) (*AddTasksResul",
+        "AdvanceSprint(projectRoot string) (*AdvanceSprintResult, error)",
+        "AgentDegradedWorktreeCreateFailed",
+        "AgentDegradedWorktreePermissionDenied",
+        "AgentDegradedWorktreeReadonly",
+        "Analyze(projectRoot string) (*AnalyzeResult, error)",
+        "AnalyzeTestFiles(g *git.Git, taskID string, baseCommit string, headRef string) (",
+        "AssessBlocked(projectRoot string, taskID string, note string, agentID string) (*",
+        "AssessHypothesisExhausted(projectRoot string, taskID string, note string, agentI"
+      ],
+      "type_defs": {
+        "AddTaskInput": "ID string, Type string, RolePair string, Description string, SpecRef string, PlanRef string, DoneWhen string, Scope string, Priority int, DependsOn []string",
+        "AddTaskItemResult": "TaskID string, Success bool, Error string, Warnings []string",
+        "AddTaskResult": "TaskID string, Warnings []string",
+        "AddTasksInput": "Tasks []AddTaskInput, OrchestratorID string",
+        "AddTasksResult": "Results []AddTaskItemResult",
+        "AdvanceSprintResult": "ArchivedSprintID string, NewSprintID string, NewSprintNumber int, CarriedTasks []string, ArchivePath string",
+        "AnalyzeResult": "Triggered bool, Pattern string, Severity string, Evidence string, ReportPath string",
+        "AssessBlockedResult": "TaskID string, Warnings []string",
+        "AssessHypothesisExhaustedResult": "TaskID string",
+        "AwaitResubmissionResult": "Verdict string, TaskStatus models.TaskStatus, Reason string, ReviewCommit string, ReviewCycle int"
+      },
+      "depends_on": [
+        "internal/alerts",
+        "internal/analysis",
+        "internal/db",
+        "internal/errors",
+        "internal/git",
+        "internal/identity",
+        "internal/initcheck",
+        "internal/log",
+        "internal/models",
+        "internal/paths",
+        "internal/pipeline",
+        "internal/procscan",
+        "internal/projectdetect",
+        "internal/roles",
+        "internal/scipsearch",
+        "internal/secretmask",
+        "internal/stacklit",
+        "internal/statevalidate"
+      ],
+      "depended_by": [
+        "cmd/liza",
+        "internal/agent",
+        "internal/commands",
+        "internal/jsonout",
+        "internal/prompts",
+        "internal/tui"
+      ],
+      "activity": "high"
+    },
+    "internal/paths": {
+      "purpose": "Canonical project, state, worktree, and artifact path construction",
+      "language": "go",
+      "files": 7,
+      "lines": 946,
+      "file_list": [
+        "doc.go",
+        "goalslug.go",
+        "goalslug_test.go",
+        "normalize.go",
+        "normalize_test.go",
+        "paths.go",
+        "paths_test.go"
+      ],
+      "exports": [
+        "AgentOutputsDir() string",
+        "AgentOutputsDirName",
+        "AgentPromptsDir() string",
+        "AgentPromptsDirName",
+        "AlertsLogFileName",
+        "AlertsLogPath() string",
+        "ArchiveDir() string",
+        "ArchiveDirName",
+        "CircuitBreakerReportFileName",
+        "CircuitBreakerReportPath() string"
+      ],
+      "depends_on": [
+        "internal/gitenv"
+      ],
+      "depended_by": [
+        "cmd/liza",
+        "internal/agent",
+        "internal/commands",
+        "internal/git",
+        "internal/ops",
+        "internal/process",
+        "internal/statevalidate",
+        "internal/tui"
+      ],
+      "activity": "low"
+    },
+    "internal/pipeline": {
+      "purpose": "Role pipeline loading, validation, and prompt section resolution",
+      "language": "go",
+      "files": 6,
+      "lines": 6146,
+      "file_list": [
+        "config.go",
+        "config_test.go",
+        "migrate.go",
+        "migrate_test.go",
+        "resolver.go",
+        "resolver_test.go"
+      ],
+      "exports": [
+        "AllDeclaredStates() []models.TaskStatus",
+        "AllRoleNames() []string",
+        "AllTransitions() []TransitionDef",
+        "AllowedOperations(name string) ([]string, error)",
+        "ApprovedStatus(rolePair string) (models.TaskStatus, error)",
+        "AvailableAutoTransitions(status models.TaskStatus, transitionsExecuted map[strin",
+        "AvailableManualTransitions(status models.TaskStatus, transitionsExecuted map[str",
+        "CleanStatus(rolePair string) (models.TaskStatus, error)",
+        "ContextSections(name string) ([]string, error)",
+        "DecompositionOutputRef(rolePair string) (string, error)"
+      ],
+      "type_defs": {
+        "Pipeline": "Roles map[string]RoleDef, RolePairs map[string]RolePairDef, SubPipelines map[string]SubPipeline, PipelineTransitions []TransitionDef, EntryPoints map[string]string",
+        "PipelineConfig": "Pipeline Pipeline",
+        "ResolvedTimeouts": "Execution time.Duration, PollInterval time.Duration, MaxWait time.Duration",
+        "ReviewPolicyDef": "Quorum int, ProviderDiversity string, SignificantChange *ReviewPolicyOverrideDef, ArchitectureImpact *ReviewPolicyOverrideDef",
+        "ReviewPolicyOverrideDef": "Quorum int, ProviderDiversity string",
+        "RoleDef": "Type string, DisplayName string, Description string, MaxInstances int, Timeouts *TimeoutDef, ContextSections []string, AllowedOperations []string, Skills []string, MandatoryDocs []string",
+        "RolePairDef": "Doer string, Reviewer string, DecompositionRoot bool, DecompositionOutputRef string, ReviewPolicy *ReviewPolicyDef, States RolePairStates",
+        "RolePairStates": "Initial string, Executing string, Submitted string, Reviewing string, Approved string, Rejected string, PartiallyApproved string, Reviewing2 string, Clean string",
+        "SubPipeline": "Steps []string, Transitions []TransitionDef",
+        "TimeoutDef": "Execution string, PollInterval string, MaxWait string"
+      },
+      "depends_on": [
+        "internal/models"
+      ],
+      "depended_by": [
+        "cmd/liza",
+        "internal/agent",
+        "internal/commands",
+        "internal/ops",
+        "internal/prompts",
+        "internal/statevalidate",
+        "internal/tui"
+      ],
+      "activity": "low"
+    },
+    "internal/precommit": {
+      "purpose": "Pre-commit integration and touched-file hook execution",
+      "language": "go",
+      "files": 2,
+      "lines": 371,
+      "file_list": [
+        "precommit.go",
+        "precommit_test.go"
+      ],
+      "exports": [
+        "BootstrapInFlight(state *models.State) bool",
+        "ConfigExistsOnIntegration(projectRoot string, integrationBranch string) (bool, e",
+        "ErrContextBuild",
+        "Kind"
+      ],
+      "depends_on": [
+        "internal/gitenv",
+        "internal/models",
+        "internal/taskkind"
+      ],
+      "depended_by": [
+        "internal/agent"
+      ],
+      "activity": "low"
+    },
+    "internal/process": {
+      "purpose": "Process launching, tracking, and termination helpers",
+      "language": "go",
+      "files": 5,
+      "lines": 353,
+      "file_list": [
+        "procattr_unix.go",
+        "procattr_unix_test.go",
+        "procattr_windows.go",
+        "spawn.go",
+        "spawn_test.go"
+      ],
+      "exports": [
+        "SetDetachedProcessGroup(cmd *exec.Cmd)",
+        "SpawnAgent(projectRoot string, role string, cli string, extraArgs ...string) (*e"
+      ],
+      "depends_on": [
+        "internal/agent",
+        "internal/db",
+        "internal/paths"
+      ],
+      "depended_by": [
+        "internal/commands",
+        "internal/tui"
+      ],
+      "activity": "low"
+    },
+    "internal/procscan": {
+      "purpose": "Process discovery used by runtime health and cleanup checks",
+      "language": "go",
+      "files": 2,
+      "lines": 422,
+      "file_list": [
+        "liza_agents.go",
+        "liza_agents_test.go"
+      ],
+      "exports": [
+        "ErrProcessScanUnavailable",
+        "FindZombieAgents(opts ZombieScanOptions) ([]ZombieProcess, error)",
+        "IsLizaAgentArgv(argv []string) bool",
+        "MatchesLizaAgentIdentity(argv []string, role string, agentID string) bool",
+        "ParseCmdlineBytes(data []byte) []string",
+        "type ZombieProcess",
+        "type ZombieScanOptions"
+      ],
+      "type_defs": {
+        "ZombieProcess": "PID int, Role string, CLI string, GoalID string, CWD string, Cmdline []string, Reason string",
+        "ZombieScanOptions": "ProjectRoot string, GoalID string, RegisteredPIDs map[int]bool, ProcRoot string"
+      },
+      "depended_by": [
+        "internal/commands",
+        "internal/ops"
+      ],
+      "activity": "low"
+    },
+    "internal/projectdetect": {
+      "purpose": "Project language and toolchain detection for optional indexers",
+      "language": "go",
+      "files": 1,
+      "lines": 107,
+      "file_list": [
+        "node.go"
+      ],
+      "exports": [
+        "DetectInstallCmdInDir(dir string) string",
+        "DetectLockfileInDir(dir string) string",
+        "DetectNodeSubdirs(projectRoot string) []string",
+        "DetectPkgManagerContext(projectRoot string) string",
+        "DetectPostWorktreeCmd(projectRoot string) string"
+      ],
+      "depended_by": [
+        "internal/commands",
+        "internal/ops"
+      ],
+      "activity": "low"
+    },
+    "internal/prompts": {
+      "purpose": "Base prompt, role context, wake prompt, and dashboard rendering templates",
+      "language": "go",
+      "files": 10,
+      "lines": 4664,
+      "file_list": [
+        "builder.go",
+        "builder_test.go",
+        "role_context.go",
+        "role_context_test.go",
+        "templates.go",
+        "text.go",
+        "text_test.go",
+        "wake.go",
+        "wake_initial_planning_render_test.go",
+        "wake_route_data_test.go"
+      ],
+      "exports": [
+        "BuildBasePrompt(config BasePromptConfig) (string, error)",
+        "BuildRoleContext(role string, sectionNames []string, data *RoleContextData) (str",
+        "RenderOrchestratorDashboard(state *models.State, projectRoot string, agentID str",
+        "TruncateText(s string, maxRunes int) string",
+        "type BasePromptConfig",
+        "type CompletedTaskSummary",
+        "type ParentTaskContext",
+        "type RoleContextData",
+        "type ScipIndexRef",
+        "type ScipSearchIndex"
+      ],
+      "type_defs": {
+        "BasePromptConfig": "Role string, AgentID string, TaskID string, SpecsDir string, ProjectRoot string, StatePath string, GoalDesc string, GoalSpecRef string, ScipSearchIndexes []ScipSearchIndex, StacklitIndexes []Stackl...",
+        "CompletedTaskSummary": "ID string, Description string, DoneWhen string, SpecRef string",
+        "ParentTaskContext": "ID string, Description string, DoneWhen string, SpecRef string, EpicRef string, PlanRef string",
+        "RoleContextData": "Role string, AgentID string, RoleType string, TaskID string, Description string, DoneWhen string, Scope string, SpecRef string, EpicRef string, EpicSection string, EpicSlug string, PlanRef string, ...",
+        "ScipIndexRef": "Language string, Path string",
+        "ScipSearchIndex": "Language string, IndexPath string",
+        "SiblingTaskSummary": "ID string, Description string, Status string, PlanRef string, RolePair string",
+        "StacklitIndex": "IndexPath string",
+        "StacklitIndexRef": "Path string",
+        "TaskGraphDigest": "DirectDependencies []TaskGraphEntry, BlockedRelatedTasks []TaskGraphEntry, SiblingsSharingRefs []TaskGraphEntry, CompletedArtifacts []TaskGraphEntry"
+      },
+      "depends_on": [
+        "internal/models",
+        "internal/ops",
+        "internal/pipeline"
+      ],
+      "depended_by": [
+        "internal/agent"
+      ],
+      "activity": "high"
+    },
+    "internal/render": {
+      "purpose": "Reusable text rendering helpers for CLI and prompt output",
+      "language": "go",
+      "files": 5,
+      "lines": 409,
+      "file_list": [
+        "duration.go",
+        "duration_test.go",
+        "format.go",
+        "format_test.go",
+        "template.go"
+      ],
+      "exports": [
+        "ExecuteTemplate(name string, data any) (string, error)",
+        "FormatDuration(d time.Duration) string",
+        "FormatJSON(data any) (string, error)",
+        "FormatTable(headers []string, rows [][]string) string",
+        "FormatValue(data any) (string, error)",
+        "FormatYAML(data any) (string, error)"
+      ],
+      "depended_by": [
+        "internal/commands",
+        "internal/tui"
+      ],
+      "activity": "low"
+    },
+    "internal/roles": {
+      "purpose": "Role definitions, role types, and role-specific behavior metadata",
+      "language": "go",
+      "files": 2,
+      "lines": 250,
+      "file_list": [
+        "roles.go",
+        "roles_test.go"
+      ],
+      "exports": [
+        "All() []string",
+        "Architect",
+        "ArchitectureReviewer",
+        "ClaimBoth",
+        "ClaimDoer",
+        "ClaimReviewer",
+        "CodePlanReviewer",
+        "CodePlanner",
+        "CodeReviewer",
+        "Coder"
+      ],
+      "depended_by": [
+        "cmd/liza",
+        "internal/agent",
+        "internal/commands",
+        "internal/db",
+        "internal/models",
+        "internal/ops"
+      ],
+      "activity": "low"
+    },
+    "internal/scipsearch": {
+      "purpose": "Optional SCIP index generation and prompt-safe scip-search discovery",
+      "language": "go",
+      "files": 3,
+      "lines": 2259,
+      "file_list": [
+        "doc.go",
+        "scipsearch.go",
+        "scipsearch_test.go"
+      ],
+      "exports": [
+        "AvailableIndexes(opts RuntimePlanOptions) ([]IndexRef, error)",
+        "EnvEnableScipSearch",
+        "ParseEnvGate(value string) bool",
+        "PlanRuntimeCommands(opts RuntimePlanOptions) ([]RuntimeCommandPlan, error)",
+        "RefreshIndexes(opts RefreshOptions) (RefreshResult, error)",
+        "ResolveInitConfig(opts InitOptions) (InitResult, error)",
+        "RuntimeEnabled(configuredLanguages []string) bool",
+        "SetCommandRunnerForTest(runner CommandRunner) any",
+        "TargetKindProjectRoot",
+        "TargetKindTaskWorktree"
+      ],
+      "type_defs": {
+        "IndexRef": "Language string, Path string",
+        "InitOptions": "ProjectRoot string, ExplicitLanguages []string, EnvValue string, CommandRunner CommandRunner, GitFiles GitFilesFunc",
+        "InitResult": "Languages []string, Diagnostics []string, Warnings []string",
+        "RefreshFailure": "Language string, Diagnostic string",
+        "RefreshOptions": "TargetRoot string, TargetKind TargetKind, ConfiguredLanguages []string, GitFiles GitFilesFunc, Runner RuntimeRunner",
+        "RefreshResult": "Successes []IndexRef, Failures []RefreshFailure",
+        "RuntimeCommandPlan": "Language string, Name string, Args []string, Dir string, OutputPath string",
+        "RuntimePlanOptions": "TargetRoot string, ConfiguredLanguages []string, GitFiles GitFilesFunc"
+      },
+      "depends_on": [
+        "internal/gitenv"
+      ],
+      "depended_by": [
+        "internal/agent",
+        "internal/commands",
+        "internal/ops"
+      ],
+      "activity": "low"
+    },
+    "internal/secretmask": {
+      "purpose": "Secret redaction for logs, prompts, and command output",
+      "language": "go",
+      "files": 2,
+      "lines": 349,
+      "file_list": [
+        "masker.go",
+        "masker_test.go"
+      ],
+      "exports": [
+        "AddEntries(entries []string)",
+        "Flush() error",
+        "IsSecretKey(key string) bool",
+        "MaskText(text string) string",
+        "New() *Masker",
+        "NewFromEnv(environ []string) *Masker",
+        "NewStreamingWriter(dst io.Writer) *StreamingWriter",
+        "Write(p []byte) (int, error)",
+        "type Masker",
+        "type StreamingWriter"
+      ],
+      "depended_by": [
+        "internal/agent",
+        "internal/ops"
+      ],
+      "activity": "low"
+    },
+    "internal/stacklit": {
+      "purpose": "Optional Stacklit index generation and prompt-safe repository map discovery",
+      "language": "go",
+      "files": 3,
+      "lines": 479,
+      "file_list": [
+        "doc.go",
+        "stacklit.go",
+        "stacklit_test.go"
+      ],
+      "exports": [
+        "AvailableIndexes(opts RuntimePlanOptions) ([]IndexRef, error)",
+        "EnvEnableStacklit",
+        "PlanRuntimeCommand(targetRoot string) (RuntimeCommandPlan, error)",
+        "RefreshIndex(opts RefreshOptions) (RefreshResult, error)",
+        "RuntimeEnabled() bool",
+        "SetRuntimeRunnerForTest(runner RuntimeRunner) any",
+        "TargetKindProjectRoot",
+        "TargetKindTaskWorktree",
+        "type IndexRef",
+        "type RefreshFailure"
+      ],
+      "type_defs": {
+        "IndexRef": "Path string",
+        "RefreshFailure": "Diagnostic string",
+        "RefreshOptions": "TargetRoot string, TargetKind TargetKind, Runner RuntimeRunner",
+        "RefreshResult": "Successes []IndexRef, Failures []RefreshFailure",
+        "RuntimeCommandPlan": "Name string, Args []string, Dir string, OutputPath string",
+        "RuntimePlanOptions": "TargetRoot string"
+      },
+      "depends_on": [
+        "internal/gitenv"
+      ],
+      "depended_by": [
+        "internal/agent",
+        "internal/ops"
+      ],
+      "activity": "low"
+    },
+    "internal/statehygiene": {
+      "purpose": "State cleanup and invariant maintenance for stale runtime records",
+      "language": "go",
+      "files": 2,
+      "lines": 583,
+      "file_list": [
+        "hygiene.go",
+        "hygiene_test.go"
+      ],
+      "exports": [
+        "IsTranscriptPayload(s string) bool",
+        "MaxStateTextBytes",
+        "ScrubStateForMigration(state *models.State) bool",
+        "ScrubbedProviderAuditMessage",
+        "ScrubbedStateMessage",
+        "ValidateState(state *models.State) error"
+      ],
+      "depends_on": [
+        "internal/models"
+      ],
+      "depended_by": [
+        "internal/commands",
+        "internal/db",
+        "internal/statevalidate"
+      ],
+      "activity": "low"
+    },
+    "internal/statevalidate": {
+      "purpose": "Blackboard schema and invariant validation",
+      "language": "go",
+      "files": 19,
+      "lines": 5766,
+      "file_list": [
+        "artifact_refs.go",
+        "artifact_refs_test.go",
+        "candidate_artifact_refs.go",
+        "candidate_artifact_refs_test.go",
+        "validate.go",
+        "validate_agent.go",
+        "validate_agent_test.go",
+        "validate_deps.go",
+        "validate_deps_test.go",
+        "validate_entity.go",
+        "validate_pipeline_test.go",
+        "validate_roles.go",
+        "validate_roles_test.go",
+        "validate_specref_test.go",
+        "validate_sprint.go",
+        "validate_sprint_test.go",
+        "validate_task.go",
+        "validate_task_test.go",
+        "validate_test.go"
+      ],
+      "exports": [
+        "CollectArtifactRefs(state *models.State, projectRoot string) ([]ArtifactRef, err",
+        "CollectMergeArtifactRefs(state *models.State, projectRoot string, mergingTaskID ",
+        "Error() string",
+        "IsApproved(s models.TaskStatus) bool",
+        "IsExecuting(s models.TaskStatus) bool",
+        "IsInitial(s models.TaskStatus) bool",
+        "IsRejected(s models.TaskStatus) bool",
+        "IsReviewing(s models.TaskStatus) bool",
+        "IsSubmitted(s models.TaskStatus) bool",
+        "SafeDetails() map[string]any"
+      ],
+      "type_defs": {
+        "ArtifactRef": "Path string, Raw string, Owner ArtifactRefOwner",
+        "ArtifactRefError": "Field string, Value string, Path string, Mode string, TaskID string, OutputIndex *int, Cause string",
+        "ArtifactRefOwner": "Field string, TaskID string, OutputIndex *int",
+        "CandidateArtifactRefError": "CandidateTreeish string, Path string, Value string, Mode string, Cause string, Owners []ArtifactRefOwner, Err error",
+        "CandidateTreeLookup": "interface{TreePathMode()}"
+      },
+      "depends_on": [
+        "internal/db",
+        "internal/errors",
+        "internal/git",
+        "internal/models",
+        "internal/paths",
+        "internal/pipeline",
+        "internal/statehygiene"
+      ],
+      "depended_by": [
+        "internal/commands",
+        "internal/ops"
+      ],
+      "activity": "high"
+    },
+    "internal/taskkind": {
+      "purpose": "Task type and role-pair classification helpers",
+      "language": "go",
+      "files": 1,
+      "lines": 5,
+      "file_list": [
+        "kind.go"
+      ],
+      "exports": [
+        "PreCommitBootstrap"
+      ],
+      "depended_by": [
+        "internal/models",
+        "internal/precommit"
+      ],
+      "activity": "low"
+    },
+    "internal/testguard": {
+      "purpose": "Test-change guardrails and test file analysis",
+      "language": "go",
+      "files": 2,
+      "lines": 121,
+      "file_list": [
+        "parallel_usage_test.go",
+        "sleep_usage_test.go"
+      ],
+      "activity": "low"
+    },
+    "internal/testhelpers": {
+      "purpose": "Shared helpers for Go unit and integration tests",
+      "language": "go",
+      "files": 10,
+      "lines": 1862,
+      "file_list": [
+        "assertions.go",
+        "assertions_test.go",
+        "fixtures.go",
+        "fixtures_test.go",
+        "git.go",
+        "ops_testing.go",
+        "pipeline.go",
+        "setup.go",
+        "setup_test.go",
+        "utils.go"
+      ],
+      "exports": [
+        "AssertError(t testingT, err error, wantErr bool)",
+        "AssertErrorContains(t testingT, err error, substring string)",
+        "AssertNoError(t testingT, err error)",
+        "BuildTaskByStatus(taskID string, status models.TaskStatus, now time.Time) models",
+        "CreateCommittedSpecFile(t *testing.T, tmpDir string, filename string, content st",
+        "CreateCommittedSpecFileOnIntegration(t *testing.T, tmpDir string, filename strin",
+        "CreateSpecFile(t *testing.T, tmpDir string, filename string, content string) str",
+        "CreateTestWorktree(t *testing.T, tmpDir string, taskID string)",
+        "CreateValidState() *models.State",
+        "FindRepoRoot(t *testing.T) string"
+      ],
+      "depends_on": [
+        "internal/db",
+        "internal/gitenv",
+        "internal/models"
+      ],
+      "activity": "low"
+    },
+    "internal/tui": {
+      "purpose": "Terminal UI components for monitoring and operator interaction",
+      "language": "go",
+      "files": 12,
+      "lines": 6932,
+      "file_list": [
+        "commands.go",
+        "commands_test.go",
+        "keymap.go",
+        "keymap_test.go",
+        "model.go",
+        "model_test.go",
+        "styles.go",
+        "styles_test.go",
+        "update.go",
+        "update_test.go",
+        "view.go",
+        "view_test.go"
+      ],
+      "exports": [
+        "CategoryColor(category pipeline.StateCategory) lipgloss.Color",
+        "ColorActive",
+        "ColorApproved",
+        "ColorBareDraft",
+        "ColorFallback",
+        "ColorHandoff",
+        "ColorIdle",
+        "ColorPartialApproved",
+        "ColorPlanning",
+        "ColorRejected"
+      ],
+      "type_defs": {
+        "ActivityEntry": "Timestamp time.Time, Source string, Agent string, Action string, Task string, Detail string, Level string, AlertKey string, Resolved bool",
+        "AlertMsg": "Timestamp time.Time, Level string, Category string, Message string, Key string",
+        "CmdResultMsg": "Success bool, Message string",
+        "KeyMap": "Spawn key.Binding, SpawnWith key.Binding, Terminate key.Binding, Pause key.Binding, Resume key.Binding, AddTask key.Binding, Checkpoint key.Binding, Yolo key.Binding, Help key.Binding, Quit key.Bin...",
+        "LogEntriesMsg": "Entries []log.Entry, NewPosition int64",
+        "StateMsg": "State *models.State",
+        "StateWatcher": "interface{Events(), Errors(), Close()}",
+        "Styles": "HeaderBar lipgloss.Style, HeaderTitle lipgloss.Style, HeaderLabel lipgloss.Style, HeaderStatus lipgloss.Style, AgentPanel lipgloss.Style, TaskPanel lipgloss.Style, ActivityPanel lipgloss.Style, Pan..."
+      },
+      "depends_on": [
+        "internal/agent",
+        "internal/alerts",
+        "internal/commands",
+        "internal/db",
+        "internal/log",
+        "internal/models",
+        "internal/ops",
+        "internal/paths",
+        "internal/pipeline",
+        "internal/process",
+        "internal/render"
+      ],
+      "depended_by": [
+        "cmd/liza"
+      ],
+      "activity": "low"
+    },
+    "root": {
+      "purpose": "Repository-level Go module, embedded assets, docs, specs, and build configuration",
+      "language": "shell",
+      "files": 1,
+      "lines": 267,
+      "file_list": [
+        "install.sh"
+      ],
+      "activity": "low"
+    },
+    "scripts/repro": {
+      "purpose": "Reproduction scripts for debugging specific operational failures",
+      "language": "shell",
+      "files": 1,
+      "lines": 218,
+      "file_list": [
+        "precommit-bootstrap-greenfield.sh"
+      ],
+      "activity": "low"
+    },
+    "skills/context-engineering/scripts": {
+      "purpose": "Skill support scripts for prompt and context analysis",
+      "language": "python",
+      "files": 1,
+      "lines": 962,
+      "file_list": [
+        "context-corpus-index.py"
+      ],
+      "exports": [
+        "detect_log_format(event_type: str) -\u003e str",
+        "parse_file_info(path: Path, base: Path) -\u003e FileInfo",
+        "timestamp_dt(info: FileInfo | OutputMetrics) -\u003e datetime | None"
+      ],
+      "activity": "low"
+    },
+    "skills/liza-logs/scripts": {
+      "purpose": "Skill support scripts for Liza log inspection",
+      "language": "python",
+      "files": 6,
+      "lines": 2992,
+      "file_list": [
+        "analyze-log.py",
+        "analyze-state.py",
+        "query-log.py",
+        "test_analyze_log.py",
+        "test_analyze_state.py",
+        "test_query_log.py"
+      ],
+      "exports": [
+        "add(kind: str, label: str, detail: str = \"\", body: str = \"\", is_error: bool = False) -\u003e None",
+        "analyze_state(state: dict[str, Any]) -\u003e dict[str, Any]",
+        "as_lines(*events: dict[str, Any]) -\u003e list[str]",
+        "as_lines(*events: dict[str, Any]) -\u003e str",
+        "command_completed_event(item_id: str, command: str, output: str = \"\", exit_code: int = 0) -\u003e dict[str, Any]",
+        "detect_format(lines: list[str]) -\u003e str",
+        "load_analyzer() -\u003e Any",
+        "load_query_log() -\u003e Any",
+        "load_state(path: str) -\u003e dict[str, Any]",
+        "load_state_analyzer() -\u003e Any"
+      ],
+      "activity": "low"
+    },
+    "skills/spec-backfill/scripts": {
+      "purpose": "Skill support scripts for specification backfill workflows",
+      "language": "shell",
+      "files": 2,
+      "lines": 291,
+      "file_list": [
+        "detect-stale.sh",
+        "update-mapping.sh"
+      ],
+      "activity": "low"
+    },
+    "skills/white-box-red-testing/scripts": {
+      "purpose": "Skill support scripts for white-box red-test generation",
+      "language": "python",
+      "files": 1,
+      "lines": 193,
+      "file_list": [
+        "discover_targets.py"
+      ],
+      "activity": "low"
+    }
+  },
+  "dependencies": {
+    "edges": [
+      [
+        "cmd/liza",
+        "internal/agent"
+      ],
+      [
+        "cmd/liza",
+        "internal/commands"
+      ],
+      [
+        "cmd/liza",
+        "internal/db"
+      ],
+      [
+        "cmd/liza",
+        "internal/errors"
+      ],
+      [
+        "cmd/liza",
+        "internal/identity"
+      ],
+      [
+        "cmd/liza",
+        "internal/interactive"
+      ],
+      [
+        "cmd/liza",
+        "internal/jsonout"
+      ],
+      [
+        "cmd/liza",
+        "internal/models"
+      ],
+      [
+        "cmd/liza",
+        "internal/ops"
+      ],
+      [
+        "cmd/liza",
+        "internal/paths"
+      ],
+      [
+        "cmd/liza",
+        "internal/pipeline"
+      ],
+      [
+        "cmd/liza",
+        "internal/roles"
+      ],
+      [
+        "cmd/liza",
+        "internal/tui"
+      ],
+      [
+        "internal/agent",
+        "internal/codexconfig"
+      ],
+      [
+        "internal/agent",
+        "internal/db"
+      ],
+      [
+        "internal/agent",
+        "internal/errors"
+      ],
+      [
+        "internal/agent",
+        "internal/git"
+      ],
+      [
+        "internal/agent",
+        "internal/identity"
+      ],
+      [
+        "internal/agent",
+        "internal/models"
+      ],
+      [
+        "internal/agent",
+        "internal/ops"
+      ],
+      [
+        "internal/agent",
+        "internal/paths"
+      ],
+      [
+        "internal/agent",
+        "internal/pipeline"
+      ],
+      [
+        "internal/agent",
+        "internal/precommit"
+      ],
+      [
+        "internal/agent",
+        "internal/prompts"
+      ],
+      [
+        "internal/agent",
+        "internal/roles"
+      ],
+      [
+        "internal/agent",
+        "internal/scipsearch"
+      ],
+      [
+        "internal/agent",
+        "internal/secretmask"
+      ],
+      [
+        "internal/agent",
+        "internal/stacklit"
+      ],
+      [
+        "internal/analysis",
+        "internal/models"
+      ],
+      [
+        "internal/commands",
+        "internal/agent"
+      ],
+      [
+        "internal/commands",
+        "internal/alerts"
+      ],
+      [
+        "internal/commands",
+        "internal/analysis"
+      ],
+      [
+        "internal/commands",
+        "internal/db"
+      ],
+      [
+        "internal/commands",
+        "internal/errors"
+      ],
+      [
+        "internal/commands",
+        "internal/gitenv"
+      ],
+      [
+        "internal/commands",
+        "internal/initcheck"
+      ],
+      [
+        "internal/commands",
+        "internal/log"
+      ],
+      [
+        "internal/commands",
+        "internal/models"
+      ],
+      [
+        "internal/commands",
+        "internal/ops"
+      ],
+      [
+        "internal/commands",
+        "internal/paths"
+      ],
+      [
+        "internal/commands",
+        "internal/pipeline"
+      ],
+      [
+        "internal/commands",
+        "internal/process"
+      ],
+      [
+        "internal/commands",
+        "internal/procscan"
+      ],
+      [
+        "internal/commands",
+        "internal/projectdetect"
+      ],
+      [
+        "internal/commands",
+        "internal/render"
+      ],
+      [
+        "internal/commands",
+        "internal/roles"
+      ],
+      [
+        "internal/commands",
+        "internal/scipsearch"
+      ],
+      [
+        "internal/commands",
+        "internal/statehygiene"
+      ],
+      [
+        "internal/commands",
+        "internal/statevalidate"
+      ],
+      [
+        "internal/db",
+        "internal/errors"
+      ],
+      [
+        "internal/db",
+        "internal/filelock"
+      ],
+      [
+        "internal/db",
+        "internal/models"
+      ],
+      [
+        "internal/db",
+        "internal/roles"
+      ],
+      [
+        "internal/db",
+        "internal/statehygiene"
+      ],
+      [
+        "internal/git",
+        "internal/gitenv"
+      ],
+      [
+        "internal/git",
+        "internal/paths"
+      ],
+      [
+        "internal/initcheck",
+        "internal/gitenv"
+      ],
+      [
+        "internal/interactive",
+        "internal/commands"
+      ],
+      [
+        "internal/jsonout",
+        "internal/errors"
+      ],
+      [
+        "internal/jsonout",
+        "internal/ops"
+      ],
+      [
+        "internal/log",
+        "internal/filelock"
+      ],
+      [
+        "internal/models",
+        "internal/roles"
+      ],
+      [
+        "internal/models",
+        "internal/taskkind"
+      ],
+      [
+        "internal/ops",
+        "internal/alerts"
+      ],
+      [
+        "internal/ops",
+        "internal/analysis"
+      ],
+      [
+        "internal/ops",
+        "internal/db"
+      ],
+      [
+        "internal/ops",
+        "internal/errors"
+      ],
+      [
+        "internal/ops",
+        "internal/git"
+      ],
+      [
+        "internal/ops",
+        "internal/identity"
+      ],
+      [
+        "internal/ops",
+        "internal/initcheck"
+      ],
+      [
+        "internal/ops",
+        "internal/log"
+      ],
+      [
+        "internal/ops",
+        "internal/models"
+      ],
+      [
+        "internal/ops",
+        "internal/paths"
+      ],
+      [
+        "internal/ops",
+        "internal/pipeline"
+      ],
+      [
+        "internal/ops",
+        "internal/procscan"
+      ],
+      [
+        "internal/ops",
+        "internal/projectdetect"
+      ],
+      [
+        "internal/ops",
+        "internal/roles"
+      ],
+      [
+        "internal/ops",
+        "internal/scipsearch"
+      ],
+      [
+        "internal/ops",
+        "internal/secretmask"
+      ],
+      [
+        "internal/ops",
+        "internal/stacklit"
+      ],
+      [
+        "internal/ops",
+        "internal/statevalidate"
+      ],
+      [
+        "internal/paths",
+        "internal/gitenv"
+      ],
+      [
+        "internal/pipeline",
+        "internal/models"
+      ],
+      [
+        "internal/precommit",
+        "internal/gitenv"
+      ],
+      [
+        "internal/precommit",
+        "internal/models"
+      ],
+      [
+        "internal/precommit",
+        "internal/taskkind"
+      ],
+      [
+        "internal/process",
+        "internal/agent"
+      ],
+      [
+        "internal/process",
+        "internal/db"
+      ],
+      [
+        "internal/process",
+        "internal/paths"
+      ],
+      [
+        "internal/prompts",
+        "internal/models"
+      ],
+      [
+        "internal/prompts",
+        "internal/ops"
+      ],
+      [
+        "internal/prompts",
+        "internal/pipeline"
+      ],
+      [
+        "internal/scipsearch",
+        "internal/gitenv"
+      ],
+      [
+        "internal/stacklit",
+        "internal/gitenv"
+      ],
+      [
+        "internal/statehygiene",
+        "internal/models"
+      ],
+      [
+        "internal/statevalidate",
+        "internal/db"
+      ],
+      [
+        "internal/statevalidate",
+        "internal/errors"
+      ],
+      [
+        "internal/statevalidate",
+        "internal/git"
+      ],
+      [
+        "internal/statevalidate",
+        "internal/models"
+      ],
+      [
+        "internal/statevalidate",
+        "internal/paths"
+      ],
+      [
+        "internal/statevalidate",
+        "internal/pipeline"
+      ],
+      [
+        "internal/statevalidate",
+        "internal/statehygiene"
+      ],
+      [
+        "internal/testhelpers",
+        "internal/db"
+      ],
+      [
+        "internal/testhelpers",
+        "internal/gitenv"
+      ],
+      [
+        "internal/testhelpers",
+        "internal/models"
+      ],
+      [
+        "internal/tui",
+        "internal/agent"
+      ],
+      [
+        "internal/tui",
+        "internal/alerts"
+      ],
+      [
+        "internal/tui",
+        "internal/commands"
+      ],
+      [
+        "internal/tui",
+        "internal/db"
+      ],
+      [
+        "internal/tui",
+        "internal/log"
+      ],
+      [
+        "internal/tui",
+        "internal/models"
+      ],
+      [
+        "internal/tui",
+        "internal/ops"
+      ],
+      [
+        "internal/tui",
+        "internal/paths"
+      ],
+      [
+        "internal/tui",
+        "internal/pipeline"
+      ],
+      [
+        "internal/tui",
+        "internal/process"
+      ],
+      [
+        "internal/tui",
+        "internal/render"
+      ]
+    ],
+    "entrypoints": [
+      "cmd/liza/main.go"
+    ],
+    "most_depended": [
+      "internal/models",
+      "internal/db",
+      "internal/gitenv",
+      "internal/paths",
+      "internal/errors",
+      "internal/pipeline",
+      "internal/ops",
+      "internal/roles",
+      "internal/agent",
+      "internal/alerts"
+    ],
+    "isolated": [
+      "internal/integration",
+      "internal/testguard",
+      "root",
+      "scripts/repro",
+      "skills/context-engineering/scripts",
+      "skills/liza-logs/scripts",
+      "skills/spec-backfill/scripts",
+      "skills/white-box-red-testing/scripts"
+    ]
+  },
+  "git": {
+    "hot_files": [
+      {
+        "path": "internal/prompts/builder_test.go",
+        "commits_90d": 103
+      },
+      {
+        "path": "internal/agent/supervisor.go",
+        "commits_90d": 54
+      },
+      {
+        "path": "README.md",
+        "commits_90d": 51
+      },
+      {
+        "path": "docs/USAGE_MULTI_AGENTS.md",
+        "commits_90d": 51
+      },
+      {
+        "path": "internal/ops/proceed.go",
+        "commits_90d": 47
+      },
+      {
+        "path": "internal/models/task.go",
+        "commits_90d": 44
+      },
+      {
+        "path": "internal/commands/init.go",
+        "commits_90d": 43
+      },
+      {
+        "path": "internal/prompts/builder.go",
+        "commits_90d": 43
+      },
+      {
+        "path": "internal/ops/proceed_test.go",
+        "commits_90d": 42
+      },
+      {
+        "path": "internal/prompts/templates/base_prompt.tmpl",
+        "commits_90d": 42
+      },
+      {
+        "path": "specs/architecture/blackboard-schema.md",
+        "commits_90d": 39
+      },
+      {
+        "path": "internal/agent/prompt.go",
+        "commits_90d": 35
+      },
+      {
+        "path": "internal/agent/prompt_test.go",
+        "commits_90d": 34
+      },
+      {
+        "path": "internal/models/state_test.go",
+        "commits_90d": 34
+      },
+      {
+        "path": "internal/ops/submit_review.go",
+        "commits_90d": 34
+      },
+      {
+        "path": "internal/commands/init_test.go",
+        "commits_90d": 33
+      },
+      {
+        "path": "internal/ops/claim_task.go",
+        "commits_90d": 33
+      },
+      {
+        "path": "internal/statevalidate/validate.go",
+        "commits_90d": 33
+      },
+      {
+        "path": "internal/commands/watch.go",
+        "commits_90d": 31
+      },
+      {
+        "path": "internal/prompts/templates/blocks/review_instructions.tmpl",
+        "commits_90d": 31
+      }
+    ],
+    "recent": [
+      "README.md",
+      "contracts/AGENT_TOOLS.md",
+      "contracts/CORE.md",
+      "support-docs/CONFIGURATION.md",
+      "support-docs/CUSTOMIZING_AGENT_TOOLS.md",
+      "cmd/liza/cmd_init_test.go",
+      "internal/scipsearch/scipsearch.go",
+      "internal/scipsearch/scipsearch_test.go",
+      "cmd/liza/json_wiring_test.go",
+      "internal/agent/prompt.go"
+    ],
+    "stable": [
+      ".github/workflows/ci.yml",
+      "cmd/liza/agent_help_test.go",
+      "cmd/liza/cmd_check.go",
+      "contracts/CONTRACT_FAILURE_MODE_MAP.md",
+      "contracts/README.md",
+      "docs/CUSTOMIZING_AGENT_TOOLS.md",
+      "docs/PERFORMANCE.md",
+      "docs/README.md",
+      "docs/USAGE_PAIRING.md",
+      "docs/how-liza-grew-up.md"
+    ]
+  },
+  "hints": {
+    "add_feature": "Start from entrypoint cmd/liza/main.go",
+    "test_command": "make test",
+    "env_vars": [
+      "LIZA_AGENT_ID",
+      "LIZA_DEFAULT_CLI",
+      "LIZA_DEFAULT_DOER_CLI",
+      "LIZA_DEFAULT_REVIEWER_CLI",
+      "LIZA_SPECS"
+    ],
+    "do_not_touch": [
+      ".github/"
+    ]
+  },
+  "architecture": {}
+}
