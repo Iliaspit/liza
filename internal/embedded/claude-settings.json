@@ -190,6 +190,7 @@
       "Bash(ast-grep:*)",
       "Bash(scip-search:*)",
       "Bash(stacklit:*)",
+      "Bash(mdtoc:*)",
       "Bash(go fmt:*)",
       "Bash(go test:*)",
       "Bash(go mod:*)",
