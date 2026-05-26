@@ -1227,25 +1227,23 @@ func TestBuildPrompt_RelevantTaskGraphDigest(t *testing.T) {
 		"git -C " + filepath.Join(tmpDir, worktree) + " show main:<file-ref>",
 		"RELEVANT TASK GRAPH DIGEST",
 		"Direct dependencies:",
-		"task-dep [BLOCKED, code-planning-pair]: Prepare migration contract",
-		"load: liza get task-dep --json",
+		"Active tasks: `liza get tasks --active --summary --json`.",
+		"task-dep [BLOCKED]: Prepare migration contract",
+		"task detail: liza get task-dep --json",
 		"Blocked related tasks:",
-		"task-blocked-sibling [BLOCKED, coding-pair]: Coordinate repository behavior",
+		"task-blocked-sibling [BLOCKED]: Coordinate repository behavior",
 		"blocker: waiting for migration plan",
 		"blocker: waiting for repository owner",
-		"Siblings sharing file refs:",
-		"task-other-sibling [DRAFT_CODE, coding-pair]: Review unrelated CLI behavior",
-		"shared refs:",
-		"internal/repository.go",
+		"Siblings with overlapping file refs:",
+		"task-other-sibling [DRAFT_CODE]: Review unrelated CLI behavior",
 		"Completed artifacts:",
-		"task-sibling [MERGED, coding-pair]: Document repository behavior",
-		"plan: specs/plans/repository.md",
-		"output: specs/plans/migration-output.md",
+		"task-sibling [MERGED]: Document repository behavior",
+		"produced outputs: liza get task-dep --output-summary --json",
 		"Plan siblings (scope boundary only):",
 		"This task is 1 of 4 in the current sprint plan.",
-		"task-sibling [MERGED]: Document repository behavior",
-		"task-other-sibling [DRAFT_CODE]: Review unrelated CLI behavior",
-		"task-blocked-sibling [BLOCKED]: Coordinate repository behavior",
+		"task-sibling [MERGED]: Document repository behavior | task detail: liza get task-sibling --json",
+		"task-other-sibling [DRAFT_CODE]: Review unrelated CLI behavior | task detail: liza get task-other-sibling --json",
+		"task-blocked-sibling [BLOCKED]: Coordinate repository behavior | task detail: liza get task-blocked-sibling --json",
 		"SIBLING CONSISTENCY RULE:",
 		"task-superseded-sibling [SUPERSEDED] — plan: specs/plans/superseded.md",
 	} {
@@ -1254,8 +1252,19 @@ func TestBuildPrompt_RelevantTaskGraphDigest(t *testing.T) {
 		}
 	}
 
+	for _, unwanted := range []string{
+		"shared refs:",
+		"exact refs:",
+		"output: specs/plans/migration-output.md",
+		"plan: specs/plans/repository.md",
+	} {
+		if strings.Contains(prompt, unwanted) {
+			t.Errorf("buildPrompt() should not pre-inline task graph detail %q", unwanted)
+		}
+	}
+
 	blockedStart := strings.Index(prompt, "Blocked related tasks:")
-	siblingsStart := strings.Index(prompt, "Siblings sharing file refs:")
+	siblingsStart := strings.Index(prompt, "Siblings with overlapping file refs:")
 	completedStart := strings.Index(prompt, "Completed artifacts:")
 	if blockedStart == -1 || siblingsStart == -1 || completedStart == -1 ||
 		!(blockedStart < siblingsStart && siblingsStart < completedStart) {
@@ -1263,9 +1272,8 @@ func TestBuildPrompt_RelevantTaskGraphDigest(t *testing.T) {
 	}
 	blockedSection := prompt[blockedStart:siblingsStart]
 	for _, want := range []string{
-		"task-blocked-sibling [BLOCKED, coding-pair]: Coordinate repository behavior",
-		"shared refs:",
-		"internal/repository.go",
+		"task-blocked-sibling [BLOCKED]: Coordinate repository behavior",
+		"task detail: liza get task-blocked-sibling --json",
 		"blocker: waiting for repository owner",
 	} {
 		if !strings.Contains(blockedSection, want) {
@@ -1275,9 +1283,9 @@ func TestBuildPrompt_RelevantTaskGraphDigest(t *testing.T) {
 
 	siblingsSection := prompt[siblingsStart:completedStart]
 	for _, unwanted := range []string{
-		"task-sibling [MERGED, coding-pair]",
-		"task-superseded-sibling [SUPERSEDED, coding-pair]",
-		"task-abandoned-sibling [ABANDONED, coding-pair]",
+		"task-sibling [MERGED]",
+		"task-superseded-sibling [SUPERSEDED]",
+		"task-abandoned-sibling [ABANDONED]",
 	} {
 		if strings.Contains(siblingsSection, unwanted) {
 			t.Errorf("terminal sibling should not render in shared-ref sibling section: %q\n%s", unwanted, siblingsSection)
@@ -1838,7 +1846,7 @@ func TestCollectSiblingTasks_TruncatesLongDescriptions(t *testing.T) {
 	if len(siblings) != 1 {
 		t.Fatalf("len(siblings) = %d, want 1", len(siblings))
 	}
-	if len(siblings[0].Description) > 203 { // 200 + len("...")
+	if len(siblings[0].Description) > 99 { // 96 + len("...")
 		t.Errorf("sibling description not truncated: len=%d", len(siblings[0].Description))
 	}
 	if !strings.HasSuffix(siblings[0].Description, "...") {

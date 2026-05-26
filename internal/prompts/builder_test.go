@@ -2367,7 +2367,7 @@ func TestCollectivePlanScoping_PhaseConsistencyRule(t *testing.T) {
 		}
 	})
 
-	t.Run("output refs add compact output hint without replacing full load", func(t *testing.T) {
+	t.Run("output refs add produced-outputs hint without replacing task detail", func(t *testing.T) {
 		data := &RoleContextData{
 			Role:        "code-planner",
 			RoleType:    "doer",
@@ -2389,11 +2389,14 @@ func TestCollectivePlanScoping_PhaseConsistencyRule(t *testing.T) {
 			t.Fatalf("BuildRoleContext: %v", err)
 		}
 
-		if !strings.Contains(output, "load: liza get plan-1 --json") {
-			t.Error("expected generic full task load to remain available")
+		if !strings.Contains(output, "task detail: liza get plan-1 --json") {
+			t.Error("expected full task detail command to remain available")
 		}
-		if !strings.Contains(output, "output context: liza get plan-1 --output-summary --json") {
-			t.Error("expected compact output hint for entries with output refs")
+		if !strings.Contains(output, "produced outputs: liza get plan-1 --output-summary --json") {
+			t.Error("expected produced outputs hint for entries with output refs")
+		}
+		if strings.Contains(output, "exact refs:") || strings.Contains(output, "output: specs/plans/plan-1.md") {
+			t.Errorf("expected produced output refs to stay load-on-demand, got:\n%s", output)
 		}
 	})
 }

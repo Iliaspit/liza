@@ -25,7 +25,7 @@ If you discover work needed outside your scope that you cannot handle, log it as
 {{- end}}
 
 RELEVANT TASK GRAPH DIGEST:
-Use this digest before broad state queries. If you need more detail, run `liza get <task-id> --json` for the listed ID.
+Use this compact digest before broad state queries. Active tasks: `liza get tasks --active --summary --json`.
 {{- if gt (len .TaskGraph.DirectDependencies) 0}}
 Direct dependencies:
 {{- range .TaskGraph.DirectDependencies}}
@@ -43,7 +43,7 @@ Blocked related tasks:
 {{- end}}
 {{- if gt (len .TaskGraph.SiblingsSharingRefs) 0}}
 
-Siblings sharing file refs:
+Siblings with overlapping file refs:
 {{- range .TaskGraph.SiblingsSharingRefs}}
 {{template "task-graph-entry" .}}
 {{- end}}
@@ -59,7 +59,7 @@ Completed artifacts:
 
 Plan siblings (scope boundary only):
 {{- range .SiblingTasks}}
-- {{.ID}} [{{.Status}}]: {{.Description}}{{if ne .PlanRef ""}} — plan: {{.PlanRef}}{{end}}
+- {{.ID}} [{{.Status}}]: {{.Description}} | task detail: liza get {{.ID}} --json
 {{- end}}
 {{- end}}
 {{- if ne .PlanRef ""}}
@@ -82,39 +82,7 @@ If your plan CANNOT be made consistent with those prior plans:
 {{- end -}}
 
 {{- define "task-graph-entry" -}}
-- {{.ID}} [{{.Status}}{{if ne .RolePair ""}}, {{.RolePair}}{{end}}]: {{.Description}}
-  load: liza get {{.ID}} --json
-{{- if .OutputRefs}}
-  output context: liza get {{.ID}} --output-summary --json
-{{- end}}
-{{- if .SharedRefs}}
-  shared refs:
-{{- range .SharedRefs}}
-  - {{.}}
-{{- end}}
-{{- end}}
-{{- if or .SpecRef .EpicRef .PlanRef .ArchRef .OutputRefs}}
-  exact refs:
-{{- if .SpecRef}}
-  - spec: {{.SpecRef}}
-{{- end}}
-{{- if .EpicRef}}
-  - epic: {{.EpicRef}}
-{{- end}}
-{{- if .PlanRef}}
-  - plan: {{.PlanRef}}
-{{- end}}
-{{- if .ArchRef}}
-  - arch: {{.ArchRef}}
-{{- end}}
-{{- range .OutputRefs}}
-  - output: {{.}}
-{{- end}}
-{{- end}}
-{{- if .BlockedReason}}
-  blocker: {{.BlockedReason}}
-{{- end}}
-{{- if .RepairOperation}}
-  repair: {{.RepairOperation}}
-{{- end}}
+- {{.ID}} [{{.Status}}]: {{.Description}} | task detail: liza get {{.ID}} --json{{if .OutputRefs}} | produced outputs: liza get {{.ID}} --output-summary --json{{end -}}
+{{- if .BlockedReason}} | blocker: {{.BlockedReason}}{{end -}}
+{{- if .RepairOperation}} | repair: {{.RepairOperation}}{{end}}
 {{- end -}}

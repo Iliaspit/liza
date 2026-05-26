@@ -27,7 +27,6 @@ type TaskGraphEntry struct {
 	ID              string
 	Description     string
 	Status          string
-	RolePair        string
 	SpecRef         string
 	EpicRef         string
 	PlanRef         string

@@ -491,7 +491,7 @@ func isDeadPathPlanSibling(status models.TaskStatus) bool {
 func siblingTaskSummary(task *models.Task) prompts.SiblingTaskSummary {
 	return prompts.SiblingTaskSummary{
 		ID:          task.ID,
-		Description: prompts.TruncateText(task.Description, 200),
+		Description: prompts.TruncateText(task.Description, 96),
 		Status:      string(task.Status),
 		PlanRef:     task.PlanRef,
 		RolePair:    task.RolePair,
@@ -597,9 +597,8 @@ func plannedSiblings(state *models.State, currentTaskID string) []*models.Task {
 func taskGraphEntry(task *models.Task, sharedRefs []string) prompts.TaskGraphEntry {
 	entry := prompts.TaskGraphEntry{
 		ID:          task.ID,
-		Description: prompts.TruncateText(task.Description, 180),
+		Description: prompts.TruncateText(task.Description, 96),
 		Status:      string(task.Status),
-		RolePair:    task.RolePair,
 		SpecRef:     task.SpecRef,
 		EpicRef:     task.EpicRef,
 		PlanRef:     task.PlanRef,
@@ -608,7 +607,7 @@ func taskGraphEntry(task *models.Task, sharedRefs []string) prompts.TaskGraphEnt
 		SharedRefs:  sharedRefs,
 	}
 	if task.BlockedReason != nil {
-		entry.BlockedReason = prompts.TruncateText(*task.BlockedReason, 220)
+		entry.BlockedReason = prompts.TruncateText(*task.BlockedReason, 120)
 	}
 	if task.RepairRequest != nil {
 		entry.RepairOperation = task.RepairRequest.Operation
