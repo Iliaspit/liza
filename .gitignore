@@ -11,7 +11,6 @@ Thumbs.db
 # Temporary files
 *.tmp
 *~
-*.scip
 
 # Environment files
 .env
@@ -51,4 +50,6 @@ AGENTS.md
 GEMINI.md
 
 .worktrees/
-console.sh
+stacklit.html
+stacklit.json
+*.scip
