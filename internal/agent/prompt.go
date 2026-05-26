@@ -240,7 +240,7 @@ func availablePromptStacklitIndexRefs(targetRoot string) ([]prompts.StacklitInde
 func buildTaskRoleContextData(task *models.Task, state *models.State, config SupervisorConfig, resolver *pipeline.Resolver) (*prompts.RoleContextData, error) {
 	roleType, _ := resolver.RoleType(config.Role)
 
-	siblingTasks, totalPlanTasks, taskOrdinal := collectSiblingTasks(state, task.ID)
+	totalPlanTasks, taskOrdinal := collectPlanPosition(state, task.ID)
 
 	data := &prompts.RoleContextData{
 		// Identity
@@ -266,7 +266,6 @@ func buildTaskRoleContextData(task *models.Task, state *models.State, config Sup
 
 		// Plan scoping
 		GoalSpecRef:          state.Goal.SpecRef,
-		SiblingTasks:         siblingTasks,
 		TotalPlanTasks:       totalPlanTasks,
 		TaskOrdinal:          taskOrdinal,
 		DependsOn:            task.DependsOn,
@@ -442,21 +441,20 @@ func derefString(s *string) string {
 	return *s
 }
 
-// collectSiblingTasks returns summaries of visible sibling tasks in the sprint plan (excluding currentTaskID),
-// the visible count of planned tasks, and the 1-based ordinal position of currentTaskID in the visible plan.
-// Returns nil, 0, 0 if no planned tasks or if currentTaskID is not in the planned list
+// collectPlanPosition returns the visible count of planned tasks and the 1-based
+// ordinal position of currentTaskID in the visible plan.
+// Returns 0, 0 if no planned tasks or if currentTaskID is not in the planned list
 // (e.g. mid-sprint replacement tasks created outside the original plan).
 //
 // Note: tasks not found by FindTask are silently skipped. This assumes the orchestrator keeps
 // Sprint.Scope.Planned in sync with the task list (archived/removed tasks are pruned from planned[]).
-func collectSiblingTasks(state *models.State, currentTaskID string) ([]prompts.SiblingTaskSummary, int, int) {
+func collectPlanPosition(state *models.State, currentTaskID string) (int, int) {
 	planned := state.Sprint.Scope.Planned
 	if len(planned) == 0 {
-		return nil, 0, 0
+		return 0, 0
 	}
 
 	ordinal := 0
-	var siblings []prompts.SiblingTaskSummary
 	visibleTotal := 0
 	for _, id := range planned {
 		task := state.FindTask(id)
@@ -472,16 +470,15 @@ func collectSiblingTasks(state *models.State, currentTaskID string) ([]prompts.S
 			continue
 		}
 		visibleTotal++
-		siblings = append(siblings, siblingTaskSummary(task))
 	}
 
 	// Suppress scoping for tasks not in the plan (mid-sprint replacements).
 	// Returning 0 for totalPlanTasks ensures the template condition is false.
 	if ordinal == 0 {
-		return nil, 0, 0
+		return 0, 0
 	}
 
-	return siblings, visibleTotal, ordinal
+	return visibleTotal, ordinal
 }
 
 func isDeadPathPlanSibling(status models.TaskStatus) bool {
@@ -524,49 +521,92 @@ var (
 )
 
 func buildRelevantTaskGraph(state *models.State, current *models.Task) prompts.TaskGraphDigest {
-	var digest prompts.TaskGraphDigest
 	currentRefs := taskScopeRefs(current)
-	seenBlocked := make(map[string]bool)
-	seenArtifacts := make(map[string]bool)
+	entries := make(map[string]*prompts.TaskGraphEntry)
+	var ordered []*prompts.TaskGraphEntry
 
+	addTask := func(task *models.Task, relation string, sharedRefs []string) {
+		if task == nil {
+			return
+		}
+		entry := entries[task.ID]
+		if entry == nil {
+			newEntry := taskGraphEntry(task)
+			entry = &newEntry
+			entries[task.ID] = entry
+			ordered = append(ordered, entry)
+		}
+		entry.Relations = appendUniqueString(entry.Relations, relation)
+		entry.SharedRefs = appendUniqueStrings(entry.SharedRefs, sharedRefs...)
+	}
+
+	dependencies := make([]*models.Task, 0, len(current.DependsOn))
 	for _, depID := range current.DependsOn {
 		dep := state.FindTask(depID)
 		if dep == nil {
 			continue
 		}
-		entry := taskGraphEntry(dep, nil)
-		digest.DirectDependencies = append(digest.DirectDependencies, entry)
-		if dep.Status == models.TaskStatusBlocked && !seenBlocked[dep.ID] {
-			digest.BlockedRelatedTasks = append(digest.BlockedRelatedTasks, entry)
-			seenBlocked[dep.ID] = true
-		}
-		if isCompletedForDigest(state, dep) && hasArtifactRefs(entry) && !seenArtifacts[dep.ID] {
-			digest.CompletedArtifacts = append(digest.CompletedArtifacts, entry)
-			seenArtifacts[dep.ID] = true
+		dependencies = append(dependencies, dep)
+		addTask(dep, "dependency", nil)
+		if dep.Status == models.TaskStatusBlocked {
+			addTask(dep, "blocked", nil)
 		}
 	}
 
-	for _, sibling := range plannedSiblings(state, current.ID) {
-		entry := taskGraphEntry(sibling, nil)
-		if !sibling.Status.IsTerminal() {
-			entry.SharedRefs = intersectRefs(currentRefs, taskScopeRefs(sibling))
+	siblings := plannedSiblings(state, current.ID)
+	for _, sibling := range siblings {
+		if sibling.Status == models.TaskStatusBlocked {
+			addTask(sibling, "blocked", nil)
 		}
-		if sibling.Status == models.TaskStatusBlocked && !seenBlocked[sibling.ID] {
-			digest.BlockedRelatedTasks = append(digest.BlockedRelatedTasks, entry)
-			seenBlocked[sibling.ID] = true
-		}
-		if isCompletedForDigest(state, sibling) && hasArtifactRefs(entry) && !seenArtifacts[sibling.ID] {
-			digest.CompletedArtifacts = append(digest.CompletedArtifacts, entry)
-			seenArtifacts[sibling.ID] = true
-		}
+	}
+
+	for _, sibling := range siblings {
 		if sibling.Status.IsTerminal() {
 			continue
 		}
-		if len(entry.SharedRefs) > 0 {
-			digest.SiblingsSharingRefs = append(digest.SiblingsSharingRefs, entry)
+		sharedRefs := intersectRefs(currentRefs, taskScopeRefs(sibling))
+		if len(sharedRefs) > 0 {
+			addTask(sibling, "sibling", nil)
+			addTask(sibling, "file-overlap", sharedRefs)
 		}
 	}
 
+	for _, dep := range dependencies {
+		if taskHasProducedOutputRefs(dep) {
+			addTask(dep, "artifact-producer", nil)
+		}
+		if !isCompletedForDigest(state, dep) {
+			continue
+		}
+		if taskHasTaskArtifactRefs(dep) {
+			addTask(dep, "artifact-ref", nil)
+		}
+	}
+
+	for _, sibling := range siblings {
+		if taskHasProducedOutputRefs(sibling) {
+			addTask(sibling, "artifact-producer", nil)
+		}
+		if !isCompletedForDigest(state, sibling) {
+			continue
+		}
+		if taskHasTaskArtifactRefs(sibling) {
+			addTask(sibling, "artifact-ref", nil)
+		}
+	}
+
+	for _, sibling := range siblings {
+		if !isDeadPathPlanSibling(sibling.Status) {
+			addTask(sibling, "sibling", nil)
+		}
+	}
+
+	digest := prompts.TaskGraphDigest{
+		Entries: make([]prompts.TaskGraphEntry, 0, len(ordered)),
+	}
+	for _, entry := range ordered {
+		digest.Entries = append(digest.Entries, *entry)
+	}
 	return digest
 }
 
@@ -594,17 +634,11 @@ func plannedSiblings(state *models.State, currentTaskID string) []*models.Task {
 	return siblings
 }
 
-func taskGraphEntry(task *models.Task, sharedRefs []string) prompts.TaskGraphEntry {
+func taskGraphEntry(task *models.Task) prompts.TaskGraphEntry {
 	entry := prompts.TaskGraphEntry{
 		ID:          task.ID,
 		Description: prompts.TruncateText(task.Description, 96),
 		Status:      string(task.Status),
-		SpecRef:     task.SpecRef,
-		EpicRef:     task.EpicRef,
-		PlanRef:     task.PlanRef,
-		ArchRef:     task.ArchRef,
-		OutputRefs:  outputArtifactRefs(task),
-		SharedRefs:  sharedRefs,
 	}
 	if task.BlockedReason != nil {
 		entry.BlockedReason = prompts.TruncateText(*task.BlockedReason, 120)
@@ -648,18 +682,23 @@ func appendPathRef(refs []string, ref string) []string {
 	return appendUniqueString(refs, ref)
 }
 
-func outputArtifactRefs(task *models.Task) []string {
-	var refs []string
+func taskHasTaskArtifactRefs(task *models.Task) bool {
+	if task == nil {
+		return false
+	}
+	return task.SpecRef != "" || task.EpicRef != "" || task.PlanRef != "" || task.ArchRef != ""
+}
+
+func taskHasProducedOutputRefs(task *models.Task) bool {
+	if task == nil {
+		return false
+	}
 	for _, entry := range task.Output {
-		refs = appendUniqueString(refs, entry.SpecRef)
-		refs = appendUniqueString(refs, entry.EpicRef)
-		refs = appendUniqueString(refs, entry.PlanRef)
-		refs = appendUniqueString(refs, entry.ArchRef)
-		if len(refs) >= 8 {
-			return refs[:8]
+		if entry.SpecRef != "" || entry.EpicRef != "" || entry.PlanRef != "" || entry.ArchRef != "" {
+			return true
 		}
 	}
-	return refs
+	return false
 }
 
 func intersectRefs(left, right []string) []string {
@@ -684,11 +723,6 @@ func isCompletedForDigest(state *models.State, task *models.Task) bool {
 		return false
 	}
 	return state.ResolveDependency(task.ID).Satisfied()
-}
-
-func hasArtifactRefs(entry prompts.TaskGraphEntry) bool {
-	return entry.SpecRef != "" || entry.EpicRef != "" || entry.PlanRef != "" ||
-		entry.ArchRef != "" || len(entry.OutputRefs) > 0
 }
 
 func appendUniqueStrings(refs []string, candidates ...string) []string {

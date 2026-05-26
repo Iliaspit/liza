@@ -1,5 +1,5 @@
 {{- define "collective-plan-scoping" -}}
-{{- $hasGraph := or (gt (len .TaskGraph.DirectDependencies) 0) (gt (len .TaskGraph.BlockedRelatedTasks) 0) (gt (len .TaskGraph.SiblingsSharingRefs) 0) (gt (len .TaskGraph.CompletedArtifacts) 0) -}}
+{{- $hasGraph := gt (len .TaskGraph.Entries) 0 -}}
 {{- if or (gt .TotalPlanTasks 1) $hasGraph}}
 
 === COLLECTIVE PLAN SCOPING ===
@@ -26,41 +26,14 @@ If you discover work needed outside your scope that you cannot handle, log it as
 
 RELEVANT TASK GRAPH DIGEST:
 Use this compact digest before broad state queries. Active tasks: `liza get tasks --active --summary --json`.
-{{- if gt (len .TaskGraph.DirectDependencies) 0}}
-Direct dependencies:
-{{- range .TaskGraph.DirectDependencies}}
+Task detail: `liza get <id> --json` for full task state and `artifact-ref` tasks.
+Produced outputs: `liza get <id> --output-summary --json` for `artifact-producer` tasks.
+{{- if gt (len .TaskGraph.Entries) 0}}
+{{- range .TaskGraph.Entries}}
 {{template "task-graph-entry" .}}
 {{- end}}
 {{- else}}
-Direct dependencies: none listed.
-{{- end}}
-{{- if gt (len .TaskGraph.BlockedRelatedTasks) 0}}
-
-Blocked related tasks:
-{{- range .TaskGraph.BlockedRelatedTasks}}
-{{template "task-graph-entry" .}}
-{{- end}}
-{{- end}}
-{{- if gt (len .TaskGraph.SiblingsSharingRefs) 0}}
-
-Siblings with overlapping file refs:
-{{- range .TaskGraph.SiblingsSharingRefs}}
-{{template "task-graph-entry" .}}
-{{- end}}
-{{- end}}
-{{- if gt (len .TaskGraph.CompletedArtifacts) 0}}
-
-Completed artifacts:
-{{- range .TaskGraph.CompletedArtifacts}}
-{{template "task-graph-entry" .}}
-{{- end}}
-{{- end}}
-{{- if gt .TotalPlanTasks 1}}
-
-Plan siblings (scope boundary only):
-{{- range .SiblingTasks}}
-- {{.ID}} [{{.Status}}]: {{.Description}} | task detail: liza get {{.ID}} --json
-{{- end}}
+Related tasks: none listed.
 {{- end}}
 {{- if ne .PlanRef ""}}
 PLAN ARTIFACT: {{.PlanRef}}
@@ -82,7 +55,8 @@ If your plan CANNOT be made consistent with those prior plans:
 {{- end -}}
 
 {{- define "task-graph-entry" -}}
-- {{.ID}} [{{.Status}}]: {{.Description}} | task detail: liza get {{.ID}} --json{{if .OutputRefs}} | produced outputs: liza get {{.ID}} --output-summary --json{{end -}}
+- {{.ID}} [{{.Status}}; {{range $i, $rel := .Relations}}{{if $i}}, {{end}}{{$rel}}{{end}}]: {{.Description -}}
+{{- if .SharedRefs}} | shared refs: {{range $i, $ref := .SharedRefs}}{{if $i}}, {{end}}{{$ref}}{{end}}{{end -}}
 {{- if .BlockedReason}} | blocker: {{.BlockedReason}}{{end -}}
 {{- if .RepairOperation}} | repair: {{.RepairOperation}}{{end}}
 {{- end -}}

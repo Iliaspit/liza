@@ -32,10 +32,7 @@ func TestRoleContextData_CoderPopulation(t *testing.T) {
 		PriorRejection: "Missing error handling",
 
 		// Plan scoping
-		GoalSpecRef: "specs/vision.md",
-		SiblingTasks: []SiblingTaskSummary{
-			{ID: "task-41", Description: "Setup infrastructure", Status: "MERGED"},
-		},
+		GoalSpecRef:    "specs/vision.md",
 		TotalPlanTasks: 5,
 		TaskOrdinal:    2,
 
@@ -102,12 +99,6 @@ func TestRoleContextData_CoderPopulation(t *testing.T) {
 	if data.GoalSpecRef != "specs/vision.md" {
 		t.Errorf("GoalSpecRef = %q, want %q", data.GoalSpecRef, "specs/vision.md")
 	}
-	if len(data.SiblingTasks) != 1 {
-		t.Fatalf("SiblingTasks length = %d, want 1", len(data.SiblingTasks))
-	}
-	if data.SiblingTasks[0].ID != "task-41" {
-		t.Errorf("SiblingTasks[0].ID = %q, want %q", data.SiblingTasks[0].ID, "task-41")
-	}
 	if data.TotalPlanTasks != 5 {
 		t.Errorf("TotalPlanTasks = %d, want %d", data.TotalPlanTasks, 5)
 	}
@@ -165,11 +156,7 @@ func TestRoleContextData_CodeReviewerPopulation(t *testing.T) {
 		},
 
 		// Plan scoping
-		GoalSpecRef: "specs/vision.md",
-		SiblingTasks: []SiblingTaskSummary{
-			{ID: "task-41", Description: "Setup infrastructure", Status: "MERGED"},
-			{ID: "task-43", Description: "Write docs", Status: "DRAFT_CODE"},
-		},
+		GoalSpecRef:    "specs/vision.md",
 		TotalPlanTasks: 5,
 		TaskOrdinal:    2,
 
@@ -204,11 +191,6 @@ func TestRoleContextData_CodeReviewerPopulation(t *testing.T) {
 	}
 	if data.ScopeExtensions[0]["file"] != "go.mod" {
 		t.Errorf("ScopeExtensions[0][file] = %q, want %q", data.ScopeExtensions[0]["file"], "go.mod")
-	}
-
-	// Verify plan scoping
-	if len(data.SiblingTasks) != 2 {
-		t.Errorf("SiblingTasks length = %d, want 2", len(data.SiblingTasks))
 	}
 
 	// Verify task artifact / integration context

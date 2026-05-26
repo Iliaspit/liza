@@ -1087,9 +1087,8 @@ func TestBuildPrompt_CollectiveScoping(t *testing.T) {
 		"1 of 3 in the current sprint",
 		"specs/vision.md",
 		"RELEVANT TASK GRAPH DIGEST",
-		"Plan siblings (scope boundary only)",
-		"task-2 [DRAFT_CODE]: Add user API",
-		"task-3 [MERGED]: Add tests",
+		"task-2 [DRAFT_CODE; sibling]: Add user API",
+		"task-3 [MERGED; artifact-ref, sibling]: Add tests",
 	}
 	for _, want := range wantContains {
 		if !strings.Contains(prompt, want) {
@@ -1226,24 +1225,16 @@ func TestBuildPrompt_RelevantTaskGraphDigest(t *testing.T) {
 		"Artifact refs below are repo-relative.",
 		"git -C " + filepath.Join(tmpDir, worktree) + " show main:<file-ref>",
 		"RELEVANT TASK GRAPH DIGEST",
-		"Direct dependencies:",
 		"Active tasks: `liza get tasks --active --summary --json`.",
-		"task-dep [BLOCKED]: Prepare migration contract",
-		"task detail: liza get task-dep --json",
-		"Blocked related tasks:",
-		"task-blocked-sibling [BLOCKED]: Coordinate repository behavior",
+		"Task detail: `liza get <id> --json` for full task state and `artifact-ref` tasks.",
+		"Produced outputs: `liza get <id> --output-summary --json` for `artifact-producer` tasks.",
+		"task-dep [BLOCKED; dependency, blocked, artifact-producer]: Prepare migration contract",
 		"blocker: waiting for migration plan",
+		"task-blocked-sibling [BLOCKED; blocked, sibling, file-overlap]: Coordinate repository behavior",
 		"blocker: waiting for repository owner",
-		"Siblings with overlapping file refs:",
-		"task-other-sibling [DRAFT_CODE]: Review unrelated CLI behavior",
-		"Completed artifacts:",
-		"task-sibling [MERGED]: Document repository behavior",
-		"produced outputs: liza get task-dep --output-summary --json",
-		"Plan siblings (scope boundary only):",
+		"task-other-sibling [DRAFT_CODE; sibling, file-overlap]: Review unrelated CLI behavior | shared refs: internal/repository.go",
+		"task-sibling [MERGED; artifact-ref, sibling]: Document repository behavior",
 		"This task is 1 of 4 in the current sprint plan.",
-		"task-sibling [MERGED]: Document repository behavior | task detail: liza get task-sibling --json",
-		"task-other-sibling [DRAFT_CODE]: Review unrelated CLI behavior | task detail: liza get task-other-sibling --json",
-		"task-blocked-sibling [BLOCKED]: Coordinate repository behavior | task detail: liza get task-blocked-sibling --json",
 		"SIBLING CONSISTENCY RULE:",
 		"task-superseded-sibling [SUPERSEDED] — plan: specs/plans/superseded.md",
 	} {
@@ -1253,56 +1244,39 @@ func TestBuildPrompt_RelevantTaskGraphDigest(t *testing.T) {
 	}
 
 	for _, unwanted := range []string{
-		"shared refs:",
 		"exact refs:",
 		"output: specs/plans/migration-output.md",
 		"plan: specs/plans/repository.md",
+		"Direct dependencies:",
+		"Blocked related tasks:",
+		"Siblings with overlapping file refs:",
+		"Completed artifacts:",
+		"Plan siblings (scope boundary only):",
+		"task detail: liza get task-dep --json",
 	} {
 		if strings.Contains(prompt, unwanted) {
 			t.Errorf("buildPrompt() should not pre-inline task graph detail %q", unwanted)
 		}
 	}
 
-	blockedStart := strings.Index(prompt, "Blocked related tasks:")
-	siblingsStart := strings.Index(prompt, "Siblings with overlapping file refs:")
-	completedStart := strings.Index(prompt, "Completed artifacts:")
-	if blockedStart == -1 || siblingsStart == -1 || completedStart == -1 ||
-		!(blockedStart < siblingsStart && siblingsStart < completedStart) {
-		t.Fatalf("buildPrompt() missing ordered sibling/completed task graph sections")
-	}
-	blockedSection := prompt[blockedStart:siblingsStart]
-	for _, want := range []string{
-		"task-blocked-sibling [BLOCKED]: Coordinate repository behavior",
-		"task detail: liza get task-blocked-sibling --json",
-		"blocker: waiting for repository owner",
-	} {
-		if !strings.Contains(blockedSection, want) {
-			t.Errorf("blocked related task section missing %q:\n%s", want, blockedSection)
-		}
-	}
-
-	siblingsSection := prompt[siblingsStart:completedStart]
-	for _, unwanted := range []string{
-		"task-sibling [MERGED]",
-		"task-superseded-sibling [SUPERSEDED]",
-		"task-abandoned-sibling [ABANDONED]",
-	} {
-		if strings.Contains(siblingsSection, unwanted) {
-			t.Errorf("terminal sibling should not render in shared-ref sibling section: %q\n%s", unwanted, siblingsSection)
-		}
-	}
 	for _, unwanted := range []string{
 		"task-superseded-sibling [SUPERSEDED]: Superseded repository behavior",
 		"task-abandoned-sibling [ABANDONED]: Abandoned repository behavior",
 	} {
-		planStart := strings.Index(prompt, "Plan siblings (scope boundary only):")
+		planStart := strings.Index(prompt, "RELEVANT TASK GRAPH DIGEST:")
 		consistencyStart := strings.Index(prompt, "SIBLING CONSISTENCY RULE:")
 		if planStart == -1 || consistencyStart == -1 || consistencyStart < planStart {
-			t.Fatalf("buildPrompt() missing ordered plan siblings and consistency sections")
+			t.Fatalf("buildPrompt() missing ordered task graph and consistency sections")
 		}
 		planSection := prompt[planStart:consistencyStart]
 		if strings.Contains(planSection, unwanted) {
-			t.Errorf("dead-path sibling should not render in plan sibling list: %q\n%s", unwanted, planSection)
+			t.Errorf("dead-path sibling should not render in task graph list: %q\n%s", unwanted, planSection)
+		}
+	}
+
+	for _, id := range []string{"task-dep", "task-blocked-sibling", "task-other-sibling", "task-sibling"} {
+		if count := strings.Count(prompt, "- "+id+" ["); count != 1 {
+			t.Errorf("task graph should render %s once, got %d", id, count)
 		}
 	}
 }
@@ -1640,10 +1614,10 @@ func TestBuildPrompt_CollectiveScopingOrdinal(t *testing.T) {
 		t.Error("buildPrompt() should not include current task in sibling list")
 	}
 	// task-1 and task-3 should appear as siblings
-	if !strings.Contains(prompt, "task-1 [MERGED]: Add auth") {
+	if !strings.Contains(prompt, "task-1 [MERGED; artifact-ref, sibling]: Add auth") {
 		t.Error("buildPrompt() should include task-1 as sibling")
 	}
-	if !strings.Contains(prompt, "task-3 [DRAFT_CODE]: Add tests") {
+	if !strings.Contains(prompt, "task-3 [DRAFT_CODE; sibling]: Add tests") {
 		t.Error("buildPrompt() should include task-3 as sibling")
 	}
 }
@@ -1804,57 +1778,26 @@ func TestSplitRef(t *testing.T) {
 	}
 }
 
-func TestCollectSiblingTasks_TruncatesLongDescriptions(t *testing.T) {
+func TestTaskGraphEntry_TruncatesLongDescriptions(t *testing.T) {
 	now := time.Now().UTC()
 	longDesc := strings.Repeat("x", 400)
-	state := &models.State{
-		Version: 1,
-		Goal: models.Goal{
-			ID:          "goal-1",
-			Description: "Test goal",
-			Status:      models.GoalStatusInProgress,
-			Created:     now,
-		},
-		Tasks: []models.Task{
-			{
-				ID:          "task-1",
-				Description: "Current task",
-				Status:      models.TaskStatusImplementing,
-				Priority:    1,
-				Created:     now,
-			},
-			{
-				ID:          "task-2",
-				Description: longDesc,
-				Status:      models.TaskStatusReady,
-				Priority:    2,
-				Created:     now,
-			},
-		},
-		Sprint: models.Sprint{
-			Scope: models.SprintScope{
-				Planned: []string{"task-1", "task-2"},
-			},
-		},
-		Agents: make(map[string]models.Agent),
-	}
+	entry := taskGraphEntry(&models.Task{
+		ID:          "task-2",
+		Description: longDesc,
+		Status:      models.TaskStatusReady,
+		Priority:    2,
+		Created:     now,
+	})
 
-	siblings, total, ordinal := collectSiblingTasks(state, "task-1")
-	if total != 2 || ordinal != 1 {
-		t.Fatalf("total=%d ordinal=%d, want 2, 1", total, ordinal)
+	if len(entry.Description) > 99 { // 96 + len("...")
+		t.Errorf("task graph entry description not truncated: len=%d", len(entry.Description))
 	}
-	if len(siblings) != 1 {
-		t.Fatalf("len(siblings) = %d, want 1", len(siblings))
-	}
-	if len(siblings[0].Description) > 99 { // 96 + len("...")
-		t.Errorf("sibling description not truncated: len=%d", len(siblings[0].Description))
-	}
-	if !strings.HasSuffix(siblings[0].Description, "...") {
+	if !strings.HasSuffix(entry.Description, "...") {
 		t.Error("truncated description should end with ellipsis")
 	}
 }
 
-func TestCollectSiblingTasks_UsesVisiblePlanCountAndOrdinal(t *testing.T) {
+func TestCollectPlanPosition_UsesVisiblePlanCountAndOrdinal(t *testing.T) {
 	now := time.Now().UTC()
 	state := &models.State{
 		Version: 1,
@@ -1878,15 +1821,9 @@ func TestCollectSiblingTasks_UsesVisiblePlanCountAndOrdinal(t *testing.T) {
 		Agents: make(map[string]models.Agent),
 	}
 
-	siblings, total, ordinal := collectSiblingTasks(state, "task-current")
+	total, ordinal := collectPlanPosition(state, "task-current")
 	if total != 2 || ordinal != 1 {
 		t.Fatalf("total=%d ordinal=%d, want visible total 2 and visible ordinal 1", total, ordinal)
-	}
-	if len(siblings) != 1 {
-		t.Fatalf("len(siblings) = %d, want 1", len(siblings))
-	}
-	if siblings[0].ID != "task-active" {
-		t.Fatalf("sibling ID = %q, want task-active", siblings[0].ID)
 	}
 }
 

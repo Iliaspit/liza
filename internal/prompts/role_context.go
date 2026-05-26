@@ -15,10 +15,7 @@ type CompletedTaskSummary struct {
 // TaskGraphDigest provides bounded task graph context so agents can load exact
 // related tasks instead of pulling the full task list.
 type TaskGraphDigest struct {
-	DirectDependencies  []TaskGraphEntry
-	BlockedRelatedTasks []TaskGraphEntry
-	SiblingsSharingRefs []TaskGraphEntry
-	CompletedArtifacts  []TaskGraphEntry
+	Entries []TaskGraphEntry
 }
 
 // TaskGraphEntry is a compact, prompt-safe summary of a task related to the
@@ -27,11 +24,7 @@ type TaskGraphEntry struct {
 	ID              string
 	Description     string
 	Status          string
-	SpecRef         string
-	EpicRef         string
-	PlanRef         string
-	ArchRef         string
-	OutputRefs      []string
+	Relations       []string
 	SharedRefs      []string
 	BlockedReason   string
 	RepairOperation string
@@ -96,7 +89,6 @@ type RoleContextData struct {
 
 	// Plan scoping (populated for task-aware roles)
 	GoalSpecRef          string
-	SiblingTasks         []SiblingTaskSummary
 	TotalPlanTasks       int
 	TaskOrdinal          int // 1-based position in visible sprint plan
 	DependsOn            []string

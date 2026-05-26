@@ -1435,10 +1435,6 @@ func TestBuildRoleContext_AllRoles(t *testing.T) {
 		return &task
 	}
 
-	siblings := []SiblingTaskSummary{
-		{ID: "task-0", Description: "Setup infrastructure", Status: "MERGED"},
-	}
-
 	_ = makeDoerTask     // used in subtests
 	_ = makeReviewerTask // used in subtests
 
@@ -1453,7 +1449,6 @@ func TestBuildRoleContext_AllRoles(t *testing.T) {
 			PriorRejection:    "Missing error handling",
 			IntegrationBranch: "integration",
 			GoalSpecRef:       "specs/goal.md",
-			SiblingTasks:      siblings,
 			TotalPlanTasks:    3, TaskOrdinal: 2,
 			ProjectRoot: projectRoot,
 		}
@@ -1511,7 +1506,7 @@ func TestBuildRoleContext_AllRoles(t *testing.T) {
 			Worktree:     projectRoot + "/.worktrees/task-reviewer",
 			IterationNum: 2, PriorRejection: "Missing error handling",
 			BaseCommit: "abc1234", ReviewCommit: "def5678", IntegrationBranch: "integration", AssignedTo: "coder-1",
-			GoalSpecRef: "specs/goal.md", SiblingTasks: siblings,
+			GoalSpecRef:    "specs/goal.md",
 			TotalPlanTasks: 3, TaskOrdinal: 2, ProjectRoot: projectRoot,
 		}
 		sections, err := resolver.ContextSections("code-reviewer")
@@ -1610,7 +1605,7 @@ func TestBuildRoleContext_AllRoles(t *testing.T) {
 			DoneWhen: "Feature X works correctly", Scope: "internal/feature",
 			Worktree:     projectRoot + "/.worktrees/task-planner",
 			IterationNum: 2, PriorRejection: "Missing error handling",
-			GoalSpecRef: "specs/goal.md", SiblingTasks: siblings,
+			GoalSpecRef:    "specs/goal.md",
 			TotalPlanTasks: 3, TaskOrdinal: 2, ProjectRoot: projectRoot,
 		}
 		sections, err := resolver.ContextSections("code-planner")
@@ -1655,7 +1650,7 @@ func TestBuildRoleContext_AllRoles(t *testing.T) {
 			Worktree:     projectRoot + "/.worktrees/task-cpr",
 			IterationNum: 2, PriorRejection: "Missing error handling",
 			BaseCommit: "abc1234", ReviewCommit: "def5678", AssignedTo: "coder-1",
-			GoalSpecRef: "specs/goal.md", SiblingTasks: siblings,
+			GoalSpecRef:    "specs/goal.md",
 			TotalPlanTasks: 3, TaskOrdinal: 2, ProjectRoot: projectRoot,
 		}
 		sections, err := resolver.ContextSections("code-plan-reviewer")
@@ -1789,7 +1784,7 @@ func TestBuildRoleContext_AllRoles(t *testing.T) {
 			EpicSlug:     "ep-001",
 			Worktree:     projectRoot + "/.worktrees/task-usw",
 			IterationNum: 2, PriorRejection: "Missing error handling",
-			GoalSpecRef: "specs/goal.md", SiblingTasks: siblings,
+			GoalSpecRef:    "specs/goal.md",
 			TotalPlanTasks: 3, TaskOrdinal: 2, ProjectRoot: projectRoot,
 		}
 		sections, err := resolver.ContextSections("us-writer")
@@ -1836,7 +1831,7 @@ func TestBuildRoleContext_AllRoles(t *testing.T) {
 			Worktree:     projectRoot + "/.worktrees/task-usr",
 			IterationNum: 2, PriorRejection: "Missing error handling",
 			BaseCommit: "abc1234", ReviewCommit: "def5678", AssignedTo: "coder-1",
-			GoalSpecRef: "specs/goal.md", SiblingTasks: siblings,
+			GoalSpecRef:    "specs/goal.md",
 			TotalPlanTasks: 3, TaskOrdinal: 2, ProjectRoot: projectRoot,
 		}
 		sections, err := resolver.ContextSections("us-reviewer")
@@ -2219,9 +2214,6 @@ func TestCollectivePlanScoping_PhaseConsistencyRule(t *testing.T) {
 			TaskRolePair:         "code-planning-pair",
 			DependsOn:            []string{"plan-1"},
 			PhaseDependencyTasks: []SiblingTaskSummary{{ID: "plan-1", Description: "Phase 1 planning", Status: "MERGED", PlanRef: "specs/plan-phase1.md", RolePair: "code-planning-pair"}},
-			SiblingTasks: []SiblingTaskSummary{
-				{ID: "plan-1", Description: "Phase 1 planning", Status: "MERGED", PlanRef: "specs/plan-phase1.md", RolePair: "code-planning-pair"},
-			},
 		}
 
 		output, err := BuildRoleContext("code-planner", []string{"collective-plan-scoping"}, data)
@@ -2253,9 +2245,6 @@ func TestCollectivePlanScoping_PhaseConsistencyRule(t *testing.T) {
 			TotalPlanTasks: 2,
 			TaskOrdinal:    1,
 			GoalSpecRef:    "specs/goal.md",
-			SiblingTasks: []SiblingTaskSummary{
-				{ID: "plan-2", Description: "Phase 2 planning", Status: "DRAFT_CODING_PLAN"},
-			},
 		}
 
 		output, err := BuildRoleContext("code-planner", []string{"collective-plan-scoping"}, data)
@@ -2277,9 +2266,6 @@ func TestCollectivePlanScoping_PhaseConsistencyRule(t *testing.T) {
 			GoalSpecRef:    "specs/goal.md",
 			TaskRolePair:   "code-planning-pair",
 			DependsOn:      []string{"plan-1"},
-			SiblingTasks: []SiblingTaskSummary{
-				{ID: "plan-1", Description: "Phase 1 planning", Status: "MERGED", RolePair: "code-planning-pair"},
-			},
 		}
 
 		output, err := BuildRoleContext("code-planner", []string{"collective-plan-scoping"}, data)
@@ -2302,9 +2288,6 @@ func TestCollectivePlanScoping_PhaseConsistencyRule(t *testing.T) {
 			TaskRolePair:         "code-planning-pair",
 			DependsOn:            []string{"plan-old"},
 			PhaseDependencyTasks: []SiblingTaskSummary{{ID: "plan-old", Description: "Old phase planning", Status: "SUPERSEDED", PlanRef: "specs/plan-old.md", RolePair: "code-planning-pair"}},
-			SiblingTasks: []SiblingTaskSummary{
-				{ID: "plan-new", Description: "Replacement phase planning", Status: "DRAFT_CODING_PLAN", PlanRef: "specs/plan-new.md", RolePair: "code-planning-pair"},
-			},
 		}
 
 		output, err := BuildRoleContext("code-planner", []string{"collective-plan-scoping"}, data)
@@ -2330,9 +2313,6 @@ func TestCollectivePlanScoping_PhaseConsistencyRule(t *testing.T) {
 			TotalPlanTasks: 2,
 			TaskOrdinal:    1,
 			GoalSpecRef:    "specs/goal.md",
-			SiblingTasks: []SiblingTaskSummary{
-				{ID: "plan-2", Description: "Phase 2", Status: "DRAFT_EPIC_PLAN"},
-			},
 		}
 
 		output, err := BuildRoleContext("epic-planner", []string{"collective-plan-scoping"}, data)
@@ -2352,9 +2332,6 @@ func TestCollectivePlanScoping_PhaseConsistencyRule(t *testing.T) {
 			TotalPlanTasks: 2,
 			TaskOrdinal:    1,
 			GoalSpecRef:    "specs/goal.md",
-			SiblingTasks: []SiblingTaskSummary{
-				{ID: "plan-2", Description: "Phase 2", Status: "DRAFT_EPIC_PLAN"},
-			},
 		}
 
 		output, err := BuildRoleContext("epic-plan-reviewer", []string{"collective-plan-scoping"}, data)
@@ -2367,18 +2344,18 @@ func TestCollectivePlanScoping_PhaseConsistencyRule(t *testing.T) {
 		}
 	})
 
-	t.Run("output refs add produced-outputs hint without replacing task detail", func(t *testing.T) {
+	t.Run("artifact-producer relation keeps produced outputs load hint without inline refs", func(t *testing.T) {
 		data := &RoleContextData{
 			Role:        "code-planner",
 			RoleType:    "doer",
 			GoalSpecRef: "specs/goal.md",
 			TaskGraph: TaskGraphDigest{
-				CompletedArtifacts: []TaskGraphEntry{
+				Entries: []TaskGraphEntry{
 					{
 						ID:          "plan-1",
 						Description: "Completed plan",
 						Status:      "MERGED",
-						OutputRefs:  []string{"specs/plans/plan-1.md"},
+						Relations:   []string{"artifact-producer"},
 					},
 				},
 			},
@@ -2389,11 +2366,14 @@ func TestCollectivePlanScoping_PhaseConsistencyRule(t *testing.T) {
 			t.Fatalf("BuildRoleContext: %v", err)
 		}
 
-		if !strings.Contains(output, "task detail: liza get plan-1 --json") {
-			t.Error("expected full task detail command to remain available")
+		if !strings.Contains(output, "Task detail: `liza get <id> --json` for full task state and `artifact-ref` tasks.") {
+			t.Error("expected full task detail command hint to remain available")
 		}
-		if !strings.Contains(output, "produced outputs: liza get plan-1 --output-summary --json") {
-			t.Error("expected produced outputs hint for entries with output refs")
+		if !strings.Contains(output, "Produced outputs: `liza get <id> --output-summary --json` for `artifact-producer` tasks.") {
+			t.Error("expected produced outputs command hint for artifact producers")
+		}
+		if !strings.Contains(output, "plan-1 [MERGED; artifact-producer]: Completed plan") {
+			t.Error("expected artifact-producer relation on compact task graph entry")
 		}
 		if strings.Contains(output, "exact refs:") || strings.Contains(output, "output: specs/plans/plan-1.md") {
 			t.Errorf("expected produced output refs to stay load-on-demand, got:\n%s", output)

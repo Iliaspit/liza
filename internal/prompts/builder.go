@@ -56,7 +56,7 @@ type stacklitPromptIndex struct {
 	ShellIndexPath string
 }
 
-// SiblingTaskSummary provides minimal context about sibling tasks in the same sprint
+// SiblingTaskSummary provides minimal context about phase dependency tasks.
 type SiblingTaskSummary struct {
 	ID          string
 	Description string
