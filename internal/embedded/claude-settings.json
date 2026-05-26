@@ -160,6 +160,7 @@
       "Bash(printenv:*)",
       "Bash(gh:*)",
       "Bash(git:*)",
+      "Bash(node:*)",
       "Bash(npm:*)",
       "Bash(npx:*)",
       "Bash(mypy:*)",

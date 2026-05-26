@@ -1195,6 +1195,7 @@ func assertClaudeSettingsToolPermissions(t *testing.T, allow []string) {
 	}
 
 	required := []string{
+		"Bash(node:*)",
 		"Bash(rg:*)",
 		"Bash(ast-grep:*)",
 	}

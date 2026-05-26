@@ -477,7 +477,7 @@ The full template also pre-approves skills (code-review, testing, debugging, etc
 > | Python | `uv`, `ruff`, `pytest`, `mypy`, `pip`, `pre-commit` |
 > | Go | `go`, `make` |
 > | Rust | `cargo`, `rustfmt`, `clippy-driver` |
-> | Node.js | `npm`, `npx`, `yarn`, `pnpm`, `bun`, `eslint`, `prettier`, `tsc` |
+> | Node.js | `node`, `npm`, `npx`, `yarn`, `pnpm`, `bun`, `eslint`, `prettier`, `tsc` |
 >
 > If your project uses tools not in this list, add them to `.claude/settings.json` before
 > spawning agents. Run `/liza-logs` after your first sprint to catch any remaining
