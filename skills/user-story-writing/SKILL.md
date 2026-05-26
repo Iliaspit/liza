@@ -7,6 +7,10 @@ description: Transform requirements into user stories for coding tasks
 
 Transform high-level, fuzzy requirements into precise, well-structured user stories that an Orchestrator can decompose into coding tasks.
 
+**Stories have two audiences: first the intent owner, then the Coder.** The Story Review (Part 1)
+lets the intent owner verify the lived user behavior in minutes. The Coder Contract (Part 2) gives
+the Coder implementation-ready acceptance criteria. Neither section is optional.
+
 The output is a user story artifact — a markdown document, git-tracked, treated with the same rigor as code.
 One story document per task; one cohesive capability per document. A capability is the document's scope.
 Individual user stories are its constituent parts — each story maps to one Coder-sized unit of work.
@@ -62,7 +66,37 @@ persona tells the Coder that `--help` should exist and errors should go to stder
 If the source material contains multiple independent capabilities, flag this to the Orchestrator — it may need to split the task.
 Do not silently produce a mega-document.
 
-## 2. Write
+## 2. Write the Story Review
+
+Write Part 1 before Part 2. The Story Review is a forcing function: if you cannot write a clear
+walkthrough of the experience, the stories are not yet understood from the user's perspective.
+
+**Promise (Before/After):** State what the persona cannot do or trust today and what becomes
+possible after these stories ship. Plain language, no IDs. A non-technical stakeholder should be
+able to read this and say "yes, that's the experience I want."
+
+**Behavior Map:** One row per story. The user-visible change column restates the story as a
+plain-language outcome — not the AC list, but its human consequence. The source intent column
+traces back to the capability or source material. The main exclusion column names what this story
+deliberately leaves out.
+
+**Example Walkthrough:** Write a short narrative (3–6 steps) of a representative user going through
+the main happy path. This is not Given/When/Then — it is a plain-language scenario the intent owner
+can picture. The walkthrough should exercise the most important story, or the flow that connects
+multiple stories. If the walkthrough does not match the intent owner's mental model, the ACs need
+revision regardless of how technically complete they are.
+
+**Interpretation Decisions:** Surface judgment calls made during decomposition. When the parent
+epic's Intent Review already resolved the interpretation, do not repeat it here — only surface
+new story-level decisions (AC boundary choices, edge case handling, decomposition trade-offs).
+Omit this section entirely when no new judgment calls arose.
+
+**Review Questions:** Write 3–5 targeted questions the intent owner can answer with a short
+response. Focus on behavior and experience: "Is the user expected to see X before Y?", "Should
+this edge case be handled now or deferred?", "Is this the right story boundary between ST-001
+and ST-002?"
+
+## 3. Write the Coder Contract
 
 Every user story follows the canonical form:
 
@@ -103,9 +137,18 @@ is not a story-level acceptance criterion.
 Edge cases cover error states, boundary conditions, and unexpected input — not just the happy path.
 Each edge case states expected behavior explicitly.
 
-## 3. Self-Review
+## 4. Self-Review
 
 Before submitting for review, verify:
+
+**Story Review (Part 1):**
+- [ ] Promise is readable without implementation context
+- [ ] Behavior Map covers every story — no row missing
+- [ ] Example Walkthrough exercises the main happy path as a narrative the intent owner can picture
+- [ ] Interpretation Decisions surface story-level judgment calls not already resolved by the parent epic
+- [ ] Review Questions are specific and answerable — focused on behavior, experience, and scope boundaries
+
+**Coder Contract (Part 2):**
 - [ ] Every story traces to a source reference (not invented, as granular as possible)
 - [ ] Every story has a clear persona, action, and value statement
 - [ ] Persona includes environment or skill-level detail when it affects feature behavior
@@ -126,7 +169,8 @@ If self-review reveals issues, fix before submitting.
 
 # Constraints
 
-- **DO** write for the Coder, not for management. Be precise and technical. Avoid marketing language, hedging, and filler.
+- **DO** write Part 1 for the intent owner (plain language, verification surface) and Part 2 for
+  the Coder (precise, technical, implementation-ready).
 - **DO** check existing stories in the same domain for consistency — contradictions between story documents are costly to discover at implementation time.
 - **DO** surface inconsistencies as an Open Question if references contradict each other.
 - **DO NOT** write code — stories only.
@@ -143,6 +187,8 @@ If self-review reveals issues, fix before submitting.
 - **Premature Solutioning**: ACs or assumptions that prescribe implementation. "Given the JSON file exists" is solutioning; "Given tasks were previously saved" is behavioral. "Priority is a numeric value where lower = higher" is solutioning; "Priorities have a defined sort order" is behavioral.
 - **Generic Persona**: "As a User, I want to..." where "User" could be any noun. A persona should tell the Coder about context, skill level, or environment that affects behavior.
 - **Valueless Story**: Hand-waving the "so that" clause. If you can't articulate the value, the story may not be needed.
+- **AC Wall**: Acceptance criteria are technically complete but there is no plain-language
+  walkthrough, making it hard for the intent owner to verify the experience being specified.
 
 # ID Conventions
 

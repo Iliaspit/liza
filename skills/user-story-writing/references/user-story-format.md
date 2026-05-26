@@ -2,6 +2,59 @@
 
 Status: draft/review/approved/superseded
 
+---
+
+# Part 1 — Story Review
+
+*For the intent owner. Verify the user-visible behavior before coding starts.*
+
+## Promise
+
+**Before these stories:** <what the persona cannot do or cannot trust today>
+
+**After these stories:** <what the persona can do, decide, recover from, or rely on>
+
+## Behavior Map
+
+| Story | User-visible change | Source intent captured | Main exclusion |
+|-------|---------------------|-----------------------|----------------|
+| ST-001 — <name> | <plain-language outcome> | <source section / capability point> | <not covered here> |
+| ... | | | |
+
+## Example Walkthrough
+
+A representative user would:
+1. <do or observe X>
+2. <receive or see Y>
+3. <end in state Z>
+
+Narrative, not Given/When/Then. Exercises the main happy path so the intent owner can picture the
+experience being specified.
+
+## Interpretation Decisions
+
+Non-obvious inferences made while decomposing the capability into stories.
+Omit when all interpretation was resolved at the epic level and no new judgment calls arose.
+
+| Source signal | Story interpretation | Confidence | Verify? |
+|---------------|---------------------|------------|---------|
+| <source wording or capability claim> | <how the story interprets it> | HIGH / MEDIUM / LOW | Yes / No |
+| ... | | | |
+
+## Review Questions
+
+Targeted questions only the intent owner can answer. Not technical unknowns — those belong in
+Open Questions within the coder contract.
+
+- [ ] <question about behavior, scope boundary, or AC judgment call>
+- [ ] ...
+
+---
+
+# Part 2 — Coder Contract
+
+*For the Coder. Implementation-ready acceptance criteria and context.*
+
 ## Goal
 One sentence. What this set of stories achieves when implemented. Measurable.
 
@@ -15,7 +68,7 @@ Why this matters. How it fits in the broader system. Dependencies on other story
 - **<Persona name>**: <one-line description of who they are and what they care about>
 - ...
 
-## General information
+## General Information
 
 Applies to: the entire scope (all stories).
 
@@ -30,6 +83,7 @@ Applies to: the entire scope (all stories).
 ### Related External Components
 Summary of all the external components referenced by this document:
 - Component C-002 - <component name>
+- ...
 
 ### Interfaces *(include only when this document defines component boundaries)*
 
@@ -42,7 +96,7 @@ Explicit list of what this document does NOT cover. Adjacent concerns the Coder 
 
 ### Assumptions
 Items where the source material was ambiguous and you made a judgment call. Each assumption is:
-- **ASM-000-1**: <what you assumed> — *Why*: <reasoning> — ⚠️ Confidence: HIGH | MEDIUM | LOW
+- **ASM-000-1**: <what you assumed> — *Why*: <reasoning> — Confidence: HIGH | MEDIUM | LOW
 - ...
 
 LOW confidence assumptions are blocking: the human must resolve them before stories move to coding.
@@ -78,7 +132,7 @@ Explicit list of what this story does NOT cover. Adjacent concerns the Coder mus
 
 ### Assumptions
 Items where the source material was ambiguous and you made a judgment call. Each assumption is:
-- **ASM-001-1**: <what you assumed> — *Why*: <reasoning> — ⚠️ Confidence: HIGH | MEDIUM | LOW
+- **ASM-001-1**: <what you assumed> — *Why*: <reasoning> — Confidence: HIGH | MEDIUM | LOW
 
 LOW confidence assumptions are blocking: the human must resolve them before this story moves to coding.
 

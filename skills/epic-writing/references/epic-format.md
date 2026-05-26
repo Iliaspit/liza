@@ -2,6 +2,49 @@
 
 Status: draft/review/approved/superseded
 
+---
+
+# Part 1 — Intent Review
+
+*For the intent owner. Verify that this epic captures what you meant before agents decompose it.*
+
+## Promise
+
+**Before this epic:** <what the product cannot do today, in plain language>
+
+**After this epic:** <what becomes possible, in plain language>
+
+## Capability Map
+
+| Capability | Human-facing outcome | Source intent captured | Main exclusion |
+|------------|---------------------|-----------------------|----------------|
+| CAP-001 — <name> | <what the user gains> | <source section/problem ID> | <what this deliberately leaves out> |
+| ... | | | |
+
+## Interpretation Decisions
+
+Non-obvious inferences made while translating source material into this epic.
+Omit when the epic is a straightforward decomposition with no judgment calls.
+
+| Source signal | Epic interpretation | Confidence | Verify? |
+|---------------|---------------------|------------|---------|
+| <quote or paraphrase from source> | <how this epic interprets it> | HIGH / MEDIUM / LOW | Yes / No |
+| ... | | | |
+
+## Review Questions
+
+Targeted questions only the intent owner can answer. Not technical unknowns — those belong in
+Open Questions within the execution contract.
+
+- [ ] <question about intent, scope boundary, or ownership>
+- [ ] ...
+
+---
+
+# Part 2 — Execution Contract
+
+*For Story Writers and the Orchestrator. Operational detail for decomposition and implementation.*
+
 ## Goal
 One sentence. What this epic achieves when fully delivered. Measurable at the product level.
 
@@ -13,12 +56,16 @@ Keep it brief — the Orchestrator needs orientation, not a lecture.
 - **<Persona name>**: <one-line description of who they are, their environment, and what they care about>
 - ...
 
-## General information
+## General Information
 
 Applies to: the entire epic scope.
 
 ### References
 - <ref-type>: <path or link> — <section/line range if applicable>
+- ...
+
+### Epic Dependencies
+- <dependency on another epic, if any>
 - ...
 
 ### Completion Criteria
@@ -49,7 +96,7 @@ Explicit list of what this epic does NOT cover. Adjacent capabilities the Story 
 
 ### Assumptions
 Items where the vision material was ambiguous and you made a judgment call.
-- **ASM-000-1**: <what you assumed> — *Why*: <reasoning> — ⚠️ Confidence: HIGH | MEDIUM | LOW
+- **ASM-000-1**: <what you assumed> — *Why*: <reasoning> — Confidence: HIGH | MEDIUM | LOW
 
 LOW confidence assumptions are blocking: the human must resolve them before story-writing begins.
 
@@ -88,7 +135,7 @@ work a Story Writer can own.
 What this capability explicitly excludes. Prevents Story Writer scope absorption.
 
 ### Assumptions
-- **ASM-001-1**: <what you assumed> — *Why*: <reasoning> — ⚠️ Confidence: HIGH | MEDIUM | LOW
+- **ASM-001-1**: <what you assumed> — *Why*: <reasoning> — Confidence: HIGH | MEDIUM | LOW
 
 ### Open Questions
 - **OQ-001-1**: <question> — *Impact if unresolved*: <what the Story Writer cannot bound>

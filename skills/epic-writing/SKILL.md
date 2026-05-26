@@ -8,10 +8,15 @@ description: Transform vision documents into structured epics that bound story-w
 Transform a vision document or high-level product requirement into a structured epic — a markdown
 document, git-tracked, treated with the same rigor as code.
 
-An epic is the primary input to the **user-story-writing** skill. Each capability section becomes a
-Story Writer task: the Story Writer reads the epic's Personas, General Information, and the
-capability section — nothing else. Write accordingly. A capability that requires the Story Writer
-to re-read the vision to understand what they're building is incomplete.
+**An epic has two audiences: first the teller, then the doer.** The Intent Review (Part 1) lets the
+intent owner verify scope and interpretation in minutes. The Execution Contract (Part 2) gives
+Story Writers and the Orchestrator everything they need to decompose and implement. Neither section
+is optional.
+
+The Execution Contract is the primary input to the **user-story-writing** skill. Each capability
+section becomes a Story Writer task: the Story Writer reads the epic's Personas, General
+Information, and the capability section — nothing else. Write accordingly. A capability that
+requires the Story Writer to re-read the vision to understand what they're building is incomplete.
 
 An epic bounds one cohesive capability area, serving a coherent persona cluster, expected to
 decompose into **3–8 user stories** across its capabilities. It lives one level above user stories.
@@ -110,7 +115,32 @@ cohesive unit of work a Story Writer can own independently. You are naming docum
 stories — the Story Writer does that. Each entry needs only a short title and any known dependency
 notes.
 
-## 3. Write
+## 3. Write the Intent Review
+
+Write Part 1 before Part 2. The Intent Review is a forcing function: if you cannot write a clear
+Before/After promise, the epic scope is not yet understood.
+
+**Promise (Before/After):** State what the product cannot do today and what becomes possible after
+this epic ships. Plain language, no IDs, no jargon. A non-technical stakeholder should be able to
+read this and say "yes, that's what I want" or "no, you misunderstood."
+
+**Capability Map:** One row per capability. The human-facing outcome column restates the capability
+as a user benefit — not the capability description (which is written for Story Writers), but its
+plain-language consequence. The source intent column traces back to the vision material. The main
+exclusion column names the most important thing this capability deliberately leaves out.
+
+**Interpretation Decisions:** Surface every non-obvious inference from source to epic. The test: if
+a reasonable reader of the source material might interpret a signal differently, it belongs here.
+Omit this section only when the epic is a straightforward decomposition with no judgment calls.
+Mark "Verify? Yes" when the interpretation is consequential — meaning a wrong call here changes
+what gets built.
+
+**Review Questions:** Write 3–5 targeted questions the intent owner can answer with a short
+response. These are not open-ended feedback prompts ("does this look right?") — they are specific
+verification points ("Is X intentionally out of scope, or should it move into this epic?", "Did
+we correctly interpret Y as Z?", "Is this the right ownership boundary between EP-NNN and EP-MMM?").
+
+## 4. Write the Execution Contract
 
 **Completion Criteria** replace vague success metrics. They are the falsifiable condition that
 closes the epic: when all story ACs pass, the completion criteria must be satisfied. Write them
@@ -144,9 +174,19 @@ state the behavioral constraint only.
 completion criteria, or capability ordering. Technical open questions belong in story documents,
 not here.
 
-## 4. Self-Review
+## 5. Self-Review
 
 Before submitting for review, verify:
+
+**Intent Review (Part 1):**
+- [ ] Before/After promise is readable by a non-technical stakeholder
+- [ ] Capability Map covers every capability — no row missing
+- [ ] Capability Map exclusions match the Out of Scope sections in Part 2
+- [ ] Every consequential interpretation appears in the Interpretation Decisions ledger
+- [ ] Review Questions are specific and answerable — not open-ended feedback prompts
+- [ ] Review Questions cover: scope boundaries, key interpretations, and ownership boundaries with adjacent epics
+
+**Execution Contract (Part 2):**
 - [ ] Completion criteria are falsifiable — all story ACs passing satisfies them
 - [ ] Epic decomposes into 3–8 user stories (use story document count as a proxy)
 - [ ] Every capability traces to a source reference — none invented
@@ -167,7 +207,8 @@ If self-review reveals issues, fix before submitting.
 
 # Constraints
 
-- **DO** write for the Orchestrator and Story Writers, not for management. Be precise and bounded.
+- **DO** write Part 1 for the intent owner (plain language, verification surface) and Part 2 for
+  the Orchestrator and Story Writers (precise, bounded, operational).
 - **DO** check existing epics in the same domain for consistency — contradictions between epic
   documents surface late and are expensive.
 - **DO** surface contradictions between source references as an Open Question.
@@ -201,6 +242,9 @@ If self-review reveals issues, fix before submitting.
 - **Opaque Capability**: The Story Writer needs to re-read the vision to understand what to build.
   Every capability must be self-contained enough that it can be handed to a Story Writer as a
   complete task brief.
+- **Buried Interpretation**: A consequential judgment call (scope boundary, signal interpretation,
+  ownership split) is embedded in capability prose instead of surfaced in the Interpretation
+  Decisions ledger. The intent owner will miss it during review.
 
 # ID Conventions
 
