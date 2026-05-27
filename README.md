@@ -227,7 +227,7 @@ For repository-navigation-heavy MAS runs, `scip-search` is highly recommended
 but strictly opt-in. Liza does not install `scip-search` or language indexers
 automatically; install the external tools you need, set
 `LIZA_ENABLE_SCIP_SEARCH=1` for the MAS process, and initialize with repeated
-language allowlist flags when you want explicit selection:
+language allowlist flags when you want explicit selection (all detected languages by default):
 
 ```bash
 LIZA_ENABLE_SCIP_SEARCH=1 liza init "Project goal" --spec specs/vision.md \
