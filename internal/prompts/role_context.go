@@ -21,13 +21,24 @@ type TaskGraphDigest struct {
 // TaskGraphEntry is a compact, prompt-safe summary of a task related to the
 // assigned task.
 type TaskGraphEntry struct {
-	ID              string
-	Description     string
-	Status          string
-	Relations       []string
-	SharedRefs      []string
-	BlockedReason   string
-	RepairOperation string
+	ID                string
+	Description       string
+	Status            string
+	Relations         []string
+	SharedRefs        []string
+	Children          []TaskGraphChildSummary
+	RemainingChildren int
+	BlockedReason     string
+	RepairOperation   string
+}
+
+// TaskGraphChildSummary is a bounded summary of a direct generated child task.
+type TaskGraphChildSummary struct {
+	ID                 string
+	Status             string
+	RolePair           string
+	DependsOn          []string
+	RemainingDependsOn int
 }
 
 // ParentTaskContext provides context about a parent task for architecture consolidation.

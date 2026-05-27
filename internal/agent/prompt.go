@@ -520,8 +520,14 @@ var (
 	pathRefPattern = regexp.MustCompile(`[A-Za-z0-9_.@+/-]+/[A-Za-z0-9_.@+/-]+|[A-Za-z0-9_.@+-]+\.[A-Za-z0-9][A-Za-z0-9_.@+-]*`)
 )
 
+const (
+	maxTaskGraphChildrenPerEntry = 8
+	maxTaskGraphChildDeps        = 3
+)
+
 func buildRelevantTaskGraph(state *models.State, current *models.Task) prompts.TaskGraphDigest {
 	currentRefs := taskScopeRefs(current)
+	childrenByParent := taskChildrenByParent(state)
 	entries := make(map[string]*prompts.TaskGraphEntry)
 	var ordered []*prompts.TaskGraphEntry
 
@@ -605,9 +611,40 @@ func buildRelevantTaskGraph(state *models.State, current *models.Task) prompts.T
 		Entries: make([]prompts.TaskGraphEntry, 0, len(ordered)),
 	}
 	for _, entry := range ordered {
+		entry.Children, entry.RemainingChildren = summarizeTaskGraphChildren(childrenByParent[entry.ID])
 		digest.Entries = append(digest.Entries, *entry)
 	}
 	return digest
+}
+
+func taskChildrenByParent(state *models.State) map[string][]*models.Task {
+	childrenByParent := make(map[string][]*models.Task)
+	for i := range state.Tasks {
+		task := &state.Tasks[i]
+		for _, parentID := range task.EffectiveParentTasks() {
+			if parentID == "" {
+				continue
+			}
+			childrenByParent[parentID] = append(childrenByParent[parentID], task)
+		}
+	}
+	return childrenByParent
+}
+
+func summarizeTaskGraphChildren(children []*models.Task) ([]prompts.TaskGraphChildSummary, int) {
+	limit := min(len(children), maxTaskGraphChildrenPerEntry)
+	summaries := make([]prompts.TaskGraphChildSummary, 0, limit)
+	for _, child := range children[:limit] {
+		depLimit := min(len(child.DependsOn), maxTaskGraphChildDeps)
+		summaries = append(summaries, prompts.TaskGraphChildSummary{
+			ID:                 child.ID,
+			Status:             string(child.Status),
+			RolePair:           child.RolePair,
+			DependsOn:          child.DependsOn[:depLimit],
+			RemainingDependsOn: len(child.DependsOn) - depLimit,
+		})
+	}
+	return summaries, len(children) - limit
 }
 
 func plannedSiblings(state *models.State, currentTaskID string) []*models.Task {

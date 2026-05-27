@@ -2356,6 +2356,16 @@ func TestCollectivePlanScoping_PhaseConsistencyRule(t *testing.T) {
 						Description: "Completed plan",
 						Status:      "MERGED",
 						Relations:   []string{"artifact-producer"},
+						Children: []TaskGraphChildSummary{
+							{
+								ID:                 "plan-1-coding-0",
+								Status:             "MERGED",
+								RolePair:           "coding-pair",
+								DependsOn:          []string{"bootstrap-0", "phase-gate-1", "phase-gate-2"},
+								RemainingDependsOn: 2,
+							},
+						},
+						RemainingChildren: 3,
 					},
 				},
 			},
@@ -2366,6 +2376,9 @@ func TestCollectivePlanScoping_PhaseConsistencyRule(t *testing.T) {
 			t.Fatalf("BuildRoleContext: %v", err)
 		}
 
+		if !strings.Contains(output, "Use listed entries before broad state queries. Active tasks fallback: `liza get tasks --active --summary --json`.") {
+			t.Error("expected active task command to be framed as fallback")
+		}
 		if !strings.Contains(output, "Task detail: `liza get <id> --json` for full task state and `artifact-ref` tasks.") {
 			t.Error("expected full task detail command hint to remain available")
 		}
@@ -2374,6 +2387,9 @@ func TestCollectivePlanScoping_PhaseConsistencyRule(t *testing.T) {
 		}
 		if !strings.Contains(output, "plan-1 [MERGED; artifact-producer]: Completed plan") {
 			t.Error("expected artifact-producer relation on compact task graph entry")
+		}
+		if !strings.Contains(output, "children: plan-1-coding-0 [MERGED, coding-pair, deps: bootstrap-0, phase-gate-1, phase-gate-2 (+2 more)] (+3 more)") {
+			t.Errorf("expected bounded child summaries to render, got:\n%s", output)
 		}
 		if strings.Contains(output, "exact refs:") || strings.Contains(output, "output: specs/plans/plan-1.md") {
 			t.Errorf("expected produced output refs to stay load-on-demand, got:\n%s", output)

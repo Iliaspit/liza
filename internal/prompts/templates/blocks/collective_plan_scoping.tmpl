@@ -25,7 +25,7 @@ If you discover work needed outside your scope that you cannot handle, log it as
 {{- end}}
 
 RELEVANT TASK GRAPH DIGEST:
-Use this compact digest before broad state queries. Active tasks: `liza get tasks --active --summary --json`.
+Use listed entries before broad state queries. Active tasks fallback: `liza get tasks --active --summary --json`.
 Task detail: `liza get <id> --json` for full task state and `artifact-ref` tasks.
 Produced outputs: `liza get <id> --output-summary --json` for `artifact-producer` tasks.
 {{- if gt (len .TaskGraph.Entries) 0}}
@@ -57,6 +57,7 @@ If your plan CANNOT be made consistent with those prior plans:
 {{- define "task-graph-entry" -}}
 - {{.ID}} [{{.Status}}; {{range $i, $rel := .Relations}}{{if $i}}, {{end}}{{$rel}}{{end}}]: {{.Description -}}
 {{- if .SharedRefs}} | shared refs: {{range $i, $ref := .SharedRefs}}{{if $i}}, {{end}}{{$ref}}{{end}}{{end -}}
+{{- if .Children}} | children: {{range $i, $child := .Children}}{{if $i}}, {{end}}{{$child.ID}} [{{$child.Status}}, {{$child.RolePair}}{{if $child.DependsOn}}, deps: {{range $j, $dep := $child.DependsOn}}{{if $j}}, {{end}}{{$dep}}{{end}}{{if gt $child.RemainingDependsOn 0}} (+{{$child.RemainingDependsOn}} more){{end}}{{end}}]{{end}}{{if gt .RemainingChildren 0}} (+{{.RemainingChildren}} more){{end}}{{end -}}
 {{- if .BlockedReason}} | blocker: {{.BlockedReason}}{{end -}}
 {{- if .RepairOperation}} | repair: {{.RepairOperation}}{{end}}
 {{- end -}}

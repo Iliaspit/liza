@@ -2,6 +2,7 @@ package agent
 
 import (
 	stderrors "errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -1106,6 +1107,7 @@ func TestBuildPrompt_RelevantTaskGraphDigest(t *testing.T) {
 	blockedReason := "waiting for migration plan"
 	blockedSiblingReason := "waiting for repository owner"
 	worktree := ".worktrees/task-current"
+	taskSiblingID := "task-sibling"
 	state := &models.State{
 		Version: 1,
 		Goal: models.Goal{
@@ -1152,6 +1154,31 @@ func TestBuildPrompt_RelevantTaskGraphDigest(t *testing.T) {
 				SpecRef:     "specs/repository.md",
 				PlanRef:     "specs/plans/repository.md",
 				Scope:       "In scope: internal/repository.go and docs/repository.md",
+				Created:     now,
+			},
+			{
+				ID:          "task-sibling-coding-0",
+				Description: "Implement repository docs",
+				Status:      models.TaskStatusMerged,
+				RolePair:    "coding-pair",
+				Priority:    1,
+				ParentTask:  &taskSiblingID,
+				SpecRef:     "specs/repository.md",
+				DoneWhen:    "docs are implemented",
+				Scope:       "In scope: docs/repository.md",
+				Created:     now,
+			},
+			{
+				ID:          "task-sibling-coding-1",
+				Description: "Implement repository tests",
+				Status:      models.TaskStatusReady,
+				RolePair:    "coding-pair",
+				Priority:    1,
+				ParentTask:  &taskSiblingID,
+				SpecRef:     "specs/repository.md",
+				DoneWhen:    "tests are implemented",
+				Scope:       "In scope: tests/repository_test.go",
+				DependsOn:   []string{"task-sibling-coding-0", "phase-gate-1", "phase-gate-2", "phase-gate-3"},
 				Created:     now,
 			},
 			{
@@ -1225,7 +1252,7 @@ func TestBuildPrompt_RelevantTaskGraphDigest(t *testing.T) {
 		"Artifact refs below are repo-relative.",
 		"git -C " + filepath.Join(tmpDir, worktree) + " show main:<file-ref>",
 		"RELEVANT TASK GRAPH DIGEST",
-		"Active tasks: `liza get tasks --active --summary --json`.",
+		"Use listed entries before broad state queries. Active tasks fallback: `liza get tasks --active --summary --json`.",
 		"Task detail: `liza get <id> --json` for full task state and `artifact-ref` tasks.",
 		"Produced outputs: `liza get <id> --output-summary --json` for `artifact-producer` tasks.",
 		"task-dep [BLOCKED; dependency, blocked, artifact-producer]: Prepare migration contract",
@@ -1233,7 +1260,7 @@ func TestBuildPrompt_RelevantTaskGraphDigest(t *testing.T) {
 		"task-blocked-sibling [BLOCKED; blocked, sibling, file-overlap]: Coordinate repository behavior",
 		"blocker: waiting for repository owner",
 		"task-other-sibling [DRAFT_CODE; sibling, file-overlap]: Review unrelated CLI behavior | shared refs: internal/repository.go",
-		"task-sibling [MERGED; artifact-ref, sibling]: Document repository behavior",
+		"task-sibling [MERGED; artifact-ref, sibling]: Document repository behavior | children: task-sibling-coding-0 [MERGED, coding-pair], task-sibling-coding-1 [DRAFT_CODE, coding-pair, deps: task-sibling-coding-0, phase-gate-1, phase-gate-2 (+1 more)]",
 		"This task is 1 of 4 in the current sprint plan.",
 		"SIBLING CONSISTENCY RULE:",
 		"task-superseded-sibling [SUPERSEDED] — plan: specs/plans/superseded.md",
@@ -1277,6 +1304,59 @@ func TestBuildPrompt_RelevantTaskGraphDigest(t *testing.T) {
 	for _, id := range []string{"task-dep", "task-blocked-sibling", "task-other-sibling", "task-sibling"} {
 		if count := strings.Count(prompt, "- "+id+" ["); count != 1 {
 			t.Errorf("task graph should render %s once, got %d", id, count)
+		}
+	}
+}
+
+func TestTaskGraphChildrenAreBounded(t *testing.T) {
+	now := time.Now().UTC()
+	children := make([]*models.Task, 0, maxTaskGraphChildrenPerEntry+1)
+	for i := range maxTaskGraphChildrenPerEntry + 1 {
+		children = append(children, &models.Task{
+			ID:        fmt.Sprintf("child-%d", i),
+			Status:    models.TaskStatusReady,
+			RolePair:  "coding-pair",
+			DependsOn: []string{"dep-1", "dep-2", "dep-3", "dep-4"},
+			Created:   now,
+		})
+	}
+
+	summaries, remaining := summarizeTaskGraphChildren(children)
+	if len(summaries) != maxTaskGraphChildrenPerEntry {
+		t.Fatalf("summaries count = %d, want %d", len(summaries), maxTaskGraphChildrenPerEntry)
+	}
+	if remaining != 1 {
+		t.Fatalf("remaining children = %d, want 1", remaining)
+	}
+	if got := summaries[0].DependsOn; !slices.Equal(got, []string{"dep-1", "dep-2", "dep-3"}) {
+		t.Fatalf("child deps = %v, want first three deps", got)
+	}
+	if summaries[0].RemainingDependsOn != 1 {
+		t.Fatalf("remaining child deps = %d, want 1", summaries[0].RemainingDependsOn)
+	}
+}
+
+func TestTaskChildrenByParentIncludesManyToOneChildren(t *testing.T) {
+	now := time.Now().UTC()
+	state := &models.State{
+		Tasks: []models.Task{
+			{ID: "parent-a", Status: models.TaskStatusMerged, Created: now},
+			{ID: "parent-b", Status: models.TaskStatusMerged, Created: now},
+			{
+				ID:          "consolidated-child",
+				Status:      models.TaskStatusDraft,
+				RolePair:    "architecture-main-pair",
+				ParentTasks: []string{"parent-a", "parent-b"},
+				Created:     now,
+			},
+		},
+	}
+
+	childrenByParent := taskChildrenByParent(state)
+	for _, parentID := range []string{"parent-a", "parent-b"} {
+		children := childrenByParent[parentID]
+		if len(children) != 1 || children[0].ID != "consolidated-child" {
+			t.Fatalf("children for %s = %#v, want consolidated-child", parentID, children)
 		}
 	}
 }
