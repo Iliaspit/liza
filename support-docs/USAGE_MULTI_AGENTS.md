@@ -110,9 +110,9 @@ liza setup --agent-tools ~/my-agent-tools.md  # use custom AGENT_TOOLS.md
 > snapshot index locations.
 
 > **Optional:** enable `stacklit-cli` for low-token repository maps in MAS
-> prompts. `LIZA_ENABLE_STACKLIT` is the activation gate. Commit
-> `stacklit.json`, and optionally `stacklit-insights.json` plus
-> `.stacklitrc.json`, at the repo root for the baseline project index. Liza
+> prompts. `LIZA_ENABLE_STACKLIT` is the activation gate. Commit curated
+> Stacklit inputs such as `stacklit-insights.json` and `.stacklitrc.json` when
+> you use them, and either commit or ignore generated `stacklit.json`. Liza
 > refreshes task-local `stacklit.json` files in worktrees for prompt context
 > without adding them to task diffs. See [Configuration Reference](CONFIGURATION.md)
 > for the runtime contract and non-goals.

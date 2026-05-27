@@ -103,9 +103,9 @@ func RuntimeEnabled() bool {
 
 // RefreshIndex generates stacklit.json for one target root. For task worktrees,
 // it first isolates the generated file from task diffs: tracked stacklit.json is
-// marked skip-worktree for that linked worktree. Task-local generation requires
-// the repository-level stacklit.json to be committed so generated task-local
-// snapshots cannot dirty task diffs.
+// marked skip-worktree for that linked worktree, while ignored stacklit.json is
+// generated as an ignored prompt-local file. Task-local generation requires one
+// of those git states so generated snapshots cannot dirty task diffs.
 func RefreshIndex(opts RefreshOptions) (RefreshResult, error) {
 	if !RuntimeEnabled() {
 		return RefreshResult{}, nil
@@ -214,7 +214,14 @@ func prepareTaskWorktreeStacklitFile(targetRoot string) error {
 		}
 		return nil
 	}
-	return fmt.Errorf("task worktree stacklit.json is not tracked; commit stacklit.json at the repository root before enabling %s", EnvEnableStacklit)
+	ignored, err := stacklitJSONIgnored(targetRoot)
+	if err != nil {
+		return err
+	}
+	if ignored {
+		return nil
+	}
+	return fmt.Errorf("task worktree stacklit.json is neither tracked nor ignored; commit or ignore stacklit.json before enabling %s", EnvEnableStacklit)
 }
 
 func stacklitJSONTracked(targetRoot string) (bool, error) {
@@ -226,6 +233,18 @@ func stacklitJSONTracked(targetRoot string) (bool, error) {
 		return false, nil
 	}
 	return false, fmt.Errorf("inspect task worktree stacklit.json tracking: %w%s", err, outputSuffix(string(output)))
+}
+
+func stacklitJSONIgnored(targetRoot string) (bool, error) {
+	output, err := gitenv.CombinedOutput(targetRoot, "check-ignore", "stacklit.json")
+	if err == nil {
+		return true, nil
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
+		return false, nil
+	}
+	return false, fmt.Errorf("inspect task worktree stacklit.json ignore state: %w%s", err, outputSuffix(string(output)))
 }
 
 func gitUnmatchedPath(err error, output []byte) bool {

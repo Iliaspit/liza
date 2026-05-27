@@ -79,6 +79,51 @@ func TestRefreshIndexTaskWorktreeTrackedStacklitJSONIsPromptLocalAndClean(t *tes
 	}
 }
 
+func TestRefreshIndexTaskWorktreeIgnoredStacklitJSONIsPromptLocalAndClean(t *testing.T) {
+	projectRoot := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, projectRoot)
+	commitIgnoredStacklitJSON(t, projectRoot)
+	testhelpers.CreateTestWorktree(t, projectRoot, "task-1")
+	worktreeRoot := filepath.Join(projectRoot, ".worktrees", "task-1")
+	t.Setenv(EnvEnableStacklit, "true")
+
+	result, err := RefreshIndex(RefreshOptions{
+		TargetRoot: worktreeRoot,
+		TargetKind: TargetKindTaskWorktree,
+		Runner: func(plan RuntimeCommandPlan) (string, error) {
+			assertStacklitPlan(t, plan, worktreeRoot)
+			if err := os.WriteFile(plan.OutputPath, []byte("task-local index\n"), 0o644); err != nil {
+				return "", err
+			}
+			return "", nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("RefreshIndex() error = %v", err)
+	}
+	if len(result.Failures) != 0 || len(result.Successes) != 1 {
+		t.Fatalf("RefreshIndex() = %#v, want one success and no failures", result)
+	}
+	if got := string(readFile(t, filepath.Join(worktreeRoot, "stacklit.json"))); got != "task-local index\n" {
+		t.Fatalf("stacklit.json content = %q, want task-local index", got)
+	}
+	if status := gitOutput(t, worktreeRoot, "status", "--porcelain"); status != "" {
+		t.Fatalf("git status --porcelain = %q, want clean", status)
+	}
+	if ignored := gitOutput(t, worktreeRoot, "check-ignore", "stacklit.json"); ignored != "stacklit.json" {
+		t.Fatalf("git check-ignore stacklit.json = %q, want ignored stacklit.json", ignored)
+	}
+
+	available, err := AvailableIndexes(RuntimePlanOptions{TargetRoot: worktreeRoot})
+	if err != nil {
+		t.Fatalf("AvailableIndexes() error = %v", err)
+	}
+	wantPath := filepath.Join(worktreeRoot, "stacklit.json")
+	if len(available) != 1 || available[0].Path != wantPath {
+		t.Fatalf("AvailableIndexes() = %#v, want %s", available, wantPath)
+	}
+}
+
 func TestRefreshIndexTaskWorktreeFailureRemovesPromptLocalIndex(t *testing.T) {
 	projectRoot := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, projectRoot)
@@ -113,7 +158,7 @@ func TestRefreshIndexTaskWorktreeFailureRemovesPromptLocalIndex(t *testing.T) {
 	}
 }
 
-func TestRefreshIndexTaskWorktreeRequiresTrackedStacklitJSON(t *testing.T) {
+func TestRefreshIndexTaskWorktreeRejectsUntrackedUnignoredStacklitJSON(t *testing.T) {
 	projectRoot := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, projectRoot)
 	testhelpers.CreateTestWorktree(t, projectRoot, "task-1")
@@ -130,13 +175,13 @@ func TestRefreshIndexTaskWorktreeRequiresTrackedStacklitJSON(t *testing.T) {
 		},
 	})
 	if err == nil {
-		t.Fatal("RefreshIndex() error = nil, want tracked stacklit.json requirement")
+		t.Fatal("RefreshIndex() error = nil, want stacklit.json git-state requirement")
 	}
-	if !strings.Contains(err.Error(), "commit stacklit.json at the repository root") {
-		t.Fatalf("RefreshIndex() error = %v, want tracked stacklit.json guidance", err)
+	if !strings.Contains(err.Error(), "neither tracked nor ignored") {
+		t.Fatalf("RefreshIndex() error = %v, want tracked-or-ignored stacklit.json guidance", err)
 	}
 	if called {
-		t.Fatal("runner called despite missing tracked stacklit.json")
+		t.Fatal("runner called despite unsafe stacklit.json git state")
 	}
 	if len(result.Successes) != 0 || len(result.Failures) != 0 {
 		t.Fatalf("RefreshIndex() = %#v, want empty result on preparation error", result)
@@ -175,6 +220,16 @@ func commitTrackedStacklitJSON(t *testing.T, projectRoot, content string) {
 	}
 	testhelpers.MustGit(t, projectRoot, "add", "stacklit.json")
 	testhelpers.MustGit(t, projectRoot, "commit", "-m", "Add stacklit index")
+	testhelpers.MustGit(t, projectRoot, "branch", "-f", "integration", "HEAD")
+}
+
+func commitIgnoredStacklitJSON(t *testing.T, projectRoot string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(projectRoot, ".gitignore"), []byte("stacklit.json\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(.gitignore) error = %v", err)
+	}
+	testhelpers.MustGit(t, projectRoot, "add", ".gitignore")
+	testhelpers.MustGit(t, projectRoot, "commit", "-m", "Ignore stacklit index")
 	testhelpers.MustGit(t, projectRoot, "branch", "-f", "integration", "HEAD")
 }
 

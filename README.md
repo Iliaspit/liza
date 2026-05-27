@@ -237,12 +237,13 @@ LIZA_ENABLE_SCIP_SEARCH=1 liza init "Project goal" --spec specs/vision.md \
 See [Configuration](support-docs/CONFIGURATION.md) for supported languages,
 indexer prerequisites, auto-detection behavior, and detailed opt-in setup.
 
-`stacklit-cli` is also optional for MAS runs. Commit `stacklit.json`, and
-optionally `stacklit-insights.json` plus `.stacklitrc.json`, at the repo root
-for the baseline project map. Set `LIZA_ENABLE_STACKLIT=1` for the MAS process
-when you want Liza to refresh root/worktree `stacklit.json` files and inject
-Stacklit prompt guidance. Liza does not install Stacklit or mutate curated
-insights/config files; see [Configuration](support-docs/CONFIGURATION.md).
+`stacklit-cli` is also optional for MAS runs. Commit curated Stacklit inputs
+such as `stacklit-insights.json` and `.stacklitrc.json` when you use them, and
+either commit or ignore generated `stacklit.json`. Set `LIZA_ENABLE_STACKLIT=1`
+for the MAS process when you want Liza to refresh root/worktree
+`stacklit.json` files and inject Stacklit prompt guidance. Liza does not install
+Stacklit or mutate curated insights/config files; see
+[Configuration](support-docs/CONFIGURATION.md).
 
 ### Pairing and MAS Modes
 

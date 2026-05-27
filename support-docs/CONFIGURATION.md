@@ -136,14 +136,16 @@ Values are trimmed and compared case-insensitively:
 | `1`, `true` | Enable MAS Stacklit index refresh and prompt guidance |
 | unset, empty, `0`, `false` | Disable MAS Stacklit index refresh and prompt guidance |
 
-Repository-level Stacklit files are operator-owned and should be committed when
-used:
+Repository-level Stacklit files are operator-owned. Commit curated Stacklit
+inputs when used:
 
 ```text
-<project_root>/stacklit.json
 <project_root>/stacklit-insights.json
 <project_root>/.stacklitrc.json
 ```
+
+`stacklit.json` is generated runtime context. Projects may either commit it for
+a shared baseline snapshot or ignore it and regenerate it locally.
 
 Liza does not create or mutate `stacklit-insights.json` or `.stacklitrc.json`.
 When those files exist, `stacklit generate-json` consumes them naturally while
@@ -157,22 +159,24 @@ lifecycle points:
   refresh `<worktree>/stacklit.json`.
 
 Task-local `stacklit.json` is generated for prompt context only. Liza requires
-`stacklit.json` to be tracked before task-local generation; when it is tracked,
-Liza marks only that task worktree copy as skip-worktree before regenerating it
-so it does not enter the task diff. This preserves the clean task-review
-invariant without adding Stacklit-specific per-worktree git configuration.
+`stacklit.json` to be either tracked or ignored before task-local generation.
+When it is tracked, Liza marks only that task worktree copy as skip-worktree
+before regenerating it. When it is ignored, the generated task-local file remains
+ignored. Liza rejects the unsafe middle state where `stacklit.json` is neither
+tracked nor ignored, preserving the clean task-review invariant.
 
 Stacklit generation failures degrade gracefully at runtime. Liza still spawns
 the agent and omits Stacklit prompt guidance when no task-local or project-root
-`stacklit.json` is available. If a previously committed project-root index is
+`stacklit.json` is available. If a previously generated project-root index is
 available after a failed root refresh, prompts may still include it as an
 available repository snapshot; agents are instructed to verify behavior against
 source files before editing.
 
 Explicit non-goals: Liza does not install `stacklit-cli`, run `stacklit view`,
 generate `stacklit.html`, run `stacklit init-insights`, run `stacklit
-ai-summary`, or curate Stacklit insights. Operators install Stacklit and commit
-their chosen Stacklit inputs.
+ai-summary`, or curate Stacklit insights. Operators install Stacklit, commit
+their curated Stacklit inputs, and choose whether to commit or ignore generated
+indexes.
 
 ### SCIP Search (`config.scip_search`)
 
