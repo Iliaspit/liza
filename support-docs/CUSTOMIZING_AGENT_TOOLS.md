@@ -66,7 +66,7 @@ the authority. If no explicit index path is available, fall back to `rg`,
 When Liza supplies an explicit Stacklit index path in an agent prompt, use
 `stacklit` for low-token repository orientation before opening files:
 
-- `stacklit derive -i <path>` for a compact module/dependency/hints map
+- `stacklit derive --ai-summary -i <path>` for a compact module/dependency/hints map
 - `stacklit find-module <query> -i <path>` to locate likely ownership
 - `stacklit get-module <module> -i <path>` for files, exports, type
   definitions, dependencies, and activity

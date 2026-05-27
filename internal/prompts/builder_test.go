@@ -308,7 +308,7 @@ func TestBuildBasePromptStacklitRendersSuppliedIndex(t *testing.T) {
 		"=== STACKLIT INDEX ===",
 		"Stacklit index: " + indexPath,
 		"Stacklit index files are available for this target. They are repository snapshots that may lag behind current edits or failed refresh attempts; use them for orientation, then verify against source files before editing.",
-		"stacklit derive -i " + quotedPath,
+		"stacklit derive --ai-summary -i " + quotedPath,
 		"stacklit find-module <query> -i " + quotedPath,
 		"stacklit get-module <module> -i " + quotedPath,
 		"stacklit get-dependencies <module> -i " + quotedPath,

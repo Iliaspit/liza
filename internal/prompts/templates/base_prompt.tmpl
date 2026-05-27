@@ -139,7 +139,7 @@ Stacklit index files are available for this target. They are repository snapshot
 
 Stacklit index: {{ .IndexPath }}
 ```bash
-stacklit derive -i {{ .ShellIndexPath }}
+stacklit derive --ai-summary -i {{ .ShellIndexPath }}
 stacklit find-module <query> -i {{ .ShellIndexPath }}
 stacklit get-module <module> -i {{ .ShellIndexPath }}
 stacklit get-dependencies <module> -i {{ .ShellIndexPath }}

@@ -437,7 +437,7 @@ func TestBuildPromptWithContextStacklitIndexUsesTaskWorktree(t *testing.T) {
 		t.Fatalf("buildPromptWithContext() error = %v", err)
 	}
 
-	if !strings.Contains(prompt, "stacklit derive -i '"+taskStacklitIndex+"'") {
+	if !strings.Contains(prompt, "stacklit derive --ai-summary -i '"+taskStacklitIndex+"'") {
 		t.Fatalf("prompt missing task worktree Stacklit command for %q", taskStacklitIndex)
 	}
 	if strings.Contains(prompt, projectStacklitIndex) {
@@ -1002,7 +1002,7 @@ func TestBuildOrchestratorPromptContextStacklitIndexRendersFromProjectRoot(t *te
 		t.Fatalf("buildOrchestratorPromptContext() error = %v", err)
 	}
 
-	if !strings.Contains(prompt, "stacklit derive -i '"+projectStacklitIndex+"'") {
+	if !strings.Contains(prompt, "stacklit derive --ai-summary -i '"+projectStacklitIndex+"'") {
 		t.Fatalf("prompt missing project-root Stacklit command for %q", projectStacklitIndex)
 	}
 	if strings.Contains(prompt, taskStacklitIndex) {

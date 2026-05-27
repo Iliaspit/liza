@@ -6,7 +6,7 @@ When a default tool is unavailable in the current session, fall through to the n
 ## Decision Kernel
 
 1. Prefer filesystem-truth tools tied to the current worktree.
-2. When Liza supplies an explicit Stacklit index path, use `stacklit derive -i <path>` for first-pass repo orientation and `stacklit get-module` / `get-dependencies` for module impact before opening files.
+2. When Liza supplies an explicit Stacklit index path, use `stacklit derive --ai-summary -i <path>` for first-pass repo orientation and `stacklit get-module` / `get-dependencies` for module impact before opening files.
 3. When Liza supplies explicit SCIP index paths, use `scip-search` for indexed symbol/package/reference/implementation navigation.
 4. Use `rg` for working-tree text search; use `git grep` for tracked, index, `HEAD`, or historical revision search.
 5. Use `ast-grep` for syntax-shaped code search.
