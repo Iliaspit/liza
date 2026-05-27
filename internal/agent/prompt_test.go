@@ -1308,6 +1308,134 @@ func TestBuildPrompt_RelevantTaskGraphDigest(t *testing.T) {
 	}
 }
 
+func TestBuildPrompt_TaskGraphSummarizesLowSalienceSiblings(t *testing.T) {
+	now := time.Now().UTC()
+	blockedReason := "waiting for owner"
+	worktree := ".worktrees/task-current"
+	state := &models.State{
+		Version: 1,
+		Goal: models.Goal{
+			ID:          "goal-1",
+			Description: "Test goal",
+			SpecRef:     "specs/vision.md",
+			Status:      models.GoalStatusInProgress,
+			Created:     now,
+		},
+		Tasks: []models.Task{
+			{
+				ID:          "task-current",
+				Description: "Implement shared behavior",
+				Status:      models.TaskStatusImplementing,
+				RolePair:    "coding-pair",
+				Priority:    1,
+				DependsOn:   []string{"dep-task"},
+				Scope:       "In scope: internal/shared.go",
+				Worktree:    &worktree,
+				Created:     now,
+			},
+			{
+				ID:          "dep-task",
+				Description: "Critical dependency",
+				Status:      models.TaskStatusReady,
+				RolePair:    "coding-pair",
+				Priority:    1,
+				Created:     now,
+			},
+		},
+		Sprint: models.Sprint{
+			Scope: models.SprintScope{
+				Planned: []string{"task-current"},
+			},
+		},
+		Agents: make(map[string]models.Agent),
+		Config: models.Config{IntegrationBranch: "main"},
+	}
+
+	for i := range 30 {
+		id := fmt.Sprintf("sibling-%02d", i)
+		state.Tasks = append(state.Tasks, models.Task{
+			ID:          id,
+			Description: fmt.Sprintf("Plain sibling %02d", i),
+			Status:      models.TaskStatusReady,
+			RolePair:    "coding-pair",
+			Priority:    i + 2,
+			Scope:       fmt.Sprintf("In scope: docs/%02d.md", i),
+			Created:     now,
+		})
+		state.Sprint.Scope.Planned = append(state.Sprint.Scope.Planned, id)
+	}
+	state.Tasks = append(state.Tasks,
+		models.Task{
+			ID:            "blocked-sibling",
+			Description:   "Blocked sibling",
+			Status:        models.TaskStatusBlocked,
+			RolePair:      "coding-pair",
+			Priority:      40,
+			Scope:         "In scope: docs/blocked.md",
+			BlockedReason: &blockedReason,
+			Created:       now,
+		},
+		models.Task{
+			ID:          "overlap-sibling",
+			Description: "Overlapping sibling",
+			Status:      models.TaskStatusReady,
+			RolePair:    "coding-pair",
+			Priority:    41,
+			Scope:       "In scope: internal/shared.go",
+			Created:     now,
+		},
+		models.Task{
+			ID:          "artifact-sibling",
+			Description: "Artifact sibling",
+			Status:      models.TaskStatusMerged,
+			RolePair:    "coding-pair",
+			Priority:    42,
+			PlanRef:     "specs/plans/artifact.md",
+			Scope:       "In scope: docs/artifact.md",
+			Output: []models.OutputEntry{
+				{PlanRef: "specs/plans/artifact-output.md"},
+			},
+			Created: now,
+		},
+	)
+	state.Sprint.Scope.Planned = append(state.Sprint.Scope.Planned, "blocked-sibling", "overlap-sibling", "artifact-sibling")
+
+	tmpDir := t.TempDir()
+	config := SupervisorConfig{
+		Role:        "coder",
+		AgentID:     "coder-1",
+		ProjectRoot: tmpDir,
+		SpecsDir:    filepath.Join(tmpDir, "specs"),
+		StatePath:   filepath.Join(tmpDir, "state.yaml"),
+	}
+
+	prompt, err := testBuildPrompt(t, state, config, "task-current")
+	if err != nil {
+		t.Fatalf("BuildPrompt() error: %v", err)
+	}
+
+	if got := strings.Count(prompt, "- sibling-"); got != 12 {
+		t.Fatalf("rendered low-salience siblings = %d, want 12", got)
+	}
+	for _, want := range []string{
+		"dep-task [DRAFT_CODE; dependency]: Critical dependency",
+		"blocked-sibling [BLOCKED; blocked, sibling]: Blocked sibling | blocker: waiting for owner",
+		"overlap-sibling [DRAFT_CODE; sibling, file-overlap]: Overlapping sibling | shared refs: internal/shared.go",
+		"artifact-sibling [MERGED; artifact-producer, artifact-ref, sibling]: Artifact sibling",
+		"Omitted related tasks: 18",
+		"statuses: DRAFT_CODE=18",
+		"relations: sibling=18",
+		"sample ids: sibling-12, sibling-13, sibling-14, sibling-15, sibling-16, sibling-17, sibling-18, sibling-19 (+10 more)",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("bounded task graph missing %q", want)
+		}
+	}
+	if strings.Contains(prompt, "Plain sibling 20") {
+		t.Error("omitted sibling descriptions should not render inline")
+	}
+}
+
 func TestTaskGraphChildrenAreBounded(t *testing.T) {
 	now := time.Now().UTC()
 	children := make([]*models.Task, 0, maxTaskGraphChildrenPerEntry+1)

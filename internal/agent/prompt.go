@@ -3,6 +3,7 @@ package agent
 import (
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/liza-mas/liza/internal/errors"
@@ -523,6 +524,8 @@ var (
 const (
 	maxTaskGraphChildrenPerEntry = 8
 	maxTaskGraphChildDeps        = 3
+	maxTaskGraphEntries          = 16
+	maxTaskGraphOmittedSampleIDs = 8
 )
 
 func buildRelevantTaskGraph(state *models.State, current *models.Task) prompts.TaskGraphDigest {
@@ -610,11 +613,104 @@ func buildRelevantTaskGraph(state *models.State, current *models.Task) prompts.T
 	digest := prompts.TaskGraphDigest{
 		Entries: make([]prompts.TaskGraphEntry, 0, len(ordered)),
 	}
-	for _, entry := range ordered {
+	for _, entry := range boundedTaskGraphEntries(ordered, &digest) {
 		entry.Children, entry.RemainingChildren = summarizeTaskGraphChildren(childrenByParent[entry.ID])
 		digest.Entries = append(digest.Entries, *entry)
 	}
 	return digest
+}
+
+func boundedTaskGraphEntries(ordered []*prompts.TaskGraphEntry, digest *prompts.TaskGraphDigest) []*prompts.TaskGraphEntry {
+	if len(ordered) <= maxTaskGraphEntries {
+		return ordered
+	}
+
+	var selected []*prompts.TaskGraphEntry
+	var deferred []*prompts.TaskGraphEntry
+	for _, entry := range ordered {
+		if isCriticalTaskGraphEntry(entry) {
+			selected = append(selected, entry)
+			continue
+		}
+		deferred = append(deferred, entry)
+	}
+
+	remainingSlots := max(0, maxTaskGraphEntries-len(selected))
+	remainingSlots = min(remainingSlots, len(deferred))
+
+	selectedIDs := make(map[string]bool, len(selected)+remainingSlots)
+	for _, entry := range selected {
+		selectedIDs[entry.ID] = true
+	}
+	for _, entry := range deferred[:remainingSlots] {
+		selectedIDs[entry.ID] = true
+	}
+
+	var bounded []*prompts.TaskGraphEntry
+	var omitted []prompts.TaskGraphEntry
+	for _, entry := range ordered {
+		if selectedIDs[entry.ID] {
+			bounded = append(bounded, entry)
+			continue
+		}
+		omitted = append(omitted, *entry)
+	}
+	digest.Omitted = summarizeOmittedTaskGraphEntries(omitted)
+	return bounded
+}
+
+func isCriticalTaskGraphEntry(entry *prompts.TaskGraphEntry) bool {
+	if entry == nil {
+		return false
+	}
+	return hasTaskGraphRelation(entry, "dependency") ||
+		hasTaskGraphRelation(entry, "blocked") ||
+		hasTaskGraphRelation(entry, "file-overlap") ||
+		hasTaskGraphRelation(entry, "artifact-producer") ||
+		hasTaskGraphRelation(entry, "artifact-ref") ||
+		entry.BlockedReason != "" ||
+		entry.RepairOperation != ""
+}
+
+func hasTaskGraphRelation(entry *prompts.TaskGraphEntry, relation string) bool {
+	return slices.Contains(entry.Relations, relation)
+}
+
+func summarizeOmittedTaskGraphEntries(entries []prompts.TaskGraphEntry) prompts.TaskGraphOmittedSummary {
+	summary := prompts.TaskGraphOmittedSummary{Count: len(entries)}
+	if len(entries) == 0 {
+		return summary
+	}
+
+	statusCounts := make(map[string]int)
+	relationCounts := make(map[string]int)
+	for _, entry := range entries {
+		statusCounts[entry.Status]++
+		for _, relation := range entry.Relations {
+			relationCounts[relation]++
+		}
+		if len(summary.SampleIDs) < maxTaskGraphOmittedSampleIDs {
+			summary.SampleIDs = append(summary.SampleIDs, entry.ID)
+		}
+	}
+	summary.RemainingSampleIDs = len(entries) - len(summary.SampleIDs)
+	summary.StatusCounts = sortedTaskGraphCounts(statusCounts)
+	summary.RelationCounts = sortedTaskGraphCounts(relationCounts)
+	return summary
+}
+
+func sortedTaskGraphCounts(counts map[string]int) []prompts.TaskGraphCount {
+	keys := make([]string, 0, len(counts))
+	for key := range counts {
+		keys = append(keys, key)
+	}
+	slices.Sort(keys)
+
+	sorted := make([]prompts.TaskGraphCount, 0, len(keys))
+	for _, key := range keys {
+		sorted = append(sorted, prompts.TaskGraphCount{Name: key, Count: counts[key]})
+	}
+	return sorted
 }
 
 func taskChildrenByParent(state *models.State) map[string][]*models.Task {

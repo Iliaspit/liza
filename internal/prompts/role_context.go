@@ -16,6 +16,7 @@ type CompletedTaskSummary struct {
 // related tasks instead of pulling the full task list.
 type TaskGraphDigest struct {
 	Entries []TaskGraphEntry
+	Omitted TaskGraphOmittedSummary
 }
 
 // TaskGraphEntry is a compact, prompt-safe summary of a task related to the
@@ -39,6 +40,22 @@ type TaskGraphChildSummary struct {
 	RolePair           string
 	DependsOn          []string
 	RemainingDependsOn int
+}
+
+// TaskGraphOmittedSummary summarizes low-salience related tasks omitted from
+// the rendered digest to keep prompt size bounded.
+type TaskGraphOmittedSummary struct {
+	Count              int
+	StatusCounts       []TaskGraphCount
+	RelationCounts     []TaskGraphCount
+	SampleIDs          []string
+	RemainingSampleIDs int
+}
+
+// TaskGraphCount is a stable key/count pair for prompt rendering.
+type TaskGraphCount struct {
+	Name  string
+	Count int
 }
 
 // ParentTaskContext provides context about a parent task for architecture consolidation.

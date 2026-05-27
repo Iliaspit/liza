@@ -32,6 +32,9 @@ Produced outputs: `liza get <id> --output-summary --json` for `artifact-producer
 {{- range .TaskGraph.Entries}}
 {{template "task-graph-entry" .}}
 {{- end}}
+{{- if gt .TaskGraph.Omitted.Count 0}}
+Omitted related tasks: {{.TaskGraph.Omitted.Count}}{{if .TaskGraph.Omitted.StatusCounts}} | statuses: {{range $i, $count := .TaskGraph.Omitted.StatusCounts}}{{if $i}}, {{end}}{{$count.Name}}={{$count.Count}}{{end}}{{end}}{{if .TaskGraph.Omitted.RelationCounts}} | relations: {{range $i, $count := .TaskGraph.Omitted.RelationCounts}}{{if $i}}, {{end}}{{$count.Name}}={{$count.Count}}{{end}}{{end}}{{if .TaskGraph.Omitted.SampleIDs}} | sample ids: {{range $i, $id := .TaskGraph.Omitted.SampleIDs}}{{if $i}}, {{end}}{{$id}}{{end}}{{if gt .TaskGraph.Omitted.RemainingSampleIDs 0}} (+{{.TaskGraph.Omitted.RemainingSampleIDs}} more){{end}}{{end}}
+{{- end}}
 {{- else}}
 Related tasks: none listed.
 {{- end}}
