@@ -62,6 +62,8 @@ python3 ~/.liza/skills/liza-logs/scripts/query-log.py .liza/agent-outputs/coder-
 
 FALSE POSITIVES:
 - **Repeated contract reads** (~8KB per session): Agents read AGENT_TOOLS.md, GUARDRAILS.md, etc. during initialization. These are usually cache hits — negligible cost. Do not flag as waste unless the same payload is reread for no reason later in the session.
+- **Rich JSON transcript volume**: Provider CLIs may emit full JSONL session transcripts containing runtime envelopes, tool calls, tool results, usage metadata, rate-limit events, and command output. Large `.liza/agent-outputs/*.txt` files are not automatically agent reasoning bloat. Attribute volume to avoidable behavior before raising it: broad file reads, repeated large diffs, noisy failing tests, unbounded command output, or repeated tool loops.
+- **Contract/prompt volume**: Contract and guardrail files are stable, load-bearing context and are often cacheable. Do not report their size as waste by itself. Parametric role/task prompts are expected to vary and may not cache well; flag only avoidable duplication, poor ordering that defeats stable-prefix reuse, prompt growth across retries, or dynamic artifacts that should have been referenced instead of embedded.
 
 NOTE:
 The skill contains a web tool for humans to inspect logs: ~/.liza/skills/liza-logs/tools/liza-session-analyzer.html

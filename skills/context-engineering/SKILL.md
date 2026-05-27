@@ -37,7 +37,7 @@ python3 skills/context-engineering/scripts/context-corpus-index.py .liza --sampl
 - Use `--max-pair-minutes` to control how strict same-role timestamp pairing should be.
 - Use `--sample-limit` to expand or shrink top lists and the sampling plan.
 
-If a `liza-logs` report or analyzer output is available, use it as the first sampling guide. Prioritize roles, runs, or timestamps with high token volume, low cache hit rate, repeated tool failures, excessive output volume, or blocked/rejected task outcomes.
+If a `liza-logs` report or analyzer output is available, use it as the first sampling guide. Prioritize roles, runs, or timestamps with repeated tool failures, broad tool-result volume, duplicated task-local material, growing prompts, low cache reuse for expected-stable prefixes, or blocked/rejected task outcomes.
 
 If `liza-logs` and context-engineering evidence disagree, report the disagreement explicitly and keep the narrower claim supported by direct prompt/output evidence. Example: `liza-logs` may correctly flag token pressure while prompt shape is not the cause.
 
@@ -68,13 +68,18 @@ Use the index's largest-prompt, largest-output, token, cache, and pressure signa
 
 Use the index's **Role Distribution** table for per-role prompt/output averages, output-to-prompt ratios, and prompt size trend classification (stable, growing, shrinking). Use **Prompt Size Trends** for chronological size progressions on roles with ≥10 prompts or non-stable trends.
 
+Separate expected fixed cost from avoidable bloat before raising findings:
+- **Contract, guardrail, and tool instructions** are load-bearing stable context. Do not flag their volume solely because they are large. Raise an issue only when they are duplicated unnecessarily, rendered in a way that defeats provider prefix/block caching, or bury the current task badly enough to explain observed behavior.
+- **Role/task prompts** are parametric by design. Do not flag low cacheability solely because task IDs, state, paths, timestamps, or acceptance criteria vary. Raise an issue only when avoidable dynamic bytes repeat across runs, prompt growth accumulates retry history without compression, or measured cache metrics show expected-stable prefixes are not being reused.
+- **Provider/runtime transcript volume** is a logging/storage signal, not automatically an agent-quality or prompt-design problem. Treat rich JSON output size as evidence only after attributing the volume to avoidable agent/tool behavior, such as broad reads, huge command output, repeated diffs, or noisy failing tests.
+
 Treat these as structural pressure signals:
 - Prompt leaves insufficient room for expected tool output, code reads, and reasoning given that role's observed output-to-prompt ratio
-- One role's rendered prompt is much larger than sibling roles without a task-specific reason
-- Output-to-prompt ratio >20x suggests tool-heavy exploration that targeted file refs might reduce
-- Output-to-prompt ratio <3x on a non-trivial task suggests the prompt consumed budget that could support deeper work
+- One role's rendered prompt is much larger than sibling roles because of avoidable dynamic or duplicated task-local material
+- Output-to-prompt ratio >20x suggests tool-heavy exploration only when top items show avoidable broad reads, large diffs, repeated command output, or missing targeted file refs
+- Output-to-prompt ratio <3x on a non-trivial task suggests the prompt may have crowded out work only after excluding stable load-bearing contract/context
 - Prompt size trend classified as "growing" indicates accumulating state across iterations
-- Repeated runs vary early in the prompt, reducing prefix cache reuse
+- Repeated runs vary early in the prompt before expected-stable blocks, reducing prefix or block cache reuse
 
 Classify prompt segments as:
 
@@ -99,6 +104,12 @@ Check salience order separately from cacheability. A stable prefix helps provide
 - Broader references and load-on-demand source pointers
 
 Flag packing failures where stable but low-salience material buries the task, where broad references appear before the current decision surface, or where large artifacts are embedded when a precise source pointer would let the agent load them on demand.
+
+Actively raise these prompt-shape issues when supported by evidence:
+- duplicated task-local material within a prompt, across retries, or across handoffs where a compact summary would preserve the decision surface
+- huge embedded artifacts where a file path, line range, artifact pointer, or bounded excerpt would let the agent load only what it needs
+- poor salience ordering where the task, next action, acceptance criteria, prior failure, or validation plan is buried behind broad context
+- prompt growth across retries or restarts without compression of prior attempts, decisions, rejected paths, and current hypothesis
 
 ### 3. Prompt Context Audit
 
@@ -248,5 +259,7 @@ Recommend delegation only when slices are separable, evidence can be passed as r
 - Do not rely on exact prompt/output filename stems for pairing; match by same role and nearest timestamp, then report the matching window.
 - Do not claim fix localization unless the source artifact that generates or routes the relevant context was inspected.
 - Do not recommend deleting contract or guardrail context solely because it is large; first decide whether it is cacheable, load-bearing, or duplicated.
+- Do not raise prompt cacheability as a finding solely because task-local prompts are parametric. Identify avoidable dynamic content, bad stable/dynamic ordering, or cache metrics inconsistent with the intended stable prefix/block.
+- Do not raise runtime output volume as a context-engineering finding solely because rich JSON transcripts are large. Attribute the volume to avoidable agent/tool behavior before calling it a prompt or context problem.
 - Do not optimize only for token count. Context engineering optimizes task success per token, not minimum tokens.
 - Prefer structured handoff summaries over broad truncation when downstream judgment depends on upstream decisions.
