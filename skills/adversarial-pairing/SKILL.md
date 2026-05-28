@@ -11,7 +11,7 @@ Use as:
 /adversarial-pairing <role> <blackboard-path>
 ```
 
-`role` is `doer` or `reviewer`. `blackboard-path` is a Markdown file. It may be untracked and must not be committed unless the user explicitly asks.
+`role` is `doer` or `reviewer`. `blackboard-path` is the authoritative Markdown blackboard file for this session. It may be untracked and must not be committed unless the user explicitly asks. Do not use sibling or similarly named blackboards as fallbacks when the provided path is missing.
 
 # Operating Model
 
@@ -32,9 +32,9 @@ Stop polling when `phase` is terminal: `COMMITTED`, `BLOCKED`, or `STOPPED`.
 - The doer owns phase transitions.
 - Each agent owns only its own `agents.<id>` entry.
 - Reviewers append review notes to the Markdown body and update only their own agent entry, plus the reviewer-owned claim transitions listed below.
+- Reviewer-owned blackboard writes authorized by this skill do not require an additional human approval gate. They still MUST follow the lock protocol and field ownership rules.
 - Before any write, re-read the blackboard and verify the revision or round being edited is still current.
-- Every blackboard write MUST acquire `lock` first, including agent self-registration, status updates, review verdicts, Markdown body appends, and phase transitions. Do not lock for polling.
-- Treat an expired lock as reclaimable; if lock state is ambiguous, stop and ask the user.
+- Every blackboard write MUST go through the sidecar OS lock acquired by `skills/adversarial-pairing/scripts/blackboard_write.py`, including agent self-registration, status updates, review verdicts, Markdown body appends, and phase transitions. Do not lock for polling.
 - Never overwrite another agent's comments or status.
 - If two writes conflict or the file changed unexpectedly, stop and ask the user how to reconcile.
 
@@ -55,11 +55,6 @@ red_test_round: 0
 code_review_round: 0
 phase_updated_at: "YYYY-MM-DDTHH:MM:SSZ"
 worktree: null
-lock:
-  owner: null
-  purpose: null
-  acquired_at: null
-  expires_at: null
 agents:
   doer:
     role: doer
@@ -89,7 +84,7 @@ Worktree rules:
 
 Reviewer registration:
 
-- If invoked as a reviewer and no agent entry exists for you, choose a stable human-readable ID and self-register under `agents.<id>`. Self-registration is a write and MUST follow the lock protocol.
+- If invoked as a reviewer and no agent entry exists for you, choose a stable human-readable ID and self-register under `agents.<id>`. Self-registration is a reviewer-owned blackboard write authorized by this skill; do not ask for additional human approval unless identity is ambiguous. Self-registration MUST follow the lock protocol.
 - Do not add yourself directly to `required_reviewers` unless the user explicitly names you as required.
 - Before the first reviewable artifact is submitted, the doer snapshots registered reviewer agents into `required_reviewers`.
 - Once populated, `required_reviewers` changes only by explicit user instruction.
@@ -108,6 +103,7 @@ Field ownership:
 
 - The doer owns `phase`, counters, `work_type`, gate booleans, `required_reviewers`, and `worktree`, except reviewer-owned claim transitions listed below.
 - Each agent owns only its own `agents.<id>` status, timestamps, reviewed counters, and verdicts.
+- The doer MUST NOT modify reviewer-owned `agents.<id>` entries, including `status`, `last_seen`, reviewed counters, or verdicts. Doer writes must preserve reviewer entries exactly.
 - Reviewers write verdict fields only for their own agent entry.
 - Reviewers may move `ANALYSIS_SUBMITTED -> REVIEWING_ANALYSIS`, `PLANNING_SUBMITTED -> REVIEWING_PLAN`, `RED_TEST_SUBMITTED -> REVIEWING_RED_TEST`, and `CODE_SUBMITTED -> REVIEWING_CODE` when claiming review work.
 - Reviewers may move `CODE_CHANGES_REQUESTED -> FOLLOWUP_REVIEW` only after the doer has updated `code_review_round` and submitted follow-up changes.
@@ -116,12 +112,25 @@ Field ownership:
 
 Lock protocol:
 
-- Lock all writes and phase transitions. Do not lock for polling.
+- Agents MUST use `skills/adversarial-pairing/scripts/blackboard_write.py` for blackboard writes. Prepare the complete intended file content in a temporary file, then run:
+
+```bash
+python3 skills/adversarial-pairing/scripts/blackboard_write.py \
+  --path <blackboard-path> \
+  --content-file <tmp-content-file> \
+  --operation <short-operation-name> \
+  --expect-sha256 <sha256-read-before-edit>
+```
+
+- For creating a missing doer-authorized blackboard, use `--create-if-missing` instead of `--expect-sha256`.
+- `--expect-sha256` is the SHA-256 of the uncommitted working-tree file content read before editing; it is not a git commit hash. Use it for every write to an existing blackboard.
+- The helper acquires an OS file lock on `<blackboard-path>.lock`, re-reads the blackboard under lock, verifies the expected SHA-256, atomically replaces the Markdown file, and releases the lock. If it reports stale content or lock timeout, re-read and restart the write from current state.
+- Do not use Edit/Write tools to manually acquire, release, or modify in-document `lock` or `locked_by` fields. New blackboards do not include in-document lock fields; lock authority is `<blackboard-path>.lock` plus `<blackboard-path>.lock.owner.json` diagnostics.
+- Lock all writes and phase transitions through the helper. Do not lock for polling.
 - Use UTC ISO-8601 timestamps ending in `Z`.
-- Default lease duration is 120 seconds unless the blackboard states another duration in the Markdown body.
-- To write: re-read frontmatter, acquire lock if empty or expired, re-read and confirm ownership, write the intended update, then release the lock.
-- Writing without acquiring and confirming `lock` is a protocol violation. Stop and report the violation if it happens; do not make a second unlocked write to repair it.
-- If lock ownership is ambiguous, stop and ask the user.
+- If one logical action updates both frontmatter and Markdown body, perform both updates in the same helper write. Do not split a verdict/status update and its explanatory notes across separate writes.
+- Within a logical write, update the Markdown body first and the frontmatter status/phase last in the prepared content. A status or phase must never advertise completed/submitted/reviewed work before the corresponding worklog, artifact, or review notes are present in the same committed file content.
+- Writing without the helper is a protocol violation. Stop and report the violation if it happens; do not make a second unlocked write to repair it.
 
 Completion predicates:
 
@@ -178,7 +187,11 @@ The doer resolves requested changes and resubmits. Increment the relevant counte
 - `red_test_round` for red tests or reproductions.
 - `code_review_round` for the initial staged code submission and each follow-up review submission.
 
-Counter increments, Markdown artifact updates, and phase transitions to `*_SUBMITTED` or `FOLLOWUP_REVIEW` must happen in the same locked write.
+Counter increments, Markdown artifact updates, and phase transitions to `*_SUBMITTED` or `FOLLOWUP_REVIEW` must happen in the same helper write.
+
+For submissions and resubmissions, write the worklog/artifact body content before changing `phase`, counters, or agent status in the same transaction. Other agents may observe the file immediately after the short-lived lock releases, so the released file must never contain a readiness/status signal without its matching body evidence.
+
+Doer submission and resubmission writes MUST NOT reset, normalize, or otherwise edit reviewer-owned agent fields. If the doer accidentally changes reviewer-owned fields, stop and report the ownership violation; do not perform a doer-side repair of those fields unless the user gives an explicit ownership-waiver repair instruction naming the exact fields.
 
 If follow-up review requests changes, move back to `CODE_CHANGES_REQUESTED`; repeat until code is approved or the workflow stops.
 
@@ -191,7 +204,8 @@ When the user asks to stop or abort the workflow, move `phase` to `STOPPED`. All
 On invocation:
 
 - If invoked as the doer and the blackboard file does not exist, create it only when the user asked the doer to create it.
-- New blackboard creation is a write and must be serialized through `lock`: create the file with create-if-absent semantics and `lock.owner` set to this doer, `lock.purpose: create_blackboard`, current `acquired_at`, and a normal `expires_at`; re-read and confirm ownership; then write the complete template with the finalized body and release the lock by clearing the lock fields. If the file appears during creation, re-read it instead of overwriting it.
+- Create the exact `blackboard-path` provided by the user. Do not search for, read, or continue from sibling blackboards as substitutes for a missing target path.
+- New blackboard creation is a write and MUST use `blackboard_write.py --create-if-missing` with the complete initial file content. If the file appears during creation, re-read it instead of overwriting it.
 - If invoked as the doer and the blackboard file is missing but the user did not ask for creation, stop and ask whether to create it.
 - If invoked as a reviewer and the blackboard file does not exist, fail fast: report that the doer must create the blackboard before reviewers start, then stop instead of creating or polling.
 
@@ -228,6 +242,10 @@ After a user-approved commit is complete, the doer MUST propose the next integra
 # Reviewer Protocol
 
 Reviewer sessions remain active while `phase` is non-terminal. If no reviewable artifact exists yet, keep polling frontmatter instead of stopping after registration, reporting `WAITING`, or summarizing idle state as completion.
+
+Reviewer verdict submission is one logical write: append the review notes to the Markdown body and update the reviewer frontmatter fields under the same lock acquisition, then release `lock`.
+
+Do not ask for additional human approval before reviewer-owned claim transitions, review-note appends, or reviewer verdict/status updates authorized by this protocol.
 
 When `phase` is `ANALYSIS_SUBMITTED` or `REVIEWING_ANALYSIS`, review the RCA artifact, not the fix plan. Check root-cause quality, evidence, contradictions, falsifiability, and whether the reported failure would become impossible if this cause were fixed. Record the revision reviewed in `reviewed_analysis_revision` and set `analysis_verdict`.
 
@@ -276,11 +294,6 @@ red_test_round: 0
 code_review_round: 0
 phase_updated_at: "YYYY-MM-DDTHH:MM:SSZ"
 worktree: null
-lock:
-  owner: null
-  purpose: null
-  acquired_at: null
-  expires_at: null
 agents:
   doer:
     role: doer
