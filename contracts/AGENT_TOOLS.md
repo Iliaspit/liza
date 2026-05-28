@@ -5,17 +5,24 @@ When a default tool is unavailable in the current session, fall through to the n
 
 ## Decision Kernel
 
-1. Prefer filesystem-truth tools tied to the current worktree.
-2. When Liza supplies an explicit Stacklit index path, use `stacklit derive --ai-summary -i <path>` for first-pass repo orientation and `stacklit get-module` / `get-dependencies` for module impact before opening files.
-3. When Liza supplies explicit SCIP index paths, use `scip-search` for indexed symbol/package/reference/implementation navigation.
-4. Use `rg` for working-tree text search; use `git grep` for tracked, index, `HEAD`, or historical revision search.
-5. Use `ast-grep` for syntax-shaped code search.
-6. Use direct reads for source-of-truth; use line-numbered reads when discussing edits.
-7. Use `apply_patch` for edits; use `morph-mcp` only for broad, context-heavy, or fast-apply edits.
-8. Use native manifests and language-native commands for project structure and dependencies.
-9. Validate edits with native build/test/lint/typecheck commands plus pre-commit on touched files.
-10. Use `context7` → `Ref` → `deepwiki` → `WebFetch` for docs, repo architecture, and web lookup.
-11. In MAS worktrees, do not use workspace-level or IDE/LSP-backed tools.
+### Search and Navigation
+
+Choose the smallest reliable routing source before raw search: explicit user paths for named-file tasks, changed-file lists for reviews, Stacklit/module maps for exploration, and section/symbol routers for docs/code.
+
+1. When Liza supplies a Stacklit index and the task needs repo understanding, run `stacklit derive --ai-summary -i <path>` before broad search or source reads. Direct reads are appropriate when the task provides an explicit path and symbol.
+2. When Liza supplies SCIP indexes, use `scip-search` for indexed symbol/package/reference/implementation navigation.
+3. For long Markdown docs/specs, use `rg -c "pattern" <paths>` to find candidate files, then `mdtoc` and section-scoped reads; see Tool Preferences for the full workflow.
+4. Use `ast-grep` for syntax-shaped code search.
+5. Use bounded `rg` for text search, e.g. `rg --max-count 3 "pattern" internal/foo/`; use `git grep` for tracked/index/HEAD/history searches.
+6. Use direct, line-numbered reads (`nl -ba ... | sed -n ...`) for source-of-truth verification and edit discussion.
+
+### Execution and Validation
+
+1. Use `apply_patch` for edits; use `morph-mcp` only for broad, context-heavy, or fast-apply edits.
+2. Use native manifests and language-native commands for project structure and dependencies.
+3. Validate edits with native build/test/lint/typecheck commands plus pre-commit on touched files.
+4. Use `context7` → `Ref` → `deepwiki` → `WebFetch` for docs, repo architecture, and web lookup.
+5. In MAS worktrees, do not use workspace-level or IDE/LSP-backed tools.
 
 ## Forbidden tools
 
