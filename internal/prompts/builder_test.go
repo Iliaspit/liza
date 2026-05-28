@@ -2521,8 +2521,20 @@ func TestBlockBranchIntegrationContext_Populated(t *testing.T) {
 	if !strings.Contains(result, "git -C /home/user/.worktrees/task-1 diff abc123def456..HEAD") {
 		t.Error("expected diff command with GoalBaseCommit and Worktree path")
 	}
+	if strings.Contains(result, "Run all project test suites") {
+		t.Error("branch integration context must not mandate full project test suites")
+	}
+	if !strings.Contains(result, "VALIDATION (after changed-file and diff inspection)") {
+		t.Error("expected validation guidance after changed-file and diff inspection")
+	}
+	if !strings.Contains(result, "Run the smallest tests covering changed files") {
+		t.Error("expected scoped validation guidance")
+	}
+	if !strings.Contains(result, "new-vs-baseline status") {
+		t.Error("expected baseline-aware failure guidance")
+	}
 	if !strings.Contains(result, "without `cd &&`") {
-		t.Error("expected branch integration test guidance to reject cd &&")
+		t.Error("expected branch integration validation guidance to reject cd &&")
 	}
 	if strings.Contains(result, "cd /home/user/.worktrees/task-1 &&") {
 		t.Error("branch integration context must not teach cd && worktree commands")

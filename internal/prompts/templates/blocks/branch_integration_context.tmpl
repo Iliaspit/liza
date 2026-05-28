@@ -7,9 +7,10 @@ SCAN BOUNDARY: goal base commit {{.GoalBaseCommit}}
 DIFF COMMAND (execute in your worktree to see all changes for this goal):
 git -C {{.Worktree}} diff {{.GoalBaseCommit}}..HEAD
 
-TEST EXECUTION (run in your worktree BEFORE analyzing the diff):
-Run all project test suites from {{.Worktree}} without `cd &&`; use the test runner's directory flag or the execution tool's working-directory option.
-Failing tests are findings. Include them in your output[] as fix tasks with the test failure details.
+VALIDATION (after changed-file and diff inspection):
+Run the smallest tests covering changed files, declared validation, or plausible integration risks from {{.Worktree}} without `cd &&`; use runner directory flags or the execution tool's working directory.
+For broad/noisy suites, report only command, exit code, failing names/counts, first relevant error, and new-vs-baseline status.
+Treat failures as findings only when tied to this diff, new versus baseline, or baseline unknown and documented as an evidence gap.
 
 COMPLETED TASKS:
 {{- range .CompletedTasks}}
