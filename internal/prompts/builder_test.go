@@ -1993,7 +1993,7 @@ func TestBuildRoleContext_AwaitVerdictLoopRendersForAllDoers(t *testing.T) {
 		"timeout_seconds",
 		"sole polling primitive",
 		"Call await-verdict at most 3 times",
-		"If the harness backgrounds await-verdict and says it will notify on completion, end the turn; do NOT call Monitor, search for Monitor, or read/tail/sleep/poll the output file.",
+		"If the harness backgrounds await-verdict and says it will notify on completion, end the turn; do NOT call Monitor, search for Monitor, ScheduleWakeup, or read/tail/sleep/poll the output file.",
 		"Do NOT poll liza get",
 		"Do NOT run more worktree commands after APPROVED, TERMINAL, or ALREADY_TRANSITIONED",
 	}
@@ -2033,6 +2033,18 @@ func TestBuildRoleContext_AwaitVerdictLoopRendersForAllDoers(t *testing.T) {
 			}
 			if !strings.Contains(strings.ToLower(monitorLines[0]), "do not") {
 				t.Errorf("Monitor guidance line is not negative: %q", monitorLines[0])
+			}
+			var scheduleWakeupLines []string
+			for _, line := range strings.Split(output, "\n") {
+				if strings.Contains(line, "ScheduleWakeup") {
+					scheduleWakeupLines = append(scheduleWakeupLines, line)
+				}
+			}
+			if len(scheduleWakeupLines) != 1 {
+				t.Fatalf("output contains %d ScheduleWakeup guidance lines, want exactly 1 negative line: %#v", len(scheduleWakeupLines), scheduleWakeupLines)
+			}
+			if !strings.Contains(strings.ToLower(scheduleWakeupLines[0]), "do not") {
+				t.Errorf("ScheduleWakeup guidance line is not negative: %q", scheduleWakeupLines[0])
 			}
 		})
 	}

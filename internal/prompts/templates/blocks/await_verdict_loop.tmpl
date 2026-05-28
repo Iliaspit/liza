@@ -8,7 +8,7 @@
   - NEW_ATTEMPT, TIMEOUT, ABORTED: exit normally
   - Budget error: exit normally
   BUDGET: Call await-verdict at most 3 times. If no verdict after 3 calls, exit normally — the supervisor will restart you with the verdict.
-  If the harness backgrounds await-verdict and says it will notify on completion, end the turn; do NOT call Monitor, search for Monitor, or read/tail/sleep/poll the output file.
+  If the harness backgrounds await-verdict and says it will notify on completion, end the turn; do NOT call Monitor, search for Monitor, ScheduleWakeup, or read/tail/sleep/poll the output file.
   Do NOT poll liza get, cat /tmp, or any other command to check for verdict arrival between calls.
   Do NOT wrap in custom polling or background execution; await-verdict is the sole polling primitive.
   Do NOT run more worktree commands after APPROVED, TERMINAL, or ALREADY_TRANSITIONED with safe_action=stop; Liza may already have merged the task and cleaned up the worktree.
