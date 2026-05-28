@@ -41,6 +41,14 @@ For reviewers, startup registration is not task completion. After registering or
 
 Stop polling when `phase` is terminal: `COMMITTED`, `BLOCKED`, or `STOPPED`.
 
+# Context Hygiene
+
+Between plan approval and coding, compact or refresh the active context before starting implementation work or implementation review. Keep: goal, current phase, current frontmatter, approved plan revision, unresolved reviewer constraints, required gates, next intended action, validation commands, and active invariants. Drop obsolete plan drafts, resolved plan-review discussion, and stale hypotheses unless needed to explain a retained constraint.
+
+After compaction, re-read this skill before starting implementation work or implementation review.
+
+Compaction is context hygiene only; it does not satisfy approval gates, change phase, authorize writes, or authorize implementation.
+
 # Blackboard Ownership
 
 - The doer owns phase transitions and workflow fields listed in `Field ownership`.
