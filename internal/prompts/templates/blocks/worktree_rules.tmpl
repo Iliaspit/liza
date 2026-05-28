@@ -1,7 +1,8 @@
 {{- define "worktree-rules" -}}
 
 WORKTREE RULES:
-First, run: /usr/bin/test -d {{.Worktree}}
+Supervisor verified this worktree before launch; do not run a standalone `/usr/bin/test -d {{.Worktree}}` probe.
+If later worktree operations report the path missing, stop and report worktree drift.
 Then:
 - ALL file operations use {{.Worktree}}/ prefix (Read, Edit, Glob, Grep tools)
 - All git commands MUST use: git -C {{.Worktree}}

@@ -148,7 +148,7 @@ Role-specific decision tree for what to do first.
    - Read task from state.yaml
    - Verify status is IMPLEMENTING
    - Verify assigned_to matches $LIZA_AGENT_ID
-   - Verify worktree directory exists
+   - Treat WORKTREE as supervisor-verified at launch; if later worktree operations report it missing, stop and report worktree drift
 
 3. IF verification fails:
    → Log error to handoff
@@ -187,6 +187,7 @@ Role-specific decision tree for what to do first.
    - Read review_commit from task
    - Verify worktree HEAD matches
    - If mismatch: log error, exit
+   - If the worktree path is missing during this or any later operation, stop and report worktree drift
 
 5. Read task's spec_ref document
 

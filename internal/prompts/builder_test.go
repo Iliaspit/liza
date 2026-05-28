@@ -1474,7 +1474,8 @@ func TestBuildRoleContext_AllRoles(t *testing.T) {
 			"ANOMALY LOGGING:",
 			"BLOCKING PROTOCOL:",
 			"WORKTREE RULES:",
-			"First, run: /usr/bin/test -d " + data.Worktree,
+			"Supervisor verified this worktree before launch; do not run a standalone `/usr/bin/test -d " + data.Worktree + "` probe.",
+			"If later worktree operations report the path missing, stop and report worktree drift.",
 			"git -C " + data.Worktree,
 			"COMMIT WORKFLOW:",
 			"IMPLEMENTATION PHASE",
@@ -1494,6 +1495,9 @@ func TestBuildRoleContext_AllRoles(t *testing.T) {
 		}
 		if strings.Contains(output, "cd "+data.Worktree+" &&") {
 			t.Error("coder prompt must not teach cd && worktree commands")
+		}
+		if strings.Contains(output, "First, run: /usr/bin/test -d") {
+			t.Error("coder prompt must not require a standalone worktree existence probe")
 		}
 	})
 
@@ -1533,7 +1537,8 @@ func TestBuildRoleContext_AllRoles(t *testing.T) {
 			"liza await-resubmission",
 			"ANOMALY LOGGING:",
 			"WORKTREE RULES:",
-			"First, run: /usr/bin/test -d " + data.Worktree,
+			"Supervisor verified this worktree before launch; do not run a standalone `/usr/bin/test -d " + data.Worktree + "` probe.",
+			"If later worktree operations report the path missing, stop and report worktree drift.",
 			"Run tests from the worktree without `cd &&`",
 			"REVIEW SCOPE:",
 			"Changed-file map and stat first:",
@@ -1556,6 +1561,9 @@ func TestBuildRoleContext_AllRoles(t *testing.T) {
 		}
 		if strings.Contains(output, "cd "+data.Worktree+" &&") {
 			t.Error("code-reviewer prompt must not teach cd && worktree commands")
+		}
+		if strings.Contains(output, "First, run: /usr/bin/test -d") {
+			t.Error("code-reviewer prompt must not require a standalone worktree existence probe")
 		}
 	})
 
