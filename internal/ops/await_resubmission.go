@@ -2,6 +2,7 @@ package ops
 
 import (
 	"context"
+	stderrors "errors"
 	"fmt"
 	"log"
 	"time"
@@ -339,8 +340,12 @@ func reclaimForReview(projectRoot string, bb *db.Blackboard, taskID, agentID str
 			return &errors.NotFoundError{Entity: "task", ID: taskID}
 		}
 
-		if err := validateReviewBoundaryForAssignment(projectRoot, task); err != nil {
+		if err := validateReviewBoundaryForAssignment(projectRoot, task, s.Config.IntegrationBranch); err != nil {
 			reviewBoundaryErr = err
+			var repairNeeded *ReviewBoundaryRepairNeededError
+			if stderrors.As(err, &repairNeeded) {
+				return err
+			}
 			return markReviewBoundaryIntegrationFailed(s, task, agentID, transitions, err)
 		}
 
@@ -367,6 +372,10 @@ func reclaimForReview(projectRoot string, bb *db.Blackboard, taskID, agentID str
 	})
 	if modErr != nil {
 		releaseReviewOwnership(bb, agentID, taskID)
+		var repairNeeded *ReviewBoundaryRepairNeededError
+		if stderrors.As(modErr, &repairNeeded) {
+			return nil, repairNeeded
+		}
 		return nil, &OperationalError{Message: "failed to reclaim task for review", Err: modErr}
 	}
 	if reviewBoundaryErr != nil {

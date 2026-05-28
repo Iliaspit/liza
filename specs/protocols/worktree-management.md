@@ -133,6 +133,20 @@ drift_commits=$(git rev-list --count $base_commit..$current_integration)
 - More frequent integration checkpoints
 - Prioritizing tasks that touch shared code early
 
+At `submit-for-review`, the CLI rebases the task worktree onto the current integration head and updates the live review boundary:
+
+```bash
+review_commit=$(git -C "$WORKTREE" rev-parse HEAD)
+base_commit=$(git merge-base "$review_commit" integration)
+# Stored as task.review_commit and task.base_commit
+```
+
+For submitted/reviewing tasks with a worktree, this boundary must stay coherent:
+- `review_commit` equals the task worktree HEAD
+- `base_commit` equals the merge-base of `review_commit` and the configured integration branch
+
+If an external rebase or operator repair changes the worktree after submission, run `liza update-review-commit <task-id>`. The command updates both `review_commit` and `base_commit` and releases any active reviewer claim so review restarts from a coherent boundary.
+
 ---
 
 ## Integration Protocol
@@ -206,7 +220,7 @@ liza submit-for-review "$TASK_ID" HEAD --agent-id "$AGENT_ID"
 - `git status --porcelain` returns empty string
 - Submodule state is not checked (out of scope for v1)
 
-Blackboard records `review_commit` as the resolved worktree HEAD. Code Reviewer verifies this SHA before reviewing.
+Blackboard records `review_commit` as the resolved worktree HEAD and `base_commit` as the effective review base. Code Reviewer verifies this boundary before reviewing.
 
 ---
 
@@ -217,9 +231,12 @@ Code Reviewer must verify before examining work (implemented by supervisor at re
 ```
 ACTUAL  = git -C $WORKTREE rev-parse HEAD
 EXPECTED = task.review_commit from blackboard
+EXPECTED_BASE = git merge-base $EXPECTED integration
 
 if ACTUAL != EXPECTED:
-    ERROR: Worktree modified since review requested
+    ERROR: Worktree modified since review requested; run liza update-review-commit <task-id>
+if task.base_commit != EXPECTED_BASE:
+    ERROR: Review base is stale; run liza update-review-commit <task-id>
 ```
 
 ## Concurrent Merge Safety

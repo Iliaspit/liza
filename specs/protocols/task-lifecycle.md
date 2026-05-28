@@ -163,6 +163,7 @@ Original task history is preserved. No silent rewrites.
 | Coder BLOCKED | Planner notified, may rescope |
 | Code Reviewer and Coder deadlocked (5 cycles) | Planner intervenes (see Review Deadlock Protocol) |
 | Integration failed | Task reclaimable with integration-fix scope |
+| Review boundary metadata stale | Operator/supervisor runs `liza update-review-commit <task-id>`; task remains submitted/reviewable |
 | Two coders failed same task | Hypothesis exhaustion → mandatory rescope |
 
 ### Review Budget Exhaustion Protocol

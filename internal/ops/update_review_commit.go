@@ -15,17 +15,20 @@ import (
 
 // UpdateReviewCommitResult contains the outcome of updating a task's review commit.
 type UpdateReviewCommitResult struct {
-	TaskID           string `json:"task_id"`
-	OldReviewCommit  string `json:"old_review_commit"`
-	NewReviewCommit  string `json:"new_review_commit"`
-	ReviewerReleased bool   `json:"reviewer_released"`
-	ChangedBy        string `json:"changed_by"`
+	TaskID           string  `json:"task_id"`
+	OldReviewCommit  string  `json:"old_review_commit"`
+	NewReviewCommit  string  `json:"new_review_commit"`
+	OldBaseCommit    *string `json:"old_base_commit"`
+	NewBaseCommit    string  `json:"new_base_commit"`
+	ReviewerReleased bool    `json:"reviewer_released"`
+	ChangedBy        string  `json:"changed_by"`
 }
 
-// UpdateReviewCommit updates review_commit to the current worktree HEAD after
-// an external rebase. This is an explicit resubmission boundary: if a reviewer
-// has claimed the task, their claim is released so the task returns to submitted
-// state for a fresh review pass. No terminal I/O.
+// UpdateReviewCommit updates the review boundary to the current worktree HEAD
+// and effective merge base after an external rebase. This is an explicit
+// resubmission boundary: if a reviewer has claimed the task, their claim is
+// released so the task returns to submitted state for a fresh review pass.
+// No terminal I/O.
 func UpdateReviewCommit(projectRoot, taskID, changedBy string) (*UpdateReviewCommitResult, error) {
 	if taskID == "" {
 		return nil, &PreconditionError{Reason: "task ID is required"}
@@ -38,7 +41,7 @@ func UpdateReviewCommit(projectRoot, taskID, changedBy string) (*UpdateReviewCom
 	bb := db.For(lp.StatePath())
 
 	// Phase 1: Read state and validate preconditions
-	_, task, err := readTaskState(bb, taskID)
+	state, task, err := readTaskState(bb, taskID)
 	if err != nil {
 		return nil, err
 	}
@@ -95,10 +98,15 @@ func UpdateReviewCommit(projectRoot, taskID, changedBy string) (*UpdateReviewCom
 	if err != nil {
 		return nil, fmt.Errorf("failed to get worktree HEAD: %w", err)
 	}
+	effectiveBase, err := g.GetMergeBase(wtHEAD, state.Config.IntegrationBranch)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve effective review base: %w", err)
+	}
 
 	oldReviewCommit := *task.ReviewCommit
-	if oldReviewCommit == wtHEAD {
-		return nil, &PreconditionError{Reason: fmt.Sprintf("review_commit already matches worktree HEAD (%s) — no update needed", wtHEAD)}
+	oldBaseCommit := cloneStringPtr(task.BaseCommit)
+	if oldReviewCommit == wtHEAD && oldBaseCommit != nil && *oldBaseCommit == effectiveBase {
+		return nil, &PreconditionError{Reason: fmt.Sprintf("review boundary already matches worktree HEAD %s and base %s — no update needed", wtHEAD, effectiveBase)}
 	}
 
 	// Phase 3: Atomic state update
@@ -120,8 +128,9 @@ func UpdateReviewCommit(projectRoot, taskID, changedBy string) (*UpdateReviewCom
 			return &PreconditionError{Reason: fmt.Sprintf("task %s must be in submitted or reviewing state (current: %s)", taskID, task.Status)}
 		}
 
-		// Update review_commit
+		// Update the full review boundary.
 		task.ReviewCommit = &wtHEAD
+		task.BaseCommit = &effectiveBase
 
 		// If reviewer is claimed, release them and reset to submitted —
 		// they must re-claim and re-review the updated content.
@@ -143,7 +152,17 @@ func UpdateReviewCommit(projectRoot, taskID, changedBy string) (*UpdateReviewCom
 			log.Printf("update-review-commit %s: released reviewer %s", taskID, releasedAgent)
 		}
 
-		updateReason := fmt.Sprintf("review_commit updated: %s → %s (worktree rebased after submission)", oldReviewCommit, wtHEAD)
+		oldBaseForReason := "<nil>"
+		if oldBaseCommit != nil {
+			oldBaseForReason = *oldBaseCommit
+		}
+		updateReason := fmt.Sprintf(
+			"review boundary updated: review_commit %s → %s, base_commit %s → %s (worktree rebased after submission)",
+			oldReviewCommit,
+			wtHEAD,
+			oldBaseForReason,
+			effectiveBase,
+		)
 		task.History = append(task.History, models.TaskHistoryEntry{
 			Time:   now,
 			Event:  models.TaskEventReviewCommitUpdated,
@@ -153,6 +172,8 @@ func UpdateReviewCommit(projectRoot, taskID, changedBy string) (*UpdateReviewCom
 			Extra: map[string]any{
 				"old_review_commit": oldReviewCommit,
 				"new_review_commit": wtHEAD,
+				"old_base_commit":   oldBaseCommit,
+				"new_base_commit":   effectiveBase,
 			},
 		})
 
@@ -167,7 +188,17 @@ func UpdateReviewCommit(projectRoot, taskID, changedBy string) (*UpdateReviewCom
 		TaskID:           taskID,
 		OldReviewCommit:  oldReviewCommit,
 		NewReviewCommit:  wtHEAD,
+		OldBaseCommit:    oldBaseCommit,
+		NewBaseCommit:    effectiveBase,
 		ReviewerReleased: reviewerReleased,
 		ChangedBy:        changedBy,
 	}, nil
+}
+
+func cloneStringPtr(value *string) *string {
+	if value == nil {
+		return nil
+	}
+	cloned := *value
+	return &cloned
 }

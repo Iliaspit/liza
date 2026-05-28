@@ -66,6 +66,15 @@ func (g *Git) IsAncestor(commitA, commitB string) (bool, error) {
 	return true, nil
 }
 
+// GetMergeBase returns the best common ancestor for two commits or refs.
+func (g *Git) GetMergeBase(commitA, commitB string) (string, error) {
+	base, err := g.exec("merge-base", commitA, commitB)
+	if err != nil {
+		return "", fmt.Errorf("merge-base failed: %w", err)
+	}
+	return base, nil
+}
+
 // GetWorktreeHEAD returns the commit SHA of the worktree's HEAD
 func (g *Git) GetWorktreeHEAD(taskID string) (string, error) {
 	wtPath := g.GetWorktreePath(taskID)

@@ -263,7 +263,11 @@ func SubmitForReview(projectRoot, taskID, commitRef, agentID string) (*SubmitFor
 			Err: err,
 		}
 	}
-	if err := validateReviewBoundaryCommit(projectRoot, task, postRebaseCommit); err != nil {
+	// Validate against the boundary that will be written below; the state copy
+	// still contains the pre-submit claim base.
+	reviewBoundaryTask := *task
+	reviewBoundaryTask.BaseCommit = &rebaseBase
+	if err := validateReviewBoundaryCommit(projectRoot, &reviewBoundaryTask, postRebaseCommit, rebaseBase); err != nil {
 		return nil, err
 	}
 

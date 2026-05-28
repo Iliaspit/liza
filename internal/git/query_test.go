@@ -323,3 +323,21 @@ func TestIsAncestor(t *testing.T) {
 		t.Error("Expected commit to be ancestor of itself")
 	}
 }
+
+func TestGetMergeBase(t *testing.T) {
+	repoDir := setupTestRepo(t)
+	git := New(repoDir)
+
+	mainSHA, err := git.GetCommitSHA("main")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	base, err := git.GetMergeBase("main", "integration")
+	if err != nil {
+		t.Fatalf("GetMergeBase() error = %v", err)
+	}
+	if base != mainSHA {
+		t.Errorf("GetMergeBase(main, integration) = %s, want %s", base, mainSHA)
+	}
+}

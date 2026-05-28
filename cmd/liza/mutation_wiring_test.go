@@ -475,10 +475,12 @@ func TestMutationCommandWiring(t *testing.T) {
 		// Set stale review_commit and worktree path in state
 		staleCommit := testhelpers.MustGit(t, projectRoot, "rev-parse", "integration")
 		wtHEAD := testhelpers.MustGit(t, wtPath, "rev-parse", "HEAD")
+		expectedBase := testhelpers.MustGit(t, projectRoot, "merge-base", wtHEAD, "integration")
 		bb := db.For(statePath)
 		if err := bb.Modify(func(s *models.State) error {
 			task := s.FindTask("task-urc")
 			task.ReviewCommit = &staleCommit
+			task.BaseCommit = &staleCommit
 			worktreeRel := g.GetWorktreeRelPath("task-urc")
 			task.Worktree = &worktreeRel
 			return nil
@@ -499,6 +501,13 @@ func TestMutationCommandWiring(t *testing.T) {
 				got = *task.ReviewCommit
 			}
 			t.Fatalf("review_commit = %s, want %s", got, wtHEAD)
+		}
+		if task.BaseCommit == nil || *task.BaseCommit != expectedBase {
+			got := "<nil>"
+			if task.BaseCommit != nil {
+				got = *task.BaseCommit
+			}
+			t.Fatalf("base_commit = %s, want %s", got, expectedBase)
 		}
 
 		// Verify history entry records the operator

@@ -161,7 +161,7 @@ Agent registration/unregistration, heartbeat, post-exit IDLE reset, orchestrator
 | REJECTED verdict must have non-empty reason | Unactionable feedback | code (`submit_verdict.go`) |
 | Quorum enforcement: approval count tracked, provider diversity required (≥2 distinct providers for multi-reviewer quorum) | Rubber-stamping, single-provider bias | code (`submit_verdict.go`) |
 | Impact can only escalate, never downgrade | Severity minimization | code (`submit_verdict.go`) |
-| Review covers ALL changes (`base_commit` → `review_commit`), not just since last rejection; code reviewers run a separate late current-integration drift check before verdict | Partial coverage oversight, stale review ranges | spec (`roles.md`) |
+| Review covers ALL changes (`base_commit` → `review_commit`), not just since last rejection; for submitted/reviewing tasks with a worktree, `review_commit` must match worktree HEAD and `base_commit` must match the effective merge-base of `review_commit` and the configured integration branch; code reviewers run a separate late current-integration drift check before verdict | Partial coverage oversight, stale review ranges | spec (`roles.md`), code (`review_boundary.go`) |
 | Reviewer validates against current spec version; material spec change since task creation → reject | Stale spec validation | spec (`roles.md`) |
 | Commit SHA verification: reviewer must verify `review_commit` matches worktree HEAD before examining work | Reviewing stale code | spec (`worktree-management.md`) |
 | Max iteration limits (default 10 coder, 5 review cycles) → BLOCKED | Infinite coder-reviewer loops | spec (`task-lifecycle.md`), code (`claim_task.go`) |

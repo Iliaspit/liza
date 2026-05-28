@@ -646,6 +646,14 @@ func TestSubmitForReview_RebaseRewriteUsesPostRebaseHead(t *testing.T) {
 	if task.ReviewCommit == nil || *task.ReviewCommit != postRebaseHead {
 		t.Fatalf("task.ReviewCommit = %v, want %s", task.ReviewCommit, postRebaseHead)
 	}
+	integrationHead := testhelpers.MustGit(t, tmpDir, "rev-parse", "integration")
+	if task.BaseCommit == nil || *task.BaseCommit != integrationHead {
+		t.Fatalf("task.BaseCommit = %v, want integration HEAD %s", task.BaseCommit, integrationHead)
+	}
+	diffNames := testhelpers.MustGit(t, wtPath, "diff", "--name-only", *task.BaseCommit+".."+*task.ReviewCommit)
+	if strings.Contains(diffNames, "integration.txt") {
+		t.Fatalf("review diff includes sibling integration file: %q", diffNames)
+	}
 	lastHistory := task.History[len(task.History)-1]
 	if lastHistory.Event != models.TaskEventSubmittedForReview {
 		t.Fatalf("History event = %q, want %q", lastHistory.Event, models.TaskEventSubmittedForReview)

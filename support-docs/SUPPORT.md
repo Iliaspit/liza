@@ -196,8 +196,8 @@ Key task fields:
 - `assigned_to` — which agent holds the task (doer)
 - `reviewing_by` — which agent is reviewing
 - `lease_expires` / `review_lease_expires` — when the claim expires
-- `base_commit` — commit the worktree was created from
-- `review_commit` — commit submitted for review
+- `base_commit` — review diff base; for submitted/reviewing tasks with a worktree, the merge-base of `review_commit` and the configured integration branch
+- `review_commit` — commit submitted for review; must match task worktree HEAD
 - `merge_commit` — commit on integration branch after merge
 - `iteration` — doer iteration count
 - `review_cycles_current` / `review_cycles_total` — rejection count

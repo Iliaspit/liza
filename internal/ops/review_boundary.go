@@ -14,16 +14,49 @@ const (
 	reviewBoundaryOperationAssignment = "review-assignment"
 )
 
+// ReviewBoundaryRepairNeededError indicates submitted review metadata is stale
+// but repairable by updating the task's review boundary from the worktree.
+type ReviewBoundaryRepairNeededError struct {
+	TaskID       string
+	Reason       string
+	RecoveryHint string
+}
+
+func (e *ReviewBoundaryRepairNeededError) Error() string {
+	return fmt.Sprintf("task %s review boundary needs repair: %s — %s", e.TaskID, e.Reason, e.RecoveryHint)
+}
+
 // validateReviewBoundaryForAssignment verifies that assigning a reviewer would
-// point them at the same commit currently checked out in the task worktree.
-func validateReviewBoundaryForAssignment(projectRoot string, task *models.Task) error {
+// point them at the same commit currently checked out in the task worktree and
+// the current effective review base.
+func validateReviewBoundaryForAssignment(projectRoot string, task *models.Task, integrationBranch string) error {
+	if task.Worktree == nil {
+		return nil
+	}
 	if task.ReviewCommit == nil {
 		return &PreconditionError{Reason: fmt.Sprintf("task %s has no review_commit — cannot assign for review", task.ID)}
 	}
-	return validateReviewBoundaryCommit(projectRoot, task, *task.ReviewCommit)
+	g := gitpkg.New(projectRoot)
+	expectedBase, err := g.GetMergeBase(*task.ReviewCommit, integrationBranch)
+	if err != nil {
+		return &OperationalError{
+			Code:    "git_operation",
+			Phase:   "review-boundary",
+			Message: "failed to resolve effective review base",
+			Details: map[string]any{
+				"operation":          reviewBoundaryOperationAssignment,
+				"task_id":            task.ID,
+				"integration_branch": integrationBranch,
+				"review_commit":      *task.ReviewCommit,
+				"recovery_hint":      "Inspect the task worktree and integration branch, then retry the review operation.",
+			},
+			Err: err,
+		}
+	}
+	return validateReviewBoundaryCommit(projectRoot, task, *task.ReviewCommit, expectedBase)
 }
 
-func validateReviewBoundaryCommit(projectRoot string, task *models.Task, reviewCommit string) error {
+func validateReviewBoundaryCommit(projectRoot string, task *models.Task, reviewCommit, expectedBase string) error {
 	if task.Worktree == nil {
 		return nil
 	}
@@ -67,7 +100,25 @@ func validateReviewBoundaryCommit(projectRoot string, task *models.Task, reviewC
 		}
 	}
 	if reviewCommit != wtHEAD {
-		return &PreconditionError{Reason: fmt.Sprintf("review_commit %s does not match worktree HEAD %s — cannot assign task %s for review", reviewCommit, wtHEAD, task.ID)}
+		return &ReviewBoundaryRepairNeededError{
+			TaskID:       task.ID,
+			Reason:       fmt.Sprintf("review_commit %s does not match worktree HEAD %s", reviewCommit, wtHEAD),
+			RecoveryHint: fmt.Sprintf("run liza update-review-commit %s", task.ID),
+		}
+	}
+	if task.BaseCommit == nil {
+		return &ReviewBoundaryRepairNeededError{
+			TaskID:       task.ID,
+			Reason:       fmt.Sprintf("base_commit is missing; expected effective review base %s", expectedBase),
+			RecoveryHint: fmt.Sprintf("run liza update-review-commit %s", task.ID),
+		}
+	}
+	if *task.BaseCommit != expectedBase {
+		return &ReviewBoundaryRepairNeededError{
+			TaskID:       task.ID,
+			Reason:       fmt.Sprintf("base_commit %s does not match effective review base %s", *task.BaseCommit, expectedBase),
+			RecoveryHint: fmt.Sprintf("run liza update-review-commit %s", task.ID),
+		}
 	}
 	return nil
 }

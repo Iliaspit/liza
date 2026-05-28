@@ -245,6 +245,7 @@ func TestClaimReviewerTask_Success(t *testing.T) {
 	state := testhelpers.CreateValidState()
 	registerClaimReviewerTaskTestAgents(state)
 	worktree, reviewCommit := createClaimReviewWorktree(t, tmpDir, "task-1")
+	baseCommit := testhelpers.MustGit(t, tmpDir, "merge-base", reviewCommit, "integration")
 	state.Tasks = []models.Task{
 		{
 			ID:           "task-1",
@@ -252,6 +253,7 @@ func TestClaimReviewerTask_Success(t *testing.T) {
 			RolePair:     "coding-pair",
 			Priority:     1,
 			Worktree:     &worktree,
+			BaseCommit:   &baseCommit,
 			ReviewCommit: &reviewCommit,
 			History:      []models.TaskHistoryEntry{},
 			Created:      now,
@@ -322,6 +324,7 @@ func TestClaimReviewerTask_RejectsReviewCommitMismatch(t *testing.T) {
 
 	worktree, headCommit := createClaimReviewWorktree(t, tmpDir, "task-1")
 	staleCommit := testhelpers.MustGit(t, tmpDir, "rev-parse", "integration")
+	baseCommit := testhelpers.MustGit(t, tmpDir, "merge-base", headCommit, "integration")
 	if staleCommit == headCommit {
 		t.Fatal("test setup failed: stale commit matches worktree HEAD")
 	}
@@ -344,6 +347,7 @@ func TestClaimReviewerTask_RejectsReviewCommitMismatch(t *testing.T) {
 			Priority:     1,
 			AssignedTo:   &coderID,
 			Worktree:     &worktree,
+			BaseCommit:   &baseCommit,
 			ReviewCommit: &staleCommit,
 			Created:      now,
 		},
@@ -358,8 +362,8 @@ func TestClaimReviewerTask_RejectsReviewCommitMismatch(t *testing.T) {
 	if err == nil {
 		t.Fatal("Expected error for review_commit/worktree HEAD mismatch")
 	}
-	if !strings.Contains(err.Error(), IntegrationReasonReviewBoundaryMismatch) {
-		t.Errorf("Error = %q, want review boundary mismatch", err.Error())
+	if !strings.Contains(err.Error(), "update-review-commit") {
+		t.Errorf("Error = %q, want update-review-commit recovery hint", err.Error())
 	}
 
 	readState, readErr := db.New(stateFile).Read()
@@ -370,23 +374,17 @@ func TestClaimReviewerTask_RejectsReviewCommitMismatch(t *testing.T) {
 	if task == nil {
 		t.Fatal("Task not found")
 	}
-	if task.Status != models.TaskStatusIntegrationFailed {
-		t.Errorf("Task status = %v, want INTEGRATION_FAILED", task.Status)
+	if task.Status != models.TaskStatusReadyForReview {
+		t.Errorf("Task status = %v, want READY_FOR_REVIEW", task.Status)
 	}
 	if task.ReviewingBy != nil {
-		t.Fatal("Task should not be review-assigned after boundary mismatch")
+		t.Fatal("Task should not be review-assigned after boundary repair requirement")
 	}
-	if task.AssignedTo != nil {
-		t.Fatal("Task AssignedTo should be cleared after boundary mismatch")
+	if task.AssignedTo == nil || *task.AssignedTo != coderID {
+		t.Fatal("Task AssignedTo should be preserved after repairable boundary drift")
 	}
-	if task.IntegrationFailure == nil {
-		t.Fatal("IntegrationFailure should be recorded after boundary mismatch")
-	}
-	if task.IntegrationFailure["reason"] != IntegrationReasonReviewBoundaryMismatch {
-		t.Errorf("IntegrationFailure reason = %v, want %q", task.IntegrationFailure["reason"], IntegrationReasonReviewBoundaryMismatch)
-	}
-	if task.IntegrationFailure["operation"] != reviewBoundaryOperationAssignment {
-		t.Errorf("IntegrationFailure operation = %v, want %q", task.IntegrationFailure["operation"], reviewBoundaryOperationAssignment)
+	if task.IntegrationFailure != nil {
+		t.Fatal("IntegrationFailure should not be recorded for repairable boundary drift")
 	}
 	coder := readState.Agents[coderID]
 	if coder.Status != models.AgentStatusWorking {
@@ -404,6 +402,7 @@ func TestClaimReviewerTask_ReleasesSameTaskAssignedAgentOnBoundaryMismatch(t *te
 
 	worktree, headCommit := createClaimReviewWorktree(t, tmpDir, "task-1")
 	staleCommit := testhelpers.MustGit(t, tmpDir, "rev-parse", "integration")
+	baseCommit := testhelpers.MustGit(t, tmpDir, "merge-base", headCommit, "integration")
 	if staleCommit == headCommit {
 		t.Fatal("test setup failed: stale commit matches worktree HEAD")
 	}
@@ -426,6 +425,7 @@ func TestClaimReviewerTask_ReleasesSameTaskAssignedAgentOnBoundaryMismatch(t *te
 			Priority:     1,
 			AssignedTo:   &coderID,
 			Worktree:     &worktree,
+			BaseCommit:   &baseCommit,
 			ReviewCommit: &staleCommit,
 			Created:      now,
 		},
@@ -449,18 +449,18 @@ func TestClaimReviewerTask_ReleasesSameTaskAssignedAgentOnBoundaryMismatch(t *te
 	if task == nil {
 		t.Fatal("Task not found")
 	}
-	if task.Status != models.TaskStatusIntegrationFailed {
-		t.Errorf("Task status = %v, want INTEGRATION_FAILED", task.Status)
+	if task.Status != models.TaskStatusReadyForReview {
+		t.Errorf("Task status = %v, want READY_FOR_REVIEW", task.Status)
 	}
-	if task.AssignedTo != nil {
-		t.Fatal("Task AssignedTo should be cleared after boundary mismatch")
+	if task.AssignedTo == nil || *task.AssignedTo != coderID {
+		t.Fatal("Task AssignedTo should be preserved after repairable boundary drift")
 	}
 	coder := readState.Agents[coderID]
-	if coder.Status != models.AgentStatusIdle {
-		t.Errorf("coder status = %q, want IDLE", coder.Status)
+	if coder.Status != models.AgentStatusWorking {
+		t.Errorf("coder status = %q, want WORKING", coder.Status)
 	}
-	if coder.CurrentTask != nil {
-		t.Fatalf("coder CurrentTask = %v, want nil", *coder.CurrentTask)
+	if coder.CurrentTask == nil || *coder.CurrentTask != taskID {
+		t.Fatalf("coder CurrentTask = %v, want %s", coder.CurrentTask, taskID)
 	}
 }
 
@@ -472,6 +472,8 @@ func TestClaimReviewerTask_SkipsStaleReviewBoundaryCandidate(t *testing.T) {
 	staleWorktree, staleHead := createClaimReviewWorktree(t, tmpDir, "task-stale")
 	validWorktree, validHead := createClaimReviewWorktree(t, tmpDir, "task-valid")
 	staleCommit := testhelpers.MustGit(t, tmpDir, "rev-parse", "integration")
+	staleBase := testhelpers.MustGit(t, tmpDir, "merge-base", staleHead, "integration")
+	validBase := testhelpers.MustGit(t, tmpDir, "merge-base", validHead, "integration")
 	if staleCommit == staleHead {
 		t.Fatal("test setup failed: stale commit matches stale worktree HEAD")
 	}
@@ -486,6 +488,7 @@ func TestClaimReviewerTask_SkipsStaleReviewBoundaryCandidate(t *testing.T) {
 			RolePair:     "coding-pair",
 			Priority:     1,
 			Worktree:     &staleWorktree,
+			BaseCommit:   &staleBase,
 			ReviewCommit: &staleCommit,
 			Created:      now.Add(-time.Minute),
 		},
@@ -495,6 +498,7 @@ func TestClaimReviewerTask_SkipsStaleReviewBoundaryCandidate(t *testing.T) {
 			RolePair:     "coding-pair",
 			Priority:     2,
 			Worktree:     &validWorktree,
+			BaseCommit:   &validBase,
 			ReviewCommit: &validHead,
 			Created:      now,
 		},
@@ -521,8 +525,11 @@ func TestClaimReviewerTask_SkipsStaleReviewBoundaryCandidate(t *testing.T) {
 	if staleTask == nil {
 		t.Fatal("stale task not found")
 	}
-	if staleTask.Status != models.TaskStatusIntegrationFailed {
-		t.Errorf("stale task status = %v, want INTEGRATION_FAILED", staleTask.Status)
+	if staleTask.Status != models.TaskStatusReadyForReview {
+		t.Errorf("stale task status = %v, want READY_FOR_REVIEW", staleTask.Status)
+	}
+	if staleTask.IntegrationFailure != nil {
+		t.Fatal("stale task IntegrationFailure should not be recorded for repairable boundary drift")
 	}
 	validTask := readState.FindTask("task-valid")
 	if validTask == nil {
@@ -533,6 +540,63 @@ func TestClaimReviewerTask_SkipsStaleReviewBoundaryCandidate(t *testing.T) {
 	}
 	if validTask.ReviewingBy == nil || *validTask.ReviewingBy != "code-reviewer-1" {
 		t.Fatalf("valid task ReviewingBy = %v, want code-reviewer-1", validTask.ReviewingBy)
+	}
+}
+
+func TestClaimReviewerTask_AllCandidatesNeedBoundaryRepair(t *testing.T) {
+	tmpDir := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, tmpDir)
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+
+	worktree, reviewCommit := createClaimReviewWorktree(t, tmpDir, "task-stale-base")
+	staleBase := reviewCommit
+	effectiveBase := testhelpers.MustGit(t, tmpDir, "merge-base", reviewCommit, "integration")
+	if staleBase == effectiveBase {
+		t.Fatal("test setup failed: stale base equals effective base")
+	}
+
+	now := time.Now().UTC()
+	state := testhelpers.CreateValidState()
+	registerClaimReviewerTaskTestAgents(state)
+	state.Tasks = []models.Task{
+		{
+			ID:           "task-stale-base",
+			Status:       models.TaskStatusReadyForReview,
+			RolePair:     "coding-pair",
+			Priority:     1,
+			Worktree:     &worktree,
+			BaseCommit:   &staleBase,
+			ReviewCommit: &reviewCommit,
+			Created:      now,
+		},
+	}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	_, err := ClaimReviewerTask(ClaimReviewerTaskInput{
+		ProjectRoot:   tmpDir,
+		AgentID:       "code-reviewer-1",
+		LeaseDuration: 1800,
+	})
+	if err == nil {
+		t.Fatal("Expected error when all candidates need boundary repair")
+	}
+	if !strings.Contains(err.Error(), "task-stale-base") || !strings.Contains(err.Error(), "update-review-commit") {
+		t.Fatalf("Error = %q, want task ID and update-review-commit recovery hint", err.Error())
+	}
+
+	readState, readErr := db.New(stateFile).Read()
+	if readErr != nil {
+		t.Fatalf("Failed to read state: %v", readErr)
+	}
+	task := readState.FindTask("task-stale-base")
+	if task == nil {
+		t.Fatal("task not found")
+	}
+	if task.Status != models.TaskStatusReadyForReview {
+		t.Errorf("task status = %v, want READY_FOR_REVIEW", task.Status)
+	}
+	if task.IntegrationFailure != nil {
+		t.Fatal("IntegrationFailure should not be recorded for repairable boundary drift")
 	}
 }
 

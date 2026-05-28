@@ -40,6 +40,7 @@ func TestUpdateReviewCommit_HappyPath_Submitted(t *testing.T) {
 	state := testhelpers.CreateValidState()
 	task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusReadyForReview, now)
 	task.ReviewCommit = &staleCommit
+	task.BaseCommit = &staleCommit
 	worktreeRel := g.GetWorktreeRelPath("task-1")
 	task.Worktree = &worktreeRel
 	state.Tasks = []models.Task{task}
@@ -55,6 +56,13 @@ func TestUpdateReviewCommit_HappyPath_Submitted(t *testing.T) {
 	}
 	if result.NewReviewCommit != wtHEAD {
 		t.Errorf("NewReviewCommit = %s, want %s", result.NewReviewCommit, wtHEAD)
+	}
+	expectedBase := testhelpers.MustGit(t, tmpDir, "merge-base", wtHEAD, "integration")
+	if result.OldBaseCommit == nil || *result.OldBaseCommit != staleCommit {
+		t.Errorf("OldBaseCommit = %v, want %s", result.OldBaseCommit, staleCommit)
+	}
+	if result.NewBaseCommit != expectedBase {
+		t.Errorf("NewBaseCommit = %s, want %s", result.NewBaseCommit, expectedBase)
 	}
 	if result.ReviewerReleased {
 		t.Error("ReviewerReleased should be false (no reviewer claimed)")
@@ -73,6 +81,13 @@ func TestUpdateReviewCommit_HappyPath_Submitted(t *testing.T) {
 			got = *readTask.ReviewCommit
 		}
 		t.Errorf("ReviewCommit = %s, want %s", got, wtHEAD)
+	}
+	if readTask.BaseCommit == nil || *readTask.BaseCommit != expectedBase {
+		got := "<nil>"
+		if readTask.BaseCommit != nil {
+			got = *readTask.BaseCommit
+		}
+		t.Errorf("BaseCommit = %s, want %s", got, expectedBase)
 	}
 
 	// Status should remain submitted (no reviewer to release)
@@ -96,6 +111,12 @@ func TestUpdateReviewCommit_HappyPath_Submitted(t *testing.T) {
 			}
 			if entry.Extra["new_review_commit"] != wtHEAD {
 				t.Errorf("new_review_commit extra = %v, want %s", entry.Extra["new_review_commit"], wtHEAD)
+			}
+			if got := entry.Extra["old_base_commit"]; got == nil {
+				t.Errorf("old_base_commit extra = nil, want %s", staleCommit)
+			}
+			if entry.Extra["new_base_commit"] != expectedBase {
+				t.Errorf("new_base_commit extra = %v, want %s", entry.Extra["new_base_commit"], expectedBase)
 			}
 			break
 		}
@@ -211,13 +232,15 @@ func TestUpdateReviewCommit_RejectsNoMismatch(t *testing.T) {
 		t.Fatalf("Failed to create worktree: %v", err)
 	}
 
-	// Set review_commit to the actual worktree HEAD (no mismatch)
+	// Set review_commit and base_commit to the actual current boundary (no mismatch)
 	wtHEAD := testhelpers.MustGit(t, g.GetWorktreePath("task-1"), "rev-parse", "HEAD")
+	baseCommit := testhelpers.MustGit(t, tmpDir, "merge-base", wtHEAD, "integration")
 
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()
 	task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusReadyForReview, now)
 	task.ReviewCommit = &wtHEAD
+	task.BaseCommit = &baseCommit
 	worktreeRel := g.GetWorktreeRelPath("task-1")
 	task.Worktree = &worktreeRel
 	state.Tasks = []models.Task{task}
@@ -229,6 +252,98 @@ func TestUpdateReviewCommit_RejectsNoMismatch(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "no update needed") {
 		t.Errorf("Error = %q, want to mention 'no update needed'", err.Error())
+	}
+}
+
+func TestUpdateReviewCommit_UpdatesStaleBaseWhenReviewCommitMatchesHead(t *testing.T) {
+	tmpDir := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, tmpDir)
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+
+	g := git.New(tmpDir)
+	_, err := g.CreateWorktree("task-1", "integration")
+	if err != nil {
+		t.Fatalf("Failed to create worktree: %v", err)
+	}
+	wtPath := g.GetWorktreePath("task-1")
+	if err := os.WriteFile(filepath.Join(wtPath, "feature.go"), []byte("package feature\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	testhelpers.MustGit(t, wtPath, "add", "feature.go")
+	testhelpers.MustGit(t, wtPath, "commit", "-m", "Add feature")
+	wtHEAD := testhelpers.MustGit(t, wtPath, "rev-parse", "HEAD")
+	effectiveBase := testhelpers.MustGit(t, tmpDir, "merge-base", wtHEAD, "integration")
+	staleBase := wtHEAD
+	if staleBase == effectiveBase {
+		t.Fatal("test setup failed: stale base equals effective base")
+	}
+
+	now := time.Now().UTC()
+	state := testhelpers.CreateValidState()
+	task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusReadyForReview, now)
+	task.ReviewCommit = &wtHEAD
+	task.BaseCommit = &staleBase
+	worktreeRel := g.GetWorktreeRelPath("task-1")
+	task.Worktree = &worktreeRel
+	state.Tasks = []models.Task{task}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	result, err := UpdateReviewCommit(tmpDir, "task-1", "human")
+	if err != nil {
+		t.Fatalf("Expected success, got: %v", err)
+	}
+	if result.NewReviewCommit != wtHEAD {
+		t.Errorf("NewReviewCommit = %s, want unchanged %s", result.NewReviewCommit, wtHEAD)
+	}
+	if result.OldBaseCommit == nil || *result.OldBaseCommit != staleBase {
+		t.Errorf("OldBaseCommit = %v, want %s", result.OldBaseCommit, staleBase)
+	}
+	if result.NewBaseCommit != effectiveBase {
+		t.Errorf("NewBaseCommit = %s, want %s", result.NewBaseCommit, effectiveBase)
+	}
+}
+
+func TestUpdateReviewCommit_SetsMissingBaseCommit(t *testing.T) {
+	tmpDir := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, tmpDir)
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+
+	g := git.New(tmpDir)
+	_, err := g.CreateWorktree("task-1", "integration")
+	if err != nil {
+		t.Fatalf("Failed to create worktree: %v", err)
+	}
+	wtHEAD := testhelpers.MustGit(t, g.GetWorktreePath("task-1"), "rev-parse", "HEAD")
+	effectiveBase := testhelpers.MustGit(t, tmpDir, "merge-base", wtHEAD, "integration")
+
+	now := time.Now().UTC()
+	state := testhelpers.CreateValidState()
+	task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusReadyForReview, now)
+	task.ReviewCommit = &wtHEAD
+	task.BaseCommit = nil
+	worktreeRel := g.GetWorktreeRelPath("task-1")
+	task.Worktree = &worktreeRel
+	state.Tasks = []models.Task{task}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	result, err := UpdateReviewCommit(tmpDir, "task-1", "human")
+	if err != nil {
+		t.Fatalf("Expected success, got: %v", err)
+	}
+	if result.OldBaseCommit != nil {
+		t.Errorf("OldBaseCommit = %v, want nil", *result.OldBaseCommit)
+	}
+	if result.NewBaseCommit != effectiveBase {
+		t.Errorf("NewBaseCommit = %s, want %s", result.NewBaseCommit, effectiveBase)
+	}
+
+	readState, err := db.New(stateFile).Read()
+	if err != nil {
+		t.Fatalf("Failed to read state: %v", err)
+	}
+	readTask := readState.FindTask("task-1")
+	if readTask.BaseCommit == nil || *readTask.BaseCommit != effectiveBase {
+		t.Fatalf("BaseCommit = %v, want %s", readTask.BaseCommit, effectiveBase)
 	}
 }
 

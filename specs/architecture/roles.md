@@ -458,6 +458,8 @@ Code Reviewer evaluates:
 **Review Scope on Iteration Cycles:**
 Review covers **all changes in the scope/workmanship diff** (`base_commit` → `review_commit`), not just changes since last rejection. Each review is a fresh evaluation of whether the full implementation meets the spec. This catches regressions introduced by fixes and keeps the mental model simple: "does this worktree satisfy the task?"
 
+For submitted/reviewing tasks with a worktree, `review_commit` must match the task worktree HEAD and `base_commit` must match the effective merge-base of `review_commit` and the configured integration branch. If either side of that boundary is stale, reviewer assignment is blocked as repairable metadata drift; the task is not marked `INTEGRATION_FAILED`. Repair with `liza update-review-commit <task-id>` before review.
+
 Coverage does not require loading the raw full diff into context. Code Reviewer follows the Reviewer Diff Context Protocol above.
 
 For code reviews, current integration drift is checked separately immediately before verdict with `integration_branch` → `review_commit`. Scope findings come exclusively from the scope/workmanship diff. If current-integration drift makes approval unsafe or ambiguous while the scope diff is clean, reject with verdict text saying review-range drift / rebase needed instead of logging `scope_deviation`.

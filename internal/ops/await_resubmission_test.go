@@ -804,10 +804,10 @@ func TestAwaitResubmission_RejectsReviewCommitMismatchOnReclaim(t *testing.T) {
 
 	_, err = AwaitResubmission(context.Background(), tmpDir, taskID, "reviewer-1", 10*time.Second)
 	if err == nil {
-		t.Fatal("Expected review boundary mismatch error")
+		t.Fatal("Expected review boundary repair error")
 	}
-	if !strings.Contains(err.Error(), IntegrationReasonReviewBoundaryMismatch) {
-		t.Errorf("Error = %q, want review boundary mismatch", err.Error())
+	if !strings.Contains(err.Error(), "update-review-commit") {
+		t.Errorf("Error = %q, want update-review-commit recovery hint", err.Error())
 	}
 
 	readState, readErr := bb.Read()
@@ -818,17 +818,14 @@ func TestAwaitResubmission_RejectsReviewCommitMismatchOnReclaim(t *testing.T) {
 	if task == nil {
 		t.Fatal("task not found")
 	}
-	if task.Status != models.TaskStatusIntegrationFailed {
-		t.Errorf("task status = %q, want INTEGRATION_FAILED", task.Status)
+	if task.Status != models.TaskStatusReadyForReview {
+		t.Errorf("task status = %q, want READY_FOR_REVIEW", task.Status)
 	}
 	if task.ReviewingBy != nil {
-		t.Fatal("ReviewingBy should be released after reclaim boundary mismatch")
+		t.Fatal("ReviewingBy should be released after repairable boundary drift")
 	}
-	if task.IntegrationFailure == nil {
-		t.Fatal("IntegrationFailure should be recorded after reclaim boundary mismatch")
-	}
-	if task.IntegrationFailure["reason"] != IntegrationReasonReviewBoundaryMismatch {
-		t.Errorf("IntegrationFailure reason = %v, want %q", task.IntegrationFailure["reason"], IntegrationReasonReviewBoundaryMismatch)
+	if task.IntegrationFailure != nil {
+		t.Fatal("IntegrationFailure should not be recorded for repairable boundary drift")
 	}
 	agent := readState.Agents["reviewer-1"]
 	if agent.CurrentTask != nil {

@@ -1,8 +1,10 @@
 package ops
 
 import (
+	stderrors "errors"
 	"fmt"
 	"math/rand/v2"
+	"strings"
 	"time"
 
 	"github.com/liza-mas/liza/internal/db"
@@ -69,6 +71,7 @@ func ClaimReviewerTask(input ClaimReviewerTaskInput) (*ClaimReviewerTaskResult, 
 
 	var result ClaimReviewerTaskResult
 	var reviewBoundaryErr error
+	var repairNeededTaskIDs []string
 
 	// Load pipeline config once for both IsClaimable and transition.
 	pb, err := loadPipelineBundle(input.ProjectRoot)
@@ -126,8 +129,14 @@ func ClaimReviewerTask(input ClaimReviewerTaskInput) (*ClaimReviewerTaskResult, 
 				break
 			}
 
-			if err := validateReviewBoundaryForAssignment(input.ProjectRoot, task); err != nil {
+			if err := validateReviewBoundaryForAssignment(input.ProjectRoot, task, state.Config.IntegrationBranch); err != nil {
 				reviewBoundaryErr = err
+				var repairNeeded *ReviewBoundaryRepairNeededError
+				if stderrors.As(err, &repairNeeded) {
+					repairNeededTaskIDs = append(repairNeededTaskIDs, task.ID)
+					candidates = removeCandidate(candidates, task)
+					continue
+				}
 				if markErr := markReviewBoundaryIntegrationFailed(state, task, input.AgentID, pb.transitions, err); markErr != nil {
 					return markErr
 				}
@@ -177,6 +186,14 @@ func ClaimReviewerTask(input ClaimReviewerTaskInput) (*ClaimReviewerTaskResult, 
 		return nil, err
 	}
 	if reviewBoundaryErr != nil && result.TaskID == "" {
+		if len(repairNeededTaskIDs) > 0 {
+			return nil, &PreconditionError{
+				Reason: fmt.Sprintf(
+					"review boundary needs repair for task(s): %s — run liza update-review-commit <task-id>",
+					strings.Join(repairNeededTaskIDs, ", "),
+				),
+			}
+		}
 		return nil, &IntegrationFailedError{Reason: IntegrationReasonReviewBoundaryMismatch}
 	}
 
