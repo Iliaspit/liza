@@ -44,7 +44,7 @@ Liza is a **frontier Multi-Agent System**:
 - **Behavior, Posture, Know-How** — three layers that make coding agents useful:
   - **Behavior**: A [behavioral contract](contracts/) enforces governance intrinsically — not through external scaffolding as *Harness Engineering* does. Optional project [guardrails](GUARDRAILS.md) extend the contract with project-specific constraints.
   - **Posture**: Original pairing postures (User Duck, Socratic Coach, Challenger, etc.)
-  - **Know-How**: 20 composable [skills](skills/) encode methodology
+  - **Know-How**: composable [skills](skills/) encode methodology
   - *[Full analysis](https://medium.com/@tangi.vass/behavior-posture-know-how-the-three-layers-that-make-ai-agents-useful-d485388442eb)*
 - **Autonomous Spec-driven Coding System:**
   - From **general goal** to code and tests, with multi-stage decomposition into intermediate artifacts (epics, US, implementation plans)
