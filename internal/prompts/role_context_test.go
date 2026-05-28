@@ -408,9 +408,10 @@ func TestRoleContextData_Architect(t *testing.T) {
 func TestRoleContextData_PlanRefAndValidationPlan(t *testing.T) {
 	// Coder gets PlanRef but not ValidationPlan
 	coderData := RoleContextData{
-		Role:     "coder",
-		RoleType: "doer",
-		PlanRef:  "specs/plans/20260317-plan.md",
+		Role:               "coder",
+		RoleType:           "doer",
+		PlanRef:            "specs/plans/20260317-plan.md",
+		ValidationCommands: []string{"make test"},
 	}
 	if coderData.PlanRef != "specs/plans/20260317-plan.md" {
 		t.Errorf("Coder PlanRef = %q, want %q", coderData.PlanRef, "specs/plans/20260317-plan.md")
@@ -418,18 +419,25 @@ func TestRoleContextData_PlanRefAndValidationPlan(t *testing.T) {
 	if coderData.ValidationPlan != "" {
 		t.Errorf("Coder ValidationPlan should be empty, got %q", coderData.ValidationPlan)
 	}
+	if len(coderData.ValidationCommands) != 1 || coderData.ValidationCommands[0] != "make test" {
+		t.Errorf("Coder ValidationCommands = %v, want [make test]", coderData.ValidationCommands)
+	}
 
 	// Reviewer gets both PlanRef and ValidationPlan
 	reviewerData := RoleContextData{
-		Role:           "code-reviewer",
-		RoleType:       "reviewer",
-		PlanRef:        "specs/plans/20260317-plan.md",
-		ValidationPlan: "run go test ./... and verify all pass",
+		Role:               "code-reviewer",
+		RoleType:           "reviewer",
+		PlanRef:            "specs/plans/20260317-plan.md",
+		ValidationCommands: []string{"make test"},
+		ValidationPlan:     "run go test ./... and verify all pass",
 	}
 	if reviewerData.PlanRef != "specs/plans/20260317-plan.md" {
 		t.Errorf("Reviewer PlanRef = %q, want %q", reviewerData.PlanRef, "specs/plans/20260317-plan.md")
 	}
 	if reviewerData.ValidationPlan != "run go test ./... and verify all pass" {
 		t.Errorf("Reviewer ValidationPlan = %q, want %q", reviewerData.ValidationPlan, "run go test ./... and verify all pass")
+	}
+	if len(reviewerData.ValidationCommands) != 1 || reviewerData.ValidationCommands[0] != "make test" {
+		t.Errorf("Reviewer ValidationCommands = %v, want [make test]", reviewerData.ValidationCommands)
 	}
 }

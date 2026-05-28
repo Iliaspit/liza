@@ -26,6 +26,7 @@ type AddTaskInput struct {
 	SpecRef     string   `json:"spec"`
 	PlanRef     string   `json:"plan_ref,omitempty"`
 	DoneWhen    string   `json:"done"`
+	Validation  []string `json:"validation,omitempty"`
 	Scope       string   `json:"scope"`
 	Priority    int      `json:"priority"`
 	DependsOn   []string `json:"depends,omitempty"`
@@ -75,6 +76,9 @@ func AddTask(statePath, logPath string, input *AddTaskInput, orchestratorID stri
 	}
 	if input.DoneWhen == "" {
 		return nil, &PreconditionError{Reason: "done_when is required"}
+	}
+	if err := models.ValidateValidationCommands("validation", input.Validation); err != nil {
+		return nil, &PreconditionError{Reason: err.Error()}
 	}
 	if input.Scope == "" {
 		return nil, &PreconditionError{Reason: "scope is required"}
@@ -150,6 +154,7 @@ func AddTask(statePath, logPath string, input *AddTaskInput, orchestratorID stri
 		SpecRef:     paths.NormalizeSpecRef(input.SpecRef),
 		PlanRef:     paths.NormalizeSpecRef(input.PlanRef),
 		DoneWhen:    input.DoneWhen,
+		Validation:  slices.Clone(input.Validation),
 		Scope:       input.Scope,
 		DependsOn:   normalizedDeps,
 		Created:     now,

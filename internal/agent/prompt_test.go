@@ -3229,6 +3229,7 @@ func TestBuildTaskRoleContextData_ArchRef(t *testing.T) {
 				EpicRef:     "specs/epics/feature-x.md#capability-auth",
 				PlanRef:     "specs/plans/feature-x.md#task-breakdown",
 				ArchRef:     "specs/arch-plan/feature-x.md",
+				Validation:  []string{"make test", "pre-commit run --files specs/arch-plan/feature-x.md"},
 				Created:     now,
 			},
 		},
@@ -3266,6 +3267,9 @@ func TestBuildTaskRoleContextData_ArchRef(t *testing.T) {
 	}
 	if data.ArchRef != "specs/arch-plan/feature-x.md" {
 		t.Errorf("ArchRef = %q, want repo-relative file ref", data.ArchRef)
+	}
+	if !slices.Equal(data.ValidationCommands, []string{"make test", "pre-commit run --files specs/arch-plan/feature-x.md"}) {
+		t.Errorf("ValidationCommands = %v, want canonical commands", data.ValidationCommands)
 	}
 	if data.IntegrationBranch != "main" {
 		t.Errorf("IntegrationBranch = %q, want main", data.IntegrationBranch)

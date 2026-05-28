@@ -86,6 +86,8 @@ Example YAML file format:
   description: Implement feature X
   spec_ref: specs/vision.md
   done_when: Feature X is implemented and tested
+  validation:
+    - make test
   scope: Add feature X to the codebase
   role_pair: coding-pair
   priority: 1
@@ -145,6 +147,9 @@ Example YAML file format:
 		if cmd.Flags().Changed("done") {
 			input.DoneWhen, _ = cmd.Flags().GetString("done")
 		}
+		if cmd.Flags().Changed("validation") {
+			input.Validation, _ = cmd.Flags().GetStringArray("validation")
+		}
 		if cmd.Flags().Changed("scope") {
 			input.Scope, _ = cmd.Flags().GetString("scope")
 		}
@@ -191,6 +196,7 @@ Example YAML file format:
 				Description: input.Description,
 				SpecRef:     input.SpecRef,
 				DoneWhen:    input.DoneWhen,
+				Validation:  input.Validation,
 				Scope:       input.Scope,
 				Priority:    input.Priority,
 				DependsOn:   input.DependsOn,
@@ -802,8 +808,8 @@ var setTaskOutputCmd = &cobra.Command{
 	Long: `Define output entries that will become downstream tasks after merge.
 
 Reads output entries from a JSON file. Each entry must have desc, done_when,
-and scope. Optional fields: spec_ref, plan_ref, arch_ref, depends_on,
-task_depends_on.
+and scope. Optional fields: spec_ref, plan_ref, arch_ref, validation,
+depends_on, task_depends_on.
 
 depends_on contains sibling output indexes, e.g. "0" for output[0].
 task_depends_on contains existing concrete task IDs to copy onto generated
@@ -822,7 +828,7 @@ Example:
   cat > outputs.json <<'EOF'
   [
     {"desc": "Subtask 1", "done_when": "Tests pass", "scope": "internal/pkg"},
-    {"desc": "Subtask 2", "done_when": "API works", "scope": "internal/api", "depends_on": ["0"], "task_depends_on": ["existing-task-id"]}
+    {"desc": "Subtask 2", "done_when": "API works", "scope": "internal/api", "validation": ["make test"], "depends_on": ["0"], "task_depends_on": ["existing-task-id"]}
   ]
   EOF
   liza set-task-output task-1 --output outputs.json`,
@@ -898,7 +904,8 @@ var addTasksCmd = &cobra.Command{
 	Long: `Add multiple tasks to state.yaml in a single batch operation.
 
 Reads task definitions from a JSON file. Each task must have id, desc, spec,
-done, and scope. Optional fields: priority, depends, type, role_pair, plan_ref.
+done, and scope. Optional fields: priority, depends, type, role_pair, plan_ref,
+validation.
 
 Tasks are added independently; failed tasks don't block subsequent ones.
 
@@ -906,7 +913,7 @@ Example:
   cat > tasks.json <<'EOF'
   [
     {"id": "task-1", "desc": "Implement X", "spec": "specs/x.md", "done": "X works", "scope": "internal/x"},
-    {"id": "task-2", "desc": "Implement Y", "spec": "specs/y.md", "done": "Y works", "scope": "internal/y", "depends": ["task-1"]}
+    {"id": "task-2", "desc": "Implement Y", "spec": "specs/y.md", "done": "Y works", "scope": "internal/y", "validation": ["make test"], "depends": ["task-1"]}
   ]
   EOF
   liza add-tasks --tasks-file tasks.json`,
@@ -1084,6 +1091,7 @@ func init() {
 	addTaskCmd.Flags().String("desc", "", "task description (required unless using --file)")
 	addTaskCmd.Flags().String("spec", "", "spec reference (required unless using --file)")
 	addTaskCmd.Flags().String("done", "", "done-when criteria (required unless using --file)")
+	addTaskCmd.Flags().StringArray("validation", nil, "canonical validation command; repeat for multiple commands (overrides file value)")
 	addTaskCmd.Flags().String("scope", "", "task scope (required unless using --file)")
 	addTaskCmd.Flags().Int("priority", 0, "task priority (default: 1, overrides file value)")
 	addTaskCmd.Flags().String("depends", "", "comma-separated list of task IDs this task depends on (overrides file value)")

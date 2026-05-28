@@ -391,7 +391,7 @@ func TestProceed_CrashRecovery_CreatesMissingChildren(t *testing.T) {
 		ReviewCommit: &reviewCommit,
 		Output: []models.OutputEntry{
 			{Desc: "Child 0", DoneWhen: "Done 0", Scope: "s0", SpecRef: "README.md"},
-			{Desc: "Child 1", DoneWhen: "Done 1", Scope: "s1", SpecRef: "README.md"},
+			{Desc: "Child 1", DoneWhen: "Done 1", Scope: "s1", SpecRef: "README.md", Validation: []string{"make test ./child1"}},
 		},
 		TransitionsExecuted: map[string]bool{"code-plan-to-coding": true},
 		History:             []models.TaskHistoryEntry{},
@@ -442,6 +442,9 @@ func TestProceed_CrashRecovery_CreatesMissingChildren(t *testing.T) {
 	}
 	if child1.Description != "Child 1" {
 		t.Errorf("Child 1 desc = %q, want %q", child1.Description, "Child 1")
+	}
+	if !slices.Equal(child1.Validation, []string{"make test ./child1"}) {
+		t.Errorf("Child 1 validation = %v, want [make test ./child1]", child1.Validation)
 	}
 }
 
@@ -3188,6 +3191,7 @@ func TestProceed_PerSubtask_PropagatesDecompositionKindAndDirectRefs(t *testing.
 				PlanRef:       "specs/plans/auth-plan.md",
 				ArchRef:       "specs/arch-plan/auth-arch.md",
 				Kind:          taskkind.PreCommitBootstrap,
+				Validation:    []string{"make test ./internal/auth", "pre-commit run --files internal/auth/login.go"},
 				Decomposition: decomposition,
 			},
 		},
@@ -3223,6 +3227,9 @@ func TestProceed_PerSubtask_PropagatesDecompositionKindAndDirectRefs(t *testing.
 	}
 	if child.ArchRef != "specs/arch-plan/auth-arch.md" {
 		t.Errorf("child.ArchRef = %q, want specs/arch-plan/auth-arch.md", child.ArchRef)
+	}
+	if !slices.Equal(child.Validation, []string{"make test ./internal/auth", "pre-commit run --files internal/auth/login.go"}) {
+		t.Errorf("child.Validation = %v, want canonical commands", child.Validation)
 	}
 	if child.Decomposition == nil {
 		t.Fatal("child.Decomposition is nil")
@@ -3330,6 +3337,7 @@ func TestProceed_OneToOne_InheritsPlanRefFromParent(t *testing.T) {
 		ParentTasks:  []string{cohortParentID},
 		SpecRef:      "specs/feature.md",
 		EpicRef:      "specs/epics/auth-epic.md#capability-cap-001---authentication",
+		Validation:   []string{"make test ./should-not-copy"},
 		DoneWhen:     "US approved",
 		Scope:        "auth module",
 		ReviewCommit: &reviewCommit,
@@ -3357,6 +3365,9 @@ func TestProceed_OneToOne_InheritsPlanRefFromParent(t *testing.T) {
 	// Many-to-one child (architecture task) does not inherit PlanRef
 	if child.PlanRef != "" {
 		t.Errorf("Child plan_ref = %q, want empty (many-to-one architecture tasks don't inherit PlanRef)", child.PlanRef)
+	}
+	if len(child.Validation) != 0 {
+		t.Errorf("Child validation = %v, want empty (many-to-one tasks don't inherit parent validation)", child.Validation)
 	}
 	// Inherits SpecRef
 	if child.SpecRef != "specs/feature.md" {
@@ -3557,6 +3568,7 @@ func TestProceed_OneToOne_InheritsArchRef(t *testing.T) {
 		SpecRef:      "README.md",
 		ArchRef:      "specs/arch-plan/feature.md",
 		PlanRef:      "specs/plans/plan.md",
+		Validation:   []string{"make test ./should-not-copy"},
 		DoneWhen:     "Plan approved",
 		Scope:        "auth module",
 		ReviewCommit: &reviewCommit,
@@ -3587,6 +3599,9 @@ func TestProceed_OneToOne_InheritsArchRef(t *testing.T) {
 	}
 	if child.ArchRef != "specs/arch-plan/feature.md" {
 		t.Errorf("Child arch_ref = %q, want %q", child.ArchRef, "specs/arch-plan/feature.md")
+	}
+	if len(child.Validation) != 0 {
+		t.Errorf("Child validation = %v, want empty (one-to-one tasks don't inherit parent validation)", child.Validation)
 	}
 }
 

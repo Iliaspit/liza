@@ -42,6 +42,7 @@ type taskInfo struct {
 	LeaseExpires       *string                       `json:"lease_expires,omitempty" yaml:"lease_expires,omitempty"`
 	Worktree           *string                       `json:"worktree,omitempty" yaml:"worktree,omitempty"`
 	DoneWhen           string                        `json:"done_when,omitempty" yaml:"done_when,omitempty"`
+	Validation         []string                      `json:"validation,omitempty" yaml:"validation,omitempty"`
 	Scope              string                        `json:"scope,omitempty" yaml:"scope,omitempty"`
 	SpecRef            string                        `json:"spec_ref,omitempty" yaml:"spec_ref,omitempty"`
 	MergeCommit        *string                       `json:"merge_commit,omitempty" yaml:"merge_commit,omitempty"`
@@ -90,6 +91,7 @@ type outputEntrySummaryInfo struct {
 	EpicRef       string                        `json:"epic_ref,omitempty" yaml:"epic_ref,omitempty"`
 	PlanRef       string                        `json:"plan_ref,omitempty" yaml:"plan_ref,omitempty"`
 	ArchRef       string                        `json:"arch_ref,omitempty" yaml:"arch_ref,omitempty"`
+	Validation    []string                      `json:"validation,omitempty" yaml:"validation,omitempty"`
 	DependsOn     []string                      `json:"depends_on,omitempty" yaml:"depends_on,omitempty"`
 	TaskDependsOn []string                      `json:"task_depends_on,omitempty" yaml:"task_depends_on,omitempty"`
 	Decomposition *models.DecompositionManifest `json:"decomposition,omitempty" yaml:"decomposition,omitempty"`
@@ -179,6 +181,7 @@ func buildTaskInfo(task *models.Task, projectRoot string) taskInfo {
 		ReviewCycles:       task.ReviewCyclesCurrent,
 		Worktree:           task.Worktree,
 		DoneWhen:           task.DoneWhen,
+		Validation:         task.Validation,
 		Scope:              task.Scope,
 		SpecRef:            task.SpecRef,
 		MergeCommit:        task.MergeCommit,
@@ -248,6 +251,7 @@ func buildTaskOutputSummaryInfo(task *models.Task) taskOutputSummaryInfo {
 			EpicRef:       entry.EpicRef,
 			PlanRef:       entry.PlanRef,
 			ArchRef:       entry.ArchRef,
+			Validation:    entry.Validation,
 			DependsOn:     entry.DependsOn,
 			TaskDependsOn: entry.TaskDependsOn,
 			Decomposition: entry.Decomposition,
@@ -532,6 +536,9 @@ func formatTaskOutputSummaryValue(task taskOutputSummaryInfo) string {
 		if output.ArchRef != "" {
 			parts = append(parts, fmt.Sprintf("arch_ref=%s", output.ArchRef))
 		}
+		if len(output.Validation) > 0 {
+			parts = append(parts, fmt.Sprintf("validation=%s", strings.Join(output.Validation, "; ")))
+		}
 		if len(output.DependsOn) > 0 {
 			parts = append(parts, fmt.Sprintf("depends_on=%s", strings.Join(output.DependsOn, ",")))
 		}
@@ -688,6 +695,10 @@ func formatTaskValue(task taskInfo) string {
 
 	if task.DoneWhen != "" {
 		lines = append(lines, fmt.Sprintf("Done When: %s", task.DoneWhen))
+	}
+
+	if len(task.Validation) > 0 {
+		lines = append(lines, fmt.Sprintf("Validation: %s", strings.Join(task.Validation, "; ")))
 	}
 
 	if task.Scope != "" {

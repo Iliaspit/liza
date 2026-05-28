@@ -35,4 +35,12 @@ DESCRIPTION: {{.Description}}
 
 DONE WHEN:
 {{.DoneWhen}}
+{{- if .ValidationCommands }}
+
+CANONICAL VALIDATION:
+Use these commands as declared; do not infer local tool paths.
+{{- range .ValidationCommands }}
+- {{.}}
+{{- end }}
+{{- end }}
 {{- end -}}

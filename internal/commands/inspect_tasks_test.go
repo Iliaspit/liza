@@ -394,6 +394,7 @@ func TestInspectTasksOutputSummary(t *testing.T) {
 						PlanRef:       "specs/plans/api.md",
 						ArchRef:       "specs/arch-plan/api.md",
 						Kind:          "code-task",
+						Validation:    []string{"make test ./internal/api"},
 						DependsOn:     []string{"0"},
 						TaskDependsOn: []string{"existing-task"},
 						Decomposition: inspectTasksTestDecomposition(),
@@ -464,6 +465,9 @@ func TestInspectTasksOutputSummary(t *testing.T) {
 	}
 	if got := entry["task_depends_on"].([]any); len(got) != 1 || got[0] != "existing-task" {
 		t.Errorf("task_depends_on = %v, want [existing-task]", got)
+	}
+	if got := entry["validation"].([]any); len(got) != 1 || got[0] != "make test ./internal/api" {
+		t.Errorf("validation = %v, want [make test ./internal/api]", got)
 	}
 	decomposition, ok := entry["decomposition"].(map[string]any)
 	if !ok {
@@ -1082,6 +1086,23 @@ func TestFormatTaskValue_WithDependencies(t *testing.T) {
 			},
 			notExpectContain: []string{
 				"Dependencies: none",
+			},
+		},
+		{
+			name: "task with canonical validation",
+			task: taskInfo{
+				ID:           "task-validation",
+				Description:  "Test task",
+				Status:       "DRAFT_CODE",
+				Priority:     1,
+				DoneWhen:     "Tests pass",
+				Validation:   []string{"make test", "pre-commit run --files docs/USAGE.md"},
+				Age:          "1h ago",
+				TimeInStatus: "1h ago",
+			},
+			expectContains: []string{
+				"ID: task-validation",
+				"Validation: make test; pre-commit run --files docs/USAGE.md",
 			},
 		},
 		{

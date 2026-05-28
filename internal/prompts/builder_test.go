@@ -2027,11 +2027,12 @@ func TestBuildRoleContext_PlanRefAndValidationPlan(t *testing.T) {
 			Role: "coder", AgentID: "coder-1", RoleType: "doer",
 			TaskID: "task-1", Description: "Implement feature X",
 			DoneWhen: "Feature X works", Scope: "internal/feature",
-			Worktree:          projectRoot + "/.worktrees/task-1",
-			IterationNum:      1,
-			IntegrationBranch: "integration",
-			PlanRef:           "specs/plans/20260317-plan.md",
-			ProjectRoot:       projectRoot,
+			Worktree:           projectRoot + "/.worktrees/task-1",
+			IterationNum:       1,
+			IntegrationBranch:  "integration",
+			PlanRef:            "specs/plans/20260317-plan.md",
+			ValidationCommands: []string{"make test", "pre-commit run --files internal/feature/feature.go"},
+			ProjectRoot:        projectRoot,
 		}
 		sections, _ := resolver.ContextSections("coder")
 		output, err := BuildRoleContext("coder", sections, data)
@@ -2044,6 +2045,12 @@ func TestBuildRoleContext_PlanRefAndValidationPlan(t *testing.T) {
 		if !strings.Contains(output, "implementation plan") {
 			t.Error("output missing plan context text")
 		}
+		if !strings.Contains(output, "CANONICAL VALIDATION:") {
+			t.Error("output missing canonical validation section")
+		}
+		if !strings.Contains(output, "- make test") || !strings.Contains(output, "- pre-commit run --files internal/feature/feature.go") {
+			t.Error("output missing canonical validation commands")
+		}
 	})
 
 	t.Run("code-reviewer with PlanRef and ValidationPlan", func(t *testing.T) {
@@ -2054,9 +2061,10 @@ func TestBuildRoleContext_PlanRefAndValidationPlan(t *testing.T) {
 			Worktree:     projectRoot + "/.worktrees/task-1",
 			IterationNum: 1,
 			BaseCommit:   "abc", ReviewCommit: "def", AssignedTo: "coder-1",
-			PlanRef:        "specs/plans/20260317-plan.md",
-			ValidationPlan: "run go test ./... and verify all pass",
-			ProjectRoot:    projectRoot,
+			PlanRef:            "specs/plans/20260317-plan.md",
+			ValidationCommands: []string{"make test"},
+			ValidationPlan:     "run go test ./... and verify all pass",
+			ProjectRoot:        projectRoot,
 		}
 		sections, _ := resolver.ContextSections("code-reviewer")
 		output, err := BuildRoleContext("code-reviewer", sections, data)
@@ -2071,6 +2079,11 @@ func TestBuildRoleContext_PlanRefAndValidationPlan(t *testing.T) {
 		}
 		if !strings.Contains(output, "run go test ./... and verify all pass") {
 			t.Error("output missing validation plan content")
+		}
+		canonicalIdx := strings.Index(output, "CANONICAL VALIDATION:")
+		planIdx := strings.Index(output, "DOER VALIDATION PLAN:")
+		if canonicalIdx == -1 || planIdx == -1 || canonicalIdx > planIdx {
+			t.Fatalf("canonical validation should render before doer validation plan:\n%s", output)
 		}
 	})
 

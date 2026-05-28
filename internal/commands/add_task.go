@@ -17,6 +17,7 @@ type TaskInput struct {
 	Description string   `yaml:"description"`
 	SpecRef     string   `yaml:"spec_ref"`
 	DoneWhen    string   `yaml:"done_when"`
+	Validation  []string `yaml:"validation,omitempty"`
 	Scope       string   `yaml:"scope"`
 	Priority    int      `yaml:"priority"`
 	DependsOn   []string `yaml:"depends_on,omitempty"`
@@ -47,6 +48,7 @@ func AddTaskCommand(statePath, logPath string, input *TaskInput, orchestratorID 
 		Description: input.Description,
 		SpecRef:     input.SpecRef,
 		DoneWhen:    input.DoneWhen,
+		Validation:  input.Validation,
 		Scope:       input.Scope,
 		Priority:    input.Priority,
 		DependsOn:   input.DependsOn,

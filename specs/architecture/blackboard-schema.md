@@ -74,6 +74,8 @@ tasks:
     merge_commit: d4e5f6a7
     spec_ref: specs/retry-logic.md  # Path to spec, optionally with #anchor
     done_when: "UserAPI.get_user() retries 3x on 5xx errors with exponential backoff"
+    validation:
+      - make test
     history:
       - { time: "2025-01-17T14:05:00Z", event: "created" }
       - { time: "2025-01-17T14:06:00Z", event: "claimed", agent: "coder-1" }
@@ -246,6 +248,8 @@ Tasks support inter-pair transitions via `liza proceed` (manual) or orchestrator
       scope: "src/middleware/auth.go"
       spec_ref: specs/auth.md
       plan_ref: specs/plans/auth-master-plan.md
+      validation:
+        - make test
       decomposition:
         owned_files: ["src/middleware/auth.go"]
         owned_modules: ["auth middleware"]
@@ -258,6 +262,8 @@ Tasks support inter-pair transitions via `liza proceed` (manual) or orchestrator
       done_when: "Expired tokens trigger refresh flow"
       scope: "src/auth/refresh.go"
       spec_ref: specs/auth.md#refresh
+      validation:
+        - make test
   parent_task: null                # Deprecated: use parent_tasks. Set on child tasks, references parent task ID
   parent_tasks: []                 # Multi-parent linkage (many-to-one transitions). Back-references from child to parent tasks
   transitions_executed:            # Tracks which transitions have been applied
@@ -286,6 +292,7 @@ Optional:
 - `plan_ref` (`string`): Path to the plan artifact (repo-relative). Set by doer via `set-task-output`. Normalized by `NormalizeSpecRef` (worktree prefixes stripped).
 - `arch_ref` (`string`): Path to the architecture document (repo-relative). Set by architect via `set-task-output`. Normalized by `NormalizeSpecRef` (worktree prefixes stripped). Propagated to child tasks by `proceed.go` during transitions.
 - `epic_ref` (`string`): Path to a concrete epic artifact (repo-relative). Specialized `epic-planning-pair` outputs use this for `us-writing-pair` children; epic master framework refs use `plan_ref`, not `epic_ref`.
+- `validation` (`[]string`): Ordered canonical validation commands for the generated child task. Commands are stored exactly as declared, must be single-line, non-empty, and must not have leading or trailing whitespace. They are task-declared executable guidance, distinct from `repair_request.validation`, which records validation for an orchestrator repair request.
 - `task_depends_on` (`[]string`): Existing concrete task IDs outside this `output[]`. Set by doer via `set-task-output`; copied to generated child tasks as scheduler-facing `depends_on`.
 - `decomposition` (`DecompositionManifest`): Typed decomposition metadata. Required on `output[]` entries produced by `decomposition-root` role-pairs and optional elsewhere.
 
@@ -306,6 +313,8 @@ Optional:
 `read_only_depends_on` and `read_only_task_depends_on` do not schedule work by themselves. They must be mirrored in scheduler-facing `depends_on` and `task_depends_on`; validation rejects decomposition-root output where the read-only metadata and scheduling dependency fields diverge.
 
 Generated child tasks also persist task-level `decomposition` metadata copied from the source `output[]` entry. Task-level metadata is read-only context for the child and does not change dependency scheduling.
+
+Generated child tasks for per-subtask transitions also persist task-level `validation` copied from the source `output[]` entry. Synthesized one-to-one and many-to-one transition children do not inherit parent task validation because those commands belong to the parent phase.
 
 For decomposition-root outputs, `liza set-task-output` requires the configured `decomposition-output-ref` framework ref on every entry:
 
@@ -1071,6 +1080,7 @@ invariants:
   - "Task failed_by list must contain unique agent IDs"
   - "Task parent_task/parent_tasks must reference existing task IDs"
   - "Task output entries must have all required fields (desc, done_when, scope, spec_ref)"
+  - "Task validation and output entry validation commands must be single-line non-empty strings without leading or trailing whitespace"
   - "Artifact reference fields are scalar repo-relative refs with optional #fragment anchors; semicolon-joined multi-refs are rejected"
   - "Artifact refs fail closed when fragment stripping leaves an empty path, the path traverses outside the repository, or an absolute ref cannot be safely normalized to repo-relative"
   - "Protected artifact fields are goal spec_ref; task spec_ref, epic_ref, plan_ref, arch_ref; and output entry spec_ref, epic_ref, plan_ref, arch_ref"

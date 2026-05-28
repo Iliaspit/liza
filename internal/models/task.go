@@ -252,6 +252,7 @@ type Task struct {
 	ArchRef             string                 `yaml:"arch_ref,omitempty"`
 	Kind                string                 `yaml:"kind,omitempty"`
 	DoneWhen            string                 `yaml:"done_when"`
+	Validation          []string               `yaml:"validation,omitempty" json:"validation,omitempty"`
 	Scope               string                 `yaml:"scope"`
 	RejectionReason     *string                `yaml:"rejection_reason,omitempty"`
 	BlockedReason       *string                `yaml:"blocked_reason,omitempty"`
@@ -320,6 +321,7 @@ type OutputEntry struct {
 	PlanRef       string                 `yaml:"plan_ref,omitempty" json:"plan_ref,omitempty"`
 	ArchRef       string                 `yaml:"arch_ref,omitempty" json:"arch_ref,omitempty"`
 	Kind          string                 `yaml:"kind,omitempty" json:"kind,omitempty"`
+	Validation    []string               `yaml:"validation,omitempty" json:"validation,omitempty"`
 	DependsOn     []string               `yaml:"depends_on,omitempty" json:"depends_on,omitempty"`
 	Decomposition *DecompositionManifest `yaml:"decomposition,omitempty" json:"decomposition,omitempty"`
 	// TaskDependsOn names existing concrete task IDs to copy onto generated child tasks.
@@ -342,6 +344,24 @@ func ValidateKind(kind string) error {
 		return nil
 	}
 	return fmt.Errorf("unknown kind %q", kind)
+}
+
+// ValidateValidationCommands rejects malformed task-declared canonical
+// validation commands before they enter state or prompts.
+func ValidateValidationCommands(field string, commands []string) error {
+	for i, command := range commands {
+		trimmed := strings.TrimSpace(command)
+		if trimmed == "" {
+			return fmt.Errorf("%s[%d] must not be empty", field, i)
+		}
+		if command != trimmed {
+			return fmt.Errorf("%s[%d] must not have leading or trailing whitespace", field, i)
+		}
+		if strings.ContainsAny(command, "\r\n") {
+			return fmt.Errorf("%s[%d] must be a single-line command", field, i)
+		}
+	}
+	return nil
 }
 
 // ValidateDependsOn checks that DependsOn indices are valid references within

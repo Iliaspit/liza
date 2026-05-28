@@ -368,7 +368,7 @@ Before agents can run, human must initialize the project:
 
 1. Extract task ID and worktree path from bootstrap prompt
 2. Verify assignment in state.yaml (status IMPLEMENTING, assigned_to matches self)
-3. Read the **full task entry** from blackboard (all fields: description, done_when, scope, iteration, rejection_reason, etc.)
+3. Read the **full task entry** from blackboard (all fields: description, done_when, validation, scope, iteration, rejection_reason, etc.)
 4. Read specs relevant to task (using task's `spec_ref`)
 5. **For iteration 2+:** Read and address prior `rejection_reason` (extracted into prompt by supervisor)
 6. If task under-specified (no clear spec) → BLOCKED with clarifying questions (see [Blocking Protocol](../architecture/roles.md#blocking-protocol))
@@ -381,9 +381,9 @@ Before agents can run, human must initialize the project:
 1. Extract review task ID and worktree path from bootstrap prompt
 2. Verify assignment in state.yaml (status READY_FOR_REVIEW, reviewing_by matches self)
 3. Verify commit SHA matches worktree HEAD
-4. Read the **full task entry** from blackboard (all fields including prior `rejection_reason` for iteration 2+)
+4. Read the **full task entry** from blackboard (all fields including `validation` and prior `rejection_reason` for iteration 2+)
 5. Read specs relevant to task (using task's `spec_ref`)
-6. Examine worktree, validate against spec and `done_when` criteria, run validations, produce verdict
+6. Examine worktree, validate against spec and `done_when` criteria, run task-declared `validation` commands when present, produce verdict
 7. **For iteration 2+:** Compare current submission against prior rejection — report which issues are RESOLVED, STILL PRESENT, or PARTIAL
 8. On approval: execute merge
 
@@ -394,7 +394,7 @@ After all coding tasks for a goal complete, the orchestrator spawns an integrati
 ### Lifecycle
 
 1. **Orchestrator** creates integration-pair task (status: DRAFT_INTEGRATION_ANALYSIS)
-2. **Integration Analyst** claims, scans branch diff, produces fix-task definitions as `output[]`
+2. **Integration Analyst** claims, scans branch diff, produces fix-task definitions as `output[]` with optional canonical `validation` commands
 3. **Integration Reviewer** validates findings via submit/verdict
 4. **Two outcomes after approval:**
    - **Findings exist** (`output[]` non-empty): auto-transition `integration-to-fix` creates one coding-pair child per finding. Fix tasks follow the standard coding lifecycle (coder + code-reviewer).
