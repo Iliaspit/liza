@@ -78,6 +78,7 @@ POST-VERDICT (MANDATORY for REJECTED):
 After submitting a REJECTED verdict, MUST run liza await-resubmission immediately:
    liza await-resubmission {{.TaskID}} --agent-id {{.AgentID}} --json
 Do NOT exit. It blocks ~100s per call, returning POLL with remaining timeout_seconds.
+If the harness backgrounds await-resubmission and says it will notify on completion, end the turn; do NOT call Monitor, search for Monitor, ScheduleWakeup, or read/tail/sleep/poll the output file.
 - RESUBMITTED: re-review the new changes
 - POLL: call await-resubmission again with the timeout_seconds from the response
 - TERMINAL/TIMEOUT/ABORTED: exit normally
@@ -371,6 +372,7 @@ POST-VERDICT (MANDATORY for REJECTED):
 After submitting a REJECTED verdict, MUST run liza await-resubmission immediately:
    liza await-resubmission {{.TaskID}} --agent-id {{.AgentID}} --json
 Do NOT exit. It blocks ~100s per call, returning POLL with remaining timeout_seconds.
+If the harness backgrounds await-resubmission and says it will notify on completion, end the turn; do NOT call Monitor, search for Monitor, ScheduleWakeup, or read/tail/sleep/poll the output file.
 - RESUBMITTED: re-review the new changes
 - POLL: call await-resubmission again with the timeout_seconds from the response
 - TERMINAL/TIMEOUT/ABORTED: exit normally

@@ -16,6 +16,46 @@ import (
 	"github.com/liza-mas/liza/internal/testhelpers"
 )
 
+const awaitResubmissionPassiveGuidance = "If the harness backgrounds await-resubmission and says it will notify on completion, end the turn; do NOT call Monitor, search for Monitor, ScheduleWakeup, or read/tail/sleep/poll the output file."
+
+func assertAwaitResubmissionPassiveGuidance(t *testing.T, output string, wantGuidanceLines int) {
+	t.Helper()
+
+	var guidanceLines []string
+	var monitorLines []string
+	var scheduleWakeupLines []string
+	for _, line := range strings.Split(output, "\n") {
+		if strings.Contains(line, awaitResubmissionPassiveGuidance) {
+			guidanceLines = append(guidanceLines, line)
+		}
+		if strings.Contains(strings.ToLower(line), "monitor") {
+			monitorLines = append(monitorLines, line)
+		}
+		if strings.Contains(line, "ScheduleWakeup") {
+			scheduleWakeupLines = append(scheduleWakeupLines, line)
+		}
+	}
+	if len(guidanceLines) != wantGuidanceLines {
+		t.Fatalf("output contains %d await-resubmission passive guidance lines, want %d: %#v", len(guidanceLines), wantGuidanceLines, guidanceLines)
+	}
+	if len(monitorLines) != wantGuidanceLines {
+		t.Fatalf("output contains %d Monitor guidance lines, want %d negative lines: %#v", len(monitorLines), wantGuidanceLines, monitorLines)
+	}
+	for _, line := range monitorLines {
+		if !strings.Contains(strings.ToLower(line), "do not") {
+			t.Errorf("Monitor guidance line is not negative: %q", line)
+		}
+	}
+	if len(scheduleWakeupLines) != wantGuidanceLines {
+		t.Fatalf("output contains %d ScheduleWakeup guidance lines, want %d negative lines: %#v", len(scheduleWakeupLines), wantGuidanceLines, scheduleWakeupLines)
+	}
+	for _, line := range scheduleWakeupLines {
+		if !strings.Contains(strings.ToLower(line), "do not") {
+			t.Errorf("ScheduleWakeup guidance line is not negative: %q", line)
+		}
+	}
+}
+
 func TestBuildBasePrompt(t *testing.T) {
 	tests := []struct {
 		name           string
@@ -1565,6 +1605,7 @@ func TestBuildRoleContext_AllRoles(t *testing.T) {
 		if strings.Contains(output, "First, run: /usr/bin/test -d") {
 			t.Error("code-reviewer prompt must not require a standalone worktree existence probe")
 		}
+		assertAwaitResubmissionPassiveGuidance(t, output, 2)
 	})
 
 	t.Run("orchestrator", func(t *testing.T) {
@@ -1696,6 +1737,7 @@ func TestBuildRoleContext_AllRoles(t *testing.T) {
 				t.Errorf("output missing key string %q", key)
 			}
 		}
+		assertAwaitResubmissionPassiveGuidance(t, output, 1)
 	})
 
 	t.Run("epic-planner", func(t *testing.T) {
@@ -1778,6 +1820,7 @@ func TestBuildRoleContext_AllRoles(t *testing.T) {
 				t.Errorf("output missing key string %q", key)
 			}
 		}
+		assertAwaitResubmissionPassiveGuidance(t, output, 1)
 	})
 
 	t.Run("us-writer", func(t *testing.T) {
@@ -1877,6 +1920,7 @@ func TestBuildRoleContext_AllRoles(t *testing.T) {
 				t.Errorf("output missing key string %q", key)
 			}
 		}
+		assertAwaitResubmissionPassiveGuidance(t, output, 1)
 	})
 
 	t.Run("architect", func(t *testing.T) {
@@ -1967,6 +2011,7 @@ func TestBuildRoleContext_AllRoles(t *testing.T) {
 				t.Errorf("output missing key string %q", key)
 			}
 		}
+		assertAwaitResubmissionPassiveGuidance(t, output, 1)
 	})
 }
 
@@ -2568,6 +2613,7 @@ func TestBlockReviewInstructions_IntegrationReviewer(t *testing.T) {
 	if !strings.Contains(result, "output[]") {
 		t.Error("expected output[] references")
 	}
+	assertAwaitResubmissionPassiveGuidance(t, result, 1)
 }
 
 func TestReviewInstructions_CodeReviewerSkipsIntegrationDriftWhenBranchMissing(t *testing.T) {
@@ -2711,6 +2757,9 @@ func TestReviewInstructions_OutputReviewersUseFullTaskJSON(t *testing.T) {
 				if strings.Contains(output, unbounded) {
 					t.Fatalf("reviewer prompt should not instruct unbounded full diff %q, got:\n%s", unbounded, output)
 				}
+			}
+			if role == "integration-reviewer" {
+				assertAwaitResubmissionPassiveGuidance(t, output, 1)
 			}
 		})
 	}
