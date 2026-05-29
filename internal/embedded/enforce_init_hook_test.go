@@ -235,6 +235,41 @@ func TestEnforceInitHook_GuardrailsWrapperClearsAfterRequiredDocs(t *testing.T) 
 	}
 }
 
+func TestEnforceInitHook_DoesNotBlockIndexedPairingRepoAfterInit(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not available")
+	}
+
+	hookPath := writeEnforceInitHook(t)
+	projectRoot := t.TempDir()
+	writeIndexedRepoMarkers(t, projectRoot)
+	sessionID := "test-codex-bash-pairing-index-advisory-" + strings.ReplaceAll(t.Name(), "/", "-") + "-" + time.Now().Format("150405.000000000")
+	stateDir := filepath.Join(os.TempDir(), "liza-init-gate-"+sessionID)
+	defer os.RemoveAll(stateDir)
+
+	completePairingInit(t, hookPath, sessionID, projectRoot)
+
+	runHook(t, hookPath, bashPayload(t, sessionID, projectRoot, "git status --short"), 0)
+}
+
+func TestEnforceInitHook_AllowsPairingRepoWithIndexFileButNoLizaIndexHook(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not available")
+	}
+
+	hookPath := writeEnforceInitHook(t)
+	projectRoot := t.TempDir()
+	if err := os.WriteFile(filepath.Join(projectRoot, "stacklit.json"), []byte("{}\n"), 0644); err != nil {
+		t.Fatalf("write stacklit index: %v", err)
+	}
+	sessionID := "test-codex-bash-no-pairing-index-advisory-" + strings.ReplaceAll(t.Name(), "/", "-") + "-" + time.Now().Format("150405.000000000")
+	stateDir := filepath.Join(os.TempDir(), "liza-init-gate-"+sessionID)
+	defer os.RemoveAll(stateDir)
+
+	completePairingInit(t, hookPath, sessionID, projectRoot)
+	runHook(t, hookPath, bashPayload(t, sessionID, projectRoot, "git status --short"), 0)
+}
+
 func TestEnforceInitHook_PairingModeListsCompanionDocsUntilRead(t *testing.T) {
 	if _, err := exec.LookPath("bash"); err != nil {
 		t.Skip("bash not available")
@@ -412,6 +447,32 @@ func writeEnforceInitHook(t *testing.T) string {
 		t.Fatalf("write hook: %v", err)
 	}
 	return hookPath
+}
+
+func completePairingInit(t *testing.T, hookPath, sessionID, projectRoot string) {
+	t.Helper()
+
+	runHook(t, hookPath, bashPayload(t, sessionID, projectRoot, "cat ~/.liza/AGENT_TOOLS.md ~/.liza/PAIRING_MODE.md"), 0)
+	runHook(t, hookPath, bashPayload(t, sessionID, projectRoot, "sed -n '1,260p' "+projectRoot+"/REPOSITORY.md"), 0)
+	runHook(t, hookPath, bashPayload(t, sessionID, projectRoot, "head -n 20 "+projectRoot+"/docs/USAGE.md"), 0)
+	runHook(t, hookPath, bashPayload(t, sessionID, projectRoot, "cat ~/.liza/COLLABORATION_CONTINUITY.md"), 0)
+}
+
+func writeIndexedRepoMarkers(t *testing.T, projectRoot string) {
+	t.Helper()
+
+	hooksDir := filepath.Join(projectRoot, ".git", "hooks")
+	if err := os.MkdirAll(hooksDir, 0755); err != nil {
+		t.Fatalf("create git hooks dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(hooksDir, "post-commit"), []byte("#!/bin/sh\nliza-index\n"), 0755); err != nil {
+		t.Fatalf("write post-commit hook: %v", err)
+	}
+	for _, name := range []string{"stacklit.json", "go.scip", "python.scip"} {
+		if err := os.WriteFile(filepath.Join(projectRoot, name), []byte("index\n"), 0644); err != nil {
+			t.Fatalf("write index %s: %v", name, err)
+		}
+	}
 }
 
 func bashPayload(t *testing.T, sessionID, cwd, command string) string {

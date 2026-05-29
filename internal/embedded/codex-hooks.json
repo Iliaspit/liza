@@ -1,5 +1,17 @@
 {
   "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "command": "root=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0; hook=\"$root/.codex/hooks/index-context.sh\"; [ -x \"$hook\" ] || { echo \"Missing Liza Codex hook: $hook. Run 'liza init --codex' to repair project hooks, or remove .codex/hooks.json to disable them.\" >&2; exit 1; }; bash \"$hook\"",
+            "statusMessage": "Loading Liza repository indexes",
+            "timeout": 5,
+            "type": "command"
+          }
+        ]
+      }
+    ],
     "PreToolUse": [
       {
         "hooks": [

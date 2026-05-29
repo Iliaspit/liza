@@ -1671,6 +1671,7 @@ func TestWriteHooks(t *testing.T) {
 
 	for name, wantContent := range map[string][]byte{
 		"enforce-init.sh":        enforceInitHookContent,
+		"index-context.sh":       indexContextHookContent,
 		"git-guard.sh":           gitGuardHookContent,
 		"rtk-guard.sh":           rtkGuardHookContent,
 		"worktree-path-guard.sh": worktreePathGuardHookContent,
@@ -1705,7 +1706,7 @@ func TestWriteHooks_Overwrites(t *testing.T) {
 	if err := os.MkdirAll(hooksDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"enforce-init.sh", "git-guard.sh", "rtk-guard.sh", "worktree-path-guard.sh"} {
+	for _, name := range []string{"enforce-init.sh", "index-context.sh", "git-guard.sh", "rtk-guard.sh", "worktree-path-guard.sh"} {
 		if err := os.WriteFile(filepath.Join(hooksDir, name), []byte("old"), 0755); err != nil {
 			t.Fatal(err)
 		}
@@ -1716,7 +1717,7 @@ func TestWriteHooks_Overwrites(t *testing.T) {
 		t.Fatalf("WriteHooks failed: %v", err)
 	}
 
-	for _, name := range []string{"enforce-init.sh", "git-guard.sh", "rtk-guard.sh", "worktree-path-guard.sh"} {
+	for _, name := range []string{"enforce-init.sh", "index-context.sh", "git-guard.sh", "rtk-guard.sh", "worktree-path-guard.sh"} {
 		content, err := os.ReadFile(filepath.Join(hooksDir, name))
 		if err != nil {
 			t.Fatal(err)
@@ -1754,6 +1755,8 @@ func TestWriteCodexProjectHooks_NewFile(t *testing.T) {
 	}
 	text := string(hooksContent)
 	for _, want := range []string{
+		`"SessionStart"`,
+		`.codex/hooks/index-context.sh`,
 		`.codex/hooks/enforce-init.sh`,
 		`"matcher": "^Bash$"`,
 	} {
@@ -2046,7 +2049,7 @@ func TestWriteCodexHooks_Overwrites(t *testing.T) {
 	if err := os.MkdirAll(hooksDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"enforce-init.sh", "git-guard.sh", "worktree-path-guard.sh"} {
+	for _, name := range []string{"enforce-init.sh", "index-context.sh", "git-guard.sh", "worktree-path-guard.sh"} {
 		if err := os.WriteFile(filepath.Join(hooksDir, name), []byte("old"), 0755); err != nil {
 			t.Fatal(err)
 		}
@@ -2083,6 +2086,7 @@ func assertHookScripts(t *testing.T, hooksDir string) {
 func hookScriptContents() map[string][]byte {
 	return map[string][]byte{
 		"enforce-init.sh":        enforceInitHookContent,
+		"index-context.sh":       indexContextHookContent,
 		"git-guard.sh":           gitGuardHookContent,
 		"worktree-path-guard.sh": worktreePathGuardHookContent,
 	}
