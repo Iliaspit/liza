@@ -50,8 +50,8 @@ var codexHooksContent []byte
 //go:embed "hooks/enforce-init.sh"
 var enforceInitHookContent []byte
 
-//go:embed "hooks/index-context.sh"
-var indexContextHookContent []byte
+//go:embed "hooks/session-context.sh"
+var sessionContextHookContent []byte
 
 //go:embed "hooks/git-guard.sh"
 var gitGuardHookContent []byte
@@ -1287,7 +1287,7 @@ func WriteHooks(projectRoot string) error {
 
 	for name, content := range map[string][]byte{
 		"enforce-init.sh":        enforceInitHookContent,
-		"index-context.sh":       indexContextHookContent,
+		"session-context.sh":     sessionContextHookContent,
 		"git-guard.sh":           gitGuardHookContent,
 		"rtk-guard.sh":           rtkGuardHookContent,
 		"worktree-path-guard.sh": worktreePathGuardHookContent,
@@ -1311,7 +1311,7 @@ func WriteCodexHooks(projectRoot string) error {
 
 	for name, content := range map[string][]byte{
 		"enforce-init.sh":        enforceInitHookContent,
-		"index-context.sh":       indexContextHookContent,
+		"session-context.sh":     sessionContextHookContent,
 		"git-guard.sh":           gitGuardHookContent,
 		"worktree-path-guard.sh": worktreePathGuardHookContent,
 	} {

@@ -36,7 +36,7 @@ Any non destructive tool by default.
 
 All modes: use source-of-truth tools for verification.
 MAS worktree rule: Do not use workspace-level or IDE/LSP-backed tools in Liza multi-agent worktrees, even if the user has configured them for personal use. Use filesystem-truth tools tied to the current worktree instead: `stacklit` with explicit `-i` paths supplied by Liza, `scip-search` with explicit `--index` paths supplied by Liza, `rg`, `ast-grep`, direct reads, filesystem glob/search, native manifests, `git`, language-native commands, `morph-mcp`, and `apply_patch`.
-Pairing mode: user-personal workspace tools may exist, but they do not replace source-of-truth verification. When the SessionStart index hook emits explicit repo-root Stacklit or SCIP index paths for an indexed Pairing repo, treat those paths as Liza-supplied for that session; they are refreshed after commits and do not reflect uncommitted changes.
+Pairing mode: user-personal workspace tools may exist, but they do not replace source-of-truth verification. When the SessionStart session context hook emits explicit repo-root Stacklit or SCIP index paths for an indexed Pairing repo, treat those paths as Liza-supplied for that session; they are refreshed after commits and do not reflect uncommitted changes.
 
 ## Tool Routing
 
@@ -84,8 +84,8 @@ For all MCP-backed default rows, if the tool is unavailable in the current sessi
 | Multi-file structural analysis | `rg` + direct reads | — | — |
 
 **Additional caveats:**
-- **stacklit**: use only explicit `-i <path>` values supplied in the prompt or Pairing SessionStart index context. Do not infer index locations, regenerate Stacklit indexes, run `stacklit view`, or mutate `stacklit-insights.json` / `.stacklitrc.json` from an agent task. Stacklit is for orientation and impact analysis; verify behavior against source files before editing.
-- **scip-search**: use only explicit `--index <path>` values supplied in the prompt or Pairing SessionStart index context. Do not search for default SCIP indexes or rely on daemon/global/cache behavior.
+- **stacklit**: use only explicit `-i <path>` values supplied in the prompt or Pairing SessionStart session context. Do not infer index locations, regenerate Stacklit indexes, run `stacklit view`, or mutate `stacklit-insights.json` / `.stacklitrc.json` from an agent task. Stacklit is for orientation and impact analysis; verify behavior against source files before editing.
+- **scip-search**: use only explicit `--index <path>` values supplied in the prompt or Pairing SessionStart session context. Do not search for default SCIP indexes or rely on daemon/global/cache behavior.
 - **morph-mcp codebase_search**: semantic discovery — use when you'd have to guess the search string. If Morph is not exposed, load it with your tool-loading mechanism (e.g. `ToolSearch`, `tool_search`) before broad exploratory `rg`. Fallback to `rg` + exact reads when results are insufficient, rate limited, or error.
 
 ### Precedence
