@@ -15,7 +15,9 @@ func TestSupportWritableRoots(t *testing.T) {
 	got := SupportWritableRoots(home, cache)
 	want := []string{
 		filepath.Join(home, ".codex"),
+		filepath.Join(home, ".liza"),
 		filepath.Join(home, ".npm"),
+		filepath.Join(home, ".pyenv", "shims"),
 		cache,
 	}
 
@@ -28,10 +30,8 @@ func TestSupportReadableRoots(t *testing.T) {
 	home := filepath.Join(string(filepath.Separator), "home", "user")
 
 	got := SupportReadableRoots(home)
-	want := []string{filepath.Join(home, ".liza")}
-
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("SupportReadableRoots() = %#v, want %#v", got, want)
+	if got != nil {
+		t.Fatalf("SupportReadableRoots() = %#v, want nil", got)
 	}
 }
 

@@ -34,35 +34,27 @@ Verification: Run `claude` and prompt `hello`.
 ## Codex
 
 `liza init --codex` performs project activation. In `~/.codex/config.toml`, it
-adds Liza's pairing-friendly `workspace` permission baseline, including
-workspace-write mode, writable roots for the active project root, its `.git`
-directory, `/tmp`, and Codex/Liza support/cache roots. In `<project>/.codex/`,
-it enables Codex hooks in `config.toml`, writes `hooks.json`, and deploys hook
-scripts to `hooks/`. If a config file already exists, Liza prompts before
-merging and preserves unrelated settings. It does not install the full baseline
-below.
+adds Liza's Codex baseline, including workspace-write mode, noninteractive
+approval, high reasoning effort, network access, and writable roots for the
+active project root, its `.git` directory, `/tmp`, and Codex/Liza support/cache
+roots. In `<project>/.codex/`, it enables Codex hooks in `config.toml`, writes
+`hooks.json`, and deploys hook scripts to `hooks/`. If a config file already
+exists, Liza prompts before merging and preserves unrelated settings.
 
 The session-init hook allows the mandatory startup documents to be read through
 Codex MCP filesystem read tools, or through simple Bash read commands such as
 `cat`, `sed`, `head`, `tail`, and `wc`. More complex Bash commands remain
 blocked until initialization is complete.
 
-For full Codex setup, edit `~/.codex/config.toml` (replace `<USER>` with your
-username):
+For full Codex setup, use this shape in `~/.codex/config.toml` (replace
+`<USER>` and project paths with local values):
 
 ```toml
-approval_policy = "on-failure"
+model = "gpt-5.5"
+approval_policy = "never"
 sandbox_mode = "workspace-write"
-default_permissions = "workspace"
-
-[permissions.workspace.filesystem]
-":root" = "read"
-":tmpdir" = "write"
-"/tmp" = "write"
-"/home/<USER>/.codex" = "write"
-"/home/<USER>/.liza" = "read"
-"/home/<USER>/.cache" = "write"
-"/home/<USER>/.npm" = "write"
+model_reasoning_effort = "high"
+personality = "pragmatic"
 
 [permissions.workspace.network]
 enabled = true
@@ -73,17 +65,15 @@ exclude_tmpdir_env_var = false
 exclude_slash_tmp = false
 writable_roots = [
   "/home/<USER>/.codex",
-  "/home/<USER>/.cache",
+  "/home/<USER>/.liza",
   "/home/<USER>/.npm",
   "/home/<USER>/.pyenv/shims",
-  # /tmp, project root, and project .git entries are managed by `liza init --codex`.
+  "/home/<USER>/.cache",
+  "/tmp",
+  # `liza init --codex` manages these project entries for the active project.
+  "/path/to/project",
+  "/path/to/project/.git",
 ]
-
-[mcp_servers.filesystem]
-command = "npx"
-args = ["-y", "@modelcontextprotocol/server-filesystem", "/home/<USER>/.claude", "/home/<USER>/.codex", "/home/<USER>/Workspace", "/home/<USER>/.liza"]
-
-# Codex agents access Liza via `liza` CLI commands through Bash — no MCP server needed.
 ```
 
 Liza launches Codex supervisors with `codex exec -` plus `workspace` permission

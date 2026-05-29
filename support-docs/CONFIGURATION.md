@@ -31,16 +31,15 @@ For global settings setup and provider-specific config (Claude, Codex, Gemini), 
 
 **`~/.codex/config.toml`** — global Codex CLI settings.
 
-`liza init --codex` manages the Codex permissions Liza needs for unattended
-supervisor tasks without breaking pairing mode. It adds or corrects the global
-`workspace` permission baseline and adds the active project root plus the active
-project `.git` directory to `sandbox_workspace_write.writable_roots` so
-interactive Codex can edit project files. It also marks Codex/Liza support
-directories and user cache roots readable or writable in
-`permissions.workspace.filesystem`: `~/.liza` is readable for contracts and
-skills, while Codex state, Go cache, and npm cache roots are writable. If the
-file already exists, Liza prompts before merging those entries and preserves
-unrelated settings.
+`liza init --codex` manages the Codex settings Liza needs for unattended
+supervisor tasks and pairing mode. It adds or corrects the global Codex
+baseline (`gpt-5.5`, noninteractive approvals, high reasoning effort,
+workspace-write sandboxing, and network access) and adds the active project root
+plus the active project `.git` directory to
+`sandbox_workspace_write.writable_roots` so Codex can edit project files and
+write Git metadata. It also adds Codex/Liza support directories and user cache
+roots to `writable_roots`. If the file already exists, Liza prompts before
+merging those entries and preserves unrelated settings.
 
 When launching headless MAS agents, Liza passes launch-time `workspace`
 permission overrides and explicit `--add-dir` entries for both the task worktree
@@ -75,10 +74,8 @@ Codex agents through
 version takes precedence over the environment fallback. Interactive
 `liza agent -i` keeps using the installed Codex binary.
 
-This is not the full Codex baseline. Users still own broader settings such as
-interactive `approval_policy` and MCP server configuration. See
-[Contract Activation](../contracts/contract-activation.md#codex) for the
-recommended complete setup.
+See [Contract Activation](../contracts/contract-activation.md#codex) for the
+recommended complete setup shape.
 
 ### Troubleshooting
 

@@ -1,14 +1,14 @@
+model = "gpt-5.5"
+approval_policy = "never"
 sandbox_mode = "workspace-write"
-default_permissions = "workspace"
-
-[permissions.workspace.filesystem]
-":root" = "read"
-":tmpdir" = "write"
-"/tmp" = "write"
-# {{WORKSPACE_SUPPORT_ROOTS}}
+model_reasoning_effort = "high"
+personality = "pragmatic"
 
 [permissions.workspace.network]
 enabled = true
 
 [sandbox_workspace_write]
+network_access = true
+exclude_tmpdir_env_var = false
+exclude_slash_tmp = false
 # {{WRITABLE_ROOTS_BLOCK}}

@@ -612,11 +612,6 @@ func codexSupportWritableRoots() []string {
 	return codexconfig.SupportWritableRoots(homeDir, cacheDir)
 }
 
-func codexSupportReadableRoots() []string {
-	homeDir, _ := os.UserHomeDir()
-	return codexconfig.SupportReadableRoots(homeDir)
-}
-
 func codexProjectWritableRoots(projectRoot string) ([]string, error) {
 	if projectRoot == "" {
 		return nil, fmt.Errorf("project root is required")
@@ -635,7 +630,6 @@ func codexProjectWritableRoots(projectRoot string) ([]string, error) {
 
 func renderCodexProjectConfig(roots []string) string {
 	content := string(codexConfigContent)
-	content = strings.ReplaceAll(content, "# {{WORKSPACE_SUPPORT_ROOTS}}", strings.TrimSuffix(codexconfig.RenderWorkspaceFilesystemSupportAssignments(codexSupportReadableRoots(), codexSupportWritableRoots()), "\n"))
 	content = strings.ReplaceAll(content, "# {{WRITABLE_ROOTS_BLOCK}}", strings.TrimSuffix(renderWritableRootsBlock("", roots), "\n"))
 	return ensureTrailingNewline(content)
 }
@@ -650,34 +644,38 @@ func mergeCodexProjectConfig(content string, roots []string) (string, bool, erro
 }
 
 func mergeCodexWorkspacePermissionBaseline(content string) (string, bool) {
-	assignments := []struct {
+	recommendedDefaults := []struct {
 		section string
 		key     string
 		value   string
 	}{
+		{"", "model", `"gpt-5.5"`},
+		{"", "model_reasoning_effort", `"high"`},
+		{"", "personality", `"pragmatic"`},
+	}
+	requiredAssignments := []struct {
+		section string
+		key     string
+		value   string
+	}{
+		{"", "approval_policy", `"never"`},
 		{"", "sandbox_mode", `"workspace-write"`},
-		{"", "default_permissions", `"workspace"`},
-		{"permissions.workspace.filesystem", `":root"`, `"read"`},
-		{"permissions.workspace.filesystem", `":tmpdir"`, `"write"`},
-		{"permissions.workspace.filesystem", `"/tmp"`, `"write"`},
 		{"permissions.workspace.network", "enabled", "true"},
+		{"sandbox_workspace_write", "network_access", "true"},
+		{"sandbox_workspace_write", "exclude_tmpdir_env_var", "false"},
+		{"sandbox_workspace_write", "exclude_slash_tmp", "false"},
 	}
 
 	updated := content
 	changed := false
-	for _, assignment := range assignments {
+	for _, assignment := range recommendedDefaults {
+		var assignmentChanged bool
+		updated, assignmentChanged = ensureTomlAssignmentIfMissing(updated, assignment.section, assignment.key, assignment.value)
+		changed = changed || assignmentChanged
+	}
+	for _, assignment := range requiredAssignments {
 		var assignmentChanged bool
 		updated, assignmentChanged = ensureTomlAssignment(updated, assignment.section, assignment.key, assignment.value)
-		changed = changed || assignmentChanged
-	}
-	for _, root := range codexSupportWritableRoots() {
-		var assignmentChanged bool
-		updated, assignmentChanged = ensureTomlAssignment(updated, "permissions.workspace.filesystem", strconv.Quote(root), `"write"`)
-		changed = changed || assignmentChanged
-	}
-	for _, root := range codexSupportReadableRoots() {
-		var assignmentChanged bool
-		updated, assignmentChanged = ensureTomlAssignment(updated, "permissions.workspace.filesystem", strconv.Quote(root), `"read"`)
 		changed = changed || assignmentChanged
 	}
 	return updated, changed
@@ -756,6 +754,23 @@ func ensureTomlAssignment(content, section, key, value string) (string, bool) {
 		lines = append(lines[:lineStart+1], lines[lineEnd+1:]...)
 	}
 	return ensureTrailingNewline(strings.Join(lines, "\n")), true
+}
+
+func ensureTomlAssignmentIfMissing(content, section, key, value string) (string, bool) {
+	lines := strings.Split(content, "\n")
+	start, end := tomlAssignmentRange(lines, section)
+	if start == -1 {
+		block := fmt.Sprintf("[%s]\n%s = %s\n", section, key, value)
+		return appendTomlBlock(content, block), true
+	}
+
+	lineStart, _ := findTomlAssignment(lines, start, end, key)
+	if lineStart != -1 {
+		return content, false
+	}
+
+	updated := insertLines(lines, end, []string{key + " = " + value})
+	return ensureTrailingNewline(strings.Join(updated, "\n")), true
 }
 
 func tomlAssignmentRange(lines []string, section string) (int, int) {
@@ -944,16 +959,45 @@ func warnIncompleteCodexBaseline(content string) {
 	if codexBaselineLooksComplete(content) {
 		return
 	}
-	fmt.Fprintln(os.Stderr, "Warning: Codex config is missing optional setup such as cache roots or MCP filesystem config. For the full recommended Codex setup, see contracts/contract-activation.md#codex.")
+	fmt.Fprintln(os.Stderr, "Warning: Codex config is missing part of the recommended Liza baseline. For the full recommended Codex setup, see contracts/contract-activation.md#codex.")
 }
 
 func codexBaselineLooksComplete(content string) bool {
+	requiredAssignments := []struct {
+		section string
+		key     string
+		value   string
+	}{
+		{"", "approval_policy", `"never"`},
+		{"", "sandbox_mode", `"workspace-write"`},
+		{"permissions.workspace.network", "enabled", "true"},
+		{"sandbox_workspace_write", "network_access", "true"},
+		{"sandbox_workspace_write", "exclude_tmpdir_env_var", "false"},
+		{"sandbox_workspace_write", "exclude_slash_tmp", "false"},
+	}
+	recommendedKeys := []struct {
+		section string
+		key     string
+	}{
+		{"", "model"},
+		{"", "model_reasoning_effort"},
+		{"", "personality"},
+	}
 	requiredSnippets := []string{
-		"approval_policy",
-		"sandbox_mode",
-		"network_access",
+		".codex",
+		".liza",
 		".npm",
-		"mcp_servers.filesystem",
+		".pyenv",
+	}
+	for _, assignment := range requiredAssignments {
+		if !tomlAssignmentMatches(content, assignment.section, assignment.key, assignment.value) {
+			return false
+		}
+	}
+	for _, recommendedKey := range recommendedKeys {
+		if !tomlAssignmentExists(content, recommendedKey.section, recommendedKey.key) {
+			return false
+		}
 	}
 	for _, snippet := range requiredSnippets {
 		if !strings.Contains(content, snippet) {
@@ -961,6 +1005,30 @@ func codexBaselineLooksComplete(content string) bool {
 		}
 	}
 	return true
+}
+
+func tomlAssignmentExists(content, section, key string) bool {
+	lines := strings.Split(content, "\n")
+	start, end := tomlAssignmentRange(lines, section)
+	if start == -1 {
+		return false
+	}
+	lineStart, _ := findTomlAssignment(lines, start, end, key)
+	return lineStart != -1
+}
+
+func tomlAssignmentMatches(content, section, key, value string) bool {
+	lines := strings.Split(content, "\n")
+	start, end := tomlAssignmentRange(lines, section)
+	if start == -1 {
+		return false
+	}
+	lineStart, lineEnd := findTomlAssignment(lines, start, end, key)
+	if lineStart == -1 || lineEnd > lineStart {
+		return false
+	}
+	current := strings.TrimSpace(stripTomlLineComment(strings.Join(lines[lineStart:lineEnd+1], "\n")))
+	return current == key+" = "+value
 }
 
 // CleanStaleMCPEntry removes the "liza" key from the "mcpServers" object in

@@ -15,7 +15,9 @@ func SupportWritableRoots(homeDir, cacheDir string) []string {
 	if homeDir != "" {
 		roots = append(roots,
 			filepath.Join(homeDir, ".codex"),
+			filepath.Join(homeDir, ".liza"),
 			filepath.Join(homeDir, ".npm"),
+			filepath.Join(homeDir, ".pyenv", "shims"),
 		)
 		if cacheDir == "" && runtime.GOOS != "windows" {
 			cacheDir = filepath.Join(homeDir, ".cache")
@@ -28,12 +30,11 @@ func SupportWritableRoots(homeDir, cacheDir string) []string {
 }
 
 // SupportReadableRoots returns host-level roots Codex agents need to inspect
-// without being allowed to mutate them.
+// without being allowed to mutate them. The current baseline treats Liza support
+// files as writable through sandbox_workspace_write, so there are no global
+// read-only support roots.
 func SupportReadableRoots(homeDir string) []string {
-	if homeDir == "" {
-		return nil
-	}
-	return []string{filepath.Join(homeDir, ".liza")}
+	return nil
 }
 
 // WorkspaceFilesystemInlineTable renders the Codex permissions.workspace

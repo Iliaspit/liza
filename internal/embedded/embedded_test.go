@@ -10,8 +10,6 @@ import (
 	"runtime"
 	"strings"
 	"testing"
-
-	"github.com/liza-mas/liza/internal/codexconfig"
 )
 
 func TestListEmbeddedFiles(t *testing.T) {
@@ -1244,29 +1242,36 @@ func TestWriteCodexProjectPermissions_NewFile(t *testing.T) {
 	if !strings.Contains(text, "[sandbox_workspace_write]") {
 		t.Errorf("config missing sandbox_workspace_write section:\n%s", text)
 	}
-	if strings.Contains(text, "approval_policy") {
-		t.Errorf("new config should leave interactive approval policy to the user:\n%s", text)
+	if !strings.Contains(text, `approval_policy = "never"`) {
+		t.Errorf("new config should set noninteractive approval policy:\n%s", text)
 	}
 }
 
 func expectedCodexPermissionSnippets() []string {
-	snippets := []string{
+	return []string{
+		`model = "gpt-5.5"`,
+		`approval_policy = "never"`,
 		`sandbox_mode = "workspace-write"`,
-		`default_permissions = "workspace"`,
-		`[permissions.workspace.filesystem]`,
-		`":root" = "read"`,
-		`":tmpdir" = "write"`,
-		`"/tmp" = "write"`,
+		`model_reasoning_effort = "high"`,
+		`personality = "pragmatic"`,
 		`[permissions.workspace.network]`,
 		`enabled = true`,
+		`network_access = true`,
+		`exclude_tmpdir_env_var = false`,
+		`exclude_slash_tmp = false`,
 	}
-	for _, root := range codexSupportWritableRoots() {
-		snippets = append(snippets, tomlStringValue(root)+` = "write"`)
+}
+
+func expectedCodexRequiredSnippets() []string {
+	return []string{
+		`approval_policy = "never"`,
+		`sandbox_mode = "workspace-write"`,
+		`[permissions.workspace.network]`,
+		`enabled = true`,
+		`network_access = true`,
+		`exclude_tmpdir_env_var = false`,
+		`exclude_slash_tmp = false`,
 	}
-	for _, root := range codexSupportReadableRoots() {
-		snippets = append(snippets, tomlStringValue(root)+` = "read"`)
-	}
-	return snippets
 }
 
 func expectedCodexWritableRootSnippets(projectRoot string) []string {
@@ -1290,23 +1295,22 @@ func TestRenderCodexProjectConfig_RendersWritableRootsExactly(t *testing.T) {
 	fakeHome := setCodexHomeForTest(t)
 	projectRoot := "/tmp/project"
 	gitDir := filepath.Join(projectRoot, ".git")
-	readRoots := codexSupportReadableRoots()
 	writeRoots := codexSupportWritableRoots()
 
 	got := renderCodexProjectConfig(append([]string{projectRoot, gitDir}, append(writeRoots, "/tmp")...))
-	want := `sandbox_mode = "workspace-write"
-default_permissions = "workspace"
-
-[permissions.workspace.filesystem]
-":root" = "read"
-":tmpdir" = "write"
-"/tmp" = "write"
-` + strings.TrimSuffix(codexconfig.RenderWorkspaceFilesystemSupportAssignments(readRoots, writeRoots), "\n") + `
+	want := `model = "gpt-5.5"
+approval_policy = "never"
+sandbox_mode = "workspace-write"
+model_reasoning_effort = "high"
+personality = "pragmatic"
 
 [permissions.workspace.network]
 enabled = true
 
 [sandbox_workspace_write]
+network_access = true
+exclude_tmpdir_env_var = false
+exclude_slash_tmp = false
 writable_roots = [
   "/tmp/project",
   "/tmp/project/.git",
@@ -1317,10 +1321,10 @@ writable_roots = [
 		t.Fatalf("rendered config mismatch\nwant:\n%s\ngot:\n%s", want, got)
 	}
 	if strings.Contains(got, tomlStringValue(filepath.Join(fakeHome, ".liza"))+` = "write"`) {
-		t.Fatalf("rendered config should not make ~/.liza writable:\n%s", got)
+		t.Fatalf("rendered config should only grant ~/.liza through writable_roots, not permissions.workspace.filesystem:\n%s", got)
 	}
-	if !strings.Contains(got, tomlStringValue(filepath.Join(fakeHome, ".liza"))+` = "read"`) {
-		t.Fatalf("rendered config should make ~/.liza readable:\n%s", got)
+	if !strings.Contains(got, tomlStringValue(filepath.Join(fakeHome, ".liza"))+",") {
+		t.Fatalf("rendered config should include ~/.liza in writable_roots:\n%s", got)
 	}
 }
 
@@ -1328,23 +1332,22 @@ func TestRenderCodexProjectConfig_RemovesTmpPlaceholderWhenAbsent(t *testing.T) 
 	setCodexHomeForTest(t)
 	projectRoot := "/tmp/project"
 	gitDir := filepath.Join(projectRoot, ".git")
-	readRoots := codexSupportReadableRoots()
 	writeRoots := codexSupportWritableRoots()
 
 	got := renderCodexProjectConfig(append([]string{projectRoot, gitDir}, writeRoots...))
-	want := `sandbox_mode = "workspace-write"
-default_permissions = "workspace"
-
-[permissions.workspace.filesystem]
-":root" = "read"
-":tmpdir" = "write"
-"/tmp" = "write"
-` + strings.TrimSuffix(codexconfig.RenderWorkspaceFilesystemSupportAssignments(readRoots, writeRoots), "\n") + `
+	want := `model = "gpt-5.5"
+approval_policy = "never"
+sandbox_mode = "workspace-write"
+model_reasoning_effort = "high"
+personality = "pragmatic"
 
 [permissions.workspace.network]
 enabled = true
 
 [sandbox_workspace_write]
+network_access = true
+exclude_tmpdir_env_var = false
+exclude_slash_tmp = false
 writable_roots = [
   "/tmp/project",
   "/tmp/project/.git",
@@ -1419,11 +1422,15 @@ writable_roots = [
 		t.Fatalf("failed to read codex config: %v", err)
 	}
 	text := string(content)
-	for _, want := range expectedCodexConfigSnippets(projectRoot,
+	snippets := append(expectedCodexRequiredSnippets(),
 		`model = "gpt-5"`,
+		`model_reasoning_effort = "high"`,
+		`personality = "pragmatic"`,
 		"# keep this comment",
 		`"/home/test/.npm"`,
-	) {
+	)
+	snippets = append(snippets, expectedCodexWritableRootSnippets(projectRoot)...)
+	for _, want := range snippets {
 		if !strings.Contains(text, want) {
 			t.Errorf("merged config missing %q:\n%s", want, text)
 		}
@@ -1438,7 +1445,7 @@ func TestWriteCodexProjectPermissions_MergeDeclined(t *testing.T) {
 	if err := os.MkdirAll(codexDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	original := "model = \"gpt-5\"\n"
+	original := "unrelated = true\n"
 	if err := os.WriteFile(configPath, []byte(original), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -1465,7 +1472,7 @@ func TestWriteCodexProjectPermissions_AppendsMissingSection(t *testing.T) {
 	if err := os.MkdirAll(codexDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	original := "model = \"gpt-5\"\n"
+	original := "unrelated = true\n"
 	if err := os.WriteFile(configPath, []byte(original), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -1494,7 +1501,7 @@ func TestWriteCodexProjectPermissions_AppendsMissingSection(t *testing.T) {
 	}
 }
 
-func TestWriteCodexProjectPermissions_ReplacesInsufficientPermissionWithoutDuplicate(t *testing.T) {
+func TestWriteCodexProjectPermissions_ReplacesManagedBaselineWithoutDuplicate(t *testing.T) {
 	fakeHome := t.TempDir()
 	t.Setenv("HOME", fakeHome)
 	codexDir := filepath.Join(fakeHome, ".codex")
@@ -1502,12 +1509,20 @@ func TestWriteCodexProjectPermissions_ReplacesInsufficientPermissionWithoutDupli
 	if err := os.MkdirAll(codexDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	original := `sandbox_mode = "read-only"
-default_permissions = "read-only"
-model = "gpt-5"
+	original := `model = "gpt-5"
+approval_policy = "on-failure"
+sandbox_mode = "read-only"
+model_reasoning_effort = "minimal"
+personality = "friendly"
+unrelated = true
 
 [permissions.workspace.network]
 enabled = false
+
+[sandbox_workspace_write]
+network_access = false
+exclude_tmpdir_env_var = true
+exclude_slash_tmp = true
 `
 	if err := os.WriteFile(configPath, []byte(original), 0644); err != nil {
 		t.Fatal(err)
@@ -1527,9 +1542,6 @@ enabled = false
 		t.Fatalf("failed to read codex config: %v", err)
 	}
 	text := string(content)
-	if count := strings.Count(text, "default_permissions"); count != 1 {
-		t.Fatalf("default_permissions count = %d, want 1:\n%s", count, text)
-	}
 	if count := strings.Count(text, "sandbox_mode"); count != 1 {
 		t.Fatalf("sandbox_mode count = %d, want 1:\n%s", count, text)
 	}
@@ -1537,16 +1549,72 @@ enabled = false
 		t.Fatalf("network enabled count = %d, want 1:\n%s", count, text)
 	}
 	for _, want := range []string{
+		`model = "gpt-5"`,
+		`approval_policy = "never"`,
 		`sandbox_mode = "workspace-write"`,
-		`default_permissions = "workspace"`,
+		`model_reasoning_effort = "minimal"`,
+		`personality = "friendly"`,
+		`unrelated = true`,
 		`enabled = true`,
+		`network_access = true`,
+		`exclude_tmpdir_env_var = false`,
+		`exclude_slash_tmp = false`,
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("config missing corrected value %q:\n%s", want, text)
 		}
 	}
-	if !strings.Contains(text, `model = "gpt-5"`) {
-		t.Fatalf("existing setting not preserved:\n%s", text)
+}
+
+func TestCodexBaselineLooksComplete_AllowsUserPreferenceValues(t *testing.T) {
+	content := `model = "gpt-5"
+approval_policy = "never"
+sandbox_mode = "workspace-write"
+model_reasoning_effort = "minimal"
+personality = "friendly"
+
+[permissions.workspace.network]
+enabled = true
+
+[sandbox_workspace_write]
+network_access = true
+exclude_tmpdir_env_var = false
+exclude_slash_tmp = false
+writable_roots = [
+  "/home/test/.codex",
+  "/home/test/.liza",
+  "/home/test/.npm",
+  "/home/test/.pyenv/shims",
+]
+`
+	if !codexBaselineLooksComplete(content) {
+		t.Fatalf("baseline completeness should allow user preference values:\n%s", content)
+	}
+}
+
+func TestCodexBaselineLooksComplete_RequiresOperationalValues(t *testing.T) {
+	content := `model = "gpt-5"
+approval_policy = "on-failure"
+sandbox_mode = "workspace-write"
+model_reasoning_effort = "minimal"
+personality = "friendly"
+
+[permissions.workspace.network]
+enabled = true
+
+[sandbox_workspace_write]
+network_access = true
+exclude_tmpdir_env_var = false
+exclude_slash_tmp = false
+writable_roots = [
+  "/home/test/.codex",
+  "/home/test/.liza",
+  "/home/test/.npm",
+  "/home/test/.pyenv/shims",
+]
+`
+	if codexBaselineLooksComplete(content) {
+		t.Fatalf("baseline completeness should reject insufficient operational values:\n%s", content)
 	}
 }
 

@@ -356,9 +356,3 @@ Stop and ask the user if:
 - The current diff scope is ambiguous: staged, unstaged, or full pending state.
 - The blackboard path appears to point outside the intended repository or worktree.
 - A write would overwrite another agent's state or comments.
-
-# Troubleshooting
-
-Recent codex versions have broken sandboxes. Codex agents facing sandbox permission failures executing `blackboard_write.py` should halt
-and tell the user this is an open issue on codex: https://github.com/liza-mas/liza/issues/75 and to restart a new session
-with `npm exec --yes --package @openai/codex@0.125.0 -- codex --enable use_legacy_landlock --sandbox workspace-write`.

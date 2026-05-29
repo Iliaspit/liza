@@ -1239,9 +1239,10 @@ func TestCodexWorkspacePermissionOverridesIncludesSupportRoots(t *testing.T) {
 	filesystemOverride := findCodexOverride(t, overrides, "permissions.workspace.filesystem=")
 	for _, want := range []string{
 		strconv.Quote(filepath.Join(fakeHome, ".codex")) + `="write"`,
+		strconv.Quote(filepath.Join(fakeHome, ".liza")) + `="write"`,
 		strconv.Quote(filepath.Join(fakeHome, ".npm")) + `="write"`,
+		strconv.Quote(filepath.Join(fakeHome, ".pyenv", "shims")) + `="write"`,
 		strconv.Quote(cacheDir) + `="write"`,
-		strconv.Quote(filepath.Join(fakeHome, ".liza")) + `="read"`,
 		strconv.Quote(projectRoot) + `="write"`,
 		strconv.Quote(filepath.Join(projectRoot, ".git")) + `="write"`,
 		strconv.Quote(filepath.Join(projectRoot, ".codex")) + `="read"`,
@@ -1250,9 +1251,6 @@ func TestCodexWorkspacePermissionOverridesIncludesSupportRoots(t *testing.T) {
 		if !strings.Contains(filesystemOverride, want) {
 			t.Fatalf("override missing %q:\n%s", want, filesystemOverride)
 		}
-	}
-	if strings.Contains(filesystemOverride, strconv.Quote(filepath.Join(fakeHome, ".liza"))+`="write"`) {
-		t.Fatalf("override should not make ~/.liza writable:\n%s", filesystemOverride)
 	}
 	if !containsInOrder(overrides, `default_permissions="workspace"`, filesystemOverride) {
 		t.Fatalf("overrides should select workspace profile before defining filesystem permissions: %v", overrides)
