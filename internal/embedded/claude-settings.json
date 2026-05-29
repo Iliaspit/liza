@@ -80,8 +80,10 @@
       "Read(~/.claude/**)",
       "Read(~/.liza/**)",
       "Write(/tmp/**)",
+      "Monitor(*)",
 
       "Skill(adr-backfill)",
+      "Skill(adversarial-pairing)",
       "Skill(architecture-planning)",
       "Skill(black-box-red-testing)",
       "Skill(checkpoint-summary)",
