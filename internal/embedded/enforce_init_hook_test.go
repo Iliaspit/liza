@@ -277,6 +277,15 @@ func TestEnforceInitHook_PairingModeListsCompanionDocsUntilRead(t *testing.T) {
 
 	hookPath := writeEnforceInitHook(t)
 	projectRoot := t.TempDir()
+	if err := os.WriteFile(filepath.Join(projectRoot, "REPOSITORY.md"), []byte("# repo\n"), 0644); err != nil {
+		t.Fatalf("write repository doc: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(projectRoot, "docs"), 0755); err != nil {
+		t.Fatalf("create docs dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(projectRoot, "docs", "USAGE.md"), []byte("# usage\n"), 0644); err != nil {
+		t.Fatalf("write usage doc: %v", err)
+	}
 	sessionID := "test-codex-bash-pairing-missing-companions-" + strings.ReplaceAll(t.Name(), "/", "-") + "-" + time.Now().Format("150405.000000000")
 	stateDir := filepath.Join(os.TempDir(), "liza-init-gate-"+sessionID)
 	defer os.RemoveAll(stateDir)
@@ -292,6 +301,34 @@ func TestEnforceInitHook_PairingModeListsCompanionDocsUntilRead(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(stateDir, "CLEARED")); !os.IsNotExist(err) {
 		t.Fatalf("pairing mode should remain blocked until companion docs are read, stat err: %v", err)
+	}
+}
+
+func TestEnforceInitHook_PairingModeOmitsAbsentProjectCompanionDocs(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not available")
+	}
+
+	hookPath := writeEnforceInitHook(t)
+	projectRoot := t.TempDir()
+	sessionID := "test-codex-bash-pairing-absent-project-companions-" + strings.ReplaceAll(t.Name(), "/", "-") + "-" + time.Now().Format("150405.000000000")
+	stateDir := filepath.Join(os.TempDir(), "liza-init-gate-"+sessionID)
+	defer os.RemoveAll(stateDir)
+
+	runHook(t, hookPath, bashPayload(t, sessionID, projectRoot, "cat ~/.liza/AGENT_TOOLS.md ~/.liza/PAIRING_MODE.md"), 0)
+
+	output := runHook(t, hookPath, bashPayload(t, sessionID, projectRoot, "git diff --cached"), 2)
+	if strings.Contains(output, "REPOSITORY.md (repo root)") ||
+		strings.Contains(output, "docs/USAGE.md (from repo root)") {
+		t.Fatalf("missing-doc message should omit absent Pairing project companion docs, got:\n%s", output)
+	}
+	if !strings.Contains(output, "~/.liza/COLLABORATION_CONTINUITY.md") {
+		t.Fatalf("missing-doc message should still require collaboration continuity, got:\n%s", output)
+	}
+
+	runHook(t, hookPath, bashPayload(t, sessionID, projectRoot, "cat ~/.liza/COLLABORATION_CONTINUITY.md"), 0)
+	if _, err := os.Stat(filepath.Join(stateDir, "CLEARED")); err != nil {
+		t.Fatalf("pairing mode should clear when absent project companion docs are the only unread docs: %v", err)
 	}
 }
 

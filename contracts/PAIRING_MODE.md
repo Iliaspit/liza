@@ -225,15 +225,9 @@ The human need not justify invocation. The phrase itself is sufficient authority
 ## Session Initialization
 
 **Before responding to ANY message in a new session:**
-1. Read initialization files:
-   - `REPOSITORY.md` (repo root)
-   - `docs/USAGE.md` (from repo root)
-   - `GUARDRAILS.md` (from repo root, if it exists — project-specific operational instructions)
-   - `~/.liza/AGENT_TOOLS.md`
-   - `~/.liza/COLLABORATION_CONTINUITY.md`
-2. Build the 6 mental models. This should be done before ANY substantive response, including greetings.
+1. Build the 6 mental models. This should be done before ANY substantive response, including greetings.
    - For Collaboration Model: extract patterns from the letter into working memory. The letter then becomes reference, not active context.
-3. Greet the user
+2. Greet the user
    - State the project purpose.
    - State project-specific Stop Conditions and Red Flags
    - if the user message is a greeting without a task, share:

@@ -7,7 +7,7 @@
 #   - AGENT_TOOLS.md
 #   - GUARDRAILS.md (or verified absent)
 #   - One mode contract from the Mode Selection Gate
-#   - Pairing only: REPOSITORY.md, docs/USAGE.md, ~/.liza/COLLABORATION_CONTINUITY.md
+#   - Pairing only: existing REPOSITORY.md/docs/USAGE.md, ~/.liza/COLLABORATION_CONTINUITY.md
 #
 # No external dependencies (no jq, no sed -i). Portable across Linux and macOS.
 
@@ -91,11 +91,23 @@ if [[ -f "$STATE_DIR/CLEARED" ]]; then
   exit 0
 fi
 
-# Initialize: auto-clear GUARDRAILS.md if absent from project root.
-if [[ ! -f "$STATE_DIR/GUARDRAILS.done" ]] && \
-   [[ ! -f "$project_dir/GUARDRAILS.md" ]]; then
-  touch "$STATE_DIR/GUARDRAILS.done"
-fi
+mark_absent_project_docs_if_needed() {
+  if [[ ! -f "$STATE_DIR/GUARDRAILS.done" ]] && \
+     [[ ! -f "$project_dir/GUARDRAILS.md" ]]; then
+    touch "$STATE_DIR/GUARDRAILS.done"
+  fi
+  if [[ ! -f "$STATE_DIR/REPOSITORY.done" ]] && \
+     [[ ! -f "$project_dir/REPOSITORY.md" ]]; then
+    touch "$STATE_DIR/REPOSITORY.done"
+  fi
+  if [[ ! -f "$STATE_DIR/USAGE.done" ]] && \
+     [[ ! -f "$project_dir/docs/USAGE.md" ]]; then
+    touch "$STATE_DIR/USAGE.done"
+  fi
+}
+
+# Initialize: auto-clear optional project docs if absent from project root.
+mark_absent_project_docs_if_needed
 
 # Read-only discovery tools: allow before gate clears.
 if [[ "$tool_name" == "ToolSearch" || "$tool_name" == "Glob" ]]; then
@@ -134,6 +146,8 @@ requires_pairing_companion_docs() {
 }
 
 clear_if_ready() {
+  mark_absent_project_docs_if_needed
+
   if [[ ! -f "$STATE_DIR/AGENT_TOOLS.done" ]] || \
      [[ ! -f "$STATE_DIR/MODE.done" ]] || \
      [[ ! -f "$STATE_DIR/GUARDRAILS.done" ]]; then
@@ -147,13 +161,6 @@ clear_if_ready() {
   fi
 
   touch "$STATE_DIR/CLEARED"
-}
-
-mark_guardrails_absent_if_needed() {
-  if [[ ! -f "$STATE_DIR/GUARDRAILS.done" ]] && \
-     [[ ! -f "$project_dir/GUARDRAILS.md" ]]; then
-    touch "$STATE_DIR/GUARDRAILS.done"
-  fi
 }
 
 is_required_doc_path() {
@@ -405,16 +412,16 @@ fi
 
 # Non-Read tool call: block if gate not cleared.
 # Stderr is shown to the agent as the block reason (exit 2 protocol).
-mark_guardrails_absent_if_needed
+mark_absent_project_docs_if_needed
 missing=""
 [[ ! -f "$STATE_DIR/AGENT_TOOLS.done" ]] && missing="$missing
   - ~/.liza/AGENT_TOOLS.md"
 [[ ! -f "$STATE_DIR/MODE.done" ]] && missing="$missing
   - The applicable mode contract from the Mode Selection Gate"
 if requires_pairing_companion_docs; then
-  [[ ! -f "$STATE_DIR/REPOSITORY.done" ]] && missing="$missing
+  [[ -f "$project_dir/REPOSITORY.md" ]] && [[ ! -f "$STATE_DIR/REPOSITORY.done" ]] && missing="$missing
   - REPOSITORY.md (repo root)"
-  [[ ! -f "$STATE_DIR/USAGE.done" ]] && missing="$missing
+  [[ -f "$project_dir/docs/USAGE.md" ]] && [[ ! -f "$STATE_DIR/USAGE.done" ]] && missing="$missing
   - docs/USAGE.md (from repo root)"
   [[ ! -f "$STATE_DIR/COLLABORATION_CONTINUITY.done" ]] && missing="$missing
   - ~/.liza/COLLABORATION_CONTINUITY.md"
