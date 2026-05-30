@@ -74,7 +74,7 @@ func TestSessionContextHook_EmitsSessionStartContextForIndexedRepo(t *testing.T)
 	}
 }
 
-func TestSessionContextHook_IncludesBoundedStacklitSummaryWhenAvailable(t *testing.T) {
+func TestSessionContextHook_InstructsAgentsToRunStacklitSummaryWhenAvailable(t *testing.T) {
 	if _, err := exec.LookPath("bash"); err != nil {
 		t.Skip("bash not available")
 	}
@@ -86,27 +86,21 @@ func TestSessionContextHook_IncludesBoundedStacklitSummaryWhenAvailable(t *testi
 	projectRoot := t.TempDir()
 	writePairingProjectDocs(t, projectRoot)
 	writeIndexedRepoMarkers(t, projectRoot)
-	binDir := t.TempDir()
-	stacklitPath := filepath.Join(binDir, "stacklit")
-	longOutput := strings.Repeat("summary ", 600)
-	if err := os.WriteFile(stacklitPath, []byte("#!/bin/sh\nprintf '%s' '"+longOutput+"'\n"), 0755); err != nil {
-		t.Fatalf("write fake stacklit: %v", err)
-	}
 
 	cmd := exec.Command("bash", hookPath)
 	cmd.Stdin = strings.NewReader(sessionStartPayload(t, projectRoot))
-	cmd.Env = append(os.Environ(), "PATH="+binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	cmd.Env = os.Environ()
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("hook exited non-zero: %v\n%s", err, output)
 	}
 	context := sessionStartAdditionalContext(t, string(output))
-	if !strings.Contains(context, "Stacklit summary:") ||
-		!strings.Contains(context, "summary summary") {
-		t.Fatalf("startup context should include stacklit summary, got:\n%s", context)
+	want := "Run `stacklit derive --ai-summary -i '" + filepath.Join(projectRoot, "stacklit.json") + "'` at the end of the session initialization."
+	if !strings.Contains(context, want) {
+		t.Fatalf("startup context should instruct agent to run stacklit summary, missing %q in:\n%s", want, context)
 	}
-	if strings.Count(context, "summary ") > 450 {
-		t.Fatalf("stacklit summary should be bounded, got %d repetitions", strings.Count(context, "summary "))
+	if strings.Contains(context, "Stacklit summary:") {
+		t.Fatalf("startup context should not inline stacklit summary, got:\n%s", context)
 	}
 }
 
