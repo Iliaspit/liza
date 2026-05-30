@@ -10,6 +10,7 @@ The goal is catching issues the author couldn't see — and occasionally sharing
 
 Before reviewing, establish context:
 - **Scope:** Default to staged files (`git diff --cached --name-only`, then `git diff --cached --stat`, then targeted path diffs). For PRs or commits, inspect changed files and stats before reading targeted hunks. Only broaden if explicitly asked.
+- **Local working tree:** For local reviews, triage unstaged and untracked files before review. If related but not staged, surface this explicitly and include only if the review target is "pending changes"; if unrelated, ignore; if unclear, ask before including.
 - **Intent:** Check ticket/description (PRs) or ask the author (pending). If unclear, clarify before reviewing.
 - **Timing:** Is now the right time for this functionality? Half-baked or premature additions warrant a `[question]`.
 - **Approach:** For complex changes, was the approach discussed before implementation? Catch architectural misalignment early — complete rewrites are painful.
@@ -177,6 +178,45 @@ Suggestion: Use parameterized query: cursor.execute("SELECT ... WHERE user = %s"
 **Comment without blocking when:**
 - Only suggestions/nits remain
 - Concerns acknowledged with reasonable deferral plan
+
+# Re-Review Protocol
+
+Iterative reviews converge by narrowing scope. A re-review after fixes is not a fresh review.
+
+**Re-review scope:**
+
+For round 2 after fixes, review only:
+- whether prior `[blocker]` / `[concern]` findings were fixed at root cause
+- whether the fix introduced new P0-P2 issues
+- tests/docs directly added to prove or document the fix
+
+Do not broaden into unrelated code, re-derive the whole diff, or escalate methodology to match a prior reviewer. Review mode cannot exceed the original review mode unless the fix itself introduced new complexity or risk.
+
+**Convergence rule:**
+
+- **Round 1:** Full review according to selected mode.
+- **Round 2:** Focused verification of prior findings. New findings are allowed only if they are P0-P2 and introduced by the fix.
+- **Round 3+:** Only allowed with an explicit question, such as "is X fixed?", "does Y still apply?", or "did this test prove the failure mode?" Open-ended re-review is not permitted.
+
+Stop when:
+- no `[blocker]` remains
+- `[concern]` items are fixed, accepted as tech debt, or explicitly deferred with rationale
+- validation evidence exercises the changed behavior
+- no new P0-P2 issue was introduced by the fix
+
+At that point, approve or comment. Remaining `[suggestion]`, `[nit]`, and low-risk `[question]` items do not justify another broad pass.
+
+**Blast-radius proportionality:**
+
+Review depth scales with blast radius, not with prior review depth.
+
+- **Low blast radius:** dev tooling, internal scripts, config, docs. At most one Standard review plus one focused verification pass.
+- **Medium blast radius:** production behavior without schema/auth/public API impact. Standard review plus focused re-reviews until blockers close.
+- **High blast radius:** auth, security, data integrity, migrations, public API, production runtime. Deep review is allowed; re-review still narrows to fixes unless the design changed.
+
+**Anti-pattern:**
+
+**Methodological arms race:** matching or exceeding a prior review's rigor to appear credible rather than because the change warrants it. This creates non-converging review loops. Prefer a smaller, evidence-focused re-review over a broader, more impressive one.
 
 # Failure Mode Sweep
 
