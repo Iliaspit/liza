@@ -96,7 +96,9 @@ Agent IDs should be stable and human-readable. If absent, register yourself by a
 Worktree rules:
 
 - Before entering `CODING`, after all prior gates are satisfied, the doer must create or select a dedicated git worktree and set `worktree` to its absolute path.
-- If `worktree` is null before `CODING`, ask the user for the worktree path or approval to create one.
+- If `worktree` is null before `CODING`, derive the default path as `<repo-root>/.worktrees/<blackboard-stem>`, where `<repo-root>` comes from `git rev-parse --show-toplevel` and `<blackboard-stem>` is the basename of `blackboard-path` with one trailing `.md` removed.
+- Before creating the default worktree, ask the user for approval using the derived absolute path. If the user provides a different path, use their path instead.
+- Reject or stop and ask if the derived stem is empty, contains unsafe path characters, resolves outside `<repo-root>/.worktrees/`, or collides with an existing path that is not the intended worktree.
 - Do not implement in the main checkout unless the user explicitly approves a no-worktree workflow.
 - Once `worktree` is set, run all implementation, staging, validation, and review diff commands from that path.
 - Reviewers must run code review diff commands from `worktree`.
@@ -252,7 +254,7 @@ After a user-approved commit is complete, the doer MUST propose the next integra
 
 # Reviewer Protocol
 
-Reviewer verdict submission appends review notes to the Markdown body and updates the reviewer frontmatter fields in one logical write.
+Reviewer verdict submission appends review notes to the bottom of the relevant Markdown body section and updates the reviewer frontmatter fields in one logical write. Do not insert new review notes directly under the section heading or before older entries; review sections stay chronological oldest-to-newest.
 
 Do not ask for additional human approval before reviewer-owned claim transitions, review-note appends, or reviewer verdict/status updates authorized by this protocol.
 
@@ -341,7 +343,7 @@ agents:
 
 Include `Root Cause Analysis` and `Red Tests` only when `work_type: debugging` or the corresponding gates are enabled. For non-debugging work, omit empty debugging-only sections.
 
-Append; do not rewrite history except to fix obvious formatting before reviewers have acted on it.
+Append new entries to the bottom of the relevant section; do not insert newest entries directly under a section heading or before older entries. Do not rewrite history except to fix obvious formatting before reviewers have acted on it.
 
 # Stop Conditions
 
