@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
-	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -1076,10 +1075,9 @@ func TestCodexCommandContextRejectsWhitespaceVersion(t *testing.T) {
 }
 
 func TestResolveCodexLaunchConfig(t *testing.T) {
-	t.Run("state config wins for version and can enable legacy landlock", func(t *testing.T) {
+	t.Run("state config wins for version", func(t *testing.T) {
 		got := resolveCodexLaunchConfig(models.Config{
 			CodexPackageVersion: "0.125.0",
-			CodexLegacyLandlock: true,
 		}, []string{
 			envLizaCodexVersion + "=0.132.0",
 		})
@@ -1087,59 +1085,37 @@ func TestResolveCodexLaunchConfig(t *testing.T) {
 		if got.PackageVersion != "0.125.0" {
 			t.Fatalf("PackageVersion = %q, want state value", got.PackageVersion)
 		}
-		if !got.LegacyLandlock {
-			t.Fatalf("LegacyLandlock = false, want true")
-		}
 	})
 
 	t.Run("environment supplies process-local fallback", func(t *testing.T) {
 		got := resolveCodexLaunchConfig(models.Config{}, []string{
 			envLizaCodexVersion + "=0.125.0",
-			envLizaCodexLegacyLandlock + "=1",
 		})
 
 		if got.PackageVersion != "0.125.0" {
 			t.Fatalf("PackageVersion = %q, want env value", got.PackageVersion)
 		}
-		if !got.LegacyLandlock {
-			t.Fatalf("LegacyLandlock = false, want true")
-		}
 	})
-}
-
-func TestCodexLegacyLandlockEnabled(t *testing.T) {
-	for _, value := range []string{"1", "true", "TRUE", "yes", "on"} {
-		if !codexLegacyLandlockEnabled([]string{envLizaCodexLegacyLandlock + "=" + value}) {
-			t.Fatalf("codexLegacyLandlockEnabled(%q) = false, want true", value)
-		}
-	}
-	for _, value := range []string{"", "0", "false", "no", "off", "maybe"} {
-		if codexLegacyLandlockEnabled([]string{envLizaCodexLegacyLandlock + "=" + value}) {
-			t.Fatalf("codexLegacyLandlockEnabled(%q) = true, want false", value)
-		}
-	}
 }
 
 func TestBuildCodexArgs(t *testing.T) {
 	t.Run("stdin without logging disables approval prompts", func(t *testing.T) {
-		projectRoot := "/tmp/project"
 		additionalDirs := []string{"/tmp", "/tmp/project/.worktrees/task-1"}
-		args := buildCodexArgs(projectRoot, "ignored", true, "", additionalDirs, false)
+		args := buildCodexArgs("ignored", true, "", additionalDirs)
 
 		if slices.Contains(args, "--full-auto") {
 			t.Fatalf("args = %v, did not expect --full-auto flag", args)
 		}
+		if !containsAdjacent(args, "-c", `sandbox_mode="workspace-write"`) {
+			t.Fatalf("args = %v, want workspace-write sandbox override", args)
+		}
 		if !containsAdjacent(args, "-c", `approval_policy="never"`) {
 			t.Fatalf("args = %v, want noninteractive approval policy", args)
-		}
-		for _, override := range codexWorkspacePermissionOverrides(projectRoot, additionalDirs) {
-			if !containsAdjacent(args, "-c", override) {
-				t.Fatalf("args = %v, missing Codex config override %q", args, override)
-			}
 		}
 		if slices.Contains(args, "--dangerously-bypass-approvals-and-sandbox") {
 			t.Fatalf("args = %v, did not expect bypass flag", args)
 		}
+		assertNoObsoleteCodexOverrides(t, args)
 		if !slices.Contains(args, "exec") || !slices.Contains(args, "-") {
 			t.Fatalf("args = %v, want stdin exec invocation", args)
 		}
@@ -1156,8 +1132,7 @@ func TestBuildCodexArgs(t *testing.T) {
 	})
 
 	t.Run("prompt with logging emits json", func(t *testing.T) {
-		projectRoot := "/tmp/project"
-		args := buildCodexArgs(projectRoot, "do the thing", false, "/tmp/logs", nil, false)
+		args := buildCodexArgs("do the thing", false, "/tmp/logs", nil)
 
 		if !slices.Contains(args, "do the thing") {
 			t.Fatalf("args = %v, want prompt argument", args)
@@ -1168,14 +1143,13 @@ func TestBuildCodexArgs(t *testing.T) {
 		if slices.Contains(args, "--full-auto") {
 			t.Fatalf("args = %v, did not expect --full-auto flag", args)
 		}
+		if !containsAdjacent(args, "-c", `sandbox_mode="workspace-write"`) {
+			t.Fatalf("args = %v, want workspace-write sandbox override", args)
+		}
 		if !containsAdjacent(args, "-c", `approval_policy="never"`) {
 			t.Fatalf("args = %v, want noninteractive approval policy", args)
 		}
-		for _, override := range codexWorkspacePermissionOverrides(projectRoot, nil) {
-			if !containsAdjacent(args, "-c", override) {
-				t.Fatalf("args = %v, missing Codex config override %q", args, override)
-			}
-		}
+		assertNoObsoleteCodexOverrides(t, args)
 		for _, a := range args {
 			if strings.Contains(a, "mcp_servers") {
 				t.Fatalf("args = %v, did not expect mcp_servers config", args)
@@ -1183,89 +1157,20 @@ func TestBuildCodexArgs(t *testing.T) {
 		}
 	})
 
-	t.Run("non-legacy includes workspace permission profile", func(t *testing.T) {
-		args := buildCodexArgs("/tmp/project", "ignored", true, "", nil, false)
+	t.Run("uses only baseline config overrides", func(t *testing.T) {
+		args := buildCodexArgs("ignored", true, "", nil)
 
 		if !containsAdjacent(args, "-c", `sandbox_mode="workspace-write"`) {
 			t.Fatalf("args = %v, want workspace-write sandbox override", args)
 		}
-		if !containsAdjacent(args, "-c", `default_permissions="workspace"`) {
-			t.Fatalf("args = %v, want workspace permission profile", args)
-		}
-		if !containsPrefix(args, "permissions.workspace.filesystem=") {
-			t.Fatalf("args = %v, want workspace filesystem permissions override", args)
-		}
-	})
-
-	t.Run("legacy landlock uses tested workspace-write path without permission profile overrides", func(t *testing.T) {
-		projectRoot := "/tmp/project"
-		additionalDirs := []string{"/tmp/project/.git", "/tmp/project/.worktrees/task-1"}
-		args := buildCodexArgs(projectRoot, "ignored", true, "", additionalDirs, true)
-
-		if !containsAdjacent(args, "--enable", "use_legacy_landlock") {
-			t.Fatalf("args = %v, want legacy landlock feature flag", args)
-		}
-		if !containsAdjacent(args, "--sandbox", "workspace-write") {
-			t.Fatalf("args = %v, want workspace-write sandbox flag", args)
-		}
 		if !containsAdjacent(args, "-c", `approval_policy="never"`) {
 			t.Fatalf("args = %v, want noninteractive approval policy", args)
 		}
-		for _, arg := range args {
-			if strings.Contains(arg, "permissions.workspace") || strings.Contains(arg, "default_permissions") || strings.Contains(arg, "sandbox_mode") {
-				t.Fatalf("legacy landlock args should not include permission profile overrides: %v", args)
-			}
-		}
-		assertCodexAddDir(t, args, "/tmp/project/.git")
-		assertCodexAddDir(t, args, "/tmp/project/.worktrees/task-1")
+		assertNoObsoleteCodexOverrides(t, args)
 		if args[len(args)-1] != "-" {
 			t.Fatalf("args = %v, want stdin prompt marker last", args)
 		}
 	})
-}
-
-func TestCodexWorkspacePermissionOverridesIncludesSupportRoots(t *testing.T) {
-	fakeHome := t.TempDir()
-	t.Setenv("HOME", fakeHome)
-	t.Setenv("XDG_CACHE_HOME", filepath.Join(fakeHome, ".cache"))
-	cacheDir, err := os.UserCacheDir()
-	if err != nil {
-		t.Fatalf("UserCacheDir() error: %v", err)
-	}
-	projectRoot := "/tmp/project"
-	additionalDirs := []string{"/tmp/project/.worktrees/task-1"}
-
-	overrides := codexWorkspacePermissionOverrides(projectRoot, additionalDirs)
-	filesystemOverride := findCodexOverride(t, overrides, "permissions.workspace.filesystem=")
-	for _, want := range []string{
-		strconv.Quote(filepath.Join(fakeHome, ".codex")) + `="write"`,
-		strconv.Quote(filepath.Join(fakeHome, ".liza")) + `="write"`,
-		strconv.Quote(filepath.Join(fakeHome, ".npm")) + `="write"`,
-		strconv.Quote(filepath.Join(fakeHome, ".pyenv", "shims")) + `="write"`,
-		strconv.Quote(cacheDir) + `="write"`,
-		strconv.Quote(projectRoot) + `="write"`,
-		strconv.Quote(filepath.Join(projectRoot, ".git")) + `="write"`,
-		strconv.Quote(filepath.Join(projectRoot, ".codex")) + `="read"`,
-		strconv.Quote(additionalDirs[0]) + `="write"`,
-	} {
-		if !strings.Contains(filesystemOverride, want) {
-			t.Fatalf("override missing %q:\n%s", want, filesystemOverride)
-		}
-	}
-	if !containsInOrder(overrides, `default_permissions="workspace"`, filesystemOverride) {
-		t.Fatalf("overrides should select workspace profile before defining filesystem permissions: %v", overrides)
-	}
-}
-
-func findCodexOverride(t *testing.T, overrides []string, prefix string) string {
-	t.Helper()
-	for _, override := range overrides {
-		if strings.HasPrefix(override, prefix) {
-			return override
-		}
-	}
-	t.Fatalf("missing Codex override prefix %q in %v", prefix, overrides)
-	return ""
 }
 
 func containsAdjacent(values []string, first, second string) bool {
@@ -1277,49 +1182,30 @@ func containsAdjacent(values []string, first, second string) bool {
 	return false
 }
 
-func containsInOrder(values []string, first, second string) bool {
-	foundFirst := false
-	for _, value := range values {
-		if value == first {
-			foundFirst = true
-			continue
-		}
-		if foundFirst && value == second {
-			return true
-		}
-	}
-	return false
-}
-
-func containsPrefix(values []string, prefix string) bool {
-	for _, value := range values {
-		if strings.HasPrefix(value, prefix) {
-			return true
+func assertNoObsoleteCodexOverrides(t *testing.T, args []string) {
+	t.Helper()
+	for _, forbidden := range []string{
+		`default_permissions="workspace"`,
+		"permissions.workspace.filesystem=",
+		"permissions.workspace.network.enabled=true",
+		"use_legacy_landlock",
+	} {
+		for _, arg := range args {
+			if strings.Contains(arg, forbidden) {
+				t.Fatalf("args = %v, did not expect obsolete Codex override %q", args, forbidden)
+			}
 		}
 	}
-	return false
 }
 
 func TestCodexInteractiveArgs(t *testing.T) {
-	args := codexInteractiveArgs([]string{"/tmp", "", "/tmp/project/.worktrees/task-1"}, false)
+	args := codexInteractiveArgs([]string{"/tmp", "", "/tmp/project/.worktrees/task-1"})
 
 	assertCodexAddDir(t, args, "/tmp")
 	assertCodexAddDir(t, args, "/tmp/project/.worktrees/task-1")
 	if slices.Contains(args, "") {
 		t.Fatalf("args = %v, did not expect empty argument", args)
 	}
-}
-
-func TestCodexInteractiveArgsLegacyLandlock(t *testing.T) {
-	args := codexInteractiveArgs([]string{"/tmp/project/.git"}, true)
-
-	if !containsAdjacent(args, "--enable", "use_legacy_landlock") {
-		t.Fatalf("args = %v, want legacy landlock feature flag", args)
-	}
-	if !containsAdjacent(args, "--sandbox", "workspace-write") {
-		t.Fatalf("args = %v, want workspace-write sandbox flag", args)
-	}
-	assertCodexAddDir(t, args, "/tmp/project/.git")
 }
 
 func TestCodexAdditionalDirs(t *testing.T) {

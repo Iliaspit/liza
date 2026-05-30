@@ -41,38 +41,35 @@ write Git metadata. It also adds Codex/Liza support directories and user cache
 roots to `writable_roots`. If the file already exists, Liza prompts before
 merging those entries and preserves unrelated settings.
 
-When launching headless MAS agents, Liza passes launch-time `workspace`
-permission overrides and explicit `--add-dir` entries for both the task worktree
-and the project `.git` directory. This is required because Git worktrees write
-the task index under the main repo metadata path
-(`.git/worktrees/<task>/index.lock`), not under the worktree directory itself.
+When launching headless MAS agents, Liza passes launch-time
+`sandbox_mode="workspace-write"` and `approval_policy="never"` overrides plus
+explicit `--add-dir` entries for both the task worktree and the project `.git`
+directory. This is required because Git worktrees write the task index under the
+main repo metadata path (`.git/worktrees/<task>/index.lock`), not under the
+worktree directory itself. Liza does not inject Codex `default_permissions` or
+`permissions.workspace.*` overrides; writable roots come from the normal Codex
+configuration plus `--add-dir`.
 
-Codex versions 0.126.0-alpha.17 through 0.132.0 keep linked-worktree metadata
-read-only under `workspace-write`. Until upstream fixes this, pin MAS Codex
-agents to the last tested working compatibility path with these durable project
-config keys:
+Pin MAS Codex agents to a specific package version with this durable project
+config key:
 
 ```yaml
 config:
   codex_package_version: "0.125.0"
-  codex_legacy_landlock: true
 ```
 
-For a temporary process-local fallback when those config fields are unset, set
-these before running `liza agent`:
+For a temporary process-local fallback when that config field is unset, set this
+before running `liza agent`:
 
 ```bash
 export LIZA_CODEX_VERSION=0.125.0
-export LIZA_CODEX_LEGACY_LANDLOCK=1
 ```
 
 `codex_package_version` or `LIZA_CODEX_VERSION` makes Liza launch headless
 Codex agents through
 `npm exec --yes --package @openai/codex@<version> -- codex`.
-`codex_legacy_landlock: true` or `LIZA_CODEX_LEGACY_LANDLOCK=1` adds
-`--enable use_legacy_landlock --sandbox workspace-write`. The state config
-version takes precedence over the environment fallback. Interactive
-`liza agent -i` keeps using the installed Codex binary.
+The state config version takes precedence over the environment fallback.
+Interactive `liza agent -i` keeps using the installed Codex binary.
 
 See [Contract Activation](../contracts/contract-activation.md#codex) for the
 recommended complete setup shape.
@@ -84,14 +81,10 @@ recommended complete setup shape.
 - Check: `ls -la .liza/state.yaml`
 
 **Codex `.git` read-only in linked worktrees:**
-- Use `config.codex_package_version: "0.125.0"` with
-  `config.codex_legacy_landlock: true` for MAS agents that must stage or commit
-  from linked worktrees.
-- If you need a temporary process-local test before changing durable project
-  config, use
-  `LIZA_CODEX_VERSION=0.125.0` with `LIZA_CODEX_LEGACY_LANDLOCK=1`.
-- Treat this as a temporary local workaround. `use_legacy_landlock` is a
-  deprecated Codex compatibility feature.
+- Verify `~/.codex/config.toml` includes the project root and project `.git`
+  directory in `sandbox_workspace_write.writable_roots`.
+- If the failure is version-specific, pin MAS agents with
+  `config.codex_package_version` or temporary `LIZA_CODEX_VERSION`.
 
 ## Configuration Matrix
 
@@ -114,7 +107,6 @@ All configuration lives in `.liza/state.yaml` under the `config` section.
 | `default_doer_cli` | (none) | — | — | CLI name | Default coding agent CLI for doers and orchestrators |
 | `default_reviewer_cli` | (none) | — | — | CLI name | Default coding agent CLI for reviewers |
 | `codex_package_version` | (none) | — | — | npm package version | Pins headless Codex agents to `@openai/codex@<version>` |
-| `codex_legacy_landlock` | false | — | — | boolean | Adds Codex `use_legacy_landlock` and `workspace-write` flags for headless MAS agents |
 | `post_worktree_cmd` | (none) | — | — | shell cmd | Command run after worktree creation (e.g. `npm install`) |
 | `auto_checkpoint_summary` | true | — | — | boolean | Auto-runs checkpoint-summary after successful merges and writes `.liza/checkpoint-summary.md` |
 | `scip_search` | (none) | — | — | language list | Durable allowlist of SCIP languages Liza may index when `LIZA_ENABLE_SCIP_SEARCH` is truthy |
@@ -447,7 +439,6 @@ project configuration belongs in `.liza/state.yaml`.
 | `LIZA_ENABLE_SCIP_SEARCH` | No | unset | Strict opt-in MAS activation gate for SCIP indexing and `scip-search` prompt guidance. Truthy values are `1` and `true`; unset, empty, `0`, and `false` disable it. Values are trimmed and parsed case-insensitively. |
 | `LIZA_ENABLE_STACKLIT` | No | unset | Strict opt-in MAS activation gate for Stacklit `stacklit.json` refresh and prompt guidance. Truthy values are `1` and `true`; unset, empty, `0`, and `false` disable it. Values are trimmed and parsed case-insensitively. |
 | `LIZA_CODEX_VERSION` | No | unset | Process-local fallback for `config.codex_package_version` when launching headless Codex agents |
-| `LIZA_CODEX_LEGACY_LANDLOCK` | No | unset | Process-local fallback enabling legacy Landlock for headless Codex agents when `config.codex_legacy_landlock` is false |
 | `LIZA_SPECS` | No | `specs/` | Path to specs directory (relative to project root) |
 | `LIZA_LOG_LEVEL` | No | `INFO` | Logging verbosity: DEBUG, INFO, WARN, ERROR |
 

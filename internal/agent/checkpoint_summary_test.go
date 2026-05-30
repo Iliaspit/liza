@@ -125,7 +125,7 @@ func TestCheckpointSummaryCLIArgs_Supported(t *testing.T) {
 	}
 
 	for _, c := range cases {
-		args, useStdin, err := checkpointSummaryCLIArgs(c.cli, "/tmp/project", "prompt", models.Config{}, nil)
+		args, useStdin, err := checkpointSummaryCLIArgs(c.cli, "prompt", nil)
 		if err != nil {
 			t.Errorf("%s: unexpected error: %v", c.cli, err)
 			continue
@@ -149,7 +149,7 @@ func TestCheckpointSummaryCLIArgs_Supported(t *testing.T) {
 }
 
 func TestCheckpointSummaryCLIArgs_Unsupported(t *testing.T) {
-	if _, _, err := checkpointSummaryCLIArgs("not-a-cli", "/tmp/project", "x", models.Config{}, nil); err == nil {
+	if _, _, err := checkpointSummaryCLIArgs("not-a-cli", "x", nil); err == nil {
 		t.Fatal("expected error for unsupported CLI")
 	}
 }

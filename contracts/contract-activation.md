@@ -76,39 +76,36 @@ writable_roots = [
 ]
 ```
 
-Liza launches Codex supervisors with `codex exec -` plus `workspace` permission
-overrides, `approval_policy="never"`, and explicit `--add-dir` entries for the
-task worktree and project `.git` directory. Git linked worktrees write their
-index lock under the main repo metadata path
-(`.git/worktrees/<task>/index.lock`), not under the worktree directory itself.
+Liza launches Codex supervisors with `codex exec -`, launch-time
+`sandbox_mode="workspace-write"` and `approval_policy="never"` overrides, and
+explicit `--add-dir` entries for the task worktree and project `.git`
+directory. Git linked worktrees write their index lock under the main repo
+metadata path (`.git/worktrees/<task>/index.lock`), not under the worktree
+directory itself. Liza does not inject Codex `default_permissions` or
+`permissions.workspace.*` overrides; writable roots come from the normal Codex
+configuration plus `--add-dir`.
 
-Codex versions 0.126.0-alpha.17 through 0.132.0 keep that linked-worktree
-metadata read-only under `workspace-write`. Until upstream fixes this, MAS
-supervisors can be pinned to the last tested working Codex path with these
-durable project config keys:
+MAS supervisors can be pinned to a specific Codex package version with this
+durable project config key:
 
 ```yaml
 config:
   codex_package_version: "0.125.0"
-  codex_legacy_landlock: true
 ```
 
-For a temporary process-local fallback when those config fields are unset, set
-these before running `liza agent`:
+For a temporary process-local fallback when that config field is unset, set this
+before running `liza agent`:
 
 ```bash
 export LIZA_CODEX_VERSION=0.125.0
-export LIZA_CODEX_LEGACY_LANDLOCK=1
 ```
 
 With `codex_package_version` or `LIZA_CODEX_VERSION` set, Liza launches
 headless Codex agents through
-`npm exec --yes --package @openai/codex@<version> -- codex`. With
-`codex_legacy_landlock: true` or `LIZA_CODEX_LEGACY_LANDLOCK=1`, Liza also
-passes `--enable use_legacy_landlock --sandbox workspace-write`. The state
-config version takes precedence over the environment fallback. This
-compatibility path is for headless MAS agents only; interactive `liza agent -i`
-keeps using the installed Codex binary and normal pairing configuration.
+`npm exec --yes --package @openai/codex@<version> -- codex`. The state config
+version takes precedence over the environment fallback. This package pinning
+path is for headless MAS agents only; interactive `liza agent -i` keeps using
+the installed Codex binary and normal pairing configuration.
 
 After editing `~/.codex/config.toml`, restart Codex completely before testing.
 

@@ -13,7 +13,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/liza-mas/liza/internal/codexconfig"
 	"github.com/liza-mas/liza/internal/db"
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/ops"
@@ -438,14 +437,10 @@ func cliSupportsStdin(cliName string) bool {
 	return cliName != "vibe"
 }
 
-const (
-	envLizaCodexVersion        = "LIZA_CODEX_VERSION"
-	envLizaCodexLegacyLandlock = "LIZA_CODEX_LEGACY_LANDLOCK"
-)
+const envLizaCodexVersion = "LIZA_CODEX_VERSION"
 
 type codexLaunchConfig struct {
 	PackageVersion string
-	LegacyLandlock bool
 }
 
 func resolveCodexLaunchConfig(config models.Config, env []string) codexLaunchConfig {
@@ -455,19 +450,14 @@ func resolveCodexLaunchConfig(config models.Config, env []string) codexLaunchCon
 	}
 	return codexLaunchConfig{
 		PackageVersion: version,
-		LegacyLandlock: config.CodexLegacyLandlock || codexLegacyLandlockEnabled(env),
 	}
 }
 
-func buildCodexArgs(projectRoot, prompt string, useStdin bool, outputsDir string, additionalDirs []string, legacyLandlock bool) []string {
-	args := []string{"exec"}
-	if legacyLandlock {
-		args = append(args, "--enable", "use_legacy_landlock", "--sandbox", "workspace-write")
-		args = append(args, "-c", `approval_policy="never"`)
-	} else {
-		for _, override := range codexWorkspacePermissionOverrides(projectRoot, additionalDirs) {
-			args = append(args, "-c", override)
-		}
+func buildCodexArgs(prompt string, useStdin bool, outputsDir string, additionalDirs []string) []string {
+	args := []string{
+		"exec",
+		"-c", `sandbox_mode="workspace-write"`,
+		"-c", `approval_policy="never"`,
 	}
 	for _, dir := range additionalDirs {
 		if dir == "" {
@@ -486,44 +476,8 @@ func buildCodexArgs(projectRoot, prompt string, useStdin bool, outputsDir string
 	return args
 }
 
-func codexWorkspacePermissionOverrides(projectRoot string, additionalDirs []string) []string {
-	readRoots := codexSessionReadableRoots(projectRoot)
-	writeRoots := codexSessionWritableRoots(projectRoot, additionalDirs)
-	return []string{
-		`sandbox_mode="workspace-write"`,
-		`approval_policy="never"`,
-		`default_permissions="workspace"`,
-		// Codex accepts one TOML assignment per -c override. Keep the nested
-		// filesystem profile as one inline table so the quoted pseudo-root keys
-		// stay grouped under permissions.workspace.filesystem.
-		`permissions.workspace.filesystem=` + codexconfig.WorkspaceFilesystemInlineTable(readRoots, writeRoots),
-		`permissions.workspace.network.enabled=true`,
-	}
-}
-
-func codexSessionReadableRoots(projectRoot string) []string {
-	roots := codexSupportReadableRoots()
-	if projectRoot != "" {
-		roots = append(roots, filepath.Join(projectRoot, ".codex"))
-	}
-	return codexconfig.UniqueNonEmptyStrings(roots)
-}
-
-func codexSessionWritableRoots(projectRoot string, additionalDirs []string) []string {
-	var roots []string
-	if projectRoot != "" {
-		roots = append(roots, projectRoot, filepath.Join(projectRoot, ".git"))
-	}
-	roots = append(roots, additionalDirs...)
-	roots = append(roots, codexSupportWritableRoots()...)
-	return codexconfig.UniqueNonEmptyStrings(roots)
-}
-
-func codexInteractiveArgs(additionalDirs []string, legacyLandlock bool) []string {
+func codexInteractiveArgs(additionalDirs []string) []string {
 	var args []string
-	if legacyLandlock {
-		args = append(args, "--enable", "use_legacy_landlock", "--sandbox", "workspace-write")
-	}
 	for _, dir := range additionalDirs {
 		if dir == "" {
 			continue
@@ -531,17 +485,6 @@ func codexInteractiveArgs(additionalDirs []string, legacyLandlock bool) []string
 		args = append(args, "--add-dir", dir)
 	}
 	return args
-}
-
-func codexSupportWritableRoots() []string {
-	homeDir, _ := os.UserHomeDir()
-	cacheDir, _ := os.UserCacheDir()
-	return codexconfig.SupportWritableRoots(homeDir, cacheDir)
-}
-
-func codexSupportReadableRoots() []string {
-	homeDir, _ := os.UserHomeDir()
-	return codexconfig.SupportReadableRoots(homeDir)
 }
 
 func codexAdditionalDirs(projectRoot string, state *models.State, taskID string) []string {
@@ -569,19 +512,6 @@ func uniqueNonEmptyStrings(values []string) []string {
 		unique = append(unique, value)
 	}
 	return unique
-}
-
-func codexLegacyLandlockEnabled(env []string) bool {
-	return truthyEnvValue(envValue(env, envLizaCodexLegacyLandlock))
-}
-
-func truthyEnvValue(value string) bool {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "1", "true", "yes", "on":
-		return true
-	default:
-		return false
-	}
 }
 
 func codexCommandContext(ctx context.Context, version string, args []string) (*exec.Cmd, error) {
@@ -660,7 +590,7 @@ func (d *DefaultCLIExecutor) Execute(ctx context.Context, cliName string, agentI
 		cmd = exec.CommandContext(ctx, "claude", args...)
 	case "codex":
 		codexConfig := resolveCodexLaunchConfig(runtimeConfig, cmdEnv)
-		args := buildCodexArgs(projectRoot, prompt, useStdin, d.outputsDir, additionalDirs, codexConfig.LegacyLandlock)
+		args := buildCodexArgs(prompt, useStdin, d.outputsDir, additionalDirs)
 		var err error
 		cmd, err = codexCommandContext(ctx, codexConfig.PackageVersion, args)
 		if err != nil {
@@ -808,7 +738,7 @@ func (d *DefaultCLIExecutor) ExecuteInteractive(ctx context.Context, cliName str
 	case "codex":
 		// Interactive Codex is pairing mode: use the installed binary and do not
 		// apply headless MAS compatibility pinning or legacy Landlock flags.
-		args := codexInteractiveArgs(additionalDirs, false)
+		args := codexInteractiveArgs(additionalDirs)
 		var err error
 		cmd, err = codexCommandContext(ctx, "", args)
 		if err != nil {

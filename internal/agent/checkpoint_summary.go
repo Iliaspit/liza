@@ -168,7 +168,7 @@ func checkpointSummaryCLICommand(
 		actualCLI = "vibe"
 	}
 
-	args, useStdin, err := checkpointSummaryCLIArgs(actualCLI, projectRoot, prompt, cfg, env)
+	args, useStdin, err := checkpointSummaryCLIArgs(actualCLI, prompt, env)
 	if err != nil {
 		return nil, false, err
 	}
@@ -189,14 +189,13 @@ func checkpointSummaryCLICommand(
 // checkpointSummaryCLIArgs returns the argv tail and whether stdin should be
 // piped for each supported CLI. It mirrors the normal supervisor's per-CLI
 // argv builders so checkpoint summaries honor the same launch semantics.
-func checkpointSummaryCLIArgs(cliName, projectRoot, prompt string, cfg models.Config, env []string) ([]string, bool, error) {
+func checkpointSummaryCLIArgs(cliName, prompt string, env []string) ([]string, bool, error) {
 	switch cliName {
 	case "claude":
 		disableSubagents := envValue(env, "LIZA_DISABLE_CLAUDE_SUBAGENTS") == "1"
 		return buildClaudeArgs(prompt, true, "", disableSubagents), true, nil
 	case "codex":
-		codexConfig := resolveCodexLaunchConfig(cfg, env)
-		return buildCodexArgs(projectRoot, prompt, true, "", nil, codexConfig.LegacyLandlock), true, nil
+		return buildCodexArgs(prompt, true, "", nil), true, nil
 	case "gemini":
 		return []string{"-p"}, true, nil
 	case "vibe", "mistral":

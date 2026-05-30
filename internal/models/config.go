@@ -135,7 +135,6 @@ type Config struct {
 	DefaultReviewerCLI       string     `yaml:"default_reviewer_cli,omitempty"`
 	ScipSearch               []string   `yaml:"scip_search,omitempty"`
 	CodexPackageVersion      string     `yaml:"codex_package_version,omitempty"`
-	CodexLegacyLandlock      bool       `yaml:"codex_legacy_landlock,omitempty"`
 	IntegrationBranch        string     `yaml:"integration_branch"`
 	EscalationWebhook        *string    `yaml:"escalation_webhook,omitempty"`
 	Mode                     SystemMode `yaml:"mode,omitempty"`
