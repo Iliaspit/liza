@@ -35,7 +35,7 @@ Any non destructive tool by default.
 ## Mode Boundary
 
 All modes: use source-of-truth tools for verification.
-MAS worktree rule: Do not use workspace-level or IDE/LSP-backed tools in Liza multi-agent worktrees, even if the user has configured them for personal use. Use filesystem-truth tools tied to the current worktree instead: `stacklit` with explicit `-i` paths supplied by Liza, `scip-search` with explicit `--index` paths supplied by Liza, `rg`, `ast-grep`, direct reads, filesystem glob/search, native manifests, `git`, language-native commands, `morph-mcp`, and `apply_patch`.
+MAS worktree rule: Do not use workspace-level or IDE/LSP-backed tools in Liza multi-agent worktrees, even if the user has configured them for personal use. Use filesystem-truth tools tied to the current worktree instead: `stacklit` with explicit `-i` paths supplied by Liza, `scip-search` with explicit `--index` paths supplied by Liza, `rg`, `rg --files`, `find`, `ast-grep`, direct reads, native manifests, `git`, language-native commands, `morph-mcp`, and `apply_patch`.
 Pairing mode: user-personal workspace tools may exist, but they do not replace source-of-truth verification. When the SessionStart session context hook emits explicit repo-root Stacklit or SCIP index paths for an indexed Pairing repo, treat those paths as Liza-supplied for that session; they are refreshed after commits and do not reflect uncommitted changes.
 
 ## Tool Routing
@@ -45,17 +45,17 @@ Default tools are mandatory unless the fallback condition applies or the tool is
 MCP server/tool names may be normalized differently across providers (for example `-` vs `_`). Treat concrete names below as examples; use the equivalent exposed name in the current session.
 If a default or preferred MCP capability is referenced here but is not currently exposed in the tool list, use your tool-loading mechanism (e.g. `ToolSearch`, `tool_search`) to load that capability before falling back. Fallback is allowed only after the tool cannot be found/loaded, the loaded tool errors, or the result is insufficient.
 Fallback tools are permitted ONLY when the fallback condition is met OR the default tool returns an error.
-For all MCP-backed default rows, if the tool is unavailable in the current session, errors, or is unsupported by the provider, use the row fallback tool.
+For any MCP-backed default row in the tables below, if the tool is unavailable in the current session, errors, or is unsupported by the provider, use the row fallback tool.
 
 ### Operations
 
 | Operation | Default Tool | Fallback | Use Fallback When |
 |-----------|---------------------------------------------------|----------|-------------------|
-| Read multiple files | filesystem multi-file read | Read | 2-3 files; batch native reads carefully for larger scopes |
-| Single-file read (targeted) | `nl -ba <file> \| sed -n '<start>,<end>p'` | Read / filesystem read_file | Native read is lower-noise, already available, or line numbers are not needed |
-| Directory exploration | filesystem `directory_tree` / `search_files` | Read + manual tree walk | Filesystem tree/search capability unavailable |
-| File discovery | `rg --files` / filesystem glob / `search_files` | native filename search | Glob/search capability unavailable |
-| Project structure / modules | Native manifest reads + filesystem tree | language-native project metadata commands | Need generated module metadata from the active worktree |
+| Read multiple files | Native batch reads / parallel Read calls | shell reads | Need line-numbered source snippets or provider Read is unavailable |
+| Single-file read (targeted) | `nl -ba <file> \| sed -n '<start>,<end>p'` | Read | Native read is lower-noise, already available, or line numbers are not needed |
+| Directory exploration | `rg --files`, `find`, or `ls` | native tree/list capability | Need a structured tree and native shell output is insufficient |
+| File discovery | `rg --files` | native filename search / `find` | `rg` unavailable |
+| Project structure / modules | Native manifest reads + `rg --files` / `find` | language-native project metadata commands | Need generated module metadata from the active worktree |
 | Dependency inspection | Native manifest reads + lockfiles | language-native dependency commands | Manifest/lockfile inspection is insufficient |
 | Code search | `rg` | — | — |
 | Symbol discovery | `rg` pattern search | — | — |
@@ -106,8 +106,6 @@ For all MCP-backed default rows, if the tool is unavailable in the current sessi
 - **`gh` (GitHub CLI)**: Use `gh` for GitHub issues, PRs, releases, and GitHub API queries when repository context and authentication are available. Prefer `gh` over raw `curl` calls to GitHub APIs.
 
 ### Tool Details
-
-**filesystem MCP**: Bulk/batch file operations — multi-file reads, recursive directory trees, file metadata.
 
 **Morph-MCP**:
 - *Fast Apply (`edit_file`)*: Shows only changed lines using `// ... existing code ...` placeholders. Avoids reading full files into context. Skip for files >2000 lines.
