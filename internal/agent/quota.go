@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -16,16 +17,16 @@ import (
 type quotaPattern struct {
 	// Provider is the CLIName (e.g. "codex", "claude", "gemini").
 	Provider string
-	// Needles are substrings that must all appear on the same output line.
-	Needles []string
+	// Pattern matches a single output line that indicates quota exhaustion.
+	Pattern *regexp.Regexp
 }
 
 // quotaPatterns is the registry of known quota-exhaustion signatures.
 // Add new entries here when a new provider's quota message is observed.
 var quotaPatterns = []quotaPattern{
-	{Provider: "codex", Needles: []string{"You've hit your usage limit"}},
-	{Provider: "claude", Needles: []string{"You're out of extra usage"}},
-	{Provider: "claude", Needles: []string{"You've hit your limit", "resets"}},
+	{Provider: "codex", Pattern: regexp.MustCompile(`You've hit your .*limit`)},
+	{Provider: "claude", Pattern: regexp.MustCompile(`You're out of extra usage`)},
+	{Provider: "claude", Pattern: regexp.MustCompile(`You've hit your .*limit`)},
 }
 
 // QuotaExhaustion holds details about a detected quota event.
@@ -42,14 +43,7 @@ func DetectQuotaExhaustion(output, cliName string) *QuotaExhaustion {
 			if p.Provider != cliName {
 				continue
 			}
-			matched := true
-			for _, needle := range p.Needles {
-				if !strings.Contains(line, needle) {
-					matched = false
-					break
-				}
-			}
-			if matched {
+			if p.Pattern.MatchString(line) {
 				return &QuotaExhaustion{
 					Provider: p.Provider,
 					Message:  line,
