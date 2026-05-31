@@ -249,7 +249,7 @@ func normalizeRepairRequest(request *models.RepairRequest) (*models.RepairReques
 		return nil, &PreconditionError{Reason: "repair request validation is required"}
 	}
 	if !normalized.HasStructuredFailureEvidence() {
-		return nil, &PreconditionError{Reason: "repair requests require structured failure evidence with exit_code= and stderr=, exit_code= and error=, or standalone error="}
+		return nil, &PreconditionError{Reason: `repair requests require structured failure evidence; valid examples: "command=liza add-task --json exit_code=1 stderr=command requires role type [orchestrator]", "command=provider-call exit_code=1 error=provider unavailable", or "error=provider session thread not found"`}
 	}
 	return normalized, nil
 }

@@ -410,6 +410,32 @@ func TestJSON_MarkBlocked_IncompleteRepairRequestReportsActionableValidation(t *
 	assertJSONError(t, stdout, "validation", "--repair-target is required")
 }
 
+func TestJSON_MarkBlocked_InvalidRepairEvidenceReportsValidExample(t *testing.T) {
+	projectRoot, _ := setupMutationTestProject(t, func(state *models.State) {
+		now := time.Now().UTC()
+		state.Tasks = []models.Task{
+			testhelpers.BuildTaskByStatus("task-invalid-repair-evidence", models.TaskStatusImplementing, now),
+		}
+	})
+
+	stdout, err := executeRootCommandCapture(t, projectRoot,
+		"mark-blocked", "task-invalid-repair-evidence",
+		"--agent-id", "coder-1",
+		"--reason", "Required state repair is orchestrator-only",
+		"--questions", "Can the orchestrator repair the state?",
+		"--repair-operation", "retarget-dependency",
+		"--repair-target", "task-invalid-repair-evidence",
+		"--repair-command", "liza retarget-dependency task-invalid-repair-evidence old-dep new-dep --json",
+		"--repair-evidence", "retarget failed",
+		"--repair-validation", "liza validate --json",
+		"--json",
+	)
+	if err == nil {
+		t.Fatalf("expected invalid repair evidence validation error, got nil")
+	}
+	assertJSONError(t, stdout, "validation", "valid examples", "exit_code=1 stderr=", "error=provider session thread not found")
+}
+
 func TestJSON_RetargetDependency_Success(t *testing.T) {
 	projectRoot, _ := setupMutationTestProject(t, func(state *models.State) {
 		now := time.Now().UTC()
