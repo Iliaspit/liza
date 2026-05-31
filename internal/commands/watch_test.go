@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -2481,7 +2483,7 @@ func TestRunChecksWithState_RunningTaskWithoutLiveProcess(t *testing.T) {
 			CurrentTask:  &taskID,
 			LeaseExpires: testhelpers.TimePtr(now.Add(30 * time.Minute)),
 			Heartbeat:    now,
-			PID:          0,
+			PID:          987654321,
 		},
 	}
 	testhelpers.WriteInitialState(t, stateFile, state)
@@ -2503,6 +2505,7 @@ func TestRunChecksWithState_RunningTaskWithoutLiveProcess(t *testing.T) {
 
 func TestRunChecksWithState_LiveDoerProcessNoAlert(t *testing.T) {
 	now := time.Now().UTC()
+	t.Cleanup(ops.SetAgentProcessProcRootForTest(filepath.Join(t.TempDir(), "missing-proc")))
 
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
@@ -2542,6 +2545,7 @@ func TestRunChecksWithState_LiveDoerProcessNoAlert(t *testing.T) {
 
 func TestRunChecksWithState_OwnedExecutingRecoveryNoInvalidOwnership(t *testing.T) {
 	now := time.Now().UTC()
+	t.Cleanup(ops.SetAgentProcessProcRootForTest(filepath.Join(t.TempDir(), "missing-proc")))
 
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
@@ -2584,6 +2588,7 @@ func TestRunChecksWithState_OwnedExecutingRecoveryNoInvalidOwnership(t *testing.
 
 func TestRunChecksWithState_HandoffOwnershipNoInvalidOwnership(t *testing.T) {
 	now := time.Now().UTC()
+	t.Cleanup(ops.SetAgentProcessProcRootForTest(filepath.Join(t.TempDir(), "missing-proc")))
 
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
@@ -2649,8 +2654,8 @@ func TestRunChecksWithState_ExecutingSentinelNoDeadProcessAlert(t *testing.T) {
 	}
 
 	alerts := RunChecksWithState(state, config)
-	if got := countAlertsByCategory(alerts, "DEAD AGENT PROCESS"); got != 0 {
-		t.Fatalf("DEAD AGENT PROCESS alerts = %d, want 0; alerts: %v", got, alerts)
+	if got := countAlertsByCategory(alerts, "REGISTERED AGENT PROCESS"); got != 0 {
+		t.Fatalf("REGISTERED AGENT PROCESS alerts = %d, want 0; alerts: %v", got, alerts)
 	}
 }
 
@@ -2678,7 +2683,7 @@ func TestRunChecksWithState_ReviewerWithoutLiveProcess(t *testing.T) {
 			CurrentTask:  &taskID,
 			LeaseExpires: testhelpers.TimePtr(now.Add(30 * time.Minute)),
 			Heartbeat:    now,
-			PID:          0,
+			PID:          987654321,
 		},
 	}
 	testhelpers.WriteInitialState(t, stateFile, state)
@@ -2723,7 +2728,7 @@ func TestRunChecksWithState_Reviewing2WithoutLiveProcess(t *testing.T) {
 			CurrentTask:  &taskID,
 			LeaseExpires: testhelpers.TimePtr(now.Add(30 * time.Minute)),
 			Heartbeat:    now,
-			PID:          0,
+			PID:          987654321,
 		},
 	}
 	testhelpers.WriteInitialState(t, stateFile, state)
@@ -2745,6 +2750,7 @@ func TestRunChecksWithState_Reviewing2WithoutLiveProcess(t *testing.T) {
 
 func TestRunChecksWithState_LiveReviewerProcessNoAlert(t *testing.T) {
 	now := time.Now().UTC()
+	t.Cleanup(ops.SetAgentProcessProcRootForTest(filepath.Join(t.TempDir(), "missing-proc")))
 
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
@@ -2929,6 +2935,66 @@ func TestCheckReverseActiveAgentOwnership_OrchestratorPlanningCurrentTaskIsNotOw
 	}
 }
 
+func TestCheckRegisteredAgentsWithoutLiveProcess_ActiveLeaseDeadOrMismatched(t *testing.T) {
+	now := time.Now().UTC()
+	tests := []struct {
+		name    string
+		pid     int
+		argv    []string
+		wantMsg string
+	}{
+		{name: "dead pid", pid: 987654321, wantMsg: "no live process"},
+		{name: "mismatched pid", pid: 1234, argv: []string{"go", "test"}, wantMsg: "mismatched process"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			procRoot := t.TempDir()
+			t.Cleanup(ops.SetAgentProcessProcRootForTest(procRoot))
+			if len(tt.argv) > 0 {
+				writeWatchProcCmdline(t, procRoot, tt.pid, tt.argv)
+			}
+			state := testhelpers.CreateValidState()
+			state.Agents = map[string]models.Agent{
+				"coder-1": {
+					Role:         "coder",
+					Status:       models.AgentStatusIdle,
+					LeaseExpires: testhelpers.TimePtr(now.Add(30 * time.Minute)),
+					Heartbeat:    now,
+					PID:          tt.pid,
+				},
+			}
+
+			alerts := checkRegisteredAgentsWithoutLiveProcess(state)
+			if got := countAlertsByCategory(alerts, "REGISTERED AGENT PROCESS"); got != 1 {
+				t.Fatalf("REGISTERED AGENT PROCESS alerts = %d, want 1; alerts: %v", got, alerts)
+			}
+			if !strings.Contains(alerts[0].Message, tt.wantMsg) {
+				t.Fatalf("alert message = %q, want %q", alerts[0].Message, tt.wantMsg)
+			}
+		})
+	}
+}
+
+func TestCheckRegisteredAgentsWithoutLiveProcess_UnknownProcfsDoesNotAlert(t *testing.T) {
+	t.Cleanup(ops.SetAgentProcessProcRootForTest(filepath.Join(t.TempDir(), "missing-proc")))
+	now := time.Now().UTC()
+	state := testhelpers.CreateValidState()
+	state.Agents = map[string]models.Agent{
+		"coder-1": {
+			Role:         "coder",
+			Status:       models.AgentStatusIdle,
+			LeaseExpires: testhelpers.TimePtr(now.Add(30 * time.Minute)),
+			Heartbeat:    now,
+			PID:          os.Getpid(),
+		},
+	}
+
+	alerts := checkRegisteredAgentsWithoutLiveProcess(state)
+	if got := countAlertsByCategory(alerts, "DEAD AGENT PROCESS"); got != 0 {
+		t.Fatalf("DEAD AGENT PROCESS alerts = %d, want 0; alerts: %v", got, alerts)
+	}
+}
+
 func TestRunChecksWithState_StuckAlertsDedupedAndRealertAfterClear(t *testing.T) {
 	now := time.Now().UTC()
 
@@ -3074,6 +3140,7 @@ func TestRunChecksWithStateSnapshot_ReportsActiveKeysForLeaseExpired(t *testing.
 
 func TestRunChecksWithStateSnapshot_ReportsActiveKeysForDeadAgentProcess(t *testing.T) {
 	now := time.Now().UTC()
+	t.Cleanup(ops.SetAgentProcessProcRootForTest(filepath.Join(t.TempDir(), "missing-proc")))
 
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
@@ -3094,7 +3161,7 @@ func TestRunChecksWithStateSnapshot_ReportsActiveKeysForDeadAgentProcess(t *test
 			CurrentTask:  &taskID,
 			LeaseExpires: testhelpers.TimePtr(now.Add(30 * time.Minute)),
 			Heartbeat:    now,
-			PID:          0,
+			PID:          987654321,
 		},
 	}
 	testhelpers.WriteInitialState(t, stateFile, state)
@@ -3139,6 +3206,67 @@ func TestRunChecksWithStateSnapshot_ReportsActiveKeysForDeadAgentProcess(t *test
 		Heartbeat:    now,
 		PID:          os.Getpid(),
 	}
+	cleared := RunChecksWithStateSnapshot(state, config)
+	if cleared.ActiveKeys[alertKey] {
+		t.Fatalf("cleared poll still reports inactive key %q active", alertKey)
+	}
+}
+
+func TestRunChecksWithStateSnapshot_ReportsActiveKeysForRegisteredAgentProcess(t *testing.T) {
+	now := time.Now().UTC()
+	procRoot := t.TempDir()
+	t.Cleanup(ops.SetAgentProcessProcRootForTest(procRoot))
+
+	tmpDir := t.TempDir()
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	testhelpers.SetupPipelineConfig(t, tmpDir)
+
+	agentID := "coder-1"
+	state := testhelpers.CreateValidState()
+	state.Tasks = nil
+	state.Agents = map[string]models.Agent{
+		agentID: {
+			Role:         "coder",
+			Status:       models.AgentStatusIdle,
+			LeaseExpires: testhelpers.TimePtr(now.Add(30 * time.Minute)),
+			Heartbeat:    now,
+			PID:          987654321,
+		},
+	}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	config := WatchConfig{
+		ProjectRoot: tmpDir,
+		AlertsLog:   paths.New(tmpDir).AlertsLogPath(),
+		StateCache:  make(map[string]time.Time),
+	}
+
+	first := RunChecksWithStateSnapshot(state, config)
+	if got := countAlertsByCategory(first.Alerts, "REGISTERED AGENT PROCESS"); got != 1 {
+		t.Fatalf("first poll emitted alerts = %d, want 1; alerts: %v", got, first.Alerts)
+	}
+	alert := firstAlertByCategory(t, first.Alerts, "REGISTERED AGENT PROCESS")
+	alertKey := AlertKey(alert)
+	if !first.ActiveKeys[alertKey] {
+		t.Fatalf("first poll active key %q missing", alertKey)
+	}
+
+	second := RunChecksWithStateSnapshot(state, config)
+	if got := countAlertsByCategory(second.Alerts, "REGISTERED AGENT PROCESS"); got != 0 {
+		t.Fatalf("second poll emitted alerts = %d, want 0; alerts: %v", got, second.Alerts)
+	}
+	if !second.ActiveKeys[alertKey] {
+		t.Fatalf("second poll active key %q missing despite throttling", alertKey)
+	}
+
+	state.Agents[agentID] = models.Agent{
+		Role:         "coder",
+		Status:       models.AgentStatusIdle,
+		LeaseExpires: testhelpers.TimePtr(now.Add(30 * time.Minute)),
+		Heartbeat:    now,
+		PID:          os.Getpid(),
+	}
+	t.Cleanup(ops.SetAgentProcessProcRootForTest(filepath.Join(t.TempDir(), "missing-proc")))
 	cleared := RunChecksWithStateSnapshot(state, config)
 	if cleared.ActiveKeys[alertKey] {
 		t.Fatalf("cleared poll still reports inactive key %q active", alertKey)
@@ -3283,6 +3411,18 @@ func firstAlertByCategory(t *testing.T, alerts []Alert, category string) Alert {
 	}
 	t.Fatalf("missing alert category %q; alerts: %v", category, alerts)
 	return Alert{}
+}
+
+func writeWatchProcCmdline(t *testing.T, procRoot string, pid int, argv []string) {
+	t.Helper()
+	procDir := filepath.Join(procRoot, strconv.Itoa(pid))
+	if err := os.MkdirAll(procDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	cmdline := strings.Join(argv, "\x00") + "\x00"
+	if err := os.WriteFile(filepath.Join(procDir, "cmdline"), []byte(cmdline), 0644); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func loadPipelineResolverForWatchTest(t *testing.T) models.PipelineResolver {

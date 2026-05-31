@@ -132,7 +132,7 @@ Every non-empty task ID must identify exactly one task in `state.yaml`.
 | Active review ownership: tasks in a pipeline reviewing state (`ReviewingStatus` or `Reviewing2Status`) must have `reviewing_by` pointing to an agent with the exact reviewer role for the task's `role_pair`, status `REVIEWING`, matching `current_task`, and valid review lease | Dead reviewers holding review work, cross-role review claims | spec, code |
 | No two agents assigned to same executing task | Ownership collisions | spec, code (`validate_task.go`) |
 | Agent ID format: `{role}-{number}` (e.g., `coder-1`) | Identity spoofing, cross-role execution | code (registration validation) |
-| Registration collision: active-lease agent blocks duplicate registration → immediate exit | Ghost agents holding claims | spec, code (`AgentCollisionError`) |
+| Registration collision: active-lease agent with live-matching or unknown process identity blocks duplicate registration → immediate exit; dead or mismatched registered PIDs do not count as live capacity | Ghost agents holding claims, PID reuse collisions | spec, code (`AgentCollisionError`, `procscan`) |
 
 ### Supervisor-Only Actions (agents cannot perform)
 

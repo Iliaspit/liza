@@ -61,9 +61,14 @@ func registerAgent(bb *db.Blackboard, projectRoot, agentID, role, terminal strin
 		if existing, exists := state.Agents[agentID]; exists {
 			// Check if lease is still valid
 			if existing.LeaseExpires != nil && existing.LeaseExpires.After(now) {
-				return &errors.AgentCollisionError{AgentID: agentID}
+				processStatus := ops.AgentProcessStatus(agentID, existing)
+				if processStatus.IsLiveOrUnknown() {
+					return &errors.AgentCollisionError{AgentID: agentID}
+				}
+				logger.Info("Taking over non-live agent lease", "agent_id", agentID, "pid", existing.PID, "process_state", processStatus.State, "process_detail", processStatus.Detail)
+			} else {
+				logger.Info("Taking over expired agent lease", "agent_id", agentID)
 			}
-			logger.Info("Taking over expired agent lease", "agent_id", agentID)
 		}
 
 		// Singularity check via resolver: at most N instances per role.
@@ -80,6 +85,9 @@ func registerAgent(bb *db.Blackboard, projectRoot, agentID, role, terminal strin
 						continue
 					}
 					if agent.LeaseExpires == nil || !agent.LeaseExpires.After(now) {
+						continue
+					}
+					if !ops.AgentProcessStatus(id, agent).IsLiveOrUnknown() {
 						continue
 					}
 					if roleType == "orchestrator" {

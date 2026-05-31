@@ -1,15 +1,10 @@
 package commands
 
 import (
-	"errors"
 	"fmt"
 	"log"
-	"os"
-	"path/filepath"
 	"slices"
-	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/liza-mas/liza/internal/agent"
@@ -506,79 +501,12 @@ func getAgentProcessStatusInfo(agentID string, agent models.Agent) processStatus
 }
 
 func getProcessStatusInfoForAgent(pid int, role, agentID string) processStatusInfo {
-	if pid == 0 {
-		return processStatusInfo{
-			Status: "unknown",
-			Source: "pid",
-			Detail: "no pid recorded",
-		}
-	}
-
-	if info, ok := getProcfsProcessStatusInfo(pid, role, agentID); ok {
-		return info
-	}
-
-	process, err := os.FindProcess(pid)
-	if err != nil {
-		return processStatusInfo{
-			Status: "not found",
-			Source: "os.FindProcess",
-			Detail: err.Error(),
-		}
-	}
-
-	// Signal 0 checks process existence without actually signaling
-	err = process.Signal(syscall.Signal(0))
-	if err == nil {
-		return processStatusInfo{
-			Status: "running",
-			Source: "signal(0)",
-			Detail: "process accepted signal 0",
-		}
-	}
-
-	if errors.Is(err, syscall.EPERM) {
-		return processStatusInfo{
-			Status: "running",
-			Source: "signal(0)",
-			Detail: "process exists but signal permission was denied",
-		}
-	}
-	if errors.Is(err, syscall.ESRCH) {
-		return processStatusInfo{
-			Status: "stopped",
-			Source: "signal(0)",
-			Detail: "process does not exist",
-		}
-	}
+	status := procscan.AgentProcessStatusForPID(pid, role, agentID, processStatusProcRoot)
 	return processStatusInfo{
-		Status: "stopped",
-		Source: "signal(0)",
-		Detail: err.Error(),
+		Status: status.DisplayStatus(),
+		Source: status.Source,
+		Detail: status.Detail,
 	}
-}
-
-func getProcfsProcessStatusInfo(pid int, role, agentID string) (processStatusInfo, bool) {
-	cmdlinePath := filepath.Join(processStatusProcRoot, strconv.Itoa(pid), "cmdline")
-	data, err := os.ReadFile(cmdlinePath)
-	if err != nil {
-		return processStatusInfo{}, false
-	}
-
-	argv := procscan.ParseCmdlineBytes(data)
-	if procscan.MatchesLizaAgentIdentity(argv, role, agentID) {
-		return processStatusInfo{
-			Status: "running",
-			Source: "procfs",
-			Detail: "cmdline matches expected liza agent supervisor",
-		}, true
-	}
-
-	return processStatusInfo{
-		Status: "mismatched",
-		Source: "procfs",
-		Detail: "pid exists but cmdline does not match expected liza agent supervisor",
-	}, true
 }
 
 func writeTasksSection(b *strings.Builder, tasks taskStatus) {

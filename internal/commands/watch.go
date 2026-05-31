@@ -459,6 +459,7 @@ func RunChecksWithStateSnapshot(state *models.State, config WatchConfig) AlertSn
 	lizaPaths := paths.New(config.ProjectRoot)
 	checks := []func() []Alert{
 		func() []Alert { return checkExpiredLeases(state) },
+		func() []Alert { return checkRegisteredAgentsWithoutLiveProcess(state) },
 		func() []Alert { return checkRunningTasksWithoutLiveProcess(state, pr) },
 		func() []Alert { return checkBlockedTasks(state, config.StateCache) },
 		func() []Alert { return checkOrphanedRejected(state, config.StateCache) },
@@ -567,7 +568,7 @@ func reconcileStuckAlerts(alerts []Alert, cache map[string]time.Time) []Alert {
 
 func isStuckAlertCategory(category string) bool {
 	switch category {
-	case "BLOCKED", "HYPOTHESIS EXHAUSTION", "INTEGRATION FAILED", "INVALID STATE", "DEAD AGENT PROCESS":
+	case "BLOCKED", "HYPOTHESIS EXHAUSTION", "INTEGRATION FAILED", "INVALID STATE", "DEAD AGENT PROCESS", "REGISTERED AGENT PROCESS":
 		return true
 	case "INVALID AGENT OWNERSHIP":
 		return true
@@ -708,6 +709,38 @@ func checkExpiredLeases(state *models.State) []Alert {
 	return alerts
 }
 
+func checkRegisteredAgentsWithoutLiveProcess(state *models.State) []Alert {
+	var alerts []Alert
+	now := time.Now().UTC()
+	for agentID, agent := range state.Agents {
+		if agent.LeaseExpires == nil || !agent.LeaseExpires.After(now) {
+			continue
+		}
+		if agent.CurrentTask != nil && *agent.CurrentTask != "" {
+			switch agent.Status {
+			case models.AgentStatusWorking, models.AgentStatusReviewing, models.AgentStatusHandoff:
+				continue
+			}
+		}
+		processStatus := ops.AgentProcessStatus(agentID, agent)
+		if processStatus.IsLiveOrUnknown() {
+			continue
+		}
+		processDescription := "no live process"
+		if processStatus.State == "mismatched" {
+			processDescription = "mismatched process"
+		}
+		alerts = append(alerts, Alert{
+			Timestamp: now,
+			Level:     AlertLevelCritical,
+			Category:  "REGISTERED AGENT PROCESS",
+			Message: fmt.Sprintf("agent %s has active lease but %s (pid %d: %s)",
+				agentID, processDescription, agent.PID, processStatus.Detail),
+		})
+	}
+	return alerts
+}
+
 func checkRunningTasksWithoutLiveProcess(state *models.State, pr models.PipelineResolver) []Alert {
 	if pr == nil {
 		return nil
@@ -745,16 +778,21 @@ func checkRunningTasksWithoutLiveProcess(state *models.State, pr models.Pipeline
 					task.ID, task.Status, ownerKind, ownerID, reason),
 			})
 		}
-		if ops.IsProcessAlive(agent.PID) {
+		processStatus := ops.AgentProcessStatus(ownerID, agent)
+		if processStatus.IsLiveOrUnknown() {
 			continue
+		}
+		processDescription := "no live process"
+		if processStatus.State == "mismatched" {
+			processDescription = "mismatched process"
 		}
 
 		alerts = append(alerts, Alert{
 			Timestamp: now,
 			Level:     AlertLevelCritical,
 			Category:  "DEAD AGENT PROCESS",
-			Message: fmt.Sprintf("%s — status %s has %s %s but no live process (pid %d)",
-				task.ID, task.Status, ownerKind, ownerID, agent.PID),
+			Message: fmt.Sprintf("%s — status %s has %s %s but %s (pid %d: %s)",
+				task.ID, task.Status, ownerKind, ownerID, processDescription, agent.PID, processStatus.Detail),
 		})
 	}
 

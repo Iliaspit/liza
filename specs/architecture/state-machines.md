@@ -411,7 +411,7 @@ See [Blackboard Schema — Lease Model](blackboard-schema.md#lease-model) for fi
           └───────────┘
 ```
 
-**Registration Failure:** If agent registration fails (ID collision with active lease), the agent process exits immediately with error—it never enters the state machine. See [Roles — Agent Identity Protocol](roles.md#agent-identity-protocol).
+**Registration Failure:** If agent registration fails (ID collision with an active lease whose process identity is live-matching or unknown), the agent process exits immediately with error—it never enters the state machine. Active leases remain a coordination freshness signal; where procfs can prove the registered PID is dead or mismatched, that row does not count as live registration capacity. See [Roles — Agent Identity Protocol](roles.md#agent-identity-protocol).
 
 ---
 

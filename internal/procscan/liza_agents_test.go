@@ -215,6 +215,41 @@ func TestMatchesLizaAgentIdentity(t *testing.T) {
 	}
 }
 
+func TestAgentProcessStatusForPID_ProcfsIdentityStates(t *testing.T) {
+	procRoot := t.TempDir()
+	writeProcWithoutCWD(t, procRoot, 1234, []string{"liza", "agent", "coder", "--agent-id", "coder-1", "--cli", "codex"})
+	writeProcWithoutCWD(t, procRoot, 5678, []string{"go", "test"})
+
+	tests := []struct {
+		name    string
+		pid     int
+		role    string
+		agentID string
+		want    AgentProcessState
+		alive   bool
+	}{
+		{name: "matching liza agent", pid: 1234, role: "coder", agentID: "coder-1", want: AgentProcessLiveMatching, alive: true},
+		{name: "pid reused by another process", pid: 5678, role: "coder", agentID: "coder-1", want: AgentProcessMismatched, alive: true},
+		{name: "missing pid value", pid: 0, role: "coder", agentID: "coder-1", want: AgentProcessUnknown, alive: false},
+		{name: "missing pid falls through to dead signal", pid: 987654321, role: "coder", agentID: "coder-1", want: AgentProcessDead, alive: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := AgentProcessStatusForPID(tt.pid, tt.role, tt.agentID, procRoot)
+			if got.State != tt.want || got.Alive != tt.alive {
+				t.Fatalf("AgentProcessStatusForPID() = %+v, want state=%s alive=%v", got, tt.want, tt.alive)
+			}
+		})
+	}
+}
+
+func TestAgentProcessStatusForPID_ProcfsUnavailableKeepsAliveUnknown(t *testing.T) {
+	got := AgentProcessStatusForPID(os.Getpid(), "coder", "coder-1", filepath.Join(t.TempDir(), "missing-proc"))
+	if got.State != AgentProcessUnknown || !got.Alive {
+		t.Fatalf("AgentProcessStatusForPID() = %+v, want unknown alive", got)
+	}
+}
+
 func writeProc(t *testing.T, procRoot string, pid int, cwd string, argv []string) {
 	t.Helper()
 	procDir := writeProcCmdline(t, procRoot, pid, argv)

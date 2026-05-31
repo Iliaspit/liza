@@ -260,6 +260,11 @@ func TestClaimTaskCommand(t *testing.T) {
 					rc := "def5678"
 					reviewCommit = &rc
 					iteration = 1
+					exp := now.Add(-30 * time.Minute)
+					if tt.previousAgent != nil && *tt.previousAgent == tt.agentID {
+						exp = now.Add(30 * time.Minute)
+					}
+					leaseExpires = &exp
 				}
 
 				if tt.taskStatus == models.TaskStatusIntegrationFailed {

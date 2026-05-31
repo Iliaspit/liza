@@ -17,7 +17,7 @@ liza validate --skip-process-checks # Offline/archive validation only
 liza analyze                       # Circuit breaker pattern detection
 ```
 
-`liza status --format json` and `liza get agents --format json` include `process_status_source` and `process_status_detail` for agents; status also includes them for phase-handoff blockers. Use these fields when a task appears assigned but the process state is ambiguous.
+`liza status --format json` and `liza get agents --format json` include `process_status_source` and `process_status_detail` for agents; status also includes them for phase-handoff blockers. Use these fields when a task appears assigned but the process state is ambiguous. On Linux, procfs identity checks distinguish a matching Liza supervisor from a dead or PID-reused/mismatched process; when process identity is unavailable, active leases are treated conservatively.
 Agent health is separate from lifecycle status. A degraded agent epoch remains visible in status/get-agents health fields and does not count as repair-agent-pool capacity until it is cleared or a newer successful claim proves capacity. If the agent process exits and unregisters, the health marker stays visible as degraded capacity context for repair/status output.
 Live zombie-agent detection currently requires Linux procfs. On hosts without procfs, `liza validate` warns and skips the live-process check, while `liza get agents --zombies` reports that scanning is unavailable.
 
@@ -314,8 +314,8 @@ Supersede/cancel operations rewrite active downstream dependencies first; stale 
 **Fix**: `liza wt-delete <task-id>`.
 
 ### Ghost agent
-**Symptom**: Agent registered in state.yaml but process is dead.
-**Diagnosis**: `liza get agents` — check lease expiry.
+**Symptom**: Agent registered in state.yaml but process is dead or the registered PID now belongs to a different process.
+**Diagnosis**: `liza get agents` — check `process_status`, `process_status_source`, `process_status_detail`, and lease expiry. Watch alerts report active-lease registered agents whose PID is dead or mismatched; unknown process identity is treated conservatively as still live.
 **Fix**: `liza recover-agent <agent-id>` or `liza delete agent <id>`.
 
 ### Zombie agent process

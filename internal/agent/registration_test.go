@@ -2,6 +2,8 @@ package agent
 
 import (
 	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -9,6 +11,7 @@ import (
 	"github.com/liza-mas/liza/internal/db"
 	"github.com/liza-mas/liza/internal/errors"
 	"github.com/liza-mas/liza/internal/models"
+	"github.com/liza-mas/liza/internal/ops"
 	"github.com/liza-mas/liza/internal/pipeline"
 	"github.com/liza-mas/liza/internal/testhelpers"
 )
@@ -99,6 +102,7 @@ func TestValidateIdentity(t *testing.T) {
 
 // TestRegisterAgent tests agent registration
 func TestRegisterAgent(t *testing.T) {
+	t.Cleanup(ops.SetAgentProcessProcRootForTest(filepath.Join(t.TempDir(), "missing-proc")))
 	tests := []struct {
 		name           string
 		agentID        string
@@ -128,6 +132,7 @@ func TestRegisterAgent(t *testing.T) {
 				Status:       models.AgentStatusWorking,
 				LeaseExpires: testhelpers.TimePtr(time.Now().UTC().Add(10 * time.Minute)),
 				Heartbeat:    time.Now().UTC(),
+				PID:          os.Getpid(),
 			},
 			expectRegister: false,
 			wantErr:        true,
@@ -209,9 +214,69 @@ func TestRegisterAgent(t *testing.T) {
 	}
 }
 
+func TestRegisterAgentTakesOverDeadOrMismatchedActiveLease(t *testing.T) {
+	tests := []struct {
+		name string
+		pid  int
+		argv []string
+	}{
+		{name: "dead pid", pid: 987654321},
+		{name: "mismatched pid", pid: 1234, argv: []string{"go", "test"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			procRoot := t.TempDir()
+			t.Cleanup(ops.SetAgentProcessProcRootForTest(procRoot))
+			if len(tt.argv) > 0 {
+				writeRegistrationProcCmdline(t, procRoot, tt.pid, tt.argv)
+			}
+
+			statePath, _ := testhelpers.SetupLizaDir(t, tmpDir)
+			testhelpers.SetupPipelineConfig(t, tmpDir)
+			state := testhelpers.CreateValidState()
+			state.Agents["coder-1"] = models.Agent{
+				Role:         "coder",
+				Status:       models.AgentStatusWorking,
+				LeaseExpires: testhelpers.TimePtr(time.Now().UTC().Add(10 * time.Minute)),
+				Heartbeat:    time.Now().UTC(),
+				PID:          tt.pid,
+			}
+			bb := testhelpers.WriteInitialState(t, statePath, state)
+
+			err := registerAgent(bb, tmpDir, "coder-1", "coder", "terminal-1", 1800, "codex", testResolver(t))
+			if err != nil {
+				t.Fatalf("registerAgent() error = %v, want takeover", err)
+			}
+		})
+	}
+}
+
+func TestRegisterAgentKeepsUnknownActiveLeaseConservative(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Cleanup(ops.SetAgentProcessProcRootForTest(filepath.Join(t.TempDir(), "missing-proc")))
+	statePath, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	testhelpers.SetupPipelineConfig(t, tmpDir)
+	state := testhelpers.CreateValidState()
+	state.Agents["coder-1"] = models.Agent{
+		Role:         "coder",
+		Status:       models.AgentStatusWorking,
+		LeaseExpires: testhelpers.TimePtr(time.Now().UTC().Add(10 * time.Minute)),
+		Heartbeat:    time.Now().UTC(),
+		PID:          os.Getpid(),
+	}
+	bb := testhelpers.WriteInitialState(t, statePath, state)
+
+	err := registerAgent(bb, tmpDir, "coder-1", "coder", "terminal-1", 1800, "codex", testResolver(t))
+	if err == nil {
+		t.Fatal("registerAgent() error = nil, want collision for unknown live process identity")
+	}
+}
+
 // TestRegisterAgentCollisionIsTyped verifies collision returns AgentCollisionError
 func TestRegisterAgentCollisionIsTyped(t *testing.T) {
 	tmpDir := t.TempDir()
+	t.Cleanup(ops.SetAgentProcessProcRootForTest(filepath.Join(t.TempDir(), "missing-proc")))
 	statePath, _ := testhelpers.SetupLizaDir(t, tmpDir)
 	testhelpers.SetupPipelineConfig(t, tmpDir)
 
@@ -221,6 +286,7 @@ func TestRegisterAgentCollisionIsTyped(t *testing.T) {
 		Status:       models.AgentStatusWorking,
 		LeaseExpires: testhelpers.TimePtr(time.Now().UTC().Add(10 * time.Minute)),
 		Heartbeat:    time.Now().UTC(),
+		PID:          os.Getpid(),
 	}
 	bb := testhelpers.WriteInitialState(t, statePath, state)
 
@@ -340,6 +406,7 @@ func TestAutoAssignAgentID_ExhaustsRetries(t *testing.T) {
 // TestRegisterAgentConcurrent tests concurrent registration race condition
 func TestRegisterAgentConcurrent(t *testing.T) {
 	tmpDir := t.TempDir()
+	t.Cleanup(ops.SetAgentProcessProcRootForTest(filepath.Join(t.TempDir(), "missing-proc")))
 	statePath, _ := testhelpers.SetupLizaDir(t, tmpDir)
 	testhelpers.SetupPipelineConfig(t, tmpDir)
 
@@ -968,6 +1035,7 @@ func TestResetAgentAfterExit_NoCurrentTask(t *testing.T) {
 // orchestrator with an active lease is rejected.
 func TestRegisterSecondOrchestratorBlocked(t *testing.T) {
 	tmpDir := t.TempDir()
+	t.Cleanup(ops.SetAgentProcessProcRootForTest(filepath.Join(t.TempDir(), "missing-proc")))
 	statePath, _ := testhelpers.SetupLizaDir(t, tmpDir)
 	testhelpers.SetupPipelineConfig(t, tmpDir)
 
@@ -977,6 +1045,7 @@ func TestRegisterSecondOrchestratorBlocked(t *testing.T) {
 		Status:       models.AgentStatusPlanning,
 		LeaseExpires: testhelpers.TimePtr(time.Now().UTC().Add(10 * time.Minute)),
 		Heartbeat:    time.Now().UTC(),
+		PID:          os.Getpid(),
 	}
 	bb := testhelpers.WriteInitialState(t, statePath, state)
 
@@ -1027,6 +1096,7 @@ func TestRegisterOrchestratorTakeoverExpired(t *testing.T) {
 // keys that both resolve to type: orchestrator must not coexist.
 func TestRegisterOrchestratorSingularityAcrossRoleKeys(t *testing.T) {
 	tmpDir := t.TempDir()
+	t.Cleanup(ops.SetAgentProcessProcRootForTest(filepath.Join(t.TempDir(), "missing-proc")))
 	statePath, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
 	// Pipeline with two distinct orchestrator role keys.
@@ -1076,6 +1146,7 @@ pipeline:
 		Status:       models.AgentStatusPlanning,
 		LeaseExpires: testhelpers.TimePtr(time.Now().UTC().Add(10 * time.Minute)),
 		Heartbeat:    time.Now().UTC(),
+		PID:          os.Getpid(),
 	}
 	bb := testhelpers.WriteInitialState(t, statePath, state)
 
@@ -1094,6 +1165,7 @@ pipeline:
 // max-instances enforcement for non-orchestrator roles is unchanged.
 func TestRegisterNonOrchestratorMaxInstancesUnaffected(t *testing.T) {
 	tmpDir := t.TempDir()
+	t.Cleanup(ops.SetAgentProcessProcRootForTest(filepath.Join(t.TempDir(), "missing-proc")))
 	statePath, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
 	// Pipeline with two doer roles that have max-instances: 1.
@@ -1145,6 +1217,7 @@ pipeline:
 		Status:       models.AgentStatusWorking,
 		LeaseExpires: testhelpers.TimePtr(time.Now().UTC().Add(10 * time.Minute)),
 		Heartbeat:    time.Now().UTC(),
+		PID:          os.Getpid(),
 	}
 	bb := testhelpers.WriteInitialState(t, statePath, state)
 
@@ -1162,11 +1235,82 @@ pipeline:
 	}
 }
 
+func TestRegisterMaxInstancesIgnoresDeadOrMismatchedActiveLease(t *testing.T) {
+	tests := []struct {
+		name string
+		pid  int
+		argv []string
+	}{
+		{name: "dead pid", pid: 987654321},
+		{name: "mismatched pid", pid: 1234, argv: []string{"go", "test"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			procRoot := t.TempDir()
+			t.Cleanup(ops.SetAgentProcessProcRootForTest(procRoot))
+			if len(tt.argv) > 0 {
+				writeRegistrationProcCmdline(t, procRoot, tt.pid, tt.argv)
+			}
+			statePath, _ := testhelpers.SetupLizaDir(t, tmpDir)
+
+			cfg, err := pipeline.LoadFromBytes([]byte(`
+pipeline:
+  roles:
+    coder:
+      type: doer
+      max-instances: 1
+      display-name: "Coder"
+    code-reviewer:
+      type: reviewer
+      display-name: "Code Reviewer"
+  role-pairs:
+    coding-pair:
+      doer: coder
+      reviewer: code-reviewer
+      states:
+        initial: DRAFT_CODE
+        executing: IMPLEMENTING_CODE
+        submitted: CODE_READY_FOR_REVIEW
+        reviewing: REVIEWING_CODE
+        approved: CODE_APPROVED
+        rejected: CODE_REJECTED
+  sub-pipelines:
+    coding-subpipeline:
+      steps:
+        - coding-pair
+  entry-points:
+    default: coding-subpipeline.coding-pair
+`))
+			if err != nil {
+				t.Fatalf("LoadFromBytes: %v", err)
+			}
+			resolver := pipeline.NewResolver(cfg)
+
+			state := testhelpers.CreateValidState()
+			state.Agents["coder-1"] = models.Agent{
+				Role:         "coder",
+				Status:       models.AgentStatusWorking,
+				LeaseExpires: testhelpers.TimePtr(time.Now().UTC().Add(10 * time.Minute)),
+				Heartbeat:    time.Now().UTC(),
+				PID:          tt.pid,
+			}
+			bb := testhelpers.WriteInitialState(t, statePath, state)
+
+			err = registerAgent(bb, tmpDir, "coder-2", "coder", "terminal-2", 1800, "claude", resolver)
+			if err != nil {
+				t.Fatalf("registerAgent() error = %v, want capacity to ignore non-live registered agent", err)
+			}
+		})
+	}
+}
+
 // TestRegisterSecondOrchestratorBlockedDespiteMisconfiguredMaxInstances verifies
 // that orchestrator singularity holds even when pipeline YAML sets max-instances: 2.
 // This is the spec invariant: orchestrator is always singular regardless of YAML.
 func TestRegisterSecondOrchestratorBlockedDespiteMisconfiguredMaxInstances(t *testing.T) {
 	tmpDir := t.TempDir()
+	t.Cleanup(ops.SetAgentProcessProcRootForTest(filepath.Join(t.TempDir(), "missing-proc")))
 	statePath, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
 	// Build a resolver from YAML that misconfigures orchestrator with max-instances: 2.
@@ -1213,6 +1357,7 @@ pipeline:
 		Status:       models.AgentStatusPlanning,
 		LeaseExpires: testhelpers.TimePtr(time.Now().UTC().Add(10 * time.Minute)),
 		Heartbeat:    time.Now().UTC(),
+		PID:          os.Getpid(),
 	}
 	bb := testhelpers.WriteInitialState(t, statePath, state)
 
@@ -1224,5 +1369,17 @@ pipeline:
 	}
 	if !strings.Contains(err.Error(), "already has") {
 		t.Errorf("unexpected error message: %v", err)
+	}
+}
+
+func writeRegistrationProcCmdline(t *testing.T, procRoot string, pid int, argv []string) {
+	t.Helper()
+	procDir := filepath.Join(procRoot, strconv.Itoa(pid))
+	if err := os.MkdirAll(procDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	cmdline := strings.Join(argv, "\x00") + "\x00"
+	if err := os.WriteFile(filepath.Join(procDir, "cmdline"), []byte(cmdline), 0644); err != nil {
+		t.Fatal(err)
 	}
 }
