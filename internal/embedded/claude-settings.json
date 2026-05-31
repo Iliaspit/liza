@@ -84,13 +84,14 @@
     ]
   },
   "enableAllProjectMcpServers": true,
-  "additionalDirectories": ["~/.liza", "/tmp"],
   "permissions": {
     "defaultMode": "acceptEdits",
+    "additionalDirectories": ["~/.liza", "/tmp"],
     "allow": [
       "Read(~/.claude/**)",
       "Read(~/.liza/**)",
-      "Write(/tmp/**)",
+      "Write(//tmp/**)",
+      "Edit(//tmp/**)",
       "Monitor(*)",
 
       "Skill(adr-backfill)",

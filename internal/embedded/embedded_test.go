@@ -764,16 +764,17 @@ func TestMergeSettings(t *testing.T) {
 		{
 			name: "additionalDirectories unioned - liza dirs preserved when existing is empty",
 			liza: map[string]any{
-				"additionalDirectories": []any{"~/.liza"},
+				"permissions": map[string]any{
+					"additionalDirectories": []any{"~/.liza"},
+				},
 			},
 			existing: map[string]any{
-				"additionalDirectories": []any{},
+				"permissions": map[string]any{
+					"additionalDirectories": []any{},
+				},
 			},
 			checks: func(t *testing.T, result map[string]any) {
-				dirs, ok := result["additionalDirectories"].([]any)
-				if !ok {
-					t.Fatalf("additionalDirectories is not []any")
-				}
+				dirs := claudeSettingsAdditionalDirectories(t, result)
 				if len(dirs) != 1 || dirs[0] != "~/.liza" {
 					t.Errorf("Expected [~/.liza], got %v", dirs)
 				}
@@ -782,18 +783,66 @@ func TestMergeSettings(t *testing.T) {
 		{
 			name: "additionalDirectories unioned - both sources merged",
 			liza: map[string]any{
-				"additionalDirectories": []any{"~/.liza"},
+				"permissions": map[string]any{
+					"additionalDirectories": []any{"~/.liza"},
+				},
+			},
+			existing: map[string]any{
+				"permissions": map[string]any{
+					"additionalDirectories": []any{"/custom/path"},
+				},
+			},
+			checks: func(t *testing.T, result map[string]any) {
+				dirs := claudeSettingsAdditionalDirectories(t, result)
+				if len(dirs) != 2 {
+					t.Errorf("Expected 2 dirs, got %d: %v", len(dirs), dirs)
+				}
+			},
+		},
+		{
+			name: "legacy top-level additionalDirectories migrated into permissions",
+			liza: map[string]any{
+				"permissions": map[string]any{
+					"additionalDirectories": []any{"~/.liza"},
+				},
 			},
 			existing: map[string]any{
 				"additionalDirectories": []any{"/custom/path"},
 			},
 			checks: func(t *testing.T, result map[string]any) {
-				dirs, ok := result["additionalDirectories"].([]any)
-				if !ok {
-					t.Fatalf("additionalDirectories is not []any")
+				if _, ok := result["additionalDirectories"]; ok {
+					t.Fatalf("top-level additionalDirectories should be removed")
 				}
-				if len(dirs) != 2 {
-					t.Errorf("Expected 2 dirs, got %d: %v", len(dirs), dirs)
+				dirs := claudeSettingsAdditionalDirectories(t, result)
+				dirSet := stringSet(dirs)
+				if !dirSet["~/.liza"] || !dirSet["/custom/path"] {
+					t.Errorf("Expected merged dirs under permissions, got %v", dirs)
+				}
+			},
+		},
+		{
+			name: "legacy top-level additionalDirectories preserved alongside existing permissions",
+			liza: map[string]any{
+				"permissions": map[string]any{
+					"additionalDirectories": []any{"~/.liza"},
+				},
+			},
+			existing: map[string]any{
+				"permissions": map[string]any{
+					"additionalDirectories": []any{"/custom/path"},
+				},
+				"additionalDirectories": []any{"/legacy/path"},
+			},
+			checks: func(t *testing.T, result map[string]any) {
+				if _, ok := result["additionalDirectories"]; ok {
+					t.Fatalf("top-level additionalDirectories should be removed")
+				}
+				dirs := claudeSettingsAdditionalDirectories(t, result)
+				dirSet := stringSet(dirs)
+				for _, expected := range []string{"~/.liza", "/custom/path", "/legacy/path"} {
+					if !dirSet[expected] {
+						t.Errorf("Expected %s in merged dirs, got %v", expected, dirs)
+					}
 				}
 			},
 		},
@@ -981,15 +1030,9 @@ func TestWriteClaudeSettings_MergeAccepted(t *testing.T) {
 		}
 	}
 
-	// Verify additionalDirectories unioned (existing + embedded)
-	dirs, ok := merged["additionalDirectories"].([]any)
-	if !ok {
-		t.Fatalf("additionalDirectories missing after merge")
-	}
-	dirSet := make(map[string]bool)
-	for _, d := range dirs {
-		dirSet[d.(string)] = true
-	}
+	// Verify permissions.additionalDirectories unioned (existing + embedded)
+	dirs := claudeSettingsAdditionalDirectories(t, merged)
+	dirSet := stringSet(dirs)
 	if !dirSet["/custom/path"] {
 		t.Errorf("existing /custom/path not preserved after merge")
 	}
@@ -1093,6 +1136,38 @@ func TestEmbeddedClaudeSettingsScipSearchPermissions(t *testing.T) {
 	assertClaudeSettingsToolPermissions(t, allow)
 }
 
+func TestEmbeddedClaudeSettingsTmpPermissions(t *testing.T) {
+	var settings map[string]any
+	if err := json.Unmarshal(claudeSettingsContent, &settings); err != nil {
+		t.Fatalf("embedded claude-settings.json is invalid JSON: %v", err)
+	}
+
+	if _, ok := settings["additionalDirectories"]; ok {
+		t.Fatalf("additionalDirectories must be nested under permissions")
+	}
+
+	dirs := claudeSettingsAdditionalDirectories(t, settings)
+	dirSet := stringSet(dirs)
+	if !dirSet["~/.liza"] {
+		t.Errorf("permissions.additionalDirectories missing ~/.liza: %v", dirs)
+	}
+	if !dirSet["/tmp"] {
+		t.Errorf("permissions.additionalDirectories missing /tmp: %v", dirs)
+	}
+
+	allow := claudeSettingsAllowPermissions(t, settings)
+	allowSet := stringSet(allow)
+	if !allowSet["Write(//tmp/**)"] {
+		t.Errorf("permissions.allow missing Write(//tmp/**)")
+	}
+	if !allowSet["Edit(//tmp/**)"] {
+		t.Errorf("permissions.allow missing Edit(//tmp/**)")
+	}
+	if allowSet["Write(/tmp/**)"] {
+		t.Errorf("permissions.allow must not use project-relative Write(/tmp/**)")
+	}
+}
+
 func TestWriteClaudeSettings_InheritsScipSearchPermission(t *testing.T) {
 	tmpDir := t.TempDir()
 
@@ -1182,6 +1257,39 @@ func claudeSettingsAllowPermissions(t *testing.T, settings map[string]any) []str
 	}
 
 	return allow
+}
+
+func claudeSettingsAdditionalDirectories(t *testing.T, settings map[string]any) []string {
+	t.Helper()
+
+	perms, ok := settings["permissions"].(map[string]any)
+	if !ok {
+		t.Fatalf("permissions field missing or invalid")
+	}
+
+	dirValues, ok := perms["additionalDirectories"].([]any)
+	if !ok {
+		t.Fatalf("permissions.additionalDirectories missing or invalid")
+	}
+
+	dirs := make([]string, 0, len(dirValues))
+	for _, value := range dirValues {
+		dir, ok := value.(string)
+		if !ok {
+			t.Fatalf("permissions.additionalDirectories contains non-string value %T", value)
+		}
+		dirs = append(dirs, dir)
+	}
+
+	return dirs
+}
+
+func stringSet(values []string) map[string]bool {
+	set := make(map[string]bool, len(values))
+	for _, value := range values {
+		set[value] = true
+	}
+	return set
 }
 
 func assertClaudeSettingsToolPermissions(t *testing.T, allow []string) {

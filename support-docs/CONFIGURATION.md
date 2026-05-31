@@ -13,6 +13,7 @@ System configuration, tuning parameters, and environment variables.
 - **`Bash(liza:*)`** — grants permission for agents to invoke Liza CLI commands
 - **`Skill(...)`** — contract skills from `~/.liza/skills/` (installed by `liza setup`)
 - **`defaultMode: acceptEdits`** — required for headless agent operation
+- **`permissions.additionalDirectories`** — grants access to required non-project directories such as `~/.liza` and `/tmp`
 
 ### Two-Layer Architecture
 
@@ -21,7 +22,7 @@ Claude Code unions permissions from global and project settings:
 | Layer | File | Managed by | Contains |
 |-------|------|-----------|----------|
 | **Project** | `<project>/.claude/settings.json` | `liza init` (automatic) | Liza CLI permissions, skills, git/build commands |
-| **Global** | `~/.claude/settings.json` | Manual (one-time) | Personal MCP tools (IDE, search, etc.), `additionalDirectories`, `Read(~/.liza/**)` |
+| **Global** | `~/.claude/settings.json` | Manual (one-time) | Personal MCP tools (IDE, search, etc.), machine-specific permissions |
 
 The project layer is portable (team-shared). The global layer is machine-specific (personal tools and paths). Neither alone is sufficient — both are needed.
 

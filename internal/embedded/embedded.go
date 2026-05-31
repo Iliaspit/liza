@@ -1104,17 +1104,14 @@ func mergeSettings(liza, existing map[string]any) map[string]any {
 				result[k] = v
 			}
 		case "additionalDirectories":
-			lizaDirs, lizaOk := liza[k].([]any)
-			existingDirs, existingOk := v.([]any)
-			if lizaOk && existingOk {
-				result[k] = unionStringArrays(lizaDirs, existingDirs)
-			} else if existingOk {
-				result[k] = v
-			}
+			result[k] = v
 		default:
 			result[k] = v
 		}
 	}
+	mergeTopLevelAdditionalDirectories(result, liza["additionalDirectories"])
+	mergeTopLevelAdditionalDirectories(result, existing["additionalDirectories"])
+	delete(result, "additionalDirectories")
 
 	return result
 }
@@ -1126,7 +1123,8 @@ func mergePermissions(liza, existing map[string]any) map[string]any {
 	maps.Copy(result, liza)
 
 	for k, v := range existing {
-		if k == "allow" {
+		switch k {
+		case "allow", "additionalDirectories":
 			lizaAllow, lizaOk := liza[k].([]any)
 			existingAllow, existingOk := v.([]any)
 			if lizaOk && existingOk {
@@ -1134,12 +1132,28 @@ func mergePermissions(liza, existing map[string]any) map[string]any {
 			} else if existingOk {
 				result[k] = v
 			}
-		} else {
+		default:
 			result[k] = v
 		}
 	}
 
 	return result
+}
+
+func mergeTopLevelAdditionalDirectories(result map[string]any, value any) {
+	dirs, ok := value.([]any)
+	if !ok {
+		return
+	}
+
+	perms, ok := result["permissions"].(map[string]any)
+	if !ok {
+		perms = make(map[string]any)
+		result["permissions"] = perms
+	}
+
+	existingDirs, _ := perms["additionalDirectories"].([]any)
+	perms["additionalDirectories"] = unionStringArrays(existingDirs, dirs)
 }
 
 // mergeHooks merges hook configurations.
