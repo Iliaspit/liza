@@ -17,6 +17,8 @@ import (
 )
 
 const awaitResubmissionPassiveGuidance = "If the harness backgrounds await-resubmission and says it will notify on completion, end the turn; do NOT call Monitor, search for Monitor, ScheduleWakeup, or read/tail/sleep/poll the output file."
+const validationCommandShapeRule = "Forbidden validation command shapes: `cd ... &&`, command substitution/backticks, polling or tail pipelines, and task artifact paths outside the worktree."
+const validationFallback = "If a stored validation command violates BASH CONSTRAINTS, do not execute it literally; treat it as validation intent, run an equivalent single-purpose command from the worktree/tool working directory, and record both the original command and translated command in validation evidence."
 
 func assertAwaitResubmissionPassiveGuidance(t *testing.T, output string, wantGuidanceLines int) {
 	t.Helper()
@@ -2142,11 +2144,57 @@ func TestBuildRoleContext_PlanRefAndValidationPlan(t *testing.T) {
 		}
 		if !strings.Contains(output, "Evidence must prove the intended check ran") ||
 			!strings.Contains(output, "do not infer local tool paths") ||
-			!strings.Contains(output, "not inferred from local tooling") {
+			!strings.Contains(output, "not inferred from local tooling") ||
+			!strings.Contains(output, validationFallback) {
 			t.Error("output missing validation proof guidance")
 		}
 		if !strings.Contains(output, "\n- make test") || strings.Contains(output, "tooling.-") {
 			t.Error("canonical validation note should render before commands with a line break")
+		}
+	})
+
+	t.Run("unsafe validation commands render with adjacent fallback", func(t *testing.T) {
+		data := &RoleContextData{
+			Role: "coder", AgentID: "coder-1", RoleType: "doer",
+			TaskID: "task-unsafe-validation", Description: "Implement feature X",
+			DoneWhen: "Feature X works", Scope: "internal/feature",
+			Worktree:          projectRoot + "/.worktrees/task-unsafe-validation",
+			IterationNum:      1,
+			IntegrationBranch: "integration",
+			ValidationCommands: []string{
+				"cd services/foo && test",
+				"echo $(pwd)",
+				"tail -f /tmp/liza-output",
+			},
+			ProjectRoot: projectRoot,
+		}
+		sections, _ := resolver.ContextSections("coder")
+		output, err := BuildRoleContext("coder", sections, data)
+		if err != nil {
+			t.Fatalf("BuildRoleContext: %v", err)
+		}
+
+		canonicalIdx := strings.Index(output, "CANONICAL VALIDATION:")
+		noteIdx := strings.Index(output, validationFallback)
+		firstCommandIdx := strings.Index(output, "- cd services/foo && test")
+		if canonicalIdx == -1 || noteIdx == -1 || firstCommandIdx == -1 {
+			t.Fatalf("canonical validation section missing fallback or raw command:\n%s", output)
+		}
+		if !(canonicalIdx < noteIdx && noteIdx < firstCommandIdx) {
+			t.Fatalf("validation fallback must render between CANONICAL VALIDATION and raw commands:\n%s", output)
+		}
+		between := output[noteIdx+len(validationFallback) : firstCommandIdx]
+		if strings.TrimSpace(between) != "" {
+			t.Fatalf("validation fallback should be adjacent to raw validation commands, got intervening text %q", between)
+		}
+		for _, rawCommand := range []string{
+			"- cd services/foo && test",
+			"- echo $(pwd)",
+			"- tail -f /tmp/liza-output",
+		} {
+			if !strings.Contains(output, rawCommand) {
+				t.Fatalf("raw validation command %q should remain visible:\n%s", rawCommand, output)
+			}
 		}
 	})
 
@@ -2227,6 +2275,77 @@ func TestBuildRoleContext_PlanRefAndValidationPlan(t *testing.T) {
 			t.Error("output should NOT contain plan reference when PlanRef is empty")
 		}
 	})
+}
+
+func TestBuildRoleContext_ValidationCommandShapeGuidance(t *testing.T) {
+	projectRoot := setupPipelineConfig(t)
+	resolver := testPipelineResolver(t)
+
+	for _, tc := range []struct {
+		role     string
+		agentID  string
+		roleType string
+	}{
+		{role: "code-planner", agentID: "code-planner-1", roleType: "doer"},
+		{role: "epic-planner", agentID: "epic-planner-1", roleType: "doer"},
+		{role: "architect", agentID: "architect-1", roleType: "doer"},
+		{role: "integration-analyst", agentID: "integration-analyst-1", roleType: "doer"},
+	} {
+		t.Run("producer/"+tc.role, func(t *testing.T) {
+			data := &RoleContextData{
+				Role: tc.role, AgentID: tc.agentID, RoleType: tc.roleType,
+				TaskID: "task-validation-shape", Description: "Produce child tasks",
+				DoneWhen: "Output entries are ready", Scope: "specs",
+				Worktree:          projectRoot + "/.worktrees/task-validation-shape",
+				IterationNum:      1,
+				GoalSpecRef:       "specs/goal.md",
+				GoalSlug:          "goal-slug",
+				IntegrationBranch: "integration",
+				ProjectRoot:       projectRoot,
+			}
+			sections, err := resolver.ContextSections(tc.role)
+			if err != nil {
+				t.Fatalf("ContextSections: %v", err)
+			}
+			output, err := BuildRoleContext(tc.role, sections, data)
+			if err != nil {
+				t.Fatalf("BuildRoleContext: %v", err)
+			}
+			if !strings.Contains(output, "single-purpose and agent-executable") {
+				t.Fatalf("%s prompt missing validation command executability rule:\n%s", tc.role, output)
+			}
+			if !strings.Contains(output, validationCommandShapeRule) {
+				t.Fatalf("%s prompt missing forbidden validation command shapes:\n%s", tc.role, output)
+			}
+		})
+	}
+
+	tmpl := template.Must(template.ParseFiles("templates/blocks/review_instructions.tmpl"))
+	for _, role := range []string{"code-plan-reviewer", "epic-plan-reviewer", "architecture-reviewer", "integration-reviewer"} {
+		t.Run("reviewer/"+role, func(t *testing.T) {
+			data := RoleContextData{
+				Role:           role,
+				TaskID:         "task-review",
+				AgentID:        "reviewer-1",
+				Worktree:       "/tmp/worktree",
+				BaseCommit:     "base123",
+				ReviewCommit:   "review123",
+				GoalBaseCommit: "goalbase123",
+				GoalSlug:       "goal-slug",
+			}
+			var buf bytes.Buffer
+			if err := tmpl.ExecuteTemplate(&buf, "review-instructions", &data); err != nil {
+				t.Fatalf("failed to execute review-instructions template: %v", err)
+			}
+			output := buf.String()
+			if !strings.Contains(output, "single-purpose and agent-executable") {
+				t.Fatalf("%s prompt missing validation command executability rule:\n%s", role, output)
+			}
+			if !strings.Contains(output, validationCommandShapeRule) {
+				t.Fatalf("%s prompt missing forbidden validation command shapes:\n%s", role, output)
+			}
+		})
+	}
 }
 
 func TestRenderOrchestratorDashboard_CycleBlocked(t *testing.T) {

@@ -98,6 +98,7 @@ REVIEW CHECKLIST:
 | Task-output JSON location | Task-output JSON artifact missing from diff next to the plan artifact at specs/plans/{{.GoalSlug}}/TIMESTAMP-{{.TaskID}}-output.json, or any committed task-output JSON appears under .liza/agent-outputs/ |
 | output[] matches plan | For each output[] entry, compare desc, done_when, scope, spec_ref, validation, depends_on, and task_depends_on against the plan artifact in the worktree — they must be identical, not paraphrased or extended |
 | validation satisfiable | An output[] validation command can exit 0 without exercising its intended check, or hook/check intent is not declared in durable plan/task text |
+| validation command shape | A validation[] command is not single-purpose and agent-executable. Forbidden validation command shapes: `cd ... &&`, command substitution/backticks, polling or tail pipelines, and task artifact paths outside the worktree. |
 | Cross-reference consistency | For every cross-reference in the plan ("owned by CPx", "depends on CPx", "out of scope for CPx"), the referenced task must explicitly state that responsibility, dependency, or exclusion. Reject if any dangling reference. |
 | e2e/doc coverage | Spec compliance matrix missing mandatory E2E or DOC impact rows, or rows marked N/A without justification, or feature adds user-visible behavior but no e2e test or doc update task planned |
 {{- if ne .ArchRef ""}}
@@ -173,6 +174,7 @@ REVIEW CHECKLIST:
 | Right-sized scope | Epic would produce >8 or <2 user stories — reject with merge/split suggestion |
 | Falsifiable done_when | done_when is vague, untestable, or requires outcomes across unrelated subsystems |
 | validation satisfiable | An output[] validation command can exit 0 without exercising its intended check, or hook/check intent is not declared in durable epic/story/task text |
+| validation command shape | A validation[] command is not single-purpose and agent-executable. Forbidden validation command shapes: `cd ... &&`, command substitution/backticks, polling or tail pipelines, and task artifact paths outside the worktree. |
 | Persona coherence | Epic mixes unrelated persona clusters — US Writer would need to context-switch |
 | Independence | Epic has unnecessary coupling to other epics — verify cross-epic dependencies are true ordering constraints |
 | Vision coverage | Epics collectively miss or exceed vision scope — reject with gap/scope-absorption note |
@@ -292,6 +294,7 @@ REVIEW CHECKLIST:
 | Domain-level scopes | Scopes split within a domain by implementation steps rather than by domain boundaries. Sequencing within a domain is code-planner territory. |
 | Falsifiable done_when | done_when for output[] entries is vague or untestable |
 | validation satisfiable | An output[] validation command can exit 0 without exercising its intended check, or hook/check intent is not declared in durable architecture/task text |
+| validation command shape | A validation[] command is not single-purpose and agent-executable. Forbidden validation command shapes: `cd ... &&`, command substitution/backticks, polling or tail pipelines, and task artifact paths outside the worktree. |
 | Dependency ordering | Output[] entries have circular or missing dependencies |
 | Shared-file dependencies | Two output[] entries may modify the same files without depends_on |
 | arch_ref set | Output[] entries missing arch_ref pointing to the architecture document |
@@ -356,6 +359,7 @@ INSTRUCTIONS:
    b. Verify the fix-task is well-formed: single intent, falsifiable done_when, correct scope
    c. Verify the scope is minimal — fix only what's needed, no scope creep
    d. Verify any validation command is satisfiable and its intended check/hook intent is declared in durable fix-task text
+   e. Verify any validation[] command is single-purpose and agent-executable. Forbidden validation command shapes: `cd ... &&`, command substitution/backticks, polling or tail pipelines, and task artifact paths outside the worktree.
 5. Systemic enrichment: after reviewing individual fix-tasks, analyze:
    a. Interaction effects: could fixing A break the fix for B?
    b. Architectural drift: do the fixes collectively move the codebase away from its design intent?
