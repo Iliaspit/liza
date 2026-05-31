@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"regexp"
 	"slices"
+	"sort"
 	"strings"
 
 	"github.com/liza-mas/liza/internal/errors"
@@ -626,24 +627,14 @@ func boundedTaskGraphEntries(ordered []*prompts.TaskGraphEntry, digest *prompts.
 		return ordered
 	}
 
-	var selected []*prompts.TaskGraphEntry
-	var deferred []*prompts.TaskGraphEntry
-	for _, entry := range ordered {
-		if isCriticalTaskGraphEntry(entry) {
-			selected = append(selected, entry)
-			continue
-		}
-		deferred = append(deferred, entry)
-	}
+	ranked := append([]*prompts.TaskGraphEntry(nil), ordered...)
+	sort.SliceStable(ranked, func(i, j int) bool {
+		// Equal scores keep the existing candidate discovery order.
+		return taskGraphPriority(ranked[i]) > taskGraphPriority(ranked[j])
+	})
 
-	remainingSlots := max(0, maxTaskGraphEntries-len(selected))
-	remainingSlots = min(remainingSlots, len(deferred))
-
-	selectedIDs := make(map[string]bool, len(selected)+remainingSlots)
-	for _, entry := range selected {
-		selectedIDs[entry.ID] = true
-	}
-	for _, entry := range deferred[:remainingSlots] {
+	selectedIDs := make(map[string]bool, maxTaskGraphEntries)
+	for _, entry := range ranked[:maxTaskGraphEntries] {
 		selectedIDs[entry.ID] = true
 	}
 
@@ -660,17 +651,40 @@ func boundedTaskGraphEntries(ordered []*prompts.TaskGraphEntry, digest *prompts.
 	return bounded
 }
 
-func isCriticalTaskGraphEntry(entry *prompts.TaskGraphEntry) bool {
+func taskGraphPriority(entry *prompts.TaskGraphEntry) int {
+	if entry == nil {
+		return 0
+	}
+	if hasTaskGraphRelation(entry, "dependency") {
+		return 100
+	}
+	if hasTaskGraphRelation(entry, "blocked") || entry.BlockedReason != "" || entry.RepairOperation != "" {
+		return 90
+	}
+	if hasTaskGraphRelation(entry, "file-overlap") {
+		return 80
+	}
+	if isArtifactOnlyTaskGraphEntry(entry) {
+		return 10
+	}
+	if hasTaskGraphRelation(entry, "sibling") {
+		return 50
+	}
+	return 30
+}
+
+func isArtifactOnlyTaskGraphEntry(entry *prompts.TaskGraphEntry) bool {
 	if entry == nil {
 		return false
 	}
-	return hasTaskGraphRelation(entry, "dependency") ||
+	if hasTaskGraphRelation(entry, "dependency") ||
 		hasTaskGraphRelation(entry, "blocked") ||
 		hasTaskGraphRelation(entry, "file-overlap") ||
-		hasTaskGraphRelation(entry, "artifact-producer") ||
-		hasTaskGraphRelation(entry, "artifact-ref") ||
 		entry.BlockedReason != "" ||
-		entry.RepairOperation != ""
+		entry.RepairOperation != "" {
+		return false
+	}
+	return hasTaskGraphRelation(entry, "artifact-producer") || hasTaskGraphRelation(entry, "artifact-ref")
 }
 
 func hasTaskGraphRelation(entry *prompts.TaskGraphEntry, relation string) bool {

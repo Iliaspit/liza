@@ -16,6 +16,7 @@ import (
 	"github.com/liza-mas/liza/internal/paths"
 	"github.com/liza-mas/liza/internal/pipeline"
 	"github.com/liza-mas/liza/internal/precommit"
+	"github.com/liza-mas/liza/internal/prompts"
 	"github.com/liza-mas/liza/internal/scipsearch"
 	"github.com/liza-mas/liza/internal/stacklit"
 	"github.com/liza-mas/liza/internal/testhelpers"
@@ -1414,26 +1415,196 @@ func TestBuildPrompt_TaskGraphSummarizesLowSalienceSiblings(t *testing.T) {
 		t.Fatalf("BuildPrompt() error: %v", err)
 	}
 
-	if got := strings.Count(prompt, "- sibling-"); got != 12 {
-		t.Fatalf("rendered low-salience siblings = %d, want 12", got)
+	if got := strings.Count(prompt, "- sibling-"); got != 13 {
+		t.Fatalf("rendered low-salience siblings = %d, want 13", got)
 	}
 	for _, want := range []string{
 		"dep-task [DRAFT_CODE; dependency]: Critical dependency",
 		"blocked-sibling [BLOCKED; blocked, sibling]: Blocked sibling | blocker: waiting for owner",
 		"overlap-sibling [DRAFT_CODE; sibling, file-overlap]: Overlapping sibling | shared refs: internal/shared.go",
-		"artifact-sibling [MERGED; artifact-producer, artifact-ref, sibling]: Artifact sibling",
 		"Omitted related tasks: 18",
-		"statuses: DRAFT_CODE=18",
-		"relations: sibling=18",
-		"sample ids: sibling-12, sibling-13, sibling-14, sibling-15, sibling-16, sibling-17, sibling-18, sibling-19 (+10 more)",
+		"statuses: DRAFT_CODE=17, MERGED=1",
+		"relations: artifact-producer=1, artifact-ref=1, sibling=18",
+		"sample ids: artifact-sibling, sibling-13, sibling-14, sibling-15, sibling-16, sibling-17, sibling-18, sibling-19 (+10 more)",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Errorf("bounded task graph missing %q", want)
 		}
 	}
+	if strings.Contains(prompt, "artifact-sibling [MERGED; artifact-producer, artifact-ref, sibling]: Artifact sibling") {
+		t.Error("artifact-only sibling should be omitted before plain planned siblings")
+	}
 	if strings.Contains(prompt, "Plain sibling 20") {
 		t.Error("omitted sibling descriptions should not render inline")
 	}
+}
+
+func TestBuildPrompt_TaskGraphCapsArtifactSiblingFlood(t *testing.T) {
+	now := time.Now().UTC()
+	worktree := ".worktrees/task-current"
+	state := &models.State{
+		Version: 1,
+		Goal: models.Goal{
+			ID:          "goal-1",
+			Description: "Test goal",
+			SpecRef:     "specs/vision.md",
+			Status:      models.GoalStatusInProgress,
+			Created:     now,
+		},
+		Tasks: []models.Task{
+			{
+				ID:          "task-current",
+				Description: "Implement current behavior",
+				Status:      models.TaskStatusImplementing,
+				RolePair:    "coding-pair",
+				Priority:    1,
+				DependsOn:   []string{"artifact-dep"},
+				Scope:       "In scope: internal/current.go",
+				Worktree:    &worktree,
+				Created:     now,
+			},
+			{
+				ID:          "artifact-dep",
+				Description: "Dependency with produced outputs",
+				Status:      models.TaskStatusMerged,
+				RolePair:    "code-planning-pair",
+				Priority:    1,
+				PlanRef:     "specs/plans/dependency.md",
+				Output: []models.OutputEntry{
+					{PlanRef: "specs/plans/dependency-output.md"},
+				},
+				Created: now,
+			},
+		},
+		Sprint: models.Sprint{
+			Scope: models.SprintScope{
+				Planned: []string{"task-current"},
+			},
+		},
+		Agents: make(map[string]models.Agent),
+		Config: models.Config{IntegrationBranch: "main"},
+	}
+
+	for i := range maxTaskGraphEntries + 10 {
+		id := fmt.Sprintf("artifact-sibling-%02d", i)
+		state.Tasks = append(state.Tasks, models.Task{
+			ID:          id,
+			Description: fmt.Sprintf("Merged artifact sibling %02d", i),
+			Status:      models.TaskStatusMerged,
+			RolePair:    "coding-pair",
+			Priority:    i + 2,
+			PlanRef:     fmt.Sprintf("specs/plans/artifact-%02d.md", i),
+			Output: []models.OutputEntry{
+				{PlanRef: fmt.Sprintf("specs/plans/artifact-output-%02d.md", i)},
+			},
+			Created: now,
+		})
+		state.Sprint.Scope.Planned = append(state.Sprint.Scope.Planned, id)
+	}
+
+	digest := buildRelevantTaskGraph(state, &state.Tasks[0])
+	if got := len(digest.Entries); got != maxTaskGraphEntries {
+		t.Fatalf("task graph entries = %d, want hard cap %d", got, maxTaskGraphEntries)
+	}
+	if !taskGraphDigestContains(digest, "artifact-dep") {
+		t.Fatalf("artifact-producing dependency should remain rendered under artifact sibling pressure: %+v", digest.Entries)
+	}
+	if taskGraphDigestContains(digest, "artifact-sibling-15") {
+		t.Fatalf("artifact-only siblings should be omitted after hard cap: %+v", digest.Entries)
+	}
+	if digest.Omitted.Count != 11 {
+		t.Fatalf("omitted count = %d, want 11", digest.Omitted.Count)
+	}
+	if want := []prompts.TaskGraphCount{{Name: "MERGED", Count: 11}}; !slices.Equal(digest.Omitted.StatusCounts, want) {
+		t.Fatalf("omitted status counts = %+v, want %+v", digest.Omitted.StatusCounts, want)
+	}
+	wantRelationCounts := []prompts.TaskGraphCount{
+		{Name: "artifact-producer", Count: 11},
+		{Name: "artifact-ref", Count: 11},
+		{Name: "sibling", Count: 11},
+	}
+	if !slices.Equal(digest.Omitted.RelationCounts, wantRelationCounts) {
+		t.Fatalf("omitted relation counts = %+v, want %+v", digest.Omitted.RelationCounts, wantRelationCounts)
+	}
+	wantSampleIDs := []string{
+		"artifact-sibling-15",
+		"artifact-sibling-16",
+		"artifact-sibling-17",
+		"artifact-sibling-18",
+		"artifact-sibling-19",
+		"artifact-sibling-20",
+		"artifact-sibling-21",
+		"artifact-sibling-22",
+	}
+	if !slices.Equal(digest.Omitted.SampleIDs, wantSampleIDs) {
+		t.Fatalf("omitted sample ids = %+v, want %+v", digest.Omitted.SampleIDs, wantSampleIDs)
+	}
+	if digest.Omitted.RemainingSampleIDs != 3 {
+		t.Fatalf("remaining omitted sample ids = %d, want 3", digest.Omitted.RemainingSampleIDs)
+	}
+
+	tmpDir := t.TempDir()
+	config := SupervisorConfig{
+		Role:        "coder",
+		AgentID:     "coder-1",
+		ProjectRoot: tmpDir,
+		SpecsDir:    filepath.Join(tmpDir, "specs"),
+		StatePath:   filepath.Join(tmpDir, "state.yaml"),
+	}
+
+	prompt, err := testBuildPrompt(t, state, config, "task-current")
+	if err != nil {
+		t.Fatalf("BuildPrompt() error: %v", err)
+	}
+	graphSection := extractRenderedTaskGraphSection(t, prompt)
+	if got := strings.Count(graphSection, "\n- "); got != maxTaskGraphEntries {
+		t.Fatalf("rendered task graph entries = %d, want hard cap %d\n%s", got, maxTaskGraphEntries, graphSection)
+	}
+	if !strings.Contains(graphSection, "artifact-dep [MERGED; dependency, artifact-producer, artifact-ref]: Dependency with produced outputs") {
+		t.Fatalf("artifact-producing dependency should remain rendered under artifact sibling pressure:\n%s", graphSection)
+	}
+	if strings.Contains(graphSection, "artifact-sibling-15 [") {
+		t.Fatalf("artifact-only sibling entry should be omitted after hard cap:\n%s", graphSection)
+	}
+	if !strings.Contains(graphSection, "Omitted related tasks: 11") ||
+		!strings.Contains(graphSection, "statuses: MERGED=11") ||
+		!strings.Contains(graphSection, "relations: artifact-producer=11, artifact-ref=11, sibling=11") ||
+		!strings.Contains(graphSection, "sample ids: artifact-sibling-15, artifact-sibling-16, artifact-sibling-17, artifact-sibling-18, artifact-sibling-19, artifact-sibling-20, artifact-sibling-21, artifact-sibling-22 (+3 more)") {
+		t.Fatalf("rendered task graph omitted summary missing artifact flood details:\n%s", graphSection)
+	}
+}
+
+func taskGraphDigestContains(digest prompts.TaskGraphDigest, id string) bool {
+	for _, entry := range digest.Entries {
+		if entry.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
+func extractRenderedTaskGraphSection(t *testing.T, prompt string) string {
+	t.Helper()
+	scopingStart := strings.LastIndex(prompt, "=== COLLECTIVE PLAN SCOPING ===")
+	if scopingStart == -1 {
+		t.Fatalf("buildPrompt() missing collective plan scoping")
+	}
+	graphStartOffset := strings.Index(prompt[scopingStart:], "RELEVANT TASK GRAPH DIGEST:")
+	if graphStartOffset == -1 {
+		t.Fatalf("buildPrompt() missing task graph digest")
+	}
+	graphStart := scopingStart + graphStartOffset
+	graphFromStart := prompt[graphStart:]
+	omittedStart := strings.Index(graphFromStart, "\nOmitted related tasks:")
+	if omittedStart == -1 {
+		t.Fatalf("rendered task graph missing omitted summary:\n%s", graphFromStart)
+	}
+	afterOmitted := graphFromStart[omittedStart+1:]
+	omittedEnd := strings.Index(afterOmitted, "\n")
+	if omittedEnd == -1 {
+		return graphFromStart
+	}
+	return graphFromStart[:omittedStart+1+omittedEnd]
 }
 
 func TestTaskGraphChildrenAreBounded(t *testing.T) {
