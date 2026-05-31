@@ -74,6 +74,7 @@ func TestWaitForCoderWork(t *testing.T) {
 			config := SupervisorConfig{
 				StatePath:   statePath,
 				ProjectRoot: tmpDir,
+				AgentID:     "coder-1",
 			}
 
 			bb := db.New(statePath)
@@ -385,6 +386,7 @@ func TestWaitForOrchestratorWork(t *testing.T) {
 			config := SupervisorConfig{
 				StatePath:   statePath,
 				ProjectRoot: tmpDir,
+				AgentID:     "orchestrator-1",
 			}
 
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -421,6 +423,7 @@ func TestOrchestratorRespectsMaxWaitConfig(t *testing.T) {
 	config := SupervisorConfig{
 		StatePath:   statePath,
 		ProjectRoot: tmpDir,
+		AgentID:     "coder-1",
 	}
 
 	// Test with a short maxWait - orchestrator should timeout when maxWait is reached
@@ -513,6 +516,7 @@ func TestWaitForWorkEventDriven(t *testing.T) {
 			config := SupervisorConfig{
 				StatePath:   statePath,
 				ProjectRoot: tmpDir,
+				AgentID:     tt.role + "-1",
 			}
 
 			bb := db.New(statePath)
@@ -581,6 +585,7 @@ func TestWaitForWorkCancellation(t *testing.T) {
 	config := SupervisorConfig{
 		StatePath:   statePath,
 		ProjectRoot: tmpDir,
+		AgentID:     "coder-1",
 	}
 
 	bb := db.New(statePath)
@@ -623,6 +628,7 @@ func TestWaitForWorkTimeout(t *testing.T) {
 	config := SupervisorConfig{
 		StatePath:   statePath,
 		ProjectRoot: tmpDir,
+		AgentID:     "coder-1",
 	}
 
 	bb := db.New(statePath)
@@ -1301,6 +1307,7 @@ func TestWaitForWork_AbortTickerDetectsWork_TOCTOU(t *testing.T) {
 	config := SupervisorConfig{
 		StatePath:   statePath,
 		ProjectRoot: tmpDir,
+		AgentID:     "coder-1",
 	}
 	bb := db.New(statePath)
 

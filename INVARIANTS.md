@@ -128,6 +128,7 @@ Every non-empty task ID must identify exactly one task in `state.yaml`.
 | Per-role-key instance limits: max N instances per role (configurable) | Resource contention | code (`resolver.MaxInstances()`) |
 | WORKING agent must have `current_task` and valid `lease_expires` | Ghost agents, phantom work | spec, code (`validate_agent.go`) |
 | Active doer ownership: tasks in a pipeline executing state must have `assigned_to` pointing to an agent with the exact doer role for the task's `role_pair`, valid owner metadata, and either status `WORKING` with matching `current_task`, status `HANDOFF` with `handoff_pending` and matching `current_task`, or the owned-executing recovery state | Dead doers holding work, cross-role doer claims | spec, code |
+| Rejected doer ownership: tasks in a pipeline rejected state with `assigned_to` and an unexpired `lease_expires` can be reclaimed only by that same agent; an expired lease permits reassignment; `assigned_to` without `lease_expires` is corrupted state requiring repair before any reclaim | Ownership collisions, lost rejected work, noisy claim loops | spec, code (`claim_task.go`, `diagnostics.go`) |
 | Active review ownership: tasks in a pipeline reviewing state (`ReviewingStatus` or `Reviewing2Status`) must have `reviewing_by` pointing to an agent with the exact reviewer role for the task's `role_pair`, status `REVIEWING`, matching `current_task`, and valid review lease | Dead reviewers holding review work, cross-role review claims | spec, code |
 | No two agents assigned to same executing task | Ownership collisions | spec, code (`validate_task.go`) |
 | Agent ID format: `{role}-{number}` (e.g., `coder-1`) | Identity spoofing, cross-role execution | code (registration validation) |
@@ -146,7 +147,7 @@ Agent registration/unregistration, heartbeat, post-exit IDLE reset, orchestrator
 | Invariant | Protects Against | Enforced |
 |-----------|------------------|----------|
 | All state modifications atomic via exclusive file lock | Race conditions, partial writes | code (`blackboard.go` `Modify()`) |
-| Three-phase claim: validate under lock → worktree outside lock → re-validate and commit under lock | TOCTOU races on claim | code (`claim_task.go`) |
+| Three-phase claim: validate ownership/eligibility under lock → worktree outside lock → re-validate ownership/eligibility and commit under lock | TOCTOU races on claim | code (`claim_task.go`) |
 | CAS merge: `update-ref` uses compare-and-swap; retries up to 3× if ref moved | Concurrent merge corruption | spec (`worktree-management.md`), code (`wt_merge.go`) |
 | Singleton Blackboard instances per state path | Cache coherence, fragmented locks | code (`blackboard.go` via `sync.Map`) |
 | Concurrent transition detection: re-validate status under lock before committing | Status changed between read and write | code (`wt_merge.go`, `submit_review.go`) |
@@ -187,7 +188,7 @@ Integration-fix claims clear active `output[]`, `review_commit`, approvals, `mer
 | If post-merge `ValidateArtifactRefs` fails → rollback via `update-ref` to pre-merge HEAD | Backstop for broken blackboard artifact refs after ref advancement | spec, code (`wt_merge.go`, `validate.go`) |
 | Worktree path is deterministic: `.worktrees/{taskID}` | Directory traversal, path confusion | code (`claim_task.go`, `wt_create.go`) |
 | BLOCKED/ABANDONED/SUPERSEDED/MERGED tasks: worktree must be deleted | Stale worktrees, resource leaks | spec (`worktree-management.md`) |
-| Different coder reclaiming REJECTED task → delete and recreate fresh worktree | Context contamination from failed work | spec |
+| Rejected-task reclaim preserves the task worktree/branch for same-owner reclaim and post-expiry reassignment; missing or corrupt worktree state is recreated from integration | Lost rejected work, inconsistent reassignment semantics | spec, code (`claim_task.go`) |
 | Rebase onto integration branch before submission; conflict → abort and restore clean state | Merge conflicts discovered late | code (`submit_review.go`) |
 
 The candidate-tree artifact guard protects goal `spec_ref`; task `spec_ref`,

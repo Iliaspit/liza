@@ -472,8 +472,8 @@ func TestClaimTask_IntegrationFailed(t *testing.T) {
 }
 
 // TestClaimTask_RejectedWorktreePresent_Preserved verifies that when a REJECTED
-// task has both worktree dir and branch present, claiming preserves the worktree
-// regardless of coder identity (different coder does NOT trigger teardown+recreate).
+// task's ownership lease has expired and both worktree dir and branch are
+// present, reassignment preserves the worktree.
 func TestClaimTask_RejectedWorktreePresent_Preserved(t *testing.T) {
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
@@ -483,7 +483,8 @@ func TestClaimTask_RejectedWorktreePresent_Preserved(t *testing.T) {
 	state := testhelpers.CreateValidState()
 	registerClaimTaskTestAgents(state)
 	task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusRejected, now)
-	// task.AssignedTo is "coder-1" from BuildTaskByStatus
+	expiredLease := now.Add(-time.Minute)
+	task.LeaseExpires = &expiredLease
 	state.Tasks = []models.Task{task}
 	testhelpers.WriteInitialState(t, stateFile, state)
 
@@ -508,7 +509,7 @@ func TestClaimTask_RejectedWorktreePresent_Preserved(t *testing.T) {
 		t.Fatalf("Failed to read old task branch SHA: %v", err)
 	}
 
-	// Different coder claims — worktree should be preserved (identity-free).
+	// After ownership expiry, a different coder may claim and preserve worktree state.
 	result, err := ClaimTask(tmpDir, "task-1", "coder-2")
 	if err != nil {
 		t.Fatalf("ClaimTask() error: %v", err)
@@ -518,7 +519,7 @@ func TestClaimTask_RejectedWorktreePresent_Preserved(t *testing.T) {
 		t.Errorf("PreviousAssignee = %q, want %q", result.PreviousAssignee, "coder-1")
 	}
 	if result.WorktreeRecreated {
-		t.Error("WorktreeRecreated should be false — worktree preserved regardless of coder identity")
+		t.Error("WorktreeRecreated should be false — post-expiry reassignment preserves worktree")
 	}
 
 	// Verify the worktree retains the prior rejected work (branch SHA unchanged).
@@ -660,8 +661,8 @@ func TestClaimTask_RejectedWorktreeDirExistsBranchMissing_Recreated(t *testing.T
 }
 
 // TestClaimTask_RejectedMutateTask_NoCounterReset verifies that ReviewCyclesCurrent
-// is NOT reset when a different coder claims within the same attempt. The attempt —
-// not the agent — is the resource boundary.
+// is NOT reset when a different coder claims after ownership expiry within the
+// same attempt. The attempt, not the agent, is the resource boundary.
 func TestClaimTask_RejectedMutateTask_NoCounterReset(t *testing.T) {
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
@@ -672,6 +673,8 @@ func TestClaimTask_RejectedMutateTask_NoCounterReset(t *testing.T) {
 	registerClaimTaskTestAgents(state)
 	task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusRejected, now)
 	task.ReviewCyclesCurrent = 3 // Non-zero — should be preserved on different-coder claim.
+	expiredLease := now.Add(-time.Minute)
+	task.LeaseExpires = &expiredLease
 	state.Tasks = []models.Task{task}
 	testhelpers.WriteInitialState(t, stateFile, state)
 
@@ -681,7 +684,7 @@ func TestClaimTask_RejectedMutateTask_NoCounterReset(t *testing.T) {
 		t.Fatalf("Failed to create worktree: %v", err)
 	}
 
-	// Different coder claims — ReviewCyclesCurrent must NOT be reset.
+	// After ownership expiry, a different coder can claim without resetting counters.
 	result, err := ClaimTask(tmpDir, "task-1", "coder-2")
 	if err != nil {
 		t.Fatalf("ClaimTask() error: %v", err)
@@ -696,7 +699,166 @@ func TestClaimTask_RejectedMutateTask_NoCounterReset(t *testing.T) {
 		t.Fatal("Task not found in state")
 	}
 	if claimedTask.ReviewCyclesCurrent != 3 {
-		t.Errorf("ReviewCyclesCurrent = %d, want 3 (should not reset on different-coder claim within same attempt)", claimedTask.ReviewCyclesCurrent)
+		t.Errorf("ReviewCyclesCurrent = %d, want 3 (should not reset on post-expiry different-coder claim within same attempt)", claimedTask.ReviewCyclesCurrent)
+	}
+}
+
+func TestClaimTask_RejectedActiveLeaseBlocksDifferentCoder(t *testing.T) {
+	tmpDir := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, tmpDir)
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+
+	now := time.Now().UTC()
+	state := testhelpers.CreateValidState()
+	registerClaimTaskTestAgents(state)
+	task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusRejected, now)
+	futureLease := now.Add(30 * time.Minute)
+	task.LeaseExpires = &futureLease
+	state.Tasks = []models.Task{task}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	_, err := ClaimTask(tmpDir, "task-1", "coder-2")
+	if err == nil {
+		t.Fatal("Expected active rejected ownership lease to block different coder")
+	}
+	var precondErr *PreconditionError
+	if !stderrors.As(err, &precondErr) {
+		t.Fatalf("Expected PreconditionError, got %T: %v", err, err)
+	}
+	if !strings.Contains(err.Error(), "cannot claim rejected work before the lease expires") {
+		t.Errorf("Error = %q, want active ownership lease message", err.Error())
+	}
+
+	readState := readClaimStateForTest(t, stateFile)
+	blockedTask := readState.FindTask("task-1")
+	if blockedTask == nil {
+		t.Fatal("Task not found in state")
+	}
+	if blockedTask.Status != models.TaskStatusRejected {
+		t.Errorf("Status = %v, want REJECTED", blockedTask.Status)
+	}
+	if blockedTask.AssignedTo == nil || *blockedTask.AssignedTo != "coder-1" {
+		t.Errorf("AssignedTo = %v, want coder-1", blockedTask.AssignedTo)
+	}
+}
+
+func TestClaimTask_RejectedActiveLeaseAllowsSameCoder(t *testing.T) {
+	tmpDir := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, tmpDir)
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+
+	now := time.Now().UTC()
+	state := testhelpers.CreateValidState()
+	registerClaimTaskTestAgents(state)
+	task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusRejected, now)
+	futureLease := now.Add(30 * time.Minute)
+	task.LeaseExpires = &futureLease
+	state.Tasks = []models.Task{task}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	gitWrapper := git.New(tmpDir)
+	if _, err := gitWrapper.CreateWorktree("task-1", "integration"); err != nil {
+		t.Fatalf("Failed to create initial rejected worktree: %v", err)
+	}
+
+	result, err := ClaimTask(tmpDir, "task-1", "coder-1")
+	if err != nil {
+		t.Fatalf("ClaimTask() error: %v", err)
+	}
+	if result.PreviousAssignee != "coder-1" {
+		t.Errorf("PreviousAssignee = %q, want coder-1", result.PreviousAssignee)
+	}
+	if result.SourceStatus != models.TaskStatusRejected {
+		t.Errorf("SourceStatus = %v, want REJECTED", result.SourceStatus)
+	}
+}
+
+func TestClaimTask_RejectedAssignedWithoutLeaseFailsClosed(t *testing.T) {
+	tmpDir := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, tmpDir)
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+
+	now := time.Now().UTC()
+	state := testhelpers.CreateValidState()
+	registerClaimTaskTestAgents(state)
+	task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusRejected, now)
+	task.LeaseExpires = nil
+	state.Tasks = []models.Task{task}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	for _, agentID := range []string{"coder-1", "coder-2"} {
+		_, err := ClaimTask(tmpDir, "task-1", agentID)
+		if err == nil {
+			t.Fatalf("Expected malformed rejected ownership to block %s", agentID)
+		}
+		var precondErr *PreconditionError
+		if !stderrors.As(err, &precondErr) {
+			t.Fatalf("Expected PreconditionError for %s, got %T: %v", agentID, err, err)
+		}
+		if !strings.Contains(err.Error(), "without lease_expires") {
+			t.Errorf("Error for %s = %q, want malformed ownership message", agentID, err.Error())
+		}
+	}
+}
+
+func TestClaimTask_RejectedOwnershipRaceRecheckedInPhase3(t *testing.T) {
+	tmpDir := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, tmpDir)
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+
+	now := time.Now().UTC()
+	state := testhelpers.CreateValidState()
+	registerClaimTaskTestAgents(state)
+	task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusRejected, now)
+	task.AssignedTo = nil
+	task.LeaseExpires = nil
+	state.Tasks = []models.Task{task}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	testClaimTaskHooks = &claimTaskTestHooks{
+		beforePhase3Modify: func() {
+			bb := db.For(stateFile)
+			if err := bb.Modify(func(state *models.State) error {
+				task := state.FindTask("task-1")
+				if task == nil {
+					return fmt.Errorf("task not found")
+				}
+				assignedTo := "coder-2"
+				futureLease := time.Now().UTC().Add(30 * time.Minute)
+				task.AssignedTo = &assignedTo
+				task.LeaseExpires = &futureLease
+				return nil
+			}); err != nil {
+				t.Fatalf("failed to inject ownership race: %v", err)
+			}
+		},
+	}
+	t.Cleanup(func() {
+		testClaimTaskHooks = nil
+	})
+
+	_, err := ClaimTask(tmpDir, "task-1", "coder-1")
+	if err == nil {
+		t.Fatal("Expected Phase 3 rejected ownership race guard to block claim")
+	}
+	var precondErr *PreconditionError
+	if !stderrors.As(err, &precondErr) {
+		t.Fatalf("Expected PreconditionError, got %T: %v", err, err)
+	}
+	if !strings.Contains(err.Error(), "cannot claim rejected work before the lease expires") {
+		t.Errorf("Error = %q, want active ownership lease message", err.Error())
+	}
+
+	readState := readClaimStateForTest(t, stateFile)
+	racedTask := readState.FindTask("task-1")
+	if racedTask == nil {
+		t.Fatal("Task not found in state")
+	}
+	if racedTask.Status != models.TaskStatusRejected {
+		t.Errorf("Status = %v, want REJECTED", racedTask.Status)
+	}
+	if racedTask.AssignedTo == nil || *racedTask.AssignedTo != "coder-2" {
+		t.Errorf("AssignedTo = %v, want coder-2", racedTask.AssignedTo)
 	}
 }
 
@@ -1309,7 +1471,8 @@ func TestClaimTask_IterationLimitDoesNotReleaseCoder_WhenCoderMovedOn(t *testing
 	task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusRejected, now)
 	task.Iteration = 3
 	task.Attempt = 2 // Attempt 2: iteration cap → BLOCKED (not new attempt)
-	// task.AssignedTo is "coder-1" (set by BuildTaskByStatus for REJECTED)
+	expiredLease := now.Add(-time.Minute)
+	task.LeaseExpires = &expiredLease
 	state.Tasks = []models.Task{task}
 
 	// Coder has moved on: CurrentTask = "task-2", status = WORKING.

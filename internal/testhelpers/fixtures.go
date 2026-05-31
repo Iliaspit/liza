@@ -242,6 +242,8 @@ func BuildTaskByStatus(taskID string, status models.TaskStatus, now time.Time) m
 	case models.TaskStatusRejected:
 		agent := "coder-1"
 		task.AssignedTo = &agent
+		leaseExpires := now.Add(30 * time.Minute)
+		task.LeaseExpires = &leaseExpires
 		reason := "Needs improvement"
 		task.RejectionReason = &reason
 		reviewCommit := "review123"

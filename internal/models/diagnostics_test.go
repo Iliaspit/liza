@@ -119,6 +119,104 @@ func TestCountClaimableTasks(t *testing.T) {
 	}
 }
 
+func TestCountDoerClaimableTasksForAgent_RejectedOwnership(t *testing.T) {
+	pr := &mockPipelineResolver{
+		doer:      "coder",
+		reviewer:  "code-reviewer",
+		initial:   TaskStatusReady,
+		rejected:  TaskStatusRejected,
+		submitted: TaskStatusReadyForReview,
+		reviewing: TaskStatusReviewing,
+		executing: TaskStatusImplementing,
+		approved:  TaskStatusApproved,
+	}
+	now := time.Now().UTC()
+
+	owner := "coder-2"
+	futureLease := now.Add(30 * time.Minute)
+	expiredLease := now.Add(-time.Minute)
+
+	tests := []struct {
+		name    string
+		task    Task
+		agentID string
+		want    int
+	}{
+		{
+			name: "active lease blocks different coder",
+			task: Task{
+				ID:           "t1",
+				Status:       TaskStatusRejected,
+				Type:         TaskTypeCoding,
+				RolePair:     "coding-pair",
+				AssignedTo:   &owner,
+				LeaseExpires: &futureLease,
+			},
+			agentID: "coder-1",
+			want:    0,
+		},
+		{
+			name: "active lease allows owner",
+			task: Task{
+				ID:           "t1",
+				Status:       TaskStatusRejected,
+				Type:         TaskTypeCoding,
+				RolePair:     "coding-pair",
+				AssignedTo:   &owner,
+				LeaseExpires: &futureLease,
+			},
+			agentID: "coder-2",
+			want:    1,
+		},
+		{
+			name: "expired lease allows different coder",
+			task: Task{
+				ID:           "t1",
+				Status:       TaskStatusRejected,
+				Type:         TaskTypeCoding,
+				RolePair:     "coding-pair",
+				AssignedTo:   &owner,
+				LeaseExpires: &expiredLease,
+			},
+			agentID: "coder-1",
+			want:    1,
+		},
+		{
+			name: "assigned without lease fails closed",
+			task: Task{
+				ID:         "t1",
+				Status:     TaskStatusRejected,
+				Type:       TaskTypeCoding,
+				RolePair:   "coding-pair",
+				AssignedTo: &owner,
+			},
+			agentID: "coder-2",
+			want:    0,
+		},
+		{
+			name: "ready task remains agent claimable",
+			task: Task{
+				ID:       "t1",
+				Status:   TaskStatusReady,
+				Type:     TaskTypeCoding,
+				RolePair: "coding-pair",
+			},
+			agentID: "coder-1",
+			want:    1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			state := &State{Tasks: []Task{tt.task}}
+			got := CountDoerClaimableTasksForAgent(state, RoleCoder, tt.agentID, pr)
+			if got != tt.want {
+				t.Errorf("CountDoerClaimableTasksForAgent() = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestCountReviewableTasks(t *testing.T) {
 	pr := &mockPipelineResolver{
 		doer:      "coder",         // runtime form
@@ -304,6 +402,45 @@ func TestGetCoderWorkDiagnostics(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestGetCoderWorkDiagnosticsForAgent_ProtectedRejectedTask(t *testing.T) {
+	pr := &mockPipelineResolver{
+		doer:      "coder",
+		reviewer:  "code-reviewer",
+		initial:   TaskStatusReady,
+		rejected:  TaskStatusRejected,
+		submitted: TaskStatusReadyForReview,
+		reviewing: TaskStatusReviewing,
+		executing: TaskStatusImplementing,
+		approved:  TaskStatusApproved,
+	}
+
+	now := time.Now().UTC()
+	owner := "coder-2"
+	futureLease := now.Add(30 * time.Minute)
+	state := &State{
+		Tasks: []Task{
+			{
+				ID:           "t1",
+				Status:       TaskStatusRejected,
+				Type:         TaskTypeCoding,
+				RolePair:     "coding-pair",
+				AssignedTo:   &owner,
+				LeaseExpires: &futureLease,
+			},
+		},
+	}
+
+	wrongCoder := GetCoderWorkDiagnosticsForAgent(state, "coder-1", pr)
+	if strings.Contains(wrongCoder, "Found 1 claimable task(s)") {
+		t.Errorf("GetCoderWorkDiagnosticsForAgent() for wrong coder = %q, want no claimable task", wrongCoder)
+	}
+
+	owningCoder := GetCoderWorkDiagnosticsForAgent(state, "coder-2", pr)
+	if !strings.Contains(owningCoder, "Found 1 claimable task(s)") {
+		t.Errorf("GetCoderWorkDiagnosticsForAgent() for owner = %q, want claimable task", owningCoder)
 	}
 }
 

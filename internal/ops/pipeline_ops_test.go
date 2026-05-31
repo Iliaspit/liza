@@ -373,23 +373,25 @@ func TestClaimTask_PipelineRejectedIterationLimit(t *testing.T) {
 	agent := "coder-1"
 	worktree := ".worktrees/task-1"
 	baseCommit := "abc1234"
+	leaseExpires := now.Add(30 * time.Minute)
 	task := models.Task{
-		ID:          "task-1",
-		Type:        models.TaskTypeCoding,
-		RolePair:    "coding-pair",
-		Description: "Pipeline coding task at iteration limit",
-		Status:      models.TaskStatus("CODE_REJECTED"),
-		Priority:    1,
-		AssignedTo:  &agent,
-		BaseCommit:  &baseCommit,
-		Worktree:    &worktree,
-		Iteration:   3, // at limit
-		Attempt:     2, // attempt 2: iteration cap → BLOCKED
-		Created:     now,
-		SpecRef:     "README.md",
-		DoneWhen:    "done",
-		Scope:       "scope",
-		History:     []models.TaskHistoryEntry{},
+		ID:           "task-1",
+		Type:         models.TaskTypeCoding,
+		RolePair:     "coding-pair",
+		Description:  "Pipeline coding task at iteration limit",
+		Status:       models.TaskStatus("CODE_REJECTED"),
+		Priority:     1,
+		AssignedTo:   &agent,
+		LeaseExpires: &leaseExpires,
+		BaseCommit:   &baseCommit,
+		Worktree:     &worktree,
+		Iteration:    3, // at limit
+		Attempt:      2, // attempt 2: iteration cap → BLOCKED
+		Created:      now,
+		SpecRef:      "README.md",
+		DoneWhen:     "done",
+		Scope:        "scope",
+		History:      []models.TaskHistoryEntry{},
 	}
 	state.Tasks = []models.Task{task}
 	state.Sprint.Scope.Planned = []string{"task-1"}

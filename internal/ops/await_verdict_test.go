@@ -376,6 +376,8 @@ func TestAwaitVerdict_Rejected_SameAttempt(t *testing.T) {
 		tk.Status = models.TaskStatusRejected
 		reason := "Missing error handling"
 		tk.RejectionReason = &reason
+		leaseExpires := time.Now().UTC().Add(30 * time.Minute)
+		tk.LeaseExpires = &leaseExpires
 		reviewer := "code-reviewer-1"
 		tk.History = append(tk.History, models.TaskHistoryEntry{
 			Time:  time.Now().UTC(),
@@ -477,6 +479,8 @@ func TestAwaitVerdict_Rejected_ObservedByTickWhenWatcherSilent(t *testing.T) {
 		tk.Status = models.TaskStatusRejected
 		reason := "Missing error handling"
 		tk.RejectionReason = &reason
+		leaseExpires := time.Now().UTC().Add(30 * time.Minute)
+		tk.LeaseExpires = &leaseExpires
 		reviewer := "code-reviewer-1"
 		tk.History = append(tk.History, models.TaskHistoryEntry{
 			Time:  time.Now().UTC(),
@@ -546,6 +550,8 @@ func TestAwaitVerdict_Rejected_NewAttempt(t *testing.T) {
 		reason := "Missing tests"
 		tk.RejectionReason = &reason
 		tk.ReviewCyclesCurrent = 5 // now at limit — ClaimTask triggers new attempt
+		leaseExpires := time.Now().UTC().Add(30 * time.Minute)
+		tk.LeaseExpires = &leaseExpires
 		reviewer := "code-reviewer-1"
 		tk.History = append(tk.History, models.TaskHistoryEntry{
 			Time:  time.Now().UTC(),
@@ -1084,6 +1090,8 @@ func TestAwaitVerdict_RaceGuard(t *testing.T) {
 		tk.Status = models.TaskStatusRejected
 		reason := "Needs fixes"
 		tk.RejectionReason = &reason
+		leaseExpires := time.Now().UTC().Add(30 * time.Minute)
+		tk.LeaseExpires = &leaseExpires
 		reviewer := "code-reviewer-1"
 		tk.History = append(tk.History, models.TaskHistoryEntry{
 			Time:  time.Now().UTC(),

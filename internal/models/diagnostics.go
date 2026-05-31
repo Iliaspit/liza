@@ -18,6 +18,81 @@ func CountClaimableTasks(state *State, role string, pr PipelineResolver) int {
 	return count
 }
 
+// DoerClaimBlockedReason returns a human-readable reason when the given agent
+// cannot claim a doer task. An empty string means claimable by this agent.
+func DoerClaimBlockedReason(state *State, task *Task, role, agentID string, pr PipelineResolver, now time.Time) string {
+	if state == nil {
+		return "state is required"
+	}
+	if task == nil {
+		return "task is required"
+	}
+	if agentID == "" {
+		return "agent ID is required"
+	}
+	if !task.IsClaimable(role, state.Tasks, pr) {
+		return fmt.Sprintf("task %s is %s (not claimable by %s)", task.ID, task.Status, role)
+	}
+
+	doerRole, err := pr.DoerRole(task.RolePair)
+	if err != nil {
+		return fmt.Sprintf("invalid role-pair %q: %v", task.RolePair, err)
+	}
+	if role != doerRole {
+		return fmt.Sprintf("task %s is %s (not claimable by %s)", task.ID, task.Status, role)
+	}
+
+	rejected, err := pr.RejectedStatus(task.RolePair)
+	if err != nil {
+		return fmt.Sprintf("invalid role-pair %q: %v", task.RolePair, err)
+	}
+	if task.Status != rejected {
+		return ""
+	}
+	if task.AssignedTo == nil || *task.AssignedTo == "" {
+		return ""
+	}
+
+	assignedTo := *task.AssignedTo
+	if strings.HasPrefix(assignedTo, "$") {
+		return fmt.Sprintf("task %s is in transition (assigned_to: %s)", task.ID, assignedTo)
+	}
+	if task.LeaseExpires == nil {
+		return fmt.Sprintf("task %s has rejected ownership assigned_to=%s without lease_expires; repair ownership before reclaiming", task.ID, assignedTo)
+	}
+	if assignedTo == agentID {
+		return ""
+	}
+	if task.LeaseExpires.After(now) {
+		return fmt.Sprintf("task %s is assigned to %s until %s; %s cannot claim rejected work before the lease expires",
+			task.ID, assignedTo, task.LeaseExpires.UTC().Format(time.RFC3339), agentID)
+	}
+
+	return ""
+}
+
+// IsDoerClaimableByAgent is the agent-aware doer claimability predicate used by
+// supervisors and claim selection. It preserves role-level claimability while
+// honoring rejected-task ownership leases.
+func IsDoerClaimableByAgent(state *State, task *Task, role, agentID string, pr PipelineResolver, now time.Time) bool {
+	return DoerClaimBlockedReason(state, task, role, agentID, pr, now) == ""
+}
+
+// CountDoerClaimableTasksForAgent counts tasks a specific doer agent can claim.
+func CountDoerClaimableTasksForAgent(state *State, role, agentID string, pr PipelineResolver) int {
+	if state == nil {
+		return 0
+	}
+	now := time.Now().UTC()
+	count := 0
+	for i := range state.Tasks {
+		if IsDoerClaimableByAgent(state, &state.Tasks[i], role, agentID, pr, now) {
+			count++
+		}
+	}
+	return count
+}
+
 // CountReviewableTasks counts tasks immediately claimable by the reviewer role.
 // Uses IsClaimable so each role-pair's reviewer states are honored.
 func CountReviewableTasks(state *State, role string, pr PipelineResolver) int {
@@ -52,7 +127,17 @@ func CountReviewableTasksForAgent(state *State, role, agentID string, pr Pipelin
 // GetCoderWorkDiagnostics returns detailed diagnostic information about task availability for coders.
 func GetCoderWorkDiagnostics(state *State, pr PipelineResolver) string {
 	claimable := CountClaimableTasks(state, RoleCoder, pr)
+	return getCoderWorkDiagnostics(state, pr, claimable)
+}
 
+// GetCoderWorkDiagnosticsForAgent returns coder diagnostics using agent-aware
+// claimability, so protected rejected tasks do not wake the wrong coder.
+func GetCoderWorkDiagnosticsForAgent(state *State, agentID string, pr PipelineResolver) string {
+	claimable := CountDoerClaimableTasksForAgent(state, RoleCoder, agentID, pr)
+	return getCoderWorkDiagnostics(state, pr, claimable)
+}
+
+func getCoderWorkDiagnostics(state *State, pr PipelineResolver, claimable int) string {
 	if claimable > 0 {
 		return fmt.Sprintf("Found %d claimable task(s)", claimable)
 	}

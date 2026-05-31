@@ -54,8 +54,9 @@ func claimDoerTask(projectRoot, agentID, role string, bb *db.Blackboard) (taskID
 	pr := loadResolver(projectRoot)
 
 	var candidates []*models.Task
+	now := time.Now().UTC()
 	for i := range state.Tasks {
-		if state.Tasks[i].IsClaimable(role, state.Tasks, pr) {
+		if models.IsDoerClaimableByAgent(state, &state.Tasks[i], role, agentID, pr, now) {
 			candidates = append(candidates, &state.Tasks[i])
 		}
 	}

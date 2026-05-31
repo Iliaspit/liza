@@ -168,6 +168,66 @@ func TestClaimCoderTask_RejectedTasksPriority(t *testing.T) {
 	}
 }
 
+func TestClaimCoderTask_SkipsProtectedRejectedTopPriorityTier(t *testing.T) {
+	tmpDir := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, tmpDir)
+	statePath, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	testhelpers.SetupPipelineConfig(t, tmpDir)
+
+	now := time.Now().UTC()
+	state := testhelpers.CreateValidState()
+	state.Agents["coder-1"] = testhelpers.RegisteredTestAgent("coder")
+
+	taskRejectedHigh := testhelpers.BuildTaskByStatus("task-rejected-high", models.TaskStatusRejected, now)
+	taskRejectedHigh.Priority = 1
+	owner := "coder-2"
+	taskRejectedHigh.AssignedTo = &owner
+	futureLease := now.Add(30 * time.Minute)
+	taskRejectedHigh.LeaseExpires = &futureLease
+
+	taskReadyLow := testhelpers.BuildTaskByStatus("task-ready-low", models.TaskStatusReady, now)
+	taskReadyLow.Priority = 5
+
+	state.Tasks = []models.Task{taskRejectedHigh, taskReadyLow}
+	bb := testhelpers.WriteInitialState(t, statePath, state)
+
+	taskID, _, err := claimCoderTask(tmpDir, "coder-1", bb)
+	if err != nil {
+		t.Fatalf("Expected lower-priority ready task to be claimable, got error: %v", err)
+	}
+	if taskID != "task-ready-low" {
+		t.Errorf("Expected to claim task-ready-low after filtering protected rejected task, got %q", taskID)
+	}
+}
+
+func TestClaimCoderTask_OnlyProtectedRejectedTaskIsNotClaimable(t *testing.T) {
+	tmpDir := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, tmpDir)
+	statePath, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	testhelpers.SetupPipelineConfig(t, tmpDir)
+
+	now := time.Now().UTC()
+	state := testhelpers.CreateValidState()
+	state.Agents["coder-1"] = testhelpers.RegisteredTestAgent("coder")
+
+	task := testhelpers.BuildTaskByStatus("task-rejected", models.TaskStatusRejected, now)
+	owner := "coder-2"
+	task.AssignedTo = &owner
+	futureLease := now.Add(30 * time.Minute)
+	task.LeaseExpires = &futureLease
+
+	state.Tasks = []models.Task{task}
+	bb := testhelpers.WriteInitialState(t, statePath, state)
+
+	_, _, err := claimCoderTask(tmpDir, "coder-1", bb)
+	if err == nil {
+		t.Fatal("Expected no claimable tasks for protected rejected ownership")
+	}
+	if !strings.Contains(err.Error(), "no claimable tasks found") {
+		t.Errorf("Error = %q, want no claimable tasks found", err.Error())
+	}
+}
+
 // TestClaimCoderTask_IntegrationFailedPriority verifies that INTEGRATION_FAILED tasks
 // participate in priority-based selection.
 func TestClaimCoderTask_IntegrationFailedPriority(t *testing.T) {

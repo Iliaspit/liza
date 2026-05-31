@@ -69,7 +69,7 @@ func (s *doerStrategy) WaitForWork(ctx context.Context, bb *db.Blackboard, confi
 	pr := loadResolver(config.ProjectRoot)
 	return waitForWorkEventDriven(ctx, bb, config.ProjectRoot, pollInterval, maxWait,
 		func(state *models.State) (bool, string) {
-			claimable := models.CountClaimableTasks(state, s.role, pr)
+			claimable := models.CountDoerClaimableTasksForAgent(state, s.role, config.AgentID, pr)
 			resumableHandoffs := countResumableHandoffTasks(state, config.AgentID, pr)
 			resumableOwned := ops.CountResumableOwnedTasks(state, config.AgentID, pr)
 
@@ -77,7 +77,7 @@ func (s *doerStrategy) WaitForWork(ctx context.Context, bb *db.Blackboard, confi
 
 			// Use richer diagnostics for coder role
 			if s.role == "coder" {
-				logMsg = models.GetCoderWorkDiagnostics(state, pr)
+				logMsg = models.GetCoderWorkDiagnosticsForAgent(state, config.AgentID, pr)
 				if resumableHandoffs > 0 {
 					handoffMsg := fmt.Sprintf("Found %d resumable handoff task(s) for %s", resumableHandoffs, config.AgentID)
 					if logMsg != "" {

@@ -35,6 +35,12 @@ type claimWorktreePhaseResult struct {
 	deleted bool
 }
 
+type claimTaskTestHooks struct {
+	beforePhase3Modify func()
+}
+
+var testClaimTaskHooks *claimTaskTestHooks
+
 // ClaimTask implements the three-phase claim pattern to prevent TOCTOU races.
 // Phase 1: Validate under lock (no mutation)
 // Phase 2: Handle worktree outside lock
@@ -156,6 +162,9 @@ func ClaimTask(projectRoot, taskID, agentID string) (*ClaimResult, error) {
 	if err := strategy.validate(task, state, runtimeRole, doerRole, &claimCtx); err != nil {
 		return nil, err
 	}
+	if reason := models.DoerClaimBlockedReason(state, task, runtimeRole, agentID, resolver, time.Now().UTC()); reason != "" {
+		return nil, &PreconditionError{Reason: reason}
+	}
 
 	// Enforce coder iteration/review-cycle limits before doing any filesystem work.
 	// Attempt 1 cap hit → new attempt (TransitionToNewAttempt). Attempt 2 cap hit → BLOCKED.
@@ -237,6 +246,10 @@ func ClaimTask(projectRoot, taskID, agentID string) (*ClaimResult, error) {
 	leaseExpires := now.Add(time.Duration(leaseDuration) * time.Second)
 	claimCtx.leaseExpires = leaseExpires
 
+	if testClaimTaskHooks != nil && testClaimTaskHooks.beforePhase3Modify != nil {
+		testClaimTaskHooks.beforePhase3Modify()
+	}
+
 	err = bb.Modify(func(state *models.State) error {
 		// Re-check task exists and status hasn't changed
 		task := state.FindTask(taskID)
@@ -246,6 +259,10 @@ func ClaimTask(projectRoot, taskID, agentID string) (*ClaimResult, error) {
 
 		if task.Status != taskStatus {
 			return fmt.Errorf("race condition: task status changed from %s to %s", taskStatus, task.Status)
+		}
+
+		if reason := models.DoerClaimBlockedReason(state, task, runtimeRole, agentID, resolver, now); reason != "" {
+			return &PreconditionError{Reason: reason}
 		}
 
 		// Verify worktree health before committing state (unconditional —
