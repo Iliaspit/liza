@@ -410,6 +410,70 @@ func TestJSON_MarkBlocked_IncompleteRepairRequestReportsActionableValidation(t *
 	assertJSONError(t, stdout, "validation", "--repair-target is required")
 }
 
+func TestJSON_RetargetDependency_Success(t *testing.T) {
+	projectRoot, _ := setupMutationTestProject(t, func(state *models.State) {
+		now := time.Now().UTC()
+		state.Goal.SpecRef = "README.md"
+		task := testhelpers.BuildTaskByStatus("task-json-retarget", models.TaskStatusBlocked, now)
+		task.DependsOn = []string{"old-dep"}
+		state.Tasks = []models.Task{
+			task,
+			testhelpers.BuildTaskByStatus("old-dep", models.TaskStatusMerged, now),
+			testhelpers.BuildTaskByStatus("new-dep", models.TaskStatusMerged, now),
+		}
+	})
+
+	stdout, err := executeRootCommandCapture(t, projectRoot,
+		"retarget-dependency", "task-json-retarget", "old-dep", "new-dep",
+		"--reason", "Correct dependency edge",
+		"--agent-id", "orchestrator-1",
+		"--json",
+	)
+	if err != nil {
+		t.Fatalf("retarget-dependency --json failed: %v\n%s", err, stdout)
+	}
+
+	env := parseEnvelope(t, stdout)
+	if env["ok"] != true {
+		t.Fatalf("expected ok=true, got %v", env["ok"])
+	}
+	result, ok := env["result"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected result object, got %T", env["result"])
+	}
+	if result["task_id"] != "task-json-retarget" {
+		t.Fatalf("task_id = %v, want task-json-retarget", result["task_id"])
+	}
+	if result["old_dependency"] != "old-dep" {
+		t.Fatalf("old_dependency = %v, want old-dep", result["old_dependency"])
+	}
+}
+
+func TestJSON_RetargetDependency_RejectsNonOrchestrator(t *testing.T) {
+	projectRoot, _ := setupMutationTestProject(t, func(state *models.State) {
+		now := time.Now().UTC()
+		state.Goal.SpecRef = "README.md"
+		task := testhelpers.BuildTaskByStatus("task-json-retarget-rbac", models.TaskStatusBlocked, now)
+		task.DependsOn = []string{"old-dep"}
+		state.Tasks = []models.Task{
+			task,
+			testhelpers.BuildTaskByStatus("old-dep", models.TaskStatusMerged, now),
+			testhelpers.BuildTaskByStatus("new-dep", models.TaskStatusMerged, now),
+		}
+	})
+
+	stdout, err := executeRootCommandCapture(t, projectRoot,
+		"retarget-dependency", "task-json-retarget-rbac", "old-dep", "new-dep",
+		"--reason", "Correct dependency edge",
+		"--agent-id", "coder-1",
+		"--json",
+	)
+	if err == nil {
+		t.Fatalf("expected RBAC error, got nil")
+	}
+	assertJSONError(t, stdout, "permission_denied", `operation "retarget-dependency" not allowed for role "coder"`)
+}
+
 func TestJSON_MarkBlocked_AlertWriteFailureReturnsWarning(t *testing.T) {
 	projectRoot, _ := setupMutationTestProject(t, func(state *models.State) {
 		now := time.Now().UTC()

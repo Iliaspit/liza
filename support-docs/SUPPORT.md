@@ -223,8 +223,8 @@ Key agent fields:
 
 **Safe mutation methods (preference order):**
 
-1. **CLI commands** — `liza unblock-task`, `liza cancel-task`, `liza supersede-task`, `liza release-claim`, `liza recover-task`, etc. Always prefer these.
-2. **Line-level text edits** — For changes the CLI doesn't support (e.g., fixing `depends_on`, setting a status the CLI rejects). Use `liza pause` first to stop heartbeat updates, then back up before touching anything:
+1. **CLI commands** — `liza unblock-task`, `liza retarget-dependency`, `liza cancel-task`, `liza supersede-task`, `liza release-claim`, `liza recover-task`, etc. Always prefer these.
+2. **Line-level text edits** — For changes the CLI doesn't support (e.g., output-entry dependency repair, setting a status the CLI rejects). Use `liza pause` first to stop heartbeat updates, then back up before touching anything:
 
 ```bash
 cp .liza/state.yaml .liza/state.yaml.bak
@@ -261,7 +261,7 @@ os.rename(tmp_path, '.liza/state.yaml')
 - **Concurrent writes**: Agents and CLI write concurrently. Use `liza pause` before manual edits, or write atomically (temp file + `os.rename`).
 - **Field names**: SUPERSEDED tasks require `rescope_reason` (not `superseded_reason`). Check `liza validate` for correct field names.
 - **Status constraints**: `liza supersede-task` works from BLOCKED, REJECTED, or any pipeline-declared initial state. For other states, edit state.yaml directly.
-- **Dependency edits**: No CLI command exists to modify `depends_on`. Edit state.yaml directly with line-level ops.
+- **Dependency edits**: Use `liza retarget-dependency <task-id> <old-dep-id> <new-dep-ids> --reason "..."` for one non-terminal task's direct `depends_on` edge. It does not repair `output[].task_depends_on`; use line-level ops only for dependency metadata the CLI still does not support.
 - **Holding a task from review**: Add a `depends_on` on the task that should be reviewed first — the system enforces ordering. Alternatively, set status to the pre-review state.
 
 ## Agent Exit Codes
@@ -295,7 +295,7 @@ Exit 42 with `handoff_pending: true` on the task means context exhaustion — th
 ### BLOCKED task
 **Symptom**: Task in BLOCKED state, agents skip it.
 **Diagnosis**: Read `blocked_reason`, `blocked_questions`, `depends_on`, and optional `repair_request` in state.yaml. A `BLOCKED` alert is raised when a task blocks; if the orchestrator assesses but cannot resolve it, an `UNRESOLVED BLOCKED` alert is raised.
-**Fix**: If the blocker was another task, the blocked task should list it in `depends_on` so the orchestrator wakes when that task changes. If the blocker was repaired and every `depends_on` target is directly MERGED, use `liza unblock-task <id> --assign-to <doer-agent-id> --reason "..."`.
+**Fix**: If the blocker was another task, the blocked task should list it in `depends_on` so the orchestrator wakes when that task changes. If the wrong direct dependency edge is the blocker, use `liza retarget-dependency <id> <old-dep-id> <new-dep-id[,new-dep-id]> --reason "..."`; the task remains BLOCKED until explicitly unblocked or assessed. If the blocker was repaired and every `depends_on` target is directly MERGED, use `liza unblock-task <id> --assign-to <doer-agent-id> --reason "..."`.
 Supersede/cancel operations rewrite active downstream dependencies first; stale edges to SUPERSEDED or ABANDONED tasks must not remain on active tasks. Otherwise use `liza supersede-task <id> [replacements] --reason "..."` (replace with new tasks or mark completed externally) or `liza recover-task <id>` to reset.
 
 ### Integration failure

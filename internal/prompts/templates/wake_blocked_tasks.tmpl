@@ -9,6 +9,11 @@ Tasks are BLOCKED. Analyze and resolve immediately:
    - External dependency → document, possibly supersede task
    - Wrong approach → supersede task, create alternative (run commands NOW)
 3. For each blocked task, decide action:
+   - To repair a wrong direct task dependency without replacing either task:
+     a. Re-read the task via liza get <task-id> --json to confirm it is still BLOCKED and still has the old depends_on edge.
+     b. Verify the new dependency task(s) already exist and represent the intended blocker.
+     c. Run: liza retarget-dependency <task-id> <old-dep-id> <new-dep-id[,new-dep-id]> --reason "Correct dependency edge because <why>" --agent-id {{.AgentID}} --json
+     d. The task remains BLOCKED. After validation/repair is complete, use liza unblock-task or liza assess-blocked.
    - To resume after verified repair:
      a. Re-read the task via liza get <task-id> --json to confirm it is still BLOCKED.
      b. Verify the blocker is no longer true using the repair_request validation, current worktree state, or another concrete check.

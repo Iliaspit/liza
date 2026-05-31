@@ -12,6 +12,7 @@ pipeline:
       allowed-operations:
         - add-tasks
         - supersede-task
+        - retarget-dependency
         - cancel-task
         - reconcile-merged
         - unblock-task

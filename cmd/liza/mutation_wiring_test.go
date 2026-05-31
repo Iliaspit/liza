@@ -197,6 +197,46 @@ func TestMutationCommandWiring(t *testing.T) {
 		}
 	})
 
+	t.Run("retarget-dependency updates one task edge", func(t *testing.T) {
+		projectRoot, statePath := setupMutationTestProject(t, func(state *models.State) {
+			now := time.Now().UTC()
+			state.Goal.SpecRef = "README.md"
+			task := testhelpers.BuildTaskByStatus("task-retarget", models.TaskStatusBlocked, now)
+			task.DependsOn = []string{"old-dep"}
+			state.Tasks = []models.Task{
+				task,
+				testhelpers.BuildTaskByStatus("old-dep", models.TaskStatusMerged, now),
+				testhelpers.BuildTaskByStatus("new-dep", models.TaskStatusMerged, now),
+			}
+		})
+
+		err := executeRootCommand(
+			t,
+			projectRoot,
+			"retarget-dependency",
+			"task-retarget",
+			"old-dep",
+			"new-dep",
+			"--reason",
+			"Correct dependency edge",
+			"--agent-id",
+			"orchestrator-1",
+		)
+		if err != nil {
+			t.Fatalf("retarget-dependency execute failed: %v", err)
+		}
+
+		state := readState(t, statePath)
+		task := mustFindTask(t, state, "task-retarget")
+		if len(task.DependsOn) != 1 || task.DependsOn[0] != "new-dep" {
+			t.Fatalf("task DependsOn = %v, want [new-dep]", task.DependsOn)
+		}
+		last := task.History[len(task.History)-1]
+		if last.Event != models.TaskEventDependenciesRewritten {
+			t.Fatalf("history event = %s, want dependencies_rewritten", last.Event)
+		}
+	})
+
 	t.Run("handoff rejects code-reviewer agent via RBAC", func(t *testing.T) {
 		projectRoot, _ := setupMutationTestProject(t, func(state *models.State) {
 			now := time.Now().UTC()

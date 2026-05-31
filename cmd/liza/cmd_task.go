@@ -276,6 +276,65 @@ Examples:
 	},
 }
 
+var retargetDependencyCmd = &cobra.Command{
+	Use:   "retarget-dependency <task-id> <old-dep-id> <new-dep-ids> --reason <reason>",
+	Short: "Retarget one non-terminal task dependency edge",
+	Long: `Retarget one non-terminal task's direct depends_on edge.
+
+This is an orchestrator-only metadata repair operation for cases where one task
+has the wrong scheduler dependency but neither the dependent task nor the old
+dependency should be superseded. It replaces exactly one old dependency with one
+or more comma-separated new dependencies, canonicalizes the resulting dependency
+list, validates the full candidate state, records audit history, and leaves task
+status unchanged.
+
+Examples:
+  liza retarget-dependency task-3 old-task replacement-task --reason "Correct dependency after planning repair"
+  liza retarget-dependency task-3 old-task repl-a,repl-b --reason "Split dependency into two prerequisites"`,
+	Args: cobra.ExactArgs(3),
+	RunE: func(cmd *cobra.Command, args []string) (retErr error) {
+		if isJSON(cmd) {
+			log.SetOutput(io.Discard)
+			defer log.SetOutput(os.Stderr)
+			defer func() {
+				if retErr != nil && !errors.Is(retErr, jsonout.ErrAlreadyWritten) {
+					_ = jsonout.WriteResult(os.Stdout, nil, nil, retErr)
+					retErr = jsonout.ErrAlreadyWritten
+				}
+			}()
+		}
+
+		taskID := args[0]
+		oldDependency := args[1]
+		newDependencies := strings.Split(args[2], ",")
+		reason, _ := cmd.Flags().GetString("reason")
+
+		agentID, err := resolveOrchestratorID(cmd)
+		if err != nil {
+			return err
+		}
+
+		projectRoot, err := requireProjectRoot()
+		if err != nil {
+			return err
+		}
+
+		resolver, err := loadResolverForRBAC(projectRoot)
+		if err != nil {
+			return err
+		}
+		if err := validateAllowedOperation(resolver, agentID, "retarget-dependency"); err != nil {
+			return err
+		}
+
+		if isJSON(cmd) {
+			result, err := ops.RetargetDependency(projectRoot, taskID, oldDependency, newDependencies, reason, agentID)
+			return jsonout.WriteResult(os.Stdout, result, resultWarnings(result), err)
+		}
+		return commands.RetargetDependencyCommand(projectRoot, taskID, oldDependency, newDependencies, reason, agentID)
+	},
+}
+
 var markBlockedCmd = &cobra.Command{
 	Use:   "mark-blocked <task-id>",
 	Short: "Mark a task as BLOCKED due to unresolvable blocker",
@@ -1020,6 +1079,7 @@ func init() {
 	rootCmd.AddCommand(addTaskCmd)
 	rootCmd.AddCommand(addTasksCmd)
 	rootCmd.AddCommand(supersedeTaskCmd)
+	rootCmd.AddCommand(retargetDependencyCmd)
 	rootCmd.AddCommand(cancelTaskCmd)
 	rootCmd.AddCommand(reconcileMergedCmd)
 	rootCmd.AddCommand(markBlockedCmd)
@@ -1035,6 +1095,7 @@ func init() {
 	addJSONFlag(addTaskCmd)
 	addJSONFlag(addTasksCmd)
 	addJSONFlag(supersedeTaskCmd)
+	addJSONFlag(retargetDependencyCmd)
 	addJSONFlag(cancelTaskCmd)
 	addJSONFlag(reconcileMergedCmd)
 	addJSONFlag(markBlockedCmd)
@@ -1049,6 +1110,9 @@ func init() {
 	addAgentIDFlag(supersedeTaskCmd)
 	supersedeTaskCmd.Flags().String("reason", "", "reason for superseding (required)")
 	supersedeTaskCmd.MarkFlagRequired("reason")
+	addAgentIDFlag(retargetDependencyCmd)
+	retargetDependencyCmd.Flags().String("reason", "", "reason for retargeting this dependency (required)")
+	retargetDependencyCmd.MarkFlagRequired("reason")
 	addAgentIDFlag(cancelTaskCmd)
 	addAgentIDFlag(reconcileMergedCmd)
 	reconcileMergedCmd.Flags().String("merge-commit", "", "merge commit that completed the task externally (required)")

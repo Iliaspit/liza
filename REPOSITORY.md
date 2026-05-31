@@ -137,7 +137,7 @@ Key command groups:
 
 **Agent supervision:** `liza agent`, `liza tui`, `liza analyze`, `liza sprint-checkpoint`, `liza handoff`, `liza delete`
 
-**Task management:** `liza add-task`, `liza claim-task`, `liza mark-blocked`, `liza supersede-task`, `liza cancel-task`
+**Task management:** `liza add-task`, `liza claim-task`, `liza mark-blocked`, `liza retarget-dependency`, `liza supersede-task`, `liza cancel-task`
 
 **Review & merge:** `liza submit-for-review`, `liza submit-verdict`, `liza release-claim`, `liza clear-stale-review-claims`
 
