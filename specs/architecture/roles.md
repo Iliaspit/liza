@@ -175,7 +175,7 @@ Tasks missing any gate remain DRAFT until completed. This enables:
 |-------|--------|---------|
 | `spec_ref` | Path to spec file relative to project root, optionally with `#anchor` | `specs/api.md#pagination` |
 | `done_when` | Falsifiable statement describing observable outcome. Must be something that could be proven wrong. | `"GET /users returns 200 with JSON array containing user objects"` |
-| `validation` | Optional ordered list of single-line canonical validation commands. Commands are executable guidance declared by task/config/spec and must not be inferred from local tool paths. | `["make test", "pre-commit run --files docs/USAGE.md"]` |
+| `validation` | Optional ordered list of single-line canonical validation commands. Commands must be satisfiable for task scope and prove the intended check ran, not only exit 0. | `["make test", "pre-commit run --files docs/USAGE.md"]` |
 
 **`spec_ref` Validation:**
 - Required: Field must be present (enforced by `liza validate`)
@@ -206,6 +206,7 @@ Tasks missing any gate remain DRAFT until completed. This enables:
 
 **`validation` vs validation plan:**
 - `validation` is task-declared canonical executable guidance rendered to both doers and reviewers.
+- Check or hook intent lives in durable task text/artifacts (`desc`, `done_when`, plan/epic/architecture/fix artifact), not in reviewer inference from local tooling.
 - A doer's checkpoint validation plan remains narrative evidence of what the doer intended or ran.
 - Reviewers prefer task-declared validation commands when present and do not infer environment-specific tool paths from the worktree.
 

@@ -57,6 +57,7 @@ plan from the provided spec artifacts (architecture document, goal spec, or assi
    Each entry becomes a child task after merge. The Code Plan Reviewer will verify these.
    Fields: desc (single intent), done_when (falsifiable), scope (boundary), spec_ref (source),
    plan_ref (repo-relative path to the plan file — set to the plan file path from step 2 for all entries),
+   validation (optional canonical commands; hook/check intent must appear in the plan text, desc, or done_when),
    depends_on (optional array of sibling index strings, e.g. ["0", "2"] — resolved to child task IDs at transition),
    task_depends_on (optional array of existing concrete task IDs outside this output[]).
    Extract each field verbatim from the plan file — do not compose from memory or paraphrase.
@@ -92,6 +93,7 @@ plan from the provided spec artifacts (architecture document, goal spec, or assi
    e. output[] parity: re-read the plan file at the path chosen in step 2 and verify each output[]
       entry's desc, done_when, scope, and spec_ref is character-identical to the plan.
       If any field was paraphrased, replace it with the verbatim text before submitting.
+      Verify any validation[] command is character-identical to the plan and satisfiable for the task scope.
       Verify depends_on indices match the dependency order described in the plan.
    f. Shared-file audit: for each file appearing in more than one task's scope,
       verify a depends_on chain exists between those tasks. Missing dependency on
@@ -121,6 +123,7 @@ IMPLEMENTATION PHASE:
    Fields: desc (single cohesive capability), done_when (falsifiable), scope (boundary),
    spec_ref (goal spec reference — preserves traceability to the original requirements),
    epic_ref (epic document path with section anchor — locates the specific capability for downstream agents),
+   validation (optional canonical commands; hook/check intent must appear in the epic/story text, desc, or done_when),
    depends_on (optional array of sibling index strings for capability ordering),
    task_depends_on (optional array of existing concrete task IDs outside this output[]).
    desc: extract verbatim from the capability's one-sentence description in the epic.
@@ -141,6 +144,7 @@ IMPLEMENTATION PHASE:
       - spec_ref equals {{.SpecRef}} (the goal spec reference, same for all entries).
       - epic_ref is the epic document path with a #section-anchor matching the capability heading.
    c. Each output[] done_when is falsifiable: a specific observable outcome, not vague.
+      Any validation[] command is satisfiable for the capability scope.
    d. Git readiness: stage the intended files, create the submission commit, verify `git -C {{.Worktree}} status --short` is clean, then submit with HEAD.
    e. Submission proof: `liza submit-for-review` must actually run successfully after step 9d; do not stop at "ready for review".
 10. Submit using liza submit-for-review --json only after all checks in step 9 pass, using HEAD.
@@ -187,6 +191,7 @@ IMPLEMENTATION PHASE:
    Each entry becomes a code-planning child task after merge. The Architecture Reviewer will verify these.
    Fields: desc (scope boundary), done_when (falsifiable), scope (what the code-planner covers),
    spec_ref (goal spec — same for all entries), arch_ref (repo-relative path to the arch doc from step 5),
+   validation (optional canonical commands; hook/check intent must appear in the arch doc, desc, or done_when),
    depends_on (optional array of sibling index strings for ordering constraints),
    task_depends_on (optional array of existing concrete task IDs outside this output[]).
    Extract each field verbatim from the arch doc — do not compose from memory or paraphrase.
@@ -213,6 +218,7 @@ EMIT RULES (when both flags are false and the project lacks a pre-commit config)
 9. PRE-SUBMIT SELF-CHECK (MANDATORY — do NOT call liza submit-for-review --json until all pass):
    a. Each output[] entry has a single, well-scoped code-planning intent.
    b. Each output[] done_when is falsifiable: a specific observable outcome, not vague.
+      Any validation[] command is satisfiable for the generated scope.
    c. Verify the arch doc contains a decomposition section mapping to each output[] entry.
    d. All output[] entries have arch_ref set to the arch doc path.
    e. Spec compliance: the decomposition covers the full scope of the goal spec.

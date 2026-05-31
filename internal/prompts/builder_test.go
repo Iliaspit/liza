@@ -1679,6 +1679,8 @@ func TestBuildRoleContext_AllRoles(t *testing.T) {
 			"plan from the provided spec artifacts",
 			"TIMESTAMP-task-planner.md", // canonical plan file path with task ID
 			"TIMESTAMP-task-planner-output.json",
+			"validation (optional canonical commands",
+			"Verify any validation[] command is character-identical to the plan",
 			"Submission requires a new worktree commit for this task",
 			"Submission proof: `liza submit-for-review` is not optional bookkeeping",
 			"COLLECTIVE PLAN SCOPING",
@@ -1725,6 +1727,8 @@ func TestBuildRoleContext_AllRoles(t *testing.T) {
 			"Plan artifact not in diff at", // gate condition wording
 			"Task-output JSON location",
 			"any committed task-output JSON appears under .liza/agent-outputs/",
+			"validation satisfiable",
+			"durable plan/task text",
 			"Changed-file map and stat first:",
 			"git -C " + data.Worktree + " diff --name-only abc1234..def5678",
 			"git -C " + data.Worktree + " diff --stat abc1234..def5678",
@@ -1768,6 +1772,7 @@ func TestBuildRoleContext_AllRoles(t *testing.T) {
 			"WORKTREE RULES:",
 			"EPIC-WRITING SKILL:",
 			"IMPLEMENTATION PHASE:",
+			"Any validation[] command is satisfiable for the capability scope",
 			"Submission requires a new worktree commit for this task",
 			"Submission proof: `liza submit-for-review` must actually run successfully",
 			"PRIOR REJECTION FEEDBACK (MUST ADDRESS)",
@@ -1808,6 +1813,7 @@ func TestBuildRoleContext_AllRoles(t *testing.T) {
 			"liza await-resubmission",
 			"EPIC-WRITING SKILL:",
 			"REVIEW CHECKLIST:",
+			"durable check/hook intent",
 			"Changed-file map and stat first:",
 			"git -C " + data.Worktree + " diff --name-only abc1234..def5678",
 			"git -C " + data.Worktree + " diff --stat abc1234..def5678",
@@ -1959,6 +1965,7 @@ func TestBuildRoleContext_AllRoles(t *testing.T) {
 			"IMPLEMENTATION PHASE:",
 			"Architecture document",
 			"specs/arch-plan",
+			"Any validation[] command is satisfiable for the generated scope",
 			"Submission requires a new worktree commit for this task",
 			"Submission proof: `liza submit-for-review` must actually run successfully after step 9g",
 		} {
@@ -1999,6 +2006,7 @@ func TestBuildRoleContext_AllRoles(t *testing.T) {
 			"REVIEW CHECKLIST:",
 			"Decomposition completeness",
 			"Composability",
+			"durable architecture/task text",
 			"Changed-file map and stat first:",
 			"git -C " + data.Worktree + " diff --name-only abc1234..def5678",
 			"git -C " + data.Worktree + " diff --stat abc1234..def5678",
@@ -2067,6 +2075,10 @@ func TestBuildRoleContext_AwaitVerdictLoopRendersForAllDoers(t *testing.T) {
 					t.Errorf("output missing await-verdict loop key %q", key)
 				}
 			}
+			if tc.role == "integration-analyst" &&
+				!strings.Contains(output, "fix-task desc, done_when, or supporting artifact text") {
+				t.Fatalf("integration analyst prompt missing durable validation intent source, got:\n%s", output)
+			}
 			var monitorLines []string
 			for _, line := range strings.Split(output, "\n") {
 				if strings.Contains(strings.ToLower(line), "monitor") {
@@ -2127,6 +2139,14 @@ func TestBuildRoleContext_PlanRefAndValidationPlan(t *testing.T) {
 		}
 		if !strings.Contains(output, "- make test") || !strings.Contains(output, "- pre-commit run --files internal/feature/feature.go") {
 			t.Error("output missing canonical validation commands")
+		}
+		if !strings.Contains(output, "Evidence must prove the intended check ran") ||
+			!strings.Contains(output, "do not infer local tool paths") ||
+			!strings.Contains(output, "not inferred from local tooling") {
+			t.Error("output missing validation proof guidance")
+		}
+		if !strings.Contains(output, "\n- make test") || strings.Contains(output, "tooling.-") {
+			t.Error("canonical validation note should render before commands with a line break")
 		}
 	})
 
@@ -2625,6 +2645,9 @@ func TestBlockReviewInstructions_IntegrationReviewer(t *testing.T) {
 	if !strings.Contains(result, "output[]") {
 		t.Error("expected output[] references")
 	}
+	if !strings.Contains(result, "durable fix-task text") {
+		t.Error("expected fix-task validation satisfiability guidance")
+	}
 	assertAwaitResubmissionPassiveGuidance(t, result, 1)
 }
 
@@ -2771,7 +2794,12 @@ func TestReviewInstructions_OutputReviewersUseFullTaskJSON(t *testing.T) {
 				}
 			}
 			if role == "integration-reviewer" {
+				if !strings.Contains(output, "durable fix-task text") {
+					t.Fatalf("integration reviewer prompt missing fix-task validation guidance, got:\n%s", output)
+				}
 				assertAwaitResubmissionPassiveGuidance(t, output, 1)
+			} else if !strings.Contains(output, "durable check/hook intent") {
+				t.Fatalf("%s prompt missing output[] validation satisfiability guidance, got:\n%s", role, output)
 			}
 		})
 	}
