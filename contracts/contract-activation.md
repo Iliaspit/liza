@@ -76,14 +76,13 @@ writable_roots = [
 ]
 ```
 
-Liza launches Codex supervisors with `codex exec -`, launch-time
-`sandbox_mode="workspace-write"` and `approval_policy="never"` overrides, and
-explicit `--add-dir` entries for the task worktree and project `.git`
-directory. Git linked worktrees write their index lock under the main repo
-metadata path (`.git/worktrees/<task>/index.lock`), not under the worktree
-directory itself. Liza does not inject Codex `default_permissions` or
-`permissions.workspace.*` overrides; writable roots come from the normal Codex
-configuration plus `--add-dir`.
+Liza launches Codex supervisors with `codex exec -` and relies on the normal
+Codex configuration above for sandbox mode, approval policy, network access, and
+writable roots. Liza does not pass launch-time permission overrides (`-c
+sandbox_mode=...`, `-c approval_policy=...`) or explicit `--add-dir` entries.
+Git linked worktrees write their index lock under the main repo metadata path
+(`.git/worktrees/<task>/index.lock`), not under the worktree directory itself,
+so the active project `.git` directory must be present in `writable_roots`.
 
 MAS supervisors can be pinned to a specific Codex package version with this
 durable project config key:

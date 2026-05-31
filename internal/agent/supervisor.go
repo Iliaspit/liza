@@ -453,18 +453,8 @@ func resolveCodexLaunchConfig(config models.Config, env []string) codexLaunchCon
 	}
 }
 
-func buildCodexArgs(prompt string, useStdin bool, outputsDir string, additionalDirs []string) []string {
-	args := []string{
-		"exec",
-		"-c", `sandbox_mode="workspace-write"`,
-		"-c", `approval_policy="never"`,
-	}
-	for _, dir := range additionalDirs {
-		if dir == "" {
-			continue
-		}
-		args = append(args, "--add-dir", dir)
-	}
+func buildCodexArgs(prompt string, useStdin bool, outputsDir string) []string {
+	args := []string{"exec"}
 	if outputsDir != "" {
 		args = append(args, "--json")
 	}
@@ -476,42 +466,8 @@ func buildCodexArgs(prompt string, useStdin bool, outputsDir string, additionalD
 	return args
 }
 
-func codexInteractiveArgs(additionalDirs []string) []string {
-	var args []string
-	for _, dir := range additionalDirs {
-		if dir == "" {
-			continue
-		}
-		args = append(args, "--add-dir", dir)
-	}
-	return args
-}
-
-func codexAdditionalDirs(projectRoot string, state *models.State, taskID string) []string {
-	var dirs []string
-	if state != nil && taskID != "" {
-		task := state.FindTask(taskID)
-		if task != nil {
-			dirs = append(dirs, resolveWorktreePath(projectRoot, task.Worktree))
-			if task.Worktree != nil && *task.Worktree != "" {
-				dirs = append(dirs, filepath.Join(projectRoot, ".git"))
-			}
-		}
-	}
-	return uniqueNonEmptyStrings(dirs)
-}
-
-func uniqueNonEmptyStrings(values []string) []string {
-	seen := make(map[string]bool, len(values))
-	var unique []string
-	for _, value := range values {
-		if value == "" || seen[value] {
-			continue
-		}
-		seen[value] = true
-		unique = append(unique, value)
-	}
-	return unique
+func codexInteractiveArgs() []string {
+	return nil
 }
 
 func codexCommandContext(ctx context.Context, version string, args []string) (*exec.Cmd, error) {
@@ -590,7 +546,7 @@ func (d *DefaultCLIExecutor) Execute(ctx context.Context, cliName string, agentI
 		cmd = exec.CommandContext(ctx, "claude", args...)
 	case "codex":
 		codexConfig := resolveCodexLaunchConfig(runtimeConfig, cmdEnv)
-		args := buildCodexArgs(prompt, useStdin, d.outputsDir, additionalDirs)
+		args := buildCodexArgs(prompt, useStdin, d.outputsDir)
 		var err error
 		cmd, err = codexCommandContext(ctx, codexConfig.PackageVersion, args)
 		if err != nil {
@@ -736,9 +692,9 @@ func (d *DefaultCLIExecutor) ExecuteInteractive(ctx context.Context, cliName str
 	var cmd *exec.Cmd
 	switch actualCLI {
 	case "codex":
-		// Interactive Codex is pairing mode: use the installed binary and do not
-		// apply headless MAS compatibility pinning or legacy Landlock flags.
-		args := codexInteractiveArgs(additionalDirs)
+		// Interactive Codex is pairing mode: use the installed binary and rely
+		// on the configured Codex writable roots instead of launch-time mounts.
+		args := codexInteractiveArgs()
 		var err error
 		cmd, err = codexCommandContext(ctx, "", args)
 		if err != nil {
@@ -1057,8 +1013,7 @@ func RunSupervisor(ctx context.Context, config SupervisorConfig) error {
 		GetLogger().Info("Prompt saved", "file", promptFile)
 
 		// Execute agent
-		additionalDirs := codexAdditionalDirs(config.ProjectRoot, stateBefore, taskID)
-		exitCode, currentOutput, err := executeAgent(supervisorCtx, config, prompt, additionalDirs, effectiveTask, stateBefore.Config)
+		exitCode, currentOutput, err := executeAgent(supervisorCtx, config, prompt, nil, effectiveTask, stateBefore.Config)
 		if err != nil {
 			if hbErr := checkHeartbeat(); hbErr != nil {
 				return hbErr

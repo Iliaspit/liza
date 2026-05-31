@@ -41,14 +41,13 @@ write Git metadata. It also adds Codex/Liza support directories and user cache
 roots to `writable_roots`. If the file already exists, Liza prompts before
 merging those entries and preserves unrelated settings.
 
-When launching headless MAS agents, Liza passes launch-time
-`sandbox_mode="workspace-write"` and `approval_policy="never"` overrides plus
-explicit `--add-dir` entries for both the task worktree and the project `.git`
-directory. This is required because Git worktrees write the task index under the
-main repo metadata path (`.git/worktrees/<task>/index.lock`), not under the
-worktree directory itself. Liza does not inject Codex `default_permissions` or
-`permissions.workspace.*` overrides; writable roots come from the normal Codex
-configuration plus `--add-dir`.
+When launching headless MAS agents, Liza relies on this global Codex
+configuration for sandbox mode, approval policy, network access, and writable
+roots. It does not pass launch-time permission overrides (`-c
+sandbox_mode=...`, `-c approval_policy=...`) or explicit `--add-dir` entries.
+Git worktrees write the task index under the main repo metadata path
+(`.git/worktrees/<task>/index.lock`), not under the worktree directory itself,
+so the active project `.git` directory must be present in `writable_roots`.
 
 Pin MAS Codex agents to a specific package version with this durable project
 config key:

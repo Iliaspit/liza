@@ -195,7 +195,7 @@ func checkpointSummaryCLIArgs(cliName, prompt string, env []string) ([]string, b
 		disableSubagents := envValue(env, "LIZA_DISABLE_CLAUDE_SUBAGENTS") == "1"
 		return buildClaudeArgs(prompt, true, "", disableSubagents), true, nil
 	case "codex":
-		return buildCodexArgs(prompt, true, "", nil), true, nil
+		return buildCodexArgs(prompt, true, ""), true, nil
 	case "gemini":
 		return []string{"-p"}, true, nil
 	case "vibe", "mistral":

@@ -1099,40 +1099,27 @@ func TestResolveCodexLaunchConfig(t *testing.T) {
 }
 
 func TestBuildCodexArgs(t *testing.T) {
-	t.Run("stdin without logging disables approval prompts", func(t *testing.T) {
-		additionalDirs := []string{"/tmp", "/tmp/project/.worktrees/task-1"}
-		args := buildCodexArgs("ignored", true, "", additionalDirs)
+	t.Run("stdin without logging relies on configured permissions", func(t *testing.T) {
+		args := buildCodexArgs("ignored", true, "")
 
 		if slices.Contains(args, "--full-auto") {
 			t.Fatalf("args = %v, did not expect --full-auto flag", args)
 		}
-		if !containsAdjacent(args, "-c", `sandbox_mode="workspace-write"`) {
-			t.Fatalf("args = %v, want workspace-write sandbox override", args)
-		}
-		if !containsAdjacent(args, "-c", `approval_policy="never"`) {
-			t.Fatalf("args = %v, want noninteractive approval policy", args)
-		}
 		if slices.Contains(args, "--dangerously-bypass-approvals-and-sandbox") {
 			t.Fatalf("args = %v, did not expect bypass flag", args)
 		}
+		assertNoCodexPermissionOverrides(t, args)
 		assertNoObsoleteCodexOverrides(t, args)
-		if !slices.Contains(args, "exec") || !slices.Contains(args, "-") {
-			t.Fatalf("args = %v, want stdin exec invocation", args)
+		if len(args) != 2 || args[0] != "exec" || args[1] != "-" {
+			t.Fatalf("args = %v, want plain stdin exec invocation", args)
 		}
 		if slices.Contains(args, "--json") {
 			t.Fatalf("args = %v, did not expect --json without logging", args)
 		}
-		assertCodexAddDir(t, args, "/tmp")
-		assertCodexAddDir(t, args, "/tmp/project/.worktrees/task-1")
-		for _, a := range args {
-			if strings.Contains(a, "mcp_servers") {
-				t.Fatalf("args = %v, did not expect mcp_servers config", args)
-			}
-		}
 	})
 
 	t.Run("prompt with logging emits json", func(t *testing.T) {
-		args := buildCodexArgs("do the thing", false, "/tmp/logs", nil)
+		args := buildCodexArgs("do the thing", false, "/tmp/logs")
 
 		if !slices.Contains(args, "do the thing") {
 			t.Fatalf("args = %v, want prompt argument", args)
@@ -1143,12 +1130,7 @@ func TestBuildCodexArgs(t *testing.T) {
 		if slices.Contains(args, "--full-auto") {
 			t.Fatalf("args = %v, did not expect --full-auto flag", args)
 		}
-		if !containsAdjacent(args, "-c", `sandbox_mode="workspace-write"`) {
-			t.Fatalf("args = %v, want workspace-write sandbox override", args)
-		}
-		if !containsAdjacent(args, "-c", `approval_policy="never"`) {
-			t.Fatalf("args = %v, want noninteractive approval policy", args)
-		}
+		assertNoCodexPermissionOverrides(t, args)
 		assertNoObsoleteCodexOverrides(t, args)
 		for _, a := range args {
 			if strings.Contains(a, "mcp_servers") {
@@ -1157,15 +1139,10 @@ func TestBuildCodexArgs(t *testing.T) {
 		}
 	})
 
-	t.Run("uses only baseline config overrides", func(t *testing.T) {
-		args := buildCodexArgs("ignored", true, "", nil)
+	t.Run("uses no launch-time config overrides", func(t *testing.T) {
+		args := buildCodexArgs("ignored", true, "")
 
-		if !containsAdjacent(args, "-c", `sandbox_mode="workspace-write"`) {
-			t.Fatalf("args = %v, want workspace-write sandbox override", args)
-		}
-		if !containsAdjacent(args, "-c", `approval_policy="never"`) {
-			t.Fatalf("args = %v, want noninteractive approval policy", args)
-		}
+		assertNoCodexPermissionOverrides(t, args)
 		assertNoObsoleteCodexOverrides(t, args)
 		if args[len(args)-1] != "-" {
 			t.Fatalf("args = %v, want stdin prompt marker last", args)
@@ -1180,6 +1157,20 @@ func containsAdjacent(values []string, first, second string) bool {
 		}
 	}
 	return false
+}
+
+func assertNoCodexPermissionOverrides(t *testing.T, args []string) {
+	t.Helper()
+	for _, forbidden := range []string{
+		"-c",
+		"--add-dir",
+		`sandbox_mode="workspace-write"`,
+		`approval_policy="never"`,
+	} {
+		if slices.Contains(args, forbidden) {
+			t.Fatalf("args = %v, did not expect Codex permission override %q", args, forbidden)
+		}
+	}
 }
 
 func assertNoObsoleteCodexOverrides(t *testing.T, args []string) {
@@ -1199,53 +1190,11 @@ func assertNoObsoleteCodexOverrides(t *testing.T, args []string) {
 }
 
 func TestCodexInteractiveArgs(t *testing.T) {
-	args := codexInteractiveArgs([]string{"/tmp", "", "/tmp/project/.worktrees/task-1"})
+	args := codexInteractiveArgs()
 
-	assertCodexAddDir(t, args, "/tmp")
-	assertCodexAddDir(t, args, "/tmp/project/.worktrees/task-1")
-	if slices.Contains(args, "") {
-		t.Fatalf("args = %v, did not expect empty argument", args)
+	if len(args) != 0 {
+		t.Fatalf("args = %v, want no interactive Codex args", args)
 	}
-}
-
-func TestCodexAdditionalDirs(t *testing.T) {
-	t.Run("no task context returns empty dirs", func(t *testing.T) {
-		if dirs := codexAdditionalDirs("/tmp/project", nil, ""); len(dirs) != 0 {
-			t.Fatalf("dirs = %v, want empty", dirs)
-		}
-	})
-
-	t.Run("task worktree and git metadata are added", func(t *testing.T) {
-		projectRoot := "/tmp/project"
-		worktreeRel := ".worktrees/task-1"
-		state := &models.State{
-			Tasks: []models.Task{
-				{
-					ID:       "task-1",
-					Worktree: &worktreeRel,
-				},
-			},
-		}
-
-		dirs := codexAdditionalDirs(projectRoot, state, "task-1")
-
-		if !slices.Contains(dirs, filepath.Join(projectRoot, worktreeRel)) {
-			t.Fatalf("dirs = %v, want task worktree", dirs)
-		}
-		if !slices.Contains(dirs, filepath.Join(projectRoot, ".git")) {
-			t.Fatalf("dirs = %v, want project git metadata dir", dirs)
-		}
-	})
-}
-
-func assertCodexAddDir(t *testing.T, args []string, wantDir string) {
-	t.Helper()
-	for i := 0; i < len(args)-1; i++ {
-		if args[i] == "--add-dir" && args[i+1] == wantDir {
-			return
-		}
-	}
-	t.Fatalf("args = %v, want --add-dir %s", args, wantDir)
 }
 
 // buildPromptFailureFixture wires a minimal ARCHITECTING architect task
