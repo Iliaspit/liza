@@ -28,6 +28,7 @@ type AwaitResubmissionResult struct {
 	Verdict      string            `json:"verdict"`       // One of the Resubmission* constants
 	TaskStatus   models.TaskStatus `json:"task_status"`   // Final observed task status
 	Reason       string            `json:"reason"`        // Terminal explanation (empty on RESUBMITTED)
+	BaseCommit   string            `json:"base_commit"`   // Fresh review base SHA to use on RESUBMITTED
 	ReviewCommit string            `json:"review_commit"` // New commit SHA to review (on RESUBMITTED)
 	ReviewCycle  int               `json:"review_cycle"`  // Current review cycle count
 }
@@ -331,6 +332,7 @@ func reclaimForReview(projectRoot string, bb *db.Blackboard, taskID, agentID str
 	freshLease := time.Now().Add(reclaimReviewLeaseDuration)
 
 	var reviewCommit string
+	var baseCommit string
 	var reviewCycle int
 	var reviewBoundaryErr error
 
@@ -359,6 +361,9 @@ func reclaimForReview(projectRoot string, bb *db.Blackboard, taskID, agentID str
 		if task.ReviewCommit != nil {
 			reviewCommit = *task.ReviewCommit
 		}
+		if task.BaseCommit != nil {
+			baseCommit = *task.BaseCommit
+		}
 		reviewCycle = task.ReviewCyclesCurrent
 
 		agent, ok := s.Agents[agentID]
@@ -385,6 +390,7 @@ func reclaimForReview(projectRoot string, bb *db.Blackboard, taskID, agentID str
 	return &AwaitResubmissionResult{
 		Verdict:      ResubmissionResubmitted,
 		TaskStatus:   reviewing,
+		BaseCommit:   baseCommit,
 		ReviewCommit: reviewCommit,
 		ReviewCycle:  reviewCycle,
 	}, nil

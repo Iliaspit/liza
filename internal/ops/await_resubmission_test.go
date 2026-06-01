@@ -190,10 +190,12 @@ func TestAwaitResubmission_Resubmitted(t *testing.T) {
 
 	testhelpers.WaitForAsyncSetup()
 	// Simulate doer resubmission: transition to CODE_READY_FOR_REVIEW.
+	newBase := "newbase123"
 	newCommit := "newcommit456"
 	if err := bb.Modify(func(s *models.State) error {
 		tk := s.FindTask("task-1")
 		tk.Status = models.TaskStatusReadyForReview
+		tk.BaseCommit = &newBase
 		tk.ReviewCommit = &newCommit
 		tk.Worktree = nil
 		tk.ReviewCyclesCurrent = 2
@@ -214,6 +216,9 @@ func TestAwaitResubmission_Resubmitted(t *testing.T) {
 	}
 	if result.ReviewCommit != newCommit {
 		t.Errorf("ReviewCommit = %q, want %q", result.ReviewCommit, newCommit)
+	}
+	if result.BaseCommit != newBase {
+		t.Errorf("BaseCommit = %q, want %q", result.BaseCommit, newBase)
 	}
 	if result.ReviewCycle != 2 {
 		t.Errorf("ReviewCycle = %d, want 2", result.ReviewCycle)
@@ -708,7 +713,9 @@ func TestAwaitResubmission_EarlyResubmission(t *testing.T) {
 		Event: models.TaskEventRejected,
 		Agent: strPtr("reviewer-1"),
 	})
+	newBase := "earlybase456"
 	newCommit := "earlycommit789"
+	task.BaseCommit = &newBase
 	task.ReviewCommit = &newCommit
 	task.Worktree = nil
 	task.ReviewCyclesCurrent = 3
@@ -732,6 +739,9 @@ func TestAwaitResubmission_EarlyResubmission(t *testing.T) {
 	}
 	if result.ReviewCommit != newCommit {
 		t.Errorf("ReviewCommit = %q, want %q", result.ReviewCommit, newCommit)
+	}
+	if result.BaseCommit != newBase {
+		t.Errorf("BaseCommit = %q, want %q", result.BaseCommit, newBase)
 	}
 	if result.ReviewCycle != 3 {
 		t.Errorf("ReviewCycle = %d, want 3", result.ReviewCycle)

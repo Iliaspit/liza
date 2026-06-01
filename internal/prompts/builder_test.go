@@ -17,6 +17,7 @@ import (
 )
 
 const awaitResubmissionPassiveGuidance = "If the harness backgrounds await-resubmission and says it will notify on completion, end the turn; do NOT call Monitor, search for Monitor, ScheduleWakeup, or read/tail/sleep/poll the output file."
+const awaitResubmissionBoundaryGuidance = "On RESUBMITTED, use the returned `base_commit` and `review_commit` for every diff command in this same session."
 const validationCommandShapeRule = "Forbidden validation command shapes: `cd ... &&`, command substitution/backticks, polling or tail pipelines, and task artifact paths outside the worktree."
 const validationFallback = "If a stored validation command violates BASH CONSTRAINTS, do not execute it literally; treat it as validation intent, run an equivalent single-purpose command from the worktree/tool working directory, and record both the original command and translated command in validation evidence."
 
@@ -1577,6 +1578,7 @@ func TestBuildRoleContext_AllRoles(t *testing.T) {
 			"REVIEWER TOOLS:",
 			"liza submit-verdict",
 			"liza await-resubmission",
+			awaitResubmissionBoundaryGuidance,
 			"ANOMALY LOGGING:",
 			"WORKTREE RULES:",
 			"Supervisor verified this worktree before launch; do not run a standalone `/usr/bin/test -d " + data.Worktree + "` probe.",
@@ -1725,6 +1727,7 @@ func TestBuildRoleContext_AllRoles(t *testing.T) {
 			"CODE PLAN REVIEWER TOOLS:",
 			"liza submit-verdict",
 			"liza await-resubmission",
+			awaitResubmissionBoundaryGuidance,
 			"REVIEW CHECKLIST:",
 			"TIMESTAMP-task-cpr",           // interpolated task ID in reviewer gate
 			"Plan file location",           // gate label present in checklist
@@ -1815,6 +1818,7 @@ func TestBuildRoleContext_AllRoles(t *testing.T) {
 			"EPIC PLAN REVIEWER TOOLS:",
 			"liza submit-verdict",
 			"liza await-resubmission",
+			awaitResubmissionBoundaryGuidance,
 			"EPIC-WRITING SKILL:",
 			"REVIEW CHECKLIST:",
 			"durable check/hook intent",
@@ -1912,6 +1916,7 @@ func TestBuildRoleContext_AllRoles(t *testing.T) {
 			"US REVIEWER TOOLS:",
 			"liza submit-verdict",
 			"liza await-resubmission",
+			awaitResubmissionBoundaryGuidance,
 			"SPEC-REVIEW SKILL:",
 			"USER-STORY ANTI-PATTERNS",
 			"QUALITY GATES:",
@@ -2009,6 +2014,7 @@ func TestBuildRoleContext_AllRoles(t *testing.T) {
 			"ARCHITECTURE REVIEWER TOOLS:",
 			"liza submit-verdict",
 			"liza await-resubmission",
+			awaitResubmissionBoundaryGuidance,
 			"REVIEW CHECKLIST:",
 			"Decomposition completeness",
 			"Composability",
@@ -2347,6 +2353,38 @@ func TestBuildRoleContext_ValidationCommandShapeGuidance(t *testing.T) {
 			}
 			if !strings.Contains(output, validationCommandShapeRule) {
 				t.Fatalf("%s prompt missing forbidden validation command shapes:\n%s", role, output)
+			}
+		})
+	}
+}
+
+func TestReviewInstructions_PostVerdictResubmissionBoundaryGuidance(t *testing.T) {
+	tmpl := template.Must(template.ParseFiles("templates/blocks/review_instructions.tmpl"))
+
+	for _, role := range []string{"code-reviewer", "integration-reviewer"} {
+		t.Run(role, func(t *testing.T) {
+			data := RoleContextData{
+				Role:           role,
+				TaskID:         "task-review",
+				AgentID:        "reviewer-1",
+				Worktree:       "/tmp/worktree",
+				BaseCommit:     "base123",
+				ReviewCommit:   "review123",
+				GoalBaseCommit: "goalbase123",
+				GoalSlug:       "goal-slug",
+			}
+
+			var buf bytes.Buffer
+			if err := tmpl.ExecuteTemplate(&buf, "review-instructions", &data); err != nil {
+				t.Fatalf("failed to execute review-instructions template: %v", err)
+			}
+
+			output := buf.String()
+			if !strings.Contains(output, "POST-VERDICT (MANDATORY for REJECTED)") {
+				t.Fatalf("%s prompt missing post-verdict block:\n%s", role, output)
+			}
+			if !strings.Contains(output, "discard prompt-time BASE COMMIT / REVIEW_COMMIT") {
+				t.Fatalf("%s prompt missing resubmission boundary refresh guidance:\n%s", role, output)
 			}
 		})
 	}

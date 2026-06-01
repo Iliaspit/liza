@@ -14,4 +14,5 @@ CODE PLAN REVIEWER TOOLS:
     liza submit-verdict {{.TaskID}} REJECTED --reason "$reason" --agent-id {{.AgentID}} --json
 - liza await-resubmission — Block until doer resubmits after rejection (call after submit-verdict REJECTED)
   liza await-resubmission {{.TaskID}} --agent-id {{.AgentID}} --json
+  On RESUBMITTED, use the returned `base_commit` and `review_commit` for every diff command in this same session.
 {{- end -}}

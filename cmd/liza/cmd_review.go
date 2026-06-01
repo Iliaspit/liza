@@ -362,7 +362,7 @@ Requirements:
   - Task must have been rejected by the calling reviewer
 
 Possible outcomes:
-  - RESUBMITTED: doer submitted new changes, reviewer should re-review
+  - RESUBMITTED: doer submitted new changes; use returned base_commit..review_commit for re-review
   - TIMEOUT: no resubmission within timeout period
   - TERMINAL: task reached a terminal state (superseded, abandoned)
   - ABORTED: task was cancelled or reassigned`,
