@@ -33,6 +33,19 @@ python3 ~/.liza/skills/liza-logs/scripts/analyze-state.py .liza/state.yaml
    - if `review_cycles_total` is missing, count task `history` events named
      `rejected` or `review_verdict_rejected`
 
+Lifecycle churn outranks aggregate log noise:
+   - Treat any task with `review_cycles_total >= 4` or counted rejection events
+     >= 4 as a P1 finding by default, even if its current status is `MERGED`.
+   - Do not let high tool-error counts, token volume, or eventual merge status
+     bury repeated review/retry cycles. A merged high-churn task is unhealthy
+     convergence unless the evidence proves the retries were expected.
+   - If analyzer counts and current task fields disagree, report both numbers
+     and explain the likely distinction (for example, history/attempt total vs
+     current `review_cycles` field). Prioritize using the higher history count
+     until disproven by bounded evidence.
+   - The highest-churn task must appear first in the summary table and in
+     cross-correlation before setup/tool/context frictions.
+
 Report sections: session header, token summary, content breakdown, top items by
 size, tool usage, empty turns, skill invocations, secret-word/init breadcrumb
 detection, turn timeline, tool result breakdown, MCP usage, efficiency insights,

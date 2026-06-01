@@ -12,6 +12,11 @@ Logs analyzed:
 State file analyzed:
 Roles covered:
 
+Start with the primary lifecycle friction. If any task has >=4 rejections or
+review cycles, list the highest-churn task first even when it eventually merged.
+Tool errors, token volume, and setup friction come after lifecycle churn unless
+they are security/data-loss issues.
+
 | Priority | Friction | Evidence | Impact | Recommended fix |
 |----------|----------|----------|--------|-----------------|
 
@@ -26,6 +31,15 @@ Source: `.liza/state.yaml`
 | BLOCKED | N |
 | SUPERSEDED | N |
 | ABANDONED | N |
+
+### Primary Lifecycle Friction
+
+Required when any high-rejection task exists. Reconcile analyzer/history counts
+against current task fields instead of choosing the lower or more convenient
+number.
+
+| Task | Why this is primary | Analyzer/history count | Current task field | Final status | Evidence | Recommended fix |
+|------|---------------------|-----------------------:|--------------------|--------------|----------|-----------------|
 
 ### High-Rejection Tasks
 
