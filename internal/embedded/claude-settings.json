@@ -202,6 +202,7 @@
       "Bash(grep:*)",
       "Bash(rg:*)",
       "Bash(ast-grep:*)",
+      "Bash(semble:*)",
       "Bash(scip-search:*)",
       "Bash(stacklit:*)",
       "Bash(mdtoc:*)",

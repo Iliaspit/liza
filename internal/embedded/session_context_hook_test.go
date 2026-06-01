@@ -258,6 +258,135 @@ func TestSessionContextHook_SuppressesRepoIndexesForLizaAgentSessions(t *testing
 	}
 }
 
+func TestSessionContextHook_EmitsSembleWhenEnabledSafeAndOfflineReady(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not available")
+	}
+	if runtime.GOOS == "windows" {
+		t.Skip("shell script test")
+	}
+
+	hookPath := writeSessionContextHook(t)
+	projectRoot := t.TempDir()
+	writeRootSembleIgnore(t, projectRoot)
+	binDir := writeFakeSembleTools(t, true)
+
+	output := runHookWithEnv(t, hookPath, sessionStartPayload(t, projectRoot), []string{
+		"PATH=" + binDir + string(os.PathListSeparator) + os.Getenv("PATH"),
+		"LIZA_ENABLE_SEMBLE=true",
+	}, 0)
+	context := sessionStartAdditionalContext(t, output)
+	for _, want := range []string{
+		"Semble semantic search is available for this repo root: " + projectRoot,
+		"HF_HUB_OFFLINE=1 semble search \"where is review submission validated?\" '" + projectRoot + "'",
+		"HF_HUB_OFFLINE=1 semble search \"where is task superseding specified?\" '" + projectRoot + "' --content docs",
+		"Use --content with one of: code, docs, config, all; code is the default.",
+		"Semble returns candidate chunks, not proof",
+		"Do not use rg for broad-scope or common-word conceptual queries.",
+	} {
+		if !strings.Contains(context, want) {
+			t.Fatalf("session context missing %q, got:\n%s", want, context)
+		}
+	}
+	if strings.Contains(context, "Liza repository indexes detected") {
+		t.Fatalf("Semble-only context should not claim Stacklit/SCIP indexes, got:\n%s", context)
+	}
+}
+
+func TestSessionContextHook_OmitsSembleWithoutRootIgnore(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not available")
+	}
+	if runtime.GOOS == "windows" {
+		t.Skip("shell script test")
+	}
+
+	hookPath := writeSessionContextHook(t)
+	projectRoot := t.TempDir()
+	binDir := writeFakeSembleTools(t, true)
+
+	output := runHookWithEnv(t, hookPath, sessionStartPayload(t, projectRoot), []string{
+		"PATH=" + binDir + string(os.PathListSeparator) + os.Getenv("PATH"),
+		"LIZA_ENABLE_SEMBLE=true",
+	}, 0)
+	context := sessionStartAdditionalContext(t, output)
+	if strings.Contains(context, "Semble semantic search is available") {
+		t.Fatalf("startup context should omit Semble without root .sembleignore, got:\n%s", context)
+	}
+}
+
+func TestSessionContextHook_OmitsSembleWithIncompleteRootIgnore(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not available")
+	}
+	if runtime.GOOS == "windows" {
+		t.Skip("shell script test")
+	}
+
+	hookPath := writeSessionContextHook(t)
+	projectRoot := t.TempDir()
+	if err := os.WriteFile(filepath.Join(projectRoot, ".sembleignore"), []byte(".liza/\n.worktrees/\n"), 0644); err != nil {
+		t.Fatalf("write incomplete root .sembleignore: %v", err)
+	}
+	binDir := writeFakeSembleTools(t, true)
+
+	output := runHookWithEnv(t, hookPath, sessionStartPayload(t, projectRoot), []string{
+		"PATH=" + binDir + string(os.PathListSeparator) + os.Getenv("PATH"),
+		"LIZA_ENABLE_SEMBLE=true",
+	}, 0)
+	context := sessionStartAdditionalContext(t, output)
+	if strings.Contains(context, "Semble semantic search is available") {
+		t.Fatalf("startup context should omit Semble with incomplete root .sembleignore, got:\n%s", context)
+	}
+}
+
+func TestSessionContextHook_OmitsSembleWhenOfflineValidationFails(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not available")
+	}
+	if runtime.GOOS == "windows" {
+		t.Skip("shell script test")
+	}
+
+	hookPath := writeSessionContextHook(t)
+	projectRoot := t.TempDir()
+	writeRootSembleIgnore(t, projectRoot)
+	binDir := writeFakeSembleTools(t, false)
+
+	output := runHookWithEnv(t, hookPath, sessionStartPayload(t, projectRoot), []string{
+		"PATH=" + binDir + string(os.PathListSeparator) + os.Getenv("PATH"),
+		"LIZA_ENABLE_SEMBLE=true",
+	}, 0)
+	context := sessionStartAdditionalContext(t, output)
+	if strings.Contains(context, "Semble semantic search is available") {
+		t.Fatalf("startup context should omit Semble when offline validation fails, got:\n%s", context)
+	}
+}
+
+func TestSessionContextHook_SuppressesSembleForLizaAgentSessions(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not available")
+	}
+	if runtime.GOOS == "windows" {
+		t.Skip("shell script test")
+	}
+
+	hookPath := writeSessionContextHook(t)
+	projectRoot := t.TempDir()
+	writeRootSembleIgnore(t, projectRoot)
+	binDir := writeFakeSembleTools(t, true)
+
+	output := runHookWithEnv(t, hookPath, sessionStartPayload(t, projectRoot), []string{
+		"PATH=" + binDir + string(os.PathListSeparator) + os.Getenv("PATH"),
+		"LIZA_ENABLE_SEMBLE=true",
+		"LIZA_AGENT_ID=coder-1",
+	}, 0)
+	context := sessionStartAdditionalContext(t, output)
+	if strings.Contains(context, "Semble semantic search is available") {
+		t.Fatalf("Liza agent context should not include Pairing Semble guidance, got:\n%s", context)
+	}
+}
+
 func writeSessionContextHook(t *testing.T) string {
 	t.Helper()
 	hookPath := filepath.Join(t.TempDir(), "session-context.sh")
@@ -307,4 +436,81 @@ func sessionStartAdditionalContext(t *testing.T, output string) string {
 		t.Fatalf("session context output is not JSON: %v\n%s", err, output)
 	}
 	return got.HookSpecificOutput.AdditionalContext
+}
+
+func runHookWithEnv(t *testing.T, hookPath, payload string, extraEnv []string, wantCode int) string {
+	t.Helper()
+	cmd := exec.Command("bash", hookPath)
+	cmd.Stdin = strings.NewReader(payload)
+	cmd.Env = append(os.Environ(), extraEnv...)
+	output, err := cmd.CombinedOutput()
+	if wantCode == 0 {
+		if err != nil {
+			t.Fatalf("hook exited non-zero: %v\n%s", err, output)
+		}
+		return string(output)
+	}
+	exitErr, ok := err.(*exec.ExitError)
+	if !ok {
+		t.Fatalf("hook exit = %v, want code %d\n%s", err, wantCode, output)
+	}
+	if exitErr.ExitCode() != wantCode {
+		t.Fatalf("hook exit code = %d, want %d\n%s", exitErr.ExitCode(), wantCode, output)
+	}
+	return string(output)
+}
+
+func writeRootSembleIgnore(t *testing.T, projectRoot string) {
+	t.Helper()
+	content := strings.Join([]string{
+		".liza/",
+		".worktrees/",
+		"stacklit.json",
+		"*.scip",
+		".env",
+		".env.*",
+		"*.env",
+		"credentials.*",
+		"secrets.*",
+		"*secret*.*",
+		"*.pem",
+		"*.key",
+		"*.p12",
+		"*.pfx",
+		"*.jks",
+		"*_rsa",
+		"*_dsa",
+		"*_ecdsa",
+		"*_ed25519",
+		"*.keystore",
+		"*.truststore",
+		"config/secrets/",
+		"**/secrets/",
+		"serviceAccountKey.json",
+		"*-credentials.json",
+	}, "\n") + "\n"
+	if err := os.WriteFile(filepath.Join(projectRoot, ".sembleignore"), []byte(content), 0644); err != nil {
+		t.Fatalf("write root .sembleignore: %v", err)
+	}
+}
+
+func writeFakeSembleTools(t *testing.T, validationSucceeds bool) string {
+	t.Helper()
+	binDir := t.TempDir()
+	timeoutPath := filepath.Join(binDir, "timeout")
+	if err := os.WriteFile(timeoutPath, []byte("#!/bin/sh\nshift\nexec \"$@\"\n"), 0755); err != nil {
+		t.Fatalf("write fake timeout: %v", err)
+	}
+	exitCode := "0"
+	if !validationSucceeds {
+		exitCode = "42"
+	}
+	sembleScript := "#!/bin/sh\n" +
+		"test \"${HF_HUB_OFFLINE:-}\" = \"1\" || exit 17\n" +
+		"test \"$1\" = \"search\" || exit 18\n" +
+		"exit " + exitCode + "\n"
+	if err := os.WriteFile(filepath.Join(binDir, "semble"), []byte(sembleScript), 0755); err != nil {
+		t.Fatalf("write fake semble: %v", err)
+	}
+	return binDir
 }

@@ -86,6 +86,70 @@ repo_liza_index_hook_path() {
   printf '%s/.git/hooks/post-commit' "$project_dir"
 }
 
+truthy_env() {
+  local value="$1"
+
+  value="${value#"${value%%[![:space:]]*}"}"
+  value="${value%"${value##*[![:space:]]}"}"
+  value="${value,,}"
+  [[ "$value" == "1" || "$value" == "true" ]]
+}
+
+semble_offline_ready() {
+  local tmpdir status
+
+  command -v semble >/dev/null 2>&1 || return 1
+  command -v timeout >/dev/null 2>&1 || return 1
+
+  tmpdir=$(mktemp -d "${TMPDIR:-/tmp}/liza-semble.XXXXXX") || return 1
+  if ! printf 'def liza_semble_prewarm(): pass\n' >"$tmpdir/prewarm.py"; then
+    rm -rf "$tmpdir"
+    return 1
+  fi
+
+  HF_HUB_OFFLINE=1 timeout 30s semble search "__liza_semble_prewarm__" "$tmpdir" --top-k 1 --content code >/dev/null 2>&1
+  status=$?
+  rm -rf "$tmpdir"
+  return "$status"
+}
+
+root_sembleignore_safe() {
+  local ignore_file="$project_dir/.sembleignore"
+  local required_patterns=(
+    ".liza/"
+    ".worktrees/"
+    "stacklit.json"
+    "*.scip"
+    ".env"
+    ".env.*"
+    "*.env"
+    "credentials.*"
+    "secrets.*"
+    "*secret*.*"
+    "*.pem"
+    "*.key"
+    "*.p12"
+    "*.pfx"
+    "*.jks"
+    "*_rsa"
+    "*_dsa"
+    "*_ecdsa"
+    "*_ed25519"
+    "*.keystore"
+    "*.truststore"
+    "config/secrets/"
+    "**/secrets/"
+    "serviceAccountKey.json"
+    "*-credentials.json"
+  )
+  local pattern
+
+  [[ -f "$ignore_file" ]] || return 1
+  for pattern in "${required_patterns[@]}"; do
+    grep -Fxq "$pattern" "$ignore_file" 2>/dev/null || return 1
+  done
+}
+
 cwd=$(json_val cwd)
 project_dir="${CLAUDE_PROJECT_DIR:-}"
 if [[ -z "$project_dir" ]]; then
@@ -126,37 +190,42 @@ if [[ -n "${LIZA_AGENT_ID:-}" ]]; then
   exit 0
 fi
 
-if [[ ! -f "$hook_path" ]] || ! grep -q 'liza-index' "$hook_path" 2>/dev/null; then
-  printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"%s"}}\n' "$(json_escape "$context")"
-  exit 0
-fi
-
-stacklit_path="$project_dir/stacklit.json"
-if [[ -f "$stacklit_path" ]]; then
-  shell_stacklit_path=$(quote_for_shell "$stacklit_path")
-fi
-
 scip_files=()
-for scip_path in "$project_dir"/*.scip; do
-  [[ -f "$scip_path" ]] || continue
-  scip_files+=("$scip_path")
-done
+if [[ -f "$hook_path" ]] && grep -q 'liza-index' "$hook_path" 2>/dev/null; then
+  stacklit_path="$project_dir/stacklit.json"
+  if [[ -f "$stacklit_path" ]]; then
+    shell_stacklit_path=$(quote_for_shell "$stacklit_path")
+  fi
 
-if [[ -z "${shell_stacklit_path:-}" && "${#scip_files[@]}" -eq 0 ]]; then
+  for scip_path in "$project_dir"/*.scip; do
+    [[ -f "$scip_path" ]] || continue
+    scip_files+=("$scip_path")
+  done
+fi
+
+semble_enabled=false
+if truthy_env "${LIZA_ENABLE_SEMBLE:-}" && root_sembleignore_safe && semble_offline_ready; then
+  semble_enabled=true
+  shell_project_dir=$(quote_for_shell "$project_dir")
+fi
+
+if [[ -z "${shell_stacklit_path:-}" && "${#scip_files[@]}" -eq 0 && "$semble_enabled" != "true" ]]; then
   printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"%s"}}\n' "$(json_escape "$context")"
   exit 0
 fi
 
-context+=" Liza repository indexes detected. Pairing mode can use these explicit repo-root index paths. They are refreshed after commits and do not reflect uncommitted changes; verify against source files before editing."
+if [[ -n "${shell_stacklit_path:-}" || "${#scip_files[@]}" -gt 0 ]]; then
+  context+=" Liza repository indexes detected. Pairing mode can use these explicit repo-root index paths. They are refreshed after commits and do not reflect uncommitted changes; verify against source files before editing."
+fi
 
 if [[ -n "${shell_stacklit_path:-}" ]]; then
   context+=" // Stacklit index: $stacklit_path
-    //  stacklit derive --ai-summary -i $shell_stacklit_path
-    //  stacklit find-module <query> -i $shell_stacklit_path
-    //  stacklit get-module <module> -i $shell_stacklit_path
-    //  stacklit get-dependencies <module> -i $shell_stacklit_path
-    //  stacklit get-hints -i $shell_stacklit_path
-    //  stacklit get-hot-files -i $shell_stacklit_path"
+ // stacklit derive --ai-summary -i $shell_stacklit_path
+ // stacklit find-module <query> -i $shell_stacklit_path
+ // stacklit get-module <module> -i $shell_stacklit_path
+ // stacklit get-dependencies <module> -i $shell_stacklit_path
+ // stacklit get-hints -i $shell_stacklit_path
+ // stacklit get-hot-files -i $shell_stacklit_path"
 fi
 
 if [[ "${#scip_files[@]}" -gt 0 ]]; then
@@ -172,8 +241,8 @@ if [[ "${#scip_files[@]}" -gt 0 ]]; then
     context+=" // $display_language index: $scip_path"
   done
   context+="
-    // scip-search symbols --index <index-path> --name Foo --name Bar
-    // scip-search references --index <index-path> --symbol '<exact-foo>' --symbol '<exact-bar>' --location-only"
+ // scip-search symbols --index <index-path> --name Foo --name Bar
+ // scip-search references --index <index-path> --symbol '<exact-foo>' --symbol '<exact-bar>' --location-only"
   context+=" // (except python): scip-search implementations --index <index-path> --symbol '<exact-symbol>'"
 fi
 
@@ -183,6 +252,18 @@ fi
 
 if [[ -n "${shell_stacklit_path:-}" ]]; then
   context+=" === Run \`stacklit derive --ai-summary -i $shell_stacklit_path\` at the end of the session initialization."
+fi
+
+if [[ "$semble_enabled" == "true" ]]; then
+  context+=" // Semble semantic search is available for this repo root: $project_dir
+ // HF_HUB_OFFLINE=1 semble search \"where is review submission validated?\" $shell_project_dir
+ // HF_HUB_OFFLINE=1 semble search \"agent CLI defaults\" $shell_project_dir --top-k 10
+ // HF_HUB_OFFLINE=1 semble search \"where is task superseding specified?\" $shell_project_dir --content docs
+ // HF_HUB_OFFLINE=1 semble search \"default CLI config\" $shell_project_dir --content config
+ // HF_HUB_OFFLINE=1 semble find-related <file_path> <line> $shell_project_dir
+ // Use --content with one of: code, docs, config, all; code is the default.
+ // Semble returns candidate chunks, not proof; verify source files before editing.
+ // Do not use rg for broad-scope or common-word conceptual queries."
 fi
 
 printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"%s"}}\n' "$(json_escape "$context")"
