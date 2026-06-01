@@ -8,10 +8,12 @@ description: Coordinate Pairing-mode doer/reviewer sessions through a Markdown b
 Use as:
 
 ```text
-/adversarial-pairing <role> <blackboard-path>
+/adversarial-pairing <role-or-reviewer-id> <blackboard-path>
 ```
 
-`role` is `doer` or `reviewer`. `blackboard-path` may be untracked and must not be committed unless the user explicitly asks.
+`role-or-reviewer-id` is `doer`, `reviewer`, or `reviewer-<id>`.
+`reviewer-<id>` means reviewer role with `<id>` as the stable agent entry to use when registering in the blackboard, for example `reviewer-codex` or `reviewer-claude`.
+`blackboard-path` may be untracked and must not be committed unless the user explicitly asks.
 
 # Operating Model
 
@@ -91,7 +93,7 @@ agents:
 ---
 ```
 
-Agent IDs should be stable and human-readable. If absent, register yourself by adding an entry for your role after asking the user if identity is ambiguous.
+Agent IDs should be stable and human-readable. If the invocation is `reviewer-<id>`, use `<id>` as the reviewer agent ID. If absent, register yourself by adding an entry for your role after asking the user if identity is ambiguous.
 
 Worktree rules:
 

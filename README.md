@@ -251,6 +251,7 @@ Stacklit or mutate curated insights/config files; see
 > **Reading [USAGE_MULTI_AGENTS](support-docs/USAGE_MULTI_AGENTS.md)** thoroughly before running a multi-agent pipeline is essential to a successful experience. Liza is complex system.
 
 - **Pairing**: See [Pairing Guide](support-docs/USAGE_PAIRING.md) — human-agent collaboration under contract
+- **Adversarial Pairing**: See [Pairing Guide](support-docs/USAGE_PAIRING.md#adversarial-pairing) — one doer plus multiple reviewers, usually on different models, through a shared Markdown blackboard when you want peer review without launching the full MAS
 - **Multi-Agent (Liza)**: See [USAGE](support-docs/USAGE_MULTI_AGENTS.md), then try the [DEMO](docs/DEMO.md)
 - **Reference**: [Configuration](support-docs/CONFIGURATION.md) · [Recipes](docs/RECIPES.md) · [Troubleshooting](support-docs/TROUBLESHOOTING.md)
 
@@ -263,6 +264,11 @@ Reading the contract files is enforced by a hook for Claude, by instructions for
 The agent reads the contract, builds mental models, and operates as a senior peer:
 analyzing before acting, presenting approval requests at every state change, validating before claiming done.
 Or you may choose to make it your Socratic colleague, your rubber duck, or your challenger.
+
+For higher-stakes work that still does not need a full autonomous sprint, the
+`adversarial-pairing` skill coordinates one doer session and multiple reviewer
+sessions, typically running different models, through a shared Markdown blackboard. It keeps the human in
+Pairing-mode approval control while adding MAS-style adversarial review gates.
 
 **Multi-agent mode** — autonomous spec-to-code pipeline:
 1. `liza init "[Goal description]" --spec vision.md` (this file needs to be committed). Use `--entry-point functional-spec` to skip the epic/user-story spec phase and start at architecture, or `--entry-point technical-spec` to start at code planning when architecture is already settled. Add `--no-follow-up` to run only the entry-point sub-pipeline. `detailed-spec` remains as a legacy alias for `functional-spec`.

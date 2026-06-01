@@ -242,6 +242,43 @@ Best for: exploring new features, validating requirements through code simulatio
 
 ---
 
+## Adversarial Pairing
+
+Adversarial Pairing is the middle step between ordinary Pairing mode and the full Liza MAS. Use it when one agent should implement and multiple reviewers should challenge the work, but a full autonomous sprint would be too heavy.
+
+It runs multiple Pairing-mode sessions against a shared Markdown blackboard. The typical setup is one doer and several reviewers on different models, so review disagreement exposes model-specific blind spots. The human remains the approval authority; the blackboard coordinates doer/reviewer state, submitted artifacts, review notes, validation output, and decisions.
+
+Use it as:
+
+```text
+/adversarial-pairing <role-or-reviewer-id> <blackboard-path>
+```
+
+`role-or-reviewer-id` is `doer`, `reviewer`, or `reviewer-<id>`. Use `reviewer-<id>` when you want the agent to receive both its reviewer role and the stable ID it should use when registering in the blackboard. Start the doer first so it can create or initialize the blackboard, then start reviewer sessions against the same path:
+
+```text
+/adversarial-pairing doer .liza/adversarial/retry-client.md
+/adversarial-pairing reviewer-codex .liza/adversarial/retry-client.md
+/adversarial-pairing reviewer-claude .liza/adversarial/retry-client.md
+```
+
+The blackboard path may be untracked and should not be committed unless you explicitly want it preserved. During coding, the doer normally uses a dedicated git worktree recorded in the blackboard; reviewers review the staged or unstaged diff for the current review round.
+
+Typical flow:
+
+1. The doer records the goal, evidence, and plan in the blackboard.
+2. Reviewers, usually on different models, challenge the submitted plan and record verdicts.
+3. After plan approval and human approval to code, the doer implements.
+4. The doer submits the candidate diff for code review.
+5. Reviewers request changes or approve. Follow-up rounds continue until approval.
+6. The doer asks before commit, rebase, merge, or cleanup.
+
+For debugging work, the blackboard can require explicit root-cause analysis and red-test gates before implementation. That gives you the MAS-style discipline of diagnosis review and failing-test review without handing the whole task to the autonomous pipeline.
+
+Best for: high-stakes Pairing-mode changes, complex debugging, architectural edits that need a second agent's review, and situations where the full MAS would be disproportionate.
+
+---
+
 ## Steering Tools
 
 ### Magic Phrases
@@ -402,6 +439,7 @@ Use `/clear` to start a fresh context. The contract ensures continuity through e
 | "Be my duck" / "Agent Duck" | Agent Duck |
 | "Let's pair on this" | True Pairing |
 | "Let's spike this" | Spike |
+| `/adversarial-pairing doer <path>` plus reviewer sessions | Adversarial Pairing |
 
 ### Approval Shortcuts
 
