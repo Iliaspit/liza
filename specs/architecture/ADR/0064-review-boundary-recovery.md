@@ -1,5 +1,9 @@
 # 64 - Review Boundary Recovery
 
+## Superseded In Part
+
+ADR-0078 supersedes the recovery outcome in this ADR. Stale review boundary metadata is now treated as repairable drift via `update-review-commit`, not automatically as `INTEGRATION_FAILED`. The invariant that reviewers must inspect the recorded `review_commit` remains in force.
+
 ## Context and Problem Statement
 
 `submit-for-review` can rebase a task worktree and rewrite the commit SHA. Reviewers must inspect the exact commit Liza records as `review_commit`. In the observed failure, reviewer prompts referenced a pre-rebase commit while the task worktree had moved to the post-rebase HEAD.

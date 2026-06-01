@@ -1,5 +1,9 @@
 # 65 - Recursive Superseded Dependency Resolution
 
+## Superseded In Part
+
+ADR-0077 supersedes the runtime recursive-resolution mechanism in this ADR. Supersession still redirects dependency meaning, but Liza now canonicalizes dependency edges at write and transition time instead of relying on recursive resolution at claim, unblock, or status time.
+
 ## Context and Problem Statement
 
 Liza tasks can be superseded by replacement tasks. Before this decision, superseded tasks could be treated as dependency-satisfying even when their replacement work had not merged. That allowed downstream tasks to become claimable against stale baselines or remain blocked by old references instead of following the replacement path.

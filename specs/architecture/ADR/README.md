@@ -69,3 +69,13 @@
 | [0065 — Recursive Superseded Dependency Resolution](0065-recursive-superseded-dependency-resolution.md) | Resolve dependencies through supersession chains so replacement work, not superseded tasks, controls downstream claimability. |
 | [0066 — Architecture Sub-Pipeline and Spec Entry Points](0066-architecture-subpipeline-entry-points.md) | Extract architecture into its own sub-pipeline and distinguish functional-spec, technical-spec, and legacy detailed-spec entry points. |
 | [0067 — Master Planning Task Pattern](0067-master-planning-task-pattern.md) | Add reviewed master planning tasks before fan-out while preserving simple specialized entry routing and ADR-0066's architecture-to-code-plan bypass. |
+| [0068 — Optional Repository Indexing with SCIP and Stacklit](0068-optional-repository-indexing-with-scip-and-stacklit.md) | Add opt-in SCIP and Stacklit index refresh with explicit prompt paths for worktree-safe repository navigation. |
+| [0070 — Active Task Cancellation](0070-active-task-cancellation.md) | Allow invariant-checked cancellation of active tasks before approval while preserving approved-merge boundaries. |
+| [0071 — Automatic Checkpoint Summary on Merge](0071-automatic-checkpoint-summary-on-merge.md) | Auto-run checkpoint-summary after successful merges as a best-effort steering context artifact. |
+| [0072 — Declared Validation Commands](0072-declared-validation-commands.md) | Store validation commands on tasks and generated outputs so agents validate against explicit executable contracts. |
+| [0073 — Adversarial Pairing Blackboard](0073-adversarial-pairing-blackboard.md) | Add a lightweight Markdown blackboard and locked writer for separate doer/reviewer pairing sessions. |
+| [0074 — SessionStart Context Hooks](0074-sessionstart-context-hooks.md) | Use provider SessionStart hooks to emit initialization guidance and explicit repo index context before first agent action. |
+| [0075 — Retarget Dependency Repair](0075-retarget-dependency-repair.md) | Add a first-class repair command for retargeting stale direct task dependencies without superseding dependent tasks. |
+| [0076 — Candidate Artifact Reference Guard](0076-candidate-artifact-reference-guard.md) | Validate protected artifact refs against the candidate Git tree before advancing the integration ref. |
+| [0077 — Dependency Edge Canonicalization](0077-dependency-edge-canonicalization.md) | Canonicalize dependency edges at mutation and transition time instead of resolving supersession chains at read time. |
+| [0078 — Repairable Review Boundary Metadata](0078-repairable-review-boundary-metadata.md) | Treat stale review commit/base metadata as repairable drift while preserving exact review-boundary validation. |

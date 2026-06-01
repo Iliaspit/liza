@@ -1,7 +1,7 @@
 version: 1
 repository: "/home/tangi/Workspace/liza"
 started_at: "2026-02-01T12:00:00Z"
-last_updated: "2026-05-19T16:44:36Z"
+last_updated: "2026-06-01T00:45:43+02:00"
 
 file_classification:
   # Tier 0 - Dependency manifests
@@ -965,11 +965,198 @@ clusters:
       rationale: "Supersession redirects dependency evaluation to replacement work; it is not dependency satisfaction."
       limitations: "Dependency resolution becomes recursive and must detect invalid chains."
 
+  - id: 66
+    title: "Architecture Sub-Pipeline and Spec Entry Points"
+    commit_shas: ["38f3be7d"]
+    date_range: "2026-05-22"
+    confidence: 0.90
+    status: "adr_generated"
+    adr_path: "specs/architecture/ADR/0066-architecture-subpipeline-entry-points.md"
+    cluster_path: "specs/architecture/ADR/adr-backfill-clusters/0066-architecture-subpipeline-entry-points.md"
+    analysis:
+      intent_hypothesis: "Separate architecture consolidation from coding and distinguish functional-spec, technical-spec, and legacy detailed-spec entry points."
+      solution_detected: "Extract architecture-pair into architecture-subpipeline and promote architecture-to-code-plan to a top-level transition with explicit entry-point routing."
+    user_context:
+      problem: "Architecture was nested inside coding-subpipeline, making entry altitudes hard to express cleanly."
+      rationale: "Pipeline topology should match the conceptual flow from specification to architecture to coding."
+      limitations: "Existing frozen .liza/pipeline.yaml workspaces do not automatically gain the new topology or entry-point names."
+    note: "Supersedes the architecture-pair placement portion of ADR-0056."
+
+  - id: 67
+    title: "Master Planning Task Pattern"
+    commit_shas: ["60ee9afd"]
+    source_issues: ["#81"]
+    date_range: "2026-05-24"
+    confidence: 0.90
+    status: "adr_generated"
+    adr_path: "specs/architecture/ADR/0067-master-planning-task-pattern.md"
+    cluster_path: "specs/architecture/ADR/adr-backfill-clusters/0067-master-planning-task-pattern.md"
+    analysis:
+      intent_hypothesis: "Add a reviewed coherence gate before planning fan-out starts parallel specialized work."
+      solution_detected: "Use decomposition-root master role-pairs with quorum 2, typed decomposition metadata, and per-subtask transitions to specialized planning children."
+    user_context:
+      problem: "Parallel planning tasks could produce plausible but mutually inconsistent decompositions before adversarial review."
+      rationale: "Fan-out and uncertain work need a reviewed master decomposition before specialized planners spend agent cycles."
+      limitations: "Fan-out work pays an additional planning review cycle; poor master decomposition becomes high-impact and is mitigated by quorum 2."
+    note: "Builds on ADR-0066 while preserving its direct architecture-to-code-plan transition."
+
+  - id: 68
+    title: "Optional Repository Indexing with SCIP and Stacklit"
+    commit_shas: ["2e626ba1", "f28de468", "a16a2a5a", "8d50b5bd", "e4848776", "68e693b2", "6f1d3b42", "ba003785"]
+    gap_commits: ["08b5189b", "e4ef50ca"]
+    date_range: "2026-05-21 to 2026-05-27"
+    confidence: 0.90
+    status: "adr_generated"
+    adr_path: "specs/architecture/ADR/0068-optional-repository-indexing-with-scip-and-stacklit.md"
+    cluster_path: "specs/architecture/ADR/adr-backfill-clusters/0068-optional-repository-indexing-with-scip-and-stacklit.md"
+    analysis:
+      intent_hypothesis: "Make repository indexes prompt-safe, opt-in navigation aids for MAS worktrees and Pairing startup context."
+      solution_detected: "LIZA_ENABLE_SCIP_SEARCH and LIZA_ENABLE_STACKLIT gate generated SCIP/Stacklit indexes, prompts receive explicit index paths, and generated artifacts remain worktree-clean."
+    note: "Expanded after user noticed SCIP lacked a standalone ADR; SCIP and Stacklit are treated as one repository-indexing decision introduced in the same period."
+
+  - id: 69
+    title: "Bounded Reviewer Diff Context"
+    commit_shas: ["aa598803"]
+    date_range: "2026-05-25"
+    confidence: 0.70
+    status: "skipped"
+    cluster_path: "specs/architecture/ADR/adr-backfill-clusters/0069-bounded-reviewer-diff-context.md"
+    analysis:
+      intent_hypothesis: "Prevent review prompts from causing unbounded diff reads under context pressure."
+      solution_detected: "Reviewer protocol now inspects name-only/stat output before targeted path diffs, with matching code-review skill and role-spec guidance."
+    note: "Skipped by user selection; treat as prompt protocol refinement under existing context-management decisions."
+
+  - id: 70
+    title: "Active Task Cancellation"
+    commit_shas: ["ec0082c3"]
+    date_range: "2026-05-26"
+    confidence: 0.80
+    status: "adr_generated"
+    adr_path: "specs/architecture/ADR/0070-active-task-cancellation.md"
+    cluster_path: "specs/architecture/ADR/adr-backfill-clusters/0070-active-task-cancellation.md"
+    analysis:
+      intent_hypothesis: "Give operators a first-class abort path for already-claimed or review-flow tasks."
+      solution_detected: "Extend cancel-task transitions to executing, submitted, reviewing, and quorum-reviewing states while blocking approved cancellation."
+    note: "Candidate only; user context required before ADR generation."
+
+  - id: 71
+    title: "Automatic Checkpoint Summary on Merge"
+    commit_shas: ["cdc2981e"]
+    source_issues: ["#82"]
+    date_range: "2026-05-26"
+    confidence: 0.65
+    status: "adr_generated"
+    adr_path: "specs/architecture/ADR/0071-automatic-checkpoint-summary-on-merge.md"
+    cluster_path: "specs/architecture/ADR/adr-backfill-clusters/0071-automatic-checkpoint-summary-on-merge.md"
+    analysis:
+      intent_hypothesis: "Emit a human-readable checkpoint summary automatically after successful merges without blocking the merge loop."
+      solution_detected: "Best-effort checkpoint-summary subprocess writes .liza/checkpoint-summary.md, guarded by auto_checkpoint_summary config and unexpected-mutation checks."
+    user_context:
+      problem: "Checkpoint summaries are one of the most valuable features for keeping users able to steer as Liza becomes more autonomous."
+      alternatives: "Rely on existing logs, but logs lose agent intent and decision context."
+      rationale: "Capturing events and decisions from the blackboard preserves more context than archaeological reconstruction from logs."
+      limitations: "The value of preserved steering context is greater than the implementation limitations and risks."
+      related_decisions: "Decision capture is intended to grow; manual checkpoint-summary was the first step, automatic post-merge summaries are the second."
+    note: "Mixed commit also fixes review quorum claiming bugs; classify only the auto-summary behavior if ADR-worthy."
+
+  - id: 72
+    title: "Declared Validation Commands"
+    commit_shas: ["1e88541f", "0bad71fa", "03e2d19f"]
+    date_range: "2026-05-28 to 2026-05-31"
+    confidence: 0.90
+    status: "adr_generated"
+    adr_path: "specs/architecture/ADR/0072-declared-validation-commands.md"
+    cluster_path: "specs/architecture/ADR/adr-backfill-clusters/0072-declared-validation-commands.md"
+    analysis:
+      intent_hypothesis: "Make validation commands explicit task contract data instead of environment-specific agent inference."
+      solution_detected: "Add task/output validation fields, state validation, propagation into generated children, prompt rendering, review preference, and stricter satisfiability/executability guidance."
+    note: "Candidate only; user context required before ADR generation."
+
+  - id: 73
+    title: "Adversarial Pairing Blackboard"
+    commit_shas: ["00d57671", "b3cee812"]
+    gap_commits: ["35d308ad", "91bb232a", "bc0fa6c9", "ce16c058", "c93fdcaa"]
+    date_range: "2026-05-28 to 2026-05-30"
+    confidence: 0.90
+    status: "adr_generated"
+    adr_path: "specs/architecture/ADR/0073-adversarial-pairing-blackboard.md"
+    cluster_path: "specs/architecture/ADR/adr-backfill-clusters/0073-adversarial-pairing-blackboard.md"
+    analysis:
+      intent_hypothesis: "Support separate doer/reviewer pairing terminals with a lightweight shared coordination surface without switching to full multi-agent mode."
+      solution_detected: "Add adversarial-pairing skill with Markdown blackboard protocol and a flock plus SHA-256 compare-and-swap writer."
+    note: "Candidate only; user context required before ADR generation."
+
+  - id: 74
+    title: "SessionStart Context Hooks"
+    commit_shas: ["09e3cb62", "6ed315eb"]
+    gap_commits: ["c306d969", "c13a060a"]
+    date_range: "2026-05-29 to 2026-05-30"
+    confidence: 0.85
+    status: "adr_generated"
+    adr_path: "specs/architecture/ADR/0074-sessionstart-context-hooks.md"
+    cluster_path: "specs/architecture/ADR/adr-backfill-clusters/0074-sessionstart-context-hooks.md"
+    analysis:
+      intent_hypothesis: "Provide initialization guidance and explicit repo index paths at session startup instead of relying on reactive hook failures or manual discovery."
+      solution_detected: "Shared Claude/Codex SessionStart hook emits mode-specific initialization guidance, filters missing files, and includes Pairing repo Stacklit/SCIP context."
+    note: "Candidate only; user context required before ADR generation."
+
+  - id: 75
+    title: "Retarget Dependency Repair"
+    commit_shas: ["c8685023", "e6ce5db7"]
+    date_range: "2026-05-31"
+    confidence: 0.80
+    status: "adr_generated"
+    adr_path: "specs/architecture/ADR/0075-retarget-dependency-repair.md"
+    cluster_path: "specs/architecture/ADR/adr-backfill-clusters/0075-retarget-dependency-repair.md"
+    analysis:
+      intent_hypothesis: "Provide a first-class repair path for replacing stale direct task dependencies without superseding the dependent task."
+      solution_detected: "Add retarget-dependency CLI/ops mutation with canonicalization, full state validation, RBAC wiring, wake/support documentation, and repair evidence guidance."
+    note: "Candidate only; user context required before ADR generation."
+
+  - id: 76
+    title: "Candidate Artifact Reference Guard"
+    commit_shas: ["d6c3d10a"]
+    date_range: "2026-05-21"
+    confidence: 0.95
+    status: "adr_generated"
+    adr_path: "specs/architecture/ADR/0076-candidate-artifact-reference-guard.md"
+    cluster_path: "specs/architecture/ADR/adr-backfill-clusters/0076-candidate-artifact-reference-guard.md"
+    analysis:
+      intent_hypothesis: "Prevent integration ref advancement when blackboard artifact refs would no longer resolve to regular files in the candidate Git tree."
+      solution_detected: "Collect artifact refs with provenance, validate candidate tree modes in a CAS pre-update hook, fail closed with diagnostics, retry stale hook failures, and retain post-merge validation as a backstop."
+    note: "Late-discovered ADR-worthy decision from the 2026-05-20 artifact-ref protection goal."
+
+  - id: 77
+    title: "Dependency Edge Canonicalization"
+    commit_shas: ["1f720664", "9455761a", "e7cb6544"]
+    date_range: "2026-05-21 to 2026-05-24"
+    confidence: 0.90
+    status: "adr_generated"
+    adr_path: "specs/architecture/ADR/0077-dependency-edge-canonicalization.md"
+    cluster_path: "specs/architecture/ADR/adr-backfill-clusters/0077-dependency-edge-canonicalization.md"
+    analysis:
+      intent_hypothesis: "Move dependency correctness from recursive read-time supersession resolution to write-time canonical dependency edges."
+      solution_detected: "Supersede, cancel, output mutation, transition, child generation, and crash recovery rewrite or reject stale dependency edges so claim/unblock/status paths require direct merged dependencies."
+    note: "Supersedes ADR-0065's recursive runtime-resolution mechanism while preserving the dependency redirection intent."
+
+  - id: 78
+    title: "Repairable Review Boundary Metadata"
+    commit_shas: ["b1e7cd1f", "1692f388"]
+    date_range: "2026-05-21 to 2026-05-28"
+    confidence: 0.90
+    status: "adr_generated"
+    adr_path: "specs/architecture/ADR/0078-repairable-review-boundary-metadata.md"
+    cluster_path: "specs/architecture/ADR/adr-backfill-clusters/0078-repairable-review-boundary-metadata.md"
+    analysis:
+      intent_hypothesis: "Preserve exact review boundaries while treating stale review metadata as repairable drift instead of integration failure."
+      solution_detected: "Code-review scope uses base_commit..review_commit, current integration drift is checked separately, and update-review-commit refreshes review_commit/base_commit from the worktree merge-base."
+    note: "Supersedes ADR-0064's stale-boundary transition to INTEGRATION_FAILED."
+
 processing_cursor:
   step: "ordering"
-  substep: "wave_11_generated"
-  cluster_index: 65
-  note: "Wave 11 ADRs generated through ADR-0065. Init preflight/committed-spec, project-root CWD, and structured submit operational errors are classified as non-ADR findings per user direction."
+  substep: "wave_13_generated"
+  cluster_index: 78
+  note: "Wave 13 ADRs generated for artifact refs, dependency canonicalization, and repairable review boundary metadata. ADR-0069 remains skipped by user selection."
 
 non_adr_findings:
   - title: "Init Preflight Requires Committed Spec and Valid Integration Branch"
