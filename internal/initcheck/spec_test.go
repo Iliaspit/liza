@@ -120,6 +120,92 @@ func TestEnsureSpecCommittedCleanRejectsSymlinkOutsideRepo(t *testing.T) {
 	}
 }
 
+func TestEnsurePreCommitConfigCommittedClean(t *testing.T) {
+	repo := setupRepo(t)
+	writeFile(t, repo, ".pre-commit-config.yaml", "repos: []\n")
+	git(t, repo, "add", ".pre-commit-config.yaml")
+	git(t, repo, "commit", "-m", "Add pre-commit config")
+
+	got, err := EnsurePreCommitConfigCommittedClean(repo, "integration")
+	if err != nil {
+		t.Fatalf("EnsurePreCommitConfigCommittedClean() error = %v", err)
+	}
+	if got != ".pre-commit-config.yaml" {
+		t.Fatalf("EnsurePreCommitConfigCommittedClean() rel = %q, want .pre-commit-config.yaml", got)
+	}
+}
+
+func TestEnsurePreCommitConfigCommittedCleanRejectsMissingOnExistingBranch(t *testing.T) {
+	repo := setupRepo(t)
+	git(t, repo, "branch", "integration", "HEAD")
+	writeFile(t, repo, ".pre-commit-config.yaml", "repos: []\n")
+	git(t, repo, "add", ".pre-commit-config.yaml")
+	git(t, repo, "commit", "-m", "Add pre-commit config")
+
+	_, err := EnsurePreCommitConfigCommittedClean(repo, "integration")
+	if err == nil {
+		t.Fatal("EnsurePreCommitConfigCommittedClean() succeeded, want error")
+	}
+	if !strings.Contains(err.Error(), "pre-commit config") || !strings.Contains(err.Error(), "integration") {
+		t.Fatalf("EnsurePreCommitConfigCommittedClean() error = %v, want branch-specific pre-commit error", err)
+	}
+}
+
+func TestEnsurePreCommitConfigCommittedCleanRejectsPendingConfig(t *testing.T) {
+	tests := []struct {
+		name  string
+		setup func(t *testing.T, repo string)
+	}{
+		{
+			name: "untracked",
+			setup: func(t *testing.T, repo string) {
+				writeFile(t, repo, ".pre-commit-config.yaml", "repos: []\n")
+			},
+		},
+		{
+			name: "staged new",
+			setup: func(t *testing.T, repo string) {
+				writeFile(t, repo, ".pre-commit-config.yaml", "repos: []\n")
+				git(t, repo, "add", ".pre-commit-config.yaml")
+			},
+		},
+		{
+			name: "staged modification",
+			setup: func(t *testing.T, repo string) {
+				writeFile(t, repo, ".pre-commit-config.yaml", "repos: []\n")
+				git(t, repo, "add", ".pre-commit-config.yaml")
+				git(t, repo, "commit", "-m", "Add pre-commit config")
+				writeFile(t, repo, ".pre-commit-config.yaml", "repos:\n  - repo: local\n")
+				git(t, repo, "add", ".pre-commit-config.yaml")
+			},
+		},
+		{
+			name: "unstaged modification",
+			setup: func(t *testing.T, repo string) {
+				writeFile(t, repo, ".pre-commit-config.yaml", "repos: []\n")
+				git(t, repo, "add", ".pre-commit-config.yaml")
+				git(t, repo, "commit", "-m", "Add pre-commit config")
+				writeFile(t, repo, ".pre-commit-config.yaml", "repos:\n  - repo: local\n")
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := setupRepo(t)
+			tt.setup(t, repo)
+
+			_, err := EnsurePreCommitConfigCommittedClean(repo, "integration")
+			if err == nil {
+				t.Fatal("EnsurePreCommitConfigCommittedClean() succeeded, want error")
+			}
+			if !strings.Contains(err.Error(), "pre-commit config") {
+				t.Fatalf("EnsurePreCommitConfigCommittedClean() error = %v, want pre-commit config precondition", err)
+			}
+		})
+	}
+}
+
 func setupRepo(t *testing.T) string {
 	t.Helper()
 

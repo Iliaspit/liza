@@ -42,6 +42,7 @@ func setupInitTestDir(t *testing.T) (projectRoot, specFile string) {
 			t.Fatalf("git command %v failed: %v\n%s", args, err, out)
 		}
 	}
+	testhelpers.CreateCommittedPreCommitConfig(t, projectRoot)
 
 	return projectRoot, specFile
 }
@@ -323,6 +324,96 @@ func TestInitProject_UncommittedSpecFailsBeforeArtifacts(t *testing.T) {
 	}
 	if _, statErr := os.Stat(filepath.Join(projectRoot, ".liza")); !os.IsNotExist(statErr) {
 		t.Fatalf(".liza directory state after failed init = %v, want not exist", statErr)
+	}
+}
+
+func TestInitProject_MissingPreCommitConfigFailsBeforeArtifacts(t *testing.T) {
+	testhelpers.SetupGlobalLiza(t)
+	projectRoot := t.TempDir()
+	gitInit(t, projectRoot)
+
+	specDir := filepath.Join(projectRoot, "specs")
+	if err := os.MkdirAll(specDir, 0755); err != nil {
+		t.Fatalf("Failed to create specs dir: %v", err)
+	}
+	specFile := filepath.Join(specDir, "goal.md")
+	if err := os.WriteFile(specFile, []byte("# Test Goal\n"), 0644); err != nil {
+		t.Fatalf("Failed to write spec file: %v", err)
+	}
+	cmds := [][]string{
+		{"git", "-C", projectRoot, "add", "specs/goal.md"},
+		{"git", "-C", projectRoot, "commit", "-m", "Add goal spec"},
+	}
+	for _, args := range cmds {
+		cmd := exec.Command(args[0], args[1:]...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git command %v failed: %v\n%s", args, err, out)
+		}
+	}
+
+	err := InitProject(projectRoot, InitProjectParams{
+		Description: "Test project",
+		SpecRef:     specFile,
+	})
+	if err == nil {
+		t.Fatal("InitProject() succeeded without a pre-commit config")
+	}
+	if !strings.Contains(err.Error(), "pre-commit config") {
+		t.Fatalf("InitProject() error = %v, want pre-commit config precondition", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(projectRoot, ".liza")); !os.IsNotExist(statErr) {
+		t.Fatalf(".liza directory state after failed init = %v, want not exist", statErr)
+	}
+}
+
+func TestInitProject_PreCommitConfigMustBeClean(t *testing.T) {
+	tests := []struct {
+		name  string
+		setup func(t *testing.T, projectRoot string)
+	}{
+		{
+			name: "staged modification",
+			setup: func(t *testing.T, projectRoot string) {
+				configPath := filepath.Join(projectRoot, ".pre-commit-config.yaml")
+				if err := os.WriteFile(configPath, []byte("repos:\n  - repo: local\n"), 0644); err != nil {
+					t.Fatal(err)
+				}
+				cmd := exec.Command("git", "-C", projectRoot, "add", ".pre-commit-config.yaml")
+				if out, err := cmd.CombinedOutput(); err != nil {
+					t.Fatalf("git add pre-commit config failed: %v\n%s", err, out)
+				}
+			},
+		},
+		{
+			name: "unstaged modification",
+			setup: func(t *testing.T, projectRoot string) {
+				configPath := filepath.Join(projectRoot, ".pre-commit-config.yaml")
+				if err := os.WriteFile(configPath, []byte("repos:\n  - repo: local\n"), 0644); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			projectRoot, specFile := setupInitTestDir(t)
+			tt.setup(t, projectRoot)
+
+			err := InitProject(projectRoot, InitProjectParams{
+				Description: "Test project",
+				SpecRef:     specFile,
+			})
+			if err == nil {
+				t.Fatal("InitProject() succeeded with dirty pre-commit config")
+			}
+			if !strings.Contains(err.Error(), "pre-commit config") || !strings.Contains(err.Error(), "changes") {
+				t.Fatalf("InitProject() error = %v, want dirty pre-commit config precondition", err)
+			}
+			if _, statErr := os.Stat(filepath.Join(projectRoot, ".liza")); !os.IsNotExist(statErr) {
+				t.Fatalf(".liza directory state after failed init = %v, want not exist", statErr)
+			}
+		})
 	}
 }
 

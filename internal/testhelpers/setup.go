@@ -168,12 +168,28 @@ func CreateCommittedSpecFile(t *testing.T, tmpDir, filename, content string) str
 	return specFile
 }
 
+// CreateCommittedPreCommitConfig creates a minimal .pre-commit-config.yaml and
+// commits it to HEAD.
+func CreateCommittedPreCommitConfig(t *testing.T, tmpDir string) string {
+	t.Helper()
+
+	configPath := filepath.Join(tmpDir, ".pre-commit-config.yaml")
+	content := []byte("repos: []\n")
+	if err := os.WriteFile(configPath, content, 0644); err != nil {
+		t.Fatalf("Failed to create pre-commit config: %v", err)
+	}
+	MustGit(t, tmpDir, "add", ".pre-commit-config.yaml")
+	MustGit(t, tmpDir, "commit", "-m", "Add pre-commit config")
+	return configPath
+}
+
 // CreateCommittedSpecFileOnIntegration creates a committed spec file and moves
 // the test integration branch to that commit.
 func CreateCommittedSpecFileOnIntegration(t *testing.T, tmpDir, filename, content string) string {
 	t.Helper()
 
 	specFile := CreateCommittedSpecFile(t, tmpDir, filename, content)
+	CreateCommittedPreCommitConfig(t, tmpDir)
 	MustGit(t, tmpDir, "branch", "-f", "integration", "HEAD")
 	return specFile
 }

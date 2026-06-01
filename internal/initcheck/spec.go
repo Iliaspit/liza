@@ -11,49 +11,81 @@ import (
 	"github.com/liza-mas/liza/internal/gitenv"
 )
 
+const preCommitConfigPath = ".pre-commit-config.yaml"
+
 // EnsureSpecCommittedClean verifies that specPath is a repo-local file whose
 // committed content at HEAD matches the index and working tree.
 func EnsureSpecCommittedClean(projectRoot, specPath string) (string, error) {
-	repoRel, err := repoRelativePath(projectRoot, specPath)
+	return ensureCommittedCleanFile(projectRoot, specPath, "HEAD", "spec file", true)
+}
+
+// EnsurePreCommitConfigCommittedClean verifies that the pre-commit config is
+// committed on the branch Liza will use for agent worktrees. If that branch
+// does not exist yet, init will create it from HEAD, so HEAD is checked.
+func EnsurePreCommitConfigCommittedClean(projectRoot, integrationBranch string) (string, error) {
+	targetRef, err := initWorktreeSourceRef(projectRoot, integrationBranch)
+	if err != nil {
+		return "", err
+	}
+	return ensureCommittedCleanFile(projectRoot, filepath.Join(projectRoot, preCommitConfigPath), targetRef, "pre-commit config", false)
+}
+
+func ensureCommittedCleanFile(projectRoot, filePath, targetRef, label string, requireWorktreeFile bool) (string, error) {
+	repoRel, err := repoRelativePath(projectRoot, filePath, label)
 	if err != nil {
 		return "", err
 	}
 
-	info, err := os.Stat(filepath.Join(projectRoot, repoRel))
-	if err != nil {
-		return "", fmt.Errorf("spec file does not exist: %s", specPath)
-	}
-	if info.IsDir() {
-		return "", fmt.Errorf("spec path is a directory: %s", specPath)
+	if requireWorktreeFile {
+		info, err := os.Stat(filepath.Join(projectRoot, repoRel))
+		if err != nil {
+			return "", fmt.Errorf("%s does not exist: %s", label, filePath)
+		}
+		if info.IsDir() {
+			return "", fmt.Errorf("%s path is a directory: %s", label, filePath)
+		}
 	}
 
 	gitPath := filepath.ToSlash(repoRel)
-	if _, err := gitenv.CombinedOutput(projectRoot, "ls-files", "--error-unmatch", "--", gitPath); err != nil {
-		return "", fmt.Errorf("spec file must be fully committed before liza init: %s", gitPath)
-	}
-	if _, err := gitenv.CombinedOutput(projectRoot, "cat-file", "-e", "HEAD:"+gitPath); err != nil {
-		return "", fmt.Errorf("spec file must be fully committed before liza init: %s", gitPath)
+	if _, err := gitenv.CombinedOutput(projectRoot, "cat-file", "-e", targetRef+":"+gitPath); err != nil {
+		if targetRef == "HEAD" {
+			return "", fmt.Errorf("%s must be fully committed before liza init: %s", label, gitPath)
+		}
+		return "", fmt.Errorf("%s must exist on %s before liza init: %s", label, targetRef, gitPath)
 	}
 	if changed, err := gitDiffHasChanges(projectRoot, "--cached", "--", gitPath); err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to check %s git status: %w", label, err)
 	} else if changed {
-		return "", fmt.Errorf("spec file has staged changes; commit them before liza init: %s", gitPath)
+		return "", fmt.Errorf("%s has staged changes; commit them before liza init: %s", label, gitPath)
 	}
 	if changed, err := gitDiffHasChanges(projectRoot, "--", gitPath); err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to check %s git status: %w", label, err)
 	} else if changed {
-		return "", fmt.Errorf("spec file has unstaged changes; commit them before liza init: %s", gitPath)
+		return "", fmt.Errorf("%s has unstaged changes; commit them before liza init: %s", label, gitPath)
 	}
 
 	return gitPath, nil
 }
 
-func repoRelativePath(projectRoot, specPath string) (string, error) {
+func initWorktreeSourceRef(projectRoot, integrationBranch string) (string, error) {
+	if integrationBranch == "" {
+		integrationBranch = "integration"
+	}
+	if _, err := gitenv.CombinedOutput(projectRoot, "rev-parse", "--verify", "--quiet", integrationBranch+"^{commit}"); err == nil {
+		return integrationBranch, nil
+	}
+	if _, err := gitenv.CombinedOutput(projectRoot, "rev-parse", "--verify", "--quiet", "HEAD^{commit}"); err != nil {
+		return "", fmt.Errorf("failed to resolve init worktree source ref: HEAD is unborn")
+	}
+	return "HEAD", nil
+}
+
+func repoRelativePath(projectRoot, filePath, label string) (string, error) {
 	if projectRoot == "" {
 		return "", fmt.Errorf("project root is empty")
 	}
-	if specPath == "" {
-		return "", fmt.Errorf("spec path is empty")
+	if filePath == "" {
+		return "", fmt.Errorf("%s path is empty", label)
 	}
 
 	rootAbs, err := filepath.Abs(projectRoot)
@@ -66,30 +98,30 @@ func repoRelativePath(projectRoot, specPath string) (string, error) {
 	}
 	rootAbs = resolvedRoot
 
-	specAbs := specPath
-	if !filepath.IsAbs(specAbs) {
-		specAbs = filepath.Join(rootAbs, specAbs)
+	fileAbs := filePath
+	if !filepath.IsAbs(fileAbs) {
+		fileAbs = filepath.Join(rootAbs, fileAbs)
 	}
-	specAbs, err = filepath.Abs(specAbs)
+	fileAbs, err = filepath.Abs(fileAbs)
 	if err != nil {
-		return "", fmt.Errorf("failed to resolve spec path: %w", err)
+		return "", fmt.Errorf("failed to resolve %s path: %w", label, err)
 	}
-	resolvedSpec, err := filepath.EvalSymlinks(specAbs)
+	resolvedFile, err := filepath.EvalSymlinks(fileAbs)
 	if err != nil {
-		if _, lstatErr := os.Lstat(specAbs); lstatErr == nil {
-			return "", fmt.Errorf("failed to resolve spec path symlinks: %w", err)
+		if _, lstatErr := os.Lstat(fileAbs); lstatErr == nil {
+			return "", fmt.Errorf("failed to resolve %s path symlinks: %w", label, err)
 		}
 	} else {
-		specAbs = resolvedSpec
+		fileAbs = resolvedFile
 	}
 
-	rel, err := filepath.Rel(rootAbs, specAbs)
+	rel, err := filepath.Rel(rootAbs, fileAbs)
 	if err != nil {
-		return "", fmt.Errorf("failed to resolve spec path relative to repo: %w", err)
+		return "", fmt.Errorf("failed to resolve %s path relative to repo: %w", label, err)
 	}
 	cleanRel := filepath.Clean(rel)
 	if cleanRel == "." || cleanRel == ".." || strings.HasPrefix(cleanRel, ".."+string(filepath.Separator)) || filepath.IsAbs(cleanRel) {
-		return "", fmt.Errorf("spec file must be inside the git repository: %s", specPath)
+		return "", fmt.Errorf("%s must be inside the git repository: %s", label, filePath)
 	}
 	return cleanRel, nil
 }
@@ -101,7 +133,7 @@ func gitDiffHasChanges(projectRoot string, args ...string) (bool, error) {
 		if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
 			return true, nil
 		}
-		return false, fmt.Errorf("failed to check spec file git status: %w", err)
+		return false, err
 	}
 	return false, nil
 }

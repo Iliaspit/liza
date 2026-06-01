@@ -148,6 +148,8 @@ func TestInitDispatch_ScipSearchRepeatableFlagPersistsConfig(t *testing.T) {
 	testhelpers.SetupTestGitRepo(t, projectRoot)
 	testhelpers.SetupGlobalLiza(t)
 	testhelpers.CreateCommittedSpecFile(t, projectRoot, "vision.md", "# Vision\n")
+	testhelpers.CreateCommittedPreCommitConfig(t, projectRoot)
+	testhelpers.MustGit(t, projectRoot, "branch", "-f", "integration", "HEAD")
 
 	var calls []string
 	restore := scipsearch.SetCommandRunnerForTest(func(name string, args ...string) (string, error) {
@@ -197,6 +199,8 @@ func TestInitDispatch_FullInitSkipsScipSearchWhenEnvDisabled(t *testing.T) {
 	testhelpers.SetupTestGitRepo(t, projectRoot)
 	testhelpers.SetupGlobalLiza(t)
 	testhelpers.CreateCommittedSpecFile(t, projectRoot, "vision.md", "# Vision\n")
+	testhelpers.CreateCommittedPreCommitConfig(t, projectRoot)
+	testhelpers.MustGit(t, projectRoot, "branch", "-f", "integration", "HEAD")
 	t.Setenv(scipsearch.EnvEnableScipSearch, "false")
 
 	var calls []string

@@ -1803,6 +1803,8 @@ func setupInitializedProjectWithEntryPoint(t *testing.T, entryPoint string) (str
 	testhelpers.SetupTestGitRepo(t, projectRoot)
 	testhelpers.SetupGlobalLiza(t)
 	testhelpers.CreateCommittedSpecFile(t, projectRoot, "vision.md", "# Vision\n")
+	testhelpers.CreateCommittedPreCommitConfig(t, projectRoot)
+	testhelpers.MustGit(t, projectRoot, "branch", "-f", "integration", "HEAD")
 	embeddedPipelinePath, err := filepath.Abs(filepath.Join("..", "..", "internal", "embedded", "pipeline.yaml"))
 	if err != nil {
 		t.Fatalf("resolve embedded pipeline path: %v", err)

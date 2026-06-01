@@ -271,7 +271,7 @@ sessions, typically running different models, through a shared Markdown blackboa
 Pairing-mode approval control while adding MAS-style adversarial review gates.
 
 **Multi-agent mode** — autonomous spec-to-code pipeline:
-1. `liza init "[Goal description]" --spec vision.md` (this file needs to be committed). Use `--entry-point functional-spec` to skip the epic/user-story spec phase and start at architecture, or `--entry-point technical-spec` to start at code planning when architecture is already settled. Add `--no-follow-up` to run only the entry-point sub-pipeline. `detailed-spec` remains as a legacy alias for `functional-spec`.
+1. `liza init "[Goal description]" --spec vision.md` (this file and `.pre-commit-config.yaml` need to be committed on the configured integration branch). Use `--entry-point functional-spec` to skip the epic/user-story spec phase and start at architecture, or `--entry-point technical-spec` to start at code planning when architecture is already settled. Add `--no-follow-up` to run only the entry-point sub-pipeline. `detailed-spec` remains as a legacy alias for `functional-spec`.
    `INITIAL_PLANNING` always creates one first task: simple entry-point work starts in the specialized planning pair, while fan-out or uncertain work starts in the mapped master planning pair for the same phase.
    Existing frozen `.liza/pipeline.yaml` workspaces are not migrated; run a new `liza init` to receive updated role-pairs, transitions, and routing.
 2. `liza tui` — the TUI shows live system state (agents, tasks, alerts, sprint metrics). From it you can spawn agents with role autocompletion (`s` uses configured default CLI, `S` lets you pick). Pause/resume the system, add tasks, and trigger sprint checkpoints.

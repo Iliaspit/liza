@@ -119,7 +119,7 @@ liza setup --agent-tools ~/my-agent-tools.md  # use custom AGENT_TOOLS.md
 
 **2. Initialize Project**
 
-> **Commit your spec file before running `liza init`.** Worktrees are created from the current branch — uncommitted files won't be visible to agents.
+> **Commit your spec file and `.pre-commit-config.yaml` before running `liza init`.** Worktrees are created from the configured integration branch, so uncommitted files won't be visible to agents.
 
 ```bash
 # Interactive wizard: walks through setup choices.
@@ -132,6 +132,7 @@ liza init --claude --codex
 liza init "[Goal description]" --spec [spec_ref]
 
 # spec_ref: Path to goal specification (default: specs/vision.md)
+# .pre-commit-config.yaml must exist on the configured integration branch.
 # Examples:
 #   liza init "Implement retry logic"                        # uses specs/vision.md
 #   liza init "Add auth" --spec specs/auth-feature.md        # uses custom spec

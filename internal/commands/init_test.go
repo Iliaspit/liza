@@ -415,6 +415,133 @@ func TestInitCommandSpecMustBeFullyCommitted(t *testing.T) {
 	}
 }
 
+func TestInitCommandRequiresCommittedPreCommitConfig(t *testing.T) {
+	tmpDir := setupGitRepoWithoutPreCommitConfig(t)
+	defer os.RemoveAll(tmpDir)
+
+	setupGlobalLiza(t)
+
+	originalDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(originalDir)
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatal(err)
+	}
+
+	testhelpers.CreateCommittedSpecFile(t, tmpDir, "vision.md", "# Vision\n")
+
+	err = InitCommand("Test goal", "specs/vision.md", nil)
+	if err == nil {
+		t.Fatal("InitCommand() succeeded without a pre-commit config")
+	}
+	if !strings.Contains(err.Error(), "pre-commit config") {
+		t.Fatalf("InitCommand() error = %v, want pre-commit config precondition", err)
+	}
+	if _, statErr := os.Stat(paths.New(tmpDir).LizaDir()); !os.IsNotExist(statErr) {
+		t.Fatalf(".liza directory state after failed init = %v, want not exist", statErr)
+	}
+}
+
+func TestInitCommandRequiresPreCommitConfigOnExistingIntegrationBranch(t *testing.T) {
+	tmpDir := setupGitRepoWithoutPreCommitConfig(t)
+	defer os.RemoveAll(tmpDir)
+
+	setupGlobalLiza(t)
+
+	originalDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(originalDir)
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatal(err)
+	}
+
+	testhelpers.CreateCommittedSpecFile(t, tmpDir, "vision.md", "# Vision\n")
+	cmd := exec.Command("git", "branch", "integration", "HEAD")
+	cmd.Dir = tmpDir
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("failed to create integration branch without pre-commit config: %v\n%s", err, output)
+	}
+	testhelpers.CreateCommittedPreCommitConfig(t, tmpDir)
+
+	err = InitCommand("Test goal", "specs/vision.md", nil)
+	if err == nil {
+		t.Fatal("InitCommand() succeeded when integration branch lacked pre-commit config")
+	}
+	if !strings.Contains(err.Error(), "pre-commit config") || !strings.Contains(err.Error(), "integration") {
+		t.Fatalf("InitCommand() error = %v, want integration pre-commit config precondition", err)
+	}
+	if _, statErr := os.Stat(paths.New(tmpDir).LizaDir()); !os.IsNotExist(statErr) {
+		t.Fatalf(".liza directory state after failed init = %v, want not exist", statErr)
+	}
+}
+
+func TestInitCommandPreCommitConfigMustBeClean(t *testing.T) {
+	tests := []struct {
+		name  string
+		setup func(t *testing.T, tmpDir string)
+	}{
+		{
+			name: "staged modification",
+			setup: func(t *testing.T, tmpDir string) {
+				configPath := filepath.Join(tmpDir, ".pre-commit-config.yaml")
+				if err := os.WriteFile(configPath, []byte("repos:\n  - repo: local\n"), 0644); err != nil {
+					t.Fatal(err)
+				}
+				cmd := exec.Command("git", "add", ".pre-commit-config.yaml")
+				cmd.Dir = tmpDir
+				if out, err := cmd.CombinedOutput(); err != nil {
+					t.Fatalf("git add pre-commit config failed: %v\n%s", err, out)
+				}
+			},
+		},
+		{
+			name: "unstaged modification",
+			setup: func(t *testing.T, tmpDir string) {
+				configPath := filepath.Join(tmpDir, ".pre-commit-config.yaml")
+				if err := os.WriteFile(configPath, []byte("repos:\n  - repo: local\n"), 0644); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := setupGitRepo(t)
+			defer os.RemoveAll(tmpDir)
+
+			setupGlobalLiza(t)
+
+			originalDir, err := os.Getwd()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer os.Chdir(originalDir)
+			if err := os.Chdir(tmpDir); err != nil {
+				t.Fatal(err)
+			}
+
+			testhelpers.CreateCommittedSpecFile(t, tmpDir, "vision.md", "# Vision\n")
+			tt.setup(t, tmpDir)
+
+			err = InitCommand("Test goal", "specs/vision.md", nil)
+			if err == nil {
+				t.Fatal("InitCommand() succeeded with dirty pre-commit config")
+			}
+			if !strings.Contains(err.Error(), "pre-commit config") || !strings.Contains(err.Error(), "changes") {
+				t.Fatalf("InitCommand() error = %v, want dirty pre-commit config precondition", err)
+			}
+			if _, statErr := os.Stat(paths.New(tmpDir).LizaDir()); !os.IsNotExist(statErr) {
+				t.Fatalf(".liza directory state after failed init = %v, want not exist", statErr)
+			}
+		})
+	}
+}
+
 func TestInitCommandCustomBranch(t *testing.T) {
 	tmpDir := setupGitRepo(t)
 	defer os.RemoveAll(tmpDir)
@@ -511,6 +638,14 @@ func TestInitCommandInvalidBranchName(t *testing.T) {
 // Helper functions
 
 func setupGitRepo(t *testing.T) string {
+	t.Helper()
+
+	tmpDir := setupGitRepoWithoutPreCommitConfig(t)
+	testhelpers.CreateCommittedPreCommitConfig(t, tmpDir)
+	return tmpDir
+}
+
+func setupGitRepoWithoutPreCommitConfig(t *testing.T) string {
 	t.Helper()
 
 	tmpDir := t.TempDir()

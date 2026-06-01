@@ -547,6 +547,9 @@ func InitCommandWithConfig(params InitParams) error {
 	if err != nil {
 		return err
 	}
+	if _, err := initcheck.EnsurePreCommitConfigCommittedClean(lizaPaths.ProjectRoot(), branch); err != nil {
+		return err
+	}
 
 	// Validate global config exists (liza setup must have been run)
 	globalDir, err := paths.GlobalLizaDir()

@@ -93,6 +93,9 @@ func InitProject(projectRoot string, params InitProjectParams) error {
 	if err != nil {
 		return &lzerr.ValidationError{Message: err.Error()}
 	}
+	if _, err := initcheck.EnsurePreCommitConfigCommittedClean(projectRoot, branch); err != nil {
+		return &lzerr.ValidationError{Message: err.Error()}
+	}
 
 	// Validate global config exists (liza setup prerequisite)
 	globalDir, err := paths.GlobalLizaDir()
