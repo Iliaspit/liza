@@ -45,6 +45,11 @@ Read the epic for requirement context. User stories are at specs/stories/{{.Goal
 NOTE: You are planning, not implementing. The codebase may not contain the directories
 listed in SCOPE yet. Do NOT explore implementation directories that don't exist —
 plan from the provided spec artifacts (architecture document, goal spec, or assigned scope).
+PLANNING BOUNDARY:
+If DESCRIPTION, DONE WHEN, SCOPE, or validation names implementation, documentation,
+configuration, test, or support files, treat those as downstream child-task scope.
+As code-planner, do not modify those files. Encode the required changes in the plan
+file and output[] entries only.
 1. Work ONLY in the worktree directory. Use git -C {{.Worktree}} for all git commands.
 2. Plan file location:
    Run: mkdir -p {{.Worktree}}/specs/plans/{{.GoalSlug}}
@@ -61,7 +66,7 @@ plan from the provided spec artifacts (architecture document, goal spec, or assi
    depends_on (optional array of sibling index strings, e.g. ["0", "2"] — resolved to child task IDs at transition),
    task_depends_on (optional array of existing concrete task IDs outside this output[]).
    Extract each field verbatim from the plan file — do not compose from memory or paraphrase.
-4. Update worktree artifacts required by DONE WHEN.
+4. Update only planning artifacts required by DONE WHEN (plan file and task-output JSON).
 5. Validate done_when criteria with concrete checks.
 6. PRE-SUBMIT SELF-CHECK (MANDATORY — do NOT call liza submit-for-review --json until all pass):
    a. Each output[] entry passes TASK DECOMPOSITION PRINCIPLE checks above.
@@ -176,6 +181,11 @@ IMPLEMENTATION PHASE:
    Read any referenced spec or plan documents to understand the full scope.
 {{- end}}
 4. Explore the codebase to understand the existing architecture and relevant components.
+ARCHITECTURE BOUNDARY:
+If DESCRIPTION, DONE WHEN, SCOPE, or validation names implementation, documentation,
+configuration, test, or support files, treat those as downstream code-planning scope.
+As architect, do not modify those files. Encode the required changes in the architecture
+document and output[] entries only.
 5. Architecture document:
    Run: mkdir -p {{.Worktree}}/specs/arch-plan/{{.GoalSlug}}
    Capture a timestamp by running: date -u +'%Y%m%d-%H%M%S'
@@ -213,7 +223,7 @@ EMIT RULES (when both flags are false and the project lacks a pre-commit config)
     (b) the project's dep-manager manifest (whichever file or lockfile records dev dependencies for the chosen stack) records pre-commit as a dev dependency.
 - Hook-set selection: the architect picks stack-appropriate hook categories and concrete hooks in free-form prose inside desc. Do NOT defer to a default hook list — there is no default. Do NOT include version pins (deferred to a later hook-selection task per goal-spec Out of Scope).
 - Stack-specific runners, manifest filenames, and worked done_when phrasings live in the goal spec (see Worked Example), never in this prompt (G1.1: prompt is stack-agnostic).
-7. Update worktree artifacts required by DONE WHEN.
+7. Update only architecture artifacts required by DONE WHEN (architecture document and task-output JSON).
 8. Validate done_when criteria with concrete checks.
 9. PRE-SUBMIT SELF-CHECK (MANDATORY — do NOT call liza submit-for-review --json until all pass):
    a. Each output[] entry has a single, well-scoped code-planning intent.
