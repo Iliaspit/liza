@@ -53,9 +53,9 @@ func (m *MockCLIExecutor) Execute(ctx context.Context, cliName string, agentID s
 	return CLIExecutionResult{ExitCode: m.ExitCode, Output: m.Output}, m.ExitError
 }
 
-func (m *MockCLIExecutor) ExecuteInteractive(ctx context.Context, cliName string, projectRoot string, additionalDirs []string) (int, error) {
+func (m *MockCLIExecutor) ExecuteInteractive(ctx context.Context, cliName string, agentID string, projectRoot string, additionalDirs []string) (int, error) {
 	m.mu.Lock()
-	m.InteractiveCalls = append(m.InteractiveCalls, MockCLICall{CLIName: cliName, ProjectRoot: projectRoot, AdditionalDirs: slices.Clone(additionalDirs)})
+	m.InteractiveCalls = append(m.InteractiveCalls, MockCLICall{CLIName: cliName, AgentID: agentID, ProjectRoot: projectRoot, AdditionalDirs: slices.Clone(additionalDirs)})
 	m.mu.Unlock()
 	return m.ExitCode, m.ExitError
 }
@@ -378,6 +378,81 @@ done
 	}
 	if strings.Contains(result.Output, "prompt body") {
 		t.Fatalf("prompt should be passed via stdin, not argv: %q", result.Output)
+	}
+}
+
+func TestDefaultCLIExecutorExportsResolvedAgentIDLast(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake CLI shell script test requires /bin/sh")
+	}
+
+	projectRoot := t.TempDir()
+	outputsDir := filepath.Join(projectRoot, ".liza", "agent-outputs")
+	binDir := t.TempDir()
+	fakeClaude := filepath.Join(binDir, "claude")
+	script := `#!/bin/sh
+printf 'agent-id:%s\n' "$LIZA_AGENT_ID"
+`
+	if err := os.WriteFile(fakeClaude, []byte(script), 0755); err != nil {
+		t.Fatalf("write fake claude: %v", err)
+	}
+	claudeEnv := []byte("LIZA_AGENT_ID=from-claude-env\n")
+	if err := os.WriteFile(filepath.Join(projectRoot, "claude.env"), claudeEnv, 0644); err != nil {
+		t.Fatalf("write claude.env: %v", err)
+	}
+
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("LIZA_AGENT_ID", "from-parent-env")
+
+	executor := NewDefaultCLIExecutor(outputsDir)
+	result, err := executor.Execute(context.Background(), "claude", "coder-7", "prompt body", projectRoot, nil, models.Config{})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0", result.ExitCode)
+	}
+	if !strings.Contains(result.Output, "agent-id:coder-7") {
+		t.Fatalf("result output = %q, want resolved agent ID", result.Output)
+	}
+	if strings.Contains(result.Output, "from-parent-env") || strings.Contains(result.Output, "from-claude-env") {
+		t.Fatalf("result output used stale agent ID: %q", result.Output)
+	}
+}
+
+func TestDefaultCLIExecutorInteractiveExportsResolvedAgentID(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake CLI shell script test requires /bin/sh")
+	}
+
+	projectRoot := t.TempDir()
+	binDir := t.TempDir()
+	envFile := filepath.Join(projectRoot, "interactive-env.txt")
+	fakeGemini := filepath.Join(binDir, "gemini")
+	script := fmt.Sprintf(`#!/bin/sh
+printf '%%s\n' "$LIZA_AGENT_ID" > %q
+`, envFile)
+	if err := os.WriteFile(fakeGemini, []byte(script), 0755); err != nil {
+		t.Fatalf("write fake gemini: %v", err)
+	}
+
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("LIZA_AGENT_ID", "from-parent-env")
+
+	executor := NewDefaultCLIExecutor("")
+	exitCode, err := executor.ExecuteInteractive(context.Background(), "gemini", "code-reviewer-4", projectRoot, nil)
+	if err != nil {
+		t.Fatalf("ExecuteInteractive error: %v", err)
+	}
+	if exitCode != 0 {
+		t.Fatalf("exitCode = %d, want 0", exitCode)
+	}
+	data, err := os.ReadFile(envFile)
+	if err != nil {
+		t.Fatalf("read env file: %v", err)
+	}
+	if got := strings.TrimSpace(string(data)); got != "code-reviewer-4" {
+		t.Fatalf("LIZA_AGENT_ID = %q, want code-reviewer-4", got)
 	}
 }
 

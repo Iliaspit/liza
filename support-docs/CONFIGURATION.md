@@ -422,6 +422,7 @@ Agent identity is auto-assigned by default (`coder-1`, or `coder-2` if `coder-1`
 2. **Environment variable**: `export LIZA_AGENT_ID=coder-5`
 
 The `--agent-id` flag takes precedence over `LIZA_AGENT_ID`.
+After resolution, `liza agent` exports the resolved value as `LIZA_AGENT_ID` to the spawned provider CLI, including `-i` interactive sessions. This environment variable is how SessionStart and guard hooks distinguish Liza MAS sessions from Pairing sessions. Project env overlays such as `claude.env` cannot override the resolved agent ID.
 
 **Agent ID format**: `{role}-{number}` — e.g. `coder-1`, `code-reviewer-1`, `planner-1`.
 
@@ -434,7 +435,7 @@ project configuration belongs in `.liza/state.yaml`.
 
 | Variable | Required | Default | Purpose |
 |----------|----------|---------|---------|
-| `LIZA_AGENT_ID` | For agent commands | -- | Agent identifier (format: `{role}-{number}`) |
+| `LIZA_AGENT_ID` | For agent commands | -- | Agent identifier input (format: `{role}-{number}`). `liza agent` also exports the resolved ID to spawned provider CLIs so hooks select MAS mode. |
 | `LIZA_DISABLE_CLAUDE_SUBAGENTS` | No | unset | Set to `1` to launch Claude Code agents with `--disallowedTools Task`, disabling Claude subagent delegation. Use only when intentionally waiving Claude subagent delegation; agents may be unable to satisfy contract delegation triggers while this is set. |
 | `LIZA_ENABLE_SCIP_SEARCH` | No | unset | Strict opt-in MAS activation gate for SCIP indexing and `scip-search` prompt guidance. Truthy values are `1` and `true`; unset, empty, `0`, and `false` disable it. Values are trimmed and parsed case-insensitively. |
 | `LIZA_ENABLE_STACKLIT` | No | unset | Strict opt-in MAS activation gate for Stacklit `stacklit.json` refresh and prompt guidance. Truthy values are `1` and `true`; unset, empty, `0`, and `false` disable it. Values are trimmed and parsed case-insensitively. |

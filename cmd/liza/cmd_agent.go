@@ -50,7 +50,8 @@ Roles:
 
 Agent ID defaults to the first <role>-N not already registered with a valid lease
 (e.g. coder-1, or coder-2 if coder-1 is active). Override with --agent-id or
-LIZA_AGENT_ID.
+LIZA_AGENT_ID. The resolved ID is exported as LIZA_AGENT_ID to spawned provider
+CLIs so hooks select Multi-Agent mode.
 
 Example:
   # Auto-assigned agent ID (simplest)

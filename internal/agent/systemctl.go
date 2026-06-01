@@ -139,7 +139,7 @@ func executeAgent(ctx context.Context, config SupervisorConfig, prompt string, a
 		fmt.Println("=== INTERACTIVE MODE ===")
 		fmt.Println("Paste the prompt from the file above into the CLI session.")
 		fmt.Printf("Launching: %s\n", config.CLIName)
-		exitCode, err := config.Executor.ExecuteInteractive(ctx, config.CLIName, config.ProjectRoot, additionalDirs)
+		exitCode, err := config.Executor.ExecuteInteractive(ctx, config.CLIName, config.AgentID, config.ProjectRoot, additionalDirs)
 		return exitCode, "", err
 	}
 

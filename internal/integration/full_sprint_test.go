@@ -128,7 +128,7 @@ func (m *SmartMockCLIExecutor) Execute(ctx context.Context, cliName, agentID, pr
 	return agent.CLIExecutionResult{ExitCode: 0}, nil
 }
 
-func (m *SmartMockCLIExecutor) ExecuteInteractive(_ context.Context, _, _ string, _ []string) (int, error) {
+func (m *SmartMockCLIExecutor) ExecuteInteractive(_ context.Context, _, _, _ string, _ []string) (int, error) {
 	return 0, fmt.Errorf("interactive mode not supported in mock")
 }
 

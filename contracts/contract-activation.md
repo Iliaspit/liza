@@ -104,7 +104,10 @@ headless Codex agents through
 `npm exec --yes --package @openai/codex@<version> -- codex`. The state config
 version takes precedence over the environment fallback. This package pinning
 path is for headless MAS agents only; interactive `liza agent -i` keeps using
-the installed Codex binary and normal pairing configuration.
+the installed Codex binary and local Codex configuration. Both headless and
+interactive `liza agent` provider processes receive the resolved
+`LIZA_AGENT_ID`, which SessionStart and guard hooks use to select Multi-Agent
+mode instead of Pairing mode.
 
 After editing `~/.codex/config.toml`, restart Codex completely before testing.
 

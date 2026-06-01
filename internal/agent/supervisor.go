@@ -490,7 +490,7 @@ type CLIExecutor interface {
 	Execute(ctx context.Context, cliName string, agentID string, prompt string, projectRoot string, additionalDirs []string, runtimeConfig models.Config) (CLIExecutionResult, error)
 	// ExecuteInteractive launches the CLI without a prompt arg, with stdin connected,
 	// so the user can paste the prompt manually. Used by -i (interactive) mode.
-	ExecuteInteractive(ctx context.Context, cliName string, projectRoot string, additionalDirs []string) (exitCode int, err error)
+	ExecuteInteractive(ctx context.Context, cliName string, agentID string, projectRoot string, additionalDirs []string) (exitCode int, err error)
 }
 
 type CLIExecutionResult struct {
@@ -518,7 +518,7 @@ func (d *DefaultCLIExecutor) Execute(ctx context.Context, cliName string, agentI
 		actualCLI = "vibe"
 	}
 
-	cmdEnv := append(os.Environ(), "LIZA_AGENT_ID="+agentID)
+	cmdEnv := os.Environ()
 	if actualCLI == "claude" {
 		envFile := filepath.Join(projectRoot, "claude.env")
 		if extra := loadEnvFile(envFile); len(extra) > 0 {
@@ -529,6 +529,7 @@ func (d *DefaultCLIExecutor) Execute(ctx context.Context, cliName string, agentI
 			}
 		}
 	}
+	cmdEnv = agentProcessEnv(cmdEnv, agentID)
 
 	// Build command based on CLI.
 	// Structured output flags (stream-json, --json, etc.) are only added when logging is
@@ -680,7 +681,18 @@ func envValue(env []string, key string) string {
 	return ""
 }
 
-func (d *DefaultCLIExecutor) ExecuteInteractive(ctx context.Context, cliName string, projectRoot string, additionalDirs []string) (int, error) {
+func agentProcessEnv(base []string, agentID string) []string {
+	out := make([]string, 0, len(base)+1)
+	for _, entry := range base {
+		if strings.HasPrefix(entry, "LIZA_AGENT_ID=") {
+			continue
+		}
+		out = append(out, entry)
+	}
+	return append(out, "LIZA_AGENT_ID="+agentID)
+}
+
+func (d *DefaultCLIExecutor) ExecuteInteractive(ctx context.Context, cliName string, agentID string, projectRoot string, additionalDirs []string) (int, error) {
 	// Map CLI names (mistral -> vibe)
 	actualCLI := cliName
 	if cliName == "mistral" {
@@ -688,12 +700,12 @@ func (d *DefaultCLIExecutor) ExecuteInteractive(ctx context.Context, cliName str
 	}
 
 	// Launch CLI without prompt arg — user pastes prompt manually
-	cmdEnv := os.Environ()
+	cmdEnv := agentProcessEnv(os.Environ(), agentID)
 	var cmd *exec.Cmd
 	switch actualCLI {
 	case "codex":
-		// Interactive Codex is pairing mode: use the installed binary and rely
-		// on the configured Codex writable roots instead of launch-time mounts.
+		// Interactive Codex uses the installed binary and relies on the configured
+		// Codex writable roots instead of launch-time mounts.
 		args := codexInteractiveArgs()
 		var err error
 		cmd, err = codexCommandContext(ctx, "", args)
