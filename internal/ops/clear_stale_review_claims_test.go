@@ -15,6 +15,7 @@ func TestClearStaleReviewClaims_NoStale(t *testing.T) {
 	testhelpers.SetupTestGitRepo(t, tmpDir)
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 	setupLogFile(t, tmpDir)
+	t.Cleanup(SetAgentProcessProcRootForTest(filepath.Join(t.TempDir(), "missing-proc")))
 
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()
@@ -30,6 +31,12 @@ func TestClearStaleReviewClaims_NoStale(t *testing.T) {
 			ReviewingBy: &reviewer, ReviewLeaseExpires: &futureLease,
 			History: []models.TaskHistoryEntry{},
 		},
+	}
+	state.Agents[reviewer] = models.Agent{
+		Role:        "code-reviewer",
+		Status:      models.AgentStatusReviewing,
+		CurrentTask: testhelpers.StringPtr("t1"),
+		PID:         os.Getpid(),
 	}
 	testhelpers.WriteInitialState(t, stateFile, state)
 
@@ -406,7 +413,7 @@ func TestClearStaleReviewClaims_OrphanedOnSubmitted(t *testing.T) {
 	}
 }
 
-func TestClearStaleReviewClaims_ActiveLeaseOnRejected(t *testing.T) {
+func TestClearStaleReviewClaims_FutureLeaseMissingReviewerAgent(t *testing.T) {
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
@@ -415,7 +422,8 @@ func TestClearStaleReviewClaims_ActiveLeaseOnRejected(t *testing.T) {
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()
 
-	// REJECTED task with ReviewingBy set and valid (future) lease — should NOT be cleared
+	// REJECTED task with ReviewingBy set and valid (future) lease, but no
+	// reviewer agent row — passive ownership has no live observer.
 	futureLease := now.Add(30 * time.Minute)
 	reviewer := "code-reviewer-1"
 	state.Tasks = []models.Task{
@@ -433,8 +441,8 @@ func TestClearStaleReviewClaims_ActiveLeaseOnRejected(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ClearStaleReviewClaims() error: %v", err)
 	}
-	if cleared != 0 {
-		t.Errorf("cleared = %d, want 0 (active lease should not be cleared)", cleared)
+	if cleared != 1 {
+		t.Errorf("cleared = %d, want 1", cleared)
 	}
 
 	readState := readStateForTest(t, stateFile)
@@ -442,10 +450,191 @@ func TestClearStaleReviewClaims_ActiveLeaseOnRejected(t *testing.T) {
 	if task == nil {
 		t.Fatal("Task not found")
 	}
-	if task.ReviewingBy == nil {
-		t.Error("ReviewingBy should still be set")
-	} else if *task.ReviewingBy != reviewer {
-		t.Errorf("ReviewingBy = %v, want %v", *task.ReviewingBy, reviewer)
+	if task.ReviewingBy != nil {
+		t.Errorf("ReviewingBy should be nil, got %v", *task.ReviewingBy)
+	}
+	if task.ReviewLeaseExpires != nil {
+		t.Error("ReviewLeaseExpires should be nil")
+	}
+}
+
+func TestClearStaleReviewClaims_FutureLeaseWithLiveUnknownReviewerProcess(t *testing.T) {
+	tmpDir := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, tmpDir)
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	setupLogFile(t, tmpDir)
+	t.Cleanup(SetAgentProcessProcRootForTest(filepath.Join(t.TempDir(), "missing-proc")))
+
+	now := time.Now().UTC()
+	state := testhelpers.CreateValidState()
+
+	futureLease := now.Add(30 * time.Minute)
+	reviewer := "code-reviewer-1"
+	state.Tasks = []models.Task{
+		{
+			ID: "t1", Description: "Rejected with active live-unknown reviewer", Status: models.TaskStatusRejected,
+			Priority: 1, Created: now, SpecRef: "README.md", DoneWhen: "Done", Scope: "Test",
+			RolePair:    "coding-pair",
+			ReviewingBy: &reviewer, ReviewLeaseExpires: &futureLease,
+			History: []models.TaskHistoryEntry{},
+		},
+	}
+	state.Agents[reviewer] = models.Agent{
+		Role:        "code-reviewer",
+		Status:      models.AgentStatusWaiting,
+		CurrentTask: testhelpers.StringPtr("t1"),
+		PID:         os.Getpid(),
+	}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	cleared, err := ClearStaleReviewClaims(tmpDir)
+	if err != nil {
+		t.Fatalf("ClearStaleReviewClaims() error: %v", err)
+	}
+	if cleared != 0 {
+		t.Errorf("cleared = %d, want 0 (live/unknown observer should be preserved)", cleared)
+	}
+
+	readState := readStateForTest(t, stateFile)
+	task := readState.FindTask("t1")
+	if task == nil {
+		t.Fatal("Task not found")
+	}
+	if task.ReviewingBy == nil || *task.ReviewingBy != reviewer {
+		t.Fatalf("ReviewingBy = %v, want %v", task.ReviewingBy, reviewer)
+	}
+	if task.ReviewLeaseExpires == nil {
+		t.Fatal("ReviewLeaseExpires should remain set")
+	}
+}
+
+func TestClearStaleReviewClaims_SubmittedTaskWithLiveWaitingReviewerPreserved(t *testing.T) {
+	tmpDir := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, tmpDir)
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	setupLogFile(t, tmpDir)
+	t.Cleanup(SetAgentProcessProcRootForTest(filepath.Join(t.TempDir(), "missing-proc")))
+
+	now := time.Now().UTC()
+	state := testhelpers.CreateValidState()
+
+	futureLease := now.Add(30 * time.Minute)
+	reviewer := "code-reviewer-1"
+	state.Tasks = []models.Task{
+		{
+			ID: "t1", Description: "Submitted while reviewer awaits reclaim", Status: models.TaskStatusReadyForReview,
+			Priority: 1, Created: now, SpecRef: "README.md", DoneWhen: "Done", Scope: "Test",
+			RolePair:    "coding-pair",
+			ReviewingBy: &reviewer, ReviewLeaseExpires: &futureLease,
+			History: []models.TaskHistoryEntry{},
+		},
+	}
+	state.Agents[reviewer] = models.Agent{
+		Role:        "code-reviewer",
+		Status:      models.AgentStatusWaiting,
+		CurrentTask: testhelpers.StringPtr("t1"),
+		PID:         os.Getpid(),
+	}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	cleared, err := ClearStaleReviewClaims(tmpDir)
+	if err != nil {
+		t.Fatalf("ClearStaleReviewClaims() error: %v", err)
+	}
+	if cleared != 0 {
+		t.Errorf("cleared = %d, want 0 (submitted reclaim window should be preserved)", cleared)
+	}
+
+	readState := readStateForTest(t, stateFile)
+	task := readState.FindTask("t1")
+	if task == nil {
+		t.Fatal("Task not found")
+	}
+	if task.ReviewingBy == nil || *task.ReviewingBy != reviewer {
+		t.Fatalf("ReviewingBy = %v, want %v", task.ReviewingBy, reviewer)
+	}
+	if task.ReviewLeaseExpires == nil {
+		t.Fatal("ReviewLeaseExpires should remain set")
+	}
+}
+
+func TestClearStaleReviewClaims_FutureLeaseClearsWhenAgentNotObservingTask(t *testing.T) {
+	tmpDir := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, tmpDir)
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	setupLogFile(t, tmpDir)
+	t.Cleanup(SetAgentProcessProcRootForTest(filepath.Join(t.TempDir(), "missing-proc")))
+
+	now := time.Now().UTC()
+	futureLease := now.Add(30 * time.Minute)
+	reviewer := "code-reviewer-1"
+
+	tests := []struct {
+		name        string
+		status      models.TaskStatus
+		agentStatus models.AgentStatus
+		currentTask *string
+	}{
+		{
+			name:        "passive claim with idle agent",
+			status:      models.TaskStatusRejected,
+			agentStatus: models.AgentStatusIdle,
+			currentTask: testhelpers.StringPtr("t1"),
+		},
+		{
+			name:        "passive claim with mismatched current task",
+			status:      models.TaskStatusRejected,
+			agentStatus: models.AgentStatusWaiting,
+			currentTask: testhelpers.StringPtr("other-task"),
+		},
+		{
+			name:        "active review with mismatched current task",
+			status:      models.TaskStatusReviewing,
+			agentStatus: models.AgentStatusReviewing,
+			currentTask: testhelpers.StringPtr("other-task"),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			state := testhelpers.CreateValidState()
+			state.Tasks = []models.Task{
+				{
+					ID: "t1", Description: "Future lease without matching observer", Status: tt.status,
+					Priority: 1, Created: now, SpecRef: "README.md", DoneWhen: "Done", Scope: "Test",
+					RolePair:    "coding-pair",
+					ReviewingBy: &reviewer, ReviewLeaseExpires: &futureLease,
+					History: []models.TaskHistoryEntry{},
+				},
+			}
+			state.Agents[reviewer] = models.Agent{
+				Role:        "code-reviewer",
+				Status:      tt.agentStatus,
+				CurrentTask: tt.currentTask,
+				PID:         os.Getpid(),
+			}
+			testhelpers.WriteInitialState(t, stateFile, state)
+
+			cleared, err := ClearStaleReviewClaims(tmpDir)
+			if err != nil {
+				t.Fatalf("ClearStaleReviewClaims() error: %v", err)
+			}
+			if cleared != 1 {
+				t.Fatalf("cleared = %d, want 1", cleared)
+			}
+
+			readState := readStateForTest(t, stateFile)
+			task := readState.FindTask("t1")
+			if task == nil {
+				t.Fatal("Task not found")
+			}
+			if task.ReviewingBy != nil {
+				t.Errorf("ReviewingBy should be nil, got %v", *task.ReviewingBy)
+			}
+			if task.ReviewLeaseExpires != nil {
+				t.Error("ReviewLeaseExpires should be nil")
+			}
+		})
 	}
 }
 

@@ -898,7 +898,15 @@ agent must have the exact reviewer role resolved from the task's `role_pair`,
 status `REVIEWING`, `current_task` equal to the task ID, and a valid review
 lease. A `reviewing_by` value on non-reviewing states is stale/orphaned state,
 not an active claim, except while a `WAITING` reviewer is passively awaiting
-resubmission for a rejected/executing task with an unexpired review lease.
+resubmission for a rejected/executing task or reclaiming a just-submitted task
+with an unexpired review lease and a live observer. A live observer means the
+reviewer agent row exists, has a usable
+PID, `AgentProcessStatus(...).IsLiveOrUnknown()` is true, and `current_task`
+matches the task ID. Active review ownership additionally requires agent status
+`REVIEWING`; passive await-resubmission ownership requires agent status
+`WAITING`. Provider CLI exit releases passive reviewer ownership even when the
+supervisor PID remains alive; missing, unusable, dead, mismatched, or
+non-observing reviewer process/agent evidence makes the claim stale.
 
 **Heartbeat interval:** 60 seconds
 **Lease duration:** 1800 seconds (30 minutes)

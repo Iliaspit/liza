@@ -44,14 +44,9 @@ func ClearStaleReviewClaims(projectRoot string) (int, error) {
 				// Not in a reviewing state — check for orphaned ReviewingBy
 				// from an await_resubmission crash.
 				if task.ReviewingBy != nil {
-					var expiredAt string
-					switch {
-					case task.ReviewLeaseExpires == nil:
-						expiredAt = "unknown (lease missing)"
-					case !task.ReviewLeaseExpires.After(now):
-						expiredAt = task.ReviewLeaseExpires.Format(time.RFC3339)
-					default:
-						continue // lease still valid
+					staleReason := staleReviewClaimReason(state, task, now, pb, false)
+					if staleReason == "" {
+						continue
 					}
 
 					staleReviewer := *task.ReviewingBy
@@ -64,8 +59,8 @@ func ClearStaleReviewClaims(projectRoot string) (int, error) {
 						}
 					}
 
-					detail := fmt.Sprintf("Orphaned ReviewingBy cleared (expired at %s, reviewer: %s, task status: %s)",
-						expiredAt, staleReviewer, task.Status)
+					detail := fmt.Sprintf("Orphaned ReviewingBy cleared (%s, reviewer: %s, task status: %s)",
+						staleReason, staleReviewer, task.Status)
 					logEntry := log.Entry{
 						Timestamp: now,
 						Agent:     "system",
@@ -86,13 +81,8 @@ func ClearStaleReviewClaims(projectRoot string) (int, error) {
 				continue
 			}
 
-			var expiredAt string
-			switch {
-			case task.ReviewLeaseExpires == nil:
-				expiredAt = "unknown (lease missing)"
-			case !task.ReviewLeaseExpires.After(now):
-				expiredAt = task.ReviewLeaseExpires.Format(time.RFC3339)
-			default:
+			staleReason := staleReviewClaimReason(state, task, now, pb, true)
+			if staleReason == "" {
 				continue
 			}
 
@@ -111,7 +101,7 @@ func ClearStaleReviewClaims(projectRoot string) (int, error) {
 				}
 			}
 
-			detail := fmt.Sprintf("Review claim expired at %s (reviewer: %s)", expiredAt, staleReviewer)
+			detail := fmt.Sprintf("Review claim cleared (%s, reviewer: %s)", staleReason, staleReviewer)
 			logEntry := log.Entry{
 				Timestamp: now,
 				Agent:     "system",
@@ -134,6 +124,63 @@ func ClearStaleReviewClaims(projectRoot string) (int, error) {
 	}
 
 	return cleared, nil
+}
+
+func staleReviewClaimReason(state *models.State, task *models.Task, now time.Time, pb *pipelineBundle, activeReview bool) string {
+	if task.ReviewingBy == nil {
+		return ""
+	}
+	if task.ReviewLeaseExpires == nil {
+		return "lease missing"
+	}
+	if !task.ReviewLeaseExpires.After(now) {
+		return fmt.Sprintf("lease expired at %s", task.ReviewLeaseExpires.Format(time.RFC3339))
+	}
+
+	reviewerID := *task.ReviewingBy
+	agent, ok := state.Agents[reviewerID]
+	if !ok {
+		return "reviewer agent missing"
+	}
+	if agent.PID <= 0 {
+		return "reviewer agent has no usable pid"
+	}
+	if status := AgentProcessStatus(reviewerID, agent); !status.IsLiveOrUnknown() {
+		return fmt.Sprintf("reviewer process is %s (%s)", status.State, status.Detail)
+	}
+	if activeReview {
+		if agent.Status != models.AgentStatusReviewing {
+			return fmt.Sprintf("reviewer agent status is %s, want REVIEWING", agent.Status)
+		}
+		if agent.CurrentTask == nil || *agent.CurrentTask != task.ID {
+			return "reviewer agent current_task does not match task"
+		}
+		return ""
+	}
+	if !isPassiveReviewOwnershipStatus(task, pb) {
+		return fmt.Sprintf("task status %s is not passive review ownership", task.Status)
+	}
+	if agent.Status != models.AgentStatusWaiting {
+		return fmt.Sprintf("reviewer agent status is %s, want WAITING", agent.Status)
+	}
+	if agent.CurrentTask == nil || *agent.CurrentTask != task.ID {
+		return "reviewer agent current_task does not match task"
+	}
+	return ""
+}
+
+func isPassiveReviewOwnershipStatus(task *models.Task, pb *pipelineBundle) bool {
+	if pb == nil || pb.pr == nil {
+		return false
+	}
+	if models.IsSubmittedStatus(task, pb.pr) {
+		return true
+	}
+	rejected, err := pb.pr.RejectedStatus(task.RolePair)
+	if err == nil && task.Status == rejected {
+		return true
+	}
+	return models.IsExecutingStatus(task, pb.pr)
 }
 
 // detectReviewingState checks whether a task is in a reviewing state

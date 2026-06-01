@@ -749,9 +749,9 @@ func TestResetAgentAfterExit_WaitingWithoutCurrentTask(t *testing.T) {
 	}
 }
 
-// TestResetAgentAfterExit_WaitingWithCurrentTask tests that a WAITING agent
-// with CurrentTask set is preserved (existing behavior).
-func TestResetAgentAfterExit_WaitingWithCurrentTask(t *testing.T) {
+// TestResetAgentAfterExit_DoerWaitingWithCurrentTask tests that a WAITING doer
+// with CurrentTask set is preserved for await-verdict continuity.
+func TestResetAgentAfterExit_DoerWaitingWithCurrentTask(t *testing.T) {
 	tmpDir := t.TempDir()
 	statePath, _ := testhelpers.SetupLizaDir(t, tmpDir)
 	testhelpers.SetupPipelineConfig(t, tmpDir)
@@ -783,6 +783,125 @@ func TestResetAgentAfterExit_WaitingWithCurrentTask(t *testing.T) {
 	}
 	if agent.CurrentTask == nil || *agent.CurrentTask != taskID {
 		t.Errorf("Expected CurrentTask %q, got %v", taskID, agent.CurrentTask)
+	}
+}
+
+func TestResetAgentAfterExit_ReviewerWaitingReleasesPassiveOwnership(t *testing.T) {
+	tmpDir := t.TempDir()
+	statePath, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	testhelpers.SetupPipelineConfig(t, tmpDir)
+
+	state := testhelpers.CreateValidState()
+	agentID := "code-reviewer-1"
+	taskID := "task-1"
+	now := time.Now().UTC()
+	state.Tasks = []models.Task{
+		{
+			ID:                 taskID,
+			Description:        "Rejected task awaiting resubmission",
+			Status:             models.TaskStatusRejected,
+			Priority:           1,
+			Created:            now,
+			SpecRef:            "README.md",
+			DoneWhen:           "Done",
+			Scope:              "Test",
+			RolePair:           "coding-pair",
+			ReviewingBy:        testhelpers.StringPtr(agentID),
+			ReviewLeaseExpires: testhelpers.TimePtr(now.Add(30 * time.Minute)),
+		},
+	}
+	state.Agents[agentID] = models.Agent{
+		Role:        "code-reviewer",
+		Status:      models.AgentStatusWaiting,
+		CurrentTask: &taskID,
+		Heartbeat:   now,
+	}
+	bb := testhelpers.WriteInitialState(t, statePath, state)
+
+	if err := resetAgentAfterExit(bb, agentID, tmpDir); err != nil {
+		t.Fatalf("resetAgentAfterExit() error = %v", err)
+	}
+
+	state, err := bb.Read()
+	if err != nil {
+		t.Fatalf("Failed to read state: %v", err)
+	}
+	agent := state.Agents[agentID]
+	if agent.Status != models.AgentStatusIdle {
+		t.Errorf("Expected agent status IDLE, got %s", agent.Status)
+	}
+	if agent.CurrentTask != nil {
+		t.Errorf("Expected CurrentTask nil, got %v", *agent.CurrentTask)
+	}
+	task := state.FindTask(taskID)
+	if task == nil {
+		t.Fatal("Task not found")
+	}
+	if task.Status != models.TaskStatusRejected {
+		t.Errorf("Expected task status CODE_REJECTED, got %s", task.Status)
+	}
+	if task.ReviewingBy != nil {
+		t.Errorf("Expected ReviewingBy nil, got %v", *task.ReviewingBy)
+	}
+	if task.ReviewLeaseExpires != nil {
+		t.Error("Expected ReviewLeaseExpires nil")
+	}
+}
+
+func TestResetAgentAfterExit_ReviewerWaitingDoesNotClearOtherReviewerClaim(t *testing.T) {
+	tmpDir := t.TempDir()
+	statePath, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	testhelpers.SetupPipelineConfig(t, tmpDir)
+
+	state := testhelpers.CreateValidState()
+	agentID := "code-reviewer-1"
+	otherReviewer := "code-reviewer-2"
+	taskID := "task-1"
+	now := time.Now().UTC()
+	state.Tasks = []models.Task{
+		{
+			ID:                 taskID,
+			Description:        "Rejected task claimed by another reviewer",
+			Status:             models.TaskStatusRejected,
+			Priority:           1,
+			Created:            now,
+			SpecRef:            "README.md",
+			DoneWhen:           "Done",
+			Scope:              "Test",
+			RolePair:           "coding-pair",
+			ReviewingBy:        testhelpers.StringPtr(otherReviewer),
+			ReviewLeaseExpires: testhelpers.TimePtr(now.Add(30 * time.Minute)),
+		},
+	}
+	state.Agents[agentID] = models.Agent{
+		Role:        "code-reviewer",
+		Status:      models.AgentStatusWaiting,
+		CurrentTask: &taskID,
+		Heartbeat:   now,
+	}
+	bb := testhelpers.WriteInitialState(t, statePath, state)
+
+	if err := resetAgentAfterExit(bb, agentID, tmpDir); err != nil {
+		t.Fatalf("resetAgentAfterExit() error = %v", err)
+	}
+
+	state, err := bb.Read()
+	if err != nil {
+		t.Fatalf("Failed to read state: %v", err)
+	}
+	agent := state.Agents[agentID]
+	if agent.Status != models.AgentStatusIdle {
+		t.Errorf("Expected agent status IDLE, got %s", agent.Status)
+	}
+	task := state.FindTask(taskID)
+	if task == nil {
+		t.Fatal("Task not found")
+	}
+	if task.ReviewingBy == nil || *task.ReviewingBy != otherReviewer {
+		t.Fatalf("ReviewingBy = %v, want %s", task.ReviewingBy, otherReviewer)
+	}
+	if task.ReviewLeaseExpires == nil {
+		t.Fatal("ReviewLeaseExpires should remain set")
 	}
 }
 

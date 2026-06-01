@@ -402,15 +402,23 @@ whose role is the exact reviewer role resolved from the task's `role_pair`, and
 that agent must be `REVIEWING` with `current_task` set to the same task.
 `reviewing_by` on a non-reviewing task is not active review ownership. It is
 valid only as passive wait metadata when a `WAITING` reviewer is awaiting doer
-resubmission for a rejected/executing task and `review_lease_expires` is still
-in the future; otherwise it is stale or orphaned state to clear through
-recovery.
+resubmission for a rejected/executing task or reclaiming a just-submitted task,
+and `review_lease_expires` is still in the future. That passive ownership also
+requires a live observer: the
+reviewer agent row must exist with a usable PID and `AgentProcessStatus(...).IsLiveOrUnknown()`
+must be true, agent status must be `WAITING`, and agent `current_task` must
+match the task ID. Active review ownership uses the same live observer
+requirement with agent status `REVIEWING`. Provider CLI exit releases reviewer
+passive ownership even if the supervisor process is still alive; missing,
+unusable, dead, mismatched, or non-observing process/agent evidence is stale or
+orphaned state to clear through recovery.
 
 | Condition | Review Claimable? |
 |-----------|-------------------|
 | `reviewing_by` is null | Yes |
 | `reviewing_by` set but `review_lease_expires` in past | Yes (stale claim) |
-| `reviewing_by` set and `review_lease_expires` in future | No (active claim) |
+| `reviewing_by` set and `review_lease_expires` in future but no live/unknown observer | Yes (stale claim) |
+| `reviewing_by` set and `review_lease_expires` in future with live/unknown observer | No (active claim) |
 
 **Code Reviewer must extend lease with heartbeats** during long reviews (same 60s interval as coders).
 
