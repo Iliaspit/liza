@@ -147,6 +147,10 @@ stacklit get-hints -i {{ .ShellIndexPath }}
 stacklit get-hot-files -i {{ .ShellIndexPath }}
 ```
 {{- end }}
+{{- else }}
+
+=== STACKLIT INDEX ===
+No Stacklit index path was supplied for this target. Do not infer or generate stacklit.json; use scip-search, rg, ast-grep, and direct source reads.
 {{- end }}
 
 {{- if or .StacklitIndexes .ScipSearchIndexes }}

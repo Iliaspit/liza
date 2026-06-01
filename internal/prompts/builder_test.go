@@ -315,12 +315,21 @@ func TestBuildBasePromptStacklitOmittedWhenNoIndexes(t *testing.T) {
 	}
 
 	for _, notWant := range []string{
-		"=== STACKLIT INDEX ===",
 		"stacklit derive",
 		"stacklit get-module",
 	} {
 		if strings.Contains(prompt, notWant) {
 			t.Fatalf("BuildBasePrompt() rendered stacklit content %q with no supplied indexes", notWant)
+		}
+	}
+	for _, want := range []string{
+		"=== STACKLIT INDEX ===",
+		"No Stacklit index path was supplied for this target.",
+		"Do not infer or generate stacklit.json",
+		"use scip-search, rg, ast-grep, and direct source reads",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("BuildBasePrompt() missing no-stacklit guidance %q:\n%s", want, prompt)
 		}
 	}
 }
