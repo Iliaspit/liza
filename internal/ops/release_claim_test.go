@@ -1,6 +1,7 @@
 package ops
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"github.com/liza-mas/liza/internal/errors"
 	"github.com/liza-mas/liza/internal/git"
 	"github.com/liza-mas/liza/internal/models"
+	"github.com/liza-mas/liza/internal/statevalidate"
 	"github.com/liza-mas/liza/internal/testhelpers"
 )
 
@@ -454,6 +456,71 @@ func TestReleaseClaim_PipelineReviewerClaim(t *testing.T) {
 	}
 }
 
+func TestReleaseClaim_PipelineReviewerClaimReviewing2(t *testing.T) {
+	tmpDir, stateFile := setupPipelineTest(t)
+	writeValidationSpecRefs(t, tmpDir)
+
+	now := time.Now().UTC()
+	state := testhelpers.CreateValidState()
+	reviewer := "code-reviewer-2"
+	reviewCommit := "review123"
+	reviewLease := now.Add(30 * time.Minute)
+	agentLease := now.Add(30 * time.Minute)
+	worktree := ".worktrees/task-1"
+	task := testhelpers.BuildTaskByStatus("task-1", "REVIEWING_CODE_2", now)
+	task.RolePair = "coding-pair"
+	task.ReviewCommit = &reviewCommit
+	task.ReviewingBy = &reviewer
+	task.ReviewLeaseExpires = &reviewLease
+	task.Worktree = &worktree
+	task.HandoffEvents = []models.HandoffEvent{
+		{Timestamp: now.Add(-2 * time.Minute), Agent: "coder-1", Trigger: models.HandoffTriggerSubmission},
+	}
+	task.Approvals = []models.Approval{
+		{Agent: "code-reviewer-1", Provider: "codex", Timestamp: now.Add(-time.Minute)},
+	}
+	state.Tasks = []models.Task{task}
+	state.Agents[reviewer] = models.Agent{
+		Role:         "code-reviewer",
+		Provider:     "codex",
+		Status:       models.AgentStatusReviewing,
+		CurrentTask:  testhelpers.StringPtr("task-1"),
+		LeaseExpires: &agentLease,
+		Heartbeat:    now,
+		PID:          12345,
+	}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	result, err := ReleaseClaim(tmpDir, "task-1", "reviewer", true, "pipeline test", "human")
+	if err != nil {
+		t.Fatalf("ReleaseClaim() error: %v", err)
+	}
+	if !result.ReleasedReviewer {
+		t.Error("ReleasedReviewer should be true")
+	}
+
+	readState, err := db.New(stateFile).Read()
+	if err != nil {
+		t.Fatalf("Failed to read state: %v", err)
+	}
+	readTask := readState.FindTask("task-1")
+	if readTask == nil {
+		t.Fatal("Task not found")
+	}
+	if readTask.Status != "CODE_PARTIALLY_APPROVED" {
+		t.Errorf("Status = %v, want CODE_PARTIALLY_APPROVED", readTask.Status)
+	}
+	if readTask.ReviewingBy != nil {
+		t.Error("ReviewingBy should be nil")
+	}
+	if readTask.ReviewLeaseExpires != nil {
+		t.Error("ReviewLeaseExpires should be nil")
+	}
+	if err := statevalidate.ValidateState(readState, tmpDir, false, io.Discard); err != nil {
+		t.Fatalf("state should validate after release: %v", err)
+	}
+}
+
 func TestReleaseClaim_PipelineReviewerClaim_LegacySubmittedStatus(t *testing.T) {
 	tmpDir, stateFile := setupPipelineTest(t)
 	pipelinePath := filepath.Join(tmpDir, ".liza", "pipeline.yaml")
@@ -492,5 +559,91 @@ func TestReleaseClaim_PipelineReviewerClaim_LegacySubmittedStatus(t *testing.T) 
 	}
 	if readTask.Status != models.TaskStatusLegacyReadyForReview {
 		t.Errorf("Status = %v, want %s", readTask.Status, models.TaskStatusLegacyReadyForReview)
+	}
+}
+
+func writeValidationSpecRefs(t *testing.T, tmpDir string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Join(tmpDir, "specs"), 0755); err != nil {
+		t.Fatalf("create specs dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, "specs", "vision.md"), []byte("test goal\n"), 0644); err != nil {
+		t.Fatalf("write goal spec: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, "README.md"), []byte("test task spec\n"), 0644); err != nil {
+		t.Fatalf("write task spec: %v", err)
+	}
+}
+
+type partialResolutionFailureResolver struct{}
+
+func (partialResolutionFailureResolver) RolePairNames() []string { return []string{"coding-pair"} }
+func (partialResolutionFailureResolver) RoleType(role string) (string, error) {
+	switch role {
+	case "coder":
+		return "doer", nil
+	case "code-reviewer":
+		return "reviewer", nil
+	default:
+		return "", assertAnError{}
+	}
+}
+func (partialResolutionFailureResolver) AllRoleNames() []string { return nil }
+func (partialResolutionFailureResolver) DoerRole(string) (string, error) {
+	return "coder", nil
+}
+func (partialResolutionFailureResolver) ReviewerRole(string) (string, error) {
+	return "code-reviewer", nil
+}
+func (partialResolutionFailureResolver) InitialStatus(string) (models.TaskStatus, error) {
+	return "DRAFT_CODE", nil
+}
+func (partialResolutionFailureResolver) RejectedStatus(string) (models.TaskStatus, error) {
+	return "CODE_REJECTED", nil
+}
+func (partialResolutionFailureResolver) SubmittedStatus(string) (models.TaskStatus, error) {
+	return "CODE_TO_REVIEW", nil
+}
+func (partialResolutionFailureResolver) ReviewingStatus(string) (models.TaskStatus, error) {
+	return "REVIEWING_CODE", nil
+}
+func (partialResolutionFailureResolver) ExecutingStatus(string) (models.TaskStatus, error) {
+	return "IMPLEMENTING_CODE", nil
+}
+func (partialResolutionFailureResolver) ApprovedStatus(string) (models.TaskStatus, error) {
+	return "CODE_APPROVED", nil
+}
+func (partialResolutionFailureResolver) PartiallyApprovedStatus(string) (models.TaskStatus, error) {
+	return "", assertAnError{}
+}
+func (partialResolutionFailureResolver) Reviewing2Status(string) (models.TaskStatus, error) {
+	return "REVIEWING_CODE_2", nil
+}
+
+type assertAnError struct{}
+
+func (assertAnError) Error() string { return "partial status unavailable" }
+
+func TestResolveReviewerClaimReleaseStatus_Reviewing2MissingPartialFailsClosed(t *testing.T) {
+	now := time.Now().UTC()
+	reviewer := "code-reviewer-2"
+	reviewLease := now.Add(30 * time.Minute)
+	task := models.Task{
+		ID:                 "task-1",
+		Status:             "REVIEWING_CODE_2",
+		RolePair:           "coding-pair",
+		ReviewingBy:        &reviewer,
+		ReviewLeaseExpires: &reviewLease,
+	}
+
+	_, _, err := ResolveReviewerReleaseStatus(&task, partialResolutionFailureResolver{})
+	if err == nil {
+		t.Fatal("expected error when reviewing-2 release target cannot be resolved")
+	}
+	if task.ReviewingBy == nil || *task.ReviewingBy != reviewer {
+		t.Fatalf("ReviewingBy = %v, want preserved %s", task.ReviewingBy, reviewer)
+	}
+	if task.ReviewLeaseExpires == nil || !task.ReviewLeaseExpires.Equal(reviewLease) {
+		t.Fatalf("ReviewLeaseExpires = %v, want preserved %v", task.ReviewLeaseExpires, reviewLease)
 	}
 }

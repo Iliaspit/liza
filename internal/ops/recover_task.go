@@ -160,31 +160,60 @@ func RecoverTask(projectRoot, taskID string, force bool, reason string) (*Recove
 			agentsToRecover[*task.ReviewingBy] = true
 		}
 
-		effectiveCoderRelease, effectiveReviewerRelease := resolveClaimReleaseStatuses(task, resolver)
+		claimReleaseFailed := false
 
-		if task.AssignedTo != nil {
-			currentCoderID := *task.AssignedTo
-			released, err := releaseOneClaim(state, task, effectiveCoderRelease, pipelineTransitions, true, currentCoderID, reason, now)
-			if err != nil {
-				result.Warnings = append(result.Warnings, fmt.Sprintf("coder claim release: %v", err))
+		if resolver == nil {
+			if task.AssignedTo != nil {
+				currentCoderID := *task.AssignedTo
+				result.Warnings = append(result.Warnings, "coder claim release: pipeline resolver not loaded")
+				delete(agentsToRecover, currentCoderID)
+				claimReleaseFailed = true
 			}
-			if released {
-				result.ClaimReleased = true
+			if task.ReviewingBy != nil {
+				currentReviewerID := *task.ReviewingBy
+				result.Warnings = append(result.Warnings, "reviewer claim release: pipeline resolver not loaded")
+				delete(agentsToRecover, currentReviewerID)
+				claimReleaseFailed = true
+			}
+		} else {
+			if task.AssignedTo != nil {
+				currentCoderID := *task.AssignedTo
+				effectiveCoderRelease := resolveDoerClaimReleaseStatus(task, resolver)
+				released, err := releaseOneClaim(state, task, effectiveCoderRelease, pipelineTransitions, true, currentCoderID, reason, now)
+				if err != nil {
+					result.Warnings = append(result.Warnings, fmt.Sprintf("coder claim release: %v", err))
+					delete(agentsToRecover, currentCoderID)
+					claimReleaseFailed = true
+				}
+				if released {
+					result.ClaimReleased = true
+				}
+			}
+
+			if task.ReviewingBy != nil {
+				currentReviewerID := *task.ReviewingBy
+				effectiveReviewerRelease, err := resolveReviewerClaimReleaseStatus(task, resolver)
+				if err != nil {
+					result.Warnings = append(result.Warnings, fmt.Sprintf("reviewer claim release: %v", err))
+					delete(agentsToRecover, currentReviewerID)
+					claimReleaseFailed = true
+				} else {
+					released, err := releaseOneClaim(state, task, effectiveReviewerRelease, pipelineTransitions, true, currentReviewerID, reason, now)
+					if err != nil {
+						result.Warnings = append(result.Warnings, fmt.Sprintf("reviewer claim release: %v", err))
+						delete(agentsToRecover, currentReviewerID)
+						claimReleaseFailed = true
+					}
+					if released {
+						result.ClaimReleased = true
+					}
+				}
 			}
 		}
 
-		if task.ReviewingBy != nil {
-			currentReviewerID := *task.ReviewingBy
-			released, err := releaseOneClaim(state, task, effectiveReviewerRelease, pipelineTransitions, true, currentReviewerID, reason, now)
-			if err != nil {
-				result.Warnings = append(result.Warnings, fmt.Sprintf("reviewer claim release: %v", err))
-			}
-			if released {
-				result.ClaimReleased = true
-			}
+		if !claimReleaseFailed {
+			task.Worktree = nil
 		}
-
-		task.Worktree = nil
 
 		// Detect and fix review_commit corruption: tasks in submitted/reviewing/approved
 		// states without review_commit are unclaimable and stuck. Reset to initial status.

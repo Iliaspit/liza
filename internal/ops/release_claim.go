@@ -68,41 +68,92 @@ var doerRelease = claimRelease{
 // ResolveReleaseStatuses returns the active/released status pairs for doer and
 // reviewer claims, resolving from the pipeline config.
 // Returns zero-value statuses when task has no RolePair or resolver is nil.
+// This legacy convenience helper intentionally drops reviewer release resolution
+// errors. Mutating reviewer-release paths must use ResolveReviewerReleaseStatus
+// so they fail closed instead of clearing ownership in-place.
 func ResolveReleaseStatuses(task *models.Task, resolver *pipeline.Resolver) (doerActive, doerReleased, reviewerActive, reviewerReleased models.TaskStatus) {
+	doerActive, doerReleased = ResolveDoerReleaseStatus(task, resolver)
+	reviewerActive, reviewerReleased, _ = ResolveReviewerReleaseStatus(task, resolver)
+	return
+}
+
+// ResolveDoerReleaseStatus returns the active/released status pair for a doer
+// claim, resolving from the pipeline config when available.
+func ResolveDoerReleaseStatus(task *models.Task, resolver models.PipelineResolver) (active, released models.TaskStatus) {
 	if task.RolePair == "" || resolver == nil {
 		return
 	}
 	initial, initialErr := resolver.InitialStatus(task.RolePair)
 	executing, executingErr := resolver.ExecutingStatus(task.RolePair)
 	if initialErr == nil && executingErr == nil {
-		doerActive = executing
-		doerReleased = initial
-	}
-	submitted, submittedErr := resolver.SubmittedStatus(task.RolePair)
-	reviewing, reviewingErr := resolver.ReviewingStatus(task.RolePair)
-	if submittedErr == nil && reviewingErr == nil {
-		reviewerActive = reviewing
-		reviewerReleased = submitted
+		active = executing
+		released = initial
 	}
 	return
 }
 
-// resolveClaimReleaseStatuses returns doer and reviewer claimRelease configs with
+// ResolveReviewerReleaseStatus returns the active/released status pair for an
+// active reviewer claim. Non-reviewing statuses return zero values with no
+// error so passive/orphaned review fields can still be cleared. Reviewing states
+// fail closed when their release target cannot be resolved.
+func ResolveReviewerReleaseStatus(task *models.Task, resolver models.PipelineResolver) (active, released models.TaskStatus, err error) {
+	if task.RolePair == "" || resolver == nil {
+		return
+	}
+
+	reviewing, reviewingErr := resolver.ReviewingStatus(task.RolePair)
+	if reviewingErr == nil && task.Status == reviewing {
+		submitted, submittedErr := resolver.SubmittedStatus(task.RolePair)
+		if submittedErr != nil {
+			return "", "", fmt.Errorf("task %s is in reviewing state %s but submitted status resolution failed for role-pair %q: %w",
+				task.ID, task.Status, task.RolePair, submittedErr)
+		}
+		return reviewing, submitted, nil
+	}
+
+	reviewing2, reviewing2Err := resolver.Reviewing2Status(task.RolePair)
+	if reviewing2Err == nil && task.Status == reviewing2 {
+		partiallyApproved, partiallyApprovedErr := resolver.PartiallyApprovedStatus(task.RolePair)
+		if partiallyApprovedErr != nil {
+			return "", "", fmt.Errorf("task %s is in reviewing-2 state %s but partially-approved status resolution failed for role-pair %q: %w",
+				task.ID, task.Status, task.RolePair, partiallyApprovedErr)
+		}
+		return reviewing2, partiallyApproved, nil
+	}
+
+	return
+}
+
+// resolveDoerClaimReleaseStatus returns the doer claimRelease config with
 // pipeline-resolved active/released statuses when the task has a RolePair and a
 // resolver is available.
-func resolveClaimReleaseStatuses(task *models.Task, resolver *pipeline.Resolver) (doer claimRelease, reviewer claimRelease) {
-	doer = doerRelease
-	reviewer = reviewerRelease
-	doerActive, doerReleased, reviewerActive, reviewerReleased := ResolveReleaseStatuses(task, resolver)
+func resolveDoerClaimReleaseStatus(task *models.Task, resolver models.PipelineResolver) claimRelease {
+	doer := doerRelease
+	doerActive, doerReleased := ResolveDoerReleaseStatus(task, resolver)
 	if doerActive != "" && doerReleased != "" {
 		doer.activeStatus = doerActive
 		doer.releasedStatus = doerReleased
+	}
+	return doer
+}
+
+// resolveReviewerClaimReleaseStatus returns the reviewer claimRelease config
+// with pipeline-resolved active/released statuses. It returns an error when an
+// active reviewing status is recognized but its release target is unavailable.
+func resolveReviewerClaimReleaseStatus(task *models.Task, resolver models.PipelineResolver) (claimRelease, error) {
+	reviewer := reviewerRelease
+	if resolver == nil && (task.ReviewingBy != nil || task.ReviewLeaseExpires != nil) {
+		return reviewer, fmt.Errorf("cannot release reviewer claim for task %s: pipeline resolver not loaded", task.ID)
+	}
+	reviewerActive, reviewerReleased, err := ResolveReviewerReleaseStatus(task, resolver)
+	if err != nil {
+		return reviewer, err
 	}
 	if reviewerActive != "" && reviewerReleased != "" {
 		reviewer.activeStatus = reviewerActive
 		reviewer.releasedStatus = reviewerReleased
 	}
-	return doer, reviewer
+	return reviewer, nil
 }
 
 // releaseOneClaim executes the 9-step release sequence for a single role's claim.
@@ -192,10 +243,11 @@ func ReleaseClaim(projectRoot, taskID, role string, force bool, reason, agentID 
 			return &errors.NotFoundError{Entity: "task", ID: taskID}
 		}
 
-		// Resolve pipeline-aware statuses for claim release
-		effectiveCoderRelease, effectiveReviewerRelease := resolveClaimReleaseStatuses(task, resolver)
-
 		if role == roles.ClaimReviewer || role == roles.ClaimBoth {
+			effectiveReviewerRelease, err := resolveReviewerClaimReleaseStatus(task, resolver)
+			if err != nil {
+				return err
+			}
 			released, err := releaseOneClaim(state, task, effectiveReviewerRelease, pipelineTransitions, force, agentID, reason, now)
 			if err != nil {
 				return err
@@ -204,6 +256,7 @@ func ReleaseClaim(projectRoot, taskID, role string, force bool, reason, agentID 
 		}
 
 		if role == roles.ClaimDoer || role == roles.ClaimBoth {
+			effectiveCoderRelease := resolveDoerClaimReleaseStatus(task, resolver)
 			released, err := releaseOneClaim(state, task, effectiveCoderRelease, pipelineTransitions, force, agentID, reason, now)
 			if err != nil {
 				return err

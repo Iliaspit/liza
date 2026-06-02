@@ -575,7 +575,7 @@ func TestRecoverAgent_CustomDoerRole_WorktreeRemoval(t *testing.T) {
 
 // TestRecoverAgent_NilResolver_WarningLogLine verifies that when the resolver is nil
 // during agent recovery, a warning log line is emitted indicating claim release was
-// skipped due to missing resolver.
+// skipped due to missing resolver and the claim-owning agent is preserved.
 func TestRecoverAgent_NilResolver_WarningLogLine(t *testing.T) {
 	tmpDir := t.TempDir()
 
@@ -637,8 +637,23 @@ func TestRecoverAgent_NilResolver_WarningLogLine(t *testing.T) {
 		if result.ClaimReleased {
 			t.Error("ClaimReleased should be false when resolver is nil")
 		}
-		if !result.AgentDeleted {
-			t.Error("Expected AgentDeleted=true even with nil resolver")
+		if result.AgentDeleted {
+			t.Error("AgentDeleted should be false when resolver is nil and a claim remains attached")
+		}
+
+		readState, err := db.New(stateFile).Read()
+		if err != nil {
+			t.Fatalf("read state after RecoverAgent: %v", err)
+		}
+		if _, exists := readState.Agents["coder-1"]; !exists {
+			t.Fatal("agent should be preserved when claim release is skipped")
+		}
+		task := readState.FindTask("task-nil-1")
+		if task == nil {
+			t.Fatal("task-nil-1 not found")
+		}
+		if task.AssignedTo == nil || *task.AssignedTo != "coder-1" {
+			t.Fatalf("task AssignedTo = %v, want coder-1", task.AssignedTo)
 		}
 	})
 

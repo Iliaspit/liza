@@ -85,6 +85,7 @@ func RecoverAgent(projectRoot, agentID string, force bool, reason string) (*Reco
 	} else {
 		pipelineTransitions = BuildPipelineTransitions(resolver)
 	}
+	preserveAgent := false
 
 	// Phase 2: Git side effects (outside lock) — remove worktrees for doer claims
 	if len(doerTaskIDs) > 0 {
@@ -116,6 +117,9 @@ func RecoverAgent(projectRoot, agentID string, force bool, reason string) (*Reco
 				log.Printf("WARNING: recover-agent %s: claim release skipped for task %s — resolver not loaded", agentID, ownedTaskID)
 				result.Warnings = append(result.Warnings, fmt.Sprintf("claim release skipped for task %s — resolver not loaded", ownedTaskID))
 			}
+			if len(currentDoerTaskIDs) > 0 || len(currentReviewerTaskIDs) > 0 {
+				preserveAgent = true
+			}
 		} else {
 			for _, ownedTaskID := range currentDoerTaskIDs {
 				task := state.FindTask(ownedTaskID)
@@ -123,10 +127,12 @@ func RecoverAgent(projectRoot, agentID string, force bool, reason string) (*Reco
 					result.Warnings = append(result.Warnings, fmt.Sprintf("task %s not found in state", ownedTaskID))
 					continue
 				}
-				effectiveCoderRelease, _ := resolveClaimReleaseStatuses(task, resolver)
+				effectiveCoderRelease := resolveDoerClaimReleaseStatus(task, resolver)
 				released, err := releaseOneClaim(state, task, effectiveCoderRelease, pipelineTransitions, true, agentID, reason, now)
 				if err != nil {
 					result.Warnings = append(result.Warnings, fmt.Sprintf("doer claim release for %s: %v", ownedTaskID, err))
+					preserveAgent = true
+					continue
 				}
 				if released {
 					result.ClaimReleased = true
@@ -140,10 +146,17 @@ func RecoverAgent(projectRoot, agentID string, force bool, reason string) (*Reco
 					result.Warnings = append(result.Warnings, fmt.Sprintf("task %s not found in state", ownedTaskID))
 					continue
 				}
-				_, effectiveReviewerRelease := resolveClaimReleaseStatuses(task, resolver)
+				effectiveReviewerRelease, err := resolveReviewerClaimReleaseStatus(task, resolver)
+				if err != nil {
+					result.Warnings = append(result.Warnings, fmt.Sprintf("reviewer claim release for %s: %v", ownedTaskID, err))
+					preserveAgent = true
+					continue
+				}
 				released, err := releaseOneClaim(state, task, effectiveReviewerRelease, pipelineTransitions, true, agentID, reason, now)
 				if err != nil {
 					result.Warnings = append(result.Warnings, fmt.Sprintf("reviewer claim release for %s: %v", ownedTaskID, err))
+					preserveAgent = true
+					continue
 				}
 				if released {
 					result.ClaimReleased = true
@@ -151,9 +164,11 @@ func RecoverAgent(projectRoot, agentID string, force bool, reason string) (*Reco
 			}
 		}
 
-		if agentStillExists {
+		if agentStillExists && !preserveAgent {
 			delete(state.Agents, agentID)
 			result.AgentDeleted = true
+		} else if agentStillExists && preserveAgent {
+			result.Warnings = append(result.Warnings, fmt.Sprintf("agent %s preserved because one or more claims could not be released", agentID))
 		}
 
 		state.HumanNotes = append(state.HumanNotes, models.HumanNote{

@@ -202,7 +202,9 @@ func unregisterAgent(bb *db.Blackboard, agentID, projectRoot string) {
 		}
 		for taskID := range taskIDs {
 			if task := state.FindTask(taskID); task != nil {
-				releaseTaskClaim(state, task, agent.Role, agentID, pipelineTransitions, resolver, now)
+				if err := releaseTaskClaim(state, task, agent.Role, agentID, pipelineTransitions, resolver, now); err != nil {
+					return err
+				}
 			}
 		}
 
@@ -216,25 +218,31 @@ func unregisterAgent(bb *db.Blackboard, agentID, projectRoot string) {
 }
 
 // releaseTaskClaim transitions a task back to its unclaimed status and clears
-// the claim fields. Best-effort: logs warnings instead of failing.
+// the claim fields. It fails closed when an active claim cannot be safely
+// released, so callers preserve both task-side and agent-side ownership.
 // pipelineTransitions and resolver are pre-loaded by the caller (outside bb.Modify)
 // to avoid disk I/O under the state lock.
 // Uses resolver.RoleType() for doer/reviewer classification.
-func releaseTaskClaim(state *models.State, task *models.Task, role, agentID string, pipelineTransitions map[models.TaskStatus][]models.TaskStatus, resolver *pipeline.Resolver, now time.Time) {
-	logger := GetLogger()
+func releaseTaskClaim(state *models.State, task *models.Task, role, agentID string, pipelineTransitions map[models.TaskStatus][]models.TaskStatus, resolver *pipeline.Resolver, now time.Time) error {
 	reason := "agent interrupted"
 
-	// Resolve pipeline-aware statuses (shared logic with ops.ReleaseClaim)
-	activeExecuting, releasedInitial, activeReviewing, releasedSubmitted := ops.ResolveReleaseStatuses(task, resolver)
+	activeExecuting, releasedInitial := ops.ResolveDoerReleaseStatus(task, resolver)
 
-	transitionTask := func(to models.TaskStatus) {
+	resolveReviewerRelease := func() (models.TaskStatus, models.TaskStatus, error) {
+		if resolver == nil {
+			return "", "", fmt.Errorf("cannot release reviewer claim for task %s: pipeline resolver not loaded", task.ID)
+		}
+		return ops.ResolveReviewerReleaseStatus(task, resolver)
+	}
+
+	transitionTask := func(to models.TaskStatus) error {
 		if pipelineTransitions == nil {
-			logger.Warn("Cannot transition task on unregister: pipeline transitions not loaded", "task_id", task.ID)
-			return
+			return fmt.Errorf("cannot transition task %s on claim release: pipeline transitions not loaded", task.ID)
 		}
 		if err := task.TransitionWith(to, pipelineTransitions); err != nil {
-			logger.Warn("Failed to transition task on unregister", "task_id", task.ID, "error", err)
+			return fmt.Errorf("transition task %s on claim release: %w", task.ID, err)
 		}
+		return nil
 	}
 
 	// Classify role using resolver for doer/reviewer determination.
@@ -248,15 +256,23 @@ func releaseTaskClaim(state *models.State, task *models.Task, role, agentID stri
 	switch roleType {
 	case "doer":
 		if task.Status == activeExecuting {
-			transitionTask(releasedInitial)
+			if err := transitionTask(releasedInitial); err != nil {
+				return err
+			}
 		}
 		task.AssignedTo = nil
 		task.LeaseExpires = nil
 
 	case "reviewer":
 		if task.ReviewingBy != nil && *task.ReviewingBy == agentID {
+			activeReviewing, releasedSubmitted, err := resolveReviewerRelease()
+			if err != nil {
+				return err
+			}
 			if task.Status == activeReviewing {
-				transitionTask(releasedSubmitted)
+				if err := transitionTask(releasedSubmitted); err != nil {
+					return err
+				}
 			}
 			task.ReviewingBy = nil
 			task.ReviewLeaseExpires = nil
@@ -265,18 +281,26 @@ func releaseTaskClaim(state *models.State, task *models.Task, role, agentID stri
 	default:
 		if task.AssignedTo != nil && *task.AssignedTo == agentID {
 			if task.Status == activeExecuting {
-				transitionTask(releasedInitial)
+				if err := transitionTask(releasedInitial); err != nil {
+					return err
+				}
 			}
 			task.AssignedTo = nil
 			task.LeaseExpires = nil
 		} else if task.ReviewingBy != nil && *task.ReviewingBy == agentID {
+			activeReviewing, releasedSubmitted, err := resolveReviewerRelease()
+			if err != nil {
+				return err
+			}
 			if task.Status == activeReviewing {
-				transitionTask(releasedSubmitted)
+				if err := transitionTask(releasedSubmitted); err != nil {
+					return err
+				}
 			}
 			task.ReviewingBy = nil
 			task.ReviewLeaseExpires = nil
 		} else {
-			return
+			return nil
 		}
 	}
 
@@ -288,6 +312,7 @@ func releaseTaskClaim(state *models.State, task *models.Task, role, agentID stri
 		Agent:  &agentID,
 		Reason: &reason,
 	})
+	return nil
 }
 
 // loadPipelineForRelease loads pipeline resolver and transitions, logging
@@ -348,8 +373,7 @@ func resetAgentAfterExit(bb *db.Blackboard, agentID, projectRoot string) error {
 			if agent.CurrentTask != nil {
 				task := state.FindTask(*agent.CurrentTask)
 				if task != nil && task.ReviewingBy != nil && *task.ReviewingBy == agentID {
-					releaseTaskClaim(state, task, agent.Role, agentID, pipelineTransitions, resolver, now)
-					return nil
+					return releaseTaskClaim(state, task, agent.Role, agentID, pipelineTransitions, resolver, now)
 				}
 				if roleType == "reviewer" {
 					break
@@ -371,7 +395,9 @@ func resetAgentAfterExit(bb *db.Blackboard, agentID, projectRoot string) error {
 		// Release any held task claim before clearing CurrentTask
 		if agent.CurrentTask != nil {
 			if task := state.FindTask(*agent.CurrentTask); task != nil {
-				releaseTaskClaim(state, task, agent.Role, agentID, pipelineTransitions, resolver, now)
+				if err := releaseTaskClaim(state, task, agent.Role, agentID, pipelineTransitions, resolver, now); err != nil {
+					return err
+				}
 			}
 		}
 

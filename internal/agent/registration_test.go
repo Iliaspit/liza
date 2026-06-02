@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -13,6 +14,7 @@ import (
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/ops"
 	"github.com/liza-mas/liza/internal/pipeline"
+	"github.com/liza-mas/liza/internal/statevalidate"
 	"github.com/liza-mas/liza/internal/testhelpers"
 )
 
@@ -988,6 +990,103 @@ func TestResetAgentAfterExit_ReviewerReleasesTask(t *testing.T) {
 	}
 	if task.ReviewLeaseExpires != nil {
 		t.Error("Expected ReviewLeaseExpires nil")
+	}
+}
+
+func TestResetAgentAfterExit_ReviewerReleasesReviewing2Task(t *testing.T) {
+	tmpDir := t.TempDir()
+	statePath, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	testhelpers.SetupPipelineConfig(t, tmpDir)
+	writeValidationSpecRefs(t, tmpDir)
+
+	state := testhelpers.CreateValidState()
+	agentID := "code-reviewer-2"
+	taskID := "task-1"
+	now := time.Now().UTC()
+	reviewCommit := "review123"
+	reviewLease := now.Add(30 * time.Minute)
+	agentLease := now.Add(30 * time.Minute)
+	worktree := ".worktrees/task-1"
+
+	state.Tasks = append(state.Tasks, models.Task{
+		ID:                 taskID,
+		Status:             "REVIEWING_CODE_2",
+		ReviewCommit:       &reviewCommit,
+		ReviewingBy:        testhelpers.StringPtr(agentID),
+		ReviewLeaseExpires: &reviewLease,
+		Created:            now,
+		Priority:           1,
+		Iteration:          1,
+		Type:               models.TaskTypeCoding,
+		RolePair:           "coding-pair",
+		SpecRef:            "README.md",
+		DoneWhen:           "Task is complete",
+		Scope:              "Test scope",
+		Worktree:           &worktree,
+		HandoffEvents: []models.HandoffEvent{
+			{Timestamp: now.Add(-2 * time.Minute), Agent: "coder-1", Trigger: models.HandoffTriggerSubmission},
+		},
+		Approvals: []models.Approval{
+			{Agent: "code-reviewer-1", Provider: "codex", Timestamp: now.Add(-time.Minute)},
+		},
+	})
+	state.Agents[agentID] = models.Agent{
+		Role:         "code-reviewer",
+		Provider:     "codex",
+		Status:       models.AgentStatusReviewing,
+		CurrentTask:  &taskID,
+		LeaseExpires: &agentLease,
+		Heartbeat:    now,
+		PID:          12345,
+	}
+	bb := testhelpers.WriteInitialState(t, statePath, state)
+
+	err := resetAgentAfterExit(bb, agentID, tmpDir)
+	if err != nil {
+		t.Fatalf("resetAgentAfterExit() error = %v", err)
+	}
+
+	state, err = bb.Read()
+	if err != nil {
+		t.Fatalf("Failed to read state: %v", err)
+	}
+
+	agent := state.Agents[agentID]
+	if agent.Status != models.AgentStatusIdle {
+		t.Errorf("Expected agent status IDLE, got %s", agent.Status)
+	}
+	if agent.CurrentTask != nil {
+		t.Errorf("Expected CurrentTask nil, got %v", *agent.CurrentTask)
+	}
+
+	task := state.FindTask(taskID)
+	if task == nil {
+		t.Fatal("Task not found")
+	}
+	if task.Status != "CODE_PARTIALLY_APPROVED" {
+		t.Errorf("Expected task status CODE_PARTIALLY_APPROVED, got %s", task.Status)
+	}
+	if task.ReviewingBy != nil {
+		t.Errorf("Expected ReviewingBy nil, got %v", *task.ReviewingBy)
+	}
+	if task.ReviewLeaseExpires != nil {
+		t.Error("Expected ReviewLeaseExpires nil")
+	}
+	if err := statevalidate.ValidateState(state, tmpDir, false, io.Discard); err != nil {
+		t.Fatalf("state should validate after resetAgentAfterExit: %v", err)
+	}
+}
+
+func writeValidationSpecRefs(t *testing.T, tmpDir string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Join(tmpDir, "specs"), 0755); err != nil {
+		t.Fatalf("create specs dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, "specs", "vision.md"), []byte("test goal\n"), 0644); err != nil {
+		t.Fatalf("write goal spec: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, "README.md"), []byte("test task spec\n"), 0644); err != nil {
+		t.Fatalf("write task spec: %v", err)
 	}
 }
 

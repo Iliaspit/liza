@@ -251,6 +251,83 @@ func TestRecoverTask_ReviewingTask(t *testing.T) {
 	}
 }
 
+func TestRecoverTask_NilResolver_PreservesReviewerAgent(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Manually create .liza dir WITHOUT pipeline config so resolver loading fails.
+	lizaDir := filepath.Join(tmpDir, ".liza")
+	if err := os.MkdirAll(lizaDir, 0755); err != nil {
+		t.Fatalf("Failed to create .liza dir: %v", err)
+	}
+	lockPath := filepath.Join(lizaDir, "state.yaml.lock")
+	if err := os.WriteFile(lockPath, []byte{}, 0644); err != nil {
+		t.Fatalf("Failed to create lock file: %v", err)
+	}
+
+	stateFile := filepath.Join(lizaDir, "state.yaml")
+	taskID := "task-nil-reviewer"
+	reviewerID := "code-reviewer-1"
+	now := time.Now().UTC()
+	leaseExpires := now.Add(-10 * time.Minute)
+	state := testhelpers.CreateValidState()
+	state.Agents[reviewerID] = models.Agent{
+		Role:         "code-reviewer",
+		Status:       models.AgentStatusReviewing,
+		CurrentTask:  &taskID,
+		LeaseExpires: &leaseExpires,
+		PID:          999999,
+	}
+	state.Tasks = append(state.Tasks, models.Task{
+		ID:                 taskID,
+		Description:        "test task",
+		Status:             models.TaskStatusReviewing,
+		RolePair:           "coding-pair",
+		Priority:           1,
+		ReviewingBy:        &reviewerID,
+		ReviewLeaseExpires: &leaseExpires,
+		SpecRef:            "spec.md",
+		DoneWhen:           "tests pass",
+		Scope:              "small",
+	})
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	result, err := RecoverTask(tmpDir, taskID, false, "crashed")
+	if err != nil {
+		t.Fatalf("RecoverTask() error: %v", err)
+	}
+	if result.ClaimReleased {
+		t.Error("ClaimReleased should be false when resolver is nil")
+	}
+	if result.AgentRecovered {
+		t.Error("AgentRecovered should be false when resolver is nil and a reviewer claim remains attached")
+	}
+	found := false
+	for _, w := range result.Warnings {
+		if strings.Contains(w, "reviewer claim release") && strings.Contains(w, "pipeline resolver not loaded") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("Expected reviewer resolver warning, got: %v", result.Warnings)
+	}
+
+	readState, err := db.New(stateFile).Read()
+	if err != nil {
+		t.Fatalf("Failed to read state: %v", err)
+	}
+	if _, exists := readState.Agents[reviewerID]; !exists {
+		t.Fatal("reviewer agent should be preserved when claim release is skipped")
+	}
+	task := readState.FindTask(taskID)
+	if task == nil {
+		t.Fatal("task should still exist")
+	}
+	if task.ReviewingBy == nil || *task.ReviewingBy != reviewerID {
+		t.Fatalf("task ReviewingBy = %v, want %s", task.ReviewingBy, reviewerID)
+	}
+}
+
 func TestRecoverTask_DualClaim_ReviewerPIDAlive_NoForce(t *testing.T) {
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
