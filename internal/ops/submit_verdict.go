@@ -10,6 +10,7 @@ import (
 	"github.com/liza-mas/liza/internal/errors"
 	"github.com/liza-mas/liza/internal/git"
 	"github.com/liza-mas/liza/internal/identity"
+	activitylog "github.com/liza-mas/liza/internal/log"
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/paths"
 )
@@ -85,7 +86,7 @@ func ResolveEffectiveImpact(history []models.TaskHistoryEntry) string {
 // review cycles and requires a reason. The optional impact parameter records
 // the reviewer's impact classification; it cannot downgrade the effective impact.
 // No terminal I/O.
-func SubmitVerdict(projectRoot, taskID, verdict, reason, agentID, impact string) (*VerdictResult, error) {
+func SubmitVerdict(projectRoot, taskID, verdict, reason, agentID, impact string) (result *VerdictResult, retErr error) {
 	if taskID == "" {
 		return nil, &PreconditionError{Reason: "task ID is required"}
 	}
@@ -111,6 +112,11 @@ func SubmitVerdict(projectRoot, taskID, verdict, reason, agentID, impact string)
 
 	lp := paths.New(projectRoot)
 	bb := db.For(lp.StatePath())
+	defer func() {
+		if retErr != nil {
+			logSubmitVerdictError(lp.LogPath(), taskID, agentID, verdict, retErr)
+		}
+	}()
 
 	if _, err := identity.ExtractRole(agentID); err != nil {
 		return nil, fmt.Errorf("invalid agent ID %s: %w", agentID, err)
@@ -375,6 +381,45 @@ func SubmitVerdict(projectRoot, taskID, verdict, reason, agentID, impact string)
 		BlockedReason:       blockedReasonOut,
 		NewAttemptTriggered: !escalatedToBlocked && newAttemptNeeded,
 	}, nil
+}
+
+func logSubmitVerdictError(logPath, taskID, agentID, verdict string, err error) {
+	if logPath == "" || err == nil {
+		return
+	}
+	detail := fmt.Sprintf("verdict=%s error=%s", verdict, boundedErrorString(err, 2048))
+	_ = activitylog.New(logPath).Append(activitylog.Entry{
+		Agent:  agentIDOrSystem(agentID),
+		Action: "submit_verdict_failed",
+		Task:   optionalTaskID(taskID),
+		Detail: detail,
+	})
+}
+
+func boundedErrorString(err error, limit int) string {
+	if err == nil {
+		return ""
+	}
+	text := err.Error()
+	if limit <= 0 || len([]byte(text)) <= limit {
+		return text
+	}
+	bytes := []byte(text)
+	return string(bytes[:limit]) + "... [truncated]"
+}
+
+func agentIDOrSystem(agentID string) string {
+	if agentID == "" {
+		return "system"
+	}
+	return agentID
+}
+
+func optionalTaskID(taskID string) *string {
+	if taskID == "" {
+		return nil
+	}
+	return &taskID
 }
 
 func isReviewingStatus(status, expectedReviewingStatus, expectedReviewing2Status models.TaskStatus) bool {

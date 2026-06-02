@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/liza-mas/liza/internal/errors"
+	"github.com/liza-mas/liza/internal/filelock"
 	"github.com/liza-mas/liza/internal/ops"
 	"github.com/liza-mas/liza/internal/statevalidate"
 )
@@ -210,6 +211,23 @@ func TestClassifyError_OperationalErrorCodeBeatsUntypedInnerHeuristics(t *testin
 	}
 }
 
+func TestClassifyError_OperationalErrorCodeBeatsTypedInnerErrors(t *testing.T) {
+	err := &ops.OperationalError{
+		Code:    "state_write",
+		Phase:   "write-state",
+		Message: "failed to submit task for review",
+		Err:     filelock.NewLockTimeout(fmt.Errorf("lock unavailable after 10s")),
+	}
+
+	code, msg := ClassifyError(err)
+	if code != "state_write" {
+		t.Errorf("code = %q, want state_write", code)
+	}
+	if msg != "failed to submit task for review" {
+		t.Errorf("message = %q, want operational message", msg)
+	}
+}
+
 func TestClassifyError_IntegrationFailedError(t *testing.T) {
 	err := &ops.IntegrationFailedError{Reason: "merge conflict"}
 	code, msg := ClassifyError(err)
@@ -239,10 +257,55 @@ func TestClassifyError_LockTimeout(t *testing.T) {
 	}
 }
 
+func TestClassifyError_FileLockErrors(t *testing.T) {
+	tests := []struct {
+		name     string
+		err      error
+		wantCode string
+		wantMsg  string
+	}{
+		{
+			name:     "timeout",
+			err:      filelock.NewLockTimeout(fmt.Errorf("lock unavailable after 10s")),
+			wantCode: "lock_timeout",
+			wantMsg:  "lock acquisition timed out",
+		},
+		{
+			name: "filesystem",
+			err: &filelock.LockError{
+				Type:    filelock.LockErrorFilesystem,
+				Message: "filesystem error",
+				Err:     fmt.Errorf("open state.yaml.lock: no such file or directory"),
+			},
+			wantCode: "filesystem",
+			wantMsg:  "lock filesystem error",
+		},
+		{
+			name:     "stale",
+			err:      filelock.NewLockStale(12345),
+			wantCode: "lock_stale",
+			wantMsg:  "lock owner metadata is stale",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			code, msg := ClassifyError(fmt.Errorf("submit verdict: %w", tt.err))
+			if code != tt.wantCode {
+				t.Fatalf("code = %q, want %q", code, tt.wantCode)
+			}
+			if msg != tt.wantMsg {
+				t.Fatalf("message = %q, want %q", msg, tt.wantMsg)
+			}
+		})
+	}
+}
+
 func TestClassifyError_RaceCondition(t *testing.T) {
 	tests := []string{
 		"race condition detected",
 		"state changed concurrently",
+		"phase 3 failed: sentinel replaced: expected $transitioning, got coder-2 (concurrent modification)",
 	}
 	for _, s := range tests {
 		err := fmt.Errorf("%s", s)
@@ -293,7 +356,7 @@ func TestClassifyError_OperationalErrorPreservesTransientCodes(t *testing.T) {
 	}{
 		{
 			name:     "lock timeout surfaces through OperationalError",
-			inner:    fmt.Errorf("failed to acquire lock: timed out"),
+			inner:    filelock.NewLockTimeout(fmt.Errorf("lock unavailable after 10s")),
 			wantCode: "lock_timeout",
 			wantMsg:  "lock acquisition timed out",
 		},

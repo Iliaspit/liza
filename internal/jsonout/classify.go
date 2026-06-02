@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	lizaerrors "github.com/liza-mas/liza/internal/errors"
+	"github.com/liza-mas/liza/internal/filelock"
 	"github.com/liza-mas/liza/internal/ops"
 )
 
@@ -25,7 +26,7 @@ var stringErrorRules = []stringRule{
 		message:  "resource not found",
 	},
 	{
-		patterns: []string{"race condition", "changed concurrently"},
+		patterns: []string{"race condition", "changed concurrently", "concurrent modification", "sentinel replaced"},
 		code:     "race_condition",
 		message:  "state changed concurrently, retry",
 	},
@@ -110,6 +111,9 @@ func ClassifyError(err error) (code string, message string) {
 			return opErr.Code, opErr.Message
 		}
 		if inner := opErr.Unwrap(); inner != nil {
+			if innerCode, innerMsg, ok := classifyFileLock(inner); ok {
+				return innerCode, innerMsg
+			}
 			if innerCode, innerMsg := classifyUntyped(inner); innerCode != "internal" {
 				return innerCode, innerMsg
 			}
@@ -117,7 +121,32 @@ func ClassifyError(err error) (code string, message string) {
 		return "internal", opErr.Message
 	}
 
+	if lockCode, lockMsg, ok := classifyFileLock(err); ok {
+		return lockCode, lockMsg
+	}
+
 	return classifyUntyped(err)
+}
+
+func classifyFileLock(err error) (code string, message string, ok bool) {
+	var lockErr *filelock.LockError
+	if !errors.As(err, &lockErr) {
+		return "", "", false
+	}
+	switch lockErr.Type {
+	case filelock.LockErrorTimeout:
+		return "lock_timeout", "lock acquisition timed out", true
+	case filelock.LockErrorPermission:
+		return "permission_denied", "lock permission denied", true
+	case filelock.LockErrorDiskFull:
+		return "filesystem", "lock failed: no space left on device", true
+	case filelock.LockErrorFilesystem:
+		return "filesystem", "lock filesystem error", true
+	case filelock.LockErrorStale:
+		return "lock_stale", "lock owner metadata is stale", true
+	default:
+		return "", "", false
+	}
 }
 
 type safeDetails interface {

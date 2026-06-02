@@ -10,7 +10,9 @@ import (
 	"github.com/liza-mas/liza/internal/db"
 	"github.com/liza-mas/liza/internal/errors"
 	"github.com/liza-mas/liza/internal/git"
+	activitylog "github.com/liza-mas/liza/internal/log"
 	"github.com/liza-mas/liza/internal/models"
+	"github.com/liza-mas/liza/internal/paths"
 	"github.com/liza-mas/liza/internal/testhelpers"
 )
 
@@ -1859,6 +1861,21 @@ func TestSubmitVerdict_RejectionAtReviewCap_Attempt1_TransitionFailure_Propagate
 	}
 	if failedTask.AssignedTo == nil || *failedTask.AssignedTo != "coder-interloper" {
 		t.Errorf("AssignedTo = %v, want 'coder-interloper' (sentinel was replaced, Phase 3 aborted)", failedTask.AssignedTo)
+	}
+
+	entries, logErr := activitylog.New(paths.New(tmpDir).LogPath()).Read()
+	if logErr != nil {
+		t.Fatalf("failed to read activity log: %v", logErr)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("log entries = %d, want 1", len(entries))
+	}
+	if entries[0].Action != "submit_verdict_failed" {
+		t.Fatalf("log action = %q, want submit_verdict_failed", entries[0].Action)
+	}
+	if !strings.Contains(entries[0].Detail, "attempt transition failed") ||
+		!strings.Contains(entries[0].Detail, "sentinel replaced") {
+		t.Fatalf("log detail = %q, want underlying transition failure", entries[0].Detail)
 	}
 }
 
