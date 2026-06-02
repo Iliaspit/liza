@@ -19,6 +19,7 @@
     "internal/log": "Append-only runtime log storage, validation, reading, and timestamp tracking.",
     "internal/models": "Core state, task, agent, sprint, config, diagnostics, lease, and history data models.",
     "internal/ops": "Authoritative business operations for tasks, agents, reviews, merges, worktrees, indexing, and blackboard mutations.",
+    "internal/pairingindex": "Pairingindex",
     "internal/paths": "Canonical construction of project, state, worktree, archive, prompt, output, and alert paths.",
     "internal/pipeline": "Pipeline role configuration, role-pair states, transitions, review policies, and timeout resolution.",
     "internal/precommit": "Pre-commit bootstrap detection and touched-file hook execution planning.",

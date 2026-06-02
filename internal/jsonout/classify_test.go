@@ -93,6 +93,30 @@ func TestClassifyError_PreconditionError(t *testing.T) {
 	}
 }
 
+func TestClassifyError_UnblockRebaseConflictError(t *testing.T) {
+	err := &ops.UnblockRebaseConflictError{
+		TaskID:    "task-1",
+		TargetRef: "integration",
+		TargetSHA: "abc123",
+		Cause:     fmt.Errorf("rebase conflict"),
+	}
+
+	code, msg := ClassifyError(err)
+	if code != "unblock_rebase_conflict" {
+		t.Errorf("code = %q, want %q", code, "unblock_rebase_conflict")
+	}
+	if msg != "unblock rebase conflict: task remains BLOCKED with repair_request" {
+		t.Errorf("message = %q", msg)
+	}
+	details := ErrorDetails(err)
+	if details["task_status"] != "BLOCKED" {
+		t.Errorf("task_status = %v, want BLOCKED", details["task_status"])
+	}
+	if details["repair_request"] != true {
+		t.Errorf("repair_request = %v, want true", details["repair_request"])
+	}
+}
+
 func TestClassifyError_CLIInputError(t *testing.T) {
 	err := &errors.CLIInputError{
 		Message: "reading tasks file: open missing.json: no such file or directory",

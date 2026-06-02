@@ -12,7 +12,7 @@
 | REJECTED | Code Reviewer rejected, feedback provided | → IMPLEMENTING (supervisor reclaims for coder) |
 | APPROVED | Code Reviewer approved, merge eligible | → MERGED, INTEGRATION_FAILED |
 | MERGED | Successfully merged to integration | Terminal |
-| BLOCKED | Cannot proceed, awaiting escalation | → SUPERSEDED, ABANDONED |
+| BLOCKED | Cannot proceed, awaiting escalation or repair | → SUPERSEDED, ABANDONED; guarded `unblock-task` exception may restore the role-pair initial status |
 | SUPERSEDED | Replaced by rescoped task(s) or completed externally | Terminal |
 | ABANDONED | Orchestrator killed task | Terminal |
 | INTEGRATION_FAILED | Merge conflict or integration test failure | → IMPLEMENTING (integration-fix scope) |
@@ -246,6 +246,12 @@ The integration pair introduces a state cycle for branch-wide integration analys
 
 **Goal.BaseCommit:** Snapshotted when the first coding-pair children are created (from any transition). The analyst diffs `goal.base_commit..HEAD` to scope the integration analysis.
 
+### Blocked Repair Exception
+
+`BLOCKED` is not a generally claimable pipeline state and must not be wired as a broad pipeline transition back to an initial or ready status. The only supported exception is the `unblock-task` operation. After dependency validation, optional preserved-worktree validation, and optional unblock-time rebase validation, `unblock-task` may move a repaired task from `BLOCKED` to that task's role-pair initial status so it is claimable again. With `--assign-to`, the same operation may directly resume the role-pair executing status for a registered doer.
+
+A role-pair initial task with `worktree` still set is a preserved-branch continuation, not stale state. Claiming that shape must validate the deterministic worktree path, `task/<id>` branch, current HEAD, and `base_commit`; if preservation validation fails, claim must fail rather than silently deleting or replacing the worktree.
+
 ### Forbidden Transitions
 
 - DRAFT → IMPLEMENTING (coders cannot claim drafts)
@@ -254,7 +260,7 @@ The integration pair introduces a state cycle for branch-wide integration analys
 - READY_FOR_REVIEW → APPROVED (must go through REVIEWING)
 - READY_FOR_REVIEW → REJECTED (must go through REVIEWING)
 - REJECTED → APPROVED (without addressing feedback)
-- BLOCKED → READY (in current implementation, blocked tasks are resolved via SUPERSEDED/ABANDONED)
+- BLOCKED → READY or any role-pair initial status through generic pipeline transitions. Only `unblock-task` may apply the guarded blocked-repair exception described above.
 - Any terminal state → Any other state (MERGED, ABANDONED, SUPERSEDED are final)
 
 ### Transition Requirements
@@ -269,6 +275,8 @@ The integration pair introduces a state cycle for branch-wide integration analys
 | REJECTED → IMPLEMENTING (same coder) | `lease_expires` (new) | `worktree`, `review_cycles_current`, `review_cycles_total` | Supervisor reclaims for same coder to address feedback |
 | REJECTED → IMPLEMENTING (different coder) | `lease_expires`, `assigned_to`, `review_cycles_current: 0` | `review_cycles_total` | Worktree reset: delete old, create fresh |
 | INTEGRATION_FAILED → IMPLEMENTING | `lease_expires`, `integration_fix: true` | `worktree` | Any coder may claim; keeps worktree for conflict resolution |
+| BLOCKED → role-pair initial (`unblock-task`) | status=role-pair initial; clear `assigned_to`, `lease_expires`, blocked metadata | valid preserved `worktree`, `base_commit` when present | Operation-scoped exception only; makes task claimable without requiring a live agent. If `--rebase-on` succeeds, set `base_commit` to the resolved target SHA. |
+| BLOCKED → role-pair executing (`unblock-task --assign-to`) | status=role-pair executing; `assigned_to`, `lease_expires` | valid preserved `worktree`; `base_commit` updated by successful `--rebase-on` | Direct-resume fast path for a registered doer with matching role and no conflicting current task; no live PID proof required. |
 | BLOCKED → SUPERSEDED | `rescope_reason`, status=SUPERSEDED; `superseded_by` optional | `output[]`, `failed_by` as terminal context | Orchestrator supersedes task — with replacements or completed externally; clear live review/failure metadata |
 | BLOCKED → ABANDONED | status=ABANDONED | `output[]`, `failed_by` as terminal context | Orchestrator abandons blocked task when no viable continuation exists; clear live review/failure metadata |
 | READY → IMPLEMENTING (reassignment) | `lease_expires`, `assigned_to`, `review_cycles_current: 0` | `failed_by`, `review_cycles_total` | Fresh worktree created |
@@ -570,6 +578,15 @@ is not live. It leaves the physical worktree on disk for inspection, but a later
 fresh claim of that task may remove stale worktree resources before recreating
 them. If the assigned PID is live, repair refuses and requires explicit recovery
 tooling.
+
+`liza unblock-task <id>` is the explicit exception to the broad
+`BLOCKED -> initial` prohibition. Without `--assign-to`, it may restore a
+BLOCKED task to the role-pair initial status after dependency and optional
+rebase validation. If the task still has `worktree` metadata, the initial task
+is claimable continuation from the preserved task branch, not stale state. The
+next claim must validate the deterministic worktree path, `task/<id>` branch,
+HEAD, and `base_commit`; invalid preserved work fails closed instead of being
+deleted and recreated.
 
 ---
 

@@ -45,7 +45,7 @@ Each task status requires specific fields to be set. Validated on every state tr
 
 | Status | Required Fields | Enforced |
 |--------|----------------|----------|
-| DRAFT, DRAFT_CODING_PLAN | `assigned_to` must be nil | spec, code (`validate_task.go`) |
+| DRAFT, DRAFT_CODING_PLAN | `assigned_to` must be nil; `worktree` may be set only for claimable continuation from a preserved task branch | spec, code (`validate_task.go`, `claim_task.go`) |
 | IMPLEMENTING, CODE_PLANNING | `assigned_to`, `worktree`, `lease_expires`, `base_commit` (unless `integration_fix`) | spec, code |
 | READY_FOR_REVIEW, CODING_PLAN_TO_REVIEW | `review_commit` | spec, code |
 | REVIEWING, REVIEWING_CODING_PLAN | `reviewing_by`, `review_lease_expires`, `review_commit` | spec, code |
@@ -68,7 +68,7 @@ Non-DRAFT tasks must have `done_when` and `spec_ref` (both non-empty). `spec_ref
 | IMPLEMENTING → APPROVED | Self-approval |
 | READY_FOR_REVIEW → APPROVED/REJECTED | Must go through REVIEWING |
 | REJECTED → APPROVED | Must address feedback first |
-| BLOCKED → READY | Resolve via SUPERSEDED/ABANDONED only |
+| BLOCKED → READY | Broad transition forbidden; only `unblock-task`, after dependency/worktree/rebase validation, may restore a BLOCKED task to its role-pair initial status |
 | Any terminal → Any | MERGED, ABANDONED, SUPERSEDED are final |
 
 Contract-level (agent state machine): ANALYSIS → EXECUTION (skipping gate), READY → DONE, EXECUTION → DONE (skipping validation).
@@ -182,13 +182,14 @@ Integration-fix claims clear active `output[]`, `review_commit`, approvals, `mer
 | Clean sync: before READY_FOR_REVIEW, working tree must be clean (no staged, unstaged, or untracked files) | Uncommitted work in review | spec (`worktree-management.md`), code (`submit_review.go`) |
 | Coders cannot commit to or merge to integration branch; only supervisor after reviewer approval | Uncontrolled integration branch | spec (`worktree-management.md`) |
 | Merge uses working-tree-less operations (merge-tree, commit-tree, update-ref) | Race conditions, checkout conflicts | spec, code (`wt_merge.go`) |
-| If merge conflict detected → INTEGRATION_FAILED (must be reclaimed) | Silent conflict resolution | spec, code |
+| If submit/merge conflict detected → INTEGRATION_FAILED (must be reclaimed); unblock-time `--rebase-on` conflicts remain BLOCKED with repair metadata | Silent conflict resolution, wrong recovery path | spec, code |
 | Candidate-tree artifact guard validates protected blackboard artifact refs before `update-ref`; invalid candidates do not advance integration | Broken durable artifact refs propagating through normal merge control flow | spec (`worktree-management.md`), code (`wt_merge.go`, `validate.go`) |
 | If integration tests fail → rollback via `update-ref` to pre-merge HEAD | Failed integrations propagating | spec, code |
 | If post-merge `ValidateArtifactRefs` fails → rollback via `update-ref` to pre-merge HEAD | Backstop for broken blackboard artifact refs after ref advancement | spec, code (`wt_merge.go`, `validate.go`) |
 | Worktree path is deterministic: `.worktrees/{taskID}` | Directory traversal, path confusion | code (`claim_task.go`, `wt_create.go`) |
-| BLOCKED/ABANDONED/SUPERSEDED/MERGED tasks: worktree must be deleted | Stale worktrees, resource leaks | spec (`worktree-management.md`) |
+| ABANDONED/SUPERSEDED/MERGED tasks: worktree must be deleted; BLOCKED worktrees may be preserved only for explicit repair/unblock workflows | Stale worktrees, resource leaks, lost repair work | spec (`worktree-management.md`) |
 | Rejected-task reclaim preserves the task worktree/branch for same-owner reclaim and post-expiry reassignment; missing or corrupt worktree state is recreated from integration | Lost rejected work, inconsistent reassignment semantics | spec, code (`claim_task.go`) |
+| Initial-status task with `worktree` set means claimable continuation from preserved branch; claim validates path, task branch, HEAD, and `base_commit`, and fails rather than deleting invalid preserved work | Lost blocked-task work, stale worktree misclassification | spec, code (`claim_task.go`) |
 | Rebase onto integration branch before submission; conflict → abort and restore clean state | Merge conflicts discovered late | code (`submit_review.go`) |
 
 The candidate-tree artifact guard protects goal `spec_ref`; task `spec_ref`,

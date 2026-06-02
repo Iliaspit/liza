@@ -31,11 +31,26 @@ func (e *RebaseError) Unwrap() error {
 	return e.Err
 }
 
+// RebaseOptions configures a worktree rebase.
+type RebaseOptions struct {
+	Autostash bool
+}
+
 // RebaseOnto rebases the current branch in a worktree onto the specified base branch.
 // Must be called from within a worktree context.
 // Returns *RebaseConflictError for merge conflicts, generic error for other failures.
 func (g *Git) RebaseOnto(wtPath string, baseBranch string) error {
-	rawOutput, err := gitenv.CombinedOutput(wtPath, "rebase", baseBranch)
+	return g.RebaseOntoWithOptions(wtPath, baseBranch, RebaseOptions{})
+}
+
+// RebaseOntoWithOptions rebases the current branch in a worktree onto the specified base.
+func (g *Git) RebaseOntoWithOptions(wtPath string, baseBranch string, opts RebaseOptions) error {
+	args := []string{"rebase"}
+	if opts.Autostash {
+		args = append(args, "--autostash")
+	}
+	args = append(args, baseBranch)
+	rawOutput, err := gitenv.CombinedOutput(wtPath, args...)
 	if err != nil {
 		out := string(rawOutput)
 		// Classify using canonical git conflict markers from command output only,
@@ -45,7 +60,7 @@ func (g *Git) RebaseOnto(wtPath string, baseBranch string) error {
 			return &RebaseConflictError{Output: out}
 		}
 		return &RebaseError{
-			Command: []string{"git", "rebase", baseBranch},
+			Command: append([]string{"git"}, args...),
 			Output:  out,
 			Err:     err,
 		}

@@ -445,7 +445,7 @@ The `liza` binary provides all system operations. Key commands:
 | `liza mark-blocked <task-id>` | Mark a task as BLOCKED with reason/questions; optional `--depends-on` records blocking task IDs for scheduling and orchestrator re-wake; optional `--repair-*` flags request orchestrator-only state repair |
 | `liza assess-blocked <task-id>` | Record orchestrator assessment of a BLOCKED task and raise an `UNRESOLVED BLOCKED` alert when it cannot be resolved now |
 | `liza retarget-dependency <task-id> <old-dep-id> <new-dep-ids> --reason "..."` | Orchestrator-only repair for one non-terminal task's direct `depends_on` edge. Replaces the old edge with one or more existing task IDs, canonicalizes dependencies, validates the full candidate state, and leaves task status unchanged. |
-| `liza unblock-task <task-id> --assign-to <agent-id> --reason "..."` | Restore a repaired BLOCKED task to its executing state and assign it back to a doer; fails while any `depends_on` target is not directly MERGED. Supersede/cancel operations rewrite active downstream dependencies first. |
+| `liza unblock-task <task-id> --reason "..." [--assign-to <agent-id>] [--rebase-on <branch>] [--allow-dirty]` | Restore a repaired BLOCKED task. Without `--assign-to`, the task becomes claimable again; with `--assign-to`, it directly resumes for that doer. `--rebase-on` rebases a preserved task worktree before unblocking, updates `base_commit`, and leaves conflicts BLOCKED with repair metadata. Fails while any `depends_on` target is not directly MERGED. |
 | `liza assess-hypothesis-exhausted <task-id>` | Record orchestrator assessment of a hypothesis-exhausted task (2+ coders failed)                                     |
 | `liza cancel-task <task-id> "reason"` | Cancel a non-approved, non-terminal task, including active/submitted/reviewing work, by transitioning it to ABANDONED with audit trail. Releases Liza state claims and removes the task worktree/branch best-effort; it does not kill a live provider process. |
 | `liza handoff <task-id> <summary> <next-action>` | Context-exhaustion handoff for a doer agent's claimed task                                                           |
@@ -618,5 +618,6 @@ The supervisor automatically handles these conditions (transparent to agents):
 |-----------|--------|
 | Agent crash loop (3× in 5min) | Supervisor stops the agent |
 | Blackboard validation fails | All agents pause |
-| Integration branch conflict | Task set to INTEGRATION_FAILED |
+| Submit/merge integration branch conflict | Task set to INTEGRATION_FAILED |
+| Unblock-time `--rebase-on` conflict | Task remains BLOCKED with fresh repair metadata |
 | Circuit-breaker pattern detected in anomalies | Set mode to `CIRCUIT_BREAKER_TRIPPED`, create sprint `CHECKPOINT`, write reports |

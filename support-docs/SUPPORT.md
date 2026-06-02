@@ -296,7 +296,8 @@ Exit 42 with `handoff_pending: true` on the task means context exhaustion — th
 ### BLOCKED task
 **Symptom**: Task in BLOCKED state, agents skip it.
 **Diagnosis**: Read `blocked_reason`, `blocked_questions`, `depends_on`, and optional `repair_request` in state.yaml. A `BLOCKED` alert is raised when a task blocks; if the orchestrator assesses but cannot resolve it, an `UNRESOLVED BLOCKED` alert is raised.
-**Fix**: If the blocker was another task, the blocked task should list it in `depends_on` so the orchestrator wakes when that task changes. If the wrong direct dependency edge is the blocker, use `liza retarget-dependency <id> <old-dep-id> <new-dep-id[,new-dep-id]> --reason "..."`; the task remains BLOCKED until explicitly unblocked or assessed. If the blocker was repaired and every `depends_on` target is directly MERGED, use `liza unblock-task <id> --assign-to <doer-agent-id> --reason "..."`.
+**Fix**: If the blocker was another task, the blocked task should list it in `depends_on` so the orchestrator wakes when that task changes. If the wrong direct dependency edge is the blocker, use `liza retarget-dependency <id> <old-dep-id> <new-dep-id[,new-dep-id]> --reason "..."`; the task remains BLOCKED until explicitly unblocked or assessed. If the blocker was repaired and every `depends_on` target is directly MERGED, use `liza unblock-task <id> --reason "..."` to make the task claimable again, or add `--assign-to <doer-agent-id>` for a direct-resume fast path.
+If the task has a preserved worktree and integration moved while it was blocked, use `liza unblock-task <id> --rebase-on <integration-branch> --reason "..."`. Tracked worktree changes require `--allow-dirty`, which rebases with Git autostash; untracked files that would be overwritten are refused. Submit/merge conflicts move tasks to `INTEGRATION_FAILED`; unblock-time rebase conflicts remain `BLOCKED` with fresh repair metadata so the preserved worktree can be repaired and unblocked again.
 Supersede/cancel operations rewrite active downstream dependencies first; stale edges to SUPERSEDED or ABANDONED tasks must not remain on active tasks. Otherwise use `liza supersede-task <id> [replacements] --reason "..."` (replace with new tasks or mark completed externally) or `liza recover-task <id>` to reset.
 
 ### Integration failure
@@ -349,7 +350,8 @@ After a circuit-breaker trigger is reviewed and `liza resume` clears it (`status
 |-----------|--------|
 | Agent crash loop (3× in 5min) | Supervisor stops the agent |
 | Blackboard validation fails | All agents pause |
-| Integration branch conflict | Task set to INTEGRATION_FAILED |
+| Submit/merge integration branch conflict | Task set to INTEGRATION_FAILED |
+| Unblock-time `--rebase-on` conflict | Task remains BLOCKED with fresh repair metadata |
 | Circuit-breaker pattern in anomalies | CIRCUIT_BREAKER_TRIPPED mode, sprint CHECKPOINT, reports written |
 
 ## Validation Invariants

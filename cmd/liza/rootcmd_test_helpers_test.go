@@ -137,7 +137,7 @@ func resetRootCmdForTest(t *testing.T) {
 		resetFlagIfPresent(child, "summary")
 		resetFlagIfPresent(child, "output-summary")
 		resetFlagIfPresent(child, "active")
-		for _, name := range []string{"reason", "questions", "repair-operation", "repair-target", "repair-command", "repair-evidence", "repair-validation"} {
+		for _, name := range []string{"reason", "questions", "repair-operation", "repair-target", "repair-command", "repair-evidence", "repair-validation", "assign-to", "rebase-on", "allow-dirty"} {
 			resetFlagIfPresent(child, name)
 		}
 		// Init command workspace flags — must reset Changed state between tests.

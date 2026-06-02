@@ -104,6 +104,20 @@ If stale, coder decides based on:
 
 **Decision rule:** If in doubt, BLOCKED is safer than silent rebase. Planner can always unblock.
 
+`liza unblock-task <id> --rebase-on <branch>` is an orchestrator repair path for
+blocked tasks whose preserved worktree should be rebased before resuming. The
+rebase runs outside the blackboard lock, then the final state update revalidates
+task status, worktree path, task branch, HEAD, and the resolved target SHA. On
+success, `base_commit` becomes the resolved target SHA and history records old
+HEAD, new HEAD, target ref, and target SHA. Rebase conflicts are aborted and the
+task remains `BLOCKED` with fresh blocked metadata and a repair request; this is
+distinct from submit/merge conflicts that move tasks to `INTEGRATION_FAILED`.
+
+When `unblock-task` is run without `--assign-to`, it restores the task to the
+role-pair initial status. If `worktree` remains set, that initial task is a
+claimable continuation from the preserved branch. Claim validates the preserved
+path/branch/HEAD/base and fails closed rather than deleting invalid work.
+
 ---
 
 ## Drift Tracking

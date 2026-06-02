@@ -410,12 +410,15 @@ Effects:
 
 var unblockTaskCmd = &cobra.Command{
 	Use:   "unblock-task <task-id>",
-	Short: "Restore a repaired BLOCKED task to its executing state",
+	Short: "Restore a repaired BLOCKED task to claimable or executing state",
 	Long: `Restore a BLOCKED task after the orchestrator has verified that the blocker is gone.
 
-This is for repair completion, not normal task claiming. It moves the task back
-to the executing status for its role_pair, assigns it to the requested doer
-agent, clears stale blocked metadata, and records an unblocked history event.`,
+	This is for repair completion, not normal task claiming. Without --assign-to,
+it moves the task back to the initial claimable status for its role_pair. With
+--assign-to, it directly restores the executing status and assigns the requested
+doer agent. With --rebase-on, it rebases a preserved task worktree before
+unblocking, updates base_commit, and leaves rebase conflicts BLOCKED with fresh
+repair metadata.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) (retErr error) {
 		if isJSON(cmd) {
@@ -431,7 +434,23 @@ agent, clears stale blocked metadata, and records an unblocked history event.`,
 
 		taskID := args[0]
 		assignTo, _ := cmd.Flags().GetString("assign-to")
+		if !cmd.Flags().Changed("assign-to") {
+			assignTo = ""
+		}
 		reason, _ := cmd.Flags().GetString("reason")
+		rebaseOn, _ := cmd.Flags().GetString("rebase-on")
+		if !cmd.Flags().Changed("rebase-on") {
+			rebaseOn = ""
+		}
+		allowDirty, _ := cmd.Flags().GetBool("allow-dirty")
+		if !cmd.Flags().Changed("allow-dirty") {
+			allowDirty = false
+		}
+		opts := ops.UnblockTaskOptions{
+			AssignTo:   assignTo,
+			RebaseOn:   rebaseOn,
+			AllowDirty: allowDirty,
+		}
 
 		agentID, err := resolveOrchestratorID(cmd)
 		if err != nil {
@@ -452,10 +471,10 @@ agent, clears stale blocked metadata, and records an unblocked history event.`,
 		}
 
 		if isJSON(cmd) {
-			result, err := ops.UnblockTask(projectRoot, taskID, assignTo, reason, agentID)
+			result, err := ops.UnblockTaskWithOptions(projectRoot, taskID, reason, agentID, opts)
 			return jsonout.WriteResult(os.Stdout, result, nil, err)
 		}
-		return commands.UnblockTaskCommand(projectRoot, taskID, assignTo, reason, agentID)
+		return commands.UnblockTaskWithOptionsCommand(projectRoot, taskID, reason, agentID, opts)
 	},
 }
 
@@ -1136,9 +1155,10 @@ func init() {
 
 	// Unblock-task command flags
 	unblockTaskCmd.Flags().String("agent-id", "", "orchestrator agent ID (auto-resolved if not provided)")
-	unblockTaskCmd.Flags().String("assign-to", "", "doer agent ID to resume the task (required)")
+	unblockTaskCmd.Flags().String("assign-to", "", "doer agent ID to resume the task directly; omitted makes the task claimable")
 	unblockTaskCmd.Flags().String("reason", "", "reason the blocked task can resume (required)")
-	unblockTaskCmd.MarkFlagRequired("assign-to")
+	unblockTaskCmd.Flags().String("rebase-on", "", "branch or commit to rebase the task worktree onto before unblocking")
+	unblockTaskCmd.Flags().Bool("allow-dirty", false, "allow tracked worktree changes during --rebase-on by using git rebase --autostash")
 	unblockTaskCmd.MarkFlagRequired("reason")
 
 	// Assess-blocked command flags

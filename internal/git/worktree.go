@@ -200,6 +200,51 @@ func (g *Git) WorktreeProgressSignature(taskID string) (string, error) {
 	return head + "\n" + status, nil
 }
 
+// WorktreeStatusShort returns git status --short output for a worktree path.
+func (g *Git) WorktreeStatusShort(worktreePath string) (string, error) {
+	return g.execInDir(worktreePath, "status", "--short")
+}
+
+// WorktreeUntrackedFiles returns untracked, non-ignored paths relative to a worktree.
+func (g *Git) WorktreeUntrackedFiles(worktreePath string) ([]string, error) {
+	output, err := g.execInDir(worktreePath, "ls-files", "--others", "--exclude-standard", "-z")
+	if err != nil {
+		return nil, err
+	}
+	if output == "" {
+		return nil, nil
+	}
+
+	records := strings.Split(strings.TrimSuffix(output, "\x00"), "\x00")
+	files := make([]string, 0, len(records))
+	for _, record := range records {
+		if record != "" {
+			files = append(files, record)
+		}
+	}
+	return files, nil
+}
+
+// UntrackedFilesOverwrittenBy reports untracked files that are present in targetTreeish.
+func (g *Git) UntrackedFilesOverwrittenBy(worktreePath, targetTreeish string) ([]string, error) {
+	untracked, err := g.WorktreeUntrackedFiles(worktreePath)
+	if err != nil {
+		return nil, err
+	}
+
+	var overwritten []string
+	for _, path := range untracked {
+		_, present, err := g.TreePathMode(targetTreeish, path)
+		if err != nil {
+			return nil, err
+		}
+		if present {
+			overwritten = append(overwritten, path)
+		}
+	}
+	return overwritten, nil
+}
+
 // EnableWorktreeConfigExtension ensures the main repo has
 // extensions.worktreeConfig enabled so each worktree can override config
 // values (notably core.hooksPath) without polluting the shared repo config.

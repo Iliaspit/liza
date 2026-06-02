@@ -97,6 +97,11 @@ func ClassifyError(err error) (code string, message string) {
 		return "validation", precond.Reason
 	}
 
+	var unblockRebaseConflict *ops.UnblockRebaseConflictError
+	if errors.As(err, &unblockRebaseConflict) {
+		return "unblock_rebase_conflict", "unblock rebase conflict: task remains BLOCKED with repair_request"
+	}
+
 	var intErr *ops.IntegrationFailedError
 	if errors.As(err, &intErr) {
 		return "validation", fmt.Sprintf("integration failed: %s", intErr.Reason)

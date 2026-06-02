@@ -7,6 +7,7 @@ import (
 	"github.com/liza-mas/liza/internal/db"
 	"github.com/liza-mas/liza/internal/git"
 	"github.com/liza-mas/liza/internal/models"
+	"github.com/liza-mas/liza/internal/paths"
 )
 
 type claimContext struct {
@@ -96,6 +97,93 @@ func (freshClaimStrategy) historyEntry(now time.Time, ctx *claimContext) models.
 		Time:  now,
 		Event: models.TaskEventClaimed,
 		Agent: agentPtr,
+	}
+}
+
+type preservedInitialClaimStrategy struct{}
+
+func (preservedInitialClaimStrategy) validate(task *models.Task, state *models.State, runtimeRole, doerRole string, ctx *claimContext) error {
+	if runtimeRole != doerRole {
+		return fmt.Errorf("task %s is %s (not claimable by %s)", task.ID, task.Status, runtimeRole)
+	}
+	if task.Worktree == nil || *task.Worktree == "" {
+		return &PreconditionError{Reason: fmt.Sprintf("task %s preserved claim requires worktree metadata", task.ID)}
+	}
+	if *task.Worktree != ctx.worktreeRel {
+		return &PreconditionError{Reason: fmt.Sprintf("task %s worktree = %q, want %q", task.ID, *task.Worktree, ctx.worktreeRel)}
+	}
+	if task.BaseCommit == nil || *task.BaseCommit == "" {
+		return &PreconditionError{Reason: fmt.Sprintf("task %s preserved claim requires base_commit", task.ID)}
+	}
+	if unmet := unmetDependencies(task, state); len(unmet) > 0 {
+		return fmt.Errorf("task has unmet dependencies: %s", formatDependencyResults(unmet))
+	}
+	return nil
+}
+
+func (preservedInitialClaimStrategy) enforceIterationLimit() bool {
+	return false
+}
+
+func (preservedInitialClaimStrategy) requiresDependencyRecheck() bool {
+	return true
+}
+
+func (preservedInitialClaimStrategy) handleWorktree(
+	_ *db.Blackboard,
+	gitWrapper *git.Git,
+	ctx *claimContext,
+) (claimWorktreePhaseResult, error) {
+	result := claimWorktreePhaseResult{}
+	if err := gitWrapper.ValidateWorktreeHealth(ctx.taskID); err != nil {
+		return result, &PreconditionError{Reason: fmt.Sprintf("preserved worktree not healthy: %v", err)}
+	}
+	branch, err := gitWrapper.GetWorktreeBranch(ctx.worktreeDir)
+	if err != nil {
+		return result, err
+	}
+	expectedBranch := paths.TaskBranchPrefix + ctx.taskID
+	if branch != expectedBranch {
+		return result, &PreconditionError{Reason: fmt.Sprintf("preserved worktree branch = %q, want %q", branch, expectedBranch)}
+	}
+	head, err := gitWrapper.GetWorktreeHEAD(ctx.taskID)
+	if err != nil {
+		return result, err
+	}
+	if _, err := gitWrapper.GetCommitSHA(ctx.baseCommit); err != nil {
+		return result, &PreconditionError{Reason: fmt.Sprintf("preserved base_commit %s does not resolve: %v", ctx.baseCommit, err)}
+	}
+	ancestor, err := gitWrapper.IsAncestor(ctx.baseCommit, head)
+	if err != nil {
+		return result, err
+	}
+	if !ancestor {
+		return result, &PreconditionError{Reason: fmt.Sprintf("preserved base_commit %s is not an ancestor of worktree HEAD %s", ctx.baseCommit, head)}
+	}
+	return result, nil
+}
+
+func (preservedInitialClaimStrategy) shouldRunPostWorktreeCmd(claimWorktreePhaseResult) bool {
+	return true
+}
+
+func (preservedInitialClaimStrategy) mutateTask(task *models.Task, ctx *claimContext) {
+	task.Worktree = &ctx.worktreeRel
+	task.BaseCommit = &ctx.baseCommit
+	if task.Attempt == 0 {
+		task.Attempt = 1
+	}
+}
+
+func (preservedInitialClaimStrategy) historyEntry(now time.Time, ctx *claimContext) models.TaskHistoryEntry {
+	agentPtr := &ctx.agentID
+	return models.TaskHistoryEntry{
+		Time:  now,
+		Event: models.TaskEventClaimed,
+		Agent: agentPtr,
+		Extra: map[string]any{
+			"preserved_worktree": true,
+		},
 	}
 }
 

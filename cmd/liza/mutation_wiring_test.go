@@ -370,6 +370,40 @@ func TestMutationCommandWiring(t *testing.T) {
 		}
 	})
 
+	t.Run("unblock-task without assign-to restores claimable state", func(t *testing.T) {
+		projectRoot, statePath := setupMutationTestProject(t, func(state *models.State) {
+			now := time.Now().UTC()
+			task := testhelpers.BuildTaskByStatus("task-unblock-claimable", models.TaskStatusBlocked, now)
+			task.RolePair = "code-planning-pair"
+			task.Worktree = nil
+			task.BaseCommit = nil
+			state.Tasks = []models.Task{task}
+		})
+
+		err := executeRootCommand(
+			t,
+			projectRoot,
+			"unblock-task",
+			"task-unblock-claimable",
+			"--reason",
+			"repair verified",
+			"--agent-id",
+			"orchestrator-1",
+		)
+		if err != nil {
+			t.Fatalf("unblock-task execute failed: %v", err)
+		}
+
+		state := readState(t, statePath)
+		task := mustFindTask(t, state, "task-unblock-claimable")
+		if task.Status != models.TaskStatusDraftCodingPlan {
+			t.Fatalf("task status = %s, want %s", task.Status, models.TaskStatusDraftCodingPlan)
+		}
+		if task.AssignedTo != nil {
+			t.Fatalf("task assigned_to = %v, want nil", *task.AssignedTo)
+		}
+	})
+
 	t.Run("mark-blocked persists orchestrator repair request", func(t *testing.T) {
 		projectRoot, statePath := setupMutationTestProject(t, func(state *models.State) {
 			now := time.Now().UTC()

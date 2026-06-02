@@ -14,11 +14,13 @@ Tasks are BLOCKED. Analyze and resolve immediately:
      b. Verify the new dependency task(s) already exist and represent the intended blocker.
      c. Run: liza retarget-dependency <task-id> <old-dep-id> <new-dep-id[,new-dep-id]> --reason "Correct dependency edge because <why>" --agent-id {{.AgentID}} --json
      d. The task remains BLOCKED. After validation/repair is complete, use liza unblock-task or liza assess-blocked.
-   - To resume after verified repair:
-     a. Re-read the task via liza get <task-id> --json to confirm it is still BLOCKED.
-     b. Verify the blocker is no longer true using the repair_request validation, current worktree state, or another concrete check.
-     c. Run: liza unblock-task <task-id> --assign-to <doer-agent-id> --reason "Verified blocker is resolved" --agent-id {{.AgentID}} --json
-     d. The assigned doer can then submit or continue from the restored executing state.
+	   - To resume after verified repair:
+	     a. Re-read the task via liza get <task-id> --json to confirm it is still BLOCKED.
+	     b. Verify the blocker is no longer true using the repair_request validation, current worktree state, or another concrete check.
+	     c. If the task has a preserved worktree and integration moved while blocked, prefer: liza unblock-task <task-id> --rebase-on <integration-branch> --reason "Verified blocker is resolved" --agent-id {{.AgentID}} --json
+	     d. Otherwise run: liza unblock-task <task-id> --reason "Verified blocker is resolved" --agent-id {{.AgentID}} --json
+	     e. Add --assign-to <doer-agent-id> only when direct resume is required; no live process check is required for unblock assignment.
+	     f. A --rebase-on conflict remains BLOCKED with a fresh repair_request; do not treat it as submit/merge INTEGRATION_FAILED.
    - To supersede (create clean replacement):
    Example supersede workflow:
    a. Re-read the task via liza get <task-id> --json to confirm it is still BLOCKED.

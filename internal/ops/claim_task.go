@@ -122,7 +122,11 @@ func ClaimTask(projectRoot, taskID, agentID string) (*ClaimResult, error) {
 
 	switch task.Status {
 	case pipelineInitial:
-		strategy = freshClaimStrategy{}
+		if task.Worktree != nil {
+			strategy = preservedInitialClaimStrategy{}
+		} else {
+			strategy = freshClaimStrategy{}
+		}
 	case pipelineRejected:
 		strategy = rejectedClaimStrategy{}
 	case models.TaskStatusIntegrationFailed:
@@ -202,9 +206,13 @@ func ClaimTask(projectRoot, taskID, agentID string) (*ClaimResult, error) {
 	// --- Phase 2: Handle Worktree ---
 	gitWrapper := git.New(lp.ProjectRoot())
 
-	baseCommit, err = gitWrapper.GetCommitSHA(integrationBranch)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get integration branch commit: %w", err)
+	if _, preserveInitial := strategy.(preservedInitialClaimStrategy); preserveInitial {
+		baseCommit = *task.BaseCommit
+	} else {
+		baseCommit, err = gitWrapper.GetCommitSHA(integrationBranch)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get integration branch commit: %w", err)
+		}
 	}
 	claimCtx.baseCommit = baseCommit
 
