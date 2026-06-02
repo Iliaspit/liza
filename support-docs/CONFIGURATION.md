@@ -113,8 +113,12 @@ All configuration lives in `.liza/state.yaml` under the `config` section.
 
 ## Optional Indexing Activation
 
-Stacklit, SCIP Search, and Semble are optional navigation aids. Liza separates
-their activation across setup, pairing init, and MAS runtime:
+[Stacklit](https://github.com/liza-mas/stacklit-cli),
+[SCIP Search](https://github.com/liza-mas/scip-search/), and
+[Semble](https://github.com/MinishLab/semble/) are optional navigation aids.
+They are external tools that users install and maintain separately; Liza only
+activates prompt/index guidance when the configured gates and runtime checks pass.
+Liza separates their activation across setup, pairing init, and MAS runtime:
 
 - `liza setup` owns global generic guidance in `~/.liza/AGENT_TOOLS.md`. That
   guidance explains how agents should route to optional tools only when a session
