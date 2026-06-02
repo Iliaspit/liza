@@ -118,6 +118,8 @@ All configuration lives in `.liza/state.yaml` under the `config` section.
 [Semble](https://github.com/MinishLab/semble/) are optional navigation aids.
 They are external tools that users install and maintain separately; Liza only
 activates prompt/index guidance when the configured gates and runtime checks pass.
+Set the corresponding `LIZA_ENABLE_*` environment variable before running the
+`liza setup` or `liza init` command that should activate that tool.
 Liza separates their activation across setup, pairing init, and MAS runtime:
 
 - `liza setup` owns global generic guidance in `~/.liza/AGENT_TOOLS.md`. That
