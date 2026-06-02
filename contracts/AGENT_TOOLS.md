@@ -7,14 +7,15 @@ When a default tool is unavailable in the current session, fall through to the n
 
 ### Search and Navigation
 
-Choose the smallest reliable routing source before raw search: explicit user paths for named-file tasks, changed-file lists for reviews, Stacklit/module maps for exploration, and section/symbol routers for docs/code.
+Choose the smallest reliable routing source before raw search: explicit user paths for named-file tasks, changed-file lists for reviews, optional Liza-supplied indexes/search roots, and section/symbol routers for docs/code.
 
-1. When Liza supplies a Stacklit index and the task needs repo understanding, run `stacklit derive --ai-summary -i <path>` before broad search or source reads. Direct reads are appropriate when the task provides an explicit path and symbol.
-2. When Liza supplies SCIP indexes, use `scip-search` for indexed symbol/package/reference/implementation navigation.
-3. For long Markdown docs/specs, use `rg -c "pattern" <paths>` to find candidate files, then `mdtoc` and section-scoped reads; see Tool Preferences for the full workflow.
-4. Use `ast-grep` for syntax-shaped code search.
-5. Use bounded `rg` for text search, e.g. `rg --max-count 3 "pattern" internal/foo/`; use `git grep` for tracked/index/HEAD/history searches.
-6. Use direct, line-numbered reads (`nl -ba ... | sed -n ...`) for source-of-truth verification and edit discussion.
+1. Use Semble for conceptual discovery only when Liza supplies a Semble target root or current session context says Semble is available and ready.
+2. Use Stacklit for repo orientation only when Liza supplies an explicit Stacklit index path.
+3. Use `scip-search` for indexed symbol/package/reference/implementation navigation only when Liza supplies an explicit SCIP index path.
+4. If an optional index/search tool is disabled, unavailable, or not advertised, fall back to `rg`, `ast-grep`, direct reads, and Morph MCP only when policy exposes it.
+5. For long Markdown docs/specs, use `rg -c "pattern" <paths>` to find candidate files, then `mdtoc` and section-scoped reads; see Tool Preferences for the full workflow.
+6. Use bounded `rg` for exact text search and path discovery; use `git grep` for tracked/index/HEAD/history searches.
+7. Use direct, line-numbered reads (`nl -ba ... | sed -n ...`) for source-of-truth verification and edit discussion.
 
 ### Execution and Validation
 
@@ -76,7 +77,7 @@ For any MCP-backed default row in the tables below, if the tool is unavailable i
 | Structural code pattern (call shape, signature) | `ast-grep` | `rg` with regex approximation | — |
 | Find files by name | Glob | `rg --files` / native filename search | Glob unavailable |
 | Repo orientation and module impact | `stacklit derive/get-module/get-dependencies -i <supplied-index>` | `rg` + manifest reads + exact source reads | No Stacklit index path supplied, Stacklit unavailable, or index result insufficient |
-| Semantic code search ("how does X work?") | **morph-mcp** codebase_search | `rg` + exact reads (`ast-grep` when structural search helps) | morph-mcp insufficient, rate limited, or errors |
+| Semantic code search ("how does X work?") | Semble with a Liza-supplied target root | Morph MCP codebase search, then `rg` + exact reads (`ast-grep` when structural search helps) | Semble is disabled, unavailable, not advertised, or insufficient; use Morph MCP only when policy exposes it |
 | Symbol info at position | `rg` + direct reads | — | — |
 | Find references | `rg` | — | — |
 | Call hierarchy (callers/callees) | `rg` + direct reads | — | — |
@@ -84,9 +85,10 @@ For any MCP-backed default row in the tables below, if the tool is unavailable i
 | Multi-file structural analysis | `rg` + direct reads | — | — |
 
 **Additional caveats:**
+- **Semble**: use only an explicit target root supplied by Liza or current session context that says Semble is available. Do not infer target roots, initialize Semble, or treat semantic results as proof.
 - **stacklit**: use only explicit `-i <path>` values supplied in the prompt or Pairing SessionStart session context. Do not infer index locations, regenerate Stacklit indexes, run `stacklit view`, or mutate `stacklit-insights.json` / `.stacklitrc.json` from an agent task. Stacklit is for orientation and impact analysis; verify behavior against source files before editing.
 - **scip-search**: use only explicit `--index <path>` values supplied in the prompt or Pairing SessionStart session context. Do not search for default SCIP indexes or rely on daemon/global/cache behavior.
-- **morph-mcp codebase_search**: semantic discovery — use when you'd have to guess the search string. If Morph is not exposed, load it with your tool-loading mechanism (e.g. `ToolSearch`, `tool_search`) before broad exploratory `rg`. Fallback to `rg` + exact reads when results are insufficient, rate limited, or error.
+- **morph-mcp codebase_search**: use only as the semantic fallback when Semble is unavailable and policy exposes Morph MCP. Fallback to `rg` + exact reads when results are insufficient, rate limited, or error.
 
 ### Precedence
 

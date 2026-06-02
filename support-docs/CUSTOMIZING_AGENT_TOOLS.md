@@ -21,6 +21,17 @@ Before your first real run:
 - Provide your own file during setup if you already maintain one:
   `liza setup --agent-tools ~/my-agent-tools.md`
 
+`liza setup` owns this global generic guidance. It should describe routing rules
+that are safe for any project and any stack. It should not contain generated
+paths for one repository, worktree-specific index locations, Semble target roots,
+SCIP index paths, Stacklit index paths, or readiness claims from a past session.
+
+Pairing `liza init` owns project-local activation artifacts such as provider
+SessionStart hooks, project Git hook plumbing, generated-index cleanliness, SCIP
+hook command plans, and Semble safety files. MAS prompts own task/reviewer/root
+specific optional-tool metadata. Those mechanisms supply concrete paths or
+readiness when they exist; `AGENT_TOOLS.md` should only explain how to use them.
+
 ## Why It Matters
 
 Agents treat `AGENT_TOOLS.md` as an operational contract:
@@ -29,11 +40,31 @@ Agents treat `AGENT_TOOLS.md` as an operational contract:
 - Suboptimal tools bloat context by injecting more material than the task needs.
 - Wrong precedence wastes context and pushes agents toward weaker discovery paths.
 - Stale or incompatible indexing tools can return silently wrong answers.
+- Project-specific generated paths in global guidance become stale outside the
+  session or repository that produced them.
 
 ## Multi-Agent Specific Warnings
 
 Some support tools are a poor fit, or outright incompatible, with Liza multi-agent
 mode.
+
+## Optional Index Routing
+
+Stacklit, SCIP Search, and Semble are optional. Keep global guidance conditional:
+
+- Use Semble only when the current session supplies an explicit target root or
+  readiness metadata.
+- Use `scip-search` only when the current session supplies an explicit
+  `--index` path.
+- Use Stacklit only when the current session supplies an explicit `-i` index
+  path.
+- Treat all index and semantic-search results as navigation candidates. Direct
+  source reads remain the evidence for edits, reviews, and success claims.
+
+When an optional tool is disabled, unavailable, or not advertised in the current
+session, do not require agents to try it first. Route them to direct reads, `rg`
+for exact literals and path discovery, `ast-grep` for syntax-shaped search, and
+policy-exposed semantic fallback tools only when those tools are available.
 
 ### Worktree-Local Semble Search
 
@@ -60,8 +91,9 @@ Semble complements the rest of the worktree-safe stack:
   success claims.
 
 Do not infer Semble target roots, search sibling worktrees, run `semble init`,
-use Semble remote Git URL indexing from unattended MAS prompts, or treat Semble
-MCP as part of the default MAS setup.
+use Semble remote Git URL indexing from unattended MAS prompts, write one
+project's Semble root into global guidance, or treat Semble MCP as part of the
+default MAS setup.
 
 ### Worktree-Local SCIP Indexes
 
@@ -87,7 +119,8 @@ Agents should not search for default SCIP indexes, infer index locations from
 worktree paths, or rely on `scip-search` daemon, global-index, cache, watch, or
 auto-discovery behavior. Treat the explicit `--index <path>` supplied by Liza as
 the authority. If no explicit index path is available, fall back to `rg`,
-`ast-grep`, exact reads, and other worktree-safe tools.
+`ast-grep`, exact reads, and other worktree-safe tools. Do not copy concrete
+SCIP paths from one project or worktree into global guidance examples.
 
 ### Worktree-Local Stacklit Indexes
 
@@ -106,7 +139,8 @@ This is the MAS-safe path for broad codebase navigation because the query is
 tied to a caller-supplied worktree or project-root index. Agents should not
 infer index locations, regenerate insights, run `stacklit view`, or mutate
 `stacklit-insights.json` / `.stacklitrc.json`. Treat the explicit `-i <path>`
-supplied by Liza as the authority.
+supplied by Liza as the authority. Do not copy concrete Stacklit paths from one
+project or worktree into global guidance examples.
 
 ### Per-Worktree Servers
 

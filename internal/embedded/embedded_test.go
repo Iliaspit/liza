@@ -51,6 +51,15 @@ func TestListEmbeddedFiles(t *testing.T) {
 	}
 }
 
+func TestAgentToolsOptionalIndexGuidance(t *testing.T) {
+	content, err := contractsFS.ReadFile("contracts/AGENT_TOOLS.md")
+	if err != nil {
+		t.Fatalf("reading embedded AGENT_TOOLS.md: %v", err)
+	}
+
+	assertAgentToolsOptionalIndexGuidance(t, string(content))
+}
+
 func TestFrontmatter(t *testing.T) {
 	// Set test values
 	Version = "1.2.3"
@@ -82,6 +91,39 @@ func TestFrontmatter(t *testing.T) {
 	Version = "dev"
 	GitCommit = "unknown"
 	BuildDate = "unknown"
+}
+
+func assertAgentToolsOptionalIndexGuidance(t *testing.T, content string) {
+	t.Helper()
+
+	required := []string{
+		"Semble target root",
+		"current session context says Semble is available",
+		"explicit Stacklit index path",
+		"explicit SCIP index path",
+		"disabled, unavailable, or not advertised",
+		"fall back to `rg`, `ast-grep`, direct reads",
+		"Morph MCP only when policy exposes it",
+	}
+	for _, want := range required {
+		if !strings.Contains(content, want) {
+			t.Errorf("embedded AGENT_TOOLS.md missing optional-index guidance: %q", want)
+		}
+	}
+
+	forbidden := []string{
+		"/home/tangi/",
+		"/home/",
+		".worktrees/",
+		".liza/scip/",
+		"stacklit.json in pairing mode",
+		"<task-worktree-path>",
+	}
+	for _, text := range forbidden {
+		if strings.Contains(content, text) {
+			t.Errorf("embedded AGENT_TOOLS.md contains project-specific generated path guidance: %q", text)
+		}
+	}
 }
 
 func TestPrependFrontmatter(t *testing.T) {

@@ -1,0 +1,107 @@
+[
+  {
+    "desc": "Add setup and disabled-tool integration coverage.",
+    "done_when": "Integration tests prove a fresh `liza setup` installs generic optional-index guidance while disabled Stacklit, SCIP, and Semble env gates leave pairing init without optional indexing hooks, leave SessionStart without optional command blocks, and leave MAS prompts without optional tool sections even when stale artifacts or SCIP config are present.",
+    "scope": "Owns a new integration test file such as `internal/integration/indexing_activation_disabled_test.go` and minimal reusable helpers in `internal/integration/indexing_activation_helpers_test.go` for isolated setup, pairing init, SessionStart, and prompt fixtures. May add narrowly scoped command test fixtures only if existing public command surfaces cannot be driven from integration tests. Does not modify production setup, init, SessionStart, prompt, or index generation behavior.",
+    "spec_ref": "specs/goals/20260602-indexing-activation.md",
+    "plan_ref": "specs/plans/20260602-indexing-activation/20260602-151416-code-planning-main-1-code-planning-6.md",
+    "validation": [
+      "go test ./internal/integration ./internal/commands"
+    ],
+    "task_depends_on": [
+      "code-planning-main-1-code-planning-0",
+      "code-planning-main-1-code-planning-4",
+      "code-planning-main-1-code-planning-5"
+    ]
+  },
+  {
+    "desc": "Add Stacklit pairing activation integration coverage.",
+    "done_when": "Integration tests prove Stacklit-only pairing init installs effective lifecycle hook plumbing without editing `AGENT_TOOLS.md`, automatic lifecycle refresh creates or updates repo-root `stacklit.json` without running AI-summary behavior, and the generated `liza-index.sh ai` path is exercised when the script exposes manual AI-summary refresh.",
+    "scope": "Owns a new integration test file such as `internal/integration/indexing_activation_stacklit_test.go`. Reads CP7-1 integration helpers. May add command fixture seams only for fake Stacklit command capture needed to prove no automatic AI-summary invocation. Does not modify pairing hook implementation, Stacklit command planning, global guidance, SessionStart hook logic, or production init behavior.",
+    "spec_ref": "specs/goals/20260602-indexing-activation.md",
+    "plan_ref": "specs/plans/20260602-indexing-activation/20260602-151416-code-planning-main-1-code-planning-6.md",
+    "validation": [
+      "go test ./internal/integration ./internal/commands"
+    ],
+    "depends_on": [
+      "0"
+    ],
+    "task_depends_on": [
+      "code-planning-main-1-code-planning-0",
+      "code-planning-main-1-code-planning-4",
+      "code-planning-main-1-code-planning-5"
+    ]
+  },
+  {
+    "desc": "Add hook-path and generated-artifact cleanliness integration coverage.",
+    "done_when": "Integration tests prove pairing init with generated index artifacts keeps those artifacts out of `git status --short` unless they are intentionally tracked, and repositories with non-default `core.hooksPath` either receive Liza indexing hooks in the effective hook path or fail with a clear diagnostic instead of installing inert `.git/hooks` files.",
+    "scope": "Owns a new integration test file such as `internal/integration/indexing_activation_hooks_test.go`. Reads CP7-1 integration helpers. May add command fixture seams only for asserting public init diagnostics and git status output. Does not modify hook installation production code, generated script content, worktree exclusion logic, or global guidance.",
+    "spec_ref": "specs/goals/20260602-indexing-activation.md",
+    "plan_ref": "specs/plans/20260602-indexing-activation/20260602-151416-code-planning-main-1-code-planning-6.md",
+    "validation": [
+      "go test ./internal/integration ./internal/commands"
+    ],
+    "depends_on": [
+      "0"
+    ],
+    "task_depends_on": [
+      "code-planning-main-1-code-planning-0",
+      "code-planning-main-1-code-planning-4",
+      "code-planning-main-1-code-planning-5"
+    ]
+  },
+  {
+    "desc": "Add SCIP pairing planning integration coverage.",
+    "done_when": "Integration tests prove `LIZA_ENABLE_SCIP_SEARCH=1` pairing init in a single-root Go, TypeScript, or Python repository writes concrete repo-specific SCIP indexer commands with required root/cwd arguments, repeated `--scip-search <language>` filters exclude other detected languages while still requiring a confident root for the requested language, and ambiguous monorepo roots fail with candidate-root diagnostics instead of writing guessed hook commands.",
+    "scope": "Owns a new integration test file such as `internal/integration/indexing_activation_scip_test.go`. Reads CP7-1 integration helpers. May add command fixture seams only for fake SCIP indexer command capture and diagnostic assertions. Does not modify SCIP root planning, pairing init wiring, generated hook implementation, MAS SCIP runtime planning, or prompt rendering.",
+    "spec_ref": "specs/goals/20260602-indexing-activation.md",
+    "plan_ref": "specs/plans/20260602-indexing-activation/20260602-151416-code-planning-main-1-code-planning-6.md",
+    "validation": [
+      "go test ./internal/integration ./internal/commands"
+    ],
+    "depends_on": [
+      "0"
+    ],
+    "task_depends_on": [
+      "code-planning-main-1-code-planning-0",
+      "code-planning-main-1-code-planning-4",
+      "code-planning-main-1-code-planning-5"
+    ]
+  },
+  {
+    "desc": "Add Semble safety and SessionStart integration coverage.",
+    "done_when": "Integration tests prove Semble-enabled pairing init creates or verifies a safe physical project-root `.sembleignore` before Semble is advertised, unsafe or missing safety artifacts produce the implemented clear diagnostic when safety cannot be established, and pairing SessionStart emits concrete repo-root optional-tool guidance only when the corresponding Stacklit, SCIP, or Semble artifacts and readiness checks exist.",
+    "scope": "Owns a new integration test file such as `internal/integration/indexing_activation_sessionstart_test.go`. Reads CP7-1 integration helpers. May add command fixture seams only for running the embedded SessionStart hook or equivalent public hook entrypoint in an isolated project. Does not modify Semble safety implementation, SessionStart hook logic, pairing init production behavior, MAS prompt rendering, or global guidance.",
+    "spec_ref": "specs/goals/20260602-indexing-activation.md",
+    "plan_ref": "specs/plans/20260602-indexing-activation/20260602-151416-code-planning-main-1-code-planning-6.md",
+    "validation": [
+      "go test ./internal/integration ./internal/commands"
+    ],
+    "depends_on": [
+      "0"
+    ],
+    "task_depends_on": [
+      "code-planning-main-1-code-planning-0",
+      "code-planning-main-1-code-planning-4",
+      "code-planning-main-1-code-planning-5"
+    ]
+  },
+  {
+    "desc": "Add MAS optional-index prompt integration coverage.",
+    "done_when": "Integration tests prove MAS task, reviewer, and orchestrator prompts include Stacklit, SCIP, and Semble sections only from env-gated metadata for the current target root, use task or reviewer worktree paths instead of pairing repo-root paths, omit disabled sections even when stale artifacts exist, and omit only the failed optional-tool section when another enabled tool remains ready.",
+    "scope": "Owns a new integration test file such as `internal/integration/indexing_activation_mas_prompt_test.go`. Reads CP7-1 integration helpers and existing integration prompt builders. May add command fixture seams only for prompt-building fixtures that exercise public agent strategy behavior. Does not modify MAS prompt templates, prompt metadata builders, runtime index generation, pairing SessionStart hooks, pairing init activation, or global guidance.",
+    "spec_ref": "specs/goals/20260602-indexing-activation.md",
+    "plan_ref": "specs/plans/20260602-indexing-activation/20260602-151416-code-planning-main-1-code-planning-6.md",
+    "validation": [
+      "go test ./internal/integration ./internal/commands"
+    ],
+    "depends_on": [
+      "0"
+    ],
+    "task_depends_on": [
+      "code-planning-main-1-code-planning-0",
+      "code-planning-main-1-code-planning-4",
+      "code-planning-main-1-code-planning-5"
+    ]
+  }
+]

@@ -119,7 +119,7 @@ symlinks needed for pairing (no .liza/ workspace):
 		}
 
 		// Interactive wizard: no args, no agent flags, no explicit workspace flags, TTY
-		if len(args) == 0 && len(agents) == 0 && !hasExplicitInitFlags(cmd) {
+		if len(args) == 0 && len(agents) == 0 && !hasExplicitInitFlags(cmd) && !cmd.Flags().Changed("scip-search") {
 			if !interactive.IsInteractive() {
 				return fmt.Errorf("requires a description argument or at least one agent flag (--claude, --codex, --gemini, --mistral)\nSee: liza init --help")
 			}
@@ -153,6 +153,7 @@ symlinks needed for pairing (no .liza/ workspace):
 				}
 				if err := commands.InitPairingCommand(commands.InitPairingParams{
 					Agents:         result.Agents,
+					ScipSearch:     scipSearch,
 					Stdin:          os.Stdin,
 					ContractAction: result.ContractAction,
 				}); err != nil {
@@ -199,8 +200,9 @@ symlinks needed for pairing (no .liza/ workspace):
 				return fmt.Errorf("workspace flags (--branch, --config, --spec, --entry-point, --post-worktree-cmd, --default-cli, --default-doer-cli, --default-reviewer-cli) require a description argument for full workspace init")
 			}
 			if err := commands.InitPairingCommand(commands.InitPairingParams{
-				Agents: agents,
-				Stdin:  os.Stdin,
+				Agents:     agents,
+				ScipSearch: scipSearch,
+				Stdin:      os.Stdin,
 			}); err != nil {
 				return err
 			}
@@ -358,7 +360,7 @@ var agentFlagNames = []string{"claude", "codex", "gemini", "mistral"}
 // hasExplicitInitFlags returns true if any workspace-specific flag was explicitly set.
 // This prevents the interactive wizard from silently swallowing CLI flags it doesn't collect.
 func hasExplicitInitFlags(cmd *cobra.Command) bool {
-	for _, name := range []string{"spec", "config", "entry-point", "branch", "post-worktree-cmd", "default-cli", "default-doer-cli", "default-reviewer-cli", "scip-search"} {
+	for _, name := range []string{"spec", "config", "entry-point", "branch", "post-worktree-cmd", "default-cli", "default-doer-cli", "default-reviewer-cli"} {
 		if cmd.Flags().Changed(name) {
 			return true
 		}

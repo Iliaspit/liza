@@ -328,10 +328,72 @@ func DefaultIgnorePatterns() []string {
 	return patterns
 }
 
+// DefaultIgnorePayload returns the physical .sembleignore content shared by
+// project-root and generated task-worktree safety setup.
+func DefaultIgnorePayload() string {
+	return strings.Join(DefaultIgnorePatterns(), "\n") + "\n"
+}
+
 // GeneratedWorktreeIgnorePayload returns the generated task-worktree
 // .sembleignore content. Lifecycle callers own writing this payload.
 func GeneratedWorktreeIgnorePayload() string {
-	return strings.Join(DefaultIgnorePatterns(), "\n") + "\n"
+	return DefaultIgnorePayload()
+}
+
+// EnsureProjectRootIgnore creates or verifies the project-root .sembleignore
+// required before pairing SessionStart may advertise Semble.
+func EnsureProjectRootIgnore(root string) TargetSafetyResult {
+	targetRoot, err := normalizeRoot(root)
+	if err != nil {
+		return TargetSafetyResult{
+			Kind:       TargetKindProjectRoot,
+			TargetRoot: root,
+			Diagnostic: Diagnostic{
+				Kind:    DiagnosticExecutionFailure,
+				Message: boundedDiagnosticMessage("semble project root invalid", err.Error()),
+			},
+		}
+	}
+
+	ignorePath := filepath.Join(targetRoot, ".sembleignore")
+	file, err := os.OpenFile(ignorePath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	if errors.Is(err, os.ErrExist) {
+		return ValidateTargetSafety(TargetSafetyOptions{
+			Kind:       TargetKindProjectRoot,
+			TargetRoot: targetRoot,
+		})
+	}
+	if err != nil {
+		return TargetSafetyResult{
+			Kind:       TargetKindProjectRoot,
+			TargetRoot: targetRoot,
+			Diagnostic: Diagnostic{
+				Kind:    DiagnosticExecutionFailure,
+				Message: boundedDiagnosticMessage("semble create project root .sembleignore", err.Error()),
+			},
+		}
+	}
+
+	_, writeErr := file.WriteString(DefaultIgnorePayload())
+	if closeErr := file.Close(); writeErr == nil {
+		writeErr = closeErr
+	}
+	if writeErr != nil {
+		_ = os.Remove(ignorePath)
+		return TargetSafetyResult{
+			Kind:       TargetKindProjectRoot,
+			TargetRoot: targetRoot,
+			Diagnostic: Diagnostic{
+				Kind:    DiagnosticExecutionFailure,
+				Message: boundedDiagnosticMessage("semble write project root .sembleignore", writeErr.Error()),
+			},
+		}
+	}
+
+	return ValidateTargetSafety(TargetSafetyOptions{
+		Kind:       TargetKindProjectRoot,
+		TargetRoot: targetRoot,
+	})
 }
 
 // ValidateTargetSafety checks whether a target root is safe for Semble prompt

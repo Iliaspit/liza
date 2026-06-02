@@ -55,6 +55,15 @@ type RuntimePlanOptions struct {
 	GitFiles            GitFilesFunc
 }
 
+// PairingPlanOptions configures project-root SCIP planning for pairing init
+// hook generation. ExplicitLanguages is the repeated --scip-search language
+// allowlist; it restricts languages but does not select monorepo roots.
+type PairingPlanOptions struct {
+	ProjectRoot       string
+	ExplicitLanguages []string
+	GitFiles          GitFilesFunc
+}
+
 // RuntimeCommandPlan describes one fixed language-indexer invocation.
 type RuntimeCommandPlan struct {
 	Language   string
@@ -102,6 +111,10 @@ type RefreshFailure struct {
 	Language   string
 	Diagnostic string
 }
+
+// PairingRuntimeInferenceNote states the intentional difference between pairing
+// hook planning and MAS runtime refresh planning.
+const PairingRuntimeInferenceNote = "MAS runtime SCIP planning intentionally remains deterministic/fallback-based; pairing planning rejects ambiguous roots before hook generation."
 
 var (
 	runnerMu      sync.Mutex
@@ -284,6 +297,43 @@ func AvailableIndexes(opts RuntimePlanOptions) ([]IndexRef, error) {
 	return indexes, nil
 }
 
+// PlanPairingCommands returns concrete repo-root SCIP indexer commands for
+// pairing init hook generation. It rejects ambiguous project layouts instead of
+// choosing deterministic/fallback roots as MAS runtime planning does.
+func PlanPairingCommands(opts PairingPlanOptions) ([]RuntimeCommandPlan, error) {
+	projectRoot, err := filepath.Abs(opts.ProjectRoot)
+	if err != nil {
+		return nil, fmt.Errorf("resolve pairing scip-search project root: %w", err)
+	}
+
+	gitFiles := opts.GitFiles
+	if gitFiles == nil {
+		gitFiles = listGitFiles
+	}
+	files, err := gitFiles(projectRoot)
+	if err != nil {
+		return nil, fmt.Errorf("detect pairing scip-search languages: %w", err)
+	}
+
+	languages := detectLanguages(files)
+	if len(opts.ExplicitLanguages) > 0 {
+		languages, err = canonicalizeExplicit(opts.ExplicitLanguages)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	plans := make([]RuntimeCommandPlan, 0, len(languages))
+	for _, language := range languages {
+		plan, candidates, ok := pairingCommandPlan(projectRoot, language, files)
+		if !ok {
+			return nil, pairingRootSelectionError{language: language, candidates: candidates}
+		}
+		plans = append(plans, plan)
+	}
+	return plans, nil
+}
+
 func selectLanguages(opts InitOptions, gitFiles GitFilesFunc) ([]string, error) {
 	if len(opts.ExplicitLanguages) > 0 {
 		return canonicalizeExplicit(opts.ExplicitLanguages)
@@ -401,6 +451,132 @@ func runtimeCommandPlan(targetRoot, language, outputPath string, files []string)
 		}
 	}
 	return plan, true
+}
+
+type pairingRootSelectionError struct {
+	language   string
+	candidates []string
+}
+
+func (err pairingRootSelectionError) Error() string {
+	if len(err.candidates) == 0 {
+		return fmt.Sprintf("unresolved scip-search language %s: no candidate roots found", err.language)
+	}
+	return fmt.Sprintf("unresolved scip-search language %s: ambiguous candidate roots: %s", err.language, strings.Join(err.candidates, ", "))
+}
+
+func pairingCommandPlan(projectRoot, language string, files []string) (RuntimeCommandPlan, []string, bool) {
+	outputPath := filepath.Join(projectRoot, language+".scip")
+	plan := RuntimeCommandPlan{
+		Language:   language,
+		Name:       languageIndexers[language],
+		Dir:        projectRoot,
+		OutputPath: outputPath,
+	}
+
+	switch language {
+	case "go":
+		roots := goRootCandidates(projectRoot, files)
+		if len(roots) != 1 {
+			return RuntimeCommandPlan{}, roots, false
+		}
+		plan.Args = []string{"index", "--module-root", roots[0], "--output", outputPath}
+	case "typescript":
+		candidates := pairingTypeScriptCommandInputs(projectRoot, files)
+		if len(candidates) != 1 {
+			return RuntimeCommandPlan{}, typeScriptCandidateRoots(candidates), false
+		}
+		plan.Args = []string{"index", "--cwd", candidates[0].Cwd, "--output", outputPath, candidates[0].ProjectRoot}
+	case "python":
+		candidates := pairingPythonCommandInputs(projectRoot, files)
+		if len(candidates) != 1 {
+			return RuntimeCommandPlan{}, pythonCandidateRoots(candidates), false
+		}
+		plan.Args = []string{"index", "--cwd", candidates[0].Cwd, "--output", outputPath}
+		if candidates[0].TargetOnly != "" {
+			plan.Args = append(plan.Args, "--target-only="+candidates[0].TargetOnly)
+		}
+	default:
+		return RuntimeCommandPlan{}, nil, false
+	}
+
+	return plan, nil, true
+}
+
+func goRootCandidates(targetRoot string, files []string) []string {
+	seen := map[string]bool{}
+	hasGoFile := false
+	for _, file := range files {
+		path, ok := cleanTargetRelativePath(targetRoot, file)
+		if !ok {
+			continue
+		}
+		switch {
+		case filepath.Base(path) == "go.mod":
+			seen[filepath.Dir(path)] = true
+		case filepath.Ext(path) == ".go":
+			hasGoFile = true
+		}
+	}
+	if len(seen) == 0 && hasGoFile {
+		seen[targetRoot] = true
+	}
+	return sortedMapKeys(seen)
+}
+
+func pairingTypeScriptCommandInputs(targetRoot string, files []string) []typeScriptCommandInputs {
+	rootConfigs := typeScriptRootConfigCandidates(files)
+	if len(rootConfigs) == 0 {
+		if languageDetected(files, "typescript") {
+			return []typeScriptCommandInputs{{Cwd: targetRoot, ProjectRoot: targetRoot}}
+		}
+		return nil
+	}
+
+	var candidates []typeScriptCommandInputs
+	for _, relConfig := range rootConfigs {
+		rootConfig := filepath.Join(targetRoot, filepath.FromSlash(relConfig))
+		rootConfig = filepath.Clean(rootConfig)
+		if !pathWithin(targetRoot, rootConfig) {
+			continue
+		}
+		projectRoot := filepath.Dir(rootConfig)
+		sourceCandidates := typeScriptSourceCandidatesForRoot(targetRoot, rootConfig, projectRoot)
+		if len(sourceCandidates) == 0 {
+			candidates = append(candidates, typeScriptCommandInputs{Cwd: projectRoot, ProjectRoot: projectRoot})
+			continue
+		}
+		for _, candidate := range sourceCandidates {
+			candidates = append(candidates, typeScriptCommandInputs{Cwd: candidate.sourceRoot, ProjectRoot: candidate.projectRoot})
+		}
+	}
+	return dedupeTypeScriptInputs(candidates)
+}
+
+func pairingPythonCommandInputs(targetRoot string, files []string) []pythonCommandInputs {
+	pythonFiles := pythonTrackedFiles(targetRoot, files)
+	if len(pythonFiles) == 0 {
+		return nil
+	}
+
+	roots := pythonProjectRootCandidates(targetRoot, files)
+	if len(roots) == 0 {
+		return []pythonCommandInputs{{Cwd: targetRoot}}
+	}
+
+	var candidates []pythonCommandInputs
+	for _, root := range roots {
+		eligible := eligiblePythonFilesForRoot(root, roots, pythonFiles)
+		if len(eligible) == 0 {
+			continue
+		}
+		inputs := pythonCommandInputs{Cwd: root}
+		if pythonFilesAllUnderSrc(root, eligible) {
+			inputs.TargetOnly = "src"
+		}
+		candidates = append(candidates, inputs)
+	}
+	return candidates
 }
 
 type pythonCommandInputs struct {
@@ -727,6 +903,55 @@ func dedupePaths(paths []string) []string {
 		out = append(out, path)
 	}
 	return out
+}
+
+func dedupeTypeScriptInputs(inputs []typeScriptCommandInputs) []typeScriptCommandInputs {
+	seen := make(map[string]bool, len(inputs))
+	out := make([]typeScriptCommandInputs, 0, len(inputs))
+	for _, input := range inputs {
+		key := input.Cwd + "\x00" + input.ProjectRoot
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, input)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].ProjectRoot != out[j].ProjectRoot {
+			return out[i].ProjectRoot < out[j].ProjectRoot
+		}
+		return out[i].Cwd < out[j].Cwd
+	})
+	return out
+}
+
+func typeScriptCandidateRoots(candidates []typeScriptCommandInputs) []string {
+	roots := make([]string, 0, len(candidates))
+	for _, candidate := range candidates {
+		roots = append(roots, candidate.Cwd)
+	}
+	return dedupePaths(roots)
+}
+
+func pythonCandidateRoots(candidates []pythonCommandInputs) []string {
+	roots := make([]string, 0, len(candidates))
+	for _, candidate := range candidates {
+		roots = append(roots, candidate.Cwd)
+	}
+	return dedupePaths(roots)
+}
+
+func languageDetected(files []string, language string) bool {
+	return slices.Contains(detectLanguages(files), language)
+}
+
+func sortedMapKeys(values map[string]bool) []string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 func typeScriptSourceRootsForConfig(configDir string, config tsconfigFile) []string {

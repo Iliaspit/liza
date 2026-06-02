@@ -1,0 +1,25 @@
+[
+  {
+    "desc": "Render MAS optional-index prompt sections only from supplied prompt metadata.",
+    "done_when": "`BuildBasePrompt` omits Stacklit, SCIP, Semble, and QUERY ROUTING command sections when their corresponding metadata is absent; renders only supplied sections when one or more metadata inputs are present; and the rendered routing guidance distinguishes conceptual discovery, module orientation, dependency impact, symbol tracing, exact literal/path search, syntax-shaped search, and direct source reads as the evidence required for edits, reviews, and success claims.",
+    "scope": "Owns `internal/prompts/templates/base_prompt.tmpl`, `internal/prompts/builder.go`, `internal/prompts/builder_test.go`, and prompt renderer helper tests needed for BasePromptConfig metadata filtering. Does not modify `AGENT_TOOLS.md`, pairing SessionStart hooks, pairing init activation, or runtime index generation.",
+    "spec_ref": "specs/goals/20260602-indexing-activation.md",
+    "plan_ref": "specs/plans/20260602-indexing-activation/20260602-130539-code-planning-main-1-code-planning-5.md",
+    "validation": [
+      "go test ./internal/prompts"
+    ]
+  },
+  {
+    "desc": "Build MAS prompt metadata from env-gated, target-specific readiness only.",
+    "done_when": "Task, reviewer, and orchestrator prompt construction populate Stacklit, SCIP, and Semble metadata only from the current task worktree, reviewer worktree, or safe orchestrator project root; disabled env gates suppress sections even when stale artifacts exist; Stacklit, SCIP, or Semble availability/readiness failures suppress only that tool's prompt metadata while preserving other available routing metadata and prompt construction.",
+    "scope": "Owns `internal/agent/prompt.go`, `internal/agent/prompt_test.go`, `internal/agent/strategy_orchestrator.go`, `internal/agent/strategy_orchestrator_scip_test.go`, and directly related metadata calls in `internal/ops/scip_indexing.go`, `internal/ops/stacklit_indexing.go`, `internal/ops/semble_indexing.go`, and `internal/ops/semble_indexing_test.go` if prompt metadata failure isolation requires runtime-index cleanup or warning behavior changes. Does not modify `internal/prompts/templates/base_prompt.tmpl`, pairing SessionStart hooks, pairing init activation, global `AGENT_TOOLS.md`, or generated index locations.",
+    "spec_ref": "specs/goals/20260602-indexing-activation.md",
+    "plan_ref": "specs/plans/20260602-indexing-activation/20260602-130539-code-planning-main-1-code-planning-5.md",
+    "validation": [
+      "go test ./internal/agent ./internal/ops"
+    ],
+    "depends_on": [
+      "0"
+    ]
+  }
+]

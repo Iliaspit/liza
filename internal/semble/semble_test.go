@@ -172,6 +172,114 @@ func TestDefaultIgnorePatterns(t *testing.T) {
 	}
 }
 
+func TestEnsureProjectRootIgnore(t *testing.T) {
+	t.Run("creates missing physical ignore with default payload", func(t *testing.T) {
+		root := t.TempDir()
+
+		result := EnsureProjectRootIgnore(root)
+
+		if !result.Safe {
+			t.Fatalf("EnsureProjectRootIgnore() = %#v, want safe created ignore", result)
+		}
+		if result.Kind != TargetKindProjectRoot {
+			t.Fatalf("Kind = %q, want project root", result.Kind)
+		}
+		assertFileContent(t, filepath.Join(root, ".sembleignore"), GeneratedWorktreeIgnorePayload())
+		safety := ValidateTargetSafety(TargetSafetyOptions{
+			Kind:       TargetKindProjectRoot,
+			TargetRoot: root,
+		})
+		if !safety.Safe {
+			t.Fatalf("ValidateTargetSafety() after ensure = %#v, want safe", safety)
+		}
+	})
+
+	t.Run("verifies safe existing ignore without rewriting", func(t *testing.T) {
+		root := t.TempDir()
+		ignorePath := filepath.Join(root, ".sembleignore")
+		content := "# keep local comment\n" + GeneratedWorktreeIgnorePayload()
+		if err := os.WriteFile(ignorePath, []byte(content), 0o644); err != nil {
+			t.Fatalf("write safe .sembleignore: %v", err)
+		}
+
+		result := EnsureProjectRootIgnore(root)
+
+		if !result.Safe {
+			t.Fatalf("EnsureProjectRootIgnore() = %#v, want safe existing ignore", result)
+		}
+		assertFileContent(t, ignorePath, content)
+	})
+
+	t.Run("reports incomplete existing ignore without overwriting user content", func(t *testing.T) {
+		root := t.TempDir()
+		ignorePath := filepath.Join(root, ".sembleignore")
+		partial := strings.Join(DefaultIgnorePatterns()[:2], "\n") + "\n"
+		if err := os.WriteFile(ignorePath, []byte(partial), 0o644); err != nil {
+			t.Fatalf("write incomplete .sembleignore: %v", err)
+		}
+
+		result := EnsureProjectRootIgnore(root)
+
+		if result.Safe {
+			t.Fatalf("EnsureProjectRootIgnore() = %#v, want unsafe incomplete ignore", result)
+		}
+		if len(result.MissingIgnorePatterns) == 0 {
+			t.Fatalf("MissingIgnorePatterns = %#v, want missing required patterns", result.MissingIgnorePatterns)
+		}
+		if result.Diagnostic.Kind != DiagnosticExecutionFailure {
+			t.Fatalf("Diagnostic = %#v, want execution failure", result.Diagnostic)
+		}
+		if !strings.Contains(result.Diagnostic.Message, "missing required patterns") {
+			t.Fatalf("Diagnostic.Message = %q, want missing required patterns", result.Diagnostic.Message)
+		}
+		assertFileContent(t, ignorePath, partial)
+	})
+
+	t.Run("reports unreadable existing ignore without replacing it", func(t *testing.T) {
+		root := t.TempDir()
+		ignorePath := filepath.Join(root, ".sembleignore")
+		if err := os.Mkdir(ignorePath, 0o755); err != nil {
+			t.Fatalf("create directory at .sembleignore: %v", err)
+		}
+
+		result := EnsureProjectRootIgnore(root)
+
+		if result.Safe {
+			t.Fatalf("EnsureProjectRootIgnore() = %#v, want unsafe unreadable ignore", result)
+		}
+		if result.Diagnostic.Kind != DiagnosticExecutionFailure {
+			t.Fatalf("Diagnostic = %#v, want execution failure", result.Diagnostic)
+		}
+		if !strings.Contains(result.Diagnostic.Message, "project root .sembleignore") {
+			t.Fatalf("Diagnostic.Message = %q, want project-root ignore diagnostic", result.Diagnostic.Message)
+		}
+		info, err := os.Stat(ignorePath)
+		if err != nil {
+			t.Fatalf("Stat(%q) error = %v", ignorePath, err)
+		}
+		if !info.IsDir() {
+			t.Fatalf("%s was replaced; want original directory preserved", ignorePath)
+		}
+	})
+
+	t.Run("reports create failure when project root cannot receive ignore", func(t *testing.T) {
+		root := filepath.Join(t.TempDir(), "missing-root")
+
+		result := EnsureProjectRootIgnore(root)
+
+		if result.Safe {
+			t.Fatalf("EnsureProjectRootIgnore() = %#v, want unsafe creation failure", result)
+		}
+		if result.Diagnostic.Kind != DiagnosticExecutionFailure {
+			t.Fatalf("Diagnostic = %#v, want execution failure", result.Diagnostic)
+		}
+		if !strings.Contains(result.Diagnostic.Message, "create project root .sembleignore") {
+			t.Fatalf("Diagnostic.Message = %q, want creation diagnostic", result.Diagnostic.Message)
+		}
+		assertBoundedDiagnostic(t, result.Diagnostic)
+	})
+}
+
 func TestValidation(t *testing.T) {
 	t.Run("prewarm creates fixture outside target root and cleans it", func(t *testing.T) {
 		t.Setenv(EnvEnableSemble, "true")
@@ -463,6 +571,9 @@ func TestTargetSafety(t *testing.T) {
 		if !strings.HasSuffix(payload, "\n") {
 			t.Fatalf("GeneratedWorktreeIgnorePayload() = %q, want trailing newline", payload)
 		}
+		if payload != DefaultIgnorePayload() {
+			t.Fatalf("GeneratedWorktreeIgnorePayload() = %q, want shared default payload %q", payload, DefaultIgnorePayload())
+		}
 		lines := strings.Split(strings.TrimSuffix(payload, "\n"), "\n")
 		if !reflect.DeepEqual(lines, DefaultIgnorePatterns()) {
 			t.Fatalf("GeneratedWorktreeIgnorePayload() lines = %#v, want DefaultIgnorePatterns()", lines)
@@ -727,6 +838,17 @@ func assertBoundedDiagnostic(t *testing.T, diagnostic Diagnostic) {
 	}
 	if len(diagnostic.Message) > maxDiagnosticBytes {
 		t.Fatalf("diagnostic length = %d, want <= %d: %q", len(diagnostic.Message), maxDiagnosticBytes, diagnostic.Message)
+	}
+}
+
+func assertFileContent(t *testing.T, path, want string) {
+	t.Helper()
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(%q) error = %v", path, err)
+	}
+	if got := string(content); got != want {
+		t.Fatalf("%s content = %q, want %q", path, got, want)
 	}
 }
 

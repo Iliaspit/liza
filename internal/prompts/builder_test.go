@@ -121,6 +121,10 @@ func TestBuildBasePrompt(t *testing.T) {
 				"liza_add_tasks",
 				"liza_submit_for_review",
 				"liza_submit_verdict",
+				"=== SCIP-SEARCH INDEXES ===",
+				"=== STACKLIT INDEX ===",
+				"=== SEMBLE SEARCH ===",
+				"=== QUERY ROUTING ===",
 				"Read the goal spec: specs/vision.md",
 				// shared_reference content should NOT be in base prompt
 				"TASK STATE MACHINE:",
@@ -315,21 +319,14 @@ func TestBuildBasePromptStacklitOmittedWhenNoIndexes(t *testing.T) {
 	}
 
 	for _, notWant := range []string{
+		"=== STACKLIT INDEX ===",
 		"stacklit derive",
 		"stacklit get-module",
+		"No Stacklit index path was supplied for this target.",
+		"Do not infer or generate stacklit.json",
 	} {
 		if strings.Contains(prompt, notWant) {
 			t.Fatalf("BuildBasePrompt() rendered stacklit content %q with no supplied indexes", notWant)
-		}
-	}
-	for _, want := range []string{
-		"=== STACKLIT INDEX ===",
-		"No Stacklit index path was supplied for this target.",
-		"Do not infer or generate stacklit.json",
-		"use scip-search, rg, ast-grep, and direct source reads",
-	} {
-		if !strings.Contains(prompt, want) {
-			t.Fatalf("BuildBasePrompt() missing no-stacklit guidance %q:\n%s", want, prompt)
 		}
 	}
 }
@@ -366,7 +363,9 @@ func TestBuildBasePromptStacklitRendersSuppliedIndex(t *testing.T) {
 		"stacklit get-dependencies <module> -i " + quotedPath,
 		"stacklit get-hints -i " + quotedPath,
 		"stacklit get-hot-files -i " + quotedPath,
-		"Use Stacklit for orientation and impact analysis, then verify behavior against source files before editing.",
+		"- stacklit derive/find-module/get-module: module orientation before opening source files",
+		"- stacklit get-dependencies: dependency impact and direction",
+		"Direct source reads are required evidence for edits, reviews, and success claims.",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("BuildBasePrompt() missing expected stacklit content:\n%q", want)
@@ -402,14 +401,17 @@ func TestBuildBasePromptStacklitAndScipUnifiedQueryRouting(t *testing.T) {
 	if strings.Count(prompt, "=== QUERY ROUTING ===") != 1 {
 		t.Fatal("expected exactly one unified QUERY ROUTING section")
 	}
-	if !strings.Contains(prompt, "Orient with Stacklit (modules, dependencies, symbol names), then trace precisely with scip-search") {
-		t.Fatal("missing unified pipeline guidance when both tools present")
-	}
-	if strings.Contains(prompt, "Decompose broad queries") {
-		t.Fatal("scip-only routing text should not appear when Stacklit is also present")
-	}
-	if strings.Contains(prompt, "Use Stacklit for orientation and impact analysis, then verify") {
-		t.Fatal("stacklit-only routing text should not appear when scip-search is also present")
+	for _, want := range []string{
+		"- stacklit derive/find-module/get-module: module orientation before opening source files",
+		"- stacklit get-dependencies: dependency impact and direction",
+		"- scip-search: symbol tracing for definitions, references, callers/callees, implementations, and package structure",
+		"- rg: exact literal strings, config values, comments, CLI command names, filenames, and paths",
+		"- ast-grep: syntax-shaped search for call patterns, signatures, and structural matches",
+		"Direct source reads are required evidence for edits, reviews, and success claims.",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("missing unified routing guidance %q", want)
+		}
 	}
 }
 
@@ -491,7 +493,6 @@ func TestBuildBasePromptSembleSearchRendersPromptMetadata(t *testing.T) {
 		"Use --content with one of: code, docs, config, all; code is the default.",
 		"Semble returns candidate chunks, not proof",
 		"Do not use rg for broad-scope or common-word conceptual queries.",
-		"search only when Semble is unavailable and the current tool/MCP policy exposes",
 		"stacklit derive --ai-summary -i '/abs/worktree with spaces/stacklit.json'",
 		"scip-search symbols --index '/abs/worktree with spaces/.liza/scip/go.scip'",
 	} {
@@ -502,8 +503,76 @@ func TestBuildBasePromptSembleSearchRendersPromptMetadata(t *testing.T) {
 	if strings.Count(prompt, "=== QUERY ROUTING ===") != 1 {
 		t.Fatal("expected exactly one unified QUERY ROUTING section with Semble, Stacklit, and SCIP")
 	}
+	for _, want := range []string{
+		"- semble search: conceptual discovery when the exact symbol or module is unknown",
+		"- stacklit derive/find-module/get-module: module orientation before opening source files",
+		"- stacklit get-dependencies: dependency impact and direction",
+		"- scip-search: symbol tracing for definitions, references, callers/callees, implementations, and package structure",
+		"- rg: exact literal strings, config values, comments, CLI command names, filenames, and paths",
+		"- ast-grep: syntax-shaped search for call patterns, signatures, and structural matches",
+		"Direct source reads are required evidence for edits, reviews, and success claims.",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("BuildBasePrompt() missing routing guidance:\n%q", want)
+		}
+	}
 	if strings.Contains(prompt, "Morph MCP semantic search: broad conceptual search") {
 		t.Fatal("Morph must not be positioned as the primary semantic search tool")
+	}
+}
+
+func TestBuildBasePromptSembleOnlyRoutingOmitsUnavailableOptionalTools(t *testing.T) {
+	quotedRoot := "'/abs/worktree with spaces'"
+	config := BasePromptConfig{
+		Role:        "code-coder",
+		AgentID:     "coder-1",
+		TaskID:      "task-1",
+		SpecsDir:    "/project/specs",
+		ProjectRoot: "/project",
+		StatePath:   "/project/.liza/state.yaml",
+		GoalDesc:    "Build a web API",
+		GoalSpecRef: "specs/vision.md",
+		SembleSearch: SembleSearchMetadata{
+			TargetRoot:       "/abs/worktree with spaces",
+			ShellTargetRoot:  quotedRoot,
+			OfflineEnvPrefix: "HF_HUB_OFFLINE=1",
+			SearchExamples: []string{
+				`HF_HUB_OFFLINE=1 semble search "where is review submission validated?" ` + quotedRoot,
+			},
+			FindRelatedExample:  "HF_HUB_OFFLINE=1 semble find-related <file_path> <line> " + quotedRoot,
+			ContentModeGuidance: "Use --content with one of: code, docs, config, all; code is the default.",
+			DiscoveryNotice:     "Semble returns candidate chunks, not proof; verify with direct source reads before editing or claiming behavior.",
+		},
+	}
+
+	prompt, err := BuildBasePrompt(config)
+	if err != nil {
+		t.Fatalf("BuildBasePrompt() error: %v", err)
+	}
+
+	for _, want := range []string{
+		"=== SEMBLE SEARCH ===",
+		"=== QUERY ROUTING ===",
+		"- semble search: conceptual discovery when the exact symbol or module is unknown",
+		"- rg: exact literal strings, config values, comments, CLI command names, filenames, and paths",
+		"- ast-grep: syntax-shaped search for call patterns, signatures, and structural matches",
+		"Direct source reads are required evidence for edits, reviews, and success claims.",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("BuildBasePrompt() missing Semble-only routing guidance:\n%q", want)
+		}
+	}
+	for _, notWant := range []string{
+		"=== STACKLIT INDEX ===",
+		"=== SCIP-SEARCH INDEXES ===",
+		"stacklit derive",
+		"scip-search symbols",
+		"- stacklit",
+		"- scip-search",
+	} {
+		if strings.Contains(prompt, notWant) {
+			t.Fatalf("BuildBasePrompt() rendered unavailable optional-tool guidance %q:\n%s", notWant, prompt)
+		}
 	}
 }
 

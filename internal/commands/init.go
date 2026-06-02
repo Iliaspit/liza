@@ -15,11 +15,13 @@ import (
 	gitpkg "github.com/liza-mas/liza/internal/gitenv"
 	"github.com/liza-mas/liza/internal/initcheck"
 	"github.com/liza-mas/liza/internal/models"
+	"github.com/liza-mas/liza/internal/pairingindex"
 	"github.com/liza-mas/liza/internal/paths"
 	"github.com/liza-mas/liza/internal/pipeline"
 	"github.com/liza-mas/liza/internal/projectdetect"
 	"github.com/liza-mas/liza/internal/scipsearch"
 	"github.com/liza-mas/liza/internal/semble"
+	"github.com/liza-mas/liza/internal/stacklit"
 )
 
 var (
@@ -66,6 +68,7 @@ var globalFallbacks = map[string]string{
 // InitPairingParams holds the parameters for InitPairingCommand.
 type InitPairingParams struct {
 	Agents         []string  // agent names (e.g. "claude", "codex", "gemini", "mistral")
+	ScipSearch     []string  // --scip-search: enabled pairing SCIP languages
 	Stdin          io.Reader // input for interactive prompts (nil = os.Stdin)
 	ContractAction string    // "global", "rename", "skip", or "" (default behavior)
 }
@@ -116,12 +119,46 @@ func InitPairingCommand(params InitPairingParams) error {
 
 	// Resolve project root for repo-root operations
 	var projectRoot string
+	stacklitEnabled := stacklit.RuntimeEnabled()
+	scipEnabled := pairingScipEnabled()
+	sembleEnabled := semble.RuntimeEnabled()
 	if len(repoRootNames) > 0 || hasClaude {
 		lizaPaths, err := paths.LizaPathsFromGit()
 		if err != nil {
 			return fmt.Errorf("failed to determine project root: %w", err)
 		}
 		projectRoot = lizaPaths.ProjectRoot()
+	}
+
+	if projectRoot != "" && sembleEnabled {
+		safety := semble.EnsureProjectRootIgnore(projectRoot)
+		if safety.Diagnostic != (semble.Diagnostic{}) {
+			return fmt.Errorf("semble project-root safety failed: %s", safety.Diagnostic.Message)
+		}
+		runSembleInitPrewarm(projectRoot)
+	}
+
+	if projectRoot != "" && (stacklitEnabled || scipEnabled) {
+		var scipPlans []scipsearch.RuntimeCommandPlan
+		if scipEnabled {
+			plans, err := scipsearch.PlanPairingCommands(scipsearch.PairingPlanOptions{
+				ProjectRoot:       projectRoot,
+				ExplicitLanguages: params.ScipSearch,
+			})
+			if err != nil {
+				return fmt.Errorf("scip-search pairing plan failed: %w", err)
+			}
+			scipPlans = plans
+		}
+		if stacklitEnabled || len(scipPlans) > 0 {
+			if _, err := pairingindex.InstallActivation(pairingindex.InstallActivationOptions{
+				RepoRoot:       projectRoot,
+				EnableStacklit: stacklitEnabled,
+				ScipPlans:      scipPlans,
+			}); err != nil {
+				return fmt.Errorf("pairing index activation failed: %w", err)
+			}
+		}
 	}
 
 	if len(repoRootNames) > 0 {
@@ -165,6 +202,10 @@ func InitPairingCommand(params InitPairingParams) error {
 	}
 
 	return nil
+}
+
+func pairingScipEnabled() bool {
+	return scipsearch.ParseEnvGate(os.Getenv(scipsearch.EnvEnableScipSearch))
 }
 
 // isLizaSymlink returns true if path exists, is a symlink, and points to contractTarget.

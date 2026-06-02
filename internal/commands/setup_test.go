@@ -53,6 +53,21 @@ func TestSetupCommand_NewInstall(t *testing.T) {
 	}
 }
 
+func TestSetupCommand_NewInstallAgentToolsOptionalIndexGuidance(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	err := SetupCommand(SetupParams{TargetDir: tmpDir})
+	if err != nil {
+		t.Fatalf("SetupCommand failed: %v", err)
+	}
+
+	content, err := os.ReadFile(filepath.Join(tmpDir, "AGENT_TOOLS.md"))
+	if err != nil {
+		t.Fatalf("reading installed AGENT_TOOLS.md: %v", err)
+	}
+	assertAgentToolsOptionalIndexGuidance(t, string(content))
+}
+
 func TestSetupCommand_ExistingWithoutForce(t *testing.T) {
 	tmpDir := t.TempDir()
 
@@ -142,6 +157,9 @@ func TestSetupCommand_CustomizableFileSkipped(t *testing.T) {
 	}
 	if string(toolsContent) != "my custom tools" {
 		t.Error("AGENT_TOOLS.md was overwritten despite user declining")
+	}
+	if strings.Contains(string(toolsContent), "Stacklit") || strings.Contains(string(toolsContent), "Semble") {
+		t.Error("AGENT_TOOLS.md custom content was not preserved exactly")
 	}
 
 	// AGENT_TOOLS.md.bak should NOT exist (file was skipped, not overwritten)
@@ -367,6 +385,39 @@ func TestSetupCommand_CustomAgentToolsFileNotFound(t *testing.T) {
 	// No files should have been written
 	if _, err := os.Stat(filepath.Join(tmpDir, "CORE.md")); err == nil {
 		t.Error("CORE.md should not exist — early validation should prevent any writes")
+	}
+}
+
+func assertAgentToolsOptionalIndexGuidance(t *testing.T, content string) {
+	t.Helper()
+
+	required := []string{
+		"Semble target root",
+		"current session context says Semble is available",
+		"explicit Stacklit index path",
+		"explicit SCIP index path",
+		"disabled, unavailable, or not advertised",
+		"fall back to `rg`, `ast-grep`, direct reads",
+		"Morph MCP only when policy exposes it",
+	}
+	for _, want := range required {
+		if !strings.Contains(content, want) {
+			t.Errorf("AGENT_TOOLS.md missing optional-index guidance: %q", want)
+		}
+	}
+
+	forbidden := []string{
+		"/home/tangi/",
+		"/home/",
+		".worktrees/",
+		".liza/scip/",
+		"stacklit.json in pairing mode",
+		"<task-worktree-path>",
+	}
+	for _, text := range forbidden {
+		if strings.Contains(content, text) {
+			t.Errorf("AGENT_TOOLS.md contains project-specific generated path guidance: %q", text)
+		}
 	}
 }
 

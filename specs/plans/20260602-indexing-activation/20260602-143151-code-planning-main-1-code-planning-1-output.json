@@ -1,0 +1,41 @@
+[
+  {
+    "desc": "Implement effective Git hook plumbing for pairing index refresh.",
+    "done_when": "`internal/pairingindex` can resolve the effective Git hooks directory for default and non-default `core.hooksPath`, install or verify Liza-managed wrappers for `post-commit`, `post-checkout`, `post-merge`, and `post-rewrite`, preserve idempotent Liza-managed hook state, and return explicit collision diagnostics instead of silently overwriting existing non-Liza hooks.",
+    "scope": "Owns `internal/pairingindex` hook path resolution, lifecycle hook wrapper installation APIs, hook collision diagnostics, and tests/fixtures for default hooks, relative and absolute `core.hooksPath`, idempotent reinstall, missing or unsafe hook directories, and existing-hook collisions. Does not generate the `liza-index.sh` Stacklit script body, plan SCIP roots, wire pairing init CLI behavior, update global `AGENT_TOOLS.md`, or change MAS worktree index generation.",
+    "spec_ref": "specs/goals/20260602-indexing-activation.md",
+    "plan_ref": "specs/plans/20260602-indexing-activation/20260602-143151-code-planning-main-1-code-planning-1.md",
+    "validation": [
+      "go test ./internal/pairingindex"
+    ],
+    "task_depends_on": [
+      "code-planning-main-1-code-planning-0"
+    ]
+  },
+  {
+    "desc": "Implement Stacklit `liza-index.sh` script contract for pairing lifecycle refresh.",
+    "done_when": "`internal/pairingindex` can render and install an executable repo-local `liza-index.sh` that automatic lifecycle hooks invoke without AI-summary, refreshes repo-root `stacklit.json` using the existing no-AI Stacklit generation command contract, and supports manual `liza-index.sh ai` invocation that includes Stacklit AI-summary behavior.",
+    "scope": "Owns `internal/pairingindex` generated `liza-index.sh` content, script installation permissions, automatic no-AI Stacklit refresh command tests, manual `ai` argument tests, and integration points from lifecycle wrappers to the script entrypoint. Does not define SCIP indexer command construction, wire pairing init CLI behavior, edit SessionStart hooks, update global `AGENT_TOOLS.md`, or change MAS Stacklit refresh behavior in `internal/stacklit`.",
+    "spec_ref": "specs/goals/20260602-indexing-activation.md",
+    "plan_ref": "specs/plans/20260602-indexing-activation/20260602-143151-code-planning-main-1-code-planning-1.md",
+    "validation": [
+      "go test ./internal/pairingindex"
+    ],
+    "depends_on": [
+      "0"
+    ]
+  },
+  {
+    "desc": "Implement generated Stacklit artifact cleanliness for pairing index refresh.",
+    "done_when": "`internal/pairingindex` keeps generated repo-root Stacklit artifacts out of accidental task diffs by verifying `stacklit.json` is intentionally tracked, ignored, or privately excluded before activation succeeds, reports a clear diagnostic when no safe status strategy exists, and proves with Git status fixtures that generated Stacklit artifacts do not appear as accidental untracked files.",
+    "scope": "Owns `internal/pairingindex` generated artifact status checks, private exclude or ignore coordination for repo-root `stacklit.json`, diagnostics for unsafe generated-artifact state, and tests/fixtures for tracked, ignored, privately excluded, and unsafe untracked Stacklit artifact cases. Does not modify worktree-local MAS artifact handling, wire pairing init CLI behavior, update global `AGENT_TOOLS.md`, or document user-facing env-gate behavior.",
+    "spec_ref": "specs/goals/20260602-indexing-activation.md",
+    "plan_ref": "specs/plans/20260602-indexing-activation/20260602-143151-code-planning-main-1-code-planning-1.md",
+    "validation": [
+      "go test ./internal/pairingindex"
+    ],
+    "depends_on": [
+      "1"
+    ]
+  }
+]

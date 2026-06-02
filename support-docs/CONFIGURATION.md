@@ -111,19 +111,41 @@ All configuration lives in `.liza/state.yaml` under the `config` section.
 | `auto_checkpoint_summary` | true | — | — | boolean | Auto-runs checkpoint-summary after successful merges and writes `.liza/checkpoint-summary.md` |
 | `scip_search` | (none) | — | — | language list | Durable allowlist of SCIP languages Liza may index when `LIZA_ENABLE_SCIP_SEARCH` is truthy |
 
+## Optional Indexing Activation
+
+Stacklit, SCIP Search, and Semble are optional navigation aids. Liza separates
+their activation across setup, pairing init, and MAS runtime:
+
+- `liza setup` owns global generic guidance in `~/.liza/AGENT_TOOLS.md`. That
+  guidance explains how agents should route to optional tools only when a session
+  supplies explicit paths or readiness metadata. It must stay generic and must
+  not contain project-specific generated paths, readiness state, or claims that
+  optional tools are installed.
+- Pairing `liza init` owns project-local activation artifacts. When an optional
+  indexing environment gate is truthy during pairing init, Liza installs or
+  verifies the project-local hooks, generated-artifact cleanliness, SCIP command
+  plans, and Semble safety files needed by pairing SessionStart context.
+- MAS runtime owns per-agent prompt activation. MAS prompts include Stacklit,
+  SCIP Search, or Semble sections only from target-specific runtime metadata for
+  the current project root, task worktree, or reviewer worktree.
+
+Disabled or unavailable optional tools degrade by omission. Liza omits the
+unavailable prompt or SessionStart section and agents fall back to direct source
+reads, `rg` for exact literals and path discovery, `ast-grep` for syntax-shaped
+search, and any semantic fallback tool exposed by the active tool policy.
+
 ### Stacklit (`LIZA_ENABLE_STACKLIT`)
 
-`stacklit-cli` is an optional external repository-navigation tool for MAS
-worktrees. It is strict opt-in: Liza refreshes `stacklit.json` and injects
-Stacklit prompt guidance only when `LIZA_ENABLE_STACKLIT` is truthy.
+`stacklit-cli` is an optional external repository-navigation tool. It is strict
+opt-in.
 
 `LIZA_ENABLE_STACKLIT` is process-local activation, not durable project state.
 Values are trimmed and compared case-insensitively:
 
 | Value | Meaning |
 |-------|---------|
-| `1`, `true` | Enable MAS Stacklit index refresh and prompt guidance |
-| unset, empty, `0`, `false` | Disable MAS Stacklit index refresh and prompt guidance |
+| `1`, `true` | Enable Stacklit activation for the current init/runtime process |
+| unset, empty, `0`, `false` | Keep Stacklit disabled for the current init/runtime process |
 
 Repository-level Stacklit files are operator-owned. Commit curated Stacklit
 inputs when used:
@@ -140,8 +162,24 @@ Liza does not create or mutate `stacklit-insights.json` or `.stacklitrc.json`.
 When those files exist, `stacklit generate-json` consumes them naturally while
 refreshing `stacklit.json`.
 
+Pairing init behavior:
+
+- Truthy `LIZA_ENABLE_STACKLIT` during pairing `liza init` installs or verifies
+  project-local Git hook plumbing that refreshes the repo-root `stacklit.json`
+  at safe lifecycle points.
+- Pairing init also keeps generated Stacklit artifacts out of accidental task
+  diffs by requiring them to be intentionally tracked, ignored, privately
+  excluded, or otherwise protected by the generated project-local setup.
+- Automatic pairing lifecycle refresh runs `stacklit generate-json`; it does not
+  run `stacklit ai-summary`. Manual project-local refresh may include AI-summary
+  only when the generated hook script is invoked with its explicit AI argument.
+- Pairing init never writes repo-specific Stacklit paths into
+  `~/.liza/AGENT_TOOLS.md`.
+
+MAS runtime behavior:
+
 At runtime, Liza runs `stacklit generate-json -o stacklit.json` at controlled
-lifecycle points:
+lifecycle points when `LIZA_ENABLE_STACKLIT` is truthy:
 
 - Orchestrator refreshes `<project_root>/stacklit.json`.
 - Task worktree creation, reviewer worktree recovery, and submit-for-review
@@ -161,26 +199,46 @@ available after a failed root refresh, prompts may still include it as an
 available repository snapshot; agents are instructed to verify behavior against
 source files before editing.
 
+Pairing SessionStart and MAS prompts advertise Stacklit only when they have an
+explicit current-session index path. Agents must not infer index locations from
+global guidance.
+
 Explicit non-goals: Liza does not install `stacklit-cli`, run `stacklit view`,
-generate `stacklit.html`, run `stacklit init-insights`, run `stacklit
-ai-summary`, or curate Stacklit insights. Operators install Stacklit, commit
-their curated Stacklit inputs, and choose whether to commit or ignore generated
-indexes.
+generate `stacklit.html`, run `stacklit init-insights`, or curate Stacklit
+insights. Operators install Stacklit, commit their curated Stacklit inputs, and
+choose whether to commit or ignore generated indexes.
 
 ### Semble (`LIZA_ENABLE_SEMBLE`)
 
-Semble is an optional external semantic repository search tool for MAS
-worktrees. It is strict opt-in: Liza validates Semble and injects Semble prompt
-guidance only when `LIZA_ENABLE_SEMBLE` is truthy, the `semble` CLI is present,
-offline validation succeeds, and the target root is safe to index.
+Semble is an optional external semantic repository search tool. It is strict
+opt-in.
 
 `LIZA_ENABLE_SEMBLE` is process-local activation, not durable project state.
 Values are trimmed and compared case-insensitively:
 
 | Value | Meaning |
 |-------|---------|
-| `1`, `true` | Enable Semble prewarm, offline validation, and prompt guidance when Semble is installed and offline-ready |
-| unset, empty, `0`, `false` | Keep Semble disabled; Liza does not validate Semble, run Semble, or mention Semble commands in MAS prompts |
+| `1`, `true` | Enable Semble activation for the current init/runtime process when Semble is installed and offline-ready |
+| unset, empty, `0`, `false` | Keep Semble disabled for the current init/runtime process |
+
+Pairing init behavior:
+
+- Truthy `LIZA_ENABLE_SEMBLE` during pairing `liza init` ensures the project root
+  has a physical `.sembleignore` safety file before pairing SessionStart
+  advertises Semble.
+- The pairing `.sembleignore` excludes Liza runtime state, generated indexes, and
+  common credential patterns. Projects with sensitive source-adjacent files
+  should add their own project-specific patterns before enabling Semble.
+- Pairing SessionStart advertises Semble only when the current project root has
+  the required safety artifact and Semble is available for that session.
+- Pairing init never writes repo-specific Semble target roots into
+  `~/.liza/AGENT_TOOLS.md`.
+
+MAS runtime behavior:
+
+Liza validates Semble and injects MAS Semble prompt guidance only when
+`LIZA_ENABLE_SEMBLE` is truthy, the `semble` CLI is present, offline validation
+succeeds, and the target root is safe to index.
 
 During `liza init --spec`, a truthy `LIZA_ENABLE_SEMBLE` lets Liza perform a
 controlled init-time prewarm when `semble` is available. The prewarm uses a
@@ -254,23 +312,21 @@ candidates only; source reads remain the evidence.
 
 ### SCIP Search (`config.scip_search`)
 
-`scip-search` is an optional external repository-navigation tool for MAS
-worktrees. It is strict opt-in: Liza generates SCIP indexes and injects
-`scip-search` prompt guidance only when `LIZA_ENABLE_SCIP_SEARCH` is truthy and
-`config.scip_search` contains at least one supported language.
+`scip-search` is an optional external repository-navigation tool. It is strict
+opt-in.
 
 `LIZA_ENABLE_SCIP_SEARCH` is process-local activation, not durable project
 state. Values are trimmed and compared case-insensitively:
 
 | Value | Meaning |
 |-------|---------|
-| `1`, `true` | Enable MAS SCIP indexing and prompt guidance when `config.scip_search` allows a detected language |
-| unset, empty, `0`, `false` | Disable MAS SCIP indexing and prompt guidance, even when `config.scip_search` exists |
+| `1`, `true` | Enable SCIP activation for the current init/runtime process |
+| unset, empty, `0`, `false` | Keep SCIP disabled for the current init/runtime process |
 
 `config.scip_search` is the durable language allowlist written under
-`.liza/state.yaml` by `liza init`. It does not activate MAS indexing by itself;
-it only limits which detected languages Liza may index after the environment
-gate is truthy.
+`.liza/state.yaml` by `liza init --spec`. It does not activate MAS indexing by
+itself; it only limits which detected languages Liza may index after the
+environment gate is truthy.
 
 Use repeated `--scip-search <language>` options during init to set an explicit
 allowlist:
@@ -280,9 +336,32 @@ LIZA_ENABLE_SCIP_SEARCH=1 liza init --spec goal.md --scip-search go --scip-searc
 ```
 
 Supported `--scip-search <language>` values are exactly `go`, `typescript`, and
-`python`. When no explicit `--scip-search` value is supplied and
-`LIZA_ENABLE_SCIP_SEARCH` is truthy, Liza auto-detects supported languages from
-git-tracked code and writes the detected allowlist to `config.scip_search`.
+`python`. During MAS `liza init --spec`, when no explicit `--scip-search` value
+is supplied and `LIZA_ENABLE_SCIP_SEARCH` is truthy, Liza auto-detects supported
+languages from git-tracked code and writes the detected allowlist to
+`config.scip_search`.
+
+Pairing init behavior:
+
+- Truthy `LIZA_ENABLE_SCIP_SEARCH` during pairing `liza init` asks Liza to
+  autodetect a repo-specific SCIP indexing plan and install or verify
+  project-local Git hook plumbing for the enabled languages.
+- Repeated `--scip-search <language>` flags restrict which languages pairing init
+  considers, but they are not root or working-directory selections. Pairing init
+  still needs one confident root per enabled language.
+- If pairing init finds multiple plausible roots for an enabled language and
+  cannot choose confidently, it reports an ambiguity diagnostic instead of
+  writing guessed hook commands.
+- If pairing init finds exactly one confident root per enabled language, the
+  generated project-local hook contains concrete repo-specific indexer commands.
+  Those concrete commands belong in the project hook, not in global setup
+  guidance.
+
+MAS runtime behavior:
+
+Liza generates MAS SCIP indexes and injects `scip-search` prompt guidance only
+when `LIZA_ENABLE_SCIP_SEARCH` is truthy and `config.scip_search` contains at
+least one supported language for the current target root.
 
 `scip-search` and the language indexers are separate external prerequisites.
 Installing `scip-search` does not install the indexers:
@@ -313,6 +392,10 @@ Indexing failures degrade gracefully at runtime. If one enabled language fails
 to index, Liza still spawns the agent and omits that failed language from the
 `scip-search` prompt guidance. If no index is available, Liza omits the
 `scip-search` prompt section entirely.
+
+Pairing SessionStart and MAS prompts advertise SCIP only when they have explicit
+current-session index paths. Agents must not search for default SCIP indexes or
+infer paths from global guidance.
 
 Explicit non-goals: Liza does not build, vendor, auto-install, daemonize, watch,
 cache, or wrap `scip-search` or its language indexers. Operators install and
@@ -522,9 +605,9 @@ project configuration belongs in `.liza/state.yaml`.
 |----------|----------|---------|---------|
 | `LIZA_AGENT_ID` | For agent commands | -- | Agent identifier input (format: `{role}-{number}`). `liza agent` also exports the resolved ID to spawned provider CLIs so hooks select MAS mode. |
 | `LIZA_DISABLE_CLAUDE_SUBAGENTS` | No | unset | Set to `1` to launch Claude Code agents with `--disallowedTools Task`, disabling Claude subagent delegation. Use only when intentionally waiving Claude subagent delegation; agents may be unable to satisfy contract delegation triggers while this is set. |
-| `LIZA_ENABLE_SCIP_SEARCH` | No | unset | Strict opt-in MAS activation gate for SCIP indexing and `scip-search` prompt guidance. Truthy values are `1` and `true`; unset, empty, `0`, and `false` disable it. Values are trimmed and parsed case-insensitively. |
-| `LIZA_ENABLE_SEMBLE` | No | unset | Strict opt-in MAS activation gate for Semble semantic discovery. Truthy values are `1` and `true`; unset, empty, `0`, and `false` disable it. Values are trimmed and parsed case-insensitively. When enabled, `liza init --spec` may prewarm the model/cache and MAS prompts mention Semble only after `HF_HUB_OFFLINE=1` offline validation succeeds. |
-| `LIZA_ENABLE_STACKLIT` | No | unset | Strict opt-in MAS activation gate for Stacklit `stacklit.json` refresh and prompt guidance. Truthy values are `1` and `true`; unset, empty, `0`, and `false` disable it. Values are trimmed and parsed case-insensitively. |
+| `LIZA_ENABLE_SCIP_SEARCH` | No | unset | Strict opt-in activation gate for SCIP. In pairing init, truthy values enable project-local hook planning and installation for detected or selected languages. In MAS, truthy values enable indexing and `scip-search` prompt guidance only when `config.scip_search` also allows a detected language. Unset, empty, `0`, and `false` disable it. Values are trimmed and parsed case-insensitively. |
+| `LIZA_ENABLE_SEMBLE` | No | unset | Strict opt-in activation gate for Semble. In pairing init, truthy values enable project-root `.sembleignore` safety setup before SessionStart advertisement. In MAS, truthy values enable prewarm/offline validation and prompt guidance only when Semble is installed, offline-ready, and safe for the target root. Unset, empty, `0`, and `false` disable it. Values are trimmed and parsed case-insensitively. |
+| `LIZA_ENABLE_STACKLIT` | No | unset | Strict opt-in activation gate for Stacklit. In pairing init, truthy values enable project-local hook setup for repo-root `stacklit.json` refresh. In MAS, truthy values enable target-local `stacklit.json` refresh and prompt guidance when an index is available. Unset, empty, `0`, and `false` disable it. Values are trimmed and parsed case-insensitively. |
 | `LIZA_CODEX_VERSION` | No | unset | Process-local fallback for `config.codex_package_version` when launching headless Codex agents |
 | `LIZA_SPECS` | No | `specs/` | Path to specs directory (relative to project root) |
 | `LIZA_LOG_LEVEL` | No | `INFO` | Logging verbosity: DEBUG, INFO, WARN, ERROR |

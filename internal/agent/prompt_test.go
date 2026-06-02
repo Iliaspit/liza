@@ -1087,45 +1087,72 @@ func TestBuildPromptWithContextScipSearchOmitsEmptyAvailableIndexes(t *testing.T
 	}
 }
 
-func TestBuildPromptWithContextScipAvailableIndexErrorPropagates(t *testing.T) {
-	projectRoot := t.TempDir()
-	testhelpers.SetupPipelineConfig(t, projectRoot)
-	t.Setenv(scipsearch.EnvEnableScipSearch, "true")
+func TestBuildPromptWithContextScipAvailableIndexErrorOmitsScipAndKeepsStacklit(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		role string
+	}{
+		{name: "coder", role: "coder"},
+		{name: "reviewer", role: "code-reviewer"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			projectRoot := t.TempDir()
+			testhelpers.SetupPipelineConfig(t, projectRoot)
+			taskWorktree := filepath.Join(projectRoot, ".worktrees", "task-1")
+			if err := os.MkdirAll(taskWorktree, 0o755); err != nil {
+				t.Fatalf("MkdirAll(%q): %v", taskWorktree, err)
+			}
+			t.Setenv(scipsearch.EnvEnableScipSearch, "true")
+			t.Setenv(stacklit.EnvEnableStacklit, "true")
+			taskStacklitIndex := filepath.Join(taskWorktree, "stacklit.json")
+			writePromptTestFile(t, taskStacklitIndex, `{"project":{"name":"task"}}`)
+			restore := replaceScipAvailableIndexesForTest(t, func(opts scipsearch.RuntimePlanOptions) ([]scipsearch.IndexRef, error) {
+				if opts.TargetRoot != taskWorktree {
+					t.Fatalf("SCIP target root = %q, want task worktree %q", opts.TargetRoot, taskWorktree)
+				}
+				return nil, stderrors.New("scip discovery failed")
+			})
+			defer restore()
 
-	worktree := ".worktrees/missing-task"
-	state := &models.State{
-		Goal: models.Goal{
-			Description: "Test goal",
-			SpecRef:     "specs/goal.md",
-		},
-		Tasks: []models.Task{
-			{
-				ID:          "task-1",
-				Description: "Test task",
-				Status:      models.TaskStatusImplementing,
-				DoneWhen:    "Task is complete",
-				Worktree:    &worktree,
-			},
-		},
-		Config: models.Config{
-			ScipSearch:        []string{"go"},
-			IntegrationBranch: "main",
-		},
-	}
-	config := SupervisorConfig{
-		Role:        "coder",
-		AgentID:     "coder-1",
-		ProjectRoot: projectRoot,
-		SpecsDir:    filepath.Join(projectRoot, "specs"),
-		StatePath:   filepath.Join(projectRoot, ".liza", "state.yaml"),
-	}
+			worktree := ".worktrees/task-1"
+			state := &models.State{
+				Goal: models.Goal{
+					Description: "Test goal",
+					SpecRef:     "specs/goal.md",
+				},
+				Tasks: []models.Task{
+					{
+						ID:          "task-1",
+						Description: "Test task",
+						Status:      models.TaskStatusImplementing,
+						DoneWhen:    "Task is complete",
+						Worktree:    &worktree,
+					},
+				},
+				Config: models.Config{
+					ScipSearch:        []string{"go"},
+					IntegrationBranch: "main",
+				},
+			}
+			config := SupervisorConfig{
+				Role:        tt.role,
+				AgentID:     tt.role + "-1",
+				ProjectRoot: projectRoot,
+				SpecsDir:    filepath.Join(projectRoot, "specs"),
+				StatePath:   filepath.Join(projectRoot, ".liza", "state.yaml"),
+			}
 
-	_, err := buildPromptWithContext(state, config, "task-1", testResolver(t))
-	if err == nil {
-		t.Fatalf("buildPromptWithContext() error = nil, want available-index error")
-	}
-	if !strings.Contains(err.Error(), "available scip-search indexes") {
-		t.Fatalf("buildPromptWithContext() error = %q, want available-index context", err)
+			prompt, err := buildPromptWithContext(state, config, "task-1", testResolver(t))
+			if err != nil {
+				t.Fatalf("buildPromptWithContext() error = %v", err)
+			}
+			if strings.Contains(prompt, "=== SCIP-SEARCH INDEXES ===") {
+				t.Fatalf("prompt contains scip-search section after discovery failure:\n%s", prompt)
+			}
+			if !strings.Contains(prompt, "stacklit derive --ai-summary -i '"+taskStacklitIndex+"'") {
+				t.Fatalf("prompt missing Stacklit metadata after SCIP discovery failure")
+			}
+		})
 	}
 }
 
@@ -1209,6 +1236,52 @@ func TestBuildOrchestratorPromptContextStacklitIndexRendersFromProjectRoot(t *te
 	}
 	if strings.Contains(prompt, taskStacklitIndex) {
 		t.Fatalf("prompt contains task worktree Stacklit index path %q for orchestrator prompt", taskStacklitIndex)
+	}
+}
+
+func TestBuildOrchestratorPromptContextStacklitAvailableIndexErrorOmitsStacklitAndKeepsScip(t *testing.T) {
+	projectRoot := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, projectRoot)
+	testhelpers.SetupPipelineConfig(t, projectRoot)
+	t.Setenv(scipsearch.EnvEnableScipSearch, "true")
+	t.Setenv(stacklit.EnvEnableStacklit, "true")
+	writePromptTestFile(t, filepath.Join(projectRoot, "go.mod"), "module example.com/project\n")
+	testhelpers.MustGit(t, projectRoot, "add", "go.mod")
+	testhelpers.MustGit(t, projectRoot, "commit", "-m", "Add go module")
+	projectGoIndex := filepath.Join(projectRoot, ".liza", "scip", "go.scip")
+	writePromptTestFile(t, projectGoIndex, "go index")
+	restore := replaceStacklitAvailableIndexesForTest(t, func(opts stacklit.RuntimePlanOptions) ([]stacklit.IndexRef, error) {
+		if opts.TargetRoot != projectRoot {
+			t.Fatalf("Stacklit target root = %q, want project root %q", opts.TargetRoot, projectRoot)
+		}
+		return nil, stderrors.New("stacklit discovery failed")
+	})
+	defer restore()
+
+	state := &models.State{
+		Goal: models.Goal{
+			Description: "Test goal",
+			SpecRef:     "specs/goal.md",
+		},
+		Config: models.Config{ScipSearch: []string{"go"}},
+	}
+	config := SupervisorConfig{
+		Role:        "orchestrator",
+		AgentID:     "orchestrator-1",
+		ProjectRoot: projectRoot,
+		SpecsDir:    filepath.Join(projectRoot, "specs"),
+		StatePath:   filepath.Join(projectRoot, ".liza", "state.yaml"),
+	}
+
+	prompt, err := buildOrchestratorPromptContext(state, config, testResolver(t))
+	if err != nil {
+		t.Fatalf("buildOrchestratorPromptContext() error = %v", err)
+	}
+	if strings.Contains(prompt, "=== STACKLIT INDEX ===") || strings.Contains(prompt, "stacklit derive") {
+		t.Fatalf("prompt contains Stacklit guidance after discovery failure:\n%s", prompt)
+	}
+	if !strings.Contains(prompt, "scip-search symbols --index '"+projectGoIndex+"' --name Foo --name Bar") {
+		t.Fatalf("prompt missing SCIP metadata after Stacklit discovery failure")
 	}
 }
 
@@ -4392,6 +4465,24 @@ func replaceSemblePromptMetadataForTest(t *testing.T, build func(semble.PromptMe
 	buildSemblePromptMetadata = build
 	return func() {
 		buildSemblePromptMetadata = previous
+	}
+}
+
+func replaceScipAvailableIndexesForTest(t *testing.T, available func(scipsearch.RuntimePlanOptions) ([]scipsearch.IndexRef, error)) func() {
+	t.Helper()
+	previous := scipAvailableIndexes
+	scipAvailableIndexes = available
+	return func() {
+		scipAvailableIndexes = previous
+	}
+}
+
+func replaceStacklitAvailableIndexesForTest(t *testing.T, available func(stacklit.RuntimePlanOptions) ([]stacklit.IndexRef, error)) func() {
+	t.Helper()
+	previous := stacklitAvailableIndexes
+	stacklitAvailableIndexes = available
+	return func() {
+		stacklitAvailableIndexes = previous
 	}
 }
 

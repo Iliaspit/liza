@@ -14,15 +14,21 @@ import (
 
 	"github.com/liza-mas/liza/internal/db"
 	"github.com/liza-mas/liza/internal/models"
+	"github.com/liza-mas/liza/internal/pairingindex"
 	"github.com/liza-mas/liza/internal/paths"
 	"github.com/liza-mas/liza/internal/scipsearch"
 	"github.com/liza-mas/liza/internal/semble"
+	"github.com/liza-mas/liza/internal/stacklit"
 	"github.com/liza-mas/liza/internal/testhelpers"
 )
 
 // setupGlobalLiza delegates to testhelpers.SetupGlobalLiza.
 func setupGlobalLiza(t *testing.T) string {
-	return testhelpers.SetupGlobalLiza(t)
+	fakeHome := testhelpers.SetupGlobalLiza(t)
+	unsetEnvForTest(t, stacklit.EnvEnableStacklit)
+	unsetEnvForTest(t, scipsearch.EnvEnableScipSearch)
+	unsetEnvForTest(t, semble.EnvEnableSemble)
+	return fakeHome
 }
 
 func TestInitCommand(t *testing.T) {
@@ -2180,6 +2186,295 @@ func TestInitPairingCommand_MultipleAgents(t *testing.T) {
 	verifyCodexHooks(t, gitDir)
 }
 
+func TestInitPairingCommand_DisabledIndexGatesPreserveProviderHooksOnly(t *testing.T) {
+	gitDir := setupGitRepo(t)
+	defer os.RemoveAll(gitDir)
+	unsetEnvForTest(t, stacklit.EnvEnableStacklit)
+	unsetEnvForTest(t, scipsearch.EnvEnableScipSearch)
+	unsetEnvForTest(t, semble.EnvEnableSemble)
+	setupGlobalLiza(t)
+
+	originalDir, _ := os.Getwd()
+	defer os.Chdir(originalDir)
+	os.Chdir(gitDir)
+
+	var scipCalls int
+	restoreScip := scipsearch.SetCommandRunnerForTest(func(name string, args ...string) (string, error) {
+		scipCalls++
+		return "unexpected\n", nil
+	})
+	defer restoreScip()
+	var sembleLookups int
+	restoreSemble := setInitSembleHooksForTest(
+		func(name string) (string, error) {
+			sembleLookups++
+			return filepath.Join(gitDir, "bin", name), nil
+		},
+		func(plan semble.CommandPlan) (semble.CommandResult, error) {
+			t.Fatalf("Semble runner called with disabled gate")
+			return semble.CommandResult{}, nil
+		},
+	)
+	defer restoreSemble()
+
+	if err := InitPairingCommand(InitPairingParams{Agents: []string{"claude", "codex"}}); err != nil {
+		t.Fatalf("InitPairingCommand() error = %v", err)
+	}
+
+	verifyCodexHooks(t, gitDir)
+	if scipCalls != 0 {
+		t.Fatalf("scip calls = %d, want zero", scipCalls)
+	}
+	if sembleLookups != 0 {
+		t.Fatalf("Semble lookups = %d, want zero", sembleLookups)
+	}
+	for _, rel := range []string{".git/hooks/liza-index.sh", ".sembleignore"} {
+		if _, err := os.Stat(filepath.Join(gitDir, rel)); !os.IsNotExist(err) {
+			t.Fatalf("%s stat err = %v, want missing", rel, err)
+		}
+	}
+}
+
+func TestInitPairingCommand_DisabledScipGateIgnoresExplicitLanguageFilter(t *testing.T) {
+	gitDir := setupGitRepo(t)
+	defer os.RemoveAll(gitDir)
+	unsetEnvForTest(t, stacklit.EnvEnableStacklit)
+	unsetEnvForTest(t, scipsearch.EnvEnableScipSearch)
+	unsetEnvForTest(t, semble.EnvEnableSemble)
+	setupGlobalLiza(t)
+	writeTrackedFile(t, gitDir, "go.mod", "module example.com/project\n")
+	testhelpers.MustGit(t, gitDir, "add", "go.mod")
+	testhelpers.MustGit(t, gitDir, "commit", "-m", "Add Go module")
+
+	originalDir, _ := os.Getwd()
+	defer os.Chdir(originalDir)
+	os.Chdir(gitDir)
+
+	if err := InitPairingCommand(InitPairingParams{
+		Agents:     []string{"codex"},
+		ScipSearch: []string{"go"},
+	}); err != nil {
+		t.Fatalf("InitPairingCommand() error = %v", err)
+	}
+
+	verifyCodexHooks(t, gitDir)
+	if _, statErr := os.Stat(filepath.Join(gitDir, ".git", "hooks", "liza-index.sh")); !os.IsNotExist(statErr) {
+		t.Fatalf("liza-index.sh stat err = %v, want missing when SCIP env gate is disabled", statErr)
+	}
+	exclude, err := os.ReadFile(filepath.Join(gitDir, ".git", "info", "exclude"))
+	if err != nil {
+		t.Fatalf("read git private exclude: %v", err)
+	}
+	if strings.Contains(string(exclude), "go.scip") {
+		t.Fatalf("git private exclude contains go.scip with SCIP env gate disabled:\n%s", exclude)
+	}
+}
+
+func TestInitPairingCommand_StacklitEnabledInstallsIndexHooksWithoutGlobalToolsMutation(t *testing.T) {
+	gitDir := setupGitRepo(t)
+	defer os.RemoveAll(gitDir)
+	fakeHome := setupGlobalLiza(t)
+	t.Setenv(stacklit.EnvEnableStacklit, "true")
+
+	toolsPath := filepath.Join(fakeHome, ".liza", "AGENT_TOOLS.md")
+	if err := os.WriteFile(toolsPath, []byte("global tools sentinel\n"), 0644); err != nil {
+		t.Fatalf("write AGENT_TOOLS.md sentinel: %v", err)
+	}
+	beforeTools, err := os.ReadFile(toolsPath)
+	if err != nil {
+		t.Fatalf("read AGENT_TOOLS.md before init: %v", err)
+	}
+	originalDir, _ := os.Getwd()
+	defer os.Chdir(originalDir)
+	os.Chdir(gitDir)
+
+	if err := InitPairingCommand(InitPairingParams{Agents: []string{"claude", "codex"}}); err != nil {
+		t.Fatalf("InitPairingCommand() error = %v", err)
+	}
+
+	verifyCodexHooks(t, gitDir)
+	scriptPath := filepath.Join(gitDir, ".git", "hooks", "liza-index.sh")
+	script := readFileForTest(t, scriptPath)
+	if !strings.Contains(script, pairingindex.ManagedIndexScriptMarker) {
+		t.Fatalf("liza-index.sh missing managed marker:\n%s", script)
+	}
+	for _, hook := range pairingindex.DefaultLifecycleHooks() {
+		content := readFileForTest(t, filepath.Join(gitDir, ".git", "hooks", hook))
+		if !strings.Contains(content, pairingindex.ManagedHookMarker) {
+			t.Fatalf("%s missing pairing index marker:\n%s", hook, content)
+		}
+	}
+	if got := runGitOutputForTest(t, gitDir, "check-ignore", "stacklit.json"); got != "stacklit.json" {
+		t.Fatalf("git check-ignore stacklit.json = %q, want private exclude", got)
+	}
+	afterTools, err := os.ReadFile(toolsPath)
+	if err != nil {
+		t.Fatalf("read AGENT_TOOLS.md after init: %v", err)
+	}
+	if string(afterTools) != string(beforeTools) {
+		t.Fatal("pairing init modified global AGENT_TOOLS.md")
+	}
+}
+
+func TestInitPairingCommand_ScipSearchGoFilterPlansConcreteHookCommand(t *testing.T) {
+	gitDir := setupGitRepo(t)
+	defer os.RemoveAll(gitDir)
+	setupGlobalLiza(t)
+	t.Setenv(scipsearch.EnvEnableScipSearch, "true")
+	writeTrackedFile(t, gitDir, "go.mod", "module example.com/project\n")
+	writeTrackedFile(t, gitDir, "web/package.json", "{}\n")
+	writeTrackedFile(t, gitDir, "web/app.ts", "export const app = 1\n")
+	testhelpers.MustGit(t, gitDir, "add", "go.mod", "web/package.json", "web/app.ts")
+	testhelpers.MustGit(t, gitDir, "commit", "-m", "Add tracked source")
+
+	originalDir, _ := os.Getwd()
+	defer os.Chdir(originalDir)
+	os.Chdir(gitDir)
+
+	if err := InitPairingCommand(InitPairingParams{
+		Agents:     []string{"codex"},
+		ScipSearch: []string{"go"},
+	}); err != nil {
+		t.Fatalf("InitPairingCommand() error = %v", err)
+	}
+
+	script := readFileForTest(t, filepath.Join(gitDir, ".git", "hooks", "liza-index.sh"))
+	if !strings.Contains(script, "scip-go index --module-root") {
+		t.Fatalf("liza-index.sh missing Go SCIP command:\n%s", script)
+	}
+	if strings.Contains(script, "scip-typescript") || strings.Contains(script, "scip-python") {
+		t.Fatalf("liza-index.sh ignored --scip-search go filter:\n%s", script)
+	}
+}
+
+func TestInitPairingCommand_ScipSearchEnabledWithNoLanguagesSkipsInertHooks(t *testing.T) {
+	gitDir := setupGitRepo(t)
+	defer os.RemoveAll(gitDir)
+	setupGlobalLiza(t)
+	t.Setenv(scipsearch.EnvEnableScipSearch, "true")
+
+	originalDir, _ := os.Getwd()
+	defer os.Chdir(originalDir)
+	os.Chdir(gitDir)
+
+	if err := InitPairingCommand(InitPairingParams{Agents: []string{"codex"}}); err != nil {
+		t.Fatalf("InitPairingCommand() error = %v", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(gitDir, ".git", "hooks", "liza-index.sh")); !os.IsNotExist(statErr) {
+		t.Fatalf("liza-index.sh stat err = %v, want missing with no SCIP language plans", statErr)
+	}
+}
+
+func TestInitPairingCommand_ScipSearchAmbiguityFailsBeforeInstallingHooks(t *testing.T) {
+	gitDir := setupGitRepo(t)
+	defer os.RemoveAll(gitDir)
+	setupGlobalLiza(t)
+	t.Setenv(scipsearch.EnvEnableScipSearch, "true")
+	writeTrackedFile(t, gitDir, "service-a/go.mod", "module example.com/a\n")
+	writeTrackedFile(t, gitDir, "service-b/go.mod", "module example.com/b\n")
+	testhelpers.MustGit(t, gitDir, "add", "service-a/go.mod", "service-b/go.mod")
+	testhelpers.MustGit(t, gitDir, "commit", "-m", "Add ambiguous Go roots")
+
+	originalDir, _ := os.Getwd()
+	defer os.Chdir(originalDir)
+	os.Chdir(gitDir)
+
+	err := InitPairingCommand(InitPairingParams{
+		Agents:     []string{"codex"},
+		ScipSearch: []string{"go"},
+	})
+	if err == nil {
+		t.Fatal("InitPairingCommand() error = nil, want ambiguous SCIP root diagnostic")
+	}
+	for _, want := range []string{"unresolved scip-search language go", "service-a", "service-b"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error = %v, want %q", err, want)
+		}
+	}
+	if _, statErr := os.Stat(filepath.Join(gitDir, ".git", "hooks", "liza-index.sh")); !os.IsNotExist(statErr) {
+		t.Fatalf("liza-index.sh stat err = %v, want missing after failed SCIP planning", statErr)
+	}
+}
+
+func TestInitPairingCommand_SembleEnabledEnsuresProjectRootIgnore(t *testing.T) {
+	gitDir := setupGitRepo(t)
+	defer os.RemoveAll(gitDir)
+	setupGlobalLiza(t)
+	t.Setenv(semble.EnvEnableSemble, "true")
+
+	originalDir, _ := os.Getwd()
+	defer os.Chdir(originalDir)
+	os.Chdir(gitDir)
+
+	restoreSemble := setInitSembleHooksForTest(
+		func(name string) (string, error) {
+			return filepath.Join(gitDir, "bin", name), nil
+		},
+		func(plan semble.CommandPlan) (semble.CommandResult, error) {
+			return semble.CommandResult{ExitCode: 0}, nil
+		},
+	)
+	defer restoreSemble()
+
+	if err := InitPairingCommand(InitPairingParams{Agents: []string{"gemini"}}); err != nil {
+		t.Fatalf("InitPairingCommand() error = %v", err)
+	}
+
+	ignore := readFileForTest(t, filepath.Join(gitDir, ".sembleignore"))
+	for _, want := range []string{".liza/", ".worktrees/", "stacklit.json", "*.scip", "*.pem"} {
+		if !strings.Contains(ignore, want) {
+			t.Fatalf(".sembleignore missing %q:\n%s", want, ignore)
+		}
+	}
+}
+
+func TestInitPairingCommand_IndexHookFailuresReportDiagnostics(t *testing.T) {
+	tests := []struct {
+		name      string
+		setup     func(t *testing.T, repo string)
+		wantError string
+	}{
+		{
+			name: "existing lifecycle hook collision",
+			setup: func(t *testing.T, repo string) {
+				writeFileForTest(t, filepath.Join(repo, ".git", "hooks", "post-commit"), "#!/bin/sh\necho user hook\n", 0755)
+			},
+			wantError: "not Liza-managed",
+		},
+		{
+			name: "unsafe hooksPath file",
+			setup: func(t *testing.T, repo string) {
+				hooksPath := filepath.Join(repo, ".git", "hooks-file")
+				writeFileForTest(t, hooksPath, "not a directory\n", 0644)
+				testhelpers.MustGit(t, repo, "config", "core.hooksPath", hooksPath)
+			},
+			wantError: "not a directory",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gitDir := setupGitRepo(t)
+			defer os.RemoveAll(gitDir)
+			setupGlobalLiza(t)
+			t.Setenv(stacklit.EnvEnableStacklit, "true")
+			tt.setup(t, gitDir)
+
+			originalDir, _ := os.Getwd()
+			defer os.Chdir(originalDir)
+			os.Chdir(gitDir)
+
+			err := InitPairingCommand(InitPairingParams{Agents: []string{"codex"}})
+			if err == nil {
+				t.Fatal("InitPairingCommand() error = nil, want indexing diagnostic")
+			}
+			if !strings.Contains(err.Error(), tt.wantError) {
+				t.Fatalf("error = %v, want %q", err, tt.wantError)
+			}
+		})
+	}
+}
+
 func TestInitPairingCommand_Idempotent(t *testing.T) {
 	gitDir := setupGitRepo(t)
 	defer os.RemoveAll(gitDir)
@@ -3034,6 +3329,36 @@ func unsetEnvForTest(t *testing.T, key string) {
 
 func stringPtrForTest(value string) *string {
 	return &value
+}
+
+func readFileForTest(t *testing.T, path string) string {
+	t.Helper()
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	return string(content)
+}
+
+func writeFileForTest(t *testing.T, path, content string, mode os.FileMode) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		t.Fatalf("create parent for %s: %v", path, err)
+	}
+	if err := os.WriteFile(path, []byte(content), mode); err != nil {
+		t.Fatalf("write %s: %v", path, err)
+	}
+}
+
+func runGitOutputForTest(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s in %s failed: %v\n%s", strings.Join(args, " "), dir, err, output)
+	}
+	return strings.TrimSpace(string(output))
 }
 
 func verifyCodexHooks(t *testing.T, projectRoot string) {

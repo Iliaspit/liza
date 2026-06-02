@@ -113,6 +113,196 @@ func TestRuntimeActivationContractIsDocumented(t *testing.T) {
 	}
 }
 
+func TestPairingCommandPlanningBuildsConcreteSingleRootPlans(t *testing.T) {
+	target := t.TempDir()
+	writeTestFile(t, target, "web/tsconfig.json", `{"include":["src/**/*.ts"]}`)
+
+	plans, err := PlanPairingCommands(PairingPlanOptions{
+		ProjectRoot: target,
+		GitFiles: func(root string) ([]string, error) {
+			if root != target {
+				t.Fatalf("GitFiles root = %q, want %q", root, target)
+			}
+			return []string{
+				"go.mod",
+				"cmd/main.go",
+				"web/tsconfig.json",
+				"web/src/app.ts",
+				"service/pyproject.toml",
+				"service/src/pkg/app.py",
+			}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("PlanPairingCommands() error = %v", err)
+	}
+
+	want := []RuntimeCommandPlan{
+		{
+			Language:   "go",
+			Name:       "scip-go",
+			Args:       []string{"index", "--module-root", target, "--output", filepath.Join(target, "go.scip")},
+			Dir:        target,
+			OutputPath: filepath.Join(target, "go.scip"),
+		},
+		{
+			Language:   "typescript",
+			Name:       "scip-typescript",
+			Args:       []string{"index", "--cwd", filepath.Join(target, "web", "src"), "--output", filepath.Join(target, "typescript.scip"), filepath.Join(target, "web")},
+			Dir:        target,
+			OutputPath: filepath.Join(target, "typescript.scip"),
+		},
+		{
+			Language:   "python",
+			Name:       "scip-python",
+			Args:       []string{"index", "--cwd", filepath.Join(target, "service"), "--output", filepath.Join(target, "python.scip"), "--target-only=src"},
+			Dir:        target,
+			OutputPath: filepath.Join(target, "python.scip"),
+		},
+	}
+	if !reflect.DeepEqual(plans, want) {
+		t.Fatalf("PlanPairingCommands() = %#v, want %#v", plans, want)
+	}
+}
+
+func TestPairingCommandPlanningExplicitLanguageFiltersDoNotSelectRoots(t *testing.T) {
+	target := t.TempDir()
+
+	plans, err := PlanPairingCommands(PairingPlanOptions{
+		ProjectRoot:       target,
+		ExplicitLanguages: []string{"go", "go"},
+		GitFiles: func(string) ([]string, error) {
+			return []string{
+				"go.mod",
+				"cmd/main.go",
+				"web/tsconfig.json",
+				"web/src/app.ts",
+				"service/pyproject.toml",
+				"service/main.py",
+			}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("PlanPairingCommands() error = %v", err)
+	}
+	if got, want := planLanguages(plans), []string{"go"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("plan languages = %v, want %v", got, want)
+	}
+	if plans[0].Args[2] != target {
+		t.Fatalf("go module root = %q, want %q", plans[0].Args[2], target)
+	}
+
+	_, err = PlanPairingCommands(PairingPlanOptions{
+		ProjectRoot:       target,
+		ExplicitLanguages: []string{"go"},
+		GitFiles: func(string) ([]string, error) {
+			return []string{
+				"services/api/go.mod",
+				"services/api/main.go",
+				"services/worker/go.mod",
+				"services/worker/main.go",
+			}, nil
+		},
+	})
+	if err == nil {
+		t.Fatal("PlanPairingCommands() error = nil, want ambiguous Go roots")
+	}
+	message := err.Error()
+	for _, want := range []string{
+		"unresolved scip-search language go",
+		filepath.Join(target, "services", "api"),
+		filepath.Join(target, "services", "worker"),
+	} {
+		if !strings.Contains(message, want) {
+			t.Fatalf("PlanPairingCommands() error = %q, want substring %q", message, want)
+		}
+	}
+}
+
+func TestPairingCommandPlanningRejectsTypeScriptReferenceMonorepo(t *testing.T) {
+	target := t.TempDir()
+	writeTestFile(t, target, "tsconfig.json", `{"references":[{"path":"apps/web"},{"path":"apps/admin"}]}`)
+	writeTestFile(t, target, "apps/web/tsconfig.json", `{"include":["src/**/*.ts"]}`)
+	writeTestFile(t, target, "apps/admin/tsconfig.json", `{"include":["src/**/*.ts"]}`)
+
+	_, err := PlanPairingCommands(PairingPlanOptions{
+		ProjectRoot:       target,
+		ExplicitLanguages: []string{"typescript"},
+		GitFiles: func(string) ([]string, error) {
+			return []string{
+				"tsconfig.json",
+				"apps/web/tsconfig.json",
+				"apps/web/src/app.ts",
+				"apps/admin/tsconfig.json",
+				"apps/admin/src/app.ts",
+			}, nil
+		},
+	})
+	if err == nil {
+		t.Fatal("PlanPairingCommands() error = nil, want ambiguous TypeScript roots")
+	}
+	message := err.Error()
+	for _, want := range []string{
+		"unresolved scip-search language typescript",
+		filepath.Join(target, "apps", "admin", "src"),
+		filepath.Join(target, "apps", "web", "src"),
+	} {
+		if !strings.Contains(message, want) {
+			t.Fatalf("PlanPairingCommands() error = %q, want substring %q", message, want)
+		}
+	}
+}
+
+func TestPairingCommandPlanningRejectsPythonMonorepoWhileMASRuntimeRemainsDifferent(t *testing.T) {
+	target := t.TempDir()
+	files := []string{
+		"apps/api/pyproject.toml",
+		"apps/api/app.py",
+		"apps/worker/pyproject.toml",
+		"apps/worker/worker.py",
+	}
+
+	_, err := PlanPairingCommands(PairingPlanOptions{
+		ProjectRoot: target,
+		GitFiles: func(string) ([]string, error) {
+			return files, nil
+		},
+	})
+	if err == nil {
+		t.Fatal("PlanPairingCommands() error = nil, want ambiguous Python roots")
+	}
+	message := err.Error()
+	for _, want := range []string{
+		"unresolved scip-search language python",
+		filepath.Join(target, "apps", "api"),
+		filepath.Join(target, "apps", "worker"),
+	} {
+		if !strings.Contains(message, want) {
+			t.Fatalf("PlanPairingCommands() error = %q, want substring %q", message, want)
+		}
+	}
+
+	if !strings.Contains(PairingRuntimeInferenceNote, "MAS runtime") || !strings.Contains(PairingRuntimeInferenceNote, "intentionally") {
+		t.Fatalf("PairingRuntimeInferenceNote = %q, want explicit MAS divergence statement", PairingRuntimeInferenceNote)
+	}
+
+	t.Setenv(EnvEnableScipSearch, "true")
+	runtimePlans, err := PlanRuntimeCommands(RuntimePlanOptions{
+		TargetRoot:          target,
+		ConfiguredLanguages: []string{"python"},
+		GitFiles: func(string) ([]string, error) {
+			return files, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("PlanRuntimeCommands() error = %v", err)
+	}
+	wantRuntimeArgs := []string{"index", "--cwd", filepath.Join(target, "apps", "api"), "--output", filepath.Join(target, ".liza", "scip", "python.scip")}
+	if len(runtimePlans) != 1 || !reflect.DeepEqual(runtimePlans[0].Args, wantRuntimeArgs) {
+		t.Fatalf("PlanRuntimeCommands() = %#v, want deterministic MAS runtime args %#v", runtimePlans, wantRuntimeArgs)
+	}
+}
+
 func TestResolveInitConfigVersionFailureIsNonFatal(t *testing.T) {
 	var calls []string
 	got, err := ResolveInitConfig(InitOptions{

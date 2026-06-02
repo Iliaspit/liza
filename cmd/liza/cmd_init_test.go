@@ -94,11 +94,6 @@ func TestInitDispatch_WorkspaceFlagsRequireDescription(t *testing.T) {
 			wantErr: "workspace flags",
 		},
 		{
-			name:    "agent flag with scip-search and no description errors",
-			args:    []string{"init", "--codex", "--scip-search", "go"},
-			wantErr: "workspace flags",
-		},
-		{
 			name:    "agent flag with no-follow-up and no description errors",
 			args:    []string{"init", "--codex", "--no-follow-up"},
 			wantErr: "--no-follow-up requires full workspace init",
@@ -212,6 +207,38 @@ func TestHasExplicitInitFlags_SembleEnvDoesNotForceWorkspaceInit(t *testing.T) {
 	}
 	if !strings.HasSuffix(linkTarget, filepath.Join(".liza", "CORE.md")) {
 		t.Fatalf("GEMINI.md target = %q, want global CORE.md symlink", linkTarget)
+	}
+}
+
+func TestInitDispatch_PairingScipSearchFlagIsAllowedWithAgent(t *testing.T) {
+	resetRootCmdForTest(t)
+	defer resetRootCmdForTest(t)
+
+	projectRoot := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, projectRoot)
+	testhelpers.SetupGlobalLiza(t)
+	t.Setenv(scipsearch.EnvEnableScipSearch, "true")
+	if err := os.WriteFile(filepath.Join(projectRoot, "go.mod"), []byte("module example.com/project\n"), 0644); err != nil {
+		t.Fatalf("write go.mod: %v", err)
+	}
+	testhelpers.MustGit(t, projectRoot, "add", "go.mod")
+	testhelpers.MustGit(t, projectRoot, "commit", "-m", "Add Go module")
+
+	err := executeRootCommand(t, projectRoot, "init", "--codex", "--scip-search", "go")
+	if err != nil {
+		t.Fatalf("pairing init with --scip-search failed: %v", err)
+	}
+
+	scriptPath := filepath.Join(projectRoot, ".git", "hooks", "liza-index.sh")
+	script, err := os.ReadFile(scriptPath)
+	if err != nil {
+		t.Fatalf("liza-index.sh missing after pairing SCIP init: %v", err)
+	}
+	if !strings.Contains(string(script), "scip-go index --module-root") {
+		t.Fatalf("liza-index.sh missing Go SCIP command:\n%s", string(script))
+	}
+	if _, statErr := os.Stat(filepath.Join(projectRoot, ".liza")); !os.IsNotExist(statErr) {
+		t.Fatalf(".liza stat error = %v, want missing so --scip-search keeps pairing mode", statErr)
 	}
 }
 

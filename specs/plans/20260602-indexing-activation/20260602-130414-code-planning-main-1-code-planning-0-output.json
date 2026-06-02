@@ -1,0 +1,12 @@
+[
+  {
+    "desc": "Install generic optional-index routing in setup defaults.",
+    "done_when": "A fresh `liza setup` installs default `AGENT_TOOLS.md` content that conditionally routes Stacklit, SCIP, and Semble only when Liza supplies explicit paths or readiness, describes fallback search/read tools for disabled tools, preserves user customization protection, and contains no project-specific generated paths.",
+    "scope": "Owns `contracts/AGENT_TOOLS.md`, `internal/embedded/contracts/AGENT_TOOLS.md`, and setup/embedded tests that verify installed default content and customization protection. Does not modify pairing init, MAS prompt templates, SessionStart hooks, or project-local activation artifacts.",
+    "spec_ref": "specs/goals/20260602-indexing-activation.md",
+    "plan_ref": "specs/plans/20260602-indexing-activation/20260602-130414-code-planning-main-1-code-planning-0.md",
+    "validation": [
+      "go test ./internal/embedded ./internal/commands"
+    ]
+  }
+]

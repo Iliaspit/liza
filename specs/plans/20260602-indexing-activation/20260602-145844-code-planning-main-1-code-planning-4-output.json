@@ -1,0 +1,18 @@
+[
+  {
+    "desc": "Wire pairing init to project-local index activation.",
+    "done_when": "`liza init --claude`, `liza init --codex`, and combined pairing init flows preserve existing provider hook installation while env-gated project-local activation invokes Stacklit hook setup, SCIP hook command planning, and Semble `.sembleignore` safety without modifying `~/.liza/AGENT_TOOLS.md`; disabled env gates activate no optional indexing behavior; failures report clear diagnostics instead of installing inert hooks or guessed SCIP commands.",
+    "scope": "Owns `internal/commands/init.go`, CLI command wiring for pairing `--scip-search <language>` where applicable, and command-level tests for disabled gates, Stacklit enabled, SCIP enabled/filtering, Semble enabled, hook collisions, and non-default hooks paths. Consumes Task 2, Task 3, and Task 4 package APIs. Does not redefine hook script internals, SCIP root selection rules, Semble ignore payload, global setup guidance, MAS prompt metadata, or user-facing documentation.",
+    "spec_ref": "specs/goals/20260602-indexing-activation.md",
+    "plan_ref": "specs/plans/20260602-indexing-activation/20260602-145844-code-planning-main-1-code-planning-4.md",
+    "validation": [
+      "go test ./cmd/liza ./internal/commands"
+    ],
+    "task_depends_on": [
+      "code-planning-main-1-code-planning-0",
+      "code-planning-main-1-code-planning-1",
+      "code-planning-main-1-code-planning-2",
+      "code-planning-main-1-code-planning-3"
+    ]
+  }
+]

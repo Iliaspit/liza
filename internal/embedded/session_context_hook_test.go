@@ -20,7 +20,7 @@ func TestSessionContextHook_EmitsSessionStartContextForIndexedRepo(t *testing.T)
 	writePairingProjectDocs(t, projectRoot)
 	writeIndexedRepoMarkers(t, projectRoot)
 
-	output := runHook(t, hookPath, sessionStartPayload(t, projectRoot), 0)
+	output := runSessionContextHook(t, hookPath, sessionStartPayload(t, projectRoot), nil, 0)
 	var got struct {
 		HookSpecificOutput struct {
 			HookEventName     string `json:"hookEventName"`
@@ -87,14 +87,8 @@ func TestSessionContextHook_InstructsAgentsToRunStacklitSummaryWhenAvailable(t *
 	writePairingProjectDocs(t, projectRoot)
 	writeIndexedRepoMarkers(t, projectRoot)
 
-	cmd := exec.Command("bash", hookPath)
-	cmd.Stdin = strings.NewReader(sessionStartPayload(t, projectRoot))
-	cmd.Env = os.Environ()
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("hook exited non-zero: %v\n%s", err, output)
-	}
-	context := sessionStartAdditionalContext(t, string(output))
+	output := runSessionContextHook(t, hookPath, sessionStartPayload(t, projectRoot), nil, 0)
+	context := sessionStartAdditionalContext(t, output)
 	want := "Run `stacklit derive --ai-summary -i '" + filepath.Join(projectRoot, "stacklit.json") + "'` at the end of the session initialization."
 	if !strings.Contains(context, want) {
 		t.Fatalf("startup context should instruct agent to run stacklit summary, missing %q in:\n%s", want, context)
@@ -122,14 +116,10 @@ func TestSessionContextHook_StillEmitsContextWhenStacklitFails(t *testing.T) {
 		t.Fatalf("write failing stacklit: %v", err)
 	}
 
-	cmd := exec.Command("bash", hookPath)
-	cmd.Stdin = strings.NewReader(sessionStartPayload(t, projectRoot))
-	cmd.Env = append(os.Environ(), "PATH="+binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("hook should not fail when stacklit fails: %v\n%s", err, output)
-	}
-	context := sessionStartAdditionalContext(t, string(output))
+	output := runSessionContextHook(t, hookPath, sessionStartPayload(t, projectRoot), []string{
+		"PATH=" + binDir + string(os.PathListSeparator) + os.Getenv("PATH"),
+	}, 0)
+	context := sessionStartAdditionalContext(t, output)
 	if !strings.Contains(context, "Liza session initialization is mandatory") ||
 		!strings.Contains(context, "stacklit derive --ai-summary") {
 		t.Fatalf("startup context should remain useful after stacklit failure, got:\n%s", context)
@@ -147,14 +137,10 @@ func TestSessionContextHook_UsesMultiAgentModeForLizaAgentSessions(t *testing.T)
 	hookPath := writeSessionContextHook(t)
 	projectRoot := t.TempDir()
 
-	cmd := exec.Command("bash", hookPath)
-	cmd.Stdin = strings.NewReader(sessionStartPayload(t, projectRoot))
-	cmd.Env = append(os.Environ(), "LIZA_AGENT_ID=coder-1")
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("hook exited non-zero: %v\n%s", err, output)
-	}
-	context := sessionStartAdditionalContext(t, string(output))
+	output := runSessionContextHook(t, hookPath, sessionStartPayload(t, projectRoot), []string{
+		"LIZA_AGENT_ID=coder-1",
+	}, 0)
+	context := sessionStartAdditionalContext(t, output)
 	if !strings.Contains(context, "~/.liza/MULTI_AGENT_MODE.md") {
 		t.Fatalf("startup context should name MULTI_AGENT_MODE for Liza agents, got:\n%s", context)
 	}
@@ -176,7 +162,7 @@ func TestSessionContextHook_EmitsInitContextWithoutLizaIndexHook(t *testing.T) {
 		t.Fatalf("write stacklit index: %v", err)
 	}
 
-	output := runHook(t, hookPath, sessionStartPayload(t, projectRoot), 0)
+	output := runSessionContextHook(t, hookPath, sessionStartPayload(t, projectRoot), nil, 0)
 	context := sessionStartAdditionalContext(t, output)
 	if !strings.Contains(context, "Liza session initialization is mandatory") {
 		t.Fatalf("startup context should include initialization reminder, got:\n%s", context)
@@ -201,13 +187,82 @@ func TestSessionContextHook_EmitsInitContextWithoutIndexes(t *testing.T) {
 		t.Fatalf("write post-commit hook: %v", err)
 	}
 
-	output := runHook(t, hookPath, sessionStartPayload(t, projectRoot), 0)
+	output := runSessionContextHook(t, hookPath, sessionStartPayload(t, projectRoot), nil, 0)
 	context := sessionStartAdditionalContext(t, output)
 	if !strings.Contains(context, "Liza session initialization is mandatory") {
 		t.Fatalf("startup context should include initialization reminder, got:\n%s", context)
 	}
 	if strings.Contains(context, "Liza repository indexes detected") {
 		t.Fatalf("startup context should omit index paths without indexes, got:\n%s", context)
+	}
+}
+
+func TestSessionContextHook_EmitsStacklitBlockOnlyWhenStacklitArtifactExists(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not available")
+	}
+
+	hookPath := writeSessionContextHook(t)
+	projectRoot := t.TempDir()
+	writeLizaIndexHook(t, projectRoot)
+	if err := os.WriteFile(filepath.Join(projectRoot, "stacklit.json"), []byte("{}\n"), 0644); err != nil {
+		t.Fatalf("write stacklit index: %v", err)
+	}
+
+	output := runSessionContextHook(t, hookPath, sessionStartPayload(t, projectRoot), nil, 0)
+	context := sessionStartAdditionalContext(t, output)
+	for _, want := range []string{
+		"Liza repository indexes detected",
+		"Stacklit index: " + filepath.Join(projectRoot, "stacklit.json"),
+		"stacklit derive --ai-summary -i '" + filepath.Join(projectRoot, "stacklit.json") + "'",
+	} {
+		if !strings.Contains(context, want) {
+			t.Fatalf("startup context missing %q, got:\n%s", want, context)
+		}
+	}
+	for _, notWant := range []string{
+		"SCIP indexes:",
+		"scip-search symbols --index",
+		"Semble semantic search is available",
+	} {
+		if strings.Contains(context, notWant) {
+			t.Fatalf("startup context should omit unavailable optional block %q, got:\n%s", notWant, context)
+		}
+	}
+}
+
+func TestSessionContextHook_EmitsScipBlockOnlyWhenScipArtifactExists(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not available")
+	}
+
+	hookPath := writeSessionContextHook(t)
+	projectRoot := t.TempDir()
+	writeLizaIndexHook(t, projectRoot)
+	if err := os.WriteFile(filepath.Join(projectRoot, "go.scip"), []byte("index\n"), 0644); err != nil {
+		t.Fatalf("write Go SCIP index: %v", err)
+	}
+
+	output := runSessionContextHook(t, hookPath, sessionStartPayload(t, projectRoot), nil, 0)
+	context := sessionStartAdditionalContext(t, output)
+	for _, want := range []string{
+		"Liza repository indexes detected",
+		"SCIP indexes:",
+		"Go index: " + filepath.Join(projectRoot, "go.scip"),
+		"scip-search symbols --index <index-path> --name Foo --name Bar",
+	} {
+		if !strings.Contains(context, want) {
+			t.Fatalf("startup context missing %q, got:\n%s", want, context)
+		}
+	}
+	for _, notWant := range []string{
+		"Stacklit index:",
+		"stacklit derive --ai-summary",
+		"Semble semantic search is available",
+	} {
+		if strings.Contains(context, notWant) {
+			t.Fatalf("startup context should omit unavailable optional block %q, got:\n%s", notWant, context)
+		}
 	}
 }
 
@@ -219,7 +274,7 @@ func TestSessionContextHook_FiltersMissingPairingProjectDocs(t *testing.T) {
 	hookPath := writeSessionContextHook(t)
 	projectRoot := t.TempDir()
 
-	output := runHook(t, hookPath, sessionStartPayload(t, projectRoot), 0)
+	output := runSessionContextHook(t, hookPath, sessionStartPayload(t, projectRoot), nil, 0)
 	context := sessionStartAdditionalContext(t, output)
 	if !strings.Contains(context, "~/.liza/PAIRING_MODE.md") ||
 		!strings.Contains(context, "~/.liza/AGENT_TOOLS.md") ||
@@ -242,14 +297,10 @@ func TestSessionContextHook_SuppressesRepoIndexesForLizaAgentSessions(t *testing
 	projectRoot := t.TempDir()
 	writeIndexedRepoMarkers(t, projectRoot)
 
-	cmd := exec.Command("bash", hookPath)
-	cmd.Stdin = strings.NewReader(sessionStartPayload(t, projectRoot))
-	cmd.Env = append(os.Environ(), "LIZA_AGENT_ID=coder-1")
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("hook exited non-zero: %v\n%s", err, output)
-	}
-	context := sessionStartAdditionalContext(t, string(output))
+	output := runSessionContextHook(t, hookPath, sessionStartPayload(t, projectRoot), []string{
+		"LIZA_AGENT_ID=coder-1",
+	}, 0)
+	context := sessionStartAdditionalContext(t, output)
 	if !strings.Contains(context, "Liza session initialization is mandatory") {
 		t.Fatalf("startup context should include initialization reminder for Liza agents, got:\n%s", context)
 	}
@@ -271,7 +322,7 @@ func TestSessionContextHook_EmitsSembleWhenEnabledSafeAndOfflineReady(t *testing
 	writeRootSembleIgnore(t, projectRoot)
 	binDir := writeFakeSembleTools(t, true)
 
-	output := runHookWithEnv(t, hookPath, sessionStartPayload(t, projectRoot), []string{
+	output := runSessionContextHook(t, hookPath, sessionStartPayload(t, projectRoot), []string{
 		"PATH=" + binDir + string(os.PathListSeparator) + os.Getenv("PATH"),
 		"LIZA_ENABLE_SEMBLE=true",
 	}, 0)
@@ -305,7 +356,7 @@ func TestSessionContextHook_OmitsSembleWithoutRootIgnore(t *testing.T) {
 	projectRoot := t.TempDir()
 	binDir := writeFakeSembleTools(t, true)
 
-	output := runHookWithEnv(t, hookPath, sessionStartPayload(t, projectRoot), []string{
+	output := runSessionContextHook(t, hookPath, sessionStartPayload(t, projectRoot), []string{
 		"PATH=" + binDir + string(os.PathListSeparator) + os.Getenv("PATH"),
 		"LIZA_ENABLE_SEMBLE=true",
 	}, 0)
@@ -330,7 +381,7 @@ func TestSessionContextHook_OmitsSembleWithIncompleteRootIgnore(t *testing.T) {
 	}
 	binDir := writeFakeSembleTools(t, true)
 
-	output := runHookWithEnv(t, hookPath, sessionStartPayload(t, projectRoot), []string{
+	output := runSessionContextHook(t, hookPath, sessionStartPayload(t, projectRoot), []string{
 		"PATH=" + binDir + string(os.PathListSeparator) + os.Getenv("PATH"),
 		"LIZA_ENABLE_SEMBLE=true",
 	}, 0)
@@ -353,7 +404,7 @@ func TestSessionContextHook_OmitsSembleWhenOfflineValidationFails(t *testing.T) 
 	writeRootSembleIgnore(t, projectRoot)
 	binDir := writeFakeSembleTools(t, false)
 
-	output := runHookWithEnv(t, hookPath, sessionStartPayload(t, projectRoot), []string{
+	output := runSessionContextHook(t, hookPath, sessionStartPayload(t, projectRoot), []string{
 		"PATH=" + binDir + string(os.PathListSeparator) + os.Getenv("PATH"),
 		"LIZA_ENABLE_SEMBLE=true",
 	}, 0)
@@ -376,7 +427,7 @@ func TestSessionContextHook_SuppressesSembleForLizaAgentSessions(t *testing.T) {
 	writeRootSembleIgnore(t, projectRoot)
 	binDir := writeFakeSembleTools(t, true)
 
-	output := runHookWithEnv(t, hookPath, sessionStartPayload(t, projectRoot), []string{
+	output := runSessionContextHook(t, hookPath, sessionStartPayload(t, projectRoot), []string{
 		"PATH=" + binDir + string(os.PathListSeparator) + os.Getenv("PATH"),
 		"LIZA_ENABLE_SEMBLE=true",
 		"LIZA_AGENT_ID=coder-1",
@@ -413,6 +464,18 @@ func writePairingProjectDocs(t *testing.T, projectRoot string) {
 	}
 }
 
+func writeLizaIndexHook(t *testing.T, projectRoot string) {
+	t.Helper()
+
+	hooksDir := filepath.Join(projectRoot, ".git", "hooks")
+	if err := os.MkdirAll(hooksDir, 0755); err != nil {
+		t.Fatalf("create git hooks dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(hooksDir, "post-commit"), []byte("#!/bin/sh\nliza-index\n"), 0755); err != nil {
+		t.Fatalf("write post-commit hook: %v", err)
+	}
+}
+
 func sessionStartPayload(t *testing.T, cwd string) string {
 	t.Helper()
 	payload, err := json.Marshal(map[string]any{
@@ -438,11 +501,11 @@ func sessionStartAdditionalContext(t *testing.T, output string) string {
 	return got.HookSpecificOutput.AdditionalContext
 }
 
-func runHookWithEnv(t *testing.T, hookPath, payload string, extraEnv []string, wantCode int) string {
+func runSessionContextHook(t *testing.T, hookPath, payload string, extraEnv []string, wantCode int) string {
 	t.Helper()
 	cmd := exec.Command("bash", hookPath)
 	cmd.Stdin = strings.NewReader(payload)
-	cmd.Env = append(os.Environ(), extraEnv...)
+	cmd.Env = sessionContextHookEnv(extraEnv)
 	output, err := cmd.CombinedOutput()
 	if wantCode == 0 {
 		if err != nil {
@@ -458,6 +521,22 @@ func runHookWithEnv(t *testing.T, hookPath, payload string, extraEnv []string, w
 		t.Fatalf("hook exit code = %d, want %d\n%s", exitErr.ExitCode(), wantCode, output)
 	}
 	return string(output)
+}
+
+func sessionContextHookEnv(extraEnv []string) []string {
+	env := make([]string, 0, len(os.Environ())+len(extraEnv))
+	for _, item := range os.Environ() {
+		switch {
+		case strings.HasPrefix(item, "CLAUDE_PROJECT_DIR="):
+			continue
+		case strings.HasPrefix(item, "LIZA_AGENT_ID="):
+			continue
+		case strings.HasPrefix(item, "LIZA_ENABLE_SEMBLE="):
+			continue
+		}
+		env = append(env, item)
+	}
+	return append(env, extraEnv...)
 }
 
 func writeRootSembleIgnore(t *testing.T, projectRoot string) {
