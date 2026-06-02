@@ -1,14 +1,18 @@
 package ops
 
 import (
+	"errors"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/liza-mas/liza/internal/db"
 	"github.com/liza-mas/liza/internal/models"
+	"github.com/liza-mas/liza/internal/semble"
 	"github.com/liza-mas/liza/internal/testhelpers"
 )
 
@@ -169,6 +173,248 @@ func TestInitProject_Success(t *testing.T) {
 	pipelinePath := filepath.Join(lizaDir, "pipeline.yaml")
 	if _, err := os.Stat(pipelinePath); os.IsNotExist(err) {
 		t.Fatal("pipeline.yaml was not created")
+	}
+}
+
+func TestInitProject_SembleDisabledSkipsLookupValidationAndDiagnostics(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+		unset bool
+	}{
+		{name: "unset", unset: true},
+		{name: "empty", value: ""},
+		{name: "zero", value: "0"},
+		{name: "false", value: "false"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.unset {
+				unsetEnvForInitProjectTest(t, semble.EnvEnableSemble)
+			} else {
+				t.Setenv(semble.EnvEnableSemble, tt.value)
+			}
+			projectRoot, specFile := setupInitTestDir(t)
+			var diagnostics []string
+			restore := setInitProjectSembleHooksForTest(t,
+				func(string) (string, error) {
+					t.Fatal("Semble executable lookup called while disabled")
+					return "", nil
+				},
+				func(semble.CommandPlan) (semble.CommandResult, error) {
+					t.Fatal("Semble command runner called while disabled")
+					return semble.CommandResult{}, nil
+				},
+			)
+			defer restore()
+
+			err := InitProject(projectRoot, InitProjectParams{
+				Description: "Test project",
+				SpecRef:     specFile,
+				SembleDiagnosticSink: func(message string) {
+					diagnostics = append(diagnostics, message)
+				},
+			})
+			if err != nil {
+				t.Fatalf("InitProject() error: %v", err)
+			}
+			if len(diagnostics) != 0 {
+				t.Fatalf("Semble diagnostics = %#v, want none", diagnostics)
+			}
+		})
+	}
+}
+
+func TestInitProject_SembleEnabledSkipsLookupWhenHardPreconditionsFail(t *testing.T) {
+	t.Setenv(semble.EnvEnableSemble, "true")
+	testhelpers.SetupGlobalLiza(t)
+	projectRoot := t.TempDir()
+	gitInit(t, projectRoot)
+
+	specDir := filepath.Join(projectRoot, "specs")
+	if err := os.MkdirAll(specDir, 0755); err != nil {
+		t.Fatalf("Failed to create specs dir: %v", err)
+	}
+	specFile := filepath.Join(specDir, "goal.md")
+	if err := os.WriteFile(specFile, []byte("# Test Goal\n"), 0644); err != nil {
+		t.Fatalf("Failed to write spec file: %v", err)
+	}
+	var diagnostics []string
+	restore := setInitProjectSembleHooksForTest(t,
+		func(string) (string, error) {
+			t.Fatal("Semble executable lookup called before spec/pre-commit preconditions passed")
+			return "", nil
+		},
+		func(semble.CommandPlan) (semble.CommandResult, error) {
+			t.Fatal("Semble command runner called before spec/pre-commit preconditions passed")
+			return semble.CommandResult{}, nil
+		},
+	)
+	defer restore()
+
+	err := InitProject(projectRoot, InitProjectParams{
+		Description: "Test project",
+		SpecRef:     specFile,
+		SembleDiagnosticSink: func(message string) {
+			diagnostics = append(diagnostics, message)
+		},
+	})
+	if err == nil {
+		t.Fatal("InitProject() succeeded with an uncommitted spec")
+	}
+	if !strings.Contains(err.Error(), "spec file") || !strings.Contains(err.Error(), "commit") {
+		t.Fatalf("InitProject() error = %v, want spec commit precondition", err)
+	}
+	if len(diagnostics) != 0 {
+		t.Fatalf("Semble diagnostics = %#v, want none", diagnostics)
+	}
+	if _, statErr := os.Stat(filepath.Join(projectRoot, ".liza")); !os.IsNotExist(statErr) {
+		t.Fatalf(".liza directory state after failed init = %v, want not exist", statErr)
+	}
+}
+
+func TestInitProject_SembleEnabledRunsPrewarmAndOfflineValidationBeforeLizaCreation(t *testing.T) {
+	t.Setenv(semble.EnvEnableSemble, "true")
+	t.Setenv("SEMBLE_MODEL_NAME", t.Name())
+	projectRoot, specFile := setupInitTestDir(t)
+	executablePath := fakeSembleExecutable(t)
+	var runnerCalls []string
+	var lookupCalls []string
+	restore := setInitProjectSembleHooksForTest(t,
+		func(name string) (string, error) {
+			lookupCalls = append(lookupCalls, name)
+			return executablePath, nil
+		},
+		func(plan semble.CommandPlan) (semble.CommandResult, error) {
+			if _, statErr := os.Stat(filepath.Join(projectRoot, ".liza")); !os.IsNotExist(statErr) {
+				t.Fatalf(".liza state during Semble validation = %v, want not exist", statErr)
+			}
+			if hasOfflineEnv(plan.Env) {
+				runnerCalls = append(runnerCalls, "offline")
+			} else {
+				runnerCalls = append(runnerCalls, "prewarm")
+			}
+			return semble.CommandResult{ExitCode: 0}, nil
+		},
+	)
+	defer restore()
+
+	var diagnostics []string
+	err := InitProject(projectRoot, InitProjectParams{
+		Description: "Test project",
+		SpecRef:     specFile,
+		SembleDiagnosticSink: func(message string) {
+			diagnostics = append(diagnostics, message)
+		},
+	})
+	if err != nil {
+		t.Fatalf("InitProject() error: %v", err)
+	}
+	if !reflect.DeepEqual(runnerCalls, []string{"prewarm", "offline"}) {
+		t.Fatalf("Semble runner calls = %#v, want prewarm then offline", runnerCalls)
+	}
+	if !reflect.DeepEqual(lookupCalls, []string{"semble", "semble"}) {
+		t.Fatalf("Semble lookup calls = %#v, want two semble lookups", lookupCalls)
+	}
+	if len(diagnostics) != 0 {
+		t.Fatalf("Semble diagnostics = %#v, want none", diagnostics)
+	}
+	assertNoSembleState(t, projectRoot)
+}
+
+func TestInitProject_SembleDiagnosticsAreTransientNonFatalAndSilent(t *testing.T) {
+	tests := []struct {
+		name        string
+		lookPath    func(t *testing.T) semble.ExecutableLookup
+		runner      semble.CommandRunner
+		wantMessage string
+	}{
+		{
+			name: "missing executable",
+			lookPath: func(t *testing.T) semble.ExecutableLookup {
+				t.Helper()
+				return func(string) (string, error) {
+					return "", exec.ErrNotFound
+				}
+			},
+			runner: func(semble.CommandPlan) (semble.CommandResult, error) {
+				t.Fatal("runner called for missing executable")
+				return semble.CommandResult{}, nil
+			},
+			wantMessage: "semble executable not found",
+		},
+		{
+			name: "offline model unavailable",
+			lookPath: func(t *testing.T) semble.ExecutableLookup {
+				t.Helper()
+				executablePath := fakeSembleExecutable(t)
+				return func(string) (string, error) {
+					return executablePath, nil
+				}
+			},
+			runner: func(plan semble.CommandPlan) (semble.CommandResult, error) {
+				if hasOfflineEnv(plan.Env) {
+					return semble.CommandResult{ExitCode: 1, Stderr: "HF_HUB_OFFLINE localentrynotfounderror model not in cache"}, nil
+				}
+				return semble.CommandResult{ExitCode: 0}, nil
+			},
+			wantMessage: "semble: model unavailable offline",
+		},
+		{
+			name: "generic execution failure",
+			lookPath: func(t *testing.T) semble.ExecutableLookup {
+				t.Helper()
+				executablePath := fakeSembleExecutable(t)
+				return func(string) (string, error) {
+					return executablePath, nil
+				}
+			},
+			runner: func(semble.CommandPlan) (semble.CommandResult, error) {
+				return semble.CommandResult{ExitCode: 2, Stderr: "raw output should be bounded"}, errors.New("runner failed")
+			},
+			wantMessage: "semble: execution failed",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(semble.EnvEnableSemble, "true")
+			t.Setenv("SEMBLE_MODEL_NAME", t.Name())
+			projectRoot, specFile := setupInitTestDir(t)
+			restore := setInitProjectSembleHooksForTest(t, tt.lookPath(t), tt.runner)
+			defer restore()
+
+			var diagnostics []string
+			stdout, stderr, err := captureInitProjectOutput(t, func() error {
+				return InitProject(projectRoot, InitProjectParams{
+					Description: "Test project",
+					SpecRef:     specFile,
+					SembleDiagnosticSink: func(message string) {
+						diagnostics = append(diagnostics, message)
+					},
+				})
+			})
+			if err != nil {
+				t.Fatalf("InitProject() error: %v", err)
+			}
+			if stdout != "" || stderr != "" {
+				t.Fatalf("InitProject wrote stdout=%q stderr=%q, want no terminal output", stdout, stderr)
+			}
+			if len(diagnostics) != 1 {
+				t.Fatalf("Semble diagnostics = %#v, want exactly one", diagnostics)
+			}
+			if !strings.Contains(diagnostics[0], tt.wantMessage) {
+				t.Fatalf("Semble diagnostic = %q, want to contain %q", diagnostics[0], tt.wantMessage)
+			}
+			if len(diagnostics[0]) > 1024 {
+				t.Fatalf("Semble diagnostic length = %d, want bounded <= 1024", len(diagnostics[0]))
+			}
+			if _, statErr := os.Stat(filepath.Join(projectRoot, ".liza")); statErr != nil {
+				t.Fatalf(".liza after non-fatal Semble diagnostic = %v, want created", statErr)
+			}
+			assertNoSembleState(t, projectRoot)
+		})
 	}
 }
 
@@ -576,5 +822,97 @@ func TestInitProject_DefaultCLIEmpty(t *testing.T) {
 	}
 	if strings.Contains(string(data), "default_reviewer_cli") {
 		t.Error("state.yaml contains default_reviewer_cli, want omitted when empty")
+	}
+}
+
+func setInitProjectSembleHooksForTest(t *testing.T, lookPath semble.ExecutableLookup, runner semble.CommandRunner) func() {
+	t.Helper()
+	previousLookPath := initProjectSembleLookPath
+	previousRunner := initProjectSembleRunner
+	initProjectSembleLookPath = lookPath
+	initProjectSembleRunner = runner
+	return func() {
+		initProjectSembleLookPath = previousLookPath
+		initProjectSembleRunner = previousRunner
+	}
+}
+
+func unsetEnvForInitProjectTest(t *testing.T, name string) {
+	t.Helper()
+	previous, hadPrevious := os.LookupEnv(name)
+	if err := os.Unsetenv(name); err != nil {
+		t.Fatalf("unset %s: %v", name, err)
+	}
+	t.Cleanup(func() {
+		if hadPrevious {
+			_ = os.Setenv(name, previous)
+		} else {
+			_ = os.Unsetenv(name)
+		}
+	})
+}
+
+func hasOfflineEnv(vars []semble.EnvVar) bool {
+	for _, env := range vars {
+		if env.Name == "HF_HUB_OFFLINE" && env.Value == "1" {
+			return true
+		}
+	}
+	return false
+}
+
+func fakeSembleExecutable(t *testing.T) string {
+	t.Helper()
+	executablePath := filepath.Join(t.TempDir(), "semble")
+	if err := os.WriteFile(executablePath, []byte("fake Semble executable\n"), 0o755); err != nil {
+		t.Fatalf("write fake Semble executable: %v", err)
+	}
+	return executablePath
+}
+
+func captureInitProjectOutput(t *testing.T, fn func() error) (string, string, error) {
+	t.Helper()
+	originalStdout := os.Stdout
+	originalStderr := os.Stderr
+	stdoutReader, stdoutWriter, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe stdout: %v", err)
+	}
+	stderrReader, stderrWriter, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe stderr: %v", err)
+	}
+	os.Stdout = stdoutWriter
+	os.Stderr = stderrWriter
+	defer func() {
+		os.Stdout = originalStdout
+		os.Stderr = originalStderr
+	}()
+	callErr := fn()
+	_ = stdoutWriter.Close()
+	_ = stderrWriter.Close()
+	stdoutBytes, readStdoutErr := io.ReadAll(stdoutReader)
+	stderrBytes, readStderrErr := io.ReadAll(stderrReader)
+	if readStdoutErr != nil {
+		t.Fatalf("read stdout: %v", readStdoutErr)
+	}
+	if readStderrErr != nil {
+		t.Fatalf("read stderr: %v", readStderrErr)
+	}
+	return string(stdoutBytes), string(stderrBytes), callErr
+}
+
+func assertNoSembleState(t *testing.T, projectRoot string) {
+	t.Helper()
+	statePath := filepath.Join(projectRoot, ".liza", "state.yaml")
+	data, err := os.ReadFile(statePath)
+	if err != nil {
+		t.Fatalf("Failed to read state.yaml: %v", err)
+	}
+	if strings.Contains(strings.ToLower(string(data)), "semble") {
+		t.Fatalf("state.yaml contains Semble data, want no durable Semble state:\n%s", data)
+	}
+	if _, ok := reflect.TypeOf(models.Config{}).FieldByName("Semble"); ok {
+		t.Fatal("models.Config contains Semble field, want environment-only activation")
 	}
 }

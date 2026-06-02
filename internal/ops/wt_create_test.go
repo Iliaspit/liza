@@ -12,6 +12,7 @@ import (
 
 	"github.com/liza-mas/liza/internal/embedded"
 	"github.com/liza-mas/liza/internal/errors"
+	"github.com/liza-mas/liza/internal/git"
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/paths"
 	"github.com/liza-mas/liza/internal/scipsearch"
@@ -114,6 +115,59 @@ func TestCreateWorktree_AlreadyExists(t *testing.T) {
 	}
 }
 
+func TestCreateWorktreePreparesSembleIgnoreForFreshWorktree(t *testing.T) {
+	tmpDir := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, tmpDir)
+	addTrackedGoSourceForCreateWorktreeScipTest(t, tmpDir)
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	t.Setenv(stacklit.EnvEnableStacklit, "false")
+
+	state := testhelpers.CreateValidState()
+	state.Tasks = []models.Task{
+		testhelpers.BuildTaskByStatus("task-1", models.TaskStatusImplementing, time.Now().UTC()),
+	}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	result, err := CreateWorktree(tmpDir, "task-1", false)
+	if err != nil {
+		t.Fatalf("CreateWorktree() error: %v", err)
+	}
+
+	assertPrepareSembleIgnorePayload(t, result.WorktreeDir)
+	assertPrepareSemblePrivateExcludeCount(t, result.WorktreeDir, ".sembleignore", 1)
+	assertGitStatusClean(t, result.WorktreeDir)
+}
+
+func TestCreateWorktreePreparesSembleIgnoreForExistingWorktree(t *testing.T) {
+	tmpDir := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, tmpDir)
+	addTrackedGoSourceForCreateWorktreeScipTest(t, tmpDir)
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	t.Setenv(stacklit.EnvEnableStacklit, "false")
+
+	state := testhelpers.CreateValidState()
+	state.Tasks = []models.Task{
+		testhelpers.BuildTaskByStatus("task-1", models.TaskStatusImplementing, time.Now().UTC()),
+	}
+	testhelpers.WriteInitialState(t, stateFile, state)
+	gitWrapper := git.New(tmpDir)
+	if _, err := gitWrapper.CreateWorktree("task-1", "integration"); err != nil {
+		t.Fatalf("CreateWorktree() setup error: %v", err)
+	}
+
+	result, err := CreateWorktree(tmpDir, "task-1", false)
+	if err != nil {
+		t.Fatalf("CreateWorktree() error: %v", err)
+	}
+	if !result.AlreadyExisted {
+		t.Fatal("AlreadyExisted = false, want true")
+	}
+
+	assertPrepareSembleIgnorePayload(t, result.WorktreeDir)
+	assertPrepareSemblePrivateExcludeCount(t, result.WorktreeDir, ".sembleignore", 1)
+	assertGitStatusClean(t, result.WorktreeDir)
+}
+
 func TestCreateWorktree_ScipIndexesEnabledNewWorktreeAfterSetup(t *testing.T) {
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
@@ -121,6 +175,7 @@ func TestCreateWorktree_ScipIndexesEnabledNewWorktreeAfterSetup(t *testing.T) {
 	writeClaudeSettingsForCreateWorktreeScipTest(t, tmpDir)
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 	t.Setenv(scipsearch.EnvEnableScipSearch, "true")
+	t.Setenv(stacklit.EnvEnableStacklit, "false")
 
 	markerPath := filepath.Join(tmpDir, "post-worktree-ran")
 	now := time.Now().UTC()
@@ -230,6 +285,7 @@ func TestCreateWorktree_ScipDisabledActivationNoop(t *testing.T) {
 	addTrackedGoSourceForCreateWorktreeScipTest(t, tmpDir)
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 	t.Setenv(scipsearch.EnvEnableScipSearch, "false")
+	t.Setenv(stacklit.EnvEnableStacklit, "false")
 
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()
@@ -312,6 +368,7 @@ func TestCreateWorktree_ScipFailedIndexerWarningOnly(t *testing.T) {
 	addTrackedGoSourceForCreateWorktreeScipTest(t, tmpDir)
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 	t.Setenv(scipsearch.EnvEnableScipSearch, "true")
+	t.Setenv(stacklit.EnvEnableStacklit, "false")
 
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()
@@ -343,6 +400,7 @@ func TestCreateWorktree_ScipConcurrentCreatesUseIsolatedIndexes(t *testing.T) {
 	addTrackedGoSourceForCreateWorktreeScipTest(t, tmpDir)
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 	t.Setenv(scipsearch.EnvEnableScipSearch, "true")
+	t.Setenv(stacklit.EnvEnableStacklit, "false")
 
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()

@@ -16,11 +16,14 @@ import (
 	"github.com/liza-mas/liza/internal/prompts"
 	"github.com/liza-mas/liza/internal/roles"
 	"github.com/liza-mas/liza/internal/scipsearch"
+	"github.com/liza-mas/liza/internal/semble"
 	"github.com/liza-mas/liza/internal/stacklit"
 )
 
+var buildSemblePromptMetadata = semble.BuildPromptMetadata
+
 // baseConfigFrom constructs the BasePromptConfig shared by all roles.
-func baseConfigFrom(state *models.State, config SupervisorConfig, taskID string, scipIndexes []prompts.ScipSearchIndex, stacklitIndexes []prompts.StacklitIndex) prompts.BasePromptConfig {
+func baseConfigFrom(state *models.State, config SupervisorConfig, taskID string, scipIndexes []prompts.ScipSearchIndex, stacklitIndexes []prompts.StacklitIndex, sembleSearch prompts.SembleSearchMetadata) prompts.BasePromptConfig {
 	return prompts.BasePromptConfig{
 		Role:              config.Role,
 		AgentID:           config.AgentID,
@@ -32,6 +35,7 @@ func baseConfigFrom(state *models.State, config SupervisorConfig, taskID string,
 		GoalSpecRef:       state.Goal.SpecRef,
 		ScipSearchIndexes: scipIndexes,
 		StacklitIndexes:   stacklitIndexes,
+		SembleSearch:      sembleSearch,
 	}
 }
 
@@ -54,6 +58,7 @@ func buildPromptWithContext(state *models.State, config SupervisorConfig, taskID
 		taskID,
 		toBasePromptScipSearchIndexes(data.ScipIndexes),
 		toBasePromptStacklitIndexes(data.StacklitIndexes),
+		availablePromptSembleSearchMetadata(data.Worktree, semble.TargetKindTaskWorktree),
 	))
 	if err != nil {
 		return "", fmt.Errorf("building base prompt: %w", err)
@@ -96,6 +101,7 @@ func buildOrchestratorPromptContext(state *models.State, config SupervisorConfig
 		"",
 		toBasePromptScipSearchIndexes(data.ScipIndexes),
 		toBasePromptStacklitIndexes(data.StacklitIndexes),
+		availablePromptSembleSearchMetadata(config.ProjectRoot, semble.TargetKindProjectRoot),
 	))
 	if err != nil {
 		return "", fmt.Errorf("building base prompt: %w", err)
@@ -236,6 +242,32 @@ func availablePromptStacklitIndexRefs(targetRoot string) ([]prompts.StacklitInde
 		return nil, fmt.Errorf("available stacklit indexes: %w", err)
 	}
 	return toPromptStacklitIndexRefs(availableIndexes), nil
+}
+
+func availablePromptSembleSearchMetadata(targetRoot string, kind semble.TargetKind) prompts.SembleSearchMetadata {
+	if targetRoot == "" {
+		return prompts.SembleSearchMetadata{}
+	}
+	opts := semble.PromptMetadataOptions{
+		Kind:       kind,
+		TargetRoot: targetRoot,
+	}
+	if kind == semble.TargetKindTaskWorktree {
+		opts.ExpectedWorktreeRoot = targetRoot
+	}
+	metadata, ok := buildSemblePromptMetadata(opts)
+	if !ok {
+		return prompts.SembleSearchMetadata{}
+	}
+	return prompts.SembleSearchMetadata{
+		TargetRoot:          metadata.TargetRoot,
+		ShellTargetRoot:     metadata.ShellTargetRoot,
+		OfflineEnvPrefix:    metadata.OfflineEnvPrefix,
+		SearchExamples:      slices.Clone(metadata.SearchExamples),
+		FindRelatedExample:  metadata.FindRelatedExample,
+		ContentModeGuidance: metadata.ContentModeGuidance,
+		DiscoveryNotice:     metadata.DiscoveryNotice,
+	}
 }
 
 // buildTaskRoleContextData constructs RoleContextData for task-based roles (doers and reviewers).

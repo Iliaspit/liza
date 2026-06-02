@@ -245,6 +245,13 @@ for the MAS process when you want Liza to refresh root/worktree
 Stacklit or mutate curated insights/config files; see
 [Configuration](support-docs/CONFIGURATION.md).
 
+Semble is an optional semantic discovery tool for repository-navigation-heavy
+MAS runs when agents need natural-language candidate search before they know the
+right symbol or module. Set `LIZA_ENABLE_SEMBLE=1` only after installing
+Semble and preparing the model/cache for offline MAS use; Liza treats Semble as
+candidate discovery, not a requirement or validation source. See
+[Configuration](support-docs/CONFIGURATION.md) for setup and safety details.
+
 ### Pairing and MAS Modes
 
 > **New to Liza?** Start with Pairing mode — it's the fastest way to experience how the behavioral contract changes agent behavior. The trust you build watching agents pause at gates, surface assumptions, and validate before claiming done is what makes letting them run autonomously in Multi-Agent mode a comfortable next step.<br>
@@ -343,6 +350,7 @@ Liza optimizes cost-to-quality, not cost-to-lets-cross-fingers. These tools redu
 | [RTK](https://github.com/rtk-ai/rtk) | CLI proxy that compresses tool output (git, go, pytest, ...) — ~90% token savings on command results | Fewer tokens per tool call, more budget for reasoning |
 | [scip-search](https://github.com/liza-mas/scip-search/) | Precise symbol navigation — definitions, references, callers/callees, implementations via SCIP indexes | Saves agent tokens on symbol lookups in worktrees; pairs with Stacklit for orient-then-trace workflows |
 | [stacklit-cli](https://github.com/liza-mas/stacklit-cli) | Compact codebase index — modules, dependencies, hot files, workflow hints | Low-token repo map before targeted reads; surfaces symbol names that scip-search can trace precisely |
+| [Semble](https://github.com/MinishLab/semble/) | Optional semantic discovery and semantic repository search for natural-language code, docs, and config questions | Finds candidate chunks before exact symbols are known; direct source reads still provide evidence |
 | [ast-grep](https://ast-grep.github.io/) | Complementary AST-aware structural pattern search/rewrite — matches code structure, not text | Finds patterns indexes cannot express (function signatures, call shapes, nested expressions) |
 | [mdtoc](https://github.com/liza-mas/mdtoc) | Highly recommended for MAS Markdown navigation: prints per-file section line ranges and `mdq` selectors | Saves agent tokens by mapping long specs/plans before reading only the relevant section |
 | [MorphLLM MCP](https://www.morphllm.com/) (WarpGrep) | Fast Apply edits via `// ... existing code ...` placeholders + semantic codebase search | Avoids reading full files into context for edits |

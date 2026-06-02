@@ -2,6 +2,7 @@ package commands
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"os/exec"
@@ -15,6 +16,7 @@ import (
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/paths"
 	"github.com/liza-mas/liza/internal/scipsearch"
+	"github.com/liza-mas/liza/internal/semble"
 	"github.com/liza-mas/liza/internal/testhelpers"
 )
 
@@ -1814,6 +1816,231 @@ func TestInitCommandWithConfig_AutodetectsAndPersistsValidatedScipSearchLanguage
 	}
 }
 
+func TestInitCommandWithConfig_SembleDisabledSkipsReadiness(t *testing.T) {
+	tests := []struct {
+		name  string
+		value *string
+	}{
+		{name: "unset"},
+		{name: "empty", value: stringPtrForTest("")},
+		{name: "zero", value: stringPtrForTest("0")},
+		{name: "false", value: stringPtrForTest("false")},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := setupGitRepo(t)
+			defer os.RemoveAll(tmpDir)
+			setupGlobalLiza(t)
+			if tt.value == nil {
+				unsetEnvForTest(t, semble.EnvEnableSemble)
+			} else {
+				t.Setenv(semble.EnvEnableSemble, *tt.value)
+			}
+			t.Setenv("SEMBLE_MODEL_NAME", "disabled-"+tt.name)
+
+			originalDir, err := os.Getwd()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer os.Chdir(originalDir)
+			if err := os.Chdir(tmpDir); err != nil {
+				t.Fatal(err)
+			}
+			testhelpers.CreateCommittedSpecFile(t, tmpDir, "vision.md", "# Vision\n")
+
+			var lookups, runs int
+			restore := setInitSembleHooksForTest(
+				func(name string) (string, error) {
+					lookups++
+					return filepath.Join(tmpDir, "bin", name), nil
+				},
+				func(plan semble.CommandPlan) (semble.CommandResult, error) {
+					runs++
+					return semble.CommandResult{ExitCode: 0}, nil
+				},
+			)
+			defer restore()
+
+			stderr, err := captureStderrForTest(func() error {
+				return InitCommandWithConfig(InitParams{
+					Description: "Goal with disabled optional search",
+					SpecRef:     "specs/vision.md",
+				})
+			})
+			if err != nil {
+				t.Fatalf("InitCommandWithConfig() error = %v", err)
+			}
+			if lookups != 0 || runs != 0 {
+				t.Fatalf("Semble lookups=%d runs=%d, want zero", lookups, runs)
+			}
+			if strings.Contains(strings.ToLower(stderr), "semble") {
+				t.Fatalf("stderr = %q, want no Semble diagnostics", stderr)
+			}
+			assertStateHasNoSembleForTest(t, filepath.Join(tmpDir, ".liza", "state.yaml"))
+		})
+	}
+}
+
+func TestInitCommandWithConfig_SembleEnabledPrewarmsBeforeStateWrite(t *testing.T) {
+	tmpDir := setupGitRepo(t)
+	defer os.RemoveAll(tmpDir)
+	setupGlobalLiza(t)
+	t.Setenv(semble.EnvEnableSemble, "true")
+	t.Setenv("SEMBLE_MODEL_NAME", "enabled-before-state")
+
+	originalDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(originalDir)
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatal(err)
+	}
+	testhelpers.CreateCommittedSpecFile(t, tmpDir, "vision.md", "# Vision\n")
+
+	var calls []string
+	restore := setInitSembleHooksForTest(
+		func(name string) (string, error) {
+			calls = append(calls, "lookup:"+name)
+			return filepath.Join(tmpDir, "bin", name), nil
+		},
+		func(plan semble.CommandPlan) (semble.CommandResult, error) {
+			if _, err := os.Stat(filepath.Join(tmpDir, ".liza", "state.yaml")); !os.IsNotExist(err) {
+				t.Fatalf("Semble runner observed state.yaml before returning: %v", err)
+			}
+			if len(plan.Env) == 0 {
+				calls = append(calls, "prewarm")
+			} else {
+				calls = append(calls, "offline")
+			}
+			return semble.CommandResult{ExitCode: 0}, nil
+		},
+	)
+	defer restore()
+
+	stderr, err := captureStderrForTest(func() error {
+		return InitCommandWithConfig(InitParams{
+			Description: "Goal with enabled optional search",
+			SpecRef:     "specs/vision.md",
+		})
+	})
+	if err != nil {
+		t.Fatalf("InitCommandWithConfig() error = %v", err)
+	}
+	if strings.Contains(strings.ToLower(stderr), "semble") {
+		t.Fatalf("stderr = %q, want no Semble diagnostics", stderr)
+	}
+	wantCalls := []string{"lookup:semble", "prewarm", "lookup:semble", "offline"}
+	if !slices.Equal(calls, wantCalls) {
+		t.Fatalf("Semble calls = %v, want %v", calls, wantCalls)
+	}
+	assertStateHasNoSembleForTest(t, filepath.Join(tmpDir, ".liza", "state.yaml"))
+}
+
+func TestInitCommandWithConfig_SembleReadinessDiagnosticsNonFatal(t *testing.T) {
+	tests := []struct {
+		name       string
+		lookPath   semble.ExecutableLookup
+		runner     semble.CommandRunner
+		wantStderr string
+		notStderr  string
+		wantRuns   int
+	}{
+		{
+			name: "missing executable",
+			lookPath: func(name string) (string, error) {
+				return "", os.ErrNotExist
+			},
+			runner: func(plan semble.CommandPlan) (semble.CommandResult, error) {
+				t.Fatalf("Semble runner called for missing executable")
+				return semble.CommandResult{}, nil
+			},
+			wantStderr: "semble: semble executable not found",
+			wantRuns:   0,
+		},
+		{
+			name: "offline unready model",
+			lookPath: func(name string) (string, error) {
+				return "/tmp/fake-," + name, nil
+			},
+			runner: func(plan semble.CommandPlan) (semble.CommandResult, error) {
+				if len(plan.Env) == 0 {
+					return semble.CommandResult{ExitCode: 0}, nil
+				}
+				return semble.CommandResult{
+					ExitCode: 1,
+					Stderr:   "LocalEntryNotFoundError: HF_HUB_OFFLINE=1 cache miss",
+				}, errors.New("exit status 1")
+			},
+			wantStderr: "semble: model unavailable offline",
+			wantRuns:   2,
+		},
+		{
+			name: "generic execution failure",
+			lookPath: func(name string) (string, error) {
+				return "/tmp/fake-," + name, nil
+			},
+			runner: func(plan semble.CommandPlan) (semble.CommandResult, error) {
+				return semble.CommandResult{
+					ExitCode: 2,
+					Stdout:   strings.Repeat("verbose-output ", 90) + "UNBOUNDED_TAIL",
+				}, errors.New("exit status 2")
+			},
+			wantStderr: "semble: execution failed",
+			notStderr:  "UNBOUNDED_TAIL",
+			wantRuns:   1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := setupGitRepo(t)
+			defer os.RemoveAll(tmpDir)
+			setupGlobalLiza(t)
+			t.Setenv(semble.EnvEnableSemble, "1")
+			t.Setenv("SEMBLE_MODEL_NAME", "diagnostic-"+tt.name)
+
+			originalDir, err := os.Getwd()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer os.Chdir(originalDir)
+			if err := os.Chdir(tmpDir); err != nil {
+				t.Fatal(err)
+			}
+			testhelpers.CreateCommittedSpecFile(t, tmpDir, "vision.md", "# Vision\n")
+
+			var runs int
+			restore := setInitSembleHooksForTest(tt.lookPath, func(plan semble.CommandPlan) (semble.CommandResult, error) {
+				runs++
+				return tt.runner(plan)
+			})
+			defer restore()
+
+			stderr, err := captureStderrForTest(func() error {
+				return InitCommandWithConfig(InitParams{
+					Description: "Goal with optional search diagnostic",
+					SpecRef:     "specs/vision.md",
+				})
+			})
+			if err != nil {
+				t.Fatalf("InitCommandWithConfig() error = %v", err)
+			}
+			if !strings.Contains(stderr, tt.wantStderr) {
+				t.Fatalf("stderr = %q, want %q", stderr, tt.wantStderr)
+			}
+			if tt.notStderr != "" && strings.Contains(stderr, tt.notStderr) {
+				t.Fatalf("stderr = %q, want it to omit %q", stderr, tt.notStderr)
+			}
+			if runs != tt.wantRuns {
+				t.Fatalf("Semble runner calls = %d, want %d", runs, tt.wantRuns)
+			}
+			assertStateHasNoSembleForTest(t, filepath.Join(tmpDir, ".liza", "state.yaml"))
+		})
+	}
+}
+
 func writeTrackedFile(t *testing.T, root, rel, content string) {
 	t.Helper()
 	path := filepath.Join(root, rel)
@@ -2735,6 +2962,78 @@ func TestInitCommand_WorkspaceInit(t *testing.T) {
 	if strings.Contains(stdout, "MCP tools and personal permissions") {
 		t.Error("stdout still contains stale MCP note after MCP removal")
 	}
+}
+
+func setInitSembleHooksForTest(lookPath semble.ExecutableLookup, runner semble.CommandRunner) func() {
+	previousLookPath := initSembleLookPath
+	previousRunner := initSembleRunner
+	initSembleLookPath = lookPath
+	initSembleRunner = runner
+	return func() {
+		initSembleLookPath = previousLookPath
+		initSembleRunner = previousRunner
+	}
+}
+
+func captureStderrForTest(fn func() error) (string, error) {
+	originalStderr := os.Stderr
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		return "", err
+	}
+	os.Stderr = writer
+	runErr := fn()
+	closeErr := writer.Close()
+	os.Stderr = originalStderr
+	stderrBytes, readErr := io.ReadAll(reader)
+	if readErr != nil {
+		return string(stderrBytes), readErr
+	}
+	if runErr != nil {
+		return string(stderrBytes), runErr
+	}
+	return string(stderrBytes), closeErr
+}
+
+func assertStateHasNoSembleForTest(t *testing.T, statePath string) {
+	t.Helper()
+	state, err := db.New(statePath).Read()
+	if err != nil {
+		t.Fatalf("Failed to read state: %v", err)
+	}
+	configJSON, err := json.Marshal(state.Config)
+	if err != nil {
+		t.Fatalf("Failed to marshal state.Config: %v", err)
+	}
+	if strings.Contains(strings.ToLower(string(configJSON)), "semble") {
+		t.Fatalf("state.Config contains Semble data: %s", string(configJSON))
+	}
+	content, err := os.ReadFile(statePath)
+	if err != nil {
+		t.Fatalf("Failed to read state.yaml: %v", err)
+	}
+	if strings.Contains(strings.ToLower(string(content)), "semble") {
+		t.Fatalf("state.yaml contains Semble data:\n%s", string(content))
+	}
+}
+
+func unsetEnvForTest(t *testing.T, key string) {
+	t.Helper()
+	previous, hadPrevious := os.LookupEnv(key)
+	if err := os.Unsetenv(key); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if hadPrevious {
+			_ = os.Setenv(key, previous)
+			return
+		}
+		_ = os.Unsetenv(key)
+	})
+}
+
+func stringPtrForTest(value string) *string {
+	return &value
 }
 
 func verifyCodexHooks(t *testing.T, projectRoot string) {

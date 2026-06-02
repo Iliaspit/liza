@@ -2,9 +2,7 @@ package scipsearch
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
-	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,6 +12,7 @@ import (
 	"sync"
 
 	"github.com/liza-mas/liza/internal/gitenv"
+	"github.com/liza-mas/liza/internal/worktreeexclude"
 	"github.com/tailscale/hujson"
 )
 
@@ -105,9 +104,8 @@ type RefreshFailure struct {
 }
 
 var (
-	runnerMu                    sync.Mutex
-	taskWorktreeExcludeConfigMu sync.Mutex
-	defaultRunner               CommandRunner = runCommand
+	runnerMu      sync.Mutex
+	defaultRunner CommandRunner = runCommand
 )
 
 // SetCommandRunnerForTest replaces the process runner until the returned restore
@@ -860,96 +858,10 @@ func removeStaleIndex(path string) error {
 }
 
 func ensureTaskWorktreeScipExclude(targetRoot string) error {
-	output, err := gitenv.Output(targetRoot, "rev-parse", "--git-dir")
-	if err != nil {
-		return fmt.Errorf("resolve task worktree gitdir: %w", err)
-	}
-
-	gitDir := strings.TrimSpace(string(output))
-	if gitDir == "" {
-		return fmt.Errorf("resolve task worktree gitdir: git rev-parse --git-dir returned empty path")
-	}
-	if !filepath.IsAbs(gitDir) {
-		gitDir = filepath.Join(targetRoot, gitDir)
-	}
-
-	excludePath := filepath.Join(gitDir, "info", "exclude")
-	if err := os.MkdirAll(filepath.Dir(excludePath), 0o755); err != nil {
-		return fmt.Errorf("create task worktree exclude directory: %w", err)
-	}
-
-	content, err := os.ReadFile(excludePath)
-	if err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("read task worktree exclude: %w", err)
-	}
-	if hasTaskWorktreeScipExclude(content) {
-		return configureTaskWorktreeExclude(targetRoot, excludePath)
-	}
-
-	next := slices.Clone(content)
-	if len(next) > 0 && next[len(next)-1] != '\n' {
-		next = append(next, '\n')
-	}
-	next = append(next, ".liza/scip/\n"...)
-	if err := os.WriteFile(excludePath, next, 0o644); err != nil {
-		return fmt.Errorf("write task worktree exclude: %w", err)
-	}
-	if err := configureTaskWorktreeExclude(targetRoot, excludePath); err != nil {
-		return err
+	if err := worktreeexclude.EnsurePrivateExclude(targetRoot, ".liza/scip/"); err != nil {
+		return fmt.Errorf("ensure task worktree scip-search exclude: %w", err)
 	}
 	return nil
-}
-
-func hasTaskWorktreeScipExclude(content []byte) bool {
-	for _, line := range strings.Split(string(content), "\n") {
-		if strings.TrimSpace(line) == ".liza/scip/" {
-			return true
-		}
-	}
-	return false
-}
-
-func configureTaskWorktreeExclude(targetRoot, excludePath string) error {
-	taskWorktreeExcludeConfigMu.Lock()
-	defer taskWorktreeExcludeConfigMu.Unlock()
-
-	// Linked worktrees do not consult their private info/exclude unless
-	// worktree-specific config points core.excludesFile at it.
-	worktreeConfigEnabled := false
-	output, err := gitenv.Output(targetRoot, "config", "--get", "extensions.worktreeConfig")
-	if err == nil {
-		worktreeConfigEnabled = strings.EqualFold(strings.TrimSpace(string(output)), "true")
-	} else if !gitConfigUnset(err) {
-		return fmt.Errorf("inspect task worktree config extension: %w", err)
-	}
-
-	if output, err := gitenv.CombinedOutput(targetRoot, "config", "extensions.worktreeConfig", "true"); err != nil {
-		return fmt.Errorf("enable task worktree config for scip-search exclude: %w%s", err, outputSuffix(string(output)))
-	}
-	if !worktreeConfigEnabled {
-		log.Printf("INFO: enabled git extensions.worktreeConfig for scip-search task worktree excludes in %s", targetRoot)
-	}
-
-	output, err = gitenv.Output(targetRoot, "config", "--worktree", "--get", "core.excludesFile")
-	if err == nil {
-		current := strings.TrimSpace(string(output))
-		if current != "" && filepath.Clean(current) != filepath.Clean(excludePath) {
-			return fmt.Errorf("task worktree core.excludesFile already configured as %q", current)
-		}
-	}
-	if err != nil && !gitConfigUnset(err) {
-		return fmt.Errorf("inspect task worktree core.excludesFile: %w", err)
-	}
-
-	if output, err := gitenv.CombinedOutput(targetRoot, "config", "--worktree", "core.excludesFile", excludePath); err != nil {
-		return fmt.Errorf("configure task worktree scip-search exclude: %w%s", err, outputSuffix(string(output)))
-	}
-	return nil
-}
-
-func gitConfigUnset(err error) bool {
-	var exitErr *exec.ExitError
-	return errors.As(err, &exitErr) && exitErr.ExitCode() == 1
 }
 
 func listGitFiles(projectRoot string) ([]string, error) {

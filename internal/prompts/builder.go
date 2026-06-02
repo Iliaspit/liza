@@ -23,6 +23,7 @@ type BasePromptConfig struct {
 
 	ScipSearchIndexes []ScipSearchIndex
 	StacklitIndexes   []StacklitIndex
+	SembleSearch      SembleSearchMetadata
 }
 
 // ScipSearchIndex is prompt-safe metadata for one successful generated SCIP index.
@@ -36,10 +37,22 @@ type StacklitIndex struct {
 	IndexPath string
 }
 
+// SembleSearchMetadata is prompt-safe metadata for one authorized Semble target root.
+type SembleSearchMetadata struct {
+	TargetRoot          string
+	ShellTargetRoot     string
+	OfflineEnvPrefix    string
+	SearchExamples      []string
+	FindRelatedExample  string
+	ContentModeGuidance string
+	DiscoveryNotice     string
+}
+
 type basePromptTemplateData struct {
 	BasePromptConfig
 	ScipSearchIndexes []scipSearchPromptIndex
 	StacklitIndexes   []stacklitPromptIndex
+	SembleSearch      *SembleSearchMetadata
 }
 
 type scipSearchPromptIndex struct {
@@ -71,8 +84,27 @@ func BuildBasePrompt(config BasePromptConfig) (string, error) {
 		BasePromptConfig:  config,
 		ScipSearchIndexes: buildScipSearchPromptIndexes(config.ScipSearchIndexes),
 		StacklitIndexes:   buildStacklitPromptIndexes(config.StacklitIndexes),
+		SembleSearch:      buildSembleSearchPromptMetadata(config.SembleSearch),
 	}
 	return executeTemplate("base_prompt", data)
+}
+
+func buildSembleSearchPromptMetadata(metadata SembleSearchMetadata) *SembleSearchMetadata {
+	if metadata.TargetRoot == "" || metadata.ShellTargetRoot == "" {
+		return nil
+	}
+	examples := make([]string, 0, len(metadata.SearchExamples))
+	for _, example := range metadata.SearchExamples {
+		if strings.TrimSpace(example) != "" {
+			examples = append(examples, example)
+		}
+	}
+	if len(examples) == 0 || strings.TrimSpace(metadata.FindRelatedExample) == "" {
+		return nil
+	}
+	copy := metadata
+	copy.SearchExamples = examples
+	return &copy
 }
 
 func buildStacklitPromptIndexes(indexes []StacklitIndex) []stacklitPromptIndex {

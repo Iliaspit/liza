@@ -1,0 +1,11 @@
+[
+  {
+    "desc": "Align task-worktree Semble prompt safety with `.sembleignore` preparation. The current diff makes `PrepareSembleWorktreeIgnore` warnings non-fatal, including tracked or conflicting `.sembleignore` cases, but `semble.ValidateTargetSafety` treats any exact task worktree root as safe and `BuildPromptMetadata` can still inject MAS Semble guidance without verifying that the physical task-root `.sembleignore` exists and contains the required runtime/generated/credential exclusions. Fix the task-worktree prompt gate so Semble guidance is omitted when the task worktree ignore file is missing, incomplete, or could not be prepared safely, while preserving the exact-root rejection for parent-project substitution.",
+    "done_when": "With `LIZA_ENABLE_SEMBLE=true` and offline validation mocked successful, task/reviewer prompt metadata is omitted for a task worktree that lacks `.sembleignore` or has an incomplete tracked `.sembleignore`, and is emitted only after the task root has a complete `.sembleignore` containing `semble.DefaultIgnorePatterns()`. Regression coverage proves preparation warnings cannot be followed by Semble prompt guidance for the same unsafe task root, and project-root Semble safety behavior remains unchanged.",
+    "scope": "Restrict changes to the Semble task-worktree safety/prompt gate and directly related tests in `internal/semble`, `internal/agent`, and, if needed for lifecycle signal plumbing, `internal/ops`. Do not change the activation gate, init prewarm/offline validation command contract, operator documentation, or Stacklit/SCIP routing.",
+    "spec_ref": "specs/goals/20260601-integrate-semble.md#worktree-safety-requirements",
+    "validation": [
+      "env LIZA_ENABLE_STACKLIT=0 go test ./internal/semble ./internal/agent ./internal/ops"
+    ]
+  }
+]

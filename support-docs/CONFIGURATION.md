@@ -167,6 +167,91 @@ ai-summary`, or curate Stacklit insights. Operators install Stacklit, commit
 their curated Stacklit inputs, and choose whether to commit or ignore generated
 indexes.
 
+### Semble (`LIZA_ENABLE_SEMBLE`)
+
+Semble is an optional external semantic repository search tool for MAS
+worktrees. It is strict opt-in: Liza validates Semble and injects Semble prompt
+guidance only when `LIZA_ENABLE_SEMBLE` is truthy, the `semble` CLI is present,
+offline validation succeeds, and the target root is safe to index.
+
+`LIZA_ENABLE_SEMBLE` is process-local activation, not durable project state.
+Values are trimmed and compared case-insensitively:
+
+| Value | Meaning |
+|-------|---------|
+| `1`, `true` | Enable Semble prewarm, offline validation, and prompt guidance when Semble is installed and offline-ready |
+| unset, empty, `0`, `false` | Keep Semble disabled; Liza does not validate Semble, run Semble, or mention Semble commands in MAS prompts |
+
+During `liza init --spec`, a truthy `LIZA_ENABLE_SEMBLE` lets Liza perform a
+controlled init-time prewarm when `semble` is available. The prewarm uses a
+temporary one-file fixture outside the project/worktree and may contact
+Hugging Face or the local model cache path to populate the Semble/model2vec/Hugging
+Face cache. After prewarming, Liza performs offline validation with
+`HF_HUB_OFFLINE=1` against the same fixture shape. MAS-facing Semble commands
+also use `HF_HUB_OFFLINE=1` so unattended agents do not trigger model downloads.
+
+The implementation-owned Semble validation timeout constant applies to both
+prewarm and offline validation and defaults to 30 seconds. Semble diagnostics
+are bounded diagnostics: Liza reports concise operator-visible cases such as a
+missing executable, model unavailable offline, or Semble execution failure
+without dumping raw command output, cache contents, or file contents. Semble
+failures are non-blocking for MAS agent spawn; Liza omits Semble prompt guidance
+when Semble is disabled, unavailable, or not offline-ready.
+
+Semble prompt guidance is scoped to explicit local roots. Task agents search
+their task worktree root; reviewer agents search the reviewer worktree root; an
+orchestrator may search the project root only when runtime and worktree
+exclusions make that root safe. Liza should prefer local paths over remote Git
+URL indexing for MAS.
+
+Semble reads physical `.sembleignore` files while walking directories.
+`.sembleignore` is directory-scoped, not global, so a task worktree needs its
+own file before Semble is advertised there. Git private excludes hide generated
+worktree `.sembleignore` files from task diffs, but Git excludes do not replace
+the physical `.sembleignore` that Semble reads.
+
+Default generated `.sembleignore` entries exclude Liza runtime state, generated
+indexes, and common credential files:
+
+```gitignore
+.liza/
+.worktrees/
+stacklit.json
+*.scip
+.env
+.env.*
+*.env
+credentials.*
+secrets.*
+*secret*.*
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*_rsa
+*_dsa
+*_ecdsa
+*_ed25519
+*.keystore
+*.truststore
+config/secrets/
+**/secrets/
+serviceAccountKey.json
+*-credentials.json
+```
+
+Projects with sensitive source-adjacent files should add project-specific
+ignore patterns before enabling Semble.
+
+Explicit non-goals: Liza does not vendor Semble, implement semantic search
+inside Liza, automatically install Semble or Python dependencies, automatically
+install or download models outside the controlled init prewarm, run `semble init`,
+use Semble MCP in this milestone, rely on remote Git URL indexing for MAS,
+make Semble required, replace Stacklit, SCIP, `rg`, `ast-grep`, or direct
+source reads, or guarantee semantic result relevance. Semble results are
+candidates only; source reads remain the evidence.
+
 ### SCIP Search (`config.scip_search`)
 
 `scip-search` is an optional external repository-navigation tool for MAS
@@ -438,6 +523,7 @@ project configuration belongs in `.liza/state.yaml`.
 | `LIZA_AGENT_ID` | For agent commands | -- | Agent identifier input (format: `{role}-{number}`). `liza agent` also exports the resolved ID to spawned provider CLIs so hooks select MAS mode. |
 | `LIZA_DISABLE_CLAUDE_SUBAGENTS` | No | unset | Set to `1` to launch Claude Code agents with `--disallowedTools Task`, disabling Claude subagent delegation. Use only when intentionally waiving Claude subagent delegation; agents may be unable to satisfy contract delegation triggers while this is set. |
 | `LIZA_ENABLE_SCIP_SEARCH` | No | unset | Strict opt-in MAS activation gate for SCIP indexing and `scip-search` prompt guidance. Truthy values are `1` and `true`; unset, empty, `0`, and `false` disable it. Values are trimmed and parsed case-insensitively. |
+| `LIZA_ENABLE_SEMBLE` | No | unset | Strict opt-in MAS activation gate for Semble semantic discovery. Truthy values are `1` and `true`; unset, empty, `0`, and `false` disable it. Values are trimmed and parsed case-insensitively. When enabled, `liza init --spec` may prewarm the model/cache and MAS prompts mention Semble only after `HF_HUB_OFFLINE=1` offline validation succeeds. |
 | `LIZA_ENABLE_STACKLIT` | No | unset | Strict opt-in MAS activation gate for Stacklit `stacklit.json` refresh and prompt guidance. Truthy values are `1` and `true`; unset, empty, `0`, and `false` disable it. Values are trimmed and parsed case-insensitively. |
 | `LIZA_CODEX_VERSION` | No | unset | Process-local fallback for `config.codex_package_version` when launching headless Codex agents |
 | `LIZA_SPECS` | No | `specs/` | Path to specs directory (relative to project root) |

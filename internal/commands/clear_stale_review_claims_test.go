@@ -1,11 +1,14 @@
 package commands
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/liza-mas/liza/internal/log"
 	"github.com/liza-mas/liza/internal/models"
+	"github.com/liza-mas/liza/internal/ops"
 	"github.com/liza-mas/liza/internal/paths"
 	"github.com/liza-mas/liza/internal/testhelpers"
 )
@@ -193,6 +196,7 @@ func TestClearStaleReviewClaimsCommand(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create temp directory
 			tmpDir := t.TempDir()
+			t.Cleanup(ops.SetAgentProcessProcRootForTest(filepath.Join(t.TempDir(), "missing-proc")))
 
 			// Setup liza directory
 			stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
@@ -202,6 +206,7 @@ func TestClearStaleReviewClaimsCommand(t *testing.T) {
 			// Create initial state
 			initialState := testhelpers.CreateValidState()
 			initialState.Tasks = tt.tasks
+			addLiveReviewerAgentsForFutureClaims(initialState)
 
 			bb := testhelpers.WriteInitialState(t, stateFile, initialState)
 
@@ -243,6 +248,25 @@ func TestClearStaleReviewClaimsCommand(t *testing.T) {
 				tt.validateFunc(t, state, entries)
 			}
 		})
+	}
+}
+
+func addLiveReviewerAgentsForFutureClaims(state *models.State) {
+	now := time.Now().UTC()
+	for _, task := range state.Tasks {
+		if task.Status != models.TaskStatusReviewing || task.ReviewingBy == nil || task.ReviewLeaseExpires == nil {
+			continue
+		}
+		if !task.ReviewLeaseExpires.After(now) {
+			continue
+		}
+		reviewer := *task.ReviewingBy
+		state.Agents[reviewer] = models.Agent{
+			Role:        "code-reviewer",
+			Status:      models.AgentStatusReviewing,
+			CurrentTask: testhelpers.StringPtr(task.ID),
+			PID:         os.Getpid(),
+		}
 	}
 }
 

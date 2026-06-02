@@ -1,15 +1,20 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
 
+	"github.com/liza-mas/liza/internal/commands"
 	"github.com/liza-mas/liza/internal/db"
 	"github.com/liza-mas/liza/internal/scipsearch"
+	"github.com/liza-mas/liza/internal/semble"
 	"github.com/liza-mas/liza/internal/testhelpers"
+	"github.com/spf13/pflag"
 )
 
 func TestInitDispatch_WorkspaceFlagsRequireDescription(t *testing.T) {
@@ -143,6 +148,73 @@ func TestHasExplicitInitFlags_NoFollowUpDoesNotBypassWizard(t *testing.T) {
 	}
 }
 
+func TestInitDispatch_NoSembleFlagsOrInitParams(t *testing.T) {
+	resetRootCmdForTest(t)
+	defer resetRootCmdForTest(t)
+
+	var flagNames []string
+	initCmd.Flags().VisitAll(func(flag *pflag.Flag) {
+		flagNames = append(flagNames, flag.Name)
+		if strings.Contains(strings.ToLower(flag.Name), "semble") {
+			t.Fatalf("init flag %q contains Semble; Semble must remain environment-only", flag.Name)
+		}
+		if strings.Contains(strings.ToLower(flag.Usage), "semble") {
+			t.Fatalf("init flag %q usage mentions Semble: %q", flag.Name, flag.Usage)
+		}
+	})
+	if initCmd.Flags().Lookup("semble") != nil {
+		t.Fatal("init command registered --semble, want no Semble CLI flag")
+	}
+	if initCmd.Flags().Lookup("enable-semble") != nil {
+		t.Fatal("init command registered --enable-semble, want no Semble CLI flag")
+	}
+
+	paramsType := reflect.TypeOf(commands.InitParams{})
+	for i := 0; i < paramsType.NumField(); i++ {
+		field := paramsType.Field(i)
+		if strings.Contains(strings.ToLower(field.Name), "semble") {
+			t.Fatalf("commands.InitParams field %q contains Semble; Semble must not be forwarded as durable CLI params", field.Name)
+		}
+	}
+
+	help, err := executeInitHelpForTest(t)
+	if err != nil {
+		t.Fatalf("init --help failed: %v", err)
+	}
+	if strings.Contains(strings.ToLower(help), "semble") {
+		t.Fatalf("init --help mentions Semble; flags=%v help:\n%s", flagNames, help)
+	}
+}
+
+func TestHasExplicitInitFlags_SembleEnvDoesNotForceWorkspaceInit(t *testing.T) {
+	resetRootCmdForTest(t)
+	defer resetRootCmdForTest(t)
+	t.Setenv(semble.EnvEnableSemble, "true")
+
+	if hasExplicitInitFlags(initCmd) {
+		t.Fatal("hasExplicitInitFlags() = true for LIZA_ENABLE_SEMBLE=true, want false")
+	}
+
+	projectRoot := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, projectRoot)
+	testhelpers.SetupGlobalLiza(t)
+
+	err := executeRootCommand(t, projectRoot, "init", "--gemini")
+	if err != nil {
+		t.Fatalf("pairing init with Semble env failed: %v", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(projectRoot, ".liza")); !os.IsNotExist(statErr) {
+		t.Fatalf(".liza stat error = %v, want missing so Semble env does not force full workspace init", statErr)
+	}
+	linkTarget, err := os.Readlink(filepath.Join(projectRoot, "GEMINI.md"))
+	if err != nil {
+		t.Fatalf("GEMINI.md symlink missing after pairing init: %v", err)
+	}
+	if !strings.HasSuffix(linkTarget, filepath.Join(".liza", "CORE.md")) {
+		t.Fatalf("GEMINI.md target = %q, want global CORE.md symlink", linkTarget)
+	}
+}
+
 func TestInitDispatch_ScipSearchRepeatableFlagPersistsConfig(t *testing.T) {
 	projectRoot := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, projectRoot)
@@ -229,6 +301,63 @@ func TestInitDispatch_FullInitSkipsScipSearchWhenEnvDisabled(t *testing.T) {
 	}
 }
 
+func TestInitDispatch_SembleEnabledFullInitThroughCobraHasNoDurableSurface(t *testing.T) {
+	projectRoot := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, projectRoot)
+	fakeHome := testhelpers.SetupGlobalLiza(t)
+	testhelpers.CreateCommittedSpecFile(t, projectRoot, "vision.md", "# Vision\n")
+	testhelpers.CreateCommittedPreCommitConfig(t, projectRoot)
+	testhelpers.MustGit(t, projectRoot, "branch", "-f", "integration", "HEAD")
+	t.Setenv(semble.EnvEnableSemble, "true")
+
+	logPath := filepath.Join(t.TempDir(), "semble.log")
+	t.Setenv("SEMBLE_TEST_LOG", logPath)
+	writeFakeSembleForTest(t, filepath.Join(fakeHome, "bin", "semble"))
+
+	err := executeRootCommand(
+		t,
+		projectRoot,
+		"init",
+		"--spec",
+		"specs/vision.md",
+		"Goal with semantic env",
+	)
+	if err != nil {
+		t.Fatalf("init with enabled Semble failed: %v", err)
+	}
+
+	logContent, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read fake Semble log: %v", err)
+	}
+	logText := string(logContent)
+	if got := strings.Count(logText, "__liza_semble_prewarm__"); got != 2 {
+		t.Fatalf("Semble invocation count = %d, want prewarm and offline validation; log:\n%s", got, logText)
+	}
+	for _, want := range []string{"search __liza_semble_prewarm__", "--top-k 1", "--content code", "HF_HUB_OFFLINE=1"} {
+		if !strings.Contains(logText, want) {
+			t.Fatalf("fake Semble log missing %q:\n%s", want, logText)
+		}
+	}
+
+	statePath := filepath.Join(projectRoot, ".liza", "state.yaml")
+	state, err := db.New(statePath).Read()
+	if err != nil {
+		t.Fatalf("read state: %v", err)
+	}
+	configJSON := marshalConfigForTest(t, state.Config)
+	if strings.Contains(strings.ToLower(string(configJSON)), "semble") {
+		t.Fatalf("state.Config contains Semble data: %s", string(configJSON))
+	}
+	stateYAML, err := os.ReadFile(statePath)
+	if err != nil {
+		t.Fatalf("read state.yaml: %v", err)
+	}
+	if strings.Contains(strings.ToLower(string(stateYAML)), "semble") {
+		t.Fatalf("state.yaml contains Semble data:\n%s", string(stateYAML))
+	}
+}
+
 func TestInitDispatch_AgentFlagAlonePassesDispatch(t *testing.T) {
 	// Run in a temp dir with fake HOME to prevent side effects on the
 	// developer's workspace. The command will fail downstream (no git repo,
@@ -299,4 +428,40 @@ func TestInitDispatch_WizardPathForwardsConfigDefault(t *testing.T) {
 	if configPath != pipelinePath {
 		t.Errorf("wizard path ConfigPath = %q, want %q (cobra default not forwarded)", configPath, pipelinePath)
 	}
+}
+
+func executeInitHelpForTest(t *testing.T) (string, error) {
+	t.Helper()
+
+	var out strings.Builder
+	rootCmd.SetOut(&out)
+	rootCmd.SetErr(&out)
+	rootCmd.SetArgs([]string{"init", "--help"})
+	err := rootCmd.Execute()
+	return out.String(), err
+}
+
+func writeFakeSembleForTest(t *testing.T, path string) {
+	t.Helper()
+
+	script := `#!/bin/sh
+{
+  printf '%s\n' "$*"
+  printf 'HF_HUB_OFFLINE=%s\n' "$HF_HUB_OFFLINE"
+} >> "$SEMBLE_TEST_LOG"
+exit 0
+`
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake semble: %v", err)
+	}
+}
+
+func marshalConfigForTest(t *testing.T, config any) []byte {
+	t.Helper()
+
+	content, err := json.Marshal(config)
+	if err != nil {
+		t.Fatalf("marshal config: %v", err)
+	}
+	return content
 }

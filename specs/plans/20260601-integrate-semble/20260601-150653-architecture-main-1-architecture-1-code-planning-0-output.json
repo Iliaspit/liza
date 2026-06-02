@@ -1,0 +1,41 @@
+[
+  {
+    "desc": "Semble operator-facing init prewarm: wire `internal/semble` into `internal/commands.InitCommandWithConfig` so full workspace init skips Semble entirely when disabled, performs enabled Semble prewarm plus immediate offline validation after existing hard init preconditions and SCIP init resolution but before `.liza/` scaffold creation, emits bounded stderr diagnostics for missing executable and offline-unready or execution-failure readiness results, keeps Semble readiness non-fatal, preserves existing SCIP init behavior, and does not persist Semble state.",
+    "done_when": "`go test ./internal/commands` proves `InitCommandWithConfig` performs zero Semble executable lookups, prewarm calls, offline validation calls, and diagnostics when `LIZA_ENABLE_SEMBLE` is unset, empty, `0`, or `false`; with `LIZA_ENABLE_SEMBLE` truthy and a fake `semble` executable present it invokes the upstream `internal/semble` init prewarm/offline validation entry point before `.liza/state.yaml` is written; missing executable, offline-unready model, and generic Semble execution failures emit bounded `semble:` diagnostics on stderr without failing init; generated state YAML and `models.Config` contain no Semble field or readiness marker; existing SCIP init tests for explicit languages, autodetect diagnostics, disabled no-op behavior, and `config.scip_search` persistence still pass unchanged.",
+    "scope": "In scope: `internal/commands/init.go` and `internal/commands/init_test.go` changes for importing and calling the upstream `internal/semble` init readiness API, placement after branch/spec/pre-commit/global-config validation and SCIP init resolution but before `.liza/` creation, stderr warning presentation, fake Semble readiness hooks in tests, and regression coverage for no durable Semble state plus preserved SCIP init behavior. Out of scope: `cmd/liza` flag registration and dispatch tests, `internal/ops` non-interactive init, `internal/semble` command execution implementation, MAS prompt rendering, worktree `.sembleignore` generation, operator docs, Pairing SessionStart shell hooks, automatic Semble/model installation, user-project build commands, and `.liza/agent-outputs/`.",
+    "spec_ref": "specs/arch-plan/20260601-integrate-semble/20260601-135031-architecture-main-1-architecture-1.md#interactivecli-workspace-init-internalcommandsinitgo",
+    "plan_ref": "specs/plans/20260601-integrate-semble/20260601-150653-architecture-main-1-architecture-1-code-planning-0.md",
+    "validation": [
+      "go test ./internal/commands"
+    ],
+    "task_depends_on": [
+      "architecture-main-1-architecture-0-code-planning-0-coding-1"
+    ]
+  },
+  {
+    "desc": "Semble programmatic init prewarm: wire `internal/semble` into `internal/ops.InitProject` so non-interactive workspace initialization has the same enabled prewarm and immediate offline validation semantics as CLI init, exposes bounded diagnostics only through a transient caller-provided sink, keeps ops free of terminal I/O, leaves Semble readiness failures non-fatal, and does not persist Semble state.",
+    "done_when": "`go test ./internal/ops` proves `InitProject` skips Semble lookup, prewarm, offline validation, and diagnostics when `LIZA_ENABLE_SEMBLE` is disabled; with `LIZA_ENABLE_SEMBLE` truthy and a fake `semble` executable present it invokes the upstream `internal/semble` init prewarm/offline validation entry point after branch/spec/pre-commit/global-config validation and before `.liza/` directory creation; missing executable, offline-unready model, and generic Semble execution failures are delivered as bounded transient diagnostics through an optional `InitProjectParams` sink without failing init; `InitProject` never writes Semble diagnostics directly to stdout or stderr; generated state YAML and `models.Config` contain no Semble field or readiness marker.",
+    "scope": "In scope: `internal/ops/init_project.go` and `internal/ops/init_project_test.go` changes for adding a transient diagnostic sink or callback to `InitProjectParams`, importing and calling the upstream `internal/semble` init readiness API, placement before `.liza/` creation, tests for disabled/enabled/missing/offline-unready/non-blocking behavior, and state serialization assertions. Out of scope: `internal/commands` CLI presentation, `cmd/liza` flag registration and dispatch tests, `internal/semble` command execution implementation, MAS prompt rendering, worktree `.sembleignore` generation, operator docs, Pairing SessionStart shell hooks, automatic Semble/model installation, user-project build commands, and `.liza/agent-outputs/`.",
+    "spec_ref": "specs/arch-plan/20260601-integrate-semble/20260601-135031-architecture-main-1-architecture-1.md#programmatic-workspace-init-internalopsinit_projectgo",
+    "plan_ref": "specs/plans/20260601-integrate-semble/20260601-150653-architecture-main-1-architecture-1-code-planning-0.md",
+    "validation": [
+      "go test ./internal/ops"
+    ],
+    "task_depends_on": [
+      "architecture-main-1-architecture-0-code-planning-0-coding-1"
+    ]
+  },
+  {
+    "desc": "Semble CLI init surface guard: add `cmd/liza` regression coverage proving Semble remains environment-only for `liza init`, no Semble CLI flags are registered, `hasExplicitInitFlags` is unchanged by `LIZA_ENABLE_SEMBLE`, pairing dispatch remains unaffected by Semble environment variables, and full `liza init --spec` reaches the command-layer Semble integration without adding durable flags or config.",
+    "done_when": "`go test ./cmd/liza` proves the init command has no `--semble`, `--enable-semble`, or Semble-specific flag; setting `LIZA_ENABLE_SEMBLE=true` does not make `hasExplicitInitFlags` return true and does not force pairing-only invocations into full workspace init; the full workspace init command path still forwards only the existing `commands.InitParams` fields; and an enabled `liza init --spec` test exercises the command-layer Semble integration through the Cobra path without introducing a Semble field in state YAML or a Semble flag in help output.",
+    "scope": "In scope: `cmd/liza/cmd_init_test.go`, `cmd/liza/rootcmd_test_helpers_test.go` if helper reset coverage is needed, and narrowly scoped `cmd/liza/cmd_init.go` changes only if required to preserve the existing dispatch contract while adding tests. Out of scope: registering any Semble CLI flag, adding Semble to `hasExplicitInitFlags`, changing pairing SessionStart behavior, changing `internal/commands` Semble execution semantics beyond Task 1, changing `internal/ops`, MAS prompt rendering, worktree `.sembleignore` generation, operator docs, automatic Semble/model installation, user-project build commands, and `.liza/agent-outputs/`.",
+    "spec_ref": "specs/arch-plan/20260601-integrate-semble/20260601-135031-architecture-main-1-architecture-1.md#cli-init-dispatch-cmdlizacmd_initgo",
+    "plan_ref": "specs/plans/20260601-integrate-semble/20260601-150653-architecture-main-1-architecture-1-code-planning-0.md",
+    "validation": [
+      "go test ./cmd/liza"
+    ],
+    "depends_on": [
+      "0"
+    ]
+  }
+]

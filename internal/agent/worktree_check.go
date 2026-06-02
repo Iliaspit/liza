@@ -24,6 +24,7 @@ var errTaskBlocked = errors.New("task blocked")
 var (
 	reviewerWorktreeRefreshIndexes       = scipsearch.RefreshIndexes
 	reviewerWorktreeRefreshStacklitIndex = stacklit.RefreshIndex
+	reviewerWorktreePrepareSembleIgnore  = ops.PrepareSembleWorktreeIgnore
 )
 
 // ensureReviewerWorktree verifies the worktree exists for a reviewer task.
@@ -81,6 +82,10 @@ func ensureReviewerWorktree(projectRoot string, bb *db.Blackboard, taskID, agent
 		if postErr := ops.RunPostWorktreeCmd(*state.Config.PostWorktreeCmd, wtPath); postErr != nil {
 			logger.Warn("post-worktree-cmd failed after worktree recovery", "task_id", taskID, "error", postErr)
 		}
+	}
+
+	for _, warning := range reviewerWorktreePrepareSembleIgnore(wtPath) {
+		logger.Warn("semble .sembleignore preparation warning after worktree recovery", "task_id", taskID, "warning", warning)
 	}
 
 	refreshResult, refreshErr := reviewerWorktreeRefreshIndexes(scipsearch.RefreshOptions{

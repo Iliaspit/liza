@@ -18,6 +18,7 @@ import (
 	"github.com/liza-mas/liza/internal/precommit"
 	"github.com/liza-mas/liza/internal/prompts"
 	"github.com/liza-mas/liza/internal/scipsearch"
+	"github.com/liza-mas/liza/internal/semble"
 	"github.com/liza-mas/liza/internal/stacklit"
 	"github.com/liza-mas/liza/internal/testhelpers"
 )
@@ -388,8 +389,14 @@ func TestBuildPromptWithContextScipSearchGateOmitsStaleIndexes(t *testing.T) {
 			if err != nil {
 				t.Fatalf("buildPromptWithContext() error = %v", err)
 			}
-			if strings.Contains(prompt, "scip-search") {
-				t.Fatalf("prompt contains scip-search section despite inactive gate:\n%s", prompt)
+			for _, notWant := range []string{
+				"=== SCIP-SEARCH INDEXES ===",
+				"scip-search symbols --index",
+				"scip-search references --index",
+			} {
+				if strings.Contains(prompt, notWant) {
+					t.Fatalf("prompt contains scip-search section content %q despite inactive gate:\n%s", notWant, prompt)
+				}
 			}
 		})
 	}
@@ -444,6 +451,199 @@ func TestBuildPromptWithContextStacklitIndexUsesTaskWorktree(t *testing.T) {
 	}
 	if strings.Contains(prompt, projectStacklitIndex) {
 		t.Fatalf("prompt contains project-root Stacklit index path %q for task prompt", projectStacklitIndex)
+	}
+}
+
+func TestBuildPromptWithContextSembleSearchUsesRoleWorktreeRoot(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		role string
+	}{
+		{name: "coder", role: "coder"},
+		{name: "reviewer", role: "code-reviewer"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			projectRoot := t.TempDir()
+			testhelpers.SetupPipelineConfig(t, projectRoot)
+			taskWorktree := filepath.Join(projectRoot, ".worktrees", "task-1")
+			projectRootCommand := "HF_HUB_OFFLINE=1 semble search \"where is review submission validated?\" " + shellQuoteForTest(projectRoot)
+			worktree := ".worktrees/task-1"
+			var calls []semble.PromptMetadataOptions
+			restore := replaceSemblePromptMetadataForTest(t, func(opts semble.PromptMetadataOptions) (semble.PromptMetadata, bool) {
+				calls = append(calls, opts)
+				if opts.Kind != semble.TargetKindTaskWorktree {
+					return semble.PromptMetadata{}, false
+				}
+				if opts.TargetRoot != taskWorktree || opts.ExpectedWorktreeRoot != taskWorktree {
+					return semble.PromptMetadata{}, false
+				}
+				return fakeSemblePromptMetadata(opts.TargetRoot), true
+			})
+			defer restore()
+
+			state := &models.State{
+				Goal: models.Goal{
+					Description: "Test goal",
+					SpecRef:     "specs/goal.md",
+				},
+				Tasks: []models.Task{
+					{
+						ID:          "task-1",
+						Description: "Test task",
+						Status:      models.TaskStatusImplementing,
+						DoneWhen:    "Task is complete",
+						Worktree:    &worktree,
+					},
+				},
+				Config: models.Config{IntegrationBranch: "main"},
+			}
+			config := SupervisorConfig{
+				Role:        tt.role,
+				AgentID:     tt.role + "-1",
+				ProjectRoot: projectRoot,
+				SpecsDir:    filepath.Join(projectRoot, "specs"),
+				StatePath:   filepath.Join(projectRoot, ".liza", "state.yaml"),
+			}
+
+			prompt, err := buildPromptWithContext(state, config, "task-1", testResolver(t))
+			if err != nil {
+				t.Fatalf("buildPromptWithContext() error = %v", err)
+			}
+
+			if len(calls) != 1 {
+				t.Fatalf("Semble prompt metadata calls = %d, want 1", len(calls))
+			}
+			if !strings.Contains(prompt, "=== SEMBLE SEARCH ===") {
+				t.Fatalf("prompt missing Semble section")
+			}
+			if !strings.Contains(prompt, "HF_HUB_OFFLINE=1 semble search \"where is review submission validated?\" "+shellQuoteForTest(taskWorktree)) {
+				t.Fatalf("prompt missing shell-quoted role worktree Semble command for %q", taskWorktree)
+			}
+			if strings.Contains(prompt, projectRootCommand) {
+				t.Fatalf("prompt contains project-root Semble command %q for %s prompt", projectRootCommand, tt.role)
+			}
+		})
+	}
+}
+
+func TestBuildPromptWithContextSembleSearchOmittedWhenPromptMetadataUnavailable(t *testing.T) {
+	for _, reason := range []string{"disabled", "unavailable", "offline-unready", "target-unsafe"} {
+		t.Run(reason, func(t *testing.T) {
+			projectRoot := t.TempDir()
+			testhelpers.SetupPipelineConfig(t, projectRoot)
+			worktree := ".worktrees/task-1"
+			restore := replaceSemblePromptMetadataForTest(t, func(opts semble.PromptMetadataOptions) (semble.PromptMetadata, bool) {
+				return semble.PromptMetadata{}, false
+			})
+			defer restore()
+
+			state := &models.State{
+				Goal: models.Goal{
+					Description: "Test goal",
+					SpecRef:     "specs/goal.md",
+				},
+				Tasks: []models.Task{
+					{
+						ID:          "task-1",
+						Description: "Test task",
+						Status:      models.TaskStatusImplementing,
+						DoneWhen:    "Task is complete",
+						Worktree:    &worktree,
+					},
+				},
+				Config: models.Config{IntegrationBranch: "main"},
+			}
+			config := SupervisorConfig{
+				Role:        "coder",
+				AgentID:     "coder-1",
+				ProjectRoot: projectRoot,
+				SpecsDir:    filepath.Join(projectRoot, "specs"),
+				StatePath:   filepath.Join(projectRoot, ".liza", "state.yaml"),
+			}
+
+			prompt, err := buildPromptWithContext(state, config, "task-1", testResolver(t))
+			if err != nil {
+				t.Fatalf("buildPromptWithContext() error = %v", err)
+			}
+			if strings.Contains(prompt, "=== SEMBLE SEARCH ===") || strings.Contains(prompt, "semble search") {
+				t.Fatalf("prompt contains Semble guidance for %s case:\n%s", reason, prompt)
+			}
+		})
+	}
+}
+
+func TestBuildPromptWithContextSembleSearchRequiresCompleteTaskIgnore(t *testing.T) {
+	t.Setenv(semble.EnvEnableSemble, "true")
+	for _, tt := range []struct {
+		name       string
+		role       string
+		ignoreFile string
+		wantSemble bool
+	}{
+		{name: "coder missing ignore", role: "coder"},
+		{name: "coder incomplete ignore", role: "coder", ignoreFile: ".liza/\n"},
+		{name: "coder complete ignore", role: "coder", ignoreFile: semble.GeneratedWorktreeIgnorePayload(), wantSemble: true},
+		{name: "reviewer missing ignore", role: "code-reviewer"},
+		{name: "reviewer incomplete ignore", role: "code-reviewer", ignoreFile: ".liza/\n"},
+		{name: "reviewer complete ignore", role: "code-reviewer", ignoreFile: semble.GeneratedWorktreeIgnorePayload(), wantSemble: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			projectRoot := t.TempDir()
+			testhelpers.SetupPipelineConfig(t, projectRoot)
+			taskWorktree := filepath.Join(projectRoot, ".worktrees", "task-1")
+			if err := os.MkdirAll(taskWorktree, 0o755); err != nil {
+				t.Fatalf("create task worktree: %v", err)
+			}
+			if tt.ignoreFile != "" {
+				if err := os.WriteFile(filepath.Join(taskWorktree, ".sembleignore"), []byte(tt.ignoreFile), 0o644); err != nil {
+					t.Fatalf("write .sembleignore: %v", err)
+				}
+			}
+			restore := replaceSemblePromptMetadataForTest(t, func(opts semble.PromptMetadataOptions) (semble.PromptMetadata, bool) {
+				opts.LookPath = func(string) (string, error) {
+					return filepath.Join(t.TempDir(), "semble"), nil
+				}
+				opts.Runner = func(semble.CommandPlan) (semble.CommandResult, error) {
+					return semble.CommandResult{ExitCode: 0}, nil
+				}
+				return semble.BuildPromptMetadata(opts)
+			})
+			defer restore()
+
+			worktree := ".worktrees/task-1"
+			state := &models.State{
+				Goal: models.Goal{
+					Description: "Test goal",
+					SpecRef:     "specs/goal.md",
+				},
+				Tasks: []models.Task{
+					{
+						ID:          "task-1",
+						Description: "Test task",
+						Status:      models.TaskStatusImplementing,
+						DoneWhen:    "Task is complete",
+						Worktree:    &worktree,
+					},
+				},
+				Config: models.Config{IntegrationBranch: "main"},
+			}
+			config := SupervisorConfig{
+				Role:        tt.role,
+				AgentID:     tt.role + "-1",
+				ProjectRoot: projectRoot,
+				SpecsDir:    filepath.Join(projectRoot, "specs"),
+				StatePath:   filepath.Join(projectRoot, ".liza", "state.yaml"),
+			}
+
+			prompt, err := buildPromptWithContext(state, config, "task-1", testResolver(t))
+			if err != nil {
+				t.Fatalf("buildPromptWithContext() error = %v", err)
+			}
+			hasSemble := strings.Contains(prompt, "=== SEMBLE SEARCH ===")
+			if hasSemble != tt.wantSemble {
+				t.Fatalf("Semble prompt presence = %v, want %v", hasSemble, tt.wantSemble)
+			}
+		})
 	}
 }
 
@@ -1009,6 +1209,81 @@ func TestBuildOrchestratorPromptContextStacklitIndexRendersFromProjectRoot(t *te
 	}
 	if strings.Contains(prompt, taskStacklitIndex) {
 		t.Fatalf("prompt contains task worktree Stacklit index path %q for orchestrator prompt", taskStacklitIndex)
+	}
+}
+
+func TestBuildOrchestratorPromptContextSembleSearchUsesSafeProjectRoot(t *testing.T) {
+	tmpDir := t.TempDir()
+	testhelpers.SetupPipelineConfig(t, tmpDir)
+	var calls []semble.PromptMetadataOptions
+	restore := replaceSemblePromptMetadataForTest(t, func(opts semble.PromptMetadataOptions) (semble.PromptMetadata, bool) {
+		calls = append(calls, opts)
+		if opts.Kind != semble.TargetKindProjectRoot || opts.TargetRoot != tmpDir {
+			return semble.PromptMetadata{}, false
+		}
+		return fakeSemblePromptMetadata(opts.TargetRoot), true
+	})
+	defer restore()
+
+	state := &models.State{
+		Goal: models.Goal{
+			Description: "Test goal",
+			SpecRef:     "specs/goal.md",
+		},
+	}
+	config := SupervisorConfig{
+		Role:        "orchestrator",
+		AgentID:     "orchestrator-1",
+		ProjectRoot: tmpDir,
+		SpecsDir:    filepath.Join(tmpDir, "specs"),
+		StatePath:   filepath.Join(tmpDir, ".liza", "state.yaml"),
+	}
+
+	prompt, err := buildOrchestratorPromptContext(state, config, testResolver(t))
+	if err != nil {
+		t.Fatalf("buildOrchestratorPromptContext() error = %v", err)
+	}
+
+	if len(calls) != 1 {
+		t.Fatalf("Semble prompt metadata calls = %d, want 1", len(calls))
+	}
+	if !strings.Contains(prompt, "HF_HUB_OFFLINE=1 semble search \"where is review submission validated?\" "+shellQuoteForTest(tmpDir)) {
+		t.Fatalf("prompt missing safe project-root Semble command for %q", tmpDir)
+	}
+}
+
+func TestBuildOrchestratorPromptContextSembleSearchOmittedWhenProjectRootUnsafe(t *testing.T) {
+	tmpDir := t.TempDir()
+	testhelpers.SetupPipelineConfig(t, tmpDir)
+	restore := replaceSemblePromptMetadataForTest(t, func(opts semble.PromptMetadataOptions) (semble.PromptMetadata, bool) {
+		if opts.Kind != semble.TargetKindProjectRoot || opts.TargetRoot != tmpDir {
+			t.Fatalf("Semble prompt metadata opts = %#v, want project root %q", opts, tmpDir)
+		}
+		return semble.PromptMetadata{}, false
+	})
+	defer restore()
+
+	state := &models.State{
+		Goal: models.Goal{
+			Description: "Test goal",
+			SpecRef:     "specs/goal.md",
+		},
+	}
+	config := SupervisorConfig{
+		Role:        "orchestrator",
+		AgentID:     "orchestrator-1",
+		ProjectRoot: tmpDir,
+		SpecsDir:    filepath.Join(tmpDir, "specs"),
+		StatePath:   filepath.Join(tmpDir, ".liza", "state.yaml"),
+	}
+
+	prompt, err := buildOrchestratorPromptContext(state, config, testResolver(t))
+	if err != nil {
+		t.Fatalf("buildOrchestratorPromptContext() error = %v", err)
+	}
+
+	if strings.Contains(prompt, "=== SEMBLE SEARCH ===") || strings.Contains(prompt, "semble search") {
+		t.Fatalf("prompt contains Semble guidance for unsafe project root:\n%s", prompt)
 	}
 }
 
@@ -4109,6 +4384,37 @@ func writePromptTestFile(t *testing.T, path, content string) {
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatalf("WriteFile(%q): %v", path, err)
 	}
+}
+
+func replaceSemblePromptMetadataForTest(t *testing.T, build func(semble.PromptMetadataOptions) (semble.PromptMetadata, bool)) func() {
+	t.Helper()
+	previous := buildSemblePromptMetadata
+	buildSemblePromptMetadata = build
+	return func() {
+		buildSemblePromptMetadata = previous
+	}
+}
+
+func fakeSemblePromptMetadata(targetRoot string) semble.PromptMetadata {
+	quotedRoot := shellQuoteForTest(targetRoot)
+	return semble.PromptMetadata{
+		TargetRoot:       targetRoot,
+		ShellTargetRoot:  quotedRoot,
+		OfflineEnvPrefix: "HF_HUB_OFFLINE=1",
+		SearchExamples: []string{
+			`HF_HUB_OFFLINE=1 semble search "where is review submission validated?" ` + quotedRoot,
+			`HF_HUB_OFFLINE=1 semble search "agent CLI defaults" ` + quotedRoot + ` --top-k 10`,
+			`HF_HUB_OFFLINE=1 semble search "where is task superseding specified?" ` + quotedRoot + ` --content docs`,
+			`HF_HUB_OFFLINE=1 semble search "default CLI config" ` + quotedRoot + ` --content config`,
+		},
+		FindRelatedExample:  "HF_HUB_OFFLINE=1 semble find-related <file_path> <line> " + quotedRoot,
+		ContentModeGuidance: "Use --content with one of: code, docs, config, all; code is the default.",
+		DiscoveryNotice:     "Semble returns candidate chunks, not proof; verify with direct source reads before editing or claiming behavior.",
+	}
+}
+
+func shellQuoteForTest(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
 }
 
 // Ensure pipeline import is used (linter guard).

@@ -117,6 +117,15 @@ liza setup --agent-tools ~/my-agent-tools.md  # use custom AGENT_TOOLS.md
 > without adding them to task diffs. See [Configuration Reference](CONFIGURATION.md)
 > for the runtime contract and non-goals.
 
+> **Optional:** enable Semble for semantic discovery when MAS agents need
+> natural-language repository search before exact symbols or modules are known.
+> `LIZA_ENABLE_SEMBLE` is the activation gate. Run `liza init --spec` with
+> Semble installed so Liza can prewarm the model/cache and perform offline
+> validation; MAS prompts mention Semble only when `HF_HUB_OFFLINE=1` validation
+> succeeds and `.sembleignore` safety rules protect runtime, generated, and
+> credential files. See [Configuration Reference](CONFIGURATION.md) for setup,
+> offline behavior, `.sembleignore` scope, routing, and non-goals.
+
 **2. Initialize Project**
 
 > **Commit your spec file and `.pre-commit-config.yaml` before running `liza init`.** Worktrees are created from the configured integration branch, so uncommitted files won't be visible to agents.

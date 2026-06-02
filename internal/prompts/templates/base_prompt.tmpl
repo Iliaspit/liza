@@ -153,9 +153,38 @@ stacklit get-hot-files -i {{ .ShellIndexPath }}
 No Stacklit index path was supplied for this target. Do not infer or generate stacklit.json; use scip-search, rg, ast-grep, and direct source reads.
 {{- end }}
 
-{{- if or .StacklitIndexes .ScipSearchIndexes }}
+{{- if .SembleSearch }}
+
+=== SEMBLE SEARCH ===
+Semble is available for semantic repository search in this target root:
+{{ .SembleSearch.ShellTargetRoot }}
+
+Use Semble for natural-language or conceptual discovery when you do not yet know
+the exact symbol or module:
+
+{{- range .SembleSearch.SearchExamples }}
+{{ . }}
+{{- end }}
+{{ .SembleSearch.FindRelatedExample }}
+
+{{ .SembleSearch.ContentModeGuidance }}
+
+{{ .SembleSearch.DiscoveryNotice }}
+Do not use rg for broad-scope or common-word conceptual queries. Use rg for
+exhaustive literal matches, ast-grep for syntax-shaped searches, Stacklit for
+module/dependency orientation when available, scip-search for exact
+symbol/reference/implementation tracing when available, and Morph MCP semantic
+search only when Semble is unavailable and the current tool/MCP policy exposes
+Morph to this agent.
+{{- end }}
+
+{{- if or .SembleSearch .StacklitIndexes .ScipSearchIndexes }}
 
 === QUERY ROUTING ===
+{{- if .SembleSearch }}
+- semble search: natural-language or conceptual discovery when the exact symbol or module is unknown
+- semble --content docs/config: documentation, spec, and configuration discovery before direct reads
+{{- end }}
 {{- if .StacklitIndexes }}
 - stacklit derive: first-pass repository map before opening files
 - stacklit find-module/get-module: module ownership, files, exports, type definitions, and activity
@@ -167,7 +196,14 @@ No Stacklit index path was supplied for this target. Do not infer or generate st
 {{- end }}
 - ast-grep: syntactic shapes — call patterns, signatures, structural matching across files
 - rg: literal strings, config values, comments, CLI command names, filenames
-{{- if and .StacklitIndexes .ScipSearchIndexes }}
+{{- if .SembleSearch }}
+For broad conceptual questions, start with Semble to find candidate chunks.
+Use Semble --content docs for documentation/spec questions and --content config for configuration questions.
+Use Stacklit to understand module ownership and impact when available.
+Use scip-search for exact symbols, references, and implementations when available.
+Use Morph MCP semantic search only as a fallback when Semble is unavailable and the current tool/MCP policy exposes Morph to this agent.
+Verify with direct source reads before editing.
+{{- else if and .StacklitIndexes .ScipSearchIndexes }}
 Orient with Stacklit (modules, dependencies, symbol names), then trace precisely with scip-search (definitions, references, callers). Verify against source files before editing.
 {{- else if .StacklitIndexes }}
 Use Stacklit for orientation and impact analysis, then verify behavior against source files before editing.

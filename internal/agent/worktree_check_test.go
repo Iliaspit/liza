@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -14,6 +15,7 @@ import (
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/paths"
 	"github.com/liza-mas/liza/internal/scipsearch"
+	"github.com/liza-mas/liza/internal/semble"
 	"github.com/liza-mas/liza/internal/testhelpers"
 )
 
@@ -288,6 +290,231 @@ func TestEnsureReviewerWorktree_MissingRecoverable_ScipFailureWarningOnlyAndOmit
 	}
 }
 
+func TestEnsureReviewerWorktreeRecoveryPreparesSembleIgnore(t *testing.T) {
+	tmpDir := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, tmpDir)
+	statePath, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	testhelpers.SetupPipelineConfig(t, tmpDir)
+
+	state := testhelpers.CreateValidState()
+	now := time.Now().UTC()
+	task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusReviewing, now)
+	state.Tasks = []models.Task{task}
+	bb := testhelpers.WriteInitialState(t, statePath, state)
+
+	branchName := paths.TaskBranchPrefix + "task-1"
+	testhelpers.MustGit(t, tmpDir, "branch", branchName)
+
+	recovered, err := ensureReviewerWorktree(tmpDir, bb, "task-1", "code-reviewer-1")
+	if err != nil {
+		t.Fatalf("ensureReviewerWorktree() error = %v", err)
+	}
+	if !recovered {
+		t.Fatal("ensureReviewerWorktree() recovered = false, want true")
+	}
+
+	wtPath := filepath.Join(tmpDir, paths.WorktreesDirName, "task-1")
+	ignorePath := filepath.Join(wtPath, ".sembleignore")
+	content, err := os.ReadFile(ignorePath)
+	if err != nil {
+		t.Fatalf("ReadFile(.sembleignore) error = %v", err)
+	}
+	lines := nonEmptyTestLines(string(content))
+	if !reflect.DeepEqual(lines, semble.DefaultIgnorePatterns()) {
+		t.Fatalf(".sembleignore lines = %#v, want DefaultIgnorePatterns()", lines)
+	}
+	if status := testhelpers.MustGit(t, wtPath, "status", "--porcelain"); status != "" {
+		t.Fatalf("git status --porcelain = %q, want clean", status)
+	}
+}
+
+func TestEnsureReviewerWorktreeRecoveryRunsSemblePreparationBeforeIndexRefresh(t *testing.T) {
+	tmpDir := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, tmpDir)
+	statePath, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	testhelpers.SetupPipelineConfig(t, tmpDir)
+
+	state := testhelpers.CreateValidState()
+	postCmd := "touch ../post-worktree-ran"
+	state.Config.PostWorktreeCmd = &postCmd
+	now := time.Now().UTC()
+	task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusReviewing, now)
+	state.Tasks = []models.Task{task}
+	bb := testhelpers.WriteInitialState(t, statePath, state)
+
+	branchName := paths.TaskBranchPrefix + "task-1"
+	testhelpers.MustGit(t, tmpDir, "branch", branchName)
+
+	semblePreparedBeforeRefresh := false
+	postCommandRanBeforeRefresh := false
+	historyRecordedBeforeRefresh := false
+	restoreRefresh := replaceReviewerWorktreeScipRefreshForTest(func(opts scipsearch.RefreshOptions) (scipsearch.RefreshResult, error) {
+		if _, err := os.Stat(filepath.Join(opts.TargetRoot, ".sembleignore")); err == nil {
+			semblePreparedBeforeRefresh = true
+		}
+		if _, err := os.Stat(filepath.Join(opts.TargetRoot, "..", "post-worktree-ran")); err == nil {
+			postCommandRanBeforeRefresh = true
+		}
+		readState, err := bb.Read()
+		if err != nil {
+			t.Fatalf("bb.Read() error = %v", err)
+		}
+		if hasWorktreeRecoveredHistory(readState.FindTask("task-1")) {
+			historyRecordedBeforeRefresh = true
+		}
+		return scipsearch.RefreshResult{}, nil
+	})
+	defer restoreRefresh()
+
+	recovered, err := ensureReviewerWorktree(tmpDir, bb, "task-1", "code-reviewer-1")
+	if err != nil {
+		t.Fatalf("ensureReviewerWorktree() error = %v", err)
+	}
+	if !recovered {
+		t.Fatal("ensureReviewerWorktree() recovered = false, want true")
+	}
+	if !postCommandRanBeforeRefresh {
+		t.Fatal("SCIP refresh ran before post-worktree command marker existed")
+	}
+	if !semblePreparedBeforeRefresh {
+		t.Fatal("SCIP refresh ran before Semble .sembleignore preparation")
+	}
+	if historyRecordedBeforeRefresh {
+		t.Fatal("recovery history was recorded before Semble preparation and index refresh")
+	}
+}
+
+func TestEnsureReviewerWorktreeRecoveryLogsBoundedSembleWarning(t *testing.T) {
+	tmpDir := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, tmpDir)
+	statePath, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	testhelpers.SetupPipelineConfig(t, tmpDir)
+
+	if err := os.WriteFile(filepath.Join(tmpDir, ".sembleignore"), []byte(".liza/\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	testhelpers.MustGit(t, tmpDir, "add", ".sembleignore")
+	testhelpers.MustGit(t, tmpDir, "commit", "-m", "Add operator Semble ignore")
+
+	state := testhelpers.CreateValidState()
+	now := time.Now().UTC()
+	task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusReviewing, now)
+	state.Tasks = []models.Task{task}
+	bb := testhelpers.WriteInitialState(t, statePath, state)
+
+	branchName := paths.TaskBranchPrefix + "task-1"
+	testhelpers.MustGit(t, tmpDir, "branch", branchName)
+
+	logs := captureAgentLogs(t)
+	recovered, err := ensureReviewerWorktree(tmpDir, bb, "task-1", "code-reviewer-1")
+	if err != nil {
+		t.Fatalf("ensureReviewerWorktree() error = %v", err)
+	}
+	if !recovered {
+		t.Fatal("ensureReviewerWorktree() recovered = false, want true")
+	}
+
+	logOutput := logs.String()
+	if !strings.Contains(logOutput, "semble .sembleignore preparation warning after worktree recovery") ||
+		!strings.Contains(logOutput, "tracked .sembleignore missing required patterns") ||
+		!strings.Contains(logOutput, "(+") {
+		t.Fatalf("logs = %q, want bounded Semble missing-pattern warning", logOutput)
+	}
+	if len(logOutput) > 1200 {
+		t.Fatalf("logs length = %d, want bounded warning output", len(logOutput))
+	}
+}
+
+func TestEnsureReviewerWorktreeRecoveryLeavesTrackedSembleIgnoreUnmodified(t *testing.T) {
+	tmpDir := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, tmpDir)
+	statePath, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	testhelpers.SetupPipelineConfig(t, tmpDir)
+
+	operatorContent := []byte("# operator-owned\ncustom-pattern\n")
+	if err := os.WriteFile(filepath.Join(tmpDir, ".sembleignore"), operatorContent, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	testhelpers.MustGit(t, tmpDir, "add", ".sembleignore")
+	testhelpers.MustGit(t, tmpDir, "commit", "-m", "Add operator Semble ignore")
+
+	state := testhelpers.CreateValidState()
+	now := time.Now().UTC()
+	task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusReviewing, now)
+	state.Tasks = []models.Task{task}
+	bb := testhelpers.WriteInitialState(t, statePath, state)
+
+	branchName := paths.TaskBranchPrefix + "task-1"
+	testhelpers.MustGit(t, tmpDir, "branch", branchName)
+
+	logs := captureAgentLogs(t)
+	recovered, err := ensureReviewerWorktree(tmpDir, bb, "task-1", "code-reviewer-1")
+	if err != nil {
+		t.Fatalf("ensureReviewerWorktree() error = %v", err)
+	}
+	if !recovered {
+		t.Fatal("ensureReviewerWorktree() recovered = false, want true")
+	}
+
+	wtPath := filepath.Join(tmpDir, paths.WorktreesDirName, "task-1")
+	got, err := os.ReadFile(filepath.Join(wtPath, ".sembleignore"))
+	if err != nil {
+		t.Fatalf("ReadFile(.sembleignore) error = %v", err)
+	}
+	if !bytes.Equal(got, operatorContent) {
+		t.Fatalf("tracked .sembleignore mutated:\ngot  %q\nwant %q", got, operatorContent)
+	}
+	if !strings.Contains(logs.String(), "tracked .sembleignore missing required patterns") {
+		t.Fatalf("logs = %q, want explicit missing-pattern warning", logs.String())
+	}
+	if status := testhelpers.MustGit(t, wtPath, "status", "--porcelain"); status != "" {
+		t.Fatalf("git status --porcelain = %q, want clean tracked operator file", status)
+	}
+}
+
+func TestEnsureReviewerWorktreeRecoveryExistingWorktreeFastPathUnchanged(t *testing.T) {
+	tmpDir := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, tmpDir)
+	statePath, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	testhelpers.SetupPipelineConfig(t, tmpDir)
+
+	state := testhelpers.CreateValidState()
+	state.Config.ScipSearch = []string{"go"}
+	now := time.Now().UTC()
+	task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusReviewing, now)
+	state.Tasks = []models.Task{task}
+	bb := testhelpers.WriteInitialState(t, statePath, state)
+
+	testhelpers.CreateTestWorktree(t, tmpDir, "task-1")
+
+	semblePrepared := false
+	restorePrepare := replaceReviewerWorktreeSemblePreparationForTest(func(string) []string {
+		semblePrepared = true
+		return nil
+	})
+	defer restorePrepare()
+	refreshCalled := false
+	restoreRefresh := replaceReviewerWorktreeScipRefreshForTest(func(scipsearch.RefreshOptions) (scipsearch.RefreshResult, error) {
+		refreshCalled = true
+		return scipsearch.RefreshResult{}, nil
+	})
+	defer restoreRefresh()
+
+	recovered, err := ensureReviewerWorktree(tmpDir, bb, "task-1", "code-reviewer-1")
+	if err != nil {
+		t.Fatalf("ensureReviewerWorktree() error = %v", err)
+	}
+	if recovered {
+		t.Fatal("ensureReviewerWorktree() recovered = true, want false")
+	}
+	if semblePrepared {
+		t.Fatal("existing reviewer worktree triggered Semble preparation")
+	}
+	if refreshCalled {
+		t.Fatal("existing reviewer worktree triggered SCIP refresh")
+	}
+}
+
 func TestEnsureReviewerWorktree_MissingAlreadyRecovered(t *testing.T) {
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
@@ -359,6 +586,14 @@ func replaceReviewerWorktreeScipRefreshForTest(refresh func(scipsearch.RefreshOp
 	}
 }
 
+func replaceReviewerWorktreeSemblePreparationForTest(prepare func(string) []string) func() {
+	previous := reviewerWorktreePrepareSembleIgnore
+	reviewerWorktreePrepareSembleIgnore = prepare
+	return func() {
+		reviewerWorktreePrepareSembleIgnore = previous
+	}
+}
+
 func commitGoModuleForReviewerScip(t *testing.T, repoDir string) {
 	t.Helper()
 	if err := os.WriteFile(filepath.Join(repoDir, "go.mod"), []byte("module example.com/reviewer\n\ngo 1.22\n"), 0o644); err != nil {
@@ -402,6 +637,28 @@ func captureAgentLogs(t *testing.T) *bytes.Buffer {
 		logger = previous
 	})
 	return &logs
+}
+
+func nonEmptyTestLines(content string) []string {
+	lines := make([]string, 0)
+	for _, line := range strings.Split(content, "\n") {
+		if trimmed := strings.TrimSpace(line); trimmed != "" {
+			lines = append(lines, trimmed)
+		}
+	}
+	return lines
+}
+
+func hasWorktreeRecoveredHistory(task *models.Task) bool {
+	if task == nil {
+		return false
+	}
+	for _, entry := range task.History {
+		if entry.Event == models.TaskEventWorktreeRecovered {
+			return true
+		}
+	}
+	return false
 }
 
 func TestEnsureReviewerWorktree_MissingBranchGone(t *testing.T) {

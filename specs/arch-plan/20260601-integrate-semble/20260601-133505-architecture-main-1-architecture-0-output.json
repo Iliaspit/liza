@@ -1,0 +1,12 @@
+[
+  {
+    "desc": "Semble Capability Package: create `internal/semble/doc.go`, `internal/semble/semble.go`, and `internal/semble/semble_test.go` with activation parsing, executable detection, prewarm/offline validation command planning and execution, process-local validation cache, bounded diagnostic classification, prompt-safe context metadata, shell-quoted command examples, target-root safety checks, and the default `.sembleignore` pattern source of truth. Out of scope: wiring into init, worktree creation, prompt templates, SessionStart, operator documentation, durable state config, installing Semble/Python/models, Semble MCP, and remote Git URL indexing.",
+    "done_when": "`go test ./internal/semble` proves `LIZA_ENABLE_SEMBLE` truthy/false parsing, disabled-mode no-op behavior, exact prewarm and offline validation command plans, `HF_HUB_OFFLINE=1` offline execution, process-local cache hit/miss behavior for executable/model/cache/fixture key changes, bounded diagnostics for missing executable/model-offline/execution failure classes, default `.sembleignore` pattern coverage including runtime/generated/credential patterns, target-root safety validation, and prompt-safe command rendering with shell-quoted absolute target roots.",
+    "scope": "In scope: create `internal/semble/doc.go`, `internal/semble/semble.go`, and `internal/semble/semble_test.go` with activation parsing, executable detection, prewarm/offline validation command planning and execution, process-local validation cache, bounded diagnostic classification, prompt-safe context metadata, shell-quoted command examples, target-root safety checks, and the default `.sembleignore` pattern source of truth. Out of scope: wiring into init, worktree creation, prompt templates, SessionStart, operator documentation, durable state config, installing Semble/Python/models, Semble MCP, and remote Git URL indexing.",
+    "spec_ref": "specs/goals/20260601-integrate-semble.md",
+    "arch_ref": "specs/arch-plan/20260601-integrate-semble/20260601-133505-architecture-main-1-architecture-0.md",
+    "validation": [
+      "go test ./internal/semble"
+    ]
+  }
+]

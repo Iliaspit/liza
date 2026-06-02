@@ -16,22 +16,29 @@ import (
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/paths"
 	"github.com/liza-mas/liza/internal/pipeline"
+	"github.com/liza-mas/liza/internal/semble"
 )
 
 // InitProjectParams holds parameters for non-interactive project initialization.
 type InitProjectParams struct {
-	Description        string
-	SpecRef            string
-	Branch             string // default "integration" if empty
-	EntryPoint         string // optional
-	PostWorktreeCmd    string // optional
-	DefaultCLI         string // optional; default CLI for agent spawning
-	DefaultDoerCLI     string // optional; default CLI for doer and orchestrator agent spawning
-	DefaultReviewerCLI string // optional; default CLI for reviewer agent spawning
-	AutoResume         bool
-	NoFollowUp         bool
-	PipelineConfig     []byte // optional raw YAML; nil = use embedded default
+	Description          string
+	SpecRef              string
+	Branch               string // default "integration" if empty
+	EntryPoint           string // optional
+	PostWorktreeCmd      string // optional
+	DefaultCLI           string // optional; default CLI for agent spawning
+	DefaultDoerCLI       string // optional; default CLI for doer and orchestrator agent spawning
+	DefaultReviewerCLI   string // optional; default CLI for reviewer agent spawning
+	AutoResume           bool
+	NoFollowUp           bool
+	PipelineConfig       []byte       // optional raw YAML; nil = use embedded default
+	SembleDiagnosticSink func(string) // optional transient sink for bounded Semble diagnostics
 }
+
+var (
+	initProjectSembleLookPath semble.ExecutableLookup
+	initProjectSembleRunner   semble.CommandRunner
+)
 
 // InitProject initializes a Liza workspace at projectRoot. No terminal I/O.
 // Returns error if .liza already exists, spec file is missing, or setup not run.
@@ -109,6 +116,8 @@ func InitProject(projectRoot string, params InitProjectParams) error {
 		}
 		return fmt.Errorf("cannot access global config at %s: %w", globalCoreFile, err)
 	}
+
+	runInitProjectSemblePrewarm(projectRoot, params)
 
 	// Create directory structure
 	if err := os.MkdirAll(lp.LizaDir(), 0755); err != nil {
@@ -252,6 +261,33 @@ func InitProject(projectRoot string, params InitProjectParams) error {
 	}
 
 	return nil
+}
+
+func runInitProjectSemblePrewarm(projectRoot string, params InitProjectParams) {
+	opts := semble.ValidationOptions{
+		TargetRoot: projectRoot,
+		LookPath:   initProjectSembleLookPath,
+		Runner:     initProjectSembleRunner,
+	}
+	prewarm := semble.ExecutePrewarm(opts)
+	if !prewarm.Enabled {
+		return
+	}
+	if emitInitProjectSembleDiagnostic(params, prewarm.Diagnostic) {
+		return
+	}
+	offline := semble.CheckOfflineReadiness(opts)
+	emitInitProjectSembleDiagnostic(params, offline.Diagnostic)
+}
+
+func emitInitProjectSembleDiagnostic(params InitProjectParams, diagnostic semble.Diagnostic) bool {
+	if diagnostic.Message == "" {
+		return false
+	}
+	if params.SembleDiagnosticSink != nil {
+		params.SembleDiagnosticSink(diagnostic.Message)
+	}
+	return true
 }
 
 // validateBranch checks that name is a valid git branch name.

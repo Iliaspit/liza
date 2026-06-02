@@ -18,6 +18,8 @@ import (
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/paths"
 	"github.com/liza-mas/liza/internal/scipsearch"
+	"github.com/liza-mas/liza/internal/semble"
+	"github.com/liza-mas/liza/internal/stacklit"
 	"github.com/liza-mas/liza/internal/testhelpers"
 )
 
@@ -1141,6 +1143,7 @@ func TestClaimTask_PostWorktreeCmdRunsOnFreshClaim(t *testing.T) {
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	t.Setenv(stacklit.EnvEnableStacklit, "false")
 
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()
@@ -1205,6 +1208,7 @@ func TestClaimTask_PostWorktreeCmdRunsOnSameCoderReclaim(t *testing.T) {
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	t.Setenv(stacklit.EnvEnableStacklit, "false")
 
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()
@@ -1240,12 +1244,68 @@ func TestClaimTask_PostWorktreeCmdRunsOnSameCoderReclaim(t *testing.T) {
 	}
 }
 
+func TestClaimTaskPreparesSembleIgnoreForFreshClaim(t *testing.T) {
+	tmpDir := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, tmpDir)
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	t.Setenv(stacklit.EnvEnableStacklit, "false")
+
+	state := testhelpers.CreateValidState()
+	registerClaimTaskTestAgents(state)
+	state.Tasks = []models.Task{
+		testhelpers.BuildTaskByStatus("task-1", models.TaskStatusReady, time.Now().UTC()),
+	}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	result, err := ClaimTask(tmpDir, "task-1", "coder-1")
+	if err != nil {
+		t.Fatalf("ClaimTask() error: %v", err)
+	}
+
+	worktreeDir := filepath.Join(tmpDir, paths.WorktreesDirName, "task-1")
+	if result.WorktreeRel != filepath.Join(paths.WorktreesDirName, "task-1") {
+		t.Fatalf("WorktreeRel = %q, want task worktree", result.WorktreeRel)
+	}
+	assertPrepareSembleIgnorePayload(t, worktreeDir)
+	assertPrepareSemblePrivateExcludeCount(t, worktreeDir, ".sembleignore", 1)
+	assertGitStatusClean(t, worktreeDir)
+}
+
+func TestClaimTaskPreparesSembleIgnoreForRejectedReclaim(t *testing.T) {
+	tmpDir := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, tmpDir)
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	t.Setenv(stacklit.EnvEnableStacklit, "false")
+
+	state := testhelpers.CreateValidState()
+	registerClaimTaskTestAgents(state)
+	state.Tasks = []models.Task{
+		testhelpers.BuildTaskByStatus("task-1", models.TaskStatusRejected, time.Now().UTC()),
+	}
+	testhelpers.WriteInitialState(t, stateFile, state)
+	gitWrapper := git.New(tmpDir)
+	if _, err := gitWrapper.CreateWorktree("task-1", "integration"); err != nil {
+		t.Fatalf("CreateWorktree() setup error: %v", err)
+	}
+
+	_, err := ClaimTask(tmpDir, "task-1", "coder-1")
+	if err != nil {
+		t.Fatalf("ClaimTask() error: %v", err)
+	}
+
+	worktreeDir := filepath.Join(tmpDir, paths.WorktreesDirName, "task-1")
+	assertPrepareSembleIgnorePayload(t, worktreeDir)
+	assertPrepareSemblePrivateExcludeCount(t, worktreeDir, ".sembleignore", 1)
+	assertGitStatusClean(t, worktreeDir)
+}
+
 func TestClaimTask_ScipIndexesEnabledWorktreeAfterPostWorktreeCmd(t *testing.T) {
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
 	addTrackedGoSourceForClaimScipTest(t, tmpDir)
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 	t.Setenv(scipsearch.EnvEnableScipSearch, "true")
+	t.Setenv(stacklit.EnvEnableStacklit, "false")
 
 	markerPath := filepath.Join(tmpDir, "post-worktree-ran")
 	now := time.Now().UTC()
@@ -1291,12 +1351,53 @@ func TestClaimTask_ScipIndexesEnabledWorktreeAfterPostWorktreeCmd(t *testing.T) 
 	assertGitStatusClean(t, worktreeDir)
 }
 
+func TestClaimTaskSembleIgnorePreparationRunsAfterPostWorktreeBeforeIndexRefresh(t *testing.T) {
+	tmpDir := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, tmpDir)
+	addTrackedGoSourceForClaimScipTest(t, tmpDir)
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	t.Setenv(scipsearch.EnvEnableScipSearch, "true")
+	t.Setenv(stacklit.EnvEnableStacklit, "false")
+
+	state := testhelpers.CreateValidState()
+	registerClaimTaskTestAgents(state)
+	state.Config.ScipSearch = []string{"go"}
+	postCmd := "printf '.liza/\\n' > .sembleignore"
+	state.Config.PostWorktreeCmd = &postCmd
+	state.Tasks = []models.Task{
+		testhelpers.BuildTaskByStatus("task-1", models.TaskStatusReady, time.Now().UTC()),
+	}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	withClaimTaskScipRuntimeRunner(t, func(plan scipsearch.RuntimeCommandPlan) (string, error) {
+		got := readPrepareSembleIgnoreFile(t, plan.Dir)
+		if got != semble.GeneratedWorktreeIgnorePayload() {
+			return "", fmt.Errorf(".sembleignore before index refresh = %q, want generated payload", got)
+		}
+		return writeClaimScipIndex(plan, []byte(plan.Dir))
+	})
+
+	result, err := ClaimTask(tmpDir, "task-1", "coder-1")
+	if err != nil {
+		t.Fatalf("ClaimTask() error: %v", err)
+	}
+	if len(result.Warnings) != 0 {
+		t.Fatalf("ClaimTask() warnings = %v, want none", result.Warnings)
+	}
+	worktreeDir := filepath.Join(tmpDir, paths.WorktreesDirName, "task-1")
+	assertPrepareSembleIgnorePayload(t, worktreeDir)
+	assertPrepareSemblePrivateExcludeCount(t, worktreeDir, ".liza/scip/", 1)
+	assertPrepareSemblePrivateExcludeCount(t, worktreeDir, ".sembleignore", 1)
+	assertGitStatusClean(t, worktreeDir)
+}
+
 func TestClaimTask_ScipDisabledActivationNoop(t *testing.T) {
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
 	addTrackedGoSourceForClaimScipTest(t, tmpDir)
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 	t.Setenv(scipsearch.EnvEnableScipSearch, "false")
+	t.Setenv(stacklit.EnvEnableStacklit, "false")
 
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()
@@ -1334,6 +1435,7 @@ func TestClaimTask_ScipFailedIndexerWarningOnly(t *testing.T) {
 	addTrackedGoSourceForClaimScipTest(t, tmpDir)
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 	t.Setenv(scipsearch.EnvEnableScipSearch, "true")
+	t.Setenv(stacklit.EnvEnableStacklit, "false")
 
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()
@@ -1371,12 +1473,60 @@ func TestClaimTask_ScipFailedIndexerWarningOnly(t *testing.T) {
 	assertGitStatusClean(t, worktreeDir)
 }
 
+func TestClaimTaskSembleIgnorePreparationWarningsAreBounded(t *testing.T) {
+	tmpDir := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, tmpDir)
+	if err := os.WriteFile(filepath.Join(tmpDir, ".sembleignore"), []byte("operator-owned marker\n.liza/\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(.sembleignore) error: %v", err)
+	}
+	testhelpers.MustGit(t, tmpDir, "add", ".sembleignore")
+	testhelpers.MustGit(t, tmpDir, "commit", "-m", "track incomplete semble ignore")
+	testhelpers.MustGit(t, tmpDir, "branch", "-f", "integration", "HEAD")
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	t.Setenv(stacklit.EnvEnableStacklit, "false")
+
+	state := testhelpers.CreateValidState()
+	registerClaimTaskTestAgents(state)
+	state.Tasks = []models.Task{
+		testhelpers.BuildTaskByStatus("task-1", models.TaskStatusReady, time.Now().UTC()),
+	}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	result, err := ClaimTask(tmpDir, "task-1", "coder-1")
+	if err != nil {
+		t.Fatalf("ClaimTask() error: %v", err)
+	}
+	if len(result.Warnings) != 1 {
+		t.Fatalf("ClaimTask() warnings = %#v, want one Semble warning", result.Warnings)
+	}
+	warning := result.Warnings[0]
+	for _, want := range []string{"tracked .sembleignore", "missing required patterns"} {
+		if !strings.Contains(warning, want) {
+			t.Fatalf("warning = %q, want to contain %q", warning, want)
+		}
+	}
+	if strings.Contains(warning, "operator-owned marker") {
+		t.Fatalf("warning includes tracked file contents: %q", warning)
+	}
+	if len(warning) > 512 {
+		t.Fatalf("warning length = %d, want bounded <= 512", len(warning))
+	}
+
+	worktreeDir := filepath.Join(tmpDir, paths.WorktreesDirName, "task-1")
+	if got := readPrepareSembleIgnoreFile(t, worktreeDir); got != "operator-owned marker\n.liza/\n" {
+		t.Fatalf("tracked .sembleignore mutated: got %q", got)
+	}
+	assertPrepareSemblePrivateExcludeCount(t, worktreeDir, ".sembleignore", 0)
+	assertGitStatusClean(t, worktreeDir)
+}
+
 func TestClaimTask_ScipConcurrentClaimsUseIsolatedIndexes(t *testing.T) {
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
 	addTrackedGoSourceForClaimScipTest(t, tmpDir)
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 	t.Setenv(scipsearch.EnvEnableScipSearch, "true")
+	t.Setenv(stacklit.EnvEnableStacklit, "false")
 
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()
@@ -1454,6 +1604,58 @@ func TestClaimTask_ScipConcurrentClaimsUseIsolatedIndexes(t *testing.T) {
 	}
 	assertGitStatusClean(t, filepath.Join(tmpDir, paths.WorktreesDirName, "task-1"))
 	assertGitStatusClean(t, filepath.Join(tmpDir, paths.WorktreesDirName, "task-2"))
+}
+
+func TestClaimTaskSembleIgnorePreparationConcurrentCallsCleanStatus(t *testing.T) {
+	tmpDir := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, tmpDir)
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	t.Setenv(stacklit.EnvEnableStacklit, "false")
+
+	state := testhelpers.CreateValidState()
+	registerClaimTaskTestAgents(state)
+	now := time.Now().UTC()
+	state.Tasks = []models.Task{
+		testhelpers.BuildTaskByStatus("task-1", models.TaskStatusReady, now),
+		testhelpers.BuildTaskByStatus("task-2", models.TaskStatusReady, now),
+	}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	type claimOutcome struct {
+		result *ClaimResult
+		err    error
+	}
+	results := make(chan claimOutcome, 2)
+	for _, claim := range []struct {
+		taskID  string
+		agentID string
+	}{
+		{taskID: "task-1", agentID: "coder-1"},
+		{taskID: "task-2", agentID: "coder-2"},
+	} {
+		claim := claim
+		go func() {
+			result, err := ClaimTask(tmpDir, claim.taskID, claim.agentID)
+			results <- claimOutcome{result: result, err: err}
+		}()
+	}
+
+	for range 2 {
+		outcome := <-results
+		if outcome.err != nil {
+			t.Fatalf("ClaimTask() concurrent claim error: %v", outcome.err)
+		}
+		if len(outcome.result.Warnings) != 0 {
+			t.Fatalf("ClaimTask() warnings = %v, want none", outcome.result.Warnings)
+		}
+	}
+
+	for _, taskID := range []string{"task-1", "task-2"} {
+		worktreeDir := filepath.Join(tmpDir, paths.WorktreesDirName, taskID)
+		assertPrepareSembleIgnorePayload(t, worktreeDir)
+		assertPrepareSemblePrivateExcludeCount(t, worktreeDir, ".sembleignore", 1)
+		assertGitStatusClean(t, worktreeDir)
+	}
 }
 
 // TestClaimTask_IterationLimitDoesNotReleaseCoder_WhenCoderMovedOn verifies

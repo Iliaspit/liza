@@ -1,0 +1,28 @@
+[
+  {
+    "desc": "Shared Worktree Private Excludes and SCIP Migration: create `internal/worktreeexclude/` as the shared linked-worktree private exclude helper, move SCIP task-worktree private exclude setup onto that helper, preserve SCIP `.liza/scip/` generated-index cleanliness, and cover idempotent, conflicting, and concurrent exclude setup in helper/SCIP tests. Out of scope: Semble `.sembleignore` generation, task/reviewer lifecycle wiring, prompt rendering, init prewarm, operator documentation, and project-root `.sembleignore` handling.",
+    "done_when": "`go test ./internal/worktreeexclude ./internal/scipsearch` proves the shared helper covers idempotent, conflicting, and concurrent linked-worktree private exclude setup; SCIP task-worktree refresh uses `internal/worktreeexclude` for `.liza/scip/` private excludes; generated SCIP indexes remain prompt-local and hidden from `git status --porcelain`; repeated refreshes do not duplicate exclude entries; concurrent refreshes keep the private exclude file valid; and an existing conflicting task-worktree `core.excludesFile` is reported instead of overwritten.",
+    "scope": "In scope: create `internal/worktreeexclude/` as the shared linked-worktree private exclude helper, move SCIP task-worktree private exclude setup onto that helper, preserve SCIP `.liza/scip/` generated-index cleanliness, and cover idempotent, conflicting, and concurrent exclude setup in helper/SCIP tests. Out of scope: Semble `.sembleignore` generation, task/reviewer lifecycle wiring, prompt rendering, init prewarm, operator documentation, and project-root `.sembleignore` handling.",
+    "spec_ref": "specs/goals/20260601-integrate-semble.md",
+    "arch_ref": "specs/arch-plan/20260601-integrate-semble/20260601-135025-architecture-main-1-architecture-2.md",
+    "validation": [
+      "go test ./internal/worktreeexclude ./internal/scipsearch"
+    ]
+  },
+  {
+    "desc": "Task Worktree Semble Ignore Preparation and Lifecycle Wiring: add Semble task-worktree `.sembleignore` preparation using `internal/semble` default ignore patterns and `internal/worktreeexclude`; wire it into `CreateWorktree`, `ClaimTask`, and reviewer worktree recovery after worktree/post-worktree setup and before Semble prompt guidance can target those roots; prove generated `.sembleignore` files contain every default runtime/generated/credential pattern, are hidden from task diffs, share the private exclude with `.liza/scip/`, remain idempotent under repeated and concurrent lifecycle calls, and treat tracked operator-owned `.sembleignore` files explicitly rather than silently overwriting them. Out of scope: Semble offline validation internals, init prewarm, prompt template wording, operator documentation, project-root `.sembleignore` creation, and modifying tracked operator-owned `.sembleignore` content without explicit task scope.",
+    "done_when": "`go test ./internal/ops ./internal/agent` proves fresh claims, rejected-task reclaims, existing and fresh `CreateWorktree` calls, and reviewer worktree recovery prepare a Semble-visible task-root `.sembleignore` with every default runtime/generated/credential ignore pattern; generated `.sembleignore` and `.liza/scip/` entries share the same private worktree exclude without competing `core.excludesFile` values; repeated and concurrent lifecycle calls are idempotent and keep `git status --porcelain` clean; preparation runs after post-worktree setup and before prompt-eligible recovery/claim completion; warnings are bounded; and tracked operator-owned `.sembleignore` files are left unmodified with explicit missing-pattern handling instead of silent overwrite.",
+    "scope": "In scope: add Semble task-worktree `.sembleignore` preparation using `internal/semble` default ignore patterns and `internal/worktreeexclude`; wire it into `CreateWorktree`, `ClaimTask`, and reviewer worktree recovery after worktree/post-worktree setup and before Semble prompt guidance can target those roots; prove generated `.sembleignore` files contain every default runtime/generated/credential pattern, are hidden from task diffs, share the private exclude with `.liza/scip/`, remain idempotent under repeated and concurrent lifecycle calls, and treat tracked operator-owned `.sembleignore` files explicitly rather than silently overwriting them. Out of scope: Semble offline validation internals, init prewarm, prompt template wording, operator documentation, project-root `.sembleignore` creation, and modifying tracked operator-owned `.sembleignore` content without explicit task scope.",
+    "spec_ref": "specs/goals/20260601-integrate-semble.md",
+    "arch_ref": "specs/arch-plan/20260601-integrate-semble/20260601-135025-architecture-main-1-architecture-2.md",
+    "validation": [
+      "go test ./internal/ops ./internal/agent"
+    ],
+    "depends_on": [
+      "0"
+    ],
+    "task_depends_on": [
+      "architecture-main-1-architecture-0-code-planning-0"
+    ]
+  }
+]

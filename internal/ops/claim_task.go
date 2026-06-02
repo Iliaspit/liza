@@ -232,6 +232,10 @@ func ClaimTask(projectRoot, taskID, agentID string) (*ClaimResult, error) {
 			log.Printf("WARNING: claim-task %s: %s", taskID, warning)
 		}
 	}
+	sembleWarnings := PrepareSembleWorktreeIgnore(worktreeDir)
+	for _, warning := range sembleWarnings {
+		log.Printf("WARNING: claim-task %s: %s", taskID, warning)
+	}
 	scipWarnings := refreshTaskWorktreeScipIndexes(worktreeDir, scipSearchLanguages)
 	for _, warning := range scipWarnings {
 		log.Printf("WARNING: claim-task %s: %s", taskID, warning)
@@ -338,6 +342,11 @@ func ClaimTask(projectRoot, taskID, agentID string) (*ClaimResult, error) {
 		return nil, fmt.Errorf("failed to commit claim: %w", err)
 	}
 
+	warnings := append([]string{}, postCmdWarnings...)
+	warnings = append(warnings, sembleWarnings...)
+	warnings = append(warnings, scipWarnings...)
+	warnings = append(warnings, stacklitWarnings...)
+
 	return &ClaimResult{
 		TaskID:            taskID,
 		AgentID:           agentID,
@@ -348,7 +357,7 @@ func ClaimTask(projectRoot, taskID, agentID string) (*ClaimResult, error) {
 		IntegrationFix:    taskStatus == models.TaskStatusIntegrationFailed,
 		PreviousAssignee:  claimCtx.previousAssignee,
 		WorktreeRecreated: worktreeDeleted && worktreeCreated,
-		Warnings:          append(append(postCmdWarnings, scipWarnings...), stacklitWarnings...),
+		Warnings:          warnings,
 	}, nil
 }
 

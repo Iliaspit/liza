@@ -413,6 +413,100 @@ func TestBuildBasePromptStacklitAndScipUnifiedQueryRouting(t *testing.T) {
 	}
 }
 
+func TestBuildBasePromptSembleSearchOmittedWhenNoMetadata(t *testing.T) {
+	config := BasePromptConfig{
+		Role:        "code-coder",
+		AgentID:     "coder-1",
+		TaskID:      "task-1",
+		SpecsDir:    "/project/specs",
+		ProjectRoot: "/project",
+		StatePath:   "/project/.liza/state.yaml",
+		GoalDesc:    "Build a web API",
+		GoalSpecRef: "specs/vision.md",
+	}
+
+	prompt, err := BuildBasePrompt(config)
+	if err != nil {
+		t.Fatalf("BuildBasePrompt() error: %v", err)
+	}
+
+	for _, notWant := range []string{
+		"=== SEMBLE SEARCH ===",
+		"semble search",
+		"semble find-related",
+		"Semble returns candidate chunks, not proof",
+	} {
+		if strings.Contains(prompt, notWant) {
+			t.Fatalf("BuildBasePrompt() rendered Semble content %q with no supplied metadata", notWant)
+		}
+	}
+}
+
+func TestBuildBasePromptSembleSearchRendersPromptMetadata(t *testing.T) {
+	targetRoot := "/abs/worktree with spaces"
+	quotedRoot := "'/abs/worktree with spaces'"
+	config := BasePromptConfig{
+		Role:        "code-coder",
+		AgentID:     "coder-1",
+		TaskID:      "task-1",
+		SpecsDir:    "/project/specs",
+		ProjectRoot: "/project",
+		StatePath:   "/project/.liza/state.yaml",
+		GoalDesc:    "Build a web API",
+		GoalSpecRef: "specs/vision.md",
+		SembleSearch: SembleSearchMetadata{
+			TargetRoot:       targetRoot,
+			ShellTargetRoot:  quotedRoot,
+			OfflineEnvPrefix: "HF_HUB_OFFLINE=1",
+			SearchExamples: []string{
+				`HF_HUB_OFFLINE=1 semble search "where is review submission validated?" ` + quotedRoot,
+				`HF_HUB_OFFLINE=1 semble search "agent CLI defaults" ` + quotedRoot + ` --top-k 10`,
+				`HF_HUB_OFFLINE=1 semble search "where is task superseding specified?" ` + quotedRoot + ` --content docs`,
+				`HF_HUB_OFFLINE=1 semble search "default CLI config" ` + quotedRoot + ` --content config`,
+			},
+			FindRelatedExample:  "HF_HUB_OFFLINE=1 semble find-related <file_path> <line> " + quotedRoot,
+			ContentModeGuidance: "Use --content with one of: code, docs, config, all; code is the default.",
+			DiscoveryNotice:     "Semble returns candidate chunks, not proof; verify with direct source reads before editing or claiming behavior.",
+		},
+		StacklitIndexes: []StacklitIndex{{IndexPath: "/abs/worktree with spaces/stacklit.json"}},
+		ScipSearchIndexes: []ScipSearchIndex{
+			{Language: "go", IndexPath: "/abs/worktree with spaces/.liza/scip/go.scip"},
+		},
+	}
+
+	prompt, err := BuildBasePrompt(config)
+	if err != nil {
+		t.Fatalf("BuildBasePrompt() error: %v", err)
+	}
+
+	for _, want := range []string{
+		"=== SEMBLE SEARCH ===",
+		"Semble is available for semantic repository search in this target root:",
+		quotedRoot,
+		`HF_HUB_OFFLINE=1 semble search "where is review submission validated?" ` + quotedRoot,
+		`HF_HUB_OFFLINE=1 semble search "agent CLI defaults" ` + quotedRoot + ` --top-k 10`,
+		`HF_HUB_OFFLINE=1 semble search "where is task superseding specified?" ` + quotedRoot + ` --content docs`,
+		`HF_HUB_OFFLINE=1 semble search "default CLI config" ` + quotedRoot + ` --content config`,
+		"HF_HUB_OFFLINE=1 semble find-related <file_path> <line> " + quotedRoot,
+		"Use --content with one of: code, docs, config, all; code is the default.",
+		"Semble returns candidate chunks, not proof",
+		"Do not use rg for broad-scope or common-word conceptual queries.",
+		"search only when Semble is unavailable and the current tool/MCP policy exposes",
+		"stacklit derive --ai-summary -i '/abs/worktree with spaces/stacklit.json'",
+		"scip-search symbols --index '/abs/worktree with spaces/.liza/scip/go.scip'",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("BuildBasePrompt() missing expected Semble prompt content:\n%q", want)
+		}
+	}
+	if strings.Count(prompt, "=== QUERY ROUTING ===") != 1 {
+		t.Fatal("expected exactly one unified QUERY ROUTING section with Semble, Stacklit, and SCIP")
+	}
+	if strings.Contains(prompt, "Morph MCP semantic search: broad conceptual search") {
+		t.Fatal("Morph must not be positioned as the primary semantic search tool")
+	}
+}
+
 func TestRenderOrchestratorDashboard(t *testing.T) {
 	now := time.Now().UTC()
 	projectRoot := setupPipelineConfig(t)

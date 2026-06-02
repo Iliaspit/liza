@@ -19,6 +19,12 @@ import (
 	"github.com/liza-mas/liza/internal/pipeline"
 	"github.com/liza-mas/liza/internal/projectdetect"
 	"github.com/liza-mas/liza/internal/scipsearch"
+	"github.com/liza-mas/liza/internal/semble"
+)
+
+var (
+	initSembleLookPath semble.ExecutableLookup
+	initSembleRunner   semble.CommandRunner
 )
 
 // InitParams holds the parameters for InitCommand.
@@ -467,6 +473,40 @@ func InitCommand(description string, specRef string, stdin io.Reader) error {
 	})
 }
 
+func runSembleInitPrewarm(projectRoot string) {
+	opts := semble.ValidationOptions{
+		TargetRoot: projectRoot,
+		LookPath:   initSembleLookPath,
+		Runner:     initSembleRunner,
+	}
+	prewarm := semble.ExecutePrewarm(opts)
+	if !prewarm.Enabled {
+		return
+	}
+	if prewarm.Diagnostic != (semble.Diagnostic{}) {
+		writeSembleDiagnostic(prewarm.Diagnostic)
+		return
+	}
+	if !prewarm.Ready {
+		return
+	}
+	offline := semble.CheckOfflineReadiness(opts)
+	if offline.Diagnostic != (semble.Diagnostic{}) {
+		writeSembleDiagnostic(offline.Diagnostic)
+	}
+}
+
+func writeSembleDiagnostic(diagnostic semble.Diagnostic) {
+	message := strings.TrimSpace(diagnostic.Message)
+	if message == "" {
+		return
+	}
+	if !strings.HasPrefix(message, "semble:") {
+		message = "semble: " + message
+	}
+	fmt.Fprintln(os.Stderr, message)
+}
+
 // InitCommandWithConfig initializes a workspace with optional pipeline config.
 func InitCommandWithConfig(params InitParams) error {
 	description := params.Description
@@ -582,6 +622,8 @@ func InitCommandWithConfig(params InitParams) error {
 	for _, warning := range scipSearchConfig.Warnings {
 		fmt.Fprintf(os.Stderr, "Warning: %s\n", warning)
 	}
+
+	runSembleInitPrewarm(lizaPaths.ProjectRoot())
 
 	// Create directory structure
 	if err := os.MkdirAll(lizaPaths.LizaDir(), 0755); err != nil {

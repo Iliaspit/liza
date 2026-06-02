@@ -15,6 +15,7 @@ import (
 	"github.com/liza-mas/liza/internal/git"
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/scipsearch"
+	"github.com/liza-mas/liza/internal/stacklit"
 	"github.com/liza-mas/liza/internal/testhelpers"
 )
 
@@ -677,6 +678,7 @@ func TestSubmitForReview_RebaseRewriteUsesPostRebaseHead(t *testing.T) {
 
 func TestSubmitForReview_ScipRefreshesPostRebaseCandidateBeforeSubmittedTransition(t *testing.T) {
 	t.Setenv(scipsearch.EnvEnableScipSearch, "true")
+	t.Setenv(stacklit.EnvEnableStacklit, "false")
 
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
@@ -826,6 +828,7 @@ func TestSubmitForReview_ScipRefreshesPostRebaseCandidateBeforeSubmittedTransiti
 
 func TestSubmitForReview_ScipFailureWarnsAndOmitsFailedLanguage(t *testing.T) {
 	t.Setenv(scipsearch.EnvEnableScipSearch, "true")
+	t.Setenv(stacklit.EnvEnableStacklit, "false")
 	tmpDir, taskID, wtCommit, agentID, bb := setupSuccessfulSubmitScenario(t)
 	g := git.New(tmpDir)
 	wtPath := g.GetWorktreePath(taskID)

@@ -35,6 +35,34 @@ Agents treat `AGENT_TOOLS.md` as an operational contract:
 Some support tools are a poor fit, or outright incompatible, with Liza multi-agent
 mode.
 
+### Worktree-Local Semble Search
+
+When Liza supplies a Semble target root in an agent prompt, use Semble for
+natural-language semantic discovery before exact symbols or modules are known.
+Examples include "where is this behavior implemented?", "where is this behavior
+specified?", and "where is this config/default defined?". Use `--content docs`
+for documentation/spec questions and `--content config` for configuration
+questions. Semble returns candidate chunks, not proof; always follow with a
+direct read or exact source read before editing or claiming behavior.
+
+Semble complements the rest of the worktree-safe stack:
+
+- Use Semble for broad conceptual discovery when it is enabled and offline-ready.
+- Use Stacklit for module ownership, dependencies, hot files, and impact maps.
+- Use SCIP / `scip-search` for exact symbols, references, callers, and
+  implementations when Liza supplies an explicit index path.
+- Use Morph MCP semantic/codebase search only as a fallback when Semble is
+  unavailable or not offline-ready and the current tool policy exposes Morph MCP.
+- Use `rg` for literal strings, exact error messages, config keys, and path
+  discovery; do not spray broad common-word conceptual queries through `rg`.
+- Use `ast-grep` for syntax-shaped search and rewrite workflows.
+- Use direct source reads as the evidence source before edits, reviews, or
+  success claims.
+
+Do not infer Semble target roots, search sibling worktrees, run `semble init`,
+use Semble remote Git URL indexing from unattended MAS prompts, or treat Semble
+MCP as part of the default MAS setup.
+
 ### Worktree-Local SCIP Indexes
 
 When Liza supplies an explicit SCIP index path in an agent prompt, prefer
@@ -93,11 +121,13 @@ Examples:
 
 - LSP servers such as `gopls`, `pyright`, `tsserver`
 
-Prefer `scip-search` when Liza supplies an explicit `--index` path for indexed
-symbols, packages, references, and implementations; `rg` for exact text/path
-search; `ast-grep` for syntax-pattern structural search and rewrites; and
-workspace-aware tools such as `morph-mcp` or Task(Explore) for broader semantic
-or cross-file analysis in multi-agent worktrees.
+Prefer Semble for broad conceptual discovery when Liza supplies an offline-ready
+target root; `scip-search` when Liza supplies an explicit `--index` path for
+indexed symbols, packages, references, and implementations; Stacklit when Liza
+supplies an explicit `-i` path for module and dependency orientation; `rg` for
+exact text/path search; `ast-grep` for syntax-pattern structural search and
+rewrites; Morph MCP only as the semantic fallback when Semble is unavailable and
+policy exposes it; and direct reads for evidence in multi-agent worktrees.
 
 ### IDE-Specific MCP Tools
 
@@ -139,13 +169,16 @@ Exception:
 
 Prefer tools that remain correct across divergent worktrees:
 
+- Semble with the explicit target root supplied by Liza, for semantic discovery
 - `scip-search` with explicit `--index` paths supplied by Liza, for indexed
   symbols, packages, references, and implementations
+- Stacklit with explicit `-i` paths supplied by Liza, for module and dependency
+  orientation
 - `rg` and related search tools
 - `ast-grep` for syntax-pattern structural search and rewrite workflows
-- workspace-aware tools such as `morph-mcp`
+- workspace-aware tools such as `morph-mcp` when policy exposes them
 - `glob`
-- exact file reads and narrowly scoped fetch tools
+- direct read / exact read tools and narrowly scoped fetch tools
 
 These constraints are less severe in pairing mode, where one human and one agent
 typically share a single worktree.
