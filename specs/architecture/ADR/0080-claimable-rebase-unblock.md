@@ -1,0 +1,65 @@
+# 80 - Claimable Rebase Unblock
+
+## Status
+
+ACCEPTED
+
+## Context
+
+Blocked tasks are often blocked because a required artifact is missing. The orchestrator can create a separate task to fill that gap, but once the repair task merges, the original blocked task's preserved worktree may still be based on an older integration branch that does not contain the newly introduced artifact.
+
+Before this decision, `unblock-task` was less useful for that common recovery path. The blocked task needed to see the new artifact before resuming, and direct reassignment with `--assign-to` was not a good default for sandboxed agents. Agents running inside sandboxes can be confused by their inability to inspect process state reliably, so asking them to choose or validate a direct target agent creates avoidable operational friction.
+
+The better recovery shape is: repair the missing artifact, rebase the preserved blocked-task worktree onto the integration branch that now contains it, then return the task to normal claimability.
+
+## Decision
+
+Make `unblock-task` able to rebase preserved blocked-task worktrees and restore repaired tasks to claimable status without requiring a live assignee.
+
+When unblocking a repaired `BLOCKED` task, Liza may:
+- validate dependencies and preserved-worktree metadata
+- optionally rebase the preserved task worktree onto a chosen branch
+- update `base_commit` after a successful unblock-time rebase
+- move the task back to its role-pair initial status so any eligible agent can claim it
+- keep `--assign-to` as an explicit direct-resume fast path
+
+If the unblock-time rebase conflicts, Liza leaves the task `BLOCKED` with repair metadata instead of moving it to integration failure or pretending the task is claimable.
+
+## Consequences
+
+Positive:
+- Blocked tasks can see artifacts introduced by repair/fill-gap tasks before resuming.
+- Normal scheduler claimability becomes the default recovery path.
+- Sandboxed agents do not need to reason about live process state to resume repaired work.
+- `--assign-to` remains available for operators or controlled direct-resume flows.
+- Rebase conflicts stay attached to the blocked repair flow with actionable metadata.
+
+Trade-offs:
+- `unblock-task` now owns more preserved-worktree validation and rebase behavior.
+- Rebase conflicts add another blocked-task repair state operators and agents must understand.
+- Successful unblock can change a task's base commit, so state and prompt guidance must make that boundary explicit.
+
+## Alternatives Considered
+
+1. Require `--assign-to` for all unblocked work.
+
+Rejected because direct assignment is inconvenient and confusing for sandboxed agents that cannot reliably inspect process state.
+
+2. Make agents manually rebase preserved worktrees before unblocking.
+
+Rejected because the need to rebase is part of the blocked-task repair boundary and should be validated by the operation that restores claimability.
+
+3. Move unblock-time rebase conflicts to integration failure.
+
+Rejected because these conflicts are repair-specific and should remain `BLOCKED` with repair metadata until the blocked task can be safely resumed.
+
+4. Treat dependency repair as sufficient without rebasing.
+
+Rejected because a preserved worktree may not contain the newly merged artifact even after the dependency that created it is satisfied.
+
+## Relationship to Prior Decisions
+
+Extends ADR-0063 (Blocked Task Alerts and Re-Wake) by making repaired blocked tasks resumable through normal claimability. Complements ADR-0075 (Retarget Dependency Repair), which fixes stale dependency edges before unblock. Relates to ADR-0077 (Dependency Edge Canonicalization) because unblock requires direct merged dependencies before restoring claimability.
+
+---
+*Reconstructed from commit b3d44346 and user context (2026-06-02)*
