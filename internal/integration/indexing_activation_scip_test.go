@@ -202,7 +202,12 @@ func newScipIndexingActivationProject(t *testing.T) string {
 	t.Helper()
 
 	t.Setenv(scipsearch.EnvEnableScipSearch, "true")
-	return newIndexingActivationProject(t)
+	projectDir := newIndexingActivationProject(t)
+	resolved, err := filepath.EvalSymlinks(projectDir)
+	if err != nil {
+		t.Fatalf("EvalSymlinks(%q): %v", projectDir, err)
+	}
+	return resolved
 }
 
 func commitScipIndexingActivationFiles(t *testing.T, projectDir string, files map[string]string, message string) {
