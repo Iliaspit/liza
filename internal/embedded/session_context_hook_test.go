@@ -74,6 +74,14 @@ func TestSessionContextHook_EmitsSessionStartContextForIndexedRepo(t *testing.T)
 	}
 }
 
+func TestSessionContextHook_AvoidsBash4CaseConversion(t *testing.T) {
+	for _, pattern := range []string{",,}", "^^}"} {
+		if strings.Contains(string(sessionContextHookContent), pattern) {
+			t.Fatalf("session-context.sh uses Bash 4-only case conversion %q", pattern)
+		}
+	}
+}
+
 func TestSessionContextHook_InstructsAgentsToRunStacklitSummaryWhenAvailable(t *testing.T) {
 	if _, err := exec.LookPath("bash"); err != nil {
 		t.Skip("bash not available")

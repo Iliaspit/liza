@@ -91,7 +91,7 @@ truthy_env() {
 
   value="${value#"${value%%[![:space:]]*}"}"
   value="${value%"${value##*[![:space:]]}"}"
-  value="${value,,}"
+  value=$(printf '%s' "$value" | tr '[:upper:]' '[:lower:]')
   [[ "$value" == "1" || "$value" == "true" ]]
 }
 
