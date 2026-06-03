@@ -257,6 +257,10 @@ func TestInitDispatch_PairingScipSearchPlanFlagWritesOverrideCommands(t *testing
 	defer resetRootCmdForTest(t)
 
 	projectRoot := t.TempDir()
+	projectRoot, err := filepath.EvalSymlinks(projectRoot)
+	if err != nil {
+		t.Fatalf("resolve temp project root: %v", err)
+	}
 	testhelpers.SetupTestGitRepo(t, projectRoot)
 	testhelpers.SetupGlobalLiza(t)
 	t.Setenv(scipsearch.EnvEnableScipSearch, "true")
@@ -273,7 +277,7 @@ func TestInitDispatch_PairingScipSearchPlanFlagWritesOverrideCommands(t *testing
 	testhelpers.MustGit(t, projectRoot, "add", ".")
 	testhelpers.MustGit(t, projectRoot, "commit", "-m", "Add monorepo roots")
 
-	err := executeRootCommand(t, projectRoot,
+	err = executeRootCommand(t, projectRoot,
 		"init",
 		"--codex",
 		"--scip-search-plan", "go=services/design-diagnosis/cli",
