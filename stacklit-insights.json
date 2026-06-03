@@ -59,7 +59,8 @@
       "LIZA_DEFAULT_REVIEWER_CLI",
       "LIZA_SPECS",
       "LIZA_ENABLE_SCIP_SEARCH",
-      "LIZA_ENABLE_STACKLIT"
+      "LIZA_ENABLE_STACKLIT",
+      "LIZA_ENABLE_SEMBLE"
     ],
     "do_not_touch": [
       ".github/"
