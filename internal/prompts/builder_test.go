@@ -448,12 +448,12 @@ func TestBuildBasePromptSembleSearchRendersPromptMetadata(t *testing.T) {
 			ShellTargetRoot:  quotedRoot,
 			OfflineEnvPrefix: "HF_HUB_OFFLINE=1",
 			SearchExamples: []string{
-				`HF_HUB_OFFLINE=1 semble search "where is review submission validated?" ` + quotedRoot,
-				`HF_HUB_OFFLINE=1 semble search "agent CLI defaults" ` + quotedRoot + ` --top-k 10`,
-				`HF_HUB_OFFLINE=1 semble search "where is task superseding specified?" ` + quotedRoot + ` --content docs`,
-				`HF_HUB_OFFLINE=1 semble search "default CLI config" ` + quotedRoot + ` --content config`,
+				`env HF_HUB_OFFLINE=1 semble search "where is review submission validated?" ` + quotedRoot,
+				`env HF_HUB_OFFLINE=1 semble search "agent CLI defaults" ` + quotedRoot + ` --top-k 10`,
+				`env HF_HUB_OFFLINE=1 semble search "where is task superseding specified?" ` + quotedRoot + ` --content docs`,
+				`env HF_HUB_OFFLINE=1 semble search "default CLI config" ` + quotedRoot + ` --content config`,
 			},
-			FindRelatedExample:  "HF_HUB_OFFLINE=1 semble find-related <file_path> <line> " + quotedRoot,
+			FindRelatedExample:  "env HF_HUB_OFFLINE=1 semble find-related <file_path> <line> " + quotedRoot,
 			ContentModeGuidance: "Use --content with one of: code, docs, config, all; code is the default.",
 			DiscoveryNotice:     "Semble returns candidate chunks, not proof; verify with direct source reads before editing or claiming behavior.",
 		},
@@ -481,8 +481,8 @@ func TestBuildBasePromptSembleSearchRendersPromptMetadata(t *testing.T) {
 		}
 	}
 	for _, notWant := range []string{
-		`HF_HUB_OFFLINE=1 semble search "where is review submission validated?" ` + quotedRoot,
-		"HF_HUB_OFFLINE=1 semble find-related <file_path> <line> " + quotedRoot,
+		`env HF_HUB_OFFLINE=1 semble search "where is review submission validated?" ` + quotedRoot,
+		"env HF_HUB_OFFLINE=1 semble find-related <file_path> <line> " + quotedRoot,
 		"stacklit derive --ai-summary -i",
 		"scip-search symbols --index",
 		"=== QUERY ROUTING ===",
@@ -512,9 +512,9 @@ func TestBuildBasePromptSembleOnlyRoutingOmitsUnavailableOptionalTools(t *testin
 			ShellTargetRoot:  quotedRoot,
 			OfflineEnvPrefix: "HF_HUB_OFFLINE=1",
 			SearchExamples: []string{
-				`HF_HUB_OFFLINE=1 semble search "where is review submission validated?" ` + quotedRoot,
+				`env HF_HUB_OFFLINE=1 semble search "where is review submission validated?" ` + quotedRoot,
 			},
-			FindRelatedExample:  "HF_HUB_OFFLINE=1 semble find-related <file_path> <line> " + quotedRoot,
+			FindRelatedExample:  "env HF_HUB_OFFLINE=1 semble find-related <file_path> <line> " + quotedRoot,
 			ContentModeGuidance: "Use --content with one of: code, docs, config, all; code is the default.",
 			DiscoveryNotice:     "Semble returns candidate chunks, not proof; verify with direct source reads before editing or claiming behavior.",
 		},

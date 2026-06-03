@@ -469,7 +469,7 @@ func TestBuildPromptWithContextSembleSearchUsesRoleWorktreeRoot(t *testing.T) {
 			projectRoot := t.TempDir()
 			testhelpers.SetupPipelineConfig(t, projectRoot)
 			taskWorktree := filepath.Join(projectRoot, ".worktrees", "task-1")
-			projectRootCommand := "HF_HUB_OFFLINE=1 semble search \"where is review submission validated?\" " + shellQuoteForTest(projectRoot)
+			projectRootCommand := "env HF_HUB_OFFLINE=1 semble search \"where is review submission validated?\" " + shellQuoteForTest(projectRoot)
 			worktree := ".worktrees/task-1"
 			var calls []semble.PromptMetadataOptions
 			restore := replaceSemblePromptMetadataForTest(t, func(opts semble.PromptMetadataOptions) (semble.PromptMetadata, bool) {
@@ -525,7 +525,7 @@ func TestBuildPromptWithContextSembleSearchUsesRoleWorktreeRoot(t *testing.T) {
 			if !strings.Contains(prompt, "Use `~/.liza/AGENT_TOOLS.md` for Semble command syntax, content modes, routing rules, and proof requirements.") {
 				t.Fatalf("prompt missing AGENT_TOOLS Semble usage pointer")
 			}
-			if strings.Contains(prompt, "HF_HUB_OFFLINE=1 semble search") {
+			if strings.Contains(prompt, "env HF_HUB_OFFLINE=1 semble search") {
 				t.Fatalf("prompt contains reusable Semble command syntax")
 			}
 			if strings.Contains(prompt, projectRootCommand) {
@@ -1341,7 +1341,7 @@ func TestBuildOrchestratorPromptContextSembleSearchUsesSafeProjectRoot(t *testin
 	if !strings.Contains(prompt, "Use `~/.liza/AGENT_TOOLS.md` for Semble command syntax, content modes, routing rules, and proof requirements.") {
 		t.Fatalf("prompt missing AGENT_TOOLS Semble usage pointer")
 	}
-	if strings.Contains(prompt, "HF_HUB_OFFLINE=1 semble search") {
+	if strings.Contains(prompt, "env HF_HUB_OFFLINE=1 semble search") {
 		t.Fatalf("prompt contains reusable Semble command syntax")
 	}
 }
@@ -4514,12 +4514,12 @@ func fakeSemblePromptMetadata(targetRoot string) semble.PromptMetadata {
 		ShellTargetRoot:  quotedRoot,
 		OfflineEnvPrefix: "HF_HUB_OFFLINE=1",
 		SearchExamples: []string{
-			`HF_HUB_OFFLINE=1 semble search "where is review submission validated?" ` + quotedRoot,
-			`HF_HUB_OFFLINE=1 semble search "agent CLI defaults" ` + quotedRoot + ` --top-k 10`,
-			`HF_HUB_OFFLINE=1 semble search "where is task superseding specified?" ` + quotedRoot + ` --content docs`,
-			`HF_HUB_OFFLINE=1 semble search "default CLI config" ` + quotedRoot + ` --content config`,
+			`env HF_HUB_OFFLINE=1 semble search "where is review submission validated?" ` + quotedRoot,
+			`env HF_HUB_OFFLINE=1 semble search "agent CLI defaults" ` + quotedRoot + ` --top-k 10`,
+			`env HF_HUB_OFFLINE=1 semble search "where is task superseding specified?" ` + quotedRoot + ` --content docs`,
+			`env HF_HUB_OFFLINE=1 semble search "default CLI config" ` + quotedRoot + ` --content config`,
 		},
-		FindRelatedExample:  "HF_HUB_OFFLINE=1 semble find-related <file_path> <line> " + quotedRoot,
+		FindRelatedExample:  "env HF_HUB_OFFLINE=1 semble find-related <file_path> <line> " + quotedRoot,
 		ContentModeGuidance: "Use --content with one of: code, docs, config, all; code is the default.",
 		DiscoveryNotice:     "Semble returns candidate chunks, not proof; verify with direct source reads before editing or claiming behavior.",
 	}

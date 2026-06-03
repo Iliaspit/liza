@@ -106,9 +106,9 @@ stacklit get-module <module> -i <index-path>
 stacklit get-dependencies <module> -i <index-path>
 stacklit get-hints -i <index-path>
 stacklit get-hot-files -i <index-path>
-HF_HUB_OFFLINE=1 semble search "where is review submission validated?" <target-root>
-HF_HUB_OFFLINE=1 semble search "default CLI config" <target-root> --content config
-HF_HUB_OFFLINE=1 semble find-related <file_path> <line> <target-root>
+env HF_HUB_OFFLINE=1 semble search "where is review submission validated?" <target-root>
+env HF_HUB_OFFLINE=1 semble search "default CLI config" <target-root> --content config
+env HF_HUB_OFFLINE=1 semble find-related <file_path> <line> <target-root>
 ```
 
 `scip-search --name` matches symbol substrings; `--symbol` matches exact SCIP symbols from prior results. Supported SCIP languages are Go, Python, and TypeScript; `implementations` is not supported for Python. Semble `--content` accepts `code`, `docs`, `config`, and `all`; `code` is the default.
@@ -187,6 +187,7 @@ rtk git status
 rtk cargo test
 rtk npm run build
 rtk pytest -q
+rtk env HF_HUB_OFFLINE=1 semble search "where is review submission validated?" <target-root>
 ```
 
 Temporary upstream bug workarounds, until rtk-ai/rtk#1922 and rtk-ai/rtk#925 merge:

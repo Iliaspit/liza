@@ -748,8 +748,8 @@ func TestPromptMetadata(t *testing.T) {
 
 		rendered := strings.Join(append(metadata.SearchExamples, metadata.FindRelatedExample), "\n")
 		for _, want := range []string{
-			"HF_HUB_OFFLINE=1 semble search",
-			"HF_HUB_OFFLINE=1 semble find-related",
+			"env HF_HUB_OFFLINE=1 semble search",
+			"env HF_HUB_OFFLINE=1 semble find-related",
 			metadata.ShellTargetRoot,
 			"--content docs",
 			"--content config",
@@ -792,15 +792,15 @@ func TestShellQuotedCommands(t *testing.T) {
 
 	quotedRoot := "'" + strings.ReplaceAll(filepath.Clean(targetRoot), "'", "'\\''") + "'"
 	wantSearch := []string{
-		`HF_HUB_OFFLINE=1 semble search "where is review submission validated?" ` + quotedRoot,
-		`HF_HUB_OFFLINE=1 semble search "agent CLI defaults" ` + quotedRoot + ` --top-k 10`,
-		`HF_HUB_OFFLINE=1 semble search "where is task superseding specified?" ` + quotedRoot + ` --content docs`,
-		`HF_HUB_OFFLINE=1 semble search "default CLI config" ` + quotedRoot + ` --content config`,
+		`env HF_HUB_OFFLINE=1 semble search "where is review submission validated?" ` + quotedRoot,
+		`env HF_HUB_OFFLINE=1 semble search "agent CLI defaults" ` + quotedRoot + ` --top-k 10`,
+		`env HF_HUB_OFFLINE=1 semble search "where is task superseding specified?" ` + quotedRoot + ` --content docs`,
+		`env HF_HUB_OFFLINE=1 semble search "default CLI config" ` + quotedRoot + ` --content config`,
 	}
 	if !reflect.DeepEqual(metadata.SearchExamples, wantSearch) {
 		t.Fatalf("SearchExamples = %#v, want %#v", metadata.SearchExamples, wantSearch)
 	}
-	wantFindRelated := "HF_HUB_OFFLINE=1 semble find-related <file_path> <line> " + quotedRoot
+	wantFindRelated := "env HF_HUB_OFFLINE=1 semble find-related <file_path> <line> " + quotedRoot
 	if metadata.FindRelatedExample != wantFindRelated {
 		t.Fatalf("FindRelatedExample = %q, want %q", metadata.FindRelatedExample, wantFindRelated)
 	}

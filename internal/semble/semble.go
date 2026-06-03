@@ -482,12 +482,12 @@ func BuildPromptMetadata(opts PromptMetadataOptions) (PromptMetadata, bool) {
 		ShellTargetRoot:  shellTargetRoot,
 		OfflineEnvPrefix: "HF_HUB_OFFLINE=1",
 		SearchExamples: []string{
-			`HF_HUB_OFFLINE=1 semble search "where is review submission validated?" ` + shellTargetRoot,
-			`HF_HUB_OFFLINE=1 semble search "agent CLI defaults" ` + shellTargetRoot + ` --top-k 10`,
-			`HF_HUB_OFFLINE=1 semble search "where is task superseding specified?" ` + shellTargetRoot + ` --content docs`,
-			`HF_HUB_OFFLINE=1 semble search "default CLI config" ` + shellTargetRoot + ` --content config`,
+			`env HF_HUB_OFFLINE=1 semble search "where is review submission validated?" ` + shellTargetRoot,
+			`env HF_HUB_OFFLINE=1 semble search "agent CLI defaults" ` + shellTargetRoot + ` --top-k 10`,
+			`env HF_HUB_OFFLINE=1 semble search "where is task superseding specified?" ` + shellTargetRoot + ` --content docs`,
+			`env HF_HUB_OFFLINE=1 semble search "default CLI config" ` + shellTargetRoot + ` --content config`,
 		},
-		FindRelatedExample:  "HF_HUB_OFFLINE=1 semble find-related <file_path> <line> " + shellTargetRoot,
+		FindRelatedExample:  "env HF_HUB_OFFLINE=1 semble find-related <file_path> <line> " + shellTargetRoot,
 		ContentModeGuidance: "Use --content with one of: code, docs, config, all; code is the default.",
 		DiscoveryNotice:     "Semble returns candidate chunks, not proof; verify with direct source reads before editing or claiming behavior.",
 	}, true

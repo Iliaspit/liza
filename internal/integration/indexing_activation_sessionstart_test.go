@@ -43,7 +43,7 @@ func TestIndexingActivationSemblePairingInitCreatesProjectRootIgnoreBeforeSessio
 
 	assertIndexingActivationContainsAll(t, context,
 		"Semble semantic search is available for this repo root: "+projectDir,
-		"HF_HUB_OFFLINE=1 semble search",
+		"env HF_HUB_OFFLINE=1 semble search",
 		"Semble returns candidate chunks, not proof",
 	)
 	assertIndexingActivationContainsNone(t, context,
@@ -79,7 +79,7 @@ func TestIndexingActivationSemblePairingInitVerifiesExistingSafeProjectRootIgnor
 	context := runPairingSessionStartContext(t, projectDir, sembleSessionStartOverrides(binDir))
 	assertIndexingActivationContainsAll(t, context,
 		"Semble semantic search is available for this repo root: "+projectDir,
-		"HF_HUB_OFFLINE=1 semble find-related",
+		"env HF_HUB_OFFLINE=1 semble find-related",
 	)
 }
 
