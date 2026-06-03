@@ -252,6 +252,71 @@ func TestInitDispatch_PairingScipSearchFlagIsAllowedWithAgent(t *testing.T) {
 	}
 }
 
+func TestInitDispatch_PairingScipSearchPlanFlagWritesOverrideCommands(t *testing.T) {
+	resetRootCmdForTest(t)
+	defer resetRootCmdForTest(t)
+
+	projectRoot := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, projectRoot)
+	testhelpers.SetupGlobalLiza(t)
+	t.Setenv(scipsearch.EnvEnableScipSearch, "true")
+	writeFile(t, filepath.Join(projectRoot, "services", "design-diagnosis", "cli", "go.mod"), "module example.com/cli\n")
+	writeFile(t, filepath.Join(projectRoot, "services", "design-diagnosis", "cli", "main.go"), "package main\n")
+	writeFile(t, filepath.Join(projectRoot, "apps", "web", "tsconfig.json"), "{}\n")
+	writeFile(t, filepath.Join(projectRoot, "apps", "web", "src", "App.tsx"), "export const app = 1\n")
+	writeFile(t, filepath.Join(projectRoot, "infra", "cdk", "tsconfig.json"), "{}\n")
+	writeFile(t, filepath.Join(projectRoot, "infra", "cdk", "app.ts"), "export const cdk = 1\n")
+	writeFile(t, filepath.Join(projectRoot, "apps", "api", "pyproject.toml"), "[project]\nname = \"api\"\n")
+	writeFile(t, filepath.Join(projectRoot, "apps", "api", "backend", "main.py"), "print('api')\n")
+	writeFile(t, filepath.Join(projectRoot, "services", "design-diagnosis", "pyproject.toml"), "[project]\nname = \"service\"\n")
+	writeFile(t, filepath.Join(projectRoot, "services", "design-diagnosis", "app.py"), "print('service')\n")
+	testhelpers.MustGit(t, projectRoot, "add", ".")
+	testhelpers.MustGit(t, projectRoot, "commit", "-m", "Add monorepo roots")
+
+	err := executeRootCommand(t, projectRoot,
+		"init",
+		"--codex",
+		"--scip-search-plan", "go=services/design-diagnosis/cli",
+		"--scip-search-plan", "typescript=apps/web/src,apps/web",
+		"--scip-search-plan", "python=apps/api",
+	)
+	if err != nil {
+		t.Fatalf("pairing init with --scip-search-plan failed: %v", err)
+	}
+
+	scriptPath := filepath.Join(projectRoot, ".git", "hooks", "liza-index.sh")
+	script, err := os.ReadFile(scriptPath)
+	if err != nil {
+		t.Fatalf("liza-index.sh missing after pairing SCIP init: %v", err)
+	}
+	for _, want := range []string{
+		"scip-go index --module-root " + projectRoot + "/services/design-diagnosis/cli --output " + projectRoot + "/go.scip",
+		"scip-typescript index --cwd " + projectRoot + "/apps/web/src --output " + projectRoot + "/typescript.scip " + projectRoot + "/apps/web",
+		"scip-python index --cwd " + projectRoot + "/apps/api --output " + projectRoot + "/python.scip",
+	} {
+		if !strings.Contains(string(script), want) {
+			t.Fatalf("liza-index.sh missing override command %q:\n%s", want, string(script))
+		}
+	}
+}
+
+func TestInitDispatch_ScipSearchPlanFlagRequiresPairingInit(t *testing.T) {
+	resetRootCmdForTest(t)
+	defer resetRootCmdForTest(t)
+
+	projectRoot := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, projectRoot)
+	testhelpers.SetupGlobalLiza(t)
+
+	err := executeRootCommand(t, projectRoot, "init", "--scip-search-plan", "go=.", "Goal with invalid pairing plan")
+	if err == nil {
+		t.Fatal("full init with --scip-search-plan error = nil, want pairing-only rejection")
+	}
+	if !strings.Contains(err.Error(), "--scip-search-plan is only supported for pairing init") {
+		t.Fatalf("full init error = %v, want pairing-only diagnostic", err)
+	}
+}
+
 func TestInitDispatch_ScipSearchRepeatableFlagPersistsConfig(t *testing.T) {
 	projectRoot := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, projectRoot)
@@ -476,6 +541,17 @@ func executeInitHelpForTest(t *testing.T) (string, error) {
 	rootCmd.SetArgs([]string{"init", "--help"})
 	err := rootCmd.Execute()
 	return out.String(), err
+}
+
+func writeFile(t *testing.T, path, content string) {
+	t.Helper()
+
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", filepath.Dir(path), err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write %s: %v", path, err)
+	}
 }
 
 func writeFakeSembleForTest(t *testing.T, path string) {

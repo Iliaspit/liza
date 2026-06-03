@@ -154,20 +154,21 @@ Values are trimmed and compared case-insensitively:
 | `1`, `true` | Enable Stacklit activation for the current init/runtime process |
 | unset, empty, `0`, `false` | Keep Stacklit disabled for the current init/runtime process |
 
-Repository-level Stacklit files are operator-owned. Commit curated Stacklit
-inputs when used:
+Repository-level Stacklit inputs are operator-owned. Commit curated Stacklit
+configuration when used:
 
 ```text
-<project_root>/stacklit-insights.json
 <project_root>/.stacklitrc.json
 ```
 
-`stacklit.json` is generated runtime context. Projects may either commit it for
-a shared baseline snapshot or ignore it and regenerate it locally.
+`stacklit.json` is generated runtime context. `stacklit-insights.json` may be a
+curated input, but pairing hook refresh can also create or update it through
+`stacklit init-insights`. Projects may either commit these files for a shared
+baseline snapshot or ignore/protect them and regenerate them locally.
 
-Liza does not create or mutate `stacklit-insights.json` or `.stacklitrc.json`.
-When those files exist, `stacklit generate-json` consumes them naturally while
-refreshing `stacklit.json`.
+Liza does not create or mutate `.stacklitrc.json`. When Stacklit input files
+exist, `stacklit generate-json` consumes them naturally while refreshing
+`stacklit.json`.
 
 Pairing init behavior:
 
@@ -177,9 +178,12 @@ Pairing init behavior:
 - Pairing init also keeps generated Stacklit artifacts out of accidental task
   diffs by requiring them to be intentionally tracked, ignored, privately
   excluded, or otherwise protected by the generated project-local setup.
-- Automatic pairing lifecycle refresh runs `stacklit generate-json`; it does not
-  run `stacklit ai-summary`. Manual project-local refresh may include AI-summary
-  only when the generated hook script is invoked with its explicit AI argument.
+- Automatic pairing lifecycle refresh uses `stacklit diff` to skip no-op refresh,
+  runs `stacklit generate-json -o stacklit.json --parse-workers 3`, runs
+  `stacklit init-insights`, regenerates `stacklit.json` when insights change, and
+  does not run `stacklit ai-summary`. Manual project-local refresh may include
+  AI-summary only when the generated hook script is invoked with its explicit AI
+  argument.
 - Pairing init never writes repo-specific Stacklit paths into
   `~/.liza/AGENT_TOOLS.md`.
 
@@ -211,9 +215,9 @@ explicit current-session index path. Agents must not infer index locations from
 global guidance.
 
 Explicit non-goals: Liza does not install `stacklit-cli`, run `stacklit view`,
-generate `stacklit.html`, run `stacklit init-insights`, or curate Stacklit
-insights. Operators install Stacklit, commit their curated Stacklit inputs, and
-choose whether to commit or ignore generated indexes.
+generate `stacklit.html`, or curate Stacklit insights. Operators install
+Stacklit, commit their curated Stacklit inputs, and choose whether to commit or
+ignore generated indexes and insights.
 
 ### Semble (`LIZA_ENABLE_SEMBLE`)
 
@@ -356,6 +360,14 @@ Pairing init behavior:
 - Repeated `--scip-search <language>` flags restrict which languages pairing init
   considers, but they are not root or working-directory selections. Pairing init
   still needs one confident root per enabled language.
+- Repeated `--scip-search-plan <language>=<values>` flags provide explicit
+  pairing hook roots when monorepo autodetection would otherwise be ambiguous:
+  `go=<module-root>`, `typescript=<cwd>,<project-root>`, or
+  `python=<cwd>[,<target-only>]`. Values may be repo-relative or absolute paths
+  under the repo root. These overrides are used only for project-local pairing
+  hook generation; full workspace init rejects the flag, and the values are not
+  persisted to MAS `config.scip_search`. If `--scip-search <language>` is also
+  supplied, every override language must be in that allowlist.
 - If pairing init finds multiple plausible roots for an enabled language and
   cannot choose confidently, it reports an ambiguity diagnostic instead of
   writing guessed hook commands.
@@ -363,6 +375,9 @@ Pairing init behavior:
   generated project-local hook contains concrete repo-specific indexer commands.
   Those concrete commands belong in the project hook, not in global setup
   guidance.
+- Pairing lifecycle refresh skips a SCIP indexer when its generated index exists
+  and is newer than the relevant source files. It runs the indexer when the index
+  is missing or stale.
 
 MAS runtime behavior:
 

@@ -45,6 +45,7 @@ type InitParams struct {
 	DefaultDoerCLI       string   // --default-doer-cli: default CLI for doer and orchestrator agent spawning
 	DefaultReviewerCLI   string   // --default-reviewer-cli: default CLI for reviewer agent spawning
 	ScipSearch           []string // --scip-search: enabled SCIP languages
+	ScipSearchPlans      []string // --scip-search-plan: pairing SCIP root overrides
 	Agents               []string // --claude, --codex, --gemini, --mistral
 	Stdin                io.Reader
 	ForceInteractive     bool   // bypass TTY check (for testing)
@@ -69,10 +70,11 @@ var globalFallbacks = map[string]string{
 
 // InitPairingParams holds the parameters for InitPairingCommand.
 type InitPairingParams struct {
-	Agents         []string  // agent names (e.g. "claude", "codex", "gemini", "mistral")
-	ScipSearch     []string  // --scip-search: enabled pairing SCIP languages
-	Stdin          io.Reader // input for interactive prompts (nil = os.Stdin)
-	ContractAction string    // "global", "rename", "skip", or "" (default behavior)
+	Agents          []string  // agent names (e.g. "claude", "codex", "gemini", "mistral")
+	ScipSearch      []string  // --scip-search: enabled pairing SCIP languages
+	ScipSearchPlans []string  // --scip-search-plan: pairing SCIP root overrides
+	Stdin           io.Reader // input for interactive prompts (nil = os.Stdin)
+	ContractAction  string    // "global", "rename", "skip", or "" (default behavior)
 }
 
 // InitPairingCommand creates agent-specific contract symlinks without
@@ -143,9 +145,14 @@ func InitPairingCommand(params InitPairingParams) error {
 	if projectRoot != "" && (stacklitEnabled || scipEnabled) {
 		var scipPlans []scipsearch.RuntimeCommandPlan
 		if scipEnabled {
+			overrides, err := scipsearch.ParsePairingCommandOverrides(projectRoot, params.ScipSearchPlans)
+			if err != nil {
+				return fmt.Errorf("scip-search pairing plan failed: %w", err)
+			}
 			plans, err := scipsearch.PlanPairingCommands(scipsearch.PairingPlanOptions{
 				ProjectRoot:       projectRoot,
 				ExplicitLanguages: params.ScipSearch,
+				CommandOverrides:  overrides,
 			})
 			if err != nil {
 				return fmt.Errorf("scip-search pairing plan failed: %w", err)
@@ -560,6 +567,9 @@ func InitCommandWithConfig(params InitParams) error {
 	branch := params.Branch
 	if branch == "" {
 		branch = "integration"
+	}
+	if len(params.ScipSearchPlans) > 0 {
+		return fmt.Errorf("--scip-search-plan is only supported for pairing init without a description")
 	}
 
 	// Validate branch name using git's own ref format rules

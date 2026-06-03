@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/liza-mas/liza/internal/scipsearch"
 )
@@ -48,6 +49,13 @@ func TestInstallLifecycleHooksDefaultHooks(t *testing.T) {
 		}
 		if info.Mode()&0111 == 0 {
 			t.Fatalf("%s is not executable: mode=%v", hookPath, info.Mode())
+		}
+		target, err := os.Readlink(hookPath)
+		if err != nil {
+			t.Fatalf("%s is not a dispatcher symlink: %v", hookPath, err)
+		}
+		if target != defaultHookDispatcherName {
+			t.Fatalf("%s symlink target = %q, want %q", hookPath, target, defaultHookDispatcherName)
 		}
 		content := readFile(t, hookPath)
 		if !strings.Contains(content, ManagedHookMarker) {
@@ -123,8 +131,8 @@ func TestInstallLifecycleHooksIsIdempotentForManagedHooks(t *testing.T) {
 	assertHookActions(t, second, HookActionVerified)
 	for _, hook := range DefaultLifecycleHooks() {
 		hookPath := filepath.Join(first.HooksDir, hook)
-		if got := readFile(t, hookPath); got != managedHookContent(hook) {
-			t.Fatalf("%s changed unexpectedly:\n%s", hook, got)
+		if got, err := os.Readlink(hookPath); err != nil || got != defaultHookDispatcherName {
+			t.Fatalf("%s symlink = %q, err=%v; want %q", hook, got, err, defaultHookDispatcherName)
 		}
 	}
 }
@@ -152,8 +160,8 @@ func TestInstallLifecycleHooksRefreshesStaleManagedHook(t *testing.T) {
 	if result.Hooks[index].Action != HookActionUpdated {
 		t.Fatalf("post-merge action = %q, want %q", result.Hooks[index].Action, HookActionUpdated)
 	}
-	if got := readFile(t, hookPath); got != managedHookContent("post-merge") {
-		t.Fatalf("post-merge content was not refreshed:\n%s", got)
+	if got, err := os.Readlink(hookPath); err != nil || got != defaultHookDispatcherName {
+		t.Fatalf("post-merge symlink = %q, err=%v; want %q", got, err, defaultHookDispatcherName)
 	}
 	info, err := os.Stat(hookPath)
 	if err != nil {
@@ -164,7 +172,7 @@ func TestInstallLifecycleHooksRefreshesStaleManagedHook(t *testing.T) {
 	}
 }
 
-func TestManagedHookWrapperInvokesLocalIndexScriptWithoutAIArgument(t *testing.T) {
+func TestManagedHookDispatcherInvokesLocalIndexScriptWithoutLifecycleArguments(t *testing.T) {
 	repo := initGitRepo(t)
 	result, err := InstallLifecycleHooks(InstallHooksOptions{
 		RepoRoot: repo,
@@ -175,12 +183,13 @@ func TestManagedHookWrapperInvokesLocalIndexScriptWithoutAIArgument(t *testing.T
 	}
 	logPath := filepath.Join(t.TempDir(), "args.log")
 	scriptPath := filepath.Join(result.HooksDir, "liza-index.sh")
-	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$LIZA_TEST_HOOK_LOG\"\n"
+	script := "#!/bin/sh\nprintf 'args:%s\\n' \"$*\" > \"$LIZA_TEST_HOOK_LOG\"\n"
 	if err := os.WriteFile(scriptPath, []byte(script), 0755); err != nil {
 		t.Fatalf("write liza-index.sh fixture: %v", err)
 	}
 
 	cmd := exec.Command(filepath.Join(result.HooksDir, "post-rewrite"), "rebase", "amend")
+	cmd.Dir = repo
 	cmd.Env = append(os.Environ(), "LIZA_TEST_HOOK_LOG="+logPath)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -188,15 +197,43 @@ func TestManagedHookWrapperInvokesLocalIndexScriptWithoutAIArgument(t *testing.T
 	}
 
 	args := readFile(t, logPath)
-	if args != "rebase\namend\n" {
-		t.Fatalf("liza-index.sh args = %q, want lifecycle args without ai", args)
+	if args != "args:\n" {
+		t.Fatalf("liza-index.sh args = %q, want no lifecycle arguments", args)
 	}
 	if strings.Contains(args, "ai") {
 		t.Fatalf("automatic lifecycle wrapper must not request AI summary: %q", args)
 	}
 }
 
-func TestRenderIndexScriptUsesStacklitGenerateJSONWithoutAutomaticAISummary(t *testing.T) {
+func TestManagedHookDispatcherSkipsPostCheckoutFileCheckout(t *testing.T) {
+	repo := initGitRepo(t)
+	result, err := InstallLifecycleHooks(InstallHooksOptions{
+		RepoRoot: repo,
+		Hooks:    []string{"post-checkout"},
+	})
+	if err != nil {
+		t.Fatalf("InstallLifecycleHooks() error = %v", err)
+	}
+	logPath := filepath.Join(t.TempDir(), "args.log")
+	scriptPath := filepath.Join(result.HooksDir, "liza-index.sh")
+	script := "#!/bin/sh\nprintf 'ran\\n' > \"$LIZA_TEST_HOOK_LOG\"\n"
+	if err := os.WriteFile(scriptPath, []byte(script), 0755); err != nil {
+		t.Fatalf("write liza-index.sh fixture: %v", err)
+	}
+
+	cmd := exec.Command(filepath.Join(result.HooksDir, "post-checkout"), "old", "new", "0")
+	cmd.Dir = repo
+	cmd.Env = append(os.Environ(), "LIZA_TEST_HOOK_LOG="+logPath)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("post-checkout hook failed: %v\n%s", err, output)
+	}
+	if _, err := os.Stat(logPath); !os.IsNotExist(err) {
+		t.Fatalf("liza-index.sh ran for file checkout; stat err=%v", err)
+	}
+}
+
+func TestRenderIndexScriptUsesLegacyStacklitRefreshWithoutAutomaticAISummary(t *testing.T) {
 	repo := initGitRepo(t)
 
 	script, err := RenderIndexScript(repo)
@@ -207,8 +244,14 @@ func TestRenderIndexScriptUsesStacklitGenerateJSONWithoutAutomaticAISummary(t *t
 	if !strings.Contains(script, ManagedIndexScriptMarker) {
 		t.Fatalf("script missing managed marker:\n%s", script)
 	}
-	if !strings.Contains(script, "stacklit generate-json -o stacklit.json") {
+	if !strings.Contains(script, "stacklit diff -i stacklit.json") {
+		t.Fatalf("script missing Stacklit diff short-circuit:\n%s", script)
+	}
+	if !strings.Contains(script, "stacklit generate-json -o stacklit.json --parse-workers 3") {
 		t.Fatalf("script missing no-AI Stacklit generation command:\n%s", script)
+	}
+	if !strings.Contains(script, "stacklit init-insights -i stacklit.json -o stacklit-insights.json") {
+		t.Fatalf("script missing Stacklit insights initialization command:\n%s", script)
 	}
 	if !strings.Contains(script, "stacklit ai-summary") {
 		t.Fatalf("script missing manual AI-summary command:\n%s", script)
@@ -301,7 +344,8 @@ func TestInstalledIndexScriptRefreshesStacklitJSONWithoutAIByDefault(t *testing.
 		t.Fatalf("liza-index.sh failed: %v\n%s", err, output)
 	}
 
-	if got := readFile(t, logPath); got != "generate-json -o stacklit.json\n" {
+	want := "generate-json -o stacklit.json --parse-workers 3\ninit-insights -i stacklit.json -o stacklit-insights.json\ngenerate-json -o stacklit.json --parse-workers 3\n"
+	if got := readFile(t, logPath); got != want {
 		t.Fatalf("stacklit calls = %q, want no-AI generate-json only", got)
 	}
 	if got := readFile(t, filepath.Join(repo, "stacklit.json")); got != "generated index\n" {
@@ -403,9 +447,134 @@ func TestInstalledIndexScriptManualAIArgumentRunsAISummary(t *testing.T) {
 		t.Fatalf("liza-index.sh ai failed: %v\n%s", err, output)
 	}
 
-	want := "generate-json -o stacklit.json\nai-summary\ngenerate-json -o stacklit.json\n"
+	want := "generate-json -o stacklit.json --parse-workers 3\ninit-insights -i stacklit.json -o stacklit-insights.json\nai-summary\ngenerate-json -o stacklit.json --parse-workers 3\n"
 	if got := readFile(t, logPath); got != want {
 		t.Fatalf("stacklit calls = %q, want %q", got, want)
+	}
+}
+
+func TestInstalledIndexScriptSkipsStacklitRefreshWhenDiffReportsNoChanges(t *testing.T) {
+	repo := initGitRepo(t)
+	writeFile(t, filepath.Join(repo, "stacklit.json"), "tracked index\n", 0644)
+	commitPath(t, repo, "stacklit.json", "Add tracked Stacklit index")
+	result, err := InstallIndexScript(InstallIndexScriptOptions{RepoRoot: repo})
+	if err != nil {
+		t.Fatalf("InstallIndexScript() error = %v", err)
+	}
+	logPath := filepath.Join(t.TempDir(), "stacklit.log")
+	pathDir := writeFakeStacklit(t)
+
+	cmd := exec.Command(result.Path)
+	cmd.Env = append(os.Environ(),
+		"PATH="+pathDir+string(os.PathListSeparator)+os.Getenv("PATH"),
+		"LIZA_TEST_STACKLIT_LOG="+logPath,
+		"LIZA_TEST_STACKLIT_DIFF_EXIT=0",
+	)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("liza-index.sh failed: %v\n%s", err, output)
+	}
+
+	if got := readFile(t, logPath); got != "diff -i stacklit.json\n" {
+		t.Fatalf("stacklit calls = %q, want diff-only short-circuit", got)
+	}
+	if got := readFile(t, filepath.Join(repo, "stacklit.json")); got != "tracked index\n" {
+		t.Fatalf("stacklit.json = %q, want unchanged index", got)
+	}
+}
+
+func TestInstalledIndexScriptSkipsFreshScipIndexAndRefreshesWhenSourceIsNewer(t *testing.T) {
+	repo := initGitRepo(t)
+	sourcePath := filepath.Join(repo, "main.go")
+	writeFile(t, sourcePath, "package main\n", 0644)
+	outputPath := filepath.Join(repo, "go.scip")
+	result, err := InstallIndexScript(InstallIndexScriptOptions{
+		RepoRoot:        repo,
+		DisableStacklit: true,
+		ScipPlans: []scipsearch.RuntimeCommandPlan{{
+			Language:   "go",
+			Name:       "scip-go",
+			Args:       []string{"index", "--module-root", repo, "--output", outputPath},
+			Dir:        repo,
+			OutputPath: outputPath,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("InstallIndexScript() error = %v", err)
+	}
+	logPath := filepath.Join(t.TempDir(), "scip.log")
+	pathDir := writeFakeScipGo(t)
+
+	runIndexScriptWithPath(t, result.Path, pathDir, "LIZA_TEST_SCIP_LOG="+logPath)
+	if got := readFile(t, logPath); got != "scip-go index --module-root "+repo+" --output "+outputPath+"\n" {
+		t.Fatalf("first SCIP calls = %q", got)
+	}
+
+	writeFile(t, logPath, "", 0644)
+	runIndexScriptWithPath(t, result.Path, pathDir, "LIZA_TEST_SCIP_LOG="+logPath)
+	if got := readFile(t, logPath); got != "" {
+		t.Fatalf("fresh SCIP calls = %q, want skipped", got)
+	}
+
+	newer := time.Now().Add(10 * time.Second)
+	if err := os.Chtimes(sourcePath, newer, newer); err != nil {
+		t.Fatalf("Chtimes(source) error = %v", err)
+	}
+	runIndexScriptWithPath(t, result.Path, pathDir, "LIZA_TEST_SCIP_LOG="+logPath)
+	if got := readFile(t, logPath); got != "scip-go index --module-root "+repo+" --output "+outputPath+"\n" {
+		t.Fatalf("stale SCIP calls = %q, want refresh", got)
+	}
+}
+
+func TestInstalledIndexScriptUsesScipCommandRootForFreshness(t *testing.T) {
+	repo := initGitRepo(t)
+	webSrc := filepath.Join(repo, "apps", "web", "src")
+	infraSrc := filepath.Join(repo, "infra", "cdk")
+	if err := os.MkdirAll(webSrc, 0755); err != nil {
+		t.Fatalf("MkdirAll(webSrc) error = %v", err)
+	}
+	if err := os.MkdirAll(infraSrc, 0755); err != nil {
+		t.Fatalf("MkdirAll(infraSrc) error = %v", err)
+	}
+	webSource := filepath.Join(webSrc, "App.tsx")
+	infraSource := filepath.Join(infraSrc, "app.ts")
+	writeFile(t, webSource, "export const app = 1\n", 0644)
+	writeFile(t, infraSource, "export const cdk = 1\n", 0644)
+	outputPath := filepath.Join(repo, "typescript.scip")
+	result, err := InstallIndexScript(InstallIndexScriptOptions{
+		RepoRoot:        repo,
+		DisableStacklit: true,
+		ScipPlans: []scipsearch.RuntimeCommandPlan{{
+			Language:   "typescript",
+			Name:       "scip-typescript",
+			Args:       []string{"index", "--cwd", webSrc, "--output", outputPath, filepath.Join(repo, "apps", "web")},
+			Dir:        repo,
+			OutputPath: outputPath,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("InstallIndexScript() error = %v", err)
+	}
+	logPath := filepath.Join(t.TempDir(), "scip.log")
+	pathDir := writeFakeScipTypeScript(t)
+
+	runIndexScriptWithPath(t, result.Path, pathDir, "LIZA_TEST_SCIP_LOG="+logPath)
+	writeFile(t, logPath, "", 0644)
+	newer := time.Now().Add(10 * time.Second)
+	if err := os.Chtimes(infraSource, newer, newer); err != nil {
+		t.Fatalf("Chtimes(infraSource) error = %v", err)
+	}
+	runIndexScriptWithPath(t, result.Path, pathDir, "LIZA_TEST_SCIP_LOG="+logPath)
+	if got := readFile(t, logPath); got != "" {
+		t.Fatalf("unrelated TypeScript source triggered refresh: %q", got)
+	}
+
+	if err := os.Chtimes(webSource, newer.Add(10*time.Second), newer.Add(10*time.Second)); err != nil {
+		t.Fatalf("Chtimes(webSource) error = %v", err)
+	}
+	runIndexScriptWithPath(t, result.Path, pathDir, "LIZA_TEST_SCIP_LOG="+logPath)
+	if got := readFile(t, logPath); got != "scip-typescript index --cwd "+webSrc+" --output "+outputPath+" "+filepath.Join(repo, "apps", "web")+"\n" {
+		t.Fatalf("stale TypeScript source calls = %q, want refresh", got)
 	}
 }
 
@@ -425,6 +594,7 @@ func TestManagedLifecycleHookInvokesInstalledIndexScriptWithoutAI(t *testing.T) 
 	pathDir := writeFakeStacklit(t)
 
 	cmd := exec.Command(filepath.Join(hookResult.HooksDir, "post-commit"))
+	cmd.Dir = repo
 	cmd.Env = append(os.Environ(),
 		"PATH="+pathDir+string(os.PathListSeparator)+os.Getenv("PATH"),
 		"LIZA_TEST_STACKLIT_LOG="+logPath,
@@ -434,7 +604,8 @@ func TestManagedLifecycleHookInvokesInstalledIndexScriptWithoutAI(t *testing.T) 
 		t.Fatalf("post-commit hook failed: %v\n%s", err, output)
 	}
 
-	if got := readFile(t, logPath); got != "generate-json -o stacklit.json\n" {
+	want := "generate-json -o stacklit.json --parse-workers 3\ninit-insights -i stacklit.json -o stacklit-insights.json\ngenerate-json -o stacklit.json --parse-workers 3\n"
+	if got := readFile(t, logPath); got != want {
 		t.Fatalf("lifecycle stacklit calls = %q, want no-AI generate-json only", got)
 	}
 }
@@ -585,6 +756,18 @@ func writeFile(t *testing.T, path, content string, mode os.FileMode) {
 	}
 }
 
+func runIndexScriptWithPath(t *testing.T, scriptPath, pathDir string, extraEnv ...string) {
+	t.Helper()
+
+	cmd := exec.Command(scriptPath)
+	cmd.Env = append(os.Environ(), "PATH="+pathDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	cmd.Env = append(cmd.Env, extraEnv...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("%s failed: %v\n%s", scriptPath, err, output)
+	}
+}
+
 func runInstalledIndexScript(t *testing.T, scriptPath string) {
 	t.Helper()
 
@@ -607,17 +790,73 @@ func writeFakeStacklit(t *testing.T) string {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "stacklit")
 	script := `#!/bin/sh
-printf '%s\n' "$*" >> "$LIZA_TEST_STACKLIT_LOG"
-if [ "$1" = "generate-json" ]; then
-	printf '%s\n' "generated index" > "$PWD/stacklit.json"
-fi
-if [ "$1" = "ai-summary" ] && [ ! -f "$PWD/stacklit.json" ]; then
-	echo "stacklit generate-json must run before ai-summary" >&2
-	exit 7
+	printf '%s\n' "$*" >> "$LIZA_TEST_STACKLIT_LOG"
+	if [ "$1" = "diff" ]; then
+		exit "${LIZA_TEST_STACKLIT_DIFF_EXIT:-1}"
+	fi
+	if [ "$1" = "generate-json" ]; then
+		printf '%s\n' "generated index" > "$PWD/stacklit.json"
+	fi
+	if [ "$1" = "init-insights" ]; then
+		printf '%s\n' "generated insights" > "$PWD/stacklit-insights.json"
+	fi
+	if [ "$1" = "ai-summary" ] && [ ! -f "$PWD/stacklit.json" ]; then
+		echo "stacklit generate-json must run before ai-summary" >&2
+		exit 7
 fi
 	`
 	if err := os.WriteFile(path, []byte(script), 0755); err != nil {
 		t.Fatalf("write fake stacklit: %v", err)
+	}
+	return dir
+}
+
+func writeFakeScipGo(t *testing.T) string {
+	t.Helper()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "scip-go")
+	script := `#!/bin/sh
+printf '%s\n' "scip-go $*" >> "$LIZA_TEST_SCIP_LOG"
+output=""
+while [ "$#" -gt 0 ]; do
+	if [ "$1" = "--output" ]; then
+		shift
+		output="$1"
+	fi
+	shift
+done
+if [ -n "$output" ]; then
+	printf '%s\n' "generated scip index" > "$output"
+fi
+	`
+	if err := os.WriteFile(path, []byte(script), 0755); err != nil {
+		t.Fatalf("write fake scip-go: %v", err)
+	}
+	return dir
+}
+
+func writeFakeScipTypeScript(t *testing.T) string {
+	t.Helper()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "scip-typescript")
+	script := `#!/bin/sh
+printf '%s\n' "scip-typescript $*" >> "$LIZA_TEST_SCIP_LOG"
+output=""
+while [ "$#" -gt 0 ]; do
+	if [ "$1" = "--output" ]; then
+		shift
+		output="$1"
+	fi
+	shift
+done
+if [ -n "$output" ]; then
+	printf '%s\n' "generated scip index" > "$output"
+fi
+`
+	if err := os.WriteFile(path, []byte(script), 0755); err != nil {
+		t.Fatalf("write fake scip-typescript: %v", err)
 	}
 	return dir
 }

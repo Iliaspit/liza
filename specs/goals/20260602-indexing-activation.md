@@ -157,7 +157,9 @@ Runtime coupling:
   flows must install project-local provider hooks as they do today.
 - FR-002-2: When `LIZA_ENABLE_STACKLIT` is truthy, pairing init must install or
   verify project-local Git hook plumbing that refreshes repo-root `stacklit.json`
-  at safe lifecycle points.
+  at safe lifecycle points, skips refresh when `stacklit diff` reports no
+  changes, initializes Stacklit insights, and regenerates `stacklit.json` when
+  insights change.
 - FR-002-2a: Automatic Git lifecycle refresh must not run `stacklit ai-summary`.
   The generated `liza-index.sh` may run AI-summary only when invoked manually with
   an explicit `ai` argument, matching the temporary manual procedure.
@@ -175,9 +177,18 @@ Runtime coupling:
   language and cannot choose one confidently, pairing init must fail with a
   monorepo ambiguity diagnostic listing candidate roots and the unresolved
   language instead of generating a guessed hook command.
+- FR-002-3c1: Pairing init must accept explicit per-language SCIP command-plan
+  overrides for monorepos whose desired roots cannot be inferred safely. These
+  overrides select concrete Go module roots, TypeScript cwd/project roots, or
+  Python cwd values for the generated project-local hook. Full workspace init
+  must reject these pairing-only overrides, and explicit `--scip-search`
+  allowlists must restrict which override languages are accepted.
 - FR-002-3d: If autodetection finds exactly one confident root for each enabled
   language, pairing init must generate `.git/hooks/liza-index.sh` with concrete
   repo-specific SCIP indexer commands.
+- FR-002-3e: Pairing lifecycle refresh must skip SCIP indexer execution when the
+  existing index is newer than the relevant source files, and refresh when the
+  index is missing or stale.
 - FR-002-4: Pairing init must ensure generated pairing indexes are either
   ignored, privately excluded, or otherwise kept out of accidental task diffs
   unless already intentionally tracked.
@@ -229,6 +240,10 @@ Runtime coupling:
 - AC-002-7: Given `--scip-search go` in pairing mode, when TypeScript and Python
   roots also exist, then SCIP autodetection considers only Go roots while still
   requiring confident Go root selection.
+- AC-002-7a: Given explicit pairing SCIP plan overrides for Go, TypeScript, and
+  Python in an ambiguous monorepo, when pairing init runs, then the generated
+  `.git/hooks/liza-index.sh` contains the override roots instead of failing
+  ambiguity or guessing root-level commands.
 - AC-002-8: Given an existing project Git hook at a lifecycle event Liza needs,
   when pairing init runs, then the existing hook is preserved, chained, or init
   reports an explicit collision diagnostic; it is not overwritten silently.
@@ -236,10 +251,14 @@ Runtime coupling:
   init runs, then Liza installs into the effective hook path or reports that it
   cannot safely do so.
 - AC-002-10: Given pairing Stacklit activation, when automatic Git lifecycle
-  refresh runs, then it refreshes `stacklit.json` without running
-  `stacklit ai-summary`.
+  refresh runs, then it refreshes `stacklit.json`, initializes Stacklit insights,
+  avoids unnecessary refresh when `stacklit diff` reports no changes, and does
+  not run `stacklit ai-summary`.
 - AC-002-11: Given the generated `liza-index.sh` is invoked manually with the
   `ai` argument, then Stacklit refresh includes AI-summary behavior.
+- AC-002-11a: Given a generated SCIP index exists and no relevant source file is
+  newer than it, when a lifecycle refresh runs, then the SCIP indexer is skipped;
+  when a relevant source file is newer, the indexer runs.
 - AC-002-12: Given this goal is implemented, when docs are checked, then
   `support-docs/CONFIGURATION.md` and embedded support docs explain pairing-init
   env-gate behavior separately from MAS runtime activation.

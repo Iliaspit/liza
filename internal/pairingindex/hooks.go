@@ -21,7 +21,9 @@ const ManagedHookMarker = "# LIZA-PAIRING-INDEX-HOOK: managed"
 const ManagedIndexScriptMarker = "# LIZA-PAIRING-INDEX-SCRIPT: managed"
 
 const defaultScriptName = "liza-index.sh"
+const defaultHookDispatcherName = "liza-index-hook.sh"
 const stacklitArtifactName = "stacklit.json"
+const stacklitInsightsArtifactName = "stacklit-insights.json"
 
 var defaultLifecycleHooks = []string{"post-commit", "post-checkout", "post-merge", "post-rewrite"}
 var stacklitArtifactExcludeMu sync.Mutex
@@ -155,6 +157,9 @@ func InstallActivation(opts InstallActivationOptions) (InstallActivationResult, 
 		return result, err
 	}
 	result.Script = InstallIndexScriptResult{Path: scriptPath, Action: action}
+	if _, err := installManagedHookDispatcher(filepath.Join(hooksDir, defaultHookDispatcherName)); err != nil {
+		return result, err
+	}
 
 	for _, hook := range hooks {
 		hookPath := filepath.Join(hooksDir, hook)
@@ -212,6 +217,9 @@ func InstallLifecycleHooks(opts InstallHooksOptions) (InstallHooksResult, error)
 	if err := rejectHookCollisions(hooksDir, hooks); err != nil {
 		return result, err
 	}
+	if _, err := installManagedHookDispatcher(filepath.Join(hooksDir, defaultHookDispatcherName)); err != nil {
+		return result, err
+	}
 
 	for _, hook := range hooks {
 		hookPath := filepath.Join(hooksDir, hook)
@@ -267,22 +275,48 @@ if [ "${1:-}" = "ai" ]; then
 	shift
 fi
 `)
+	for _, plan := range opts.ScipPlans {
+		body.WriteString(renderScipCommand(plan))
+	}
 	if opts.EnableStacklit {
-		stacklitGenerateCommand := shellCommand(stacklitPlan.Name, stacklitPlan.Args)
+		stacklitGenerateCommand := shellCommand(stacklitPlan.Name, append(stacklitPlan.Args, "--parse-workers", "3"))
 		body.WriteString(fmt.Sprintf(`if ! command -v %s >/dev/null 2>&1; then
 	echo "liza-index.sh: %s not found; skipping Stacklit refresh" >&2
 else
 	cd "$repo_root"
-	if [ "$run_ai" = "1" ]; then
-		%s
-		%s ai-summary
+	code=0
+	stacklit_refresh=1
+	if [ -f stacklit.json ]; then
+		%s diff -i stacklit.json >/dev/null || code=$?
+		case "$code" in
+			0) [ "$run_ai" = "1" ] || stacklit_refresh=0 ;;
+			1) ;;
+			*) echo "stacklit diff failed"; exit "$code" ;;
+		esac
 	fi
-	%s
+	if [ "$stacklit_refresh" = "1" ]; then
+		echo "Stacklit Indexing..."
+		insights_before=""
+		if [ -f stacklit-insights.json ]; then
+			insights_before="$(cksum stacklit-insights.json | awk '{print $1 ":" $2}')"
+		fi
+		%s
+		%s init-insights -i stacklit.json -o stacklit-insights.json
+		if [ "$run_ai" = "1" ]; then
+			echo "Adding AI summary..."
+			%s ai-summary
+		fi
+		insights_after=""
+		if [ -f stacklit-insights.json ]; then
+			insights_after="$(cksum stacklit-insights.json | awk '{print $1 ":" $2}')"
+		fi
+		if [ "$insights_before" != "$insights_after" ]; then
+			%s
+		fi
+		echo "Wrote stacklit.json"
+	fi
 fi
-`, shellWord(stacklitPlan.Name), stacklitPlan.Name, stacklitGenerateCommand, shellWord(stacklitPlan.Name), stacklitGenerateCommand))
-	}
-	for _, plan := range opts.ScipPlans {
-		body.WriteString(renderScipCommand(plan))
+`, shellWord(stacklitPlan.Name), stacklitPlan.Name, shellWord(stacklitPlan.Name), stacklitGenerateCommand, shellWord(stacklitPlan.Name), shellWord(stacklitPlan.Name), stacklitGenerateCommand))
 	}
 	return body.String(), nil
 }
@@ -324,13 +358,100 @@ func InstallIndexScript(opts InstallIndexScriptOptions) (InstallIndexScriptResul
 
 func renderScipCommand(plan scipsearch.RuntimeCommandPlan) string {
 	command := shellCommand(plan.Name, plan.Args)
-	return fmt.Sprintf(`if ! command -v %s >/dev/null 2>&1; then
+	needsVar := "needs_" + shellIdentifier(plan.Language) + "_scip"
+	sourceExpr := scipFindSourceExpression(plan.Language)
+	if sourceExpr == "" {
+		sourceExpr = "-type f"
+	}
+	sourceRoot := scipSourceRoot(plan)
+	exclusions := scipFindExclusions(plan.Language, sourceRoot)
+	return fmt.Sprintf(`%s=0
+if [ ! -f %s ]; then
+	%s=1
+elif find %s %s %s -newer %s -print -quit | grep -q .; then
+	%s=1
+fi
+if [ "$%s" -eq 1 ] && ! command -v %s >/dev/null 2>&1; then
 	echo "liza-index.sh: %s not found; skipping %s SCIP refresh" >&2
-else
+elif [ "$%s" -eq 1 ]; then
 	cd %s
 	%s
 fi
-`, shellWord(plan.Name), plan.Name, plan.Language, shellQuote(plan.Dir), command)
+`, needsVar, shellQuote(plan.OutputPath), needsVar, shellQuote(sourceRoot), sourceExpr, exclusions, shellQuote(plan.OutputPath), needsVar, needsVar, shellWord(plan.Name), plan.Name, plan.Language, needsVar, shellQuote(plan.Dir), command)
+}
+
+func scipFindSourceExpression(language string) string {
+	switch language {
+	case "go":
+		return `-type f -name '*.go'`
+	case "python":
+		return `-type f -name '*.py'`
+	case "typescript":
+		return `-type f \( -name '*.ts' -o -name '*.tsx' -o -name '*.js' -o -name '*.jsx' \)`
+	default:
+		return ""
+	}
+}
+
+func scipSourceRoot(plan scipsearch.RuntimeCommandPlan) string {
+	switch plan.Language {
+	case "go":
+		if value, ok := argValueAfter(plan.Args, "--module-root"); ok {
+			return value
+		}
+	case "python", "typescript":
+		if value, ok := argValueAfter(plan.Args, "--cwd"); ok {
+			return value
+		}
+	}
+	return plan.Dir
+}
+
+func argValueAfter(args []string, flag string) (string, bool) {
+	for i, arg := range args {
+		if arg == flag && i+1 < len(args) {
+			return args[i+1], true
+		}
+	}
+	return "", false
+}
+
+func scipFindExclusions(language, sourceRoot string) string {
+	paths := []string{
+		filepath.Join(sourceRoot, ".git", "*"),
+		filepath.Join(sourceRoot, ".worktrees", "*"),
+	}
+	switch language {
+	case "typescript":
+		paths = append(paths, filepath.Join(sourceRoot, "node_modules", "*"))
+	case "python":
+		paths = append(paths,
+			filepath.Join(sourceRoot, ".venv", "*"),
+			filepath.Join(sourceRoot, "venv", "*"),
+			filepath.Join(sourceRoot, "__pycache__", "*"),
+		)
+	}
+
+	parts := make([]string, 0, len(paths)*2)
+	for _, path := range paths {
+		parts = append(parts, "-not", "-path", shellQuote(path))
+	}
+	return strings.Join(parts, " ")
+}
+
+func shellIdentifier(value string) string {
+	var b strings.Builder
+	for _, r := range value {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' {
+			b.WriteRune(r)
+		} else {
+			b.WriteByte('_')
+		}
+	}
+	if b.Len() == 0 {
+		return "index"
+	}
+	return b.String()
 }
 
 func shellCommand(name string, args []string) string {
@@ -354,29 +475,10 @@ func ensureStacklitArtifactCleanliness(repoRoot string) error {
 		return fmt.Errorf("resolve repository root: %w", err)
 	}
 
-	tracked, err := stacklitArtifactTracked(repoRoot)
-	if err != nil {
+	if err := ensureGeneratedArtifactCleanliness(repoRoot, stacklitArtifactName); err != nil {
 		return err
 	}
-	if tracked {
-		return nil
-	}
-
-	ignored, err := stacklitArtifactIgnored(repoRoot)
-	if err != nil {
-		return err
-	}
-	if ignored {
-		return nil
-	}
-
-	if _, err := os.Stat(filepath.Join(repoRoot, stacklitArtifactName)); err == nil {
-		return fmt.Errorf("%s is untracked and not ignored or privately excluded; commit it, add it to .gitignore, or add it to .git/info/exclude before enabling pairing Stacklit activation", stacklitArtifactName)
-	} else if !os.IsNotExist(err) {
-		return fmt.Errorf("inspect repo-root %s: %w", stacklitArtifactName, err)
-	}
-
-	return ensureRepoPrivateExclude(repoRoot, stacklitArtifactName)
+	return ensureGeneratedArtifactCleanliness(repoRoot, stacklitInsightsArtifactName)
 }
 
 func ensureScipArtifactCleanliness(repoRoot string, plans []scipsearch.RuntimeCommandPlan) error {
@@ -415,10 +517,6 @@ func ensureGeneratedArtifactCleanliness(repoRoot, artifact string) error {
 	return ensureRepoPrivateExclude(repoRoot, artifact)
 }
 
-func stacklitArtifactTracked(repoRoot string) (bool, error) {
-	return artifactTracked(repoRoot, stacklitArtifactName)
-}
-
 func artifactTracked(repoRoot, artifact string) (bool, error) {
 	output, err := gitenv.CombinedOutput(repoRoot, "ls-files", "--error-unmatch", artifact)
 	if err == nil {
@@ -428,10 +526,6 @@ func artifactTracked(repoRoot, artifact string) (bool, error) {
 		return false, nil
 	}
 	return false, fmt.Errorf("inspect repo-root %s tracking: %w%s", artifact, err, outputSuffix(string(output)))
-}
-
-func stacklitArtifactIgnored(repoRoot string) (bool, error) {
-	return artifactIgnored(repoRoot, stacklitArtifactName)
 }
 
 func artifactIgnored(repoRoot, artifact string) (bool, error) {
@@ -551,11 +645,11 @@ func rejectHookCollisions(hooksDir string, hooks []string) error {
 	var collisions []HookCollision
 	for _, hook := range hooks {
 		hookPath := filepath.Join(hooksDir, hook)
-		content, err := os.ReadFile(hookPath)
+		managed, err := managedLifecycleHookExists(hookPath)
 		if os.IsNotExist(err) {
 			continue
 		}
-		if err != nil || !strings.Contains(string(content), ManagedHookMarker) {
+		if err != nil || !managed {
 			collisions = append(collisions, HookCollision{Hook: hook, Path: hookPath})
 		}
 	}
@@ -565,7 +659,98 @@ func rejectHookCollisions(hooksDir string, hooks []string) error {
 	return nil
 }
 
+func managedLifecycleHookExists(hookPath string) (bool, error) {
+	info, err := os.Lstat(hookPath)
+	if err != nil {
+		return false, err
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		target, err := os.Readlink(hookPath)
+		if err != nil {
+			return false, err
+		}
+		if filepath.Base(target) == defaultHookDispatcherName {
+			return true, nil
+		}
+	}
+	content, err := os.ReadFile(hookPath)
+	if err != nil {
+		return false, err
+	}
+	if strings.Contains(string(content), ManagedHookMarker) {
+		return true, nil
+	}
+	return looksLikeLegacyHookDispatcher(string(content)), nil
+}
+
+func installManagedHookDispatcher(dispatcherPath string) (HookAction, error) {
+	want := managedHookDispatcherContent()
+	current, err := os.ReadFile(dispatcherPath)
+	if os.IsNotExist(err) {
+		if err := os.WriteFile(dispatcherPath, []byte(want), 0755); err != nil {
+			return "", fmt.Errorf("install %s: %w", defaultHookDispatcherName, err)
+		}
+		return HookActionInstalled, nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("read %s: %w", defaultHookDispatcherName, err)
+	}
+	if string(current) == want {
+		if err := os.Chmod(dispatcherPath, 0755); err != nil {
+			return "", fmt.Errorf("chmod %s: %w", defaultHookDispatcherName, err)
+		}
+		return HookActionVerified, nil
+	}
+	if !strings.Contains(string(current), ManagedHookMarker) && !looksLikeLegacyHookDispatcher(string(current)) {
+		return "", fmt.Errorf("%s at %s already exists and is not Liza-managed", defaultHookDispatcherName, dispatcherPath)
+	}
+	if err := os.WriteFile(dispatcherPath, []byte(want), 0755); err != nil {
+		return "", fmt.Errorf("update %s: %w", defaultHookDispatcherName, err)
+	}
+	if err := os.Chmod(dispatcherPath, 0755); err != nil {
+		return "", fmt.Errorf("chmod %s: %w", defaultHookDispatcherName, err)
+	}
+	return HookActionUpdated, nil
+}
+
 func installManagedHook(hookPath, hook string) (HookAction, error) {
+	info, err := os.Lstat(hookPath)
+	if os.IsNotExist(err) {
+		if err := os.Symlink(defaultHookDispatcherName, hookPath); err != nil {
+			return installManagedHookWrapper(hookPath, hook)
+		}
+		return HookActionInstalled, nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("inspect %s hook: %w", hook, err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		target, err := os.Readlink(hookPath)
+		if err != nil {
+			return "", fmt.Errorf("read %s hook symlink: %w", hook, err)
+		}
+		if filepath.Base(target) == defaultHookDispatcherName {
+			return HookActionVerified, nil
+		}
+	}
+
+	managed, err := managedLifecycleHookExists(hookPath)
+	if err != nil {
+		return "", fmt.Errorf("read %s hook: %w", hook, err)
+	}
+	if !managed {
+		return "", fmt.Errorf("%s at %s already exists and is not Liza-managed", hook, hookPath)
+	}
+	if err := os.Remove(hookPath); err != nil {
+		return "", fmt.Errorf("replace %s hook wrapper: %w", hook, err)
+	}
+	if err := os.Symlink(defaultHookDispatcherName, hookPath); err != nil {
+		return installManagedHookWrapper(hookPath, hook)
+	}
+	return HookActionUpdated, nil
+}
+
+func installManagedHookWrapper(hookPath, hook string) (HookAction, error) {
 	want := managedHookContent(hook)
 	current, err := os.ReadFile(hookPath)
 	if os.IsNotExist(err) {
@@ -597,12 +782,51 @@ func managedHookContent(hook string) string {
 %s
 # Hook: %s
 hook_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd) || exit 0
-script="$hook_dir/%s"
-if [ -x "$script" ]; then
-	"$script" "$@"
+dispatcher="$hook_dir/%s"
+if [ -x "$dispatcher" ]; then
+	"$dispatcher" "$@"
 fi
 exit 0
-		`, ManagedHookMarker, hook, defaultScriptName)
+		`, ManagedHookMarker, hook, defaultHookDispatcherName)
+}
+
+func managedHookDispatcherContent() string {
+	return fmt.Sprintf(`#!/bin/sh
+%s
+set -eu
+
+repo_root="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+if [ -z "$repo_root" ]; then
+	exit 0
+fi
+
+hook_name="$(basename "$0")"
+if [ "$hook_name" = "post-checkout" ] && [ "${3:-}" = "0" ]; then
+	exit 0
+fi
+
+case "$repo_root" in
+	*/.worktrees/*)
+		exit 0
+		;;
+esac
+
+hook_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd) || exit 0
+script="$hook_dir/%s"
+if [ ! -x "$script" ]; then
+	exit 0
+fi
+
+cd "$repo_root"
+"$script"
+`, ManagedHookMarker, defaultScriptName)
+}
+
+func looksLikeLegacyHookDispatcher(content string) bool {
+	return strings.Contains(content, `repo_root="$(git rev-parse --show-toplevel`) &&
+		strings.Contains(content, "post-checkout") &&
+		strings.Contains(content, ".worktrees") &&
+		strings.Contains(content, "liza-index.sh")
 }
 
 func gitUnmatchedPath(err error, output []byte) bool {

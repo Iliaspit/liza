@@ -128,7 +128,8 @@ func TestIndexingActivationNonDefaultHooksPathUsesEffectiveHookDirectory(t *test
 
 	logPath := filepath.Join(t.TempDir(), "custom-hooks-stacklit.log")
 	runIndexingActivationGit(t, projectDir, logPath, "commit", "--allow-empty", "-m", "Trigger effective hooks path")
-	if got := readIndexingActivationFile(t, logPath); got != "generate-json -o stacklit.json\n" {
+	want := "generate-json -o stacklit.json --parse-workers 3\ninit-insights -i stacklit.json -o stacklit-insights.json\ngenerate-json -o stacklit.json --parse-workers 3\n"
+	if got := readIndexingActivationFile(t, logPath); got != want {
 		t.Fatalf("custom hooksPath Stacklit calls = %q, want effective hook path to run Liza indexing hook", got)
 	}
 }

@@ -111,6 +111,7 @@ symlinks needed for pairing (no .liza/ workspace):
 		defaultDoerCLI, _ := cmd.Flags().GetString("default-doer-cli")
 		defaultReviewerCLI, _ := cmd.Flags().GetString("default-reviewer-cli")
 		scipSearch, _ := cmd.Flags().GetStringArray("scip-search")
+		scipSearchPlans, _ := cmd.Flags().GetStringArray("scip-search-plan")
 		copyWorktreeEnvFiles, _ := cmd.Flags().GetBool("copy-worktree-env-files")
 		if err := validateDefaultCLIFlag("default-cli", defaultCLI); err != nil {
 			return err
@@ -123,7 +124,7 @@ symlinks needed for pairing (no .liza/ workspace):
 		}
 
 		// Interactive wizard: no args, no agent flags, no explicit workspace flags, TTY
-		if len(args) == 0 && len(agents) == 0 && !hasExplicitInitFlags(cmd) && !cmd.Flags().Changed("scip-search") {
+		if len(args) == 0 && len(agents) == 0 && !hasExplicitInitFlags(cmd) && !cmd.Flags().Changed("scip-search") && !cmd.Flags().Changed("scip-search-plan") {
 			if !interactive.IsInteractive() {
 				return fmt.Errorf("requires a description argument or at least one agent flag (--claude, --codex, --gemini, --mistral)\nSee: liza init --help")
 			}
@@ -156,10 +157,11 @@ symlinks needed for pairing (no .liza/ workspace):
 					return fmt.Errorf("--no-follow-up requires full workspace init (provide a description)")
 				}
 				if err := commands.InitPairingCommand(commands.InitPairingParams{
-					Agents:         result.Agents,
-					ScipSearch:     scipSearch,
-					Stdin:          os.Stdin,
-					ContractAction: result.ContractAction,
+					Agents:          result.Agents,
+					ScipSearch:      scipSearch,
+					ScipSearchPlans: scipSearchPlans,
+					Stdin:           os.Stdin,
+					ContractAction:  result.ContractAction,
 				}); err != nil {
 					return err
 				}
@@ -180,6 +182,7 @@ symlinks needed for pairing (no .liza/ workspace):
 				DefaultDoerCLI:       defaultDoerCLI,
 				DefaultReviewerCLI:   defaultReviewerCLI,
 				ScipSearch:           scipSearch,
+				ScipSearchPlans:      scipSearchPlans,
 				Agents:               result.Agents,
 				Stdin:                os.Stdin,
 				ContractAction:       result.ContractAction,
@@ -205,9 +208,10 @@ symlinks needed for pairing (no .liza/ workspace):
 				return fmt.Errorf("workspace flags (--branch, --config, --spec, --entry-point, --post-worktree-cmd, --copy-worktree-env-files, --default-cli, --default-doer-cli, --default-reviewer-cli) require a description argument for full workspace init")
 			}
 			if err := commands.InitPairingCommand(commands.InitPairingParams{
-				Agents:     agents,
-				ScipSearch: scipSearch,
-				Stdin:      os.Stdin,
+				Agents:          agents,
+				ScipSearch:      scipSearch,
+				ScipSearchPlans: scipSearchPlans,
+				Stdin:           os.Stdin,
 			}); err != nil {
 				return err
 			}
@@ -236,6 +240,7 @@ symlinks needed for pairing (no .liza/ workspace):
 			DefaultDoerCLI:       defaultDoerCLI,
 			DefaultReviewerCLI:   defaultReviewerCLI,
 			ScipSearch:           scipSearch,
+			ScipSearchPlans:      scipSearchPlans,
 			Agents:               agents,
 			Stdin:                os.Stdin,
 		}); err != nil {
@@ -423,6 +428,7 @@ func init() {
 	initCmd.Flags().String("default-doer-cli", "", "default CLI for doer and orchestrator agent spawning ("+strings.Join(agent.ValidCLIs(), ", ")+")")
 	initCmd.Flags().String("default-reviewer-cli", "", "default CLI for reviewer agent spawning ("+strings.Join(agent.ValidCLIs(), ", ")+")")
 	initCmd.Flags().StringArray("scip-search", nil, "enable a SCIP language for indexing (repeatable)")
+	initCmd.Flags().StringArray("scip-search-plan", nil, "pairing SCIP root override: go=<module-root>, typescript=<cwd>,<project-root>, or python=<cwd>[,<target-only>] (repeatable)")
 	initCmd.Flags().Bool("claude", false, "create CLAUDE.md symlink to ~/.liza/CORE.md")
 	initCmd.Flags().Bool("codex", false, "create AGENTS.md symlink to ~/.liza/CORE.md and configure repo hooks")
 	initCmd.Flags().Bool("gemini", false, "create GEMINI.md symlink to ~/.liza/CORE.md")

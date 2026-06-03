@@ -219,6 +219,107 @@ func TestPairingCommandPlanningExplicitLanguageFiltersDoNotSelectRoots(t *testin
 	}
 }
 
+func TestPairingCommandPlanningOverridesAmbiguousMonorepoRoots(t *testing.T) {
+	target := t.TempDir()
+	overrides, err := ParsePairingCommandOverrides(target, []string{
+		"go=services/design-diagnosis/cli",
+		"typescript=apps/web/src,apps/web",
+		"python=apps/api",
+	})
+	if err != nil {
+		t.Fatalf("ParsePairingCommandOverrides() error = %v", err)
+	}
+
+	plans, err := PlanPairingCommands(PairingPlanOptions{
+		ProjectRoot:      target,
+		CommandOverrides: overrides,
+		GitFiles: func(string) ([]string, error) {
+			return []string{
+				"services/design-diagnosis/cli/go.mod",
+				"services/design-diagnosis/cli/main.go",
+				"apps/web/tsconfig.json",
+				"apps/web/src/App.tsx",
+				"infra/cdk/tsconfig.json",
+				"infra/cdk/app.ts",
+				"apps/api/pyproject.toml",
+				"apps/api/backend/main.py",
+				"services/design-diagnosis/pyproject.toml",
+				"services/design-diagnosis/app.py",
+			}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("PlanPairingCommands() error = %v", err)
+	}
+
+	want := []RuntimeCommandPlan{
+		{
+			Language:   "go",
+			Name:       "scip-go",
+			Args:       []string{"index", "--module-root", filepath.Join(target, "services", "design-diagnosis", "cli"), "--output", filepath.Join(target, "go.scip")},
+			Dir:        target,
+			OutputPath: filepath.Join(target, "go.scip"),
+		},
+		{
+			Language:   "typescript",
+			Name:       "scip-typescript",
+			Args:       []string{"index", "--cwd", filepath.Join(target, "apps", "web", "src"), "--output", filepath.Join(target, "typescript.scip"), filepath.Join(target, "apps", "web")},
+			Dir:        target,
+			OutputPath: filepath.Join(target, "typescript.scip"),
+		},
+		{
+			Language:   "python",
+			Name:       "scip-python",
+			Args:       []string{"index", "--cwd", filepath.Join(target, "apps", "api"), "--output", filepath.Join(target, "python.scip")},
+			Dir:        target,
+			OutputPath: filepath.Join(target, "python.scip"),
+		},
+	}
+	if !reflect.DeepEqual(plans, want) {
+		t.Fatalf("PlanPairingCommands() = %#v, want %#v", plans, want)
+	}
+}
+
+func TestPairingCommandPlanningRejectsOverrideOutsideExplicitLanguageFilter(t *testing.T) {
+	target := t.TempDir()
+	overrides, err := ParsePairingCommandOverrides(target, []string{"python=apps/api"})
+	if err != nil {
+		t.Fatalf("ParsePairingCommandOverrides() error = %v", err)
+	}
+
+	_, err = PlanPairingCommands(PairingPlanOptions{
+		ProjectRoot:       target,
+		ExplicitLanguages: []string{"go"},
+		CommandOverrides:  overrides,
+		GitFiles: func(string) ([]string, error) {
+			return []string{"go.mod", "main.go", "apps/api/pyproject.toml", "apps/api/main.py"}, nil
+		},
+	})
+	if err == nil {
+		t.Fatal("PlanPairingCommands() error = nil, want override outside allowlist rejection")
+	}
+	if !strings.Contains(err.Error(), "outside explicit --scip-search allowlist") {
+		t.Fatalf("PlanPairingCommands() error = %v, want allowlist diagnostic", err)
+	}
+}
+
+func TestParsePairingCommandOverridesRejectsUnsafeValues(t *testing.T) {
+	target := t.TempDir()
+
+	cases := []string{
+		"go=../outside",
+		"typescript=apps/web/src",
+		"python=apps/api,../outside",
+		"rust=src",
+		"python=",
+	}
+	for _, spec := range cases {
+		if _, err := ParsePairingCommandOverrides(target, []string{spec}); err == nil {
+			t.Fatalf("ParsePairingCommandOverrides(%q) error = nil, want rejection", spec)
+		}
+	}
+}
+
 func TestPairingCommandPlanningRejectsTypeScriptReferenceMonorepo(t *testing.T) {
 	target := t.TempDir()
 	writeTestFile(t, target, "tsconfig.json", `{"references":[{"path":"apps/web"},{"path":"apps/admin"}]}`)

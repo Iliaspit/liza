@@ -61,7 +61,19 @@ type RuntimePlanOptions struct {
 type PairingPlanOptions struct {
 	ProjectRoot       string
 	ExplicitLanguages []string
+	CommandOverrides  []PairingCommandOverride
 	GitFiles          GitFilesFunc
+}
+
+// PairingCommandOverride pins one pairing-mode language indexer to explicit
+// repo-local roots when monorepo autodetection would be ambiguous.
+type PairingCommandOverride struct {
+	Language              string
+	GoModuleRoot          string
+	TypeScriptCwd         string
+	TypeScriptProjectRoot string
+	PythonCwd             string
+	PythonTargetOnly      string
 }
 
 // RuntimeCommandPlan describes one fixed language-indexer invocation.
@@ -316,6 +328,7 @@ func PlanPairingCommands(opts PairingPlanOptions) ([]RuntimeCommandPlan, error) 
 	}
 
 	languages := detectLanguages(files)
+	explicitFilter := len(opts.ExplicitLanguages) > 0
 	if len(opts.ExplicitLanguages) > 0 {
 		languages, err = canonicalizeExplicit(opts.ExplicitLanguages)
 		if err != nil {
@@ -323,8 +336,28 @@ func PlanPairingCommands(opts PairingPlanOptions) ([]RuntimeCommandPlan, error) 
 		}
 	}
 
+	overrides, err := pairingOverrideMap(opts.CommandOverrides)
+	if err != nil {
+		return nil, err
+	}
+	if explicitFilter {
+		if err := ensureOverridesAllowedByExplicitLanguages(languages, overrides); err != nil {
+			return nil, err
+		}
+	} else {
+		languages = mergePairingLanguages(languages, overrides)
+	}
+
 	plans := make([]RuntimeCommandPlan, 0, len(languages))
 	for _, language := range languages {
+		if override, ok := overrides[language]; ok {
+			plan, err := pairingCommandOverridePlan(projectRoot, override)
+			if err != nil {
+				return nil, err
+			}
+			plans = append(plans, plan)
+			continue
+		}
 		plan, candidates, ok := pairingCommandPlan(projectRoot, language, files)
 		if !ok {
 			return nil, pairingRootSelectionError{language: language, candidates: candidates}
@@ -332,6 +365,70 @@ func PlanPairingCommands(opts PairingPlanOptions) ([]RuntimeCommandPlan, error) 
 		plans = append(plans, plan)
 	}
 	return plans, nil
+}
+
+// ParsePairingCommandOverrides parses repeatable pairing SCIP override specs.
+//
+// Supported forms:
+//   - go=<module-root>
+//   - typescript=<cwd>,<project-root>
+//   - python=<cwd>
+//   - python=<cwd>,<target-only>
+func ParsePairingCommandOverrides(projectRoot string, raw []string) ([]PairingCommandOverride, error) {
+	projectRoot, err := filepath.Abs(projectRoot)
+	if err != nil {
+		return nil, fmt.Errorf("resolve pairing scip-search project root: %w", err)
+	}
+
+	overrides := make([]PairingCommandOverride, 0, len(raw))
+	for _, spec := range raw {
+		spec = strings.TrimSpace(spec)
+		if spec == "" {
+			continue
+		}
+		language, value, ok := strings.Cut(spec, "=")
+		if !ok {
+			return nil, fmt.Errorf("invalid scip-search pairing plan %q: expected language=value", spec)
+		}
+		language = strings.TrimSpace(language)
+		value = strings.TrimSpace(value)
+		if !slices.Contains(supportedLanguages, language) {
+			return nil, fmt.Errorf("unsupported scip-search language %q (supported: %s)", language, strings.Join(supportedLanguages, ", "))
+		}
+		if value == "" {
+			return nil, fmt.Errorf("invalid scip-search pairing plan %q: value is empty", spec)
+		}
+		parts := splitPairingOverrideValue(value)
+		override := PairingCommandOverride{Language: language}
+		switch language {
+		case "go":
+			if len(parts) != 1 {
+				return nil, fmt.Errorf("invalid go scip-search pairing plan %q: expected go=<module-root>", spec)
+			}
+			override.GoModuleRoot, err = resolvePairingOverridePath(projectRoot, parts[0])
+		case "typescript":
+			if len(parts) != 2 {
+				return nil, fmt.Errorf("invalid typescript scip-search pairing plan %q: expected typescript=<cwd>,<project-root>", spec)
+			}
+			override.TypeScriptCwd, err = resolvePairingOverridePath(projectRoot, parts[0])
+			if err == nil {
+				override.TypeScriptProjectRoot, err = resolvePairingOverridePath(projectRoot, parts[1])
+			}
+		case "python":
+			if len(parts) < 1 || len(parts) > 2 {
+				return nil, fmt.Errorf("invalid python scip-search pairing plan %q: expected python=<cwd> or python=<cwd>,<target-only>", spec)
+			}
+			override.PythonCwd, err = resolvePairingOverridePath(projectRoot, parts[0])
+			if err == nil && len(parts) == 2 {
+				override.PythonTargetOnly, err = cleanPairingTargetOnly(parts[1])
+			}
+		}
+		if err != nil {
+			return nil, fmt.Errorf("invalid scip-search pairing plan %q: %w", spec, err)
+		}
+		overrides = append(overrides, override)
+	}
+	return overrides, nil
 }
 
 func selectLanguages(opts InitOptions, gitFiles GitFilesFunc) ([]string, error) {
@@ -501,6 +598,154 @@ func pairingCommandPlan(projectRoot, language string, files []string) (RuntimeCo
 	}
 
 	return plan, nil, true
+}
+
+func pairingCommandOverridePlan(projectRoot string, override PairingCommandOverride) (RuntimeCommandPlan, error) {
+	outputPath := filepath.Join(projectRoot, override.Language+".scip")
+	plan := RuntimeCommandPlan{
+		Language:   override.Language,
+		Name:       languageIndexers[override.Language],
+		Dir:        projectRoot,
+		OutputPath: outputPath,
+	}
+	switch override.Language {
+	case "go":
+		if override.GoModuleRoot == "" {
+			return RuntimeCommandPlan{}, fmt.Errorf("invalid go scip-search pairing override: module root is empty")
+		}
+		if err := ensurePairingOverridePathWithin(projectRoot, override.GoModuleRoot, "module root"); err != nil {
+			return RuntimeCommandPlan{}, err
+		}
+		plan.Args = []string{"index", "--module-root", override.GoModuleRoot, "--output", outputPath}
+	case "typescript":
+		if override.TypeScriptCwd == "" || override.TypeScriptProjectRoot == "" {
+			return RuntimeCommandPlan{}, fmt.Errorf("invalid typescript scip-search pairing override: cwd and project root are required")
+		}
+		if err := ensurePairingOverridePathWithin(projectRoot, override.TypeScriptCwd, "typescript cwd"); err != nil {
+			return RuntimeCommandPlan{}, err
+		}
+		if err := ensurePairingOverridePathWithin(projectRoot, override.TypeScriptProjectRoot, "typescript project root"); err != nil {
+			return RuntimeCommandPlan{}, err
+		}
+		plan.Args = []string{"index", "--cwd", override.TypeScriptCwd, "--output", outputPath, override.TypeScriptProjectRoot}
+	case "python":
+		if override.PythonCwd == "" {
+			return RuntimeCommandPlan{}, fmt.Errorf("invalid python scip-search pairing override: cwd is empty")
+		}
+		if err := ensurePairingOverridePathWithin(projectRoot, override.PythonCwd, "python cwd"); err != nil {
+			return RuntimeCommandPlan{}, err
+		}
+		if override.PythonTargetOnly != "" {
+			targetOnly, err := cleanPairingTargetOnly(override.PythonTargetOnly)
+			if err != nil {
+				return RuntimeCommandPlan{}, err
+			}
+			override.PythonTargetOnly = targetOnly
+		}
+		plan.Args = []string{"index", "--cwd", override.PythonCwd, "--output", outputPath}
+		if override.PythonTargetOnly != "" {
+			plan.Args = append(plan.Args, "--target-only="+override.PythonTargetOnly)
+		}
+	default:
+		return RuntimeCommandPlan{}, fmt.Errorf("unsupported scip-search language %q (supported: %s)", override.Language, strings.Join(supportedLanguages, ", "))
+	}
+	return plan, nil
+}
+
+func pairingOverrideMap(overrides []PairingCommandOverride) (map[string]PairingCommandOverride, error) {
+	out := make(map[string]PairingCommandOverride, len(overrides))
+	for _, override := range overrides {
+		if !slices.Contains(supportedLanguages, override.Language) {
+			return nil, fmt.Errorf("unsupported scip-search language %q (supported: %s)", override.Language, strings.Join(supportedLanguages, ", "))
+		}
+		if _, exists := out[override.Language]; exists {
+			return nil, fmt.Errorf("duplicate scip-search pairing plan for language %s", override.Language)
+		}
+		out[override.Language] = override
+	}
+	return out, nil
+}
+
+func mergePairingLanguages(languages []string, overrides map[string]PairingCommandOverride) []string {
+	seen := make(map[string]bool, len(languages)+len(overrides))
+	for _, language := range languages {
+		seen[language] = true
+	}
+	for language := range overrides {
+		seen[language] = true
+	}
+
+	var out []string
+	for _, language := range supportedLanguages {
+		if seen[language] {
+			out = append(out, language)
+		}
+	}
+	return out
+}
+
+func ensureOverridesAllowedByExplicitLanguages(languages []string, overrides map[string]PairingCommandOverride) error {
+	allowed := make(map[string]bool, len(languages))
+	for _, language := range languages {
+		allowed[language] = true
+	}
+	for language := range overrides {
+		if !allowed[language] {
+			return fmt.Errorf("scip-search pairing plan for %s is outside explicit --scip-search allowlist", language)
+		}
+	}
+	return nil
+}
+
+func splitPairingOverrideValue(value string) []string {
+	raw := strings.Split(value, ",")
+	parts := make([]string, 0, len(raw))
+	for _, part := range raw {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			parts = append(parts, part)
+		}
+	}
+	return parts
+}
+
+func resolvePairingOverridePath(projectRoot, value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", fmt.Errorf("path is empty")
+	}
+	path := filepath.Clean(filepath.FromSlash(value))
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(projectRoot, path)
+	}
+	path = filepath.Clean(path)
+	if !pathWithin(projectRoot, path) {
+		return "", fmt.Errorf("path %q is outside repository root %q", value, projectRoot)
+	}
+	return path, nil
+}
+
+func ensurePairingOverridePathWithin(projectRoot, path, label string) error {
+	path = filepath.Clean(path)
+	if !filepath.IsAbs(path) {
+		return fmt.Errorf("invalid scip-search pairing override: %s %q must be absolute", label, path)
+	}
+	if !pathWithin(projectRoot, path) {
+		return fmt.Errorf("invalid scip-search pairing override: %s %q is outside repository root %q", label, path, projectRoot)
+	}
+	return nil
+}
+
+func cleanPairingTargetOnly(value string) (string, error) {
+	value = strings.TrimSpace(filepath.ToSlash(value))
+	if value == "" {
+		return "", fmt.Errorf("target-only is empty")
+	}
+	cleaned := filepath.ToSlash(filepath.Clean(filepath.FromSlash(value)))
+	if cleaned == "." || strings.HasPrefix(cleaned, "../") || filepath.IsAbs(cleaned) {
+		return "", fmt.Errorf("target-only %q must be relative to the python cwd", value)
+	}
+	return cleaned, nil
 }
 
 func goRootCandidates(targetRoot string, files []string) []string {

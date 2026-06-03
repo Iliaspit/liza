@@ -1807,6 +1807,32 @@ func TestInitCommandWithConfig_ScipSearchPersistsConfig(t *testing.T) {
 	}
 }
 
+func TestInitCommandWithConfig_RejectsPairingScipSearchPlan(t *testing.T) {
+	tmpDir := setupGitRepo(t)
+	defer os.RemoveAll(tmpDir)
+	setupGlobalLiza(t)
+
+	originalDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(originalDir)
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatal(err)
+	}
+
+	err = InitCommandWithConfig(InitParams{
+		Description:     "Goal with pairing-only scip-search plan",
+		ScipSearchPlans: []string{"go=."},
+	})
+	if err == nil {
+		t.Fatal("InitCommandWithConfig() error = nil, want pairing-only flag rejection")
+	}
+	if !strings.Contains(err.Error(), "--scip-search-plan is only supported for pairing init") {
+		t.Fatalf("InitCommandWithConfig() error = %v, want pairing-only diagnostic", err)
+	}
+}
+
 func TestInitCommandWithConfig_AutodetectsAndPersistsValidatedScipSearchLanguages(t *testing.T) {
 	tmpDir := setupGitRepo(t)
 	defer os.RemoveAll(tmpDir)
@@ -2414,6 +2440,51 @@ func TestInitPairingCommand_ScipSearchGoFilterPlansConcreteHookCommand(t *testin
 	}
 	if strings.Contains(script, "scip-typescript") || strings.Contains(script, "scip-python") {
 		t.Fatalf("liza-index.sh ignored --scip-search go filter:\n%s", script)
+	}
+}
+
+func TestInitPairingCommand_ScipSearchPlanOverridesAmbiguousRoots(t *testing.T) {
+	gitDir := setupGitRepo(t)
+	defer os.RemoveAll(gitDir)
+	setupGlobalLiza(t)
+	t.Setenv(scipsearch.EnvEnableScipSearch, "true")
+	writeTrackedFile(t, gitDir, "services/design-diagnosis/cli/go.mod", "module example.com/cli\n")
+	writeTrackedFile(t, gitDir, "services/design-diagnosis/cli/main.go", "package main\n")
+	writeTrackedFile(t, gitDir, "apps/web/tsconfig.json", "{}\n")
+	writeTrackedFile(t, gitDir, "apps/web/src/App.tsx", "export const app = 1\n")
+	writeTrackedFile(t, gitDir, "infra/cdk/tsconfig.json", "{}\n")
+	writeTrackedFile(t, gitDir, "infra/cdk/app.ts", "export const cdk = 1\n")
+	writeTrackedFile(t, gitDir, "apps/api/pyproject.toml", "[project]\nname = \"api\"\n")
+	writeTrackedFile(t, gitDir, "apps/api/backend/main.py", "print('api')\n")
+	writeTrackedFile(t, gitDir, "services/design-diagnosis/pyproject.toml", "[project]\nname = \"service\"\n")
+	writeTrackedFile(t, gitDir, "services/design-diagnosis/app.py", "print('service')\n")
+	testhelpers.MustGit(t, gitDir, "add", ".")
+	testhelpers.MustGit(t, gitDir, "commit", "-m", "Add monorepo source roots")
+
+	originalDir, _ := os.Getwd()
+	defer os.Chdir(originalDir)
+	os.Chdir(gitDir)
+
+	if err := InitPairingCommand(InitPairingParams{
+		Agents: []string{"codex"},
+		ScipSearchPlans: []string{
+			"go=services/design-diagnosis/cli",
+			"typescript=apps/web/src,apps/web",
+			"python=apps/api",
+		},
+	}); err != nil {
+		t.Fatalf("InitPairingCommand() error = %v", err)
+	}
+
+	script := readFileForTest(t, filepath.Join(gitDir, ".git", "hooks", "liza-index.sh"))
+	for _, want := range []string{
+		"scip-go index --module-root " + gitDir + "/services/design-diagnosis/cli --output " + gitDir + "/go.scip",
+		"scip-typescript index --cwd " + gitDir + "/apps/web/src --output " + gitDir + "/typescript.scip " + gitDir + "/apps/web",
+		"scip-python index --cwd " + gitDir + "/apps/api --output " + gitDir + "/python.scip",
+	} {
+		if !strings.Contains(script, want) {
+			t.Fatalf("liza-index.sh missing override command %q:\n%s", want, script)
+		}
 	}
 }
 
