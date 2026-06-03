@@ -320,14 +320,11 @@ func TestBuildPromptWithContextScipIndexesUseTaskWorktree(t *testing.T) {
 	if strings.Contains(prompt, taskTypescriptIndex) {
 		t.Fatalf("prompt contains missing task typescript SCIP index path %q", taskTypescriptIndex)
 	}
-	if !strings.Contains(prompt, "Go symbols, references, and implementations are supported.") {
-		t.Fatalf("prompt missing Go capability metadata")
+	if !strings.Contains(prompt, "Use `~/.liza/AGENT_TOOLS.md` for `scip-search` command syntax, routing rules, and freshness caveats.") {
+		t.Fatalf("prompt missing AGENT_TOOLS scip-search usage pointer")
 	}
-	if !strings.Contains(prompt, "scip-search implementations is not supported for Python.") {
-		t.Fatalf("prompt missing Python capability metadata")
-	}
-	if strings.Contains(prompt, "scip-search implementations --index "+taskPythonIndex) {
-		t.Fatalf("prompt contains unsupported Python implementations command")
+	if strings.Contains(prompt, "scip-search implementations --index") {
+		t.Fatalf("prompt contains reusable scip-search command syntax")
 	}
 }
 
@@ -446,8 +443,14 @@ func TestBuildPromptWithContextStacklitIndexUsesTaskWorktree(t *testing.T) {
 		t.Fatalf("buildPromptWithContext() error = %v", err)
 	}
 
-	if !strings.Contains(prompt, "stacklit derive --ai-summary -i '"+taskStacklitIndex+"'") {
-		t.Fatalf("prompt missing task worktree Stacklit command for %q", taskStacklitIndex)
+	if !strings.Contains(prompt, "Stacklit index: "+shellQuoteForTest(taskStacklitIndex)) {
+		t.Fatalf("prompt missing task worktree Stacklit index path %q", taskStacklitIndex)
+	}
+	if !strings.Contains(prompt, "Use `~/.liza/AGENT_TOOLS.md` for Stacklit command syntax, routing rules, and freshness caveats.") {
+		t.Fatalf("prompt missing AGENT_TOOLS Stacklit usage pointer")
+	}
+	if strings.Contains(prompt, "stacklit derive --ai-summary -i") {
+		t.Fatalf("prompt contains reusable Stacklit command syntax")
 	}
 	if strings.Contains(prompt, projectStacklitIndex) {
 		t.Fatalf("prompt contains project-root Stacklit index path %q for task prompt", projectStacklitIndex)
@@ -516,8 +519,14 @@ func TestBuildPromptWithContextSembleSearchUsesRoleWorktreeRoot(t *testing.T) {
 			if !strings.Contains(prompt, "=== SEMBLE SEARCH ===") {
 				t.Fatalf("prompt missing Semble section")
 			}
-			if !strings.Contains(prompt, "HF_HUB_OFFLINE=1 semble search \"where is review submission validated?\" "+shellQuoteForTest(taskWorktree)) {
-				t.Fatalf("prompt missing shell-quoted role worktree Semble command for %q", taskWorktree)
+			if !strings.Contains(prompt, shellQuoteForTest(taskWorktree)) {
+				t.Fatalf("prompt missing shell-quoted role worktree Semble target root for %q", taskWorktree)
+			}
+			if !strings.Contains(prompt, "Use `~/.liza/AGENT_TOOLS.md` for Semble command syntax, content modes, routing rules, and proof requirements.") {
+				t.Fatalf("prompt missing AGENT_TOOLS Semble usage pointer")
+			}
+			if strings.Contains(prompt, "HF_HUB_OFFLINE=1 semble search") {
+				t.Fatalf("prompt contains reusable Semble command syntax")
 			}
 			if strings.Contains(prompt, projectRootCommand) {
 				t.Fatalf("prompt contains project-root Semble command %q for %s prompt", projectRootCommand, tt.role)
@@ -1149,7 +1158,7 @@ func TestBuildPromptWithContextScipAvailableIndexErrorOmitsScipAndKeepsStacklit(
 			if strings.Contains(prompt, "=== SCIP-SEARCH INDEXES ===") {
 				t.Fatalf("prompt contains scip-search section after discovery failure:\n%s", prompt)
 			}
-			if !strings.Contains(prompt, "stacklit derive --ai-summary -i '"+taskStacklitIndex+"'") {
+			if !strings.Contains(prompt, "Stacklit index: "+shellQuoteForTest(taskStacklitIndex)) {
 				t.Fatalf("prompt missing Stacklit metadata after SCIP discovery failure")
 			}
 		})
@@ -1194,11 +1203,11 @@ func TestBuildOrchestratorPromptContextScipIndexesRenderFromProjectRoot(t *testi
 	if !strings.Contains(prompt, projectGoIndex) {
 		t.Fatalf("prompt missing project-root SCIP index path %q", projectGoIndex)
 	}
-	if !strings.Contains(prompt, "scip-search symbols --index '"+projectGoIndex+"' --name Foo --name Bar") {
-		t.Fatalf("prompt missing scip-search symbols command for project-root index")
+	if !strings.Contains(prompt, "Use `~/.liza/AGENT_TOOLS.md` for `scip-search` command syntax, routing rules, and freshness caveats.") {
+		t.Fatalf("prompt missing AGENT_TOOLS scip-search usage pointer")
 	}
-	if !strings.Contains(prompt, "Go symbols, references, and implementations are supported.") {
-		t.Fatalf("prompt missing Go capability metadata")
+	if strings.Contains(prompt, "scip-search symbols --index") {
+		t.Fatalf("prompt contains reusable scip-search command syntax")
 	}
 }
 
@@ -1231,8 +1240,14 @@ func TestBuildOrchestratorPromptContextStacklitIndexRendersFromProjectRoot(t *te
 		t.Fatalf("buildOrchestratorPromptContext() error = %v", err)
 	}
 
-	if !strings.Contains(prompt, "stacklit derive --ai-summary -i '"+projectStacklitIndex+"'") {
-		t.Fatalf("prompt missing project-root Stacklit command for %q", projectStacklitIndex)
+	if !strings.Contains(prompt, "Stacklit index: "+shellQuoteForTest(projectStacklitIndex)) {
+		t.Fatalf("prompt missing project-root Stacklit index path %q", projectStacklitIndex)
+	}
+	if !strings.Contains(prompt, "Use `~/.liza/AGENT_TOOLS.md` for Stacklit command syntax, routing rules, and freshness caveats.") {
+		t.Fatalf("prompt missing AGENT_TOOLS Stacklit usage pointer")
+	}
+	if strings.Contains(prompt, "stacklit derive --ai-summary -i") {
+		t.Fatalf("prompt contains reusable Stacklit command syntax")
 	}
 	if strings.Contains(prompt, taskStacklitIndex) {
 		t.Fatalf("prompt contains task worktree Stacklit index path %q for orchestrator prompt", taskStacklitIndex)
@@ -1280,7 +1295,7 @@ func TestBuildOrchestratorPromptContextStacklitAvailableIndexErrorOmitsStacklitA
 	if strings.Contains(prompt, "=== STACKLIT INDEX ===") || strings.Contains(prompt, "stacklit derive") {
 		t.Fatalf("prompt contains Stacklit guidance after discovery failure:\n%s", prompt)
 	}
-	if !strings.Contains(prompt, "scip-search symbols --index '"+projectGoIndex+"' --name Foo --name Bar") {
+	if !strings.Contains(prompt, "Go index: "+shellQuoteForTest(projectGoIndex)) {
 		t.Fatalf("prompt missing SCIP metadata after Stacklit discovery failure")
 	}
 }
@@ -1320,8 +1335,14 @@ func TestBuildOrchestratorPromptContextSembleSearchUsesSafeProjectRoot(t *testin
 	if len(calls) != 1 {
 		t.Fatalf("Semble prompt metadata calls = %d, want 1", len(calls))
 	}
-	if !strings.Contains(prompt, "HF_HUB_OFFLINE=1 semble search \"where is review submission validated?\" "+shellQuoteForTest(tmpDir)) {
-		t.Fatalf("prompt missing safe project-root Semble command for %q", tmpDir)
+	if !strings.Contains(prompt, shellQuoteForTest(tmpDir)) {
+		t.Fatalf("prompt missing safe project-root Semble target root for %q", tmpDir)
+	}
+	if !strings.Contains(prompt, "Use `~/.liza/AGENT_TOOLS.md` for Semble command syntax, content modes, routing rules, and proof requirements.") {
+		t.Fatalf("prompt missing AGENT_TOOLS Semble usage pointer")
+	}
+	if strings.Contains(prompt, "HF_HUB_OFFLINE=1 semble search") {
+		t.Fatalf("prompt contains reusable Semble command syntax")
 	}
 }
 

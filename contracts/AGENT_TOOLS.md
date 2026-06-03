@@ -7,20 +7,21 @@ When a default tool is unavailable in the current session, fall through to the n
 
 ### Search and Navigation
 
-Choose the smallest reliable routing source before raw search: explicit user paths for named-file tasks, changed-file lists for reviews, optional Liza-supplied indexes/search roots, and section/symbol routers for docs/code.
+Choose the highest-signal routing source before exploratory search: explicit user paths, changed-file lists, Liza-supplied indexes/search roots, and section/symbol routers. `rg`/`git grep` are appropriate first moves for literals, filenames, commands, or config keys already known from the request, indexed/semantic discovery, or source reads; do not use guessed broad keywords for first-pass discovery when Stacklit, Semble, `scip-search`, or section routers fit the question.
 
-1. Use Semble for conceptual discovery only when Liza supplies a Semble target root or current session context says Semble is available and ready.
-2. Use Stacklit for repo orientation only when Liza supplies an explicit Stacklit index path.
-3. Use `scip-search` for indexed symbol/package/reference/implementation navigation only when Liza supplies an explicit SCIP index path.
-4. If an optional index/search tool is disabled, unavailable, or not advertised, fall back to `rg`, `ast-grep`, direct reads, and Morph MCP only when policy exposes it.
-5. For long Markdown docs/specs, use `rg -c "pattern" <paths>` to find candidate files, then `mdtoc` and section-scoped reads; see Tool Preferences for the full workflow.
-6. Use bounded `rg` for exact text search and path discovery; use `git grep` for tracked/index/HEAD/history searches.
-7. Use direct, line-numbered reads (`nl -ba ... | sed -n ...`) for source-of-truth verification and edit discussion.
+Phased repository search:
+1. Orient structurally with Stacklit (modules, dependencies, impact, symbol names) and conceptually with Semble for code and docs when Liza supplies those roots/indexes.
+2. Trace precisely with `scip-search` for code symbols, definitions, references, callers, and implementations; for long docs/specs, use `rg -c "pattern" <paths>` to find candidates, then `mdtoc` and section-scoped reads.
+3. Verify against source files before editing or claiming behavior.
+
+Directly named files/sections/symbols may bypass orientation; use indexes afterward for impact and reference questions. If an optional index/search tool is disabled, unavailable, or not advertised, fall back to `rg`, `ast-grep`, direct reads, and Morph MCP only when policy exposes it. Use bounded `rg` for exact text search and path discovery; use `git grep` for tracked/index/HEAD/history searches. Use direct, line-numbered reads (`nl -ba ... | sed -n ...`) for source-of-truth verification and edit discussion.
+
+When Stacklit and `scip-search` are available, use them as the pre-edit impact baseline for shared/exported symbols or unfamiliar control paths. If that baseline suggests cross-module, lifecycle/state/review-flow, or high-risk impact, surface it through the normal Rule 7/approval checkpoint before editing. For uncommitted edits, verify impact with `git diff`, direct source reads, working-tree `rg`/`ast-grep`, and behavior tests; stale indexes are not proof of post-edit scope.
 
 ### Execution and Validation
 
 1. Use `apply_patch` for edits; use `morph-mcp` only for broad, context-heavy, or fast-apply edits.
-2. Use native manifests and language-native commands for project structure and dependencies.
+2. Use native manifests, lockfiles, and language-native commands for dependency, build, and validation evidence.
 3. Validate edits with native build/test/lint/typecheck commands plus pre-commit on touched files.
 4. Use `context7` → `Ref` → `deepwiki` → `WebFetch` for docs, repo architecture, and web lookup.
 5. In MAS worktrees, do not use workspace-level or IDE/LSP-backed tools.
@@ -56,11 +57,11 @@ For any MCP-backed default row in the tables below, if the tool is unavailable i
 | Single-file read (targeted) | `nl -ba <file> \| sed -n '<start>,<end>p'` | Read | Native read is lower-noise, already available, or line numbers are not needed |
 | Directory exploration | `rg --files`, `find`, or `ls` | native tree/list capability | Need a structured tree and native shell output is insufficient |
 | File discovery | `rg --files` | native filename search / `find` | `rg` unavailable |
-| Project structure / modules | Native manifest reads + `rg --files` / `find` | language-native project metadata commands | Need generated module metadata from the active worktree |
+| Project structure / modules | `stacklit derive/get-module -i <supplied-index>` | native manifest reads + `rg --files` / `find` | No Stacklit index path supplied, Stacklit unavailable, or result insufficient |
 | Dependency inspection | Native manifest reads + lockfiles | language-native dependency commands | Manifest/lockfile inspection is insufficient |
-| Code search | `rg` | — | — |
-| Symbol discovery | `rg` pattern search | — | — |
-| Symbol lookup | `rg` + direct reads | — | — |
+| Literal/regex code search | `rg` | — | — |
+| Symbol discovery | `scip-search symbols --index <supplied-index>` | `rg` pattern search | No SCIP index path supplied, `scip-search` unavailable, or result insufficient |
+| Symbol lookup | `scip-search symbols --index <supplied-index>` + direct reads | `rg` + direct reads | No SCIP index path supplied, `scip-search` unavailable, or result insufficient |
 | File edit | apply_patch | morph-mcp edit_file | Edit is broad, context-heavy, or benefits from fast-apply semantics |
 | Web content | WebFetch | fetch MCP | Need raw HTML, pagination, or blocked |
 | Current info / library discovery | perplexity current-info search | WebSearch | Perplexity returns nothing useful |
@@ -77,12 +78,12 @@ For any MCP-backed default row in the tables below, if the tool is unavailable i
 | Structural code pattern (call shape, signature) | `ast-grep` | `rg` with regex approximation | — |
 | Find files by name | Glob | `rg --files` / native filename search | Glob unavailable |
 | Repo orientation and module impact | `stacklit derive/get-module/get-dependencies -i <supplied-index>` | `rg` + manifest reads + exact source reads | No Stacklit index path supplied, Stacklit unavailable, or index result insufficient |
-| Semantic code search ("how does X work?") | Semble with a Liza-supplied target root | Morph MCP codebase search, then `rg` + exact reads (`ast-grep` when structural search helps) | Semble is disabled, unavailable, not advertised, or insufficient; use Morph MCP only when policy exposes it |
-| Symbol info at position | `rg` + direct reads | — | — |
-| Find references | `rg` | — | — |
-| Call hierarchy (callers/callees) | `rg` + direct reads | — | — |
-| Cross-file definitions | `rg` + direct reads | — | — |
-| Multi-file structural analysis | `rg` + direct reads | — | — |
+| Semantic repository search ("how does X work?") | Semble with a Liza-supplied target root | Morph MCP codebase search, then `rg` + exact reads (`ast-grep` when structural search helps) | Semble is disabled, unavailable, not advertised, or insufficient; use Morph MCP only when policy exposes it |
+| Symbol info at position | `scip-search symbols --index <supplied-index>` + direct reads | `rg` + direct reads | No SCIP index path supplied, `scip-search` unavailable, or result insufficient |
+| Find references | `scip-search references --index <supplied-index> --symbol '<exact-symbol>' --location-only` | `rg` | No SCIP index path supplied, `scip-search` unavailable, or result insufficient |
+| Call hierarchy (callers/callees) | `scip-search references --index <supplied-index>` + direct reads | `rg` + direct reads | No SCIP index path supplied, `scip-search` unavailable, or result insufficient |
+| Cross-file definitions | `scip-search symbols --index <supplied-index>` + direct reads | `rg` + direct reads | No SCIP index path supplied, `scip-search` unavailable, or result insufficient |
+| Multi-file structural analysis | Stacklit module/dependency commands + `scip-search`/`ast-grep` as needed | `rg` + direct reads | Supplied indexes unavailable or insufficient |
 
 **Additional caveats:**
 - **Semble**: use only an explicit target root supplied by Liza or current session context that says Semble is available. Do not infer target roots, initialize Semble, or treat semantic results as proof.
@@ -90,12 +91,34 @@ For any MCP-backed default row in the tables below, if the tool is unavailable i
 - **scip-search**: use only explicit `--index <path>` values supplied in the prompt or Pairing SessionStart session context. Do not search for default SCIP indexes or rely on daemon/global/cache behavior.
 - **morph-mcp codebase_search**: use only as the semantic fallback when Semble is unavailable and policy exposes Morph MCP. Fallback to `rg` + exact reads when results are insufficient, rate limited, or error.
 
+### Supplied Index/Search Command Shapes
+
+Replace `<index-path>` and `<target-root>` with the concrete Liza-supplied values from the current prompt/session context. Use the shell-quoted value when one is provided; otherwise quote paths before running shell commands.
+
+```bash
+scip-search symbols --index <index-path> --name Foo --name Bar
+scip-search references --index <index-path> --symbol '<exact-foo>' --symbol '<exact-bar>' --location-only
+scip-search implementations --index <index-path> --symbol '<exact-symbol>'
+nl -ba <result-path> | sed -n '<first-line>,<last-line>p'
+stacklit derive --ai-summary -i <index-path>
+stacklit find-module <query> -i <index-path>
+stacklit get-module <module> -i <index-path>
+stacklit get-dependencies <module> -i <index-path>
+stacklit get-hints -i <index-path>
+stacklit get-hot-files -i <index-path>
+HF_HUB_OFFLINE=1 semble search "where is review submission validated?" <target-root>
+HF_HUB_OFFLINE=1 semble search "default CLI config" <target-root> --content config
+HF_HUB_OFFLINE=1 semble find-related <file_path> <line> <target-root>
+```
+
+`scip-search --name` matches symbol substrings; `--symbol` matches exact SCIP symbols from prior results. Supported SCIP languages are Go, Python, and TypeScript; `implementations` is not supported for Python. Semble `--content` accepts `code`, `docs`, `config`, and `all`; `code` is the default.
+
 ### Precedence
 
 - When two tools can answer the same question, prefer the one that minimizes context injection while preserving fidelity. Claude: apply this rule to your native tools — they are not the default when a lower-context alternative exists.
 - **Local First**: Prefer local tools before remote tools when they answer the same question with equal fidelity.
 - **Diff / review / exact file state**: `git` and native shell reads > cached/indexed summaries. Source-of-truth reads beat derived views.
-- **Code search**: `rg` for exact text/regex search; `ast-grep` for syntax-aware structure.
+- **Repository navigation**: supplied Stacklit/Semble/SCIP first for orientation, conceptual discovery, and symbol/reference tracing; `rg`/`git grep` first for already-known literals, filenames, commands, and config keys.
 - **Tracked or historical search**: Use `git grep` when the question is scoped to tracked files, the index, `HEAD`, or another Git revision. Use `rg` for working-tree search, including unstaged and untracked files.
 - **File edits**: apply_patch > morph-mcp edit_file when the edit is broad, context-heavy, or benefits from fast-apply semantics.
 - **Web content**: WebFetch > fetch MCP when you need exact content, raw HTML, or pagination.

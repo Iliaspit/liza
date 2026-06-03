@@ -97,10 +97,11 @@ func assertAgentToolsOptionalIndexGuidance(t *testing.T, content string) {
 	t.Helper()
 
 	required := []string{
-		"Semble target root",
-		"current session context says Semble is available",
-		"explicit Stacklit index path",
-		"explicit SCIP index path",
+		"Supplied Index/Search Command Shapes",
+		"concrete Liza-supplied values",
+		"Use the shell-quoted value when one is provided",
+		"stacklit derive --ai-summary -i <index-path>",
+		"scip-search symbols --index <index-path>",
 		"disabled, unavailable, or not advertised",
 		"fall back to `rg`, `ast-grep`, direct reads",
 		"Morph MCP only when policy exposes it",

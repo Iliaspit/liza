@@ -83,11 +83,14 @@ func TestIndexingActivationMASPromptsRenderEnabledMetadataFromRoleTargetRoots(t 
 
 			assertIndexingActivationContainsAll(t, prompt,
 				"=== STACKLIT INDEX ===",
-				"stacklit derive --ai-summary -i '"+stacklitIndex+"'",
+				"Stacklit index: "+shellQuoteForIndexingActivationTest(stacklitIndex),
+				"Use `~/.liza/AGENT_TOOLS.md` for Stacklit command syntax, routing rules, and freshness caveats.",
 				"=== SCIP-SEARCH INDEXES ===",
-				"scip-search symbols --index '"+scipIndex+"' --name Foo --name Bar",
+				"Go index: "+shellQuoteForIndexingActivationTest(scipIndex),
+				"Use `~/.liza/AGENT_TOOLS.md` for `scip-search` command syntax, routing rules, and freshness caveats.",
 				"=== SEMBLE SEARCH ===",
-				`HF_HUB_OFFLINE=1 semble search "where is review submission validated?" `+shellQuoteForIndexingActivationTest(tt.targetRoot),
+				shellQuoteForIndexingActivationTest(tt.targetRoot),
+				"Use `~/.liza/AGENT_TOOLS.md` for Semble command syntax, content modes, routing rules, and proof requirements.",
 			)
 			assertIndexingActivationContainsNone(t, prompt, tt.forbiddenPaths...)
 		})
@@ -129,7 +132,8 @@ func TestIndexingActivationMASPromptsOmitFailedOptionalToolOnly(t *testing.T) {
 
 			assertIndexingActivationContainsAll(t, prompt,
 				"=== STACKLIT INDEX ===",
-				"stacklit derive --ai-summary -i '"+filepath.Join(targetRoot, "stacklit.json")+"'",
+				"Stacklit index: "+shellQuoteForIndexingActivationTest(filepath.Join(targetRoot, "stacklit.json")),
+				"Use `~/.liza/AGENT_TOOLS.md` for Stacklit command syntax, routing rules, and freshness caveats.",
 			)
 			assertIndexingActivationContainsNone(t, prompt,
 				"=== SCIP-SEARCH INDEXES ===",

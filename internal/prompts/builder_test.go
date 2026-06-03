@@ -267,32 +267,25 @@ func TestBuildBasePromptScipSearchRendersSuppliedIndexes(t *testing.T) {
 
 	assertContains("=== SCIP-SEARCH INDEXES ===")
 	assertContains("Generated SCIP indexes were refreshed before this prompt was built and reflect the current target tree at prompt construction time; they will not reflect subsequent agent edits.")
-	assertContains("scip-search symbols")
-	assertContains("scip-search references --index")
-	assertContains("scip-search references --index " + quotedGoPath + " --symbol '<exact-foo>' --symbol '<exact-bar>' --location-only")
-	assertContains("nl -ba <result-path> | sed -n '<first-line>,<last-line>p'")
-	assertContains("Go symbols, references, and implementations are supported.")
-	assertContains("TypeScript implementations are upstream-supported by scip-search but not locally verified; verify results in files before relying on them.")
-	assertContains("Python symbols are supported and references may be incomplete.")
-	assertContains("scip-search implementations is not supported for Python.")
+	assertContains("Use `~/.liza/AGENT_TOOLS.md` for `scip-search` command syntax, routing rules, and freshness caveats.")
 
-	for _, path := range []string{quotedGoPath, quotedTSPath, quotedPythonPath} {
-		assertContains("scip-search symbols --index " + path + " --name Foo --name Bar")
-		assertContains("scip-search references --index " + path + " --symbol '<exact-foo>' --symbol '<exact-bar>' --location-only")
-	}
-	assertContains("scip-search implementations --index " + quotedGoPath + " --symbol '<exact-symbol>'")
-	assertContains("scip-search implementations --index " + quotedTSPath + " --symbol '<exact-symbol>'")
-
-	if strings.Contains(prompt, "scip-search implementations --index "+quotedPythonPath) {
-		t.Fatalf("BuildBasePrompt() rendered a Python implementations command:\n%s", prompt)
+	for _, command := range []string{
+		"scip-search symbols --index",
+		"scip-search references --index",
+		"scip-search implementations --index",
+		"nl -ba <result-path>",
+	} {
+		if strings.Contains(prompt, command) {
+			t.Fatalf("BuildBasePrompt() rendered reusable scip-search command syntax %q:\n%s", command, prompt)
+		}
 	}
 	if strings.Contains(prompt, "--index <") {
 		t.Fatalf("BuildBasePrompt() rendered placeholder index paths:\n%s", prompt)
 	}
 
-	goPosition := strings.Index(prompt, "Go index: "+goPath)
-	tsPosition := strings.Index(prompt, "TypeScript index: "+tsPath)
-	pythonPosition := strings.Index(prompt, "Python index: "+pythonPath)
+	goPosition := strings.Index(prompt, "Go index: "+quotedGoPath)
+	tsPosition := strings.Index(prompt, "TypeScript index: "+quotedTSPath)
+	pythonPosition := strings.Index(prompt, "Python index: "+quotedPythonPath)
 	if goPosition == -1 || tsPosition == -1 || pythonPosition == -1 {
 		t.Fatalf("BuildBasePrompt() did not render every index label; positions go=%d ts=%d python=%d", goPosition, tsPosition, pythonPosition)
 	}
@@ -355,21 +348,17 @@ func TestBuildBasePromptStacklitRendersSuppliedIndex(t *testing.T) {
 
 	for _, want := range []string{
 		"=== STACKLIT INDEX ===",
-		"Stacklit index: " + indexPath,
+		"Stacklit index: " + quotedPath,
 		"Stacklit index files are available for this target. They are repository snapshots that may lag behind current edits or failed refresh attempts; use them for orientation, then verify against source files before editing.",
-		"stacklit derive --ai-summary -i " + quotedPath,
-		"stacklit find-module <query> -i " + quotedPath,
-		"stacklit get-module <module> -i " + quotedPath,
-		"stacklit get-dependencies <module> -i " + quotedPath,
-		"stacklit get-hints -i " + quotedPath,
-		"stacklit get-hot-files -i " + quotedPath,
-		"- stacklit derive/find-module/get-module: module orientation before opening source files",
-		"- stacklit get-dependencies: dependency impact and direction",
-		"Direct source reads are required evidence for edits, reviews, and success claims.",
+		"Use `~/.liza/AGENT_TOOLS.md` for Stacklit command syntax, routing rules, and freshness caveats.",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("BuildBasePrompt() missing expected stacklit content:\n%q", want)
 		}
+	}
+	if strings.Contains(prompt, "stacklit derive --ai-summary -i "+quotedPath) ||
+		strings.Contains(prompt, "stacklit get-module <module>") {
+		t.Fatalf("BuildBasePrompt() rendered reusable Stacklit command syntax:\n%s", prompt)
 	}
 }
 
@@ -398,20 +387,18 @@ func TestBuildBasePromptStacklitAndScipUnifiedQueryRouting(t *testing.T) {
 		t.Fatalf("BuildBasePrompt() error: %v", err)
 	}
 
-	if strings.Count(prompt, "=== QUERY ROUTING ===") != 1 {
-		t.Fatal("expected exactly one unified QUERY ROUTING section")
-	}
 	for _, want := range []string{
-		"- stacklit derive/find-module/get-module: module orientation before opening source files",
-		"- stacklit get-dependencies: dependency impact and direction",
-		"- scip-search: symbol tracing for definitions, references, callers/callees, implementations, and package structure",
-		"- rg: exact literal strings, config values, comments, CLI command names, filenames, and paths",
-		"- ast-grep: syntax-shaped search for call patterns, signatures, and structural matches",
-		"Direct source reads are required evidence for edits, reviews, and success claims.",
+		"Stacklit index: '" + stacklitPath + "'",
+		"Go index: '" + scipPath + "'",
+		"Use `~/.liza/AGENT_TOOLS.md` for Stacklit command syntax, routing rules, and freshness caveats.",
+		"Use `~/.liza/AGENT_TOOLS.md` for `scip-search` command syntax, routing rules, and freshness caveats.",
 	} {
 		if !strings.Contains(prompt, want) {
-			t.Fatalf("missing unified routing guidance %q", want)
+			t.Fatalf("missing supplied index guidance %q", want)
 		}
+	}
+	if strings.Contains(prompt, "=== QUERY ROUTING ===") {
+		t.Fatal("prompt should defer reusable query routing guidance to AGENT_TOOLS.md")
 	}
 }
 
@@ -485,35 +472,23 @@ func TestBuildBasePromptSembleSearchRendersPromptMetadata(t *testing.T) {
 		"=== SEMBLE SEARCH ===",
 		"Semble is available for semantic repository search in this target root:",
 		quotedRoot,
-		`HF_HUB_OFFLINE=1 semble search "where is review submission validated?" ` + quotedRoot,
-		`HF_HUB_OFFLINE=1 semble search "agent CLI defaults" ` + quotedRoot + ` --top-k 10`,
-		`HF_HUB_OFFLINE=1 semble search "where is task superseding specified?" ` + quotedRoot + ` --content docs`,
-		`HF_HUB_OFFLINE=1 semble search "default CLI config" ` + quotedRoot + ` --content config`,
-		"HF_HUB_OFFLINE=1 semble find-related <file_path> <line> " + quotedRoot,
-		"Use --content with one of: code, docs, config, all; code is the default.",
-		"Semble returns candidate chunks, not proof",
-		"Do not use rg for broad-scope or common-word conceptual queries.",
-		"stacklit derive --ai-summary -i '/abs/worktree with spaces/stacklit.json'",
-		"scip-search symbols --index '/abs/worktree with spaces/.liza/scip/go.scip'",
+		"Use `~/.liza/AGENT_TOOLS.md` for Semble command syntax, content modes, routing rules, and proof requirements.",
+		"Stacklit index: '/abs/worktree with spaces/stacklit.json'",
+		"Go index: '/abs/worktree with spaces/.liza/scip/go.scip'",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("BuildBasePrompt() missing expected Semble prompt content:\n%q", want)
 		}
 	}
-	if strings.Count(prompt, "=== QUERY ROUTING ===") != 1 {
-		t.Fatal("expected exactly one unified QUERY ROUTING section with Semble, Stacklit, and SCIP")
-	}
-	for _, want := range []string{
-		"- semble search: conceptual discovery when the exact symbol or module is unknown",
-		"- stacklit derive/find-module/get-module: module orientation before opening source files",
-		"- stacklit get-dependencies: dependency impact and direction",
-		"- scip-search: symbol tracing for definitions, references, callers/callees, implementations, and package structure",
-		"- rg: exact literal strings, config values, comments, CLI command names, filenames, and paths",
-		"- ast-grep: syntax-shaped search for call patterns, signatures, and structural matches",
-		"Direct source reads are required evidence for edits, reviews, and success claims.",
+	for _, notWant := range []string{
+		`HF_HUB_OFFLINE=1 semble search "where is review submission validated?" ` + quotedRoot,
+		"HF_HUB_OFFLINE=1 semble find-related <file_path> <line> " + quotedRoot,
+		"stacklit derive --ai-summary -i",
+		"scip-search symbols --index",
+		"=== QUERY ROUTING ===",
 	} {
-		if !strings.Contains(prompt, want) {
-			t.Fatalf("BuildBasePrompt() missing routing guidance:\n%q", want)
+		if strings.Contains(prompt, notWant) {
+			t.Fatalf("BuildBasePrompt() rendered reusable command/routing guidance %q:\n%s", notWant, prompt)
 		}
 	}
 	if strings.Contains(prompt, "Morph MCP semantic search: broad conceptual search") {
@@ -552,11 +527,7 @@ func TestBuildBasePromptSembleOnlyRoutingOmitsUnavailableOptionalTools(t *testin
 
 	for _, want := range []string{
 		"=== SEMBLE SEARCH ===",
-		"=== QUERY ROUTING ===",
-		"- semble search: conceptual discovery when the exact symbol or module is unknown",
-		"- rg: exact literal strings, config values, comments, CLI command names, filenames, and paths",
-		"- ast-grep: syntax-shaped search for call patterns, signatures, and structural matches",
-		"Direct source reads are required evidence for edits, reviews, and success claims.",
+		"Use `~/.liza/AGENT_TOOLS.md` for Semble command syntax, content modes, routing rules, and proof requirements.",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("BuildBasePrompt() missing Semble-only routing guidance:\n%q", want)
@@ -567,8 +538,7 @@ func TestBuildBasePromptSembleOnlyRoutingOmitsUnavailableOptionalTools(t *testin
 		"=== SCIP-SEARCH INDEXES ===",
 		"stacklit derive",
 		"scip-search symbols",
-		"- stacklit",
-		"- scip-search",
+		"=== QUERY ROUTING ===",
 	} {
 		if strings.Contains(prompt, notWant) {
 			t.Fatalf("BuildBasePrompt() rendered unavailable optional-tool guidance %q:\n%s", notWant, prompt)

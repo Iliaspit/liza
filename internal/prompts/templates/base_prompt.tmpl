@@ -114,20 +114,10 @@ Generated SCIP indexes were refreshed before this prompt was built and reflect t
 
 {{- range .ScipSearchIndexes }}
 
-{{ .DisplayLanguage }} index: {{ .IndexPath }}
-```bash
-scip-search symbols --index {{ .ShellIndexPath }} --name Foo --name Bar
-scip-search references --index {{ .ShellIndexPath }} --symbol '<exact-foo>' --symbol '<exact-bar>' --location-only
-{{ if .ShowImplementationCommand -}}
-scip-search implementations --index {{ .ShellIndexPath }} --symbol '<exact-symbol>'
-{{ end -}}
-nl -ba <result-path> | sed -n '<first-line>,<last-line>p'
-```
-{{ .CapabilitySummary }}
-{{ .ImplementationGuidance }}
+{{ .DisplayLanguage }} index: {{ .ShellIndexPath }}
 {{- end }}
 
-`--name` matches symbol substrings; `--symbol` matches exact SCIP symbols from prior results.
+Use `~/.liza/AGENT_TOOLS.md` for `scip-search` command syntax, routing rules, and freshness caveats.
 {{- end }}
 
 {{- if .StacklitIndexes }}
@@ -137,16 +127,9 @@ Stacklit index files are available for this target. They are repository snapshot
 
 {{- range .StacklitIndexes }}
 
-Stacklit index: {{ .IndexPath }}
-```bash
-stacklit derive --ai-summary -i {{ .ShellIndexPath }}
-stacklit find-module <query> -i {{ .ShellIndexPath }}
-stacklit get-module <module> -i {{ .ShellIndexPath }}
-stacklit get-dependencies <module> -i {{ .ShellIndexPath }}
-stacklit get-hints -i {{ .ShellIndexPath }}
-stacklit get-hot-files -i {{ .ShellIndexPath }}
-```
+Stacklit index: {{ .ShellIndexPath }}
 {{- end }}
+Use `~/.liza/AGENT_TOOLS.md` for Stacklit command syntax, routing rules, and freshness caveats.
 {{- end }}
 
 {{- if .SembleSearch }}
@@ -155,37 +138,6 @@ stacklit get-hot-files -i {{ .ShellIndexPath }}
 Semble is available for semantic repository search in this target root:
 {{ .SembleSearch.ShellTargetRoot }}
 
-Use Semble for natural-language or conceptual discovery when you do not yet know
-the exact symbol or module:
-
-{{- range .SembleSearch.SearchExamples }}
-{{ . }}
-{{- end }}
-{{ .SembleSearch.FindRelatedExample }}
-
-{{ .SembleSearch.ContentModeGuidance }}
-
-{{ .SembleSearch.DiscoveryNotice }}
-Do not use rg for broad-scope or common-word conceptual queries.
-{{- end }}
-
-{{- if or .SembleSearch .StacklitIndexes .ScipSearchIndexes }}
-
-=== QUERY ROUTING ===
-{{- if .SembleSearch }}
-- semble search: conceptual discovery when the exact symbol or module is unknown
-- semble --content docs/config: documentation, spec, and configuration discovery before direct reads
-{{- end }}
-{{- if .StacklitIndexes }}
-- stacklit derive/find-module/get-module: module orientation before opening source files
-- stacklit get-dependencies: dependency impact and direction
-- stacklit get-hints/get-hot-files: workflow commands and churn hotspots
-{{- end }}
-{{- if .ScipSearchIndexes }}
-- scip-search: symbol tracing for definitions, references, callers/callees, implementations, and package structure
-{{- end }}
-- rg: exact literal strings, config values, comments, CLI command names, filenames, and paths
-- ast-grep: syntax-shaped search for call patterns, signatures, and structural matches
-Direct source reads are required evidence for edits, reviews, and success claims.
+Use `~/.liza/AGENT_TOOLS.md` for Semble command syntax, content modes, routing rules, and proof requirements.
 {{- end }}
 {{- end -}}
