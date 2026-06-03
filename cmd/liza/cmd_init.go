@@ -95,6 +95,9 @@ creation (e.g. 'make setup', 'npm install'). This ensures worktrees are
 build/test-ready without hardcoding project-specific tooling into Liza.
 Existing workspaces can add post_worktree_cmd to state.yaml's config section.
 
+Use --copy-worktree-env-files to explicitly authorize copying ignored root env
+files into task worktrees before post-worktree setup runs.
+
 PAIRING MODE: Use agent flags without a description to create only the contract
 symlinks needed for pairing (no .liza/ workspace):
   liza init --claude           # creates CLAUDE.md → ~/.liza/CORE.md
@@ -108,6 +111,7 @@ symlinks needed for pairing (no .liza/ workspace):
 		defaultDoerCLI, _ := cmd.Flags().GetString("default-doer-cli")
 		defaultReviewerCLI, _ := cmd.Flags().GetString("default-reviewer-cli")
 		scipSearch, _ := cmd.Flags().GetStringArray("scip-search")
+		copyWorktreeEnvFiles, _ := cmd.Flags().GetBool("copy-worktree-env-files")
 		if err := validateDefaultCLIFlag("default-cli", defaultCLI); err != nil {
 			return err
 		}
@@ -163,21 +167,22 @@ symlinks needed for pairing (no .liza/ workspace):
 				return nil
 			}
 			if err := commands.InitCommandWithConfig(commands.InitParams{
-				Description:        result.Description,
-				SpecRef:            result.SpecRef,
-				ConfigPath:         configPath,
-				EntryPoint:         result.EntryPoint,
-				Branch:             branch,
-				PostWorktreeCmd:    postWorktreeCmd,
-				AutoResume:         autoResume,
-				NoFollowUp:         noFollowUp,
-				DefaultCLI:         defaultCLI,
-				DefaultDoerCLI:     defaultDoerCLI,
-				DefaultReviewerCLI: defaultReviewerCLI,
-				ScipSearch:         scipSearch,
-				Agents:             result.Agents,
-				Stdin:              os.Stdin,
-				ContractAction:     result.ContractAction,
+				Description:          result.Description,
+				SpecRef:              result.SpecRef,
+				ConfigPath:           configPath,
+				EntryPoint:           result.EntryPoint,
+				Branch:               branch,
+				PostWorktreeCmd:      postWorktreeCmd,
+				CopyWorktreeEnvFiles: copyWorktreeEnvFiles,
+				AutoResume:           autoResume,
+				NoFollowUp:           noFollowUp,
+				DefaultCLI:           defaultCLI,
+				DefaultDoerCLI:       defaultDoerCLI,
+				DefaultReviewerCLI:   defaultReviewerCLI,
+				ScipSearch:           scipSearch,
+				Agents:               result.Agents,
+				Stdin:                os.Stdin,
+				ContractAction:       result.ContractAction,
 			}); err != nil {
 				return err
 			}
@@ -197,7 +202,7 @@ symlinks needed for pairing (no .liza/ workspace):
 				return fmt.Errorf("--no-follow-up requires full workspace init (provide a description)")
 			}
 			if hasExplicitInitFlags(cmd) {
-				return fmt.Errorf("workspace flags (--branch, --config, --spec, --entry-point, --post-worktree-cmd, --default-cli, --default-doer-cli, --default-reviewer-cli) require a description argument for full workspace init")
+				return fmt.Errorf("workspace flags (--branch, --config, --spec, --entry-point, --post-worktree-cmd, --copy-worktree-env-files, --default-cli, --default-doer-cli, --default-reviewer-cli) require a description argument for full workspace init")
 			}
 			if err := commands.InitPairingCommand(commands.InitPairingParams{
 				Agents:     agents,
@@ -218,20 +223,21 @@ symlinks needed for pairing (no .liza/ workspace):
 		branch, _ := cmd.Flags().GetString("branch")
 		postCreateCmd, _ := cmd.Flags().GetString("post-worktree-cmd")
 		if err := commands.InitCommandWithConfig(commands.InitParams{
-			Description:        description,
-			SpecRef:            specRef,
-			ConfigPath:         configPath,
-			EntryPoint:         entryPoint,
-			Branch:             branch,
-			PostWorktreeCmd:    postCreateCmd,
-			AutoResume:         autoResume,
-			NoFollowUp:         noFollowUp,
-			DefaultCLI:         defaultCLI,
-			DefaultDoerCLI:     defaultDoerCLI,
-			DefaultReviewerCLI: defaultReviewerCLI,
-			ScipSearch:         scipSearch,
-			Agents:             agents,
-			Stdin:              os.Stdin,
+			Description:          description,
+			SpecRef:              specRef,
+			ConfigPath:           configPath,
+			EntryPoint:           entryPoint,
+			Branch:               branch,
+			PostWorktreeCmd:      postCreateCmd,
+			CopyWorktreeEnvFiles: copyWorktreeEnvFiles,
+			AutoResume:           autoResume,
+			NoFollowUp:           noFollowUp,
+			DefaultCLI:           defaultCLI,
+			DefaultDoerCLI:       defaultDoerCLI,
+			DefaultReviewerCLI:   defaultReviewerCLI,
+			ScipSearch:           scipSearch,
+			Agents:               agents,
+			Stdin:                os.Stdin,
 		}); err != nil {
 			return err
 		}
@@ -360,7 +366,7 @@ var agentFlagNames = []string{"claude", "codex", "gemini", "mistral"}
 // hasExplicitInitFlags returns true if any workspace-specific flag was explicitly set.
 // This prevents the interactive wizard from silently swallowing CLI flags it doesn't collect.
 func hasExplicitInitFlags(cmd *cobra.Command) bool {
-	for _, name := range []string{"spec", "config", "entry-point", "branch", "post-worktree-cmd", "default-cli", "default-doer-cli", "default-reviewer-cli"} {
+	for _, name := range []string{"spec", "config", "entry-point", "branch", "post-worktree-cmd", "copy-worktree-env-files", "default-cli", "default-doer-cli", "default-reviewer-cli"} {
 		if cmd.Flags().Changed(name) {
 			return true
 		}
@@ -410,6 +416,7 @@ func init() {
 	initCmd.Flags().String("entry-point", "", `entry-point name: "general-objective", "functional-spec", "technical-spec", or legacy "detailed-spec" in default pipeline (default: auto-classified by orchestrator)`)
 	initCmd.Flags().String("branch", "integration", "integration branch name")
 	initCmd.Flags().String("post-worktree-cmd", "", "shell command to run after worktree creation (e.g. 'make setup')")
+	initCmd.Flags().Bool("copy-worktree-env-files", false, "copy ignored root env files into worktrees before setup commands")
 	initCmd.Flags().Bool("auto-resume", false, "automatically resume at checkpoint and sprint completion")
 	initCmd.Flags().Bool("no-follow-up", false, "run only the entry-point subpipeline by suppressing top-level pipeline transitions")
 	initCmd.Flags().String("default-cli", "", "default CLI for agent spawning ("+strings.Join(agent.ValidCLIs(), ", ")+")")

@@ -115,6 +115,218 @@ func TestCreateWorktree_AlreadyExists(t *testing.T) {
 	}
 }
 
+func TestCreateWorktree_CopyWorktreeEnvFilesBeforePostWorktreeCmd(t *testing.T) {
+	tmpDir := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, tmpDir)
+	commitEnvIgnoreForWorktreeTest(t, tmpDir)
+	writeRootFileForWorktreeTest(t, tmpDir, ".env", "ROOT_ENV=1\n")
+	writeRootFileForWorktreeTest(t, tmpDir, ".env.local", "LOCAL_ENV=1\n")
+	writeRootFileForWorktreeTest(t, tmpDir, "app.env", "APP_ENV=1\n")
+	writeRootFileForWorktreeTest(t, tmpDir, ".envrc", "export ROOT_ENV=1\n")
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	t.Setenv(stacklit.EnvEnableStacklit, "false")
+
+	postCmd := "test -f .env && test -f .env.local && test -f app.env && test -f .envrc && touch ../post-worktree-saw-env"
+	state := testhelpers.CreateValidState()
+	state.Config.CopyWorktreeEnvFiles = true
+	state.Config.PostWorktreeCmd = &postCmd
+	state.Tasks = []models.Task{
+		testhelpers.BuildTaskByStatus("task-1", models.TaskStatusImplementing, time.Now().UTC()),
+	}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	result, err := CreateWorktree(tmpDir, "task-1", false)
+	if err != nil {
+		t.Fatalf("CreateWorktree() error: %v", err)
+	}
+	if len(result.Warnings) != 0 {
+		t.Fatalf("CreateWorktree() warnings = %v, want none", result.Warnings)
+	}
+
+	for _, rel := range []string{".env", ".env.local", "app.env", ".envrc"} {
+		assertWorktreeFileExists(t, result.WorktreeDir, rel)
+		assertWorktreePathIgnored(t, result.WorktreeDir, rel)
+	}
+	assertWorktreeFileExists(t, filepath.Join(tmpDir, paths.WorktreesDirName), "post-worktree-saw-env")
+	assertGitStatusClean(t, result.WorktreeDir)
+}
+
+func TestCreateWorktree_DoesNotCopyWorktreeEnvFilesByDefault(t *testing.T) {
+	tmpDir := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, tmpDir)
+	commitEnvIgnoreForWorktreeTest(t, tmpDir)
+	writeRootFileForWorktreeTest(t, tmpDir, ".env", "ROOT_ENV=1\n")
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	t.Setenv(stacklit.EnvEnableStacklit, "false")
+
+	state := testhelpers.CreateValidState()
+	state.Tasks = []models.Task{
+		testhelpers.BuildTaskByStatus("task-1", models.TaskStatusImplementing, time.Now().UTC()),
+	}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	result, err := CreateWorktree(tmpDir, "task-1", false)
+	if err != nil {
+		t.Fatalf("CreateWorktree() error: %v", err)
+	}
+
+	assertWorktreeFileMissing(t, result.WorktreeDir, ".env")
+	assertGitStatusClean(t, result.WorktreeDir)
+}
+
+func TestCreateWorktree_CopyWorktreeEnvFilesExistingWorktreeDoesNotOverwrite(t *testing.T) {
+	tmpDir := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, tmpDir)
+	commitEnvIgnoreForWorktreeTest(t, tmpDir)
+	writeRootFileForWorktreeTest(t, tmpDir, ".env", "SOURCE_ENV=1\n")
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	t.Setenv(stacklit.EnvEnableStacklit, "false")
+
+	state := testhelpers.CreateValidState()
+	state.Config.CopyWorktreeEnvFiles = true
+	state.Tasks = []models.Task{
+		testhelpers.BuildTaskByStatus("task-1", models.TaskStatusImplementing, time.Now().UTC()),
+	}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	first, err := CreateWorktree(tmpDir, "task-1", false)
+	if err != nil {
+		t.Fatalf("first CreateWorktree() error: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(first.WorktreeDir, ".env"), []byte("WORKTREE_ENV=1\n"), 0o600); err != nil {
+		t.Fatalf("overwrite worktree .env fixture: %v", err)
+	}
+
+	second, err := CreateWorktree(tmpDir, "task-1", false)
+	if err != nil {
+		t.Fatalf("second CreateWorktree() error: %v", err)
+	}
+	if !second.AlreadyExisted {
+		t.Fatal("second CreateWorktree() AlreadyExisted = false, want true")
+	}
+	got, err := os.ReadFile(filepath.Join(second.WorktreeDir, ".env"))
+	if err != nil {
+		t.Fatalf("ReadFile(worktree .env) error: %v", err)
+	}
+	if string(got) != "WORKTREE_ENV=1\n" {
+		t.Fatalf("worktree .env = %q, want preserved existing content", got)
+	}
+	assertWorktreePathIgnored(t, second.WorktreeDir, ".env")
+	assertGitStatusClean(t, second.WorktreeDir)
+}
+
+func TestProvisionWorktreeEnvFilesCandidateFilteringAndWarnings(t *testing.T) {
+	tmpDir := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, tmpDir)
+	commitEnvIgnoreForWorktreeTest(t, tmpDir)
+	writeRootFileForWorktreeTest(t, tmpDir, ".env", "ROOT_ENV=1\n")
+	writeRootFileForWorktreeTest(t, tmpDir, "credentials.local", "CREDENTIALS=1\n")
+	if err := os.MkdirAll(filepath.Join(tmpDir, "config"), 0o755); err != nil {
+		t.Fatalf("mkdir config: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, "config", ".env"), []byte("SUBDIR_ENV=1\n"), 0o600); err != nil {
+		t.Fatalf("write subdir .env fixture: %v", err)
+	}
+	gitWrapper := git.New(tmpDir)
+	if _, err := gitWrapper.CreateWorktree("task-1", "integration"); err != nil {
+		t.Fatalf("CreateWorktree() setup error: %v", err)
+	}
+	worktreeDir := filepath.Join(tmpDir, paths.WorktreesDirName, "task-1")
+
+	warnings := ProvisionWorktreeEnvFiles(tmpDir, worktreeDir)
+	if len(warnings) != 0 {
+		t.Fatalf("ProvisionWorktreeEnvFiles() warnings = %v, want none", warnings)
+	}
+
+	assertWorktreeFileExists(t, worktreeDir, ".env")
+	assertWorktreeFileMissing(t, worktreeDir, "credentials.local")
+	assertWorktreeFileMissing(t, worktreeDir, filepath.Join("config", ".env"))
+	assertGitStatusClean(t, worktreeDir)
+}
+
+func TestProvisionWorktreeEnvFilesRejectsUnsafeSources(t *testing.T) {
+	tmpDir := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, tmpDir)
+	commitEnvIgnoreForWorktreeTest(t, tmpDir)
+	if err := os.Symlink("shared-env", filepath.Join(tmpDir, ".env")); err != nil {
+		t.Fatalf("symlink .env fixture: %v", err)
+	}
+	gitWrapper := git.New(tmpDir)
+	if _, err := gitWrapper.CreateWorktree("task-1", "integration"); err != nil {
+		t.Fatalf("CreateWorktree() setup error: %v", err)
+	}
+	worktreeDir := filepath.Join(tmpDir, paths.WorktreesDirName, "task-1")
+
+	warnings := ProvisionWorktreeEnvFiles(tmpDir, worktreeDir)
+	if len(warnings) != 1 || !strings.Contains(warnings[0], "source is not a regular file") {
+		t.Fatalf("ProvisionWorktreeEnvFiles() warnings = %v, want non-regular source warning", warnings)
+	}
+	assertWorktreeFileMissing(t, worktreeDir, ".env")
+	assertWorktreePrivateExcludeMissing(t, worktreeDir, ".env")
+	assertGitStatusClean(t, worktreeDir)
+}
+
+func TestProvisionWorktreeEnvFilesWarnsForUnignoredSource(t *testing.T) {
+	tmpDir := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, tmpDir)
+	writeRootFileForWorktreeTest(t, tmpDir, ".env", "ROOT_ENV=1\n")
+	gitWrapper := git.New(tmpDir)
+	if _, err := gitWrapper.CreateWorktree("task-1", "integration"); err != nil {
+		t.Fatalf("CreateWorktree() setup error: %v", err)
+	}
+	worktreeDir := filepath.Join(tmpDir, paths.WorktreesDirName, "task-1")
+
+	warnings := ProvisionWorktreeEnvFiles(tmpDir, worktreeDir)
+	if len(warnings) != 1 || !strings.Contains(warnings[0], "source is not ignored by git") {
+		t.Fatalf("ProvisionWorktreeEnvFiles() warnings = %v, want source ignore warning", warnings)
+	}
+	assertWorktreeFileMissing(t, worktreeDir, ".env")
+	assertWorktreePrivateExcludeMissing(t, worktreeDir, ".env")
+	assertGitStatusClean(t, worktreeDir)
+}
+
+func TestProvisionWorktreeEnvFilesWarnsForTrackedSource(t *testing.T) {
+	tmpDir := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, tmpDir)
+	writeRootFileForWorktreeTest(t, tmpDir, ".env", "TRACKED_ENV=1\n")
+	testhelpers.MustGit(t, tmpDir, "add", ".env")
+	testhelpers.MustGit(t, tmpDir, "commit", "-m", "Track env file")
+	testhelpers.MustGit(t, tmpDir, "branch", "-f", "integration", "HEAD")
+	gitWrapper := git.New(tmpDir)
+	if _, err := gitWrapper.CreateWorktree("task-1", "integration"); err != nil {
+		t.Fatalf("CreateWorktree() setup error: %v", err)
+	}
+	worktreeDir := filepath.Join(tmpDir, paths.WorktreesDirName, "task-1")
+
+	warnings := ProvisionWorktreeEnvFiles(tmpDir, worktreeDir)
+	if len(warnings) != 1 || !strings.Contains(warnings[0], "source is not ignored by git") {
+		t.Fatalf("ProvisionWorktreeEnvFiles() warnings = %v, want source ignore warning for tracked file", warnings)
+	}
+	assertWorktreePrivateExcludeMissing(t, worktreeDir, ".env")
+	assertGitStatusClean(t, worktreeDir)
+}
+
+func TestProvisionWorktreeEnvFilesPrivateExcludeConflictWarningOnly(t *testing.T) {
+	tmpDir := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, tmpDir)
+	commitEnvIgnoreForWorktreeTest(t, tmpDir)
+	writeRootFileForWorktreeTest(t, tmpDir, ".env", "ROOT_ENV=1\n")
+	gitWrapper := git.New(tmpDir)
+	if _, err := gitWrapper.CreateWorktree("task-1", "integration"); err != nil {
+		t.Fatalf("CreateWorktree() setup error: %v", err)
+	}
+	worktreeDir := filepath.Join(tmpDir, paths.WorktreesDirName, "task-1")
+	conflictingExclude := filepath.Join(tmpDir, "other-exclude")
+	testhelpers.MustGit(t, worktreeDir, "config", "core.excludesFile", conflictingExclude)
+
+	warnings := ProvisionWorktreeEnvFiles(tmpDir, worktreeDir)
+	if len(warnings) != 1 || !strings.Contains(warnings[0], "configure worktree ignore") {
+		t.Fatalf("ProvisionWorktreeEnvFiles() warnings = %v, want private exclude conflict warning", warnings)
+	}
+	assertWorktreeFileMissing(t, worktreeDir, ".env")
+	assertGitStatusClean(t, worktreeDir)
+}
+
 func TestCreateWorktreePreparesSembleIgnoreForFreshWorktree(t *testing.T) {
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
@@ -1035,5 +1247,65 @@ func assertCreateWorktreeScipExcludeCount(t *testing.T, worktreeDir string, want
 	}
 	if got := strings.Count(string(content), ".liza/scip/"); got != want {
 		t.Fatalf("worktree exclude contains .liza/scip/ %d times, want %d; content: %q", got, want, content)
+	}
+}
+
+func commitEnvIgnoreForWorktreeTest(t *testing.T, projectRoot string) {
+	t.Helper()
+	ignore := ".env\n.env.*\n*.env\n.envrc\n.liza-hooks/\n"
+	if err := os.WriteFile(filepath.Join(projectRoot, ".gitignore"), []byte(ignore), 0o644); err != nil {
+		t.Fatalf("WriteFile(.gitignore) error: %v", err)
+	}
+	testhelpers.MustGit(t, projectRoot, "add", ".gitignore")
+	testhelpers.MustGit(t, projectRoot, "commit", "-m", "Ignore env files")
+	testhelpers.MustGit(t, projectRoot, "branch", "-f", "integration", "HEAD")
+}
+
+func writeRootFileForWorktreeTest(t *testing.T, projectRoot, rel, content string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(projectRoot, rel), []byte(content), 0o600); err != nil {
+		t.Fatalf("WriteFile(%s) error: %v", rel, err)
+	}
+}
+
+func assertWorktreePathIgnored(t *testing.T, worktreeDir, rel string) {
+	t.Helper()
+	cmd := exec.Command("git", "-C", worktreeDir, "check-ignore", "--quiet", "--", rel)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git check-ignore %s in %s failed: %v: %s", rel, worktreeDir, err, output)
+	}
+}
+
+func assertWorktreePrivateExcludeMissing(t *testing.T, worktreeDir, rel string) {
+	t.Helper()
+	gitDir := runGitInDir(t, worktreeDir, "rev-parse", "--git-dir")
+	if !filepath.IsAbs(gitDir) {
+		gitDir = filepath.Join(worktreeDir, gitDir)
+	}
+	content, err := os.ReadFile(filepath.Join(gitDir, "info", "exclude"))
+	if os.IsNotExist(err) {
+		return
+	}
+	if err != nil {
+		t.Fatalf("ReadFile(worktree private exclude) error: %v", err)
+	}
+	if strings.Contains(string(content), rel) {
+		t.Fatalf("worktree private exclude contains %q, want no mutation; content: %q", rel, content)
+	}
+}
+
+func assertWorktreeFileExists(t *testing.T, worktreeDir, rel string) {
+	t.Helper()
+	path := filepath.Join(worktreeDir, rel)
+	if _, err := os.Lstat(path); err != nil {
+		t.Fatalf("Lstat(%s) error: %v", path, err)
+	}
+}
+
+func assertWorktreeFileMissing(t *testing.T, worktreeDir, rel string) {
+	t.Helper()
+	path := filepath.Join(worktreeDir, rel)
+	if _, err := os.Lstat(path); !os.IsNotExist(err) {
+		t.Fatalf("Lstat(%s) error = %v, want not exist", path, err)
 	}
 }

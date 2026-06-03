@@ -136,6 +136,41 @@ func TestEnsureReviewerWorktree_MissingRecoverable_RunsPostWorktreeCmd(t *testin
 	}
 }
 
+func TestEnsureReviewerWorktree_MissingRecoverable_CopyWorktreeEnvFilesBeforePostWorktreeCmd(t *testing.T) {
+	tmpDir := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, tmpDir)
+	commitReviewerEnvIgnoreForWorktreeTest(t, tmpDir)
+	writeReviewerRootFile(t, tmpDir, ".env", "ROOT_ENV=1\n")
+	statePath, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	testhelpers.SetupPipelineConfig(t, tmpDir)
+
+	state := testhelpers.CreateValidState()
+	state.Config.CopyWorktreeEnvFiles = true
+	postCmd := "test -f .env && touch ../reviewer-saw-env"
+	state.Config.PostWorktreeCmd = &postCmd
+	now := time.Now().UTC()
+	task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusReviewing, now)
+	state.Tasks = []models.Task{task}
+	bb := testhelpers.WriteInitialState(t, statePath, state)
+
+	branchName := paths.TaskBranchPrefix + "task-1"
+	testhelpers.MustGit(t, tmpDir, "branch", branchName)
+
+	recovered, err := ensureReviewerWorktree(tmpDir, bb, "task-1", "code-reviewer-1")
+	if err != nil {
+		t.Fatalf("Expected successful recovery, got error: %v", err)
+	}
+	if !recovered {
+		t.Error("Expected recovered=true")
+	}
+
+	wtPath := filepath.Join(tmpDir, paths.WorktreesDirName, "task-1")
+	assertReviewerWorktreeFileExists(t, wtPath, ".env")
+	assertReviewerWorktreeFileExists(t, filepath.Join(tmpDir, paths.WorktreesDirName), "reviewer-saw-env")
+	assertReviewerWorktreePathIgnored(t, wtPath, ".env")
+	assertReviewerGitStatusClean(t, wtPath)
+}
+
 func TestEnsureReviewerWorktree_MissingRecoverable_RefreshesScipAfterPostWorktreeCmd(t *testing.T) {
 	t.Setenv(scipsearch.EnvEnableScipSearch, "true")
 
@@ -710,5 +745,51 @@ func TestEnsureReviewerWorktree_MissingBranchGone(t *testing.T) {
 	}
 	if agent.Status != models.AgentStatusIdle {
 		t.Errorf("Expected agent status IDLE, got %s", agent.Status)
+	}
+}
+
+func commitReviewerEnvIgnoreForWorktreeTest(t *testing.T, projectRoot string) {
+	t.Helper()
+	ignore := ".env\n.env.*\n*.env\n.envrc\n"
+	if err := os.WriteFile(filepath.Join(projectRoot, ".gitignore"), []byte(ignore), 0o644); err != nil {
+		t.Fatalf("WriteFile(.gitignore) error: %v", err)
+	}
+	testhelpers.MustGit(t, projectRoot, "add", ".gitignore")
+	testhelpers.MustGit(t, projectRoot, "commit", "-m", "Ignore env files")
+	testhelpers.MustGit(t, projectRoot, "branch", "-f", "integration", "HEAD")
+}
+
+func writeReviewerRootFile(t *testing.T, projectRoot, rel, content string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(projectRoot, rel), []byte(content), 0o600); err != nil {
+		t.Fatalf("WriteFile(%s) error: %v", rel, err)
+	}
+}
+
+func assertReviewerWorktreePathIgnored(t *testing.T, worktreeDir, rel string) {
+	t.Helper()
+	cmd := exec.Command("git", "-C", worktreeDir, "check-ignore", "--quiet", "--", rel)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git check-ignore %s in %s failed: %v: %s", rel, worktreeDir, err, output)
+	}
+}
+
+func assertReviewerWorktreeFileExists(t *testing.T, worktreeDir, rel string) {
+	t.Helper()
+	path := filepath.Join(worktreeDir, rel)
+	if _, err := os.Lstat(path); err != nil {
+		t.Fatalf("Lstat(%s) error: %v", path, err)
+	}
+}
+
+func assertReviewerGitStatusClean(t *testing.T, worktreeDir string) {
+	t.Helper()
+	cmd := exec.Command("git", "-C", worktreeDir, "status", "--porcelain")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git status --porcelain in %s failed: %v: %s", worktreeDir, err, output)
+	}
+	if strings.TrimSpace(string(output)) != "" {
+		t.Fatalf("git status --porcelain = %q, want clean", output)
 	}
 }

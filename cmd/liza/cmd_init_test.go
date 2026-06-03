@@ -44,6 +44,11 @@ func TestInitDispatch_WorkspaceFlagsRequireDescription(t *testing.T) {
 			wantErr: "requires a description argument",
 		},
 		{
+			name:    "copy-worktree-env-files without description errors",
+			args:    []string{"init", "--copy-worktree-env-files"},
+			wantErr: "requires a description argument",
+		},
+		{
 			name:    "entry-point without description errors",
 			args:    []string{"init", "--entry-point", "detailed-spec"},
 			wantErr: "requires a description argument",
@@ -86,6 +91,11 @@ func TestInitDispatch_WorkspaceFlagsRequireDescription(t *testing.T) {
 		{
 			name:    "agent flag with default-cli and no description errors",
 			args:    []string{"init", "--codex", "--default-cli", "codex"},
+			wantErr: "workspace flags",
+		},
+		{
+			name:    "agent flag with copy-worktree-env-files and no description errors",
+			args:    []string{"init", "--codex", "--copy-worktree-env-files"},
 			wantErr: "workspace flags",
 		},
 		{

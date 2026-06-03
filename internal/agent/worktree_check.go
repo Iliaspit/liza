@@ -77,6 +77,12 @@ func ensureReviewerWorktree(projectRoot string, bb *db.Blackboard, taskID, agent
 		return false, fmt.Errorf("worktree recreation failed: %w", attachErr)
 	}
 
+	if state.Config.CopyWorktreeEnvFiles {
+		for _, warning := range ops.ProvisionWorktreeEnvFiles(projectRoot, wtPath) {
+			logger.Warn("copy worktree env files warning after worktree recovery", "task_id", taskID, "warning", warning)
+		}
+	}
+
 	// Run post-worktree command to ensure recovered worktree is build-ready.
 	if state.Config.PostWorktreeCmd != nil {
 		if postErr := ops.RunPostWorktreeCmd(*state.Config.PostWorktreeCmd, wtPath); postErr != nil {

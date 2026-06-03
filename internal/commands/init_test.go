@@ -1673,6 +1673,76 @@ func TestInitCommandWithConfig_PostWorktreeCmd(t *testing.T) {
 	}
 }
 
+func TestInitCommandWithConfig_CopyWorktreeEnvFiles(t *testing.T) {
+	tmpDir := setupGitRepo(t)
+	defer os.RemoveAll(tmpDir)
+	setupGlobalLiza(t)
+
+	originalDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(originalDir)
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatal(err)
+	}
+
+	testhelpers.CreateCommittedSpecFile(t, tmpDir, "vision.md", "# Vision\n")
+
+	err = InitCommandWithConfig(InitParams{
+		Description:          "Goal with env files",
+		SpecRef:              "specs/vision.md",
+		CopyWorktreeEnvFiles: true,
+	})
+	if err != nil {
+		t.Fatalf("InitCommandWithConfig() error = %v", err)
+	}
+
+	bb := db.New(filepath.Join(tmpDir, ".liza", "state.yaml"))
+	state, err := bb.Read()
+	if err != nil {
+		t.Fatalf("Failed to read state: %v", err)
+	}
+	if !state.Config.CopyWorktreeEnvFiles {
+		t.Fatal("state.Config.CopyWorktreeEnvFiles = false, want true")
+	}
+}
+
+func TestInitCommandWithConfig_CopyWorktreeEnvFilesFromEnv(t *testing.T) {
+	tmpDir := setupGitRepo(t)
+	defer os.RemoveAll(tmpDir)
+	setupGlobalLiza(t)
+	t.Setenv(models.EnvEnableCopyWorktreeEnvFiles, "true")
+
+	originalDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(originalDir)
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatal(err)
+	}
+
+	testhelpers.CreateCommittedSpecFile(t, tmpDir, "vision.md", "# Vision\n")
+
+	err = InitCommandWithConfig(InitParams{
+		Description: "Goal with env files",
+		SpecRef:     "specs/vision.md",
+	})
+	if err != nil {
+		t.Fatalf("InitCommandWithConfig() error = %v", err)
+	}
+
+	bb := db.New(filepath.Join(tmpDir, ".liza", "state.yaml"))
+	state, err := bb.Read()
+	if err != nil {
+		t.Fatalf("Failed to read state: %v", err)
+	}
+	if !state.Config.CopyWorktreeEnvFiles {
+		t.Fatal("state.Config.CopyWorktreeEnvFiles = false, want true from env")
+	}
+}
+
 func TestInitCommandWithConfig_ScipSearchPersistsConfig(t *testing.T) {
 	tmpDir := setupGitRepo(t)
 	defer os.RemoveAll(tmpDir)

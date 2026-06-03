@@ -128,7 +128,7 @@ liza setup --agent-tools ~/my-agent-tools.md  # use custom AGENT_TOOLS.md
 
 **2. Initialize Project**
 
-> **Commit your spec file and `.pre-commit-config.yaml` before running `liza init`.** Worktrees are created from the configured integration branch, so uncommitted files won't be visible to agents.
+> **Commit your spec file and `.pre-commit-config.yaml` before running `liza init`.** Worktrees are created from the configured integration branch, so uncommitted files won't be visible to agents unless you explicitly enable ignored root env-file copying with `--copy-worktree-env-files` or `LIZA_ENABLE_COPY_ENV_FILES=true`.
 
 ```bash
 # Interactive wizard: walks through setup choices.

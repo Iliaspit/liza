@@ -1174,6 +1174,37 @@ func TestClaimTask_PostWorktreeCmdRunsOnFreshClaim(t *testing.T) {
 	}
 }
 
+func TestClaimTask_CopyWorktreeEnvFilesOnFreshClaim(t *testing.T) {
+	tmpDir := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, tmpDir)
+	commitEnvIgnoreForWorktreeTest(t, tmpDir)
+	writeRootFileForWorktreeTest(t, tmpDir, ".env", "ROOT_ENV=1\n")
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	t.Setenv(stacklit.EnvEnableStacklit, "false")
+
+	now := time.Now().UTC()
+	state := testhelpers.CreateValidState()
+	registerClaimTaskTestAgents(state)
+	state.Config.CopyWorktreeEnvFiles = true
+	state.Tasks = []models.Task{
+		testhelpers.BuildTaskByStatus("task-1", models.TaskStatusReady, now),
+	}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	result, err := ClaimTask(tmpDir, "task-1", "coder-1")
+	if err != nil {
+		t.Fatalf("ClaimTask() error: %v", err)
+	}
+	if len(result.Warnings) != 0 {
+		t.Fatalf("ClaimTask() warnings = %v, want none", result.Warnings)
+	}
+
+	worktreeDir := filepath.Join(tmpDir, paths.WorktreesDirName, "task-1")
+	assertWorktreeFileExists(t, worktreeDir, ".env")
+	assertWorktreePathIgnored(t, worktreeDir, ".env")
+	assertGitStatusClean(t, worktreeDir)
+}
+
 func TestClaimTask_PostWorktreeCmdFailureProducesWarning(t *testing.T) {
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)

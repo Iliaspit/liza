@@ -11,6 +11,7 @@ import (
 
 	"github.com/liza-mas/liza/internal/db"
 	"github.com/liza-mas/liza/internal/embedded"
+	"github.com/liza-mas/liza/internal/envgate"
 	lzerr "github.com/liza-mas/liza/internal/errors"
 	"github.com/liza-mas/liza/internal/initcheck"
 	"github.com/liza-mas/liza/internal/models"
@@ -26,6 +27,7 @@ type InitProjectParams struct {
 	Branch               string // default "integration" if empty
 	EntryPoint           string // optional
 	PostWorktreeCmd      string // optional
+	CopyWorktreeEnvFiles bool   // optional explicit authorization to copy ignored root env files into task worktrees
 	DefaultCLI           string // optional; default CLI for agent spawning
 	DefaultDoerCLI       string // optional; default CLI for doer and orchestrator agent spawning
 	DefaultReviewerCLI   string // optional; default CLI for reviewer agent spawning
@@ -148,6 +150,7 @@ func InitProject(projectRoot string, params InitProjectParams) error {
 	goalID := fmt.Sprintf("goal-%d", timestamp.Unix())
 
 	postWorktreeCmd := stringPtrIfNonEmpty(params.PostWorktreeCmd)
+	copyWorktreeEnvFiles := params.CopyWorktreeEnvFiles || envgate.Truthy(os.Getenv(models.EnvEnableCopyWorktreeEnvFiles))
 
 	state := &models.State{
 		Version:         1,
@@ -224,6 +227,7 @@ func InitProject(projectRoot string, params InitProjectParams) error {
 			AutoResume:               params.AutoResume,
 			NoFollowUp:               params.NoFollowUp,
 			PostWorktreeCmd:          postWorktreeCmd,
+			CopyWorktreeEnvFiles:     copyWorktreeEnvFiles,
 		},
 	}
 

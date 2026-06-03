@@ -90,6 +90,8 @@ const (
 	DefaultAgentProgressTimeoutSec  = 1800 // 30 minutes
 )
 
+const EnvEnableCopyWorktreeEnvFiles = "LIZA_ENABLE_COPY_ENV_FILES"
+
 // Bounds for heartbeat interval validation.
 const (
 	MinHeartbeatIntervalSeconds = 1
@@ -144,6 +146,7 @@ type Config struct {
 	AutoResume               bool       `yaml:"auto_resume,omitempty"`
 	NoFollowUp               bool       `yaml:"no_follow_up,omitempty"`
 	PostWorktreeCmd          *string    `yaml:"post_worktree_cmd,omitempty"`
+	CopyWorktreeEnvFiles     bool       `yaml:"copy_worktree_env_files,omitempty"`
 	// AutoCheckpointSummary controls whether Liza auto-invokes the
 	// checkpoint-summary skill against a task that just reached MERGED and
 	// writes the result to .liza/checkpoint-summary.md. Default (nil) is ON.

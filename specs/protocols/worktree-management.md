@@ -64,6 +64,14 @@ Merge to main is human-triggered, not part of Liza flow.
 3. No cross-worktree file access
 4. No direct commits to integration branch
 
+**Ignored env-file provisioning:** Worktree env-file copying is disabled by
+default. When `config.copy_worktree_env_files` is true, worktree setup may copy
+only root-level regular files matching `.env`, `.env.*`, `*.env`, or `.envrc`.
+The source path must be ignored by Git, the destination path must be made and
+verified ignored in the task worktree before copying, and existing destination
+files are never overwritten. Failures produce path-only warnings and do not
+block worktree creation.
+
 ---
 
 ## Lease Expiration and Worktree State

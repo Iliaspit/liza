@@ -68,6 +68,7 @@ func ClaimTask(projectRoot, taskID, agentID string) (*ClaimResult, error) {
 	var baseCommit string
 	var integrationBranch string
 	var postWorktreeCmd *string
+	var copyWorktreeEnvFiles bool
 	var scipSearchLanguages []string
 	var leaseDuration int
 	var maxCoderIterations int
@@ -148,6 +149,7 @@ func ClaimTask(projectRoot, taskID, agentID string) (*ClaimResult, error) {
 	taskStatus = task.Status
 	integrationBranch = state.Config.IntegrationBranch
 	postWorktreeCmd = state.Config.PostWorktreeCmd
+	copyWorktreeEnvFiles = state.Config.CopyWorktreeEnvFiles
 	scipSearchLanguages = append([]string(nil), state.Config.ScipSearch...)
 	leaseDuration = state.Config.LeaseDuration
 	if leaseDuration == 0 {
@@ -227,6 +229,14 @@ func ClaimTask(projectRoot, taskID, agentID string) (*ClaimResult, error) {
 	}
 	worktreeCreated := worktreePhase.created
 	worktreeDeleted := worktreePhase.deleted
+
+	var envFileWarnings []string
+	if copyWorktreeEnvFiles {
+		envFileWarnings = ProvisionWorktreeEnvFiles(lp.ProjectRoot(), worktreeDir)
+		for _, warning := range envFileWarnings {
+			log.Printf("WARNING: claim-task %s: %s", taskID, warning)
+		}
+	}
 
 	// Run post-worktree command after worktree provisioning.
 	// Runs on: fresh claims, rejection reclaims (including same-coder), integration-fix.
@@ -350,7 +360,8 @@ func ClaimTask(projectRoot, taskID, agentID string) (*ClaimResult, error) {
 		return nil, fmt.Errorf("failed to commit claim: %w", err)
 	}
 
-	warnings := append([]string{}, postCmdWarnings...)
+	warnings := append([]string{}, envFileWarnings...)
+	warnings = append(warnings, postCmdWarnings...)
 	warnings = append(warnings, sembleWarnings...)
 	warnings = append(warnings, scipWarnings...)
 	warnings = append(warnings, stacklitWarnings...)

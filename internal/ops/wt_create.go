@@ -6,13 +6,16 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/liza-mas/liza/internal/db"
 	"github.com/liza-mas/liza/internal/embedded"
 	"github.com/liza-mas/liza/internal/errors"
 	"github.com/liza-mas/liza/internal/git"
+	"github.com/liza-mas/liza/internal/gitenv"
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/paths"
+	"github.com/liza-mas/liza/internal/worktreeexclude"
 )
 
 // worktreeHooksDirName is the directory, relative to each worktree root, where
@@ -54,6 +57,7 @@ func CreateWorktree(projectRoot, taskID string, fresh bool) (*CreateWorktreeResu
 
 	integrationBranch := state.Config.IntegrationBranch
 	postCmd := state.Config.PostWorktreeCmd
+	copyEnvFiles := state.Config.CopyWorktreeEnvFiles
 	scipSearchLanguages := append([]string(nil), state.Config.ScipSearch...)
 
 	gitWrapper := git.New(lp.ProjectRoot())
@@ -74,6 +78,9 @@ func CreateWorktree(projectRoot, taskID string, fresh bool) (*CreateWorktreeResu
 			// Install the pre-commit hook — idempotent, upgrades pre-hook-era worktrees
 			// without requiring fresh=true.
 			result.Warnings = append(result.Warnings, InstallWorktreePreCommitHook(gitWrapper, worktreeDir, taskID)...)
+			if copyEnvFiles {
+				result.Warnings = append(result.Warnings, ProvisionWorktreeEnvFiles(lp.ProjectRoot(), worktreeDir)...)
+			}
 			// Run post-worktree command even on existing worktrees — idempotent, catches prior failures.
 			if postCmd != nil {
 				if err := RunPostWorktreeCmd(*postCmd, worktreeDir); err != nil {
@@ -125,6 +132,10 @@ func CreateWorktree(projectRoot, taskID string, fresh bool) (*CreateWorktreeResu
 	// post-submission mutations). Non-fatal: the submit-verdict HEAD check
 	// remains as the second line of defense.
 	result.Warnings = append(result.Warnings, InstallWorktreePreCommitHook(gitWrapper, worktreeDir, taskID)...)
+
+	if copyEnvFiles {
+		result.Warnings = append(result.Warnings, ProvisionWorktreeEnvFiles(lp.ProjectRoot(), worktreeDir)...)
+	}
 
 	// Run post-worktree command so the worktree is build/test-ready.
 	// Non-fatal: agents can run the command manually.
@@ -184,6 +195,75 @@ func ProvisionClaudeConfig(projectRoot, worktreeDir string) []string {
 	}
 
 	return warnings
+}
+
+// ProvisionWorktreeEnvFiles copies explicitly authorized, ignored root env files
+// from the project root into a task worktree. It never walks subdirectories and
+// never follows symlinks; only root-level regular files matching the candidate
+// predicate are eligible. Destination ignore setup is verified before any copy.
+func ProvisionWorktreeEnvFiles(projectRoot, worktreeDir string) []string {
+	entries, err := os.ReadDir(projectRoot)
+	if err != nil {
+		return []string{fmt.Sprintf("copy-worktree-env-files: read project root: %v", err)}
+	}
+
+	var warnings []string
+	for _, entry := range entries {
+		rel := entry.Name()
+		if !isWorktreeEnvFileCandidate(rel) {
+			continue
+		}
+
+		src := filepath.Join(projectRoot, rel)
+		info, err := os.Lstat(src)
+		if err != nil {
+			warnings = append(warnings, fmt.Sprintf("copy-worktree-env-files: %s: inspect source: %v", rel, err))
+			continue
+		}
+		if !info.Mode().IsRegular() {
+			warnings = append(warnings, fmt.Sprintf("copy-worktree-env-files: %s: source is not a regular file", rel))
+			continue
+		}
+
+		if err := checkIgnored(projectRoot, rel); err != nil {
+			warnings = append(warnings, fmt.Sprintf("copy-worktree-env-files: %s: source is not ignored by git", rel))
+			continue
+		}
+		if err := worktreeexclude.EnsurePrivateExclude(worktreeDir, rel); err != nil {
+			warnings = append(warnings, fmt.Sprintf("copy-worktree-env-files: %s: configure worktree ignore: %v", rel, err))
+			continue
+		}
+		if err := checkIgnored(worktreeDir, rel); err != nil {
+			warnings = append(warnings, fmt.Sprintf("copy-worktree-env-files: %s: destination is not ignored by git", rel))
+			continue
+		}
+
+		dst := filepath.Join(worktreeDir, rel)
+		if _, err := os.Lstat(dst); err == nil {
+			// Preserve existing worktree-local env files; ignore was verified above.
+			continue
+		} else if !os.IsNotExist(err) {
+			warnings = append(warnings, fmt.Sprintf("copy-worktree-env-files: %s: inspect destination: %v", rel, err))
+			continue
+		}
+
+		if err := copyFilePreserveMode(src, dst); err != nil {
+			warnings = append(warnings, fmt.Sprintf("copy-worktree-env-files: %s: copy: %v", rel, err))
+		}
+	}
+	return warnings
+}
+
+func isWorktreeEnvFileCandidate(name string) bool {
+	return name == ".env" ||
+		strings.HasPrefix(name, ".env.") ||
+		strings.HasSuffix(name, ".env") ||
+		name == ".envrc"
+}
+
+func checkIgnored(dir, rel string) error {
+	_, err := gitenv.CombinedOutput(dir, "check-ignore", "--quiet", "--", rel)
+	return err
 }
 
 // InstallWorktreePreCommitHook writes the rendered pre-commit hook into the

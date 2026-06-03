@@ -108,6 +108,7 @@ All configuration lives in `.liza/state.yaml` under the `config` section.
 | `default_reviewer_cli` | (none) | — | — | CLI name | Default coding agent CLI for reviewers |
 | `codex_package_version` | (none) | — | — | npm package version | Pins headless Codex agents to `@openai/codex@<version>` |
 | `post_worktree_cmd` | (none) | — | — | shell cmd | Command run after worktree creation (e.g. `npm install`) |
+| `copy_worktree_env_files` | false | — | — | boolean | Explicitly authorize copying ignored root env files into task worktrees |
 | `auto_checkpoint_summary` | true | — | — | boolean | Auto-runs checkpoint-summary after successful merges and writes `.liza/checkpoint-summary.md` |
 | `scip_search` | (none) | — | — | language list | Durable allowlist of SCIP languages Liza may index when `LIZA_ENABLE_SCIP_SEARCH` is truthy |
 
@@ -494,6 +495,10 @@ Worktrees are bare checkouts — they lack build artifacts like `node_modules/`,
 - **After init:** Add `post_worktree_cmd: "your command"` to the `config` section of `.liza/state.yaml`.
 
 **Behavior:** The command runs via `sh -c` in the worktree directory. It is non-fatal — warnings are emitted but worktree creation succeeds even if the command fails.
+
+**Ignored env files:** Worktrees are created from committed files, so untracked `.env` files are not present by default. Set `copy_worktree_env_files: true`, initialize with `liza init "Goal" --copy-worktree-env-files`, or set `LIZA_ENABLE_COPY_ENV_FILES=true` during init to explicitly authorize Liza to copy root-level env files before `post_worktree_cmd` runs. Eligible files are regular files only and must match exactly one of these root-level patterns: `.env`, `.env.*`, `*.env`, `.envrc`. The `*.env` pattern includes names such as `secrets.env` when they are ignored. Liza verifies the source is ignored, configures the task worktree private exclude, verifies the destination path is ignored, and then copies only when the destination is missing. Unsafe cases are warning-only and path-only; contents are not logged.
+
+`.envrc` is included because direnv setup is commonly required for build/test commands, but it is shell configuration. Enabling this option authorizes copying local shell environment setup as well as env values. Custom names such as `.flaskenv` are not copied in this v1 behavior.
 
 **Coder fallback:** If a coding worktree still lacks declared project dependencies during validation, coder prompts pre-authorize rerunning the configured project-scoped bootstrap command. Coders first query `liza get config.post_worktree_cmd --json`; when configured, they may run that command from the task worktree. If absent, they may use only the repo's existing lockfile-preserving install workflow. They must not edit manifests or lockfiles, install global/system tools, or add/upgrade/remove dependencies unless the task scope explicitly requires it.
 

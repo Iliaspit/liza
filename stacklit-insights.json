@@ -7,6 +7,7 @@
     "internal/codexconfig": "Codex workspace filesystem permission rendering and provider launch configuration helpers.",
     "internal/commands": "User-facing command handlers that validate CLI input and delegate lifecycle operations.",
     "internal/db": "Blackboard state access layer with locking, watchers, metrics, and model persistence.",
+    "internal/envgate": "Envgate",
     "internal/errors": "Typed errors, exit codes, and safe user-facing error classification.",
     "internal/filelock": "Cross-process file locking and lock metrics for serialized state/log access.",
     "internal/git": "Git repository, merge, rebase, branch, commit, and worktree operations.",

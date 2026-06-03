@@ -138,6 +138,9 @@ func TestInitProject_Success(t *testing.T) {
 	if state.Goal.SpecRef != "specs/goal.md" {
 		t.Errorf("SpecRef = %q, want %q", state.Goal.SpecRef, "specs/goal.md")
 	}
+	if state.Config.CopyWorktreeEnvFiles {
+		t.Error("CopyWorktreeEnvFiles = true, want false by default")
+	}
 
 	// Verify log file exists
 	logPath := filepath.Join(lizaDir, "log.yaml")
@@ -173,6 +176,50 @@ func TestInitProject_Success(t *testing.T) {
 	pipelinePath := filepath.Join(lizaDir, "pipeline.yaml")
 	if _, err := os.Stat(pipelinePath); os.IsNotExist(err) {
 		t.Fatal("pipeline.yaml was not created")
+	}
+}
+
+func TestInitProject_CopyWorktreeEnvFiles(t *testing.T) {
+	projectRoot, specFile := setupInitTestDir(t)
+
+	err := InitProject(projectRoot, InitProjectParams{
+		Description:          "Test project",
+		SpecRef:              specFile,
+		CopyWorktreeEnvFiles: true,
+	})
+	if err != nil {
+		t.Fatalf("InitProject() error: %v", err)
+	}
+
+	bb := db.For(filepath.Join(projectRoot, ".liza", "state.yaml"))
+	state, err := bb.Read()
+	if err != nil {
+		t.Fatalf("Failed to read state: %v", err)
+	}
+	if !state.Config.CopyWorktreeEnvFiles {
+		t.Fatal("CopyWorktreeEnvFiles = false, want true")
+	}
+}
+
+func TestInitProject_CopyWorktreeEnvFilesFromEnv(t *testing.T) {
+	projectRoot, specFile := setupInitTestDir(t)
+	t.Setenv(models.EnvEnableCopyWorktreeEnvFiles, "1")
+
+	err := InitProject(projectRoot, InitProjectParams{
+		Description: "Test project",
+		SpecRef:     specFile,
+	})
+	if err != nil {
+		t.Fatalf("InitProject() error: %v", err)
+	}
+
+	bb := db.For(filepath.Join(projectRoot, ".liza", "state.yaml"))
+	state, err := bb.Read()
+	if err != nil {
+		t.Fatalf("Failed to read state: %v", err)
+	}
+	if !state.Config.CopyWorktreeEnvFiles {
+		t.Fatal("CopyWorktreeEnvFiles = false, want true from env")
 	}
 }
 
