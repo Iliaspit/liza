@@ -256,6 +256,88 @@ def test_rich_bash_rtk_rg_exit_one_empty_result_is_not_error() -> None:
     assert report.actions[0].is_error is False
 
 
+def test_rich_model_usage_does_not_set_session_model() -> None:
+    analyzer = load_analyzer()
+
+    report = analyzer.parse_rich(
+        as_lines(
+            {"type": "system", "session_id": "s"},
+            {
+                "type": "result",
+                "modelUsage": {
+                    "claude-haiku-4-5-20251001": {
+                        "contextWindow": 200000,
+                        "maxOutputTokens": 32000,
+                    }
+                },
+            },
+        )
+    )
+
+    assert report.meta.model == ""
+    assert report.meta.context_window == 200000
+    assert report.meta.max_output_tokens == 32000
+
+
+def test_rich_system_event_sets_session_model() -> None:
+    analyzer = load_analyzer()
+
+    report = analyzer.parse_rich(
+        as_lines(
+            {"type": "system", "session_id": "s", "model": "claude-opus-4-5-20251101"},
+            {
+                "type": "result",
+                "modelUsage": {
+                    "claude-haiku-4-5-20251001": {
+                        "contextWindow": 200000,
+                        "maxOutputTokens": 32000,
+                    }
+                },
+            },
+        )
+    )
+
+    assert report.meta.model == "claude-opus-4-5-20251101"
+    assert report.meta.context_window == 200000
+    assert report.meta.max_output_tokens == 32000
+
+
+def test_rich_later_system_events_do_not_clear_session_model() -> None:
+    analyzer = load_analyzer()
+
+    report = analyzer.parse_rich(
+        as_lines(
+            {
+                "type": "system",
+                "subtype": "init",
+                "session_id": "s",
+                "model": "claude-opus-4-8[1m]",
+                "mcp_servers": [{"name": "playwright", "status": "pending"}],
+            },
+            {"type": "system", "subtype": "thinking_tokens", "session_id": "s", "estimated_tokens": 50},
+            {
+                "type": "result",
+                "modelUsage": {
+                    "claude-haiku-4-5-20251001": {
+                        "contextWindow": 200000,
+                        "maxOutputTokens": 32000,
+                    },
+                    "claude-opus-4-8[1m]": {
+                        "contextWindow": 1000000,
+                        "maxOutputTokens": 64000,
+                    },
+                },
+            },
+        )
+    )
+
+    assert report.meta.model == "claude-opus-4-8[1m]"
+    assert report.meta.session_id == "s"
+    assert report.mcp_servers == [{"name": "playwright", "status": "pending"}]
+    assert report.meta.context_window == 1000000
+    assert report.meta.max_output_tokens == 64000
+
+
 def test_efficiency_insights_ignore_shared_prefix_non_duplicates() -> None:
     analyzer = load_analyzer()
     report = analyzer.SessionReport()

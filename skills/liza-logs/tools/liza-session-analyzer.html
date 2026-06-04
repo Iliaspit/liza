@@ -172,8 +172,14 @@ function parseOrchestratorLog(lines) {
         lastTsMs = tsMs;
       }
       if (obj.type === "system") {
-        systemInfo = { model: obj.model, sessionId: obj.session_id, tools: obj.tools?.length || 0,
-          mcpServers: obj.mcp_servers || [], skills: obj.skills?.length || 0, plugins: obj.plugins || [] };
+        systemInfo = {
+          model: obj.model || systemInfo?.model,
+          sessionId: obj.session_id || systemInfo?.sessionId,
+          tools: obj.tools ? obj.tools.length : (systemInfo?.tools || 0),
+          mcpServers: obj.mcp_servers || systemInfo?.mcpServers || [],
+          skills: obj.skills ? obj.skills.length : (systemInfo?.skills || 0),
+          plugins: obj.plugins || systemInfo?.plugins || [],
+        };
       }
       if (obj.type === "assistant" && obj.message) {
         const msg = obj.message;
@@ -832,7 +838,7 @@ function analyzeClaudeCode(parsed) {
   }
 
   return {
-    summary: { model: Object.keys(modelUsage)[0] || systemInfo?.model || "unknown",
+    summary: { model: systemInfo?.model || "unknown",
       sessionId: systemInfo?.sessionId || "unknown",
       totalCostUsd: resultInfo?.totalCostUsd || 0, durationMs: resultInfo?.durationMs || 0,
       durationApiMs: resultInfo?.durationApiMs || 0, numTurns: resultInfo?.numTurns || turns.length,

@@ -340,15 +340,18 @@ def parse_rich(lines: list[str]) -> SessionReport:
                 last_ts_ms = ts_ms
 
         if event_type == "system":
-            report.meta.session_id = obj.get("session_id", "")
-            report.meta.model = obj.get("model", "")
-            for srv in obj.get("mcp_servers", []):
-                report.mcp_servers.append(
+            if obj.get("session_id"):
+                report.meta.session_id = obj.get("session_id", "")
+            if obj.get("model"):
+                report.meta.model = obj.get("model", "")
+            if obj.get("mcp_servers"):
+                report.mcp_servers = [
                     {
                         "name": srv.get("name", ""),
                         "status": srv.get("status", ""),
                     }
-                )
+                    for srv in obj.get("mcp_servers", [])
+                ]
 
         elif event_type == "assistant":
             msg = obj.get("message", {})
@@ -495,7 +498,6 @@ def parse_rich(lines: list[str]) -> SessionReport:
             usage = obj.get("usage", {})
             model_usage = obj.get("modelUsage", {})
             for model_name, mu in model_usage.items():
-                report.meta.model = report.meta.model or model_name
                 report.meta.context_window = mu.get("contextWindow", 0)
                 report.meta.max_output_tokens = mu.get("maxOutputTokens", 0)
 
