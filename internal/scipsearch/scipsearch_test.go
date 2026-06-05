@@ -117,7 +117,7 @@ func TestPairingCommandPlanningBuildsConcreteSingleRootPlans(t *testing.T) {
 	target := t.TempDir()
 	writeTestFile(t, target, "web/tsconfig.json", `{"include":["src/**/*.ts"]}`)
 
-	plans, err := PlanPairingCommands(PairingPlanOptions{
+	result, err := PlanPairingCommands(PairingPlanOptions{
 		ProjectRoot: target,
 		GitFiles: func(root string) ([]string, error) {
 			if root != target {
@@ -136,6 +136,7 @@ func TestPairingCommandPlanningBuildsConcreteSingleRootPlans(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PlanPairingCommands() error = %v", err)
 	}
+	plans := result.Plans
 
 	want := []RuntimeCommandPlan{
 		{
@@ -168,7 +169,7 @@ func TestPairingCommandPlanningBuildsConcreteSingleRootPlans(t *testing.T) {
 func TestPairingCommandPlanningExplicitLanguageFiltersDoNotSelectRoots(t *testing.T) {
 	target := t.TempDir()
 
-	plans, err := PlanPairingCommands(PairingPlanOptions{
+	result, err := PlanPairingCommands(PairingPlanOptions{
 		ProjectRoot:       target,
 		ExplicitLanguages: []string{"go", "go"},
 		GitFiles: func(string) ([]string, error) {
@@ -185,6 +186,7 @@ func TestPairingCommandPlanningExplicitLanguageFiltersDoNotSelectRoots(t *testin
 	if err != nil {
 		t.Fatalf("PlanPairingCommands() error = %v", err)
 	}
+	plans := result.Plans
 	if got, want := planLanguages(plans), []string{"go"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("plan languages = %v, want %v", got, want)
 	}
@@ -195,6 +197,7 @@ func TestPairingCommandPlanningExplicitLanguageFiltersDoNotSelectRoots(t *testin
 	_, err = PlanPairingCommands(PairingPlanOptions{
 		ProjectRoot:       target,
 		ExplicitLanguages: []string{"go"},
+		SkipUnresolved:    true,
 		GitFiles: func(string) ([]string, error) {
 			return []string{
 				"services/api/go.mod",
@@ -230,7 +233,7 @@ func TestPairingCommandPlanningOverridesAmbiguousMonorepoRoots(t *testing.T) {
 		t.Fatalf("ParsePairingCommandOverrides() error = %v", err)
 	}
 
-	plans, err := PlanPairingCommands(PairingPlanOptions{
+	result, err := PlanPairingCommands(PairingPlanOptions{
 		ProjectRoot:      target,
 		CommandOverrides: overrides,
 		GitFiles: func(string) ([]string, error) {
@@ -251,6 +254,7 @@ func TestPairingCommandPlanningOverridesAmbiguousMonorepoRoots(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PlanPairingCommands() error = %v", err)
 	}
+	plans := result.Plans
 
 	want := []RuntimeCommandPlan{
 		{
@@ -300,6 +304,46 @@ func TestPairingCommandPlanningRejectsOverrideOutsideExplicitLanguageFilter(t *t
 	}
 	if !strings.Contains(err.Error(), "outside explicit --scip-search allowlist") {
 		t.Fatalf("PlanPairingCommands() error = %v, want allowlist diagnostic", err)
+	}
+}
+
+func TestPairingCommandPlanningCanSkipUnresolvedAutoDetectedRoots(t *testing.T) {
+	target := t.TempDir()
+	writeTestFile(t, target, "apps/web/tsconfig.json", `{"include":["src/**/*.ts"]}`)
+	writeTestFile(t, target, "apps/admin/tsconfig.json", `{"include":["src/**/*.ts"]}`)
+
+	result, err := PlanPairingCommands(PairingPlanOptions{
+		ProjectRoot:    target,
+		SkipUnresolved: true,
+		GitFiles: func(string) ([]string, error) {
+			return []string{
+				"go.mod",
+				"cmd/main.go",
+				"apps/web/tsconfig.json",
+				"apps/web/src/app.ts",
+				"apps/admin/tsconfig.json",
+				"apps/admin/src/app.ts",
+			}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("PlanPairingCommands() error = %v", err)
+	}
+	if got, want := planLanguages(result.Plans), []string{"go"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("plan languages = %v, want %v", got, want)
+	}
+	wantSkips := []PairingPlanSkip{
+		{
+			Language: "typescript",
+			Candidates: []string{
+				filepath.Join(target, "apps", "admin", "src"),
+				filepath.Join(target, "apps", "web", "src"),
+			},
+			Reason: PairingPlanSkipAmbiguousRoots,
+		},
+	}
+	if !reflect.DeepEqual(result.Skips, wantSkips) {
+		t.Fatalf("skips = %#v, want %#v", result.Skips, wantSkips)
 	}
 }
 

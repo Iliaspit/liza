@@ -63,6 +63,29 @@ type PairingPlanOptions struct {
 	ExplicitLanguages []string
 	CommandOverrides  []PairingCommandOverride
 	GitFiles          GitFilesFunc
+	SkipUnresolved    bool // best-effort only; ignored when ExplicitLanguages is non-empty
+}
+
+// PairingPlanResult reports concrete pairing SCIP plans plus optional skipped
+// languages when planning is allowed to be best-effort.
+type PairingPlanResult struct {
+	Plans []RuntimeCommandPlan
+	Skips []PairingPlanSkip
+}
+
+// PairingPlanSkipReason identifies why a pairing SCIP language was skipped.
+type PairingPlanSkipReason string
+
+const (
+	PairingPlanSkipAmbiguousRoots PairingPlanSkipReason = "ambiguous_roots"
+	PairingPlanSkipNoCandidates   PairingPlanSkipReason = "no_candidates"
+)
+
+// PairingPlanSkip carries planner facts for presentation by callers.
+type PairingPlanSkip struct {
+	Language   string
+	Candidates []string
+	Reason     PairingPlanSkipReason
 }
 
 // PairingCommandOverride pins one pairing-mode language indexer to explicit
@@ -126,7 +149,7 @@ type RefreshFailure struct {
 
 // PairingRuntimeInferenceNote states the intentional difference between pairing
 // hook planning and MAS runtime refresh planning.
-const PairingRuntimeInferenceNote = "MAS runtime SCIP planning intentionally remains deterministic/fallback-based; pairing planning rejects ambiguous roots before hook generation."
+const PairingRuntimeInferenceNote = "MAS runtime SCIP planning intentionally remains deterministic/fallback-based; pairing planning requires confident roots and rejects ambiguous explicit languages before hook generation."
 
 var (
 	runnerMu      sync.Mutex
@@ -310,12 +333,12 @@ func AvailableIndexes(opts RuntimePlanOptions) ([]IndexRef, error) {
 }
 
 // PlanPairingCommands returns concrete repo-root SCIP indexer commands for
-// pairing init hook generation. It rejects ambiguous project layouts instead of
-// choosing deterministic/fallback roots as MAS runtime planning does.
-func PlanPairingCommands(opts PairingPlanOptions) ([]RuntimeCommandPlan, error) {
+// pairing init hook generation. It rejects ambiguous project layouts unless
+// SkipUnresolved is set, because pairing hook commands need stable roots.
+func PlanPairingCommands(opts PairingPlanOptions) (PairingPlanResult, error) {
 	projectRoot, err := filepath.Abs(opts.ProjectRoot)
 	if err != nil {
-		return nil, fmt.Errorf("resolve pairing scip-search project root: %w", err)
+		return PairingPlanResult{}, fmt.Errorf("resolve pairing scip-search project root: %w", err)
 	}
 
 	gitFiles := opts.GitFiles
@@ -324,47 +347,54 @@ func PlanPairingCommands(opts PairingPlanOptions) ([]RuntimeCommandPlan, error) 
 	}
 	files, err := gitFiles(projectRoot)
 	if err != nil {
-		return nil, fmt.Errorf("detect pairing scip-search languages: %w", err)
+		return PairingPlanResult{}, fmt.Errorf("detect pairing scip-search languages: %w", err)
 	}
 
 	languages := detectLanguages(files)
 	explicitFilter := len(opts.ExplicitLanguages) > 0
+	skipUnresolved := opts.SkipUnresolved && !explicitFilter
 	if len(opts.ExplicitLanguages) > 0 {
 		languages, err = canonicalizeExplicit(opts.ExplicitLanguages)
 		if err != nil {
-			return nil, err
+			return PairingPlanResult{}, err
 		}
 	}
 
 	overrides, err := pairingOverrideMap(opts.CommandOverrides)
 	if err != nil {
-		return nil, err
+		return PairingPlanResult{}, err
 	}
 	if explicitFilter {
 		if err := ensureOverridesAllowedByExplicitLanguages(languages, overrides); err != nil {
-			return nil, err
+			return PairingPlanResult{}, err
 		}
 	} else {
 		languages = mergePairingLanguages(languages, overrides)
 	}
 
-	plans := make([]RuntimeCommandPlan, 0, len(languages))
+	result := PairingPlanResult{
+		Plans: make([]RuntimeCommandPlan, 0, len(languages)),
+	}
 	for _, language := range languages {
 		if override, ok := overrides[language]; ok {
 			plan, err := pairingCommandOverridePlan(projectRoot, override)
 			if err != nil {
-				return nil, err
+				return PairingPlanResult{}, err
 			}
-			plans = append(plans, plan)
+			result.Plans = append(result.Plans, plan)
 			continue
 		}
 		plan, candidates, ok := pairingCommandPlan(projectRoot, language, files)
 		if !ok {
-			return nil, pairingRootSelectionError{language: language, candidates: candidates}
+			if skipUnresolved {
+				result.Skips = append(result.Skips, pairingPlanSkip(language, candidates))
+				continue
+			}
+			return PairingPlanResult{}, pairingRootSelectionError{language: language, candidates: candidates}
 		}
-		plans = append(plans, plan)
+		result.Plans = append(result.Plans, plan)
 	}
-	return plans, nil
+	return result, nil
 }
 
 // ParsePairingCommandOverrides parses repeatable pairing SCIP override specs.
@@ -560,6 +590,18 @@ func (err pairingRootSelectionError) Error() string {
 		return fmt.Sprintf("unresolved scip-search language %s: no candidate roots found", err.language)
 	}
 	return fmt.Sprintf("unresolved scip-search language %s: ambiguous candidate roots: %s", err.language, strings.Join(err.candidates, ", "))
+}
+
+func pairingPlanSkip(language string, candidates []string) PairingPlanSkip {
+	reason := PairingPlanSkipNoCandidates
+	if len(candidates) > 0 {
+		reason = PairingPlanSkipAmbiguousRoots
+	}
+	return PairingPlanSkip{
+		Language:   language,
+		Candidates: append([]string(nil), candidates...),
+		Reason:     reason,
+	}
 }
 
 func pairingCommandPlan(projectRoot, language string, files []string) (RuntimeCommandPlan, []string, bool) {

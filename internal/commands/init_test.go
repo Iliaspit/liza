@@ -2537,6 +2537,41 @@ func TestInitPairingCommand_ScipSearchAmbiguityFailsBeforeInstallingHooks(t *tes
 	}
 }
 
+func TestInitPairingCommand_AmbientScipSearchSkipsAmbiguousRoots(t *testing.T) {
+	gitDir := setupGitRepo(t)
+	defer os.RemoveAll(gitDir)
+	setupGlobalLiza(t)
+	t.Setenv(scipsearch.EnvEnableScipSearch, "true")
+	writeTrackedFile(t, gitDir, "service-a/go.mod", "module example.com/a\n")
+	writeTrackedFile(t, gitDir, "service-b/go.mod", "module example.com/b\n")
+	testhelpers.MustGit(t, gitDir, "add", "service-a/go.mod", "service-b/go.mod")
+	testhelpers.MustGit(t, gitDir, "commit", "-m", "Add ambiguous Go roots")
+
+	originalDir, _ := os.Getwd()
+	defer os.Chdir(originalDir)
+	os.Chdir(gitDir)
+
+	stderr, err := captureStderrForTest(func() error {
+		return InitPairingCommand(InitPairingParams{Agents: []string{"codex"}})
+	})
+	if err != nil {
+		t.Fatalf("InitPairingCommand() error = %v", err)
+	}
+	for _, want := range []string{
+		"Warning: skipped scip-search go: ambiguous roots",
+		"service-a",
+		"service-b",
+		"--scip-search-plan go=<module-root>",
+	} {
+		if !strings.Contains(stderr, want) {
+			t.Fatalf("stderr = %q, want %q", stderr, want)
+		}
+	}
+	if _, statErr := os.Stat(filepath.Join(gitDir, ".git", "hooks", "liza-index.sh")); !os.IsNotExist(statErr) {
+		t.Fatalf("liza-index.sh stat err = %v, want missing when all ambient SCIP plans are skipped", statErr)
+	}
+}
+
 func TestInitPairingCommand_SembleEnabledEnsuresProjectRootIgnore(t *testing.T) {
 	gitDir := setupGitRepo(t)
 	defer os.RemoveAll(gitDir)
@@ -2581,6 +2616,13 @@ func TestInitPairingCommand_IndexHookFailuresReportDiagnostics(t *testing.T) {
 				writeFileForTest(t, filepath.Join(repo, ".git", "hooks", "post-commit"), "#!/bin/sh\necho user hook\n", 0755)
 			},
 			wantError: "not Liza-managed",
+		},
+		{
+			name: "legacy index script collision",
+			setup: func(t *testing.T, repo string) {
+				writeFileForTest(t, filepath.Join(repo, ".git", "hooks", "liza-index.sh"), "#!/bin/sh\n# Refresh scip and stacklit indexes for current branch in liza pairing mode.\n", 0755)
+			},
+			wantError: "appears to be a legacy Liza index hook",
 		},
 		{
 			name: "unsafe hooksPath file",

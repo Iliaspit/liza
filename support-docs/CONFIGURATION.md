@@ -356,10 +356,12 @@ Pairing init behavior:
 
 - Truthy `LIZA_ENABLE_SCIP_SEARCH` during pairing `liza init` asks Liza to
   autodetect a repo-specific SCIP indexing plan and install or verify
-  project-local Git hook plumbing for the enabled languages.
+  project-local Git hook plumbing for confident languages. Ambiguous
+  auto-detected languages are skipped with warnings so optional SCIP indexing
+  does not block pairing setup.
 - Repeated `--scip-search <language>` flags restrict which languages pairing init
   considers, but they are not root or working-directory selections. Pairing init
-  still needs one confident root per enabled language.
+  still needs one confident root per explicitly enabled language.
 - Repeated `--scip-search-plan <language>=<values>` flags provide explicit
   pairing hook roots when monorepo autodetection would otherwise be ambiguous:
   `go=<module-root>`, `typescript=<cwd>,<project-root>`, or
@@ -368,10 +370,10 @@ Pairing init behavior:
   hook generation; full workspace init rejects the flag, and the values are not
   persisted to MAS `config.scip_search`. If `--scip-search <language>` is also
   supplied, every override language must be in that allowlist.
-- If pairing init finds multiple plausible roots for an enabled language and
-  cannot choose confidently, it reports an ambiguity diagnostic instead of
-  writing guessed hook commands.
-- If pairing init finds exactly one confident root per enabled language, the
+- If pairing init finds multiple plausible roots for an explicitly enabled
+  language and cannot choose confidently, it reports an ambiguity diagnostic
+  instead of writing guessed hook commands.
+- If pairing init finds exactly one confident root per non-skipped language, the
   generated project-local hook contains concrete repo-specific indexer commands.
   Those concrete commands belong in the project hook, not in global setup
   guidance.

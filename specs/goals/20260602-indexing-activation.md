@@ -166,26 +166,30 @@ Runtime coupling:
 - FR-002-3: When `LIZA_ENABLE_SCIP_SEARCH` is truthy, pairing init must
   autodetect a repo-specific SCIP indexing plan and install or verify
   project-local Git hook plumbing that refreshes repo-root SCIP indexes for
-  enabled languages.
+  confidently planned languages.
 - FR-002-3a: Pairing SCIP autodetection must plan concrete indexer commands,
   including language-specific roots such as Go `--module-root`, TypeScript
   `--cwd` plus project path, and Python `--cwd`.
 - FR-002-3b: Repeated `--scip-search <language>` flags may restrict which
   languages pairing init considers, but they must not be treated as sufficient
   root/cwd selection for monorepos.
-- FR-002-3c: If autodetection finds multiple plausible roots for an enabled
-  language and cannot choose one confidently, pairing init must fail with a
+- FR-002-3c: If ambient env-enabled autodetection finds multiple plausible roots
+  for a language and cannot choose one confidently, pairing init must skip that
+  language with an actionable warning instead of blocking pairing setup or
+  generating a guessed hook command.
+- FR-002-3c1: If repeated `--scip-search <language>` explicitly enables a
+  language and root selection remains ambiguous, pairing init must fail with a
   monorepo ambiguity diagnostic listing candidate roots and the unresolved
   language instead of generating a guessed hook command.
-- FR-002-3c1: Pairing init must accept explicit per-language SCIP command-plan
+- FR-002-3c2: Pairing init must accept explicit per-language SCIP command-plan
   overrides for monorepos whose desired roots cannot be inferred safely. These
   overrides select concrete Go module roots, TypeScript cwd/project roots, or
   Python cwd values for the generated project-local hook. Full workspace init
   must reject these pairing-only overrides, and explicit `--scip-search`
   allowlists must restrict which override languages are accepted.
-- FR-002-3d: If autodetection finds exactly one confident root for each enabled
-  language, pairing init must generate `.git/hooks/liza-index.sh` with concrete
-  repo-specific SCIP indexer commands.
+- FR-002-3d: If autodetection finds exactly one confident root for each
+  non-skipped language, pairing init must generate `.git/hooks/liza-index.sh`
+  with concrete repo-specific SCIP indexer commands.
 - FR-002-3e: Pairing lifecycle refresh must skip SCIP indexer execution when the
   existing index is newer than the relevant source files, and refresh when the
   index is missing or stale.
@@ -234,9 +238,13 @@ Runtime coupling:
   `LIZA_ENABLE_SCIP_SEARCH=1`, when pairing init runs, then the generated
   `.git/hooks/liza-index.sh` contains concrete SCIP indexer commands for the
   confidently detected language roots.
-- AC-002-6: Given a monorepo with multiple plausible roots for an enabled SCIP
-  language, when pairing init runs, then init fails with a clear ambiguity error
-  instead of writing a guessed SCIP hook.
+- AC-002-6: Given ambient env-enabled SCIP autodetection in a monorepo with
+  multiple plausible roots for a language, when pairing init runs, then init
+  skips the ambiguous language with an actionable warning instead of blocking
+  pairing setup or writing a guessed SCIP hook.
+- AC-002-6a: Given a monorepo with multiple plausible roots for a SCIP language
+  explicitly enabled by `--scip-search <language>`, when pairing init runs, then
+  init fails with a clear ambiguity error instead of writing a guessed SCIP hook.
 - AC-002-7: Given `--scip-search go` in pairing mode, when TypeScript and Python
   roots also exist, then SCIP autodetection considers only Go roots while still
   requiring confident Go root selection.

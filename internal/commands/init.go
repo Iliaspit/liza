@@ -149,15 +149,17 @@ func InitPairingCommand(params InitPairingParams) error {
 			if err != nil {
 				return fmt.Errorf("scip-search pairing plan failed: %w", err)
 			}
-			plans, err := scipsearch.PlanPairingCommands(scipsearch.PairingPlanOptions{
+			planResult, err := scipsearch.PlanPairingCommands(scipsearch.PairingPlanOptions{
 				ProjectRoot:       projectRoot,
 				ExplicitLanguages: params.ScipSearch,
 				CommandOverrides:  overrides,
+				SkipUnresolved:    len(params.ScipSearch) == 0,
 			})
 			if err != nil {
 				return fmt.Errorf("scip-search pairing plan failed: %w", err)
 			}
-			scipPlans = plans
+			writePairingScipSkipDiagnostics(planResult.Skips)
+			scipPlans = planResult.Plans
 		}
 		if stacklitEnabled || len(scipPlans) > 0 {
 			if _, err := pairingindex.InstallActivation(pairingindex.InstallActivationOptions{
@@ -215,6 +217,41 @@ func InitPairingCommand(params InitPairingParams) error {
 
 func pairingScipEnabled() bool {
 	return scipsearch.ParseEnvGate(os.Getenv(scipsearch.EnvEnableScipSearch))
+}
+
+func writePairingScipSkipDiagnostics(skips []scipsearch.PairingPlanSkip) {
+	for _, skip := range skips {
+		fmt.Fprintf(os.Stderr, "Warning: skipped scip-search %s: %s\n", skip.Language, pairingScipSkipReasonText(skip.Reason))
+		if len(skip.Candidates) > 0 {
+			fmt.Fprintf(os.Stderr, "  Candidate roots: %s\n", strings.Join(skip.Candidates, ", "))
+		}
+		fmt.Fprintf(os.Stderr, "  To require this language, rerun with --scip-search %s and add an explicit --scip-search-plan.\n", skip.Language)
+		fmt.Fprintf(os.Stderr, "  Plan syntax: %s\n", pairingScipPlanSyntax(skip.Language))
+	}
+}
+
+func pairingScipSkipReasonText(reason scipsearch.PairingPlanSkipReason) string {
+	switch reason {
+	case scipsearch.PairingPlanSkipAmbiguousRoots:
+		return "ambiguous roots"
+	case scipsearch.PairingPlanSkipNoCandidates:
+		return "no candidate roots found"
+	default:
+		return string(reason)
+	}
+}
+
+func pairingScipPlanSyntax(language string) string {
+	switch language {
+	case "go":
+		return "--scip-search-plan go=<module-root>"
+	case "typescript":
+		return "--scip-search-plan typescript=<cwd>,<project-root>"
+	case "python":
+		return "--scip-search-plan python=<cwd>[,<target-only>]"
+	default:
+		return "--scip-search-plan <language>=<values>"
+	}
 }
 
 // isLizaSymlink returns true if path exists, is a symlink, and points to contractTarget.

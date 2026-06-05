@@ -624,6 +624,9 @@ func installManagedIndexScript(scriptPath, want string) (HookAction, error) {
 		return "", fmt.Errorf("read %s: %w", defaultScriptName, err)
 	}
 	if !strings.Contains(string(current), ManagedIndexScriptMarker) {
+		if looksLikeLegacyIndexScript(string(current)) {
+			return "", fmt.Errorf("%s at %s already exists and appears to be a legacy Liza index hook; move it aside and rerun init: mv %s %s.backup", defaultScriptName, scriptPath, scriptPath, scriptPath)
+		}
 		return "", fmt.Errorf("%s at %s already exists and is not Liza-managed", defaultScriptName, scriptPath)
 	}
 	if string(current) == want {
@@ -827,6 +830,11 @@ func looksLikeLegacyHookDispatcher(content string) bool {
 		strings.Contains(content, "post-checkout") &&
 		strings.Contains(content, ".worktrees") &&
 		strings.Contains(content, "liza-index.sh")
+}
+
+func looksLikeLegacyIndexScript(content string) bool {
+	return strings.Contains(content, "liza pairing mode") ||
+		(strings.Contains(content, "scip-") && strings.Contains(content, "stacklit"))
 }
 
 func gitUnmatchedPath(err error, output []byte) bool {
