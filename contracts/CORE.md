@@ -487,6 +487,7 @@ When both apply, skills execute within contract constraints.
 
 If `GUARDRAILS.md` exists at the project root, read and enforce it as project-specific constraints.
 GUARDRAILS.md uses and extends the same tier system (Tier 0-3) defined in Rule Priority Architecture.
+Operational support docs live at `~/.liza/support-docs/`; read specific files when setup, configuration, or troubleshooting context is needed.
 
 ---
 
