@@ -99,6 +99,7 @@ func gitInit(t *testing.T, dir string) {
 }
 
 func TestInitProject_Success(t *testing.T) {
+	t.Setenv(models.EnvEnableCopyWorktreeEnvFiles, "0")
 	projectRoot, specFile := setupInitTestDir(t)
 
 	err := InitProject(projectRoot, InitProjectParams{
