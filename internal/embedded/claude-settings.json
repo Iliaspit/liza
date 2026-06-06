@@ -198,6 +198,7 @@
       "Bash(/usr/bin/test:*)",
       "Bash(wc:*)",
       "Bash(date:*)",
+      "Bash(sha256sum:*)",
       "Bash(find:*)",
       "Bash(grep:*)",
       "Bash(rg:*)",
