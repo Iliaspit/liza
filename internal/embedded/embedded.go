@@ -959,7 +959,7 @@ func warnIncompleteCodexBaseline(content string) {
 	if codexBaselineLooksComplete(content) {
 		return
 	}
-	fmt.Fprintln(os.Stderr, "Warning: Codex config is missing part of the recommended Liza baseline. For the full recommended Codex setup, see contracts/contract-activation.md#codex.")
+	fmt.Fprintln(os.Stderr, "Warning: Codex config is missing part of the recommended Liza baseline. For the full recommended Codex setup, see support-docs/CONFIGURATION.md#codex-project-permissions.")
 }
 
 func codexBaselineLooksComplete(content string) bool {

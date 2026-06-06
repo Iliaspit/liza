@@ -2,6 +2,81 @@
 
 System configuration, tuning parameters, and environment variables.
 
+## Global Setup (`liza setup`)
+
+`liza setup` writes Liza's global support files to `~/.liza/`:
+
+- `CORE.md`, `PAIRING_MODE.md`, `MULTI_AGENT_MODE.md`, and other contract files
+- `AGENT_TOOLS.md`
+- `COLLABORATION_CONTINUITY.md`
+- default `pipeline.yaml`
+- `skills/`
+- `support-docs/`
+
+Bare `liza setup` is the default global install path. It does not require a
+provider flag. Provider flags add provider-specific integrations in the user's
+CLI config directories. For Claude, Codex, and Gemini, setup creates skill
+symlinks under `~/.claude/skills/`, `~/.codex/skills/`, or `~/.gemini/skills/`
+pointing to `~/.liza/skills/`. Mistral/Vibe also gets its prompt link under
+`~/.vibe/prompts/`. Project hooks and runtime provider settings are handled by
+`liza init`:
+
+```bash
+liza setup --claude
+liza setup --codex
+liza setup --gemini
+liza setup --mistral
+```
+
+Use `--force` to refresh existing global files after an upgrade. Use
+`--agent-tools <path>` to install a custom `AGENT_TOOLS.md` instead of the
+embedded default.
+
+## Project Initialization (`liza init`)
+
+Run `liza init` in each project where Liza should activate the contract. The
+interactive wizard walks through mode selection, provider selection, and
+project-local setup.
+
+Depending on selected providers and options, `liza init` writes or updates:
+
+- root contract discovery files such as `CLAUDE.md`, `AGENTS.md`, and
+  `GEMINI.md`, usually as symlinks to `~/.liza/CORE.md`
+- project-local provider hooks and settings, such as `.claude/settings.json` and
+  `.codex/` hook configuration
+- `.claude/hooks/` and `.codex/hooks/` scripts that enforce session
+  initialization, inject project context, guard Git usage, route RTK, and catch
+  wrong-worktree paths for providers that support hooks
+- `.codex/config.toml` and `.codex/hooks.json` for project-local Codex hook
+  activation
+- global `~/.codex/config.toml` entries for Codex's project root, project `.git`
+  directory, support/cache writable roots, and noninteractive workspace baseline
+- global fallback contract symlinks such as `~/.claude/CLAUDE.md` or
+  `~/.codex/AGENTS.md` when brownfield repo-root files prevent local symlink
+  creation
+- `.claudeignore` when absent or explicitly refreshed
+- `GUARDRAILS.md` when absent
+- `.liza/state.yaml`, `.liza/log.yaml`, and `.liza/pipeline.yaml` for a MAS
+  workspace
+- the configured integration branch for MAS runs
+- optional indexing activation artifacts when `LIZA_ENABLE_STACKLIT`,
+  `LIZA_ENABLE_SCIP_SEARCH`, or `LIZA_ENABLE_SEMBLE` is enabled
+
+For brownfield projects that already have their own `CLAUDE.md`, `AGENTS.md`,
+or `GEMINI.md`, Liza does not overwrite the repo-root file. It uses the
+provider global fallback when possible:
+
+| Repo root file | Global fallback |
+|---------------|-----------------|
+| `CLAUDE.md` | `~/.claude/CLAUDE.md` |
+| `AGENTS.md` | `~/.codex/AGENTS.md` |
+| `GEMINI.md` | `~/.gemini/GEMINI.md` |
+
+If both the repo-root file and the global fallback are non-Liza files, `liza
+init` warns and skips that provider activation path. If a Liza symlink already
+exists at either location, `liza init` reports it and does not create a
+duplicate.
+
 ## Claude Code Settings
 
 **`.claude/settings.json`** — project-level permissions for Liza CLI commands, skills, git operations, and build commands.
@@ -26,7 +101,7 @@ Claude Code unions permissions from global and project settings:
 
 The project layer is portable (team-shared). The global layer is machine-specific (personal tools and paths). Neither alone is sufficient — both are needed.
 
-For global settings setup and provider-specific config (Claude, Codex, Gemini), see [Contract Activation](../contracts/contract-activation.md).
+For global setup and project activation, use `liza setup` and `liza init`.
 
 ## Codex Project Permissions
 
@@ -71,8 +146,36 @@ Codex agents through
 The state config version takes precedence over the environment fallback.
 Interactive `liza agent -i` keeps using the installed Codex binary.
 
-See [Contract Activation](../contracts/contract-activation.md#codex) for the
-recommended complete setup shape.
+The recommended complete setup shape is:
+
+```toml
+model = "gpt-5.5"
+approval_policy = "never"
+sandbox_mode = "workspace-write"
+model_reasoning_effort = "high"
+personality = "pragmatic"
+
+[permissions.workspace.network]
+enabled = true
+
+[sandbox_workspace_write]
+network_access = true
+exclude_tmpdir_env_var = false
+exclude_slash_tmp = false
+writable_roots = [
+  "/home/<USER>/.codex",
+  "/home/<USER>/.liza",
+  "/home/<USER>/.npm",
+  "/home/<USER>/.pyenv/shims",
+  "/home/<USER>/.cache",
+  "/tmp",
+  "/path/to/project",
+  "/path/to/project/.git",
+]
+```
+
+`liza init --codex` manages the active project entries and preserves unrelated
+settings when merging an existing config.
 
 ### Troubleshooting
 
@@ -141,6 +244,14 @@ unavailable prompt or SessionStart section and agents fall back to direct source
 reads, `rg` for exact literals and path discovery, `ast-grep` for syntax-shaped
 search, and any semantic fallback tool exposed by the active tool policy.
 
+When Stacklit or SCIP pairing activation is enabled, `liza init` installs a
+managed `liza-index.sh` entrypoint in Git's effective hooks directory, respecting
+`core.hooksPath`. Managed wrappers invoke it from `post-commit`,
+`post-checkout`, `post-merge`, and `post-rewrite` so repo-root Pairing indexes
+stay fresh after normal local history changes. The wrappers skip task worktrees
+and file-only checkout events. This Git hook plumbing is separate from
+Claude/Codex provider hooks.
+
 ### Stacklit (`LIZA_ENABLE_STACKLIT`)
 
 `stacklit-cli` is an optional external repository-navigation tool. It is strict
@@ -173,8 +284,8 @@ exist, `stacklit generate-json` consumes them naturally while refreshing
 Pairing init behavior:
 
 - Truthy `LIZA_ENABLE_STACKLIT` during pairing `liza init` installs or verifies
-  project-local Git hook plumbing that refreshes the repo-root `stacklit.json`
-  at safe lifecycle points.
+  project-local `liza-index.sh` Git hook plumbing that refreshes the repo-root
+  `stacklit.json` at safe lifecycle points.
 - Pairing init also keeps generated Stacklit artifacts out of accidental task
   diffs by requiring them to be intentionally tracked, ignored, privately
   excluded, or otherwise protected by the generated project-local setup.
@@ -356,9 +467,9 @@ Pairing init behavior:
 
 - Truthy `LIZA_ENABLE_SCIP_SEARCH` during pairing `liza init` asks Liza to
   autodetect a repo-specific SCIP indexing plan and install or verify
-  project-local Git hook plumbing for confident languages. Ambiguous
-  auto-detected languages are skipped with warnings so optional SCIP indexing
-  does not block pairing setup.
+  project-local `liza-index.sh` Git hook plumbing for confident languages.
+  Ambiguous auto-detected languages are skipped with warnings so optional SCIP
+  indexing does not block pairing setup.
 - Repeated `--scip-search <language>` flags restrict which languages pairing init
   considers, but they are not root or working-directory selections. Pairing init
   still needs one confident root per explicitly enabled language.

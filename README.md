@@ -29,11 +29,13 @@ Liza bets on time-to-quality and durable codebase maintainability through automa
 
 Liza's behavioral contract — used by both modes — **makes models more thoughtful**:
 > *"I want to wash my car. The car wash is 100 meters away. Should I walk or drive?"<br>*
-Sonnet 4.6: *"Walk. Driving 100 meters to a car wash defeats the purpose — you'd barely get the car dirty enough to justify the trip, and parking/maneuvering takes longer than the walk itself."<br>*
-Same with Liza's contract: *"Drive. You're already going to a car wash — arriving dirty is the point."*
+>
+> Sonnet 4.6: *"Walk. Driving 100 meters to a car wash defeats the purpose — you'd barely get the car dirty enough to justify the trip, and parking/maneuvering takes longer than the walk itself."*
+>
+> Sonnet 4.6 **with Liza's contract**: *"Drive. You're already going to a car wash — arriving dirty is the point."*
 
 Liza is a **frontier Multi-Agent System**:
-> Soufiane Keli – VP Software Engineering, Octo Technology (Accenture) – maps AI engineering maturity across 5 levels,
+> Soufiane Keli (Executive Director, IBM) maps AI engineering maturity across 5 levels,
 > from autocomplete (L1) to software factory (L5, still theoretical). He places Liza at L4 – Collaborative Agent Networks:
 > <br>
 > *"Multiple specialized agents work together on design, code, testing, and deployment. Humans orchestrate. This is typically
@@ -84,6 +86,8 @@ Without the contract, an agent that hits a problem it can't solve has two option
 So it spirals. Random changes dressed up as hypotheses. Each iteration more elaborate, more confident, more wrong. You watch the diff grow and wonder if any of this is moving toward a solution. If you're clever, you end up reverting.
 
 Under the contract, there's a third option: **say "I'm stuck" and mean it.** The contract makes that safe — no penalty for uncertainty, no pressure to perform progress. And the Approval Request mechanism forces agents to write down their reasoning before acting. *"I'll try random things until something works"* is hard to write in a structured plan. Surface the reasoning, and the reasoning improves — no better model required.
+
+The shift is visible in tone too. Agents under the contract stop sounding like enthusiastic, consensus-seeking assistants. They become more like senior peers — direct style, actual opinions, willing to push back.
 
 This won't self-correct. Sycophancy drives engagement — that's what gets optimized. Acting fast with little thinking controls inference costs. Model providers optimize for adoption and cost efficiency, not engineering reliability.
 
@@ -148,198 +152,17 @@ The positioning question is not "who starts highest" but "what's the minimum hum
 
 ## Getting Started
 
-### Requirements
+Start with [GETTING_STARTED.md](GETTING_STARTED.md) for the installation and
+setup path: install the `liza` binary, run `liza setup`, customize
+`AGENT_TOOLS.md`, initialize a project with `liza init`, and choose Pairing or
+Multi-Agent mode.
 
-- Unix-like environment. On Windows, use WSL2; native Windows is not supported.
-- A supported coding agent CLI: Claude Code, Codex, Kimi, Mistral, or Gemini (see [Provider Compatibility](#provider-compatibility)).
-  Liza runs on top of these CLIs — your provider subscription covers usage, no separate API billing needed.
-- Git 2.38+ (for full worktree support)
-- [ripgrep](https://github.com/BurntSushi/ripgrep) (`rg`) — used by contracts and skills as the default code search tool
-- Go 1.25.5+ (only for building from source — pre-built binaries available via `install.sh`)
+Mode-specific guides:
 
-### Installation
-
-Liza provides a single executable: `liza`:
-- By default it installs to `~/.local/bin` (created automatically, no sudo needed).
-- Set the `INSTALL_DIR` environment variable to override.
-- If upgrading from a previous install in `/usr/local/bin`, old binaries are removed automatically.
-
-**Quick install (latest release, macOS/Linux):**
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/liza-mas/liza/main/install.sh | bash
-```
-
-**Options:**
-
-```bash
-# Specific version
-curl -fsSL https://raw.githubusercontent.com/liza-mas/liza/main/install.sh | VERSION=v1.0.0 bash
-
-# Build from a branch (requires Go and make)
-curl -fsSL https://raw.githubusercontent.com/liza-mas/liza/main/install.sh | BRANCH=main bash
-
-# Custom directory
-curl -fsSL https://raw.githubusercontent.com/liza-mas/liza/main/install.sh | INSTALL_DIR=~/.local/bin bash
-```
-
-**From a local clone:**
-
-```bash
-git clone https://github.com/liza-mas/liza.git && cd liza
-make install
-```
-
-**Verify:**
-
-```bash
-liza version
-```
-
-```bash
-liza setup  # initial install or liza upgrade: installs contracts, skills, and support docs to ~/.liza/
-# With: agent-specific activation (skill symlinks, contract config)
-liza setup --claude --codex --gemini --mistral
-```
-
-> **⚠️ Do not skip `AGENT_TOOLS.md` customization.** Before your first real run, review
-> `~/.liza/AGENT_TOOLS.md` against your actual environment, or provide your own file with
-> `liza setup --agent-tools ~/my-tools.md`.
->
-> This is operationally critical: agents treat `AGENT_TOOLS.md` as their tool
-> contract. A mismatched file causes wasted context, repeated fallback attempts,
-> and in multi-agent mode can point agents at tools that are structurally wrong
-> for worktree-based execution.
->
-> See [Customizing AGENT_TOOLS.md](support-docs/CUSTOMIZING_AGENT_TOOLS.md).
-
-To init your project repo, do:
-```bash
-# Interactive wizard (recommended for first use):
-liza init
-
-# Or with explicit flags:
-liza init --claude --codex --gemini --mistral
-```
-The interactive wizard walks through mode selection (pairing vs full MAS), agent selection, and handles existing `CLAUDE.md` conflicts automatically. Claude is fully automated; for other CLIs see [contract activation](https://github.com/liza-mas/liza/blob/main/contracts/contract-activation.md) for additional manual steps.
-
-For repository-navigation-heavy MAS runs, `scip-search` is highly recommended
-but strictly opt-in. Liza does not install `scip-search` or language indexers
-automatically; install the external tools you need, set
-`LIZA_ENABLE_SCIP_SEARCH=1` for the MAS process, and initialize with repeated
-language allowlist flags when you want explicit selection (all detected languages by default):
-
-```bash
-LIZA_ENABLE_SCIP_SEARCH=1 liza init "Project goal" --spec specs/vision.md \
-  --scip-search go --scip-search typescript
-```
-
-See [Configuration](support-docs/CONFIGURATION.md) for supported languages,
-indexer prerequisites, auto-detection behavior, and detailed opt-in setup.
-
-`stacklit-cli` is also optional for MAS runs. Commit curated Stacklit inputs
-such as `stacklit-insights.json` and `.stacklitrc.json` when you use them, and
-either commit or ignore generated `stacklit.json`. Set `LIZA_ENABLE_STACKLIT=1`
-for the MAS process when you want Liza to refresh root/worktree
-`stacklit.json` files and inject Stacklit prompt guidance. Liza does not install
-Stacklit or mutate curated insights/config files; see
-[Configuration](support-docs/CONFIGURATION.md).
-
-Semble is an optional semantic discovery tool for repository-navigation-heavy
-MAS runs when agents need natural-language candidate search before they know the
-right symbol or module. Set `LIZA_ENABLE_SEMBLE=1` only after installing
-Semble and preparing the model/cache for offline MAS use; Liza treats Semble as
-candidate discovery, not a requirement or validation source. See
-[Configuration](support-docs/CONFIGURATION.md) for setup and safety details.
-
-### Pairing and MAS Modes
-
-> **New to Liza?** Start with Pairing mode — it's the fastest way to experience how the behavioral contract changes agent behavior. The trust you build watching agents pause at gates, surface assumptions, and validate before claiming done is what makes letting them run autonomously in Multi-Agent mode a comfortable next step.<br>
-> **Reading [USAGE_MULTI_AGENTS](support-docs/USAGE_MULTI_AGENTS.md)** thoroughly before running a multi-agent pipeline is essential to a successful experience. Liza is complex system.
-
-- **Pairing**: See [Pairing Guide](support-docs/USAGE_PAIRING.md) — human-agent collaboration under contract
-- **Adversarial Pairing**: See [Pairing Guide](support-docs/USAGE_PAIRING.md#adversarial-pairing) — one doer plus multiple reviewers, usually on different models, through a shared Markdown blackboard when you want peer review without launching the full MAS
-- **Multi-Agent (Liza)**: See [USAGE](support-docs/USAGE_MULTI_AGENTS.md), then try the [DEMO](docs/DEMO.md)
+- **Pairing**: [Pairing Usage](support-docs/USAGE_PAIRING.md) — human-agent collaboration under contract
+- **Adversarial Pairing**: [Adversarial Pairing](support-docs/ADVERSARIAL_PAIRING.md) — one doer plus reviewer sessions through a shared Markdown blackboard
+- **Multi-Agent (Liza)**: [Multi-Agent Usage](support-docs/USAGE_MULTI_AGENTS.md), then try the [Demo](docs/DEMO.md)
 - **Reference**: [Configuration](support-docs/CONFIGURATION.md) · [Recipes](docs/RECIPES.md) · [Troubleshooting](support-docs/TROUBLESHOOTING.md)
-
-**Pairing mode** — install once, then start coding in any project (`liza init` still required per project):
-
-When starting your CLI session (`claude`, `codex`, ...), pairing mode will be selected automatically.
-It should start by displaying a canary test inspired by [Van Halen's M&M's trick](https://colterreed.com/blog/the-genius-of-banishing-brown-mms/) — Four words coming from four different contract files to show what the agent actually read thoroughly.
-Reading the contract files is enforced by a hook for Claude, by instructions for other agents.
-
-The agent reads the contract, builds mental models, and operates as a senior peer:
-analyzing before acting, presenting approval requests at every state change, validating before claiming done.
-Or you may choose to make it your Socratic colleague, your rubber duck, or your challenger.
-
-For higher-stakes work that still does not need a full autonomous sprint, the
-`adversarial-pairing` skill coordinates one doer session and multiple reviewer
-sessions, typically running different models, through a shared Markdown blackboard. It keeps the human in
-Pairing-mode approval control while adding MAS-style adversarial review gates.
-
-**Multi-agent mode** — autonomous spec-to-code pipeline:
-1. `liza init "[Goal description]" --spec vision.md` (this file and `.pre-commit-config.yaml` need to be committed on the configured integration branch). Use `--entry-point functional-spec` to skip the epic/user-story spec phase and start at architecture, or `--entry-point technical-spec` to start at code planning when architecture is already settled. Add `--no-follow-up` to run only the entry-point sub-pipeline. `detailed-spec` remains as a legacy alias for `functional-spec`.
-   `INITIAL_PLANNING` always creates one first task: simple entry-point work starts in the specialized planning pair, while fan-out or uncertain work starts in the mapped master planning pair for the same phase.
-   Existing frozen `.liza/pipeline.yaml` workspaces are not migrated; run a new `liza init` to receive updated role-pairs, transitions, and routing.
-2. `liza tui` — the TUI shows live system state (agents, tasks, alerts, sprint metrics). From it you can spawn agents with role autocompletion (`s` uses configured default CLI, `S` lets you pick). Pause/resume the system, add tasks, and trigger sprint checkpoints.
-   Check [Quick Start](support-docs/USAGE_MULTI_AGENTS.md#quick-start-target-usage) for required roles and options (configuring default CLI, logging).
-
-Refer to [How to Produce a Goal Document For Liza](support-docs/how-to-produce-a-goal.md) to write a good input doc to use as a `--spec` argument.
-
-### Common Commands
-
-```bash
-liza setup                                          # One-time global setup
-liza setup --agent-tools ~/my-tools.md              # Custom AGENT_TOOLS.md
-liza init "Project goal" --spec specs/vision.md     # Initialize blackboard
-liza init "Goal" --no-follow-up                     # Run only entry-point subpipeline
-liza init "Goal" --spec s.md \
-  --config pipeline.yaml --entry-point epic-planning # Pipeline-configured init
-liza add-task --id t1 --desc "..." --spec "..." \
-  --done "..." --scope "..."                        # Add tasks (advanced feature for special cases)
-liza tui                                            # Live TUI (spawn agents, monitor, manage)
-liza agent coder                                    # Start agent supervisor (or spawn from TUI)
-liza validate                                       # Validate state
-liza get tasks                                      # Query tasks
-liza status                                         # Dashboard overview
-liza proceed                                        # Transition between pipeline phases
-liza pause / liza resume                            # Human intervention
-liza stop / liza start                              # System control
-liza sprint-checkpoint                              # Sprint checkpoint
-liza recover-agent <id>                             # Crash recovery (agents)
-liza recover-task <id>                              # Crash recovery (tasks)
-liza analyze                                        # Circuit breaker analysis
-```
-
-> ️⚠️ To use Claude Code with your Claude subscription, make sure the ANTHROPIC_API_KEY environment variable is not set by default on a new shell start ([Claude support](https://support.claude.com/en/articles/12304248-managing-api-key-environment-variables-in-claude-code), not specific to Liza).
-
-> **Claude environment overrides:**<br>
-> Create a `claude.env` file at your project root to inject environment variables into Claude CLI agent processes.
-> The supervisor reads this file automatically if it exists. Format: `KEY=VALUE`, one per line (comments with `#`).
-> See https://code.claude.com/docs/en/env-vars.
-> ```bash
-> # claude.env — example
-> # Mitigate recent token usage spike, https://x.com/kunchenguid/status/2043511416448307378
-> CLAUDE_CODE_EFFORT_LEVEL=high
-> CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING=1
-> CLAUDE_CODE_DISABLE_AUTO_MEMORY=1
-> CLAUDE_CODE_DISABLE_1M_CONTEXT=0
-> CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=30
-> CLAUDE_CODE_SUBAGENT_MODEL=sonnet
-> LIZA_DISABLE_CLAUDE_SUBAGENTS=1
-> ```
-
-Rationale:
-- High is probably the optimal reasoning effort - thoughtfulness without excessive token consumption.
-- The new adaptive thinking contributed to the degradation of Opus performance since March 2026.
-- Auto-memory is investment without return because Claude Code never considers it in practice.
-- 1M context is too much - Claude's performance degrades much before hitting a fraction of it: either disable it or set an aggressive autocompact threshold.
-- Use Sonnet for subagents in pairing.
-- Subagents are great in general to save context on the master session but Liza's contract is heavy, cannot be disabled for subagents and Liza's sessions are task bounded.
-
-### Diagnosing Issues
-
-After your first sprint, run `/liza-logs` in any coding agent session to identify frictions. New users will typically find setup issues (missing tool permissions in `AGENT_TOOLS.md`, wrong `--post-worktree-cmd`, stale `~/.liza/` files). Seasoned users use it to catch regressions — provider CLI updates that break flags, context budget growth from prompt changes, or new tool failure patterns. Use `/context-engineering` when the question is whether agents received the right prompt context, too much context, or poor handoff context. See [Analyzing Agent Logs](support-docs/USAGE_MULTI_AGENTS.md#analyzing-agent-logs) for details.
 
 ### Recommended Tools
 
@@ -348,9 +171,9 @@ Liza optimizes cost-to-quality, not cost-to-lets-cross-fingers. These tools redu
 | Tool | What it does | Impact |
 |------|-------------|--------|
 | [RTK](https://github.com/rtk-ai/rtk) | CLI proxy that compresses tool output (git, go, pytest, ...) — ~90% token savings on command results | Fewer tokens per tool call, more budget for reasoning |
-| [scip-search](https://github.com/liza-mas/scip-search/) | Precise symbol navigation — definitions, references, callers/callees, implementations via SCIP indexes | Saves agent tokens on symbol lookups in worktrees; pairs with Stacklit for orient-then-trace workflows |
 | [stacklit-cli](https://github.com/liza-mas/stacklit-cli) | Compact codebase index — modules, dependencies, hot files, workflow hints | Low-token repo map before targeted reads; surfaces symbol names that scip-search can trace precisely |
 | [Semble](https://github.com/MinishLab/semble/) | Optional semantic discovery and semantic repository search for natural-language code, docs, and config questions | Finds candidate chunks before exact symbols are known; direct source reads still provide evidence |
+| [scip-search](https://github.com/liza-mas/scip-search/) | Precise symbol navigation — definitions, references, callers/callees, implementations via SCIP indexes | Saves agent tokens on symbol lookups in worktrees; pairs with Stacklit for orient-then-trace workflows |
 | [ast-grep](https://ast-grep.github.io/) | Complementary AST-aware structural pattern search/rewrite — matches code structure, not text | Finds patterns indexes cannot express (function signatures, call shapes, nested expressions) |
 | [mdtoc](https://github.com/liza-mas/mdtoc) | Highly recommended for MAS Markdown navigation: prints per-file section line ranges and `mdq` selectors | Saves agent tokens by mapping long specs/plans before reading only the relevant section |
 | [MorphLLM MCP](https://www.morphllm.com/) (WarpGrep) | Fast Apply edits via `// ... existing code ...` placeholders + semantic codebase search | Avoids reading full files into context for edits |
@@ -380,6 +203,8 @@ Liza does not install them, so install the ones you intend to use, and remove or
 ---
 
 ## Architecture
+
+![Liza](docs/img/liza-illustration.png)
 
 Most spec-driven multi-agent systems are LLM-all-the-way-down: agents coordinating agents, with compliance dependent on
 prompt adherence and artifact-based workflows.
@@ -582,7 +407,7 @@ Example of a task on the blackboard:
 See [Release Notes](docs/release_notes/) for version history and [RELEASE.md](RELEASE.md) for maintainer release workflow.
 
 **Where Liza works today:**
-- **Pairing mode** is battle-tested — agents write **~90% of production code** under human supervision
+- **Pairing mode** is battle-tested — agents write **~99% of production code** under human supervision
 - **Multi-agent mode** produces solid specs and code through the full goal-to-merge pipeline with 13 roles across 3 phases — starting from release v0.4.0, all major Liza changes are implemented using this mode
 
 Liza is a collaborative agent network (L4 AI maturity) but its architecture has been designed to support a software factory (L5) where humans focus on strategy and product vision. Still a long way to go.

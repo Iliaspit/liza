@@ -243,7 +243,7 @@ func printSetupSummary(targetDir string, written []string, skipFiles map[string]
 	}
 	if hasNonClaude {
 		fmt.Printf("\nSome agents require manual configuration.\n")
-		fmt.Printf("See: https://github.com/liza-mas/liza/blob/main/contracts/contract-activation.md\n")
+		fmt.Printf("See: https://github.com/liza-mas/liza/blob/main/GETTING_STARTED.md\n")
 	}
 
 	docPath := relDisplay(targetDir, filepath.Join(targetDir, "support-docs", "CUSTOMIZING_AGENT_TOOLS.md"))

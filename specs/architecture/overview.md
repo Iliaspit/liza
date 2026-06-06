@@ -205,7 +205,7 @@ Therefore, each project creates repo-level symlinks:
 3. CORE.md contains universal rules and mode selection gate
 4. For Liza mode: read `~/.liza/MULTI_AGENT_MODE.md`. For Pairing mode: read `~/.liza/PAIRING_MODE.md`.
 
-Refer to `contracts/contract-activation.md` for activating Liza in a user project. See ADR-0009 for rationale.
+Refer to `GETTING_STARTED.md` for activating Liza in a user project. See ADR-0009 for rationale.
 
 ### Go CLI (`liza`)
 

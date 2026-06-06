@@ -24,6 +24,7 @@ This document is a navigation aid: where to find things and why they're organize
 ├── CLAUDE.md               # Symlink → ~/.liza/CORE.md (Claude Code)
 ├── GEMINI.md               # Symlink → ~/.liza/CORE.md (Gemini)
 ├── INVARIANTS.md           # System invariants (cross-ref: contracts, specs, code)
+├── GETTING_STARTED.md      # First-run installation and setup guide
 ├── LICENSE                 # Apache 2.0
 ├── go.mod                  # Go module definition
 ├── Makefile                # Build system (build, test, lint, install, release)
@@ -47,7 +48,6 @@ Behavioral contracts that turn agents into trustworthy peers by countering LLM f
 | `AGENT_TOOLS.md` | Tool sub-contract (MCP preferences, forbidden tools, codebase exploration) |
 | `COLLABORATION_CONTINUITY.md` | Cross-session collaboration patterns (the "letter to future self") |
 | `CONTRACT_FAILURE_MODE_MAP.md` | Maps every clause to the failure modes it covers |
-| `contract-activation.md` | Contract deployment and activation guide |
 | `README.md` | Contract navigation guide |
 
 Deployed by symlinking `CORE.md` to `~/.liza/CORE.md`. Mode contracts and supporting files go under `~/.liza/`.
@@ -173,7 +173,8 @@ Installable operational documentation written to `~/.liza/support-docs/` by
 |------|---------|
 | `USAGE_MULTI_AGENTS.md` | Quick start guide (Liza multi-agent) |
 | `USAGE_PAIRING.md` | Pairing mode guide (human-agent collaboration) |
-| `CONFIGURATION.md` | Configuration documentation |
+| `ADVERSARIAL_PAIRING.md` | Doer/reviewer Pairing-mode blackboard workflow |
+| `CONFIGURATION.md` | Configuration documentation, including setup/init effects |
 | `TROUBLESHOOTING.md` | Common issues and fixes |
 | `CUSTOMIZING_AGENT_TOOLS.md` | How to adapt `AGENT_TOOLS.md` to the local tool surface |
 | `how-to-produce-a-goal.md` | How to write a good goal doc for `liza init --spec` |
@@ -195,8 +196,9 @@ ADR template lives at `specs/architecture/ADR/TEMPLATE.md`.
 For newcomers:
 
 1. `README.md` — What Liza is and why
-2. `support-docs/USAGE_PAIRING.md` — Pairing mode: what you get and how to use it
-3. `specs/build/0 - Vision.md` — Design philosophy and success criteria
-4. `specs/architecture/overview.md` — System components and data flow
-5. `contracts/CORE.md` — The behavioral contract
-6. `support-docs/USAGE_MULTI_AGENTS.md` — How to run the multi-agent system
+2. `GETTING_STARTED.md` — Install and first-run setup
+3. `support-docs/USAGE_PAIRING.md` — Pairing mode: what you get and how to use it
+4. `specs/build/0 - Vision.md` — Design philosophy and success criteria
+5. `specs/architecture/overview.md` — System components and data flow
+6. `contracts/CORE.md` — The behavioral contract
+7. `support-docs/USAGE_MULTI_AGENTS.md` — How to run the multi-agent system

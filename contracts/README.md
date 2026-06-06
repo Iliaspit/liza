@@ -18,7 +18,10 @@ Contract split complete. Original `_archive/CONTRACT_FOR_PAIRING_AGENTS_v3.md` p
 
 ## Deployment
 
-See [Contract Activation](contract-activation.md)
+See the source-tree
+[Getting Started](https://github.com/liza-mas/liza/blob/main/GETTING_STARTED.md)
+guide for user-facing setup. The installed configuration reference is
+[support-docs/CONFIGURATION.md](../support-docs/CONFIGURATION.md).
 
 ## Contract Hierarchy
 

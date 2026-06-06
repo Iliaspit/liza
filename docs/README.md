@@ -6,7 +6,9 @@
 
 | Document | Purpose |
 |----------|---------|
+| [Getting Started](../GETTING_STARTED.md) | Install and first-run setup path |
 | [Pairing Usage](../support-docs/USAGE_PAIRING.md) | Practical guide to human-agent pairing under contract |
+| [Adversarial Pairing](../support-docs/ADVERSARIAL_PAIRING.md) | Doer/reviewer pairing through a shared Markdown blackboard |
 | [Multi-Agent Usage](../support-docs/USAGE_MULTI_AGENTS.md) | Running Liza as a multi-agent system |
 | [Demo](DEMO.md) | End-to-end walkthrough: Hello World Python CLI |
 | [Recipes](RECIPES.md) | Step-by-step workflows for common operations |
@@ -52,12 +54,13 @@
 ## Reading Order
 
 **Getting started:**
-1. [Pairing Usage](../support-docs/USAGE_PAIRING.md) — how to pair with an agent
-2. [Demo](DEMO.md) — see it in action
-3. [Configuration](../support-docs/CONFIGURATION.md) — tune the system
+1. [Getting Started](../GETTING_STARTED.md) — install and first-run setup
+2. [Pairing Usage](../support-docs/USAGE_PAIRING.md) — how to pair with an agent
+3. [Demo](DEMO.md) — see it in action
+4. [Configuration](../support-docs/CONFIGURATION.md) — tune the system
 
 **Running multi-agent sprints:**
-1. [Multi-Agent Usage](../support-docs/USAGE_MULTI_AGENTS.md) — activation and setup
+1. [Multi-Agent Usage](../support-docs/USAGE_MULTI_AGENTS.md) — run the MAS after setup
 2. [Recipes](RECIPES.md) — operational workflows
 3. [Troubleshooting](../support-docs/TROUBLESHOOTING.md) — when things go wrong
 
@@ -75,7 +78,7 @@
 
 | Category | Documents | Status |
 |----------|-----------|--------|
-| User Guides | 4 | Complete |
+| User Guides | 6 | Complete |
 | Operations | 4 | Complete |
 | Demo Benchmark | 8 | Complete |
 | Release Notes | 3 | Complete |

@@ -966,7 +966,7 @@ func InitCommandWithConfig(params InitParams) error {
 	}
 	if hasNonClaude {
 		fmt.Println("Some agents require manual configuration.")
-		fmt.Println("See: https://github.com/liza-mas/liza/blob/main/contracts/contract-activation.md")
+		fmt.Println("See: https://github.com/liza-mas/liza/blob/main/GETTING_STARTED.md")
 	}
 
 	return nil

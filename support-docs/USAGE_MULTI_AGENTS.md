@@ -1,12 +1,14 @@
 # Liza - Usage Guide
 
-## Activation of the Contract for Pairing Agents
-
-See [Contract Activation](../contracts/contract-activation.md).
-
 ## Liza
 
 See [DEMO](../docs/DEMO.md) for a full example.
+
+This guide assumes Liza has already been installed, `liza setup` has been run,
+`AGENT_TOOLS.md` has been reviewed, and the target project is ready for Liza
+initialization. For setup/configuration details, see
+[Configuration Reference](CONFIGURATION.md) and
+[Customizing AGENT_TOOLS.md](CUSTOMIZING_AGENT_TOOLS.md).
 
 ### Key Concepts
 
@@ -61,45 +63,7 @@ See [DEMO](../docs/DEMO.md) for a full example.
 
 ### Quick Start (Target Usage)
 
-**Prerequisites:**
-- Claude Code CLI and git installed
-- Go >= 1.25.5 installed
-- `liza` Go binary in PATH (see `make install`)
-
-**Installing the Liza CLI:**
-
-```bash
-# Latest release (macOS/Linux)
-curl -fsSL https://raw.githubusercontent.com/liza-mas/liza/main/install.sh | bash
-
-# Build from main branch (requires Go and make)
-curl -fsSL https://raw.githubusercontent.com/liza-mas/liza/main/install.sh | BRANCH=main bash
-
-# Or from a local clone
-make install
-
-# Verify
-liza version
-```
-
-**1. Global Setup (one-time)**
-```bash
-liza setup --claude --codex  # installs contracts, skills, support docs, and provider integrations
-liza setup --claude --codex --force           # overwrite existing (e.g., after liza upgrade)
-liza setup --agent-tools ~/my-agent-tools.md  # use custom AGENT_TOOLS.md
-```
-
-> **⚠️ `AGENT_TOOLS.md` must be customized before serious multi-agent use.**
-> Agents treat it as an operational contract. If it names tools you do not
-> actually have, or tools that are incompatible with worktree-heavy execution,
-> they will burn context, make worse tool choices, and may reason over stale
-> indexes. IDE-specific MCP tools on worktrees should be used with care:
-> keep only the ones that do not rely on a centralized index tied to one
-> project state.
->
-> Read and apply [Customizing AGENT_TOOLS.md](CUSTOMIZING_AGENT_TOOLS.md)
-> before your first run. If needed, install your own version directly with
-> `liza setup --agent-tools ~/my-agent-tools.md`.
+Use this section once the global setup is complete.
 
 > **Optional but highly recommended:** enable `scip-search` for
 > repository-navigation-heavy MAS runs. `LIZA_ENABLE_SCIP_SEARCH` is the MAS
@@ -126,7 +90,7 @@ liza setup --agent-tools ~/my-agent-tools.md  # use custom AGENT_TOOLS.md
 > credential files. See [Configuration Reference](CONFIGURATION.md) for setup,
 > offline behavior, `.sembleignore` scope, routing, and non-goals.
 
-**2. Initialize Project**
+**1. Initialize Project**
 
 > **Commit your spec file and `.pre-commit-config.yaml` before running `liza init`.** Worktrees are created from the configured integration branch, so uncommitted files won't be visible to agents unless you explicitly enable ignored root env-file copying with `--copy-worktree-env-files` or `LIZA_ENABLE_COPY_ENV_FILES=true`.
 
@@ -185,7 +149,7 @@ cat .liza/state.yaml
 Contracts and skills live in `~/.liza/` (global, from `liza setup`), not in the project.
 Operational reference content (blackboard fields, anomaly types, etc.) is inlined directly into agent prompts.
 
-**3. Start Agents**
+**2. Start Agents**
 
 The TUI (`liza tui`) is the primary way to spawn and monitor agents. Press `s` to spawn with the configured default CLI (role names autocomplete from the pipeline config), or `S` to pick a specific CLI.
 
@@ -478,6 +442,33 @@ See [Architecture Overview](../specs/architecture/overview.md) for detailed comp
 **`.claude/settings.json`** — Permissions for Claude Code agents (Liza CLI permissions shown, hooks, MCP servers).
 
 The full template also pre-approves skills (code-review, testing, debugging, etc.), git read/write commands, build tools, shell utilities, and web access (WebFetch, WebSearch, LSP). See `internal/embedded/claude-settings.json` for the complete list.
+
+> ️⚠️ To use Claude Code with your Claude subscription, make sure the ANTHROPIC_API_KEY environment variable is not set by default on a new shell start ([Claude support](https://support.claude.com/en/articles/12304248-managing-api-key-environment-variables-in-claude-code), not specific to Liza).
+
+**Claude environment overrides:** Create a `claude.env` file at your project root
+to inject environment variables into Claude CLI agent processes. The supervisor
+reads this file automatically if it exists. Format: `KEY=VALUE`, one per line
+(comments with `#`). See https://code.claude.com/docs/en/env-vars.
+
+```bash
+# claude.env — example
+# Mitigate recent token usage spike, https://x.com/kunchenguid/status/2043511416448307378
+CLAUDE_CODE_EFFORT_LEVEL=high
+CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING=1
+CLAUDE_CODE_DISABLE_AUTO_MEMORY=1
+CLAUDE_CODE_DISABLE_1M_CONTEXT=0
+CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=30
+CLAUDE_CODE_SUBAGENT_MODEL=sonnet
+LIZA_DISABLE_CLAUDE_SUBAGENTS=1
+```
+
+Rationale:
+- High is probably the optimal reasoning effort - thoughtfulness without excessive token consumption.
+- The new adaptive thinking contributed to the degradation of Opus performance since March 2026.
+- Auto-memory is investment without return because Claude Code never considers it in practice.
+- 1M context is too much - Claude's performance degrades much before hitting a fraction of it: either disable it or set an aggressive autocompact threshold.
+- Use Sonnet for subagents in pairing.
+- Subagents are useful in general to save context on the master session, but Liza's contract is heavy, cannot be disabled for subagents, and Liza's sessions are task bounded.
 
 > **⚠️ Dev ecosystem tools must be allowed.** Agents run non-interactively — they cannot
 > answer permission prompts. Any tool not listed in `permissions.allow` will silently fail

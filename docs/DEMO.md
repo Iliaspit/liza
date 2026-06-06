@@ -14,7 +14,8 @@ This walkthrough demonstrates Liza orchestrating a multi-agent system to build a
 - Go >= 1.25.5 installed
 - `liza` Go binary in PATH (see `make install`)
 
-See [Contract Activation](../contracts/contract-activation.md) for the agent settings setup (Claude Code, Codex, Gemini, etc.).
+See [Getting Started](../GETTING_STARTED.md) for first-run setup and
+[Configuration](../support-docs/CONFIGURATION.md) for provider settings.
 
 ---
 

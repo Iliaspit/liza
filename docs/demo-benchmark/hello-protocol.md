@@ -375,7 +375,7 @@ An agent that finds nothing to critique either didn't engage deeply enough to fo
 
 The contract works as-is with Claude, Codex, and Kimi. No modifications needed.
 
-**Mistral**: Can be made compliant with explicit activation ("You MUST follow the contract") in `contract-activation.md`. Worth documenting but not worth optimizing for — the extra supervision cost erodes the value proposition.
+**Mistral**: Can be made partially compliant with explicit activation ("You MUST follow the contract") after the setup path in `GETTING_STARTED.md`. Worth documenting but not worth optimizing for — the extra supervision cost erodes the value proposition.
 
 **Gemini**: Architectural incompatibility. No prompt-level fix exists. After 6+ months of attempts, the recommendation is to exclude Gemini from contract-governed workflows rather than attempt workarounds.
 

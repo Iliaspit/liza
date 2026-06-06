@@ -4,7 +4,10 @@ A practical guide to using the Liza behavioral contract for human-agent pairing.
 
 **Audience**: Developers who want to pair with AI coding agents as senior engineering peers — not as autocomplete tools, not as delegated workers.
 
-**Prerequisites**: A compatible agent activated with the contract. See [Contract Activation](../contracts/contract-activation.md) for setup.
+**Prerequisites**: Liza has been installed, `liza setup` has been run, the
+project has been initialized with `liza init`, and a compatible agent has been
+activated with the contract. For configuration details, see
+[Configuration Reference](CONFIGURATION.md).
 
 ---
 
@@ -26,9 +29,11 @@ For the full story behind this approach:
 
 ## Quick Start
 
-### 1. Activate the contract
+### 1. Start from an initialized project
 
-Follow [Contract Activation](../contracts/contract-activation.md) for your agent (Claude Code, Codex, etc.).
+Complete the getting-started setup before using this guide. In practical terms:
+run `liza setup` once, review `~/.liza/AGENT_TOOLS.md`, run `liza init` in the
+project, then start your coding agent from that project directory.
 
 ### 2. Say hello
 
@@ -244,40 +249,8 @@ Best for: exploring new features, validating requirements through code simulatio
 
 ## Adversarial Pairing
 
-Adversarial Pairing is the middle step between ordinary Pairing mode and the full Liza MAS. Use it when one agent should implement and multiple reviewers should challenge the work, but a full autonomous sprint would be too heavy.
-
-It runs multiple Pairing-mode sessions against a shared Markdown blackboard. The typical setup is one doer and several reviewers on different models, so review disagreement exposes model-specific blind spots. The human remains the approval authority; the blackboard coordinates doer/reviewer state, submitted artifacts, review notes, validation output, and decisions.
-
-Use it as:
-
-```text
-/adversarial-pairing <role-or-reviewer-id> <blackboard-path>
-```
-
-`role-or-reviewer-id` is `doer`, `reviewer`, or `reviewer-<id>`. Use `reviewer-<id>` when you want the agent to receive both its reviewer role and the stable ID it should use when registering in the blackboard. Start the doer first so it can create or initialize the blackboard, then start reviewer sessions against the same path:
-
-```text
-/adversarial-pairing doer .liza/adversarial/retry-client.md
-/adversarial-pairing reviewer-codex .liza/adversarial/retry-client.md
-/adversarial-pairing reviewer-claude .liza/adversarial/retry-client.md
-```
-
-The blackboard path may be untracked and should not be committed unless you explicitly want it preserved. During coding, the doer normally uses a dedicated git worktree recorded in the blackboard; reviewers review the staged or unstaged diff for the current review round.
-
-Typical flow:
-
-1. The doer records the goal, evidence, and plan in the blackboard.
-2. Reviewers, usually on different models, challenge the submitted plan and record verdicts.
-3. After plan approval and human approval to code, the doer implements.
-4. The doer submits the candidate diff for code review.
-5. Reviewers request changes or approve. Follow-up rounds continue until approval.
-6. The doer asks before commit, rebase, merge, or cleanup.
-
-For debugging work, the blackboard can require explicit root-cause analysis and red-test gates before implementation. That gives you the MAS-style discipline of diagnosis review and failing-test review without handing the whole task to the autonomous pipeline.
-
-Best for: high-stakes Pairing-mode changes, complex debugging, architectural edits that need a second agent's review, and situations where the full MAS would be disproportionate.
-
----
+For high-stakes Pairing-mode work that needs reviewer agents without launching
+the full MAS, use [Adversarial Pairing](ADVERSARIAL_PAIRING.md).
 
 ## Steering Tools
 
@@ -497,4 +470,5 @@ See [Provider Compatibility](../README.md#provider-compatibility) for detailed a
 - [Turning AI Coding Agents into Senior Engineering Peers](https://medium.com/@tangi.vass/turning-ai-coding-agents-into-senior-engineering-peers-c3d178621c9e) — the contract mechanics: state machine, approval gates, collaboration modes, hard stop triggers, and the evidence that it works
 - [I Tried to Kill Vibe Coding. I Built Adversarial Vibe Coding. Without the Vibes.](https://medium.com/@tangi.vass/i-tried-to-kill-vibe-coding-i-built-adversarial-vibe-coding-without-the-vibes-bc4a63872440) — how the pairing contract became the foundation for a multi-agent system
 - [contracts/](../contracts/) — the full behavioral contract specifications (agent-facing)
-- [Contract Activation](../contracts/contract-activation.md) — setup instructions per agent provider
+- [Configuration Reference](CONFIGURATION.md) — setup, init, provider, and runtime configuration details
+- [Adversarial Pairing](ADVERSARIAL_PAIRING.md) — doer/reviewer pairing workflow
