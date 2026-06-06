@@ -134,7 +134,7 @@ Field ownership:
 
 Lock protocol:
 
-Prepare the complete intended blackboard content in a temporary file, then run:
+Prepare the complete intended blackboard content in a temporary file (Claude: use the `Write` tool not Bash heredocs to avoid triggering permission requests). Then run:
 
 ```bash
 python3 skills/adversarial-pairing/scripts/blackboard_write.py \
