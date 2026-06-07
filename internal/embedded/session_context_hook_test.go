@@ -205,6 +205,43 @@ func TestSessionContextHook_EmitsInitContextWithoutIndexes(t *testing.T) {
 	}
 }
 
+func TestSessionContextHook_EmitsAdrDirectoryWhenPresent(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not available")
+	}
+
+	hookPath := writeSessionContextHook(t)
+	projectRoot := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(projectRoot, "specs", "architecture", "ADR"), 0755); err != nil {
+		t.Fatalf("create ADR directory: %v", err)
+	}
+
+	output := runSessionContextHook(t, hookPath, sessionStartPayload(t, projectRoot), nil, 0)
+	context := sessionStartAdditionalContext(t, output)
+	if !strings.Contains(context, " // ADRs: specs/architecture/ADR") {
+		t.Fatalf("startup context should include ADR directory, got:\n%s", context)
+	}
+	if strings.Contains(context, "Liza repository indexes detected") {
+		t.Fatalf("ADR-only context should not claim repository indexes, got:\n%s", context)
+	}
+}
+
+func TestSessionContextHook_OmitsAdrDirectoryWhenMissing(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not available")
+	}
+
+	hookPath := writeSessionContextHook(t)
+	projectRoot := t.TempDir()
+	writeIndexedRepoMarkers(t, projectRoot)
+
+	output := runSessionContextHook(t, hookPath, sessionStartPayload(t, projectRoot), nil, 0)
+	context := sessionStartAdditionalContext(t, output)
+	if strings.Contains(context, " // ADRs: specs/architecture/ADR") {
+		t.Fatalf("startup context should omit missing ADR directory, got:\n%s", context)
+	}
+}
+
 func TestSessionContextHook_EmitsStacklitBlockOnlyWhenStacklitArtifactExists(t *testing.T) {
 	if _, err := exec.LookPath("bash"); err != nil {
 		t.Skip("bash not available")

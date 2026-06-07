@@ -209,9 +209,18 @@ if truthy_env "${LIZA_ENABLE_SEMBLE:-}" && root_sembleignore_safe && semble_offl
   shell_project_dir=$(quote_for_shell "$project_dir")
 fi
 
-if [[ -z "${shell_stacklit_path:-}" && "${#scip_files[@]}" -eq 0 && "$semble_enabled" != "true" ]]; then
+adr_dir_available=false
+if [[ -d "$project_dir/specs/architecture/ADR" ]]; then
+  adr_dir_available=true
+fi
+
+if [[ -z "${shell_stacklit_path:-}" && "${#scip_files[@]}" -eq 0 && "$semble_enabled" != "true" && "$adr_dir_available" != "true" ]]; then
   printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"%s"}}\n' "$(json_escape "$context")"
   exit 0
+fi
+
+if [[ "$adr_dir_available" == "true" ]]; then
+  context+=" // ADRs: specs/architecture/ADR"
 fi
 
 if [[ -n "${shell_stacklit_path:-}" || "${#scip_files[@]}" -gt 0 ]]; then
