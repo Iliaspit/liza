@@ -81,7 +81,8 @@ Semble complements the rest of the worktree-safe stack:
 - Use Semble for broad conceptual discovery when it is enabled and offline-ready.
 - Use Stacklit for module ownership, dependencies, hot files, and impact maps.
 - Use SCIP / `scip-search` for exact symbols, references, callers, and
-  implementations when Liza supplies an explicit index path.
+  implementations, packages, static graph hints, and review/test impact hints
+  when Liza supplies an explicit index path.
 - Use Morph MCP semantic/codebase search only as a fallback when Semble is
   unavailable or not offline-ready and the current tool policy exposes Morph MCP.
 - Use `rg` for literal strings, exact error messages, config keys, and path
@@ -102,11 +103,13 @@ When Liza supplies an explicit SCIP index path in an agent prompt, prefer
 
 - `scip-search symbols --index <path>` for symbol lookup
 - `scip-search packages --index <path>` for indexed package discovery
-- `scip-search references --index <path>` for callers and references
+- `scip-search references --index <path>` for references by exact symbol or name
 - `scip-search implementations --index <path>` for implementation navigation
-  when the indexed language supports it
+  by exact symbol or name when the indexed language exposes implementation rows
+- `scip-search callers --index <path>`, `callees`, `graph`, and `impact` for
+  static SCIP-derived review hints; verify candidate paths with direct reads
 
-This is the MAS-safe path for symbol/package/reference/implementation questions
+This is the MAS-safe path for symbol/package/reference/implementation/graph questions
 because the query is tied to a caller-supplied worktree index instead of an IDE,
 LSP, or branch-global index that may describe another checkout.
 

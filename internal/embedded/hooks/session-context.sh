@@ -220,15 +220,18 @@ if [[ -z "${shell_stacklit_path:-}" && "${#scip_files[@]}" -eq 0 && "$semble_ena
 fi
 
 if [[ "$adr_dir_available" == "true" ]]; then
-  context+=" // ADRs: specs/architecture/ADR"
+  context+="
+ // ADRs: specs/architecture/ADR"
 fi
 
 if [[ -n "${shell_stacklit_path:-}" || "${#scip_files[@]}" -gt 0 ]]; then
-  context+=" Liza repository indexes detected. Pairing mode can use these explicit repo-root index paths. They are refreshed after commits and do not reflect uncommitted changes; verify against source files before editing."
+  context+="
+ Liza repository indexes detected. Pairing mode can use these explicit repo-root index paths. They are refreshed after commits and do not reflect uncommitted changes; verify against source files before editing."
 fi
 
 if [[ -n "${shell_stacklit_path:-}" ]]; then
-  context+=" // Stacklit index: $stacklit_path
+  context+="
+ // Stacklit index: $stacklit_path
  // stacklit derive --ai-summary -i $shell_stacklit_path
  // stacklit find-module <query> -i $shell_stacklit_path
  // stacklit get-module <module> -i $shell_stacklit_path
@@ -238,7 +241,8 @@ if [[ -n "${shell_stacklit_path:-}" ]]; then
 fi
 
 if [[ "${#scip_files[@]}" -gt 0 ]]; then
-  context+=" // SCIP indexes: "
+  context+="
+ // SCIP indexes:"
   for scip_path in "${scip_files[@]}"; do
     language=$(basename "$scip_path" .scip)
     case "$language" in
@@ -247,24 +251,33 @@ if [[ "${#scip_files[@]}" -gt 0 ]]; then
       python) display_language="Python" ;;
       *) display_language="$language" ;;
     esac
-    context+=" // $display_language index: $scip_path"
+    context+="
+ // $display_language index: $scip_path"
   done
   context+="
  // scip-search symbols --index <index-path> --name Foo --name Bar
- // scip-search references --index <index-path> --symbol '<exact-foo>' --symbol '<exact-bar>' --location-only"
-  context+=" // (except python): scip-search implementations --index <index-path> --symbol '<exact-symbol>'"
+ // scip-search packages --index <index-path> --prefix com.example
+ // scip-search references --index <index-path> --name Handler --one-line
+ // scip-search references --index <index-path> --symbol '<exact-foo>' --symbol '<exact-bar>' --location-only
+ // scip-search implementations --index <index-path> --name Interface --one-line (implementation rows may be absent for Python)
+ // scip-search impact --index <index-path> --symbol '<exact-symbol>' --one-line
+ // scip-search graph --index <index-path> --symbol '<exact-symbol>' --markdown
+ // Use impact first for pre-edit blast radius; graph/impact can be noisy for large functions and Python indexes."
 fi
 
 if [[ -n "${shell_stacklit_path:-}" ]] && [[ "${#scip_files[@]}" -gt 0 ]]; then
-  context+=" // Orient with Stacklit first, then trace precisely with scip-search."
+  context+="
+ // Orient with Stacklit first, then trace precisely with scip-search."
 fi
 
 if [[ -n "${shell_stacklit_path:-}" ]]; then
-  context+=" === Run \`stacklit derive --ai-summary -i $shell_stacklit_path\` at the end of the session initialization."
+  context+="
+ === Run \`stacklit derive --ai-summary -i $shell_stacklit_path\` at the end of the session initialization."
 fi
 
 if [[ "$semble_enabled" == "true" ]]; then
-  context+=" // Semble semantic search is available for this repo root: $project_dir
+  context+="
+ // Semble semantic search is available for this repo root: $project_dir
  // env HF_HUB_OFFLINE=1 semble search \"where is review submission validated?\" $shell_project_dir
  // env HF_HUB_OFFLINE=1 semble search \"agent CLI defaults\" $shell_project_dir --top-k 10
  // env HF_HUB_OFFLINE=1 semble search \"where is task superseding specified?\" $shell_project_dir --content docs

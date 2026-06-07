@@ -138,6 +138,7 @@ func TestIndexingActivationSessionStartAdvertisesOnlyReadyRepoRootOptionalTools(
 		"SCIP indexes:",
 		"Go index: "+filepath.Join(projectDir, "go.scip"),
 		"scip-search symbols --index <index-path>",
+		"scip-search impact --index <index-path>",
 	)
 	assertIndexingActivationContainsNone(t, context, "Semble semantic search is available")
 

@@ -47,21 +47,29 @@ func TestSessionContextHook_EmitsSessionStartContextForIndexedRepo(t *testing.T)
 		"Go index: " + filepath.Join(projectRoot, "go.scip"),
 		"Python index: " + filepath.Join(projectRoot, "python.scip"),
 		"scip-search symbols --index <index-path> --name Foo --name Bar",
+		"scip-search packages --index <index-path> --prefix com.example",
+		"scip-search references --index <index-path> --name Handler --one-line",
 		"scip-search references --index <index-path> --symbol '<exact-foo>' --symbol '<exact-bar>' --location-only",
-		"(except python): scip-search implementations --index <index-path> --symbol '<exact-symbol>'",
+		"scip-search implementations --index <index-path> --name Interface --one-line (implementation rows may be absent for Python)",
+		"scip-search impact --index <index-path> --symbol '<exact-symbol>' --one-line",
+		"scip-search graph --index <index-path> --symbol '<exact-symbol>' --markdown",
 		"do not reflect uncommitted changes",
 	} {
 		if !strings.Contains(context, want) {
 			t.Fatalf("session context missing %q, got:\n%s", want, context)
 		}
 	}
-	for _, needle := range []string{
-		"scip-search symbols --index",
-		"scip-search references --index",
-		"scip-search implementations --index",
-	} {
-		if got := strings.Count(context, needle); got != 1 {
-			t.Fatalf("session context should include one compact %q example, got %d in:\n%s", needle, got, context)
+	wantCounts := map[string]int{
+		"scip-search symbols --index":         1,
+		"scip-search packages --index":        1,
+		"scip-search references --index":      2,
+		"scip-search implementations --index": 1,
+		"scip-search graph --index":           1,
+		"scip-search impact --index":          1,
+	}
+	for needle, want := range wantCounts {
+		if got := strings.Count(context, needle); got != want {
+			t.Fatalf("session context should include %d compact %q example(s), got %d in:\n%s", want, needle, got, context)
 		}
 	}
 	for _, unwanted := range []string{
@@ -295,6 +303,7 @@ func TestSessionContextHook_EmitsScipBlockOnlyWhenScipArtifactExists(t *testing.
 		"SCIP indexes:",
 		"Go index: " + filepath.Join(projectRoot, "go.scip"),
 		"scip-search symbols --index <index-path> --name Foo --name Bar",
+		"scip-search graph --index <index-path> --symbol '<exact-symbol>' --markdown",
 	} {
 		if !strings.Contains(context, want) {
 			t.Fatalf("startup context missing %q, got:\n%s", want, context)

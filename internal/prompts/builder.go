@@ -162,8 +162,8 @@ func scipSearchPromptIndexFor(index ScipSearchIndex) scipSearchPromptIndex {
 			DisplayLanguage:           "Go",
 			IndexPath:                 index.IndexPath,
 			ShellIndexPath:            shellQuote(index.IndexPath),
-			CapabilitySummary:         "Go symbols, references, and implementations are supported.",
-			ImplementationGuidance:    "Use implementations for Go implementation lookups.",
+			CapabilitySummary:         "Go symbols, references, implementations, packages, and static graph hints are supported.",
+			ImplementationGuidance:    "Use implementations, graph, callers, callees, and impact for static SCIP-derived hints, then verify in files.",
 			ShowImplementationCommand: true,
 		}
 	case "typescript":
@@ -171,8 +171,8 @@ func scipSearchPromptIndexFor(index ScipSearchIndex) scipSearchPromptIndex {
 			DisplayLanguage:           "TypeScript",
 			IndexPath:                 index.IndexPath,
 			ShellIndexPath:            shellQuote(index.IndexPath),
-			CapabilitySummary:         "TypeScript symbols and references are supported.",
-			ImplementationGuidance:    "TypeScript implementations are upstream-supported by scip-search but not locally verified; verify results in files before relying on them.",
+			CapabilitySummary:         "TypeScript symbols, references, implementations, packages, and static graph hints are supported.",
+			ImplementationGuidance:    "Use implementations, graph, callers, callees, and impact for static SCIP-derived hints, then verify in files.",
 			ShowImplementationCommand: true,
 		}
 	case "python":
@@ -180,15 +180,15 @@ func scipSearchPromptIndexFor(index ScipSearchIndex) scipSearchPromptIndex {
 			DisplayLanguage:        "Python",
 			IndexPath:              index.IndexPath,
 			ShellIndexPath:         shellQuote(index.IndexPath),
-			CapabilitySummary:      "Python symbols are supported and references may be incomplete.",
-			ImplementationGuidance: "scip-search implementations is not supported for Python.",
+			CapabilitySummary:      "Python symbols, references, packages, and static graph hints are supported by scip-search; implementation rows may be absent.",
+			ImplementationGuidance: "Prefer references, graph, callers, callees, and impact for Python navigation, then verify in files.",
 		}
 	default:
 		return scipSearchPromptIndex{
 			DisplayLanguage:   index.Language,
 			IndexPath:         index.IndexPath,
 			ShellIndexPath:    shellQuote(index.IndexPath),
-			CapabilitySummary: "Symbols and references are available for this supplied SCIP index.",
+			CapabilitySummary: "Symbols, references, packages, and static graph hints are available for this supplied SCIP index.",
 		}
 	}
 }

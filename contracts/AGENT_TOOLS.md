@@ -11,7 +11,7 @@ Choose the highest-signal routing source before exploratory search: explicit use
 
 Phased repository search:
 1. Orient structurally with Stacklit (modules, dependencies, impact, symbol names) and conceptually with Semble for code and docs when Liza supplies those roots/indexes.
-2. Trace precisely with `scip-search` for code symbols, definitions, references, callers, and implementations; for long docs/specs, use `rg -c "pattern" <paths>` to find candidates, then `mdtoc` and section-scoped reads.
+2. Trace precisely with `scip-search` for code symbols, definitions, references, implementations, packages, and static graph/impact hints; for long docs/specs, use `rg -c "pattern" <paths>` to find candidates, then `mdtoc` and section-scoped reads.
 3. Verify against source files before editing or claiming behavior.
 
 Directly named files/sections/symbols may bypass orientation; use indexes afterward for impact and reference questions. If an optional index/search tool is disabled, unavailable, or not advertised, fall back to `rg`, `ast-grep`, direct reads, and Morph MCP only when policy exposes it. Use bounded `rg` for exact text search and path discovery; use `git grep` for tracked/index/HEAD/history searches. Use direct, line-numbered reads (`nl -ba ... | sed -n ...`) for source-of-truth verification and edit discussion.
@@ -62,6 +62,7 @@ For any MCP-backed default row in the tables below, if the tool is unavailable i
 | Literal/regex code search | `rg` | — | — |
 | Symbol discovery | `scip-search symbols --index <supplied-index>` | `rg` pattern search | No SCIP index path supplied, `scip-search` unavailable, or result insufficient |
 | Symbol lookup | `scip-search symbols --index <supplied-index>` + direct reads | `rg` + direct reads | No SCIP index path supplied, `scip-search` unavailable, or result insufficient |
+| Package discovery | `scip-search packages --index <supplied-index>` | manifest reads + `rg` | No SCIP index path supplied, `scip-search` unavailable, or result insufficient |
 | File edit | apply_patch | morph-mcp edit_file | Edit is broad, context-heavy, or benefits from fast-apply semantics |
 | Web content | WebFetch | fetch MCP | Need raw HTML, pagination, or blocked |
 | Current info / library discovery | perplexity current-info search | WebSearch | Perplexity returns nothing useful |
@@ -80,8 +81,8 @@ For any MCP-backed default row in the tables below, if the tool is unavailable i
 | Repo orientation and module impact | `stacklit derive/get-module/get-dependencies -i <supplied-index>` | `rg` + manifest reads + exact source reads | No Stacklit index path supplied, Stacklit unavailable, or index result insufficient |
 | Semantic repository search ("how does X work?") | Semble with a Liza-supplied target root | Morph MCP codebase search, then `rg` + exact reads (`ast-grep` when structural search helps) | Semble is disabled, unavailable, not advertised, or insufficient; use Morph MCP only when policy exposes it |
 | Symbol info at position | `scip-search symbols --index <supplied-index>` + direct reads | `rg` + direct reads | No SCIP index path supplied, `scip-search` unavailable, or result insufficient |
-| Find references | `scip-search references --index <supplied-index> --symbol '<exact-symbol>' --location-only` | `rg` | No SCIP index path supplied, `scip-search` unavailable, or result insufficient |
-| Call hierarchy (callers/callees) | `scip-search references --index <supplied-index>` + direct reads | `rg` + direct reads | No SCIP index path supplied, `scip-search` unavailable, or result insufficient |
+| Find references | `scip-search references --index <supplied-index> --name Foo` or `--symbol '<exact-symbol>' --location-only` | `rg` | No SCIP index path supplied, `scip-search` unavailable, or result insufficient |
+| Static call/dependency hints | `scip-search symbols --index <supplied-index> --name Foo --nested-json`, then `impact --symbol '<exact-symbol>' --one-line` or `graph --symbol '<exact-symbol>' --markdown` + direct reads | `rg` + direct reads | No SCIP index path supplied, `scip-search` unavailable, or result insufficient |
 | Cross-file definitions | `scip-search symbols --index <supplied-index>` + direct reads | `rg` + direct reads | No SCIP index path supplied, `scip-search` unavailable, or result insufficient |
 | Multi-file structural analysis | Stacklit module/dependency commands + `scip-search`/`ast-grep` as needed | `rg` + direct reads | Supplied indexes unavailable or insufficient |
 
@@ -97,8 +98,15 @@ Replace `<index-path>` and `<target-root>` with the concrete Liza-supplied value
 
 ```bash
 scip-search symbols --index <index-path> --name Foo --name Bar
+scip-search symbols --index <index-path> --name Foo --nested-json
+scip-search packages --index <index-path> --prefix com.example
+scip-search references --index <index-path> --name Handler --one-line
 scip-search references --index <index-path> --symbol '<exact-foo>' --symbol '<exact-bar>' --location-only
-scip-search implementations --index <index-path> --symbol '<exact-symbol>'
+scip-search implementations --index <index-path> --name Interface --one-line
+scip-search impact --index <index-path> --symbol '<exact-symbol>' --one-line
+scip-search graph --index <index-path> --symbol '<exact-symbol>' --markdown
+scip-search callers --index <index-path> --symbol '<exact-symbol>' --markdown
+scip-search callees --index <index-path> --name Handler --markdown
 nl -ba <result-path> | sed -n '<first-line>,<last-line>p'
 stacklit derive --ai-summary -i <index-path>
 stacklit find-module <query> -i <index-path>
@@ -111,7 +119,7 @@ env HF_HUB_OFFLINE=1 semble search "default CLI config" <target-root> --content 
 env HF_HUB_OFFLINE=1 semble find-related <file_path> <line> <target-root>
 ```
 
-`scip-search --name` matches symbol substrings; `--symbol` matches exact SCIP symbols from prior results. Supported SCIP languages are Go, Python, and TypeScript; `implementations` is not supported for Python. Semble `--content` accepts `code`, `docs`, `config`, and `all`; `code` is the default.
+`scip-search --name` matches symbol substrings; `--symbol` matches exact SCIP symbols from prior results. `--location-only` is only valid with exact `--symbol` queries for references and implementations. Use `impact` first for pre-edit blast-radius checks, `graph` when both incoming and outgoing local context matter, and `references`, `callers`, or `callees` when only one direction is needed. `graph`, `callers`, `callees`, and `impact` are static SCIP-derived hints, not complete runtime call graphs. For large functions or Python indexes, graph/impact output may include local symbols, builtins, and type references; prefer exact `--symbol`, `--one-line`, and direct source verification. Supported SCIP languages are Go, Python, and TypeScript; implementation rows are language/indexer-dependent and may be absent for Python indexes. Semble `--content` accepts `code`, `docs`, `config`, and `all`; `code` is the default.
 
 ### Precedence
 

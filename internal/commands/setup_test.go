@@ -397,6 +397,8 @@ func assertAgentToolsOptionalIndexGuidance(t *testing.T, content string) {
 		"Use the shell-quoted value when one is provided",
 		"stacklit derive --ai-summary -i <index-path>",
 		"scip-search symbols --index <index-path>",
+		"scip-search packages --index <index-path>",
+		"scip-search impact --index <index-path>",
 		"disabled, unavailable, or not advertised",
 		"fall back to `rg`, `ast-grep`, direct reads",
 		"Morph MCP only when policy exposes it",
