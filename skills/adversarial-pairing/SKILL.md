@@ -8,16 +8,17 @@ description: Coordinate Pairing-mode doer/reviewer sessions through a Markdown b
 Use as:
 
 ```text
-/adversarial-pairing <role-or-reviewer-id> <blackboard-path>
+/adversarial-pairing <role-or-reviewer-id> <blackboard-path> [yolo]
 ```
 
 `role-or-reviewer-id` is `doer`, `reviewer`, or `reviewer-<id>`.
 `reviewer-<id>` means reviewer role with `<id>` as the stable agent entry to use when registering in the blackboard, for example `reviewer-codex` or `reviewer-claude`.
 `blackboard-path` may be untracked and must not be committed unless the user explicitly asks.
+`yolo` is doer-only. It records `yolo: true` in the blackboard and waives doer-side human approval prompts. It does not waive reviewer approval predicates, stop conditions, validation, merge-conflict handling, or user stop instructions.
 
 # Operating Model
 
-This skill creates a lightweight Pairing-mode coordination loop. The blackboard is shared coordination state; the human remains the approval authority.
+This skill creates a lightweight Pairing-mode coordination loop. The blackboard is shared coordination state; the human remains the approval authority unless the doer is explicitly invoked with `yolo`.
 
 The YAML frontmatter is machine-pollable state. The Markdown body is durable context: goal, evidence, plans, reviewer comments, decisions, validation output, and review rounds.
 
@@ -30,8 +31,9 @@ These rules are always active for this skill:
 - Unexpected events are interruptions, not completion. After a write conflict, protocol violation, interrupted repair, or user-guided recovery is resolved, re-read frontmatter and resume polling if `phase` is still non-terminal.
 - Every blackboard write MUST use `skills/adversarial-pairing/scripts/blackboard_write.py`; do not manually edit lock state or bypass the sidecar OS lock.
 - Each logical blackboard update must be one helper write. Do not split a status/phase update from the matching body artifact, worklog, or review notes.
+- Every helper write MUST update the writing agent's frontmatter status and timestamp fields to match the body artifact or action. Stale status blocks the pipeline because agents poll frontmatter to decide whether work is available.
 - Field ownership is strict: the doer must preserve reviewer-owned agent entries exactly, and reviewers must write only their own agent entry plus authorized claim transitions.
-- Phase gates are mandatory. Do not advance to a later phase, create artifacts for a later phase, create a coding worktree, or implement unless the current phase's approval predicate is satisfied or the user explicitly waives that exact gate.
+- Phase gates are mandatory. Do not advance to a later phase, create artifacts for a later phase, create a coding worktree, or implement unless the current phase's approval predicate is satisfied, `yolo: true` waives a doer-side human approval prompt, or the user explicitly waives that exact gate.
 
 # Polling Loop
 
@@ -67,6 +69,7 @@ The blackboard frontmatter is the coordination contract. It must be valid YAML a
 ```yaml
 ---
 phase: DRAFT
+yolo: false
 work_type: feature
 rca_required: false
 red_test_required: false
@@ -99,7 +102,7 @@ Worktree rules:
 
 - Before entering `CODING`, after all prior gates are satisfied, the doer must create or select a dedicated git worktree and set `worktree` to its absolute path.
 - If `worktree` is null before `CODING`, derive the default path as `<repo-root>/.worktrees/<blackboard-stem>`, where `<repo-root>` comes from `git rev-parse --show-toplevel` and `<blackboard-stem>` is the basename of `blackboard-path` with one trailing `.md` removed.
-- Before creating the default worktree, ask the user for approval using the derived absolute path. If the user provides a different path, use their path instead.
+- Before creating the default worktree, ask the user for approval using the derived absolute path. If `yolo: true`, use the derived default path without pausing for approval. If the user provides a different path, use their path instead.
 - Reject or stop and ask if the derived stem is empty, contains unsafe path characters, resolves outside `<repo-root>/.worktrees/`, or collides with an existing path that is not the intended worktree.
 - Do not implement in the main checkout unless the user explicitly approves a no-worktree workflow.
 - Once `worktree` is set, run all implementation, staging, validation, and review diff commands from that path.
@@ -117,6 +120,7 @@ Allowed values:
 
 - `phase`: one of the phases listed in `Phases`.
 - terminal `phase`: `COMMITTED`, `BLOCKED`, or `STOPPED`.
+- `yolo`: boolean. `true` means the doer proceeds through doer-side human approval prompts without pausing; reviewer approval predicates and stop conditions still apply.
 - `work_type`: `feature`, `debugging`, `refactor`, `docs`, `spike`, or another explicit user-defined type.
 - `rca_required`, `red_test_required`: booleans.
 - `role`: `doer` or `reviewer`.
@@ -125,7 +129,7 @@ Allowed values:
 
 Field ownership:
 
-- The doer owns `phase`, counters, `work_type`, gate booleans, `required_reviewers`, and `worktree`, except reviewer-owned claim transitions listed below.
+- The doer owns `phase`, counters, `yolo`, `work_type`, gate booleans, `required_reviewers`, and `worktree`, except reviewer-owned claim transitions listed below.
 - Each agent owns only its own `agents.<id>` status, timestamps, reviewed counters, and verdicts.
 - Reviewers may move `ANALYSIS_SUBMITTED -> REVIEWING_ANALYSIS`, `PLANNING_SUBMITTED -> REVIEWING_PLAN`, `RED_TEST_SUBMITTED -> REVIEWING_RED_TEST`, and `CODE_SUBMITTED -> REVIEWING_CODE` when claiming review work.
 - Reviewers may move `CODE_CHANGES_REQUESTED -> FOLLOWUP_REVIEW` only after the doer has updated `code_review_round` and submitted follow-up changes.
@@ -134,7 +138,7 @@ Field ownership:
 
 Lock protocol:
 
-Prepare the complete intended blackboard content in a temporary file (Claude: use the `Write` tool not Bash heredocs to avoid triggering permission requests). Then run:
+Prepare the complete intended blackboard content in a temporary file. Claude MUST create that temporary file with its `Write` tool. Do not use Bash `cat <<EOF`, heredocs, `printf`, or shell inline file-writing snippets to write the temporary content. Then run:
 
 ```bash
 python3 skills/adversarial-pairing/scripts/blackboard_write.py \
@@ -150,6 +154,7 @@ python3 skills/adversarial-pairing/scripts/blackboard_write.py \
 - New blackboards do not include in-document lock fields; lock authority is `<blackboard-path>.lock` plus `<blackboard-path>.lock.owner.json` diagnostics.
 - Use UTC ISO-8601 timestamps ending in `Z`.
 - Within a logical write, update the Markdown body first and the frontmatter status/phase last in the prepared content.
+- Before running the helper, verify the prepared frontmatter reflects the new phase, status, verdict, and counter state. A body-only update is incomplete and can leave the pipeline blocked.
 - Writing without the helper is a protocol violation. Stop and report the violation if it happens; do not make a second unlocked write to repair it.
 
 Completion predicates:
@@ -190,7 +195,7 @@ Completion predicates:
 | `CODE_CHANGES_REQUESTED` | Doer is addressing review comments in unstaged changes. |
 | `FOLLOWUP_REVIEW` | Reviewers are reviewing the unstaged follow-up diff. |
 | `READY_TO_COMMIT` | Reviewers have no remaining blocking comments. |
-| `COMMITTED` | User-approved commit is complete; doer has proposed rebase, merge into the base branch, and post-merge cleanup of the worktree and merged topic branch. |
+| `COMMITTED` | Commit, merge, and post-merge cleanup are complete. |
 | `BLOCKED` | Work cannot proceed without user input. |
 | `STOPPED` | User asked to stop or abort the workflow. |
 
@@ -224,11 +229,13 @@ On invocation:
 - If invoked as the doer and the blackboard file does not exist, create it only when the user asked the doer to create it.
 - New blackboard creation is a write and MUST use `blackboard_write.py --create-if-missing` with the complete initial file content. If the file appears during creation, re-read it instead of overwriting it.
 - If invoked as the doer and the blackboard file is missing but the user did not ask for creation, stop and ask whether to create it.
+- If invoked as the doer with `yolo`, create or update the blackboard with `yolo: true`. If invoked without `yolo`, create new blackboards with `yolo: false` and do not downgrade an existing `yolo: true` value unless the user explicitly asks.
+- If invoked as a reviewer with `yolo`, stop and report that `yolo` is doer-only.
 - If invoked as a reviewer and the blackboard file does not exist, fail fast: report that the doer must create the blackboard before reviewers start, then stop instead of creating or polling.
 
 # Doer Protocol
 
-Mandatory human gates:
+Mandatory human gates when `yolo` is false or missing:
 
 1. Before leaving `DRAFT` for `ANALYZING` or `PLANNING`, ask the user for approval to begin from the blackboard contents.
 2. Before `ANALYZING -> ANALYSIS_SUBMITTED`, show the RCA and ask the user for approval to submit it for adversarial review.
@@ -236,15 +243,17 @@ Mandatory human gates:
 
 No human approval is required for `RED_TESTING -> RED_TEST_SUBMITTED`; submitting the red test is part of the approved debugging workflow.
 
+When `yolo: true`, the doer does not pause at doer-side human approval gates. The doer must still write the same artifacts to the blackboard, wait for required reviewer approvals, run validation, honor stop conditions, and stop for merge conflicts or unsafe cleanup.
+
 For `work_type: debugging`, use the debugging skill and treat RCA as a distinct artifact before planning when `rca_required: true`.
 
 Do not enter `PLANNING` from `ANALYSIS_SUBMITTED`; enter planning only from `ANALYSIS_APPROVED` unless the user explicitly waives the RCA approval gate.
 
-After all reviewers approve the plan and `phase` is `PLAN_APPROVED`, ask the user before coding unless the previous approval explicitly included permission to proceed after reviewer approval. Only an explicit user instruction to waive the plan approval gate may bypass it.
+After all reviewers approve the plan and `phase` is `PLAN_APPROVED`, ask the user before coding unless `yolo: true` or the previous approval explicitly included permission to proceed after reviewer approval. Only `yolo: true` or an explicit user instruction to waive the plan approval gate may bypass it.
 
 When `red_test_required: true`, do not implement the fix until a red test or reproduction has failed for the expected reason and reviewers have approved it. If no practical red test exists, ask the user to approve an alternate validation path.
 
-During coding, follow the normal Pairing-mode approval and validation rules. Stage only when the user asks or when the approved workflow explicitly says to stage for review.
+During coding, follow the normal Pairing-mode approval and validation rules. If `yolo: true`, treat doer-side approval prompts as pre-approved by the invocation. Stage only when the user asks, when `yolo: true`, or when the approved workflow explicitly says to stage for review.
 
 Do not begin addressing review comments until all required reviewers have completed the current review round.
 
@@ -252,7 +261,7 @@ When all reviewers complete a review round and changes are requested, stage the 
 
 When addressing code-review comments, do not stage follow-up changes. Reviewers use staged diff for the first pass and unstaged diff for follow-up passes.
 
-After a user-approved commit is complete, the doer MUST propose the next integration step to the user: rebase the worktree onto the base branch, merge the worktree back into that base branch, then delete both the worktree and the merged topic branch after the merge succeeds. Do not rebase, merge, delete the worktree, or delete the branch automatically; those git state changes require explicit user approval.
+After reviewers approve the code, the doer MUST commit, rebase the worktree onto the base branch, merge the worktree back into that base branch, then delete both the dedicated worktree and the merged topic branch after the merge succeeds. If `yolo: false`, ask before each git state change. If `yolo: true`, proceed without those approval prompts. Stop instead of deleting if the worktree is dirty, the topic branch identity is ambiguous, the branch was not successfully merged, or cleanup would affect anything outside the dedicated worktree and merged topic branch.
 
 # Reviewer Protocol
 
@@ -297,6 +306,7 @@ Keep this template in sync with `Frontmatter Contract`; it is intentionally dupl
 ```markdown
 ---
 phase: DRAFT
+yolo: false
 work_type: feature
 rca_required: false
 red_test_required: false
@@ -356,7 +366,7 @@ Stop and ask the user if:
 - Reviewable phase has empty `required_reviewers` and no explicit user-approved no-review workflow.
 - Required reviewer records are missing, stale, or contradictory for the current revision or round.
 - A reviewer reviewed an obsolete artifact revision or round.
-- The doer needs to transition through a mandatory human gate.
+- The doer needs to transition through a mandatory human gate and `yolo` is false or missing.
 - The current diff scope is ambiguous: staged, unstaged, or full pending state.
 - The blackboard path appears to point outside the intended repository or worktree.
 - A write would overwrite another agent's state or comments.
