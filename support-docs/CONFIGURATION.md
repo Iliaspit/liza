@@ -218,8 +218,9 @@ All configuration lives in `.liza/state.yaml` under the `config` section.
 ## Optional Indexing Activation
 
 [Stacklit](https://github.com/liza-mas/stacklit-cli),
-[SCIP Search](https://github.com/liza-mas/scip-search/), and
-[Semble](https://github.com/MinishLab/semble/) are optional navigation aids.
+[SCIP Search](https://github.com/liza-mas/scip-search/),
+[Semble](https://github.com/MinishLab/semble/), and
+[Functional Clusters](https://github.com/liza-mas/functional-clusters) are optional navigation aids.
 They are external tools that users install and maintain separately; Liza only
 activates prompt/index guidance when the configured gates and runtime checks pass.
 Set the corresponding `LIZA_ENABLE_*` environment variable before running the
@@ -537,6 +538,45 @@ cache, or wrap `scip-search` or its language indexers. Operators install and
 maintain `scip-search`, `scip-go`, `scip-typescript`, and `scip-python`
 separately.
 
+### Functional Clusters (`LIZA_ENABLE_FUNCTIONAL_CLUSTERS`)
+
+`functional-clusters` is an optional external repository-analysis tool. It is
+strict opt-in and consumes operator-generated artifacts; Liza does not generate
+or refresh them.
+
+`LIZA_ENABLE_FUNCTIONAL_CLUSTERS` is process-local activation, not durable
+project state. Values are trimmed and compared case-insensitively:
+
+| Value | Meaning |
+|-------|---------|
+| `1`, `true` | Enable Pairing SessionStart guidance when the repo-root artifact exists |
+| unset, empty, `0`, `false` | Keep Functional Clusters disabled for the current process |
+
+The standard artifact path is:
+
+```text
+<project_root>/functional-clusters.json
+```
+
+Pairing SessionStart advertises Functional Clusters only when
+`LIZA_ENABLE_FUNCTIONAL_CLUSTERS` is truthy and
+`<project_root>/functional-clusters.json` exists. It supplies the explicit
+artifact path for:
+
+```bash
+functional-clusters list --clusters <project_root>/functional-clusters.json
+functional-clusters explain --clusters <project_root>/functional-clusters.json '<exact-member-symbol>'
+```
+
+The artifact is advisory and may be stale. Agents must verify behavior against
+source files before editing or claiming success.
+
+Explicit non-goals: Liza does not install `functional-clusters`, run
+`functional-clusters build`, generate SCIP graph exports, generate Stacklit
+architecture exports, wire Functional Clusters into Git hooks, auto-refresh
+`functional-clusters.json`, infer alternate artifact locations, or inject MAS
+prompt guidance for this milestone.
+
 ### Agent Execution Timeouts
 
 | Role | Timeout | Rationale |
@@ -747,6 +787,7 @@ project configuration belongs in `.liza/state.yaml`.
 | `LIZA_ENABLE_SCIP_SEARCH` | No | unset | Strict opt-in activation gate for SCIP. In pairing init, truthy values enable project-local hook planning and installation for detected or selected languages. In MAS, truthy values enable indexing and `scip-search` prompt guidance only when `config.scip_search` also allows a detected language. Unset, empty, `0`, and `false` disable it. Values are trimmed and parsed case-insensitively. |
 | `LIZA_ENABLE_SEMBLE` | No | unset | Strict opt-in activation gate for Semble. In pairing init, truthy values enable project-root `.sembleignore` safety setup before SessionStart advertisement. In MAS, truthy values enable prewarm/offline validation and prompt guidance only when Semble is installed, offline-ready, and safe for the target root. Unset, empty, `0`, and `false` disable it. Values are trimmed and parsed case-insensitively. |
 | `LIZA_ENABLE_STACKLIT` | No | unset | Strict opt-in activation gate for Stacklit. In pairing init, truthy values enable project-local hook setup for repo-root `stacklit.json` refresh. In MAS, truthy values enable target-local `stacklit.json` refresh and prompt guidance when an index is available. Unset, empty, `0`, and `false` disable it. Values are trimmed and parsed case-insensitively. |
+| `LIZA_ENABLE_FUNCTIONAL_CLUSTERS` | No | unset | Strict opt-in activation gate for Functional Clusters. In Pairing SessionStart, truthy values enable guidance only when repo-root `functional-clusters.json` exists. Liza does not generate, refresh, or hook this artifact. Unset, empty, `0`, and `false` disable it. Values are trimmed and parsed case-insensitively. |
 | `LIZA_CODEX_VERSION` | No | unset | Process-local fallback for `config.codex_package_version` when launching headless Codex agents |
 | `LIZA_SPECS` | No | `specs/` | Path to specs directory (relative to project root) |
 | `LIZA_LOG_LEVEL` | No | `INFO` | Logging verbosity: DEBUG, INFO, WARN, ERROR |

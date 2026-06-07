@@ -209,12 +209,19 @@ if truthy_env "${LIZA_ENABLE_SEMBLE:-}" && root_sembleignore_safe && semble_offl
   shell_project_dir=$(quote_for_shell "$project_dir")
 fi
 
+functional_clusters_enabled=false
+functional_clusters_path="$project_dir/functional-clusters.json"
+if truthy_env "${LIZA_ENABLE_FUNCTIONAL_CLUSTERS:-}" && [[ -f "$functional_clusters_path" ]]; then
+  functional_clusters_enabled=true
+  shell_functional_clusters_path=$(quote_for_shell "$functional_clusters_path")
+fi
+
 adr_dir_available=false
 if [[ -d "$project_dir/specs/architecture/ADR" ]]; then
   adr_dir_available=true
 fi
 
-if [[ -z "${shell_stacklit_path:-}" && "${#scip_files[@]}" -eq 0 && "$semble_enabled" != "true" && "$adr_dir_available" != "true" ]]; then
+if [[ -z "${shell_stacklit_path:-}" && "${#scip_files[@]}" -eq 0 && "$semble_enabled" != "true" && "$functional_clusters_enabled" != "true" && "$adr_dir_available" != "true" ]]; then
   printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"%s"}}\n' "$(json_escape "$context")"
   exit 0
 fi
@@ -286,6 +293,14 @@ if [[ "$semble_enabled" == "true" ]]; then
  // Use --content with one of: code, docs, config, all; code is the default.
  // Semble returns candidate chunks, not proof; verify source files before editing.
  // Do not use rg for broad-scope or common-word conceptual queries."
+fi
+
+if [[ "$functional_clusters_enabled" == "true" ]]; then
+  context+="
+ // Functional clusters artifact: $functional_clusters_path
+ // functional-clusters list --clusters $shell_functional_clusters_path
+ // functional-clusters explain --clusters $shell_functional_clusters_path '<exact-member-symbol>'
+ // Functional clusters are advisory and may be stale; verify against source files before editing."
 fi
 
 printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"%s"}}\n' "$(json_escape "$context")"

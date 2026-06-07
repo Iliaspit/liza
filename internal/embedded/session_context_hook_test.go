@@ -320,6 +320,74 @@ func TestSessionContextHook_EmitsScipBlockOnlyWhenScipArtifactExists(t *testing.
 	}
 }
 
+func TestSessionContextHook_EmitsFunctionalClustersWhenEnabledAndArtifactExists(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not available")
+	}
+
+	hookPath := writeSessionContextHook(t)
+	projectRoot := t.TempDir()
+	clustersPath := filepath.Join(projectRoot, "functional-clusters.json")
+	if err := os.WriteFile(clustersPath, []byte("{}\n"), 0644); err != nil {
+		t.Fatalf("write functional clusters artifact: %v", err)
+	}
+
+	output := runSessionContextHook(t, hookPath, sessionStartPayload(t, projectRoot), []string{
+		"LIZA_ENABLE_FUNCTIONAL_CLUSTERS=true",
+	}, 0)
+	context := sessionStartAdditionalContext(t, output)
+	for _, want := range []string{
+		"Functional clusters artifact: " + clustersPath,
+		"functional-clusters list --clusters '" + clustersPath + "'",
+		"functional-clusters explain --clusters '" + clustersPath + "' '<exact-member-symbol>'",
+		"Functional clusters are advisory and may be stale",
+	} {
+		if !strings.Contains(context, want) {
+			t.Fatalf("startup context missing %q, got:\n%s", want, context)
+		}
+	}
+	for _, notWant := range []string{
+		"Liza repository indexes detected",
+		"Stacklit index:",
+		"SCIP indexes:",
+		"Semble semantic search is available",
+	} {
+		if strings.Contains(context, notWant) {
+			t.Fatalf("startup context should omit unavailable optional block %q, got:\n%s", notWant, context)
+		}
+	}
+}
+
+func TestSessionContextHook_OmitsFunctionalClustersWithoutGateOrArtifact(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not available")
+	}
+
+	hookPath := writeSessionContextHook(t)
+	projectRoot := t.TempDir()
+	clustersPath := filepath.Join(projectRoot, "functional-clusters.json")
+	if err := os.WriteFile(clustersPath, []byte("{}\n"), 0644); err != nil {
+		t.Fatalf("write functional clusters artifact: %v", err)
+	}
+
+	output := runSessionContextHook(t, hookPath, sessionStartPayload(t, projectRoot), nil, 0)
+	context := sessionStartAdditionalContext(t, output)
+	if strings.Contains(context, "Functional clusters artifact:") {
+		t.Fatalf("startup context should omit functional clusters without env gate, got:\n%s", context)
+	}
+
+	if err := os.Remove(clustersPath); err != nil {
+		t.Fatalf("remove functional clusters artifact: %v", err)
+	}
+	output = runSessionContextHook(t, hookPath, sessionStartPayload(t, projectRoot), []string{
+		"LIZA_ENABLE_FUNCTIONAL_CLUSTERS=true",
+	}, 0)
+	context = sessionStartAdditionalContext(t, output)
+	if strings.Contains(context, "Functional clusters artifact:") {
+		t.Fatalf("startup context should omit functional clusters without artifact, got:\n%s", context)
+	}
+}
+
 func TestSessionContextHook_FiltersMissingPairingProjectDocs(t *testing.T) {
 	if _, err := exec.LookPath("bash"); err != nil {
 		t.Skip("bash not available")
@@ -350,9 +418,13 @@ func TestSessionContextHook_SuppressesRepoIndexesForLizaAgentSessions(t *testing
 	hookPath := writeSessionContextHook(t)
 	projectRoot := t.TempDir()
 	writeIndexedRepoMarkers(t, projectRoot)
+	if err := os.WriteFile(filepath.Join(projectRoot, "functional-clusters.json"), []byte("{}\n"), 0644); err != nil {
+		t.Fatalf("write functional clusters artifact: %v", err)
+	}
 
 	output := runSessionContextHook(t, hookPath, sessionStartPayload(t, projectRoot), []string{
 		"LIZA_AGENT_ID=coder-1",
+		"LIZA_ENABLE_FUNCTIONAL_CLUSTERS=true",
 	}, 0)
 	context := sessionStartAdditionalContext(t, output)
 	if !strings.Contains(context, "Liza session initialization is mandatory") {
@@ -360,6 +432,9 @@ func TestSessionContextHook_SuppressesRepoIndexesForLizaAgentSessions(t *testing
 	}
 	if strings.Contains(context, "Liza repository indexes detected") {
 		t.Fatalf("startup context should not include repo-root indexes for Liza agent sessions, got:\n%s", context)
+	}
+	if strings.Contains(context, "Functional clusters artifact:") {
+		t.Fatalf("startup context should not include functional clusters for Liza agent sessions, got:\n%s", context)
 	}
 }
 
@@ -584,6 +659,8 @@ func sessionContextHookEnv(extraEnv []string) []string {
 		case strings.HasPrefix(item, "CLAUDE_PROJECT_DIR="):
 			continue
 		case strings.HasPrefix(item, "LIZA_AGENT_ID="):
+			continue
+		case strings.HasPrefix(item, "LIZA_ENABLE_FUNCTIONAL_CLUSTERS="):
 			continue
 		case strings.HasPrefix(item, "LIZA_ENABLE_SEMBLE="):
 			continue

@@ -7,10 +7,10 @@ When a default tool is unavailable in the current session, fall through to the n
 
 ### Search and Navigation
 
-Choose the highest-signal routing source before exploratory search: explicit user paths, changed-file lists, Liza-supplied indexes/search roots, and section/symbol routers. `rg`/`git grep` are appropriate first moves for literals, filenames, commands, or config keys already known from the request, indexed/semantic discovery, or source reads; do not use guessed broad keywords for first-pass discovery when Stacklit, Semble, `scip-search`, or section routers fit the question.
+Choose the highest-signal routing source before exploratory search: explicit user paths, changed-file lists, Liza-supplied indexes/search roots, functional-cluster artifacts, and section/symbol routers. `rg`/`git grep` are appropriate first moves for literals, filenames, commands, or config keys already known from the request, indexed/semantic discovery, or source reads; do not use guessed broad keywords for first-pass discovery when Stacklit, Semble, `scip-search`, functional clusters, or section routers fit the question.
 
 Phased repository search:
-1. Orient structurally with Stacklit (modules, dependencies, impact, symbol names) and conceptually with Semble for code and docs when Liza supplies those roots/indexes.
+1. Orient structurally with Stacklit (modules, dependencies, impact, symbol names), functionally with supplied `functional-clusters` artifacts, and conceptually with Semble for code and docs when Liza supplies those roots/indexes/artifacts.
 2. Trace precisely with `scip-search` for code symbols, definitions, references, implementations, packages, and static graph/impact hints; for long docs/specs, use `rg -c "pattern" <paths>` to find candidates, then `mdtoc` and section-scoped reads.
 3. Verify against source files before editing or claiming behavior.
 
@@ -37,7 +37,7 @@ Any non destructive tool by default.
 ## Mode Boundary
 
 All modes: use source-of-truth tools for verification.
-MAS worktree rule: Do not use workspace-level or IDE/LSP-backed tools in Liza multi-agent worktrees, even if the user has configured them for personal use. Use filesystem-truth tools tied to the current worktree instead: `stacklit` with explicit `-i` paths supplied by Liza, `scip-search` with explicit `--index` paths supplied by Liza, `rg`, `rg --files`, `find`, `ast-grep`, direct reads, native manifests, `git`, language-native commands, `morph-mcp`, and `apply_patch`.
+MAS worktree rule: Do not use workspace-level or IDE/LSP-backed tools in Liza multi-agent worktrees, even if the user has configured them for personal use. Use filesystem-truth tools tied to the current worktree instead: `stacklit` with explicit `-i` paths supplied by Liza, `scip-search` with explicit `--index` paths supplied by Liza, `functional-clusters` with explicit `--clusters` artifacts supplied by Liza, `rg`, `rg --files`, `find`, `ast-grep`, direct reads, native manifests, `git`, language-native commands, `morph-mcp`, and `apply_patch`.
 Pairing mode: user-personal workspace tools may exist, but they do not replace source-of-truth verification. When the SessionStart session context hook emits explicit repo-root Stacklit or SCIP index paths for an indexed Pairing repo, treat those paths as Liza-supplied for that session; they are refreshed after commits and do not reflect uncommitted changes.
 
 ## Tool Routing
@@ -58,6 +58,7 @@ For any MCP-backed default row in the tables below, if the tool is unavailable i
 | Directory exploration | `rg --files`, `find`, or `ls` | native tree/list capability | Need a structured tree and native shell output is insufficient |
 | File discovery | `rg --files` | native filename search / `find` | `rg` unavailable |
 | Project structure / modules | `stacklit derive/get-module -i <supplied-index>` | native manifest reads + `rg --files` / `find` | No Stacklit index path supplied, Stacklit unavailable, or result insufficient |
+| Functional cluster context | `functional-clusters list/explain --clusters <supplied-artifact>` | Stacklit + `scip-search` + direct reads | No clusters artifact supplied, artifact stale/insufficient, or command unavailable |
 | Dependency inspection | Native manifest reads + lockfiles | language-native dependency commands | Manifest/lockfile inspection is insufficient |
 | Literal/regex code search | `rg` | — | — |
 | Symbol discovery | `scip-search symbols --index <supplied-index>` | `rg` pattern search | No SCIP index path supplied, `scip-search` unavailable, or result insufficient |
@@ -79,6 +80,7 @@ For any MCP-backed default row in the tables below, if the tool is unavailable i
 | Structural code pattern (call shape, signature) | `ast-grep` | `rg` with regex approximation | — |
 | Find files by name | Glob | `rg --files` / native filename search | Glob unavailable |
 | Repo orientation and module impact | `stacklit derive/get-module/get-dependencies -i <supplied-index>` | `rg` + manifest reads + exact source reads | No Stacklit index path supplied, Stacklit unavailable, or index result insufficient |
+| Functional capability boundaries | `functional-clusters list/explain --clusters <supplied-artifact>` | Stacklit + `scip-search` + exact source reads | No clusters artifact supplied, artifact stale/insufficient, or command unavailable |
 | Semantic repository search ("how does X work?") | Semble with a Liza-supplied target root | Morph MCP codebase search, then `rg` + exact reads (`ast-grep` when structural search helps) | Semble is disabled, unavailable, not advertised, or insufficient; use Morph MCP only when policy exposes it |
 | Symbol info at position | `scip-search symbols --index <supplied-index>` + direct reads | `rg` + direct reads | No SCIP index path supplied, `scip-search` unavailable, or result insufficient |
 | Find references | `scip-search references --index <supplied-index> --name Foo` or `--symbol '<exact-symbol>' --location-only` | `rg` | No SCIP index path supplied, `scip-search` unavailable, or result insufficient |
@@ -90,6 +92,7 @@ For any MCP-backed default row in the tables below, if the tool is unavailable i
 - **Semble**: use only an explicit target root supplied by Liza or current session context that says Semble is available. Do not infer target roots, initialize Semble, or treat semantic results as proof.
 - **stacklit**: use only explicit `-i <path>` values supplied in the prompt or Pairing SessionStart session context. Do not infer index locations, regenerate Stacklit indexes, run `stacklit view`, or mutate `stacklit-insights.json` / `.stacklitrc.json` from an agent task. Stacklit is for orientation and impact analysis; verify behavior against source files before editing.
 - **scip-search**: use only explicit `--index <path>` values supplied in the prompt or Pairing SessionStart session context. Do not search for default SCIP indexes or rely on daemon/global/cache behavior.
+- **functional-clusters**: use only explicit `--clusters <path>` values supplied in the prompt or Pairing SessionStart session context. Do not infer artifact locations, generate exports, run `functional-clusters build`, or treat cluster membership as ground truth. Functional clusters are advisory and may be stale; verify behavior against source files before editing.
 - **morph-mcp codebase_search**: use only as the semantic fallback when Semble is unavailable and policy exposes Morph MCP. Fallback to `rg` + exact reads when results are insufficient, rate limited, or error.
 
 ### Supplied Index/Search Command Shapes
@@ -114,6 +117,8 @@ stacklit get-module <module> -i <index-path>
 stacklit get-dependencies <module> -i <index-path>
 stacklit get-hints -i <index-path>
 stacklit get-hot-files -i <index-path>
+functional-clusters list --clusters <clusters-path>
+functional-clusters explain --clusters <clusters-path> '<exact-member-symbol>'
 env HF_HUB_OFFLINE=1 semble search "where is review submission validated?" <target-root>
 env HF_HUB_OFFLINE=1 semble search "default CLI config" <target-root> --content config
 env HF_HUB_OFFLINE=1 semble find-related <file_path> <line> <target-root>

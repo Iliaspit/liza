@@ -50,7 +50,8 @@ mode.
 
 ## Optional Index Routing
 
-Stacklit, SCIP Search, and Semble are optional. Keep global guidance conditional:
+Stacklit, SCIP Search, Semble, and Functional Clusters are optional. Keep global
+guidance conditional:
 
 - Use Semble only when the current session supplies an explicit target root or
   readiness metadata.
@@ -58,6 +59,8 @@ Stacklit, SCIP Search, and Semble are optional. Keep global guidance conditional
   `--index` path.
 - Use Stacklit only when the current session supplies an explicit `-i` index
   path.
+- Use Functional Clusters only when the current session supplies an explicit
+  `--clusters` artifact path.
 - Treat all index and semantic-search results as navigation candidates. Direct
   source reads remain the evidence for edits, reviews, and success claims.
 
@@ -145,6 +148,24 @@ infer index locations, regenerate insights, run `stacklit view`, or mutate
 supplied by Liza as the authority. Do not copy concrete Stacklit paths from one
 project or worktree into global guidance examples.
 
+### Functional Cluster Artifacts
+
+When Liza supplies an explicit functional-clusters artifact path, use
+`functional-clusters` for advisory functional capability context:
+
+- `functional-clusters list --clusters <path>` for a compact cluster overview
+- `functional-clusters explain --clusters <path> '<exact-member-symbol>'` to inspect why an
+  exact artifact member symbol belongs to a cluster. Cluster labels such as
+  `internal/taskkind` are not valid `explain` inputs.
+
+This is useful after Stacklit or SCIP has identified candidate modules or
+symbols and before deciding which feature boundary or cross-cluster dependency
+to inspect. Functional clusters are generated snapshots and may be stale.
+Agents should not infer artifact locations, generate SCIP or Stacklit exports,
+run `functional-clusters build`, or treat cluster labels/membership as ground
+truth. If no explicit artifact path is supplied, fall back to Stacklit,
+`scip-search`, `rg`, `ast-grep`, and direct reads.
+
 ### Per-Worktree Servers
 
 Language servers are tied to a specific worktree. In multi-agent mode, Liza may
@@ -161,10 +182,12 @@ Examples:
 Prefer Semble for broad conceptual discovery when Liza supplies an offline-ready
 target root; `scip-search` when Liza supplies an explicit `--index` path for
 indexed symbols, packages, references, and implementations; Stacklit when Liza
-supplies an explicit `-i` path for module and dependency orientation; `rg` for
-exact text/path search; `ast-grep` for syntax-pattern structural search and
-rewrites; Morph MCP only as the semantic fallback when Semble is unavailable and
-policy exposes it; and direct reads for evidence in multi-agent worktrees.
+supplies an explicit `-i` path for module and dependency orientation; Functional
+Clusters when Liza supplies an explicit `--clusters` path for advisory feature
+boundary context; `rg` for exact text/path search; `ast-grep` for syntax-pattern
+structural search and rewrites; Morph MCP only as the semantic fallback when
+Semble is unavailable and policy exposes it; and direct reads for evidence in
+multi-agent worktrees.
 
 ### IDE-Specific MCP Tools
 
