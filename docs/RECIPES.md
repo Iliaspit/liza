@@ -74,8 +74,9 @@ Watch daemon alerts on high review cycles (>= 5). Check with `liza get tasks tas
 **Recover by task ID** (recommended — you usually know the task):
 
 ```bash
-liza recover-task task-1              # Release claims, remove worktree/branch, recover agent
-liza recover-task task-1 --force      # Also works when task not in state (orphaned git artifacts)
+liza recover-task task-1              # Release claims, preserve/reattach coherent worktree/branch, recover agent
+liza recover-task task-1 --fresh      # Explicitly discard task worktree/branch and recreate from integration
+liza recover-task task-1 --force      # Bypass live-PID checks, or clean orphaned git artifacts when task is absent from state
 ```
 
 **Recover by agent ID** (when you know the agent):

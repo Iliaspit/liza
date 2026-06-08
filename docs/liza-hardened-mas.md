@@ -466,7 +466,7 @@ Re-wake loop prevention: if sprint is already CHECKPOINT or COMPLETED, SPRINT_CO
 When things go wrong despite all layers:
 
 - `liza recover-agent <id>`: releases all tasks claimed by dead agent, clears registration
-- `liza recover-task <id>`: releases single task from stuck assignment, returns to claimable state
+- `liza recover-task <id>`: releases stale task claims while preserving coherent task work by default; `--fresh` is required to discard branch/worktree state, and `BLOCKED` tasks remain blocked until `unblock-task`
 - Both produce audit trail entries
 
 ### Sprint Governance

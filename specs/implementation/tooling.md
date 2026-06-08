@@ -42,7 +42,7 @@ All system mechanics are provided by the `liza` Go binary (assumed in PATH). See
 | `liza reconcile-merged <task> --merge-commit <sha>` | Mark an INTEGRATION_FAILED task as MERGED after verifying external completion |
 | `liza update-sprint-metrics` | Recompute sprint.metrics from task state |
 | `liza clear-stale-review-claims` | Clear expired review claims |
-| `liza recover-task <task-id>` | Recover by task ID (release claims + worktree/branch + agent) |
+| `liza recover-task <task-id>` | Recover by task ID while preserving recoverable worktree/branch state |
 | `liza recover-agent <agent-id>` | Recover by agent ID (release claim + worktree + delete agent) |
 | `liza release-claim <task> [--role R]` | Release claim on task or review |
 | `liza pause` / `liza resume` | Pause/resume system |
@@ -457,10 +457,47 @@ liza wt-delete task-3
 
 **liza recover-task** — Recover by task ID
 ```bash
-liza recover-task task-1                    # Release claims + remove worktree/branch + recover agent
-liza recover-task task-1 --force            # Also works when task is not in state (git-only cleanup)
-# Idempotent. Refuses if claiming agent's PID is alive (use --force to override).
+liza recover-task task-1                    # Release claims + preserve/reattach coherent worktree/branch + recover agent
+liza recover-task task-1 --fresh            # Explicitly discard worktree/branch and create a fresh worktree from integration
+liza recover-task task-1 --fresh --force    # Required when a claimant PID is alive and destructive reset is intentional
+liza recover-task task-1 --force            # Also cleans git artifacts when task is not in state
+# Idempotent. Refuses if claiming agent's PID is alive unless --force is set.
 ```
+
+Default recovery preserves work when it can prove the substrate is coherent:
+the task branch must exist, any worktree must be healthy and clean, and submitted
+or reviewing candidates must have `review_commit == worktree HEAD`. If only the
+branch exists, recovery reattaches a worktree and performs the same checks. Dirty
+worktrees fail closed because ambiguous unsubmitted work should not be
+redispatched.
+
+`--fresh` is the explicit destructive path. It removes the task worktree/branch,
+creates a fresh worktree from the integration branch, clears active claim and
+review metadata, and records `task_recovered_fresh`.
+
+Before deleting artifacts, `--fresh` revalidates the task state and integration
+branch. If artifact cleanup fails, recovery returns an error and leaves task
+state unchanged because the old worktree/branch may still exist. If fresh
+worktree creation still fails after successful artifact cleanup, it must commit
+a truthful repair state instead of leaving stale pointers: status becomes
+`BLOCKED`, claims are cleared, worktree/base/review metadata is cleared, and
+`blocked_reason` records the failed fresh creation. `unblock-task` remains the
+only path back to claimability.
+
+`--fresh` postconditions by status:
+
+| Current status | Allowed | Postcondition |
+| --- | --- | --- |
+| Initial status (`DRAFT_CODE` / role-pair equivalent) | Yes | Status remains initial; attempt/review/claim metadata cleared; fresh worktree recorded. |
+| Executing (`IMPLEMENTING_CODE` / role-pair equivalent) | Yes | Status resets to initial; claim and attempt metadata cleared; fresh worktree recorded. |
+| Submitted/reviewing/approved/partial-review statuses | Yes | Status resets to initial; `review_commit`, approvals, merge and output metadata cleared; fresh worktree recorded. |
+| `CODE_REJECTED` / role-pair equivalent | Yes | Status resets to initial; rejection and attempt metadata cleared; fresh worktree recorded. |
+| `INTEGRATION_FAILED` | Yes | Status resets to initial; repair and integration-failure metadata cleared; fresh worktree recorded. |
+| `BLOCKED` | Yes | Status remains `BLOCKED`; claim/review substrate is repaired, but `blocked_reason` and `blocked_questions` are preserved. Use `liza unblock-task` to restore claimability. |
+| Terminal statuses (`MERGED`, `ABANDONED`, `SUPERSEDED`) | No | Rejected. |
+
+For tasks absent from state, only `--force` performs git-only cleanup of orphaned
+task worktree/branch artifacts; it does not create or mutate blackboard state.
 
 **liza recover-agent** — Recover by agent ID
 ```bash

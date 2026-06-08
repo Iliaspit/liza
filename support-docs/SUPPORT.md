@@ -25,7 +25,8 @@ Live zombie-agent detection currently requires Linux procfs. On hosts without pr
 ## Recovery Commands
 
 ```bash
-liza recover-task <task-id>        # Release claim + remove worktree/branch
+liza recover-task <task-id>        # Release claims + preserve/reattach coherent worktree/branch
+liza recover-task <task-id> --fresh # Explicitly discard worktree/branch and reset non-blocked task to initial
 liza recover-agent <agent-id>      # Release claim + remove worktree + delete agent
 liza release-claim <task-id>       # Granular: release claim only
 liza clear-stale-review-claims     # Clear all expired review leases

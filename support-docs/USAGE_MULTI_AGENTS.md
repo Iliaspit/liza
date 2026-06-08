@@ -420,7 +420,7 @@ The `liza` binary provides all system operations. Key commands:
 | `liza wt-merge <task-id>` | Merge an approved task into the integration branch (reviewer agents)                                                 |
 | `liza wt-delete <task-id>` | Delete a worktree for a completed/abandoned task                                                                     |
 | **Recovery** |                                                                                                                      |
-| `liza recover-task <task-id>` | Recover by task ID (release claims + remove worktree/branch)                                                         |
+| `liza recover-task <task-id>` | Recover by task ID while preserving coherent worktree/branch state by default; use `--fresh` to discard intentionally |
 | `liza recover-agent <agent-id>` | Recover by agent ID (release claim + remove worktree + delete agent)                                                 |
 | `liza release-claim <task-id> [--role R]` | Release claim on a task (manual, granular recovery)                                                                  |
 | `liza delete agent <id>` / `liza delete task <id>` | Delete an agent or task from state                                                                                   |

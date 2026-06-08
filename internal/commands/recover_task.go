@@ -7,10 +7,14 @@ import (
 	"github.com/liza-mas/liza/internal/ops"
 )
 
-// RecoverTaskCommand recovers a task by releasing claims, removing worktree/branch,
-// and optionally recovering the claiming agent. Prints results to stdout.
-func RecoverTaskCommand(projectRoot, taskID string, force bool, reason string) error {
-	result, err := ops.RecoverTask(projectRoot, taskID, force, reason)
+// RecoverTaskCommand recovers a task by releasing claims while preserving
+// recoverable work by default. With fresh=true it explicitly resets the task
+// branch/worktree from integration. Prints results to stdout.
+func RecoverTaskCommand(projectRoot, taskID string, force bool, fresh bool, reason string) error {
+	result, err := ops.RecoverTaskWithOptions(projectRoot, taskID, reason, ops.RecoverTaskOptions{
+		Force: force,
+		Fresh: fresh,
+	})
 	if err != nil {
 		return fmt.Errorf("recover task: %w", err)
 	}
@@ -36,6 +40,18 @@ func RecoverTaskCommand(projectRoot, taskID string, force bool, reason string) e
 	}
 	if result.ClaimReleased {
 		fmt.Printf("  Claim released: yes\n")
+	}
+	if result.PreservedWorktree {
+		fmt.Printf("  Worktree preserved: yes\n")
+	}
+	if result.WorktreeRecovered {
+		fmt.Printf("  Worktree reattached: yes\n")
+	}
+	if result.FreshReset {
+		fmt.Printf("  Fresh reset: yes\n")
+	}
+	if result.WorktreeCreated {
+		fmt.Printf("  Worktree created: yes\n")
 	}
 	if result.WorktreeRemoved {
 		fmt.Printf("  Worktree removed: yes\n")

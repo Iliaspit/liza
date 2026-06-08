@@ -1,6 +1,7 @@
 package ops
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -8,6 +9,7 @@ import (
 	"time"
 
 	"github.com/liza-mas/liza/internal/db"
+	"github.com/liza-mas/liza/internal/git"
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/testhelpers"
 )
@@ -185,13 +187,21 @@ func TestRecoverTask_ImplementingTask_WithAgent(t *testing.T) {
 
 func TestRecoverTask_ReviewingTask(t *testing.T) {
 	tmpDir := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, tmpDir)
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	gitWrapper := git.New(tmpDir)
+	baseCommit, err := gitWrapper.CreateWorktree("task-2", "integration")
+	if err != nil {
+		t.Fatalf("CreateWorktree() error: %v", err)
+	}
+	reviewCommit, err := gitWrapper.GetWorktreeHEAD("task-2")
+	if err != nil {
+		t.Fatalf("GetWorktreeHEAD() error: %v", err)
+	}
 
 	taskRef := "task-2"
 	now := time.Now().UTC()
 	leaseExpires := now.Add(-10 * time.Minute)
-	reviewCommit := "abc123"
-	baseCommit := "def456"
 	worktreeRef := ".worktrees/task-2"
 	state := testhelpers.CreateValidState()
 	state.Agents["code-reviewer-1"] = models.Agent{
@@ -249,9 +259,15 @@ func TestRecoverTask_ReviewingTask(t *testing.T) {
 	if task.ReviewingBy != nil {
 		t.Error("Task ReviewingBy should be nil")
 	}
+	if task.Worktree == nil || *task.Worktree != worktreeRef {
+		t.Fatalf("Task Worktree = %v, want %s", task.Worktree, worktreeRef)
+	}
+	if task.ReviewCommit == nil || *task.ReviewCommit != reviewCommit {
+		t.Fatalf("Task ReviewCommit = %v, want %s", task.ReviewCommit, reviewCommit)
+	}
 }
 
-func TestRecoverTask_NilResolver_PreservesReviewerAgent(t *testing.T) {
+func TestRecoverTask_MissingPipelineConfigPreservesReviewerAgent(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Manually create .liza dir WITHOUT pipeline config so resolver loading fails.
@@ -291,25 +307,12 @@ func TestRecoverTask_NilResolver_PreservesReviewerAgent(t *testing.T) {
 	})
 	testhelpers.WriteInitialState(t, stateFile, state)
 
-	result, err := RecoverTask(tmpDir, taskID, false, "crashed")
-	if err != nil {
-		t.Fatalf("RecoverTask() error: %v", err)
+	_, err := RecoverTask(tmpDir, taskID, false, "crashed")
+	if err == nil {
+		t.Fatal("RecoverTask() error = nil, want missing pipeline config error")
 	}
-	if result.ClaimReleased {
-		t.Error("ClaimReleased should be false when resolver is nil")
-	}
-	if result.AgentRecovered {
-		t.Error("AgentRecovered should be false when resolver is nil and a reviewer claim remains attached")
-	}
-	found := false
-	for _, w := range result.Warnings {
-		if strings.Contains(w, "reviewer claim release") && strings.Contains(w, "pipeline resolver not loaded") {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Fatalf("Expected reviewer resolver warning, got: %v", result.Warnings)
+	if !strings.Contains(err.Error(), "pipeline config") {
+		t.Fatalf("RecoverTask() error = %q, want pipeline config error", err.Error())
 	}
 
 	readState, err := db.New(stateFile).Read()
@@ -432,6 +435,7 @@ func TestRecoverTask_NoAgent_TaskOnly(t *testing.T) {
 		ID:          "task-1",
 		Description: "test task",
 		Status:      models.TaskStatusReady,
+		RolePair:    "coding-pair",
 		Priority:    1,
 		Worktree:    &worktreeRef,
 		SpecRef:     "spec.md",
@@ -494,6 +498,7 @@ func TestRecoverTask_DefaultReason(t *testing.T) {
 		ID:          "task-1",
 		Description: "test task",
 		Status:      models.TaskStatusReady,
+		RolePair:    "coding-pair",
 		Priority:    1,
 		SpecRef:     "spec.md",
 		DoneWhen:    "tests pass",
@@ -551,20 +556,13 @@ func TestRecoverTask_MissingReviewCommitCorruption(t *testing.T) {
 	}
 	testhelpers.WriteInitialState(t, stateFile, state)
 
-	result, err := RecoverTask(tmpDir, "task-corrupted", true, "fix corruption")
+	result, err := RecoverTaskWithOptions(tmpDir, "task-corrupted", "fix corruption", RecoverTaskOptions{Force: true, Fresh: true})
 	if err != nil {
 		t.Fatalf("RecoverTask() error: %v", err)
 	}
 
-	// Should have a warning about the reset
-	foundWarning := false
-	for _, w := range result.Warnings {
-		if strings.Contains(w, "missing review_commit") && strings.Contains(w, "DRAFT_CODE") {
-			foundWarning = true
-		}
-	}
-	if !foundWarning {
-		t.Errorf("expected warning about missing review_commit reset, got: %v", result.Warnings)
+	if !result.FreshReset {
+		t.Error("FreshReset = false, want true")
 	}
 
 	// Verify task was reset to initial status
@@ -602,5 +600,783 @@ func TestRecoverTask_MissingReviewCommitCorruption(t *testing.T) {
 	}
 	if len(task.FailedBy) != 0 {
 		t.Errorf("FailedBy = %v, want cleared after reset", task.FailedBy)
+	}
+}
+
+func TestRecoverTask_ReviewingTask_ReattachesMissingWorktreeFromBranch(t *testing.T) {
+	tmpDir := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, tmpDir)
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	gitWrapper := git.New(tmpDir)
+	baseCommit, err := gitWrapper.CreateWorktree("task-review", "integration")
+	if err != nil {
+		t.Fatalf("CreateWorktree() error: %v", err)
+	}
+	reviewCommit, err := gitWrapper.GetWorktreeHEAD("task-review")
+	if err != nil {
+		t.Fatalf("GetWorktreeHEAD() error: %v", err)
+	}
+	if err := gitWrapper.RemoveWorktreeDir("task-review"); err != nil {
+		t.Fatalf("RemoveWorktreeDir() error: %v", err)
+	}
+
+	taskID := "task-review"
+	reviewerID := "code-reviewer-1"
+	now := time.Now().UTC()
+	leaseExpires := now.Add(-10 * time.Minute)
+	worktreeRef := ".worktrees/task-review"
+	state := testhelpers.CreateValidState()
+	state.Agents[reviewerID] = models.Agent{
+		Role:         "code-reviewer",
+		Status:       models.AgentStatusReviewing,
+		CurrentTask:  &taskID,
+		LeaseExpires: &leaseExpires,
+	}
+	state.Tasks = []models.Task{{
+		ID:                 taskID,
+		Description:        "review candidate",
+		Status:             models.TaskStatusReviewing,
+		RolePair:           "coding-pair",
+		Priority:           1,
+		ReviewingBy:        &reviewerID,
+		ReviewLeaseExpires: &leaseExpires,
+		ReviewCommit:       &reviewCommit,
+		BaseCommit:         &baseCommit,
+		Worktree:           &worktreeRef,
+		SpecRef:            "spec.md",
+		DoneWhen:           "tests pass",
+		Scope:              "small",
+	}}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	result, err := RecoverTask(tmpDir, taskID, false, "reattach reviewer worktree")
+	if err != nil {
+		t.Fatalf("RecoverTask() error: %v", err)
+	}
+	if !result.WorktreeRecovered {
+		t.Error("WorktreeRecovered = false, want true")
+	}
+	if !result.PreservedWorktree {
+		t.Error("PreservedWorktree = false, want true")
+	}
+
+	readState, err := db.New(stateFile).Read()
+	if err != nil {
+		t.Fatalf("Failed to read state: %v", err)
+	}
+	task := readState.FindTask(taskID)
+	if task.Status != models.TaskStatusReadyForReview {
+		t.Fatalf("Status = %s, want %s", task.Status, models.TaskStatusReadyForReview)
+	}
+	if task.ReviewCommit == nil || *task.ReviewCommit != reviewCommit {
+		t.Fatalf("ReviewCommit = %v, want %s", task.ReviewCommit, reviewCommit)
+	}
+	if task.Worktree == nil || *task.Worktree != worktreeRef {
+		t.Fatalf("Worktree = %v, want %s", task.Worktree, worktreeRef)
+	}
+}
+
+func TestRecoverTask_ReviewingTask_BothWorktreeAndBranchMissingFailsClosed(t *testing.T) {
+	tmpDir := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, tmpDir)
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+
+	reviewCommit := testhelpers.MustGit(t, tmpDir, "rev-parse", "integration")
+	baseCommit := reviewCommit
+	taskID := "task-review"
+	reviewerID := "code-reviewer-1"
+	now := time.Now().UTC()
+	leaseExpires := now.Add(-10 * time.Minute)
+	state := testhelpers.CreateValidState()
+	state.Agents[reviewerID] = models.Agent{
+		Role:         "code-reviewer",
+		Status:       models.AgentStatusReviewing,
+		CurrentTask:  &taskID,
+		LeaseExpires: &leaseExpires,
+	}
+	state.Tasks = []models.Task{{
+		ID:                 taskID,
+		Description:        "review candidate",
+		Status:             models.TaskStatusReviewing,
+		RolePair:           "coding-pair",
+		Priority:           1,
+		ReviewingBy:        &reviewerID,
+		ReviewLeaseExpires: &leaseExpires,
+		ReviewCommit:       &reviewCommit,
+		BaseCommit:         &baseCommit,
+		SpecRef:            "spec.md",
+		DoneWhen:           "tests pass",
+		Scope:              "small",
+	}}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	_, err := RecoverTask(tmpDir, taskID, false, "missing candidate")
+	if err == nil {
+		t.Fatal("RecoverTask() error = nil, want fail-closed missing candidate error")
+	}
+	if !strings.Contains(err.Error(), "submitted candidate is unrecoverable") {
+		t.Fatalf("RecoverTask() error = %q, want submitted candidate unrecoverable", err.Error())
+	}
+}
+
+func TestRecoverTask_ImplementingTask_BothWorktreeAndBranchMissingReleasesToInitial(t *testing.T) {
+	tmpDir := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, tmpDir)
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+
+	taskID := "task-impl"
+	doerID := "coder-1"
+	now := time.Now().UTC()
+	leaseExpires := now.Add(-10 * time.Minute)
+	state := testhelpers.CreateValidState()
+	state.Agents[doerID] = models.Agent{
+		Role:         "coder",
+		Status:       models.AgentStatusWorking,
+		CurrentTask:  &taskID,
+		LeaseExpires: &leaseExpires,
+		PID:          999999,
+	}
+	state.Tasks = []models.Task{{
+		ID:           taskID,
+		Description:  "implementation",
+		Status:       models.TaskStatusImplementing,
+		RolePair:     "coding-pair",
+		Priority:     1,
+		AssignedTo:   &doerID,
+		LeaseExpires: &leaseExpires,
+		SpecRef:      "spec.md",
+		DoneWhen:     "tests pass",
+		Scope:        "small",
+	}}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	result, err := RecoverTask(tmpDir, taskID, false, "missing implementation worktree")
+	if err != nil {
+		t.Fatalf("RecoverTask() error: %v", err)
+	}
+	if result.PreservedWorktree {
+		t.Error("PreservedWorktree = true, want false")
+	}
+	readState, err := db.New(stateFile).Read()
+	if err != nil {
+		t.Fatalf("Failed to read state: %v", err)
+	}
+	task := readState.FindTask(taskID)
+	if task.Status != models.TaskStatusReady {
+		t.Fatalf("Status = %s, want %s", task.Status, models.TaskStatusReady)
+	}
+	if task.Worktree != nil {
+		t.Fatalf("Worktree = %v, want nil for next fresh claim", task.Worktree)
+	}
+}
+
+func TestRecoverTaskFresh_ReviewingTaskResetsInitialAndClearsReviewMetadata(t *testing.T) {
+	tmpDir := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, tmpDir)
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	gitWrapper := git.New(tmpDir)
+	baseCommit, err := gitWrapper.CreateWorktree("task-review", "integration")
+	if err != nil {
+		t.Fatalf("CreateWorktree() error: %v", err)
+	}
+	reviewCommit, err := gitWrapper.GetWorktreeHEAD("task-review")
+	if err != nil {
+		t.Fatalf("GetWorktreeHEAD() error: %v", err)
+	}
+
+	taskID := "task-review"
+	reviewerID := "code-reviewer-1"
+	now := time.Now().UTC()
+	leaseExpires := now.Add(-10 * time.Minute)
+	worktreeRef := ".worktrees/task-review"
+	state := testhelpers.CreateValidState()
+	state.Agents[reviewerID] = models.Agent{
+		Role:         "code-reviewer",
+		Status:       models.AgentStatusReviewing,
+		CurrentTask:  &taskID,
+		LeaseExpires: &leaseExpires,
+	}
+	state.Tasks = []models.Task{{
+		ID:                 taskID,
+		Description:        "review candidate",
+		Status:             models.TaskStatusReviewing,
+		RolePair:           "coding-pair",
+		Priority:           1,
+		ReviewingBy:        &reviewerID,
+		ReviewLeaseExpires: &leaseExpires,
+		ReviewCommit:       &reviewCommit,
+		BaseCommit:         &baseCommit,
+		Worktree:           &worktreeRef,
+		SpecRef:            "spec.md",
+		DoneWhen:           "tests pass",
+		Scope:              "small",
+		Output:             []models.OutputEntry{{Desc: "submitted", DoneWhen: "done", Scope: "scope", SpecRef: "README.md"}},
+	}}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	result, err := RecoverTaskWithOptions(tmpDir, taskID, "discard stale candidate", RecoverTaskOptions{Fresh: true})
+	if err != nil {
+		t.Fatalf("RecoverTaskWithOptions() error: %v", err)
+	}
+	if !result.FreshReset {
+		t.Error("FreshReset = false, want true")
+	}
+	readState, err := db.New(stateFile).Read()
+	if err != nil {
+		t.Fatalf("Failed to read state: %v", err)
+	}
+	task := readState.FindTask(taskID)
+	if task.Status != models.TaskStatusReady {
+		t.Fatalf("Status = %s, want %s", task.Status, models.TaskStatusReady)
+	}
+	if task.ReviewCommit != nil {
+		t.Fatalf("ReviewCommit = %v, want nil", *task.ReviewCommit)
+	}
+	if len(task.Output) != 0 {
+		t.Fatalf("Output = %v, want cleared", task.Output)
+	}
+	if task.Worktree == nil || *task.Worktree != worktreeRef {
+		t.Fatalf("Worktree = %v, want %s", task.Worktree, worktreeRef)
+	}
+}
+
+func TestRecoverTaskFresh_LiveClaimRequiresForce(t *testing.T) {
+	tmpDir, _ := setupImplementingTask(t, os.Getpid())
+
+	_, err := RecoverTaskWithOptions(tmpDir, "task-1", "discard active work", RecoverTaskOptions{Fresh: true})
+	if err == nil {
+		t.Fatal("RecoverTaskWithOptions() error = nil, want live PID refusal")
+	}
+	if !strings.Contains(err.Error(), "--fresh --force") {
+		t.Fatalf("RecoverTaskWithOptions() error = %q, want --fresh --force hint", err.Error())
+	}
+}
+
+func TestRecoverTask_PreserveRejectsClaimDriftBeforeRelease(t *testing.T) {
+	tmpDir, stateFile := setupImplementingTask(t, 999999)
+
+	taskID := "task-1"
+	nextDoerID := "coder-2"
+	testRecoverTaskHooks = &recoverTaskTestHooks{
+		beforePreserveModify: func() {
+			err := db.New(stateFile).Modify(func(state *models.State) error {
+				leaseExpires := time.Now().UTC().Add(30 * time.Minute)
+				state.Agents[nextDoerID] = models.Agent{
+					Role:         "coder",
+					Status:       models.AgentStatusWorking,
+					CurrentTask:  &taskID,
+					LeaseExpires: &leaseExpires,
+					PID:          0,
+				}
+				task := state.FindTask(taskID)
+				task.AssignedTo = &nextDoerID
+				task.LeaseExpires = &leaseExpires
+				return nil
+			})
+			if err != nil {
+				panic(err)
+			}
+		},
+	}
+	defer func() { testRecoverTaskHooks = nil }()
+
+	_, err := RecoverTask(tmpDir, taskID, false, "stale recovery snapshot")
+	if err == nil {
+		t.Fatal("RecoverTask() error = nil, want race condition")
+	}
+	if !strings.Contains(err.Error(), "assigned_to changed during recover-task") {
+		t.Fatalf("RecoverTask() error = %q, want assigned_to drift", err.Error())
+	}
+
+	readState, err := db.New(stateFile).Read()
+	if err != nil {
+		t.Fatalf("Failed to read state: %v", err)
+	}
+	task := readState.FindTask(taskID)
+	if task.AssignedTo == nil || *task.AssignedTo != nextDoerID {
+		t.Fatalf("AssignedTo = %v, want %s", task.AssignedTo, nextDoerID)
+	}
+	if _, exists := readState.Agents[nextDoerID]; !exists {
+		t.Fatalf("agent %s should remain registered", nextDoerID)
+	}
+}
+
+func TestRecoverTaskFresh_RejectsStateDriftBeforeGitCleanup(t *testing.T) {
+	tmpDir := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, tmpDir)
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	gitWrapper := git.New(tmpDir)
+	baseCommit, err := gitWrapper.CreateWorktree("task-review", "integration")
+	if err != nil {
+		t.Fatalf("CreateWorktree() error: %v", err)
+	}
+	reviewCommit, err := gitWrapper.GetWorktreeHEAD("task-review")
+	if err != nil {
+		t.Fatalf("GetWorktreeHEAD() error: %v", err)
+	}
+
+	taskID := "task-review"
+	worktreeRef := ".worktrees/task-review"
+	state := testhelpers.CreateValidState()
+	state.Tasks = []models.Task{{
+		ID:           taskID,
+		Description:  "review candidate",
+		Status:       models.TaskStatusReadyForReview,
+		RolePair:     "coding-pair",
+		Priority:     1,
+		ReviewCommit: &reviewCommit,
+		BaseCommit:   &baseCommit,
+		Worktree:     &worktreeRef,
+		SpecRef:      "spec.md",
+		DoneWhen:     "tests pass",
+		Scope:        "small",
+	}}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	testRecoverTaskHooks = &recoverTaskTestHooks{
+		beforeFreshModify: func() {
+			err := db.New(stateFile).Modify(func(state *models.State) error {
+				task := state.FindTask(taskID)
+				task.Status = models.TaskStatusMerged
+				return nil
+			})
+			if err != nil {
+				panic(err)
+			}
+		},
+	}
+	defer func() { testRecoverTaskHooks = nil }()
+
+	_, err = RecoverTaskWithOptions(tmpDir, taskID, "stale fresh reset", RecoverTaskOptions{Fresh: true})
+	if err == nil {
+		t.Fatal("RecoverTaskWithOptions() error = nil, want race condition")
+	}
+	if !strings.Contains(err.Error(), "status changed") {
+		t.Fatalf("RecoverTaskWithOptions() error = %q, want status drift", err.Error())
+	}
+	if _, err := os.Stat(filepath.Join(tmpDir, ".worktrees", taskID)); err != nil {
+		t.Fatalf("worktree should remain after rejected fresh reset: %v", err)
+	}
+	branchExists, err := gitWrapper.BranchExists("task/" + taskID)
+	if err != nil {
+		t.Fatalf("BranchExists() error: %v", err)
+	}
+	if !branchExists {
+		t.Fatal("task branch should remain after rejected fresh reset")
+	}
+}
+
+func TestRecoverTaskFresh_CreateFailureAfterCleanupBlocksWithTruthfulState(t *testing.T) {
+	tmpDir := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, tmpDir)
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	gitWrapper := git.New(tmpDir)
+	baseCommit, err := gitWrapper.CreateWorktree("task-review", "integration")
+	if err != nil {
+		t.Fatalf("CreateWorktree() error: %v", err)
+	}
+	reviewCommit, err := gitWrapper.GetWorktreeHEAD("task-review")
+	if err != nil {
+		t.Fatalf("GetWorktreeHEAD() error: %v", err)
+	}
+
+	taskID := "task-review"
+	reviewerID := "code-reviewer-1"
+	worktreeRef := ".worktrees/task-review"
+	state := testhelpers.CreateValidState()
+	state.Agents[reviewerID] = models.Agent{
+		Role:        "code-reviewer",
+		Status:      models.AgentStatusReviewing,
+		CurrentTask: &taskID,
+	}
+	state.Tasks = []models.Task{{
+		ID:           taskID,
+		Description:  "review candidate",
+		Status:       models.TaskStatusReviewing,
+		RolePair:     "coding-pair",
+		Priority:     1,
+		ReviewingBy:  &reviewerID,
+		ReviewCommit: &reviewCommit,
+		BaseCommit:   &baseCommit,
+		Worktree:     &worktreeRef,
+		SpecRef:      "spec.md",
+		DoneWhen:     "tests pass",
+		Scope:        "small",
+	}}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	testRecoverTaskHooks = &recoverTaskTestHooks{
+		beforeFreshCreate: func() {
+			err := os.MkdirAll(filepath.Join(tmpDir, ".worktrees", taskID), 0755)
+			if err != nil {
+				panic(err)
+			}
+		},
+	}
+	defer func() { testRecoverTaskHooks = nil }()
+
+	_, err = RecoverTaskWithOptions(tmpDir, taskID, "fresh creation race", RecoverTaskOptions{Fresh: true})
+	if err == nil {
+		t.Fatal("RecoverTaskWithOptions() error = nil, want create failure")
+	}
+	if !strings.Contains(err.Error(), "task marked BLOCKED") {
+		t.Fatalf("RecoverTaskWithOptions() error = %q, want blocked repair state note", err.Error())
+	}
+
+	readState, err := db.New(stateFile).Read()
+	if err != nil {
+		t.Fatalf("Read state: %v", err)
+	}
+	task := readState.FindTask(taskID)
+	if task.Status != models.TaskStatusBlocked {
+		t.Fatalf("Status = %s, want BLOCKED", task.Status)
+	}
+	if task.Worktree != nil {
+		t.Fatalf("Worktree = %v, want nil after failed fresh creation", *task.Worktree)
+	}
+	if task.BaseCommit != nil {
+		t.Fatalf("BaseCommit = %v, want nil after failed fresh creation", *task.BaseCommit)
+	}
+	if task.ReviewCommit != nil {
+		t.Fatalf("ReviewCommit = %v, want nil after failed fresh creation", *task.ReviewCommit)
+	}
+	if task.ReviewingBy != nil {
+		t.Fatalf("ReviewingBy = %v, want nil after failed fresh creation", *task.ReviewingBy)
+	}
+	if task.BlockedReason == nil || !strings.Contains(*task.BlockedReason, "recover-task --fresh failed after deleting git artifacts") {
+		t.Fatalf("BlockedReason = %v, want fresh failure reason", task.BlockedReason)
+	}
+	if _, exists := readState.Agents[reviewerID]; exists {
+		t.Fatalf("agent %s should be removed after destructive fresh cleanup", reviewerID)
+	}
+	branchExists, err := gitWrapper.BranchExists("task/" + taskID)
+	if err != nil {
+		t.Fatalf("BranchExists() error: %v", err)
+	}
+	if branchExists {
+		t.Fatal("task branch should be absent after failed fresh cleanup")
+	}
+}
+
+func TestRecoverTaskFresh_CleanupFailureLeavesStateAndArtifactsUnchanged(t *testing.T) {
+	tmpDir := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, tmpDir)
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	gitWrapper := git.New(tmpDir)
+	baseCommit, err := gitWrapper.CreateWorktree("task-review", "integration")
+	if err != nil {
+		t.Fatalf("CreateWorktree() error: %v", err)
+	}
+	reviewCommit, err := gitWrapper.GetWorktreeHEAD("task-review")
+	if err != nil {
+		t.Fatalf("GetWorktreeHEAD() error: %v", err)
+	}
+
+	taskID := "task-review"
+	reviewerID := "code-reviewer-1"
+	worktreeRef := ".worktrees/task-review"
+	state := testhelpers.CreateValidState()
+	state.Agents[reviewerID] = models.Agent{
+		Role:        "code-reviewer",
+		Status:      models.AgentStatusReviewing,
+		CurrentTask: &taskID,
+	}
+	state.Tasks = []models.Task{{
+		ID:           taskID,
+		Description:  "review candidate",
+		Status:       models.TaskStatusReviewing,
+		RolePair:     "coding-pair",
+		Priority:     1,
+		ReviewingBy:  &reviewerID,
+		ReviewCommit: &reviewCommit,
+		BaseCommit:   &baseCommit,
+		Worktree:     &worktreeRef,
+		SpecRef:      "spec.md",
+		DoneWhen:     "tests pass",
+		Scope:        "small",
+	}}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	testRecoverTaskHooks = &recoverTaskTestHooks{
+		cleanupGitArtifacts: func() error {
+			return errors.New("simulated cleanup failure")
+		},
+	}
+	defer func() { testRecoverTaskHooks = nil }()
+
+	_, err = RecoverTaskWithOptions(tmpDir, taskID, "fresh cleanup failure", RecoverTaskOptions{Fresh: true})
+	if err == nil {
+		t.Fatal("RecoverTaskWithOptions() error = nil, want cleanup failure")
+	}
+	if !strings.Contains(err.Error(), "fresh reset cleanup failed") {
+		t.Fatalf("RecoverTaskWithOptions() error = %q, want cleanup failure", err.Error())
+	}
+
+	readState, err := db.New(stateFile).Read()
+	if err != nil {
+		t.Fatalf("Read state: %v", err)
+	}
+	task := readState.FindTask(taskID)
+	if task.Status != models.TaskStatusReviewing {
+		t.Fatalf("Status = %s, want REVIEWING_CODE", task.Status)
+	}
+	if task.Worktree == nil || *task.Worktree != worktreeRef {
+		t.Fatalf("Worktree = %v, want %s", task.Worktree, worktreeRef)
+	}
+	if task.BaseCommit == nil || *task.BaseCommit != baseCommit {
+		t.Fatalf("BaseCommit = %v, want %s", task.BaseCommit, baseCommit)
+	}
+	if task.ReviewCommit == nil || *task.ReviewCommit != reviewCommit {
+		t.Fatalf("ReviewCommit = %v, want %s", task.ReviewCommit, reviewCommit)
+	}
+	if task.ReviewingBy == nil || *task.ReviewingBy != reviewerID {
+		t.Fatalf("ReviewingBy = %v, want %s", task.ReviewingBy, reviewerID)
+	}
+	if _, exists := readState.Agents[reviewerID]; !exists {
+		t.Fatalf("agent %s should remain after failed cleanup", reviewerID)
+	}
+	if _, err := os.Stat(filepath.Join(tmpDir, ".worktrees", taskID)); err != nil {
+		t.Fatalf("worktree should remain after failed cleanup: %v", err)
+	}
+	branchExists, err := gitWrapper.BranchExists("task/" + taskID)
+	if err != nil {
+		t.Fatalf("BranchExists() error: %v", err)
+	}
+	if !branchExists {
+		t.Fatal("task branch should remain after failed cleanup")
+	}
+}
+
+func TestRecoverTask_ReviewingTask_DirtyWorktreeFailsClosed(t *testing.T) {
+	tmpDir := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, tmpDir)
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	gitWrapper := git.New(tmpDir)
+	baseCommit, err := gitWrapper.CreateWorktree("task-review", "integration")
+	if err != nil {
+		t.Fatalf("CreateWorktree() error: %v", err)
+	}
+	reviewCommit, err := gitWrapper.GetWorktreeHEAD("task-review")
+	if err != nil {
+		t.Fatalf("GetWorktreeHEAD() error: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, ".worktrees", "task-review", "unsubmitted.txt"), []byte("local edit\n"), 0644); err != nil {
+		t.Fatalf("Write dirty file: %v", err)
+	}
+
+	taskID := "task-review"
+	reviewerID := "code-reviewer-1"
+	now := time.Now().UTC()
+	leaseExpires := now.Add(-10 * time.Minute)
+	worktreeRef := ".worktrees/task-review"
+	state := testhelpers.CreateValidState()
+	state.Agents[reviewerID] = models.Agent{
+		Role:         "code-reviewer",
+		Status:       models.AgentStatusReviewing,
+		CurrentTask:  &taskID,
+		LeaseExpires: &leaseExpires,
+	}
+	state.Tasks = []models.Task{{
+		ID:                 taskID,
+		Description:        "review candidate",
+		Status:             models.TaskStatusReviewing,
+		RolePair:           "coding-pair",
+		Priority:           1,
+		ReviewingBy:        &reviewerID,
+		ReviewLeaseExpires: &leaseExpires,
+		ReviewCommit:       &reviewCommit,
+		BaseCommit:         &baseCommit,
+		Worktree:           &worktreeRef,
+		SpecRef:            "spec.md",
+		DoneWhen:           "tests pass",
+		Scope:              "small",
+	}}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	_, err = RecoverTask(tmpDir, taskID, false, "dirty reviewer worktree")
+	if err == nil {
+		t.Fatal("RecoverTask() error = nil, want dirty worktree refusal")
+	}
+	if !strings.Contains(err.Error(), "preserved worktree is dirty") {
+		t.Fatalf("RecoverTask() error = %q, want dirty worktree refusal", err.Error())
+	}
+}
+
+func TestRecoverTask_BlockedTaskPreservesBlockedStateAndWorktree(t *testing.T) {
+	tmpDir := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, tmpDir)
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	gitWrapper := git.New(tmpDir)
+	baseCommit, err := gitWrapper.CreateWorktree("task-blocked", "integration")
+	if err != nil {
+		t.Fatalf("CreateWorktree() error: %v", err)
+	}
+
+	taskID := "task-blocked"
+	doerID := "coder-1"
+	now := time.Now().UTC()
+	leaseExpires := now.Add(-10 * time.Minute)
+	worktreeRef := ".worktrees/task-blocked"
+	blockedReason := "needs operator decision"
+	blockedQuestions := []string{"choose direction"}
+	state := testhelpers.CreateValidState()
+	state.Agents[doerID] = models.Agent{
+		Role:         "coder",
+		Status:       models.AgentStatusWorking,
+		CurrentTask:  &taskID,
+		LeaseExpires: &leaseExpires,
+		PID:          999999,
+	}
+	state.Tasks = []models.Task{{
+		ID:               taskID,
+		Description:      "blocked work",
+		Status:           models.TaskStatusBlocked,
+		RolePair:         "coding-pair",
+		Priority:         1,
+		AssignedTo:       &doerID,
+		LeaseExpires:     &leaseExpires,
+		Worktree:         &worktreeRef,
+		BaseCommit:       &baseCommit,
+		BlockedReason:    &blockedReason,
+		BlockedQuestions: blockedQuestions,
+		SpecRef:          "spec.md",
+		DoneWhen:         "tests pass",
+		Scope:            "small",
+	}}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	result, err := RecoverTask(tmpDir, taskID, false, "recover blocked substrate")
+	if err != nil {
+		t.Fatalf("RecoverTask() error: %v", err)
+	}
+	if !result.PreservedWorktree {
+		t.Error("PreservedWorktree = false, want true")
+	}
+
+	readState, err := db.New(stateFile).Read()
+	if err != nil {
+		t.Fatalf("Failed to read state: %v", err)
+	}
+	task := readState.FindTask(taskID)
+	if task.Status != models.TaskStatusBlocked {
+		t.Fatalf("Status = %s, want %s", task.Status, models.TaskStatusBlocked)
+	}
+	if task.AssignedTo != nil {
+		t.Fatalf("AssignedTo = %v, want nil", task.AssignedTo)
+	}
+	if task.BlockedReason == nil || *task.BlockedReason != blockedReason {
+		t.Fatalf("BlockedReason = %v, want %q", task.BlockedReason, blockedReason)
+	}
+	if len(task.BlockedQuestions) != 1 || task.BlockedQuestions[0] != blockedQuestions[0] {
+		t.Fatalf("BlockedQuestions = %v, want %v", task.BlockedQuestions, blockedQuestions)
+	}
+	if task.Worktree == nil || *task.Worktree != worktreeRef {
+		t.Fatalf("Worktree = %v, want %s", task.Worktree, worktreeRef)
+	}
+}
+
+func TestRecoverTaskFresh_BlockedTaskPreservesBlockedStateAndReason(t *testing.T) {
+	tmpDir := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, tmpDir)
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	gitWrapper := git.New(tmpDir)
+	baseCommit, err := gitWrapper.CreateWorktree("task-blocked", "integration")
+	if err != nil {
+		t.Fatalf("CreateWorktree() error: %v", err)
+	}
+	reviewCommit, err := gitWrapper.GetWorktreeHEAD("task-blocked")
+	if err != nil {
+		t.Fatalf("GetWorktreeHEAD() error: %v", err)
+	}
+
+	taskID := "task-blocked"
+	blockedReason := "hypothesis exhausted"
+	blockedQuestions := []string{"rescope?"}
+	worktreeRef := ".worktrees/task-blocked"
+	state := testhelpers.CreateValidState()
+	state.Tasks = []models.Task{{
+		ID:               taskID,
+		Description:      "blocked work",
+		Status:           models.TaskStatusBlocked,
+		RolePair:         "coding-pair",
+		Priority:         1,
+		Worktree:         &worktreeRef,
+		BaseCommit:       &baseCommit,
+		ReviewCommit:     &reviewCommit,
+		Approvals:        []models.Approval{{Agent: "code-reviewer-1", Provider: "codex", Timestamp: time.Now().UTC()}},
+		Output:           []models.OutputEntry{{Desc: "context", DoneWhen: "done", Scope: "scope", SpecRef: "README.md"}},
+		FailedBy:         []string{"coder-1", "coder-2"},
+		BlockedReason:    &blockedReason,
+		BlockedQuestions: blockedQuestions,
+		SpecRef:          "spec.md",
+		DoneWhen:         "tests pass",
+		Scope:            "small",
+	}}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	result, err := RecoverTaskWithOptions(tmpDir, taskID, "discard substrate but stay blocked", RecoverTaskOptions{Fresh: true})
+	if err != nil {
+		t.Fatalf("RecoverTaskWithOptions() error: %v", err)
+	}
+	if !result.FreshReset {
+		t.Error("FreshReset = false, want true")
+	}
+
+	readState, err := db.New(stateFile).Read()
+	if err != nil {
+		t.Fatalf("Failed to read state: %v", err)
+	}
+	task := readState.FindTask(taskID)
+	if task.Status != models.TaskStatusBlocked {
+		t.Fatalf("Status = %s, want %s", task.Status, models.TaskStatusBlocked)
+	}
+	if task.BlockedReason == nil || *task.BlockedReason != blockedReason {
+		t.Fatalf("BlockedReason = %v, want %q", task.BlockedReason, blockedReason)
+	}
+	if len(task.BlockedQuestions) != 1 || task.BlockedQuestions[0] != blockedQuestions[0] {
+		t.Fatalf("BlockedQuestions = %v, want %v", task.BlockedQuestions, blockedQuestions)
+	}
+	if task.ReviewCommit != nil {
+		t.Fatalf("ReviewCommit = %v, want nil", *task.ReviewCommit)
+	}
+	if len(task.Approvals) != 0 {
+		t.Fatalf("Approvals = %v, want cleared", task.Approvals)
+	}
+	if len(task.Output) != 1 {
+		t.Fatalf("Output = %v, want preserved blocked context", task.Output)
+	}
+	if len(task.FailedBy) != 2 {
+		t.Fatalf("FailedBy = %v, want preserved blocked diagnostics", task.FailedBy)
+	}
+	if task.Worktree == nil || *task.Worktree != worktreeRef {
+		t.Fatalf("Worktree = %v, want %s", task.Worktree, worktreeRef)
+	}
+}
+
+func TestRecoverTask_IntegrationFailed_BothWorktreeAndBranchMissingFailsClosed(t *testing.T) {
+	tmpDir := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, tmpDir)
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+
+	taskID := "task-integration-failed"
+	state := testhelpers.CreateValidState()
+	state.Tasks = []models.Task{{
+		ID:          taskID,
+		Description: "integration failed",
+		Status:      models.TaskStatusIntegrationFailed,
+		RolePair:    "coding-pair",
+		Priority:    1,
+		SpecRef:     "spec.md",
+		DoneWhen:    "tests pass",
+		Scope:       "small",
+	}}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	_, err := RecoverTask(tmpDir, taskID, false, "missing integration repair substrate")
+	if err == nil {
+		t.Fatal("RecoverTask() error = nil, want fail-closed integration repair error")
+	}
+	if !strings.Contains(err.Error(), "integration-failed repair substrate is unrecoverable") {
+		t.Fatalf("RecoverTask() error = %q, want integration repair substrate error", err.Error())
 	}
 }

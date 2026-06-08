@@ -474,7 +474,9 @@ When a coder agent crashes (usage limit, OOM, SIGKILL) while a task is IMPLEMENT
 **Recover by task ID** (recommended — you usually know the task, not the agent):
 ```bash
 liza recover-task <task-id>
-liza recover-task <task-id> --force    # if task not in state or agent PID alive
+liza recover-task <task-id> --force         # if agent PID is alive, or task is absent from state and only git artifacts remain
+liza recover-task <task-id> --fresh         # explicitly discard task worktree/branch and recreate from integration
+liza recover-task <task-id> --fresh --force # required for destructive reset while a claimant PID is alive
 ```
 
 **Recover by agent ID** (when you know the agent):
@@ -483,7 +485,17 @@ liza recover-agent <agent-id> --cli claude   # recover + respawn
 liza recover-agent <agent-id>                # recover only
 ```
 
-Both commands perform full cleanup: release claims, remove worktree/branch, delete agent from state. Both are idempotent — safe to run multiple times. Use `--force` if the agent's PID is still alive or (for `recover-task`) if the task is no longer in state but git artifacts remain.
+`recover-task` preserves or reattaches coherent task work by default: the branch
+must exist, the worktree must be healthy and clean, and submitted/reviewing tasks
+must still have `review_commit == worktree HEAD`. Use `--fresh` only when
+discarding the task branch/worktree is intentional. `--force` is separate: it
+bypasses live-PID checks, and it enables git-only cleanup when the task is no
+longer in state.
+
+`recover-agent` performs full agent cleanup: release claim, remove worktree, and
+delete the agent from state. Both commands are idempotent, but neither should be
+used to unblock a `BLOCKED` task; after substrate recovery, use `liza
+unblock-task` for the guarded `BLOCKED` -> claimable transition.
 
 **Diagnosis (if needed):**
 ```bash
@@ -525,6 +537,7 @@ liza init "Goal description"
 ```bash
 # Recover by task
 liza recover-task <task-id>
+liza recover-task <task-id> --fresh    # only if stale work should be discarded
 
 # Or recover by agent
 liza recover-agent coder-1

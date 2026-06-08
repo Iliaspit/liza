@@ -212,31 +212,42 @@ Example:
 
 var recoverTaskCmd = &cobra.Command{
 	Use:   "recover-task <task-id>",
-	Short: "Recover a task (release claims, remove worktree and branch)",
-	Long: `Recover a task by performing full cleanup:
+	Short: "Recover a task while preserving recoverable work by default",
+	Long: `Recover a task while preserving recoverable work by default:
 
 - Release agent claims (doer and/or reviewer)
-- Remove git worktree and branch
+- Preserve or reattach the task worktree/branch when coherent
+- Validate submitted review candidates before restoring review flow
 - Recover the claiming agent from state
 
 Normal mode (no --force): requires the task to exist in state. Refuses if the
 claiming agent's PID is still alive.
 
-Force mode (--force): cleans up git artifacts (worktree + branch) even if the
-task is not in state. Use this when state is already clean but orphaned git
-artifacts remain after a hard crash.
+Fresh mode (--fresh): explicitly discards the task branch/worktree and resets a
+non-terminal in-state task to its role-pair initial status with a fresh worktree
+from the integration branch. If a claiming agent PID is still alive, use
+--fresh --force.
+
+Fresh mode keeps BLOCKED tasks BLOCKED: it repairs the substrate and preserves
+blocked_reason / blocked_questions. Use unblock-task to restore claimability.
+
+Force mode (--force): bypasses live-PID checks for in-state tasks. It also cleans
+up git artifacts (worktree + branch) when the task is not in state. Use absent-
+state cleanup when state is already clean but orphaned git artifacts remain after
+a hard crash.
 
 Idempotent: safe to run multiple times.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		taskID := args[0]
 		force, _ := cmd.Flags().GetBool("force")
+		fresh, _ := cmd.Flags().GetBool("fresh")
 		reason, _ := cmd.Flags().GetString("reason")
 		projectRoot, err := requireProjectRoot()
 		if err != nil {
 			return err
 		}
-		return commands.RecoverTaskCommand(projectRoot, taskID, force, reason)
+		return commands.RecoverTaskCommand(projectRoot, taskID, force, fresh, reason)
 	},
 }
 
@@ -383,7 +394,8 @@ func init() {
 	agentCmd.Flags().Bool("no-log", false, "Disable saving agent output to .liza/agent-outputs/")
 
 	// Recover-task command flags
-	recoverTaskCmd.Flags().Bool("force", false, "clean up git artifacts even if task is not in state")
+	recoverTaskCmd.Flags().Bool("force", false, "bypass live-PID checks; also clean git artifacts when task is not in state")
+	recoverTaskCmd.Flags().Bool("fresh", false, "discard task branch/worktree and reset in-state task from integration")
 	recoverTaskCmd.Flags().String("reason", "task recovery", "reason for recovering the task")
 
 	// Recover-agent command flags
