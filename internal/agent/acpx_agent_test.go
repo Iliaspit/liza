@@ -60,6 +60,7 @@ func TestACPXAgentRunUsesPersistentCodexSession(t *testing.T) {
 
 	log := readTextForTest(t, logPath)
 	for _, want := range []string{
+		"ENV_LIZA_AGENT_ID:coder-1",
 		"ARGS:--cwd " + req.ProjectRoot + " codex sessions ensure --name liza-coder-1",
 		"ARGS:--cwd " + req.ProjectRoot + " --format json --approve-all codex prompt -s liza-coder-1 --file -",
 		"STDIN:implement the requested change",
@@ -86,18 +87,87 @@ func TestACPXAgentRunUsesPersistentCodexSession(t *testing.T) {
 	}
 }
 
+func TestACPXAgentMasksReturnedOutputAndEvents(t *testing.T) {
+	binDir := t.TempDir()
+	logPath := filepath.Join(t.TempDir(), "acpx.log")
+	writeFakeACPX(t, filepath.Join(binDir, "acpx"), logPath)
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("ANTHROPIC_API_KEY", "sk-acpx-secret")
+
+	var events []LLMAgentEvent
+	sink := LLMAgentEventFunc(func(_ context.Context, event LLMAgentEvent) {
+		events = append(events, event)
+	})
+
+	result, err := NewACPXAgent("").Run(context.Background(), LLMAgentRunRequest{
+		BackendName: "codex-acp",
+		AgentID:     "coder-1",
+		TaskID:      "task-acp",
+		Prompt:      "emit secret",
+		ProjectRoot: t.TempDir(),
+		EventSink:   sink,
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if strings.Contains(result.Output, "sk-acpx-secret") {
+		t.Fatalf("Output leaked secret: %q", result.Output)
+	}
+	if !strings.Contains(result.Output, "***") {
+		t.Fatalf("Output = %q, want masked secret placeholder", result.Output)
+	}
+	for _, event := range events {
+		if strings.Contains(event.Message, "sk-acpx-secret") {
+			t.Fatalf("event leaked secret: %#v", event)
+		}
+	}
+}
+
+func TestACPXAgentDetectsPersistedWarmSession(t *testing.T) {
+	binDir := t.TempDir()
+	logPath := filepath.Join(t.TempDir(), "acpx.log")
+	writeFakeACPX(t, filepath.Join(binDir, "acpx"), logPath)
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("FAKE_ACPX_SESSION_EXISTS", "1")
+
+	result, err := NewACPXAgent("").Run(context.Background(), LLMAgentRunRequest{
+		BackendName: "codex-acp",
+		AgentID:     "coder-1",
+		TaskID:      "task-acp",
+		Prompt:      "implement the requested change",
+		ProjectRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if !result.WarmUsage {
+		t.Fatal("WarmUsage = false, want true for existing ACPX session")
+	}
+}
+
 func writeFakeACPX(t *testing.T, path, logPath string) {
 	t.Helper()
 	script := `#!/bin/sh
 printf 'ARGS:%s\n' "$*" >> "` + logPath + `"
+printf 'ENV_LIZA_AGENT_ID:%s\n' "$LIZA_AGENT_ID" >> "` + logPath + `"
 case "$*" in
+  *" sessions show "*)
+    if [ "$FAKE_ACPX_SESSION_EXISTS" = "1" ]; then
+      exit 0
+    fi
+    exit 2
+    ;;
   *" sessions ensure "*)
     exit 0
     ;;
   *" prompt "*)
     prompt="$(cat)"
     printf 'STDIN:%s\n' "$prompt" >> "` + logPath + `"
-    printf '%s\n' '{"params":{"update":{"sessionUpdate":"agent_message_chunk","content":{"text":"done from acpx"}}}}'
+    if [ "$prompt" = "emit secret" ]; then
+      printf '%s\n' '{"params":{"update":{"sessionUpdate":"agent_message_chunk","content":{"text":"secret sk-acpx-secret"}}}}'
+    else
+      printf '%s\n' '{"params":{"update":{"sessionUpdate":"agent_message_chunk","content":{"text":"done from acpx"}}}}'
+    fi
     printf '%s\n' '{"result":{"usage":{"inputTokens":123,"outputTokens":7,"cachedReadTokens":42}}}'
     exit 0
     ;;

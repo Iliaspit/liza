@@ -2,11 +2,13 @@ package acp
 
 import (
 	"errors"
+	"sync"
 	"time"
 )
 
 // BenchmarkAccumulator tracks ACP run metrics over time.
 type BenchmarkAccumulator struct {
+	mu   sync.Mutex
 	runs []RunMetric
 }
 
@@ -16,10 +18,16 @@ func NewBenchmarkAccumulator() *BenchmarkAccumulator {
 
 // Record appends a benchmark sample.
 func (b *BenchmarkAccumulator) Record(metric RunMetric) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
 	b.runs = append(b.runs, metric)
 }
 
 func (b *BenchmarkAccumulator) Runs() []RunMetric {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
 	out := make([]RunMetric, len(b.runs))
 	copy(out, b.runs)
 	return out
@@ -27,7 +35,8 @@ func (b *BenchmarkAccumulator) Runs() []RunMetric {
 
 // Summarize returns aggregated warm-vs-fresh metrics.
 func (b *BenchmarkAccumulator) Summarize() (BenchmarkSummary, error) {
-	if len(b.runs) == 0 {
+	runs := b.Runs()
+	if len(runs) == 0 {
 		return BenchmarkSummary{}, errors.New("no runs recorded")
 	}
 
@@ -39,7 +48,7 @@ func (b *BenchmarkAccumulator) Summarize() (BenchmarkSummary, error) {
 		freshInput            int
 	)
 
-	for _, run := range b.runs {
+	for _, run := range runs {
 		if run.Warm {
 			warmCount++
 			warmDuration += run.Duration
@@ -51,11 +60,11 @@ func (b *BenchmarkAccumulator) Summarize() (BenchmarkSummary, error) {
 		freshInput += run.Usage.InputTokens
 	}
 	if warmCount == 0 || freshCount == 0 {
-		return BenchmarkSummary{TotalRuns: len(b.runs), WarmRuns: warmCount, FreshRuns: freshCount}, nil
+		return BenchmarkSummary{TotalRuns: len(runs), WarmRuns: warmCount, FreshRuns: freshCount}, nil
 	}
 
 	sum := BenchmarkSummary{
-		TotalRuns:               len(b.runs),
+		TotalRuns:               len(runs),
 		WarmRuns:                warmCount,
 		FreshRuns:               freshCount,
 		WarmAverageDurationMs:   durationMillis(warmDuration) / float64(warmCount),

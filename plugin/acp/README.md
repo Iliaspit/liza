@@ -3,6 +3,10 @@
 `plugin/acp` is an independent Go package for tracking ACP-style task runs and
 benchmarking warm vs. fresh executions.
 
+The event kind strings intentionally mirror `internal/agent` without importing
+it. This package is kept independent so benchmarks and downstream ACP tooling do
+not depend on Liza's internal supervisor packages.
+
 It has three small APIs:
 
 - `SessionManager` tracks whether a task can reuse a session (`warm`) and when
@@ -10,7 +14,7 @@ It has three small APIs:
 - `RunManager` turns event streams into executable run metrics (`Start`,
   `HandleEvent`, `Finish`) and can produce aggregate stats.
 - `BenchmarkAccumulator` computes warm/fresh speedup and input-token savings from
-  recorded metrics.
+  recorded metrics. Its public methods are safe for concurrent callers.
 
 ## Quick example
 

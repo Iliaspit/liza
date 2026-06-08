@@ -228,30 +228,6 @@ func estimateTokens(prompt string) int {
 	return maxInt(len(prompt)/4, 1)
 }
 
-func uniqueDeltaTokens(previous, current string) int {
-	if previous == "" {
-		return estimateTokens(current)
-	}
-
-	seen := make(map[string]struct{})
-	for _, line := range strings.Split(previous, "\n") {
-		seen[strings.TrimSpace(line)] = struct{}{}
-	}
-
-	var deltaBytes int
-	for _, line := range strings.Split(current, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		if _, ok := seen[line]; ok {
-			continue
-		}
-		deltaBytes += len(line)
-	}
-	return maxInt(deltaBytes/4, 1)
-}
-
 func estimateACPTaskDeltaTokens(projectRoot, taskID string) int {
 	bb := db.For(paths.New(projectRoot).StatePath())
 	state, err := bb.Read()

@@ -205,6 +205,7 @@ func executeAgent(ctx context.Context, config SupervisorConfig, prompt string, a
 		ProjectRoot:    config.ProjectRoot,
 		AdditionalDirs: additionalDirs,
 		RuntimeConfig:  runtimeConfig,
+		EventSink:      supervisorLLMAgentEventSink{},
 	})
 	watchdogResult := stopWatchdog()
 	if watchdogResult.Blocked {
@@ -235,6 +236,34 @@ func executeAgent(ctx context.Context, config SupervisorConfig, prompt string, a
 	}
 
 	return result.ExitCode, result.Output, err
+}
+
+type supervisorLLMAgentEventSink struct{}
+
+func (supervisorLLMAgentEventSink) RecordLLMAgentEvent(_ context.Context, event LLMAgentEvent) {
+	switch event.Kind {
+	case LLMAgentEventStarted, LLMAgentEventCompleted:
+		GetLogger().Info("LLM agent event",
+			"kind", string(event.Kind),
+			"backend", event.BackendName,
+			"agent_id", event.AgentID,
+			"task_id", event.TaskID,
+			"session_id", event.SessionID)
+	case LLMAgentEventUsage:
+		usage, _ := event.Payload["usage"].(LLMAgentUsage)
+		GetLogger().Info("LLM agent usage",
+			"backend", event.BackendName,
+			"agent_id", event.AgentID,
+			"task_id", event.TaskID,
+			"session_id", event.SessionID,
+			"input_tokens", usage.InputTokens,
+			"output_tokens", usage.OutputTokens,
+			"cached_read_tokens", usage.CachedReadTokens,
+			"cached_write_tokens", usage.CachedWriteTokens)
+	default:
+		// Provider content chunks stay in the normal output stream/log files. The
+		// supervisor metadata sink intentionally avoids duplicating content events.
+	}
 }
 
 // verifyOrchestratorStateChanges checks if orchestrator made expected state changes after completion

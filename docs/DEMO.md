@@ -176,7 +176,7 @@ cd hello-cli
 liza agent orchestrator
 ```
 
-Agent output is automatically persisted to `.liza/agent-outputs/` for later analysis, and prompt captures can be audited with `/context-engineering` when available (see [Analyzing Agent Logs](USAGE_MULTI_AGENTS.md#analyzing-agent-logs)). Pass `--no-log` to disable. Each agent command also accepts a `--cli` flag to select the coding agent (`claude`, `codex`, `gemini`, `mistral`, or `kimi`). When omitted, the default is resolved from role-specific config (`config.default_doer_cli` for doers and orchestrators, `config.default_reviewer_cli` for reviewers), then role-specific env (`LIZA_DEFAULT_DOER_CLI` for doers and orchestrators, `LIZA_DEFAULT_REVIEWER_CLI` for reviewers), then `config.default_cli`, then `LIZA_DEFAULT_CLI`, then `claude`.
+Agent output is automatically persisted to `.liza/agent-outputs/` for later analysis, and prompt captures can be audited with `/context-engineering` when available (see [Analyzing Agent Logs](USAGE_MULTI_AGENTS.md#analyzing-agent-logs)). Pass `--no-log` to disable. Each agent command also accepts a `--cli` flag to select the coding agent (`claude`, `codex`, `codex-acp`, `gemini`, `mistral`, or `kimi`). When omitted, the default is resolved from role-specific config (`config.default_doer_cli` for doers and orchestrators, `config.default_reviewer_cli` for reviewers), then role-specific env (`LIZA_DEFAULT_DOER_CLI` for doers and orchestrators, `LIZA_DEFAULT_REVIEWER_CLI` for reviewers), then `config.default_cli`, then `LIZA_DEFAULT_CLI`, then `claude`.
 
 The Orchestrator will:
 1. Read `specs/vision.md`

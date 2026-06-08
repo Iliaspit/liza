@@ -48,18 +48,6 @@ func (d *CLIAgent) Run(ctx context.Context, req LLMAgentRunRequest) (LLMAgentRun
 	projectRoot := req.ProjectRoot
 	runtimeConfig := req.RuntimeConfig
 	_ = req.AdditionalDirs // CLI execution does not use this; ACP implementations may.
-	emitUsageEvent := func() {
-		emitLLMAgentEvent(ctx, req.EventSink, LLMAgentEvent{
-			Kind:        LLMAgentEventUsage,
-			BackendName: cliName,
-			AgentID:     agentID,
-			TaskID:      req.TaskID,
-			SessionID:   req.SessionID,
-			Payload: map[string]any{
-				"usage": LLMAgentUsage{},
-			},
-		})
-	}
 	eventBase := LLMAgentEvent{
 		BackendName: cliName,
 		AgentID:     agentID,
@@ -77,76 +65,8 @@ func (d *CLIAgent) Run(ctx context.Context, req LLMAgentRunRequest) (LLMAgentRun
 		},
 	})
 
-	actualCLI := cliName
-	if cliName == "mistral" {
-		actualCLI = "vibe"
-	}
-
-	cmdEnv := os.Environ()
-	if actualCLI == "claude" {
-		envFile := filepath.Join(projectRoot, "claude.env")
-		if extra := loadEnvFile(envFile); len(extra) > 0 {
-			cmdEnv = append(cmdEnv, extra...)
-			if d.masker != nil {
-				d.masker.AddEntries(extra)
-			}
-		}
-	}
-	cmdEnv = agentProcessEnv(cmdEnv, agentID)
-
-	useStdin := cliSupportsStdin(actualCLI)
-	var cmd *exec.Cmd
-	switch actualCLI {
-	case "claude":
-		disableSubagents := envValue(cmdEnv, "LIZA_DISABLE_CLAUDE_SUBAGENTS") == "1"
-		args := buildClaudeArgs(prompt, useStdin, d.outputsDir, disableSubagents)
-		cmd = exec.CommandContext(ctx, "claude", args...)
-	case "codex":
-		codexConfig := resolveCodexLaunchConfig(runtimeConfig, cmdEnv)
-		args := buildCodexArgs(prompt, useStdin, d.outputsDir)
-		var err error
-		cmd, err = codexCommandContext(ctx, codexConfig.PackageVersion, args)
-		if err != nil {
-			emitLLMAgentEvent(ctx, req.EventSink, LLMAgentEvent{
-				Kind:        LLMAgentEventCompleted,
-				BackendName: cliName,
-				AgentID:     agentID,
-				TaskID:      req.TaskID,
-				SessionID:   req.SessionID,
-				Message:     err.Error(),
-				Payload: map[string]any{
-					"error": err.Error(),
-				},
-			})
-			emitUsageEvent()
-			return LLMAgentRunResult{Usage: LLMAgentUsage{}, WarmUsage: req.WarmSession, SessionID: req.SessionID}, err
-		}
-	case "gemini":
-		args := []string{"-p"}
-		if !useStdin {
-			args = append(args, prompt)
-		}
-		if d.outputsDir != "" {
-			args = append(args, "--output-format", "stream-json")
-		}
-		cmd = exec.CommandContext(ctx, "gemini", args...)
-	case "vibe":
-		args := []string{"-p", prompt}
-		if d.outputsDir != "" {
-			args = append(args, "--output", "streaming")
-		}
-		cmd = exec.CommandContext(ctx, "vibe", args...)
-	case "kimi":
-		args := []string{"-p"}
-		if !useStdin {
-			args = append(args, prompt)
-		}
-		if d.outputsDir != "" {
-			args = append(args, "--verbose", "--output-format", "stream-json")
-		}
-		cmd = exec.CommandContext(ctx, "kimi", args...)
-	default:
-		err := fmt.Errorf("unknown CLI: %s", cliName)
+	cmd, err := d.buildRunCommand(ctx, cliName, agentID, prompt, projectRoot, runtimeConfig)
+	if err != nil {
 		emitLLMAgentEvent(ctx, req.EventSink, LLMAgentEvent{
 			Kind:        LLMAgentEventCompleted,
 			BackendName: cliName,
@@ -158,17 +78,8 @@ func (d *CLIAgent) Run(ctx context.Context, req LLMAgentRunRequest) (LLMAgentRun
 				"error": err.Error(),
 			},
 		})
-		emitUsageEvent()
 		return LLMAgentRunResult{Usage: LLMAgentUsage{}, WarmUsage: req.WarmSession, SessionID: req.SessionID}, err
 	}
-
-	cmd.Dir = projectRoot
-	if useStdin {
-		cmd.Stdin = strings.NewReader(prompt)
-	} else {
-		cmd.Stdin = nil
-	}
-	cmd.Env = cmdEnv
 
 	var stdoutBuf, stderrBuf strings.Builder
 	var stdoutLog, stderrLog *streamingOutputFile
@@ -201,7 +112,7 @@ func (d *CLIAgent) Run(ctx context.Context, req LLMAgentRunRequest) (LLMAgentRun
 
 	defer closeAgentOutputLogs(stdoutLog, stderrLog, agentID)
 
-	err := cmd.Run()
+	err = cmd.Run()
 	stdout := stdoutBuf.String()
 	stderr := stderrBuf.String()
 	output := stdout + "\n" + stderr
@@ -222,7 +133,6 @@ func (d *CLIAgent) Run(ctx context.Context, req LLMAgentRunRequest) (LLMAgentRun
 					"exit_code": exitCode,
 				},
 			})
-			emitUsageEvent()
 			return LLMAgentRunResult{ExitCode: exitCode, Output: output, Usage: LLMAgentUsage{}, WarmUsage: req.WarmSession, SessionID: req.SessionID}, nil
 		}
 		emitLLMAgentEvent(ctx, req.EventSink, LLMAgentEvent{
@@ -236,7 +146,6 @@ func (d *CLIAgent) Run(ctx context.Context, req LLMAgentRunRequest) (LLMAgentRun
 				"error": err.Error(),
 			},
 		})
-		emitUsageEvent()
 		return LLMAgentRunResult{Output: output, Usage: LLMAgentUsage{}, WarmUsage: req.WarmSession, SessionID: req.SessionID}, err
 	}
 
@@ -250,7 +159,6 @@ func (d *CLIAgent) Run(ctx context.Context, req LLMAgentRunRequest) (LLMAgentRun
 			"exit_code": 0,
 		},
 	})
-	emitUsageEvent()
 	return LLMAgentRunResult{ExitCode: 0, Output: output, Usage: LLMAgentUsage{}, WarmUsage: req.WarmSession, SessionID: req.SessionID}, nil
 }
 
@@ -383,6 +291,73 @@ func (d *CLIAgent) ExecuteInteractive(ctx context.Context, cliName string, agent
 		ProjectRoot:    projectRoot,
 		AdditionalDirs: additionalDirs,
 	})
+}
+
+func (d *CLIAgent) buildRunCommand(ctx context.Context, cliName, agentID, prompt, projectRoot string, runtimeConfig models.Config) (*exec.Cmd, error) {
+	actualCLI := cliName
+	if cliName == "mistral" {
+		actualCLI = "vibe"
+	}
+
+	cmdEnv := os.Environ()
+	if actualCLI == "claude" {
+		envFile := filepath.Join(projectRoot, "claude.env")
+		if extra := loadEnvFile(envFile); len(extra) > 0 {
+			cmdEnv = append(cmdEnv, extra...)
+			if d.masker != nil {
+				d.masker.AddEntries(extra)
+			}
+		}
+	}
+	cmdEnv = agentProcessEnv(cmdEnv, agentID)
+
+	useStdin := cliSupportsStdin(actualCLI)
+	var cmd *exec.Cmd
+	switch actualCLI {
+	case "claude":
+		disableSubagents := envValue(cmdEnv, "LIZA_DISABLE_CLAUDE_SUBAGENTS") == "1"
+		cmd = exec.CommandContext(ctx, "claude", buildClaudeArgs(prompt, useStdin, d.outputsDir, disableSubagents)...)
+	case "codex":
+		codexConfig := resolveCodexLaunchConfig(runtimeConfig, cmdEnv)
+		var err error
+		cmd, err = codexCommandContext(ctx, codexConfig.PackageVersion, buildCodexArgs(prompt, useStdin, d.outputsDir))
+		if err != nil {
+			return nil, err
+		}
+	case "gemini":
+		args := []string{"-p"}
+		if !useStdin {
+			args = append(args, prompt)
+		}
+		if d.outputsDir != "" {
+			args = append(args, "--output-format", "stream-json")
+		}
+		cmd = exec.CommandContext(ctx, "gemini", args...)
+	case "vibe":
+		args := []string{"-p", prompt}
+		if d.outputsDir != "" {
+			args = append(args, "--output", "streaming")
+		}
+		cmd = exec.CommandContext(ctx, "vibe", args...)
+	case "kimi":
+		args := []string{"-p"}
+		if !useStdin {
+			args = append(args, prompt)
+		}
+		if d.outputsDir != "" {
+			args = append(args, "--verbose", "--output-format", "stream-json")
+		}
+		cmd = exec.CommandContext(ctx, "kimi", args...)
+	default:
+		return nil, fmt.Errorf("unknown CLI: %s", cliName)
+	}
+
+	cmd.Dir = projectRoot
+	if useStdin {
+		cmd.Stdin = strings.NewReader(prompt)
+	}
+	cmd.Env = cmdEnv
+	return cmd, nil
 }
 
 func resolveCodexLaunchConfig(config models.Config, env []string) codexLaunchConfig {

@@ -50,6 +50,31 @@ The PR keeps ACP out of the default runtime path and does not change Liza's
 coordination model. ACP-backed execution is explicit opt-in provider plumbing,
 not a replacement for the supervisor or blackboard.
 
+The `codex-acp` implementation uses `acpx --approve-all` intentionally because
+Liza agents already run non-interactively inside supervised task worktrees. This
+matches the automation posture of existing CLI-backed agents, but it is a trust
+boundary: ACPX and the wrapped provider remain responsible for their own
+sandboxing and permission semantics. `codex-acp` is therefore opt-in and should
+not become the default runtime dependency without a separate review of the ACPX
+permission model.
+
+ACPX commands execute with `--cwd` set to the project root, while session names
+are scoped to the Liza agent identity so later turns by the same agent can reuse
+provider session state. `WarmUsage` is best-effort operational metadata: the
+adapter checks both process-local seen state and persisted ACPX session
+existence, but a provider may still reload, recreate, or globally resolve a
+session internally. It must not drive correctness-sensitive task transitions.
+
+Event streams may include partial message or usage events before a terminal
+`completed` event that reports an error. Consumers should treat `completed` as
+the run outcome and earlier events as partial observability, not proof of
+success.
+
+The supervisor attaches a conservative event sink for production runs. It records
+lifecycle and structured usage metadata, but intentionally does not duplicate
+provider content chunks; content stays in the normal provider output stream and
+agent output files where existing masking and retention rules apply.
+
 ## Consequences
 
 - OSS CLI support remains the default and remains provider-agnostic.
@@ -61,3 +86,5 @@ not a replacement for the supervisor or blackboard.
   model.
 - Real-time dashboards or OTLP export can be added later by consuming
   `LLMAgentEventSink` events.
+- CLI-backed agents do not emit usage events when no structured token accounting
+  is available; absence of a usage event means "unknown", not zero tokens.

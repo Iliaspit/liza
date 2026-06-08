@@ -43,6 +43,7 @@ type MockLLMAgentCall struct {
 	SessionID      string
 	ResumeSession  string
 	WarmSession    bool
+	EventSinkSet   bool
 }
 
 func (m *MockLLMAgent) Run(ctx context.Context, req LLMAgentRunRequest) (LLMAgentRunResult, error) {
@@ -57,6 +58,7 @@ func (m *MockLLMAgent) Run(ctx context.Context, req LLMAgentRunRequest) (LLMAgen
 		SessionID:      req.SessionID,
 		ResumeSession:  req.ResumeSession,
 		WarmSession:    req.WarmSession,
+		EventSinkSet:   req.EventSink != nil,
 	})
 	m.mu.Unlock()
 	if m.OnExecute != nil {
@@ -348,6 +350,9 @@ func TestExecuteAgentBlocksTaskAfterProgressTimeout(t *testing.T) {
 	if err != nil {
 		t.Fatalf("executeAgent error: %v", err)
 	}
+	if calls := mock.GetCalls(); len(calls) != 1 || !calls[0].EventSinkSet {
+		t.Fatalf("executeAgent calls = %#v, want LLMAgent event sink", calls)
+	}
 	if exitCode != 0 {
 		t.Fatalf("exitCode = %d, want 0 after watchdog block", exitCode)
 	}
@@ -598,8 +603,8 @@ exit 7
 	if !sawStdout || !sawStderr {
 		t.Fatalf("events = %#v, want stdout and stderr output chunks", events)
 	}
-	if !sawUsage {
-		t.Fatalf("events = %#v, want usage event", events)
+	if sawUsage {
+		t.Fatalf("events = %#v, CLI stdout/stderr should not emit zero-value usage", events)
 	}
 	if sawCLIMessage {
 		t.Fatalf("events = %#v, CLI stdout/stderr should not emit agent_message_chunk", events)

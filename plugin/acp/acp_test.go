@@ -1,6 +1,7 @@
 package acp
 
 import (
+	"sync"
 	"testing"
 	"time"
 )
@@ -97,6 +98,32 @@ func TestBenchmarkSummarizePreservesSubMillisecondDurations(t *testing.T) {
 	}
 	if sum.SpeedupPercent != 50 {
 		t.Fatalf("SpeedupPercent = %f, want 50", sum.SpeedupPercent)
+	}
+}
+
+func TestBenchmarkAccumulatorConcurrentRecord(t *testing.T) {
+	b := NewBenchmarkAccumulator()
+
+	var wg sync.WaitGroup
+	for i := 0; i < 20; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			b.Record(RunMetric{
+				TaskID:   "task",
+				Warm:     i%2 == 0,
+				Duration: time.Duration(i+1) * time.Millisecond,
+				Usage:    Usage{InputTokens: i + 1},
+			})
+		}(i)
+	}
+	wg.Wait()
+
+	if got := len(b.Runs()); got != 20 {
+		t.Fatalf("recorded runs = %d, want 20", got)
+	}
+	if _, err := b.Summarize(); err != nil {
+		t.Fatalf("summarize: %v", err)
 	}
 }
 
