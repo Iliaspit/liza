@@ -407,7 +407,8 @@ The `liza` binary provides all system operations. Key commands:
 | `liza stop` / `liza start` | Stop/start system                                                                                                    |
 | `liza sprint-checkpoint` | Create a checkpoint (halt + summary)                                                                                 |
 | **Task Operations** |                                                                                                                      |
-| `liza add-task` | Add a new task to the state                                                                                          |
+| `liza add-task` | Add a new task to the state. The new task is scoped-validated before persistence; if unrelated existing state corruption keeps full validation degraded, the command succeeds with a warning. |
+| `liza add-tasks --tasks-file <path>` | Add multiple tasks independently from JSON. Valid items can persist even while unrelated state remains degraded; each successful item carries a warning when the post-add full validation still fails. |
 | `liza claim-task <task-id> <agent-id>` | Atomically claim a task for a doer agent (creates worktree, updates state)                                           |
 | `liza submit-for-review <task-id> [commit-ref]` | Submit a task for review (doer agents; defaults to worktree `HEAD`)                                                  |
 | `liza submit-verdict <task-id> <APPROVED\|REJECTED> [--reason "<reason>"]` | Submit a review verdict (reviewer agents; `--reason` required for REJECTED)                                          |

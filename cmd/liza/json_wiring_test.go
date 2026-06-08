@@ -269,6 +269,84 @@ func TestJSON_AddTasks_PartialItemFailureKeepsOKEnvelope(t *testing.T) {
 	}
 }
 
+func TestJSON_AddTasks_DegradedStateIncludesItemWarning(t *testing.T) {
+	projectRoot, statePath := setupMutationTestProject(t, func(state *models.State) {
+		now := time.Now().UTC()
+		state.Tasks = append(state.Tasks, models.Task{
+			ID:          "invalid-existing-task",
+			Description: "Invalid existing task",
+			Status:      models.TaskStatusImplementing,
+			RolePair:    "coding-pair",
+			Priority:    1,
+			SpecRef:     "specs/vision.md",
+			DoneWhen:    "done",
+			Scope:       "scope",
+			Created:     now,
+			History:     []models.TaskHistoryEntry{},
+		})
+	})
+	testhelpers.CreateSpecFile(t, projectRoot, "vision.md", "# Vision\n")
+	testhelpers.CreateSpecFile(t, projectRoot, "feature.md", "# Feature\n")
+
+	tasks := []map[string]any{
+		{
+			"id":        "repair-task",
+			"desc":      "Repair degraded state",
+			"spec":      "specs/feature.md",
+			"done":      "repair task exists",
+			"scope":     "internal/ops",
+			"priority":  1,
+			"role_pair": "coding-pair",
+		},
+	}
+	data, err := json.Marshal(tasks)
+	if err != nil {
+		t.Fatalf("failed to marshal tasks: %v", err)
+	}
+	tasksFile := filepath.Join(projectRoot, "tasks.json")
+	if err := os.WriteFile(tasksFile, data, 0644); err != nil {
+		t.Fatalf("failed to write tasks file: %v", err)
+	}
+
+	stdout, err := executeRootCommandCapture(t, projectRoot,
+		"add-tasks",
+		"--tasks-file", tasksFile,
+		"--agent-id", "orchestrator-1",
+		"--json",
+	)
+	if err != nil {
+		t.Fatalf("add-tasks --json returned top-level error: %v", err)
+	}
+
+	env := parseEnvelope(t, stdout)
+	if env["ok"] != true {
+		t.Fatalf("expected ok=true for degraded-state repair add, got %v", env["ok"])
+	}
+	result, ok := env["result"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected result to be object, got %T", env["result"])
+	}
+	results, ok := result["results"].([]any)
+	if !ok || len(results) != 1 {
+		t.Fatalf("result.results = %v, want one item", result["results"])
+	}
+	item, ok := results[0].(map[string]any)
+	if !ok {
+		t.Fatalf("result item has type %T, want object", results[0])
+	}
+	warnings, ok := item["warnings"].([]any)
+	if !ok || len(warnings) == 0 {
+		t.Fatalf("item warnings = %v, want degraded-state warning", item["warnings"])
+	}
+	if warning, _ := warnings[0].(string); !strings.Contains(warning, "state remains degraded after add-task") {
+		t.Fatalf("warning = %q, want degraded-state warning", warning)
+	}
+	state := readState(t, statePath)
+	if state.FindTask("repair-task") == nil {
+		t.Fatal("repair-task was not persisted")
+	}
+}
+
 func TestJSON_AddTasks_MissingTasksFileReportsActionableValidation(t *testing.T) {
 	projectRoot, _ := setupMutationTestProject(t, nil)
 	missingFile := filepath.Join(projectRoot, "missing-tasks.json")

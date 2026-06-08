@@ -170,7 +170,7 @@ CLI commands are divided into agent-callable and supervisor-only:
 
 | Command | Called By | Purpose |
 |---------|-----------|---------|
-| `liza add-task` | Planner | Add task atomically (validates after write) |
+| `liza add-task` | Planner | Add task atomically (scoped-validates the new task; warns if full state remains degraded) |
 | `liza validate` | All agents (optional) | Verify state before/after operations |
 | `liza get` | All agents | Read blackboard data |
 | `liza submit-for-review` | Coder | Request review (atomic state transition) |
@@ -334,7 +334,9 @@ liza init "Goal description" --spec specs/vision.md
 ```bash
 liza add-task --id TASK_ID --desc DESCRIPTION --spec SPEC_REF \
   --done DONE_WHEN --scope SCOPE [--priority N] [--depends "task-a,task-b"]
-# Atomically adds task, updates sprint.scope.planned and goal.alignment_history, validates
+# Atomically adds task, updates sprint.scope.planned and goal.alignment_history,
+# validates the new task, and warns if unrelated state corruption keeps full
+# validation degraded.
 ```
 
 **liza validate** — Validate blackboard state

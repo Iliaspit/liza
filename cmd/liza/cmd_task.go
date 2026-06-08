@@ -79,7 +79,8 @@ Task details can be provided via CLI flags or loaded from a YAML file using --fi
 When using --file, CLI flags can override specific fields from the file.
 
 Updates sprint.scope.planned, goal.alignment_history, and logs the action.
-Runs validation after adding the task.
+Validates the added task and reports a warning if unrelated existing state
+corruption keeps full-state validation degraded after the add.
 
 Example YAML file format:
   id: task-1
@@ -991,6 +992,9 @@ done, and scope. Optional fields: priority, depends, type, role_pair, plan_ref,
 validation, destructive_db.
 
 Tasks are added independently; failed tasks don't block subsequent ones.
+Each added task is scoped-validated before persistence. If unrelated existing
+state corruption keeps full-state validation degraded after an add, the item
+succeeds with a warning so repair tasks can still be created.
 
 Example:
   cat > tasks.json <<'EOF'

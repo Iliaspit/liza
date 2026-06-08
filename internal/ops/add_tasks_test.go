@@ -726,7 +726,7 @@ func TestAddTask_DuplicateID(t *testing.T) {
 	}
 }
 
-func TestAddTask_ValidationFailureDoesNotPersistTask(t *testing.T) {
+func TestAddTask_DegradedCurrentStatePersistsTaskWithWarning(t *testing.T) {
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 	logFile := filepath.Join(tmpDir, ".liza", "log.jsonl")
@@ -749,8 +749,8 @@ func TestAddTask_ValidationFailureDoesNotPersistTask(t *testing.T) {
 	testhelpers.WriteInitialState(t, stateFile, state)
 
 	input := &AddTaskInput{
-		ID:          "task-added-before-validation-failure",
-		Description: "Task to trigger post-write validation",
+		ID:          "task-added-while-state-degraded",
+		Description: "Task to repair degraded state",
 		SpecRef:     "specs/feature-x.md",
 		DoneWhen:    "tests pass",
 		Scope:       "internal/ops",
@@ -758,13 +758,21 @@ func TestAddTask_ValidationFailureDoesNotPersistTask(t *testing.T) {
 		RolePair:    "coding-pair",
 	}
 
-	_, err := AddTask(stateFile, logFile, input, "orchestrator-1")
-	if err == nil {
-		t.Fatal("expected validation error")
+	result, err := AddTask(stateFile, logFile, input, "orchestrator-1")
+	if err != nil {
+		t.Fatalf("AddTask() error = %v, want nil", err)
 	}
-
-	if !strings.Contains(err.Error(), "modification function failed") {
-		t.Fatalf("error = %q, want candidate state validation failure before persistence", err.Error())
+	if result == nil {
+		t.Fatal("result = nil, want task result")
+	}
+	if result.TaskID != "task-added-while-state-degraded" {
+		t.Fatalf("TaskID = %q, want task-added-while-state-degraded", result.TaskID)
+	}
+	if len(result.Warnings) == 0 {
+		t.Fatal("warnings = nil, want degraded-state warning")
+	}
+	if !strings.Contains(result.Warnings[0], "state remains degraded after add-task") {
+		t.Fatalf("warning = %q, want degraded-state warning", result.Warnings[0])
 	}
 
 	bb := db.New(stateFile)
@@ -772,8 +780,11 @@ func TestAddTask_ValidationFailureDoesNotPersistTask(t *testing.T) {
 	if readErr != nil {
 		t.Fatalf("Failed to read state: %v", readErr)
 	}
-	if readState.FindTask("task-added-before-validation-failure") != nil {
-		t.Fatal("task was persisted even though validation failed")
+	if readState.FindTask("task-added-while-state-degraded") == nil {
+		t.Fatal("task was not persisted")
+	}
+	if existing := readState.FindTask("invalid-existing-task"); existing == nil || existing.AssignedTo != nil {
+		t.Fatalf("invalid existing task was unexpectedly repaired or removed: %#v", existing)
 	}
 }
 
@@ -880,7 +891,7 @@ func TestAddTasks_PartialSuccess(t *testing.T) {
 	}
 }
 
-func TestAddTasks_InvalidCurrentStateReturnsTopLevelErrorWithoutPersisting(t *testing.T) {
+func TestAddTasks_DegradedCurrentStatePersistsValidTasksWithWarning(t *testing.T) {
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 	logFile := filepath.Join(tmpDir, ".liza", "log.jsonl")
@@ -914,18 +925,43 @@ func TestAddTasks_InvalidCurrentStateReturnsTopLevelErrorWithoutPersisting(t *te
 				Priority:    1,
 				RolePair:    "coding-pair",
 			},
+			{
+				ID:          "bad-new-task",
+				Description: "A bad task",
+				SpecRef:     "specs/feature.md",
+				DoneWhen:    "Tests pass",
+				Scope:       "internal/ops",
+				Priority:    1,
+				RolePair:    "coding-pair",
+				DependsOn:   []string{"missing-dependency"},
+			},
 		},
 	}
 
 	result, err := AddTasks(stateFile, logFile, input)
-	if err == nil {
-		t.Fatal("expected top-level error for invalid current state")
+	if err != nil {
+		t.Fatalf("AddTasks() returned top-level error: %v", err)
 	}
-	if result != nil {
-		t.Fatalf("result = %#v, want nil when batch is rejected before writes", result)
+	if result == nil {
+		t.Fatal("result = nil, want item results")
 	}
-	if !strings.Contains(err.Error(), "current state validation failed") {
-		t.Fatalf("error = %q, want current state validation failure", err.Error())
+	if len(result.Results) != 2 {
+		t.Fatalf("result count = %d, want 2", len(result.Results))
+	}
+	if !result.Results[0].Success {
+		t.Fatalf("new-task result = %#v, want success", result.Results[0])
+	}
+	if len(result.Results[0].Warnings) == 0 {
+		t.Fatalf("new-task warnings = nil, want degraded-state warning")
+	}
+	if !strings.Contains(result.Results[0].Warnings[0], "state remains degraded after add-task") {
+		t.Fatalf("new-task warning = %q, want degraded-state warning", result.Results[0].Warnings[0])
+	}
+	if result.Results[1].Success {
+		t.Fatalf("bad-new-task result = %#v, want item failure", result.Results[1])
+	}
+	if !strings.Contains(result.Results[1].Error, "missing-dependency") {
+		t.Fatalf("bad-new-task error = %q, want missing dependency validation", result.Results[1].Error)
 	}
 
 	bb := db.New(stateFile)
@@ -933,8 +969,14 @@ func TestAddTasks_InvalidCurrentStateReturnsTopLevelErrorWithoutPersisting(t *te
 	if readErr != nil {
 		t.Fatalf("Failed to read state: %v", readErr)
 	}
-	if readState.FindTask("new-task") != nil {
-		t.Fatal("new-task was persisted even though add-tasks returned top-level failure")
+	if readState.FindTask("new-task") == nil {
+		t.Fatal("new-task was not persisted")
+	}
+	if readState.FindTask("bad-new-task") != nil {
+		t.Fatal("bad-new-task was persisted even though scoped validation failed")
+	}
+	if existing := readState.FindTask("invalid-existing-task"); existing == nil || existing.AssignedTo != nil {
+		t.Fatalf("invalid existing task was unexpectedly repaired or removed: %#v", existing)
 	}
 }
 

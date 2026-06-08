@@ -1,7 +1,6 @@
 package ops
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"path/filepath"
@@ -37,20 +36,6 @@ type AddTaskInput struct {
 type AddTaskResult struct {
 	TaskID   string   `json:"task_id"`
 	Warnings []string `json:"warnings"`
-}
-
-// PostWriteValidationError indicates the mutation succeeded but state
-// validation failed immediately afterward.
-type PostWriteValidationError struct {
-	Err error
-}
-
-func (e *PostWriteValidationError) Error() string {
-	return fmt.Sprintf("task added but state validation failed: %v", e.Err)
-}
-
-func (e *PostWriteValidationError) Unwrap() error {
-	return e.Err
 }
 
 // AddTask atomically persists a new task after validating inputs and checking
@@ -163,6 +148,7 @@ func AddTask(statePath, logPath string, input *AddTaskInput, orchestratorID stri
 		History:       []models.TaskHistoryEntry{},
 	}
 
+	var postValidationErr error
 	err = bb.Modify(func(state *models.State) error {
 		if state.FindTask(input.ID) != nil {
 			return &PreconditionError{Reason: fmt.Sprintf("task '%s' already exists", input.ID)}
@@ -183,8 +169,11 @@ func AddTask(statePath, logPath string, input *AddTaskInput, orchestratorID stri
 		}
 		state.Goal.AlignmentHistory = append(state.Goal.AlignmentHistory, alignmentEntry)
 
-		if err := statevalidate.ValidateState(state, projectRoot, false, io.Discard); err != nil {
+		if err := statevalidate.ValidateAddedTask(state, projectRoot, input.ID, false, io.Discard); err != nil {
 			return err
+		}
+		if err := statevalidate.ValidateState(state, projectRoot, false, io.Discard); err != nil {
+			postValidationErr = err
 		}
 
 		return nil
@@ -195,6 +184,9 @@ func AddTask(statePath, logPath string, input *AddTaskInput, orchestratorID stri
 	}
 
 	result := &AddTaskResult{TaskID: input.ID}
+	if postValidationErr != nil {
+		result.Warnings = append(result.Warnings, fmt.Sprintf("state remains degraded after add-task; full validation failed: %v", postValidationErr))
+	}
 
 	logger := log.New(logPath)
 	logEntry := log.Entry{
@@ -304,23 +296,11 @@ func AddTasks(statePath, logPath string, input *AddTasksInput) (*AddTasksResult,
 	if orchestratorID == "" {
 		return nil, &PreconditionError{Reason: "orchestrator agent ID is required"}
 	}
-	if err := statevalidate.ValidateStateFile(statePath, false, io.Discard); err != nil {
-		return nil, &PreconditionError{Reason: fmt.Sprintf("current state validation failed: %v", err)}
-	}
 	result := &AddTasksResult{Results: make([]AddTaskItemResult, 0, len(input.Tasks))}
 	for i := range input.Tasks {
 		r, err := AddTask(statePath, logPath, &input.Tasks[i], orchestratorID)
 		item := AddTaskItemResult{TaskID: input.Tasks[i].ID}
 		if err != nil {
-			// PostWriteValidationError means the task was persisted but state
-			// validation failed. State is suspect — halt the batch and propagate
-			// as a top-level error so the MCP layer can classify it properly.
-			var postWriteErr *PostWriteValidationError
-			if errors.As(err, &postWriteErr) {
-				item.Error = err.Error()
-				result.Results = append(result.Results, item)
-				return result, err
-			}
 			item.Error = err.Error()
 		} else {
 			item.Success = true

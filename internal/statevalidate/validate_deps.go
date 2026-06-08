@@ -17,65 +17,9 @@ import (
 // prerequisites are incomplete and detects dependency cycles that would
 // deadlock the scheduler.
 func validateDependencies(state *models.State, projectRoot string, skipSpecFileCheck bool, resolver *pipeline.Resolver, cfg *pipeline.PipelineConfig, warnWriter io.Writer) error {
-	taskIDs := buildTaskIDSet(state.Tasks)
-	sc := newStatusClassifier(resolver, cfg)
-	depResolver := models.NewDependencyResolver(state)
-
 	for _, task := range state.Tasks {
-		if len(task.DependsOn) == 0 {
-			continue
-		}
-
-		seenDeps := make(map[string]bool, len(task.DependsOn))
-		// All dependencies must reference existing tasks
-		for _, depID := range task.DependsOn {
-			if strings.TrimSpace(depID) != depID || depID == "" {
-				return fmt.Errorf("task %s has invalid depends_on entry %q (must be non-empty and trimmed)", task.ID, depID)
-			}
-			if depID == task.ID {
-				return fmt.Errorf("task %s has depends_on referencing itself", task.ID)
-			}
-			if seenDeps[depID] {
-				return fmt.Errorf("task %s has duplicate depends_on entry %q", task.ID, depID)
-			}
-			seenDeps[depID] = true
-			if !taskIDs[depID] {
-				return fmt.Errorf("task %s has depends_on referencing non-existent task '%s'", task.ID, depID)
-			}
-		}
-
-		var unmet []string
-		for _, depID := range task.DependsOn {
-			result := depResolver.Resolve(depID)
-			if result.Invalid() {
-				return fmt.Errorf("task %s has invalid dependency %s", task.ID, result.Summary())
-			}
-			if !task.Status.IsTerminal() {
-				depTask := state.FindTask(depID)
-				if depTask != nil && depTask.Status.IsTerminal() && depTask.Status != models.TaskStatusMerged {
-					return fmt.Errorf("non-terminal task %s depends on terminal non-merged task %s (%s)", task.ID, depID, depTask.Status)
-				}
-			}
-			if err := validateDependencyDirection(state, resolver, &task, depID, result); err != nil {
-				return err
-			}
-			if result.Kind == models.DependencySatisfiedViaSupersession && warnWriter != nil {
-				fmt.Fprintf(warnWriter, "WARNING: task %s dependency %s satisfied via supersession path: %s\n", task.ID, depID, strings.Join(result.Path, " -> "))
-			}
-			if !result.Satisfied() {
-				unmet = append(unmet, result.Summary())
-				if !sc.IsExecuting(task.Status) && warnWriter != nil && result.ViaSupersession() {
-					fmt.Fprintf(warnWriter, "WARNING: task %s dependency %s is not satisfied via supersession path: %s; blocking: %s\n",
-						task.ID, depID, strings.Join(result.Path, " -> "), strings.Join(result.BlockingIDs, ", "))
-				}
-			}
-		}
-
-		// Executing tasks must have all dependencies satisfied.
-		if sc.IsExecuting(task.Status) {
-			if len(unmet) > 0 {
-				return fmt.Errorf("executing task %s has unmet dependencies: %s", task.ID, strings.Join(unmet, ", "))
-			}
+		if err := validateDependenciesForTask(state, projectRoot, skipSpecFileCheck, resolver, cfg, warnWriter, &task); err != nil {
+			return err
 		}
 	}
 
@@ -90,6 +34,64 @@ func validateDependencies(state *models.State, projectRoot string, skipSpecFileC
 		}
 	}
 
+	return nil
+}
+
+func validateDependenciesForTask(state *models.State, projectRoot string, skipSpecFileCheck bool, resolver *pipeline.Resolver, cfg *pipeline.PipelineConfig, warnWriter io.Writer, task *models.Task) error {
+	if task == nil || len(task.DependsOn) == 0 {
+		return nil
+	}
+
+	taskIDs := buildTaskIDSet(state.Tasks)
+	sc := newStatusClassifier(resolver, cfg)
+	depResolver := models.NewDependencyResolver(state)
+	seenDeps := make(map[string]bool, len(task.DependsOn))
+	for _, depID := range task.DependsOn {
+		if strings.TrimSpace(depID) != depID || depID == "" {
+			return fmt.Errorf("task %s has invalid depends_on entry %q (must be non-empty and trimmed)", task.ID, depID)
+		}
+		if depID == task.ID {
+			return fmt.Errorf("task %s has depends_on referencing itself", task.ID)
+		}
+		if seenDeps[depID] {
+			return fmt.Errorf("task %s has duplicate depends_on entry %q", task.ID, depID)
+		}
+		seenDeps[depID] = true
+		if !taskIDs[depID] {
+			return fmt.Errorf("task %s has depends_on referencing non-existent task '%s'", task.ID, depID)
+		}
+	}
+
+	var unmet []string
+	for _, depID := range task.DependsOn {
+		result := depResolver.Resolve(depID)
+		if result.Invalid() {
+			return fmt.Errorf("task %s has invalid dependency %s", task.ID, result.Summary())
+		}
+		if !task.Status.IsTerminal() {
+			depTask := state.FindTask(depID)
+			if depTask != nil && depTask.Status.IsTerminal() && depTask.Status != models.TaskStatusMerged {
+				return fmt.Errorf("non-terminal task %s depends on terminal non-merged task %s (%s)", task.ID, depID, depTask.Status)
+			}
+		}
+		if err := validateDependencyDirection(state, resolver, task, depID, result); err != nil {
+			return err
+		}
+		if result.Kind == models.DependencySatisfiedViaSupersession && warnWriter != nil {
+			fmt.Fprintf(warnWriter, "WARNING: task %s dependency %s satisfied via supersession path: %s\n", task.ID, depID, strings.Join(result.Path, " -> "))
+		}
+		if !result.Satisfied() {
+			unmet = append(unmet, result.Summary())
+			if !sc.IsExecuting(task.Status) && warnWriter != nil && result.ViaSupersession() {
+				fmt.Fprintf(warnWriter, "WARNING: task %s dependency %s is not satisfied via supersession path: %s; blocking: %s\n",
+					task.ID, depID, strings.Join(result.Path, " -> "), strings.Join(result.BlockingIDs, ", "))
+			}
+		}
+	}
+
+	if sc.IsExecuting(task.Status) && len(unmet) > 0 {
+		return fmt.Errorf("executing task %s has unmet dependencies: %s", task.ID, strings.Join(unmet, ", "))
+	}
 	return nil
 }
 
