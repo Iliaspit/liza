@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/liza-mas/liza/internal/db"
@@ -164,6 +165,9 @@ func planSprintAdvanceFromCompleted(s *models.State, now time.Time, projectRoot 
 	if err != nil {
 		return nil, fmt.Errorf("cannot advance sprint: %w", err)
 	}
+	if blocked := collectApprovedPlanningWithUnmergedOutput(s, detCtx.planningPairs, detCtx.planningApprovedStatuses); len(blocked) > 0 {
+		return nil, fmt.Errorf("cannot advance sprint: approved planning task(s) must be merged before output can be carried forward: %s (run `liza wt-merge <task-id>` first)", strings.Join(blocked, ", "))
+	}
 	return buildSprintAdvancePlan(s, now, detCtx)
 }
 
@@ -312,11 +316,29 @@ func collectMergedPlanningWithUnconsumedOutput(state *models.State, planningPair
 	return carried
 }
 
+func collectApprovedPlanningWithUnmergedOutput(state *models.State, planningPairs map[string]bool, approvedStatuses map[string]models.TaskStatus) []string {
+	var blocked []string
+	for _, taskID := range state.Sprint.Scope.Planned {
+		task := state.FindTask(taskID)
+		if task == nil || len(task.Output) == 0 {
+			continue
+		}
+		if task.Status == models.TaskStatusMerged || !IsPlanningPair(task.RolePair, planningPairs) {
+			continue
+		}
+		if task.Status == approvedStatuses[task.RolePair] {
+			blocked = append(blocked, taskID)
+		}
+	}
+	return blocked
+}
+
 // advanceDetectionContext holds the detection data needed for sprint advance.
 type advanceDetectionContext struct {
-	sprintTerminals []models.TaskStatus
-	planningPairs   map[string]bool
-	m2oTransitions  []ManyToOneTransitionInfo
+	sprintTerminals          []models.TaskStatus
+	planningPairs            map[string]bool
+	planningApprovedStatuses map[string]models.TaskStatus
+	m2oTransitions           []ManyToOneTransitionInfo
 }
 
 // IsManyToOneReady checks if a MERGED task is part of a complete many-to-one
@@ -422,14 +444,19 @@ func loadDetectionContextForAdvance(projectRoot string) (*advanceDetectionContex
 	detCtx, err := LoadDetectionContext(projectRoot)
 	if err != nil {
 		if errors.Is(err, pipeline.ErrConfigNotFound) {
-			return &advanceDetectionContext{}, nil // legacy project
+			return &advanceDetectionContext{
+				planningApprovedStatuses: map[string]models.TaskStatus{
+					"code-planning-pair": models.TaskStatusCodingPlanApproved,
+				},
+			}, nil // legacy project
 		}
 		return nil, fmt.Errorf("pipeline config failed to load: %w", err)
 	}
 	return &advanceDetectionContext{
-		sprintTerminals: detCtx.SprintTerminals,
-		planningPairs:   detCtx.PlanningPairs,
-		m2oTransitions:  detCtx.ManyToOneTransitions,
+		sprintTerminals:          detCtx.SprintTerminals,
+		planningPairs:            detCtx.PlanningPairs,
+		planningApprovedStatuses: detCtx.PlanningApprovedStatuses,
+		m2oTransitions:           detCtx.ManyToOneTransitions,
 	}, nil
 }
 

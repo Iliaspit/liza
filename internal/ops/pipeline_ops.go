@@ -1,6 +1,7 @@
 package ops
 
 import (
+	"fmt"
 	"log"
 
 	"github.com/liza-mas/liza/internal/db"
@@ -150,9 +151,10 @@ type ManyToOneTransitionInfo struct {
 // PipelineDetectionContext holds pipeline-derived data needed for orchestrator
 // wake detection. Computed once from a single config load via LoadDetectionContext.
 type PipelineDetectionContext struct {
-	SprintTerminals      []models.TaskStatus
-	PlanningPairs        map[string]bool
-	ManyToOneTransitions []ManyToOneTransitionInfo
+	SprintTerminals          []models.TaskStatus
+	PlanningPairs            map[string]bool
+	PlanningApprovedStatuses map[string]models.TaskStatus
+	ManyToOneTransitions     []ManyToOneTransitionInfo
 }
 
 // LoadDetectionContext loads pipeline config once and returns both sprint-terminal
@@ -176,10 +178,21 @@ func LoadDetectionContext(projectRoot string) (*PipelineDetectionContext, error)
 		}
 	}
 
+	planningPairs := resolver.TransitionSourcePairs()
+	planningApprovedStatuses := make(map[string]models.TaskStatus, len(planningPairs))
+	for rolePair := range planningPairs {
+		approved, err := resolver.ApprovedStatus(rolePair)
+		if err != nil {
+			return nil, fmt.Errorf("approved status for transition-source role-pair %q: %w", rolePair, err)
+		}
+		planningApprovedStatuses[rolePair] = approved
+	}
+
 	return &PipelineDetectionContext{
-		SprintTerminals:      resolver.SprintTerminalStates(),
-		PlanningPairs:        resolver.TransitionSourcePairs(),
-		ManyToOneTransitions: m2oInfos,
+		SprintTerminals:          resolver.SprintTerminalStates(),
+		PlanningPairs:            planningPairs,
+		PlanningApprovedStatuses: planningApprovedStatuses,
+		ManyToOneTransitions:     m2oInfos,
 	}, nil
 }
 

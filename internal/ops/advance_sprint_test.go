@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -463,6 +464,124 @@ func TestResumeWithSprintAdvance_CarriesMergedPlanning(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("Sprint.Scope.Planned = %v, want to include code-planning-1", readState.Sprint.Scope.Planned)
+	}
+}
+
+func TestResumeWithSprintAdvance_BlocksApprovedUnmergedPlanning(t *testing.T) {
+	tests := []struct {
+		name                   string
+		taskID                 string
+		rolePair               string
+		status                 models.TaskStatus
+		removePipelineConfig   bool
+		transitionsExecuted    map[string]bool
+		wantTransitionsPersist bool
+	}{
+		{
+			name:                 "legacy code planning source",
+			taskID:               "code-planning-1",
+			rolePair:             "code-planning-pair",
+			status:               models.TaskStatusCodingPlanApproved,
+			removePipelineConfig: true,
+		},
+		{
+			name:     "configured epic planning source",
+			taskID:   "epic-planning-1",
+			rolePair: "epic-planning-pair",
+			status:   models.TaskStatus("EPIC_PLAN_APPROVED"),
+		},
+		{
+			name:                   "configured source with transition marker",
+			taskID:                 "code-planning-1",
+			rolePair:               "code-planning-pair",
+			status:                 models.TaskStatusCodingPlanApproved,
+			transitionsExecuted:    map[string]bool{"code-plan-to-coding": true},
+			wantTransitionsPersist: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir, stateFile := setupAdvanceTest(t)
+			if tt.removePipelineConfig {
+				pipelinePath := filepath.Join(tmpDir, ".liza", "pipeline.yaml")
+				if err := os.Remove(pipelinePath); err != nil {
+					t.Fatalf("failed to remove pipeline config for legacy fallback test: %v", err)
+				}
+			}
+
+			now := time.Now().UTC()
+			state := testhelpers.CreateValidState()
+			state.Config.Mode = models.SystemModeRunning
+			state.Sprint.Status = models.SprintStatusCompleted
+			state.Sprint.Number = 1
+
+			approvedBy := "code-reviewer-1"
+			reviewCommit := "review123"
+			planningTask := testhelpers.BuildTaskByStatus(tt.taskID, tt.status, now)
+			planningTask.Type = models.TaskTypePlanning
+			planningTask.RolePair = tt.rolePair
+			planningTask.ApprovedBy = &approvedBy
+			planningTask.ReviewCommit = &reviewCommit
+			planningTask.Output = []models.OutputEntry{
+				{Desc: "implement feature X", DoneWhen: "tests pass", Scope: "internal/", SpecRef: "README.md"},
+			}
+			planningTask.TransitionsExecuted = tt.transitionsExecuted
+
+			state.Tasks = []models.Task{planningTask}
+			state.Sprint.Scope.Planned = []string{tt.taskID}
+
+			testhelpers.WriteInitialState(t, stateFile, state)
+
+			result, err := Resume(tmpDir, "human")
+			if err == nil {
+				t.Fatal("Resume() error = nil, want approved planning merge precondition failure")
+			}
+			if result != nil {
+				t.Fatalf("Resume() result = %+v, want nil on precondition failure", result)
+			}
+			if !strings.Contains(err.Error(), "approved planning task(s) must be merged") ||
+				!strings.Contains(err.Error(), tt.taskID) {
+				t.Fatalf("Resume() error = %q, want merge-first message naming %s", err, tt.taskID)
+			}
+
+			archivePath := filepath.Join(tmpDir, ".liza", "archive", "sprint-1.yaml")
+			if _, statErr := os.Stat(archivePath); !os.IsNotExist(statErr) {
+				t.Fatalf("archive path stat error = %v, want archive not written at %s", statErr, archivePath)
+			}
+
+			bb := db.New(stateFile)
+			readState, err := bb.Read()
+			if err != nil {
+				t.Fatalf("Failed to read state: %v", err)
+			}
+			if readState.Sprint.Status != models.SprintStatusCompleted {
+				t.Errorf("Sprint.Status = %s, want %s", readState.Sprint.Status, models.SprintStatusCompleted)
+			}
+			if readState.Sprint.Number != 1 {
+				t.Errorf("Sprint.Number = %d, want 1", readState.Sprint.Number)
+			}
+			if len(readState.SprintHistory) != 0 {
+				t.Errorf("SprintHistory length = %d, want 0", len(readState.SprintHistory))
+			}
+			if got := readState.Sprint.Scope.Planned; len(got) != 1 || got[0] != tt.taskID {
+				t.Errorf("Sprint.Scope.Planned = %v, want [%s]", got, tt.taskID)
+			}
+			readTask := readState.FindTask(tt.taskID)
+			if readTask == nil {
+				t.Fatalf("task %q not found after failed resume", tt.taskID)
+			}
+			if tt.wantTransitionsPersist {
+				if !readTask.TransitionsExecuted["code-plan-to-coding"] {
+					t.Errorf("TransitionsExecuted = %v, want code-plan-to-coding marker preserved", readTask.TransitionsExecuted)
+				}
+			} else if len(readTask.TransitionsExecuted) != 0 {
+				t.Errorf("TransitionsExecuted = %v, want empty", readTask.TransitionsExecuted)
+			}
+			if len(readState.Tasks) != 1 {
+				t.Errorf("Tasks length = %d, want 1", len(readState.Tasks))
+			}
+		})
 	}
 }
 

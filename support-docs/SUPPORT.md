@@ -111,6 +111,7 @@ IN_PROGRESS → CHECKPOINT → COMPLETED → (new sprint) IN_PROGRESS
 | COMPLETED | — | Archive sprint, create new one, execute pipeline transitions |
 
 **Two-step advance:** To move from one pipeline phase to the next, run `liza resume` twice: first marks COMPLETED, second archives and advances.
+Approved transition-source output can make a task sprint-terminal before it is integrated. The second `liza resume` refuses to advance/archive until approved planning output is merged; run `liza wt-merge <task-id>` first.
 
 ### Checkpoint Actions
 

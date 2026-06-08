@@ -243,7 +243,7 @@ git log integration --oneline
 
 ### Running Multiple Sprints
 
-When all tasks in a sprint reach terminal state (MERGED/ABANDONED), `liza resume` marks the sprint COMPLETED. Running `liza resume` a second time archives the completed sprint, creates a new IN_PROGRESS sprint, and executes available pipeline transitions — creating child tasks for the next role-pair.
+When all tasks in a sprint reach sprint-terminal state, `liza resume` marks the sprint COMPLETED. Running `liza resume` a second time archives the completed sprint, creates a new IN_PROGRESS sprint, and executes available pipeline transitions — creating child tasks for the next role-pair. Approved transition-source output may be sprint-terminal before it is integrated; if so, merge it first with `liza wt-merge <task-id>` before the second resume can advance.
 
 #### Auto-Resume (Yolo Mode)
 
@@ -384,7 +384,7 @@ IN_PROGRESS → CHECKPOINT ──→ COMPLETED ──→ (new sprint) IN_PROGRES
 
 **`liza resume` has two behaviors depending on sprint state:**
 - **At CHECKPOINT** (not all tasks terminal): resumes the current sprint as IN_PROGRESS
-- **At CHECKPOINT** (all tasks terminal): marks sprint COMPLETED. Run `liza resume` a second time to archive the sprint, create a new one, and execute available pipeline transitions
+- **At CHECKPOINT** (all tasks terminal): marks sprint COMPLETED. Run `liza resume` a second time to archive the sprint, create a new one, and execute available pipeline transitions. Approved transition-source output must be merged before this second resume can advance
 
 ### CLI Commands
 
