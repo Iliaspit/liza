@@ -1,8 +1,24 @@
 package agent
 
 import (
+	"slices"
 	"testing"
 )
+
+func TestValidCLIsIncludesCodexACP(t *testing.T) {
+	if !slices.Contains(ValidCLIs(), "codex-acp") {
+		t.Fatalf("ValidCLIs() = %v, want codex-acp", ValidCLIs())
+	}
+}
+
+func TestNewLLMAgentForCLI(t *testing.T) {
+	if _, ok := NewLLMAgentForCLI("codex-acp", "").(*ACPXAgent); !ok {
+		t.Fatalf("NewLLMAgentForCLI(codex-acp) did not return *ACPXAgent")
+	}
+	if _, ok := NewLLMAgentForCLI("codex", "").(*CLIAgent); !ok {
+		t.Fatalf("NewLLMAgentForCLI(codex) did not return *CLIAgent")
+	}
+}
 
 func TestResolveDefaultCLI(t *testing.T) {
 	// Clean env for test isolation

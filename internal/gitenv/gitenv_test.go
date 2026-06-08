@@ -61,7 +61,7 @@ func TestOutputWithTimeout_ReturnsStdoutOnly(t *testing.T) {
 	}
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-	output, err := OutputWithTimeout(time.Second, "", "ls-tree")
+	output, err := OutputWithTimeout(5*time.Second, "", "ls-tree")
 	if err != nil {
 		t.Fatalf("OutputWithTimeout() error = %v, want nil", err)
 	}

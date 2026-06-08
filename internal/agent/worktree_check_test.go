@@ -19,6 +19,11 @@ import (
 	"github.com/liza-mas/liza/internal/testhelpers"
 )
 
+func isolateGitGlobalConfig(t *testing.T) {
+	t.Helper()
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+}
+
 func TestEnsureReviewerWorktree_Exists(t *testing.T) {
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
@@ -137,6 +142,8 @@ func TestEnsureReviewerWorktree_MissingRecoverable_RunsPostWorktreeCmd(t *testin
 }
 
 func TestEnsureReviewerWorktree_MissingRecoverable_CopyWorktreeEnvFilesBeforePostWorktreeCmd(t *testing.T) {
+	isolateGitGlobalConfig(t)
+
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
 	commitReviewerEnvIgnoreForWorktreeTest(t, tmpDir)
@@ -172,6 +179,7 @@ func TestEnsureReviewerWorktree_MissingRecoverable_CopyWorktreeEnvFilesBeforePos
 }
 
 func TestEnsureReviewerWorktree_MissingRecoverable_RefreshesScipAfterPostWorktreeCmd(t *testing.T) {
+	isolateGitGlobalConfig(t)
 	t.Setenv(scipsearch.EnvEnableScipSearch, "true")
 
 	tmpDir := t.TempDir()
@@ -274,6 +282,7 @@ func TestEnsureReviewerWorktree_Exists_DoesNotRefreshScip(t *testing.T) {
 }
 
 func TestEnsureReviewerWorktree_MissingRecoverable_ScipFailureWarningOnlyAndOmitsIndex(t *testing.T) {
+	isolateGitGlobalConfig(t)
 	t.Setenv(scipsearch.EnvEnableScipSearch, "true")
 
 	tmpDir := t.TempDir()
@@ -326,6 +335,8 @@ func TestEnsureReviewerWorktree_MissingRecoverable_ScipFailureWarningOnlyAndOmit
 }
 
 func TestEnsureReviewerWorktreeRecoveryPreparesSembleIgnore(t *testing.T) {
+	isolateGitGlobalConfig(t)
+
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
 	statePath, _ := testhelpers.SetupLizaDir(t, tmpDir)
@@ -364,6 +375,8 @@ func TestEnsureReviewerWorktreeRecoveryPreparesSembleIgnore(t *testing.T) {
 }
 
 func TestEnsureReviewerWorktreeRecoveryRunsSemblePreparationBeforeIndexRefresh(t *testing.T) {
+	isolateGitGlobalConfig(t)
+
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
 	statePath, _ := testhelpers.SetupLizaDir(t, tmpDir)

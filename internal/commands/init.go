@@ -275,6 +275,8 @@ func CheckContractConfigured(projectRoot, cliName string) string {
 	effectiveCLI := cliName
 	if cliName == "kimi" {
 		effectiveCLI = "claude"
+	} else if cliName == "codex-acp" {
+		effectiveCLI = "codex"
 	}
 
 	fileName, ok := InitAgentRepoSymlinks[effectiveCLI]

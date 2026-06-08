@@ -5,9 +5,9 @@ package integration
 // full_sprint_test.go contains an end-to-end integration test that exercises
 // the full sprint pipeline (epic-planning → US-writing → architecture-main →
 // architecture → code-planning → coding) using the real RunSupervisor loop with
-// a mock CLI executor.
+// a mock CLI agent.
 //
-// The SmartMockCLIExecutor replaces the LLM CLI by calling ops.* functions
+// The SmartMockCLIAgent replaces the LLM CLI by calling ops.* functions
 // directly to simulate what each agent role does, without any real LLM calls.
 
 import (
@@ -34,7 +34,7 @@ import (
 )
 
 // ---------------------------------------------------------------------------
-// SmartMockCLIExecutor — implements agent.CLIExecutor
+// SmartMockCLIAgent — implements agent.LLMAgent
 // ---------------------------------------------------------------------------
 
 // MockExecution records what the mock did for a single Execute call.
@@ -45,18 +45,20 @@ type MockExecution struct {
 	Action  string // "doer" or "reviewer"
 }
 
-// SmartMockCLIExecutor replaces the real LLM CLI. It reads the blackboard to
+// SmartMockCLIAgent replaces the real LLM CLI. It reads the blackboard to
 // find which task is assigned to the calling agent, then performs the expected
 // ops calls (checkpoint, output, commit, submit/verdict) directly.
-type SmartMockCLIExecutor struct {
+type SmartMockCLIAgent struct {
 	mu    sync.Mutex
 	calls []MockExecution
 }
 
-func (m *SmartMockCLIExecutor) Execute(ctx context.Context, cliName, agentID, prompt, projectRoot string, _ []string, _ models.Config) (agent.CLIExecutionResult, error) {
+func (m *SmartMockCLIAgent) Run(ctx context.Context, req agent.LLMAgentRunRequest) (agent.LLMAgentRunResult, error) {
+	agentID := req.AgentID
+	projectRoot := req.ProjectRoot
 	runtimeRole, err := identity.ExtractRole(agentID)
 	if err != nil {
-		return agent.CLIExecutionResult{ExitCode: 1}, fmt.Errorf("extract role from %s: %w", agentID, err)
+		return agent.LLMAgentRunResult{ExitCode: 1}, fmt.Errorf("extract role from %s: %w", agentID, err)
 	}
 
 	// Find the task assigned to this agent.
@@ -65,24 +67,24 @@ func (m *SmartMockCLIExecutor) Execute(ctx context.Context, cliName, agentID, pr
 	bb := db.For(lp.StatePath())
 	state, err := bb.Read()
 	if err != nil {
-		return agent.CLIExecutionResult{ExitCode: 1}, fmt.Errorf("read state: %w", err)
+		return agent.LLMAgentRunResult{ExitCode: 1}, fmt.Errorf("read state: %w", err)
 	}
 
 	// Load pipeline resolver for executing-state checks.
 	pr, prErr := ops.LoadResolverForModels(projectRoot)
 	if prErr != nil {
-		return agent.CLIExecutionResult{ExitCode: 1}, fmt.Errorf("load pipeline resolver: %w", prErr)
+		return agent.LLMAgentRunResult{ExitCode: 1}, fmt.Errorf("load pipeline resolver: %w", prErr)
 	}
 
 	// Load full pipeline resolver for role-type queries.
 	pipeCfg, pipeErr := pipeline.LoadFrozen(projectRoot)
 	if pipeErr != nil {
-		return agent.CLIExecutionResult{ExitCode: 1}, fmt.Errorf("load pipeline config: %w", pipeErr)
+		return agent.LLMAgentRunResult{ExitCode: 1}, fmt.Errorf("load pipeline config: %w", pipeErr)
 	}
 	pipeResolver := pipeline.NewResolver(pipeCfg)
 	roleType, rtErr := pipeResolver.RoleType(runtimeRole)
 	if rtErr != nil {
-		return agent.CLIExecutionResult{ExitCode: 1}, fmt.Errorf("resolve role type for %s: %w", runtimeRole, rtErr)
+		return agent.LLMAgentRunResult{ExitCode: 1}, fmt.Errorf("resolve role type for %s: %w", runtimeRole, rtErr)
 	}
 
 	var taskID string
@@ -110,25 +112,25 @@ func (m *SmartMockCLIExecutor) Execute(ctx context.Context, cliName, agentID, pr
 		}
 	}
 	if taskID == "" {
-		return agent.CLIExecutionResult{ExitCode: 1}, fmt.Errorf("no task assigned to %s (reviewer=%v)", agentID, isReviewer)
+		return agent.LLMAgentRunResult{ExitCode: 1}, fmt.Errorf("no task assigned to %s (reviewer=%v)", agentID, isReviewer)
 	}
 
 	if roleType == "doer" {
 		if err := m.executeDoer(ctx, projectRoot, agentID, taskID, runtimeRole, taskRolePair, taskArchRef); err != nil {
-			return agent.CLIExecutionResult{ExitCode: 1}, err
+			return agent.LLMAgentRunResult{ExitCode: 1}, err
 		}
 	} else if roleType == "reviewer" {
 		if err := m.executeReviewer(projectRoot, agentID, taskID, runtimeRole); err != nil {
-			return agent.CLIExecutionResult{ExitCode: 1}, err
+			return agent.LLMAgentRunResult{ExitCode: 1}, err
 		}
 	} else {
-		return agent.CLIExecutionResult{ExitCode: 1}, fmt.Errorf("unsupported role type: %s (role: %s)", roleType, runtimeRole)
+		return agent.LLMAgentRunResult{ExitCode: 1}, fmt.Errorf("unsupported role type: %s (role: %s)", roleType, runtimeRole)
 	}
 
-	return agent.CLIExecutionResult{ExitCode: 0}, nil
+	return agent.LLMAgentRunResult{ExitCode: 0}, nil
 }
 
-func (m *SmartMockCLIExecutor) ExecuteInteractive(_ context.Context, _, _, _ string, _ []string) (int, error) {
+func (m *SmartMockCLIAgent) RunInteractive(_ context.Context, _ agent.LLMAgentInteractiveRequest) (int, error) {
 	return 0, fmt.Errorf("interactive mode not supported in mock")
 }
 
@@ -137,7 +139,7 @@ func (m *SmartMockCLIExecutor) ExecuteInteractive(_ context.Context, _, _, _ str
 //  2. Set task output (planners only — needed for per-subtask transitions)
 //  3. Create a file and commit in the worktree
 //  4. Submit the task for review
-func (m *SmartMockCLIExecutor) executeDoer(ctx context.Context, projectRoot, agentID, taskID, role, rolePair, archRef string) error {
+func (m *SmartMockCLIAgent) executeDoer(ctx context.Context, projectRoot, agentID, taskID, role, rolePair, archRef string) error {
 	// 1. Write checkpoint
 	if err := ops.WriteCheckpoint(projectRoot, &ops.WriteCheckpointInput{
 		TaskID:         taskID,
@@ -288,7 +290,7 @@ func (m *SmartMockCLIExecutor) executeDoer(ctx context.Context, projectRoot, age
 }
 
 // executeReviewer simulates what a reviewer agent does: approve the task.
-func (m *SmartMockCLIExecutor) executeReviewer(projectRoot, agentID, taskID, role string) error {
+func (m *SmartMockCLIAgent) executeReviewer(projectRoot, agentID, taskID, role string) error {
 	if _, err := ops.SubmitVerdict(projectRoot, taskID, "APPROVED", "", agentID, ""); err != nil {
 		return fmt.Errorf("SubmitVerdict: %w", err)
 	}
@@ -428,12 +430,14 @@ func TestFullSprintSequence(t *testing.T) {
 		s.Config.OrchestratorPollInterval = 1
 		s.Config.OrchestratorMaxWait = 3
 		s.Config.LeaseDuration = 300 // 5 min — generous for test
+		off := false
+		s.Config.AutoCheckpointSummary = &off
 		return nil
 	}); err != nil {
 		t.Fatalf("Failed to set config: %v", err)
 	}
 
-	mock := &SmartMockCLIExecutor{}
+	mock := &SmartMockCLIAgent{}
 
 	// Helper: run a supervisor for a specific agent, blocking until it exits.
 	runSupervisor := func(agentID, role string) {
@@ -451,7 +455,7 @@ func TestFullSprintSequence(t *testing.T) {
 			LogPath:          logPath,
 			SpecsDir:         specsDir,
 			CLIName:          "claude",
-			Executor:         mock,
+			LLMAgent:         mock,
 			ExecutionTimeout: 60 * time.Second,
 		}
 
