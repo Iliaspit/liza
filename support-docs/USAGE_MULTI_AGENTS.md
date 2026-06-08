@@ -14,7 +14,7 @@ initialization. For setup/configuration details, see
 
 **Goal** — A Liza workspace (`.liza/`) is bound to a single goal. The goal is defined at `liza init` with a description and a spec reference. All tasks, sprints, and agent activity within that workspace serve this goal. To pursue a different goal, remove `.liza/` and re-initialize. One project can only have one active goal at a time.
 
-**Checkpoints** — Execution halts at defined points (sprint completion, planning output ready) so a human can review before the system continues. This is intentional — Liza defaults to human-gated transitions between pipeline phases. If you want uninterrupted execution, enable auto-resume (`liza init --auto-resume` or press `y` in the TUI).
+**Checkpoints** — Hard checkpoints halt execution so a human can review before the system continues. Transition checkpoints for planning output gate only downstream task creation: the orchestrator waits for `liza resume`, while doer/reviewer agents may continue already-available work in the current sprint. If you want uninterrupted transition execution, enable auto-resume (`liza init --auto-resume` or press `y` in the TUI).
 
 **Worktrees** — Agents don't work directly on your main branch. Each task gets its own [git worktree](https://git-scm.com/docs/git-worktree) (under `.worktrees/task-N/`), giving agents isolated workspaces that can't interfere with each other or with your working copy. Completed work merges into the integration branch, then into main. This means Liza requires a git repository and only one Liza context per repository.
 
@@ -322,8 +322,11 @@ Transitions create child tasks from the parent's `output[]` entries (per-subtask
 
 #### What Humans Do at Checkpoints
 
-When a sprint checkpoints (status: CHECKPOINT), all agents pause.
-The human reviews what agents produced and decides what to do next.
+When a sprint checkpoints (status: CHECKPOINT), behavior depends on the trigger. Hard checkpoints
+pause all agents. Transition checkpoints (`PLANNING_COMPLETE`, `MANY_TO_ONE_READY`) pause
+orchestrator transition execution only; doer/reviewer agents may continue already-available
+claimable/reviewable work in the current sprint. The human reviews what agents produced and decides
+what to do next.
 
 **Start with a summary.** Run `/checkpoint-summary` in any pairing agent session to get
 a prioritized digest of agent decisions, open points, and risks — what needs your input,

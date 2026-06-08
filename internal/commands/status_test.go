@@ -21,6 +21,71 @@ func setupPipelineRoot(t *testing.T) string {
 	return tmpDir
 }
 
+func TestCheckpointNotice(t *testing.T) {
+	tests := []struct {
+		name    string
+		sprint  models.Sprint
+		want    string
+		wantNot string
+	}{
+		{
+			name: "transition checkpoint allows doer reviewer work",
+			sprint: models.Sprint{
+				Status:            models.SprintStatusCheckpoint,
+				CheckpointTrigger: models.CheckpointTriggerPlanningComplete,
+			},
+			want:    "doer/reviewer work may continue",
+			wantNot: "agents paused",
+		},
+		{
+			name: "many-to-one checkpoint allows doer reviewer work",
+			sprint: models.Sprint{
+				Status:            models.SprintStatusCheckpoint,
+				CheckpointTrigger: models.CheckpointTriggerManyToOneReady,
+			},
+			want:    "doer/reviewer work may continue",
+			wantNot: "agents paused",
+		},
+		{
+			name: "manual checkpoint pauses agents",
+			sprint: models.Sprint{
+				Status: models.SprintStatusCheckpoint,
+			},
+			want:    "agents paused",
+			wantNot: "doer/reviewer work may continue",
+		},
+		{
+			name: "sprint-complete checkpoint pauses agents",
+			sprint: models.Sprint{
+				Status:            models.SprintStatusCheckpoint,
+				CheckpointTrigger: models.CheckpointTriggerSprintComplete,
+			},
+			want:    "agents paused",
+			wantNot: "doer/reviewer work may continue",
+		},
+		{
+			name: "non-checkpoint has no notice",
+			sprint: models.Sprint{
+				Status:            models.SprintStatusInProgress,
+				CheckpointTrigger: models.CheckpointTriggerPlanningComplete,
+			},
+			want: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := checkpointNotice(tt.sprint)
+			if !strings.Contains(got, tt.want) {
+				t.Fatalf("checkpointNotice() = %q, want to contain %q", got, tt.want)
+			}
+			if tt.wantNot != "" && strings.Contains(got, tt.wantNot) {
+				t.Fatalf("checkpointNotice() = %q, must not contain %q", got, tt.wantNot)
+			}
+		})
+	}
+}
+
 func TestBuildStatusData(t *testing.T) {
 	now := time.Now().UTC()
 	pipelineRoot := setupPipelineRoot(t)
@@ -785,6 +850,57 @@ func TestBuildStatusData_WorkQueuesReason(t *testing.T) {
 				t.Errorf("expected coder reason to contain %q, got %q", tt.expectCoderMsg, data.WorkQueues.Coder.Reason)
 			}
 		})
+	}
+}
+
+func TestBuildStatusDataCheckpointNoticeReadsSprintTrigger(t *testing.T) {
+	state := testhelpers.CreateValidState()
+	state.Sprint.Status = models.SprintStatusCheckpoint
+	state.Sprint.CheckpointTrigger = models.CheckpointTriggerManyToOneReady
+	state.Tasks = []models.Task{
+		testhelpers.BuildTaskByStatus("task-1", models.TaskStatusImplementing, time.Now().UTC()),
+	}
+	state.Sprint.Scope.Planned = []string{"task-1"}
+
+	data := BuildStatusData(state, false, "", nil, nil)
+
+	if data.Sprint.CheckpointTrigger != models.CheckpointTriggerManyToOneReady {
+		t.Fatalf("checkpoint trigger = %q, want %q", data.Sprint.CheckpointTrigger, models.CheckpointTriggerManyToOneReady)
+	}
+	if !strings.Contains(data.Sprint.CheckpointNotice, "doer/reviewer work may continue") {
+		t.Fatalf("checkpoint notice = %q, want transition checkpoint guidance", data.Sprint.CheckpointNotice)
+	}
+	if data.OrchestratorState.Trigger != "NONE" {
+		t.Fatalf("wake trigger = %q, want NONE while checkpointed", data.OrchestratorState.Trigger)
+	}
+}
+
+func TestFormatStatusDashboardCheckpointNotice(t *testing.T) {
+	now := time.Now().UTC()
+	data := statusData{
+		Goal:   goalStatus{Description: "Test", Status: "IN_PROGRESS", SpecRef: "spec.md"},
+		Sprint: sprintStatus{ID: "sprint-1", Status: "CHECKPOINT", CheckpointNotice: "CHECKPOINT: transition gate pending; doer/reviewer work may continue; run 'liza resume' to create downstream tasks", StartTime: now.Format(time.RFC3339)},
+		Config: configStatus{Mode: "RUNNING"},
+		Tasks:  taskStatus{ByStatus: map[string]int{}},
+		OrchestratorState: orchestratorStatus{
+			Trigger: "NONE",
+			Reason:  "No triggers; orchestrator is idle",
+		},
+		WorkQueues: workQueuesStatus{
+			Coder:    queueStatus{Reason: "No claimable tasks"},
+			Reviewer: queueStatus{Reason: "No reviewable tasks"},
+		},
+	}
+
+	out, err := formatStatusDashboard(data)
+	if err != nil {
+		t.Fatalf("formatStatusDashboard() error = %v", err)
+	}
+	if !strings.Contains(out, "Checkpoint: CHECKPOINT: transition gate pending; doer/reviewer work may continue") {
+		t.Fatalf("dashboard did not render checkpoint notice:\n%s", out)
+	}
+	if !strings.Contains(out, "Wake Trigger: NONE") {
+		t.Fatalf("dashboard did not preserve wake trigger output:\n%s", out)
 	}
 }
 

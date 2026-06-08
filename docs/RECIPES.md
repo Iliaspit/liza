@@ -110,7 +110,7 @@ liza delete agent coder-1 --force
 Review progress at end of sprint or major milestone.
 
 ```bash
-# 1. Create checkpoint (agents pause, summary generated)
+# 1. Create checkpoint (hard checkpoints pause agents; transition checkpoints gate downstream creation)
 liza sprint-checkpoint
 
 # 2. Review

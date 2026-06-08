@@ -109,6 +109,65 @@ func TestMockCLIExecution(t *testing.T) {
 	}
 }
 
+func TestRunSupervisorPassesResolverDerivedRoleTypeToPauseWait(t *testing.T) {
+	tmpDir := t.TempDir()
+	statePath, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	testhelpers.SetupPipelineConfig(t, tmpDir)
+
+	pipelinePath := filepath.Join(tmpDir, ".liza", "pipeline.yaml")
+	content, err := os.ReadFile(pipelinePath)
+	if err != nil {
+		t.Fatalf("read pipeline config: %v", err)
+	}
+	customRole := `  roles:
+    custom-doer:
+      type: doer
+      display-name: "Custom Doer"
+      description: "Custom doer role"
+      allowed-operations: []
+      context-sections: []
+      mandatory-docs: []
+
+`
+	updated := strings.Replace(string(content), "  roles:\n", customRole, 1)
+	if updated == string(content) {
+		t.Fatal("failed to insert custom role into pipeline config")
+	}
+	if err := os.WriteFile(pipelinePath, []byte(updated), 0o644); err != nil {
+		t.Fatalf("write pipeline config: %v", err)
+	}
+
+	state := testhelpers.CreateValidState()
+	state.Sprint.Status = models.SprintStatusCheckpoint
+	state.Sprint.CheckpointTrigger = models.CheckpointTriggerPlanningComplete
+	testhelpers.WriteInitialState(t, statePath, state)
+
+	sentinel := stderrors.New("stop after pause wait")
+	var capturedRoleType string
+	prevWait := waitWhilePausedForSupervisor
+	waitWhilePausedForSupervisor = func(_ context.Context, _ string, roleType string) error {
+		capturedRoleType = roleType
+		return sentinel
+	}
+	t.Cleanup(func() { waitWhilePausedForSupervisor = prevWait })
+
+	config := SupervisorConfig{
+		AgentID:     "custom-doer-1",
+		Role:        "custom-doer",
+		ProjectRoot: tmpDir,
+		StatePath:   statePath,
+		CLIName:     "codex",
+		Executor:    &MockCLIExecutor{ExitCode: 0},
+	}
+	err = RunSupervisor(context.Background(), config)
+	if !stderrors.Is(err, sentinel) {
+		t.Fatalf("RunSupervisor() error = %v, want sentinel", err)
+	}
+	if capturedRoleType != "doer" {
+		t.Fatalf("captured role type = %q, want doer", capturedRoleType)
+	}
+}
+
 func TestExecuteAgentBlocksTaskAfterProgressTimeout(t *testing.T) {
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)

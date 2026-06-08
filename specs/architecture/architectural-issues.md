@@ -1118,7 +1118,7 @@ Circuit breaker theoretically catches this via spec_gap_cluster, but pattern det
 **Skill:** systemic-thinking
 **Category:** ASSUMPTION
 
-**Issue:** Human is circuit breaker, escalation point, spec author, checkpoint reviewer, and resolution authority for deadlocks. Sprint governance states agents pause indefinitely awaiting human action. The "solo developers, small teams" deployment context is load-bearing, not merely scope-limiting.
+**Issue:** Human is circuit breaker, escalation point, spec author, checkpoint reviewer, and resolution authority for deadlocks. Sprint governance states hard checkpoints pause agents indefinitely awaiting human action, and transition checkpoints still require human action before downstream task creation. The "solo developers, small teams" deployment context is load-bearing, not merely scope-limiting.
 
 If human attention becomes bottleneck (competing priorities, vacation, scaling), system has no degradation path. All escalation paths terminate at same person with no delegation.
 

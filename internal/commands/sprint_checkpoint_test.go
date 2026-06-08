@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -169,5 +170,50 @@ func TestSprintCheckpointCommand(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestSprintCheckpointCommandTransitionCheckpointOutput(t *testing.T) {
+	tmpDir := t.TempDir()
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	testhelpers.SetupPipelineConfig(t, tmpDir)
+
+	state := testhelpers.CreateValidState()
+	state.Sprint.Status = models.SprintStatusInProgress
+	state.Tasks = []models.Task{
+		func() models.Task {
+			task := testhelpers.BuildTaskByStatus("plan-ready", models.TaskStatusMerged, time.Now().UTC())
+			task.RolePair = "code-planning-pair"
+			task.Output = []models.OutputEntry{
+				{Desc: "implement X", DoneWhen: "tests pass", Scope: "pkg/x"},
+			}
+			return task
+		}(),
+	}
+	state.Sprint.Scope.Planned = []string{"plan-ready"}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	oldStdout := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe stdout: %v", err)
+	}
+	os.Stdout = w
+	err = SprintCheckpointCommand(tmpDir)
+	w.Close()
+	os.Stdout = oldStdout
+	if err != nil {
+		t.Fatalf("SprintCheckpointCommand() error = %v", err)
+	}
+	outBytes, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("read stdout: %v", err)
+	}
+	out := string(outBytes)
+	if !strings.Contains(out, "Transition gate is pending") {
+		t.Fatalf("stdout missing transition gate guidance:\n%s", out)
+	}
+	if strings.Contains(out, "Agents will pause at their next check") {
+		t.Fatalf("stdout used hard-checkpoint pause guidance for transition checkpoint:\n%s", out)
 	}
 }

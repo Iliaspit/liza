@@ -473,7 +473,9 @@ When things go wrong despite all layers:
 
 - Sprint ends when: all tasks terminal, all non-terminal BLOCKED, deadline reached,
   circuit breaker triggered, or human requests checkpoint
-- Checkpoints require human response — agents remain paused indefinitely
+- Hard checkpoints require human response — agents remain paused indefinitely. Transition checkpoints
+  require human response before downstream transition creation, while doer/reviewer work already
+  available in the sprint may continue.
 - System mode transitions enforced: RUNNING↔PAUSED, any→CIRCUIT_BREAKER_TRIPPED
 
 ### Specification System as Durable Memory

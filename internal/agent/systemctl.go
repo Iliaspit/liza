@@ -63,9 +63,10 @@ func autoResumeAction(state *models.State) models.SprintStatus {
 }
 
 // waitWhilePaused blocks while system is PAUSED, CIRCUIT_BREAKER_TRIPPED,
-// or sprint is in CHECKPOINT status. When auto-resume is enabled, CHECKPOINT
-// and COMPLETED states are automatically resumed instead of blocking.
-func waitWhilePaused(ctx context.Context, projectRoot string) error {
+// or the current sprint checkpoint blocks this role type. Transition
+// checkpoints gate orchestrator transition execution, but doer/reviewer roles
+// may continue existing claimable/reviewable work.
+func waitWhilePaused(ctx context.Context, projectRoot string, roleType string) error {
 	logger := GetLogger()
 	statePath := paths.New(projectRoot).StatePath()
 
@@ -95,8 +96,10 @@ func waitWhilePaused(ctx context.Context, projectRoot string) error {
 							continue // state changed, re-read immediately
 						}
 					}
-					isPaused = true
-					pauseReason = "[CHECKPOINT] Sprint is at checkpoint"
+					if wait, reason := checkpointBlocksRole(state, roleType); wait {
+						isPaused = true
+						pauseReason = reason
+					}
 				case state.Sprint.Status == models.SprintStatusCompleted && state.Config.AutoResume:
 					logger.Info("Auto-resuming from COMPLETED")
 					result, resumeErr := ops.Resume(projectRoot, "auto-resume")
@@ -129,6 +132,25 @@ func waitWhilePaused(ctx context.Context, projectRoot string) error {
 			logger.Info("System paused, waiting for resume", "pause_reason", pauseReason)
 		}
 	}
+}
+
+func checkpointBlocksRole(state *models.State, roleType string) (bool, string) {
+	if state == nil || state.Sprint.Status != models.SprintStatusCheckpoint {
+		return false, ""
+	}
+
+	if models.IsTransitionCheckpointTrigger(state.Sprint.CheckpointTrigger) {
+		switch roleType {
+		case "doer", "reviewer":
+			return false, ""
+		case "orchestrator":
+			return true, "[CHECKPOINT] Transition gate pending - run 'liza resume' to create downstream tasks"
+		default:
+			return true, "[CHECKPOINT] Transition gate pending - unknown role type blocked"
+		}
+	}
+
+	return true, "[CHECKPOINT] Sprint is at checkpoint"
 }
 
 // executeAgent executes the CLI with timeout.

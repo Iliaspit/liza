@@ -296,7 +296,7 @@ func RenderOrchestratorDashboard(state *models.State, projectRoot, agentID strin
   liza unblock-task <task-id> --rebase-on <branch> --reason "..." --agent-id "%s" --json
 - liza wt-delete — Delete worktree for abandoned/superseded/blocked tasks
   liza wt-delete <task-id> --json
-- liza sprint-checkpoint — Create sprint checkpoint for human review (pauses all agents)
+- liza sprint-checkpoint — Create sprint checkpoint for human review (hard checkpoints pause agents; transition checkpoints gate downstream task creation)
   liza sprint-checkpoint --json
 - liza update-sprint-metrics — Recompute sprint metrics from current state
   liza update-sprint-metrics --json

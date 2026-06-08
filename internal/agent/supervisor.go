@@ -39,6 +39,8 @@ type SupervisorConfig struct {
 	ExecutionProgressTimeout time.Duration
 }
 
+var waitWhilePausedForSupervisor = waitWhilePaused
+
 type exit42RestartState struct {
 	RestartCount int
 	Signature    string
@@ -960,6 +962,11 @@ func RunSupervisor(ctx context.Context, config SupervisorConfig) error {
 	}
 	resolver := pipeline.NewResolver(pipelineCfg)
 
+	roleType, err := resolver.RoleType(config.Role)
+	if err != nil {
+		return fmt.Errorf("resolving role type for %q: %w", config.Role, err)
+	}
+
 	strategy, err := NewRoleStrategy(config.Role, resolver)
 	if err != nil {
 		return err
@@ -1076,7 +1083,7 @@ func RunSupervisor(ctx context.Context, config SupervisorConfig) error {
 		}
 
 		// Wait while PAUSE/CHECKPOINT
-		if err := waitWhilePaused(supervisorCtx, config.ProjectRoot); err != nil {
+		if err := waitWhilePausedForSupervisor(supervisorCtx, config.ProjectRoot, roleType); err != nil {
 			if hbErr := checkHeartbeat(); hbErr != nil {
 				return hbErr
 			}

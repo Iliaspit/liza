@@ -4,12 +4,13 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/ops"
 )
 
 // SprintCheckpointCommand creates a sprint checkpoint and prints the result to stdout.
 // Delegates business logic to ops.SprintCheckpoint.
-// CLI checkpoints are manual — trigger is always empty.
+// CLI checkpoints pass an empty trigger; ops may auto-detect transition checkpoints.
 func SprintCheckpointCommand(projectRoot string) error {
 	result, err := ops.SprintCheckpoint(projectRoot, "")
 	if err != nil {
@@ -22,7 +23,12 @@ func SprintCheckpointCommand(projectRoot string) error {
 	fmt.Println()
 	fmt.Printf("Sprint summary written to: %s\n", result.ReportPath)
 	fmt.Println()
-	fmt.Println("Agents will pause at their next check.")
+	if models.IsTransitionCheckpointTrigger(result.Trigger) {
+		fmt.Println("Transition gate is pending; doer/reviewer agents may continue existing work.")
+		fmt.Println("Orchestrator transition execution waits for 'liza resume'.")
+	} else {
+		fmt.Println("Agents will pause at their next check.")
+	}
 	fmt.Println("Review the sprint summary, then use 'liza resume' to continue.")
 	return nil
 }

@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
@@ -36,6 +37,110 @@ func TestAutoResumeAction(t *testing.T) {
 			got := autoResumeAction(state)
 			if got != tt.want {
 				t.Errorf("autoResumeAction() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCheckpointBlocksRole(t *testing.T) {
+	tests := []struct {
+		name     string
+		trigger  string
+		roleType string
+		wantWait bool
+	}{
+		{"planning checkpoint allows doer", models.CheckpointTriggerPlanningComplete, "doer", false},
+		{"planning checkpoint allows reviewer", models.CheckpointTriggerPlanningComplete, "reviewer", false},
+		{"many-to-one checkpoint allows doer", models.CheckpointTriggerManyToOneReady, "doer", false},
+		{"many-to-one checkpoint allows reviewer", models.CheckpointTriggerManyToOneReady, "reviewer", false},
+		{"planning checkpoint blocks orchestrator", models.CheckpointTriggerPlanningComplete, "orchestrator", true},
+		{"many-to-one checkpoint blocks orchestrator", models.CheckpointTriggerManyToOneReady, "orchestrator", true},
+		{"planning checkpoint blocks unknown role", models.CheckpointTriggerPlanningComplete, "observer", true},
+		{"manual checkpoint blocks doer", "", "doer", true},
+		{"manual checkpoint blocks reviewer", "", "reviewer", true},
+		{"manual checkpoint blocks orchestrator", "", "orchestrator", true},
+		{"sprint-complete checkpoint blocks doer", models.CheckpointTriggerSprintComplete, "doer", true},
+		{"sprint-complete checkpoint blocks reviewer", models.CheckpointTriggerSprintComplete, "reviewer", true},
+		{"sprint-complete checkpoint blocks orchestrator", models.CheckpointTriggerSprintComplete, "orchestrator", true},
+		{"non-checkpoint does not block unknown role", models.CheckpointTriggerPlanningComplete, "observer", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			status := models.SprintStatusCheckpoint
+			if tt.name == "non-checkpoint does not block unknown role" {
+				status = models.SprintStatusInProgress
+			}
+			state := &models.State{
+				Sprint: models.Sprint{
+					Status:            status,
+					CheckpointTrigger: tt.trigger,
+				},
+			}
+			gotWait, _ := checkpointBlocksRole(state, tt.roleType)
+			if gotWait != tt.wantWait {
+				t.Errorf("checkpointBlocksRole() wait = %v, want %v", gotWait, tt.wantWait)
+			}
+		})
+	}
+}
+
+func TestWaitWhilePausedAutoResumePrecedesTransitionCheckpointRoleException(t *testing.T) {
+	tmpDir := t.TempDir()
+	statePath, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	testhelpers.SetupPipelineConfig(t, tmpDir)
+
+	state := testhelpers.CreateValidState()
+	state.Config.AutoResume = true
+	state.Sprint.Status = models.SprintStatusCheckpoint
+	state.Sprint.CheckpointTrigger = models.CheckpointTriggerPlanningComplete
+	state.Tasks = []models.Task{
+		testhelpers.BuildTaskByStatus("task-1", models.TaskStatusImplementing, time.Now().UTC()),
+	}
+	state.Sprint.Scope.Planned = []string{"task-1"}
+	testhelpers.WriteInitialState(t, statePath, state)
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	if err := waitWhilePaused(ctx, tmpDir, "doer"); err != nil {
+		t.Fatalf("waitWhilePaused() error = %v", err)
+	}
+
+	updated, err := db.For(statePath).Read()
+	if err != nil {
+		t.Fatalf("read state: %v", err)
+	}
+	if updated.Sprint.Status != models.SprintStatusInProgress {
+		t.Fatalf("sprint status = %s, want %s", updated.Sprint.Status, models.SprintStatusInProgress)
+	}
+}
+
+func TestWaitWhilePausedHardModesBlockTransitionCheckpointRoleException(t *testing.T) {
+	tests := []struct {
+		name string
+		mode models.SystemMode
+	}{
+		{"paused mode", models.SystemModePaused},
+		{"circuit breaker mode", models.SystemModeCircuitBreakerTripped},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			statePath, _ := testhelpers.SetupLizaDir(t, tmpDir)
+
+			state := testhelpers.CreateValidState()
+			state.Config.Mode = tt.mode
+			state.Sprint.Status = models.SprintStatusCheckpoint
+			state.Sprint.CheckpointTrigger = models.CheckpointTriggerPlanningComplete
+			testhelpers.WriteInitialState(t, statePath, state)
+
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+			defer cancel()
+
+			if err := waitWhilePaused(ctx, tmpDir, "doer"); err == nil {
+				t.Fatal("waitWhilePaused() error = nil, want context timeout while hard mode blocks")
 			}
 		})
 	}

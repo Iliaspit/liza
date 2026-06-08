@@ -71,12 +71,14 @@ type goalStatus struct {
 }
 
 type sprintStatus struct {
-	ID         string `json:"id"`
-	Number     int    `json:"number"`
-	Status     string `json:"status"`
-	StartTime  string `json:"start_time"`
-	TasksDone  int    `json:"tasks_done"`
-	TasksTotal int    `json:"tasks_total"`
+	ID                string `json:"id"`
+	Number            int    `json:"number"`
+	Status            string `json:"status"`
+	CheckpointTrigger string `json:"checkpoint_trigger,omitempty"`
+	CheckpointNotice  string `json:"checkpoint_notice,omitempty"`
+	StartTime         string `json:"start_time"`
+	TasksDone         int    `json:"tasks_done"`
+	TasksTotal        int    `json:"tasks_total"`
 }
 
 type configStatus struct {
@@ -172,12 +174,14 @@ func BuildStatusData(state *models.State, detailed bool, projectRoot string, pr 
 	}
 
 	data.Sprint = sprintStatus{
-		ID:         state.Sprint.ID,
-		Number:     state.Sprint.Number,
-		Status:     string(state.Sprint.Status),
-		StartTime:  state.Sprint.Timeline.Started.Format(time.RFC3339),
-		TasksDone:  state.Sprint.Metrics.TasksDone,
-		TasksTotal: len(state.Tasks),
+		ID:                state.Sprint.ID,
+		Number:            state.Sprint.Number,
+		Status:            string(state.Sprint.Status),
+		CheckpointTrigger: state.Sprint.CheckpointTrigger,
+		CheckpointNotice:  checkpointNotice(state.Sprint),
+		StartTime:         state.Sprint.Timeline.Started.Format(time.RFC3339),
+		TasksDone:         state.Sprint.Metrics.TasksDone,
+		TasksTotal:        len(state.Tasks),
 	}
 
 	data.Config = configStatus{
@@ -233,6 +237,16 @@ func BuildStatusData(state *models.State, detailed bool, projectRoot string, pr 
 	}
 
 	return data
+}
+
+func checkpointNotice(sprint models.Sprint) string {
+	if sprint.Status != models.SprintStatusCheckpoint {
+		return ""
+	}
+	if models.IsTransitionCheckpointTrigger(sprint.CheckpointTrigger) {
+		return "CHECKPOINT: transition gate pending; doer/reviewer work may continue; run 'liza resume' to create downstream tasks"
+	}
+	return "CHECKPOINT: agents paused; run 'liza resume'"
 }
 
 // buildTaskStatus calculates task statistics

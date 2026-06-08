@@ -18,11 +18,13 @@ var ErrSprintAlreadyCheckpoint = errors.New("sprint is already at CHECKPOINT")
 type SprintCheckpointResult struct {
 	CheckpointAt time.Time `json:"checkpoint_at"`
 	ReportPath   string    `json:"report_path"`
+	Trigger      string    `json:"trigger,omitempty"`
 }
 
-// SprintCheckpoint transitions sprint status to CHECKPOINT, causing agents to pause,
-// and writes a sprint summary report. The trigger parameter records why the checkpoint
-// was created (e.g. "PLANNING_COMPLETE", "MANY_TO_ONE_READY", "SPRINT_COMPLETE", or "" for manual). No terminal I/O.
+// SprintCheckpoint transitions sprint status to CHECKPOINT and writes a sprint summary report.
+// The trigger parameter records why the checkpoint was created (e.g. "PLANNING_COMPLETE",
+// "MANY_TO_ONE_READY", "SPRINT_COMPLETE", or "" for manual). Transition checkpoints gate
+// downstream transition creation; hard checkpoints pause all agents. No terminal I/O.
 func SprintCheckpoint(projectRoot string, trigger string) (*SprintCheckpointResult, error) {
 	lizaPaths := paths.New(projectRoot)
 	statePath := lizaPaths.StatePath()
@@ -84,6 +86,7 @@ func SprintCheckpoint(projectRoot string, trigger string) (*SprintCheckpointResu
 	return &SprintCheckpointResult{
 		CheckpointAt: timestamp,
 		ReportPath:   reportPath,
+		Trigger:      trigger,
 	}, nil
 }
 

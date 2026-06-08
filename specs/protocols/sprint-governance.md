@@ -67,7 +67,7 @@ Sprint size is measured in **tasks, not tokens**. Token cost is observed post-ho
 
 ## Checkpoint Protocol
 
-Checkpoints are **mandatory human review points** unless auto-resume is enabled (`config.auto_resume: true`). No work proceeds until human releases (or auto-resume advances the sprint).
+Checkpoints are **mandatory human review points** unless auto-resume is enabled (`config.auto_resume: true`). Hard checkpoints pause all agents until human release. Transition checkpoints (`PLANNING_COMPLETE`, `MANY_TO_ONE_READY`) gate downstream transition creation only: the orchestrator waits for human release, while doer/reviewer roles may continue already-available claimable/reviewable work in the current sprint.
 
 ### Checkpoint Triggers
 
@@ -112,7 +112,8 @@ When implemented, watcher will post to webhook at 2h and 8h thresholds:
 ```
 
 **Design Principle (auto-resume OFF, default):**
-- Agents remain paused indefinitely — no automatic resume or abort
+- Hard checkpoints keep agents paused indefinitely — no automatic resume or abort
+- Transition checkpoints hold downstream transition creation; doer/reviewer roles may continue existing claimable/reviewable work
 - Escalation is notification only, not action
 - Human must explicitly act (`liza resume` or `liza stop`)
 - Unattended checkpoints are not errors; they're paused work awaiting decision
@@ -184,7 +185,7 @@ When planning tasks (epic-planner, code-planner) are merged, the orchestrator ch
 
 **Two-wake model:**
 
-1. **Wake 1:** Orchestrator detects merged planning tasks with unconsumed `output[]` or a ready many-to-one cohort → creates checkpoint with `trigger: PLANNING_COMPLETE` or `MANY_TO_ONE_READY` → agents pause (or auto-resume)
+1. **Wake 1:** Orchestrator detects merged planning tasks with unconsumed `output[]` or a ready many-to-one cohort → creates checkpoint with `trigger: PLANNING_COMPLETE` or `MANY_TO_ONE_READY` → downstream transition creation waits for resume; doer/reviewer roles may continue existing work (or auto-resume advances immediately)
 2. **Human reviews** planning output or fan-in readiness in the sprint summary → runs `liza resume` (skipped when auto-resume is enabled)
 3. **Wake 2 (PreWork):** Orchestrator's PreWork checks for a transition checkpoint with `status == IN_PROGRESS` and ready transitions → executes `ExecuteAvailableTransitions` → child tasks created → doers can claim
 
@@ -192,7 +193,7 @@ When planning tasks (epic-planner, code-planner) are merged, the orchestrator ch
 - Fresh sprint (trigger empty) → gate does not fire
 - Manual checkpoint (trigger empty) → gate does not fire
 - Sprint-complete checkpoint (trigger `SPRINT_COMPLETE`) → gate does not fire
-- Planning checkpoint not yet resumed (status `CHECKPOINT`) → gate does not fire
+- Planning checkpoint not yet resumed (status `CHECKPOINT`) → gate does not fire; doer/reviewer role loops may still process existing work
 - Planning checkpoint resumed (trigger + `IN_PROGRESS`) → gate fires → transitions execute
 - After transitions consumed → `countMergedPlanningTasksWithOutput` returns 0 → idempotent
 - Cycle-blocked planning tasks are excluded from orchestrator wake detection and planning-complete rendering, but remain visible for carry-forward, replan, and checkpoint auto-trigger

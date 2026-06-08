@@ -281,7 +281,7 @@ applicable.
 | Invariant | Protects Against | Enforced |
 |-----------|------------------|----------|
 | Sprint ends when: all planned tasks terminal, all non-terminal BLOCKED, deadline reached, circuit breaker triggered, or human requests checkpoint | Runaway sprints | spec (`sprint-governance.md`) |
-| Checkpoints not auto-cleared; agents remain paused indefinitely until human responds | Autonomous work continuation during pause | spec |
+| Hard checkpoints are not auto-cleared; agents remain paused indefinitely until human responds. Transition checkpoints gate downstream transition creation, while doer/reviewer work already available in the sprint may continue. | Autonomous downstream continuation during gated transition; runaway manual pauses | spec |
 | Circuit breaker: observation-only — never proposes solutions, never modifies specs/code/tasks, never continues execution after triggering | Autonomous remediation during systemic failure | spec (`circuit-breaker.md`) |
 | System mode transitions enforced: RUNNING↔PAUSED, any→CIRCUIT_BREAKER_TRIPPED, TRIPPED→PAUSED | Invalid mode combinations | code (`config.go`) |
 

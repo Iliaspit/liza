@@ -114,7 +114,9 @@ IN_PROGRESS → CHECKPOINT → COMPLETED → (new sprint) IN_PROGRESS
 
 ### Checkpoint Actions
 
-When a sprint checkpoints (status: CHECKPOINT), all agents pause. The human decides:
+When a sprint checkpoints (status: CHECKPOINT), hard checkpoints pause all agents. Transition
+checkpoints (`PLANNING_COMPLETE`, `MANY_TO_ONE_READY`) pause orchestrator transition execution only;
+doer/reviewer agents may continue already-available work in the current sprint. The human decides:
 
 | Action | Command | When |
 |--------|---------|------|
