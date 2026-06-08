@@ -65,6 +65,15 @@ adapter checks both process-local seen state and persisted ACPX session
 existence, but a provider may still reload, recreate, or globally resolve a
 session internally. It must not drive correctness-sensitive task transitions.
 
+ACP also opens a future prompt-caching and bootstrap-efficiency path, but this is
+not built in by this ADR. What is built in today is a stable session boundary:
+Liza can address an ACP-backed agent by session name and can ask the provider to
+continue work in that session. This may let an ACP provider reuse already-loaded
+conversation and tool context, depending on that provider's session semantics.
+It does not automatically create reusable base sessions, fork preloaded agent
+templates, or guarantee model-side prompt-cache hits. Cache-oriented follow-up
+work is tracked as an opportunity in `specs/architecture/acp-vs-cli.md`.
+
 Event streams may include partial message or usage events before a terminal
 `completed` event that reports an error. Consumers should treat `completed` as
 the run outcome and earlier events as partial observability, not proof of
