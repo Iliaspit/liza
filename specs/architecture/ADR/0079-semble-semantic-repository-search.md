@@ -18,7 +18,7 @@ Semble provided a local semantic chunk-search CLI that fit this missing layer, b
 
 Add Semble as an optional semantic repository-search tool for conceptual discovery.
 
-Semble activation is strict opt-in through `LIZA_ENABLE_SEMBLE`. Liza validates the executable and offline readiness before advertising Semble to unattended MAS agents. Init-time prewarm may intentionally populate the model/cache when the operator enables Semble; MAS prompt guidance uses `HF_HUB_OFFLINE=1` and omits Semble entirely when validation fails.
+Semble activation is strict opt-in through `LIZA_ENABLE_SEMBLE`. Liza validates the executable and offline readiness before advertising Semble to unattended MAS agents. Init-time prewarm may intentionally populate the model/cache when the operator enables Semble; offline validation uses `HF_HUB_OFFLINE=1`, MAS prompt guidance omits Semble entirely when validation fails, and user/operator installation guidance owns any persistent offline-mode environment setup.
 
 Semble prompt context is scoped to explicit local roots:
 - task agents search the task worktree root

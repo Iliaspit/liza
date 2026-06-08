@@ -212,6 +212,10 @@ export LIZA_ENABLE_SEMBLE=1
 ```
 
 You need to run `liza init` after they have been installed and enabled.
+For Semble, run `liza init --spec` with Semble installed so Liza can prewarm and
+validate the model cache. After installation or prewarm, set `HF_HUB_OFFLINE=1`
+in the shell or service environment that launches unattended agents if you want
+to prevent model downloads during normal work.
 
 These tools provide navigation candidates, not proof. Agents still validate
 against direct source reads. See

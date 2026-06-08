@@ -444,18 +444,8 @@ func TestBuildBasePromptSembleSearchRendersPromptMetadata(t *testing.T) {
 		GoalDesc:    "Build a web API",
 		GoalSpecRef: "specs/vision.md",
 		SembleSearch: SembleSearchMetadata{
-			TargetRoot:       targetRoot,
-			ShellTargetRoot:  quotedRoot,
-			OfflineEnvPrefix: "HF_HUB_OFFLINE=1",
-			SearchExamples: []string{
-				`env HF_HUB_OFFLINE=1 semble search "where is review submission validated?" ` + quotedRoot,
-				`env HF_HUB_OFFLINE=1 semble search "agent CLI defaults" ` + quotedRoot + ` --top-k 10`,
-				`env HF_HUB_OFFLINE=1 semble search "where is task superseding specified?" ` + quotedRoot + ` --content docs`,
-				`env HF_HUB_OFFLINE=1 semble search "default CLI config" ` + quotedRoot + ` --content config`,
-			},
-			FindRelatedExample:  "env HF_HUB_OFFLINE=1 semble find-related <file_path> <line> " + quotedRoot,
-			ContentModeGuidance: "Use --content with one of: code, docs, config, all; code is the default.",
-			DiscoveryNotice:     "Semble returns candidate chunks, not proof; verify with direct source reads before editing or claiming behavior.",
+			TargetRoot:      targetRoot,
+			ShellTargetRoot: quotedRoot,
 		},
 		StacklitIndexes: []StacklitIndex{{IndexPath: "/abs/worktree with spaces/stacklit.json"}},
 		ScipSearchIndexes: []ScipSearchIndex{
@@ -483,6 +473,8 @@ func TestBuildBasePromptSembleSearchRendersPromptMetadata(t *testing.T) {
 	for _, notWant := range []string{
 		`env HF_HUB_OFFLINE=1 semble search "where is review submission validated?" ` + quotedRoot,
 		"env HF_HUB_OFFLINE=1 semble find-related <file_path> <line> " + quotedRoot,
+		`semble search "where is review submission validated?" ` + quotedRoot,
+		"semble find-related <file_path> <line> " + quotedRoot,
 		"stacklit derive --ai-summary -i",
 		"scip-search symbols --index",
 		"=== QUERY ROUTING ===",
@@ -508,15 +500,8 @@ func TestBuildBasePromptSembleOnlyRoutingOmitsUnavailableOptionalTools(t *testin
 		GoalDesc:    "Build a web API",
 		GoalSpecRef: "specs/vision.md",
 		SembleSearch: SembleSearchMetadata{
-			TargetRoot:       "/abs/worktree with spaces",
-			ShellTargetRoot:  quotedRoot,
-			OfflineEnvPrefix: "HF_HUB_OFFLINE=1",
-			SearchExamples: []string{
-				`env HF_HUB_OFFLINE=1 semble search "where is review submission validated?" ` + quotedRoot,
-			},
-			FindRelatedExample:  "env HF_HUB_OFFLINE=1 semble find-related <file_path> <line> " + quotedRoot,
-			ContentModeGuidance: "Use --content with one of: code, docs, config, all; code is the default.",
-			DiscoveryNotice:     "Semble returns candidate chunks, not proof; verify with direct source reads before editing or claiming behavior.",
+			TargetRoot:      "/abs/worktree with spaces",
+			ShellTargetRoot: quotedRoot,
 		},
 	}
 

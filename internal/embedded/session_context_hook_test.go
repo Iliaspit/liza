@@ -458,8 +458,8 @@ func TestSessionContextHook_EmitsSembleWhenEnabledSafeAndOfflineReady(t *testing
 	context := sessionStartAdditionalContext(t, output)
 	for _, want := range []string{
 		"Semble semantic search is available for this repo root: " + projectRoot,
-		"env HF_HUB_OFFLINE=1 semble search \"where is review submission validated?\" '" + projectRoot + "'",
-		"env HF_HUB_OFFLINE=1 semble search \"where is task superseding specified?\" '" + projectRoot + "' --content docs",
+		"semble search \"where is review submission validated?\" '" + projectRoot + "'",
+		"semble search \"where is task superseding specified?\" '" + projectRoot + "' --content docs",
 		"Use --content with one of: code, docs, config, all; code is the default.",
 		"Semble returns candidate chunks, not proof",
 		"Do not use rg for broad-scope or common-word conceptual queries.",

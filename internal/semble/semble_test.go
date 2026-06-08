@@ -736,37 +736,15 @@ func TestPromptMetadata(t *testing.T) {
 		if metadata.ShellTargetRoot != "'"+strings.ReplaceAll(filepath.Clean(targetRoot), "'", "'\\''")+"'" {
 			t.Fatalf("ShellTargetRoot = %q, want shell-quoted target", metadata.ShellTargetRoot)
 		}
-		if metadata.OfflineEnvPrefix != "HF_HUB_OFFLINE=1" {
-			t.Fatalf("OfflineEnvPrefix = %q, want HF_HUB_OFFLINE=1", metadata.OfflineEnvPrefix)
-		}
-		if metadata.ContentModeGuidance != "Use --content with one of: code, docs, config, all; code is the default." {
-			t.Fatalf("ContentModeGuidance = %q", metadata.ContentModeGuidance)
-		}
-		if !strings.Contains(metadata.DiscoveryNotice, "candidate") || !strings.Contains(metadata.DiscoveryNotice, "not proof") {
-			t.Fatalf("DiscoveryNotice = %q, want discovery-not-proof metadata", metadata.DiscoveryNotice)
-		}
-
-		rendered := strings.Join(append(metadata.SearchExamples, metadata.FindRelatedExample), "\n")
-		for _, want := range []string{
-			"env HF_HUB_OFFLINE=1 semble search",
-			"env HF_HUB_OFFLINE=1 semble find-related",
-			metadata.ShellTargetRoot,
-			"--content docs",
-			"--content config",
-		} {
-			if !strings.Contains(rendered, want) {
-				t.Fatalf("rendered examples = %q, missing %q", rendered, want)
-			}
-		}
 		for _, forbidden := range []string{"/tmp/hf-cache", "raw output", "/opt/bin/semble"} {
-			if strings.Contains(rendered, forbidden) || strings.Contains(metadata.DiscoveryNotice, forbidden) {
+			if strings.Contains(metadata.TargetRoot, forbidden) || strings.Contains(metadata.ShellTargetRoot, forbidden) {
 				t.Fatalf("metadata leaked %q: %#v", forbidden, metadata)
 			}
 		}
 	})
 }
 
-func TestShellQuotedCommands(t *testing.T) {
+func TestPromptMetadataShellQuotesTargetRoot(t *testing.T) {
 	t.Setenv(EnvEnableSemble, "true")
 	resetReadinessCacheForTest()
 	targetRoot := filepath.Join(t.TempDir(), "quoted root's path")
@@ -791,18 +769,8 @@ func TestShellQuotedCommands(t *testing.T) {
 	}
 
 	quotedRoot := "'" + strings.ReplaceAll(filepath.Clean(targetRoot), "'", "'\\''") + "'"
-	wantSearch := []string{
-		`env HF_HUB_OFFLINE=1 semble search "where is review submission validated?" ` + quotedRoot,
-		`env HF_HUB_OFFLINE=1 semble search "agent CLI defaults" ` + quotedRoot + ` --top-k 10`,
-		`env HF_HUB_OFFLINE=1 semble search "where is task superseding specified?" ` + quotedRoot + ` --content docs`,
-		`env HF_HUB_OFFLINE=1 semble search "default CLI config" ` + quotedRoot + ` --content config`,
-	}
-	if !reflect.DeepEqual(metadata.SearchExamples, wantSearch) {
-		t.Fatalf("SearchExamples = %#v, want %#v", metadata.SearchExamples, wantSearch)
-	}
-	wantFindRelated := "env HF_HUB_OFFLINE=1 semble find-related <file_path> <line> " + quotedRoot
-	if metadata.FindRelatedExample != wantFindRelated {
-		t.Fatalf("FindRelatedExample = %q, want %q", metadata.FindRelatedExample, wantFindRelated)
+	if metadata.ShellTargetRoot != quotedRoot {
+		t.Fatalf("ShellTargetRoot = %q, want %q", metadata.ShellTargetRoot, quotedRoot)
 	}
 }
 

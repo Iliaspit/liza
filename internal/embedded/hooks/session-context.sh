@@ -285,11 +285,11 @@ fi
 if [[ "$semble_enabled" == "true" ]]; then
   context+="
  // Semble semantic search is available for this repo root: $project_dir
- // env HF_HUB_OFFLINE=1 semble search \"where is review submission validated?\" $shell_project_dir
- // env HF_HUB_OFFLINE=1 semble search \"agent CLI defaults\" $shell_project_dir --top-k 10
- // env HF_HUB_OFFLINE=1 semble search \"where is task superseding specified?\" $shell_project_dir --content docs
- // env HF_HUB_OFFLINE=1 semble search \"default CLI config\" $shell_project_dir --content config
- // env HF_HUB_OFFLINE=1 semble find-related <file_path> <line> $shell_project_dir
+ // semble search \"where is review submission validated?\" $shell_project_dir
+ // semble search \"agent CLI defaults\" $shell_project_dir --top-k 10
+ // semble search \"where is task superseding specified?\" $shell_project_dir --content docs
+ // semble search \"default CLI config\" $shell_project_dir --content config
+ // semble find-related <file_path> <line> $shell_project_dir
  // Use --content with one of: code, docs, config, all; code is the default.
  // Semble returns candidate chunks, not proof; verify source files before editing.
  // Do not use rg for broad-scope or common-word conceptual queries."

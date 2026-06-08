@@ -469,7 +469,7 @@ func TestBuildPromptWithContextSembleSearchUsesRoleWorktreeRoot(t *testing.T) {
 			projectRoot := t.TempDir()
 			testhelpers.SetupPipelineConfig(t, projectRoot)
 			taskWorktree := filepath.Join(projectRoot, ".worktrees", "task-1")
-			projectRootCommand := "env HF_HUB_OFFLINE=1 semble search \"where is review submission validated?\" " + shellQuoteForTest(projectRoot)
+			projectRootCommand := "semble search \"where is review submission validated?\" " + shellQuoteForTest(projectRoot)
 			worktree := ".worktrees/task-1"
 			var calls []semble.PromptMetadataOptions
 			restore := replaceSemblePromptMetadataForTest(t, func(opts semble.PromptMetadataOptions) (semble.PromptMetadata, bool) {
@@ -526,6 +526,9 @@ func TestBuildPromptWithContextSembleSearchUsesRoleWorktreeRoot(t *testing.T) {
 				t.Fatalf("prompt missing AGENT_TOOLS Semble usage pointer")
 			}
 			if strings.Contains(prompt, "env HF_HUB_OFFLINE=1 semble search") {
+				t.Fatalf("prompt contains reusable Semble command syntax")
+			}
+			if strings.Contains(prompt, "semble search \"where is review submission validated?\"") {
 				t.Fatalf("prompt contains reusable Semble command syntax")
 			}
 			if strings.Contains(prompt, projectRootCommand) {
@@ -4514,18 +4517,8 @@ func replaceStacklitAvailableIndexesForTest(t *testing.T, available func(stackli
 func fakeSemblePromptMetadata(targetRoot string) semble.PromptMetadata {
 	quotedRoot := shellQuoteForTest(targetRoot)
 	return semble.PromptMetadata{
-		TargetRoot:       targetRoot,
-		ShellTargetRoot:  quotedRoot,
-		OfflineEnvPrefix: "HF_HUB_OFFLINE=1",
-		SearchExamples: []string{
-			`env HF_HUB_OFFLINE=1 semble search "where is review submission validated?" ` + quotedRoot,
-			`env HF_HUB_OFFLINE=1 semble search "agent CLI defaults" ` + quotedRoot + ` --top-k 10`,
-			`env HF_HUB_OFFLINE=1 semble search "where is task superseding specified?" ` + quotedRoot + ` --content docs`,
-			`env HF_HUB_OFFLINE=1 semble search "default CLI config" ` + quotedRoot + ` --content config`,
-		},
-		FindRelatedExample:  "env HF_HUB_OFFLINE=1 semble find-related <file_path> <line> " + quotedRoot,
-		ContentModeGuidance: "Use --content with one of: code, docs, config, all; code is the default.",
-		DiscoveryNotice:     "Semble returns candidate chunks, not proof; verify with direct source reads before editing or claiming behavior.",
+		TargetRoot:      targetRoot,
+		ShellTargetRoot: quotedRoot,
 	}
 }
 

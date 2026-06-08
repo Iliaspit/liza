@@ -162,8 +162,9 @@ results as proof.
       fixture content; invalidate it when any key input changes.
 - [ ] If offline-readiness validation fails, degrade gracefully: omit Semble
       prompt guidance and surface a bounded operator-visible diagnostic.
-- [ ] Run Semble commands for MAS guidance with `HF_HUB_OFFLINE=1` so agents do
-      not implicitly trigger model downloads during unattended work.
+- [ ] Keep MAS Semble command guidance agent-facing and plain. Offline-readiness
+      validation uses `HF_HUB_OFFLINE=1`; persistent offline-mode environment
+      setup belongs in user/operator installation guidance.
 - [ ] Prefer Semble over Morph MCP semantic/codebase search when Semble is
       enabled and offline-ready.
 - [ ] Treat Morph MCP semantic/codebase search as the semantic fallback when
@@ -310,7 +311,9 @@ Required semantics:
   supported code file rather than relying on Semble behavior for empty
   directories.
 - After init-time prewarm, `HF_HUB_OFFLINE=1` should be set for Semble
-  validation and MAS-facing Semble command guidance.
+  validation. User/operator installation guidance should explain setting
+  `HF_HUB_OFFLINE=1` in the environment that launches unattended agents when
+  persistent offline mode is desired.
 - A Semble offline validation failure means "omit Semble guidance," not "block
   the agent."
 - A Semble search result is a candidate pointer. It does not satisfy Liza's
@@ -513,8 +516,7 @@ Required outcomes:
 - Agents should not be prompted to resolve Hugging Face authentication or model
   cache issues during normal task work.
 - If an operator configures a local model path through `SEMBLE_MODEL_NAME`, Liza
-  should preserve that environment when validating and when showing Semble
-  command guidance.
+  should preserve that environment when validating Semble readiness.
 
 ## Query Routing Requirements
 

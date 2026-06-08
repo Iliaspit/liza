@@ -119,9 +119,9 @@ stacklit get-hints -i <index-path>
 stacklit get-hot-files -i <index-path>
 functional-clusters list --clusters <clusters-path>
 functional-clusters explain --clusters <clusters-path> '<exact-member-symbol>'
-env HF_HUB_OFFLINE=1 semble search "where is review submission validated?" <target-root>
-env HF_HUB_OFFLINE=1 semble search "default CLI config" <target-root> --content config
-env HF_HUB_OFFLINE=1 semble find-related <file_path> <line> <target-root>
+semble search "where is review submission validated?" <target-root>
+semble search "default CLI config" <target-root> --content config
+semble find-related <file_path> <line> <target-root>
 ```
 
 `scip-search --name` matches symbol substrings; `--symbol` matches exact SCIP symbols from prior results. `--location-only` is only valid with exact `--symbol` queries for references and implementations. Use `impact` first for pre-edit blast-radius checks, `graph` when both incoming and outgoing local context matter, and `references`, `callers`, or `callees` when only one direction is needed. `graph`, `callers`, `callees`, and `impact` are static SCIP-derived hints, not complete runtime call graphs. For large functions or Python indexes, graph/impact output may include local symbols, builtins, and type references; prefer exact `--symbol`, `--one-line`, and direct source verification. Supported SCIP languages are Go, Python, and TypeScript; implementation rows are language/indexer-dependent and may be absent for Python indexes. Semble `--content` accepts `code`, `docs`, `config`, and `all`; `code` is the default.
@@ -200,7 +200,7 @@ rtk git status
 rtk cargo test
 rtk npm run build
 rtk pytest -q
-rtk env HF_HUB_OFFLINE=1 semble search "where is review submission validated?" <target-root>
+rtk semble search "where is review submission validated?" <target-root>
 ```
 
 Temporary upstream bug workarounds, until rtk-ai/rtk#1922 and rtk-ai/rtk#925 merge:

@@ -253,13 +253,8 @@ func availablePromptSembleSearchMetadata(targetRoot string, kind semble.TargetKi
 		return prompts.SembleSearchMetadata{}
 	}
 	return prompts.SembleSearchMetadata{
-		TargetRoot:          metadata.TargetRoot,
-		ShellTargetRoot:     metadata.ShellTargetRoot,
-		OfflineEnvPrefix:    metadata.OfflineEnvPrefix,
-		SearchExamples:      slices.Clone(metadata.SearchExamples),
-		FindRelatedExample:  metadata.FindRelatedExample,
-		ContentModeGuidance: metadata.ContentModeGuidance,
-		DiscoveryNotice:     metadata.DiscoveryNotice,
+		TargetRoot:      metadata.TargetRoot,
+		ShellTargetRoot: metadata.ShellTargetRoot,
 	}
 }
 

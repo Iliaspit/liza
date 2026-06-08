@@ -39,13 +39,8 @@ type StacklitIndex struct {
 
 // SembleSearchMetadata is prompt-safe metadata for one authorized Semble target root.
 type SembleSearchMetadata struct {
-	TargetRoot          string
-	ShellTargetRoot     string
-	OfflineEnvPrefix    string
-	SearchExamples      []string
-	FindRelatedExample  string
-	ContentModeGuidance string
-	DiscoveryNotice     string
+	TargetRoot      string
+	ShellTargetRoot string
 }
 
 type basePromptTemplateData struct {
@@ -93,17 +88,7 @@ func buildSembleSearchPromptMetadata(metadata SembleSearchMetadata) *SembleSearc
 	if metadata.TargetRoot == "" || metadata.ShellTargetRoot == "" {
 		return nil
 	}
-	examples := make([]string, 0, len(metadata.SearchExamples))
-	for _, example := range metadata.SearchExamples {
-		if strings.TrimSpace(example) != "" {
-			examples = append(examples, example)
-		}
-	}
-	if len(examples) == 0 || strings.TrimSpace(metadata.FindRelatedExample) == "" {
-		return nil
-	}
 	copy := metadata
-	copy.SearchExamples = examples
 	return &copy
 }
 

@@ -79,6 +79,11 @@ for documentation/spec questions and `--content config` for configuration
 questions. Semble returns candidate chunks, not proof; always follow with a
 direct read or exact source read before editing or claiming behavior.
 
+Do not bake `HF_HUB_OFFLINE=1` into agent-facing Semble command examples here.
+Offline mode belongs in the user/operator environment after Semble is installed
+or prewarmed; this file should describe routing syntax agents can apply in any
+session where Liza supplies a safe target root.
+
 Semble complements the rest of the worktree-safe stack:
 
 - Use Semble for broad conceptual discovery when it is enabled and offline-ready.

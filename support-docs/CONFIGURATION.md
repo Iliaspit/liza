@@ -368,8 +368,13 @@ controlled init-time prewarm when `semble` is available. The prewarm uses a
 temporary one-file fixture outside the project/worktree and may contact
 Hugging Face or the local model cache path to populate the Semble/model2vec/Hugging
 Face cache. After prewarming, Liza performs offline validation with
-`HF_HUB_OFFLINE=1` against the same fixture shape. MAS-facing Semble commands
-also use `HF_HUB_OFFLINE=1` so unattended agents do not trigger model downloads.
+`HF_HUB_OFFLINE=1` against the same fixture shape.
+
+After installing or prewarming Semble, operators should set `HF_HUB_OFFLINE=1`
+in the shell or service environment that launches Liza agents when they want to
+guarantee unattended work cannot trigger model downloads. Agent prompt and
+SessionStart command examples remain plain `semble ...` commands; offline mode is
+an operator/runtime environment choice, not agent routing syntax.
 
 The implementation-owned Semble validation timeout constant applies to both
 prewarm and offline validation and defaults to 30 seconds. Semble diagnostics

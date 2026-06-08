@@ -192,13 +192,8 @@ type PromptMetadataOptions struct {
 // PromptMetadata is safe for prompt rendering; it intentionally excludes
 // diagnostics, command output, executable paths, and cache paths.
 type PromptMetadata struct {
-	TargetRoot          string
-	ShellTargetRoot     string
-	OfflineEnvPrefix    string
-	SearchExamples      []string
-	FindRelatedExample  string
-	ContentModeGuidance string
-	DiscoveryNotice     string
+	TargetRoot      string
+	ShellTargetRoot string
 }
 
 type validationCacheKey struct {
@@ -478,18 +473,8 @@ func BuildPromptMetadata(opts PromptMetadataOptions) (PromptMetadata, bool) {
 
 	shellTargetRoot := shellQuote(safety.TargetRoot)
 	return PromptMetadata{
-		TargetRoot:       safety.TargetRoot,
-		ShellTargetRoot:  shellTargetRoot,
-		OfflineEnvPrefix: "HF_HUB_OFFLINE=1",
-		SearchExamples: []string{
-			`env HF_HUB_OFFLINE=1 semble search "where is review submission validated?" ` + shellTargetRoot,
-			`env HF_HUB_OFFLINE=1 semble search "agent CLI defaults" ` + shellTargetRoot + ` --top-k 10`,
-			`env HF_HUB_OFFLINE=1 semble search "where is task superseding specified?" ` + shellTargetRoot + ` --content docs`,
-			`env HF_HUB_OFFLINE=1 semble search "default CLI config" ` + shellTargetRoot + ` --content config`,
-		},
-		FindRelatedExample:  "env HF_HUB_OFFLINE=1 semble find-related <file_path> <line> " + shellTargetRoot,
-		ContentModeGuidance: "Use --content with one of: code, docs, config, all; code is the default.",
-		DiscoveryNotice:     "Semble returns candidate chunks, not proof; verify with direct source reads before editing or claiming behavior.",
+		TargetRoot:      safety.TargetRoot,
+		ShellTargetRoot: shellTargetRoot,
 	}, true
 }
 
