@@ -1,6 +1,6 @@
 ---
 date: 2026-06-08
-perspective: Drafted by Opus 4.8 and revised by Codex 4.6. Hosted in Liza's own repo — weigh framing accordingly. Dynamic Workflows is a first-party Anthropic feature in research preview; its surface is changing fast, so version-specific claims are point-in-time snapshots. Liza facts are from the local repository; Dynamic Workflows facts are from Anthropic's official documentation and launch blog (see Source Snapshot).
+perspective: Drafted by Opus 4.8 and revised by Opus 4.6. Hosted in Liza's own repo — weigh framing accordingly. Dynamic Workflows is a first-party Anthropic feature in research preview; its surface is changing fast, so version-specific claims are point-in-time snapshots. Liza facts are from the local repository; Dynamic Workflows facts are from Anthropic's official documentation and launch blog (see Source Snapshot).
 ---
 
 # Liza vs Claude Code Dynamic Workflows Comparison
