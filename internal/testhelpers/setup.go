@@ -46,6 +46,11 @@ func SetupTestGitRepo(t *testing.T, tmpDir string) {
 	MustGit(t, tmpDir, "init", "-b", "main")
 	MustGit(t, tmpDir, "config", "user.email", "test@example.com")
 	MustGit(t, tmpDir, "config", "user.name", "Test User")
+	hooksDir, err := filepath.Abs(filepath.Join(tmpDir, ".git", "hooks"))
+	if err != nil {
+		t.Fatalf("Failed to resolve test hooks path: %v", err)
+	}
+	MustGit(t, tmpDir, "config", "core.hooksPath", hooksDir)
 
 	readmePath := filepath.Join(tmpDir, "README.md")
 	if err := os.WriteFile(readmePath, []byte("# Test\n"), 0644); err != nil {

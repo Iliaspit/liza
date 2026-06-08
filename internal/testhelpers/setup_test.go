@@ -10,6 +10,19 @@ import (
 func TestSetupTestGitRepo(t *testing.T) {
 	tmpDir := t.TempDir()
 
+	globalHooksDir := filepath.Join(t.TempDir(), "global-hooks")
+	if err := os.MkdirAll(globalHooksDir, 0755); err != nil {
+		t.Fatalf("Failed to create global hooks dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(globalHooksDir, "post-commit"), []byte("#!/bin/sh\nexit 42\n"), 0755); err != nil {
+		t.Fatalf("Failed to create global post-commit hook: %v", err)
+	}
+	globalConfig := filepath.Join(t.TempDir(), "gitconfig")
+	if err := os.WriteFile(globalConfig, []byte("[core]\n\thooksPath = "+globalHooksDir+"\n"), 0644); err != nil {
+		t.Fatalf("Failed to write global git config: %v", err)
+	}
+	t.Setenv("GIT_CONFIG_GLOBAL", globalConfig)
+
 	// Run the setup
 	SetupTestGitRepo(t, tmpDir)
 
@@ -36,6 +49,19 @@ func TestSetupTestGitRepo(t *testing.T) {
 	}
 	if string(output) != "Test User\n" {
 		t.Errorf("Expected user.name=Test User, got %q", string(output))
+	}
+
+	cmd = exec.Command("git", "-C", tmpDir, "config", "core.hooksPath")
+	output, err = cmd.Output()
+	if err != nil {
+		t.Fatalf("Failed to get core.hooksPath: %v", err)
+	}
+	expectedHooksPath, err := filepath.Abs(filepath.Join(tmpDir, ".git", "hooks"))
+	if err != nil {
+		t.Fatalf("Failed to resolve expected hooks path: %v", err)
+	}
+	if string(output) != expectedHooksPath+"\n" {
+		t.Errorf("Expected core.hooksPath=%q, got %q", expectedHooksPath, string(output))
 	}
 
 	// Verify README was created
