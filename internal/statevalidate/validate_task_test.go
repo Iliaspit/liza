@@ -524,6 +524,29 @@ func TestValidateTaskInvariants_RejectsBrokenReferencesAndOutput(t *testing.T) {
 			wantErr: "task task-1 validation[0] must be a single-line command",
 		},
 		{
+			name: "destructive db task requires validation commands",
+			tasks: []models.Task{
+				func() models.Task {
+					task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusMerged, time.Now().UTC())
+					task.DestructiveDB = true
+					return task
+				}(),
+			},
+			wantErr: "task task-1 validation destructive_db requires at least one validation command",
+		},
+		{
+			name: "destructive db task requires every validation command to start with marker",
+			tasks: []models.Task{
+				func() models.Task {
+					task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusMerged, time.Now().UTC())
+					task.Validation = []string{"LIZA_ALLOW_DESTRUCTIVE_DB=1 make test ./db", "make test ./db"}
+					task.DestructiveDB = true
+					return task
+				}(),
+			},
+			wantErr: "task task-1 validation[1] destructive_db requires command to start with LIZA_ALLOW_DESTRUCTIVE_DB=1 or env LIZA_ALLOW_DESTRUCTIVE_DB=1",
+		},
+		{
 			name: "output validation rejects empty command",
 			tasks: []models.Task{
 				func() models.Task {
@@ -555,6 +578,29 @@ func TestValidateTaskInvariants_RejectsBrokenReferencesAndOutput(t *testing.T) {
 				}(),
 			},
 			wantErr: "task task-1 output[0].validation[0] must be a single-line command",
+		},
+		{
+			name: "destructive db output requires validation commands",
+			tasks: []models.Task{
+				func() models.Task {
+					task := validOutputTask("task-1")
+					task.Output[0].DestructiveDB = true
+					return task
+				}(),
+			},
+			wantErr: "task task-1 output[0].validation destructive_db requires at least one validation command",
+		},
+		{
+			name: "destructive db output requires every validation command to start with marker",
+			tasks: []models.Task{
+				func() models.Task {
+					task := validOutputTask("task-1")
+					task.Output[0].Validation = []string{"env LIZA_ALLOW_DESTRUCTIVE_DB=1 make test ./db", "make test ./db"}
+					task.Output[0].DestructiveDB = true
+					return task
+				}(),
+			},
+			wantErr: "task task-1 output[0].validation[1] destructive_db requires command to start with LIZA_ALLOW_DESTRUCTIVE_DB=1 or env LIZA_ALLOW_DESTRUCTIVE_DB=1",
 		},
 		{
 			name: "valid legacy parent reference passes",

@@ -88,6 +88,7 @@ Example YAML file format:
   done_when: Feature X is implemented and tested
   validation:
     - make test
+  destructive_db: false
   scope: Add feature X to the codebase
   role_pair: coding-pair
   priority: 1
@@ -150,6 +151,9 @@ Example YAML file format:
 		if cmd.Flags().Changed("validation") {
 			input.Validation, _ = cmd.Flags().GetStringArray("validation")
 		}
+		if cmd.Flags().Changed("destructive-db") {
+			input.DestructiveDB, _ = cmd.Flags().GetBool("destructive-db")
+		}
 		if cmd.Flags().Changed("scope") {
 			input.Scope, _ = cmd.Flags().GetString("scope")
 		}
@@ -190,16 +194,17 @@ Example YAML file format:
 
 		if isJSON(cmd) {
 			opsInput := &ops.AddTaskInput{
-				ID:          input.ID,
-				Type:        input.Type,
-				RolePair:    input.RolePair,
-				Description: input.Description,
-				SpecRef:     input.SpecRef,
-				DoneWhen:    input.DoneWhen,
-				Validation:  input.Validation,
-				Scope:       input.Scope,
-				Priority:    input.Priority,
-				DependsOn:   input.DependsOn,
+				ID:            input.ID,
+				Type:          input.Type,
+				RolePair:      input.RolePair,
+				Description:   input.Description,
+				SpecRef:       input.SpecRef,
+				DoneWhen:      input.DoneWhen,
+				Validation:    input.Validation,
+				DestructiveDB: input.DestructiveDB,
+				Scope:         input.Scope,
+				Priority:      input.Priority,
+				DependsOn:     input.DependsOn,
 			}
 			result, err := ops.AddTask(statePath, logPath, opsInput, orchestratorID)
 			return jsonout.WriteResult(os.Stdout, result, nil, err)
@@ -887,7 +892,7 @@ var setTaskOutputCmd = &cobra.Command{
 
 Reads output entries from a JSON file. Each entry must have desc, done_when,
 and scope. Optional fields: spec_ref, plan_ref, arch_ref, validation,
-depends_on, task_depends_on.
+destructive_db, depends_on, task_depends_on.
 
 depends_on contains sibling output indexes, e.g. "0" for output[0].
 task_depends_on contains existing concrete task IDs to copy onto generated
@@ -906,7 +911,7 @@ Example:
   cat > outputs.json <<'EOF'
   [
     {"desc": "Subtask 1", "done_when": "Tests pass", "scope": "internal/pkg"},
-    {"desc": "Subtask 2", "done_when": "API works", "scope": "internal/api", "validation": ["make test"], "depends_on": ["0"], "task_depends_on": ["existing-task-id"]}
+    {"desc": "Subtask 2", "done_when": "API works", "scope": "internal/api", "validation": ["make test"], "destructive_db": false, "depends_on": ["0"], "task_depends_on": ["existing-task-id"]}
   ]
   EOF
   liza set-task-output task-1 --output outputs.json`,
@@ -983,7 +988,7 @@ var addTasksCmd = &cobra.Command{
 
 Reads task definitions from a JSON file. Each task must have id, desc, spec,
 done, and scope. Optional fields: priority, depends, type, role_pair, plan_ref,
-validation.
+validation, destructive_db.
 
 Tasks are added independently; failed tasks don't block subsequent ones.
 
@@ -991,7 +996,7 @@ Example:
   cat > tasks.json <<'EOF'
   [
     {"id": "task-1", "desc": "Implement X", "spec": "specs/x.md", "done": "X works", "scope": "internal/x"},
-    {"id": "task-2", "desc": "Implement Y", "spec": "specs/y.md", "done": "Y works", "scope": "internal/y", "validation": ["make test"], "depends": ["task-1"]}
+    {"id": "task-2", "desc": "Implement Y", "spec": "specs/y.md", "done": "Y works", "scope": "internal/y", "validation": ["make test"], "destructive_db": false, "depends": ["task-1"]}
   ]
   EOF
   liza add-tasks --tasks-file tasks.json`,
@@ -1176,6 +1181,7 @@ func init() {
 	addTaskCmd.Flags().String("spec", "", "spec reference (required unless using --file)")
 	addTaskCmd.Flags().String("done", "", "done-when criteria (required unless using --file)")
 	addTaskCmd.Flags().StringArray("validation", nil, "canonical validation command; repeat for multiple commands (overrides file value)")
+	addTaskCmd.Flags().Bool("destructive-db", false, "mark task validation as destructive to DB state; commands must start with LIZA_ALLOW_DESTRUCTIVE_DB=1")
 	addTaskCmd.Flags().String("scope", "", "task scope (required unless using --file)")
 	addTaskCmd.Flags().Int("priority", 0, "task priority (default: 1, overrides file value)")
 	addTaskCmd.Flags().String("depends", "", "comma-separated list of task IDs this task depends on (overrides file value)")

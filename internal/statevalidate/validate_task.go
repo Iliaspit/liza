@@ -174,7 +174,7 @@ func validateTaskInvariants(state *models.State, projectRoot string, skipSpecFil
 		if err := validateStatusFields(&task, &sc); err != nil {
 			return err
 		}
-		if err := models.ValidateValidationCommands("validation", task.Validation); err != nil {
+		if err := models.ValidateValidationSafety("validation", task.Validation, task.DestructiveDB); err != nil {
 			return fmt.Errorf("task %s %w", task.ID, err)
 		}
 
@@ -412,7 +412,7 @@ func validateTaskOutput(task *models.Task, validateArtifactRefs bool) error {
 		if entry.SpecRef == "" {
 			return fmt.Errorf("task %s output[%d] missing spec_ref", task.ID, i)
 		}
-		if err := models.ValidateValidationCommands(fmt.Sprintf("output[%d].validation", i), entry.Validation); err != nil {
+		if err := models.ValidateValidationSafety(fmt.Sprintf("output[%d].validation", i), entry.Validation, entry.DestructiveDB); err != nil {
 			return fmt.Errorf("task %s %w", task.ID, err)
 		}
 		if !validateArtifactRefs {

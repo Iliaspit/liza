@@ -601,6 +601,7 @@ func TestOutputEntry_JSONUnmarshal(t *testing.T) {
 			"plan_ref": "specs/plans/plan-1.md",
 			"arch_ref": "specs/arch-plan/arch-1.md",
 			"validation": ["make -C services/auth test", "pre-commit run --files services/auth/README.md"],
+			"destructive_db": true,
 			"depends_on": ["0", "2"],
 			"task_depends_on": ["github-175-runtime-capture-artifact-coverage"]
 		}
@@ -634,6 +635,9 @@ func TestOutputEntry_JSONUnmarshal(t *testing.T) {
 	}
 	if len(e.Validation) != 2 || e.Validation[0] != "make -C services/auth test" || e.Validation[1] != "pre-commit run --files services/auth/README.md" {
 		t.Errorf("Validation = %v", e.Validation)
+	}
+	if !e.DestructiveDB {
+		t.Errorf("DestructiveDB = false, want true")
 	}
 	if len(e.DependsOn) != 2 || e.DependsOn[0] != "0" || e.DependsOn[1] != "2" {
 		t.Errorf("DependsOn = %v", e.DependsOn)
@@ -725,11 +729,12 @@ func TestOutputEntry_KindJSONRoundTrip(t *testing.T) {
 
 func TestOutputEntry_ValidationRoundTripAndOmitEmpty(t *testing.T) {
 	original := OutputEntry{
-		Desc:       "x",
-		DoneWhen:   "y",
-		Scope:      "z",
-		SpecRef:    "s",
-		Validation: []string{"make test", "pre-commit run --files docs/USAGE.md"},
+		Desc:          "x",
+		DoneWhen:      "y",
+		Scope:         "z",
+		SpecRef:       "s",
+		Validation:    []string{"make test", "pre-commit run --files docs/USAGE.md"},
+		DestructiveDB: true,
 	}
 
 	yamlData, err := yaml.Marshal(&original)
@@ -739,12 +744,18 @@ func TestOutputEntry_ValidationRoundTripAndOmitEmpty(t *testing.T) {
 	if !strings.Contains(string(yamlData), "validation:") {
 		t.Fatalf("YAML missing validation key:\n%s", string(yamlData))
 	}
+	if !strings.Contains(string(yamlData), "destructive_db: true") {
+		t.Fatalf("YAML missing destructive_db key:\n%s", string(yamlData))
+	}
 	var yamlDecoded OutputEntry
 	if err := yaml.Unmarshal(yamlData, &yamlDecoded); err != nil {
 		t.Fatalf("YAML Unmarshal: %v", err)
 	}
 	if !reflect.DeepEqual(original.Validation, yamlDecoded.Validation) {
 		t.Errorf("YAML Validation = %v, want %v", yamlDecoded.Validation, original.Validation)
+	}
+	if !yamlDecoded.DestructiveDB {
+		t.Errorf("YAML DestructiveDB = false, want true")
 	}
 
 	jsonData, err := json.Marshal(&original)
@@ -754,12 +765,18 @@ func TestOutputEntry_ValidationRoundTripAndOmitEmpty(t *testing.T) {
 	if !strings.Contains(string(jsonData), `"validation"`) || strings.Contains(string(jsonData), `"Validation"`) {
 		t.Fatalf("JSON validation key mismatch: %s", string(jsonData))
 	}
+	if !strings.Contains(string(jsonData), `"destructive_db":true`) || strings.Contains(string(jsonData), `"DestructiveDB"`) {
+		t.Fatalf("JSON destructive_db key mismatch: %s", string(jsonData))
+	}
 	var jsonDecoded OutputEntry
 	if err := json.Unmarshal(jsonData, &jsonDecoded); err != nil {
 		t.Fatalf("JSON Unmarshal: %v", err)
 	}
 	if !reflect.DeepEqual(original.Validation, jsonDecoded.Validation) {
 		t.Errorf("JSON Validation = %v, want %v", jsonDecoded.Validation, original.Validation)
+	}
+	if !jsonDecoded.DestructiveDB {
+		t.Errorf("JSON DestructiveDB = false, want true")
 	}
 
 	empty := OutputEntry{Desc: "x", DoneWhen: "y", Scope: "z", SpecRef: "s"}
@@ -770,12 +787,18 @@ func TestOutputEntry_ValidationRoundTripAndOmitEmpty(t *testing.T) {
 	if strings.Contains(string(emptyYAML), "validation:") {
 		t.Errorf("empty Validation should be omitted from YAML, got:\n%s", string(emptyYAML))
 	}
+	if strings.Contains(string(emptyYAML), "destructive_db:") {
+		t.Errorf("false DestructiveDB should be omitted from YAML, got:\n%s", string(emptyYAML))
+	}
 	emptyJSON, err := json.Marshal(&empty)
 	if err != nil {
 		t.Fatalf("empty JSON Marshal: %v", err)
 	}
 	if strings.Contains(string(emptyJSON), `"validation"`) || strings.Contains(string(emptyJSON), `"Validation"`) {
 		t.Errorf("empty Validation should be omitted from JSON, got: %s", string(emptyJSON))
+	}
+	if strings.Contains(string(emptyJSON), `"destructive_db"`) || strings.Contains(string(emptyJSON), `"DestructiveDB"`) {
+		t.Errorf("false DestructiveDB should be omitted from JSON, got: %s", string(emptyJSON))
 	}
 }
 
@@ -928,6 +951,111 @@ func TestValidateValidationCommands(t *testing.T) {
 			}
 			if !strings.Contains(err.Error(), tt.wantErr) {
 				t.Fatalf("ValidateValidationCommands() error = %q, want substring %q", err.Error(), tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestValidateValidationSafety(t *testing.T) {
+	tests := []struct {
+		name          string
+		commands      []string
+		destructiveDB bool
+		wantErr       string
+	}{
+		{name: "non destructive accepts empty commands"},
+		{name: "non destructive accepts unmarked commands", commands: []string{"make test"}},
+		{
+			name:          "destructive requires commands",
+			destructiveDB: true,
+			wantErr:       "validation destructive_db requires at least one validation command",
+		},
+		{
+			name:          "destructive rejects unmarked command",
+			commands:      []string{"make test"},
+			destructiveDB: true,
+			wantErr:       "validation[0] destructive_db requires command to start with LIZA_ALLOW_DESTRUCTIVE_DB=1 or env LIZA_ALLOW_DESTRUCTIVE_DB=1",
+		},
+		{
+			name:          "destructive rejects marker in later command only",
+			commands:      []string{"make test", "LIZA_ALLOW_DESTRUCTIVE_DB=1 make test"},
+			destructiveDB: true,
+			wantErr:       "validation[0] destructive_db requires command to start with LIZA_ALLOW_DESTRUCTIVE_DB=1 or env LIZA_ALLOW_DESTRUCTIVE_DB=1",
+		},
+		{
+			name:          "destructive rejects echoed marker",
+			commands:      []string{"echo LIZA_ALLOW_DESTRUCTIVE_DB=1 && make test"},
+			destructiveDB: true,
+			wantErr:       "validation[0] destructive_db requires command to start with LIZA_ALLOW_DESTRUCTIVE_DB=1 or env LIZA_ALLOW_DESTRUCTIVE_DB=1",
+		},
+		{
+			name:          "destructive rejects marker without command",
+			commands:      []string{"LIZA_ALLOW_DESTRUCTIVE_DB=1"},
+			destructiveDB: true,
+			wantErr:       "validation[0] destructive_db requires command to start with LIZA_ALLOW_DESTRUCTIVE_DB=1 or env LIZA_ALLOW_DESTRUCTIVE_DB=1",
+		},
+		{
+			name:          "destructive rejects marker before comment only",
+			commands:      []string{"LIZA_ALLOW_DESTRUCTIVE_DB=1 # make test ./db"},
+			destructiveDB: true,
+			wantErr:       "validation[0] destructive_db requires command to start with LIZA_ALLOW_DESTRUCTIVE_DB=1 or env LIZA_ALLOW_DESTRUCTIVE_DB=1",
+		},
+		{
+			name:          "destructive rejects semicolon separator after marker",
+			commands:      []string{"LIZA_ALLOW_DESTRUCTIVE_DB=1 ; make test ./db"},
+			destructiveDB: true,
+			wantErr:       "validation[0] destructive_db requires command to start with LIZA_ALLOW_DESTRUCTIVE_DB=1 or env LIZA_ALLOW_DESTRUCTIVE_DB=1",
+		},
+		{
+			name:          "destructive rejects and separator after marker",
+			commands:      []string{"LIZA_ALLOW_DESTRUCTIVE_DB=1 && make test ./db"},
+			destructiveDB: true,
+			wantErr:       "validation[0] destructive_db requires command to start with LIZA_ALLOW_DESTRUCTIVE_DB=1 or env LIZA_ALLOW_DESTRUCTIVE_DB=1",
+		},
+		{
+			name:          "destructive rejects or separator after env marker",
+			commands:      []string{"env LIZA_ALLOW_DESTRUCTIVE_DB=1 || make test ./db"},
+			destructiveDB: true,
+			wantErr:       "validation[0] destructive_db requires command to start with LIZA_ALLOW_DESTRUCTIVE_DB=1 or env LIZA_ALLOW_DESTRUCTIVE_DB=1",
+		},
+		{
+			name:          "destructive rejects pipe after env marker",
+			commands:      []string{"env LIZA_ALLOW_DESTRUCTIVE_DB=1 | make test ./db"},
+			destructiveDB: true,
+			wantErr:       "validation[0] destructive_db requires command to start with LIZA_ALLOW_DESTRUCTIVE_DB=1 or env LIZA_ALLOW_DESTRUCTIVE_DB=1",
+		},
+		{
+			name:          "destructive accepts leading assignment",
+			commands:      []string{"LIZA_ALLOW_DESTRUCTIVE_DB=1 make test"},
+			destructiveDB: true,
+		},
+		{
+			name:          "destructive accepts env assignment",
+			commands:      []string{"env LIZA_ALLOW_DESTRUCTIVE_DB=1 make test"},
+			destructiveDB: true,
+		},
+		{
+			name:          "destructive still rejects malformed command",
+			commands:      []string{" LIZA_ALLOW_DESTRUCTIVE_DB=1 make test"},
+			destructiveDB: true,
+			wantErr:       "validation[0] must not have leading or trailing whitespace",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateValidationSafety("validation", tt.commands, tt.destructiveDB)
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("ValidateValidationSafety() error = %v, want nil", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("ValidateValidationSafety() error = nil, want %q", tt.wantErr)
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("ValidateValidationSafety() error = %q, want substring %q", err.Error(), tt.wantErr)
 			}
 		})
 	}
@@ -1106,16 +1234,17 @@ func TestTask_DecompositionJSONRoundTrip(t *testing.T) {
 func TestTask_ValidationRoundTripAndOmitEmpty(t *testing.T) {
 	now := time.Date(2026, 5, 28, 12, 0, 0, 0, time.UTC)
 	original := Task{
-		ID:          "task-1",
-		Description: "do the thing",
-		Status:      "DRAFT_CODE",
-		Priority:    1,
-		SpecRef:     "specs/x.md",
-		DoneWhen:    "tests pass",
-		Validation:  []string{"make test", "pre-commit run --files docs/USAGE.md"},
-		Scope:       "internal/",
-		Created:     now,
-		History:     []TaskHistoryEntry{},
+		ID:            "task-1",
+		Description:   "do the thing",
+		Status:        "DRAFT_CODE",
+		Priority:      1,
+		SpecRef:       "specs/x.md",
+		DoneWhen:      "tests pass",
+		Validation:    []string{"make test", "pre-commit run --files docs/USAGE.md"},
+		DestructiveDB: true,
+		Scope:         "internal/",
+		Created:       now,
+		History:       []TaskHistoryEntry{},
 	}
 
 	yamlData, err := yaml.Marshal(&original)
@@ -1125,12 +1254,18 @@ func TestTask_ValidationRoundTripAndOmitEmpty(t *testing.T) {
 	if !strings.Contains(string(yamlData), "validation:") {
 		t.Fatalf("YAML missing validation key:\n%s", string(yamlData))
 	}
+	if !strings.Contains(string(yamlData), "destructive_db: true") {
+		t.Fatalf("YAML missing destructive_db key:\n%s", string(yamlData))
+	}
 	var yamlDecoded Task
 	if err := yaml.Unmarshal(yamlData, &yamlDecoded); err != nil {
 		t.Fatalf("YAML Unmarshal: %v", err)
 	}
 	if !reflect.DeepEqual(original.Validation, yamlDecoded.Validation) {
 		t.Errorf("YAML Validation = %v, want %v", yamlDecoded.Validation, original.Validation)
+	}
+	if !yamlDecoded.DestructiveDB {
+		t.Errorf("YAML DestructiveDB = false, want true")
 	}
 
 	jsonData, err := json.Marshal(&original)
@@ -1140,6 +1275,9 @@ func TestTask_ValidationRoundTripAndOmitEmpty(t *testing.T) {
 	if !strings.Contains(string(jsonData), `"validation"`) || strings.Contains(string(jsonData), `"Validation"`) {
 		t.Fatalf("JSON validation key mismatch: %s", string(jsonData))
 	}
+	if !strings.Contains(string(jsonData), `"destructive_db":true`) || strings.Contains(string(jsonData), `"DestructiveDB"`) {
+		t.Fatalf("JSON destructive_db key mismatch: %s", string(jsonData))
+	}
 	var jsonDecoded Task
 	if err := json.Unmarshal(jsonData, &jsonDecoded); err != nil {
 		t.Fatalf("JSON Unmarshal: %v", err)
@@ -1147,9 +1285,13 @@ func TestTask_ValidationRoundTripAndOmitEmpty(t *testing.T) {
 	if !reflect.DeepEqual(original.Validation, jsonDecoded.Validation) {
 		t.Errorf("JSON Validation = %v, want %v", jsonDecoded.Validation, original.Validation)
 	}
+	if !jsonDecoded.DestructiveDB {
+		t.Errorf("JSON DestructiveDB = false, want true")
+	}
 
 	empty := original
 	empty.Validation = nil
+	empty.DestructiveDB = false
 	emptyYAML, err := yaml.Marshal(&empty)
 	if err != nil {
 		t.Fatalf("empty YAML Marshal: %v", err)
@@ -1157,12 +1299,18 @@ func TestTask_ValidationRoundTripAndOmitEmpty(t *testing.T) {
 	if strings.Contains(string(emptyYAML), "validation:") {
 		t.Errorf("empty Validation should be omitted from YAML, got:\n%s", string(emptyYAML))
 	}
+	if strings.Contains(string(emptyYAML), "destructive_db:") {
+		t.Errorf("false DestructiveDB should be omitted from YAML, got:\n%s", string(emptyYAML))
+	}
 	emptyJSON, err := json.Marshal(&empty)
 	if err != nil {
 		t.Fatalf("empty JSON Marshal: %v", err)
 	}
 	if strings.Contains(string(emptyJSON), `"validation"`) || strings.Contains(string(emptyJSON), `"Validation"`) {
 		t.Errorf("empty Validation should be omitted from JSON, got: %s", string(emptyJSON))
+	}
+	if strings.Contains(string(emptyJSON), `"destructive_db"`) || strings.Contains(string(emptyJSON), `"DestructiveDB"`) {
+		t.Errorf("false DestructiveDB should be omitted from JSON, got: %s", string(emptyJSON))
 	}
 }
 

@@ -253,6 +253,7 @@ type Task struct {
 	Kind                string                 `yaml:"kind,omitempty"`
 	DoneWhen            string                 `yaml:"done_when"`
 	Validation          []string               `yaml:"validation,omitempty" json:"validation,omitempty"`
+	DestructiveDB       bool                   `yaml:"destructive_db,omitempty" json:"destructive_db,omitempty"`
 	Scope               string                 `yaml:"scope"`
 	RejectionReason     *string                `yaml:"rejection_reason,omitempty"`
 	BlockedReason       *string                `yaml:"blocked_reason,omitempty"`
@@ -322,6 +323,7 @@ type OutputEntry struct {
 	ArchRef       string                 `yaml:"arch_ref,omitempty" json:"arch_ref,omitempty"`
 	Kind          string                 `yaml:"kind,omitempty" json:"kind,omitempty"`
 	Validation    []string               `yaml:"validation,omitempty" json:"validation,omitempty"`
+	DestructiveDB bool                   `yaml:"destructive_db,omitempty" json:"destructive_db,omitempty"`
 	DependsOn     []string               `yaml:"depends_on,omitempty" json:"depends_on,omitempty"`
 	Decomposition *DecompositionManifest `yaml:"decomposition,omitempty" json:"decomposition,omitempty"`
 	// TaskDependsOn names existing concrete task IDs to copy onto generated child tasks.
@@ -333,6 +335,10 @@ type OutputEntry struct {
 var validKinds = map[string]struct{}{
 	taskkind.PreCommitBootstrap: {},
 }
+
+// DestructiveDBAllowMarker must appear in declared validation commands for
+// tasks or output entries that may reset, drop, or otherwise destroy DB state.
+const DestructiveDBAllowMarker = "LIZA_ALLOW_DESTRUCTIVE_DB=1"
 
 // ValidateKind rejects unknown non-empty Kind values before they can bypass
 // kind-based consumers such as task deduplication.
@@ -359,6 +365,45 @@ func ValidateValidationCommands(field string, commands []string) error {
 		}
 		if strings.ContainsAny(command, "\r\n") {
 			return fmt.Errorf("%s[%d] must be a single-line command", field, i)
+		}
+	}
+	return nil
+}
+
+// HasLeadingDestructiveDBAllowMarker reports whether command begins with the
+// explicit break-glass environment assignment required for destructive DB work.
+func HasLeadingDestructiveDBAllowMarker(command string) bool {
+	return hasLeadingDestructiveDBAllowMarker(command, DestructiveDBAllowMarker) ||
+		hasLeadingDestructiveDBAllowMarker(command, "env "+DestructiveDBAllowMarker)
+}
+
+func hasLeadingDestructiveDBAllowMarker(command, prefix string) bool {
+	if !strings.HasPrefix(command, prefix) {
+		return false
+	}
+	rest := strings.TrimSpace(strings.TrimPrefix(command, prefix))
+	return rest != "" &&
+		!strings.HasPrefix(rest, "#") &&
+		!strings.ContainsAny(rest[:1], ";&|") &&
+		len(command) > len(prefix) &&
+		(command[len(prefix)] == ' ' || command[len(prefix)] == '\t')
+}
+
+// ValidateValidationSafety rejects unsafe validation metadata combinations
+// before destructive DB work can be persisted into state or downstream prompts.
+func ValidateValidationSafety(field string, commands []string, destructiveDB bool) error {
+	if err := ValidateValidationCommands(field, commands); err != nil {
+		return err
+	}
+	if !destructiveDB {
+		return nil
+	}
+	if len(commands) == 0 {
+		return fmt.Errorf("%s destructive_db requires at least one validation command", field)
+	}
+	for i, command := range commands {
+		if !HasLeadingDestructiveDBAllowMarker(command) {
+			return fmt.Errorf("%s[%d] destructive_db requires command to start with %s or env %s", field, i, DestructiveDBAllowMarker, DestructiveDBAllowMarker)
 		}
 	}
 	return nil

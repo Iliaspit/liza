@@ -43,6 +43,7 @@ type taskInfo struct {
 	Worktree           *string                       `json:"worktree,omitempty" yaml:"worktree,omitempty"`
 	DoneWhen           string                        `json:"done_when,omitempty" yaml:"done_when,omitempty"`
 	Validation         []string                      `json:"validation,omitempty" yaml:"validation,omitempty"`
+	DestructiveDB      bool                          `json:"destructive_db,omitempty" yaml:"destructive_db,omitempty"`
 	Scope              string                        `json:"scope,omitempty" yaml:"scope,omitempty"`
 	SpecRef            string                        `json:"spec_ref,omitempty" yaml:"spec_ref,omitempty"`
 	MergeCommit        *string                       `json:"merge_commit,omitempty" yaml:"merge_commit,omitempty"`
@@ -92,6 +93,7 @@ type outputEntrySummaryInfo struct {
 	PlanRef       string                        `json:"plan_ref,omitempty" yaml:"plan_ref,omitempty"`
 	ArchRef       string                        `json:"arch_ref,omitempty" yaml:"arch_ref,omitempty"`
 	Validation    []string                      `json:"validation,omitempty" yaml:"validation,omitempty"`
+	DestructiveDB bool                          `json:"destructive_db,omitempty" yaml:"destructive_db,omitempty"`
 	DependsOn     []string                      `json:"depends_on,omitempty" yaml:"depends_on,omitempty"`
 	TaskDependsOn []string                      `json:"task_depends_on,omitempty" yaml:"task_depends_on,omitempty"`
 	Decomposition *models.DecompositionManifest `json:"decomposition,omitempty" yaml:"decomposition,omitempty"`
@@ -182,6 +184,7 @@ func buildTaskInfo(task *models.Task, projectRoot string) taskInfo {
 		Worktree:           task.Worktree,
 		DoneWhen:           task.DoneWhen,
 		Validation:         task.Validation,
+		DestructiveDB:      task.DestructiveDB,
 		Scope:              task.Scope,
 		SpecRef:            task.SpecRef,
 		MergeCommit:        task.MergeCommit,
@@ -252,6 +255,7 @@ func buildTaskOutputSummaryInfo(task *models.Task) taskOutputSummaryInfo {
 			PlanRef:       entry.PlanRef,
 			ArchRef:       entry.ArchRef,
 			Validation:    entry.Validation,
+			DestructiveDB: entry.DestructiveDB,
 			DependsOn:     entry.DependsOn,
 			TaskDependsOn: entry.TaskDependsOn,
 			Decomposition: entry.Decomposition,
@@ -539,6 +543,9 @@ func formatTaskOutputSummaryValue(task taskOutputSummaryInfo) string {
 		if len(output.Validation) > 0 {
 			parts = append(parts, fmt.Sprintf("validation=%s", strings.Join(output.Validation, "; ")))
 		}
+		if output.DestructiveDB {
+			parts = append(parts, "destructive_db=true")
+		}
 		if len(output.DependsOn) > 0 {
 			parts = append(parts, fmt.Sprintf("depends_on=%s", strings.Join(output.DependsOn, ",")))
 		}
@@ -699,6 +706,9 @@ func formatTaskValue(task taskInfo) string {
 
 	if len(task.Validation) > 0 {
 		lines = append(lines, fmt.Sprintf("Validation: %s", strings.Join(task.Validation, "; ")))
+	}
+	if task.DestructiveDB {
+		lines = append(lines, "Destructive DB: true")
 	}
 
 	if task.Scope != "" {

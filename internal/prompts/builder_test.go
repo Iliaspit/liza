@@ -2350,6 +2350,34 @@ func TestBuildRoleContext_PlanRefAndValidationPlan(t *testing.T) {
 		}
 	})
 
+	t.Run("destructive db validation renders marker preservation warning", func(t *testing.T) {
+		data := &RoleContextData{
+			Role: "coder", AgentID: "coder-1", RoleType: "doer",
+			TaskID: "task-destructive-db", Description: "Reset disposable DB",
+			DoneWhen: "Reset path is tested", Scope: "internal/dbreset",
+			Worktree:           projectRoot + "/.worktrees/task-destructive-db",
+			IterationNum:       1,
+			IntegrationBranch:  "integration",
+			ValidationCommands: []string{"LIZA_ALLOW_DESTRUCTIVE_DB=1 make test ./internal/dbreset"},
+			DestructiveDB:      true,
+			ProjectRoot:        projectRoot,
+		}
+		sections, _ := resolver.ContextSections("coder")
+		output, err := BuildRoleContext("coder", sections, data)
+		if err != nil {
+			t.Fatalf("BuildRoleContext: %v", err)
+		}
+		if !strings.Contains(output, "DESTRUCTIVE DB VALIDATION:") {
+			t.Fatalf("output missing destructive DB validation warning:\n%s", output)
+		}
+		if !strings.Contains(output, "marker is part of each canonical command and must not be translated away") {
+			t.Fatalf("output missing marker preservation warning:\n%s", output)
+		}
+		if !strings.Contains(output, "- LIZA_ALLOW_DESTRUCTIVE_DB=1 make test ./internal/dbreset") {
+			t.Fatalf("output missing marked canonical command:\n%s", output)
+		}
+	})
+
 	t.Run("code-reviewer with PlanRef and ValidationPlan", func(t *testing.T) {
 		data := &RoleContextData{
 			Role: "code-reviewer", AgentID: "code-reviewer-1", RoleType: "reviewer",

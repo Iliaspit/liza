@@ -3760,17 +3760,18 @@ func TestBuildTaskRoleContextData_ArchRef(t *testing.T) {
 		},
 		Tasks: []models.Task{
 			{
-				ID:          "arch-task-1",
-				Description: "Design feature X",
-				Status:      models.TaskStatusImplementing,
-				Priority:    1,
-				Iteration:   1,
-				DoneWhen:    "Architecture document produced",
-				EpicRef:     "specs/epics/feature-x.md#capability-auth",
-				PlanRef:     "specs/plans/feature-x.md#task-breakdown",
-				ArchRef:     "specs/arch-plan/feature-x.md",
-				Validation:  []string{"make test", "pre-commit run --files specs/arch-plan/feature-x.md"},
-				Created:     now,
+				ID:            "arch-task-1",
+				Description:   "Design feature X",
+				Status:        models.TaskStatusImplementing,
+				Priority:      1,
+				Iteration:     1,
+				DoneWhen:      "Architecture document produced",
+				EpicRef:       "specs/epics/feature-x.md#capability-auth",
+				PlanRef:       "specs/plans/feature-x.md#task-breakdown",
+				ArchRef:       "specs/arch-plan/feature-x.md",
+				Validation:    []string{"make test", "pre-commit run --files specs/arch-plan/feature-x.md"},
+				DestructiveDB: true,
+				Created:       now,
 			},
 		},
 		Agents: make(map[string]models.Agent),
@@ -3810,6 +3811,9 @@ func TestBuildTaskRoleContextData_ArchRef(t *testing.T) {
 	}
 	if !slices.Equal(data.ValidationCommands, []string{"make test", "pre-commit run --files specs/arch-plan/feature-x.md"}) {
 		t.Errorf("ValidationCommands = %v, want canonical commands", data.ValidationCommands)
+	}
+	if !data.DestructiveDB {
+		t.Errorf("DestructiveDB = false, want true")
 	}
 	if data.IntegrationBranch != "main" {
 		t.Errorf("IntegrationBranch = %q, want main", data.IntegrationBranch)

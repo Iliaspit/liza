@@ -395,6 +395,7 @@ func TestInspectTasksOutputSummary(t *testing.T) {
 						ArchRef:       "specs/arch-plan/api.md",
 						Kind:          "code-task",
 						Validation:    []string{"make test ./internal/api"},
+						DestructiveDB: true,
 						DependsOn:     []string{"0"},
 						TaskDependsOn: []string{"existing-task"},
 						Decomposition: inspectTasksTestDecomposition(),
@@ -468,6 +469,9 @@ func TestInspectTasksOutputSummary(t *testing.T) {
 	}
 	if got := entry["validation"].([]any); len(got) != 1 || got[0] != "make test ./internal/api" {
 		t.Errorf("validation = %v, want [make test ./internal/api]", got)
+	}
+	if got := entry["destructive_db"]; got != true {
+		t.Errorf("destructive_db = %v, want true", got)
 	}
 	decomposition, ok := entry["decomposition"].(map[string]any)
 	if !ok {
@@ -1091,18 +1095,20 @@ func TestFormatTaskValue_WithDependencies(t *testing.T) {
 		{
 			name: "task with canonical validation",
 			task: taskInfo{
-				ID:           "task-validation",
-				Description:  "Test task",
-				Status:       "DRAFT_CODE",
-				Priority:     1,
-				DoneWhen:     "Tests pass",
-				Validation:   []string{"make test", "pre-commit run --files docs/USAGE.md"},
-				Age:          "1h ago",
-				TimeInStatus: "1h ago",
+				ID:            "task-validation",
+				Description:   "Test task",
+				Status:        "DRAFT_CODE",
+				Priority:      1,
+				DoneWhen:      "Tests pass",
+				Validation:    []string{"make test", "pre-commit run --files docs/USAGE.md"},
+				DestructiveDB: true,
+				Age:           "1h ago",
+				TimeInStatus:  "1h ago",
 			},
 			expectContains: []string{
 				"ID: task-validation",
 				"Validation: make test; pre-commit run --files docs/USAGE.md",
+				"Destructive DB: true",
 			},
 		},
 		{
@@ -1142,6 +1148,34 @@ func TestFormatTaskValue_WithDependencies(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestFormatTaskOutputSummaryValue_IncludesDestructiveDB(t *testing.T) {
+	task := taskOutputSummaryInfo{
+		ID:       "task-with-output",
+		Status:   "MERGED",
+		RolePair: "planning-pair",
+		Output: []outputEntrySummaryInfo{
+			{
+				Index:         1,
+				Kind:          "code-task",
+				SpecRef:       "specs/api.md",
+				Validation:    []string{"LIZA_ALLOW_DESTRUCTIVE_DB=1 make test ./internal/api"},
+				DestructiveDB: true,
+				Desc:          "Implement API",
+			},
+		},
+	}
+
+	output := formatTaskOutputSummaryValue(task)
+	for _, expected := range []string{
+		"validation=LIZA_ALLOW_DESTRUCTIVE_DB=1 make test ./internal/api",
+		"destructive_db=true",
+	} {
+		if !strings.Contains(output, expected) {
+			t.Fatalf("output missing %q:\n%s", expected, output)
+		}
 	}
 }
 

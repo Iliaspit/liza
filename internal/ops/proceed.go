@@ -1292,6 +1292,7 @@ func buildChildTask(childID, parentID string, entry models.OutputEntry, targetSt
 		Kind:          entry.Kind,
 		DoneWhen:      entry.DoneWhen,
 		Validation:    slices.Clone(entry.Validation),
+		DestructiveDB: entry.DestructiveDB,
 		Scope:         entry.Scope,
 		DependsOn:     deps,
 		Created:       now,
@@ -1346,7 +1347,7 @@ func validateOutputEntry(entry models.OutputEntry, index, totalEntries int) erro
 	if err := models.ValidateKind(entry.Kind); err != nil {
 		return fmt.Errorf("output[%d] %w", index, err)
 	}
-	if err := models.ValidateValidationCommands(fmt.Sprintf("output[%d].validation", index), entry.Validation); err != nil {
+	if err := models.ValidateValidationSafety(fmt.Sprintf("output[%d].validation", index), entry.Validation, entry.DestructiveDB); err != nil {
 		return err
 	}
 	return models.ValidateDependsOn(entry.DependsOn, index, totalEntries)

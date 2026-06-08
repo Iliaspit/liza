@@ -288,6 +288,7 @@ func buildTaskRoleContextData(task *models.Task, state *models.State, config Sup
 		PlanSection:        paths.SplitRefFragment(task.PlanRef),
 		ArchRef:            paths.SplitRefFile(task.ArchRef),
 		ValidationCommands: slices.Clone(task.Validation),
+		DestructiveDB:      task.DestructiveDB,
 		Worktree:           resolveWorktreePath(config.ProjectRoot, task.Worktree),
 		IterationNum:       task.Iteration,
 		AttemptNum:         task.EffectiveAttempt(),

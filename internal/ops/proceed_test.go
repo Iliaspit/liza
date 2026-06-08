@@ -391,7 +391,14 @@ func TestProceed_CrashRecovery_CreatesMissingChildren(t *testing.T) {
 		ReviewCommit: &reviewCommit,
 		Output: []models.OutputEntry{
 			{Desc: "Child 0", DoneWhen: "Done 0", Scope: "s0", SpecRef: "README.md"},
-			{Desc: "Child 1", DoneWhen: "Done 1", Scope: "s1", SpecRef: "README.md", Validation: []string{"make test ./child1"}},
+			{
+				Desc:          "Child 1",
+				DoneWhen:      "Done 1",
+				Scope:         "s1",
+				SpecRef:       "README.md",
+				Validation:    []string{"LIZA_ALLOW_DESTRUCTIVE_DB=1 make test ./child1"},
+				DestructiveDB: true,
+			},
 		},
 		TransitionsExecuted: map[string]bool{"code-plan-to-coding": true},
 		History:             []models.TaskHistoryEntry{},
@@ -443,8 +450,11 @@ func TestProceed_CrashRecovery_CreatesMissingChildren(t *testing.T) {
 	if child1.Description != "Child 1" {
 		t.Errorf("Child 1 desc = %q, want %q", child1.Description, "Child 1")
 	}
-	if !slices.Equal(child1.Validation, []string{"make test ./child1"}) {
-		t.Errorf("Child 1 validation = %v, want [make test ./child1]", child1.Validation)
+	if !slices.Equal(child1.Validation, []string{"LIZA_ALLOW_DESTRUCTIVE_DB=1 make test ./child1"}) {
+		t.Errorf("Child 1 validation = %v, want [LIZA_ALLOW_DESTRUCTIVE_DB=1 make test ./child1]", child1.Validation)
+	}
+	if !child1.DestructiveDB {
+		t.Errorf("Child 1 DestructiveDB = false, want true")
 	}
 }
 
@@ -546,6 +556,47 @@ func TestProceed_RejectsOutputMissingFields(t *testing.T) {
 	if !strings.Contains(err.Error(), "output") {
 		t.Errorf("Error = %q, want to contain 'output'", err.Error())
 	}
+}
+
+func TestProceed_RejectsDestructiveDBOutputWithoutMarker(t *testing.T) {
+	tmpDir, stateFile := setupPipelineProceedTest(t)
+
+	state := testhelpers.CreateValidState()
+	state.PipelineVersion = 2
+	state.Sprint.Status = models.SprintStatusCompleted
+
+	now := time.Now().UTC()
+	reviewCommit := "abc123"
+	task := models.Task{
+		ID:           "plan-destructive",
+		Type:         models.TaskTypeCoding,
+		RolePair:     "code-planning-pair",
+		Description:  "Plan task",
+		Status:       models.TaskStatus("CODING_PLAN_APPROVED"),
+		Priority:     1,
+		Created:      now,
+		SpecRef:      "README.md",
+		DoneWhen:     "Approved",
+		Scope:        "scope",
+		ReviewCommit: &reviewCommit,
+		Output: []models.OutputEntry{
+			{
+				Desc:          "Child",
+				DoneWhen:      "Done",
+				Scope:         "s",
+				SpecRef:       "README.md",
+				Validation:    []string{"make test ./child"},
+				DestructiveDB: true,
+			},
+		},
+		History: []models.TaskHistoryEntry{},
+	}
+	state.Tasks = append(state.Tasks, task)
+	state.Sprint.Scope.Planned = []string{"plan-destructive"}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	_, err := Proceed(tmpDir, "plan-destructive", "code-plan-to-coding")
+	testhelpers.RequireErrorContains(t, err, "output[0].validation[0] destructive_db requires command to start with LIZA_ALLOW_DESTRUCTIVE_DB=1 or env LIZA_ALLOW_DESTRUCTIVE_DB=1")
 }
 
 // --- Pipeline-aware Proceed tests ---
@@ -3327,21 +3378,22 @@ func TestProceed_OneToOne_InheritsPlanRefFromParent(t *testing.T) {
 	taskID := "us-planref-1"
 	reviewCommit := "abc123"
 	task := models.Task{
-		ID:           taskID,
-		Type:         models.TaskTypeCoding,
-		RolePair:     "us-writing-pair",
-		Description:  "US with epic_ref",
-		Status:       models.TaskStatus("US_APPROVED"),
-		Priority:     1,
-		Created:      now,
-		ParentTasks:  []string{cohortParentID},
-		SpecRef:      "specs/feature.md",
-		EpicRef:      "specs/epics/auth-epic.md#capability-cap-001---authentication",
-		Validation:   []string{"make test ./should-not-copy"},
-		DoneWhen:     "US approved",
-		Scope:        "auth module",
-		ReviewCommit: &reviewCommit,
-		History:      []models.TaskHistoryEntry{},
+		ID:            taskID,
+		Type:          models.TaskTypeCoding,
+		RolePair:      "us-writing-pair",
+		Description:   "US with epic_ref",
+		Status:        models.TaskStatus("US_APPROVED"),
+		Priority:      1,
+		Created:       now,
+		ParentTasks:   []string{cohortParentID},
+		SpecRef:       "specs/feature.md",
+		EpicRef:       "specs/epics/auth-epic.md#capability-cap-001---authentication",
+		Validation:    []string{"LIZA_ALLOW_DESTRUCTIVE_DB=1 make test ./should-not-copy"},
+		DestructiveDB: true,
+		DoneWhen:      "US approved",
+		Scope:         "auth module",
+		ReviewCommit:  &reviewCommit,
+		History:       []models.TaskHistoryEntry{},
 	}
 	state.Tasks = append(state.Tasks, task)
 	state.Sprint.Scope.Planned = []string{taskID}
@@ -3368,6 +3420,9 @@ func TestProceed_OneToOne_InheritsPlanRefFromParent(t *testing.T) {
 	}
 	if len(child.Validation) != 0 {
 		t.Errorf("Child validation = %v, want empty (many-to-one tasks don't inherit parent validation)", child.Validation)
+	}
+	if child.DestructiveDB {
+		t.Errorf("Child destructive_db = true, want false (many-to-one tasks don't inherit parent destructive_db)")
 	}
 	// Inherits SpecRef
 	if child.SpecRef != "specs/feature.md" {
@@ -3558,21 +3613,22 @@ func TestProceed_OneToOne_InheritsArchRef(t *testing.T) {
 	parentID := "plan-archref-oto-1"
 	reviewCommit := "abc123"
 	task := models.Task{
-		ID:           parentID,
-		Type:         models.TaskTypeCoding,
-		RolePair:     "code-planning-pair",
-		Description:  "Plan with arch_ref for one-to-one",
-		Status:       models.TaskStatusMerged,
-		Priority:     1,
-		Created:      now,
-		SpecRef:      "README.md",
-		ArchRef:      "specs/arch-plan/feature.md",
-		PlanRef:      "specs/plans/plan.md",
-		Validation:   []string{"make test ./should-not-copy"},
-		DoneWhen:     "Plan approved",
-		Scope:        "auth module",
-		ReviewCommit: &reviewCommit,
-		History:      []models.TaskHistoryEntry{},
+		ID:            parentID,
+		Type:          models.TaskTypeCoding,
+		RolePair:      "code-planning-pair",
+		Description:   "Plan with arch_ref for one-to-one",
+		Status:        models.TaskStatusMerged,
+		Priority:      1,
+		Created:       now,
+		SpecRef:       "README.md",
+		ArchRef:       "specs/arch-plan/feature.md",
+		PlanRef:       "specs/plans/plan.md",
+		Validation:    []string{"LIZA_ALLOW_DESTRUCTIVE_DB=1 make test ./should-not-copy"},
+		DestructiveDB: true,
+		DoneWhen:      "Plan approved",
+		Scope:         "auth module",
+		ReviewCommit:  &reviewCommit,
+		History:       []models.TaskHistoryEntry{},
 	}
 	state.Tasks = append(state.Tasks, task)
 	state.Sprint.Scope.Planned = []string{parentID}
@@ -3602,6 +3658,9 @@ func TestProceed_OneToOne_InheritsArchRef(t *testing.T) {
 	}
 	if len(child.Validation) != 0 {
 		t.Errorf("Child validation = %v, want empty (one-to-one tasks don't inherit parent validation)", child.Validation)
+	}
+	if child.DestructiveDB {
+		t.Errorf("Child destructive_db = true, want false (one-to-one tasks don't inherit parent destructive_db)")
 	}
 }
 

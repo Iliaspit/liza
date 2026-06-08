@@ -41,7 +41,7 @@ func SetTaskOutput(projectRoot string, input *SetTaskOutputInput) error {
 		if err := models.ValidateKind(entry.Kind); err != nil {
 			return &PreconditionError{Reason: fmt.Sprintf("output[%d].%s", i, err.Error())}
 		}
-		if err := models.ValidateValidationCommands(fmt.Sprintf("output[%d].validation", i), entry.Validation); err != nil {
+		if err := models.ValidateValidationSafety(fmt.Sprintf("output[%d].validation", i), entry.Validation, entry.DestructiveDB); err != nil {
 			return &PreconditionError{Reason: err.Error()}
 		}
 		if err := models.ValidateDependsOn(entry.DependsOn, i, len(input.Output)); err != nil {

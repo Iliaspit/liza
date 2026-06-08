@@ -212,6 +212,7 @@ Key task fields:
 - `output[]` — structured output entries (used by `liza proceed` to create child tasks)
   - `output[].depends_on` — sibling output indexes resolved during `proceed`
   - `output[].task_depends_on` — existing concrete task IDs copied to generated child tasks
+  - `output[].destructive_db` — requires non-empty validation, with every command starting `LIZA_ALLOW_DESTRUCTIVE_DB=1 ` or `env LIZA_ALLOW_DESTRUCTIVE_DB=1 `; copied only to per-subtask children
 - `history[]` — timestamped event log per task
 
 Key agent fields:

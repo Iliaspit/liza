@@ -369,6 +369,7 @@ done_when: Feature X is implemented and tested
 validation:
   - make test
   - pre-commit run --files specs/vision.md
+destructive_db: true
 scope: Add feature X to the codebase
 priority: 2
 depends_on:
@@ -387,6 +388,9 @@ depends_on:
 				}
 				if len(input.DependsOn) != 1 || input.DependsOn[0] != "task-0" {
 					t.Errorf("DependsOn = %v, want [task-0]", input.DependsOn)
+				}
+				if !input.DestructiveDB {
+					t.Errorf("DestructiveDB = false, want true")
 				}
 				if len(input.Validation) != 2 || input.Validation[0] != "make test" || input.Validation[1] != "pre-commit run --files specs/vision.md" {
 					t.Errorf("Validation = %v, want canonical commands", input.Validation)

@@ -113,6 +113,37 @@ func TestSetTaskOutput_Validation(t *testing.T) {
 			},
 			errContains: "output[0].validation[0] must be a single-line command",
 		},
+		{
+			name: "destructive db output requires validation commands",
+			input: SetTaskOutputInput{
+				TaskID:  "t1",
+				AgentID: "coder-1",
+				Output: []models.OutputEntry{{
+					Desc:          "d",
+					DoneWhen:      "dw",
+					Scope:         "s",
+					SpecRef:       "specs/feature.md",
+					DestructiveDB: true,
+				}},
+			},
+			errContains: "output[0].validation destructive_db requires at least one validation command",
+		},
+		{
+			name: "destructive db output requires every validation command to start with marker",
+			input: SetTaskOutputInput{
+				TaskID:  "t1",
+				AgentID: "coder-1",
+				Output: []models.OutputEntry{{
+					Desc:          "d",
+					DoneWhen:      "dw",
+					Scope:         "s",
+					SpecRef:       "specs/feature.md",
+					Validation:    []string{"env LIZA_ALLOW_DESTRUCTIVE_DB=1 make test ./db", "make test ./db"},
+					DestructiveDB: true,
+				}},
+			},
+			errContains: "output[0].validation[1] destructive_db requires command to start with LIZA_ALLOW_DESTRUCTIVE_DB=1 or env LIZA_ALLOW_DESTRUCTIVE_DB=1",
+		},
 	}
 
 	for _, tt := range tests {

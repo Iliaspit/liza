@@ -84,3 +84,4 @@
 | [0081 — Indexing Activation for Setup and Init](0081-indexing-activation-for-setup-and-init.md) | Split optional-index activation between global setup guidance and project-local init artifacts, hooks, and session metadata. |
 | [0082 — Worktree Env-File Provisioning](0082-worktree-env-file-provisioning.md) | Add opt-in copying of ignored project-root environment files into Liza worktrees before post-worktree setup. |
 | [0083 — Preserve-by-Default recover-task](0083-preserve-by-default-recover-task.md) | Preserve or validate recoverable task work by default; require explicit `--fresh` for destructive reset. |
+| [0084 — Destructive DB Validation Marker](0084-destructive-db-validation-marker.md) | Add `destructive_db` metadata requiring a leading break-glass marker on every destructive DB validation command. |

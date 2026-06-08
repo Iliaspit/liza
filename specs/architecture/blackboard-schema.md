@@ -250,6 +250,7 @@ Tasks support inter-pair transitions via `liza proceed` (manual) or orchestrator
       plan_ref: specs/plans/auth-master-plan.md
       validation:
         - make test
+      destructive_db: false
       decomposition:
         owned_files: ["src/middleware/auth.go"]
         owned_modules: ["auth middleware"]
@@ -263,7 +264,8 @@ Tasks support inter-pair transitions via `liza proceed` (manual) or orchestrator
       scope: "src/auth/refresh.go"
       spec_ref: specs/auth.md#refresh
       validation:
-        - make test
+        - env LIZA_ALLOW_DESTRUCTIVE_DB=1 make test
+      destructive_db: true
   parent_task: null                # Deprecated: use parent_tasks. Set on child tasks, references parent task ID
   parent_tasks: []                 # Multi-parent linkage (many-to-one transitions). Back-references from child to parent tasks
   transitions_executed:            # Tracks which transitions have been applied
@@ -293,6 +295,7 @@ Optional:
 - `arch_ref` (`string`): Path to the architecture document (repo-relative). Set by architect via `set-task-output`. Normalized by `NormalizeSpecRef` (worktree prefixes stripped). Propagated to child tasks by `proceed.go` during transitions.
 - `epic_ref` (`string`): Path to a concrete epic artifact (repo-relative). Specialized `epic-planning-pair` outputs use this for `us-writing-pair` children; epic master framework refs use `plan_ref`, not `epic_ref`.
 - `validation` (`[]string`): Ordered canonical validation commands for the generated child task. Commands are stored exactly as declared, must be single-line, non-empty, and must not have leading or trailing whitespace. Newly declared validation commands must be single-purpose and agent-executable. Forbidden validation command shapes: `cd ... &&`, command substitution/backticks, polling or tail pipelines, and task artifact paths outside the worktree. Existing stored commands that violate this shape remain visible as task-declared executable guidance and are translated by consumers rather than edited in place. This field is distinct from `repair_request.validation`, which records validation for an orchestrator repair request.
+- `destructive_db` (`bool`): Optional safety marker for validation commands that may reset, drop, or otherwise destroy DB state. Defaults to false and is inert when omitted. When true, `validation` must be non-empty and every command must start with `LIZA_ALLOW_DESTRUCTIVE_DB=1 ` or `env LIZA_ALLOW_DESTRUCTIVE_DB=1 `. The marker is part of the canonical command and must not be translated away.
 - `task_depends_on` (`[]string`): Existing concrete task IDs outside this `output[]`. Set by doer via `set-task-output`; copied to generated child tasks as scheduler-facing `depends_on`.
 - `decomposition` (`DecompositionManifest`): Typed decomposition metadata. Required on `output[]` entries produced by `decomposition-root` role-pairs and optional elsewhere.
 
@@ -314,7 +317,7 @@ Optional:
 
 Generated child tasks also persist task-level `decomposition` metadata copied from the source `output[]` entry. Task-level metadata is read-only context for the child and does not change dependency scheduling.
 
-Generated child tasks for per-subtask transitions also persist task-level `validation` copied from the source `output[]` entry. Synthesized one-to-one and many-to-one transition children do not inherit parent task validation because those commands belong to the parent phase.
+Generated child tasks for per-subtask transitions also persist task-level `validation` and `destructive_db` copied from the source `output[]` entry. Synthesized one-to-one and many-to-one transition children do not inherit parent task validation or `destructive_db` because those commands belong to the parent phase.
 
 For decomposition-root outputs, `liza set-task-output` requires the configured `decomposition-output-ref` framework ref on every entry:
 
@@ -1092,6 +1095,7 @@ invariants:
   - "Task parent_task/parent_tasks must reference existing task IDs"
   - "Task output entries must have all required fields (desc, done_when, scope, spec_ref)"
   - "Task validation and output entry validation commands must be single-line non-empty strings without leading or trailing whitespace"
+  - "Task and output entry destructive_db:true requires non-empty validation, and every validation command must start with LIZA_ALLOW_DESTRUCTIVE_DB=1 or env LIZA_ALLOW_DESTRUCTIVE_DB=1"
   - "Artifact reference fields are scalar repo-relative refs with optional #fragment anchors; semicolon-joined multi-refs are rejected"
   - "Artifact refs fail closed when fragment stripping leaves an empty path, the path traverses outside the repository, or an absolute ref cannot be safely normalized to repo-relative"
   - "Protected artifact fields are goal spec_ref; task spec_ref, epic_ref, plan_ref, arch_ref; and output entry spec_ref, epic_ref, plan_ref, arch_ref"
