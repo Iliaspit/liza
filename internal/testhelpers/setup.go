@@ -24,42 +24,215 @@ package testhelpers
 // required to create realistic test environments that mirror production usage.
 
 import (
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
+
+	"github.com/liza-mas/liza/internal/gitenv"
+)
+
+type preparedGitRepoTemplate struct {
+	once sync.Once
+	dir  string
+	err  error
+}
+
+var (
+	basicGitRepoTemplate preparedGitRepoTemplate
+	testGitRepoTemplate  preparedGitRepoTemplate
 )
 
 // SetupTestGitRepo initializes a git repository with basic configuration.
 // It performs the following:
-//   - Initializes a git repo in tmpDir
+//   - Copies a prepared git repo fixture into tmpDir
 //   - Sets user.email to "test@example.com"
 //   - Sets user.name to "Test User"
-//   - Creates a README.md file with "# Test\n"
-//   - Creates an initial commit
-//   - Creates an "integration" branch
+//   - Sets local core.hooksPath to tmpDir's .git/hooks
+//   - Provides README.md, an initial commit, and an "integration" branch
 //
 // This helper eliminates ~25 lines of duplicated code that appears 8-10 times
 // across test files (claim_task_test.go, wt_create_test.go, wt_delete_test.go, etc.)
 func SetupTestGitRepo(t *testing.T, tmpDir string) {
 	t.Helper()
 
-	MustGit(t, tmpDir, "init", "-b", "main")
-	MustGit(t, tmpDir, "config", "user.email", "test@example.com")
-	MustGit(t, tmpDir, "config", "user.name", "Test User")
-	hooksDir, err := filepath.Abs(filepath.Join(tmpDir, ".git", "hooks"))
+	if err := prepareGitFixtureDir(tmpDir); err != nil {
+		t.Fatalf("Failed to prepare test git repo directory: %v", err)
+	}
+	templateDir := gitRepoTemplateDir(t, &testGitRepoTemplate, true)
+	if err := copyDirContents(templateDir, tmpDir); err != nil {
+		t.Fatalf("Failed to copy test git repo template: %v", err)
+	}
+	configureTestGitRepo(t, tmpDir)
+}
+
+// SetupBasicTestGitRepo initializes a prepared git repository without creating
+// an integration branch. Use this for tests that need to exercise branch
+// creation behavior themselves.
+func SetupBasicTestGitRepo(t *testing.T, tmpDir string) {
+	t.Helper()
+
+	if err := prepareGitFixtureDir(tmpDir); err != nil {
+		t.Fatalf("Failed to prepare basic test git repo directory: %v", err)
+	}
+	templateDir := gitRepoTemplateDir(t, &basicGitRepoTemplate, false)
+	if err := copyDirContents(templateDir, tmpDir); err != nil {
+		t.Fatalf("Failed to copy basic test git repo template: %v", err)
+	}
+	configureTestGitRepo(t, tmpDir)
+}
+
+func gitRepoTemplateDir(t *testing.T, template *preparedGitRepoTemplate, includeIntegrationBranch bool) string {
+	t.Helper()
+
+	template.once.Do(func() {
+		template.dir, template.err = createTestGitRepoTemplate(includeIntegrationBranch)
+	})
+	if template.err != nil {
+		t.Fatalf("Failed to create test git repo template: %v", template.err)
+	}
+	return template.dir
+}
+
+func createTestGitRepoTemplate(includeIntegrationBranch bool) (string, error) {
+	dir, err := os.MkdirTemp("", "liza-test-git-template-*")
 	if err != nil {
-		t.Fatalf("Failed to resolve test hooks path: %v", err)
+		return "", err
 	}
-	MustGit(t, tmpDir, "config", "core.hooksPath", hooksDir)
+	if err := initializeTestGitRepo(dir, includeIntegrationBranch); err != nil {
+		_ = os.RemoveAll(dir)
+		return "", err
+	}
+	return dir, nil
+}
 
-	readmePath := filepath.Join(tmpDir, "README.md")
+func initializeTestGitRepo(dir string, includeIntegrationBranch bool) error {
+	if err := runGitForSetup(dir, "init", "-b", "main"); err != nil {
+		return err
+	}
+	if err := runGitForSetup(dir, "config", "user.email", "test@example.com"); err != nil {
+		return err
+	}
+	if err := runGitForSetup(dir, "config", "user.name", "Test User"); err != nil {
+		return err
+	}
+	if err := configureTestGitRepoHooks(dir); err != nil {
+		return err
+	}
+
+	readmePath := filepath.Join(dir, "README.md")
 	if err := os.WriteFile(readmePath, []byte("# Test\n"), 0644); err != nil {
-		t.Fatalf("Failed to create README: %v", err)
+		return fmt.Errorf("create README: %w", err)
 	}
 
-	MustGit(t, tmpDir, "add", "README.md")
-	MustGit(t, tmpDir, "commit", "-m", "Initial commit")
-	MustGit(t, tmpDir, "branch", "integration")
+	if err := runGitForSetup(dir, "add", "README.md"); err != nil {
+		return err
+	}
+	if err := runGitForSetup(dir, "commit", "-m", "Initial commit"); err != nil {
+		return err
+	}
+	if !includeIntegrationBranch {
+		return nil
+	}
+	return runGitForSetup(dir, "branch", "integration")
+}
+
+func configureTestGitRepo(t *testing.T, repoDir string) {
+	t.Helper()
+
+	MustGit(t, repoDir, "config", "user.email", "test@example.com")
+	MustGit(t, repoDir, "config", "user.name", "Test User")
+	if err := configureTestGitRepoHooks(repoDir); err != nil {
+		t.Fatalf("Failed to configure test repo hooks path: %v", err)
+	}
+}
+
+func configureTestGitRepoHooks(repoDir string) error {
+	hooksDir, err := filepath.Abs(filepath.Join(repoDir, ".git", "hooks"))
+	if err != nil {
+		return fmt.Errorf("resolve test hooks path: %w", err)
+	}
+	return runGitForSetup(repoDir, "config", "core.hooksPath", hooksDir)
+}
+
+func runGitForSetup(dir string, args ...string) error {
+	output, err := gitenv.CombinedOutput(dir, args...)
+	if err != nil {
+		return fmt.Errorf("git %v failed: %w\nOutput: %s", args, err, output)
+	}
+	return nil
+}
+
+func prepareGitFixtureDir(dir string) error {
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return err
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
+		return fmt.Errorf("%s already contains a git repo", dir)
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	return nil
+}
+
+func copyDirContents(src, dst string) error {
+	return filepath.WalkDir(src, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if path == src {
+			return nil
+		}
+
+		rel, err := filepath.Rel(src, path)
+		if err != nil {
+			return err
+		}
+		target := filepath.Join(dst, rel)
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		mode := info.Mode()
+		switch {
+		case mode.IsDir():
+			return os.MkdirAll(target, mode.Perm())
+		case mode.Type()&os.ModeSymlink != 0:
+			linkTarget, err := os.Readlink(path)
+			if err != nil {
+				return err
+			}
+			return os.Symlink(linkTarget, target)
+		case mode.IsRegular():
+			return copyRegularFile(path, target, mode)
+		default:
+			return nil
+		}
+	})
+}
+
+func copyRegularFile(src, dst string, mode os.FileMode) error {
+	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
+		return err
+	}
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+
+	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, mode.Perm())
+	if err != nil {
+		return err
+	}
+
+	if _, err := io.Copy(out, in); err != nil {
+		_ = out.Close()
+		return err
+	}
+	return out.Close()
 }
 
 // SetupLizaDir creates the .liza directory structure and returns paths to the state file and lock file.

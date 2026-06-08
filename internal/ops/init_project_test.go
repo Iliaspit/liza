@@ -24,28 +24,10 @@ func setupInitTestDir(t *testing.T) (projectRoot, specFile string) {
 	testhelpers.SetupGlobalLiza(t)
 	projectRoot = t.TempDir()
 
-	// Initialize a git repo so branch operations work
+	// Initialize a git repo so branch operations work.
 	gitInit(t, projectRoot)
 
-	// Create a spec file
-	specDir := filepath.Join(projectRoot, "specs")
-	if err := os.MkdirAll(specDir, 0755); err != nil {
-		t.Fatalf("Failed to create specs dir: %v", err)
-	}
-	specFile = filepath.Join(specDir, "goal.md")
-	if err := os.WriteFile(specFile, []byte("# Test Goal\n"), 0644); err != nil {
-		t.Fatalf("Failed to write spec file: %v", err)
-	}
-	cmds := [][]string{
-		{"git", "-C", projectRoot, "add", "specs/goal.md"},
-		{"git", "-C", projectRoot, "commit", "-m", "Add goal spec"},
-	}
-	for _, args := range cmds {
-		cmd := exec.Command(args[0], args[1:]...)
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git command %v failed: %v\n%s", args, err, out)
-		}
-	}
+	specFile = testhelpers.CreateCommittedSpecFile(t, projectRoot, "goal.md", "# Test Goal\n")
 	testhelpers.CreateCommittedPreCommitConfig(t, projectRoot)
 
 	return projectRoot, specFile
@@ -84,18 +66,7 @@ func setupInitTestDirNoCommit(t *testing.T) (projectRoot, specFile string) {
 // gitInit initializes a bare-minimum git repo with an initial commit.
 func gitInit(t *testing.T, dir string) {
 	t.Helper()
-	cmds := [][]string{
-		{"git", "-C", dir, "init"},
-		{"git", "-C", dir, "config", "user.email", "test@test.com"},
-		{"git", "-C", dir, "config", "user.name", "Test"},
-		{"git", "-C", dir, "commit", "--allow-empty", "-m", "init"},
-	}
-	for _, args := range cmds {
-		cmd := exec.Command(args[0], args[1:]...)
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git command %v failed: %v\n%s", args, err, out)
-		}
-	}
+	testhelpers.SetupBasicTestGitRepo(t, dir)
 }
 
 func TestInitProject_Success(t *testing.T) {
@@ -280,14 +251,7 @@ func TestInitProject_SembleEnabledSkipsLookupWhenHardPreconditionsFail(t *testin
 	projectRoot := t.TempDir()
 	gitInit(t, projectRoot)
 
-	specDir := filepath.Join(projectRoot, "specs")
-	if err := os.MkdirAll(specDir, 0755); err != nil {
-		t.Fatalf("Failed to create specs dir: %v", err)
-	}
-	specFile := filepath.Join(specDir, "goal.md")
-	if err := os.WriteFile(specFile, []byte("# Test Goal\n"), 0644); err != nil {
-		t.Fatalf("Failed to write spec file: %v", err)
-	}
+	specFile := testhelpers.CreateSpecFile(t, projectRoot, "goal.md", "# Test Goal\n")
 	var diagnostics []string
 	restore := setInitProjectSembleHooksForTest(t,
 		func(string) (string, error) {
@@ -597,14 +561,7 @@ func TestInitProject_UncommittedSpecFailsBeforeArtifacts(t *testing.T) {
 	projectRoot := t.TempDir()
 	gitInit(t, projectRoot)
 
-	specDir := filepath.Join(projectRoot, "specs")
-	if err := os.MkdirAll(specDir, 0755); err != nil {
-		t.Fatalf("Failed to create specs dir: %v", err)
-	}
-	specFile := filepath.Join(specDir, "goal.md")
-	if err := os.WriteFile(specFile, []byte("# Test Goal\n"), 0644); err != nil {
-		t.Fatalf("Failed to write spec file: %v", err)
-	}
+	specFile := testhelpers.CreateSpecFile(t, projectRoot, "goal.md", "# Test Goal\n")
 
 	err := InitProject(projectRoot, InitProjectParams{
 		Description: "Test project",
@@ -626,24 +583,7 @@ func TestInitProject_MissingPreCommitConfigFailsBeforeArtifacts(t *testing.T) {
 	projectRoot := t.TempDir()
 	gitInit(t, projectRoot)
 
-	specDir := filepath.Join(projectRoot, "specs")
-	if err := os.MkdirAll(specDir, 0755); err != nil {
-		t.Fatalf("Failed to create specs dir: %v", err)
-	}
-	specFile := filepath.Join(specDir, "goal.md")
-	if err := os.WriteFile(specFile, []byte("# Test Goal\n"), 0644); err != nil {
-		t.Fatalf("Failed to write spec file: %v", err)
-	}
-	cmds := [][]string{
-		{"git", "-C", projectRoot, "add", "specs/goal.md"},
-		{"git", "-C", projectRoot, "commit", "-m", "Add goal spec"},
-	}
-	for _, args := range cmds {
-		cmd := exec.Command(args[0], args[1:]...)
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git command %v failed: %v\n%s", args, err, out)
-		}
-	}
+	specFile := testhelpers.CreateCommittedSpecFile(t, projectRoot, "goal.md", "# Test Goal\n")
 
 	err := InitProject(projectRoot, InitProjectParams{
 		Description: "Test project",

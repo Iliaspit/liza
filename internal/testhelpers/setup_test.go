@@ -63,6 +63,10 @@ func TestSetupTestGitRepo(t *testing.T) {
 	if string(output) != expectedHooksPath+"\n" {
 		t.Errorf("Expected core.hooksPath=%q, got %q", expectedHooksPath, string(output))
 	}
+	cmd = exec.Command("git", "-C", tmpDir, "commit", "--allow-empty", "-m", "Verify local hooks path")
+	if output, err = cmd.CombinedOutput(); err != nil {
+		t.Fatalf("empty commit should use local hooks path, not failing global hook: %v\n%s", err, output)
+	}
 
 	// Verify README was created
 	readmePath := filepath.Join(tmpDir, "README.md")
@@ -96,6 +100,74 @@ func TestSetupTestGitRepo(t *testing.T) {
 	}
 	if string(output) != "  integration\n" {
 		t.Errorf("integration branch not found, got %q", string(output))
+	}
+}
+
+func TestSetupTestGitRepoCopiesIsolatedFixture(t *testing.T) {
+	first := t.TempDir()
+	SetupTestGitRepo(t, first)
+
+	extraPath := filepath.Join(first, "extra.txt")
+	if err := os.WriteFile(extraPath, []byte("extra\n"), 0644); err != nil {
+		t.Fatalf("write extra file: %v", err)
+	}
+	cmd := exec.Command("git", "-C", first, "add", "extra.txt")
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git add extra.txt failed: %v\n%s", err, output)
+	}
+	cmd = exec.Command("git", "-C", first, "commit", "-m", "Add extra file")
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git commit extra.txt failed: %v\n%s", err, output)
+	}
+
+	second := t.TempDir()
+	SetupTestGitRepo(t, second)
+	if _, err := os.Stat(filepath.Join(second, "extra.txt")); !os.IsNotExist(err) {
+		t.Fatalf("second fixture extra.txt stat err = %v, want missing isolated repo", err)
+	}
+}
+
+func TestSetupTestGitRepoPreservesExistingNonGitContents(t *testing.T) {
+	tmpDir := t.TempDir()
+	lizaDir := filepath.Join(tmpDir, ".liza")
+	if err := os.MkdirAll(lizaDir, 0755); err != nil {
+		t.Fatalf("create .liza dir: %v", err)
+	}
+	statePath := filepath.Join(lizaDir, "state.yaml")
+	if err := os.WriteFile(statePath, []byte("version: 1\n"), 0644); err != nil {
+		t.Fatalf("write state file: %v", err)
+	}
+
+	SetupTestGitRepo(t, tmpDir)
+
+	if _, err := os.Stat(filepath.Join(tmpDir, ".git")); err != nil {
+		t.Fatalf(".git stat err = %v, want initialized repo", err)
+	}
+	if _, err := os.Stat(statePath); err != nil {
+		t.Fatalf(".liza state stat err = %v, want preserved non-git contents", err)
+	}
+}
+
+func TestSetupBasicTestGitRepoLeavesIntegrationBranchAbsent(t *testing.T) {
+	tmpDir := t.TempDir()
+	SetupBasicTestGitRepo(t, tmpDir)
+
+	cmd := exec.Command("git", "-C", tmpDir, "branch", "--list", "integration")
+	output, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("Failed to list branches: %v", err)
+	}
+	if string(output) != "" {
+		t.Fatalf("integration branch exists in basic fixture: %q", string(output))
+	}
+
+	cmd = exec.Command("git", "-C", tmpDir, "log", "--oneline")
+	output, err = cmd.Output()
+	if err != nil {
+		t.Fatalf("Failed to get git log: %v", err)
+	}
+	if len(output) == 0 {
+		t.Fatal("No commits found")
 	}
 }
 
