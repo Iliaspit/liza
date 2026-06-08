@@ -1194,6 +1194,14 @@ func TestValidateAnomalies_RequiredDetailsByType(t *testing.T) {
 			},
 			errContains: "stale_verdict anomaly",
 		},
+		{
+			name: "submit_verdict_failed missing required details fails",
+			anomaly: models.Anomaly{
+				Type:    "submit_verdict_failed",
+				Details: map[string]any{"verdict": "REJECTED"},
+			},
+			errContains: "submit_verdict_failed anomaly",
+		},
 	}
 
 	for _, tt := range tests {
@@ -1278,6 +1286,13 @@ func TestValidateAnomalies_RequestedTypeBranchesPassWithValidDetails(t *testing.
 			anomaly: models.Anomaly{
 				Type:    "stale_verdict",
 				Details: map[string]any{"attempted_verdict": "REJECTED", "current_status": "IMPLEMENTING_CODE"},
+			},
+		},
+		{
+			name: "submit_verdict_failed branch",
+			anomaly: models.Anomaly{
+				Type:    "submit_verdict_failed",
+				Details: map[string]any{"verdict": "REJECTED", "error": "failed to submit verdict: sentinel replaced"},
 			},
 		},
 	}

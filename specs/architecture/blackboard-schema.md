@@ -1003,6 +1003,7 @@ For detailed definition including edge cases (submodules, untracked files), see 
 | `system_ambiguity` | Any role | Liza protocol or role definition unclear, escalated to Orchestrator |
 | `provider_audit_degraded` | Supervisor | Provider ran but transcript/rollout persistence is suspect |
 | `agent_degraded` | Supervisor / CLI | Agent epoch cannot provide effective role capacity |
+| `submit_verdict_failed` | CLI | Submit-verdict failed after accepting a verdict attempt; best-effort when the blackboard remains writable |
 
 **Required Details Fields (validated by `liza validate`):**
 
@@ -1018,9 +1019,11 @@ For detailed definition including edge cases (submodules, untracked files), see 
 | `system_ambiguity` | `protocol_section`, `question` | Track Liza system gaps for human clarification |
 | `provider_audit_degraded` | `provider`, `agent_id`, `message` | Aggregate provider audit degradation across agents |
 | `agent_degraded` | `agent_id`, `role`, `reason`, `last_error` | Preserve claim-capacity degradation evidence |
+| `submit_verdict_failed` | `verdict`, `error` | Preserve failed verdict-write cause for operator diagnosis |
 
 Anomalies with malformed details will fail validation. This ensures circuit breaker pattern detection has reliable data.
 The agent should be very specific about the faced issue so this may be reproduced and investigated.
+`submit_verdict_failed` is a best-effort diagnostic for post-operation failures; if anomaly persistence fails, the CLI preserves the original verdict error and records the secondary anomaly-recording failure in the activity log when possible.
 
 State is not a transcript store. Raw provider events, command output, and full
 `item.completed` payloads belong under `.liza/agent-outputs/`; `state.yaml`
@@ -1098,7 +1101,7 @@ invariants:
   - "Task arch_ref must reference an existing file (checked via checkSpecFileExists against project root then integration branch)"
   - "Task output entry arch_ref must not contain worktree prefix (.worktrees/) — must be repo-relative"
   # Note: output entry arch_ref does NOT have file-existence validation (entries are set before merge)
-  - "Anomaly type must be one of: retry_loop, trade_off, spec_ambiguity, external_blocker, assumption_violated, scope_deviation, workaround, debt_created, spec_changed, hypothesis_exhaustion, spec_gap, review_budget_exhausted, review_exhaustion, reviewer_loop, stale_verdict, system_ambiguity, provider_audit_degraded, agent_degraded"
+  - "Anomaly type must be one of: retry_loop, trade_off, spec_ambiguity, external_blocker, assumption_violated, scope_deviation, workaround, debt_created, spec_changed, hypothesis_exhaustion, spec_gap, review_budget_exhausted, review_exhaustion, reviewer_loop, stale_verdict, system_ambiguity, provider_audit_degraded, agent_degraded, submit_verdict_failed"
   # Transition invariants (runtime-enforced, not statically validated)
   # These are enforced by agent behavior and atomic operations during state transitions.
   # `liza validate` validates static state invariants; these require history analysis.

@@ -1,8 +1,10 @@
 package ops
 
 import (
+	stderrors "errors"
 	"fmt"
 	"os"
+	"runtime/debug"
 	"strings"
 	"time"
 
@@ -13,6 +15,7 @@ import (
 	activitylog "github.com/liza-mas/liza/internal/log"
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/paths"
+	"github.com/liza-mas/liza/internal/secretmask"
 )
 
 // VerdictResult contains the outcome of a successful verdict submission.
@@ -114,7 +117,7 @@ func SubmitVerdict(projectRoot, taskID, verdict, reason, agentID, impact string)
 	bb := db.For(lp.StatePath())
 	defer func() {
 		if retErr != nil {
-			logSubmitVerdictError(lp.LogPath(), taskID, agentID, verdict, retErr)
+			recordSubmitVerdictFailure(bb, lp.LogPath(), taskID, agentID, verdict, retErr)
 		}
 	}()
 
@@ -383,11 +386,24 @@ func SubmitVerdict(projectRoot, taskID, verdict, reason, agentID, impact string)
 	}, nil
 }
 
-func logSubmitVerdictError(logPath, taskID, agentID, verdict string, err error) {
-	if logPath == "" || err == nil {
+func recordSubmitVerdictFailure(bb *db.Blackboard, logPath, taskID, agentID, verdict string, err error) {
+	errorText := boundedMaskedErrorString(err, 2048)
+	stack := boundedMaskedString(string(debug.Stack()), 4096)
+	anomalyErr := recordSubmitVerdictFailureAnomaly(bb, taskID, agentID, verdict, err, errorText)
+	logSubmitVerdictError(logPath, taskID, agentID, verdict, errorText, stack, boundedMaskedErrorString(anomalyErr, 1024))
+}
+
+func logSubmitVerdictError(logPath, taskID, agentID, verdict string, errorText string, stack string, anomalyErrText string) {
+	if logPath == "" || errorText == "" {
 		return
 	}
-	detail := fmt.Sprintf("verdict=%s error=%s", verdict, boundedErrorString(err, 2048))
+	detail := fmt.Sprintf("verdict=%s error=%s", verdict, errorText)
+	if anomalyErrText != "" {
+		detail += fmt.Sprintf(" anomaly_recording_error=%s", anomalyErrText)
+	}
+	if stack != "" {
+		detail += fmt.Sprintf(" stack=%s", stack)
+	}
 	_ = activitylog.New(logPath).Append(activitylog.Entry{
 		Agent:  agentIDOrSystem(agentID),
 		Action: "submit_verdict_failed",
@@ -396,11 +412,43 @@ func logSubmitVerdictError(logPath, taskID, agentID, verdict string, err error) 
 	})
 }
 
-func boundedErrorString(err error, limit int) string {
+func recordSubmitVerdictFailureAnomaly(bb *db.Blackboard, taskID, agentID, verdict string, err error, errorText string) error {
+	if bb == nil || err == nil || isSubmitVerdictPreconditionError(err) {
+		return nil
+	}
+
+	return bb.Modify(func(state *models.State) error {
+		state.Anomalies = append(state.Anomalies, models.Anomaly{
+			Timestamp: time.Now().UTC(),
+			Task:      taskID,
+			Reporter:  agentIDOrSystem(agentID),
+			Type:      "submit_verdict_failed",
+			Details: map[string]any{
+				"verdict": verdict,
+				"error":   errorText,
+			},
+		})
+		return nil
+	})
+}
+
+func isSubmitVerdictPreconditionError(err error) bool {
+	var precondition *PreconditionError
+	return stderrors.As(err, &precondition)
+}
+
+func boundedMaskedErrorString(err error, limit int) string {
 	if err == nil {
 		return ""
 	}
-	text := err.Error()
+	return boundedMaskedString(err.Error(), limit)
+}
+
+func boundedMaskedString(text string, limit int) string {
+	return boundedString(secretmask.New().MaskText(text), limit)
+}
+
+func boundedString(text string, limit int) string {
 	if limit <= 0 || len([]byte(text)) <= limit {
 		return text
 	}

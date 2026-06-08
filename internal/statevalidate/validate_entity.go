@@ -65,6 +65,10 @@ func validateAnomalies(state *models.State, projectRoot string, skipSpecFileChec
 			if anomaly.Details["attempted_verdict"] == nil || anomaly.Details["current_status"] == nil {
 				return fmt.Errorf("stale_verdict anomaly at index %d missing required details (attempted_verdict, current_status)", i)
 			}
+		case "submit_verdict_failed":
+			if anomaly.Details["verdict"] == nil || anomaly.Details["error"] == nil {
+				return fmt.Errorf("submit_verdict_failed anomaly at index %d missing required details (verdict, error)", i)
+			}
 		}
 	}
 	return nil

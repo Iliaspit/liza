@@ -2,11 +2,16 @@ package commands
 
 import (
 	"fmt"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/render"
+	"github.com/liza-mas/liza/internal/secretmask"
 )
+
+const anomalyDetailsSummaryLimitBytes = 200
 
 // inspectAnomaliesOptions contains options for anomaly inspection
 type inspectAnomaliesOptions struct {
@@ -121,7 +126,7 @@ func formatAnomaliesTable(anomalies []anomalyInfo) string {
 		return "No anomalies found"
 	}
 
-	headers := []string{"AGE", "TYPE", "TASK", "REPORTER", "TIMESTAMP"}
+	headers := []string{"AGE", "TYPE", "TASK", "REPORTER", "TIMESTAMP", "DETAILS"}
 	var rows [][]string
 
 	for _, anomaly := range anomalies {
@@ -134,8 +139,37 @@ func formatAnomaliesTable(anomalies []anomalyInfo) string {
 			anomaly.Task,
 			anomaly.Reporter,
 			timestampStr,
+			formatAnomalyDetailsSummary(anomaly.Details),
 		})
 	}
 
 	return render.FormatTable(headers, rows)
+}
+
+func formatAnomalyDetailsSummary(details map[string]any) string {
+	if len(details) == 0 {
+		return ""
+	}
+
+	keys := make([]string, 0, len(details))
+	for key := range details {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	parts := make([]string, 0, len(keys))
+	for _, key := range keys {
+		value, _ := render.FormatValue(details[key])
+		parts = append(parts, fmt.Sprintf("%s=%s", key, value))
+	}
+
+	return boundAnomalyDetailsSummary(secretmask.New().MaskText(strings.Join(parts, ", ")))
+}
+
+func boundAnomalyDetailsSummary(text string) string {
+	bytes := []byte(text)
+	if len(bytes) <= anomalyDetailsSummaryLimitBytes {
+		return text
+	}
+	return string(bytes[:anomalyDetailsSummaryLimitBytes]) + "... [truncated]"
 }

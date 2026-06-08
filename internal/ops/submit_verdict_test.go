@@ -1,6 +1,7 @@
 package ops
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1784,6 +1785,8 @@ func TestSubmitVerdict_RejectionAtReviewCap_Attempt1_TriggersNewAttempt(t *testi
 func TestSubmitVerdict_RejectionAtReviewCap_Attempt1_TransitionFailure_PropagatesError(t *testing.T) {
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	secret := "super-secret-submit-verdict-token"
+	t.Setenv("LIZA_TEST_TOKEN", secret)
 
 	now := time.Now().UTC()
 	coderID := "coder-1"
@@ -1819,7 +1822,7 @@ func TestSubmitVerdict_RejectionAtReviewCap_Attempt1_TransitionFailure_Propagate
 			_ = bb.Modify(func(s *models.State) error {
 				t := s.FindTask("task-1")
 				if t != nil {
-					interloper := "coder-interloper"
+					interloper := "coder-interloper-" + secret
 					t.AssignedTo = &interloper
 				}
 				return nil
@@ -1859,8 +1862,8 @@ func TestSubmitVerdict_RejectionAtReviewCap_Attempt1_TransitionFailure_Propagate
 	if failedTask.Attempt != 2 {
 		t.Errorf("Attempt = %d, want 2 (Phase 1 committed)", failedTask.Attempt)
 	}
-	if failedTask.AssignedTo == nil || *failedTask.AssignedTo != "coder-interloper" {
-		t.Errorf("AssignedTo = %v, want 'coder-interloper' (sentinel was replaced, Phase 3 aborted)", failedTask.AssignedTo)
+	if failedTask.AssignedTo == nil || *failedTask.AssignedTo != "coder-interloper-"+secret {
+		t.Errorf("AssignedTo = %v, want secret-bearing interloper (sentinel was replaced, Phase 3 aborted)", failedTask.AssignedTo)
 	}
 
 	entries, logErr := activitylog.New(paths.New(tmpDir).LogPath()).Read()
@@ -1876,6 +1879,83 @@ func TestSubmitVerdict_RejectionAtReviewCap_Attempt1_TransitionFailure_Propagate
 	if !strings.Contains(entries[0].Detail, "attempt transition failed") ||
 		!strings.Contains(entries[0].Detail, "sentinel replaced") {
 		t.Fatalf("log detail = %q, want underlying transition failure", entries[0].Detail)
+	}
+	if strings.Contains(entries[0].Detail, secret) {
+		t.Fatalf("log detail leaked secret: %q", entries[0].Detail)
+	}
+	if !strings.Contains(entries[0].Detail, "***") {
+		t.Fatalf("log detail = %q, want redacted secret marker", entries[0].Detail)
+	}
+	if !strings.Contains(entries[0].Detail, "stack=") ||
+		!strings.Contains(entries[0].Detail, "SubmitVerdict") {
+		t.Fatalf("log detail = %q, want bounded stack trace", entries[0].Detail)
+	}
+
+	readState, readErr = bb.Read()
+	if readErr != nil {
+		t.Fatalf("Failed to re-read state: %v", readErr)
+	}
+	if len(readState.Anomalies) != 1 {
+		t.Fatalf("anomaly count = %d, want 1", len(readState.Anomalies))
+	}
+	anomaly := readState.Anomalies[0]
+	if anomaly.Type != "submit_verdict_failed" || anomaly.Task != "task-1" || anomaly.Reporter != "code-reviewer-1" {
+		t.Fatalf("anomaly = %+v, want submit_verdict_failed for task-1 by code-reviewer-1", anomaly)
+	}
+	if anomaly.Details["verdict"] != "REJECTED" {
+		t.Fatalf("anomaly verdict = %v, want REJECTED", anomaly.Details["verdict"])
+	}
+	errorDetail, ok := anomaly.Details["error"].(string)
+	if !ok {
+		t.Fatalf("anomaly error detail = %T, want string", anomaly.Details["error"])
+	}
+	if !strings.Contains(errorDetail, "attempt transition failed") ||
+		!strings.Contains(errorDetail, "sentinel replaced") {
+		t.Fatalf("anomaly error = %q, want underlying transition failure", errorDetail)
+	}
+	if strings.Contains(errorDetail, secret) {
+		t.Fatalf("anomaly error leaked secret: %q", errorDetail)
+	}
+	if !strings.Contains(errorDetail, "***") {
+		t.Fatalf("anomaly error = %q, want redacted secret marker", errorDetail)
+	}
+}
+
+func TestRecordSubmitVerdictFailure_LogsAnomalyRecordingFailure(t *testing.T) {
+	tmpDir := t.TempDir()
+	_, _ = testhelpers.SetupLizaDir(t, tmpDir)
+	secret := "secondary-secret-submit-verdict-token"
+	t.Setenv("LIZA_SECONDARY_TOKEN", secret)
+
+	badStatePath := filepath.Join(tmpDir, "missing-dir", "state.yaml")
+	recordSubmitVerdictFailure(
+		db.New(badStatePath),
+		paths.New(tmpDir).LogPath(),
+		"task-1",
+		"code-reviewer-1",
+		"REJECTED",
+		fmt.Errorf("primary cause contains %s", secret),
+	)
+
+	entries, logErr := activitylog.New(paths.New(tmpDir).LogPath()).Read()
+	if logErr != nil {
+		t.Fatalf("failed to read activity log: %v", logErr)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("log entries = %d, want 1", len(entries))
+	}
+	detail := entries[0].Detail
+	if !strings.Contains(detail, "primary cause contains") {
+		t.Fatalf("log detail = %q, want primary cause preserved", detail)
+	}
+	if !strings.Contains(detail, "anomaly_recording_error=") {
+		t.Fatalf("log detail = %q, want secondary anomaly recording failure", detail)
+	}
+	if strings.Contains(detail, secret) {
+		t.Fatalf("log detail leaked secret: %q", detail)
+	}
+	if !strings.Contains(detail, "***") {
+		t.Fatalf("log detail = %q, want redacted secret marker", detail)
 	}
 }
 

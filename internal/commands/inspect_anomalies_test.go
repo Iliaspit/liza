@@ -215,6 +215,14 @@ func TestInspectAnomalies(t *testing.T) {
 							t.Errorf("expected output to contain retry_loop")
 						}
 					}
+					if tt.opts.Format == "" && tt.name == "list all anomalies" {
+						if !strings.Contains(output, "DETAILS") {
+							t.Errorf("expected default table output to contain DETAILS column, got:\n%s", output)
+						}
+						if !strings.Contains(output, "reason=test failures") {
+							t.Errorf("expected default table output to surface anomaly details, got:\n%s", output)
+						}
+					}
 				}
 			}
 		})
@@ -266,6 +274,31 @@ func TestBuildAnomalyInfo(t *testing.T) {
 	}
 	if attempts, ok := info.Details["attempts"].(int); !ok || attempts != 3 {
 		t.Errorf("expected Details[attempts]=3, got %v", info.Details["attempts"])
+	}
+}
+
+func TestFormatAnomaliesTable_MasksSecretsInDetails(t *testing.T) {
+	secret := "table-secret-submit-verdict-token"
+	t.Setenv("LIZA_TABLE_TOKEN", secret)
+
+	output := formatAnomaliesTable([]anomalyInfo{
+		{
+			Age:      "1m",
+			Task:     "task-1",
+			Reporter: "code-reviewer-1",
+			Type:     "submit_verdict_failed",
+			Details: map[string]any{
+				"error": "failed with " + secret,
+			},
+			Timestamp: time.Now().UTC(),
+		},
+	})
+
+	if strings.Contains(output, secret) {
+		t.Fatalf("table output leaked secret: %s", output)
+	}
+	if !strings.Contains(output, "error=failed with ***") {
+		t.Fatalf("table output = %s, want redacted details summary", output)
 	}
 }
 
