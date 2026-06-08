@@ -815,6 +815,218 @@ func TestSpinningTracker_ResetsOnProgress(t *testing.T) {
 	}
 }
 
+func TestDetectObservedRuntimeFailure_LizaJSONEnvelope(t *testing.T) {
+	output := `liza submit-verdict task-1 APPROVED --json
+{"ok":false,"result":null,"error":{"code":"internal","message":"internal error"}}`
+
+	failure := detectObservedRuntimeFailure(output)
+	if failure == nil {
+		t.Fatal("detectObservedRuntimeFailure() = nil, want failure")
+	}
+	if failure.Command != "submit-verdict" {
+		t.Fatalf("Command = %q, want submit-verdict", failure.Command)
+	}
+	if failure.Code != "internal" {
+		t.Fatalf("Code = %q, want internal", failure.Code)
+	}
+}
+
+func TestDetectObservedRuntimeFailure_LizaJSONEnvelopeWithoutCommandContext(t *testing.T) {
+	output := `{"ok":false,"result":null,"error":{"code":"internal","message":"internal error"}}`
+
+	failure := detectObservedRuntimeFailure(output)
+	if failure == nil {
+		t.Fatal("detectObservedRuntimeFailure() = nil, want failure")
+	}
+	if failure.Command != unknownLizaJSONCommand {
+		t.Fatalf("Command = %q, want %s", failure.Command, unknownLizaJSONCommand)
+	}
+	if failure.Code != "internal" {
+		t.Fatalf("Code = %q, want internal", failure.Code)
+	}
+}
+
+func TestDetectObservedRuntimeFailure_SubmitVerdictFailureEvidence(t *testing.T) {
+	output := "activity log action=submit_verdict_failed detail=verdict=APPROVED error=permission denied"
+
+	failure := detectObservedRuntimeFailure(output)
+	if failure == nil {
+		t.Fatal("detectObservedRuntimeFailure() = nil, want failure")
+	}
+	if failure.Command != "submit-verdict" {
+		t.Fatalf("Command = %q, want submit-verdict", failure.Command)
+	}
+	if failure.Code != "submit_verdict_failed" {
+		t.Fatalf("Code = %q, want submit_verdict_failed", failure.Code)
+	}
+}
+
+func TestDetectObservedRuntimeFailure_CodexCommandEventAggregatedOutput(t *testing.T) {
+	output := `{"type":"item.completed","item":{"type":"command_execution","command":"liza submit-verdict task-1 APPROVED --json","aggregated_output":"{\"ok\":false,\"result\":null,\"error\":{\"code\":\"internal\",\"message\":\"internal error\"}}\n","exit_code":1}}`
+
+	failure := detectObservedRuntimeFailure(output)
+	if failure == nil {
+		t.Fatal("detectObservedRuntimeFailure() = nil, want failure")
+	}
+	if failure.Command != "submit-verdict" {
+		t.Fatalf("Command = %q, want submit-verdict", failure.Command)
+	}
+	if failure.Code != "internal" {
+		t.Fatalf("Code = %q, want internal", failure.Code)
+	}
+}
+
+func TestRuntimeFailureTracker_ResetsOnDifferentFailure(t *testing.T) {
+	tracker := newRuntimeFailureTracker()
+
+	first := observedRuntimeFailure{Command: "submit-verdict", Code: "internal"}
+	second := observedRuntimeFailure{Command: "submit-verdict", Code: "permission_denied"}
+
+	if count := tracker.Track("task-1", first); count != 1 {
+		t.Fatalf("first Track() = %d, want 1", count)
+	}
+	if count := tracker.Track("task-1", first); count != 2 {
+		t.Fatalf("second Track() = %d, want 2", count)
+	}
+	if count := tracker.Track("task-1", second); count != 1 {
+		t.Fatalf("Track() after different failure = %d, want 1", count)
+	}
+}
+
+func TestObservedRuntimeFailureRetry_BlocksWithoutGenericSpin(t *testing.T) {
+	projectRoot := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, projectRoot)
+	statePath, _ := testhelpers.SetupLizaDir(t, projectRoot)
+	testhelpers.SetupPipelineConfig(t, projectRoot)
+
+	now := time.Now().UTC()
+	taskID := "task-runtime-failure"
+	agentID := "coder-1"
+	task := testhelpers.BuildTaskByStatus(taskID, models.TaskStatusImplementing, now)
+	task.AssignedTo = &agentID
+
+	state := testhelpers.CreateValidState()
+	state.Config.SpinningRestartThreshold = 2
+	state.Tasks = []models.Task{task}
+	state.Agents[agentID] = models.Agent{Role: models.RoleCoder, Status: models.AgentStatusWorking, CurrentTask: &taskID}
+	bb := testhelpers.WriteInitialState(t, statePath, state)
+
+	config := SupervisorConfig{
+		AgentID:     agentID,
+		Role:        models.RoleCoder,
+		ProjectRoot: projectRoot,
+		StatePath:   statePath,
+		CLIName:     "codex",
+	}
+	spinTracker := newSpinningTracker()
+	runtimeTracker := newRuntimeFailureTracker()
+	failure := observedRuntimeFailure{Command: "submit-verdict", Code: "internal"}
+	signature := "same-task-state"
+
+	for i := 1; i <= state.Config.SpinningRestartThreshold; i++ {
+		if count := spinTracker.Track(taskID, signature); count != 1 {
+			t.Fatalf("spin count before runtime failure %d = %d, want 1", i, count)
+		}
+		if blocked := handleObservedRuntimeFailureRetry(bb, config, taskID, state.Config, failure, runtimeTracker, spinTracker); blocked {
+			t.Fatalf("runtime failure attempt %d blocked, want below threshold", i)
+		}
+	}
+
+	if count := spinTracker.Track(taskID, signature); count != 1 {
+		t.Fatalf("spin count before blocking runtime failure = %d, want 1", count)
+	}
+	if blocked := handleObservedRuntimeFailureRetry(bb, config, taskID, state.Config, failure, runtimeTracker, spinTracker); !blocked {
+		t.Fatal("runtime failure over threshold did not block task")
+	}
+
+	updated, err := bb.Read()
+	if err != nil {
+		t.Fatalf("bb.Read: %v", err)
+	}
+	updatedTask := updated.FindTask(taskID)
+	if updatedTask == nil {
+		t.Fatalf("task %q not found", taskID)
+	}
+	if updatedTask.Status != models.TaskStatusBlocked {
+		t.Fatalf("task status = %s, want BLOCKED", updatedTask.Status)
+	}
+	if updatedTask.BlockedReason == nil {
+		t.Fatal("BlockedReason = nil, want tool-failure reason")
+	}
+	if !strings.Contains(*updatedTask.BlockedReason, "tool failure retry loop detected") {
+		t.Fatalf("BlockedReason = %q, want tool-failure retry loop", *updatedTask.BlockedReason)
+	}
+	if strings.Contains(*updatedTask.BlockedReason, "spinning detected") {
+		t.Fatalf("BlockedReason = %q, must not report generic spinning", *updatedTask.BlockedReason)
+	}
+}
+
+func TestRunSupervisor_CodexCommandRuntimeFailureBlocksWithoutGenericSpin(t *testing.T) {
+	projectRoot := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, projectRoot)
+	statePath, _ := testhelpers.SetupLizaDir(t, projectRoot)
+	testhelpers.SetupPipelineConfig(t, projectRoot)
+
+	now := time.Now().UTC()
+	taskID := "task-codex-runtime-failure"
+	state := testhelpers.CreateValidState()
+	state.Config.CoderPollInterval = 1
+	state.Config.DoerMaxWait = 1
+	state.Config.LeaseDuration = 300
+	state.Config.SpinningRestartThreshold = 1
+	state.Tasks = []models.Task{testhelpers.BuildTaskByStatus(taskID, models.TaskStatusReady, now)}
+	bb := testhelpers.WriteInitialState(t, statePath, state)
+
+	codexOutput := `{"type":"item.completed","item":{"type":"command_execution","command":"liza submit-verdict task-codex-runtime-failure APPROVED --json","aggregated_output":"{\"ok\":false,\"result\":null,\"error\":{\"code\":\"internal\",\"message\":\"internal error\"}}\n","exit_code":1}}`
+	mock := &MockCLIExecutor{ExitCode: 0, Output: codexOutput}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	err := RunSupervisor(ctx, SupervisorConfig{
+		AgentID:          "coder-1",
+		Role:             models.RoleCoder,
+		ProjectRoot:      projectRoot,
+		StatePath:        statePath,
+		LogPath:          filepath.Join(projectRoot, ".liza", "log.yaml"),
+		SpecsDir:         filepath.Join(projectRoot, "specs"),
+		CLIName:          "codex",
+		Executor:         mock,
+		ExecutionTimeout: 10 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("RunSupervisor() error = %v", err)
+	}
+
+	if calls := mock.GetCalls(); len(calls) != 2 {
+		t.Fatalf("Execute calls = %d, want 2", len(calls))
+	}
+
+	updated, err := bb.Read()
+	if err != nil {
+		t.Fatalf("bb.Read: %v", err)
+	}
+	task := updated.FindTask(taskID)
+	if task == nil {
+		t.Fatalf("task %q not found", taskID)
+	}
+	if task.Status != models.TaskStatusBlocked {
+		t.Fatalf("task status = %s, want BLOCKED", task.Status)
+	}
+	if task.BlockedReason == nil {
+		t.Fatal("BlockedReason = nil, want tool-failure reason")
+	}
+	if !strings.Contains(*task.BlockedReason, "tool failure retry loop detected") {
+		t.Fatalf("BlockedReason = %q, want tool-failure retry loop", *task.BlockedReason)
+	}
+	if !strings.Contains(*task.BlockedReason, "command=submit-verdict") || !strings.Contains(*task.BlockedReason, "code=internal") {
+		t.Fatalf("BlockedReason = %q, want command/code attribution", *task.BlockedReason)
+	}
+	if strings.Contains(*task.BlockedReason, "spinning detected") {
+		t.Fatalf("BlockedReason = %q, must not report generic spinning", *task.BlockedReason)
+	}
+}
+
 func TestRunAgent_ExtractedOps_Integration(t *testing.T) {
 	tmpDir := t.TempDir()
 	statePath, _ := testhelpers.SetupLizaDir(t, tmpDir)

@@ -406,6 +406,187 @@ func (t *spinningTracker) reset(taskID string) {
 	delete(t.byTask, taskID)
 }
 
+const unknownLizaJSONCommand = "liza-json-envelope"
+
+type observedRuntimeFailure struct {
+	Command string
+	Code    string
+}
+
+func (f observedRuntimeFailure) key() string {
+	return f.Command + "\x00" + f.Code
+}
+
+type runtimeFailureState struct {
+	Count int
+	Key   string
+}
+
+type runtimeFailureTracker struct {
+	byTask map[string]runtimeFailureState
+}
+
+func newRuntimeFailureTracker() *runtimeFailureTracker {
+	return &runtimeFailureTracker{byTask: make(map[string]runtimeFailureState)}
+}
+
+func (t *runtimeFailureTracker) Track(taskID string, failure observedRuntimeFailure) int {
+	prev := t.byTask[taskID]
+	key := failure.key()
+	if prev.Key != "" && prev.Key != key {
+		prev.Count = 0
+	}
+	prev.Count++
+	prev.Key = key
+	t.byTask[taskID] = prev
+	return prev.Count
+}
+
+func (t *runtimeFailureTracker) reset(taskID string) {
+	delete(t.byTask, taskID)
+}
+
+func detectObservedRuntimeFailure(output string) *observedRuntimeFailure {
+	if strings.Contains(output, "submit_verdict_failed") {
+		return &observedRuntimeFailure{Command: "submit-verdict", Code: "submit_verdict_failed"}
+	}
+
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "{") {
+			continue
+		}
+		if failure := detectFailedCommandEvent(line); failure != nil {
+			return failure
+		}
+		env, ok := parseFailedJSONEnvelope(line)
+		if !ok {
+			continue
+		}
+		return &observedRuntimeFailure{
+			Command: detectLizaCommandContext(output),
+			Code:    env.Error.Code,
+		}
+	}
+	return nil
+}
+
+type runtimeFailureEnvelope struct {
+	OK    *bool `json:"ok"`
+	Error *struct {
+		Code string `json:"code"`
+	} `json:"error"`
+}
+
+func parseFailedJSONEnvelope(line string) (runtimeFailureEnvelope, bool) {
+	var env runtimeFailureEnvelope
+	if err := json.Unmarshal([]byte(line), &env); err != nil {
+		return runtimeFailureEnvelope{}, false
+	}
+	if env.OK == nil || *env.OK || env.Error == nil || env.Error.Code == "" {
+		return runtimeFailureEnvelope{}, false
+	}
+	return env, true
+}
+
+type commandEventEnvelope struct {
+	Item *struct {
+		Command          string `json:"command"`
+		AggregatedOutput string `json:"aggregated_output"`
+		ExitCode         *int   `json:"exit_code"`
+	} `json:"item"`
+}
+
+func detectFailedCommandEvent(line string) *observedRuntimeFailure {
+	var event commandEventEnvelope
+	if err := json.Unmarshal([]byte(line), &event); err != nil || event.Item == nil {
+		return nil
+	}
+
+	command := detectLizaCommandContext(event.Item.Command)
+	output := event.Item.AggregatedOutput
+	if strings.Contains(output, "submit_verdict_failed") {
+		return &observedRuntimeFailure{Command: "submit-verdict", Code: "submit_verdict_failed"}
+	}
+	for _, outputLine := range strings.Split(output, "\n") {
+		outputLine = strings.TrimSpace(outputLine)
+		if !strings.HasPrefix(outputLine, "{") {
+			continue
+		}
+		env, ok := parseFailedJSONEnvelope(outputLine)
+		if !ok {
+			continue
+		}
+		return &observedRuntimeFailure{Command: command, Code: env.Error.Code}
+	}
+	if event.Item.ExitCode != nil && *event.Item.ExitCode != 0 && command != unknownLizaJSONCommand {
+		return &observedRuntimeFailure{Command: command, Code: fmt.Sprintf("exit_%d", *event.Item.ExitCode)}
+	}
+	return nil
+}
+
+func detectLizaCommandContext(output string) string {
+	for _, command := range []string{
+		"submit-verdict",
+		"submit-review",
+		"await-verdict",
+		"await-resubmission",
+		"mark-blocked",
+		"set-task-output",
+		"handoff",
+	} {
+		if strings.Contains(output, command) {
+			return command
+		}
+	}
+	return unknownLizaJSONCommand
+}
+
+func handleObservedRuntimeFailureRetry(
+	bb *db.Blackboard,
+	config SupervisorConfig,
+	taskID string,
+	runtimeConfig models.Config,
+	failure observedRuntimeFailure,
+	runtimeTracker *runtimeFailureTracker,
+	spinTracker *spinningTracker,
+) bool {
+	if taskID == "" {
+		return false
+	}
+
+	spinTracker.reset(taskID)
+
+	count := runtimeTracker.Track(taskID, failure)
+	threshold := effectiveSpinningRestartThreshold(runtimeConfig)
+	if count <= threshold {
+		GetLogger().Warn("Observed structured CLI/runtime failure; suppressing no-progress spin count",
+			"task_id", taskID,
+			"agent_id", config.AgentID,
+			"command", failure.Command,
+			"code", failure.Code,
+			"count", count,
+			"threshold", threshold)
+		return false
+	}
+
+	reason := fmt.Sprintf("tool failure retry loop detected: %d consecutive observed CLI/runtime failures for task %s without progress (threshold=%d, command=%s, code=%s)",
+		count, taskID, threshold, failure.Command, failure.Code)
+	GetLogger().Error("Tool failure retry loop detected, blocking task",
+		"task_id", taskID,
+		"agent_id", config.AgentID,
+		"command", failure.Command,
+		"code", failure.Code,
+		"count", count)
+	if alertErr := LogAlert(config.ProjectRoot, "🚨", "TOOL FAILURE RETRY LOOP", reason); alertErr != nil {
+		GetLogger().Warn("Failed to write tool failure retry alert", "error", alertErr)
+	}
+	blockTaskFromSupervisor(bb, config.ProjectRoot, taskID, config.AgentID, reason)
+	runtimeTracker.reset(taskID)
+	spinTracker.reset(taskID)
+	return true
+}
+
 // --- Effective config helpers ---
 
 func effectiveCrashRestartThreshold(cfg models.Config) int {
@@ -862,6 +1043,7 @@ func RunSupervisor(ctx context.Context, config SupervisorConfig) error {
 	exit42Tracker := newExit42RestartTracker()
 	crashTracker := newCrashRestartTracker()
 	spinTracker := newSpinningTracker()
+	runtimeFailureTracker := newRuntimeFailureTracker()
 
 	for {
 		if err := checkHeartbeat(); err != nil {
@@ -1033,6 +1215,18 @@ func RunSupervisor(ctx context.Context, config SupervisorConfig) error {
 			return fmt.Errorf("agent execution error: %w", err)
 		}
 
+		if exitCode == 0 && effectiveTask != "" {
+			if failure := detectObservedRuntimeFailure(currentOutput); failure != nil {
+				handleObservedRuntimeFailureRetry(bb, config, effectiveTask, stateBefore.Config, *failure, runtimeFailureTracker, spinTracker)
+				if err := resetAgentAfterExit(bb, config.AgentID, config.ProjectRoot); err != nil {
+					GetLogger().Warn("Failed to reset agent status after runtime failure", "error", err, "agent_id", config.AgentID)
+				}
+				exit42Tracker.reset(taskID)
+				crashTracker.reset(effectiveTask)
+				continue
+			}
+		}
+
 		// Reset runtime status after CLI exits, but preserve explicit command-driven
 		// states such as WAITING and HANDOFF.
 		if err := resetAgentAfterExit(bb, config.AgentID, config.ProjectRoot); err != nil {
@@ -1044,6 +1238,10 @@ func RunSupervisor(ctx context.Context, config SupervisorConfig) error {
 		// Handle exit code
 		switch exitCode {
 		case 0:
+			if effectiveTask != "" {
+				runtimeFailureTracker.reset(effectiveTask)
+			}
+
 			GetLogger().Info("Agent completed, checking for more work")
 			if err := strategy.PostExecution(bb, config, taskID, claimedTaskID, stateBefore); err != nil {
 				GetLogger().Warn("Post-execution error", "error", err)
@@ -1055,6 +1253,7 @@ func RunSupervisor(ctx context.Context, config SupervisorConfig) error {
 			if restartTaskID == "" {
 				restartTaskID = taskID
 			}
+			runtimeFailureTracker.reset(restartTaskID)
 
 			outcome, trackErr := exit42Tracker.Handle(bb, config.ProjectRoot, config.Role, restartTaskID, config.AgentID)
 			if trackErr != nil {
@@ -1084,6 +1283,7 @@ func RunSupervisor(ctx context.Context, config SupervisorConfig) error {
 			}
 		default:
 			exit42Tracker.reset(taskID)
+			runtimeFailureTracker.reset(effectiveTask)
 
 			// Check if crash was caused by a provider-scoped failure.
 			if handleClassifiedProviderCrash(config, currentOutput) {
