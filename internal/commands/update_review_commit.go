@@ -15,7 +15,11 @@ func UpdateReviewCommitCommand(projectRoot, taskID, changedBy string) error {
 	}
 
 	fmt.Printf("Updated review boundary for %s\n", result.TaskID)
-	fmt.Printf("  review_commit old: %s\n", result.OldReviewCommit)
+	oldReviewCommit := "<nil>"
+	if result.OldReviewCommit != nil {
+		oldReviewCommit = *result.OldReviewCommit
+	}
+	fmt.Printf("  review_commit old: %s\n", oldReviewCommit)
 	fmt.Printf("  review_commit new: %s\n", result.NewReviewCommit)
 	oldBase := "<nil>"
 	if result.OldBaseCommit != nil {

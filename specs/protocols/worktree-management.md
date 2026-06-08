@@ -169,6 +169,8 @@ For submitted/reviewing tasks with a worktree, this boundary must stay coherent:
 
 If an external rebase or operator repair changes the worktree after submission, run `liza update-review-commit <task-id>`. The command updates both `review_commit` and `base_commit` and releases any active reviewer claim so review restarts from a coherent boundary.
 
+`update-review-commit` is also the narrow degraded-state repair for a submitted/reviewing task whose `review_commit` is missing while its task worktree still exists. The input state violates the submitted/reviewing boundary invariant; the command repairs it by setting `review_commit` from worktree HEAD, setting `base_commit` from the effective merge-base, and recording the missing old boundary in audit history.
+
 ---
 
 ## Integration Protocol

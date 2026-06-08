@@ -51,8 +51,8 @@ func TestUpdateReviewCommit_HappyPath_Submitted(t *testing.T) {
 		t.Fatalf("Expected success, got: %v", err)
 	}
 
-	if result.OldReviewCommit != staleCommit {
-		t.Errorf("OldReviewCommit = %s, want %s", result.OldReviewCommit, staleCommit)
+	if result.OldReviewCommit == nil || *result.OldReviewCommit != staleCommit {
+		t.Errorf("OldReviewCommit = %v, want %s", result.OldReviewCommit, staleCommit)
 	}
 	if result.NewReviewCommit != wtHEAD {
 		t.Errorf("NewReviewCommit = %s, want %s", result.NewReviewCommit, wtHEAD)
@@ -174,6 +174,9 @@ func TestUpdateReviewCommit_ReleasesReviewer(t *testing.T) {
 	if !result.ReviewerReleased {
 		t.Error("ReviewerReleased should be true")
 	}
+	if result.OldReviewCommit == nil || *result.OldReviewCommit != staleCommit {
+		t.Errorf("OldReviewCommit = %v, want %s", result.OldReviewCommit, staleCommit)
+	}
 
 	// Verify state: task back to submitted, reviewer released
 	bb := db.New(stateFile)
@@ -199,16 +202,89 @@ func TestUpdateReviewCommit_ReleasesReviewer(t *testing.T) {
 	}
 }
 
+func TestUpdateReviewCommit_SetsMissingReviewCommitAndReleasesReviewer(t *testing.T) {
+	tmpDir := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, tmpDir)
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+
+	g := git.New(tmpDir)
+	_, err := g.CreateWorktree("task-1", "integration")
+	if err != nil {
+		t.Fatalf("Failed to create worktree: %v", err)
+	}
+	wtPath := g.GetWorktreePath("task-1")
+
+	implFile := filepath.Join(wtPath, "feature.go")
+	if err := os.WriteFile(implFile, []byte("package feature\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	testhelpers.MustGit(t, wtPath, "add", "feature.go")
+	testhelpers.MustGit(t, wtPath, "commit", "-m", "Add feature")
+	wtHEAD := testhelpers.MustGit(t, wtPath, "rev-parse", "HEAD")
+
+	now := time.Now().UTC()
+	state := testhelpers.CreateValidState()
+	task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusReviewing, now)
+	task.ReviewCommit = nil
+	worktreeRel := g.GetWorktreeRelPath("task-1")
+	task.Worktree = &worktreeRel
+	reviewerID := "code-reviewer-1"
+	task.ReviewingBy = &reviewerID
+	leaseExpiry := now.Add(30 * time.Minute)
+	task.ReviewLeaseExpires = &leaseExpiry
+	state.Tasks = []models.Task{task}
+	taskIDRef := "task-1"
+	state.Agents["code-reviewer-1"] = models.Agent{
+		Role:        "code-reviewer",
+		Status:      models.AgentStatusReviewing,
+		CurrentTask: &taskIDRef,
+	}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	result, err := UpdateReviewCommit(tmpDir, "task-1", "human")
+	if err != nil {
+		t.Fatalf("Expected success, got: %v", err)
+	}
+	if !result.ReviewerReleased {
+		t.Error("ReviewerReleased should be true")
+	}
+	if result.OldReviewCommit != nil {
+		t.Errorf("OldReviewCommit = %v, want nil", *result.OldReviewCommit)
+	}
+
+	readState, err := db.New(stateFile).Read()
+	if err != nil {
+		t.Fatalf("Failed to read state: %v", err)
+	}
+	readTask := readState.FindTask("task-1")
+	if readTask.Status != models.TaskStatusReadyForReview {
+		t.Errorf("Status = %s, want %s (reset to submitted)", readTask.Status, models.TaskStatusReadyForReview)
+	}
+	if readTask.ReviewCommit == nil || *readTask.ReviewCommit != wtHEAD {
+		t.Fatalf("ReviewCommit = %v, want %s", readTask.ReviewCommit, wtHEAD)
+	}
+	if readTask.ReviewingBy != nil {
+		t.Errorf("ReviewingBy = %v, want nil", *readTask.ReviewingBy)
+	}
+	if readTask.ReviewLeaseExpires != nil {
+		t.Error("ReviewLeaseExpires should be nil")
+	}
+
+	agent := readState.Agents["code-reviewer-1"]
+	if agent.CurrentTask != nil {
+		t.Errorf("Agent CurrentTask = %v, want nil", *agent.CurrentTask)
+	}
+}
+
 func TestUpdateReviewCommit_RejectsWrongStatus(t *testing.T) {
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
-	commit := "abc123"
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()
 	task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusImplementing, now)
-	task.ReviewCommit = &commit
+	task.ReviewCommit = nil
 	state.Tasks = []models.Task{task}
 	testhelpers.WriteInitialState(t, stateFile, state)
 
@@ -347,23 +423,77 @@ func TestUpdateReviewCommit_SetsMissingBaseCommit(t *testing.T) {
 	}
 }
 
-func TestUpdateReviewCommit_RejectsNoReviewCommit(t *testing.T) {
+func TestUpdateReviewCommit_SetsMissingReviewCommit(t *testing.T) {
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+
+	g := git.New(tmpDir)
+	_, err := g.CreateWorktree("task-1", "integration")
+	if err != nil {
+		t.Fatalf("Failed to create worktree: %v", err)
+	}
+	wtPath := g.GetWorktreePath("task-1")
+	if err := os.WriteFile(filepath.Join(wtPath, "feature.go"), []byte("package feature\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	testhelpers.MustGit(t, wtPath, "add", "feature.go")
+	testhelpers.MustGit(t, wtPath, "commit", "-m", "Add feature")
+	wtHEAD := testhelpers.MustGit(t, wtPath, "rev-parse", "HEAD")
+	effectiveBase := testhelpers.MustGit(t, tmpDir, "merge-base", wtHEAD, "integration")
 
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()
 	task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusReadyForReview, now)
 	task.ReviewCommit = nil
+	worktreeRel := g.GetWorktreeRelPath("task-1")
+	task.Worktree = &worktreeRel
 	state.Tasks = []models.Task{task}
 	testhelpers.WriteInitialState(t, stateFile, state)
 
-	_, err := UpdateReviewCommit(tmpDir, "task-1", "human")
-	if err == nil {
-		t.Fatal("Expected error for missing review_commit")
+	result, err := UpdateReviewCommit(tmpDir, "task-1", "human")
+	if err != nil {
+		t.Fatalf("Expected success, got: %v", err)
 	}
-	if !strings.Contains(err.Error(), "no review_commit") {
-		t.Errorf("Error = %q, want to mention 'no review_commit'", err.Error())
+	if result.OldReviewCommit != nil {
+		t.Errorf("OldReviewCommit = %v, want nil", *result.OldReviewCommit)
+	}
+	if result.NewReviewCommit != wtHEAD {
+		t.Errorf("NewReviewCommit = %s, want %s", result.NewReviewCommit, wtHEAD)
+	}
+	if result.NewBaseCommit != effectiveBase {
+		t.Errorf("NewBaseCommit = %s, want %s", result.NewBaseCommit, effectiveBase)
+	}
+
+	readState, err := db.New(stateFile).Read()
+	if err != nil {
+		t.Fatalf("Failed to read state: %v", err)
+	}
+	readTask := readState.FindTask("task-1")
+	if readTask.ReviewCommit == nil || *readTask.ReviewCommit != wtHEAD {
+		t.Fatalf("ReviewCommit = %v, want %s", readTask.ReviewCommit, wtHEAD)
+	}
+	if readTask.BaseCommit == nil || *readTask.BaseCommit != effectiveBase {
+		t.Fatalf("BaseCommit = %v, want %s", readTask.BaseCommit, effectiveBase)
+	}
+
+	found := false
+	for _, entry := range readTask.History {
+		if entry.Event == models.TaskEventReviewCommitUpdated {
+			found = true
+			if entry.Reason == nil || !strings.Contains(*entry.Reason, "<nil>") {
+				t.Errorf("history reason should reference missing old review_commit, got %v", entry.Reason)
+			}
+			if got := entry.Extra["old_review_commit"]; got != nil {
+				t.Errorf("old_review_commit extra = %v, want nil", got)
+			}
+			if entry.Extra["new_review_commit"] != wtHEAD {
+				t.Errorf("new_review_commit extra = %v, want %s", entry.Extra["new_review_commit"], wtHEAD)
+			}
+			break
+		}
+	}
+	if !found {
+		t.Error("Expected review_commit_updated history entry")
 	}
 }

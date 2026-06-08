@@ -600,6 +600,81 @@ func TestMutationCommandWiring(t *testing.T) {
 		}
 	})
 
+	t.Run("update-review-commit repairs missing review commit with JSON audit", func(t *testing.T) {
+		projectRoot, statePath := setupMutationTestProject(t, func(state *models.State) {
+			now := time.Now().UTC()
+			state.Tasks = []models.Task{
+				testhelpers.BuildTaskByStatus("task-urc-nil", models.TaskStatusReadyForReview, now),
+			}
+		})
+
+		g := git.New(projectRoot)
+		_, err := g.CreateWorktree("task-urc-nil", "integration")
+		if err != nil {
+			t.Fatalf("Failed to create worktree: %v", err)
+		}
+		wtPath := g.GetWorktreePath("task-urc-nil")
+		implFile := filepath.Join(wtPath, "feature.go")
+		if err := os.WriteFile(implFile, []byte("package feature\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		testhelpers.MustGit(t, wtPath, "add", "feature.go")
+		testhelpers.MustGit(t, wtPath, "commit", "-m", "repair nil boundary")
+		wtHEAD := testhelpers.MustGit(t, wtPath, "rev-parse", "HEAD")
+
+		bb := db.For(statePath)
+		if err := bb.Modify(func(s *models.State) error {
+			task := s.FindTask("task-urc-nil")
+			task.ReviewCommit = nil
+			task.BaseCommit = nil
+			worktreeRel := g.GetWorktreeRelPath("task-urc-nil")
+			task.Worktree = &worktreeRel
+			return nil
+		}); err != nil {
+			t.Fatalf("Failed to update state: %v", err)
+		}
+
+		stdout, err := executeRootCommandCapture(t, projectRoot, "update-review-commit", "task-urc-nil", "--changed-by", "operator-1", "--json")
+		if err != nil {
+			t.Fatalf("update-review-commit execute failed: %v\nstdout:\n%s", err, stdout)
+		}
+
+		env := parseEnvelope(t, stdout)
+		if env["ok"] != true {
+			t.Fatalf("expected ok=true, got %v\nstdout:\n%s", env["ok"], stdout)
+		}
+		data, ok := env["result"].(map[string]any)
+		if !ok {
+			t.Fatalf("result = %T, want object: %v", env["result"], env["result"])
+		}
+		if got := data["old_review_commit"]; got != nil {
+			t.Fatalf("old_review_commit = %v, want nil", got)
+		}
+		if data["new_review_commit"] != wtHEAD {
+			t.Fatalf("new_review_commit = %v, want %s", data["new_review_commit"], wtHEAD)
+		}
+
+		state := readState(t, statePath)
+		task := mustFindTask(t, state, "task-urc-nil")
+		if task.ReviewCommit == nil || *task.ReviewCommit != wtHEAD {
+			t.Fatalf("review_commit = %v, want %s", task.ReviewCommit, wtHEAD)
+		}
+
+		found := false
+		for _, entry := range task.History {
+			if entry.Event == models.TaskEventReviewCommitUpdated {
+				found = true
+				if got := entry.Extra["old_review_commit"]; got != nil {
+					t.Fatalf("history old_review_commit = %v, want nil", got)
+				}
+				break
+			}
+		}
+		if !found {
+			t.Fatal("expected review_commit_updated history entry")
+		}
+	})
+
 	t.Run("release-claim uses --changed-by over env fallback", func(t *testing.T) {
 		projectRoot, statePath := setupMutationTestProject(t, func(state *models.State) {
 			now := time.Now().UTC()

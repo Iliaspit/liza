@@ -16,7 +16,7 @@ import (
 // UpdateReviewCommitResult contains the outcome of updating a task's review commit.
 type UpdateReviewCommitResult struct {
 	TaskID           string  `json:"task_id"`
-	OldReviewCommit  string  `json:"old_review_commit"`
+	OldReviewCommit  *string `json:"old_review_commit"`
 	NewReviewCommit  string  `json:"new_review_commit"`
 	OldBaseCommit    *string `json:"old_base_commit"`
 	NewBaseCommit    string  `json:"new_base_commit"`
@@ -44,10 +44,6 @@ func UpdateReviewCommit(projectRoot, taskID, changedBy string) (*UpdateReviewCom
 	state, task, err := readTaskState(bb, taskID)
 	if err != nil {
 		return nil, err
-	}
-
-	if task.ReviewCommit == nil {
-		return nil, &PreconditionError{Reason: fmt.Sprintf("task %s has no review_commit", taskID)}
 	}
 
 	resolver, _, resolverErr := loadResolver(projectRoot)
@@ -103,9 +99,9 @@ func UpdateReviewCommit(projectRoot, taskID, changedBy string) (*UpdateReviewCom
 		return nil, fmt.Errorf("failed to resolve effective review base: %w", err)
 	}
 
-	oldReviewCommit := *task.ReviewCommit
+	oldReviewCommit := cloneStringPtr(task.ReviewCommit)
 	oldBaseCommit := cloneStringPtr(task.BaseCommit)
-	if oldReviewCommit == wtHEAD && oldBaseCommit != nil && *oldBaseCommit == effectiveBase {
+	if oldReviewCommit != nil && *oldReviewCommit == wtHEAD && oldBaseCommit != nil && *oldBaseCommit == effectiveBase {
 		return nil, &PreconditionError{Reason: fmt.Sprintf("review boundary already matches worktree HEAD %s and base %s — no update needed", wtHEAD, effectiveBase)}
 	}
 
@@ -152,13 +148,17 @@ func UpdateReviewCommit(projectRoot, taskID, changedBy string) (*UpdateReviewCom
 			log.Printf("update-review-commit %s: released reviewer %s", taskID, releasedAgent)
 		}
 
+		oldReviewForReason := "<nil>"
+		if oldReviewCommit != nil {
+			oldReviewForReason = *oldReviewCommit
+		}
 		oldBaseForReason := "<nil>"
 		if oldBaseCommit != nil {
 			oldBaseForReason = *oldBaseCommit
 		}
 		updateReason := fmt.Sprintf(
-			"review boundary updated: review_commit %s → %s, base_commit %s → %s (worktree rebased after submission)",
-			oldReviewCommit,
+			"review boundary repaired from worktree HEAD: review_commit %s → %s, base_commit %s → %s",
+			oldReviewForReason,
 			wtHEAD,
 			oldBaseForReason,
 			effectiveBase,

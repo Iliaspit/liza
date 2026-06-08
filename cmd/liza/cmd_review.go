@@ -417,16 +417,17 @@ var updateReviewCommitCmd = &cobra.Command{
 	Short: "Update review boundary to current worktree HEAD after external rebase",
 	Long: `Update a task's review boundary to the current worktree HEAD.
 
-Use this after manually rebasing a worktree that is already submitted for review.
-This is an explicit resubmission boundary: if a reviewer has claimed the task,
-their claim is released and the task returns to submitted state for a fresh review.
-The command updates review_commit to worktree HEAD and base_commit to the
-effective merge-base between worktree HEAD and the configured integration branch.
+	Use this after manually rebasing a worktree that is already submitted for review,
+	or to repair a submitted task whose review_commit is missing while its worktree exists.
+	This is an explicit resubmission boundary: if a reviewer has claimed the task,
+	their claim is released and the task returns to submitted state for a fresh review.
+	The command updates review_commit to worktree HEAD and base_commit to the
+	effective merge-base between worktree HEAD and the configured integration branch.
 
 Requirements:
-  - Task must be in a submitted or reviewing state
-  - Worktree must exist on disk
-  - review_commit or base_commit must differ from the current effective review boundary`,
+	  - Task must be in a submitted or reviewing state
+	  - Worktree must exist on disk
+	  - review_commit may be missing, or review_commit/base_commit must differ from the current effective review boundary`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) (retErr error) {
 		if isJSON(cmd) {
