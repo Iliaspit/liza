@@ -1205,6 +1205,32 @@ func TestCheckContractConfigured_FindsLocalMd(t *testing.T) {
 	}
 }
 
+func TestCheckContractConfigured_CodexACPUsesCodexContract(t *testing.T) {
+	dir := t.TempDir()
+	fakeHome := t.TempDir()
+	t.Setenv("HOME", fakeHome)
+
+	lizaDir := filepath.Join(fakeHome, ".liza")
+	if err := os.MkdirAll(lizaDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	coreFile := filepath.Join(lizaDir, "CORE.md")
+	if err := os.WriteFile(coreFile, []byte("core"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(coreFile, filepath.Join(dir, "AGENTS.md")); err != nil {
+		t.Fatal(err)
+	}
+
+	got := CheckContractConfigured(dir, "codex-acp")
+	if got == "" {
+		t.Fatal("expected CheckContractConfigured to find AGENTS.md for codex-acp")
+	}
+	if filepath.Base(got) != "AGENTS.md" {
+		t.Errorf("found %q, expected AGENTS.md", got)
+	}
+}
+
 func TestInitCommand_WritesClaudeSettings(t *testing.T) {
 	// Create temporary git repo
 	gitDir := setupGitRepo(t)

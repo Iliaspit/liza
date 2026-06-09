@@ -1,8 +1,63 @@
 package agent
 
 import (
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 )
+
+func TestValidCLIsIncludesCodexACP(t *testing.T) {
+	if !slices.Contains(ValidCLIs(), "codex-acp") {
+		t.Fatalf("ValidCLIs() = %v, want codex-acp", ValidCLIs())
+	}
+}
+
+func TestNewLLMAgentForCLI(t *testing.T) {
+	if _, ok := NewLLMAgentForCLI("codex-acp", "").(*ACPXAgent); !ok {
+		t.Fatalf("NewLLMAgentForCLI(codex-acp) did not return *ACPXAgent")
+	}
+	if _, ok := NewLLMAgentForCLI("codex", "").(*CLIAgent); !ok {
+		t.Fatalf("NewLLMAgentForCLI(codex) did not return *CLIAgent")
+	}
+}
+
+func TestCheckCLIPrerequisitesIgnoresPlainCLIs(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+
+	if err := CheckCLIPrerequisites("codex"); err != nil {
+		t.Fatalf("CheckCLIPrerequisites(codex) error = %v, want nil", err)
+	}
+}
+
+func TestCheckCLIPrerequisitesRequiresACPXForCodexACP(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+
+	err := CheckCLIPrerequisites("codex-acp")
+	if err == nil {
+		t.Fatal("CheckCLIPrerequisites(codex-acp) error = nil, want missing acpx error")
+	}
+	if !strings.Contains(err.Error(), "codex-acp requires acpx on PATH") {
+		t.Fatalf("error = %q, want codex-acp PATH prerequisite", err)
+	}
+	if !strings.Contains(err.Error(), "npm install -g acpx") {
+		t.Fatalf("error = %q, want install hint", err)
+	}
+}
+
+func TestCheckCLIPrerequisitesAcceptsACPXOnPath(t *testing.T) {
+	binDir := t.TempDir()
+	acpxPath := filepath.Join(binDir, "acpx")
+	if err := os.WriteFile(acpxPath, []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir)
+
+	if err := CheckCLIPrerequisites("codex-acp"); err != nil {
+		t.Fatalf("CheckCLIPrerequisites(codex-acp) error = %v, want nil", err)
+	}
+}
 
 func TestResolveDefaultCLI(t *testing.T) {
 	// Clean env for test isolation

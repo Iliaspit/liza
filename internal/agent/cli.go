@@ -1,15 +1,42 @@
 package agent
 
-import "os"
+import (
+	"fmt"
+	"os"
+	"os/exec"
+)
 
-// validCLIs is the canonical list of supported CLI backends.
-var validCLIs = []string{"claude", "codex", "gemini", "mistral", "kimi"}
+// validCLIs is the canonical list of supported agent backends.
+var validCLIs = []string{"claude", "codex", "codex-acp", "gemini", "mistral", "kimi"}
 
 // ValidCLIs returns the supported CLI backends. Returns a fresh copy to prevent mutation.
 func ValidCLIs() []string {
 	out := make([]string, len(validCLIs))
 	copy(out, validCLIs)
 	return out
+}
+
+// NewLLMAgentForCLI creates the provider backend for a configured CLI name.
+func NewLLMAgentForCLI(cliName string, outputsDir string) LLMAgent {
+	if isACPXCLI(cliName) {
+		return NewACPXAgent(outputsDir)
+	}
+	return NewCLIAgent(outputsDir)
+}
+
+// CheckCLIPrerequisites validates external binaries required by selected backends.
+func CheckCLIPrerequisites(cliName string) error {
+	if !isACPXCLI(cliName) {
+		return nil
+	}
+	if _, err := exec.LookPath("acpx"); err != nil {
+		return fmt.Errorf("%s requires acpx on PATH; install with: npm install -g acpx: %w", cliName, err)
+	}
+	return nil
+}
+
+func isACPXCLI(cliName string) bool {
+	return cliName == "codex-acp"
 }
 
 // DefaultCLI is the CLI used when none is specified.

@@ -1,0 +1,390 @@
+package agent
+
+import (
+	"bufio"
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"os"
+	"os/exec"
+	"strings"
+	"sync"
+	"time"
+)
+
+// ACPXAgent implements LLMAgent through the headless acpx ACP client.
+type ACPXAgent struct {
+	outputsDir string
+	masker     *SecretMasker
+	mu         sync.Mutex
+	seen       map[string]bool
+}
+
+// NewACPXAgent creates an ACP-backed LLM agent using acpx.
+func NewACPXAgent(outputsDir string) *ACPXAgent {
+	return &ACPXAgent{outputsDir: outputsDir, masker: NewSecretMasker(), seen: make(map[string]bool)}
+}
+
+func (a *ACPXAgent) Run(ctx context.Context, req LLMAgentRunRequest) (LLMAgentRunResult, error) {
+	acpxAgent := acpxAgentName(req.BackendName)
+	sessionName := acpxSessionName(req.AgentID)
+	warm := a.hasSeenSession(sessionName) || a.sessionExists(ctx, req.ProjectRoot, req.AgentID, acpxAgent, sessionName)
+
+	emitLLMAgentEvent(ctx, req.EventSink, LLMAgentEvent{
+		Kind:        LLMAgentEventStarted,
+		BackendName: req.BackendName,
+		AgentID:     req.AgentID,
+		TaskID:      req.TaskID,
+		SessionID:   sessionName,
+		Payload: map[string]any{
+			"mode":       "acpx",
+			"acpx_agent": acpxAgent,
+		},
+	})
+
+	if err := a.ensureSession(ctx, req.ProjectRoot, req.AgentID, acpxAgent, sessionName); err != nil {
+		errText := a.maskText(err.Error())
+		maskedErr := maskedError{message: errText, err: err}
+		emitLLMAgentEvent(ctx, req.EventSink, LLMAgentEvent{
+			Kind:        LLMAgentEventCompleted,
+			BackendName: req.BackendName,
+			AgentID:     req.AgentID,
+			TaskID:      req.TaskID,
+			SessionID:   sessionName,
+			Message:     errText,
+			Payload: map[string]any{
+				"error": errText,
+			},
+		})
+		return LLMAgentRunResult{ExitCode: 1, Output: errText, WarmUsage: warm, SessionID: sessionName}, maskedErr
+	}
+	a.markSessionSeen(sessionName)
+
+	output, usage, err := a.prompt(ctx, req, acpxAgent, sessionName)
+	emitLLMAgentEvent(ctx, req.EventSink, LLMAgentEvent{
+		Kind:        LLMAgentEventUsage,
+		BackendName: req.BackendName,
+		AgentID:     req.AgentID,
+		TaskID:      req.TaskID,
+		SessionID:   sessionName,
+		Payload: map[string]any{
+			"usage": usage,
+		},
+	})
+
+	if err != nil {
+		errText := a.maskText(err.Error())
+		maskedErr := maskedError{message: errText, err: err}
+		emitLLMAgentEvent(ctx, req.EventSink, LLMAgentEvent{
+			Kind:        LLMAgentEventCompleted,
+			BackendName: req.BackendName,
+			AgentID:     req.AgentID,
+			TaskID:      req.TaskID,
+			SessionID:   sessionName,
+			Message:     errText,
+			Payload: map[string]any{
+				"error": errText,
+			},
+		})
+		return LLMAgentRunResult{ExitCode: 1, Output: output.Text, Usage: usage, WarmUsage: warm, SessionID: sessionName}, maskedErr
+	}
+
+	emitLLMAgentEvent(ctx, req.EventSink, LLMAgentEvent{
+		Kind:        LLMAgentEventCompleted,
+		BackendName: req.BackendName,
+		AgentID:     req.AgentID,
+		TaskID:      req.TaskID,
+		SessionID:   sessionName,
+		Payload: map[string]any{
+			"exit_code": 0,
+		},
+	})
+	return LLMAgentRunResult{ExitCode: 0, Output: output.Text, Usage: usage, WarmUsage: warm, SessionID: sessionName}, nil
+}
+
+func (a *ACPXAgent) RunInteractive(context.Context, LLMAgentInteractiveRequest) (int, error) {
+	return 1, fmt.Errorf("interactive mode is not supported by ACPXAgent")
+}
+
+func (a *ACPXAgent) ensureSession(ctx context.Context, cwd, agentID, acpxAgent, sessionName string) error {
+	args := []string{"--cwd", cwd, acpxAgent, "sessions", "ensure", "--name", sessionName}
+	out, err := a.runACPX(ctx, agentID, args, "")
+	if err != nil {
+		return fmt.Errorf("acpx sessions ensure: %w\n%s", err, out)
+	}
+	return nil
+}
+
+func (a *ACPXAgent) prompt(ctx context.Context, req LLMAgentRunRequest, acpxAgent, sessionName string) (acpxOutput, LLMAgentUsage, error) {
+	args := []string{
+		"--cwd", req.ProjectRoot,
+		"--format", "json",
+		// Liza runs ACPX in non-interactive MAS worktrees. Auto-approval keeps
+		// behavior aligned with supervised CLI agents; ADR-0085 documents the
+		// trust boundary and sandbox expectation for this opt-in backend.
+		"--approve-all",
+		acpxAgent,
+		"prompt",
+		"-s", sessionName,
+		"--file", "-",
+	}
+	output, usage, raw, err := a.runACPXPrompt(ctx, req, args)
+	if err != nil {
+		return output, usage, fmt.Errorf("acpx prompt: %w\n%s", err, raw)
+	}
+	return output, usage, nil
+}
+
+func (a *ACPXAgent) sessionExists(ctx context.Context, cwd, agentID, acpxAgent, sessionName string) bool {
+	args := []string{"--cwd", cwd, acpxAgent, "sessions", "show", "--name", sessionName}
+	_, err := a.runACPX(ctx, agentID, args, "")
+	return err == nil
+}
+
+func (a *ACPXAgent) runACPX(ctx context.Context, agentID string, args []string, stdin string) (string, error) {
+	cmd := exec.CommandContext(ctx, "acpx", args...)
+	cmd.Env = agentProcessEnv(os.Environ(), agentID)
+	if stdin != "" {
+		cmd.Stdin = strings.NewReader(stdin)
+	}
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	return stdout.String() + stderr.String(), err
+}
+
+func (a *ACPXAgent) runACPXPrompt(ctx context.Context, req LLMAgentRunRequest, args []string) (acpxOutput, LLMAgentUsage, string, error) {
+	cmd := exec.CommandContext(ctx, "acpx", args...)
+	cmd.Env = agentProcessEnv(os.Environ(), req.AgentID)
+	cmd.Stdin = strings.NewReader(req.Prompt)
+
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return acpxOutput{}, LLMAgentUsage{}, "", fmt.Errorf("open acpx stdout: %w", err)
+	}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return acpxOutput{}, LLMAgentUsage{}, "", fmt.Errorf("open acpx stderr: %w", err)
+	}
+
+	var stdoutLog, stderrLog *streamingOutputFile
+	var stdoutLogWriter, stderrLogWriter io.Writer
+	if a.outputsDir != "" {
+		timestamp := time.Now().UTC().Format("20060102-150405")
+		stdoutLog = newStreamingOutputFile(a.outputsDir, req.AgentID, "txt", timestamp, a.masker)
+		stderrLog = newStreamingOutputFile(a.outputsDir, req.AgentID, "err", timestamp, a.masker)
+		stdoutLogWriter = stdoutLog
+		stderrLogWriter = stderrLog
+	}
+	defer closeAgentOutputLogs(stdoutLog, stderrLog, req.AgentID)
+
+	eventBase := LLMAgentEvent{
+		BackendName: req.BackendName,
+		AgentID:     req.AgentID,
+		TaskID:      req.TaskID,
+		SessionID:   acpxSessionName(req.AgentID),
+	}
+	progress := executionProgressCallback(ctx)
+
+	if err := cmd.Start(); err != nil {
+		return acpxOutput{}, LLMAgentUsage{}, "", err
+	}
+
+	var stdoutRaw, stderrRaw strings.Builder
+	var output acpxOutput
+	var usage LLMAgentUsage
+	stdoutErrCh := make(chan error, 1)
+	stderrErrCh := make(chan error, 1)
+	go func() {
+		stdoutErrCh <- a.scanACPXPromptStdout(ctx, stdout, stdoutLogWriter, &stdoutRaw, &output, &usage, req.EventSink, eventBase, progress)
+	}()
+	go func() {
+		stderrErrCh <- copyACPXPromptStderr(stderr, stderrLogWriter, &stderrRaw, progress)
+	}()
+
+	stdoutErr := <-stdoutErrCh
+	stderrErr := <-stderrErrCh
+	waitErr := cmd.Wait()
+	raw := stdoutRaw.String() + stderrRaw.String()
+	if stdoutErr != nil {
+		return output, usage, raw, stdoutErr
+	}
+	if stderrErr != nil {
+		return output, usage, raw, stderrErr
+	}
+	if waitErr != nil {
+		return output, usage, raw, waitErr
+	}
+	return output, usage, raw, nil
+}
+
+func (a *ACPXAgent) scanACPXPromptStdout(
+	ctx context.Context,
+	stdout io.Reader,
+	stdoutLog io.Writer,
+	raw *strings.Builder,
+	output *acpxOutput,
+	usage *LLMAgentUsage,
+	sink LLMAgentEventSink,
+	eventBase LLMAgentEvent,
+	markProgress func(),
+) error {
+	scanner := bufio.NewScanner(stdout)
+	scanner.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
+	for scanner.Scan() {
+		line := scanner.Text()
+		raw.WriteString(line)
+		raw.WriteByte('\n')
+		if stdoutLog != nil {
+			if _, err := stdoutLog.Write([]byte(line + "\n")); err != nil {
+				return err
+			}
+		}
+		if markProgress != nil {
+			markProgress()
+		}
+		a.ingestACPXPromptLine(ctx, line, output, usage, sink, eventBase)
+	}
+	return scanner.Err()
+}
+
+func copyACPXPromptStderr(stderr io.Reader, stderrLog io.Writer, raw *strings.Builder, markProgress func()) error {
+	writers := []io.Writer{raw}
+	if stderrLog != nil {
+		writers = append(writers, stderrLog)
+	}
+	if markProgress != nil {
+		writers = append(writers, progressWriter{mark: markProgress})
+	}
+	_, err := io.Copy(io.MultiWriter(writers...), stderr)
+	return err
+}
+
+func (a *ACPXAgent) ingestACPXPromptLine(ctx context.Context, line string, output *acpxOutput, usage *LLMAgentUsage, sink LLMAgentEventSink, eventBase LLMAgentEvent) {
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return
+	}
+	var msg map[string]any
+	if err := json.Unmarshal([]byte(line), &msg); err != nil {
+		return
+	}
+	if params, ok := msg["params"].(map[string]any); ok {
+		if update, ok := params["update"].(map[string]any); ok {
+			if chunk := acpxAgentMessageChunk(update); chunk != "" {
+				chunk = a.maskText(chunk)
+				output.Chunks = append(output.Chunks, chunk)
+				output.Text += chunk
+				event := eventBase
+				event.Kind = LLMAgentEventMessage
+				event.Message = chunk
+				emitLLMAgentEvent(ctx, sink, event)
+			}
+		}
+	}
+	if result, ok := msg["result"].(map[string]any); ok {
+		if parsed, ok := acpxAgentUsage(result["usage"]); ok {
+			*usage = parsed
+		}
+	}
+}
+
+func (a *ACPXAgent) hasSeenSession(sessionName string) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.seen[sessionName]
+}
+
+func (a *ACPXAgent) markSessionSeen(sessionName string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.seen[sessionName] = true
+}
+
+func (a *ACPXAgent) maskText(text string) string {
+	if a.masker == nil {
+		return text
+	}
+	return a.masker.MaskText(text)
+}
+
+type acpxOutput struct {
+	Text   string
+	Chunks []string
+}
+
+type maskedError struct {
+	message string
+	err     error
+}
+
+func (e maskedError) Error() string {
+	return e.message
+}
+
+func (e maskedError) Unwrap() error {
+	return e.err
+}
+
+func acpxAgentMessageChunk(update map[string]any) string {
+	if update["sessionUpdate"] != "agent_message_chunk" {
+		return ""
+	}
+	content, ok := update["content"].(map[string]any)
+	if !ok {
+		return ""
+	}
+	text, ok := content["text"].(string)
+	if !ok {
+		return ""
+	}
+	return text
+}
+
+func acpxAgentUsage(raw any) (LLMAgentUsage, bool) {
+	usage, ok := raw.(map[string]any)
+	if !ok {
+		return LLMAgentUsage{}, false
+	}
+	return LLMAgentUsage{
+		InputTokens:      acpxInt(usage["inputTokens"]),
+		OutputTokens:     acpxInt(usage["outputTokens"]),
+		CachedReadTokens: acpxInt(usage["cachedReadTokens"]),
+	}, true
+}
+
+func acpxInt(raw any) int {
+	switch v := raw.(type) {
+	case float64:
+		return int(v)
+	case int:
+		return v
+	default:
+		return 0
+	}
+}
+
+func acpxAgentName(cliName string) string {
+	switch cliName {
+	case "codex-acp", "acpx-codex":
+		return "codex"
+	default:
+		if strings.HasPrefix(cliName, "acpx-") {
+			return strings.TrimPrefix(cliName, "acpx-")
+		}
+		if strings.HasSuffix(cliName, "-acp") {
+			return strings.TrimSuffix(cliName, "-acp")
+		}
+		return cliName
+	}
+}
+
+func acpxSessionName(agentID string) string {
+	if agentID == "" {
+		return "liza-agent"
+	}
+	return "liza-" + agentID
+}

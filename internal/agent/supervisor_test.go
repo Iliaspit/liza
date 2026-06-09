@@ -22,77 +22,169 @@ import (
 	"github.com/liza-mas/liza/internal/testhelpers"
 )
 
-// MockCLIExecutor for testing CLI execution
-type MockCLIExecutor struct {
+// MockLLMAgent for testing LLMAgent execution
+type MockLLMAgent struct {
 	mu               sync.Mutex
-	Calls            []MockCLICall
-	InteractiveCalls []MockCLICall
+	Calls            []MockLLMAgentCall
+	InteractiveCalls []MockLLMAgentCall
 	ExitCode         int
 	Output           string
 	ExitError        error
 	OnExecute        func(ctx context.Context, cliName string, agentID string, prompt string, projectRoot string, additionalDirs []string) error
 }
 
-type MockCLICall struct {
+type MockLLMAgentCall struct {
 	CLIName        string
 	AgentID        string
 	Prompt         string
 	ProjectRoot    string
 	AdditionalDirs []string
+	TaskID         string
+	SessionID      string
+	ResumeSession  string
+	WarmSession    bool
+	EventSinkSet   bool
 }
 
-func (m *MockCLIExecutor) Execute(ctx context.Context, cliName string, agentID string, prompt string, projectRoot string, additionalDirs []string, _ models.Config) (CLIExecutionResult, error) {
+func (m *MockLLMAgent) Run(ctx context.Context, req LLMAgentRunRequest) (LLMAgentRunResult, error) {
 	m.mu.Lock()
-	m.Calls = append(m.Calls, MockCLICall{CLIName: cliName, AgentID: agentID, Prompt: prompt, ProjectRoot: projectRoot, AdditionalDirs: slices.Clone(additionalDirs)})
+	m.Calls = append(m.Calls, MockLLMAgentCall{
+		CLIName:        req.BackendName,
+		AgentID:        req.AgentID,
+		Prompt:         req.Prompt,
+		ProjectRoot:    req.ProjectRoot,
+		AdditionalDirs: slices.Clone(req.AdditionalDirs),
+		TaskID:         req.TaskID,
+		SessionID:      req.SessionID,
+		ResumeSession:  req.ResumeSession,
+		WarmSession:    req.WarmSession,
+		EventSinkSet:   req.EventSink != nil,
+	})
 	m.mu.Unlock()
 	if m.OnExecute != nil {
-		if err := m.OnExecute(ctx, cliName, agentID, prompt, projectRoot, additionalDirs); err != nil {
-			return CLIExecutionResult{ExitCode: m.ExitCode, Output: m.Output}, err
+		if err := m.OnExecute(ctx, req.BackendName, req.AgentID, req.Prompt, req.ProjectRoot, req.AdditionalDirs); err != nil {
+			return LLMAgentRunResult{ExitCode: m.ExitCode, Output: m.Output, Usage: LLMAgentUsage{}, WarmUsage: req.WarmSession, SessionID: req.SessionID}, err
 		}
 	}
-	return CLIExecutionResult{ExitCode: m.ExitCode, Output: m.Output}, m.ExitError
+	return LLMAgentRunResult{ExitCode: m.ExitCode, Output: m.Output, Usage: LLMAgentUsage{}, WarmUsage: req.WarmSession, SessionID: req.SessionID}, m.ExitError
 }
 
-func (m *MockCLIExecutor) ExecuteInteractive(ctx context.Context, cliName string, agentID string, projectRoot string, additionalDirs []string) (int, error) {
+func (m *MockLLMAgent) RunInteractive(ctx context.Context, req LLMAgentInteractiveRequest) (int, error) {
 	m.mu.Lock()
-	m.InteractiveCalls = append(m.InteractiveCalls, MockCLICall{CLIName: cliName, AgentID: agentID, ProjectRoot: projectRoot, AdditionalDirs: slices.Clone(additionalDirs)})
+	m.InteractiveCalls = append(m.InteractiveCalls, MockLLMAgentCall{CLIName: req.BackendName, AgentID: req.AgentID, ProjectRoot: req.ProjectRoot, AdditionalDirs: slices.Clone(req.AdditionalDirs)})
 	m.mu.Unlock()
 	return m.ExitCode, m.ExitError
 }
 
 // GetCalls returns a copy of the calls slice in a thread-safe manner
-func (m *MockCLIExecutor) GetCalls() []MockCLICall {
+func (m *MockLLMAgent) GetCalls() []MockLLMAgentCall {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	calls := make([]MockCLICall, len(m.Calls))
+	calls := make([]MockLLMAgentCall, len(m.Calls))
 	copy(calls, m.Calls)
 	return calls
 }
 
 // GetInteractiveCalls returns a copy of the interactive calls slice in a thread-safe manner
-func (m *MockCLIExecutor) GetInteractiveCalls() []MockCLICall {
+func (m *MockLLMAgent) GetInteractiveCalls() []MockLLMAgentCall {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	calls := make([]MockCLICall, len(m.InteractiveCalls))
+	calls := make([]MockLLMAgentCall, len(m.InteractiveCalls))
 	copy(calls, m.InteractiveCalls)
 	return calls
 }
 
-// TestMockCLIExecution tests CLI executor mock
-func TestMockCLIExecution(t *testing.T) {
-	mock := &MockCLIExecutor{
+// Execute is the legacy method name, preserved for backward compatibility.
+func (m *MockLLMAgent) Execute(ctx context.Context, cliName string, agentID string, prompt string, projectRoot string, additionalDirs []string, _ models.Config) (CLIExecutionResult, error) {
+	return m.Run(ctx, LLMAgentRunRequest{
+		BackendName:    cliName,
+		AgentID:        agentID,
+		Prompt:         prompt,
+		ProjectRoot:    projectRoot,
+		AdditionalDirs: additionalDirs,
+	})
+}
+
+// ExecuteInteractive is the legacy method name, preserved for backward compatibility.
+func (m *MockLLMAgent) ExecuteInteractive(ctx context.Context, cliName string, agentID string, projectRoot string, additionalDirs []string) (int, error) {
+	return m.RunInteractive(ctx, LLMAgentInteractiveRequest{
+		BackendName:    cliName,
+		AgentID:        agentID,
+		ProjectRoot:    projectRoot,
+		AdditionalDirs: additionalDirs,
+	})
+}
+
+// MockCLIExecutor is the legacy type name, preserved for backward compatibility.
+type MockCLIExecutor = MockLLMAgent
+
+// MockCLICall is the legacy type name, preserved for backward compatibility.
+type MockCLICall = MockLLMAgentCall
+
+type legacyOnlyCLIExecutor struct {
+	calls []MockLLMAgentCall
+}
+
+type recordingLLMAgentEventSink struct {
+	mu     sync.Mutex
+	events []LLMAgentEvent
+}
+
+func (s *recordingLLMAgentEventSink) RecordLLMAgentEvent(_ context.Context, event LLMAgentEvent) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.events = append(s.events, event)
+}
+
+func (s *recordingLLMAgentEventSink) Events() []LLMAgentEvent {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	events := make([]LLMAgentEvent, len(s.events))
+	copy(events, s.events)
+	return events
+}
+
+func (e *legacyOnlyCLIExecutor) Execute(_ context.Context, cliName string, agentID string, prompt string, projectRoot string, additionalDirs []string, _ models.Config) (CLIExecutionResult, error) {
+	e.calls = append(e.calls, MockLLMAgentCall{
+		CLIName:        cliName,
+		AgentID:        agentID,
+		Prompt:         prompt,
+		ProjectRoot:    projectRoot,
+		AdditionalDirs: slices.Clone(additionalDirs),
+	})
+	return CLIExecutionResult{ExitCode: 0, Output: "legacy output"}, nil
+}
+
+func (e *legacyOnlyCLIExecutor) ExecuteInteractive(_ context.Context, cliName string, agentID string, projectRoot string, additionalDirs []string) (int, error) {
+	e.calls = append(e.calls, MockLLMAgentCall{
+		CLIName:        cliName,
+		AgentID:        agentID,
+		ProjectRoot:    projectRoot,
+		AdditionalDirs: slices.Clone(additionalDirs),
+	})
+	return 0, nil
+}
+
+// TestMockLLMAgentRun tests the LLMAgent mock.
+func TestMockLLMAgentRun(t *testing.T) {
+	mock := &MockLLMAgent{
 		ExitCode: 0,
 	}
 
 	ctx := context.Background()
-	result, err := mock.Execute(ctx, "claude", "claude-1", "test prompt", "/tmp/test-project", nil, models.Config{})
+	result, err := mock.Run(ctx, LLMAgentRunRequest{
+		BackendName: "claude",
+		AgentID:     "claude-1",
+		Prompt:      "test prompt",
+		ProjectRoot: "/tmp/test-project",
+	})
 
 	if err != nil {
-		t.Errorf("Execute() error = %v", err)
+		t.Errorf("Run() error = %v", err)
 	}
 
 	if result.ExitCode != 0 {
-		t.Errorf("Execute() exitCode = %d, want 0", result.ExitCode)
+		t.Errorf("Run() exitCode = %d, want 0", result.ExitCode)
 	}
 
 	calls := mock.GetCalls()
@@ -168,6 +260,43 @@ func TestRunSupervisorPassesResolverDerivedRoleTypeToPauseWait(t *testing.T) {
 	}
 }
 
+func TestMockLLMAgentResultCarriesUsageAndSessionMetadata(t *testing.T) {
+	mock := &MockLLMAgent{
+		ExitCode: 0,
+		Output:   "ok",
+	}
+	ctx := context.Background()
+	result, err := mock.Run(ctx, LLMAgentRunRequest{
+		BackendName:   "claude",
+		AgentID:       "claude-2",
+		TaskID:        "task-42",
+		SessionID:     "sess-42",
+		ResumeSession: "resume-7",
+		WarmSession:   true,
+	})
+	if err != nil {
+		t.Fatalf("Run error: %v", err)
+	}
+
+	if result.SessionID != "sess-42" {
+		t.Fatalf("result session id = %s, want sess-42", result.SessionID)
+	}
+	if !result.WarmUsage {
+		t.Fatalf("result.WarmUsage = false, want true")
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("result.Usage zero check: %+v", result.Usage)
+	}
+
+	calls := mock.GetCalls()
+	if got := calls[0].SessionID; got != "sess-42" {
+		t.Fatalf("request session id = %s, want sess-42", got)
+	}
+	if !calls[0].WarmSession {
+		t.Fatalf("call warm session = false, want true")
+	}
+}
+
 func TestExecuteAgentBlocksTaskAfterProgressTimeout(t *testing.T) {
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
@@ -197,7 +326,7 @@ func TestExecuteAgentBlocksTaskAfterProgressTimeout(t *testing.T) {
 	}
 	testhelpers.WriteInitialState(t, statePath, state)
 
-	mock := &MockCLIExecutor{
+	mock := &MockLLMAgent{
 		OnExecute: func(ctx context.Context, cliName string, agentID string, prompt string, projectRoot string, additionalDirs []string) error {
 			<-ctx.Done()
 			if _, statErr := os.Stat(filepath.Join(tmpDir, ".worktrees", taskID)); statErr != nil {
@@ -212,7 +341,7 @@ func TestExecuteAgentBlocksTaskAfterProgressTimeout(t *testing.T) {
 		ProjectRoot:              tmpDir,
 		StatePath:                statePath,
 		CLIName:                  "codex",
-		Executor:                 mock,
+		LLMAgent:                 mock,
 		ExecutionTimeout:         5 * time.Second,
 		ExecutionProgressTimeout: 150 * time.Millisecond,
 	}
@@ -220,6 +349,9 @@ func TestExecuteAgentBlocksTaskAfterProgressTimeout(t *testing.T) {
 	exitCode, _, err := executeAgent(context.Background(), config, "prompt", nil, taskID, state.Config)
 	if err != nil {
 		t.Fatalf("executeAgent error: %v", err)
+	}
+	if calls := mock.GetCalls(); len(calls) != 1 || !calls[0].EventSinkSet {
+		t.Fatalf("executeAgent calls = %#v, want LLMAgent event sink", calls)
 	}
 	if exitCode != 0 {
 		t.Fatalf("exitCode = %d, want 0 after watchdog block", exitCode)
@@ -272,7 +404,7 @@ func TestExecuteAgentOutputProgressPreventsProgressTimeout(t *testing.T) {
 	state.Tasks = []models.Task{task}
 	testhelpers.WriteInitialState(t, statePath, state)
 
-	mock := &MockCLIExecutor{
+	mock := &MockLLMAgent{
 		OnExecute: func(ctx context.Context, cliName string, agentID string, prompt string, projectRoot string, additionalDirs []string) error {
 			mark := executionProgressCallback(ctx)
 			deadline := time.After(280 * time.Millisecond)
@@ -301,7 +433,7 @@ func TestExecuteAgentOutputProgressPreventsProgressTimeout(t *testing.T) {
 		ProjectRoot:              tmpDir,
 		StatePath:                statePath,
 		CLIName:                  "codex",
-		Executor:                 mock,
+		LLMAgent:                 mock,
 		ExecutionTimeout:         5 * time.Second,
 		ExecutionProgressTimeout: 120 * time.Millisecond,
 	}
@@ -348,8 +480,8 @@ printf 'stderr-before sk-test-secret-value stderr-after\n' >&2
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("ANTHROPIC_API_KEY", "sk-test-secret-value")
 
-	executor := NewDefaultCLIExecutor(outputsDir)
-	result, err := executor.Execute(context.Background(), "claude", "coder-1", "prompt body", projectRoot, nil, models.Config{})
+	executor := NewCLIAgent(outputsDir)
+	result, err := executor.Run(context.Background(), LLMAgentRunRequest{BackendName: "claude", AgentID: "coder-1", Prompt: "prompt body", ProjectRoot: projectRoot})
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
 	}
@@ -403,6 +535,127 @@ printf 'stderr-before sk-test-secret-value stderr-after\n' >&2
 	}
 }
 
+func TestCLIAgentEmitsObservabilityEvents(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake CLI shell script test requires /bin/sh")
+	}
+
+	projectRoot := t.TempDir()
+	outputsDir := filepath.Join(projectRoot, ".liza", "agent-outputs")
+	binDir := t.TempDir()
+	fakeClaude := filepath.Join(binDir, "claude")
+	script := `#!/bin/sh
+printf 'stdout event\n'
+printf 'stderr event\n' >&2
+exit 7
+`
+	if err := os.WriteFile(fakeClaude, []byte(script), 0755); err != nil {
+		t.Fatalf("write fake claude: %v", err)
+	}
+
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	sink := &recordingLLMAgentEventSink{}
+	result, err := NewCLIAgent(outputsDir).Run(context.Background(), LLMAgentRunRequest{
+		BackendName: "claude",
+		AgentID:     "coder-1",
+		TaskID:      "task-123",
+		SessionID:   "session-123",
+		Prompt:      "prompt body",
+		ProjectRoot: projectRoot,
+		EventSink:   sink,
+	})
+	if err != nil {
+		t.Fatalf("Run error: %v", err)
+	}
+	if result.ExitCode != 7 {
+		t.Fatalf("ExitCode = %d, want 7", result.ExitCode)
+	}
+
+	events := sink.Events()
+	if len(events) < 4 {
+		t.Fatalf("events = %#v, want start/output/completed events", events)
+	}
+	if events[0].Kind != LLMAgentEventStarted || events[0].BackendName != "claude" || events[0].AgentID != "coder-1" || events[0].TaskID != "task-123" {
+		t.Fatalf("first event = %#v, want claude/coder-1 started", events[0])
+	}
+
+	var sawStdout, sawStderr, sawUsage, sawCLIMessage bool
+	var completed *LLMAgentEvent
+	for i := range events {
+		event := events[i]
+		if event.Kind == LLMAgentEventOutputChunk && event.Payload["stream"] == "stdout" && strings.Contains(event.Message, "stdout event") {
+			sawStdout = true
+		}
+		if event.Kind == LLMAgentEventOutputChunk && event.Payload["stream"] == "stderr" && strings.Contains(event.Message, "stderr event") {
+			sawStderr = true
+		}
+		if event.Kind == LLMAgentEventUsage {
+			sawUsage = true
+		}
+		if event.Kind == LLMAgentEventMessage {
+			sawCLIMessage = true
+		}
+		if event.Kind == LLMAgentEventCompleted {
+			completed = &event
+		}
+	}
+	if !sawStdout || !sawStderr {
+		t.Fatalf("events = %#v, want stdout and stderr output chunks", events)
+	}
+	if sawUsage {
+		t.Fatalf("events = %#v, CLI stdout/stderr should not emit zero-value usage", events)
+	}
+	if sawCLIMessage {
+		t.Fatalf("events = %#v, CLI stdout/stderr should not emit agent_message_chunk", events)
+	}
+	if completed == nil {
+		t.Fatalf("events = %#v, want completed event", events)
+	}
+	if completed.Payload["exit_code"] != 7 {
+		t.Fatalf("completed payload = %#v, want exit_code 7", completed.Payload)
+	}
+	if completed.SessionID != "session-123" {
+		t.Fatalf("completed event session id = %s, want session-123", completed.SessionID)
+	}
+	if completed.TaskID != "task-123" {
+		t.Fatalf("completed event task id = %s, want task-123", completed.TaskID)
+	}
+}
+
+func TestCLIAgentReturnsOutputWhenLoggingDisabled(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake CLI shell script test requires /bin/sh")
+	}
+
+	projectRoot := t.TempDir()
+	binDir := t.TempDir()
+	fakeGemini := filepath.Join(binDir, "gemini")
+	script := `#!/bin/sh
+printf 'stdout with no log\n'
+printf 'stderr with no log\n' >&2
+`
+	if err := os.WriteFile(fakeGemini, []byte(script), 0755); err != nil {
+		t.Fatalf("write fake gemini: %v", err)
+	}
+
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	result, err := NewCLIAgent("").Run(context.Background(), LLMAgentRunRequest{
+		BackendName: "gemini",
+		AgentID:     "coder-1",
+		TaskID:      "task-no-log",
+		Prompt:      "prompt body",
+		ProjectRoot: projectRoot,
+	})
+	if err != nil {
+		t.Fatalf("Run error: %v", err)
+	}
+	if !strings.Contains(result.Output, "stdout with no log") || !strings.Contains(result.Output, "stderr with no log") {
+		t.Fatalf("Output = %q, want stdout and stderr even with logging disabled", result.Output)
+	}
+}
+
 func TestDefaultCLIExecutorDisallowsClaudeSubagentToolsWhenEnvEnabled(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("fake CLI shell script test requires /bin/sh")
@@ -424,8 +677,8 @@ done
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("LIZA_DISABLE_CLAUDE_SUBAGENTS", "1")
 
-	executor := NewDefaultCLIExecutor(outputsDir)
-	result, err := executor.Execute(context.Background(), "claude", "coder-1", "prompt body", projectRoot, nil, models.Config{})
+	executor := NewCLIAgent(outputsDir)
+	result, err := executor.Run(context.Background(), LLMAgentRunRequest{BackendName: "claude", AgentID: "coder-1", Prompt: "prompt body", ProjectRoot: projectRoot})
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
 	}
@@ -463,8 +716,8 @@ printf 'agent-id:%s\n' "$LIZA_AGENT_ID"
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("LIZA_AGENT_ID", "from-parent-env")
 
-	executor := NewDefaultCLIExecutor(outputsDir)
-	result, err := executor.Execute(context.Background(), "claude", "coder-7", "prompt body", projectRoot, nil, models.Config{})
+	executor := NewCLIAgent(outputsDir)
+	result, err := executor.Run(context.Background(), LLMAgentRunRequest{BackendName: "claude", AgentID: "coder-7", Prompt: "prompt body", ProjectRoot: projectRoot})
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
 	}
@@ -498,8 +751,8 @@ printf '%%s\n' "$LIZA_AGENT_ID" > %q
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("LIZA_AGENT_ID", "from-parent-env")
 
-	executor := NewDefaultCLIExecutor("")
-	exitCode, err := executor.ExecuteInteractive(context.Background(), "gemini", "code-reviewer-4", projectRoot, nil)
+	executor := NewCLIAgent("")
+	exitCode, err := executor.RunInteractive(context.Background(), LLMAgentInteractiveRequest{BackendName: "gemini", AgentID: "code-reviewer-4", ProjectRoot: projectRoot})
 	if err != nil {
 		t.Fatalf("ExecuteInteractive error: %v", err)
 	}
@@ -530,7 +783,7 @@ func TestSupervisor_Exit0ProviderAuditDegradedContinuesPostExecution(t *testing.
 	bb := testhelpers.WriteInitialState(t, statePath, state)
 
 	auditOutput := `ERROR codex_core::session: failed to record rollout items: thread 019e983f-f3a2-7071-8a66-aa1774db9101 not found`
-	mock := &MockCLIExecutor{
+	mock := &MockLLMAgent{
 		ExitCode: 0,
 		Output:   auditOutput,
 	}
@@ -563,7 +816,7 @@ func TestSupervisor_Exit0ProviderAuditDegradedContinuesPostExecution(t *testing.
 		LogPath:          filepath.Join(projectRoot, ".liza", "log.yaml"),
 		SpecsDir:         filepath.Join(projectRoot, "specs"),
 		CLIName:          "codex",
-		Executor:         mock,
+		LLMAgent:         mock,
 		ExecutionTimeout: 10 * time.Second,
 	})
 	if err != nil {
@@ -616,7 +869,7 @@ func TestRunSupervisor_HeartbeatMissingAgentStopsSupervisor(t *testing.T) {
 	state.Tasks = []models.Task{testhelpers.BuildTaskByStatus(taskID, models.TaskStatusReady, now)}
 	bb := testhelpers.WriteInitialState(t, statePath, state)
 
-	mock := &MockCLIExecutor{ExitCode: 0}
+	mock := &MockLLMAgent{ExitCode: 0}
 	mock.OnExecute = func(ctx context.Context, cliName, agentID, prompt, projectRoot string, additionalDirs []string) error {
 		if err := bb.Modify(func(s *models.State) error {
 			delete(s.Agents, agentID)
@@ -639,7 +892,7 @@ func TestRunSupervisor_HeartbeatMissingAgentStopsSupervisor(t *testing.T) {
 		LogPath:          filepath.Join(projectRoot, ".liza", "log.yaml"),
 		SpecsDir:         filepath.Join(projectRoot, "specs"),
 		CLIName:          "codex",
-		Executor:         mock,
+		LLMAgent:         mock,
 		ExecutionTimeout: 5 * time.Second,
 	})
 	if err == nil {
@@ -1607,8 +1860,8 @@ func TestSupervisor_BuildPromptFailure_BlocksTask(t *testing.T) {
 	// the supervisor uses at supervisor.go L817. The architect task and a
 	// non-existent integration branch drive ConfigExistsOnIntegration into
 	// the invalid-ref error arm, which wraps ErrContextBuild.
-	mockExecutor := &MockCLIExecutor{ExitCode: 0}
-	config.Executor = mockExecutor
+	mockExecutor := &MockLLMAgent{ExitCode: 0}
+	config.LLMAgent = mockExecutor
 	pipelineCfg, err := pipeline.LoadFrozen(projectRoot)
 	if err != nil {
 		t.Fatalf("pipeline.LoadFrozen: %v", err)
@@ -1736,9 +1989,52 @@ func TestSupervisor_BuildPromptFailure_NonPrecommit_DoesNotBlock(t *testing.T) {
 	}
 }
 
-func TestNewDefaultCLIExecutor(t *testing.T) {
+func TestExecuteAgentRequiresLLMAgent(t *testing.T) {
+	_, _, err := executeAgent(context.Background(), SupervisorConfig{}, "prompt", nil, "", models.Config{})
+	if err == nil {
+		t.Fatalf("executeAgent error = nil, want missing agent error")
+	}
+	if !strings.Contains(err.Error(), "no LLM agent configured") {
+		t.Fatalf("executeAgent error = %q, want missing agent error", err)
+	}
+}
+
+func TestExecuteAgentUsesLegacyCLIExecutor(t *testing.T) {
+	legacy := &legacyOnlyCLIExecutor{}
+	config := SupervisorConfig{
+		AgentID:          "coder-1",
+		Role:             models.RoleCoder,
+		ProjectRoot:      t.TempDir(),
+		CLIName:          "codex",
+		Executor:         legacy,
+		ExecutionTimeout: 5 * time.Second,
+	}
+
+	exitCode, output, err := executeAgent(context.Background(), config, "legacy prompt", []string{"extra-dir"}, "", models.Config{})
+	if err != nil {
+		t.Fatalf("executeAgent error: %v", err)
+	}
+	if exitCode != 0 {
+		t.Fatalf("exitCode = %d, want 0", exitCode)
+	}
+	if output != "legacy output" {
+		t.Fatalf("output = %q, want legacy output", output)
+	}
+	if len(legacy.calls) != 1 {
+		t.Fatalf("legacy calls = %d, want 1", len(legacy.calls))
+	}
+	call := legacy.calls[0]
+	if call.CLIName != "codex" || call.AgentID != "coder-1" || call.Prompt != "legacy prompt" || call.ProjectRoot != config.ProjectRoot {
+		t.Fatalf("legacy call = %+v, want codex/coder-1/legacy prompt/%s", call, config.ProjectRoot)
+	}
+	if !slices.Equal(call.AdditionalDirs, []string{"extra-dir"}) {
+		t.Fatalf("additional dirs = %#v, want extra-dir", call.AdditionalDirs)
+	}
+}
+
+func TestNewCLIAgent(t *testing.T) {
 	t.Run("empty outputsDir disables logging", func(t *testing.T) {
-		e := NewDefaultCLIExecutor("")
+		e := NewCLIAgent("")
 		if e.outputsDir != "" {
 			t.Errorf("outputsDir should be empty, got %q", e.outputsDir)
 		}
@@ -1746,9 +2042,17 @@ func TestNewDefaultCLIExecutor(t *testing.T) {
 
 	t.Run("non-empty outputsDir enables logging", func(t *testing.T) {
 		dir := t.TempDir()
-		e := NewDefaultCLIExecutor(dir)
+		e := NewCLIAgent(dir)
 		if e.outputsDir != dir {
 			t.Errorf("outputsDir = %q, want %q", e.outputsDir, dir)
 		}
 	})
+}
+
+func TestNewDefaultCLIExecutorDelegatesToCLIAgent(t *testing.T) {
+	dir := t.TempDir()
+	e := NewDefaultCLIExecutor(dir)
+	if e.outputsDir != dir {
+		t.Errorf("outputsDir = %q, want %q", e.outputsDir, dir)
+	}
 }

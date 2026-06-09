@@ -156,12 +156,24 @@ func checkpointBlocksRole(state *models.State, roleType string) (bool, string) {
 // executeAgent executes the CLI with timeout.
 func executeAgent(ctx context.Context, config SupervisorConfig, prompt string, additionalDirs []string, taskID string, runtimeConfig models.Config) (int, string, error) {
 	logger := GetLogger()
+
+	agent, err := resolveLLMAgent(config)
+	if err != nil {
+		return 0, "", err
+	}
+
 	// Interactive mode: launch CLI without -p so user can paste the prompt
 	if config.Interactive {
 		fmt.Println("=== INTERACTIVE MODE ===")
 		fmt.Println("Paste the prompt from the file above into the CLI session.")
 		fmt.Printf("Launching: %s\n", config.CLIName)
-		exitCode, err := config.Executor.ExecuteInteractive(ctx, config.CLIName, config.AgentID, config.ProjectRoot, additionalDirs)
+		exitCode, err := agent.RunInteractive(ctx, LLMAgentInteractiveRequest{
+			BackendName:    config.CLIName,
+			AgentID:        config.AgentID,
+			SessionID:      taskID,
+			ProjectRoot:    config.ProjectRoot,
+			AdditionalDirs: additionalDirs,
+		})
 		return exitCode, "", err
 	}
 
@@ -182,7 +194,19 @@ func executeAgent(ctx context.Context, config SupervisorConfig, prompt string, a
 	// so we don't start one here.
 
 	// Execute CLI with timeout
-	result, err := config.Executor.Execute(execCtx, config.CLIName, config.AgentID, prompt, config.ProjectRoot, additionalDirs, runtimeConfig)
+	result, err := agent.Run(execCtx, LLMAgentRunRequest{
+		BackendName:    config.CLIName,
+		AgentID:        config.AgentID,
+		TaskID:         taskID,
+		SessionID:      taskID,
+		ResumeSession:  "",
+		WarmSession:    false,
+		Prompt:         prompt,
+		ProjectRoot:    config.ProjectRoot,
+		AdditionalDirs: additionalDirs,
+		RuntimeConfig:  runtimeConfig,
+		EventSink:      supervisorLLMAgentEventSink{},
+	})
 	watchdogResult := stopWatchdog()
 	if watchdogResult.Blocked {
 		blockTaskFromSupervisor(db.For(config.StatePath), config.ProjectRoot, taskID, config.AgentID, watchdogResult.Reason)
@@ -212,6 +236,34 @@ func executeAgent(ctx context.Context, config SupervisorConfig, prompt string, a
 	}
 
 	return result.ExitCode, result.Output, err
+}
+
+type supervisorLLMAgentEventSink struct{}
+
+func (supervisorLLMAgentEventSink) RecordLLMAgentEvent(_ context.Context, event LLMAgentEvent) {
+	switch event.Kind {
+	case LLMAgentEventStarted, LLMAgentEventCompleted:
+		GetLogger().Info("LLM agent event",
+			"kind", string(event.Kind),
+			"backend", event.BackendName,
+			"agent_id", event.AgentID,
+			"task_id", event.TaskID,
+			"session_id", event.SessionID)
+	case LLMAgentEventUsage:
+		usage, _ := event.Payload["usage"].(LLMAgentUsage)
+		GetLogger().Info("LLM agent usage",
+			"backend", event.BackendName,
+			"agent_id", event.AgentID,
+			"task_id", event.TaskID,
+			"session_id", event.SessionID,
+			"input_tokens", usage.InputTokens,
+			"output_tokens", usage.OutputTokens,
+			"cached_read_tokens", usage.CachedReadTokens,
+			"cached_write_tokens", usage.CachedWriteTokens)
+	default:
+		// Provider content chunks stay in the normal output stream/log files. The
+		// supervisor metadata sink intentionally avoids duplicating content events.
+	}
 }
 
 // verifyOrchestratorStateChanges checks if orchestrator made expected state changes after completion

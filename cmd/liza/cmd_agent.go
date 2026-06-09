@@ -144,6 +144,9 @@ Example:
 		if !slices.Contains(agent.ValidCLIs(), cliName) {
 			return fmt.Errorf("invalid CLI: %s (must be %s)", cliName, strings.Join(agent.ValidCLIs(), ", "))
 		}
+		if err := agent.CheckCLIPrerequisites(cliName); err != nil {
+			return err
+		}
 
 		shouldLog := !noLog && !interactive
 
@@ -152,6 +155,8 @@ Example:
 			initFlag := cliName
 			if cliName == "kimi" {
 				initFlag = "claude" // kimi uses Claude's config
+			} else if cliName == "codex-acp" {
+				initFlag = "codex" // codex-acp uses Codex's config
 			}
 			fmt.Fprintf(os.Stderr, "Warning: no Liza contract symlink found for %s. Agents may not find the behavioral contract.\n", cliName)
 			fmt.Fprintf(os.Stderr, "  Run 'liza init --%s' to create one.\n", initFlag)
@@ -186,7 +191,7 @@ Example:
 					CLIName:     cliName,
 					Interactive: interactive,
 					InitialTask: initialTask,
-					Executor:    agent.NewDefaultCLIExecutor(outputsDir),
+					LLMAgent:    agent.NewLLMAgentForCLI(cliName, outputsDir),
 				}
 				return agent.RunSupervisor(ctx, config)
 			})
@@ -203,7 +208,7 @@ Example:
 			CLIName:     cliName,
 			Interactive: interactive,
 			InitialTask: initialTask,
-			Executor:    agent.NewDefaultCLIExecutor(outputsDir),
+			LLMAgent:    agent.NewLLMAgentForCLI(cliName, outputsDir),
 		}
 
 		return agent.RunSupervisor(ctx, config)
