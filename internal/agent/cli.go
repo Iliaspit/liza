@@ -1,6 +1,10 @@
 package agent
 
-import "os"
+import (
+	"fmt"
+	"os"
+	"os/exec"
+)
 
 // validCLIs is the canonical list of supported agent backends.
 var validCLIs = []string{"claude", "codex", "codex-acp", "gemini", "mistral", "kimi"}
@@ -18,6 +22,17 @@ func NewLLMAgentForCLI(cliName string, outputsDir string) LLMAgent {
 		return NewACPXAgent(outputsDir)
 	}
 	return NewCLIAgent(outputsDir)
+}
+
+// CheckCLIPrerequisites validates external binaries required by selected backends.
+func CheckCLIPrerequisites(cliName string) error {
+	if !isACPXCLI(cliName) {
+		return nil
+	}
+	if _, err := exec.LookPath("acpx"); err != nil {
+		return fmt.Errorf("%s requires acpx on PATH; install with: npm install -g acpx: %w", cliName, err)
+	}
+	return nil
 }
 
 func isACPXCLI(cliName string) bool {

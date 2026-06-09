@@ -176,3 +176,22 @@ func TestSpawnAgent_ProviderUnavailableSignalBlocksSpawnAndAlerts(t *testing.T) 
 		t.Fatalf("alerts log missing recovery hint:\n%s", alerts)
 	}
 }
+
+func TestSpawnAgent_CodexACPRequiresACPXBeforeSpawn(t *testing.T) {
+	projectRoot := t.TempDir()
+	t.Setenv("PATH", t.TempDir())
+
+	cmd, err := SpawnAgent(projectRoot, "coder", "codex-acp")
+	if err == nil {
+		t.Fatal("SpawnAgent error = nil, want acpx prerequisite error")
+	}
+	if cmd != nil {
+		t.Fatalf("SpawnAgent command = %#v, want nil", cmd)
+	}
+	if !strings.Contains(err.Error(), "spawn coder with codex-acp") {
+		t.Fatalf("SpawnAgent error = %q, want spawn context", err)
+	}
+	if !strings.Contains(err.Error(), "npm install -g acpx") {
+		t.Fatalf("SpawnAgent error = %q, want install hint", err)
+	}
+}

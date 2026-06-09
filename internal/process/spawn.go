@@ -97,6 +97,9 @@ func SpawnAgent(projectRoot, role, cli string, extraArgs ...string) (*exec.Cmd, 
 		}
 		return nil, err
 	}
+	if err := agent.CheckCLIPrerequisites(cli); err != nil {
+		return nil, fmt.Errorf("spawn %s with %s: %w", role, cli, err)
+	}
 
 	cmd, devNull, err := buildSpawnCommand(projectRoot, role, cli, extraArgs...)
 	if err != nil {

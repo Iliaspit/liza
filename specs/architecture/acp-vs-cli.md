@@ -113,9 +113,10 @@ Adding another ACP provider would require explicit Liza wiring:
 ### ACPX dependency and adapter version control (low)
 
 CLI-backed Codex can be version-pinned through `LIZA_CODEX_VERSION` and
-`config.codex_package_version`. The current ACP path only requires `acpx` to be
-available on `PATH`; it does not pin or validate the ACPX package version or the
-wrapped ACP adapter package.
+`config.codex_package_version`. The current ACP path preflights that `acpx` is
+available on `PATH` before direct agent execution or spawned agent startup, and
+the error includes the `npm install -g acpx` install hint. It does not pin or
+validate the ACPX package version or the wrapped ACP adapter package.
 
 This is an implementation gap if `codex-acp` becomes a production-critical
 runtime. It is not a structural ACP limitation, but it affects reproducibility:
