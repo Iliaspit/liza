@@ -2855,8 +2855,24 @@ func TestBlockBranchIntegrationContext_Populated(t *testing.T) {
 	if !strings.Contains(result, "BRANCH INTEGRATION CONTEXT") {
 		t.Error("expected BRANCH INTEGRATION CONTEXT header")
 	}
-	if !strings.Contains(result, "git -C /home/user/.worktrees/task-1 diff abc123def456..HEAD") {
-		t.Error("expected diff command with GoalBaseCommit and Worktree path")
+	nameOnlyDiff := "git -C /home/user/.worktrees/task-1 diff --name-only abc123def456..HEAD"
+	if !strings.Contains(result, nameOnlyDiff) {
+		t.Error("expected changed-file map diff command with GoalBaseCommit and Worktree path")
+	}
+	statDiff := "git -C /home/user/.worktrees/task-1 diff --stat abc123def456..HEAD"
+	if !strings.Contains(result, statDiff) {
+		t.Error("expected diff stat command with GoalBaseCommit and Worktree path")
+	}
+	targetedDiff := "git -C /home/user/.worktrees/task-1 diff abc123def456..HEAD -- <path>"
+	if !strings.Contains(result, targetedDiff) {
+		t.Error("expected targeted diff command with GoalBaseCommit and Worktree path")
+	}
+	unboundedBranchDiff := regexp.MustCompile(`(?m)^\s*git -C /home/user/\.worktrees/task-1 diff abc123def456\.\.HEAD\s*$`)
+	if unboundedBranchDiff.MatchString(result) {
+		t.Fatalf("branch integration context reintroduced unbounded full diff:\n%s", result)
+	}
+	if strings.Index(result, nameOnlyDiff) > strings.Index(result, targetedDiff) {
+		t.Fatalf("branch integration map should appear before targeted branch diff:\n%s", result)
 	}
 	if strings.Contains(result, "Run all project test suites") {
 		t.Error("branch integration context must not mandate full project test suites")
@@ -2924,8 +2940,14 @@ func TestBlockBranchIntegrationContext_NoCompletedTasks(t *testing.T) {
 
 	result := buf.String()
 
-	if !strings.Contains(result, "git -C /home/user/.worktrees/task-1 diff abc123def456..HEAD") {
-		t.Error("expected diff command in output")
+	if !strings.Contains(result, "git -C /home/user/.worktrees/task-1 diff --name-only abc123def456..HEAD") {
+		t.Error("expected changed-file map diff command in output")
+	}
+	if !strings.Contains(result, "git -C /home/user/.worktrees/task-1 diff --stat abc123def456..HEAD") {
+		t.Error("expected diff stat command in output")
+	}
+	if !strings.Contains(result, "git -C /home/user/.worktrees/task-1 diff abc123def456..HEAD -- <path>") {
+		t.Error("expected targeted diff command in output")
 	}
 	if !strings.Contains(result, "(no completed tasks found)") {
 		t.Error("expected '(no completed tasks found)' when CompletedTasks is nil")
@@ -3007,6 +3029,44 @@ func TestReviewInstructions_CodeReviewerSkipsIntegrationDriftWhenBranchMissing(t
 	}
 	if strings.Index(output, nameOnlyDiff) > strings.Index(output, targetedDiff) {
 		t.Fatalf("changed-file map should appear before targeted scope/workmanship diff:\n%s", output)
+	}
+}
+
+func TestReviewInstructions_CodeReviewerBoundsIntegrationDriftWhenBranchPresent(t *testing.T) {
+	tmpl := template.Must(template.ParseFiles("templates/blocks/review_instructions.tmpl"))
+
+	data := RoleContextData{
+		Role:              "code-reviewer",
+		Worktree:          "/tmp/worktree",
+		BaseCommit:        "base123",
+		ReviewCommit:      "review123",
+		IntegrationBranch: "integration",
+	}
+
+	var buf bytes.Buffer
+	if err := tmpl.ExecuteTemplate(&buf, "review-instructions", &data); err != nil {
+		t.Fatalf("failed to execute review-instructions template: %v", err)
+	}
+
+	output := buf.String()
+	nameOnlyDiff := "git -C /tmp/worktree diff --name-only integration..review123"
+	if !strings.Contains(output, nameOnlyDiff) {
+		t.Fatalf("reviewer prompt missing integration drift file map diff:\n%s", output)
+	}
+	statDiff := "git -C /tmp/worktree diff --stat integration..review123"
+	if !strings.Contains(output, statDiff) {
+		t.Fatalf("reviewer prompt missing integration drift stat diff:\n%s", output)
+	}
+	targetedDiff := "git -C /tmp/worktree diff integration..review123 -- <path>"
+	if !strings.Contains(output, targetedDiff) {
+		t.Fatalf("reviewer prompt missing targeted integration drift diff:\n%s", output)
+	}
+	unboundedIntegrationDiff := regexp.MustCompile(`(?m)^\s*git -C /tmp/worktree diff integration\.\.review123\s*$`)
+	if unboundedIntegrationDiff.MatchString(output) {
+		t.Fatalf("reviewer prompt reintroduced unbounded integration drift diff:\n%s", output)
+	}
+	if strings.Index(output, nameOnlyDiff) > strings.Index(output, targetedDiff) {
+		t.Fatalf("integration drift map should appear before targeted integration drift diff:\n%s", output)
 	}
 }
 

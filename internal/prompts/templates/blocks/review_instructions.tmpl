@@ -38,8 +38,12 @@ INSTRUCTIONS:
 8. Test discovery (e.g. pytest, python -m unittest discover) finding 0 tests is a blocker — tests must be discoverable, not just runnable when explicitly named
 9. Verify the done_when criteria are met AND tests exercise those criteria (for code tasks)
 {{- if ne .IntegrationBranch ""}}
-10. Before verdict, run current integration drift check: git -C {{.Worktree}} diff {{.IntegrationBranch}}..{{.ReviewCommit}}
+10. Before verdict, run current integration drift check by map/stat first:
+   git -C {{.Worktree}} diff --name-only {{.IntegrationBranch}}..{{.ReviewCommit}}
+   git -C {{.Worktree}} diff --stat {{.IntegrationBranch}}..{{.ReviewCommit}}
    This detects drift against current integration; it is not the authority for scope findings and not a synthetic merge result.
+   If you need detail, inspect only targeted paths from the drift map:
+   git -C {{.Worktree}} diff {{.IntegrationBranch}}..{{.ReviewCommit}} -- <path>
    If the scope/workmanship diff is clean but this drift check makes approval unsafe or ambiguous, REJECT with verdict text saying review-range drift / rebase needed.
    Do not invent or log a new anomaly type for review-range drift; keep anomaly logging to the existing taxonomy.
 {{- end}}
