@@ -422,7 +422,7 @@ The `liza` binary provides all system operations. Key commands:
 | `liza assess-hypothesis-exhausted <task-id>` | Record orchestrator assessment of a hypothesis-exhausted task (2+ coders failed)                                     |
 | `liza cancel-task <task-id> "reason"` | Cancel a non-approved, non-terminal task, including active/submitted/reviewing work, by transitioning it to ABANDONED with audit trail. Releases Liza state claims and removes the task worktree/branch best-effort; it does not kill a live provider process. |
 | `liza handoff <task-id> <summary> <next-action>` | Context-exhaustion handoff for a doer agent's claimed task                                                           |
-| `liza supersede-task <task-id> [replacements] --reason "..."` | Mark a task as SUPERSEDED (with or without replacements)                                                             |
+| `liza supersede-task <task-id> [replacements] --reason "..."` | Mark a task as SUPERSEDED. When no replacements are provided, also requires `--recoverability-command "<single-line command>"`; Liza records this audit command and a pre-cleanup branch/worktree snapshot, but does not execute it. Do not include secrets. |
 | `liza proceed <task-id> <transition>` | Execute inter-pair pipeline transition (e.g., code-plan-to-coding)                                                   |
 | **Worktree Management** |                                                                                                                      |
 | `liza wt-create <task-id>` | Create a worktree for an executing task                                                                              |

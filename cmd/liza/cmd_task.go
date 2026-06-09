@@ -225,13 +225,16 @@ or when a task's work was already completed outside the current sprint.
 Requirements:
   - Task must be in BLOCKED, rejected, or initial status
   - --reason is always required
+  - --recoverability-command is required when no replacements are given
 
 Replacement task IDs are optional and should be comma-separated.
-When no replacements are given, the task's branch is deleted immediately.
+When no replacements are given, the task's branch is deleted immediately after
+recording pre-supersession branch/worktree evidence and the operator-provided
+recoverability audit command. Liza records that command but does not execute it.
 
 Examples:
   liza supersede-task task-3 task-4,task-5 --reason "Split into smaller tasks"
-  liza supersede-task task-3 --reason "Work already merged in prior sprint"`,
+  liza supersede-task task-3 --reason "Work already merged in prior sprint" --recoverability-command "liza recover-task task-3"`,
 	Args: cobra.RangeArgs(1, 2),
 	RunE: func(cmd *cobra.Command, args []string) (retErr error) {
 		if isJSON(cmd) {
@@ -248,6 +251,7 @@ Examples:
 		taskID := args[0]
 
 		reason, _ := cmd.Flags().GetString("reason")
+		recoverabilityCommand, _ := cmd.Flags().GetString("recoverability-command")
 
 		var replacementIDs []string
 		if len(args) == 2 {
@@ -275,10 +279,12 @@ Examples:
 		}
 
 		if isJSON(cmd) {
-			result, err := ops.SupersedeTask(projectRoot, taskID, replacementIDs, reason, agentID)
+			result, err := ops.SupersedeTaskWithOptions(projectRoot, taskID, replacementIDs, reason, agentID, ops.SupersedeTaskOptions{
+				RecoverabilityCommand: recoverabilityCommand,
+			})
 			return jsonout.WriteResult(os.Stdout, result, nil, err)
 		}
-		return commands.SupersedeTaskCommand(projectRoot, taskID, replacementIDs, reason, agentID)
+		return commands.SupersedeTaskCommand(projectRoot, taskID, replacementIDs, reason, agentID, recoverabilityCommand)
 	},
 }
 
@@ -1137,6 +1143,7 @@ func init() {
 	addAgentIDFlag(addTaskCmd)
 	addAgentIDFlag(supersedeTaskCmd)
 	supersedeTaskCmd.Flags().String("reason", "", "reason for superseding (required)")
+	supersedeTaskCmd.Flags().String("recoverability-command", "", "operator audit command recorded before superseding without replacements")
 	supersedeTaskCmd.MarkFlagRequired("reason")
 	addAgentIDFlag(retargetDependencyCmd)
 	retargetDependencyCmd.Flags().String("reason", "", "reason for retargeting this dependency (required)")

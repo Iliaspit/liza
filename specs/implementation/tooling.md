@@ -51,7 +51,7 @@ All system mechanics are provided by the `liza` Go binary (assumed in PATH). See
 | `liza get` | Get blackboard data |
 | `liza mark-blocked` | Mark task as blocked |
 | `liza assess-blocked` | Record orchestrator assessment of a blocked task (prevents re-wake) |
-| `liza supersede-task` | Supersede a task |
+| `liza supersede-task` | Supersede a task; no-replacement cleanup requires an operator-provided `--recoverability-command` audit string |
 | `liza delete agent\|task` | Delete agent or task entry |
 
 Locking is internal to the binary — no external `flock` wrapper needed.
@@ -456,6 +456,39 @@ liza reconcile-merged task-3 --merge-commit abc123 --pr-url https://github.com/o
 liza wt-delete task-3
 # Removes worktree and branch for abandoned/superseded tasks
 ```
+
+**liza supersede-task** — Supersede a task
+```bash
+liza supersede-task task-3 task-4,task-5 --reason "Split into replacements"
+liza supersede-task task-3 --reason "Work already merged" --recoverability-command "liza recover-task task-3"
+```
+
+When no replacements are provided, supersession is the destructive cleanup path:
+no successor will preserve the old task branch. The command therefore requires a
+single-line `--recoverability-command` audit string. Liza records the string and
+a pre-cleanup snapshot in the `superseded` history entry, but does not execute
+the command. Do not include secrets; known environment secret values are masked
+before persistence.
+
+```yaml
+history:
+  - event: superseded
+    recoverability_command: liza recover-task task-3
+    pre_supersession:
+      status: BLOCKED
+      branch: task/task-3
+      branch_exists: true
+      branch_head: <commit-sha>
+      worktree: .worktrees/task-3
+      worktree_path: <absolute-path>
+      worktree_exists: true
+      worktree_head: <commit-sha>
+      worktree_status: ""
+      base_commit: <commit-sha>
+```
+
+In Go, these audit fields live in `TaskHistoryEntry.Extra`; the state YAML
+serializes that map inline.
 
 **liza recover-task** — Recover by task ID
 ```bash

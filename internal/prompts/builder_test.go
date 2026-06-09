@@ -566,6 +566,7 @@ func TestRenderOrchestratorDashboard(t *testing.T) {
 				"liza supersede-task",
 				`liza wt-delete`,
 				`liza supersede-task <task-id> [replacement-task-ids] --reason "..." --agent-id "orchestrator-1" --json`,
+				`liza supersede-task <task-id> --reason "Work completed externally" --recoverability-command "liza recover-task <task-id>" --agent-id "orchestrator-1" --json`,
 				`liza wt-delete <task-id> --json`,
 				`liza sprint-checkpoint — Create sprint checkpoint for human review`,
 				`liza update-sprint-metrics — Recompute sprint metrics`,

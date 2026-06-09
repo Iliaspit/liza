@@ -171,6 +171,40 @@ func TestMutationCommandWiring(t *testing.T) {
 		}
 	})
 
+	t.Run("supersede-task without replacements requires recoverability command", func(t *testing.T) {
+		projectRoot, _ := setupMutationTestProject(t, func(state *models.State) {
+			now := time.Now().UTC()
+			state.Tasks = []models.Task{
+				testhelpers.BuildTaskByStatus("task-supersede-norep", models.TaskStatusBlocked, now),
+			}
+		})
+
+		err := executeRootCommand(t, projectRoot, "supersede-task", "task-supersede-norep", "--reason", "Work already merged", "--agent-id", "orchestrator-1")
+		if err == nil {
+			t.Fatal("expected supersede-task without replacements to require recoverability command")
+		}
+		if !strings.Contains(err.Error(), "recoverability command is required when superseding without replacements") {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("supersede-task with replacements rejects recoverability command", func(t *testing.T) {
+		projectRoot, _ := setupMutationTestProject(t, func(state *models.State) {
+			now := time.Now().UTC()
+			state.Tasks = []models.Task{
+				testhelpers.BuildTaskByStatus("task-supersede-repl", models.TaskStatusBlocked, now),
+			}
+		})
+
+		err := executeRootCommand(t, projectRoot, "supersede-task", "task-supersede-repl", "task-new-1", "--reason", "Split into smaller tasks", "--recoverability-command", "liza recover-task task-supersede-repl", "--agent-id", "orchestrator-1")
+		if err == nil {
+			t.Fatal("expected supersede-task with replacements to reject recoverability command")
+		}
+		if !strings.Contains(err.Error(), "recoverability command is only valid when superseding without replacements") {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
 	t.Run("supersede-task without replacements", func(t *testing.T) {
 		projectRoot, statePath := setupMutationTestProject(t, func(state *models.State) {
 			now := time.Now().UTC()
@@ -179,7 +213,7 @@ func TestMutationCommandWiring(t *testing.T) {
 			}
 		})
 
-		err := executeRootCommand(t, projectRoot, "supersede-task", "task-supersede-norep", "--reason", "Work already merged", "--agent-id", "orchestrator-1")
+		err := executeRootCommand(t, projectRoot, "supersede-task", "task-supersede-norep", "--reason", "Work already merged", "--recoverability-command", "liza recover-task task-supersede-norep", "--agent-id", "orchestrator-1")
 		if err != nil {
 			t.Fatalf("supersede-task without replacements failed: %v", err)
 		}

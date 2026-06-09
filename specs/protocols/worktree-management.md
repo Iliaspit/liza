@@ -11,7 +11,7 @@
 | Task BLOCKED | Delete worktree: `liza wt-delete task-N` | Planner |
 | Task ABANDONED | Delete worktree: `liza wt-delete task-N` | Planner |
 | Task SUPERSEDED (with replacements) | Delete worktree directory (branch preserved for successors): `liza wt-delete task-N` | Planner |
-| Task SUPERSEDED (no replacements) | Delete worktree directory and branch | Planner |
+| Task SUPERSEDED (no replacements) | Record recoverability audit command and pre-cleanup branch/worktree snapshot, then delete worktree directory and branch | Planner |
 | Task INTEGRATION_FAILED | Worktree retained for conflict resolution | — |
 
 **Note:** Worktree creation is supervisor-only (via `liza claim-task`), not agent-callable. This ensures worktrees exist before agents are spawned.
@@ -20,7 +20,7 @@
 
 **Blocked-task note:** In the current state machine, `BLOCKED` tasks do not transition back to `READY`. They are resolved via `SUPERSEDED` (with or without replacement tasks) or `ABANDONED`; any existing worktree should be cleaned up via `liza wt-delete task-N`.
 
-**Superseded branch preservation:** When a task is superseded with replacement tasks, its worktree directory is removed but its git branch is preserved. Successor tasks may need the branch to access prior artifacts via `git show <branch>:<path>`. The branch is automatically cleaned up when **all** successor tasks listed in `superseded_by` reach terminal status (`MERGED`, `ABANDONED`, or `SUPERSEDED` per `IsTerminal()`). Cleanup is triggered by any successor terminal transition (merge, cancel, or supersede). When a task is superseded without replacements (e.g., work completed externally), the branch is deleted immediately since no successors exist to trigger later cleanup.
+**Superseded branch preservation:** When a task is superseded with replacement tasks, its worktree directory is removed but its git branch is preserved. Successor tasks may need the branch to access prior artifacts via `git show <branch>:<path>`. The branch is automatically cleaned up when **all** successor tasks listed in `superseded_by` reach terminal status (`MERGED`, `ABANDONED`, or `SUPERSEDED` per `IsTerminal()`). Cleanup is triggered by any successor terminal transition (merge, cancel, or supersede). When a task is superseded without replacements (e.g., work completed externally), the branch is deleted immediately since no successors exist to trigger later cleanup; `supersede-task` requires a single-line `--recoverability-command` audit string and records pre-cleanup branch/worktree status before deleting artifacts. Liza records this command but does not execute it, so do not include secrets.
 
 ---
 

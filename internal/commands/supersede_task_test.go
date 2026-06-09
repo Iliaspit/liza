@@ -20,6 +20,7 @@ func TestSupersedeTaskCommand(t *testing.T) {
 		assignedTo       *string
 		replacementIDs   []string
 		reason           string
+		recoverability   string
 		wantErr          bool
 		errContains      string
 		wantStatus       models.TaskStatus
@@ -104,6 +105,7 @@ func TestSupersedeTaskCommand(t *testing.T) {
 			taskStatus:       models.TaskStatusBlocked,
 			replacementIDs:   nil,
 			reason:           "Work already merged in prior sprint",
+			recoverability:   "liza recover-task task-1",
 			wantErr:          false,
 			wantStatus:       models.TaskStatusSuperseded,
 			wantSupersededBy: nil,
@@ -193,7 +195,7 @@ func TestSupersedeTaskCommand(t *testing.T) {
 			}
 
 			// Execute command
-			err = SupersedeTaskCommand(tmpDir, tt.taskID, tt.replacementIDs, tt.reason, "test-agent")
+			err = SupersedeTaskCommand(tmpDir, tt.taskID, tt.replacementIDs, tt.reason, "test-agent", tt.recoverability)
 
 			// Check error expectations
 			if tt.wantErr {
@@ -377,6 +379,8 @@ func TestSupersedeTaskCommand_RaceCondition(t *testing.T) {
 				[]string{"task-2"},
 				"Test reason",
 				"test-agent",
+				// Recoverability command is only valid for no-replacement cleanup.
+				"",
 			)
 			results <- err
 		}(i)
@@ -493,7 +497,7 @@ func TestSupersedeTaskCommand_ValidationIntegration(t *testing.T) {
 	}
 
 	// Execute supersede command
-	err = SupersedeTaskCommand(tmpDir, "task-1", []string{"task-2"}, "Test reason", "test-agent")
+	err = SupersedeTaskCommand(tmpDir, "task-1", []string{"task-2"}, "Test reason", "test-agent", "")
 	if err != nil {
 		t.Fatalf("Failed to supersede task: %v", err)
 	}
@@ -573,7 +577,7 @@ func TestSupersedeTaskCommand_LeaseFieldsCleared(t *testing.T) {
 	}
 
 	// Execute supersede command
-	err = SupersedeTaskCommand(tmpDir, "task-1", []string{"task-2"}, "Test reason", "test-agent")
+	err = SupersedeTaskCommand(tmpDir, "task-1", []string{"task-2"}, "Test reason", "test-agent", "")
 	if err != nil {
 		t.Fatalf("Failed to supersede task: %v", err)
 	}

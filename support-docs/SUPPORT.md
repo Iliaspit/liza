@@ -87,7 +87,7 @@ initial → executing → submitted → reviewing → approved (sprint-terminal)
 
 Cross-pair states (not pair-specific):
 - **BLOCKED** — Cannot proceed; see `blocked_reason` and `blocked_questions`
-- **SUPERSEDED** — Replaced by tasks in `superseded_by` (terminal)
+- **SUPERSEDED** — Replaced by tasks in `superseded_by`, or completed externally with no replacements (terminal)
 - **ABANDONED** — Killed by orchestrator (terminal)
 - **MERGED** — Merged to integration branch (terminal, coding pair only)
 - **INTEGRATION_FAILED** — Merge conflict or test failure (coding pair only)
@@ -266,7 +266,7 @@ os.rename(tmp_path, '.liza/state.yaml')
 - **Timestamps**: Python's `yaml.dump` converts `2026-04-14T14:29:31Z` to `2026-04-14 14:29:31+00:00`. Go rejects this. Never round-trip timestamps through a YAML library.
 - **Concurrent writes**: Agents and CLI write concurrently. Use `liza pause` before manual edits, or write atomically (temp file + `os.rename`).
 - **Field names**: SUPERSEDED tasks require `rescope_reason` (not `superseded_reason`). Check `liza validate` for correct field names.
-- **Status constraints**: `liza supersede-task` works from BLOCKED, REJECTED, or any pipeline-declared initial state. For other states, edit state.yaml directly.
+- **Status constraints**: `liza supersede-task` works from BLOCKED, REJECTED, or any pipeline-declared initial state. Without replacements, pass `--recoverability-command "<single-line command>"` to record the operator audit command before branch/worktree cleanup; do not include secrets. For other states, edit state.yaml directly.
 - **Dependency edits**: Use `liza retarget-dependency <task-id> <old-dep-id> <new-dep-ids> --reason "..."` for one non-terminal task's direct `depends_on` edge. It does not repair `output[].task_depends_on`; use line-level ops only for dependency metadata the CLI still does not support.
 - **Holding a task from review**: Add a `depends_on` on the task that should be reviewed first — the system enforces ordering. Alternatively, set status to the pre-review state.
 
@@ -303,7 +303,7 @@ Exit 42 with `handoff_pending: true` on the task means context exhaustion — th
 **Diagnosis**: Read `blocked_reason`, `blocked_questions`, `depends_on`, and optional `repair_request` in state.yaml. A `BLOCKED` alert is raised when a task blocks; if the orchestrator assesses but cannot resolve it, an `UNRESOLVED BLOCKED` alert is raised.
 **Fix**: If the blocker was another task, the blocked task should list it in `depends_on` so the orchestrator wakes when that task changes. If the wrong direct dependency edge is the blocker, use `liza retarget-dependency <id> <old-dep-id> <new-dep-id[,new-dep-id]> --reason "..."`; the task remains BLOCKED until explicitly unblocked or assessed. If the blocker was repaired and every `depends_on` target is directly MERGED, use `liza unblock-task <id> --reason "..."` to make the task claimable again, or add `--assign-to <doer-agent-id>` for a direct-resume fast path.
 If the task has a preserved worktree and integration moved while it was blocked, use `liza unblock-task <id> --rebase-on <integration-branch> --reason "..."`. Tracked worktree changes require `--allow-dirty`, which rebases with Git autostash; untracked files that would be overwritten are refused. Submit/merge conflicts move tasks to `INTEGRATION_FAILED`; unblock-time rebase conflicts remain `BLOCKED` with fresh repair metadata so the preserved worktree can be repaired and unblocked again.
-Supersede/cancel operations rewrite active downstream dependencies first; stale edges to SUPERSEDED or ABANDONED tasks must not remain on active tasks. Otherwise use `liza supersede-task <id> [replacements] --reason "..."` (replace with new tasks or mark completed externally) or `liza recover-task <id>` to reset.
+Supersede/cancel operations rewrite active downstream dependencies first; stale edges to SUPERSEDED or ABANDONED tasks must not remain on active tasks. Otherwise use `liza supersede-task <id> [replacements] --reason "..."` to replace with new tasks, `liza supersede-task <id> --reason "..." --recoverability-command "liza recover-task <id>"` to mark completed externally with no replacements, or `liza recover-task <id>` to reset.
 
 ### Integration failure
 **Symptom**: Task in INTEGRATION_FAILED state.

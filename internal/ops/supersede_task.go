@@ -2,6 +2,7 @@ package ops
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/liza-mas/liza/internal/git"
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/paths"
+	"github.com/liza-mas/liza/internal/secretmask"
 )
 
 // SupersedeResult contains the outcome of superseding a task.
@@ -20,11 +22,24 @@ type SupersedeResult struct {
 	Warnings       []string          `json:"warnings"`
 }
 
-// SupersedeTask transitions an initial, rejected, or BLOCKED task to SUPERSEDED,
-// optionally linking it to replacement task IDs. When no replacements are given
-// the task's branch is deleted immediately (no successors to trigger cleanup).
-// No terminal I/O.
+// SupersedeTaskOptions configures supersession behavior.
+type SupersedeTaskOptions struct {
+	// RecoverabilityCommand records the operator-provided audit command for
+	// unreplaced supersession. Liza records the command but does not execute it.
+	RecoverabilityCommand string
+}
+
+// SupersedeTask transitions an initial, rejected, or BLOCKED task to SUPERSEDED
+// with replacement task IDs. No-replacement supersession requires
+// SupersedeTaskWithOptions with RecoverabilityCommand because the task's branch
+// is deleted immediately (no successors to trigger cleanup). No terminal I/O.
 func SupersedeTask(projectRoot, taskID string, replacementIDs []string, reason, agentID string) (*SupersedeResult, error) {
+	return SupersedeTaskWithOptions(projectRoot, taskID, replacementIDs, reason, agentID, SupersedeTaskOptions{})
+}
+
+// SupersedeTaskWithOptions transitions an initial, rejected, or BLOCKED task to
+// SUPERSEDED with explicit options for destructive no-replacement cleanup.
+func SupersedeTaskWithOptions(projectRoot, taskID string, replacementIDs []string, reason, agentID string, opts SupersedeTaskOptions) (*SupersedeResult, error) {
 	if taskID == "" {
 		return nil, &PreconditionError{Reason: "task ID is required"}
 	}
@@ -34,9 +49,22 @@ func SupersedeTask(projectRoot, taskID string, replacementIDs []string, reason, 
 	if agentID == "" {
 		return nil, &PreconditionError{Reason: "orchestrator agent ID is required"}
 	}
+	recoverabilityCommand := strings.TrimSpace(opts.RecoverabilityCommand)
+	if len(replacementIDs) == 0 {
+		if recoverabilityCommand == "" {
+			return nil, &PreconditionError{Reason: "recoverability command is required when superseding without replacements"}
+		}
+		if strings.ContainsAny(recoverabilityCommand, "\r\n") {
+			return nil, &PreconditionError{Reason: "recoverability command must be a single line"}
+		}
+		recoverabilityCommand = secretmask.New().MaskText(recoverabilityCommand)
+	} else if recoverabilityCommand != "" {
+		return nil, &PreconditionError{Reason: "recoverability command is only valid when superseding without replacements"}
+	}
 
 	lp := paths.New(projectRoot)
 	bb := db.For(lp.StatePath())
+	gw := git.New(projectRoot)
 
 	pb, err := loadPipelineBundle(projectRoot)
 	if err != nil {
@@ -76,6 +104,14 @@ func SupersedeTask(projectRoot, taskID string, replacementIDs []string, reason, 
 		return nil, &PreconditionError{Reason: fmt.Sprintf("cannot supersede task %s in status %s (must be initial, rejected, or BLOCKED)", taskID, originalStatus)}
 	}
 
+	var salvage map[string]any
+	if len(replacementIDs) == 0 {
+		salvage, err = collectSupersedeSalvageSnapshot(gw, task, originalStatus, recoverabilityCommand)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	// Phase 2: Atomic State Update
 	hadWorktree := task.Worktree != nil
 	err = bb.Modify(func(state *models.State) error {
@@ -113,13 +149,17 @@ func SupersedeTask(projectRoot, taskID string, replacementIDs []string, reason, 
 		} else {
 			note = "superseded without replacements"
 		}
-		currentTask.History = append(currentTask.History, models.TaskHistoryEntry{
+		historyEntry := models.TaskHistoryEntry{
 			Time:   now,
 			Event:  models.TaskEventSuperseded,
 			Agent:  &agentID,
 			Reason: &reason,
 			Note:   &note,
-		})
+		}
+		if salvage != nil {
+			historyEntry.Extra = salvage
+		}
+		currentTask.History = append(currentTask.History, historyEntry)
 
 		if err := rewriteActiveDependents(state, pb.resolver, taskID, replacementIDs, agentID, now); err != nil {
 			return err
@@ -134,7 +174,6 @@ func SupersedeTask(projectRoot, taskID string, replacementIDs []string, reason, 
 
 	// Best-effort worktree cleanup (after state commit — safe to lose worktree now).
 	var warnings []string
-	gw := git.New(projectRoot)
 	if hadWorktree {
 		if rmErr := gw.RemoveWorktreeDir(taskID); rmErr != nil {
 			warnings = append(warnings, fmt.Sprintf("failed to remove worktree directory: %v", rmErr))
@@ -166,4 +205,60 @@ func SupersedeTask(projectRoot, taskID string, replacementIDs []string, reason, 
 		ReplacementIDs: replacementIDs,
 		Warnings:       warnings,
 	}, nil
+}
+
+func collectSupersedeSalvageSnapshot(gw *git.Git, task *models.Task, originalStatus models.TaskStatus, recoverabilityCommand string) (map[string]any, error) {
+	branchName := paths.TaskBranchPrefix + task.ID
+	snapshot := map[string]any{
+		"recoverability_command": recoverabilityCommand,
+		"pre_supersession": map[string]any{
+			"status":        string(originalStatus),
+			"branch":        branchName,
+			"worktree":      nil,
+			"worktree_path": gw.GetWorktreePath(task.ID),
+			"base_commit":   nil,
+		},
+	}
+	pre := snapshot["pre_supersession"].(map[string]any)
+	if task.Worktree != nil {
+		pre["worktree"] = *task.Worktree
+	}
+	if task.BaseCommit != nil {
+		pre["base_commit"] = *task.BaseCommit
+	}
+
+	branchExists, err := gw.BranchExists(branchName)
+	if err != nil {
+		return nil, fmt.Errorf("pre-supersession salvage branch check: %w", err)
+	}
+	pre["branch_exists"] = branchExists
+	if branchExists {
+		branchHead, err := gw.GetCommitSHA(branchName)
+		if err != nil {
+			return nil, fmt.Errorf("pre-supersession salvage branch HEAD: %w", err)
+		}
+		pre["branch_head"] = branchHead
+	}
+
+	worktreePath := gw.GetWorktreePath(task.ID)
+	_, statErr := os.Stat(worktreePath)
+	worktreeExists := statErr == nil
+	if statErr != nil && !os.IsNotExist(statErr) {
+		return nil, fmt.Errorf("pre-supersession salvage worktree check: %w", statErr)
+	}
+	pre["worktree_exists"] = worktreeExists
+	if worktreeExists {
+		worktreeHead, err := gw.GetWorktreeHEAD(task.ID)
+		if err != nil {
+			return nil, fmt.Errorf("pre-supersession salvage worktree HEAD: %w", err)
+		}
+		worktreeStatus, err := gw.WorktreeStatusShort(worktreePath)
+		if err != nil {
+			return nil, fmt.Errorf("pre-supersession salvage worktree status: %w", err)
+		}
+		pre["worktree_head"] = worktreeHead
+		pre["worktree_status"] = worktreeStatus
+	}
+
+	return snapshot, nil
 }

@@ -243,8 +243,8 @@ liza wt-delete task-3
 When a task's work was already completed externally (e.g., merged in a prior sprint):
 
 ```bash
-# Supersede without replacements (branch deleted immediately)
-liza supersede-task task-3 --reason "Work already merged in prior sprint"
+# Supersede without replacements (branch deleted immediately after audit snapshot)
+liza supersede-task task-3 --reason "Work already merged in prior sprint" --recoverability-command "liza recover-task task-3"
 ```
 
 Used by the planner agent when tasks are BLOCKED, have failed multiple times, need decomposition, or are satisfied by external work.

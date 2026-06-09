@@ -52,7 +52,7 @@ Each task status requires specific fields to be set. Validated on every state tr
 | APPROVED, CODING_PLAN_APPROVED | `review_commit` | spec, code |
 | BLOCKED | `blocked_reason`, `blocked_questions` (non-empty); optional complete `repair_request` (`operation`, `target`, `command`, non-empty `evidence`, non-empty `validation`) when a repair request is present | spec, code |
 | REJECTED, CODING_PLAN_REJECTED | `rejection_reason` | spec, code |
-| SUPERSEDED | `superseded_by` (non-empty), `rescope_reason` | spec, code |
+| SUPERSEDED | `rescope_reason`; `superseded_by` is optional for externally completed work | spec, code |
 | MERGED | `worktree` must be nil (cleanup invariant) | spec, code |
 
 Non-DRAFT tasks must have `done_when` and `spec_ref` (both non-empty). `spec_ref` files must exist on disk or on integration branch.

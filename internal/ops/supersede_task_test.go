@@ -274,6 +274,7 @@ func TestSupersedeTask_InvalidOutputReplacementLeavesStateUnchanged(t *testing.T
 
 func TestSupersedeTask_NoReplacements(t *testing.T) {
 	tmpDir := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, tmpDir)
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
 	now := time.Now().UTC()
@@ -283,7 +284,9 @@ func TestSupersedeTask_NoReplacements(t *testing.T) {
 	}
 	testhelpers.WriteInitialState(t, stateFile, state)
 
-	result, err := SupersedeTask(tmpDir, "task-1", nil, "Work already merged in prior sprint", "orchestrator-1")
+	result, err := SupersedeTaskWithOptions(tmpDir, "task-1", nil, "Work already merged in prior sprint", "orchestrator-1", SupersedeTaskOptions{
+		RecoverabilityCommand: "liza recover-task task-1",
+	})
 	if err != nil {
 		t.Fatalf("SupersedeTask() error: %v", err)
 	}
@@ -320,6 +323,93 @@ func TestSupersedeTask_NoReplacements(t *testing.T) {
 	if lastHistory.Note == nil || *lastHistory.Note != "superseded without replacements" {
 		t.Errorf("History note = %v, want 'superseded without replacements'", lastHistory.Note)
 	}
+	if lastHistory.Extra["recoverability_command"] != "liza recover-task task-1" {
+		t.Errorf("recoverability_command = %v, want command", lastHistory.Extra["recoverability_command"])
+	}
+	pre, ok := lastHistory.Extra["pre_supersession"].(map[string]any)
+	if !ok {
+		t.Fatalf("pre_supersession = %T, want map", lastHistory.Extra["pre_supersession"])
+	}
+	if pre["status"] != string(models.TaskStatusBlocked) {
+		t.Errorf("pre_supersession.status = %v, want %s", pre["status"], models.TaskStatusBlocked)
+	}
+	if pre["branch"] != "task/task-1" {
+		t.Errorf("pre_supersession.branch = %v, want task/task-1", pre["branch"])
+	}
+	if pre["branch_exists"] != false {
+		t.Errorf("pre_supersession.branch_exists = %v, want false", pre["branch_exists"])
+	}
+	if pre["worktree_exists"] != false {
+		t.Errorf("pre_supersession.worktree_exists = %v, want false", pre["worktree_exists"])
+	}
+}
+
+func TestSupersedeTask_NoReplacementsRequiresRecoverabilityCommand(t *testing.T) {
+	tmpDir := t.TempDir()
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+
+	now := time.Now().UTC()
+	state := testhelpers.CreateValidState()
+	state.Tasks = []models.Task{
+		testhelpers.BuildTaskByStatus("task-1", models.TaskStatusBlocked, now),
+	}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	_, err := SupersedeTask(tmpDir, "task-1", nil, "Work already merged in prior sprint", "orchestrator-1")
+	testhelpers.RequireErrorContains(t, err, "recoverability command is required when superseding without replacements")
+}
+
+func TestSupersedeTask_RejectsRecoverabilityCommandWithReplacements(t *testing.T) {
+	tmpDir := t.TempDir()
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+
+	now := time.Now().UTC()
+	state := testhelpers.CreateValidState()
+	state.Tasks = []models.Task{
+		testhelpers.BuildTaskByStatus("task-1", models.TaskStatusBlocked, now),
+	}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	_, err := SupersedeTaskWithOptions(tmpDir, "task-1", []string{"task-2"}, "Split into replacement", "orchestrator-1", SupersedeTaskOptions{
+		RecoverabilityCommand: "liza recover-task task-1",
+	})
+	testhelpers.RequireErrorContains(t, err, "recoverability command is only valid when superseding without replacements")
+}
+
+func TestSupersedeTask_MasksRecoverabilityCommandBeforeHistory(t *testing.T) {
+	t.Setenv("RECOVER_TOKEN", "secret-value-123")
+
+	tmpDir := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, tmpDir)
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+
+	now := time.Now().UTC()
+	state := testhelpers.CreateValidState()
+	state.Tasks = []models.Task{
+		testhelpers.BuildTaskByStatus("task-1", models.TaskStatusBlocked, now),
+	}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	_, err := SupersedeTaskWithOptions(tmpDir, "task-1", nil, "Work already merged", "orchestrator-1", SupersedeTaskOptions{
+		RecoverabilityCommand: "RECOVER_TOKEN=secret-value-123 liza recover-task task-1",
+	})
+	if err != nil {
+		t.Fatalf("SupersedeTaskWithOptions() error: %v", err)
+	}
+
+	bb := db.New(stateFile)
+	readState, err := bb.Read()
+	if err != nil {
+		t.Fatalf("Failed to read state: %v", err)
+	}
+	task := readState.FindTask("task-1")
+	if task == nil {
+		t.Fatal("Task not found")
+	}
+	lastHistory := task.History[len(task.History)-1]
+	if got := lastHistory.Extra["recoverability_command"]; got != "RECOVER_TOKEN=*** liza recover-task task-1" {
+		t.Errorf("recoverability_command = %v, want masked command", got)
+	}
 }
 
 func TestSupersedeTask_RejectsDownstreamReplacement(t *testing.T) {
@@ -347,7 +437,7 @@ func TestSupersedeTask_NoReplacements_DeletesBranch(t *testing.T) {
 
 	// Create a branch for the task
 	gw := git.New(tmpDir)
-	_, err := gw.CreateWorktree("task-1", "main")
+	baseCommit, err := gw.CreateWorktree("task-1", "main")
 	if err != nil {
 		t.Fatalf("CreateWorktree() error: %v", err)
 	}
@@ -367,10 +457,13 @@ func TestSupersedeTask_NoReplacements_DeletesBranch(t *testing.T) {
 	task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusBlocked, now)
 	worktree := ".worktrees/task-1"
 	task.Worktree = &worktree
+	task.BaseCommit = &baseCommit
 	state.Tasks = []models.Task{task}
 	testhelpers.WriteInitialState(t, stateFile, state)
 
-	result, err := SupersedeTask(tmpDir, "task-1", nil, "Completed externally", "orchestrator-1")
+	result, err := SupersedeTaskWithOptions(tmpDir, "task-1", nil, "Completed externally", "orchestrator-1", SupersedeTaskOptions{
+		RecoverabilityCommand: "liza recover-task task-1",
+	})
 	if err != nil {
 		t.Fatalf("SupersedeTask() error: %v", err)
 	}
@@ -393,6 +486,39 @@ func TestSupersedeTask_NoReplacements_DeletesBranch(t *testing.T) {
 	}
 	if exists {
 		t.Error("branch should be deleted when superseding with no replacements")
+	}
+
+	bb := db.New(stateFile)
+	readState, err := bb.Read()
+	if err != nil {
+		t.Fatalf("Failed to read state: %v", err)
+	}
+	updated := readState.FindTask("task-1")
+	if updated == nil {
+		t.Fatal("Task not found")
+	}
+	lastHistory := updated.History[len(updated.History)-1]
+	pre, ok := lastHistory.Extra["pre_supersession"].(map[string]any)
+	if !ok {
+		t.Fatalf("pre_supersession = %T, want map", lastHistory.Extra["pre_supersession"])
+	}
+	if pre["branch_exists"] != true {
+		t.Errorf("pre_supersession.branch_exists = %v, want true", pre["branch_exists"])
+	}
+	if pre["branch_head"] == "" {
+		t.Error("pre_supersession.branch_head should be recorded")
+	}
+	if pre["worktree_exists"] != true {
+		t.Errorf("pre_supersession.worktree_exists = %v, want true", pre["worktree_exists"])
+	}
+	if pre["worktree_head"] == "" {
+		t.Error("pre_supersession.worktree_head should be recorded")
+	}
+	if pre["worktree_status"] != "" {
+		t.Errorf("pre_supersession.worktree_status = %v, want clean status", pre["worktree_status"])
+	}
+	if pre["base_commit"] != baseCommit {
+		t.Errorf("pre_supersession.base_commit = %v, want %s", pre["base_commit"], baseCommit)
 	}
 }
 
@@ -418,6 +544,7 @@ func TestSupersedeTask_FromRejected(t *testing.T) {
 
 func TestSupersedeTask_FromIntegrationFailedMissingWorktree(t *testing.T) {
 	tmpDir := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, tmpDir)
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
 	now := time.Now().UTC()
@@ -428,7 +555,9 @@ func TestSupersedeTask_FromIntegrationFailedMissingWorktree(t *testing.T) {
 	state.Tasks = []models.Task{task}
 	testhelpers.WriteInitialState(t, stateFile, state)
 
-	result, err := SupersedeTask(tmpDir, "task-1", nil, "Completed externally by merged PR", "orchestrator-1")
+	result, err := SupersedeTaskWithOptions(tmpDir, "task-1", nil, "Completed externally by merged PR", "orchestrator-1", SupersedeTaskOptions{
+		RecoverabilityCommand: "liza recover-task task-1",
+	})
 	if err != nil {
 		t.Fatalf("SupersedeTask() error: %v", err)
 	}

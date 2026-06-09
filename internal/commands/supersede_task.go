@@ -9,8 +9,10 @@ import (
 
 // SupersedeTaskCommand marks a task as SUPERSEDED and prints the result to stdout.
 // Delegates business logic to ops.SupersedeTask.
-func SupersedeTaskCommand(projectRoot, taskID string, replacementIDs []string, reason, agentID string) error {
-	result, err := ops.SupersedeTask(projectRoot, taskID, replacementIDs, reason, agentID)
+func SupersedeTaskCommand(projectRoot, taskID string, replacementIDs []string, reason, agentID, recoverabilityCommand string) error {
+	result, err := ops.SupersedeTaskWithOptions(projectRoot, taskID, replacementIDs, reason, agentID, ops.SupersedeTaskOptions{
+		RecoverabilityCommand: recoverabilityCommand,
+	})
 	if err != nil {
 		return fmt.Errorf("supersede task: %w", err)
 	}
