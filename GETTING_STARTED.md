@@ -81,7 +81,8 @@ liza setup --agent-tools ~/my-agent-tools.md
 
 ## Customize Agent Tools
 
-️️️⚠ Do not skip `AGENT_TOOLS.md` customization before a serious run.
+**️️️⚠ Do not skip `AGENT_TOOLS.md` customization before a serious run.**
+
 Agents treat `~/.liza/AGENT_TOOLS.md` as their operational tool contract. If it
 names tools you do not have, or routes agents to tools that are wrong for your
 environment, agents will waste turns, bloat context, and make weaker decisions.
@@ -89,6 +90,12 @@ environment, agents will waste turns, bloat context, and make weaker decisions.
 Review the installed file against your actual MCP servers, CLI tools, and editor
 integrations. The detailed guide is
 [Customizing AGENT_TOOLS.md](support-docs/CUSTOMIZING_AGENT_TOOLS.md).
+
+The default `AGENT_TOOLS.md` references optional tools that Liza does not
+install. Before running agents, either install the CLI tools you intend agents
+to use or remove/adapt the corresponding guidance. Leaving instructions for
+missing tools is not harmless: agents will follow the contract, spend turns on
+unavailable commands or MCP servers, and then recover noisily.
 
 ## Initialize a Project
 
@@ -199,28 +206,6 @@ liza tui
 Read [Multi-Agent Usage](support-docs/USAGE_MULTI_AGENTS.md) before running a
 multi-agent pipeline. Liza is a complex system, and the usage guide explains
 roles, checkpoints, worktrees, TUI controls, and review flow.
-
-## Optional Repository Navigation Tools
-
-Stacklit, SCIP Search, and Semble are optional. You need to install them yourself, Liza won't.
-
-You also need to enable:
-```bash
-export LIZA_ENABLE_STACKLIT=1
-export LIZA_ENABLE_SCIP_SEARCH=1
-export LIZA_ENABLE_SEMBLE=1
-```
-
-You need to run `liza init` after they have been installed and enabled.
-For Semble, run `liza init --spec` with Semble installed so Liza can prewarm and
-validate the model cache. After installation or prewarm, set `HF_HUB_OFFLINE=1`
-in the shell or service environment that launches unattended agents if you want
-to prevent model downloads during normal work.
-
-These tools provide navigation candidates, not proof. Agents still validate
-against direct source reads. See
-[Configuration Reference](support-docs/CONFIGURATION.md#optional-indexing-activation)
-for setup details, safety rules, and non-goals.
 
 ## Common First Commands
 

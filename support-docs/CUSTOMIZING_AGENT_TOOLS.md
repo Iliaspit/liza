@@ -4,9 +4,9 @@
 contract agents follow when deciding how to read files, search code, fetch docs,
 and fall back when a tool is unavailable.
 
-If this file does not match your real setup, agents will waste turns, bloat
+**If this file does not match your real setup, agents will waste turns, bloat
 context, and make worse tool choices by trying tools that are missing, misnamed,
-or wrong for the current mode.
+or wrong for the current mode.**
 
 ## This Is Critical
 
@@ -18,6 +18,12 @@ Before your first real run:
 - If you have the capability under a different provider or tool name, adapt the
   row to that surface instead of deleting it.
 - Adjust precedence so the best available tools are tried first.
+- For optional navigation or compression tools, install the CLI surface Liza
+  references unless this guide explicitly says otherwise. Do not install or
+  enable the tool's MCP server just because the tool offers one.
+- Do not accept installer prompts that add generic instructions to `CLAUDE.md`,
+  `AGENTS.md`, or other agent contract files. Liza already provides the
+  agent-facing guidance through `~/.liza/AGENT_TOOLS.md` and the mode contracts.
 - Provide your own file during setup if you already maintain one:
   `liza setup --agent-tools ~/my-agent-tools.md`
 
@@ -31,6 +37,78 @@ SessionStart hooks, project Git hook plumbing, generated-index cleanliness, SCIP
 hook command plans, and Semble safety files. MAS prompts own task/reviewer/root
 specific optional-tool metadata. Those mechanisms supply concrete paths or
 readiness when they exist; `AGENT_TOOLS.md` should only explain how to use them.
+
+## Expected Tools by Default
+
+The stock `AGENT_TOOLS.md` references these tool surfaces or capabilities. Keep
+entries for the ones you actually have, rename equivalent providers to match
+your environment, and remove unavailable tools so agents do not waste turns.
+You need to install these tools yourself, Liza won't.
+
+- Compression: [`rtk`](https://github.com/rtk-ai/rtk)
+- Structured and Markdown navigation: `mdtoc`,
+  [`mdq`](https://github.com/yshavit/mdq),
+  [`jq`](https://github.com/jqlang/jq), and
+  [`yq`](https://github.com/mikefarah/yq).
+- Grep: [`rg`](https://github.com/BurntSushi/ripgrep)
+- Code search and rewrite: [`ast-grep`](https://github.com/ast-grep/ast-grep),
+  [Semble / `semble`](https://github.com/MinishLab/semble),
+  [`scip-search`](https://github.com/liza-mas/scip-search),
+  [Stacklit / `stacklit`](https://github.com/liza-mas/stacklit-cli),
+  [Functional Clusters / `functional-clusters`](https://github.com/liza-mas/functional-clusters),
+  and [Morph MCP / `morph-mcp`](https://docs.morphllm.com/mcpquickstart).
+- Mandatory quality gate:
+  [`pre-commit`](https://github.com/pre-commit/pre-commit).
+- Documentation, web, and repository lookups:
+  [`gh`](https://cli.github.com/),
+  [`context7`](https://github.com/upstash/context7),
+  [Ref](https://github.com/ref-tools/ref-tools-mcp),
+  [DeepWiki](https://deepwiki.com/home),
+  [fetch MCP](https://github.com/modelcontextprotocol/servers/tree/main/src/fetch),
+  [Perplexity](https://www.perplexity.ai/).
+- Session-dependent or provider-specific capabilities:
+  [`postgres`](https://www.postgresql.org/), native tree/list or filename search,
+  editor/IDE or LSP-backed tools, and provider tool-loading surfaces such as
+  `ToolSearch` / `tool_search`.
+
+Activate Stacklit, SCIP Search, Functional Clusters and Semble using:
+```bash
+export LIZA_ENABLE_STACKLIT=1
+export LIZA_ENABLE_SCIP_SEARCH=1
+export LIZA_ENABLE_SEMBLE=1
+export LIZA_ENABLE_FUNCTIONAL_CLUSTERS=1
+```
+This should be done before running `liza init`.
+
+Scip and Stacklit rely on indexes on every branch (repo root and worktrees) that are updated via git hooks. This slow down the git operations but speed up agents and greatly reduce token consumption.
+
+The `functional-clusters.json` is not refreshed automatically as of today.
+You have to do this manually after a major structural change. Script example
+(adapt it to the project languages):
+
+```bash
+stacklit export-architecture -o stacklit-architecture.json
+scip-search graph-export --index go.scip -o go-scip-graph.json
+scip-search graph-export --index python.scip -o python-scip-graph.json
+scip-search graph-export --index typescript.scip -o typescript-scip-graph.json
+functional-clusters build \
+  --scip-graph go-scip-graph.json \
+  --scip-graph python-scip-graph.json \
+  --scip-graph typescript-scip-graph.json \
+  --stacklit-architecture stacklit-architecture.json \
+  -o functional-clusters.json
+```
+
+Semble doesn't rely on an index but on a local LLM model that is automatically downloaded once.
+Run `liza init --spec` with Semble installed so Liza can prewarm and
+validate the model cache. After installation or prewarm, set `HF_HUB_OFFLINE=1`
+in the shell or service environment that launches unattended agents if you want
+to prevent model downloads during normal work.
+
+These tools provide navigation candidates, not proof. Agents still validate
+against direct source reads. See
+[Configuration Reference](CONFIGURATION.md#optional-indexing-activation)
+for setup details, safety rules, and non-goals.
 
 ## Why It Matters
 
@@ -103,6 +181,11 @@ Do not infer Semble target roots, search sibling worktrees, run `semble init`,
 use Semble remote Git URL indexing from unattended MAS prompts, write one
 project's Semble root into global guidance, or treat Semble MCP as part of the
 default MAS setup.
+
+When installing Semble for Liza, install the CLI and keep Liza's own
+`AGENT_TOOLS.md` routing as the source of truth. Do not enable a Semble MCP
+server by default, and do not accept installer-generated additions to
+`CLAUDE.md` or `AGENTS.md`.
 
 ### Worktree-Local SCIP Indexes
 
@@ -228,7 +311,13 @@ instructions and headless execution.
 
 Exception:
 
-- `RTK` remains useful for Claude Code because it compresses tool output at the transport layer
+- `RTK` remains most useful because it compresses tool output at the transport layer
+
+Install RTK as the CLI/proxy that Liza's tool contract references. If the RTK
+installer offers to add instructions to `CLAUDE.md`, `AGENTS.md`, or another
+agent prompt file, decline or remove them. Liza owns RTK guidance in
+`AGENT_TOOLS.md`; duplicate vendor instructions can conflict with Liza's
+fallback and mode-specific rules.
 
 ## Safer Default Direction For Multi-Agent Use
 
