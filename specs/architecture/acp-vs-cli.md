@@ -8,9 +8,9 @@ Based on the `llm-agent-boundary` branch (PR #83, ADR-0085).
 | Capability | CLIAgent | ACPXAgent | Notes |
 |---|---|---|---|
 | **Backend dispatch** | claude, codex, gemini, mistral, kimi | Current Liza integration supports codex via acpx | Implementation gap — ACP is not structurally single-backend |
-| **Agent output logs** | Streams to `.liza/agent-outputs/*.txt`, `*.err` | `outputsDir` accepted but unused | **Gap** — ACP runs leave no audit trail |
-| **Output ingestion** | Streams stdout/stderr into `.liza/agent-outputs/`, event writers, and progress signals | Current implementation buffers ACPX output until subprocess exit | Implementation gap — ACP JSON-RPC can be ingested incrementally |
-| **Progress watchdog** | Feeds `progressCh` on every stdout/stderr write | No provider-output signal | Watchdog still polls worktree + state; ACP is less granular but not blind |
+| **Agent output logs** | Streams to `.liza/agent-outputs/*.txt`, `*.err` | Streams `acpx prompt` stdout JSON-RPC to `.txt` and stderr diagnostics to `.err` | ACP logs raw prompt JSON-RPC output for transcript fidelity |
+| **Output ingestion** | Streams stdout/stderr into `.liza/agent-outputs/`, event writers, and progress signals | Streams `acpx prompt` stdout/stderr into `.liza/agent-outputs/`, message events, and progress signals | ACP stdout is parsed incrementally for message chunks and usage |
+| **Progress watchdog** | Feeds `progressCh` on every stdout/stderr write | Feeds `progressCh` on streamed ACPX stdout/stderr activity | Watchdog still also polls worktree + state |
 | **Interactive mode** | Full support | Returns error | Expected — documented |
 | **Secret masking** | Creates masker only when `outputsDir != ""` | Always creates masker | ACP is stricter — masks even in no-log mode |
 | **Provider env file** | Loads `claude.env`, feeds entries to masker | No env file loading | Low impact — ACP doesn't use Claude's env file |
@@ -70,59 +70,6 @@ Until that work exists, `codex-acp` should be treated as a warm-session adapter
 and observability path, not as a guaranteed prompt-caching mechanism.
 
 ## Implementation Gaps (PR #83)
-
-### Agent output ingestion and logs (high)
-
-`ACPXAgent.outputsDir` is stored in the struct but never referenced. ACP runs
-produce no `.txt`/`.err` files, so `/context-engineering` analysis and
-`/liza-logs` have nothing to inspect. `runACPX` also captures stdout/stderr to
-`bytes.Buffer` and parses ACPX JSON-RPC output only after `cmd.Run()` returns.
-In Liza's headless agent mode these are the same underlying gap: ACPX output is
-not ingested incrementally into the output-log/event/progress pipeline. The
-support docs now caveat this behavior for `codex-acp`.
-
-This is an implementation gap in the current adapter, not a structural ACP
-limitation. ACPX output and ACP `session/update` notifications can be consumed as
-they arrive and persisted through the same retention boundary as CLI output.
-
-Closing the gap would require Liza to:
-
-- use `outputsDir` in `ACPXAgent`
-- scan ACPX stdout line-by-line during execution instead of waiting for
-  subprocess exit
-- parse `session/update` notifications as they arrive
-- choose a transcript format for ACP runs, likely JSONL for structured updates
-  plus a human-readable `.txt` projection
-- apply the same secret masking and close/error handling as CLI output logs
-- preserve stderr diagnostics separately from provider message content
-- emit `LLMAgentEvent` updates from the incremental parser
-- include session metadata (`SessionID`, warm/cold state, backend name) so log
-  consumers can correlate ACP runs
-- update `/context-engineering` and `/liza-logs` expectations for ACP transcript
-  files
-
-### Progress watchdog granularity (low)
-
-The execution progress watchdog (`progress_watchdog.go`) uses three signals:
-1. Provider output bytes (via `progressWriter` → `progressCh`) — **CLI only**
-2. Worktree git state changes (polled on ticker)
-3. Blackboard task state changes (polled on ticker)
-
-ACPXAgent doesn't feed signal 1, but signals 2 and 3 still work. A stalled ACP run
-where the agent makes no worktree or state changes will still be caught — just with
-less granularity (polling interval vs. real-time byte stream).
-
-This is an implementation gap in the current adapter. ACP streaming updates could
-be treated as provider activity just like CLI stdout/stderr bytes.
-
-Closing the gap would require Liza to:
-
-- connect streamed ACP updates to the existing progress callback
-- decide which update kinds count as meaningful activity
-- avoid treating repeated keepalive/no-op updates as progress
-- keep worktree and blackboard polling as fallback signals
-- add tests for long-running ACP prompts that stream activity without changing
-  files or task state
 
 ### Rich ACP event handling (medium)
 
@@ -184,7 +131,20 @@ Closing the gap would require Liza to:
 - document installation/update commands for pinned ACPX adapters
 - include version details in ACP run metadata and logs
 
+### Session control-call transcripts (low)
+
+The prompt subprocess now streams to `.liza/agent-outputs/`, but ACPX session
+control calls (`sessions show` and `sessions ensure`) still use the short
+buffered `runACPX` path. Their diagnostics are returned through the run error and
+masked before crossing the `LLMAgent` boundary, but they are not written as
+separate transcript files.
+
+This is an implementation gap in startup/session diagnostics, not prompt
+execution. Closing it would require either routing session control calls through
+the same transcript writer with metadata distinguishing control calls from prompt
+runs, or adding explicit support-doc language that only prompt subprocesses are
+transcript-logged.
+
 ## Dead Code
 
-- `ACPXAgent.outputsDir` — field exists, never read
 - `CLIAgent` always returns `LLMAgentUsage{}` — the `emitUsageEvent` calls were removed but the zero-value return remains (correct: no data available)
