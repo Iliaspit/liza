@@ -202,6 +202,13 @@ func (m Model) renderAgentPanel(budget int) string {
 		return "—"
 	}
 
+	cliVal := func(_ string, a models.Agent) string {
+		if a.Provider == "" {
+			return "—"
+		}
+		return a.Provider
+	}
+
 	lastHeartbeatVal := func(_ string, a models.Agent) string {
 		if a.Heartbeat.IsZero() {
 			return "—"
@@ -225,8 +232,9 @@ func (m Model) renderAgentPanel(budget int) string {
 	if m.columnTier >= ColumnTierStandard {
 		cols = append(cols,
 			column{"ROLE", 16, func(_ string, a models.Agent) string { return a.Role }},
+			column{"CLI", 10, cliVal},
 			column{"HEALTH", 10, healthVal},
-			column{"CURRENT_TASK", 34, currentTaskVal},
+			column{"CURRENT_TASK", m.agentCurrentTaskColumnWidth(), currentTaskVal},
 		)
 	}
 
@@ -245,7 +253,8 @@ func (m Model) renderAgentPanel(budget int) string {
 	// Build header row
 	var headerParts []string
 	for _, c := range cols {
-		headerParts = append(headerParts, fmt.Sprintf("%-*s", c.width, c.header))
+		header := truncateVisual(c.header, c.width-1)
+		headerParts = append(headerParts, padRight(header, c.width))
 	}
 	headerRow := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("8")).
 		Render("  " + strings.Join(headerParts, ""))
@@ -285,6 +294,32 @@ func (m Model) renderAgentPanel(budget int) string {
 		content += "\n" + healthDetails
 	}
 	return m.styles.AgentPanel.MaxHeight(budget).Render(content)
+}
+
+func (m Model) agentCurrentTaskColumnWidth() int {
+	const (
+		idWidth            = 20
+		statusWidth        = 14
+		roleWidth          = 16
+		cliWidth           = 10
+		healthWidth        = 10
+		lastHeartbeatWidth = 16
+		pidWidth           = 10
+		rowPrefixWidth     = 2
+		panelBorderWidth   = 2
+		minCurrentTask     = 6
+	)
+
+	fixedWidth := idWidth + statusWidth + roleWidth + cliWidth + healthWidth
+	if m.columnTier >= ColumnTierWide {
+		fixedWidth += lastHeartbeatWidth
+	}
+	if m.columnTier >= ColumnTierFull {
+		fixedWidth += pidWidth
+	}
+
+	rowBudget := max(m.width-panelBorderWidth-rowPrefixWidth, 0)
+	return max(rowBudget-fixedWidth, minCurrentTask)
 }
 
 func currentAgentHealthDetailLineCount(state *models.State) int {
@@ -476,9 +511,11 @@ func (m Model) renderTaskPanel(budget int) string {
 		return render.FormatDuration(time.Since(t.Created))
 	}
 
+	taskIDWidth := m.taskIDColumnWidth()
+
 	// Build column list based on tier
 	cols := []column{
-		{"ID", 40, func(t models.Task) string { return t.ID }},
+		{"ID", taskIDWidth, func(t models.Task) string { return t.ID }},
 		{"STATUS", 24, statusVal},
 	}
 
@@ -558,6 +595,41 @@ func (m Model) renderTaskPanel(budget int) string {
 
 	content := title + "\n" + headerRow + "\n" + strings.Join(rows, "\n")
 	return m.styles.TaskPanel.MaxHeight(budget).Render(content)
+}
+
+func (m Model) taskIDColumnWidth() int {
+	const (
+		preferredIDWidth  = 72
+		minIDWidth        = 8
+		statusWidth       = 24
+		attemptWidth      = 6
+		assignedWidth     = 16
+		reviewingWidth    = 16
+		depsWidth         = 16
+		ageWidth          = 8
+		timeInStatusWidth = 16
+		minDescription    = 16
+		rowPrefixWidth    = 2
+		panelBorderWidth  = 2
+	)
+
+	otherWidth := statusWidth
+	if m.columnTier >= ColumnTierStandard {
+		otherWidth += attemptWidth + assignedWidth + reviewingWidth
+	}
+	if m.columnTier >= ColumnTierWide {
+		otherWidth += minDescription
+	}
+	if m.columnTier >= ColumnTierFull {
+		otherWidth += depsWidth + ageWidth + timeInStatusWidth
+	}
+
+	rowBudget := max(m.width-panelBorderWidth-rowPrefixWidth, 0)
+	available := rowBudget - otherWidth
+	if available <= minIDWidth {
+		return max(available, 1)
+	}
+	return min(available, preferredIDWidth)
 }
 
 // renderActivityPanel renders the activity feed as a bordered panel.

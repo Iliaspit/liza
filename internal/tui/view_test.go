@@ -372,7 +372,7 @@ func TestRenderAgentPanel_ColumnTierMinimal(t *testing.T) {
 		styles:     NewStyles(60),
 		state: &models.State{
 			Agents: map[string]models.Agent{
-				"agent-1": {Role: "coder", Status: models.AgentStatusWorking, CurrentTask: strPtr("task-1"), Heartbeat: time.Now(), PID: 12345, ContextPercent: 50},
+				"agent-1": {Role: "coder", Status: models.AgentStatusWorking, CurrentTask: strPtr("task-1"), Heartbeat: time.Now(), Provider: "codex-acp", PID: 12345, ContextPercent: 50},
 			},
 		},
 	}
@@ -387,6 +387,8 @@ func TestRenderAgentPanel_ColumnTierMinimal(t *testing.T) {
 	if colCount != 2 {
 		t.Errorf("expected 2 columns at minimal tier, got %d (header: %q)", colCount, header)
 	}
+	assertNotContains(t, header, "CLI", "minimal tier should hide CLI column")
+	assertNotContains(t, out, "codex-acp", "minimal tier should hide CLI values")
 }
 
 func TestRenderAgentPanel_ColumnTierStandard(t *testing.T) {
@@ -397,7 +399,7 @@ func TestRenderAgentPanel_ColumnTierStandard(t *testing.T) {
 		styles:     NewStyles(100),
 		state: &models.State{
 			Agents: map[string]models.Agent{
-				"agent-1": {Role: "coder", Status: models.AgentStatusWorking, CurrentTask: strPtr("task-1"), Heartbeat: time.Now(), PID: 12345, ContextPercent: 50},
+				"agent-1": {Role: "coder", Status: models.AgentStatusWorking, CurrentTask: strPtr("task-1"), Heartbeat: time.Now(), Provider: "codex-acp", PID: 12345, ContextPercent: 50},
 			},
 		},
 	}
@@ -409,13 +411,83 @@ func TestRenderAgentPanel_ColumnTierStandard(t *testing.T) {
 	}
 
 	colCount := countHeaderColumns(header)
-	if colCount != 5 {
-		t.Errorf("expected 5 columns at standard tier, got %d (header: %q)", colCount, header)
+	if colCount != 6 {
+		t.Errorf("expected 6 columns at standard tier, got %d (header: %q)", colCount, header)
 	}
 
 	assertContains(t, header, "ROLE", "header should contain ROLE")
+	assertContains(t, header, "CLI", "header should contain CLI")
 	assertContains(t, header, "HEALTH", "header should contain HEALTH")
 	assertContains(t, header, "CURRENT_TASK", "header should contain CURRENT_TASK")
+	assertContains(t, out, "codex-acp", "agent panel should show configured CLI")
+}
+
+func TestRenderAgentPanel_StandardTierFitsNarrowWidth(t *testing.T) {
+	const width = 80
+	m := Model{
+		width:      width,
+		height:     40,
+		columnTier: ColumnTierStandard,
+		styles:     NewStyles(width),
+		state: &models.State{
+			Agents: map[string]models.Agent{
+				"agent-1": {
+					Role:        "coder",
+					Status:      models.AgentStatusWorking,
+					CurrentTask: strPtr("task-with-a-very-long-id-that-must-truncate"),
+					Heartbeat:   time.Now(),
+					Provider:    "codex-acp",
+					PID:         12345,
+				},
+			},
+		},
+	}
+
+	out := m.renderAgentPanel(10)
+	header := findHeaderLine(out)
+	if header == "" {
+		t.Fatal("no header line found")
+	}
+	assertContains(t, header, "CLI", "standard tier should show CLI column")
+	assertContains(t, out, "codex-acp", "standard tier should show CLI value")
+
+	for _, line := range strings.Split(out, "\n") {
+		if got := lipgloss.Width(line); got > width {
+			t.Fatalf("agent panel line width = %d, want <= %d; line: %q\nfull output:\n%s", got, width, line, out)
+		}
+	}
+}
+
+func TestRenderAgentPanel_CurrentTaskUsesRemainingWidth(t *testing.T) {
+	const width = 180
+	taskID := "task-with-long-name-that-fits-when-current-task-uses-the-available-width"
+	m := Model{
+		width:      width,
+		height:     40,
+		columnTier: ColumnTierFull,
+		styles:     NewStyles(width),
+		state: &models.State{
+			Agents: map[string]models.Agent{
+				"agent-1": {
+					Role:        "coder",
+					Status:      models.AgentStatusWorking,
+					CurrentTask: &taskID,
+					Heartbeat:   time.Now(),
+					Provider:    "codex-acp",
+					PID:         12345,
+				},
+			},
+		},
+	}
+
+	out := m.renderAgentPanel(10)
+	assertContains(t, out, taskID, "wide agent panel should use remaining width for long task IDs")
+
+	for _, line := range strings.Split(out, "\n") {
+		if got := lipgloss.Width(line); got > width {
+			t.Fatalf("agent panel line width = %d, want <= %d; line: %q\nfull output:\n%s", got, width, line, out)
+		}
+	}
 }
 
 func TestRenderAgentPanel_ColumnTierWide(t *testing.T) {
@@ -438,8 +510,8 @@ func TestRenderAgentPanel_ColumnTierWide(t *testing.T) {
 	}
 
 	colCount := countHeaderColumns(header)
-	if colCount != 6 {
-		t.Errorf("expected 6 columns at wide tier, got %d (header: %q)", colCount, header)
+	if colCount != 7 {
+		t.Errorf("expected 7 columns at wide tier, got %d (header: %q)", colCount, header)
 	}
 
 	assertContains(t, header, "LAST_HEARTBEAT", "header should contain LAST_HEARTBEAT")
@@ -465,8 +537,8 @@ func TestRenderAgentPanel_ColumnTierFull(t *testing.T) {
 	}
 
 	colCount := countHeaderColumns(header)
-	if colCount != 7 {
-		t.Errorf("expected 7 columns at full tier, got %d (header: %q)", colCount, header)
+	if colCount != 8 {
+		t.Errorf("expected 8 columns at full tier, got %d (header: %q)", colCount, header)
 	}
 
 	assertContains(t, header, "PID", "header should contain PID")
@@ -738,6 +810,57 @@ func TestRenderTaskPanel_ColumnTierFull(t *testing.T) {
 	assertContains(t, header, "DEPS", "header should contain DEPS")
 	assertContains(t, header, "TIME_IN_STATUS", "header should contain TIME_IN_STATUS")
 	assertContains(t, header, "AGE", "header should contain AGE")
+}
+
+func TestRenderTaskPanel_TaskIDPrefersWiderColumnWhenSpaceAllows(t *testing.T) {
+	const width = 240
+	taskID := "code-planning-1-code-plan-to-coding-task-with-long-descriptive-suffix"
+	task := makeTask(taskID, models.TaskStatusImplementing, 1)
+	task.Description = "Short description"
+
+	m := Model{
+		width:      width,
+		height:     40,
+		columnTier: ColumnTierFull,
+		styles:     NewStyles(width),
+		state: &models.State{
+			Tasks: []models.Task{task},
+		},
+	}
+
+	out := m.renderTaskPanel(10)
+	assertContains(t, out, taskID, "wide task panel should show long task IDs when 72-cell ID column fits")
+
+	for _, line := range strings.Split(out, "\n") {
+		if got := lipgloss.Width(line); got > width {
+			t.Fatalf("task panel line width = %d, want <= %d; line: %q\nfull output:\n%s", got, width, line, out)
+		}
+	}
+}
+
+func TestRenderTaskPanel_TaskIDShrinksToFitFullTier(t *testing.T) {
+	const width = 170
+	task := makeTask("code-planning-1-code-plan-to-coding-task-with-long-descriptive-suffix", models.TaskStatusImplementing, 1)
+	task.Description = "Description kept at minimum width"
+
+	m := Model{
+		width:      width,
+		height:     40,
+		columnTier: ColumnTierFull,
+		styles:     NewStyles(width),
+		state: &models.State{
+			Tasks: []models.Task{task},
+		},
+	}
+
+	out := m.renderTaskPanel(10)
+	assertContains(t, out, "DESCRIPTION", "full task panel should keep description column while shrinking ID")
+
+	for _, line := range strings.Split(out, "\n") {
+		if got := lipgloss.Width(line); got > width {
+			t.Fatalf("task panel line width = %d, want <= %d; line: %q\nfull output:\n%s", got, width, line, out)
+		}
+	}
 }
 
 func TestRenderTaskPanel_SortedByCreatedTime(t *testing.T) {
@@ -1259,7 +1382,7 @@ func findHeaderLine(output string) string {
 }
 
 func countHeaderColumns(header string) int {
-	columns := []string{"ID", "STATUS", "ROLE", "HEALTH", "CURRENT_TASK", "LAST_HEARTBEAT", "PID"}
+	columns := []string{"ID", "STATUS", "ROLE", "CLI", "HEALTH", "CURRENT_TASK", "LAST_HEARTBEAT", "PID"}
 	count := 0
 	for _, col := range columns {
 		if strings.Contains(header, col) {
@@ -1302,6 +1425,13 @@ func assertContains(t *testing.T, s, substr, msg string) {
 	t.Helper()
 	if !strings.Contains(s, substr) {
 		t.Errorf("%s: %q not found in %q", msg, substr, s)
+	}
+}
+
+func assertNotContains(t *testing.T, s, substr, msg string) {
+	t.Helper()
+	if strings.Contains(s, substr) {
+		t.Errorf("%s: %q unexpectedly found in %q", msg, substr, s)
 	}
 }
 
