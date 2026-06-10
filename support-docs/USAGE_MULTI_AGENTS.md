@@ -157,6 +157,16 @@ The TUI (`liza tui`) is the primary way to spawn and monitor agents. Press `s` t
 
 Alternatively, spawn agents from the CLI: `liza agent <role>`. Agent identity defaults to the first `{role}-N` not already registered with a valid lease (e.g., `coder-1`, or `coder-2` if `coder-1` is active). Override with `--agent-id` or the `LIZA_AGENT_ID` environment variable. After resolution, `liza agent` exports that ID as `LIZA_AGENT_ID` to the spawned provider CLI, including `-i` interactive sessions, so hooks select Multi-Agent mode rather than Pairing mode.
 
+Supported CLI names for `--cli`, `--default-cli`, `--default-doer-cli`, and
+`--default-reviewer-cli` are `claude`, `codex`, `codex-acp`, `opencode`,
+`opencode-acp`, `gemini`, `mistral`, and `kimi`.
+
+For OpenCode, run both `liza setup --opencode` and `liza init --opencode`
+before spawning agents. Init installs Liza's managed
+`.opencode/tools/exec.ts` compatibility tool, which OpenCode agents should use
+for shell and file operations instead of relying on stricter built-in tool
+schemas.
+
 The interactive TUI and headless watch automatically repair claimable work that is stuck because no live usable agent is registered for the required role. Successful auto-repair spawns are written to `log.yaml` as informational events and do not raise alerts; failed spawns raise `AUTO REPAIR FAILED`. Agents marked degraded for the current process epoch do not count as usable role capacity, and their health remains visible after unregister as degraded capacity context. Disable auto-repair with `LIZA_AUTO_REPAIR_AGENT_POOL=0` (or `false`/`no`). To repair manually, run `liza repair-agent-pool`. Add `--cli <name>` to choose the backend for newly spawned agents, or `--dry-run` to print the exact spawn commands without launching them.
 
 Avoid running multiple headless watchers for the same project. Auto-repair backoff is per watcher process. Liza's agent registration and `max-instances` guards prevent invalid ownership, but two watchers can briefly observe the same missing-role gap before a newly spawned agent registers.
@@ -200,7 +210,7 @@ All of the above plus: epic-planner, epic-plan-reviewer, us-writer, us-reviewer.
 
 **Integration phase** agents (integration-analyst, integration-reviewer) are spawned by the orchestrator after all coding tasks for a goal complete. They are not needed at startup — spawn them when the orchestrator triggers the integration sub-pipeline.
 
-Each agent command accepts a `--cli` flag to select the coding agent CLI: `claude`, `codex`, `codex-acp`, `gemini`, `mistral`, or `kimi`. When `--cli` is omitted, the default is resolved from role-specific config (`config.default_doer_cli` for doers and orchestrators, `config.default_reviewer_cli` for reviewers), then role-specific env (`LIZA_DEFAULT_DOER_CLI` for doers and orchestrators, `LIZA_DEFAULT_REVIEWER_CLI` for reviewers), then `config.default_cli`, then `LIZA_DEFAULT_CLI`, then `claude`. Set defaults at init time with `liza init --default-cli codex --default-reviewer-cli gemini "..."`, or edit `state.yaml` directly.
+Each agent command accepts a `--cli` flag to select the coding agent CLI: `claude`, `codex`, `codex-acp`, `opencode`, `opencode-acp`, `gemini`, `mistral`, or `kimi`. When `--cli` is omitted, the default is resolved from role-specific config (`config.default_doer_cli` for doers and orchestrators, `config.default_reviewer_cli` for reviewers), then role-specific env (`LIZA_DEFAULT_DOER_CLI` for doers and orchestrators, `LIZA_DEFAULT_REVIEWER_CLI` for reviewers), then `config.default_cli`, then `LIZA_DEFAULT_CLI`, then `claude`. Set defaults at init time with `liza init --default-cli codex --default-reviewer-cli gemini "..."`, or edit `state.yaml` directly.
 `codex-acp` is an opt-in ACPX-backed Codex runtime. It requires the `acpx` executable on the spawned agent's `PATH`; install it with `npm install -g acpx`. Liza preflights this prerequisite before direct `liza agent` execution and before TUI/API agent spawning, so a missing binary fails before the ACP session is started. `codex-acp` uses Codex's `AGENTS.md` contract setup and runs ACPX non-interactively with auto-approved provider prompts inside Liza's supervised task worktree. During `acpx prompt`, stdout JSON-RPC and stderr diagnostics are streamed to `.liza/agent-outputs/`; parsed message chunks are returned to the supervisor and lifecycle/usage metadata is logged. Short ACPX session control calls are not transcript-logged.
 In the TUI, `s` spawns with the configured default CLI; `S` prompts for CLI selection.
 

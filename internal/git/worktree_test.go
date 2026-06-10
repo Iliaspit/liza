@@ -1,10 +1,12 @@
 package git
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/liza-mas/liza/internal/testhelpers"
 )
@@ -242,6 +244,157 @@ func TestGetWorktreeRelPath(t *testing.T) {
 	got := git.GetWorktreeRelPath(taskID)
 	if got != expected {
 		t.Errorf("GetWorktreeRelPath() = %q, want %q", got, expected)
+	}
+}
+
+func TestWorktreeProgressSignatureTracksDirtyTrackedContent(t *testing.T) {
+	repoDir := setupTestRepo(t)
+	g := New(repoDir)
+
+	taskID := "task-dirty-content"
+	if _, err := g.CreateWorktree(taskID, "integration"); err != nil {
+		t.Fatalf("CreateWorktree() error = %v", err)
+	}
+	worktreePath := g.GetWorktreePath(taskID)
+	target := filepath.Join(worktreePath, "README.md")
+	if err := os.WriteFile(target, []byte("# Test\nfirst edit\n"), 0644); err != nil {
+		t.Fatalf("write first edit: %v", err)
+	}
+	first, err := g.WorktreeProgressSignature(taskID)
+	if err != nil {
+		t.Fatalf("WorktreeProgressSignature first error = %v", err)
+	}
+	if err := os.WriteFile(target, []byte("# Test\nsecond edit\n"), 0644); err != nil {
+		t.Fatalf("write second edit: %v", err)
+	}
+	second, err := g.WorktreeProgressSignature(taskID)
+	if err != nil {
+		t.Fatalf("WorktreeProgressSignature second error = %v", err)
+	}
+	if first == second {
+		t.Fatalf("signature did not change after dirty tracked content changed:\n%s", first)
+	}
+}
+
+func TestWorktreeProgressSignatureIgnoresDirtyTrackedMTimeOnlyChange(t *testing.T) {
+	repoDir := setupTestRepo(t)
+	g := New(repoDir)
+
+	taskID := "task-tracked-mtime"
+	if _, err := g.CreateWorktree(taskID, "integration"); err != nil {
+		t.Fatalf("CreateWorktree() error = %v", err)
+	}
+	target := filepath.Join(g.GetWorktreePath(taskID), "README.md")
+	if err := os.WriteFile(target, []byte("# Test\nsame dirty content\n"), 0644); err != nil {
+		t.Fatalf("write dirty tracked file: %v", err)
+	}
+	first, err := g.WorktreeProgressSignature(taskID)
+	if err != nil {
+		t.Fatalf("WorktreeProgressSignature first error = %v", err)
+	}
+	future := time.Now().Add(2 * time.Hour)
+	if err := os.Chtimes(target, future, future); err != nil {
+		t.Fatalf("touch dirty tracked file: %v", err)
+	}
+	second, err := g.WorktreeProgressSignature(taskID)
+	if err != nil {
+		t.Fatalf("WorktreeProgressSignature second error = %v", err)
+	}
+	if first != second {
+		t.Fatalf("signature changed after dirty tracked mtime-only change:\nfirst:\n%s\nsecond:\n%s", first, second)
+	}
+}
+
+func TestWorktreeProgressSignatureTracksUntrackedContent(t *testing.T) {
+	repoDir := setupTestRepo(t)
+	g := New(repoDir)
+
+	taskID := "task-untracked-content"
+	if _, err := g.CreateWorktree(taskID, "integration"); err != nil {
+		t.Fatalf("CreateWorktree() error = %v", err)
+	}
+	target := filepath.Join(g.GetWorktreePath(taskID), "notes.txt")
+	if err := os.WriteFile(target, []byte("first\n"), 0644); err != nil {
+		t.Fatalf("write first untracked edit: %v", err)
+	}
+	first, err := g.WorktreeProgressSignature(taskID)
+	if err != nil {
+		t.Fatalf("WorktreeProgressSignature first error = %v", err)
+	}
+	if err := os.WriteFile(target, []byte("second\n"), 0644); err != nil {
+		t.Fatalf("write second untracked edit: %v", err)
+	}
+	second, err := g.WorktreeProgressSignature(taskID)
+	if err != nil {
+		t.Fatalf("WorktreeProgressSignature second error = %v", err)
+	}
+	if first == second {
+		t.Fatalf("signature did not change after untracked content changed:\n%s", first)
+	}
+}
+
+func TestWorktreeProgressSignatureIgnoresUntrackedMTimeOnlyChange(t *testing.T) {
+	repoDir := setupTestRepo(t)
+	g := New(repoDir)
+
+	taskID := "task-untracked-mtime"
+	if _, err := g.CreateWorktree(taskID, "integration"); err != nil {
+		t.Fatalf("CreateWorktree() error = %v", err)
+	}
+	target := filepath.Join(g.GetWorktreePath(taskID), "notes.txt")
+	if err := os.WriteFile(target, []byte("same untracked content\n"), 0644); err != nil {
+		t.Fatalf("write untracked file: %v", err)
+	}
+	first, err := g.WorktreeProgressSignature(taskID)
+	if err != nil {
+		t.Fatalf("WorktreeProgressSignature first error = %v", err)
+	}
+	future := time.Now().Add(2 * time.Hour)
+	if err := os.Chtimes(target, future, future); err != nil {
+		t.Fatalf("touch untracked file: %v", err)
+	}
+	second, err := g.WorktreeProgressSignature(taskID)
+	if err != nil {
+		t.Fatalf("WorktreeProgressSignature second error = %v", err)
+	}
+	if first != second {
+		t.Fatalf("signature changed after untracked mtime-only change:\nfirst:\n%s\nsecond:\n%s", first, second)
+	}
+}
+
+func TestWorktreeProgressSignatureHandlesLargeUntrackedContent(t *testing.T) {
+	repoDir := setupTestRepo(t)
+	g := New(repoDir)
+
+	taskID := "task-large-untracked-content"
+	if _, err := g.CreateWorktree(taskID, "integration"); err != nil {
+		t.Fatalf("CreateWorktree() error = %v", err)
+	}
+	target := filepath.Join(g.GetWorktreePath(taskID), "large.bin")
+	if err := os.WriteFile(target, bytes.Repeat([]byte("a"), maxProgressSignatureFileBytes+1), 0644); err != nil {
+		t.Fatalf("write large untracked file: %v", err)
+	}
+	first, err := g.WorktreeProgressSignature(taskID)
+	if err != nil {
+		t.Fatalf("WorktreeProgressSignature first error = %v", err)
+	}
+	f, err := os.OpenFile(target, os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		t.Fatalf("open large untracked file for append: %v", err)
+	}
+	if _, err := f.Write([]byte("b")); err != nil {
+		_ = f.Close()
+		t.Fatalf("append large untracked file: %v", err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatalf("close large untracked file: %v", err)
+	}
+	second, err := g.WorktreeProgressSignature(taskID)
+	if err != nil {
+		t.Fatalf("WorktreeProgressSignature second error = %v", err)
+	}
+	if first == second {
+		t.Fatalf("signature did not change after large untracked file changed:\n%s", first)
 	}
 }
 

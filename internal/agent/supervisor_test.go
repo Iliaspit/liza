@@ -656,6 +656,62 @@ printf 'stderr with no log\n' >&2
 	}
 }
 
+func TestCLIAgentRunsOpenCodePromptAsArgument(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake CLI shell script test requires /bin/sh")
+	}
+
+	projectRoot := t.TempDir()
+	outputsDir := filepath.Join(projectRoot, ".liza", "agent-outputs")
+	binDir := t.TempDir()
+	fakeOpenCode := filepath.Join(binDir, "opencode")
+	script := `#!/bin/sh
+for arg in "$@"; do
+  printf 'arg:%s\n' "$arg"
+done
+stdin="$(cat)"
+if [ -n "$stdin" ]; then
+  printf 'stdin:%s\n' "$stdin"
+else
+  printf 'stdin-empty\n'
+fi
+`
+	if err := os.WriteFile(fakeOpenCode, []byte(script), 0755); err != nil {
+		t.Fatalf("write fake opencode: %v", err)
+	}
+
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	result, err := NewCLIAgent(outputsDir).Run(context.Background(), LLMAgentRunRequest{
+		BackendName: "opencode",
+		AgentID:     "coder-1",
+		TaskID:      "task-opencode",
+		Prompt:      "prompt body",
+		ProjectRoot: projectRoot,
+	})
+	if err != nil {
+		t.Fatalf("Run error: %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0", result.ExitCode)
+	}
+	for _, want := range []string{
+		"arg:run",
+		"arg:prompt body",
+		"arg:--dangerously-skip-permissions",
+		"arg:--format",
+		"arg:json",
+		"stdin-empty",
+	} {
+		if !strings.Contains(result.Output, want) {
+			t.Fatalf("Output missing %q:\n%s", want, result.Output)
+		}
+	}
+	if strings.Contains(result.Output, "stdin:prompt body") {
+		t.Fatalf("prompt should not be passed via stdin: %q", result.Output)
+	}
+}
+
 func TestDefaultCLIExecutorDisallowsClaudeSubagentToolsWhenEnvEnabled(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("fake CLI shell script test requires /bin/sh")
@@ -1339,6 +1395,201 @@ func TestRunSupervisor_CodexCommandRuntimeFailureBlocksWithoutGenericSpin(t *tes
 	}
 }
 
+func TestRunSupervisor_OpenCodeSuccessfulNoProgressBlocksAsSpinning(t *testing.T) {
+	projectRoot := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, projectRoot)
+	statePath, _ := testhelpers.SetupLizaDir(t, projectRoot)
+	testhelpers.SetupPipelineConfig(t, projectRoot)
+
+	now := time.Now().UTC()
+	taskID := "task-opencode-spin"
+	state := testhelpers.CreateValidState()
+	state.Config.CoderPollInterval = 1
+	state.Config.DoerMaxWait = 1
+	state.Config.LeaseDuration = 300
+	state.Config.SpinningRestartThreshold = 1
+	state.Tasks = []models.Task{testhelpers.BuildTaskByStatus(taskID, models.TaskStatusReady, now)}
+	bb := testhelpers.WriteInitialState(t, statePath, state)
+
+	opencodeOutput := `{"type":"tool","name":"exec","input":{"cmd":"printf BRIDGE_EXEC_OK"},"output":"exit_code: 0\nstdout:\nBRIDGE_EXEC_OK"}`
+	mock := &MockCLIExecutor{ExitCode: 0, Output: opencodeOutput}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	err := RunSupervisor(ctx, SupervisorConfig{
+		AgentID:          "coder-1",
+		Role:             models.RoleCoder,
+		ProjectRoot:      projectRoot,
+		StatePath:        statePath,
+		LogPath:          filepath.Join(projectRoot, ".liza", "log.yaml"),
+		SpecsDir:         filepath.Join(projectRoot, "specs"),
+		CLIName:          "opencode",
+		Executor:         mock,
+		ExecutionTimeout: 10 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("RunSupervisor() error = %v", err)
+	}
+
+	if calls := mock.GetCalls(); len(calls) != 2 {
+		t.Fatalf("Execute calls = %d, want 2 before no-progress guard blocks retry", len(calls))
+	}
+
+	updated, err := bb.Read()
+	if err != nil {
+		t.Fatalf("bb.Read: %v", err)
+	}
+	task := updated.FindTask(taskID)
+	if task == nil {
+		t.Fatalf("task %q not found", taskID)
+	}
+	if task.Status != models.TaskStatusBlocked {
+		t.Fatalf("task status = %s, want BLOCKED", task.Status)
+	}
+	if task.BlockedReason == nil {
+		t.Fatal("BlockedReason = nil, want no-progress reason")
+	}
+	if !strings.Contains(*task.BlockedReason, "successful no-progress loop detected") {
+		t.Fatalf("BlockedReason = %q, want successful no-progress loop", *task.BlockedReason)
+	}
+}
+
+func TestSuccessfulTurnProgressSignatureIgnoresOpenCodeOutputVariation(t *testing.T) {
+	const taskSnapshot = "task:implementing\nworktree:clean"
+
+	first := successfulTurnProgressSignature("opencode", `{"id":"one"}`, taskSnapshot)
+	second := successfulTurnProgressSignature("opencode", `{"id":"two"}`, taskSnapshot)
+	if first != second {
+		t.Fatalf("signature changed with output only: first=%q second=%q", first, second)
+	}
+}
+
+func TestSuccessfulTurnProgressSignatureTracksOpenCodeTaskProgress(t *testing.T) {
+	const output = `{"type":"tool","name":"exec","output":"ok"}`
+
+	first := successfulTurnProgressSignature("opencode", output, "task:implementing\nworktree:clean")
+	second := successfulTurnProgressSignature("opencode", output, "task:implementing\nworktree:modified")
+	if first == second {
+		t.Fatalf("signature did not change with task/worktree progress: %q", first)
+	}
+}
+
+func TestSuccessfulTurnTaskProgressSignatureIgnoresClaimChurn(t *testing.T) {
+	now := time.Now().UTC()
+	agentID := "coder-1"
+	leaseExpires := now.Add(time.Minute)
+	first := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusImplementing, now)
+	first.AssignedTo = &agentID
+	first.LeaseExpires = &leaseExpires
+	first.Iteration = 1
+	first.History = []models.TaskHistoryEntry{{Time: now, Event: models.TaskEventClaimed, Agent: &agentID}}
+
+	second := first
+	second.Iteration = 2
+	second.History = append(second.History, models.TaskHistoryEntry{Time: now.Add(time.Second), Event: models.TaskEventClaimed, Agent: &agentID})
+
+	if successfulTurnTaskProgressSignature(&first) != successfulTurnTaskProgressSignature(&second) {
+		t.Fatal("signature changed for claim-only task churn")
+	}
+
+	second.Output = append(second.Output, models.OutputEntry{
+		Desc:       "child work",
+		DoneWhen:   "child complete",
+		Scope:      "child scope",
+		SpecRef:    "specs/child.md",
+		Validation: []string{"go test ./..."},
+	})
+	if successfulTurnTaskProgressSignature(&first) == successfulTurnTaskProgressSignature(&second) {
+		t.Fatal("signature did not change for semantic task output progress")
+	}
+}
+
+func TestReadSuccessfulTurnProgressSnapshotRequiresExecutingAgentOwnership(t *testing.T) {
+	projectRoot := t.TempDir()
+	statePath, _ := testhelpers.SetupLizaDir(t, projectRoot)
+	testhelpers.SetupPipelineConfig(t, projectRoot)
+	pr, err := ops.LoadResolverForModels(projectRoot)
+	if err != nil {
+		t.Fatalf("LoadResolverForModels: %v", err)
+	}
+
+	now := time.Now().UTC()
+	executing := testhelpers.BuildTaskByStatus("task-executing", models.TaskStatusImplementing, now)
+	reviewable := testhelpers.BuildTaskByStatus("task-reviewable", models.TaskStatusReadyForReview, now)
+	state := testhelpers.CreateValidState()
+	state.Tasks = []models.Task{executing, reviewable}
+	bb := testhelpers.WriteInitialState(t, statePath, state)
+
+	if _, eligible, err := readSuccessfulTurnProgressSnapshot(projectRoot, bb, "task-executing", "coder-2", pr); err != nil {
+		t.Fatalf("readSuccessfulTurnProgressSnapshot wrong agent error = %v", err)
+	} else if eligible {
+		t.Fatal("wrong agent was eligible")
+	}
+	if _, eligible, err := readSuccessfulTurnProgressSnapshot(projectRoot, bb, "task-reviewable", "coder-1", pr); err != nil {
+		t.Fatalf("readSuccessfulTurnProgressSnapshot reviewable error = %v", err)
+	} else if eligible {
+		t.Fatal("non-executing task was eligible")
+	}
+	if sig, eligible, err := readSuccessfulTurnProgressSnapshot(projectRoot, bb, "task-executing", "coder-1", pr); err != nil {
+		t.Fatalf("readSuccessfulTurnProgressSnapshot executing error = %v", err)
+	} else if !eligible || sig == "" {
+		t.Fatalf("executing task eligibility = %v, signature = %q; want eligible signature", eligible, sig)
+	}
+}
+
+func TestReadSuccessfulTurnProgressSnapshotTracksWorktreeChanges(t *testing.T) {
+	projectRoot := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, projectRoot)
+	statePath, _ := testhelpers.SetupLizaDir(t, projectRoot)
+	testhelpers.SetupPipelineConfig(t, projectRoot)
+	pr, err := ops.LoadResolverForModels(projectRoot)
+	if err != nil {
+		t.Fatalf("LoadResolverForModels: %v", err)
+	}
+
+	now := time.Now().UTC()
+	taskID := "task-worktree-progress"
+	agentID := "coder-1"
+	gw := lizagit.New(projectRoot)
+	baseCommit, err := gw.CreateWorktree(taskID, "main")
+	if err != nil {
+		t.Fatalf("CreateWorktree() error: %v", err)
+	}
+	worktree := ".worktrees/" + taskID
+	task := testhelpers.BuildTaskByStatus(taskID, models.TaskStatusImplementing, now)
+	task.AssignedTo = &agentID
+	task.Worktree = &worktree
+	task.BaseCommit = &baseCommit
+	state := testhelpers.CreateValidState()
+	state.Tasks = []models.Task{task}
+	bb := testhelpers.WriteInitialState(t, statePath, state)
+
+	before, eligible, err := readSuccessfulTurnProgressSnapshot(projectRoot, bb, taskID, agentID, pr)
+	if err != nil {
+		t.Fatalf("readSuccessfulTurnProgressSnapshot before change: %v", err)
+	}
+	if !eligible {
+		t.Fatal("snapshot before worktree change was not eligible")
+	}
+
+	changedPath := filepath.Join(projectRoot, worktree, "progress.txt")
+	if err := os.WriteFile(changedPath, []byte("progress\n"), 0o644); err != nil {
+		t.Fatalf("write worktree progress file: %v", err)
+	}
+
+	after, eligible, err := readSuccessfulTurnProgressSnapshot(projectRoot, bb, taskID, agentID, pr)
+	if err != nil {
+		t.Fatalf("readSuccessfulTurnProgressSnapshot after change: %v", err)
+	}
+	if !eligible {
+		t.Fatal("snapshot after worktree change was not eligible")
+	}
+	if before == after {
+		t.Fatal("snapshot did not change after actual worktree progress")
+	}
+}
+
 func TestRunAgent_ExtractedOps_Integration(t *testing.T) {
 	tmpDir := t.TempDir()
 	statePath, _ := testhelpers.SetupLizaDir(t, tmpDir)
@@ -1596,6 +1847,7 @@ func TestCLISupportsStdin(t *testing.T) {
 		{"codex", true},
 		{"gemini", true},
 		{"vibe", false},
+		{"opencode", false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.cli, func(t *testing.T) {
@@ -1745,6 +1997,25 @@ func TestBuildCodexArgs(t *testing.T) {
 		assertNoObsoleteCodexOverrides(t, args)
 		if args[len(args)-1] != "-" {
 			t.Fatalf("args = %v, want stdin prompt marker last", args)
+		}
+	})
+}
+
+func TestBuildOpenCodeArgs(t *testing.T) {
+	t.Run("prompt argument with permissions bypass", func(t *testing.T) {
+		args := buildOpenCodeArgs("do the thing", "")
+
+		want := []string{"run", "do the thing", "--dangerously-skip-permissions"}
+		if !slices.Equal(args, want) {
+			t.Fatalf("args = %v, want %v", args, want)
+		}
+	})
+
+	t.Run("logging requests json format", func(t *testing.T) {
+		args := buildOpenCodeArgs("do the thing", "/tmp/logs")
+
+		if !containsAdjacent(args, "--format", "json") {
+			t.Fatalf("args = %v, want json format flags", args)
 		}
 	})
 }

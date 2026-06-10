@@ -135,11 +135,8 @@ func readExecutionProgressSnapshot(projectRoot string, bb *db.Blackboard, taskID
 	if err != nil {
 		return "", false, err
 	}
-	task := state.FindTask(taskID)
-	if task == nil {
-		return "", false, nil
-	}
-	if task.AssignedTo == nil || *task.AssignedTo != agentID || !models.IsExecutingStatus(task, pr) {
+	task, eligible := findExecutingTaskForAgent(state, taskID, agentID, pr)
+	if !eligible {
 		return "", false, nil
 	}
 
@@ -154,6 +151,40 @@ func readExecutionProgressSnapshot(projectRoot string, bb *db.Blackboard, taskID
 	}
 
 	return exit42TaskProgressSignature(task) + "\nworktree:" + worktreeSignature, true, nil
+}
+
+func readSuccessfulTurnProgressSnapshot(projectRoot string, bb *db.Blackboard, taskID string, agentID string, pr models.PipelineResolver) (string, bool, error) {
+	state, err := bb.Read()
+	if err != nil {
+		return "", false, err
+	}
+	task, eligible := findExecutingTaskForAgent(state, taskID, agentID, pr)
+	if !eligible {
+		return "", false, nil
+	}
+
+	worktreeSignature := "none"
+	if task.Worktree != nil && *task.Worktree != "" {
+		sig, sigErr := lizagit.New(projectRoot).WorktreeProgressSignature(taskID)
+		if sigErr != nil {
+			worktreeSignature = "error:" + sigErr.Error()
+		} else {
+			worktreeSignature = sig
+		}
+	}
+
+	return successfulTurnTaskProgressSignature(task) + "\nworktree:" + worktreeSignature, true, nil
+}
+
+func findExecutingTaskForAgent(state *models.State, taskID string, agentID string, pr models.PipelineResolver) (*models.Task, bool) {
+	task := state.FindTask(taskID)
+	if task == nil {
+		return nil, false
+	}
+	if task.AssignedTo == nil || *task.AssignedTo != agentID || !models.IsExecutingStatus(task, pr) {
+		return nil, false
+	}
+	return task, true
 }
 
 func progressPollInterval(timeout time.Duration) time.Duration {

@@ -1,13 +1,18 @@
 package git
 
 import (
+	"crypto/sha256"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 
+	"github.com/liza-mas/liza/internal/gitenv"
 	"github.com/liza-mas/liza/internal/paths"
 )
+
+const maxProgressSignatureFileBytes = 1 << 20
 
 // CreateWorktree creates a worktree for the given task from the specified branch.
 // Returns the base commit (full SHA) for drift tracking.
@@ -183,7 +188,8 @@ func (g *Git) GetWorktreeRelPath(taskID string) string {
 }
 
 // WorktreeProgressSignature returns a compact signature for meaningful changes
-// inside a task worktree: HEAD movement and porcelain status changes.
+// inside a task worktree: HEAD movement, porcelain status changes, and dirty
+// content changes for tracked and untracked files.
 func (g *Git) WorktreeProgressSignature(taskID string) (string, error) {
 	if err := paths.ValidateTaskID(taskID); err != nil {
 		return "", fmt.Errorf("invalid task ID: %w", err)
@@ -197,7 +203,98 @@ func (g *Git) WorktreeProgressSignature(taskID string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return head + "\n" + status, nil
+	contentSig, err := g.worktreeDirtyContentSignature(worktreePath)
+	if err != nil {
+		return "", err
+	}
+	return head + "\n" + status + "\ncontent:" + contentSig, nil
+}
+
+func (g *Git) worktreeDirtyContentSignature(worktreePath string) (string, error) {
+	h := sha256.New()
+
+	tracked, err := gitenv.Output(worktreePath, "diff", "--name-only", "-z", "HEAD", "--")
+	if err != nil {
+		return "", fmt.Errorf("git diff failed: %w\nOutput: %s", err, tracked)
+	}
+	h.Write([]byte("tracked\x00"))
+	h.Write(tracked)
+	for _, relPath := range nulRecords(tracked) {
+		if err := writeWorktreeFileSignature(h, worktreePath, relPath); err != nil {
+			return "", err
+		}
+	}
+
+	untracked, err := gitenv.Output(worktreePath, "ls-files", "-z", "--others", "--exclude-standard")
+	if err != nil {
+		return "", fmt.Errorf("git ls-files failed: %w\nOutput: %s", err, untracked)
+	}
+	h.Write([]byte("\x00untracked\x00"))
+	h.Write(untracked)
+	for _, relPath := range nulRecords(untracked) {
+		if err := writeWorktreeFileSignature(h, worktreePath, relPath); err != nil {
+			return "", err
+		}
+	}
+
+	return fmt.Sprintf("%x", h.Sum(nil)), nil
+}
+
+func nulRecords(output []byte) []string {
+	if len(output) == 0 {
+		return nil
+	}
+	records := strings.Split(strings.TrimSuffix(string(output), "\x00"), "\x00")
+	nonEmpty := records[:0]
+	for _, record := range records {
+		if record != "" {
+			nonEmpty = append(nonEmpty, record)
+		}
+	}
+	return nonEmpty
+}
+
+func writeWorktreeFileSignature(w io.Writer, worktreePath, relPath string) error {
+	fullPath := filepath.Join(worktreePath, filepath.FromSlash(relPath))
+	info, statErr := os.Lstat(fullPath)
+	fmt.Fprintf(w, "%s\x00", relPath)
+	if statErr != nil {
+		if os.IsNotExist(statErr) {
+			fmt.Fprint(w, "missing\x00")
+			return nil
+		}
+		return fmt.Errorf("stat worktree file %s: %w", relPath, statErr)
+	}
+
+	fmt.Fprintf(w, "mode=%s\x00size=%d\x00", info.Mode().String(), info.Size())
+	if info.Mode()&os.ModeSymlink != 0 {
+		target, readlinkErr := os.Readlink(fullPath)
+		if readlinkErr != nil {
+			return fmt.Errorf("readlink worktree file %s: %w", relPath, readlinkErr)
+		}
+		fmt.Fprintf(w, "symlink\x00%s\x00", target)
+		return nil
+	}
+	if !info.Mode().IsRegular() {
+		fmt.Fprint(w, "nonregular\x00")
+		return nil
+	}
+
+	file, openErr := os.Open(fullPath)
+	if openErr != nil {
+		return fmt.Errorf("open worktree file %s: %w", relPath, openErr)
+	}
+	defer file.Close()
+
+	written, copyErr := io.Copy(w, io.LimitReader(file, maxProgressSignatureFileBytes))
+	if copyErr != nil {
+		return fmt.Errorf("hash worktree file %s: %w", relPath, copyErr)
+	}
+	fmt.Fprintf(w, "\x00sampled=%d\x00", written)
+	if info.Size() > maxProgressSignatureFileBytes {
+		fmt.Fprint(w, "truncated\x00")
+	}
+	return nil
 }
 
 // WorktreeStatusShort returns git status --short output for a worktree path.
