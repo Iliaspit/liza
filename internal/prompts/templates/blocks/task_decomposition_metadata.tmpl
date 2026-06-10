@@ -1,0 +1,44 @@
+{{- define "task-decomposition-metadata" -}}
+{{ with .TaskDecomposition }}
+DECOMPOSITION:
+{{- if .OwnedFiles }}
+owned_files:
+{{- range .OwnedFiles }}
+- {{.}}
+{{- end }}
+{{- end }}
+{{- if .OwnedModules }}
+owned_modules:
+{{- range .OwnedModules }}
+- {{.}}
+{{- end }}
+{{- end }}
+{{- if .ReadOnlyDependsOn }}
+read_only_depends_on:
+{{- range .ReadOnlyDependsOn }}
+- {{.}}
+{{- end }}
+{{- end }}
+{{- if .ReadOnlyTaskDependsOn }}
+read_only_task_depends_on:
+{{- range .ReadOnlyTaskDependsOn }}
+- {{.}}
+{{- end }}
+{{- end }}
+{{- if .InterfacesOwned }}
+interfaces_owned:
+{{- range .InterfacesOwned }}
+- {{.}}
+{{- end }}
+{{- end }}
+{{- if .InterfacesConsumed }}
+interfaces_consumed:
+{{- range .InterfacesConsumed }}
+- {{.}}
+{{- end }}
+{{- end }}
+{{- if .CoverageNotes }}
+coverage_notes: {{.CoverageNotes}}
+{{- end }}
+{{- end }}
+{{- end -}}

@@ -2862,6 +2862,116 @@ func TestBuildPrompt_ReviewerAttemptDisplay_Attempt2(t *testing.T) {
 	}
 }
 
+func TestBuildPrompt_TaskDecompositionRenders(t *testing.T) {
+	now := time.Now().UTC()
+	assignedTo := "coder-1"
+	baseCommit := "abc123"
+	reviewCommit := "def456"
+	decomposition := &models.DecompositionManifest{
+		OwnedFiles:            []string{"internal/prompts/role_context.go"},
+		OwnedModules:          []string{"internal/prompts"},
+		ReadOnlyDependsOn:     []int{1},
+		ReadOnlyTaskDependsOn: []string{"architecture-1"},
+		InterfacesOwned:       []string{"RoleContextData.TaskDecomposition"},
+		InterfacesConsumed:    []string{"models.DecompositionManifest"},
+		CoverageNotes:         "Prompt assignment includes ownership metadata.",
+	}
+
+	tests := []struct {
+		name string
+		role string
+		task models.Task
+	}{
+		{
+			name: "doer",
+			role: "coder",
+			task: models.Task{
+				ID:            "task-1",
+				RolePair:      "coding-pair",
+				Description:   "Implement prompt decomposition rendering",
+				Status:        models.TaskStatusImplementing,
+				Priority:      1,
+				DoneWhen:      "Prompt renders decomposition metadata",
+				Scope:         "internal/prompts",
+				Decomposition: decomposition,
+				Created:       now,
+			},
+		},
+		{
+			name: "reviewer",
+			role: "code-reviewer",
+			task: models.Task{
+				ID:            "task-1",
+				RolePair:      "coding-pair",
+				Description:   "Implement prompt decomposition rendering",
+				Status:        models.TaskStatusReadyForReview,
+				Priority:      1,
+				DoneWhen:      "Prompt renders decomposition metadata",
+				Scope:         "internal/prompts",
+				Decomposition: decomposition,
+				AssignedTo:    &assignedTo,
+				BaseCommit:    &baseCommit,
+				ReviewCommit:  &reviewCommit,
+				Created:       now,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			state := &models.State{
+				Version: 1,
+				Goal: models.Goal{
+					ID:          "goal-1",
+					Description: "Test goal",
+					SpecRef:     "spec.md",
+					Status:      models.GoalStatusInProgress,
+					Created:     now,
+				},
+				Tasks:  []models.Task{tt.task},
+				Agents: make(map[string]models.Agent),
+				Config: models.Config{IntegrationBranch: "main"},
+			}
+
+			tmpDir := t.TempDir()
+			testhelpers.SetupPipelineConfig(t, tmpDir)
+			config := SupervisorConfig{
+				Role:        tt.role,
+				AgentID:     tt.role + "-1",
+				ProjectRoot: tmpDir,
+				SpecsDir:    filepath.Join(tmpDir, "specs"),
+				StatePath:   filepath.Join(tmpDir, "state.yaml"),
+			}
+
+			prompt, err := testBuildPrompt(t, state, config, "task-1")
+			if err != nil {
+				t.Fatalf("BuildPrompt() error: %v", err)
+			}
+
+			assertContainsAll(t, prompt,
+				"\n\nDECOMPOSITION:",
+				"DECOMPOSITION:",
+				"owned_files:",
+				"internal/prompts/role_context.go",
+				"owned_modules:",
+				"internal/prompts",
+				"read_only_depends_on:",
+				"- 1",
+				"read_only_task_depends_on:",
+				"architecture-1",
+				"interfaces_owned:",
+				"RoleContextData.TaskDecomposition",
+				"interfaces_consumed:",
+				"models.DecompositionManifest",
+				"coverage_notes: Prompt assignment includes ownership metadata.",
+			)
+			if tt.role == "coder" {
+				assertContainsAll(t, prompt, "SCOPE:\ninternal/prompts\n\nDECOMPOSITION:")
+			}
+		})
+	}
+}
+
 // TestBuildTaskRoleContextData_AttemptNum_UsesEffectiveAttempt verifies that
 // AttemptNum is populated via task.EffectiveAttempt(), not len(task.Attempted)+1.
 func TestBuildTaskRoleContextData_AttemptNum_UsesEffectiveAttempt(t *testing.T) {

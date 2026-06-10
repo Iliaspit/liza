@@ -3071,7 +3071,10 @@ func TestReviewInstructions_CodeReviewerBoundsIntegrationDriftWhenBranchPresent(
 }
 
 func TestReviewTask_RendersIntegrationBranchOnlyForCodeReviewer(t *testing.T) {
-	tmpl := template.Must(template.ParseFiles("templates/blocks/review_task.tmpl"))
+	tmpl := template.Must(template.ParseFiles(
+		"templates/blocks/review_task.tmpl",
+		"templates/blocks/task_decomposition_metadata.tmpl",
+	))
 
 	for _, tc := range []struct {
 		role string

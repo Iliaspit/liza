@@ -102,6 +102,7 @@ type RoleContextData struct {
 	ArchRef               string // path to architecture document, empty if none
 	ValidationCommands    []string
 	DestructiveDB         bool
+	TaskDecomposition     *models.DecompositionManifest
 	ValidationPlan        string
 	Worktree              string // resolved absolute path
 	IterationNum          int

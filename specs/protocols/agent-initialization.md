@@ -142,6 +142,7 @@ Role-specific decision tree for what to do first.
    - TASK ID: task identifier
    - WORKTREE: absolute path to worktree directory
    - DESCRIPTION, DONE WHEN, SCOPE: task details
+   - DECOMPOSITION: ownership, read-only dependency, interface, and coverage metadata when present
    - INSTRUCTIONS: role-specific guidance
 
 2. Verify assignment:
@@ -172,6 +173,7 @@ Role-specific decision tree for what to do first.
    - COMMIT TO REVIEW: SHA to verify
    - AUTHOR: original coder's agent ID
    - DESCRIPTION, DONE WHEN: task details
+   - DECOMPOSITION: ownership, read-only dependency, interface, and coverage metadata when present
    - INSTRUCTIONS: review-specific guidance
 
 2. Verify assignment:
