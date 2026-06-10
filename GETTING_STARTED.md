@@ -97,6 +97,37 @@ to use or remove/adapt the corresponding guidance. Leaving instructions for
 missing tools is not harmless: agents will follow the contract, spend turns on
 unavailable commands or MCP servers, and then recover noisily.
 
+If you keep the default SCIP guidance, install `scip-search` plus the language
+indexers for the stacks you want Liza to index. Installing `scip-search` alone
+is not enough:
+
+```bash
+# scip-search
+curl -fsSL https://raw.githubusercontent.com/liza-mas/scip-search/main/install.sh | bash
+scip-search --version
+
+# Go
+go install github.com/scip-code/scip-go/cmd/scip-go@latest
+
+# TypeScript
+npm install -g @sourcegraph/scip-typescript
+
+# Python
+npm install -g @sourcegraph/scip-python
+```
+
+Enable SCIP before project init when you want Liza to generate indexes:
+
+```bash
+export LIZA_ENABLE_SCIP_SEARCH=1
+liza init --spec goal.md --scip-search go --scip-search typescript --scip-search python
+```
+
+Omit `--scip-search ...` to let Liza autodetect supported languages from
+tracked files. In monorepos, start with explicit languages and see the
+[Configuration Reference](support-docs/CONFIGURATION.md#scip-search-configscip_search)
+for `--scip-search-plan`.
+
 ## Initialize a Project
 
 Run `liza init` in each repository where you want Liza contract activation:
