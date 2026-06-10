@@ -1,6 +1,8 @@
 package ops
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"log"
 	"os"
@@ -10,6 +12,7 @@ import (
 
 	"github.com/liza-mas/liza/internal/db"
 	"github.com/liza-mas/liza/internal/errors"
+	"github.com/liza-mas/liza/internal/filelock"
 	"github.com/liza-mas/liza/internal/git"
 	"github.com/liza-mas/liza/internal/identity"
 	"github.com/liza-mas/liza/internal/models"
@@ -65,7 +68,6 @@ func ClaimTask(projectRoot, taskID, agentID string) (*ClaimResult, error) {
 
 	// --- Phase 1: Validate Under Lock ---
 	var taskStatus models.TaskStatus
-	var baseCommit string
 	var integrationBranch string
 	var postWorktreeCmd *string
 	var copyWorktreeEnvFiles bool
@@ -205,11 +207,77 @@ func ClaimTask(projectRoot, taskID, agentID string) (*ClaimResult, error) {
 		}
 	}
 
-	// --- Phase 2: Handle Worktree ---
 	gitWrapper := git.New(lp.ProjectRoot())
+	claimLock := filelock.New(claimTaskWorktreeLockPath(lp.StatePath(), taskID))
+	var claimResult *ClaimResult
+	err = claimLock.WithLockOperation("claim-task-worktree", func() error {
+		var lockedErr error
+		claimResult, lockedErr = completeClaimTaskAfterValidation(
+			bb,
+			gitWrapper,
+			lp.ProjectRoot(),
+			taskID,
+			agentID,
+			runtimeRole,
+			taskStatus,
+			integrationBranch,
+			postWorktreeCmd,
+			copyWorktreeEnvFiles,
+			scipSearchLanguages,
+			leaseDuration,
+			strategy,
+			claimCtx,
+			pipelineTransitions,
+			resolver,
+		)
+		return lockedErr
+	})
+	if err != nil {
+		return nil, err
+	}
+	return claimResult, nil
+}
 
+func claimTaskWorktreeLockPath(statePath, taskID string) string {
+	sum := sha256.Sum256([]byte(taskID))
+	return statePath + ".claim-" + hex.EncodeToString(sum[:8])
+}
+
+func completeClaimTaskAfterValidation(
+	bb *db.Blackboard,
+	gitWrapper *git.Git,
+	projectRoot,
+	taskID,
+	agentID,
+	runtimeRole string,
+	taskStatus models.TaskStatus,
+	integrationBranch string,
+	postWorktreeCmd *string,
+	copyWorktreeEnvFiles bool,
+	scipSearchLanguages []string,
+	leaseDuration int,
+	strategy claimStrategy,
+	claimCtx claimContext,
+	pipelineTransitions map[models.TaskStatus][]models.TaskStatus,
+	resolver models.PipelineResolver,
+) (*ClaimResult, error) {
+	// --- Phase 2: Handle Worktree ---
+	lockedTask, err := recheckClaimTaskBeforeWorktree(
+		bb,
+		taskID,
+		agentID,
+		runtimeRole,
+		taskStatus,
+		strategy,
+		resolver,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	var baseCommit string
 	if _, preserveInitial := strategy.(preservedInitialClaimStrategy); preserveInitial {
-		baseCommit = *task.BaseCommit
+		baseCommit = *lockedTask.BaseCommit
 	} else {
 		baseCommit, err = gitWrapper.GetCommitSHA(integrationBranch)
 		if err != nil {
@@ -232,7 +300,7 @@ func ClaimTask(projectRoot, taskID, agentID string) (*ClaimResult, error) {
 
 	var envFileWarnings []string
 	if copyWorktreeEnvFiles {
-		envFileWarnings = ProvisionWorktreeEnvFiles(lp.ProjectRoot(), worktreeDir)
+		envFileWarnings = ProvisionWorktreeEnvFiles(projectRoot, claimCtx.worktreeDir)
 		for _, warning := range envFileWarnings {
 			log.Printf("WARNING: claim-task %s: %s", taskID, warning)
 		}
@@ -244,21 +312,21 @@ func ClaimTask(projectRoot, taskID, agentID string) (*ClaimResult, error) {
 	// Non-fatal: warnings are surfaced through ClaimResult for caller visibility.
 	var postCmdWarnings []string
 	if postWorktreeCmd != nil && strategy.shouldRunPostWorktreeCmd(worktreePhase) {
-		if postErr := RunPostWorktreeCmd(*postWorktreeCmd, worktreeDir); postErr != nil {
+		if postErr := RunPostWorktreeCmd(*postWorktreeCmd, claimCtx.worktreeDir); postErr != nil {
 			warning := fmt.Sprintf("post-worktree-cmd: %v", postErr)
 			postCmdWarnings = append(postCmdWarnings, warning)
 			log.Printf("WARNING: claim-task %s: %s", taskID, warning)
 		}
 	}
-	sembleWarnings := PrepareSembleWorktreeIgnore(worktreeDir)
+	sembleWarnings := PrepareSembleWorktreeIgnore(claimCtx.worktreeDir)
 	for _, warning := range sembleWarnings {
 		log.Printf("WARNING: claim-task %s: %s", taskID, warning)
 	}
-	scipWarnings := refreshTaskWorktreeScipIndexes(worktreeDir, scipSearchLanguages)
+	scipWarnings := refreshTaskWorktreeScipIndexes(claimCtx.worktreeDir, scipSearchLanguages)
 	for _, warning := range scipWarnings {
 		log.Printf("WARNING: claim-task %s: %s", taskID, warning)
 	}
-	stacklitWarnings := refreshTaskWorktreeStacklitIndex(worktreeDir)
+	stacklitWarnings := refreshTaskWorktreeStacklitIndex(claimCtx.worktreeDir)
 	for _, warning := range stacklitWarnings {
 		log.Printf("WARNING: claim-task %s: %s", taskID, warning)
 	}
@@ -370,7 +438,7 @@ func ClaimTask(projectRoot, taskID, agentID string) (*ClaimResult, error) {
 		TaskID:            taskID,
 		AgentID:           agentID,
 		SourceStatus:      taskStatus,
-		WorktreeRel:       worktreeRel,
+		WorktreeRel:       claimCtx.worktreeRel,
 		BaseCommit:        baseCommit,
 		LeaseExpires:      leaseExpires,
 		IntegrationFix:    taskStatus == models.TaskStatusIntegrationFailed,
@@ -378,6 +446,40 @@ func ClaimTask(projectRoot, taskID, agentID string) (*ClaimResult, error) {
 		WorktreeRecreated: worktreeDeleted && worktreeCreated,
 		Warnings:          warnings,
 	}, nil
+}
+
+func recheckClaimTaskBeforeWorktree(
+	bb *db.Blackboard,
+	taskID,
+	agentID,
+	runtimeRole string,
+	expectedStatus models.TaskStatus,
+	strategy claimStrategy,
+	resolver models.PipelineResolver,
+) (*models.Task, error) {
+	state, task, err := readTaskState(bb, taskID)
+	if err != nil {
+		return nil, err
+	}
+	if task.Status != expectedStatus {
+		return nil, fmt.Errorf("race condition: task status changed from %s to %s", expectedStatus, task.Status)
+	}
+	if reason := models.DoerClaimBlockedReason(state, task, runtimeRole, agentID, resolver, time.Now().UTC()); reason != "" {
+		return nil, &PreconditionError{Reason: reason}
+	}
+	if strategy.requiresDependencyRecheck() {
+		if unmet := unmetDependencies(task, state); len(unmet) > 0 {
+			return nil, fmt.Errorf("race condition: dependencies changed: %s", formatDependencyResults(unmet))
+		}
+	}
+	agent, err := requireRegisteredClaimAgent(state, agentID, runtimeRole)
+	if err != nil {
+		return nil, err
+	}
+	if agent.CurrentTask != nil && *agent.CurrentTask != "" && *agent.CurrentTask != taskID {
+		return nil, fmt.Errorf("race condition: agent %s became busy with %s", agentID, *agent.CurrentTask)
+	}
+	return task, nil
 }
 
 func unmetDependencies(task *models.Task, state *models.State) []models.DependencySatisfaction {
