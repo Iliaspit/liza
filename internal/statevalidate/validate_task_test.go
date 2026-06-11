@@ -235,6 +235,50 @@ func TestValidateTaskInvariants_EnforcesStatusSpecificRequiredFields(t *testing.
 	}
 }
 
+func TestValidateTaskInvariants_RejectsStaleIntegrationFailureOnReviewStates(t *testing.T) {
+	cfg := loadTestConfig(t)
+	resolver := pipeline.NewResolver(cfg)
+	now := time.Now().UTC()
+
+	cases := []models.TaskStatus{
+		models.TaskStatusReadyForReview,
+		models.TaskStatusLegacyReadyForReview,
+		models.TaskStatusReviewing,
+		models.TaskStatusPartiallyApproved,
+		models.TaskStatusReviewingCode2,
+		models.TaskStatusApproved,
+		models.TaskStatusCodingPlanToReview,
+		models.TaskStatusReviewingCodingPlan,
+		models.TaskStatusCodingPlanApproved,
+	}
+
+	for _, status := range cases {
+		t.Run(string(status), func(t *testing.T) {
+			task := testhelpers.BuildTaskByStatus("task-1", status, now)
+			if status == models.TaskStatusReviewingCode2 {
+				task.ReviewCommit = testhelpers.StringPtr("review123")
+				task.ReviewingBy = testhelpers.StringPtr("code-reviewer-2")
+				task.ReviewLeaseExpires = testhelpers.TimePtr(now.Add(30 * time.Minute))
+			}
+			if status == models.TaskStatusCodingPlanToReview || status == models.TaskStatusCodingPlanApproved {
+				task.ReviewCommit = testhelpers.StringPtr("review123")
+			}
+			if status == models.TaskStatusReviewingCodingPlan {
+				task.ReviewCommit = testhelpers.StringPtr("review123")
+				task.ReviewingBy = testhelpers.StringPtr("code-plan-reviewer-1")
+				task.ReviewLeaseExpires = testhelpers.TimePtr(now.Add(30 * time.Minute))
+			}
+			task.IntegrationFailure = map[string]any{
+				"operation": "wt-merge",
+				"reason":    "merge conflict",
+			}
+
+			err := validateTaskInvariants(stateWithTasks(task), "", true, resolver, cfg)
+			testhelpers.RequireErrorContains(t, err, string(status)+" task has stale integration_failure outside integration recovery: task-1")
+		})
+	}
+}
+
 func TestValidateTaskInvariants_SupersededWithoutReplacements(t *testing.T) {
 	cfg := loadTestConfig(t)
 	resolver := pipeline.NewResolver(cfg)

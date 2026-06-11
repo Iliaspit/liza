@@ -147,6 +147,53 @@ func TestSubmitVerdict_Approved(t *testing.T) {
 	}
 }
 
+func TestSubmitVerdict_ApprovedClearsStaleIntegrationFailure(t *testing.T) {
+	tmpDir := t.TempDir()
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+
+	now := time.Now().UTC()
+	state := testhelpers.CreateValidState()
+	task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusReviewing, now)
+	staleMergeCommit := "stale-merge"
+	task.MergeCommit = &staleMergeCommit
+	task.IntegrationFailure = map[string]any{
+		"operation": "wt-merge",
+		"reason":    "merge conflict",
+	}
+	state.Tasks = []models.Task{task}
+	state.Agents["code-reviewer-1"] = models.Agent{
+		Role:   "code-reviewer",
+		Status: models.AgentStatusWorking,
+	}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	if _, err := SubmitVerdict(tmpDir, "task-1", "APPROVED", "", "code-reviewer-1", ""); err != nil {
+		t.Fatalf("SubmitVerdict() error: %v", err)
+	}
+
+	bb := db.New(stateFile)
+	readState, err := bb.Read()
+	if err != nil {
+		t.Fatalf("Failed to read state: %v", err)
+	}
+	readTask := readState.FindTask("task-1")
+	if readTask == nil {
+		t.Fatal("Task not found")
+	}
+	if readTask.Status != models.TaskStatusApproved {
+		t.Fatalf("Status = %s, want %s", readTask.Status, models.TaskStatusApproved)
+	}
+	if readTask.ReviewCommit == nil {
+		t.Fatal("ReviewCommit was cleared")
+	}
+	if readTask.MergeCommit != nil {
+		t.Fatalf("MergeCommit = %v, want nil stale merge metadata", *readTask.MergeCommit)
+	}
+	if readTask.IntegrationFailure != nil {
+		t.Fatalf("IntegrationFailure = %v, want nil stale failure metadata", readTask.IntegrationFailure)
+	}
+}
+
 func TestSubmitVerdict_Rejected(t *testing.T) {
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
@@ -939,16 +986,22 @@ func TestSubmitVerdict_ApprovedFromReviewing2(t *testing.T) {
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()
 	reviewCommit := "review123"
+	staleMergeCommit := "stale-merge"
 	worktree := ".worktrees/task-1"
 	reviewingBy := "code-reviewer-2"
 	reviewLease := now.Add(30 * time.Minute)
 	state.Tasks = []models.Task{
 		{
-			ID:                 "task-1",
-			Status:             models.TaskStatusReviewingCode2,
-			RolePair:           "coding-pair",
-			Priority:           1,
-			ReviewCommit:       &reviewCommit,
+			ID:           "task-1",
+			Status:       models.TaskStatusReviewingCode2,
+			RolePair:     "coding-pair",
+			Priority:     1,
+			ReviewCommit: &reviewCommit,
+			MergeCommit:  &staleMergeCommit,
+			IntegrationFailure: map[string]any{
+				"operation": "wt-merge",
+				"reason":    "merge conflict",
+			},
 			Worktree:           &worktree,
 			ReviewingBy:        &reviewingBy,
 			ReviewLeaseExpires: &reviewLease,
@@ -985,6 +1038,15 @@ func TestSubmitVerdict_ApprovedFromReviewing2(t *testing.T) {
 	}
 	if task.Status != models.TaskStatusApproved {
 		t.Errorf("Status = %v, want CODE_APPROVED", task.Status)
+	}
+	if task.ReviewCommit == nil || *task.ReviewCommit != reviewCommit {
+		t.Fatalf("ReviewCommit = %v, want %s", task.ReviewCommit, reviewCommit)
+	}
+	if task.MergeCommit != nil {
+		t.Fatalf("MergeCommit = %v, want nil stale merge metadata", *task.MergeCommit)
+	}
+	if task.IntegrationFailure != nil {
+		t.Fatalf("IntegrationFailure = %v, want nil stale failure metadata", task.IntegrationFailure)
 	}
 	if task.ApprovedBy == nil || *task.ApprovedBy != "code-reviewer-2" {
 		t.Error("ApprovedBy should be code-reviewer-2")

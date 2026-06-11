@@ -87,6 +87,7 @@ type statusClassifier struct {
 	submitted []models.TaskStatus
 	reviewing []models.TaskStatus
 	approved  []models.TaskStatus
+	partial   []models.TaskStatus
 	rejected  []models.TaskStatus
 }
 
@@ -116,6 +117,9 @@ func newStatusClassifier(resolver *pipeline.Resolver, cfg *pipeline.PipelineConf
 		}
 		if s, err := resolver.ApprovedStatus(rpName); err == nil {
 			sc.approved = append(sc.approved, s)
+		}
+		if s, err := resolver.PartiallyApprovedStatus(rpName); err == nil {
+			sc.partial = append(sc.partial, s)
 		}
 		if s, err := resolver.RejectedStatus(rpName); err == nil {
 			sc.rejected = append(sc.rejected, s)
@@ -153,6 +157,10 @@ func (sc *statusClassifier) IsReviewing(s models.TaskStatus) bool {
 
 func (sc *statusClassifier) IsApproved(s models.TaskStatus) bool {
 	return containsStatus(sc.approved, s)
+}
+
+func (sc *statusClassifier) IsPartiallyApproved(s models.TaskStatus) bool {
+	return containsStatus(sc.partial, s)
 }
 
 func (sc *statusClassifier) IsRejected(s models.TaskStatus) bool {
@@ -342,6 +350,9 @@ func validateStatusFields(task *models.Task, sc *statusClassifier) error {
 	if sc.IsApproved(task.Status) && task.ReviewCommit == nil {
 		return fmt.Errorf("%s task without review_commit: %s", task.Status, task.ID)
 	}
+	if task.IntegrationFailure != nil && disallowsIntegrationFailure(task.Status, sc) {
+		return fmt.Errorf("%s task has stale integration_failure outside integration recovery: %s", task.Status, task.ID)
+	}
 
 	if task.Status == models.TaskStatusMerged && task.Worktree != nil {
 		return fmt.Errorf("MERGED task still has worktree: %s", task.ID)
@@ -382,6 +393,24 @@ func validateStatusFields(task *models.Task, sc *statusClassifier) error {
 	}
 
 	return nil
+}
+
+func disallowsIntegrationFailure(status models.TaskStatus, sc *statusClassifier) bool {
+	// Belt-and-suspenders: explicit legacy/built-in statuses remain protected
+	// even if no active pipeline resolver declares the matching lifecycle state.
+	switch status {
+	case models.TaskStatusReadyForReview,
+		models.TaskStatusLegacyReadyForReview,
+		models.TaskStatusReviewing,
+		models.TaskStatusPartiallyApproved,
+		models.TaskStatusReviewingCode2,
+		models.TaskStatusApproved,
+		models.TaskStatusCodingPlanToReview,
+		models.TaskStatusReviewingCodingPlan,
+		models.TaskStatusCodingPlanApproved:
+		return true
+	}
+	return sc.IsSubmitted(status) || sc.IsReviewing(status) || sc.IsPartiallyApproved(status) || sc.IsApproved(status)
 }
 
 func nonEmptyStrings(values []string) []string {

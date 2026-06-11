@@ -230,6 +230,12 @@ func SubmitVerdict(projectRoot, taskID, verdict, reason, agentID, impact string)
 		}
 
 		if verdict == "APPROVED" {
+			// A fresh approval supersedes any stale integration attempt metadata
+			// from an earlier failed merge/submission path. Keep review_commit:
+			// wt-merge still needs the approved commit boundary.
+			task.MergeCommit = nil
+			task.IntegrationFailure = nil
+
 			// Build approval from agent registry and append to approvals list
 			provider := ""
 			if agent, ok := state.Agents[agentID]; ok {
