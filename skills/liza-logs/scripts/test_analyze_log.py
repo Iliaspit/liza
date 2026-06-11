@@ -256,6 +256,51 @@ def test_rich_bash_rtk_rg_exit_one_empty_result_is_not_error() -> None:
     assert report.actions[0].is_error is False
 
 
+def test_rich_report_highlights_permission_friction_near_top() -> None:
+    analyzer = load_analyzer()
+
+    report = analyzer.parse_rich(
+        as_lines(
+            {"type": "system", "session_id": "s", "model": "claude"},
+            {
+                "type": "assistant",
+                "message": {
+                    "id": "m1",
+                    "usage": {},
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": "toolu_1",
+                            "name": "Bash",
+                            "input": {"command": "mdtoc specs/story.md"},
+                        }
+                    ],
+                },
+            },
+            {
+                "type": "user",
+                "message": {
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": "toolu_1",
+                            "is_error": True,
+                            "content": "This command requires approval",
+                        }
+                    ]
+                },
+            },
+        )
+    )
+    report.meta.file = "coder-1-20260523-140607.txt"
+
+    rendered = analyzer.render_report(report)
+
+    assert "PERMISSION & POLICY FRICTION" in rendered
+    assert "generic approval-required command" in rendered
+    assert rendered.index("PERMISSION & POLICY FRICTION") < rendered.index("TOKEN SUMMARY")
+
+
 def test_rich_model_usage_does_not_set_session_model() -> None:
     analyzer = load_analyzer()
 
@@ -424,6 +469,35 @@ def test_role_summary_groups_logs_by_agent_role(tmp_path: Path) -> None:
     assert "code-reviewer-2" in rendered
     assert "Errors:        1" in rendered
     assert "TOP TOOL RESULT VOLUME" in rendered
+
+
+def test_role_summary_highlights_permission_friction() -> None:
+    analyzer = load_analyzer()
+    report = analyzer.SessionReport()
+    report.meta.file = "coder-1-20260523-140607.txt"
+    report.meta.format = "rich"
+    report.actions = [
+        analyzer.TurnAction(
+            tool_name="Bash",
+            detail="cd worktree && git status",
+            is_error=True,
+            result_preview="This command changes directory before running git",
+        ),
+        analyzer.TurnAction(
+            tool_name="Bash",
+            detail="uvx ruff@0.14.7 check file.py",
+            is_error=True,
+            result_preview="This command requires approval",
+        ),
+    ]
+
+    rendered = analyzer.render_role_summary([report])
+
+    assert "PERMISSION & POLICY FRICTION" in rendered
+    assert "Blocks: 2" in rendered
+    assert "cd before git" in rendered
+    assert "generic approval-required command" in rendered
+    assert rendered.index("PERMISSION & POLICY FRICTION") < rendered.index("TOP TOOL RESULT VOLUME")
 
 
 def test_role_summary_includes_mcp_usage() -> None:

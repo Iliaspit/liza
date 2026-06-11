@@ -380,6 +380,67 @@ function parseMcpToolName(toolName) {
   return null;
 }
 
+function permissionFrictionCategory(action) {
+  if (!action?.isError) return "";
+  const text = action.preview || "";
+  const detail = action.detail || "";
+
+  if (text.includes("This command requires approval")) return "generic approval-required command";
+  if (text.includes("This Bash command contains multiple operations")) return "multi-operation command";
+  if (text.includes("Commands that change directories and write via output redirection")) return "cd + output redirection";
+  if (text.includes("Commands that change directories and perform write operations")) return "cd + write-like operation";
+  if (text.includes("This command changes directory before running git")) return "cd before git";
+  if (text.includes("Blocked: sleep")) return "sleep/polling block";
+  if (text.includes("env with -C flag cannot be statically analyzed")) return "env -C unsupported shape";
+  if (text.includes("find contains unquoted glob")) return "find unquoted glob";
+  if (text.includes("This command uses shell operators")) return "shell operators require approval";
+  if (text.includes("Unrecognized redirect shape")) return "unrecognized redirect shape";
+  if (text.includes("sed target contains command-substitution")) return "runtime-determined sed target";
+  if (text.includes("PreToolUse:Bash hook error")) return "pre-tool hook block";
+  if (text.includes("must be run from project root") && text.includes("liza:")) return "liza project-root mismatch";
+  if (text.includes("ls in '") && text.includes("was blocked")) return "filesystem allowlist block";
+
+  if (text.includes("Contains shell syntax")) {
+    if (detail.includes("<<")) return "shell syntax: heredoc/inline payload";
+    if (detail.includes("$(")) return "shell syntax: command substitution";
+    return "shell syntax";
+  }
+  if (text.includes("Contains simple_expansion")) return "shell expansion: simple";
+  if (text.includes("Contains command_substitution")) return "shell expansion: command substitution";
+  if (text.includes("Contains subshell")) return "shell expansion: subshell";
+  if (text.includes("Contains expansion")) return "shell expansion";
+  if (text.includes("Contains brace with quote character")) return "shell expansion: brace/quote";
+
+  return "";
+}
+
+function computePermissionFriction(timeline) {
+  const rows = [];
+  for (const action of timeline) {
+    const category = permissionFrictionCategory(action);
+    if (!category) continue;
+    rows.push({
+      category,
+      toolName: action.toolName,
+      detail: action.detail || "",
+      preview: action.preview || "",
+    });
+  }
+  if (rows.length === 0) return null;
+
+  const categoryCounts = {};
+  const toolCounts = {};
+  for (const row of rows) {
+    categoryCounts[row.category] = (categoryCounts[row.category] || 0) + 1;
+    toolCounts[row.toolName] = (toolCounts[row.toolName] || 0) + 1;
+  }
+  return {
+    rows,
+    categoryCounts,
+    toolCounts,
+  };
+}
+
 function computeMcpUsage(timeline) {
   const mcpActions = [];
   for (const t of timeline) {
@@ -638,6 +699,7 @@ function analyzeCodex(parsed) {
       totalItems: items.length, outerTurns: parsed.outerTurns || 0 },
     breakdown: itemsByType, totalCharsAll, topItems, toolFreq,
     timeline, toolResultBreakdown, efficiencyInsights,
+    permissionFriction: computePermissionFriction(timeline),
     struggleSequences: findStruggleSequences(timeline),
     mcpUsage: computeMcpUsage(timeline),
     emptyTurnStats,
@@ -852,6 +914,7 @@ function analyzeClaudeCode(parsed) {
     turns, mcpStatus, toolsAvailable: systemInfo?.tools || 0, skillsAvailable: systemInfo?.skills || 0,
     perMsgUsage: perMsgUsage || [], contentByType, totalCharsAll, topItems, longestTurns,
     timeline, toolResultBreakdown, efficiencyInsights, systemPromptEstimate,
+    permissionFriction: computePermissionFriction(timeline),
     struggleSequences: findStruggleSequences(timeline),
     mcpUsage: computeMcpUsage(timeline),
     emptyTurnStats,
@@ -999,6 +1062,40 @@ function McpUsageSection({ mcpUsage }) {
   </>);
 }
 
+function PermissionFrictionSection({ permissionFriction }) {
+  if (!permissionFriction) return null;
+  const { rows, categoryCounts, toolCounts } = permissionFriction;
+  const categories = Object.entries(categoryCounts).sort((a, b) => b[1] - a[1]);
+  const tools = Object.entries(toolCounts).sort((a, b) => b[1] - a[1]);
+  const examples = rows.slice(0, 5);
+  return (<>
+    <SectionTitle>Permission & Policy Friction</SectionTitle>
+    <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 12 }}>
+      <StatCard label="Blocks" value={rows.length} color={C.red} />
+      <StatCard label="Categories" value={categories.length} color={C.orange} />
+      <StatCard label="Top Tool" value={tools[0]?.[0] || "—"} sub={tools[0] ? `${tools[0][1]} block(s)` : null} color={C.accent} />
+    </div>
+    <Table columns={[
+      { label: "Category", key: "category" },
+      { label: "Count", key: "count", align: "right" },
+    ]} rows={categories.map(([category, count]) => ({ category, count }))} />
+    <div style={{ fontSize: 11, color: C.textDim, margin: "12px 0 8px", textTransform: "uppercase", letterSpacing: 1 }}>
+      Examples
+    </div>
+    <Table columns={[
+      { label: "Category", key: "category", maxWidth: 260, wrap: true },
+      { label: "Tool", key: "toolName" },
+      { label: "Command/detail", key: "detail", maxWidth: 360, wrap: true },
+      { label: "Result", key: "preview", maxWidth: 360, wrap: true },
+    ]} rows={examples.map(row => ({
+      category: row.category,
+      toolName: row.toolName,
+      detail: truncate(row.detail, 120),
+      preview: truncate(row.preview, 120),
+    }))} />
+  </>);
+}
+
 function EmptyTurnsSection({ stats }) {
   if (!stats || stats.total === 0) return null;
   const ratio = stats.total > 0 ? (stats.empty / stats.total * 100).toFixed(2) : "0.00";
@@ -1036,7 +1133,8 @@ function EmptyTurnsSection({ stats }) {
 
 function CodexReport({ parsed }) {
   const analysis = useMemo(() => analyzeCodex(parsed), [parsed]);
-  const { summary, breakdown, totalCharsAll, topItems, toolFreq, timeline, toolResultBreakdown, efficiencyInsights, struggleSequences, mcpUsage, emptyTurnStats, skillInvocations, secretWordsLines } = analysis;
+  const { summary, breakdown, totalCharsAll, topItems, toolFreq, timeline, toolResultBreakdown, efficiencyInsights,
+    permissionFriction, struggleSequences, mcpUsage, emptyTurnStats, skillInvocations, secretWordsLines } = analysis;
   return (
     <div>
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 20 }}>
@@ -1057,6 +1155,7 @@ function CodexReport({ parsed }) {
         <StatCard label="Output" value={formatTokens(summary.outputTokens)} color={C.purple} />
         <StatCard label="Items" value={summary.totalItems} color={C.cyan} />
       </div>
+      <PermissionFrictionSection permissionFriction={permissionFriction} />
       <SectionTitle>Context Composition</SectionTitle>
       <ContextBar total={summary.totalInputTokens} segments={[
         { label: "Cache Hit", value: summary.cachedInputTokens, color: C.green },
@@ -1208,7 +1307,8 @@ function CodexReport({ parsed }) {
 function ClaudeCodeReport({ parsed }) {
   const analysis = useMemo(() => analyzeClaudeCode(parsed), [parsed]);
   const { summary, turns, mcpStatus, perMsgUsage, contentByType, totalCharsAll,
-    topItems, longestTurns, timeline, toolResultBreakdown, efficiencyInsights, systemPromptEstimate, struggleSequences, mcpUsage, emptyTurnStats, skillInvocations, secretWordsLines } = analysis;
+    topItems, longestTurns, timeline, toolResultBreakdown, efficiencyInsights, permissionFriction, systemPromptEstimate,
+    struggleSequences, mcpUsage, emptyTurnStats, skillInvocations, secretWordsLines } = analysis;
   const toolCalls = turns.flatMap(t => t.actions.filter(a => a.contentType === "tool_use").map(a => a.toolName)).filter(Boolean);
   const toolFreq = {};
   for (const t of toolCalls) toolFreq[t] = (toolFreq[t] || 0) + 1;
@@ -1239,6 +1339,7 @@ function ClaudeCodeReport({ parsed }) {
         {systemPromptEstimate && <StatCard label="Sys Prompt" value={formatTokens(systemPromptEstimate.tokensPerTurn)}
           sub={`${formatTokens(systemPromptEstimate.totalReplayTokens)} total replay`} color={C.orange} />}
       </div>
+      <PermissionFrictionSection permissionFriction={permissionFriction} />
       <SectionTitle>Context Token Breakdown</SectionTitle>
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 16 }}>
         <StatCard label="Cache Created" value={formatTokens(summary.cacheCreationTokens)} color={C.orange} />

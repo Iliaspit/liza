@@ -121,6 +121,18 @@ class SessionReport:
     secret_words_lines: list[str] = field(default_factory=list)
 
 
+@dataclass
+class PermissionFriction:
+    """A permission, policy, or command-shape block surfaced by agent tooling."""
+
+    category: str
+    log_file: str
+    role: str
+    tool_name: str
+    detail: str
+    result_preview: str
+
+
 # ---------------------------------------------------------------------------
 # Format detection
 # ---------------------------------------------------------------------------
@@ -231,6 +243,85 @@ def _parse_mcp_tool_name(tool_name: str) -> tuple[str, str] | None:
         if re.fullmatch(r"[A-Za-z][A-Za-z0-9_.-]*", server) and tool:
             return (server, tool)
     return None
+
+
+def _permission_friction_category(action: TurnAction) -> str:
+    """Classify command/tool permission friction separately from normal failures."""
+    if not action.is_error:
+        return ""
+
+    text = action.result_preview
+    detail = action.detail
+
+    if "This command requires approval" in text:
+        return "generic approval-required command"
+    if "This Bash command contains multiple operations" in text:
+        return "multi-operation command"
+    if "Commands that change directories and write via output redirection" in text:
+        return "cd + output redirection"
+    if "Commands that change directories and perform write operations" in text:
+        return "cd + write-like operation"
+    if "This command changes directory before running git" in text:
+        return "cd before git"
+    if "Blocked: sleep" in text:
+        return "sleep/polling block"
+    if "env with -C flag cannot be statically analyzed" in text:
+        return "env -C unsupported shape"
+    if "find contains unquoted glob" in text:
+        return "find unquoted glob"
+    if "This command uses shell operators" in text:
+        return "shell operators require approval"
+    if "Unrecognized redirect shape" in text:
+        return "unrecognized redirect shape"
+    if "sed target contains command-substitution" in text:
+        return "runtime-determined sed target"
+    if "PreToolUse:Bash hook error" in text:
+        return "pre-tool hook block"
+    if "must be run from project root" in text and "liza:" in text:
+        return "liza project-root mismatch"
+    if "ls in '" in text and "was blocked" in text:
+        return "filesystem allowlist block"
+
+    if "Contains shell syntax" in text:
+        if "<<" in detail:
+            return "shell syntax: heredoc/inline payload"
+        if "$(" in detail:
+            return "shell syntax: command substitution"
+        return "shell syntax"
+    if "Contains simple_expansion" in text:
+        return "shell expansion: simple"
+    if "Contains command_substitution" in text:
+        return "shell expansion: command substitution"
+    if "Contains subshell" in text:
+        return "shell expansion: subshell"
+    if "Contains expansion" in text:
+        return "shell expansion"
+    if "Contains brace with quote character" in text:
+        return "shell expansion: brace/quote"
+
+    return ""
+
+
+def _permission_frictions_for_report(report: SessionReport) -> list[PermissionFriction]:
+    """Return permission/policy frictions detected in a parsed report."""
+    role = _role_from_log_path(report.meta.file) if report.meta.file else ""
+    log_file = Path(report.meta.file).name if report.meta.file else ""
+    frictions: list[PermissionFriction] = []
+    for action in report.actions:
+        category = _permission_friction_category(action)
+        if not category:
+            continue
+        frictions.append(
+            PermissionFriction(
+                category=category,
+                log_file=log_file,
+                role=role,
+                tool_name=action.tool_name,
+                detail=action.detail,
+                result_preview=action.result_preview,
+            )
+        )
+    return frictions
 
 
 # ---------------------------------------------------------------------------
@@ -784,6 +875,42 @@ def render_header(report: SessionReport) -> str:
         ctx_window = report.meta.context_window
         max_fill = max(t.total_input / ctx_window * 100 for t in report.turns)
         lines.append(f"  Peak Fill:  {max_fill:.1f}%")
+    return "\n".join(lines) + "\n"
+
+
+def render_permission_friction(report: SessionReport) -> str:
+    """Render permission/policy blocks near the top of a single-log report."""
+    frictions = _permission_frictions_for_report(report)
+    if not frictions:
+        return ""
+
+    by_category = Counter(f.category for f in frictions)
+    examples = frictions[:5]
+    lines = [
+        "",
+        "-" * 72,
+        "PERMISSION & POLICY FRICTION",
+        "-" * 72,
+        f"  Blocks: {len(frictions)}",
+        "",
+        f"  {'Category':<38s} {'Count':>5s}",
+        f"  {'-' * 38} {'-' * 5}",
+    ]
+    for category, count in by_category.most_common():
+        lines.append(f"  {category:<38.38s} {count:>5d}")
+
+    lines.extend(
+        [
+            "",
+            f"  {'Example command/detail':<80s} {'Result':<80s}",
+            f"  {'-' * 80} {'-' * 80}",
+        ]
+    )
+    for friction in examples:
+        detail = friction.detail[:80]
+        result = friction.result_preview[:80]
+        lines.append(f"  {detail:<80s} {result:<80s}")
+
     return "\n".join(lines) + "\n"
 
 
@@ -1499,6 +1626,7 @@ def render_report(report: SessionReport) -> str:
     """Assemble all report sections."""
     sections = [
         render_header(report),
+        render_permission_friction(report),
         render_token_summary(report),
         render_content_breakdown(report),
         render_top_items(report),
@@ -1641,6 +1769,41 @@ def render_role_summary(reports: list[SessionReport]) -> str:
             f" {weighted_hit:>5.1f}%"
             f" {role_errors:>5d}"
         )
+
+    permission_frictions = [friction for report in reports for friction in _permission_frictions_for_report(report)]
+    if permission_frictions:
+        by_category = Counter(friction.category for friction in permission_frictions)
+        by_role_friction = Counter(friction.role for friction in permission_frictions)
+        lines.extend(
+            [
+                "",
+                "PERMISSION & POLICY FRICTION",
+                f"  Blocks: {len(permission_frictions)} ({len(by_category)} categories)",
+                "",
+                f"  {'Category':<38s} {'Count':>5s}",
+                f"  {'-' * 38} {'-' * 5}",
+            ]
+        )
+        for category, count in by_category.most_common(12):
+            lines.append(f"  {category:<38.38s} {count:>5d}")
+        lines.extend(
+            [
+                "",
+                f"  {'Role':<28s} {'Blocks':>6s}",
+                f"  {'-' * 28} {'-' * 6}",
+            ]
+        )
+        for role, count in by_role_friction.most_common():
+            lines.append(f"  {role:<28s} {count:>6d}")
+        lines.extend(
+            [
+                "",
+                f"  {'Example log':<38s} {'Category':<32s} {'Command/detail':<60s}",
+                f"  {'-' * 38} {'-' * 32} {'-' * 60}",
+            ]
+        )
+        for friction in permission_frictions[:5]:
+            lines.append(f"  {friction.log_file:<38.38s} {friction.category:<32.32s} {friction.detail[:60]:<60s}")
 
     tool_chars: Counter[str] = Counter()
     tool_calls: Counter[str] = Counter()

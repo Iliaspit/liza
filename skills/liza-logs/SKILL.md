@@ -46,12 +46,19 @@ Lifecycle churn outranks aggregate log noise:
    - The highest-churn task must appear first in the summary table and in
      cross-correlation before setup/tool/context frictions.
 
-Report sections: session header, token summary, content breakdown, top items by
-size, tool usage, empty turns, skill invocations, secret-word/init breadcrumb
-detection, turn timeline, tool result breakdown, MCP usage, efficiency insights,
-and struggle sequences. Rich format adds per-turn context growth, top longest
-turns, cost breakdown with system-prompt replay cost, and MCP server status.
-Sparse logs have aggregate usage only; do not infer exact per-turn growth or cost.
+Report sections: session header, permission/policy friction, token summary,
+content breakdown, top items by size, tool usage, empty turns, skill invocations,
+secret-word/init breadcrumb detection, turn timeline, tool result breakdown, MCP
+usage, efficiency insights, and struggle sequences. Rich format adds per-turn
+context growth, top longest turns, cost breakdown with system-prompt replay cost,
+and MCP server status. Sparse logs have aggregate usage only; do not infer exact
+per-turn growth or cost.
+
+Permission/policy friction is operational setup friction, not ordinary task
+failure. Keep it near the top and separate it from command exit failures. Split
+policy blocks, missing allowlist entries, shell-shape rejections, filesystem
+allowlist blocks, sleep/polling blocks, and Liza project-root mismatches because
+their fix surfaces differ.
 
 3. Refine the analysis with the bounded query helper, not by manually reading
    raw log files. Use `query-log.py` to extract trimmed evidence windows for

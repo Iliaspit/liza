@@ -15,7 +15,9 @@ Roles covered:
 Start with the primary lifecycle friction. If any task has >=4 rejections or
 review cycles, list the highest-churn task first even when it eventually merged.
 Tool errors, token volume, and setup friction come after lifecycle churn unless
-they are security/data-loss issues.
+they are security/data-loss issues. Permission and policy friction is the
+exception among setup friction: report it near the top because it changes how
+all later tool-error counts should be interpreted.
 
 | Priority | Friction | Evidence | Impact | Recommended fix |
 |----------|----------|----------|--------|-----------------|
@@ -72,7 +74,25 @@ missing, count task `history` events named `rejected` or
 | Task | Reason/history | Last status before abandon | Failed by | Impact | Follow-up |
 |------|----------------|----------------------------|-----------|--------|-----------|
 
-## 3. Log Friction Inventory
+## 3. Permission & Policy Friction
+
+Required when permission prompts, hook policy blocks, command-shape rejections,
+filesystem allowlist blocks, or Liza project-root mismatches appear.
+
+| Category | Count | Example log | Example command/result | Likely fix surface |
+|----------|------:|-------------|------------------------|--------------------|
+
+Keep these categories distinct:
+- policy blocks and command-shape rejections (`cd`, pipes, heredocs, shell expansions)
+- missing allowlist entries or unsupported command forms
+- filesystem allowlist blocks
+- sleep/polling blocks
+- Liza CLI project-root mismatches
+
+Do not mix permission/policy blocks with command exit failures such as failing
+tests, validation errors, missing files, or lint failures.
+
+## 4. Log Friction Inventory
 
 | Log file | Agent | Signal | Evidence | Related task | Interpretation |
 |----------|-------|--------|----------|--------------|----------------|
@@ -104,7 +124,7 @@ Interpret high-volume tool output as friction only when it is unnecessary,
 duplicated, or prevents progress. Large output from a targeted diagnostic may be
 valid evidence rather than waste.
 
-## 4. Cross-Correlation
+## 5. Cross-Correlation
 
 | Friction ID | Task | State evidence | Log evidence | Likely cause | Confidence |
 |-------------|------|----------------|--------------|--------------|------------|
@@ -114,19 +134,19 @@ Confidence:
 - Medium: state shows symptom, logs show plausible cause
 - Low: state shows symptom but log evidence is incomplete
 
-## 5. Recommendations
+## 6. Recommendations
 
 Group recommendations by root cause, not by individual task.
 
 | Priority | Recommendation | Fixes frictions | Evidence | Owner | Validation |
 |----------|----------------|-----------------|----------|-------|------------|
 
-## 6. Non-Findings / False Positives
+## 7. Non-Findings / False Positives
 
 | Signal | Why not a finding | Evidence |
 |--------|-------------------|----------|
 
-## 7. Appendix
+## 8. Appendix
 
 ### Files Analyzed
 
