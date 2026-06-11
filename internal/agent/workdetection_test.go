@@ -353,7 +353,7 @@ func TestDetectOrchestratorWakeTriggers(t *testing.T) {
 			wantCount:   1,
 		},
 		{
-			name: "blocked assessed dependency has new activity - wake",
+			name: "blocked assessed dependency merged after assessment - wake",
 			state: func() *models.State {
 				state := testhelpers.CreateValidState()
 				task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusBlocked, now)
@@ -364,7 +364,7 @@ func TestDetectOrchestratorWakeTriggers(t *testing.T) {
 					Event: models.TaskEventOrchestratorAssessment,
 					Agent: &agent,
 				})
-				dep := testhelpers.BuildTaskByStatus("task-2", models.TaskStatusImplementing, now)
+				dep := testhelpers.BuildTaskByStatus("task-2", models.TaskStatusMerged, now)
 				reviewer := "code-reviewer-1"
 				dep.History = append(dep.History, models.TaskHistoryEntry{
 					Time:  now.Add(-5 * time.Minute),
@@ -376,6 +376,171 @@ func TestDetectOrchestratorWakeTriggers(t *testing.T) {
 			}(),
 			wantTrigger: WakeTriggerBlocked,
 			wantCount:   1,
+		},
+		{
+			name: "blocked assessed dependency superseded to merged replacement after assessment - wake",
+			state: func() *models.State {
+				state := testhelpers.CreateValidState()
+				task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusBlocked, now)
+				task.DependsOn = []string{"task-2"}
+				agent := "orchestrator-1"
+				task.History = append(task.History, models.TaskHistoryEntry{
+					Time:  now.Add(-10 * time.Minute),
+					Event: models.TaskEventOrchestratorAssessment,
+					Agent: &agent,
+				})
+				dep := testhelpers.BuildTaskByStatus("task-2", models.TaskStatusSuperseded, now)
+				dep.SupersededBy = []string{"task-3"}
+				dep.History = append(dep.History, models.TaskHistoryEntry{
+					Time:  now.Add(-5 * time.Minute),
+					Event: models.TaskEventSuperseded,
+					Agent: &agent,
+				})
+				replacement := testhelpers.BuildTaskByStatus("task-3", models.TaskStatusMerged, now)
+				state.Tasks = []models.Task{task, dep, replacement}
+				return state
+			}(),
+			wantTrigger: WakeTriggerBlocked,
+			wantCount:   1,
+		},
+		{
+			name: "blocked assessed superseded dependency replacement merged after assessment - wake",
+			state: func() *models.State {
+				state := testhelpers.CreateValidState()
+				task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusBlocked, now)
+				task.DependsOn = []string{"task-2"}
+				agent := "orchestrator-1"
+				task.History = append(task.History, models.TaskHistoryEntry{
+					Time:  now.Add(-10 * time.Minute),
+					Event: models.TaskEventOrchestratorAssessment,
+					Agent: &agent,
+				})
+				dep := testhelpers.BuildTaskByStatus("task-2", models.TaskStatusSuperseded, now)
+				dep.SupersededBy = []string{"task-3"}
+				dep.History = append(dep.History, models.TaskHistoryEntry{
+					Time:  now.Add(-20 * time.Minute),
+					Event: models.TaskEventSuperseded,
+					Agent: &agent,
+				})
+				replacement := testhelpers.BuildTaskByStatus("task-3", models.TaskStatusMerged, now)
+				reviewer := "code-reviewer-1"
+				replacement.History = append(replacement.History, models.TaskHistoryEntry{
+					Time:  now.Add(-5 * time.Minute),
+					Event: models.TaskEventMerged,
+					Agent: &reviewer,
+				})
+				state.Tasks = []models.Task{task, dep, replacement}
+				return state
+			}(),
+			wantTrigger: WakeTriggerBlocked,
+			wantCount:   1,
+		},
+		{
+			name: "blocked assessed dependency submitted after assessment - no wake",
+			state: func() *models.State {
+				state := testhelpers.CreateValidState()
+				task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusBlocked, now)
+				task.DependsOn = []string{"task-2"}
+				agent := "orchestrator-1"
+				task.History = append(task.History, models.TaskHistoryEntry{
+					Time:  now.Add(-10 * time.Minute),
+					Event: models.TaskEventOrchestratorAssessment,
+					Agent: &agent,
+				})
+				dep := testhelpers.BuildTaskByStatus("task-2", models.TaskStatusReadyForReview, now)
+				coder := "coder-1"
+				dep.History = append(dep.History, models.TaskHistoryEntry{
+					Time:  now.Add(-5 * time.Minute),
+					Event: models.TaskEventSubmittedForReview,
+					Agent: &coder,
+				})
+				state.Tasks = []models.Task{task, dep}
+				return state
+			}(),
+			wantTrigger: WakeTriggerNone,
+			wantCount:   0,
+		},
+		{
+			name: "blocked assessed dependency approved after assessment - no wake",
+			state: func() *models.State {
+				state := testhelpers.CreateValidState()
+				task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusBlocked, now)
+				task.DependsOn = []string{"task-2"}
+				agent := "orchestrator-1"
+				task.History = append(task.History, models.TaskHistoryEntry{
+					Time:  now.Add(-10 * time.Minute),
+					Event: models.TaskEventOrchestratorAssessment,
+					Agent: &agent,
+				})
+				dep := testhelpers.BuildTaskByStatus("task-2", models.TaskStatusApproved, now)
+				reviewer := "code-reviewer-1"
+				dep.History = append(dep.History, models.TaskHistoryEntry{
+					Time:  now.Add(-5 * time.Minute),
+					Event: models.TaskEventApproved,
+					Agent: &reviewer,
+				})
+				state.Tasks = []models.Task{task, dep}
+				return state
+			}(),
+			wantTrigger: WakeTriggerNone,
+			wantCount:   0,
+		},
+		{
+			name: "blocked assessed dependency claimed after assessment - no wake",
+			state: func() *models.State {
+				state := testhelpers.CreateValidState()
+				task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusBlocked, now)
+				task.DependsOn = []string{"task-2"}
+				agent := "orchestrator-1"
+				task.History = append(task.History, models.TaskHistoryEntry{
+					Time:  now.Add(-10 * time.Minute),
+					Event: models.TaskEventOrchestratorAssessment,
+					Agent: &agent,
+				})
+				dep := testhelpers.BuildTaskByStatus("task-2", models.TaskStatusImplementing, now)
+				coder := "coder-1"
+				dep.History = append(dep.History, models.TaskHistoryEntry{
+					Time:  now.Add(-5 * time.Minute),
+					Event: models.TaskEventClaimed,
+					Agent: &coder,
+				})
+				state.Tasks = []models.Task{task, dep}
+				return state
+			}(),
+			wantTrigger: WakeTriggerNone,
+			wantCount:   0,
+		},
+		{
+			name: "blocked assessed dependency blocked after assessment - no wake",
+			state: func() *models.State {
+				state := testhelpers.CreateValidState()
+				task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusBlocked, now)
+				task.DependsOn = []string{"task-2"}
+				agent := "orchestrator-1"
+				task.History = append(task.History, models.TaskHistoryEntry{
+					Time:  now.Add(-10 * time.Minute),
+					Event: models.TaskEventOrchestratorAssessment,
+					Agent: &agent,
+				})
+				dep := testhelpers.BuildTaskByStatus("task-2", models.TaskStatusBlocked, now)
+				coder := "coder-1"
+				dep.History = append(dep.History,
+					models.TaskHistoryEntry{
+						Time:  now.Add(-5 * time.Minute),
+						Event: models.TaskEventBlocked,
+						Agent: &coder,
+					},
+					models.TaskHistoryEntry{
+						Time:  now.Add(-4 * time.Minute),
+						Event: models.TaskEventOrchestratorAssessment,
+						Agent: &agent,
+					},
+				)
+				state.Tasks = []models.Task{task, dep}
+				return state
+			}(),
+			wantTrigger: WakeTriggerNone,
+			wantCount:   0,
 		},
 		{
 			name: "blocked assessed dependency has only old activity - no wake",

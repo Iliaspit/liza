@@ -1,6 +1,8 @@
 package agent
 
 import (
+	"time"
+
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/ops"
 )
@@ -137,8 +139,9 @@ func DetectOrchestratorWakeTriggers(state *models.State, pipelineTerminals []mod
 
 // countActionableBlockedTasks counts BLOCKED tasks that the orchestrator should
 // wake up for. A blocked task is actionable if it has never been assessed, or if
-// new activity has occurred since the last assessment (on the task itself, its
-// dependencies, or via human notes).
+// new activity has occurred since the last assessment on the task itself or via
+// human notes. Dependency activity is actionable only when it changes dependency
+// satisfaction.
 func countActionableBlockedTasks(state *models.State) int {
 	count := 0
 	for i := range state.Tasks {
@@ -153,7 +156,7 @@ func countActionableBlockedTasks(state *models.State) int {
 // orchestrator wake. Returns true if:
 //   - No orchestrator_assessment history entry exists (never triaged)
 //   - The task itself has a non-assessment history entry after the last assessment
-//   - Any dependency has a non-assessment history entry after the last assessment
+//   - Any dependency became satisfied after the last assessment
 //   - A human note targets this task (by ID or "all") after the last assessment
 //
 // Used by both BLOCKED and HYPOTHESIS_EXHAUSTED wake triggers.
@@ -180,17 +183,10 @@ func isTaskActionableSinceAssessment(task *models.Task, state *models.State) boo
 		}
 	}
 
-	// Check dependency history for non-assessment activity after last assessment.
+	// Check whether dependency satisfaction changed after the last assessment.
 	for _, depID := range task.DependsOn {
-		dep := state.FindTask(depID)
-		if dep == nil {
-			continue // orphan reference, skip gracefully
-		}
-		for i := range dep.History {
-			if dep.History[i].Event != models.TaskEventOrchestratorAssessment &&
-				dep.History[i].Time.After(lastAssessment.Time) {
-				return true
-			}
+		if dependencySatisfactionChangedAfterAssessment(state, state.ResolveDependency(depID), lastAssessment.Time) {
+			return true
 		}
 	}
 
@@ -206,6 +202,29 @@ func isTaskActionableSinceAssessment(task *models.Task, state *models.State) boo
 		}
 	}
 
+	return false
+}
+
+func dependencySatisfactionChangedAfterAssessment(state *models.State, result models.DependencySatisfaction, after time.Time) bool {
+	if state == nil || !result.Satisfied() {
+		return false
+	}
+	for _, taskID := range result.Path {
+		task := state.FindTask(taskID)
+		if task == nil {
+			continue
+		}
+		for i := len(task.History) - 1; i >= 0; i-- {
+			entry := task.History[i]
+			if !entry.Time.After(after) {
+				break
+			}
+			switch entry.Event {
+			case models.TaskEventMerged, models.TaskEventSuperseded:
+				return true
+			}
+		}
+	}
 	return false
 }
 
