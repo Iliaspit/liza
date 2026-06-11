@@ -11,7 +11,7 @@ import (
 	"github.com/liza-mas/liza/internal/testhelpers"
 )
 
-func TestIndexingActivationScipPairingInitWritesConcreteSingleRootCommands(t *testing.T) {
+func TestIndexingActivationScipPairingInitWritesAggregateCommands(t *testing.T) {
 	for _, tc := range []struct {
 		name         string
 		files        map[string]string
@@ -27,7 +27,8 @@ func TestIndexingActivationScipPairingInitWritesConcreteSingleRootCommands(t *te
 			wantCommand: "scip-go index",
 			wantRootArgs: []string{
 				"index --module-root ${PROJECT}",
-				"--output ${PROJECT}/go.scip",
+				`--output "$tmp_go_scip/go-0.scip"`,
+				`scip-search aggregate-index --project-root ${PROJECT} --root . --index "$tmp_go_scip/go-0.scip" --out ${PROJECT}/go.scip`,
 			},
 		},
 		{
@@ -39,7 +40,8 @@ func TestIndexingActivationScipPairingInitWritesConcreteSingleRootCommands(t *te
 			wantCommand: "scip-typescript index",
 			wantRootArgs: []string{
 				"index --cwd ${PROJECT}/web/src",
-				"--output ${PROJECT}/typescript.scip ${PROJECT}/web",
+				`--output "$tmp_typescript_scip/typescript-0.scip" ${PROJECT}/web`,
+				`scip-search aggregate-index --project-root ${PROJECT} --root web/src --index "$tmp_typescript_scip/typescript-0.scip" --out ${PROJECT}/typescript.scip`,
 			},
 		},
 		{
@@ -51,7 +53,8 @@ func TestIndexingActivationScipPairingInitWritesConcreteSingleRootCommands(t *te
 			wantCommand: "scip-python index",
 			wantRootArgs: []string{
 				"index --cwd ${PROJECT}/service",
-				"--output ${PROJECT}/python.scip --target-only=src",
+				`--output "$tmp_python_scip/python-0.scip" --target-only=src`,
+				`scip-search aggregate-index --project-root ${PROJECT} --root service --index "$tmp_python_scip/python-0.scip" --out ${PROJECT}/python.scip`,
 			},
 		},
 	} {
@@ -100,12 +103,14 @@ func TestIndexingActivationScipLanguageFiltersExcludeOtherDetectedLanguages(t *t
 	script := readScipIndexingActivationHookScript(t, projectDir)
 	assertIndexingActivationContainsAll(t, script,
 		"scip-go index --module-root "+projectDir,
-		"--output "+filepath.Join(projectDir, "go.scip"),
+		`--output "$tmp_go_scip/go-0.scip"`,
+		"scip-search aggregate-index --project-root "+projectDir,
+		`--root . --index "$tmp_go_scip/go-0.scip" --out `+filepath.Join(projectDir, "go.scip"),
 	)
 	assertIndexingActivationContainsNone(t, script, "scip-typescript", "scip-python")
 }
 
-func TestIndexingActivationScipLanguageFilterStillRequiresConfidentRoot(t *testing.T) {
+func TestIndexingActivationScipLanguageFilterAggregatesFilteredRoots(t *testing.T) {
 	projectDir := newScipIndexingActivationProject(t)
 	files := map[string]string{
 		"services/api/go.mod":     "module example.com/api\n",
@@ -123,22 +128,22 @@ func TestIndexingActivationScipLanguageFilterStillRequiresConfidentRoot(t *testi
 		Stdin:          strings.NewReader(""),
 		ContractAction: "global",
 	})
-	if err == nil {
-		t.Fatal("InitPairingCommand() error = nil, want ambiguous SCIP root diagnostic")
+	if err != nil {
+		t.Fatalf("InitPairingCommand(): %v", err)
 	}
-	for _, want := range []string{
-		"unresolved scip-search language go",
-		filepath.Join(projectDir, "services", "api"),
-		filepath.Join(projectDir, "services", "worker"),
-	} {
-		if !strings.Contains(err.Error(), want) {
-			t.Fatalf("error = %v, want substring %q", err, want)
-		}
-	}
-	assertScipIndexingActivationHookScriptMissing(t, projectDir)
+	script := readScipIndexingActivationHookScript(t, projectDir)
+	assertIndexingActivationContainsAll(t, script,
+		"scip-go index --module-root "+filepath.Join(projectDir, "services", "api"),
+		"scip-go index --module-root "+filepath.Join(projectDir, "services", "worker"),
+		"scip-search aggregate-index --project-root "+projectDir,
+		"--root services/api --index",
+		"--root services/worker --index",
+		"--out "+filepath.Join(projectDir, "go.scip"),
+	)
+	assertIndexingActivationContainsNone(t, script, "scip-typescript")
 }
 
-func TestIndexingActivationScipAmbiguousMonorepoRootsFailWithCandidateDiagnostics(t *testing.T) {
+func TestIndexingActivationScipMonorepoRootsAggregate(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
 		files map[string]string
@@ -154,9 +159,12 @@ func TestIndexingActivationScipAmbiguousMonorepoRootsFailWithCandidateDiagnostic
 				"apps/admin/src/app.ts":    "export const admin = 1\n",
 			},
 			wants: []string{
-				"unresolved scip-search language typescript",
-				"${PROJECT}/apps/admin/src",
-				"${PROJECT}/apps/web/src",
+				"scip-typescript index --cwd ${PROJECT}/apps/admin/src",
+				"scip-typescript index --cwd ${PROJECT}/apps/web/src",
+				"scip-search aggregate-index --project-root ${PROJECT}",
+				"--root apps/admin/src --index",
+				"--root apps/web/src --index",
+				"--out ${PROJECT}/typescript.scip",
 			},
 		},
 		{
@@ -168,9 +176,12 @@ func TestIndexingActivationScipAmbiguousMonorepoRootsFailWithCandidateDiagnostic
 				"apps/worker/worker.py":      "def worker():\n    return 1\n",
 			},
 			wants: []string{
-				"unresolved scip-search language python",
-				"${PROJECT}/apps/api",
-				"${PROJECT}/apps/worker",
+				"scip-python index --cwd ${PROJECT}/apps/api",
+				"scip-python index --cwd ${PROJECT}/apps/worker",
+				"scip-search aggregate-index --project-root ${PROJECT}",
+				"--root apps/api --index",
+				"--root apps/worker --index",
+				"--out ${PROJECT}/python.scip",
 			},
 		},
 	} {
@@ -184,16 +195,14 @@ func TestIndexingActivationScipAmbiguousMonorepoRootsFailWithCandidateDiagnostic
 				Stdin:          strings.NewReader(""),
 				ContractAction: "global",
 			})
-			if err == nil {
-				t.Fatal("InitPairingCommand() error = nil, want ambiguous SCIP root diagnostic")
+			if err != nil {
+				t.Fatalf("InitPairingCommand(): %v", err)
 			}
+			script := readScipIndexingActivationHookScript(t, projectDir)
 			for _, want := range tc.wants {
 				want = expandScipProjectPlaceholder(want, projectDir)
-				if !strings.Contains(err.Error(), want) {
-					t.Fatalf("error = %v, want substring %q", err, want)
-				}
+				assertIndexingActivationContainsAll(t, script, want)
 			}
-			assertScipIndexingActivationHookScriptMissing(t, projectDir)
 		})
 	}
 }
@@ -231,15 +240,6 @@ func readScipIndexingActivationHookScript(t *testing.T, projectDir string) strin
 		t.Fatalf("ReadFile(%q): %v", path, err)
 	}
 	return string(content)
-}
-
-func assertScipIndexingActivationHookScriptMissing(t *testing.T, projectDir string) {
-	t.Helper()
-
-	path := filepath.Join(projectDir, ".git", "hooks", "liza-index.sh")
-	if _, err := os.Stat(path); !os.IsNotExist(err) {
-		t.Fatalf("liza-index.sh stat err = %v, want missing after failed SCIP planning", err)
-	}
 }
 
 func expandScipProjectPlaceholder(value, projectDir string) string {

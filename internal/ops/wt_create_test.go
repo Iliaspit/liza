@@ -422,8 +422,8 @@ func TestCreateWorktree_ScipIndexesEnabledNewWorktreeAfterSetup(t *testing.T) {
 	if len(result.Warnings) != 0 {
 		t.Fatalf("CreateWorktree() warnings = %v, want none", result.Warnings)
 	}
-	if len(calls) != 1 || calls[0].Language != "go" {
-		t.Fatalf("indexer calls = %#v, want one go call", calls)
+	if len(calls) != 2 || calls[0].Language != "go" || calls[1].Name != "scip-search" {
+		t.Fatalf("indexer calls = %#v, want go indexer and aggregate calls", calls)
 	}
 
 	wantIndexPath := filepath.Join(result.WorktreeDir, ".liza", "scip", "go.scip")
@@ -472,18 +472,19 @@ func TestCreateWorktree_ScipExistingWorktreeRefreshesIdempotently(t *testing.T) 
 	if !second.AlreadyExisted {
 		t.Fatal("second CreateWorktree() AlreadyExisted = false, want true")
 	}
-	if call != 2 {
-		t.Fatalf("indexer call count = %d, want 2", call)
+	if call != 4 {
+		t.Fatalf("indexer call count = %d, want 4", call)
 	}
 	wantPath := filepath.Join(first.WorktreeDir, ".liza", "scip", "go.scip")
-	if len(outputPaths) != 2 || outputPaths[0] != wantPath || outputPaths[1] != wantPath {
-		t.Fatalf("output paths = %#v, want repeated refresh of %s", outputPaths, wantPath)
+	if len(outputPaths) != 4 || outputPaths[1] == wantPath || outputPaths[3] == wantPath ||
+		!strings.HasSuffix(outputPaths[1], "go-aggregate.scip") || !strings.HasSuffix(outputPaths[3], "go-aggregate.scip") {
+		t.Fatalf("output paths = %#v, want repeated temporary aggregate refresh before atomic rename to %s", outputPaths, wantPath)
 	}
 	content, err := os.ReadFile(wantPath)
 	if err != nil {
 		t.Fatalf("ReadFile(%s) error: %v", wantPath, err)
 	}
-	wantContent := "refresh-2:" + first.WorktreeDir
+	wantContent := "refresh-4:" + first.WorktreeDir
 	if string(content) != wantContent {
 		t.Fatalf("index content = %q, want %q", content, wantContent)
 	}
@@ -626,9 +627,12 @@ func TestCreateWorktree_ScipConcurrentCreatesUseIsolatedIndexes(t *testing.T) {
 	var mu sync.Mutex
 	outputs := map[string]string{}
 	withCreateWorktreeScipRuntimeRunner(t, func(plan scipsearch.RuntimeCommandPlan) (string, error) {
-		mu.Lock()
-		outputs[plan.OutputPath] = plan.Dir
-		mu.Unlock()
+		if plan.Name == "scip-search" {
+			finalPath := filepath.Join(plan.Dir, ".liza", "scip", plan.Language+".scip")
+			mu.Lock()
+			outputs[finalPath] = plan.Dir
+			mu.Unlock()
+		}
 		return writeCreateWorktreeScipIndex(plan, []byte(plan.Dir))
 	})
 

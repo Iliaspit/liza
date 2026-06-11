@@ -1366,8 +1366,8 @@ func TestClaimTask_ScipIndexesEnabledWorktreeAfterPostWorktreeCmd(t *testing.T) 
 	if len(result.Warnings) != 0 {
 		t.Fatalf("ClaimTask() warnings = %v, want none", result.Warnings)
 	}
-	if len(calls) != 1 || calls[0].Language != "go" {
-		t.Fatalf("indexer calls = %#v, want one go call", calls)
+	if len(calls) != 2 || calls[0].Language != "go" || calls[1].Name != "scip-search" {
+		t.Fatalf("indexer calls = %#v, want go indexer and aggregate calls", calls)
 	}
 
 	worktreeDir := filepath.Join(tmpDir, paths.WorktreesDirName, "task-1")
@@ -1572,9 +1572,12 @@ func TestClaimTask_ScipConcurrentClaimsUseIsolatedIndexes(t *testing.T) {
 	var mu sync.Mutex
 	outputs := map[string]string{}
 	withClaimTaskScipRuntimeRunner(t, func(plan scipsearch.RuntimeCommandPlan) (string, error) {
-		mu.Lock()
-		outputs[plan.OutputPath] = plan.Dir
-		mu.Unlock()
+		if plan.Name == "scip-search" {
+			finalPath := filepath.Join(plan.Dir, ".liza", "scip", plan.Language+".scip")
+			mu.Lock()
+			outputs[finalPath] = plan.Dir
+			mu.Unlock()
+		}
 		return writeClaimScipIndex(plan, []byte(plan.Dir))
 	})
 

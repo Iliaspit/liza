@@ -294,9 +294,16 @@ func TestInitDispatch_PairingScipSearchPlanFlagWritesOverrideCommands(t *testing
 		t.Fatalf("liza-index.sh missing after pairing SCIP init: %v", err)
 	}
 	for _, want := range []string{
-		"scip-go index --module-root " + projectRoot + "/services/design-diagnosis/cli --output " + projectRoot + "/go.scip",
-		"scip-typescript index --cwd " + projectRoot + "/apps/web/src --output " + projectRoot + "/typescript.scip " + projectRoot + "/apps/web",
-		"scip-python index --cwd " + projectRoot + "/apps/api --output " + projectRoot + "/python.scip",
+		"scip-go index --module-root " + projectRoot + "/services/design-diagnosis/cli --output ",
+		"scip-typescript index --cwd " + projectRoot + "/apps/web/src --output ",
+		"scip-python index --cwd " + projectRoot + "/apps/api --output ",
+		"scip-search aggregate-index --project-root " + projectRoot,
+		"--root services/design-diagnosis/cli --index ",
+		"--root apps/web/src --index ",
+		"--root apps/api --index ",
+		"--out " + projectRoot + "/go.scip",
+		"--out " + projectRoot + "/typescript.scip",
+		"--out " + projectRoot + "/python.scip",
 	} {
 		if !strings.Contains(string(script), want) {
 			t.Fatalf("liza-index.sh missing override command %q:\n%s", want, string(script))

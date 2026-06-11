@@ -180,8 +180,8 @@ func writeIndexingActivationFakeScipGo(t *testing.T) string {
 	t.Helper()
 
 	dir := t.TempDir()
-	path := filepath.Join(dir, "scip-go")
-	script := `#!/bin/sh
+	scipGoPath := filepath.Join(dir, "scip-go")
+	scipGoScript := `#!/bin/sh
 args="$*"
 output=""
 while [ "$#" -gt 0 ]; do
@@ -195,8 +195,40 @@ if [ -n "$output" ]; then
 	printf '%s\n' "scip-go $args" > "$output"
 fi
 `
-	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+	if err := os.WriteFile(scipGoPath, []byte(scipGoScript), 0o755); err != nil {
 		t.Fatalf("WriteFile(fake scip-go): %v", err)
+	}
+	scipSearchPath := filepath.Join(dir, "scip-search")
+	scipSearchScript := `#!/bin/sh
+args="$*"
+indexes=""
+output=""
+while [ "$#" -gt 0 ]; do
+	case "$1" in
+		--index)
+			shift
+			indexes="${indexes}
+$1"
+			;;
+		--out)
+			shift
+			output="$1"
+			;;
+	esac
+	shift
+done
+if [ -n "$output" ]; then
+	: > "$output"
+	printf '%s\n' "$indexes" | while IFS= read -r index; do
+		if [ -n "$index" ] && [ -f "$index" ]; then
+			cat "$index" >> "$output"
+		fi
+	done
+	printf '%s\n' "scip-search $args" >> "$output"
+fi
+`
+	if err := os.WriteFile(scipSearchPath, []byte(scipSearchScript), 0o755); err != nil {
+		t.Fatalf("WriteFile(fake scip-search): %v", err)
 	}
 	return dir
 }

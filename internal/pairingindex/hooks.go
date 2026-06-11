@@ -45,7 +45,7 @@ type InstallActivationOptions struct {
 	RepoRoot       string
 	Hooks          []string
 	EnableStacklit bool
-	ScipPlans      []scipsearch.RuntimeCommandPlan
+	ScipPlans      []scipsearch.LanguageAggregatePlan
 }
 
 // InstallActivationResult reports the installed script and lifecycle hooks.
@@ -90,7 +90,7 @@ type HookCollision struct {
 type InstallIndexScriptOptions struct {
 	RepoRoot        string
 	DisableStacklit bool
-	ScipPlans       []scipsearch.RuntimeCommandPlan
+	ScipPlans       []scipsearch.LanguageAggregatePlan
 }
 
 // InstallIndexScriptResult reports the generated script location and action.
@@ -244,7 +244,7 @@ func RenderIndexScript(repoRoot string) (string, error) {
 type renderIndexScriptOptions struct {
 	RepoRoot       string
 	EnableStacklit bool
-	ScipPlans      []scipsearch.RuntimeCommandPlan
+	ScipPlans      []scipsearch.LanguageAggregatePlan
 }
 
 func renderIndexScript(opts renderIndexScriptOptions) (string, error) {
@@ -356,28 +356,68 @@ func InstallIndexScript(opts InstallIndexScriptOptions) (InstallIndexScriptResul
 	return InstallIndexScriptResult{Path: scriptPath, Action: action}, nil
 }
 
-func renderScipCommand(plan scipsearch.RuntimeCommandPlan) string {
-	command := shellCommand(plan.Name, plan.Args)
+func renderScipCommand(plan scipsearch.LanguageAggregatePlan) string {
 	needsVar := "needs_" + shellIdentifier(plan.Language) + "_scip"
-	sourceExpr := scipFindSourceExpression(plan.Language)
-	if sourceExpr == "" {
-		sourceExpr = "-type f"
-	}
-	sourceRoot := scipSourceRoot(plan)
-	exclusions := scipFindExclusions(plan.Language, sourceRoot)
-	return fmt.Sprintf(`%s=0
+	missingVar := "missing_" + shellIdentifier(plan.Language) + "_scip"
+	tmpVar := "tmp_" + shellIdentifier(plan.Language) + "_scip"
+	cleanupFunc := "cleanup_" + shellIdentifier(plan.Language) + "_scip"
+
+	var freshness strings.Builder
+	fmt.Fprintf(&freshness, `%s=0
 if [ ! -f %s ]; then
 	%s=1
-elif find %s %s %s -newer %s -print -quit | grep -q .; then
+`, needsVar, shellQuote(plan.OutputPath), needsVar)
+	for _, indexPlan := range plan.IndexPlans {
+		sourceExpr := scipFindSourceExpression(indexPlan.Language)
+		if sourceExpr == "" {
+			sourceExpr = "-type f"
+		}
+		sourceRoot := scipSourceRoot(indexPlan)
+		exclusions := scipFindExclusions(indexPlan.Language, sourceRoot)
+		fmt.Fprintf(&freshness, `elif find %s %s %s -newer %s -print -quit | grep -q .; then
+	%s=1
+`, shellQuote(sourceRoot), sourceExpr, exclusions, shellQuote(plan.OutputPath), needsVar)
+	}
+	freshness.WriteString("fi\n")
+
+	var commandChecks strings.Builder
+	checked := map[string]bool{"scip-search": true}
+	fmt.Fprintf(&commandChecks, `%s=0
+if [ "$%s" -eq 1 ] && ! command -v scip-search >/dev/null 2>&1; then
+	echo "liza-index.sh: scip-search not found; skipping %s SCIP refresh" >&2
 	%s=1
 fi
-if [ "$%s" -eq 1 ] && ! command -v %s >/dev/null 2>&1; then
+`, missingVar, needsVar, plan.Language, missingVar)
+	for _, indexPlan := range plan.IndexPlans {
+		if checked[indexPlan.Name] {
+			continue
+		}
+		checked[indexPlan.Name] = true
+		fmt.Fprintf(&commandChecks, `if [ "$%s" -eq 1 ] && ! command -v %s >/dev/null 2>&1; then
 	echo "liza-index.sh: %s not found; skipping %s SCIP refresh" >&2
-elif [ "$%s" -eq 1 ]; then
-	cd %s
-	%s
+	%s=1
 fi
-`, needsVar, shellQuote(plan.OutputPath), needsVar, shellQuote(sourceRoot), sourceExpr, exclusions, shellQuote(plan.OutputPath), needsVar, needsVar, shellWord(plan.Name), plan.Name, plan.Language, needsVar, shellQuote(plan.Dir), command)
+`, needsVar, shellWord(indexPlan.Name), indexPlan.Name, plan.Language, missingVar)
+	}
+
+	var commands strings.Builder
+	indexPaths := make([]string, 0, len(plan.IndexPlans))
+	for i, indexPlan := range plan.IndexPlans {
+		outputExpr := fmt.Sprintf("\"$%s/%s-%d.scip\"", tmpVar, plan.Language, i)
+		indexPaths = append(indexPaths, outputExpr)
+		fmt.Fprintf(&commands, "\t\t%s\n", shellCommandWithOutput(indexPlan, outputExpr))
+	}
+	fmt.Fprintf(&commands, "\t\t%s\n", shellAggregateCommand(plan, indexPaths))
+
+	return fmt.Sprintf(`%s%sif [ "$%s" -eq 1 ] && [ "$%s" -eq 0 ]; then
+	%s="$(mktemp -d "${TMPDIR:-/tmp}/liza-scip-%s.XXXXXX")"
+	%s() { rm -rf "$%s"; }
+	trap %s EXIT HUP INT TERM
+	cd %s
+%s	%s
+	trap - EXIT HUP INT TERM
+fi
+`, freshness.String(), commandChecks.String(), needsVar, missingVar, tmpVar, shellIdentifier(plan.Language), cleanupFunc, tmpVar, cleanupFunc, shellQuote(plan.ProjectRoot), commands.String(), cleanupFunc)
 }
 
 func scipFindSourceExpression(language string) string {
@@ -439,6 +479,32 @@ func scipFindExclusions(language, sourceRoot string) string {
 	return strings.Join(parts, " ")
 }
 
+func shellCommandWithOutput(plan scipsearch.RuntimeCommandPlan, outputExpr string) string {
+	parts := []string{shellWord(plan.Name)}
+	for _, arg := range plan.Args {
+		if arg == plan.OutputPath {
+			parts = append(parts, outputExpr)
+			continue
+		}
+		parts = append(parts, shellWord(arg))
+	}
+	return strings.Join(parts, " ")
+}
+
+func shellAggregateCommand(plan scipsearch.LanguageAggregatePlan, indexPathExprs []string) string {
+	parts := []string{
+		"scip-search",
+		"aggregate-index",
+		"--project-root",
+		shellWord(plan.ProjectRoot),
+	}
+	for i, indexPlan := range plan.IndexPlans {
+		parts = append(parts, "--root", shellWord(indexPlan.Root), "--index", indexPathExprs[i])
+	}
+	parts = append(parts, "--out", shellWord(plan.OutputPath))
+	return strings.Join(parts, " ")
+}
+
 func shellIdentifier(value string) string {
 	var b strings.Builder
 	for _, r := range value {
@@ -481,7 +547,7 @@ func ensureStacklitArtifactCleanliness(repoRoot string) error {
 	return ensureGeneratedArtifactCleanliness(repoRoot, stacklitInsightsArtifactName)
 }
 
-func ensureScipArtifactCleanliness(repoRoot string, plans []scipsearch.RuntimeCommandPlan) error {
+func ensureScipArtifactCleanliness(repoRoot string, plans []scipsearch.LanguageAggregatePlan) error {
 	for _, plan := range plans {
 		rel, err := filepath.Rel(repoRoot, plan.OutputPath)
 		if err != nil || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || rel == ".." || filepath.IsAbs(rel) {

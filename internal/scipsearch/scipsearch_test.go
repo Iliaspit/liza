@@ -116,6 +116,7 @@ func TestRuntimeActivationContractIsDocumented(t *testing.T) {
 func TestPairingCommandPlanningBuildsConcreteSingleRootPlans(t *testing.T) {
 	target := t.TempDir()
 	writeTestFile(t, target, "web/tsconfig.json", `{"include":["src/**/*.ts"]}`)
+	writeTestFile(t, target, "service/pyproject.toml", "[project]\nname = \"service\"\n")
 
 	result, err := PlanPairingCommands(PairingPlanOptions{
 		ProjectRoot: target,
@@ -138,27 +139,45 @@ func TestPairingCommandPlanningBuildsConcreteSingleRootPlans(t *testing.T) {
 	}
 	plans := result.Plans
 
-	want := []RuntimeCommandPlan{
+	want := []LanguageAggregatePlan{
 		{
-			Language:   "go",
-			Name:       "scip-go",
-			Args:       []string{"index", "--module-root", target, "--output", filepath.Join(target, "go.scip")},
-			Dir:        target,
-			OutputPath: filepath.Join(target, "go.scip"),
+			Language:    "go",
+			ProjectRoot: target,
+			OutputPath:  filepath.Join(target, "go.scip"),
+			IndexPlans: []RuntimeCommandPlan{{
+				Language:   "go",
+				Name:       "scip-go",
+				Args:       []string{"index", "--module-root", target, "--output", outputPathPlaceholder},
+				Dir:        target,
+				OutputPath: outputPathPlaceholder,
+				Root:       ".",
+			}},
 		},
 		{
-			Language:   "typescript",
-			Name:       "scip-typescript",
-			Args:       []string{"index", "--cwd", filepath.Join(target, "web", "src"), "--output", filepath.Join(target, "typescript.scip"), filepath.Join(target, "web")},
-			Dir:        target,
-			OutputPath: filepath.Join(target, "typescript.scip"),
+			Language:    "typescript",
+			ProjectRoot: target,
+			OutputPath:  filepath.Join(target, "typescript.scip"),
+			IndexPlans: []RuntimeCommandPlan{{
+				Language:   "typescript",
+				Name:       "scip-typescript",
+				Args:       []string{"index", "--cwd", filepath.Join(target, "web", "src"), "--output", outputPathPlaceholder, filepath.Join(target, "web")},
+				Dir:        target,
+				OutputPath: outputPathPlaceholder,
+				Root:       "web/src",
+			}},
 		},
 		{
-			Language:   "python",
-			Name:       "scip-python",
-			Args:       []string{"index", "--cwd", filepath.Join(target, "service"), "--output", filepath.Join(target, "python.scip"), "--target-only=src"},
-			Dir:        target,
-			OutputPath: filepath.Join(target, "python.scip"),
+			Language:    "python",
+			ProjectRoot: target,
+			OutputPath:  filepath.Join(target, "python.scip"),
+			IndexPlans: []RuntimeCommandPlan{{
+				Language:   "python",
+				Name:       "scip-python",
+				Args:       []string{"index", "--cwd", filepath.Join(target, "service"), "--output", outputPathPlaceholder, "--target-only=src"},
+				Dir:        target,
+				OutputPath: outputPathPlaceholder,
+				Root:       "service",
+			}},
 		},
 	}
 	if !reflect.DeepEqual(plans, want) {
@@ -190,11 +209,11 @@ func TestPairingCommandPlanningExplicitLanguageFiltersDoNotSelectRoots(t *testin
 	if got, want := planLanguages(plans), []string{"go"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("plan languages = %v, want %v", got, want)
 	}
-	if plans[0].Args[2] != target {
-		t.Fatalf("go module root = %q, want %q", plans[0].Args[2], target)
+	if realizedFirstIndexArgs(plans[0])[2] != target {
+		t.Fatalf("go module root = %q, want %q", realizedFirstIndexArgs(plans[0])[2], target)
 	}
 
-	_, err = PlanPairingCommands(PairingPlanOptions{
+	multiRoot, err := PlanPairingCommands(PairingPlanOptions{
 		ProjectRoot:       target,
 		ExplicitLanguages: []string{"go"},
 		SkipUnresolved:    true,
@@ -207,18 +226,14 @@ func TestPairingCommandPlanningExplicitLanguageFiltersDoNotSelectRoots(t *testin
 			}, nil
 		},
 	})
-	if err == nil {
-		t.Fatal("PlanPairingCommands() error = nil, want ambiguous Go roots")
+	if err != nil {
+		t.Fatalf("PlanPairingCommands() multi-root error = %v", err)
 	}
-	message := err.Error()
-	for _, want := range []string{
-		"unresolved scip-search language go",
-		filepath.Join(target, "services", "api"),
-		filepath.Join(target, "services", "worker"),
-	} {
-		if !strings.Contains(message, want) {
-			t.Fatalf("PlanPairingCommands() error = %q, want substring %q", message, want)
-		}
+	if got, want := len(multiRoot.Plans), 1; got != want {
+		t.Fatalf("multi-root plans = %d, want %d", got, want)
+	}
+	if got, want := planRoots(multiRoot.Plans[0].IndexPlans), []string{"services/api", "services/worker"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("multi-root go roots = %v, want %v", got, want)
 	}
 }
 
@@ -256,27 +271,45 @@ func TestPairingCommandPlanningOverridesAmbiguousMonorepoRoots(t *testing.T) {
 	}
 	plans := result.Plans
 
-	want := []RuntimeCommandPlan{
+	want := []LanguageAggregatePlan{
 		{
-			Language:   "go",
-			Name:       "scip-go",
-			Args:       []string{"index", "--module-root", filepath.Join(target, "services", "design-diagnosis", "cli"), "--output", filepath.Join(target, "go.scip")},
-			Dir:        target,
-			OutputPath: filepath.Join(target, "go.scip"),
+			Language:    "go",
+			ProjectRoot: target,
+			OutputPath:  filepath.Join(target, "go.scip"),
+			IndexPlans: []RuntimeCommandPlan{{
+				Language:   "go",
+				Name:       "scip-go",
+				Args:       []string{"index", "--module-root", filepath.Join(target, "services", "design-diagnosis", "cli"), "--output", outputPathPlaceholder},
+				Dir:        target,
+				OutputPath: outputPathPlaceholder,
+				Root:       "services/design-diagnosis/cli",
+			}},
 		},
 		{
-			Language:   "typescript",
-			Name:       "scip-typescript",
-			Args:       []string{"index", "--cwd", filepath.Join(target, "apps", "web", "src"), "--output", filepath.Join(target, "typescript.scip"), filepath.Join(target, "apps", "web")},
-			Dir:        target,
-			OutputPath: filepath.Join(target, "typescript.scip"),
+			Language:    "typescript",
+			ProjectRoot: target,
+			OutputPath:  filepath.Join(target, "typescript.scip"),
+			IndexPlans: []RuntimeCommandPlan{{
+				Language:   "typescript",
+				Name:       "scip-typescript",
+				Args:       []string{"index", "--cwd", filepath.Join(target, "apps", "web", "src"), "--output", outputPathPlaceholder, filepath.Join(target, "apps", "web")},
+				Dir:        target,
+				OutputPath: outputPathPlaceholder,
+				Root:       "apps/web/src",
+			}},
 		},
 		{
-			Language:   "python",
-			Name:       "scip-python",
-			Args:       []string{"index", "--cwd", filepath.Join(target, "apps", "api"), "--output", filepath.Join(target, "python.scip")},
-			Dir:        target,
-			OutputPath: filepath.Join(target, "python.scip"),
+			Language:    "python",
+			ProjectRoot: target,
+			OutputPath:  filepath.Join(target, "python.scip"),
+			IndexPlans: []RuntimeCommandPlan{{
+				Language:   "python",
+				Name:       "scip-python",
+				Args:       []string{"index", "--cwd", filepath.Join(target, "apps", "api"), "--output", outputPathPlaceholder},
+				Dir:        target,
+				OutputPath: outputPathPlaceholder,
+				Root:       "apps/api",
+			}},
 		},
 	}
 	if !reflect.DeepEqual(plans, want) {
@@ -307,7 +340,7 @@ func TestPairingCommandPlanningRejectsOverrideOutsideExplicitLanguageFilter(t *t
 	}
 }
 
-func TestPairingCommandPlanningCanSkipUnresolvedAutoDetectedRoots(t *testing.T) {
+func TestPairingCommandPlanningAggregatesAutoDetectedRoots(t *testing.T) {
 	target := t.TempDir()
 	writeTestFile(t, target, "apps/web/tsconfig.json", `{"include":["src/**/*.ts"]}`)
 	writeTestFile(t, target, "apps/admin/tsconfig.json", `{"include":["src/**/*.ts"]}`)
@@ -329,21 +362,15 @@ func TestPairingCommandPlanningCanSkipUnresolvedAutoDetectedRoots(t *testing.T) 
 	if err != nil {
 		t.Fatalf("PlanPairingCommands() error = %v", err)
 	}
-	if got, want := planLanguages(result.Plans), []string{"go"}; !reflect.DeepEqual(got, want) {
+	if got, want := planLanguages(result.Plans), []string{"go", "typescript"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("plan languages = %v, want %v", got, want)
 	}
-	wantSkips := []PairingPlanSkip{
-		{
-			Language: "typescript",
-			Candidates: []string{
-				filepath.Join(target, "apps", "admin", "src"),
-				filepath.Join(target, "apps", "web", "src"),
-			},
-			Reason: PairingPlanSkipAmbiguousRoots,
-		},
+	if len(result.Skips) != 0 {
+		t.Fatalf("skips = %#v, want none", result.Skips)
 	}
-	if !reflect.DeepEqual(result.Skips, wantSkips) {
-		t.Fatalf("skips = %#v, want %#v", result.Skips, wantSkips)
+	tsPlan := result.Plans[1]
+	if got, want := planRoots(tsPlan.IndexPlans), []string{"apps/admin/src", "apps/web/src"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("typescript aggregate roots = %v, want %v", got, want)
 	}
 }
 
@@ -364,13 +391,13 @@ func TestParsePairingCommandOverridesRejectsUnsafeValues(t *testing.T) {
 	}
 }
 
-func TestPairingCommandPlanningRejectsTypeScriptReferenceMonorepo(t *testing.T) {
+func TestPairingCommandPlanningAggregatesTypeScriptReferenceMonorepo(t *testing.T) {
 	target := t.TempDir()
 	writeTestFile(t, target, "tsconfig.json", `{"references":[{"path":"apps/web"},{"path":"apps/admin"}]}`)
 	writeTestFile(t, target, "apps/web/tsconfig.json", `{"include":["src/**/*.ts"]}`)
 	writeTestFile(t, target, "apps/admin/tsconfig.json", `{"include":["src/**/*.ts"]}`)
 
-	_, err := PlanPairingCommands(PairingPlanOptions{
+	result, err := PlanPairingCommands(PairingPlanOptions{
 		ProjectRoot:       target,
 		ExplicitLanguages: []string{"typescript"},
 		GitFiles: func(string) ([]string, error) {
@@ -383,23 +410,83 @@ func TestPairingCommandPlanningRejectsTypeScriptReferenceMonorepo(t *testing.T) 
 			}, nil
 		},
 	})
-	if err == nil {
-		t.Fatal("PlanPairingCommands() error = nil, want ambiguous TypeScript roots")
+	if err != nil {
+		t.Fatalf("PlanPairingCommands() error = %v", err)
 	}
-	message := err.Error()
-	for _, want := range []string{
-		"unresolved scip-search language typescript",
-		filepath.Join(target, "apps", "admin", "src"),
-		filepath.Join(target, "apps", "web", "src"),
-	} {
-		if !strings.Contains(message, want) {
-			t.Fatalf("PlanPairingCommands() error = %q, want substring %q", message, want)
-		}
+	if got, want := planRoots(result.Plans[0].IndexPlans), []string{"apps/admin/src", "apps/web/src"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("typescript aggregate roots = %v, want %v", got, want)
+	}
+	gotArgs := [][]string{
+		commandPlanWithOutputPath(result.Plans[0].IndexPlans[0], filepath.Join(target, "admin.scip")).Args,
+		commandPlanWithOutputPath(result.Plans[0].IndexPlans[1], filepath.Join(target, "web.scip")).Args,
+	}
+	wantArgs := [][]string{
+		{"index", "--cwd", filepath.Join(target, "apps", "admin", "src"), "--output", filepath.Join(target, "admin.scip"), filepath.Join(target, "apps", "admin")},
+		{"index", "--cwd", filepath.Join(target, "apps", "web", "src"), "--output", filepath.Join(target, "web.scip"), filepath.Join(target, "apps", "web")},
+	}
+	if !reflect.DeepEqual(gotArgs, wantArgs) {
+		t.Fatalf("typescript realized args = %#v, want %#v", gotArgs, wantArgs)
 	}
 }
 
-func TestPairingCommandPlanningRejectsPythonMonorepoWhileMASRuntimeRemainsDifferent(t *testing.T) {
+func TestPairingCommandPlanningCollapsesTypeScriptLeafCwdsPerProject(t *testing.T) {
 	target := t.TempDir()
+	writeTestFile(t, target, "apps/web/tsconfig.json", `{"references":[{"path":"./tsconfig.app.json"},{"path":"./tsconfig.node.json"}]}`)
+	writeTestFile(t, target, "apps/web/tsconfig.app.json", `{"include":["src"]}`)
+	writeTestFile(t, target, "apps/web/tsconfig.node.json", `{"include":["vite.config.ts"]}`)
+	writeTestFile(t, target, "apps/web/src/App.tsx", "export const app = 1\n")
+	writeTestFile(t, target, "apps/web/vite.config.ts", "export default {}\n")
+
+	result, err := PlanPairingCommands(PairingPlanOptions{
+		ProjectRoot:       target,
+		ExplicitLanguages: []string{"typescript"},
+		GitFiles: func(string) ([]string, error) {
+			return []string{
+				"apps/web/tsconfig.json",
+				"apps/web/tsconfig.app.json",
+				"apps/web/tsconfig.node.json",
+				"apps/web/src/App.tsx",
+				"apps/web/vite.config.ts",
+			}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("PlanPairingCommands() error = %v", err)
+	}
+	if got, want := planRoots(result.Plans[0].IndexPlans), []string{"apps/web/src"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("typescript aggregate roots = %v, want %v", got, want)
+	}
+	wantArgs := []string{"index", "--cwd", filepath.Join(target, "apps", "web", "src"), "--output", filepath.Join(target, "web.scip"), filepath.Join(target, "apps", "web")}
+	if got := commandPlanWithOutputPath(result.Plans[0].IndexPlans[0], filepath.Join(target, "web.scip")).Args; !reflect.DeepEqual(got, wantArgs) {
+		t.Fatalf("typescript realized args = %#v, want %#v", got, wantArgs)
+	}
+}
+
+func TestTypeScriptInputPreferenceUsesSrcBeforeDepthFallback(t *testing.T) {
+	target := t.TempDir()
+	projectRoot := filepath.Join(target, "apps", "web")
+
+	inputs := []typeScriptCommandInputs{
+		{Cwd: filepath.Join(projectRoot, "src"), ProjectRoot: projectRoot},
+		{Cwd: projectRoot, ProjectRoot: projectRoot},
+	}
+	if got, want := dedupeTypeScriptInputs(inputs), []typeScriptCommandInputs{{Cwd: filepath.Join(projectRoot, "src"), ProjectRoot: projectRoot}}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("dedupeTypeScriptInputs(src/root) = %#v, want %#v", got, want)
+	}
+
+	inputs = []typeScriptCommandInputs{
+		{Cwd: filepath.Join(projectRoot, "bin"), ProjectRoot: projectRoot},
+		{Cwd: projectRoot, ProjectRoot: projectRoot},
+	}
+	if got, want := dedupeTypeScriptInputs(inputs), []typeScriptCommandInputs{{Cwd: projectRoot, ProjectRoot: projectRoot}}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("dedupeTypeScriptInputs(bin/root) = %#v, want %#v", got, want)
+	}
+}
+
+func TestPairingCommandPlanningAggregatesPythonMonorepoLikeMASRuntime(t *testing.T) {
+	target := t.TempDir()
+	writeTestFile(t, target, "apps/api/pyproject.toml", "[project]\nname = \"api\"\n")
+	writeTestFile(t, target, "apps/worker/pyproject.toml", "[project]\nname = \"worker\"\n")
 	files := []string{
 		"apps/api/pyproject.toml",
 		"apps/api/app.py",
@@ -407,28 +494,21 @@ func TestPairingCommandPlanningRejectsPythonMonorepoWhileMASRuntimeRemainsDiffer
 		"apps/worker/worker.py",
 	}
 
-	_, err := PlanPairingCommands(PairingPlanOptions{
+	result, err := PlanPairingCommands(PairingPlanOptions{
 		ProjectRoot: target,
 		GitFiles: func(string) ([]string, error) {
 			return files, nil
 		},
 	})
-	if err == nil {
-		t.Fatal("PlanPairingCommands() error = nil, want ambiguous Python roots")
+	if err != nil {
+		t.Fatalf("PlanPairingCommands() error = %v", err)
 	}
-	message := err.Error()
-	for _, want := range []string{
-		"unresolved scip-search language python",
-		filepath.Join(target, "apps", "api"),
-		filepath.Join(target, "apps", "worker"),
-	} {
-		if !strings.Contains(message, want) {
-			t.Fatalf("PlanPairingCommands() error = %q, want substring %q", message, want)
-		}
+	if got, want := planRoots(result.Plans[0].IndexPlans), []string{"apps/api", "apps/worker"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("python aggregate roots = %v, want %v", got, want)
 	}
 
-	if !strings.Contains(PairingRuntimeInferenceNote, "MAS runtime") || !strings.Contains(PairingRuntimeInferenceNote, "intentionally") {
-		t.Fatalf("PairingRuntimeInferenceNote = %q, want explicit MAS divergence statement", PairingRuntimeInferenceNote)
+	if !strings.Contains(PairingRuntimeInferenceNote, "aggregate") || !strings.Contains(PairingRuntimeInferenceNote, "same multi-root") {
+		t.Fatalf("PairingRuntimeInferenceNote = %q, want unified aggregate statement", PairingRuntimeInferenceNote)
 	}
 
 	t.Setenv(EnvEnableScipSearch, "true")
@@ -442,9 +522,8 @@ func TestPairingCommandPlanningRejectsPythonMonorepoWhileMASRuntimeRemainsDiffer
 	if err != nil {
 		t.Fatalf("PlanRuntimeCommands() error = %v", err)
 	}
-	wantRuntimeArgs := []string{"index", "--cwd", filepath.Join(target, "apps", "api"), "--output", filepath.Join(target, ".liza", "scip", "python.scip")}
-	if len(runtimePlans) != 1 || !reflect.DeepEqual(runtimePlans[0].Args, wantRuntimeArgs) {
-		t.Fatalf("PlanRuntimeCommands() = %#v, want deterministic MAS runtime args %#v", runtimePlans, wantRuntimeArgs)
+	if got, want := planRoots(runtimePlans[0].IndexPlans), []string{"apps/api", "apps/worker"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("runtime python aggregate roots = %v, want %v", got, want)
 	}
 }
 
@@ -580,6 +659,7 @@ func TestRuntimeCommandPlanningNoOpWhenDisabledOrUnconfigured(t *testing.T) {
 func TestRuntimeCommandPlanningFiltersDetectedConfiguredLanguagesInDeterministicOrder(t *testing.T) {
 	t.Setenv(EnvEnableScipSearch, "true")
 	target := t.TempDir()
+	writeTestFile(t, target, "pyproject.toml", "[project]\nname = \"runtime\"\n")
 
 	plans, err := PlanRuntimeCommands(RuntimePlanOptions{
 		TargetRoot:          target,
@@ -637,6 +717,7 @@ func TestRuntimeCommandPlanningIncludesOnlyConfiguredDetectedLanguages(t *testin
 func TestRuntimeCommandPlanningBuildsExactCommandPlans(t *testing.T) {
 	t.Setenv(EnvEnableScipSearch, "true")
 	target := t.TempDir()
+	writeTestFile(t, target, "pyproject.toml", "[project]\nname = \"runtime\"\n")
 
 	plans, err := PlanRuntimeCommands(RuntimePlanOptions{
 		TargetRoot:          target,
@@ -649,31 +730,18 @@ func TestRuntimeCommandPlanningBuildsExactCommandPlans(t *testing.T) {
 		t.Fatalf("PlanRuntimeCommands() error = %v", err)
 	}
 
-	want := []RuntimeCommandPlan{
-		{
-			Language:   "go",
-			Name:       "scip-go",
-			Args:       []string{"index", "--module-root", target, "--output", filepath.Join(target, ".liza", "scip", "go.scip")},
-			Dir:        target,
-			OutputPath: filepath.Join(target, ".liza", "scip", "go.scip"),
-		},
-		{
-			Language:   "typescript",
-			Name:       "scip-typescript",
-			Args:       []string{"index", "--cwd", target, "--output", filepath.Join(target, ".liza", "scip", "typescript.scip"), target},
-			Dir:        target,
-			OutputPath: filepath.Join(target, ".liza", "scip", "typescript.scip"),
-		},
-		{
-			Language:   "python",
-			Name:       "scip-python",
-			Args:       []string{"index", "--cwd", target, "--output", filepath.Join(target, ".liza", "scip", "python.scip")},
-			Dir:        target,
-			OutputPath: filepath.Join(target, ".liza", "scip", "python.scip"),
-		},
+	wantArgs := [][]string{
+		{"index", "--module-root", target, "--output", filepath.Join(target, ".liza", "scip", "go.scip")},
+		{"index", "--cwd", target, "--output", filepath.Join(target, ".liza", "scip", "typescript.scip"), target},
+		{"index", "--cwd", target, "--output", filepath.Join(target, ".liza", "scip", "python.scip")},
 	}
-	if !reflect.DeepEqual(plans, want) {
-		t.Fatalf("PlanRuntimeCommands() = %#v, want %#v", plans, want)
+	if got, want := planLanguages(plans), []string{"go", "typescript", "python"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("plan languages = %v, want %v", got, want)
+	}
+	for i, want := range wantArgs {
+		if got := realizedFirstIndexArgs(plans[i]); !reflect.DeepEqual(got, want) {
+			t.Fatalf("%s args = %#v, want %#v", plans[i].Language, got, want)
+		}
 	}
 }
 
@@ -715,16 +783,11 @@ func TestRuntimeCommandPlanningInfersTypeScriptCwdFromReferencedConfigInclude(t 
 		t.Fatalf("PlanRuntimeCommands() error = %v", err)
 	}
 
-	outputPath := filepath.Join(target, ".liza", "scip", "typescript.scip")
-	want := []RuntimeCommandPlan{{
-		Language:   "typescript",
-		Name:       "scip-typescript",
-		Args:       []string{"index", "--cwd", filepath.Join(target, "apps", "web", "src"), "--output", outputPath, filepath.Join(target, "apps", "web")},
-		Dir:        target,
-		OutputPath: outputPath,
-	}}
-	if !reflect.DeepEqual(plans, want) {
-		t.Fatalf("PlanRuntimeCommands() = %#v, want %#v", plans, want)
+	if len(plans) != 1 {
+		t.Fatalf("PlanRuntimeCommands() = %#v, want one TypeScript aggregate plan", plans)
+	}
+	if got, want := planRoots(plans[0].IndexPlans), []string{"apps/web/src"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("TypeScript aggregate roots = %v, want %v", got, want)
 	}
 }
 
@@ -747,15 +810,9 @@ func TestRuntimeCommandPlanningInfersTypeScriptCwdFromFilesParent(t *testing.T) 
 	}
 
 	outputPath := filepath.Join(target, ".liza", "scip", "typescript.scip")
-	want := []RuntimeCommandPlan{{
-		Language:   "typescript",
-		Name:       "scip-typescript",
-		Args:       []string{"index", "--cwd", filepath.Join(target, "apps", "web"), "--output", outputPath, filepath.Join(target, "apps", "web")},
-		Dir:        target,
-		OutputPath: outputPath,
-	}}
-	if !reflect.DeepEqual(plans, want) {
-		t.Fatalf("PlanRuntimeCommands() = %#v, want %#v", plans, want)
+	wantArgs := []string{"index", "--cwd", filepath.Join(target, "apps", "web"), "--output", outputPath, filepath.Join(target, "apps", "web")}
+	if len(plans) != 1 || !reflect.DeepEqual(realizedFirstIndexArgs(plans[0]), wantArgs) {
+		t.Fatalf("PlanRuntimeCommands() = %#v, want TypeScript args %#v", plans, wantArgs)
 	}
 }
 
@@ -779,7 +836,7 @@ func TestRuntimeCommandPlanningPreservesDottedTypeScriptIncludeDirectory(t *test
 
 	outputPath := filepath.Join(target, ".liza", "scip", "typescript.scip")
 	wantArgs := []string{"index", "--cwd", filepath.Join(target, "apps", "web", ".storybook"), "--output", outputPath, filepath.Join(target, "apps", "web")}
-	if len(plans) != 1 || !reflect.DeepEqual(plans[0].Args, wantArgs) {
+	if len(plans) != 1 || !reflect.DeepEqual(realizedFirstIndexArgs(plans[0]), wantArgs) {
 		t.Fatalf("plans = %#v, want TypeScript args %#v", plans, wantArgs)
 	}
 }
@@ -805,7 +862,7 @@ func TestRuntimeCommandPlanningMapsExistingTypeScriptIncludeFileToParent(t *test
 
 	outputPath := filepath.Join(target, ".liza", "scip", "typescript.scip")
 	wantArgs := []string{"index", "--cwd", filepath.Join(target, "apps", "web"), "--output", outputPath, filepath.Join(target, "apps", "web")}
-	if len(plans) != 1 || !reflect.DeepEqual(plans[0].Args, wantArgs) {
+	if len(plans) != 1 || !reflect.DeepEqual(realizedFirstIndexArgs(plans[0]), wantArgs) {
 		t.Fatalf("plans = %#v, want TypeScript args %#v", plans, wantArgs)
 	}
 }
@@ -842,7 +899,7 @@ func TestRuntimeCommandPlanningPrefersOmittedReferenceJSONFileOverDirectory(t *t
 
 	outputPath := filepath.Join(target, ".liza", "scip", "typescript.scip")
 	wantArgs := []string{"index", "--cwd", filepath.Join(target, "apps", "web", "src"), "--output", outputPath, filepath.Join(target, "apps", "web")}
-	if len(plans) != 1 || !reflect.DeepEqual(plans[0].Args, wantArgs) {
+	if len(plans) != 1 || !reflect.DeepEqual(realizedFirstIndexArgs(plans[0]), wantArgs) {
 		t.Fatalf("plans = %#v, want TypeScript args %#v", plans, wantArgs)
 	}
 }
@@ -873,11 +930,11 @@ func TestRuntimeCommandPlanningSkipsInvalidTypeScriptRootAndUsesNextCandidate(t 
 
 	outputPath := filepath.Join(target, ".liza", "scip", "typescript.scip")
 	wantArgs := []string{"index", "--cwd", filepath.Join(target, "apps", "b", "src"), "--output", outputPath, filepath.Join(target, "apps", "b")}
-	if len(plans) != 1 || !reflect.DeepEqual(plans[0].Args, wantArgs) {
+	if len(plans) != 1 || !reflect.DeepEqual(realizedFirstIndexArgs(plans[0]), wantArgs) {
 		t.Fatalf("plans = %#v, want TypeScript args %#v", plans, wantArgs)
 	}
-	if plans[0].Dir != target {
-		t.Fatalf("TypeScript plan Dir = %q, want target root %q", plans[0].Dir, target)
+	if plans[0].IndexPlans[0].Dir != target {
+		t.Fatalf("TypeScript plan Dir = %q, want target root %q", plans[0].IndexPlans[0].Dir, target)
 	}
 }
 
@@ -908,21 +965,16 @@ func TestRuntimeCommandPlanningFallsBackWhenTypeScriptConfigCannotInferTargetLoc
 	}
 
 	outputPath := filepath.Join(target, ".liza", "scip", "typescript.scip")
-	want := []RuntimeCommandPlan{{
-		Language:   "typescript",
-		Name:       "scip-typescript",
-		Args:       []string{"index", "--cwd", target, "--output", outputPath, target},
-		Dir:        target,
-		OutputPath: outputPath,
-	}}
-	if !reflect.DeepEqual(plans, want) {
-		t.Fatalf("PlanRuntimeCommands() = %#v, want fallback %#v", plans, want)
+	wantArgs := []string{"index", "--cwd", target, "--output", outputPath, target}
+	if len(plans) != 1 || !reflect.DeepEqual(realizedFirstIndexArgs(plans[0]), wantArgs) {
+		t.Fatalf("PlanRuntimeCommands() = %#v, want fallback args %#v", plans, wantArgs)
 	}
 }
 
 func TestRuntimeCommandPlanningInfersPythonCwdAndTargetOnlyForSrcLayout(t *testing.T) {
 	t.Setenv(EnvEnableScipSearch, "true")
 	target := t.TempDir()
+	writeTestFile(t, target, "apps/api/pyproject.toml", "[project]\nname = \"api\"\n")
 
 	plans, err := PlanRuntimeCommands(RuntimePlanOptions{
 		TargetRoot:          target,
@@ -940,21 +992,16 @@ func TestRuntimeCommandPlanningInfersPythonCwdAndTargetOnlyForSrcLayout(t *testi
 	}
 
 	outputPath := filepath.Join(target, ".liza", "scip", "python.scip")
-	want := []RuntimeCommandPlan{{
-		Language:   "python",
-		Name:       "scip-python",
-		Args:       []string{"index", "--cwd", filepath.Join(target, "apps", "api"), "--output", outputPath, "--target-only=src"},
-		Dir:        target,
-		OutputPath: outputPath,
-	}}
-	if !reflect.DeepEqual(plans, want) {
-		t.Fatalf("PlanRuntimeCommands() = %#v, want %#v", plans, want)
+	wantArgs := []string{"index", "--cwd", filepath.Join(target, "apps", "api"), "--output", outputPath, "--target-only=src"}
+	if len(plans) != 1 || !reflect.DeepEqual(realizedFirstIndexArgs(plans[0]), wantArgs) {
+		t.Fatalf("PlanRuntimeCommands() = %#v, want Python args %#v", plans, wantArgs)
 	}
 }
 
 func TestRuntimeCommandPlanningPythonFlatProjectOmitsTargetOnly(t *testing.T) {
 	t.Setenv(EnvEnableScipSearch, "true")
 	target := t.TempDir()
+	writeTestFile(t, target, "pyproject.toml", "[project]\nname = \"runtime\"\n")
 
 	plans, err := PlanRuntimeCommands(RuntimePlanOptions{
 		TargetRoot:          target,
@@ -969,17 +1016,19 @@ func TestRuntimeCommandPlanningPythonFlatProjectOmitsTargetOnly(t *testing.T) {
 
 	outputPath := filepath.Join(target, ".liza", "scip", "python.scip")
 	wantArgs := []string{"index", "--cwd", target, "--output", outputPath}
-	if len(plans) != 1 || !reflect.DeepEqual(plans[0].Args, wantArgs) {
+	if len(plans) != 1 || !reflect.DeepEqual(realizedFirstIndexArgs(plans[0]), wantArgs) {
 		t.Fatalf("plans = %#v, want Python args %#v", plans, wantArgs)
 	}
-	if plans[0].Dir != target || plans[0].OutputPath != outputPath {
-		t.Fatalf("plan target scoping = Dir %q OutputPath %q, want %q %q", plans[0].Dir, plans[0].OutputPath, target, outputPath)
+	if plans[0].IndexPlans[0].Dir != target || plans[0].OutputPath != outputPath {
+		t.Fatalf("plan target scoping = Dir %q OutputPath %q, want %q %q", plans[0].IndexPlans[0].Dir, plans[0].OutputPath, target, outputPath)
 	}
 }
 
 func TestRuntimeCommandPlanningPythonNestedProjectWinsWhenRootIsUmbrella(t *testing.T) {
 	t.Setenv(EnvEnableScipSearch, "true")
 	target := t.TempDir()
+	writeTestFile(t, target, "pyproject.toml", "[tool.pytest.ini_options]\ntestpaths = [\"tests\"]\n")
+	writeTestFile(t, target, "apps/api/pyproject.toml", "[project]\nname = \"api\"\n")
 
 	plans, err := PlanRuntimeCommands(RuntimePlanOptions{
 		TargetRoot:          target,
@@ -998,14 +1047,16 @@ func TestRuntimeCommandPlanningPythonNestedProjectWinsWhenRootIsUmbrella(t *test
 
 	outputPath := filepath.Join(target, ".liza", "scip", "python.scip")
 	wantArgs := []string{"index", "--cwd", filepath.Join(target, "apps", "api"), "--output", outputPath, "--target-only=src"}
-	if len(plans) != 1 || !reflect.DeepEqual(plans[0].Args, wantArgs) {
+	if len(plans) != 1 || !reflect.DeepEqual(realizedFirstIndexArgs(plans[0]), wantArgs) {
 		t.Fatalf("plans = %#v, want Python args %#v", plans, wantArgs)
 	}
 }
 
-func TestRuntimeCommandPlanningPythonSiblingProjectsChooseFirstDeterministicCandidate(t *testing.T) {
+func TestRuntimeCommandPlanningPythonSiblingProjectsAggregateAllCandidates(t *testing.T) {
 	t.Setenv(EnvEnableScipSearch, "true")
 	target := t.TempDir()
+	writeTestFile(t, target, "apps/api/pyproject.toml", "[project]\nname = \"api\"\n")
+	writeTestFile(t, target, "apps/worker/pyproject.toml", "[project]\nname = \"worker\"\n")
 
 	plans, err := PlanRuntimeCommands(RuntimePlanOptions{
 		TargetRoot:          target,
@@ -1025,14 +1076,75 @@ func TestRuntimeCommandPlanningPythonSiblingProjectsChooseFirstDeterministicCand
 
 	outputPath := filepath.Join(target, ".liza", "scip", "python.scip")
 	wantArgs := []string{"index", "--cwd", filepath.Join(target, "apps", "api"), "--output", outputPath, "--target-only=src"}
-	if len(plans) != 1 || !reflect.DeepEqual(plans[0].Args, wantArgs) {
+	if len(plans) != 1 || !reflect.DeepEqual(realizedFirstIndexArgs(plans[0]), wantArgs) {
 		t.Fatalf("plans = %#v, want first deterministic Python project args %#v", plans, wantArgs)
+	}
+	if got, want := planRoots(plans[0].IndexPlans), []string{"apps/api", "apps/worker"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("python aggregate roots = %v, want %v", got, want)
+	}
+}
+
+func TestRuntimeCommandPlanningPythonToolingOnlyRootPyprojectDoesNotBecomeAggregateRoot(t *testing.T) {
+	t.Setenv(EnvEnableScipSearch, "true")
+	target := t.TempDir()
+	writeTestFile(t, target, "pyproject.toml", `[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+`)
+	writeTestFile(t, target, "apps/api/pyproject.toml", "[project]\nname = \"api\"\n")
+	writeTestFile(t, target, "services/design-diagnosis/pyproject.toml", "[project]\nname = \"design-diagnosis\"\n")
+
+	plans, err := PlanRuntimeCommands(RuntimePlanOptions{
+		TargetRoot:          target,
+		ConfiguredLanguages: []string{"python"},
+		GitFiles: func(string) ([]string, error) {
+			return []string{
+				"pyproject.toml",
+				"conftest.py",
+				"scripts/redact.py",
+				"apps/api/pyproject.toml",
+				"apps/api/backend/main.py",
+				"services/design-diagnosis/pyproject.toml",
+				"services/design-diagnosis/diagnosis_design/api/app.py",
+			}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("PlanRuntimeCommands() error = %v", err)
+	}
+	if got, want := planRoots(plans[0].IndexPlans), []string{"apps/api", "services/design-diagnosis"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("python aggregate roots = %v, want %v", got, want)
+	}
+}
+
+func TestPyprojectDefinesPythonProjectUsesPackageMetadataSectionsOnly(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		content string
+		want    bool
+	}{
+		{name: "project", content: "[project]\nname = \"api\"\n", want: true},
+		{name: "poetry", content: "[tool.poetry]\nname = \"api\"\n", want: true},
+		{name: "pdm", content: "[tool.pdm]\nname = \"api\"\n", want: true},
+		{name: "build system only", content: "[build-system]\nrequires = [\"hatchling\"]\n"},
+		{name: "tooling only", content: "[tool.pytest.ini_options]\ntestpaths = [\"tests\"]\n"},
+		{name: "header with comment suffix", content: "[project] # package metadata\nname = \"api\"\n"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			target := t.TempDir()
+			writeTestFile(t, target, "pyproject.toml", tt.content)
+			if got := pyprojectDefinesPythonProject(filepath.Join(target, "pyproject.toml")); got != tt.want {
+				t.Fatalf("pyprojectDefinesPythonProject() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
 
 func TestRuntimeCommandPlanningPythonRootRetainedWhenItHasEligibleFilesOutsideNestedProjects(t *testing.T) {
 	t.Setenv(EnvEnableScipSearch, "true")
 	target := t.TempDir()
+	writeTestFile(t, target, "pyproject.toml", "[project]\nname = \"runtime\"\n")
+	writeTestFile(t, target, "apps/api/pyproject.toml", "[project]\nname = \"api\"\n")
 
 	plans, err := PlanRuntimeCommands(RuntimePlanOptions{
 		TargetRoot:          target,
@@ -1052,7 +1164,7 @@ func TestRuntimeCommandPlanningPythonRootRetainedWhenItHasEligibleFilesOutsideNe
 
 	outputPath := filepath.Join(target, ".liza", "scip", "python.scip")
 	wantArgs := []string{"index", "--cwd", target, "--output", outputPath}
-	if len(plans) != 1 || !reflect.DeepEqual(plans[0].Args, wantArgs) {
+	if len(plans) != 1 || !reflect.DeepEqual(realizedFirstIndexArgs(plans[0]), wantArgs) {
 		t.Fatalf("plans = %#v, want Python args %#v", plans, wantArgs)
 	}
 }
@@ -1060,6 +1172,7 @@ func TestRuntimeCommandPlanningPythonRootRetainedWhenItHasEligibleFilesOutsideNe
 func TestRuntimeCommandPlanningPythonMixedSrcAndPackageLayoutOmitsTargetOnly(t *testing.T) {
 	t.Setenv(EnvEnableScipSearch, "true")
 	target := t.TempDir()
+	writeTestFile(t, target, "pyproject.toml", "[project]\nname = \"runtime\"\n")
 
 	plans, err := PlanRuntimeCommands(RuntimePlanOptions{
 		TargetRoot:          target,
@@ -1078,7 +1191,7 @@ func TestRuntimeCommandPlanningPythonMixedSrcAndPackageLayoutOmitsTargetOnly(t *
 
 	outputPath := filepath.Join(target, ".liza", "scip", "python.scip")
 	wantArgs := []string{"index", "--cwd", target, "--output", outputPath}
-	if len(plans) != 1 || !reflect.DeepEqual(plans[0].Args, wantArgs) {
+	if len(plans) != 1 || !reflect.DeepEqual(realizedFirstIndexArgs(plans[0]), wantArgs) {
 		t.Fatalf("plans = %#v, want Python args %#v", plans, wantArgs)
 	}
 }
@@ -1118,15 +1231,9 @@ func TestRuntimeCommandPlanningPythonNoMarkerFallsBackToTargetRootForTrackedPyth
 	}
 
 	outputPath := filepath.Join(target, ".liza", "scip", "python.scip")
-	want := []RuntimeCommandPlan{{
-		Language:   "python",
-		Name:       "scip-python",
-		Args:       []string{"index", "--cwd", target, "--output", outputPath},
-		Dir:        target,
-		OutputPath: outputPath,
-	}}
-	if !reflect.DeepEqual(plans, want) {
-		t.Fatalf("PlanRuntimeCommands() = %#v, want fallback %#v", plans, want)
+	wantArgs := []string{"index", "--cwd", target, "--output", outputPath}
+	if len(plans) != 1 || !reflect.DeepEqual(realizedFirstIndexArgs(plans[0]), wantArgs) {
+		t.Fatalf("PlanRuntimeCommands() = %#v, want fallback args %#v", plans, wantArgs)
 	}
 }
 
@@ -1155,24 +1262,27 @@ func TestRuntimeRefreshCreatesParentAndRunsExactCommandPlans(t *testing.T) {
 
 	goPath := filepath.Join(target, ".liza", "scip", "go.scip")
 	tsPath := filepath.Join(target, ".liza", "scip", "typescript.scip")
-	wantCalls := []RuntimeCommandPlan{
-		{
-			Language:   "go",
-			Name:       "scip-go",
-			Args:       []string{"index", "--module-root", target, "--output", goPath},
-			Dir:        target,
-			OutputPath: goPath,
-		},
-		{
-			Language:   "typescript",
-			Name:       "scip-typescript",
-			Args:       []string{"index", "--cwd", target, "--output", tsPath, target},
-			Dir:        target,
-			OutputPath: tsPath,
-		},
+	if got, want := len(calls), 4; got != want {
+		t.Fatalf("runner calls = %#v, want %d calls", calls, want)
 	}
-	if !reflect.DeepEqual(calls, wantCalls) {
-		t.Fatalf("runner calls = %#v, want %#v", calls, wantCalls)
+	if calls[0].Name != "scip-go" || calls[1].Name != "scip-search" || calls[2].Name != "scip-typescript" || calls[3].Name != "scip-search" {
+		t.Fatalf("runner call sequence = %#v, want indexer/aggregate pairs", calls)
+	}
+	if calls[1].OutputPath == goPath || calls[3].OutputPath == tsPath {
+		t.Fatalf("aggregate runner output paths = %q/%q, want temporary outputs before atomic rename", calls[1].OutputPath, calls[3].OutputPath)
+	}
+	if !strings.HasPrefix(calls[1].OutputPath, filepath.Dir(goPath)+string(os.PathSeparator)) ||
+		!strings.HasPrefix(calls[3].OutputPath, filepath.Dir(tsPath)+string(os.PathSeparator)) {
+		t.Fatalf("aggregate runner output paths = %q/%q, want temporary outputs beside final indexes", calls[1].OutputPath, calls[3].OutputPath)
+	}
+	if !strings.HasSuffix(calls[1].OutputPath, "go-aggregate.scip") || !strings.HasSuffix(calls[3].OutputPath, "typescript-aggregate.scip") {
+		t.Fatalf("aggregate runner output paths = %q/%q, want per-language temporary aggregate paths", calls[1].OutputPath, calls[3].OutputPath)
+	}
+	if got, want := calls[1].Args[:4], []string{"aggregate-index", "--project-root", target, "--root"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("go aggregate prefix = %#v, want %#v", got, want)
+	}
+	if got, want := calls[3].Args[:4], []string{"aggregate-index", "--project-root", target, "--root"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("typescript aggregate prefix = %#v, want %#v", got, want)
 	}
 	if !reflect.DeepEqual(result.Successes, []IndexRef{{Language: "go", Path: goPath}, {Language: "typescript", Path: tsPath}}) {
 		t.Fatalf("successes = %#v, want go/typescript paths", result.Successes)
@@ -1351,7 +1461,7 @@ func TestRefreshTaskWorktreeScipHidesGeneratedIndexes(t *testing.T) {
 		TargetKind:          TargetKindTaskWorktree,
 		ConfiguredLanguages: []string{"go"},
 		Runner: func(plan RuntimeCommandPlan) (string, error) {
-			if !strings.HasPrefix(plan.OutputPath, filepath.Join(worktree, ".liza", "scip")+string(os.PathSeparator)) {
+			if plan.Name == "scip-search" && !strings.HasPrefix(plan.OutputPath, filepath.Join(worktree, ".liza", "scip")+string(os.PathSeparator)) {
 				return "", fmt.Errorf("output path %q is not prompt-local under task .liza/scip", plan.OutputPath)
 			}
 			if err := os.WriteFile(plan.OutputPath, []byte("go"), 0o644); err != nil {
@@ -1404,8 +1514,8 @@ func TestRefreshTaskWorktreeScipRepeatedRefreshIdempotent(t *testing.T) {
 		}
 	}
 
-	if runnerCalls != 2 {
-		t.Fatalf("runner calls = %d, want 2", runnerCalls)
+	if runnerCalls != 4 {
+		t.Fatalf("runner calls = %d, want 4", runnerCalls)
 	}
 	assertIgnoreEntryInstalled(t, privateExclude)
 	if status := gitOutput(t, worktree, "status", "--porcelain"); status != "" {
@@ -1444,8 +1554,8 @@ func TestRefreshTaskWorktreeScipConcurrentExcludeSetup(t *testing.T) {
 					if !filepath.IsAbs(plan.OutputPath) {
 						return "", errors.New("output path is not absolute")
 					}
-					if !strings.HasPrefix(plan.OutputPath, worktree+string(os.PathSeparator)) {
-						return "", errors.New("output path is outside task worktree")
+					if plan.Name == "scip-search" && !strings.HasPrefix(plan.OutputPath, filepath.Join(worktree, ".liza", "scip")+string(os.PathSeparator)) {
+						return "", errors.New("output path is outside task worktree scip directory")
 					}
 					if err := ignoreEntryError(privateExcludes[name]); err != nil {
 						return "", err
@@ -1453,9 +1563,11 @@ func TestRefreshTaskWorktreeScipConcurrentExcludeSetup(t *testing.T) {
 					if err := os.WriteFile(plan.OutputPath, []byte(name), 0o644); err != nil {
 						return "", err
 					}
-					mu.Lock()
-					outputs = append(outputs, plan.OutputPath)
-					mu.Unlock()
+					if plan.Name == "scip-search" {
+						mu.Lock()
+						outputs = append(outputs, plan.OutputPath)
+						mu.Unlock()
+					}
 					return "", nil
 				},
 			})
@@ -1579,12 +1691,27 @@ func writeTestFile(t *testing.T, root, rel, content string) {
 	}
 }
 
-func planLanguages(plans []RuntimeCommandPlan) []string {
+func planLanguages(plans []LanguageAggregatePlan) []string {
 	languages := make([]string, 0, len(plans))
 	for _, plan := range plans {
 		languages = append(languages, plan.Language)
 	}
 	return languages
+}
+
+func planRoots(plans []RuntimeCommandPlan) []string {
+	roots := make([]string, 0, len(plans))
+	for _, plan := range plans {
+		roots = append(roots, plan.Root)
+	}
+	return roots
+}
+
+func realizedFirstIndexArgs(plan LanguageAggregatePlan) []string {
+	if len(plan.IndexPlans) == 0 {
+		return nil
+	}
+	return commandPlanWithOutputPath(plan.IndexPlans[0], plan.OutputPath).Args
 }
 
 func cloneRuntimeCommandPlan(plan RuntimeCommandPlan) RuntimeCommandPlan {

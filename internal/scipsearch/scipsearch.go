@@ -19,6 +19,8 @@ import (
 const EnvEnableScipSearch = "LIZA_ENABLE_SCIP_SEARCH"
 
 const maxFailureDiagnosticBytes = 1024
+const outputPathPlaceholder = "__LIZA_SCIP_OUTPUT__"
+const aggregateOutputPathPlaceholder = "__LIZA_SCIP_AGGREGATE_OUTPUT__"
 
 var supportedLanguages = []string{"go", "typescript", "python"}
 
@@ -66,10 +68,10 @@ type PairingPlanOptions struct {
 	SkipUnresolved    bool // best-effort only; ignored when ExplicitLanguages is non-empty
 }
 
-// PairingPlanResult reports concrete pairing SCIP plans plus optional skipped
-// languages when planning is allowed to be best-effort.
+// PairingPlanResult reports concrete pairing SCIP aggregate plans plus optional
+// skipped languages when planning is allowed to be best-effort.
 type PairingPlanResult struct {
-	Plans []RuntimeCommandPlan
+	Plans []LanguageAggregatePlan
 	Skips []PairingPlanSkip
 }
 
@@ -77,8 +79,7 @@ type PairingPlanResult struct {
 type PairingPlanSkipReason string
 
 const (
-	PairingPlanSkipAmbiguousRoots PairingPlanSkipReason = "ambiguous_roots"
-	PairingPlanSkipNoCandidates   PairingPlanSkipReason = "no_candidates"
+	PairingPlanSkipNoCandidates PairingPlanSkipReason = "no_candidates"
 )
 
 // PairingPlanSkip carries planner facts for presentation by callers.
@@ -88,8 +89,8 @@ type PairingPlanSkip struct {
 	Reason     PairingPlanSkipReason
 }
 
-// PairingCommandOverride pins one pairing-mode language indexer to explicit
-// repo-local roots when monorepo autodetection would be ambiguous.
+// PairingCommandOverride adds one explicit pairing-mode language root to the
+// aggregate plan for that language when autodetection should be replaced.
 type PairingCommandOverride struct {
 	Language              string
 	GoModuleRoot          string
@@ -99,13 +100,23 @@ type PairingCommandOverride struct {
 	PythonTargetOnly      string
 }
 
-// RuntimeCommandPlan describes one fixed language-indexer invocation.
+// LanguageAggregatePlan describes one final per-language SCIP index assembled
+// from one or more per-root language indexer outputs.
+type LanguageAggregatePlan struct {
+	Language    string
+	ProjectRoot string
+	OutputPath  string
+	IndexPlans  []RuntimeCommandPlan
+}
+
+// RuntimeCommandPlan describes one fixed command invocation.
 type RuntimeCommandPlan struct {
 	Language   string
 	Name       string
 	Args       []string
 	Dir        string
 	OutputPath string
+	Root       string
 }
 
 // RuntimeRunner executes one runtime indexer command plan.
@@ -147,9 +158,9 @@ type RefreshFailure struct {
 	Diagnostic string
 }
 
-// PairingRuntimeInferenceNote states the intentional difference between pairing
-// hook planning and MAS runtime refresh planning.
-const PairingRuntimeInferenceNote = "MAS runtime SCIP planning intentionally remains deterministic/fallback-based; pairing planning requires confident roots and rejects ambiguous explicit languages before hook generation."
+// PairingRuntimeInferenceNote states the shared aggregate planning contract used
+// by pairing hooks and MAS runtime refresh planning.
+const PairingRuntimeInferenceNote = "Pairing and MAS runtime SCIP planning use the same multi-root aggregate model; every final language index is rewritten relative to the target root."
 
 var (
 	runnerMu      sync.Mutex
@@ -222,7 +233,7 @@ func RuntimeEnabled(configuredLanguages []string) bool {
 
 // PlanRuntimeCommands selects detected configured languages for a target root
 // and returns fixed command plans without executing indexers or writing files.
-func PlanRuntimeCommands(opts RuntimePlanOptions) ([]RuntimeCommandPlan, error) {
+func PlanRuntimeCommands(opts RuntimePlanOptions) ([]LanguageAggregatePlan, error) {
 	if !RuntimeEnabled(opts.ConfiguredLanguages) {
 		return nil, nil
 	}
@@ -260,7 +271,7 @@ func RefreshIndexes(opts RefreshOptions) (RefreshResult, error) {
 	}
 
 	if opts.TargetKind == TargetKindTaskWorktree {
-		if err := ensureTaskWorktreeScipExclude(plans[0].Dir); err != nil {
+		if err := ensureTaskWorktreeScipExclude(plans[0].ProjectRoot); err != nil {
 			return RefreshResult{}, err
 		}
 	}
@@ -276,22 +287,14 @@ func RefreshIndexes(opts RefreshOptions) (RefreshResult, error) {
 
 	var result RefreshResult
 	for _, plan := range plans {
-		if err := removeStaleIndex(plan.OutputPath); err != nil {
-			result.Failures = append(result.Failures, RefreshFailure{
-				Language:   plan.Language,
-				Diagnostic: boundedFailureDiagnostic(err, ""),
-			})
-			continue
-		}
-		output, err := runner(plan)
+		output, err := runAggregateRefresh(plan, runner)
 		if err != nil {
-			diagnosticErr := err
 			if cleanupErr := removeStaleIndex(plan.OutputPath); cleanupErr != nil {
-				diagnosticErr = fmt.Errorf("%w; additionally %v", err, cleanupErr)
+				err = fmt.Errorf("%w; additionally %v", err, cleanupErr)
 			}
 			result.Failures = append(result.Failures, RefreshFailure{
 				Language:   plan.Language,
-				Diagnostic: boundedFailureDiagnostic(diagnosticErr, output),
+				Diagnostic: boundedFailureDiagnostic(err, output),
 			})
 			continue
 		}
@@ -300,11 +303,49 @@ func RefreshIndexes(opts RefreshOptions) (RefreshResult, error) {
 				Language:   plan.Language,
 				Diagnostic: boundedFailureDiagnostic(fmt.Errorf("indexer did not write %s: %w", plan.OutputPath, err), output),
 			})
+			_ = removeStaleIndex(plan.OutputPath)
 			continue
 		}
 		result.Successes = append(result.Successes, IndexRef{Language: plan.Language, Path: plan.OutputPath})
 	}
 	return result, nil
+}
+
+func runAggregateRefresh(plan LanguageAggregatePlan, runner RuntimeRunner) (string, error) {
+	tmpDir, err := os.MkdirTemp(filepath.Dir(plan.OutputPath), ".liza-scip-"+plan.Language+"-")
+	if err != nil {
+		return "", fmt.Errorf("create temporary scip-search index directory: %w", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	indexPaths := make([]string, 0, len(plan.IndexPlans))
+	for i, indexPlan := range plan.IndexPlans {
+		outputPath := filepath.Join(tmpDir, fmt.Sprintf("%s-%d.scip", plan.Language, i))
+		indexPlan = commandPlanWithOutputPath(indexPlan, outputPath)
+		output, err := runner(indexPlan)
+		if err != nil {
+			return output, err
+		}
+		if _, err := os.Stat(outputPath); err != nil {
+			return output, fmt.Errorf("indexer did not write %s: %w", outputPath, err)
+		}
+		indexPaths = append(indexPaths, outputPath)
+	}
+
+	aggregateOutputPath := filepath.Join(tmpDir, plan.Language+"-aggregate.scip")
+	aggregatePlan := aggregateCommandPlan(plan, indexPaths)
+	aggregatePlan = aggregatePlanWithOutputPath(aggregatePlan, aggregateOutputPath)
+	output, err := runner(aggregatePlan)
+	if err != nil {
+		return output, err
+	}
+	if _, err := os.Stat(aggregateOutputPath); err != nil {
+		return output, fmt.Errorf("aggregate indexer did not write %s: %w", aggregateOutputPath, err)
+	}
+	if err := os.Rename(aggregateOutputPath, plan.OutputPath); err != nil {
+		return output, fmt.Errorf("replace aggregate scip-search index %s: %w", plan.OutputPath, err)
+	}
+	return output, nil
 }
 
 // AvailableIndexes returns existing absolute index paths for selected runtime
@@ -332,9 +373,9 @@ func AvailableIndexes(opts RuntimePlanOptions) ([]IndexRef, error) {
 	return indexes, nil
 }
 
-// PlanPairingCommands returns concrete repo-root SCIP indexer commands for
-// pairing init hook generation. It rejects ambiguous project layouts unless
-// SkipUnresolved is set, because pairing hook commands need stable roots.
+// PlanPairingCommands returns concrete repo-root SCIP aggregate plans for
+// pairing init hook generation. It aggregates all detected roots into one final
+// per-language index.
 func PlanPairingCommands(opts PairingPlanOptions) (PairingPlanResult, error) {
 	projectRoot, err := filepath.Abs(opts.ProjectRoot)
 	if err != nil {
@@ -373,7 +414,7 @@ func PlanPairingCommands(opts PairingPlanOptions) (PairingPlanResult, error) {
 	}
 
 	result := PairingPlanResult{
-		Plans: make([]RuntimeCommandPlan, 0, len(languages)),
+		Plans: make([]LanguageAggregatePlan, 0, len(languages)),
 	}
 	for _, language := range languages {
 		if override, ok := overrides[language]; ok {
@@ -390,7 +431,7 @@ func PlanPairingCommands(opts PairingPlanOptions) (PairingPlanResult, error) {
 				result.Skips = append(result.Skips, pairingPlanSkip(language, candidates))
 				continue
 			}
-			return PairingPlanResult{}, pairingRootSelectionError{language: language, candidates: candidates}
+			return PairingPlanResult{}, pairingRootSelectionError{language: language}
 		}
 		result.Plans = append(result.Plans, plan)
 	}
@@ -537,11 +578,11 @@ func filterRuntimeLanguages(configuredLanguages, detectedLanguages []string) []s
 	return out
 }
 
-func buildRuntimeCommandPlans(targetRoot string, languages []string, files []string) []RuntimeCommandPlan {
-	plans := make([]RuntimeCommandPlan, 0, len(languages))
+func buildRuntimeCommandPlans(targetRoot string, languages []string, files []string) []LanguageAggregatePlan {
+	plans := make([]LanguageAggregatePlan, 0, len(languages))
 	for _, language := range languages {
 		outputPath := filepath.Join(targetRoot, ".liza", "scip", language+".scip")
-		plan, ok := runtimeCommandPlan(targetRoot, language, outputPath, files)
+		plan, ok := languageAggregatePlan(targetRoot, language, outputPath, files)
 		if ok {
 			plans = append(plans, plan)
 		}
@@ -549,166 +590,294 @@ func buildRuntimeCommandPlans(targetRoot string, languages []string, files []str
 	return plans
 }
 
-func runtimeCommandPlan(targetRoot, language, outputPath string, files []string) (RuntimeCommandPlan, bool) {
-	plan := RuntimeCommandPlan{
-		Language:   language,
-		Name:       languageIndexers[language],
-		Dir:        targetRoot,
-		OutputPath: outputPath,
+func languageAggregatePlan(targetRoot, language, outputPath string, files []string) (LanguageAggregatePlan, bool) {
+	indexPlans := languageIndexPlans(targetRoot, language, files)
+	indexPlans = dedupeIndexPlans(indexPlans)
+	if len(indexPlans) == 0 {
+		return LanguageAggregatePlan{}, false
 	}
+	return LanguageAggregatePlan{
+		Language:    language,
+		ProjectRoot: targetRoot,
+		OutputPath:  outputPath,
+		IndexPlans:  indexPlans,
+	}, true
+}
+
+func languageIndexPlans(targetRoot, language string, files []string) []RuntimeCommandPlan {
 	switch language {
 	case "go":
-		plan.Args = []string{"index", "--module-root", targetRoot, "--output", outputPath}
+		return goIndexPlans(targetRoot, goRootCandidates(targetRoot, files))
 	case "typescript":
-		cwd := targetRoot
-		projectRoot := targetRoot
-		if inputs, ok := inferTypeScriptCommandInputs(targetRoot, files); ok {
-			cwd = inputs.Cwd
-			projectRoot = inputs.ProjectRoot
+		inputs := pairingTypeScriptCommandInputs(targetRoot, files)
+		if len(inputs) == 0 && languageDetected(files, "typescript") {
+			inputs = []typeScriptCommandInputs{{Cwd: targetRoot, ProjectRoot: targetRoot}}
 		}
-		plan.Args = []string{"index", "--cwd", cwd, "--output", outputPath, projectRoot}
+		return typeScriptIndexPlans(targetRoot, inputs)
 	case "python":
-		inputs, ok := inferPythonCommandInputs(targetRoot, files)
+		return pythonIndexPlans(targetRoot, pairingPythonCommandInputs(targetRoot, files))
+	}
+	return nil
+}
+
+func goIndexPlans(targetRoot string, roots []string) []RuntimeCommandPlan {
+	plans := make([]RuntimeCommandPlan, 0, len(roots))
+	for _, root := range roots {
+		aggregateRoot, ok := aggregateRootFor(targetRoot, root)
 		if !ok {
-			return RuntimeCommandPlan{}, false
+			continue
 		}
-		plan.Args = []string{"index", "--cwd", inputs.Cwd, "--output", outputPath}
-		if inputs.TargetOnly != "" {
-			plan.Args = append(plan.Args, "--target-only="+inputs.TargetOnly)
+		plans = append(plans, RuntimeCommandPlan{
+			Language:   "go",
+			Name:       languageIndexers["go"],
+			Args:       []string{"index", "--module-root", root, "--output", outputPathPlaceholder},
+			Dir:        targetRoot,
+			OutputPath: outputPathPlaceholder,
+			Root:       aggregateRoot,
+		})
+	}
+	return plans
+}
+
+func typeScriptIndexPlans(targetRoot string, inputs []typeScriptCommandInputs) []RuntimeCommandPlan {
+	plans := make([]RuntimeCommandPlan, 0, len(inputs))
+	for _, input := range inputs {
+		aggregateRoot, ok := aggregateRootFor(targetRoot, input.Cwd)
+		if !ok {
+			continue
+		}
+		plans = append(plans, RuntimeCommandPlan{
+			Language:   "typescript",
+			Name:       languageIndexers["typescript"],
+			Args:       []string{"index", "--cwd", input.Cwd, "--output", outputPathPlaceholder, input.ProjectRoot},
+			Dir:        targetRoot,
+			OutputPath: outputPathPlaceholder,
+			Root:       aggregateRoot,
+		})
+	}
+	return plans
+}
+
+func pythonIndexPlans(targetRoot string, inputs []pythonCommandInputs) []RuntimeCommandPlan {
+	plans := make([]RuntimeCommandPlan, 0, len(inputs))
+	for _, input := range inputs {
+		aggregateRoot, ok := aggregateRootFor(targetRoot, input.Cwd)
+		if !ok {
+			continue
+		}
+		args := []string{"index", "--cwd", input.Cwd, "--output", outputPathPlaceholder}
+		if input.TargetOnly != "" {
+			args = append(args, "--target-only="+input.TargetOnly)
+		}
+		plans = append(plans, RuntimeCommandPlan{
+			Language:   "python",
+			Name:       languageIndexers["python"],
+			Args:       args,
+			Dir:        targetRoot,
+			OutputPath: outputPathPlaceholder,
+			Root:       aggregateRoot,
+		})
+	}
+	return plans
+}
+
+func aggregateRootFor(targetRoot, root string) (string, bool) {
+	rel, err := filepath.Rel(targetRoot, root)
+	if err != nil || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || rel == ".." || filepath.IsAbs(rel) {
+		return "", false
+	}
+	rel = filepath.ToSlash(filepath.Clean(rel))
+	if rel == "" {
+		rel = "."
+	}
+	return rel, true
+}
+
+func commandPlanWithOutputPath(plan RuntimeCommandPlan, outputPath string) RuntimeCommandPlan {
+	plan.Args = append([]string(nil), plan.Args...)
+	for i, arg := range plan.Args {
+		if arg == outputPathPlaceholder {
+			plan.Args[i] = outputPath
 		}
 	}
-	return plan, true
+	plan.OutputPath = outputPath
+	return plan
+}
+
+func dedupeIndexPlans(plans []RuntimeCommandPlan) []RuntimeCommandPlan {
+	seen := make(map[string]bool, len(plans))
+	out := make([]RuntimeCommandPlan, 0, len(plans))
+	for _, plan := range plans {
+		key := plan.Language + "\x00" + plan.Root
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, plan)
+	}
+	return out
+}
+
+func aggregateCommandPlan(plan LanguageAggregatePlan, indexPaths []string) RuntimeCommandPlan {
+	args := []string{"aggregate-index", "--project-root", plan.ProjectRoot}
+	for i, indexPlan := range plan.IndexPlans {
+		args = append(args, "--root", indexPlan.Root, "--index", indexPaths[i])
+	}
+	args = append(args, "--out", aggregateOutputPathPlaceholder)
+	return RuntimeCommandPlan{
+		Language:   plan.Language,
+		Name:       "scip-search",
+		Args:       args,
+		Dir:        plan.ProjectRoot,
+		OutputPath: aggregateOutputPathPlaceholder,
+	}
+}
+
+func aggregatePlanWithOutputPath(plan RuntimeCommandPlan, outputPath string) RuntimeCommandPlan {
+	plan.Args = append([]string(nil), plan.Args...)
+	for i, arg := range plan.Args {
+		if arg == aggregateOutputPathPlaceholder {
+			plan.Args[i] = outputPath
+		}
+	}
+	plan.OutputPath = outputPath
+	return plan
+}
+
+func removeStaleIndex(path string) error {
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("remove stale scip-search index %q: %w", path, err)
+	}
+	return nil
 }
 
 type pairingRootSelectionError struct {
-	language   string
-	candidates []string
+	language string
 }
 
 func (err pairingRootSelectionError) Error() string {
-	if len(err.candidates) == 0 {
-		return fmt.Sprintf("unresolved scip-search language %s: no candidate roots found", err.language)
-	}
-	return fmt.Sprintf("unresolved scip-search language %s: ambiguous candidate roots: %s", err.language, strings.Join(err.candidates, ", "))
+	return fmt.Sprintf("unresolved scip-search language %s: no candidate roots found", err.language)
 }
 
 func pairingPlanSkip(language string, candidates []string) PairingPlanSkip {
-	reason := PairingPlanSkipNoCandidates
-	if len(candidates) > 0 {
-		reason = PairingPlanSkipAmbiguousRoots
-	}
 	return PairingPlanSkip{
 		Language:   language,
 		Candidates: append([]string(nil), candidates...),
-		Reason:     reason,
+		Reason:     PairingPlanSkipNoCandidates,
 	}
 }
 
-func pairingCommandPlan(projectRoot, language string, files []string) (RuntimeCommandPlan, []string, bool) {
+func pairingCommandPlan(projectRoot, language string, files []string) (LanguageAggregatePlan, []string, bool) {
 	outputPath := filepath.Join(projectRoot, language+".scip")
-	plan := RuntimeCommandPlan{
-		Language:   language,
-		Name:       languageIndexers[language],
-		Dir:        projectRoot,
-		OutputPath: outputPath,
+	plan := LanguageAggregatePlan{
+		Language:    language,
+		OutputPath:  outputPath,
+		ProjectRoot: projectRoot,
 	}
 
 	switch language {
 	case "go":
 		roots := goRootCandidates(projectRoot, files)
-		if len(roots) != 1 {
-			return RuntimeCommandPlan{}, roots, false
+		if len(roots) == 0 {
+			return LanguageAggregatePlan{}, roots, false
 		}
-		plan.Args = []string{"index", "--module-root", roots[0], "--output", outputPath}
+		plan.IndexPlans = goIndexPlans(projectRoot, roots)
 	case "typescript":
 		candidates := pairingTypeScriptCommandInputs(projectRoot, files)
-		if len(candidates) != 1 {
-			return RuntimeCommandPlan{}, typeScriptCandidateRoots(candidates), false
+		if len(candidates) == 0 {
+			return LanguageAggregatePlan{}, typeScriptCandidateRoots(candidates), false
 		}
-		plan.Args = []string{"index", "--cwd", candidates[0].Cwd, "--output", outputPath, candidates[0].ProjectRoot}
+		plan.IndexPlans = typeScriptIndexPlans(projectRoot, candidates)
 	case "python":
 		candidates := pairingPythonCommandInputs(projectRoot, files)
-		if len(candidates) != 1 {
-			return RuntimeCommandPlan{}, pythonCandidateRoots(candidates), false
+		if len(candidates) == 0 {
+			return LanguageAggregatePlan{}, pythonCandidateRoots(candidates), false
 		}
-		plan.Args = []string{"index", "--cwd", candidates[0].Cwd, "--output", outputPath}
-		if candidates[0].TargetOnly != "" {
-			plan.Args = append(plan.Args, "--target-only="+candidates[0].TargetOnly)
-		}
+		plan.IndexPlans = pythonIndexPlans(projectRoot, candidates)
 	default:
-		return RuntimeCommandPlan{}, nil, false
+		return LanguageAggregatePlan{}, nil, false
 	}
 
+	plan.IndexPlans = dedupeIndexPlans(plan.IndexPlans)
 	return plan, nil, true
 }
 
-func pairingCommandOverridePlan(projectRoot string, override PairingCommandOverride) (RuntimeCommandPlan, error) {
-	outputPath := filepath.Join(projectRoot, override.Language+".scip")
-	plan := RuntimeCommandPlan{
-		Language:   override.Language,
-		Name:       languageIndexers[override.Language],
-		Dir:        projectRoot,
-		OutputPath: outputPath,
+func pairingCommandOverridePlan(projectRoot string, overrides []PairingCommandOverride) (LanguageAggregatePlan, error) {
+	if len(overrides) == 0 {
+		return LanguageAggregatePlan{}, fmt.Errorf("empty scip-search pairing overrides")
 	}
-	switch override.Language {
-	case "go":
-		if override.GoModuleRoot == "" {
-			return RuntimeCommandPlan{}, fmt.Errorf("invalid go scip-search pairing override: module root is empty")
+	language := overrides[0].Language
+	outputPath := filepath.Join(projectRoot, language+".scip")
+	plan := LanguageAggregatePlan{
+		Language:    language,
+		ProjectRoot: projectRoot,
+		OutputPath:  outputPath,
+	}
+	for _, override := range overrides {
+		if override.Language != language {
+			return LanguageAggregatePlan{}, fmt.Errorf("mixed scip-search override languages in %s plan", language)
 		}
-		if err := ensurePairingOverridePathWithin(projectRoot, override.GoModuleRoot, "module root"); err != nil {
-			return RuntimeCommandPlan{}, err
-		}
-		plan.Args = []string{"index", "--module-root", override.GoModuleRoot, "--output", outputPath}
-	case "typescript":
-		if override.TypeScriptCwd == "" || override.TypeScriptProjectRoot == "" {
-			return RuntimeCommandPlan{}, fmt.Errorf("invalid typescript scip-search pairing override: cwd and project root are required")
-		}
-		if err := ensurePairingOverridePathWithin(projectRoot, override.TypeScriptCwd, "typescript cwd"); err != nil {
-			return RuntimeCommandPlan{}, err
-		}
-		if err := ensurePairingOverridePathWithin(projectRoot, override.TypeScriptProjectRoot, "typescript project root"); err != nil {
-			return RuntimeCommandPlan{}, err
-		}
-		plan.Args = []string{"index", "--cwd", override.TypeScriptCwd, "--output", outputPath, override.TypeScriptProjectRoot}
-	case "python":
-		if override.PythonCwd == "" {
-			return RuntimeCommandPlan{}, fmt.Errorf("invalid python scip-search pairing override: cwd is empty")
-		}
-		if err := ensurePairingOverridePathWithin(projectRoot, override.PythonCwd, "python cwd"); err != nil {
-			return RuntimeCommandPlan{}, err
-		}
-		if override.PythonTargetOnly != "" {
-			targetOnly, err := cleanPairingTargetOnly(override.PythonTargetOnly)
-			if err != nil {
-				return RuntimeCommandPlan{}, err
+		switch language {
+		case "go":
+			if override.GoModuleRoot == "" {
+				return LanguageAggregatePlan{}, fmt.Errorf("invalid go scip-search pairing override: module root is empty")
 			}
-			override.PythonTargetOnly = targetOnly
+			if err := ensurePairingOverridePathWithin(projectRoot, override.GoModuleRoot, "module root"); err != nil {
+				return LanguageAggregatePlan{}, err
+			}
+			plan.IndexPlans = append(plan.IndexPlans, goIndexPlans(projectRoot, []string{override.GoModuleRoot})...)
+		case "typescript":
+			if override.TypeScriptCwd == "" || override.TypeScriptProjectRoot == "" {
+				return LanguageAggregatePlan{}, fmt.Errorf("invalid typescript scip-search pairing override: cwd and project root are required")
+			}
+			if err := ensurePairingOverridePathWithin(projectRoot, override.TypeScriptCwd, "typescript cwd"); err != nil {
+				return LanguageAggregatePlan{}, err
+			}
+			if err := ensurePairingOverridePathWithin(projectRoot, override.TypeScriptProjectRoot, "typescript project root"); err != nil {
+				return LanguageAggregatePlan{}, err
+			}
+			plan.IndexPlans = append(plan.IndexPlans, typeScriptIndexPlans(projectRoot, []typeScriptCommandInputs{{
+				Cwd:         override.TypeScriptCwd,
+				ProjectRoot: override.TypeScriptProjectRoot,
+			}})...)
+		case "python":
+			if override.PythonCwd == "" {
+				return LanguageAggregatePlan{}, fmt.Errorf("invalid python scip-search pairing override: cwd is empty")
+			}
+			if err := ensurePairingOverridePathWithin(projectRoot, override.PythonCwd, "python cwd"); err != nil {
+				return LanguageAggregatePlan{}, err
+			}
+			if override.PythonTargetOnly != "" {
+				targetOnly, err := cleanPairingTargetOnly(override.PythonTargetOnly)
+				if err != nil {
+					return LanguageAggregatePlan{}, err
+				}
+				override.PythonTargetOnly = targetOnly
+			}
+			plan.IndexPlans = append(plan.IndexPlans, pythonIndexPlans(projectRoot, []pythonCommandInputs{{
+				Cwd:        override.PythonCwd,
+				TargetOnly: override.PythonTargetOnly,
+			}})...)
+		default:
+			return LanguageAggregatePlan{}, fmt.Errorf("unsupported scip-search language %q (supported: %s)", language, strings.Join(supportedLanguages, ", "))
 		}
-		plan.Args = []string{"index", "--cwd", override.PythonCwd, "--output", outputPath}
-		if override.PythonTargetOnly != "" {
-			plan.Args = append(plan.Args, "--target-only="+override.PythonTargetOnly)
-		}
-	default:
-		return RuntimeCommandPlan{}, fmt.Errorf("unsupported scip-search language %q (supported: %s)", override.Language, strings.Join(supportedLanguages, ", "))
 	}
+	plan.IndexPlans = dedupeIndexPlans(plan.IndexPlans)
 	return plan, nil
 }
 
-func pairingOverrideMap(overrides []PairingCommandOverride) (map[string]PairingCommandOverride, error) {
-	out := make(map[string]PairingCommandOverride, len(overrides))
+func pairingOverrideMap(overrides []PairingCommandOverride) (map[string][]PairingCommandOverride, error) {
+	out := make(map[string][]PairingCommandOverride, len(overrides))
 	for _, override := range overrides {
 		if !slices.Contains(supportedLanguages, override.Language) {
 			return nil, fmt.Errorf("unsupported scip-search language %q (supported: %s)", override.Language, strings.Join(supportedLanguages, ", "))
 		}
-		if _, exists := out[override.Language]; exists {
-			return nil, fmt.Errorf("duplicate scip-search pairing plan for language %s", override.Language)
-		}
-		out[override.Language] = override
+		out[override.Language] = append(out[override.Language], override)
 	}
 	return out, nil
 }
 
-func mergePairingLanguages(languages []string, overrides map[string]PairingCommandOverride) []string {
+func mergePairingLanguages(languages []string, overrides map[string][]PairingCommandOverride) []string {
 	seen := make(map[string]bool, len(languages)+len(overrides))
 	for _, language := range languages {
 		seen[language] = true
@@ -726,7 +895,7 @@ func mergePairingLanguages(languages []string, overrides map[string]PairingComma
 	return out
 }
 
-func ensureOverridesAllowedByExplicitLanguages(languages []string, overrides map[string]PairingCommandOverride) error {
+func ensureOverridesAllowedByExplicitLanguages(languages []string, overrides map[string][]PairingCommandOverride) error {
 	allowed := make(map[string]bool, len(languages))
 	for _, language := range languages {
 		allowed[language] = true
@@ -828,8 +997,11 @@ func pairingTypeScriptCommandInputs(targetRoot string, files []string) []typeScr
 			continue
 		}
 		projectRoot := filepath.Dir(rootConfig)
-		sourceCandidates := typeScriptSourceCandidatesForRoot(targetRoot, rootConfig, projectRoot)
+		sourceCandidates := typeScriptSourceCandidatesForRoot(targetRoot, rootConfig)
 		if len(sourceCandidates) == 0 {
+			if _, err := readTSConfig(rootConfig); err != nil {
+				continue
+			}
 			candidates = append(candidates, typeScriptCommandInputs{Cwd: projectRoot, ProjectRoot: projectRoot})
 			continue
 		}
@@ -878,28 +1050,6 @@ var pythonProjectMarkerPriority = map[string]int{
 	"requirements.txt": 3,
 }
 
-func inferPythonCommandInputs(targetRoot string, files []string) (pythonCommandInputs, bool) {
-	pythonFiles := pythonTrackedFiles(targetRoot, files)
-	if len(pythonFiles) == 0 {
-		return pythonCommandInputs{}, false
-	}
-
-	roots := pythonProjectRootCandidates(targetRoot, files)
-	for _, root := range roots {
-		eligible := eligiblePythonFilesForRoot(root, roots, pythonFiles)
-		if len(eligible) == 0 {
-			continue
-		}
-		inputs := pythonCommandInputs{Cwd: root}
-		if pythonFilesAllUnderSrc(root, eligible) {
-			inputs.TargetOnly = "src"
-		}
-		return inputs, true
-	}
-
-	return pythonCommandInputs{Cwd: targetRoot}, true
-}
-
 func pythonTrackedFiles(targetRoot string, files []string) []string {
 	var out []string
 	for _, file := range files {
@@ -928,6 +1078,9 @@ func pythonProjectRootCandidates(targetRoot string, files []string) []string {
 			continue
 		}
 		root := filepath.Dir(path)
+		if base == "pyproject.toml" && !pyprojectDefinesPythonProject(path) {
+			continue
+		}
 		if previous, exists := seen[root]; !exists || priority < previous {
 			seen[root] = priority
 		}
@@ -946,6 +1099,24 @@ func pythonProjectRootCandidates(targetRoot string, files []string) []string {
 		return roots[i] < roots[j]
 	})
 	return roots
+}
+
+func pyprojectDefinesPythonProject(path string) bool {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	for _, line := range strings.Split(string(content), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		switch line {
+		case "[project]", "[tool.poetry]", "[tool.pdm]":
+			return true
+		}
+	}
+	return false
 }
 
 func eligiblePythonFilesForRoot(root string, candidateRoots, pythonFiles []string) []string {
@@ -1029,32 +1200,6 @@ type typeScriptSourceCandidate struct {
 	projectRoot string
 }
 
-func inferTypeScriptCommandInputs(targetRoot string, files []string) (typeScriptCommandInputs, bool) {
-	rootConfigs := typeScriptRootConfigCandidates(files)
-	for _, relConfig := range rootConfigs {
-		rootConfig := filepath.Join(targetRoot, filepath.FromSlash(relConfig))
-		rootConfig = filepath.Clean(rootConfig)
-		if !pathWithin(targetRoot, rootConfig) {
-			continue
-		}
-
-		projectRoot := filepath.Dir(rootConfig)
-		sourceCandidates := typeScriptSourceCandidatesForRoot(targetRoot, rootConfig, projectRoot)
-		if len(sourceCandidates) == 0 {
-			continue
-		}
-		sort.Slice(sourceCandidates, func(i, j int) bool {
-			if sourceCandidates[i].configPath != sourceCandidates[j].configPath {
-				return sourceCandidates[i].configPath < sourceCandidates[j].configPath
-			}
-			return sourceCandidates[i].sourceRoot < sourceCandidates[j].sourceRoot
-		})
-		candidate := sourceCandidates[0]
-		return typeScriptCommandInputs{Cwd: candidate.sourceRoot, ProjectRoot: candidate.projectRoot}, true
-	}
-	return typeScriptCommandInputs{}, false
-}
-
 func typeScriptRootConfigCandidates(files []string) []string {
 	candidates := make([]string, 0)
 	for _, file := range files {
@@ -1077,7 +1222,7 @@ func typeScriptRootConfigCandidates(files []string) []string {
 	return candidates
 }
 
-func typeScriptSourceCandidatesForRoot(targetRoot, rootConfig, projectRoot string) []typeScriptSourceCandidate {
+func typeScriptSourceCandidatesForRoot(targetRoot, rootConfig string) []typeScriptSourceCandidate {
 	leafConfigs := collectTypeScriptLeafConfigs(targetRoot, rootConfig, map[string]bool{})
 	candidates := make([]typeScriptSourceCandidate, 0, len(leafConfigs))
 	for _, leafConfig := range leafConfigs {
@@ -1092,7 +1237,7 @@ func typeScriptSourceCandidatesForRoot(targetRoot, rootConfig, projectRoot strin
 			candidates = append(candidates, typeScriptSourceCandidate{
 				configPath:  filepath.Clean(leafConfig),
 				sourceRoot:  filepath.Clean(sourceRoot),
-				projectRoot: projectRoot,
+				projectRoot: filepath.Dir(leafConfig),
 			})
 		}
 	}
@@ -1193,23 +1338,39 @@ func dedupePaths(paths []string) []string {
 }
 
 func dedupeTypeScriptInputs(inputs []typeScriptCommandInputs) []typeScriptCommandInputs {
-	seen := make(map[string]bool, len(inputs))
-	out := make([]typeScriptCommandInputs, 0, len(inputs))
+	byProjectRoot := make(map[string]typeScriptCommandInputs, len(inputs))
 	for _, input := range inputs {
-		key := input.Cwd + "\x00" + input.ProjectRoot
-		if seen[key] {
-			continue
+		existing, ok := byProjectRoot[input.ProjectRoot]
+		if !ok || preferTypeScriptInput(input, existing) {
+			byProjectRoot[input.ProjectRoot] = input
 		}
-		seen[key] = true
+	}
+	out := make([]typeScriptCommandInputs, 0, len(byProjectRoot))
+	for _, input := range byProjectRoot {
 		out = append(out, input)
 	}
 	sort.Slice(out, func(i, j int) bool {
-		if out[i].ProjectRoot != out[j].ProjectRoot {
-			return out[i].ProjectRoot < out[j].ProjectRoot
-		}
-		return out[i].Cwd < out[j].Cwd
+		return out[i].ProjectRoot < out[j].ProjectRoot
 	})
 	return out
+}
+
+func preferTypeScriptInput(candidate, existing typeScriptCommandInputs) bool {
+	candidateSrc := isTypeScriptProjectSrcInput(candidate)
+	existingSrc := isTypeScriptProjectSrcInput(existing)
+	if candidateSrc != existingSrc {
+		return candidateSrc
+	}
+	candidateDepth := pathDepthWithin(candidate.ProjectRoot, candidate.Cwd)
+	existingDepth := pathDepthWithin(existing.ProjectRoot, existing.Cwd)
+	if candidateDepth != existingDepth {
+		return candidateDepth < existingDepth
+	}
+	return candidate.Cwd < existing.Cwd
+}
+
+func isTypeScriptProjectSrcInput(input typeScriptCommandInputs) bool {
+	return filepath.Clean(input.Cwd) == filepath.Join(filepath.Clean(input.ProjectRoot), "src")
 }
 
 func typeScriptCandidateRoots(candidates []typeScriptCommandInputs) []string {
@@ -1360,13 +1521,6 @@ func runRuntimeCommandPlan(plan RuntimeCommandPlan) (string, error) {
 	cmd.Dir = plan.Dir
 	output, err := cmd.CombinedOutput()
 	return string(output), err
-}
-
-func removeStaleIndex(path string) error {
-	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("remove stale scip-search index %q: %w", path, err)
-	}
-	return nil
 }
 
 func ensureTaskWorktreeScipExclude(targetRoot string) error {

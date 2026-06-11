@@ -528,31 +528,27 @@ languages from git-tracked code and writes the detected allowlist to
 Pairing init behavior:
 
 - Truthy `LIZA_ENABLE_SCIP_SEARCH` during pairing `liza init` asks Liza to
-  autodetect a repo-specific SCIP indexing plan and install or verify
-  project-local `liza-index.sh` Git hook plumbing for confident languages.
-  Ambiguous auto-detected languages are skipped with warnings so optional SCIP
-  indexing does not block pairing setup.
+  autodetect repo-specific SCIP indexing roots and install or verify
+  project-local `liza-index.sh` Git hook plumbing for supported languages.
 - Repeated `--scip-search <language>` flags restrict which languages pairing init
-  considers, but they are not root or working-directory selections. Pairing init
-  still needs one confident root per explicitly enabled language.
+  considers, but they are not root or working-directory selections.
 - Repeated `--scip-search-plan <language>=<values>` flags provide explicit
-  pairing hook roots when monorepo autodetection would otherwise be ambiguous:
+  pairing hook roots when monorepo autodetection is not the desired plan:
   `go=<module-root>`, `typescript=<cwd>,<project-root>`, or
   `python=<cwd>[,<target-only>]`. Values may be repo-relative or absolute paths
-  under the repo root. These overrides are used only for project-local pairing
-  hook generation; full workspace init rejects the flag, and the values are not
+  under the repo root. Repeating the same language adds multiple input roots to
+  that language's aggregate index. Overrides replace autodiscovery for that
+  language. These overrides are used only for project-local pairing hook
+  generation; full workspace init rejects the flag, and the values are not
   persisted to MAS `config.scip_search`. If `--scip-search <language>` is also
   supplied, every override language must be in that allowlist.
-- If pairing init finds multiple plausible roots for an explicitly enabled
-  language and cannot choose confidently, it reports an ambiguity diagnostic
-  instead of writing guessed hook commands.
-- If pairing init finds exactly one confident root per non-skipped language, the
-  generated project-local hook contains concrete repo-specific indexer commands.
-  Those concrete commands belong in the project hook, not in global setup
-  guidance.
-- Pairing lifecycle refresh skips a SCIP indexer when its generated index exists
-  and is newer than the relevant source files. It runs the indexer when the index
-  is missing or stale.
+- The generated project-local hook writes one final `<language>.scip` file per
+  language by running each per-root indexer into a temporary SCIP file and then
+  calling `scip-search aggregate-index --project-root <repo>`. This aggregation
+  runs even for a single root so final result paths are repo-root relative.
+- Pairing lifecycle refresh skips a language when its generated aggregate index
+  exists and is newer than all relevant source roots. If any source root is
+  newer, Liza rebuilds that language's temporary indexes and aggregate output.
 
 MAS runtime behavior:
 
@@ -584,6 +580,12 @@ Project-root orchestrator indexes live under:
 Indexes are snapshots generated at controlled lifecycle points. They reflect the
 source tree when Liza created or refreshed them, not later edits made by an
 agent during the same task.
+
+Each generated runtime language index is also an aggregate index. Liza runs one
+or more language indexers into temporary SCIP files, then writes the final
+`<language>.scip` with `scip-search aggregate-index --project-root <target>`.
+Final document paths are relative to the task worktree or project root advertised
+to the agent.
 
 Indexing failures degrade gracefully at runtime. If one enabled language fails
 to index, Liza still spawns the agent and omits that failed language from the

@@ -228,12 +228,12 @@ func TestEnsureReviewerWorktree_MissingRecoverable_RefreshesScipAfterPostWorktre
 	if !markerSeenByIndexer {
 		t.Fatal("scip indexer ran before PostWorktreeCmd marker existed")
 	}
-	if len(calls) != 1 {
-		t.Fatalf("indexer calls = %#v, want one go refresh", calls)
+	if len(calls) != 2 {
+		t.Fatalf("indexer calls = %#v, want go indexer and aggregate refresh", calls)
 	}
 	wantIndexPath := filepath.Join(wtPath, ".liza", "scip", "go.scip")
-	if calls[0].Language != "go" || calls[0].Dir != wtPath || calls[0].OutputPath != wantIndexPath {
-		t.Fatalf("indexer call = %#v, want go plan for recovered worktree", calls[0])
+	if calls[0].Language != "go" || calls[0].Dir != wtPath || calls[1].Name != "scip-search" || !strings.HasSuffix(calls[1].OutputPath, "go-aggregate.scip") {
+		t.Fatalf("indexer calls = %#v, want go plan and aggregate for recovered worktree", calls)
 	}
 
 	available := availableReviewerScipIndexes(t, wtPath, []string{"go"})

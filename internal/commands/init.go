@@ -150,7 +150,7 @@ func InitPairingCommand(params InitPairingParams) error {
 	}
 
 	if projectRoot != "" && (stacklitEnabled || scipEnabled) {
-		var scipPlans []scipsearch.RuntimeCommandPlan
+		var scipPlans []scipsearch.LanguageAggregatePlan
 		if scipEnabled {
 			overrides, err := scipsearch.ParsePairingCommandOverrides(projectRoot, params.ScipSearchPlans)
 			if err != nil {
@@ -245,8 +245,6 @@ func writePairingScipSkipDiagnostics(skips []scipsearch.PairingPlanSkip) {
 
 func pairingScipSkipReasonText(reason scipsearch.PairingPlanSkipReason) string {
 	switch reason {
-	case scipsearch.PairingPlanSkipAmbiguousRoots:
-		return "ambiguous roots"
 	case scipsearch.PairingPlanSkipNoCandidates:
 		return "no candidate roots found"
 	default:

@@ -2734,9 +2734,16 @@ func TestInitPairingCommand_ScipSearchPlanOverridesAmbiguousRoots(t *testing.T) 
 
 	script := readFileForTest(t, filepath.Join(gitDir, ".git", "hooks", "liza-index.sh"))
 	for _, want := range []string{
-		"scip-go index --module-root " + gitDir + "/services/design-diagnosis/cli --output " + gitDir + "/go.scip",
-		"scip-typescript index --cwd " + gitDir + "/apps/web/src --output " + gitDir + "/typescript.scip " + gitDir + "/apps/web",
-		"scip-python index --cwd " + gitDir + "/apps/api --output " + gitDir + "/python.scip",
+		"scip-go index --module-root " + gitDir + "/services/design-diagnosis/cli --output ",
+		"scip-typescript index --cwd " + gitDir + "/apps/web/src --output ",
+		"scip-python index --cwd " + gitDir + "/apps/api --output ",
+		"scip-search aggregate-index --project-root " + gitDir,
+		"--root services/design-diagnosis/cli --index ",
+		"--root apps/web/src --index ",
+		"--root apps/api --index ",
+		"--out " + gitDir + "/go.scip",
+		"--out " + gitDir + "/typescript.scip",
+		"--out " + gitDir + "/python.scip",
 	} {
 		if !strings.Contains(script, want) {
 			t.Fatalf("liza-index.sh missing override command %q:\n%s", want, script)
@@ -2762,7 +2769,7 @@ func TestInitPairingCommand_ScipSearchEnabledWithNoLanguagesSkipsInertHooks(t *t
 	}
 }
 
-func TestInitPairingCommand_ScipSearchAmbiguityFailsBeforeInstallingHooks(t *testing.T) {
+func TestInitPairingCommand_ScipSearchMultiRootInstallsAggregateHooks(t *testing.T) {
 	gitDir := setupGitRepo(t)
 	defer os.RemoveAll(gitDir)
 	setupGlobalLiza(t)
@@ -2780,20 +2787,18 @@ func TestInitPairingCommand_ScipSearchAmbiguityFailsBeforeInstallingHooks(t *tes
 		Agents:     []string{"codex"},
 		ScipSearch: []string{"go"},
 	})
-	if err == nil {
-		t.Fatal("InitPairingCommand() error = nil, want ambiguous SCIP root diagnostic")
+	if err != nil {
+		t.Fatalf("InitPairingCommand() error = %v", err)
 	}
-	for _, want := range []string{"unresolved scip-search language go", "service-a", "service-b"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Fatalf("error = %v, want %q", err, want)
+	script := readFileForTest(t, filepath.Join(gitDir, ".git", "hooks", "liza-index.sh"))
+	for _, want := range []string{"--root service-a --index ", "--root service-b --index ", "--out " + gitDir + "/go.scip"} {
+		if !strings.Contains(script, want) {
+			t.Fatalf("liza-index.sh = %q, want %q", script, want)
 		}
-	}
-	if _, statErr := os.Stat(filepath.Join(gitDir, ".git", "hooks", "liza-index.sh")); !os.IsNotExist(statErr) {
-		t.Fatalf("liza-index.sh stat err = %v, want missing after failed SCIP planning", statErr)
 	}
 }
 
-func TestInitPairingCommand_AmbientScipSearchSkipsAmbiguousRoots(t *testing.T) {
+func TestInitPairingCommand_AmbientScipSearchAggregatesMultiRoot(t *testing.T) {
 	gitDir := setupGitRepo(t)
 	defer os.RemoveAll(gitDir)
 	setupGlobalLiza(t)
@@ -2813,18 +2818,14 @@ func TestInitPairingCommand_AmbientScipSearchSkipsAmbiguousRoots(t *testing.T) {
 	if err != nil {
 		t.Fatalf("InitPairingCommand() error = %v", err)
 	}
-	for _, want := range []string{
-		"Warning: skipped scip-search go: ambiguous roots",
-		"service-a",
-		"service-b",
-		"--scip-search-plan go=<module-root>",
-	} {
-		if !strings.Contains(stderr, want) {
-			t.Fatalf("stderr = %q, want %q", stderr, want)
-		}
+	if stderr != "" {
+		t.Fatalf("stderr = %q, want no multi-root warning", stderr)
 	}
-	if _, statErr := os.Stat(filepath.Join(gitDir, ".git", "hooks", "liza-index.sh")); !os.IsNotExist(statErr) {
-		t.Fatalf("liza-index.sh stat err = %v, want missing when all ambient SCIP plans are skipped", statErr)
+	script := readFileForTest(t, filepath.Join(gitDir, ".git", "hooks", "liza-index.sh"))
+	for _, want := range []string{"--root service-a --index ", "--root service-b --index ", "--out " + gitDir + "/go.scip"} {
+		if !strings.Contains(script, want) {
+			t.Fatalf("liza-index.sh = %q, want %q", script, want)
+		}
 	}
 }
 

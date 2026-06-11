@@ -266,15 +266,9 @@ func TestInstallActivationWritesScipCommandsWithoutStacklit(t *testing.T) {
 	outputPath := filepath.Join(repo, "go.scip")
 
 	result, err := InstallActivation(InstallActivationOptions{
-		RepoRoot: repo,
-		Hooks:    []string{"post-commit"},
-		ScipPlans: []scipsearch.RuntimeCommandPlan{{
-			Language:   "go",
-			Name:       "scip-go",
-			Args:       []string{"index", "--module-root", repo, "--output", outputPath},
-			Dir:        repo,
-			OutputPath: outputPath,
-		}},
+		RepoRoot:  repo,
+		Hooks:     []string{"post-commit"},
+		ScipPlans: []scipsearch.LanguageAggregatePlan{goAggregatePlan(repo, outputPath)},
 	})
 	if err != nil {
 		t.Fatalf("InstallActivation() error = %v", err)
@@ -491,13 +485,7 @@ func TestInstalledIndexScriptSkipsFreshScipIndexAndRefreshesWhenSourceIsNewer(t 
 	result, err := InstallIndexScript(InstallIndexScriptOptions{
 		RepoRoot:        repo,
 		DisableStacklit: true,
-		ScipPlans: []scipsearch.RuntimeCommandPlan{{
-			Language:   "go",
-			Name:       "scip-go",
-			Args:       []string{"index", "--module-root", repo, "--output", outputPath},
-			Dir:        repo,
-			OutputPath: outputPath,
-		}},
+		ScipPlans:       []scipsearch.LanguageAggregatePlan{goAggregatePlan(repo, outputPath)},
 	})
 	if err != nil {
 		t.Fatalf("InstallIndexScript() error = %v", err)
@@ -506,7 +494,11 @@ func TestInstalledIndexScriptSkipsFreshScipIndexAndRefreshesWhenSourceIsNewer(t 
 	pathDir := writeFakeScipGo(t)
 
 	runIndexScriptWithPath(t, result.Path, pathDir, "LIZA_TEST_SCIP_LOG="+logPath)
-	if got := readFile(t, logPath); got != "scip-go index --module-root "+repo+" --output "+outputPath+"\n" {
+	if got := readFile(t, logPath); !containsAll(got,
+		"scip-go index --module-root "+repo+" --output ",
+		"scip-search aggregate-index --project-root "+repo+" --root . --index ",
+		" --out "+outputPath,
+	) {
 		t.Fatalf("first SCIP calls = %q", got)
 	}
 
@@ -521,7 +513,11 @@ func TestInstalledIndexScriptSkipsFreshScipIndexAndRefreshesWhenSourceIsNewer(t 
 		t.Fatalf("Chtimes(source) error = %v", err)
 	}
 	runIndexScriptWithPath(t, result.Path, pathDir, "LIZA_TEST_SCIP_LOG="+logPath)
-	if got := readFile(t, logPath); got != "scip-go index --module-root "+repo+" --output "+outputPath+"\n" {
+	if got := readFile(t, logPath); !containsAll(got,
+		"scip-go index --module-root "+repo+" --output ",
+		"scip-search aggregate-index --project-root "+repo+" --root . --index ",
+		" --out "+outputPath,
+	) {
 		t.Fatalf("stale SCIP calls = %q, want refresh", got)
 	}
 }
@@ -544,13 +540,7 @@ func TestInstalledIndexScriptUsesScipCommandRootForFreshness(t *testing.T) {
 	result, err := InstallIndexScript(InstallIndexScriptOptions{
 		RepoRoot:        repo,
 		DisableStacklit: true,
-		ScipPlans: []scipsearch.RuntimeCommandPlan{{
-			Language:   "typescript",
-			Name:       "scip-typescript",
-			Args:       []string{"index", "--cwd", webSrc, "--output", outputPath, filepath.Join(repo, "apps", "web")},
-			Dir:        repo,
-			OutputPath: outputPath,
-		}},
+		ScipPlans:       []scipsearch.LanguageAggregatePlan{typescriptAggregatePlan(repo, outputPath, webSrc, filepath.Join(repo, "apps", "web"))},
 	})
 	if err != nil {
 		t.Fatalf("InstallIndexScript() error = %v", err)
@@ -573,7 +563,12 @@ func TestInstalledIndexScriptUsesScipCommandRootForFreshness(t *testing.T) {
 		t.Fatalf("Chtimes(webSource) error = %v", err)
 	}
 	runIndexScriptWithPath(t, result.Path, pathDir, "LIZA_TEST_SCIP_LOG="+logPath)
-	if got := readFile(t, logPath); got != "scip-typescript index --cwd "+webSrc+" --output "+outputPath+" "+filepath.Join(repo, "apps", "web")+"\n" {
+	if got := readFile(t, logPath); !containsAll(got,
+		"scip-typescript index --cwd "+webSrc+" --output ",
+		" "+filepath.Join(repo, "apps", "web"),
+		"scip-search aggregate-index --project-root "+repo+" --root apps/web/src --index ",
+		" --out "+outputPath,
+	) {
 		t.Fatalf("stale TypeScript source calls = %q, want refresh", got)
 	}
 }
@@ -748,6 +743,15 @@ func readFile(t *testing.T, path string) string {
 	return string(data)
 }
 
+func containsAll(content string, needles ...string) bool {
+	for _, needle := range needles {
+		if !strings.Contains(content, needle) {
+			return false
+		}
+	}
+	return true
+}
+
 func writeFile(t *testing.T, path, content string, mode os.FileMode) {
 	t.Helper()
 
@@ -815,6 +819,7 @@ func writeFakeScipGo(t *testing.T) string {
 	t.Helper()
 
 	dir := t.TempDir()
+	writeFakeScipSearch(t, dir)
 	path := filepath.Join(dir, "scip-go")
 	script := `#!/bin/sh
 printf '%s\n' "scip-go $*" >> "$LIZA_TEST_SCIP_LOG"
@@ -840,6 +845,7 @@ func writeFakeScipTypeScript(t *testing.T) string {
 	t.Helper()
 
 	dir := t.TempDir()
+	writeFakeScipSearch(t, dir)
 	path := filepath.Join(dir, "scip-typescript")
 	script := `#!/bin/sh
 printf '%s\n' "scip-typescript $*" >> "$LIZA_TEST_SCIP_LOG"
@@ -859,4 +865,65 @@ fi
 		t.Fatalf("write fake scip-typescript: %v", err)
 	}
 	return dir
+}
+
+func writeFakeScipSearch(t *testing.T, dir string) {
+	t.Helper()
+
+	path := filepath.Join(dir, "scip-search")
+	script := `#!/bin/sh
+printf '%s\n' "scip-search $*" >> "$LIZA_TEST_SCIP_LOG"
+output=""
+while [ "$#" -gt 0 ]; do
+	if [ "$1" = "--out" ]; then
+		shift
+		output="$1"
+	fi
+	shift
+done
+if [ -n "$output" ]; then
+	printf '%s\n' "aggregated scip index" > "$output"
+fi
+`
+	if err := os.WriteFile(path, []byte(script), 0755); err != nil {
+		t.Fatalf("write fake scip-search: %v", err)
+	}
+}
+
+func goAggregatePlan(repo, outputPath string) scipsearch.LanguageAggregatePlan {
+	const outputPlaceholder = "__LIZA_SCIP_OUTPUT__"
+	return scipsearch.LanguageAggregatePlan{
+		Language:    "go",
+		ProjectRoot: repo,
+		OutputPath:  outputPath,
+		IndexPlans: []scipsearch.RuntimeCommandPlan{{
+			Language:   "go",
+			Name:       "scip-go",
+			Args:       []string{"index", "--module-root", repo, "--output", outputPlaceholder},
+			Dir:        repo,
+			OutputPath: outputPlaceholder,
+			Root:       ".",
+		}},
+	}
+}
+
+func typescriptAggregatePlan(repo, outputPath, cwd, projectRoot string) scipsearch.LanguageAggregatePlan {
+	const outputPlaceholder = "__LIZA_SCIP_OUTPUT__"
+	root, err := filepath.Rel(repo, cwd)
+	if err != nil {
+		root = cwd
+	}
+	return scipsearch.LanguageAggregatePlan{
+		Language:    "typescript",
+		ProjectRoot: repo,
+		OutputPath:  outputPath,
+		IndexPlans: []scipsearch.RuntimeCommandPlan{{
+			Language:   "typescript",
+			Name:       "scip-typescript",
+			Args:       []string{"index", "--cwd", cwd, "--output", outputPlaceholder, projectRoot},
+			Dir:        repo,
+			OutputPath: outputPlaceholder,
+			Root:       filepath.ToSlash(root),
+		}},
+	}
 }
