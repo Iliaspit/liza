@@ -42,6 +42,11 @@ var deleteCmd = &cobra.Command{
 }
 
 func requireProjectRoot() (string, error) {
+	explicitRoot, _ := rootCmd.PersistentFlags().GetString("project-root")
+	if explicitRoot != "" {
+		return requireExplicitProjectRoot(explicitRoot)
+	}
+
 	projectRoot, err := paths.GetProjectRoot()
 	if err != nil {
 		return "", &lizaerrors.ProjectRootError{Operation: rootCmd.CommandPath(), Err: err}
@@ -58,12 +63,65 @@ func requireProjectRoot() (string, error) {
 	if err != nil {
 		return "", &lizaerrors.ProjectRootError{Operation: rootCmd.CommandPath(), Err: err}
 	}
-	if canonicalCurrentDir != canonicalProjectRoot {
+	if canonicalCurrentDir != canonicalProjectRoot && !paths.IsLizaTaskWorktree(projectRoot, currentDir) {
 		return "", &lizaerrors.ProjectRootError{
 			Operation:    rootCmd.CommandPath(),
 			CurrentDir:   currentDir,
 			ExpectedRoot: projectRoot,
 			Err:          fmt.Errorf("current directory is not project root"),
+		}
+	}
+	return projectRoot, nil
+}
+
+func requireExplicitProjectRoot(root string) (string, error) {
+	absRoot, err := filepath.Abs(root)
+	if err != nil {
+		return "", &lizaerrors.ProjectRootError{
+			Message:   fmt.Sprintf("failed to resolve --project-root %q", root),
+			Operation: rootCmd.CommandPath(),
+			Err:       err,
+		}
+	}
+	projectRoot, err := paths.GetProjectRootFromDir(absRoot)
+	if err != nil {
+		return "", &lizaerrors.ProjectRootError{
+			Message:      fmt.Sprintf("--project-root %q is not a git repository", root),
+			Operation:    rootCmd.CommandPath(),
+			ExpectedRoot: root,
+			Err:          err,
+		}
+	}
+	canonicalFlagRoot, err := canonicalDir(absRoot)
+	if err != nil {
+		return "", &lizaerrors.ProjectRootError{
+			Message:      fmt.Sprintf("failed to resolve --project-root %q", root),
+			Operation:    rootCmd.CommandPath(),
+			ExpectedRoot: root,
+			Err:          err,
+		}
+	}
+	canonicalProjectRoot, err := canonicalDir(projectRoot)
+	if err != nil {
+		return "", &lizaerrors.ProjectRootError{Operation: rootCmd.CommandPath(), Err: err}
+	}
+	if canonicalFlagRoot != canonicalProjectRoot {
+		return "", &lizaerrors.ProjectRootError{
+			Message:      fmt.Sprintf("--project-root must point at the Liza project root %s, got %s", projectRoot, absRoot),
+			Operation:    rootCmd.CommandPath(),
+			ExpectedRoot: projectRoot,
+			Err:          fmt.Errorf("explicit project root is not repository root"),
+		}
+	}
+	if info, err := os.Stat(filepath.Join(projectRoot, paths.LizaDirName)); err != nil || !info.IsDir() {
+		if err == nil {
+			err = fmt.Errorf("path exists but is not a directory")
+		}
+		return "", &lizaerrors.ProjectRootError{
+			Message:      fmt.Sprintf("--project-root %s is not a Liza project root: missing .liza directory", projectRoot),
+			Operation:    rootCmd.CommandPath(),
+			ExpectedRoot: projectRoot,
+			Err:          err,
 		}
 	}
 	return projectRoot, nil
@@ -169,6 +227,7 @@ func init() {
 
 	// Global flags
 	rootCmd.PersistentFlags().BoolP("verbose", "v", false, "verbose output")
+	rootCmd.PersistentFlags().StringP("project-root", "C", "", "Liza project root for state commands")
 }
 
 // addAgentIDFlag registers --agent-id on a specific command.

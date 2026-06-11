@@ -444,6 +444,8 @@ IN_PROGRESS → CHECKPOINT ──→ COMPLETED ──→ (new sprint) IN_PROGRES
 
 The `liza` binary provides all system operations. Key commands:
 
+Use `liza -C <project-root> ...` to select a Liza project root when invoking state commands from a task worktree or any directory inside it. `-C` does not change the process working directory for unrelated relative file arguments; pass absolute paths or run from the intended directory for those.
+
 | Command | Purpose                                                                                                              |
 |---------|----------------------------------------------------------------------------------------------------------------------|
 | **Setup & Init** |                                                                                                                      |

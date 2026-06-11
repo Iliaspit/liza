@@ -979,43 +979,74 @@ func TestJSON_InitialPlanningValidationMatrixDocumentsMasterPlanningCoverage(t *
 	}
 }
 
-func TestJSON_Validate_DefaultStatePathRequiresProjectRootFromTaskWorktree(t *testing.T) {
+func TestJSON_Validate_DefaultStatePathAcceptsOwnTaskWorktreeRoot(t *testing.T) {
 	projectRoot, _ := setupMutationTestProject(t, nil)
 	taskID := "task-validate-worktree"
 	testhelpers.CreateTestWorktree(t, projectRoot, taskID)
 	worktreeDir := filepath.Join(projectRoot, ".worktrees", taskID)
 
 	stdout, err := executeRootCommandCapture(t, worktreeDir, "validate", "--json", "--skip-spec-check")
-	if err == nil {
-		t.Fatalf("expected project root error from task worktree, got nil")
+	if err != nil {
+		t.Fatalf("validate from own task worktree failed: %v\n%s", err, stdout)
 	}
 
 	env := parseEnvelope(t, stdout)
-	if env["ok"] != false {
-		t.Fatalf("expected ok=false, got %v", env["ok"])
+	if env["ok"] != true {
+		t.Fatalf("expected ok=true, got %v", env["ok"])
+	}
+}
+
+func TestJSON_Validate_ProjectRootFlagFromUnrelatedDirectory(t *testing.T) {
+	projectRoot, _ := setupMutationTestProject(t, nil)
+	unrelatedDir := t.TempDir()
+
+	stdout, err := executeRootCommandCapture(t, unrelatedDir, "-C", projectRoot, "validate", "--json", "--skip-spec-check")
+	if err != nil {
+		t.Fatalf("validate -C from unrelated directory failed: %v\n%s", err, stdout)
 	}
 
-	errObj, ok := env["error"].(map[string]any)
-	if !ok {
-		t.Fatalf("expected error to be object, got %T", env["error"])
+	env := parseEnvelope(t, stdout)
+	if env["ok"] != true {
+		t.Fatalf("expected ok=true, got %v", env["ok"])
 	}
-	if errObj["code"] != "project_root" {
-		t.Fatalf("error.code = %v, want project_root", errObj["code"])
+}
+
+func TestJSON_Validate_ProjectRootFlagRejectsNonGitTarget(t *testing.T) {
+	projectRoot, _ := setupMutationTestProject(t, nil)
+	nonGitDir := t.TempDir()
+
+	stdout, err := executeRootCommandCapture(t, projectRoot, "-C", nonGitDir, "validate", "--json", "--skip-spec-check")
+	if err == nil {
+		t.Fatalf("expected project root error for non-git -C target")
 	}
-	msg, _ := errObj["message"].(string)
-	if msg == "" || msg == "internal error" || !strings.Contains(msg, "must be run from project root") {
-		t.Fatalf("error.message = %q, want project-root cwd guidance", msg)
+
+	assertJSONError(t, stdout, "project_root", "not a git repository")
+}
+
+func TestJSON_Validate_ProjectRootFlagRejectsGitRepoWithoutLizaMarker(t *testing.T) {
+	projectRoot, _ := setupMutationTestProject(t, nil)
+	nonLizaGitRoot := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, nonLizaGitRoot)
+
+	stdout, err := executeRootCommandCapture(t, projectRoot, "-C", nonLizaGitRoot, "validate", "--json", "--skip-spec-check")
+	if err == nil {
+		t.Fatalf("expected project root error for non-Liza -C target")
 	}
-	details, ok := errObj["details"].(map[string]any)
-	if !ok {
-		t.Fatalf("expected error.details to be object, got %T", errObj["details"])
+
+	assertJSONError(t, stdout, "project_root", "missing .liza directory")
+}
+
+func TestJSON_Validate_DefaultStatePathRejectsExternalLinkedWorktree(t *testing.T) {
+	projectRoot, _ := setupMutationTestProject(t, nil)
+	externalWorktree := filepath.Join(t.TempDir(), "external-task")
+	testhelpers.MustGit(t, projectRoot, "worktree", "add", externalWorktree, "integration", "-b", "task/external-linked")
+
+	stdout, err := executeRootCommandCapture(t, externalWorktree, "validate", "--json", "--skip-spec-check")
+	if err == nil {
+		t.Fatalf("expected project root error from external linked worktree, got nil")
 	}
-	if details["current_dir"] != worktreeDir {
-		t.Fatalf("details.current_dir = %v, want %s", details["current_dir"], worktreeDir)
-	}
-	if details["project_root"] != projectRoot {
-		t.Fatalf("details.project_root = %v, want %s", details["project_root"], projectRoot)
-	}
+
+	assertJSONError(t, stdout, "project_root", "must be run from project root")
 }
 
 func TestJSON_Validate_DefaultStatePathRequiresProjectRootFromSubdirectory(t *testing.T) {
@@ -1400,43 +1431,31 @@ func TestJSON_WorktreeContextErrorReportsActionableContext(t *testing.T) {
 	}
 }
 
-func TestJSON_SubmitForReviewFromTaskWorktreeRequiresProjectRoot(t *testing.T) {
+func TestJSON_SubmitForReviewFromOwnTaskWorktreeRoot(t *testing.T) {
 	projectRoot, statePath, taskID, agentID := setupSubmitForReviewCLIProject(t)
-	state := readState(t, statePath)
-	state.Config.IntegrationBranch = "missing-integration"
-	testhelpers.WriteInitialState(t, statePath, state)
 
 	worktreeDir := filepath.Join(projectRoot, ".worktrees", taskID)
 	stdout, err := executeRootCommandCapture(t, worktreeDir,
 		"submit-for-review", taskID, "HEAD", "--agent-id", agentID, "--json")
-	if err == nil {
-		t.Fatalf("expected project root error from task worktree, got nil")
+	if err != nil {
+		t.Fatalf("submit-for-review from own task worktree failed: %v\n%s", err, stdout)
 	}
 
 	env := parseEnvelope(t, stdout)
-	if env["ok"] != false {
-		t.Fatalf("expected ok=false, got %v", env["ok"])
+	if env["ok"] != true {
+		t.Fatalf("expected ok=true, got %v", env["ok"])
 	}
-	errObj, ok := env["error"].(map[string]any)
-	if !ok {
-		t.Fatalf("expected error to be object, got %T", env["error"])
+
+	state := readState(t, statePath)
+	task := state.FindTask(taskID)
+	if task == nil {
+		t.Fatalf("task %s not found", taskID)
 	}
-	if errObj["code"] != "project_root" {
-		t.Fatalf("error.code = %v, want project_root", errObj["code"])
+	if task.Status != models.TaskStatusReadyForReview {
+		t.Fatalf("task status = %s, want READY_FOR_REVIEW", task.Status)
 	}
-	msg, _ := errObj["message"].(string)
-	if msg == "" || msg == "internal error" || !strings.Contains(msg, "must be run from project root") {
-		t.Fatalf("error.message = %q, want project-root cwd guidance", msg)
-	}
-	details, ok := errObj["details"].(map[string]any)
-	if !ok {
-		t.Fatalf("expected error.details to be object, got %T", errObj["details"])
-	}
-	if details["current_dir"] != worktreeDir {
-		t.Fatalf("details.current_dir = %v, want %s", details["current_dir"], worktreeDir)
-	}
-	if details["project_root"] != projectRoot {
-		t.Fatalf("details.project_root = %v, want %s", details["project_root"], projectRoot)
+	if task.ReviewCommit == nil || *task.ReviewCommit == "" {
+		t.Fatalf("ReviewCommit = %v, want non-empty", task.ReviewCommit)
 	}
 }
 

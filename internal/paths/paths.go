@@ -158,25 +158,51 @@ func GlobalLizaDir() (string, error) {
 	return filepath.Join(homeDir, LizaDirName), nil
 }
 
-// GetProjectRoot returns the main project root directory.
+// GetProjectRoot returns the main project root directory for the current
+// working directory.
+//
 // It correctly handles both regular git repositories and git worktrees.
 //
 // In a regular repo: returns the git toplevel directory
 // In a worktree: returns the main repo directory (parent of .git common dir)
 func GetProjectRoot() (string, error) {
+	return GetProjectRootFromDir("")
+}
+
+// GetProjectRootFromDir returns the main project root directory for dir.
+//
+// It roots all git subprocesses at dir, so callers can resolve an explicit
+// project path without depending on the process working directory.
+func GetProjectRootFromDir(dir string) (string, error) {
+	gitDir := dir
+	if gitDir == "" {
+		gitDir = "."
+	}
+	absGitDir, err := filepath.Abs(gitDir)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve git command dir: %w", err)
+	}
+
 	// Get the toplevel directory
-	toplevelOut, err := gitenv.Output("", "rev-parse", "--show-toplevel")
+	toplevelOut, err := gitenv.Output(absGitDir, "rev-parse", "--show-toplevel")
 	if err != nil {
 		return "", fmt.Errorf("not a git repository or git command failed: %w", err)
 	}
 	toplevel := strings.TrimSpace(string(toplevelOut))
+	canonicalToplevel, err := filepath.EvalSymlinks(toplevel)
+	if err != nil {
+		return "", fmt.Errorf("failed to eval toplevel symlinks: %w", err)
+	}
 
 	// Get the common git directory
-	commonDirOut, err := gitenv.Output("", "rev-parse", "--git-common-dir")
+	commonDirOut, err := gitenv.Output(absGitDir, "rev-parse", "--git-common-dir")
 	if err != nil {
 		return "", fmt.Errorf("failed to get git common dir: %w", err)
 	}
 	gitCommonDir := strings.TrimSpace(string(commonDirOut))
+	if !filepath.IsAbs(gitCommonDir) {
+		gitCommonDir = filepath.Join(absGitDir, gitCommonDir)
+	}
 
 	// Resolve to absolute path
 	absCommonDir, err := filepath.Abs(gitCommonDir)
@@ -191,7 +217,7 @@ func GetProjectRoot() (string, error) {
 	// Check if we're in a worktree
 	// Main repo: git-common-dir == toplevel/.git
 	// Worktree: git-common-dir points to main repo's .git directory
-	expectedGitDir := filepath.Join(toplevel, GitDirName)
+	expectedGitDir := filepath.Join(canonicalToplevel, GitDirName)
 	if absCommonDir != expectedGitDir {
 		// We're in a worktree - common dir is <main>/.git
 		// Return the parent directory (main repo root)
@@ -199,7 +225,30 @@ func GetProjectRoot() (string, error) {
 	}
 
 	// Regular repo - return toplevel
-	return toplevel, nil
+	return canonicalToplevel, nil
+}
+
+// IsLizaTaskWorktree reports whether cwd is exactly one task worktree directory
+// under projectRoot/.worktrees. It deliberately does not match subdirectories
+// within a task worktree.
+func IsLizaTaskWorktree(projectRoot, cwd string) bool {
+	canonicalRoot, err := filepath.EvalSymlinks(projectRoot)
+	if err != nil {
+		return false
+	}
+	canonicalCWD, err := filepath.EvalSymlinks(cwd)
+	if err != nil {
+		return false
+	}
+	worktreesDir := filepath.Join(canonicalRoot, WorktreesDirName)
+	rel, err := filepath.Rel(worktreesDir, canonicalCWD)
+	if err != nil || rel == "." || rel == "" || filepath.IsAbs(rel) {
+		return false
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return false
+	}
+	return !strings.Contains(rel, string(filepath.Separator))
 }
 
 // New creates a LizaPaths instance from a known project root.

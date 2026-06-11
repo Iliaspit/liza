@@ -764,8 +764,7 @@ func setupMutationTestProject(t *testing.T, mutateState func(*models.State)) (st
 
 // executeRootCommand runs a CLI command against the given project root.
 // NOTE: os.Chdir is process-global state, which prevents t.Parallel() in this
-// package. rootCmd resolves the project root from CWD; until it accepts an
-// explicit --project-root flag, Chdir is the only option.
+// package. Most tests still use Chdir to exercise default root resolution.
 func executeRootCommand(t *testing.T, projectRoot string, args ...string) error {
 	t.Helper()
 

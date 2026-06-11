@@ -84,6 +84,7 @@ func (e *CLIInputError) Unwrap() error { return e.Err }
 // ProjectRootError indicates that Liza could not resolve the project root from
 // the current execution context.
 type ProjectRootError struct {
+	Message      string
 	Operation    string
 	CurrentDir   string
 	ExpectedRoot string
@@ -91,6 +92,12 @@ type ProjectRootError struct {
 }
 
 func (e *ProjectRootError) Error() string {
+	if e.Message != "" {
+		if e.Operation != "" {
+			return fmt.Sprintf("%s: %s", e.Operation, e.Message)
+		}
+		return e.Message
+	}
 	if e.CurrentDir != "" && e.ExpectedRoot != "" {
 		if e.Operation != "" {
 			return fmt.Sprintf("%s: must be run from project root %s (current directory: %s)", e.Operation, e.ExpectedRoot, e.CurrentDir)
@@ -115,6 +122,9 @@ func (e *ProjectRootError) SafeDetails() map[string]any {
 	}
 	if e.ExpectedRoot != "" {
 		details["project_root"] = e.ExpectedRoot
+	}
+	if e.Message != "" {
+		details["message"] = e.Message
 	}
 	return details
 }

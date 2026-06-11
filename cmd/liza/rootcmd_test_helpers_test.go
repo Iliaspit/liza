@@ -22,6 +22,9 @@ func TestResetRootCmdForTestResetsIdentityFlags(t *testing.T) {
 	if err := markBlockedCmd.Flags().Set("repair-evidence", "rbac failure"); err != nil {
 		t.Fatalf("set --repair-evidence failed: %v", err)
 	}
+	if err := rootCmd.PersistentFlags().Set("project-root", "/tmp/liza-project"); err != nil {
+		t.Fatalf("set --project-root failed: %v", err)
+	}
 
 	resetRootCmdForTest(t)
 
@@ -47,6 +50,13 @@ func TestResetRootCmdForTestResetsIdentityFlags(t *testing.T) {
 	}
 	if len(repairEvidence) != 0 {
 		t.Fatalf("--repair-evidence = %v, want empty", repairEvidence)
+	}
+	projectRoot, err := rootCmd.PersistentFlags().GetString("project-root")
+	if err != nil {
+		t.Fatalf("get --project-root failed: %v", err)
+	}
+	if projectRoot != "" {
+		t.Fatalf("--project-root = %q, want empty", projectRoot)
 	}
 }
 
@@ -129,6 +139,7 @@ func resetRootCmdForTest(t *testing.T) {
 	t.Cleanup(db.ResetInstances)
 
 	resetHelpFlag(t, rootCmd)
+	resetFlagIfPresent(rootCmd, "project-root")
 	for _, child := range rootCmd.Commands() {
 		resetCommandFlagsForTest(t, child)
 	}
@@ -148,6 +159,7 @@ func resetCommandFlagsForTest(t *testing.T, cmd *cobra.Command) {
 		"spec", "config", "entry-point", "branch", "post-worktree-cmd", "copy-worktree-env-files", "auto-resume", "no-follow-up", "default-cli", "default-doer-cli", "default-reviewer-cli", "scip-search", "scip-search-plan", "cli", "claude", "codex", "opencode", "gemini", "mistral",
 		"state", "log", "file", "id", "desc", "done", "scope", "priority", "role-pair", "output", "tasks-file",
 		"profile", "include", "exclude", "tool", "install-dir", "dry-run", "yes", "global-dir", "agent-tools", "write-shell-profile", "agents", "project",
+		"project-root",
 	} {
 		resetFlagIfPresent(cmd, name)
 	}
@@ -158,6 +170,9 @@ func resetCommandFlagsForTest(t *testing.T, cmd *cobra.Command) {
 
 func resetFlagIfPresent(cmd *cobra.Command, name string) {
 	f := cmd.Flags().Lookup(name)
+	if f == nil {
+		f = cmd.PersistentFlags().Lookup(name)
+	}
 	if f != nil {
 		if sliceValue, ok := f.Value.(pflag.SliceValue); ok {
 			_ = sliceValue.Replace(nil)
