@@ -58,6 +58,8 @@ QUERY TOOLS (all roles):
 CODEBASE EXPLORATION:
 DO comply with the guidance defined in ~/.liza/AGENT_TOOLS.md
 
+No custom polling: do not use Monitor/ScheduleWakeup/Cron, tail/sleep/PID loops, or /tmp task-output polling. Use only documented Liza wait commands, foreground validation, or stop.
+
 COMMUNICATION: Agents communicate via blackboard only through CLI commands, not direct interaction.
 
 FORBIDDEN:
