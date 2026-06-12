@@ -65,6 +65,7 @@ type Config struct {
 	InstallTimeout time.Duration
 	LookupLatest   func(context.Context) (string, error)
 	LookupMain     func(context.Context) (string, error)
+	IsMainAhead    func(context.Context, string, string) (bool, error)
 	Install        func(context.Context, candidate, string, io.Writer, io.Writer) error
 	InstallTarget  func() (string, error)
 	CheckDisabled  func() bool
@@ -91,6 +92,11 @@ type releaseInfo struct {
 	TagName string `json:"tag_name"`
 }
 
+type compareInfo struct {
+	AheadBy  int `json:"ahead_by"`
+	BehindBy int `json:"behind_by"`
+}
+
 type candidate struct {
 	Channel string
 	Current string
@@ -100,6 +106,15 @@ type candidate struct {
 
 func MaybeUpdateAndReexec(ctx context.Context, cfg Config) error {
 	cfg = withDefaults(cfg)
+	if err := validateExplicitUpdateFlags(cfg.Args); err != nil {
+		return err
+	}
+	if err := persistExplicitUpdatePreferences(cfg); err != nil {
+		return err
+	}
+	if UpdateSettingsOnly(cfg.Args) {
+		return nil
+	}
 	if shouldSkip(cfg) {
 		return nil
 	}
@@ -212,6 +227,13 @@ func lookupCandidate(ctx context.Context, cfg Config) (candidate, error) {
 		if latest == "" || sameCommit(current, latest) {
 			return candidate{}, nil
 		}
+		ahead, err := cfg.IsMainAhead(ctx, current, latest)
+		if err != nil {
+			return candidate{}, err
+		}
+		if !ahead {
+			return candidate{}, nil
+		}
 		return candidate{
 			Channel: channelMain,
 			Current: shortCommit(current),
@@ -249,6 +271,44 @@ func MainCommit(ctx context.Context) (string, error) {
 		return "", err
 	}
 	return parseMainCommit(out)
+}
+
+func MainCommitAhead(ctx context.Context, current, latest string) (bool, error) {
+	current = normalizeCommit(current)
+	latest = normalizeCommit(latest)
+	if current == "" || latest == "" || sameCommit(current, latest) {
+		return false, nil
+	}
+
+	url := fmt.Sprintf("https://api.github.com/repos/liza-mas/liza/compare/%s...%s", current, latest)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return false, err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return false, fmt.Errorf("compare main commits: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return false, nil
+	}
+	if resp.StatusCode != http.StatusOK {
+		return false, fmt.Errorf("compare main commits: HTTP %s", resp.Status)
+	}
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return false, fmt.Errorf("read compare response: %w", err)
+	}
+	var info compareInfo
+	if err := json.Unmarshal(data, &info); err != nil {
+		return false, fmt.Errorf("parse compare response: %w", err)
+	}
+	return mainCommitAheadFromCompare(info), nil
+}
+
+func mainCommitAheadFromCompare(info compareInfo) bool {
+	return info.AheadBy > 0 && info.BehindBy == 0
 }
 
 func Install(ctx context.Context, next candidate, target string, stdout, stderr io.Writer) error {
@@ -433,8 +493,8 @@ func installBinaryFromTarGz(r io.Reader, target string) error {
 		switch header.Typeflag {
 		case tar.TypeReg:
 			// Regular file is allowed
-		case tar.TypeRegA:
-			// Regular file (extended) is allowed
+		case '\x00':
+			// Legacy regular file marker is allowed
 		default:
 			// Reject symlinks, hardlinks, directories, devices, etc.
 			return fmt.Errorf("reject dangerous tar entry type %d for %s", header.Typeflag, header.Name)
@@ -702,6 +762,9 @@ func shouldSkip(cfg Config) bool {
 	if cfg.CheckDisabled != nil && cfg.CheckDisabled() {
 		return true
 	}
+	if prefs := readUpdatePreferences(); prefs.CheckUpdate != nil {
+		return !*prefs.CheckUpdate || !cfg.IsInteractive()
+	}
 	if !checkUpdateEnvEnabled(cfg) {
 		return true
 	}
@@ -712,32 +775,12 @@ func shouldSkip(cfg Config) bool {
 }
 
 func checkUpdateFlag(args []string) (bool, bool) {
-	// Stop parsing at --
-	preDashArgs := args
-	for i, arg := range args {
-		if arg == "--" {
-			preDashArgs = args[:i]
-			break
-		}
+	flags, err := parseUpdateFlags(args)
+	if err != nil {
+		return false, false
 	}
-
-	var enabled *bool
-	for i := 1; i < len(preDashArgs); i++ {
-		arg := preDashArgs[i]
-		if strings.HasPrefix(arg, "--check-update=") {
-			value := strings.TrimPrefix(arg, "--check-update=")
-			if value == "true" {
-				enabled = &[]bool{true}[0]
-			} else if value == "false" {
-				enabled = &[]bool{false}[0]
-			}
-		} else if arg == "--check-update" {
-			// --check-update without = is treated as true
-			enabled = &[]bool{true}[0]
-		}
-	}
-	if enabled != nil {
-		return *enabled, true
+	if flags.checkUpdate != nil {
+		return *flags.checkUpdate, true
 	}
 	return false, false
 }
@@ -769,7 +812,14 @@ func proposeDisableCheck(stdin *bufio.Reader, stdout io.Writer, disable func() e
 }
 
 type preferences struct {
-	CheckUpdate *bool `json:"check_update,omitempty"`
+	CheckUpdate *bool  `json:"check_update,omitempty"`
+	Channel     string `json:"channel,omitempty"`
+}
+
+type parsedUpdateFlags struct {
+	checkUpdate  *bool
+	channel      string
+	settingsOnly bool
 }
 
 func updatePrefsPath() (string, error) {
@@ -781,22 +831,130 @@ func updatePrefsPath() (string, error) {
 }
 
 func UpdateChecksDisabled() bool {
-	path, err := updatePrefsPath()
-	if err != nil {
-		return false
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return false
-	}
-	var prefs preferences
-	if err := json.Unmarshal(data, &prefs); err != nil {
-		return false
-	}
+	prefs := readUpdatePreferences()
 	return prefs.CheckUpdate != nil && !*prefs.CheckUpdate
 }
 
+func readUpdatePreferences() preferences {
+	path, err := updatePrefsPath()
+	if err != nil {
+		return preferences{}
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return preferences{}
+	}
+	var prefs preferences
+	if err := json.Unmarshal(data, &prefs); err != nil {
+		return preferences{}
+	}
+	prefs.Channel = strings.ToLower(strings.TrimSpace(prefs.Channel))
+	return prefs
+}
+
 func DisableUpdateChecks() error {
+	prefs := readUpdatePreferences()
+	disabled := false
+	prefs.CheckUpdate = &disabled
+	return writeUpdatePreferences(prefs)
+}
+
+func persistExplicitUpdatePreferences(cfg Config) error {
+	var changed bool
+	prefs := readUpdatePreferences()
+
+	if enabled, ok := checkUpdateFlag(cfg.Args); ok {
+		prefs.CheckUpdate = &enabled
+		changed = true
+	}
+	if channel, ok := updateChannelFlag(cfg.Args); ok {
+		if err := validateChannel(channel); err != nil {
+			return err
+		}
+		prefs.Channel = channel
+		changed = true
+	}
+	if !changed {
+		return nil
+	}
+	if err := writeUpdatePreferences(prefs); err != nil {
+		return &FatalError{fmt.Errorf("write update preferences: %w", err)}
+	}
+	return nil
+}
+
+func validateExplicitUpdateFlags(args []string) error {
+	_, err := parseUpdateFlags(args)
+	return err
+}
+
+func UpdateSettingsOnly(args []string) bool {
+	flags, err := parseUpdateFlags(args)
+	return err == nil && flags.settingsOnly
+}
+
+func parseUpdateFlags(args []string) (parsedUpdateFlags, error) {
+	var flags parsedUpdateFlags
+	changed := false
+	settingsOnly := true
+	for i := 1; i < len(args); i++ {
+		arg := args[i]
+		switch {
+		case arg == "--":
+			flags.settingsOnly = changed && settingsOnly && i == len(args)-1
+			return flags, nil
+		case arg == "--check-update":
+			flags.checkUpdate = boolPtr(true)
+		case strings.HasPrefix(arg, "--check-update="):
+			value := strings.TrimPrefix(arg, "--check-update=")
+			if value != "true" && value != "false" {
+				return flags, &FatalError{fmt.Errorf("invalid --check-update value %q (valid values: true, false)", value)}
+			}
+			flags.checkUpdate = boolPtr(value == "true")
+		case arg == "--update-channel":
+			if i+1 >= len(args) || args[i+1] == "--" {
+				return flags, &FatalError{fmt.Errorf("--update-channel requires a value (valid values: stable, main)")}
+			}
+			channel := strings.ToLower(strings.TrimSpace(args[i+1]))
+			flags.channel = channel
+			if err := validateChannel(channel); err != nil {
+				return flags, err
+			}
+			i++
+		case strings.HasPrefix(arg, "--update-channel="):
+			channel := strings.ToLower(strings.TrimSpace(strings.TrimPrefix(arg, "--update-channel=")))
+			flags.channel = channel
+			if err := validateChannel(channel); err != nil {
+				return flags, err
+			}
+		default:
+			settingsOnly = false
+			continue
+		}
+		changed = true
+	}
+	flags.settingsOnly = changed && settingsOnly
+	return flags, nil
+}
+
+func boolPtr(value bool) *bool {
+	return &value
+}
+
+func SavedUpdateSettingsSummary() string {
+	prefs := readUpdatePreferences()
+	checkUpdate := "unset"
+	if prefs.CheckUpdate != nil {
+		checkUpdate = fmt.Sprintf("%t", *prefs.CheckUpdate)
+	}
+	channel := prefs.Channel
+	if channel == "" {
+		channel = channelStable
+	}
+	return fmt.Sprintf("Update settings saved: check_update=%s, channel=%s\n", checkUpdate, channel)
+}
+
+func writeUpdatePreferences(prefs preferences) error {
 	path, err := updatePrefsPath()
 	if err != nil {
 		return err
@@ -804,8 +962,8 @@ func DisableUpdateChecks() error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("create global liza config dir: %w", err)
 	}
-	disabled := false
-	data, err := json.MarshalIndent(preferences{CheckUpdate: &disabled}, "", "  ")
+	prefs.Channel = strings.ToLower(strings.TrimSpace(prefs.Channel))
+	data, err := json.MarshalIndent(prefs, "", "  ")
 	if err != nil {
 		return fmt.Errorf("encode update preferences: %w", err)
 	}
@@ -825,25 +983,7 @@ func validateChannel(channel string) error {
 }
 
 func updateChannel(cfg Config) string {
-	// Stop parsing at --
-	preDashArgs := cfg.Args
-	for i, arg := range cfg.Args {
-		if arg == "--" {
-			preDashArgs = cfg.Args[:i]
-			break
-		}
-	}
-
-	var channel string
-	for i := 1; i < len(preDashArgs); i++ {
-		arg := preDashArgs[i]
-		if strings.HasPrefix(arg, "--update-channel=") {
-			channel = strings.ToLower(strings.TrimSpace(strings.TrimPrefix(arg, "--update-channel=")))
-		} else if arg == "--update-channel" && i+1 < len(preDashArgs) {
-			channel = strings.ToLower(strings.TrimSpace(preDashArgs[i+1]))
-		}
-	}
-	if channel != "" {
+	if channel, ok := updateChannelFlag(cfg.Args); ok {
 		return channel
 	}
 	if cfg.Channel != "" {
@@ -852,7 +992,21 @@ func updateChannel(cfg Config) string {
 	if envChannel := envValue(cfg.Env, channelEnvName); envChannel != "" {
 		return strings.ToLower(strings.TrimSpace(envChannel))
 	}
+	if prefs := readUpdatePreferences(); prefs.Channel != "" {
+		return prefs.Channel
+	}
 	return channelStable
+}
+
+func updateChannelFlag(args []string) (string, bool) {
+	flags, err := parseUpdateFlags(args)
+	if err != nil {
+		return "", false
+	}
+	if flags.channel != "" {
+		return flags.channel, true
+	}
+	return "", false
 }
 
 func reexecArgs(args []string) []string {
@@ -892,6 +1046,9 @@ func withDefaults(cfg Config) Config {
 	}
 	if cfg.LookupMain == nil {
 		cfg.LookupMain = MainCommit
+	}
+	if cfg.IsMainAhead == nil {
+		cfg.IsMainAhead = MainCommitAhead
 	}
 	if cfg.Install == nil {
 		// Use the configured ReleaseBaseURL for test injection, empty string uses canonical GitHub
