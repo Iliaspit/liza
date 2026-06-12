@@ -1,6 +1,7 @@
 package ops
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -126,11 +127,17 @@ func runGoalCompletionReportHook(projectRoot string, state *models.State, trigge
 		"LIZA_CHECKPOINT_TRIGGER="+trigger,
 	)
 	cmd.Stdout = io.Discard
-	cmd.Stderr = io.Discard
+	// Capture stderr for diagnostics on failure
+	stderrBuf := &bytes.Buffer{}
+	cmd.Stderr = stderrBuf
 
 	if err := cmd.Run(); err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
 			return []string{"goal completion report hook timed out"}
+		}
+		stderrMsg := stderrBuf.String()
+		if stderrMsg != "" {
+			return []string{fmt.Sprintf("goal completion report hook failed: %v (stderr: %s)", err, strings.TrimSpace(stderrMsg))}
 		}
 		return []string{fmt.Sprintf("goal completion report hook failed: %v", err)}
 	}

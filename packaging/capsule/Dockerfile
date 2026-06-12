@@ -15,6 +15,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     make \
   && rm -rf /var/lib/apt/lists/*
+# NOTE: Reproducibility risk - install scripts from main branch without commit pinning
+# For production Daytona snapshots, consider pinning specific commit SHAs
 RUN curl -fsSL https://raw.githubusercontent.com/liza-mas/stacklit-cli/main/install.sh | INSTALL_DIR=/out sh
 RUN curl -fsSL https://raw.githubusercontent.com/liza-mas/scip-search/main/install.sh | BRANCH=main INSTALL_DIR=/out bash
 RUN go install github.com/scip-code/scip-go/cmd/scip-go@latest \
@@ -53,16 +55,22 @@ RUN arch="$(dpkg --print-architecture)" \
 
 RUN useradd -m -s /bin/bash liza
 
+# NOTE: Reproducibility risk - npm packages without pinned versions
+# For production Daytona snapshots, consider pinning specific package versions
 RUN npm install -g \
     @ast-grep/cli \
     @openai/codex \
     @sourcegraph/scip-python \
     @sourcegraph/scip-typescript \
     opencode-ai
+# NOTE: Reproducibility risk - install script without commit pinning
+# For production Daytona snapshots, consider pinning specific commit SHA
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh \
   && UV_TOOL_DIR=/opt/uv/tools UV_TOOL_BIN_DIR=/usr/local/bin /root/.local/bin/uv tool install semble \
   && chmod -R a+rX /opt/uv \
   && command -v semble >/dev/null
+# NOTE: Reproducibility risk - install script without commit pinning
+# For production Daytona snapshots, consider pinning specific commit SHA
 RUN curl -fsSL https://claude.ai/install.sh | bash \
   && if [ -x /root/.local/bin/claude ]; then cp /root/.local/bin/claude /usr/local/bin/claude; fi \
   && command -v claude >/dev/null

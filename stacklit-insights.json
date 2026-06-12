@@ -5,6 +5,7 @@
     "internal/alerts": "Structured alert parsing, keying, and persistence for orchestration anomalies.",
     "internal/analysis": "Pattern detection and reporting over anomalies in the shared state.",
     "internal/bash-policy-cli": "Wrapper for initializing and running bash-policy hooks for supported agent providers.",
+    "internal/capsule": "Capsule",
     "internal/codexconfig": "Codex workspace filesystem permission rendering and provider launch configuration helpers.",
     "internal/commands": "User-facing command handlers that validate CLI input and delegate lifecycle operations.",
     "internal/db": "Blackboard state access layer with locking, watchers, metrics, and model persistence.",

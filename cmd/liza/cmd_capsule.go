@@ -43,6 +43,7 @@ var capsuleCreateCmd = &cobra.Command{
 		daytonaAutoStop, _ := cmd.Flags().GetInt("daytona-auto-stop")
 		daytonaAutoDelete, _ := cmd.Flags().GetInt("daytona-auto-delete")
 		noProvision, _ := cmd.Flags().GetBool("no-provision")
+		force, _ := cmd.Flags().GetBool("force")
 		_, err = commands.CapsuleCreateCommand(commands.CapsuleCreateParams{
 			ProjectRoot:       projectRoot,
 			Name:              args[0],
@@ -63,6 +64,8 @@ var capsuleCreateCmd = &cobra.Command{
 			DaytonaAutoStop:   daytonaAutoStop,
 			DaytonaAutoDelete: daytonaAutoDelete,
 			NoProvision:       noProvision,
+			Force:             force,
+			Writer:            os.Stdout,
 		})
 		return err
 	},
@@ -84,6 +87,7 @@ var capsuleDoctorCmd = &cobra.Command{
 			Name:        args[0],
 			Tool:        tool,
 			StoreRoot:   storeRoot,
+			Writer:      os.Stdout,
 		})
 		return err
 	},
@@ -107,6 +111,7 @@ var capsuleStartCmd = &cobra.Command{
 			Stdout:      os.Stdout,
 			Stderr:      os.Stderr,
 			Stdin:       os.Stdin,
+			Context:     cmd.Context(),
 		})
 	},
 }
@@ -195,7 +200,7 @@ var capsuleListCmd = &cobra.Command{
 			return err
 		}
 		storeRoot, _ := cmd.Flags().GetString("store-root")
-		items, err := commands.CapsuleListCommand(projectRoot, storeRoot)
+		items, err := commands.CapsuleListCommand(projectRoot, storeRoot, os.Stdout)
 		if err != nil {
 			return err
 		}
@@ -252,6 +257,7 @@ func init() {
 	capsuleCreateCmd.Flags().Int("daytona-auto-stop", 30, "Daytona auto-stop interval in minutes")
 	capsuleCreateCmd.Flags().Int("daytona-auto-delete", -1, "Daytona auto-delete interval in minutes (-1 disables)")
 	capsuleCreateCmd.Flags().Bool("no-provision", false, "write Daytona capsule metadata without creating the remote sandbox")
+	capsuleCreateCmd.Flags().Bool("force", false, "overwrite existing capsule")
 	capsuleDoctorCmd.Flags().String("tool", "all", "tool to check (opencode, codex, claude, all)")
 	capsuleStopCmd.Flags().Bool("force", false, "force stop the Daytona sandbox")
 	capsuleSnapshotCreateCmd.Flags().String("image", "", "immutable image reference to snapshot, such as ghcr.io/org/liza-capsule:20260610")

@@ -21,6 +21,7 @@ type CreateOptions struct {
 	OpenCode    *OpenCodePreset
 	Daytona     DaytonaCreateOptions
 	Now         func() time.Time
+	Force       bool
 }
 
 func Create(opts CreateOptions) (*CapsuleMetadata, error) {
@@ -72,6 +73,31 @@ func Create(opts CreateOptions) (*CapsuleMetadata, error) {
 		}
 	}
 	paths := BuildPaths(opts.StoreRoot, projectRoot, opts.Name)
+	// Check if capsule already exists
+	if _, err := os.Stat(paths.Metadata); err == nil {
+		if !opts.Force {
+			return nil, fmt.Errorf("capsule %q already exists; use --force to overwrite", opts.Name)
+		}
+		// Force mode: remove existing capsule
+		if err := os.RemoveAll(paths.ProjectLiza); err != nil {
+			return nil, fmt.Errorf("failed to remove existing capsule %q: %w", opts.Name, err)
+		}
+		if err := os.RemoveAll(paths.HomeLiza); err != nil {
+			return nil, fmt.Errorf("failed to remove existing capsule home %q: %w", opts.Name, err)
+		}
+		if err := os.RemoveAll(paths.OpenCodeConfig); err != nil {
+			return nil, fmt.Errorf("failed to remove existing capsule config %q: %w", opts.Name, err)
+		}
+		if err := os.RemoveAll(paths.OpenCodeData); err != nil {
+			return nil, fmt.Errorf("failed to remove existing capsule data %q: %w", opts.Name, err)
+		}
+		if err := os.RemoveAll(paths.Cache); err != nil {
+			return nil, fmt.Errorf("failed to remove existing capsule cache %q: %w", opts.Name, err)
+		}
+		if err := os.RemoveAll(paths.Reports); err != nil {
+			return nil, fmt.Errorf("failed to remove existing capsule reports %q: %w", opts.Name, err)
+		}
+	}
 	for _, dir := range []string{paths.ProjectLiza, paths.HomeLiza, paths.OpenCodeConfig, paths.OpenCodeData, paths.Cache, paths.Reports} {
 		if err := os.MkdirAll(dir, 0755); err != nil {
 			return nil, fmt.Errorf("failed to create capsule directory %s: %w", dir, err)

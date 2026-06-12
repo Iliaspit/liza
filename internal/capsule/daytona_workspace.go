@@ -37,6 +37,10 @@ func BuildProjectLizaArchive(projectLizaDir string) ([]byte, error) {
 			return walkErr
 		}
 		if d.IsDir() {
+			// Skip sensitive directories before descending
+			if shouldExcludeCapsuleSyncPath(path) {
+				return filepath.SkipDir
+			}
 			return nil
 		}
 		if shouldExcludeCapsuleSyncPath(path) {
@@ -109,6 +113,10 @@ func copyFilteredDir(source, target string) error {
 		}
 		destination := filepath.Join(target, rel)
 		if d.IsDir() {
+			// Skip sensitive directories before descending
+			if shouldExcludeCapsuleSyncPath(path) {
+				return filepath.SkipDir
+			}
 			return os.MkdirAll(destination, 0755)
 		}
 		if shouldExcludeCapsuleSyncPath(path) {
@@ -135,15 +143,22 @@ func copyFilteredDir(source, target string) error {
 }
 
 func shouldExcludeCapsuleSyncPath(path string) bool {
-	name := strings.ToLower(filepath.Base(path))
-	return name == ".ds_store" ||
-		strings.HasPrefix(name, ".env") ||
-		strings.Contains(name, "secret") ||
-		strings.Contains(name, "token") ||
-		strings.Contains(name, "credential") ||
-		strings.Contains(name, "auth") ||
-		strings.HasSuffix(name, ".lock") ||
-		strings.Contains(name, ".lock.")
+	// Check each path component for sensitive names
+	parts := strings.Split(filepath.ToSlash(path), "/")
+	for _, part := range parts {
+		name := strings.ToLower(part)
+		if name == ".ds_store" ||
+			strings.HasPrefix(name, ".env") ||
+			strings.Contains(name, "secret") ||
+			strings.Contains(name, "token") ||
+			strings.Contains(name, "credential") ||
+			strings.Contains(name, "auth") ||
+			strings.HasSuffix(name, ".lock") ||
+			strings.Contains(name, ".lock.") {
+			return true
+		}
+	}
+	return false
 }
 
 func Base64Chunks(data []byte, chunkSize int) []string {

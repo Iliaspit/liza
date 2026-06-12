@@ -35,9 +35,11 @@ type CapsuleCreateParams struct {
 	DaytonaAutoStop   int
 	DaytonaAutoDelete int
 	NoProvision       bool
+	Force             bool
 	HTTPClient        capsule.HTTPDoer
 	LookupEnv         func(string) (string, bool)
 	Now               func() time.Time
+	Writer            io.Writer
 }
 
 type CapsuleDoctorParams struct {
@@ -45,6 +47,7 @@ type CapsuleDoctorParams struct {
 	Name        string
 	Tool        string
 	StoreRoot   string
+	Writer      io.Writer
 }
 
 type CapsuleStartParams struct {
@@ -150,7 +153,8 @@ func CapsuleCreateCommand(params CapsuleCreateParams) (*capsule.CapsuleMetadata,
 			AutoStopMinutes:   params.DaytonaAutoStop,
 			AutoDeleteMinutes: params.DaytonaAutoDelete,
 		},
-		Now: params.Now,
+		Now:   params.Now,
+		Force: params.Force,
 	})
 	if err != nil {
 		return nil, err
@@ -175,12 +179,13 @@ func CapsuleCreateCommand(params CapsuleCreateParams) (*capsule.CapsuleMetadata,
 			return nil, err
 		}
 	}
-	fmt.Fprintf(os.Stdout, "Created capsule %q\n", meta.Name)
-	fmt.Fprintf(os.Stdout, "  runtime: %s (%s/%s guest)\n", meta.Runtime, meta.Guest.OS, meta.Guest.Arch)
-	fmt.Fprintf(os.Stdout, "  virtual .liza: %s\n", meta.Paths.ProjectLiza)
-	fmt.Fprintf(os.Stdout, "  OpenCode config: %s\n", filepath.Join(meta.Paths.OpenCodeConfig, "opencode.json"))
+	writer := writerOrDefault(params.Writer, os.Stdout)
+	fmt.Fprintf(writer, "Created capsule %q\n", meta.Name)
+	fmt.Fprintf(writer, "  runtime: %s (%s/%s guest)\n", meta.Runtime, meta.Guest.OS, meta.Guest.Arch)
+	fmt.Fprintf(writer, "  virtual .liza: %s\n", meta.Paths.ProjectLiza)
+	fmt.Fprintf(writer, "  OpenCode config: %s\n", filepath.Join(meta.Paths.OpenCodeConfig, "opencode.json"))
 	if meta.Daytona != nil {
-		fmt.Fprintf(os.Stdout, "  Daytona sandbox: %s\n", stringOrDefault(meta.Daytona.SandboxID, "not provisioned"))
+		fmt.Fprintf(writer, "  Daytona sandbox: %s\n", stringOrDefault(meta.Daytona.SandboxID, "not provisioned"))
 	}
 	return meta, nil
 }
@@ -193,12 +198,13 @@ func CapsuleDoctorCommand(params CapsuleDoctorParams) (capsule.DoctorSummary, er
 	summary := capsule.Doctor(meta, capsule.DoctorOptions{Tool: capsule.ToolName(params.Tool)})
 	meta.Doctor = summary
 	_ = capsule.SaveMetadata(meta)
+	writer := writerOrDefault(params.Writer, os.Stdout)
 	for _, check := range summary.Checks {
 		status := "OK"
 		if !check.OK {
 			status = "FAIL"
 		}
-		fmt.Fprintf(os.Stdout, "[%s] %s: %s\n", status, check.Name, check.Message)
+		fmt.Fprintf(writer, "[%s] %s: %s\n", status, check.Name, check.Message)
 	}
 	if !summary.OK {
 		return summary, fmt.Errorf("capsule %q doctor failed", params.Name)
@@ -331,7 +337,7 @@ func capsuleReportAuthorName(projectRoot string) string {
 	return ""
 }
 
-func CapsuleListCommand(projectRoot, storeRoot string) ([]capsule.CapsuleMetadata, error) {
+func CapsuleListCommand(projectRoot, storeRoot string, writer io.Writer) ([]capsule.CapsuleMetadata, error) {
 	root, err := resolveCapsuleStoreRoot(storeRoot)
 	if err != nil {
 		return nil, err
@@ -340,8 +346,9 @@ func CapsuleListCommand(projectRoot, storeRoot string) ([]capsule.CapsuleMetadat
 	if err != nil {
 		return nil, err
 	}
+	w := writerOrDefault(writer, os.Stdout)
 	for _, item := range items {
-		fmt.Fprintf(os.Stdout, "%s\t%s\t%s/%s\t%s\n", item.Name, item.Runtime, item.Guest.OS, item.Guest.Arch, item.CreatedAt.Format("2006-01-02T15:04:05Z"))
+		fmt.Fprintf(w, "%s\t%s\t%s/%s\t%s\n", item.Name, item.Runtime, item.Guest.OS, item.Guest.Arch, item.CreatedAt.Format("2006-01-02T15:04:05Z"))
 	}
 	return items, nil
 }
@@ -418,13 +425,14 @@ func capsuleStartDaytona(meta *capsule.CapsuleMetadata, params CapsuleStartParam
 	if err != nil {
 		return err
 	}
-	ctx := params.Context
-	if ctx == nil {
+	// Use a short timeout for sandbox startup only
+	startCtx := params.Context
+	if startCtx == nil {
 		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(context.Background(), 120*time.Second)
+		startCtx, cancel = context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
 	}
-	sandbox, err := client.StartSandbox(ctx, meta.Daytona.SandboxID)
+	sandbox, err := client.StartSandbox(startCtx, meta.Daytona.SandboxID)
 	if err != nil {
 		return err
 	}
@@ -436,8 +444,13 @@ func capsuleStartDaytona(meta *capsule.CapsuleMetadata, params CapsuleStartParam
 	if len(params.Command) == 0 {
 		return nil
 	}
+	// Use the full context for command execution (no timeout)
+	execCtx := params.Context
+	if execCtx == nil {
+		execCtx = context.Background()
+	}
 	if isLizaCapsuleCommand(params.Command) {
-		if err := ensureDaytonaProjectWorkspace(ctx, client, meta, params.ProjectRoot); err != nil {
+		if err := ensureDaytonaProjectWorkspace(execCtx, client, meta, params.ProjectRoot); err != nil {
 			return err
 		}
 	}
@@ -462,7 +475,7 @@ func capsuleStartDaytona(meta *capsule.CapsuleMetadata, params CapsuleStartParam
 			restore = func() error { return term.Restore(int(file.Fd()), oldState) }
 			defer restore()
 		}
-		exitCode, err := client.RunPtyCommand(ctx, meta.Daytona.SandboxID, meta.Daytona.ToolboxProxyURL, capsule.DaytonaPtyRunOptions{
+		exitCode, err := client.RunPtyCommand(execCtx, meta.Daytona.SandboxID, meta.Daytona.ToolboxProxyURL, capsule.DaytonaPtyRunOptions{
 			Command: "exec " + command,
 			Cwd:     capsule.DaytonaWorkspaceDir,
 			Env:     daytonaSandboxEnv(meta),
@@ -479,7 +492,7 @@ func capsuleStartDaytona(meta *capsule.CapsuleMetadata, params CapsuleStartParam
 		}
 		return nil
 	}
-	result, err := client.ExecuteCommand(ctx, meta.Daytona.SandboxID, command, capsule.DaytonaWorkspaceDir, 0)
+	result, err := client.ExecuteCommand(execCtx, meta.Daytona.SandboxID, command, capsule.DaytonaWorkspaceDir, 0)
 	if err != nil {
 		return err
 	}
@@ -508,27 +521,27 @@ func ensureDaytonaProjectWorkspace(ctx context.Context, client capsule.DaytonaCl
 	remoteTGZ := remoteBase + ".tgz"
 	initCommand := strings.Join([]string{
 		"set -e",
-		"mkdir -p " + capsule.DaytonaCommand([]string{capsule.DaytonaWorkspaceDir}),
-		"if [ ! -d " + capsule.DaytonaCommand([]string{filepath.Join(capsule.DaytonaWorkspaceDir, ".git")}) + " ]; then git init -q " + capsule.DaytonaCommand([]string{capsule.DaytonaWorkspaceDir}) + "; fi",
-		"git config --global --add safe.directory " + capsule.DaytonaCommand([]string{capsule.DaytonaWorkspaceDir}) + " >/dev/null 2>&1 || true",
+		"mkdir -p " + capsule.ShellQuote(capsule.DaytonaWorkspaceDir),
+		"if [ ! -d " + capsule.ShellQuote(filepath.Join(capsule.DaytonaWorkspaceDir, ".git")) + " ]; then git init -q " + capsule.ShellQuote(capsule.DaytonaWorkspaceDir) + "; fi",
+		"git config --global --add safe.directory " + capsule.ShellQuote(capsule.DaytonaWorkspaceDir) + " >/dev/null 2>&1 || true",
 		"touch ~/.zshrc",
-		"mkdir -p " + capsule.DaytonaCommand([]string{filepath.Join(capsule.DaytonaWorkspaceDir, ".liza")}),
-		"rm -f " + capsule.DaytonaCommand([]string{remoteB64}) + " " + capsule.DaytonaCommand([]string{remoteTGZ}),
+		"mkdir -p " + capsule.ShellQuote(filepath.Join(capsule.DaytonaWorkspaceDir, ".liza")),
+		"rm -f " + capsule.ShellQuote(remoteB64) + " " + capsule.ShellQuote(remoteTGZ),
 	}, "; ")
 	if err := executeDaytonaOK(ctx, client, meta.Daytona.SandboxID, initCommand, "/"); err != nil {
 		return err
 	}
 	for _, chunk := range capsule.Base64Chunks(archive, 32000) {
-		appendCommand := capsule.DaytonaCommand([]string{"printf", "%s", chunk}) + " >> " + capsule.DaytonaCommand([]string{remoteB64})
+		appendCommand := capsule.DaytonaCommand([]string{"printf", "%s", chunk}) + " >> " + capsule.ShellQuote(remoteB64)
 		if err := executeDaytonaOK(ctx, client, meta.Daytona.SandboxID, appendCommand, "/"); err != nil {
 			return err
 		}
 	}
 	applyCommand := strings.Join([]string{
 		"set -e",
-		"base64 -d " + capsule.DaytonaCommand([]string{remoteB64}) + " > " + capsule.DaytonaCommand([]string{remoteTGZ}),
-		"tar -xzf " + capsule.DaytonaCommand([]string{remoteTGZ}) + " -C " + capsule.DaytonaCommand([]string{capsule.DaytonaWorkspaceDir}),
-		"rm -f " + capsule.DaytonaCommand([]string{remoteB64}) + " " + capsule.DaytonaCommand([]string{remoteTGZ}),
+		"base64 -d " + capsule.ShellQuote(remoteB64) + " > " + capsule.ShellQuote(remoteTGZ),
+		"tar -xzf " + capsule.ShellQuote(remoteTGZ) + " -C " + capsule.ShellQuote(capsule.DaytonaWorkspaceDir),
+		"rm -f " + capsule.ShellQuote(remoteB64) + " " + capsule.ShellQuote(remoteTGZ),
 	}, "; ")
 	return executeDaytonaOK(ctx, client, meta.Daytona.SandboxID, applyCommand, "/")
 }

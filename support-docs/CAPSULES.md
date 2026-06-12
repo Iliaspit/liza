@@ -4,6 +4,8 @@ Capsules run a named, isolated Liza instance against the current repository.
 The repository is mounted as `/workspace`, but `/workspace/.liza` is shadowed by
 capsule-owned state so the host project `.liza/` is not read or modified.
 
+**Daytona .liza Seed Semantics:** For Daytona capsules, when running `liza ...` commands, Liza syncs a filtered copy of the host project's `.liza/` state to the capsule before execution. This allows `liza status` and `liza tui` to resolve the project root without touching the host `.liza/`. The sync excludes sensitive directories (secrets, auth, credentials) and files (locks, tokens). Docker capsules do not currently receive this seed; they start with an empty `.liza/` unless manually initialized.
+
 ## Create
 
 ```bash
@@ -184,6 +186,8 @@ and symlinks.
 For project/home `.liza` workspace delivery, `liza send-workspace` delegates to the
 external `liza-send-workspace` binary. Automatic delivery at sprint completion is
 optional via `config.goal_completion_report_cmd`, for example `liza-send-workspace`.
+
+**Security Note:** The `goal_completion_report_cmd` config field executes arbitrary shell commands via `sh -c`. This field is agent-writable in `state.yaml`. Ensure only trusted operators can modify this field, and validate any external command invoked. Stderr is captured on failure for diagnostics.
 
 ## Manage
 

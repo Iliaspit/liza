@@ -137,7 +137,9 @@ func (c DaytonaClient) RunPtyCommand(ctx context.Context, sandboxID, toolboxProx
 		if exit.Error != nil && *exit.Error != "" {
 			return exitCodeOrDefault(exit.ExitCode), fmt.Errorf("daytona PTY failed: %s", *exit.Error)
 		}
-		if exit.ExitReason != nil && *exit.ExitReason != "" {
+		// Only treat ExitReason as failure if exit code is non-zero
+		// Successful exits may have ExitReason like "completed"
+		if exit.ExitReason != nil && *exit.ExitReason != "" && exitCodeOrDefault(exit.ExitCode) != 0 {
 			return exitCodeOrDefault(exit.ExitCode), fmt.Errorf("daytona PTY exited: %s", *exit.ExitReason)
 		}
 		return exitCodeOrDefault(exit.ExitCode), nil

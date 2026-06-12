@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"sort"
 )
 
 type StartOptions struct {
@@ -40,8 +41,14 @@ func BuildStartCommand(meta *CapsuleMetadata, opts StartOptions) (*exec.Cmd, err
 	if opts.Interactive {
 		args = append(args, "-it")
 	}
-	for key, value := range meta.Env {
-		args = append(args, "-e", key+"="+value)
+	// Sort env keys for deterministic ordering
+	envKeys := make([]string, 0, len(meta.Env))
+	for key := range meta.Env {
+		envKeys = append(envKeys, key)
+	}
+	sort.Strings(envKeys)
+	for _, key := range envKeys {
+		args = append(args, "-e", key+"="+meta.Env[key])
 	}
 	for _, record := range meta.Tools {
 		for _, mount := range record.AuthMounts {

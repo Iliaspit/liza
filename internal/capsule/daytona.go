@@ -330,7 +330,7 @@ func DaytonaCommand(command []string) string {
 	return strings.Join(quoted, " ")
 }
 
-func shellQuote(value string) string {
+func ShellQuote(value string) string {
 	if value == "" {
 		return "''"
 	}
@@ -343,4 +343,8 @@ func shellQuote(value string) string {
 		return value
 	}
 	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
+}
+
+func shellQuote(value string) string {
+	return ShellQuote(value)
 }
