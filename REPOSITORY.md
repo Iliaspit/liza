@@ -178,6 +178,7 @@ Installable operational documentation written to `~/.liza/support-docs/` by
 | `ADVERSARIAL_PAIRING.md` | Doer/reviewer Pairing-mode blackboard workflow |
 | `CONFIGURATION.md` | Configuration documentation, including setup/init effects |
 | `TOOLCHAIN.md` | Optional local CLI toolchain install, doctor, and activation guide |
+| `CAPSULES.md` | Local isolated capsule usage, platform-aware toolchains, reports |
 | `TROUBLESHOOTING.md` | Common issues and fixes |
 | `CUSTOMIZING_AGENT_TOOLS.md` | How to adapt `AGENT_TOOLS.md` to the local tool surface |
 | `how-to-produce-a-goal.md` | How to write a good goal doc for `liza init --spec` |

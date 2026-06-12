@@ -23,6 +23,12 @@ func SprintCheckpointCommand(projectRoot string) error {
 	fmt.Println()
 	fmt.Printf("Sprint summary written to: %s\n", result.ReportPath)
 	fmt.Println()
+	for _, warning := range result.Warnings {
+		fmt.Printf("Warning: %s\n", warning)
+	}
+	if len(result.Warnings) > 0 {
+		fmt.Println()
+	}
 	if models.IsTransitionCheckpointTrigger(result.Trigger) {
 		fmt.Println("Transition gate is pending; doer/reviewer agents may continue existing work.")
 		fmt.Println("Orchestrator transition execution waits for 'liza resume'.")

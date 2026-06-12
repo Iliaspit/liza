@@ -3,6 +3,7 @@ package ops
 import (
 	"errors"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -87,6 +88,88 @@ func TestSprintCheckpoint_StoresTrigger(t *testing.T) {
 	}
 	if readState.Sprint.CheckpointTrigger != "PLANNING_COMPLETE" {
 		t.Errorf("CheckpointTrigger = %q, want %q", readState.Sprint.CheckpointTrigger, "PLANNING_COMPLETE")
+	}
+}
+
+func TestSprintCheckpoint_RunsGoalCompletionReportHookOnSprintComplete(t *testing.T) {
+	tmpDir := t.TempDir()
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	markerPath := filepath.Join(tmpDir, "report-hook.log")
+
+	state := testhelpers.CreateValidState()
+	state.Goal.ID = "goal-hook"
+	state.Sprint.ID = "sprint-hook"
+	state.Sprint.Status = models.SprintStatusInProgress
+	state.Sprint.Timeline.Started = time.Now().UTC().Add(-1 * time.Hour)
+	state.Sprint.Timeline.Deadline = time.Now().UTC().Add(5 * time.Hour)
+	hook := "printf '%s/%s/%s' \"$LIZA_GOAL_ID\" \"$LIZA_SPRINT_ID\" \"$LIZA_CHECKPOINT_TRIGGER\" > " + shellQuote(markerPath)
+	state.Config.GoalCompletionReportCmd = &hook
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	result, err := SprintCheckpoint(tmpDir, models.CheckpointTriggerSprintComplete)
+	if err != nil {
+		t.Fatalf("SprintCheckpoint() error: %v", err)
+	}
+	if len(result.Warnings) != 0 {
+		t.Fatalf("Warnings = %v, want none", result.Warnings)
+	}
+
+	content, err := os.ReadFile(markerPath)
+	if err != nil {
+		t.Fatalf("read hook marker: %v", err)
+	}
+	want := "goal-hook/sprint-hook/SPRINT_COMPLETE"
+	if string(content) != want {
+		t.Fatalf("hook marker = %q, want %q", string(content), want)
+	}
+}
+
+func TestSprintCheckpoint_SkipsGoalCompletionReportHookForOtherTriggers(t *testing.T) {
+	tmpDir := t.TempDir()
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	markerPath := filepath.Join(tmpDir, "report-hook.log")
+
+	state := testhelpers.CreateValidState()
+	state.Sprint.Status = models.SprintStatusInProgress
+	state.Sprint.Timeline.Started = time.Now().UTC().Add(-1 * time.Hour)
+	state.Sprint.Timeline.Deadline = time.Now().UTC().Add(5 * time.Hour)
+	hook := "touch " + shellQuote(markerPath)
+	state.Config.GoalCompletionReportCmd = &hook
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	result, err := SprintCheckpoint(tmpDir, models.CheckpointTriggerPlanningComplete)
+	if err != nil {
+		t.Fatalf("SprintCheckpoint() error: %v", err)
+	}
+	if len(result.Warnings) != 0 {
+		t.Fatalf("Warnings = %v, want none", result.Warnings)
+	}
+	if _, err := os.Stat(markerPath); !os.IsNotExist(err) {
+		t.Fatalf("hook marker exists or stat failed unexpectedly: %v", err)
+	}
+}
+
+func TestSprintCheckpoint_GoalCompletionReportHookFailureIsWarning(t *testing.T) {
+	tmpDir := t.TempDir()
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+
+	state := testhelpers.CreateValidState()
+	state.Sprint.Status = models.SprintStatusInProgress
+	state.Sprint.Timeline.Started = time.Now().UTC().Add(-1 * time.Hour)
+	state.Sprint.Timeline.Deadline = time.Now().UTC().Add(5 * time.Hour)
+	hook := "exit 7"
+	state.Config.GoalCompletionReportCmd = &hook
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	result, err := SprintCheckpoint(tmpDir, models.CheckpointTriggerSprintComplete)
+	if err != nil {
+		t.Fatalf("SprintCheckpoint() error: %v", err)
+	}
+	if len(result.Warnings) != 1 {
+		t.Fatalf("Warnings = %v, want one warning", result.Warnings)
+	}
+	if !strings.Contains(result.Warnings[0], "goal completion report hook failed") {
+		t.Fatalf("warning = %q, want hook failure", result.Warnings[0])
 	}
 }
 
@@ -262,6 +345,13 @@ func TestFormatDuration(t *testing.T) {
 			}
 		})
 	}
+}
+
+func shellQuote(path string) string {
+	if strings.ContainsAny(path, " '\"\\") {
+		return "'" + strings.ReplaceAll(path, "'", "'\"'\"'") + "'"
+	}
+	return path
 }
 
 func TestGenerateSprintSummary_WithAnomalies(t *testing.T) {

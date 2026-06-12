@@ -162,6 +162,7 @@ func resetCommandFlagsForTest(t *testing.T, cmd *cobra.Command) {
 		"state", "log", "file", "id", "desc", "done", "scope", "priority", "role-pair", "output", "tasks-file",
 		"profile", "include", "exclude", "tool", "install-dir", "dry-run", "yes", "global-dir", "agent-tools", "write-shell-profile", "agents", "project",
 		"project-root", "check-update", "update-channel",
+		"runtime", "image", "models-dev-provider", "api-key-env", "preferred-model", "store-root", "daytona-api-url", "daytona-target", "daytona-snapshot", "daytona-cpu", "daytona-memory", "daytona-disk", "daytona-auto-stop", "daytona-auto-delete", "no-provision", "force", "local-only", "region", "sandbox-class", "entrypoint", "cpu", "memory", "disk",
 	} {
 		resetFlagIfPresent(cmd, name)
 	}

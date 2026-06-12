@@ -146,6 +146,7 @@ type Config struct {
 	AutoResume               bool       `yaml:"auto_resume,omitempty"`
 	NoFollowUp               bool       `yaml:"no_follow_up,omitempty"`
 	PostWorktreeCmd          *string    `yaml:"post_worktree_cmd,omitempty"`
+	GoalCompletionReportCmd  *string    `yaml:"goal_completion_report_cmd,omitempty"`
 	CopyWorktreeEnvFiles     bool       `yaml:"copy_worktree_env_files,omitempty"`
 	// AutoCheckpointSummary controls whether Liza auto-invokes the
 	// checkpoint-summary skill against a task that just reached MERGED and

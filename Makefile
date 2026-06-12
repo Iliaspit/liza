@@ -1,7 +1,8 @@
-.PHONY: build test test-e2e clean install lint check-testhelpers check-embedded release package build-all tidy run coverage help
+.PHONY: build test test-e2e clean install lint check-testhelpers check-embedded release package build-all tidy run coverage capsule-image capsule-image-smoke help
 
 # Binary name
 BINARY_NAME=liza
+CAPSULE_IMAGE?=liza-capsule:latest
 
 # Build variables
 VERSION?=0.2.0
@@ -99,6 +100,13 @@ tidy:
 run: build
 	./$(BINARY_NAME)
 
+# Build the local capsule image used by Docker capsules and Daytona snapshot sources.
+capsule-image:
+	docker build -f packaging/capsule/Dockerfile -t $(CAPSULE_IMAGE) .
+
+capsule-image-smoke: capsule-image
+	docker run --rm $(CAPSULE_IMAGE) sh -lc 'liza version && opencode --version && codex --version && claude --version && go version && stacklit --version && scip-search --version && scip-go --version && scip-typescript --version && scip-python --version && semble --help && ast-grep --version && rg --version && fd --version && jq --version && yq --version && gh --version'
+
 # Build for multiple platforms
 build-all: sync-embedded
 	GOOS=linux GOARCH=amd64 go build $(LDFLAGS) -o $(BINARY_NAME)-linux-amd64 ./cmd/liza
@@ -149,6 +157,8 @@ help:
 	@echo "  check-embedded     - Verify embedded copies match repo masters"
 	@echo "  tidy               - Tidy dependencies"
 	@echo "  run                - Build and run the liza binary"
+	@echo "  capsule-image      - Build local capsule image (CAPSULE_IMAGE=...)"
+	@echo "  capsule-image-smoke - Build and verify capsule image tool binaries"
 	@echo "  build-all          - Build liza for multiple platforms"
 	@echo "  release            - Create release artifacts (run tests, build all platforms, create checksums)"
 	@echo "  package            - Create distribution packages (tarballs)"

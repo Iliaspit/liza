@@ -1,9 +1,13 @@
 package ops
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
+	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/liza-mas/liza/internal/db"
@@ -19,6 +23,7 @@ type SprintCheckpointResult struct {
 	CheckpointAt time.Time `json:"checkpoint_at"`
 	ReportPath   string    `json:"report_path"`
 	Trigger      string    `json:"trigger,omitempty"`
+	Warnings     []string  `json:"warnings,omitempty"`
 }
 
 // SprintCheckpoint transitions sprint status to CHECKPOINT and writes a sprint summary report.
@@ -83,11 +88,53 @@ func SprintCheckpoint(projectRoot string, trigger string) (*SprintCheckpointResu
 		return nil, fmt.Errorf("failed to update sprint status: %w", err)
 	}
 
+	warnings := runGoalCompletionReportHook(projectRoot, state, trigger)
+
 	return &SprintCheckpointResult{
 		CheckpointAt: timestamp,
 		ReportPath:   reportPath,
 		Trigger:      trigger,
+		Warnings:     warnings,
 	}, nil
+}
+
+// runGoalCompletionReportHook runs the optional report hook when a sprint
+// completion checkpoint is reached. Hook failure is intentionally non-fatal:
+// report delivery is useful automation, but it must not corrupt or block the
+// state transition that already succeeded.
+func runGoalCompletionReportHook(projectRoot string, state *models.State, trigger string) []string {
+	if trigger != models.CheckpointTriggerSprintComplete {
+		return nil
+	}
+	if state.Config.GoalCompletionReportCmd == nil {
+		return nil
+	}
+	hook := strings.TrimSpace(*state.Config.GoalCompletionReportCmd)
+	if hook == "" {
+		return nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "sh", "-c", hook)
+	cmd.Dir = projectRoot
+	cmd.Env = append(os.Environ(),
+		"LIZA_PROJECT_ROOT="+projectRoot,
+		"LIZA_GOAL_ID="+state.Goal.ID,
+		"LIZA_SPRINT_ID="+state.Sprint.ID,
+		"LIZA_CHECKPOINT_TRIGGER="+trigger,
+	)
+	cmd.Stdout = io.Discard
+	cmd.Stderr = io.Discard
+
+	if err := cmd.Run(); err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return []string{"goal completion report hook timed out"}
+		}
+		return []string{fmt.Sprintf("goal completion report hook failed: %v", err)}
+	}
+	return nil
 }
 
 // generateSprintSummary creates a markdown report of the sprint status.
