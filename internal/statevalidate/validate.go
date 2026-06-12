@@ -212,6 +212,9 @@ func ValidateState(state *models.State, projectRoot string, skipSpecFileCheck bo
 		validateAnomalies,
 		validateHandoffEvents,
 		validateSprint,
+		func(state *models.State, projectRoot string, skipSpecFileCheck bool) error {
+			return validateClaims(state, warnWriter)
+		},
 	}
 
 	for _, validator := range validators {

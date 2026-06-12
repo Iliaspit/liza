@@ -145,6 +145,8 @@ func markReviewBoundaryIntegrationFailed(state *models.State, task *models.Task,
 	task.LeaseExpires = nil
 	task.ReviewingBy = nil
 	task.ReviewLeaseExpires = nil
+	releaseDoerClaimRecord(state, task.ID)
+	releaseReviewerClaimRecord(state, task.ID)
 
 	diagnostic := map[string]any{
 		"operation":     reviewBoundaryOperationAssignment,

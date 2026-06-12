@@ -105,7 +105,7 @@ func CreateWorktree(projectRoot, taskID string, fresh bool) (*CreateWorktreeResu
 		return nil, fmt.Errorf("failed to create worktree: %w", err)
 	}
 
-	err = bb.Modify(func(state *models.State) error {
+	err = bb.ModifyOp("wt_create", func(state *models.State) error {
 		task := state.FindTask(taskID)
 		if task == nil {
 			return &errors.NotFoundError{Entity: "task", ID: taskID}

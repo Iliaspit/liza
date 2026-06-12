@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
@@ -12,9 +13,12 @@ import (
 
 	"github.com/liza-mas/liza/internal/errors"
 	"github.com/liza-mas/liza/internal/filelock"
+	"github.com/liza-mas/liza/internal/journal"
 	"github.com/liza-mas/liza/internal/models"
+	"github.com/liza-mas/liza/internal/pipeline"
 	"github.com/liza-mas/liza/internal/roles"
 	"github.com/liza-mas/liza/internal/statehygiene"
+	"github.com/liza-mas/liza/internal/taskinvariants"
 	"gopkg.in/yaml.v3"
 )
 
@@ -36,6 +40,12 @@ type Blackboard struct {
 	cacheMu     sync.RWMutex
 	cachedData  []byte
 	cachedMtime time.Time
+
+	// Structural-invariant classifier for write-funnel enforcement, loaded
+	// lazily from the frozen pipeline config. nil when the config is absent
+	// (legacy projects, unit tests) — enforcement is then skipped.
+	invariantsOnce sync.Once
+	invariants     *taskinvariants.StatusClassifier
 }
 
 // New creates a Blackboard backed by the given state file path.
@@ -329,11 +339,20 @@ func marshalStateForWrite(state *models.State) ([]byte, error) {
 // Write writes the state to the state file atomically with fsync
 func (bb *Blackboard) Write(state *models.State) error {
 	err := bb.fileLock.WithLockOperation("write", func() error {
+		before, beforeOK := bb.readStateForDiff()
+
 		data, err := marshalStateForWrite(state)
 		if err != nil {
 			return err
 		}
-		return bb.writeStateData(data)
+		if err := bb.writeStateData(data); err != nil {
+			return err
+		}
+
+		if beforeOK {
+			bb.appendDerivedEvents("write", before, state)
+		}
+		return nil
 	})
 
 	if err == nil {
@@ -343,9 +362,145 @@ func (bb *Blackboard) Write(state *models.State) error {
 	return err
 }
 
-// Modify performs an atomic read-modify-write operation
+// WriteInvariantError reports a named operation that attempted to write a
+// task violating a structural invariant. The write is aborted — state.yaml
+// is untouched.
+type WriteInvariantError struct {
+	Op     string
+	TaskID string
+	Err    error
+}
+
+func (e *WriteInvariantError) Error() string {
+	return fmt.Sprintf("operation %q rejected: would write structurally invalid task %s: %v", e.Op, e.TaskID, e.Err)
+}
+
+func (e *WriteInvariantError) Unwrap() error { return e.Err }
+
+// checkWriteInvariants enforces structural per-task invariants at the write
+// funnel for named operations with no-worse-than-before semantics: an
+// operation may not INTRODUCE a structural violation (create an invalid task,
+// or turn a valid task invalid), but touching a task that was already invalid
+// is allowed — otherwise pre-existing corruption would wedge the very
+// operations that repair it.
+//
+// Fail-open cases, deliberate during the strangler migration:
+//   - generic "modify"/"write" operations (unmigrated call sites, fixtures);
+//   - no frozen pipeline config (legacy projects, most unit tests).
+func (bb *Blackboard) checkWriteInvariants(op string, before, after *models.State) error {
+	if op == "modify" || op == "write" {
+		return nil
+	}
+	sc := bb.statusClassifier()
+	if sc == nil {
+		return nil
+	}
+
+	beforeTasks := make(map[string]*models.Task, len(before.Tasks))
+	for i := range before.Tasks {
+		beforeTasks[before.Tasks[i].ID] = &before.Tasks[i]
+	}
+	for i := range after.Tasks {
+		task := &after.Tasks[i]
+		prev := beforeTasks[task.ID]
+		if prev != nil && reflect.DeepEqual(*prev, *task) {
+			continue
+		}
+		err := taskinvariants.ValidateStatusFields(task, sc)
+		if err == nil {
+			continue
+		}
+		if prev != nil && taskinvariants.ValidateStatusFields(prev, sc) != nil {
+			// Pre-existing violation on this task; the op did not introduce it.
+			continue
+		}
+		return &WriteInvariantError{Op: op, TaskID: task.ID, Err: err}
+	}
+	return nil
+}
+
+// statusClassifier lazily loads the structural classifier from the frozen
+// pipeline config next to the state file. Returns nil when unavailable.
+func (bb *Blackboard) statusClassifier() *taskinvariants.StatusClassifier {
+	bb.invariantsOnce.Do(func() {
+		projectRoot := filepath.Dir(filepath.Dir(bb.statePath))
+		cfg, err := pipeline.LoadFrozen(projectRoot)
+		if err != nil {
+			return
+		}
+		sc := taskinvariants.NewStatusClassifier(pipeline.NewResolver(cfg), cfg)
+		bb.invariants = &sc
+	})
+	return bb.invariants
+}
+
+// readStateForDiff reads and parses the current state file as the "before"
+// snapshot for journal derivation. A missing file is a valid empty before
+// state (project initialization); any other failure disables journaling for
+// this write rather than failing the state operation.
+func (bb *Blackboard) readStateForDiff() (*models.State, bool) {
+	data, err := os.ReadFile(bb.statePath)
+	if os.IsNotExist(err) {
+		return &models.State{}, true
+	}
+	if err != nil {
+		return nil, false
+	}
+	var state models.State
+	if err := yaml.Unmarshal(data, &state); err != nil {
+		return nil, false
+	}
+	normalizeAgentRoles(&state)
+	normalizeTaskAttempts(&state)
+	return &state, true
+}
+
+// appendDerivedEvents derives journal events from a state transition and
+// appends them to the shadow journal. Must be called while holding the state
+// file lock so appends serialize with state writes.
+//
+// During the shadow-journal phase state.yaml remains the source of truth, so
+// an append failure must not fail (or invite a retry of) a state write that
+// already succeeded — it is reported on stderr and surfaces in
+// `liza journal --verify` instead.
+func (bb *Blackboard) appendDerivedEvents(op string, before, after *models.State) {
+	events := journal.Derive(before, after)
+	if len(events) == 0 {
+		return
+	}
+	for i := range events {
+		events[i].Op = op
+	}
+	store := journal.ForStatePath(bb.statePath)
+	if err := store.Append(events); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: journal append failed (state write succeeded): %v\n", err)
+		return
+	}
+	// Rotation check is O(1) per append: MaybeRotate stats the file and only
+	// counts events once the size heuristic says the threshold may be
+	// exceeded. We hold the state file lock here, satisfying Rotate's
+	// contract. Failures are non-fatal — the journal just keeps growing and
+	// the next append retries.
+	if _, err := store.MaybeRotate(journal.DefaultRotateThreshold); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: journal rotation failed (state write succeeded): %v\n", err)
+	}
+}
+
+// Modify performs an atomic read-modify-write operation under the generic
+// "modify" operation name. Prefer ModifyOp at call sites that represent a
+// named lifecycle operation — the name flows into lock-owner diagnostics and
+// journal event provenance.
 func (bb *Blackboard) Modify(fn func(*models.State) error) error {
-	err := bb.fileLock.WithLockOperation("modify", func() error {
+	return bb.ModifyOp("modify", fn)
+}
+
+// ModifyOp performs an atomic read-modify-write operation attributed to the
+// named operation.
+func (bb *Blackboard) ModifyOp(op string, fn func(*models.State) error) error {
+	if op == "" {
+		op = "modify"
+	}
+	err := bb.fileLock.WithLockOperation(op, func() error {
 		data, err := os.ReadFile(bb.statePath)
 		if err != nil {
 			return fmt.Errorf("failed to read state: %w", err)
@@ -356,18 +511,36 @@ func (bb *Blackboard) Modify(fn func(*models.State) error) error {
 			return &errors.StateSchemaError{Operation: "state modify", Err: err}
 		}
 
+		// Second unmarshal of the same bytes: an independent "before" snapshot
+		// for journal derivation that fn cannot reach through shared pointers.
+		var before models.State
+		if err := yaml.Unmarshal(data, &before); err != nil {
+			return &errors.StateSchemaError{Operation: "state modify", Err: err}
+		}
+
 		normalizeAgentRoles(&state)
 		normalizeTaskAttempts(&state)
+		normalizeAgentRoles(&before)
+		normalizeTaskAttempts(&before)
 
 		if err := fn(&state); err != nil {
 			return fmt.Errorf("modification function failed: %w", err)
+		}
+
+		if err := bb.checkWriteInvariants(op, &before, &state); err != nil {
+			return err
 		}
 
 		data, err = marshalStateForWrite(&state)
 		if err != nil {
 			return err
 		}
-		return bb.writeStateData(data)
+		if err := bb.writeStateData(data); err != nil {
+			return err
+		}
+
+		bb.appendDerivedEvents(op, &before, &state)
+		return nil
 	})
 
 	if err == nil {
@@ -403,7 +576,7 @@ func (bb *Blackboard) GetAgent(agentID string) (*models.Agent, error) {
 
 // UpdateTask atomically updates a task by ID
 func (bb *Blackboard) UpdateTask(taskID string, fn func(*models.Task) error) error {
-	return bb.Modify(func(state *models.State) error {
+	return bb.ModifyOp("update_task", func(state *models.State) error {
 		task := state.FindTask(taskID)
 		if task == nil {
 			return &errors.NotFoundError{Entity: "task", ID: taskID}
@@ -414,7 +587,7 @@ func (bb *Blackboard) UpdateTask(taskID string, fn func(*models.Task) error) err
 
 // UpdateAgent atomically updates an agent by ID
 func (bb *Blackboard) UpdateAgent(agentID string, fn func(*models.Agent) error) error {
-	return bb.Modify(func(state *models.State) error {
+	return bb.ModifyOp("update_agent", func(state *models.State) error {
 		agent, ok := state.Agents[agentID]
 		if !ok {
 			return &errors.NotFoundError{Entity: "agent", ID: agentID}

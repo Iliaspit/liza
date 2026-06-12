@@ -292,7 +292,7 @@ func checkLastSubmitter(task *models.Task, agentID string) error {
 // CurrentTask to taskID. This prevents other supervisors from claiming the
 // task if it gets rejected while we're waiting.
 func acquireAwaitOwnership(bb *db.Blackboard, agentID, taskID string) error {
-	return bb.Modify(func(s *models.State) error {
+	return bb.ModifyOp("acquire_await_ownership", func(s *models.State) error {
 		agent, ok := s.Agents[agentID]
 		if !ok {
 			return &errors.NotFoundError{Entity: "agent", ID: agentID}
@@ -308,7 +308,7 @@ func acquireAwaitOwnership(bb *db.Blackboard, agentID, taskID string) error {
 // of the task. Status is left unchanged — the supervisor's resetAgentAfterExit
 // handles status transitions when the CLI session ends.
 func releaseOwnership(bb *db.Blackboard, agentID string) error {
-	return bb.Modify(func(s *models.State) error {
+	return bb.ModifyOp("release_await_ownership", func(s *models.State) error {
 		if agent, ok := s.Agents[agentID]; ok {
 			agent.CurrentTask = nil
 			s.Agents[agentID] = agent

@@ -47,7 +47,7 @@ func AssessBlocked(projectRoot, taskID, note, agentID string) (*AssessBlockedRes
 	bb := db.For(lp.StatePath())
 	now := time.Now().UTC()
 
-	err := bb.Modify(func(state *models.State) error {
+	err := bb.ModifyOp("assess_blocked", func(state *models.State) error {
 		task := state.FindTask(taskID)
 		if task == nil {
 			return &errors.NotFoundError{Entity: "task", ID: taskID}

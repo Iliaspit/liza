@@ -10,6 +10,7 @@ import (
 
 	"github.com/liza-mas/liza/internal/db"
 	lizaerrors "github.com/liza-mas/liza/internal/errors"
+	"github.com/liza-mas/liza/internal/journal"
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/ops"
 	"github.com/liza-mas/liza/internal/procscan"
@@ -90,7 +91,49 @@ func ValidateCommandWithOptions(statePath string, opts ValidateOptions) error {
 			return &lizaerrors.ValidationError{Message: err.Error(), Err: err}
 		}
 	}
+	warnJournalDivergence(statePath, state, warnings)
 	return nil
+}
+
+// warnJournalDivergence reports where the journal-reconstructed view
+// contradicts state.yaml across the dimensions the journal fully captures:
+// task statuses, claim holders, and the system singletons (sprint, circuit
+// breaker, goal, mode). Warning-level while the journal is a shadow log —
+// state.yaml remains authoritative. Reads the full history (including rotated
+// archives) so the claim/singleton folds, which have no rotation snapshot,
+// stay complete. Dimensions the journal has no opinion on (pre-journal tasks,
+// unseen singletons) are intentionally silent.
+func warnJournalDivergence(statePath string, state *models.State, warnings io.Writer) {
+	events, err := journal.ForStatePath(statePath).ReadAllIncludingArchives()
+	if err != nil {
+		fmt.Fprintf(warnings, "WARNING: journal unreadable, skipping coherence check: %v\n", err)
+		return
+	}
+	if len(events) == 0 {
+		return
+	}
+
+	recon := journal.Reconstruct(events)
+
+	for i := range state.Tasks {
+		task := &state.Tasks[i]
+		projected, journaled := recon.TaskStatuses[task.ID]
+		if !journaled {
+			continue
+		}
+		if projected != string(task.Status) {
+			fmt.Fprintf(warnings,
+				"WARNING: journal/state divergence for task %s: journal=%q state=%q (investigate with `liza journal --task %s`)\n",
+				task.ID, projected, task.Status, task.ID)
+		}
+	}
+
+	for _, d := range recon.DiffClaims(state) {
+		fmt.Fprintf(warnings, "WARNING: journal/state divergence: %s\n", d)
+	}
+	for _, d := range recon.DiffSingletons(state) {
+		fmt.Fprintf(warnings, "WARNING: journal/state divergence: %s\n", d)
+	}
 }
 
 func validateNoZombieAgents(state *models.State, projectRoot string, warnings io.Writer) error {

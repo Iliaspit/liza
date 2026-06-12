@@ -16,6 +16,7 @@ type State struct {
 	HumanNotes      []HumanNote            `yaml:"human_notes"`
 	SpecChanges     []SpecChange           `yaml:"spec_changes"`
 	Anomalies       []Anomaly              `yaml:"anomalies"`
+	Claims          []Claim                `yaml:"claims,omitempty"`
 	Sprint          Sprint                 `yaml:"sprint"`
 	SprintHistory   []SprintSummary        `yaml:"sprint_history,omitempty"`
 	CircuitBreaker  CircuitBreaker         `yaml:"circuit_breaker"`

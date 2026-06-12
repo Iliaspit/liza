@@ -277,7 +277,7 @@ func SubmitForReview(projectRoot, taskID, commitRef, agentID string) (*SubmitFor
 	// Phase 3: Atomic update with new commit SHA
 	now := time.Now().UTC()
 
-	err = bb.Modify(func(state *models.State) error {
+	err = bb.ModifyOp("submit_for_review", func(state *models.State) error {
 		task := state.FindTask(taskID)
 		if task == nil {
 			return &errors.NotFoundError{Entity: "task", ID: taskID}
@@ -435,7 +435,7 @@ func truncateForDiagnostics(s string, limit int) string {
 // They differ in pre-conditions (approved vs implementing) and post-actions (agent release).
 func markSubmitRebaseConflict(bb *db.Blackboard, taskID, agentID string, pipelineTransitions map[models.TaskStatus][]models.TaskStatus) error {
 	reason := IntegrationReasonMergeConflict
-	return bb.Modify(func(s *models.State) error {
+	return bb.ModifyOp("submit_rebase_conflict", func(s *models.State) error {
 		t := s.FindTask(taskID)
 		if t == nil {
 			return &errors.NotFoundError{Entity: "task", ID: taskID}
@@ -447,6 +447,7 @@ func markSubmitRebaseConflict(bb *db.Blackboard, taskID, agentID string, pipelin
 		t.IntegrationFix = false
 		t.AssignedTo = nil
 		t.LeaseExpires = nil
+		releaseDoerClaimRecord(s, t.ID)
 
 		now := time.Now().UTC()
 		diagnostic := map[string]any{

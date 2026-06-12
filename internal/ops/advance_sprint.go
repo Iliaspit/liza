@@ -51,7 +51,7 @@ func AdvanceSprint(projectRoot string) (*AdvanceSprintResult, error) {
 
 	var result AdvanceSprintResult
 
-	err := blackboard.Modify(func(s *models.State) error {
+	err := blackboard.ModifyOp("advance_sprint", func(s *models.State) error {
 		plan, err := planSprintAdvance(s, time.Now().UTC(), projectRoot)
 		if err != nil {
 			return err

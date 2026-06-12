@@ -32,6 +32,8 @@ func blockTaskForHypothesisExhaustion(state *models.State, task *models.Task, ag
 	task.LeaseExpires = nil
 	task.ReviewingBy = nil
 	task.ReviewLeaseExpires = nil
+	releaseDoerClaimRecord(state, task.ID)
+	releaseReviewerClaimRecord(state, task.ID)
 
 	note := fmt.Sprintf("failed_by: %s", strings.Join(task.FailedBy, ", "))
 	task.History = append(task.History, models.TaskHistoryEntry{

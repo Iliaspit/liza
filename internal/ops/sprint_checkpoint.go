@@ -72,7 +72,7 @@ func SprintCheckpoint(projectRoot string, trigger string) (*SprintCheckpointResu
 		return nil, fmt.Errorf("failed to write sprint summary: %w", err)
 	}
 
-	err = blackboard.Modify(func(s *models.State) error {
+	err = blackboard.ModifyOp("sprint_checkpoint", func(s *models.State) error {
 		s.Sprint.Status = models.SprintStatusCheckpoint
 		s.Sprint.Timeline.CheckpointAt = &timestamp
 		s.Sprint.CheckpointTrigger = trigger

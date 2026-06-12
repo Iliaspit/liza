@@ -28,7 +28,7 @@ func RepairInvalidReviewOwnership(statePath, projectRoot, logPath, reason string
 	repaired := 0
 	now := time.Now().UTC()
 
-	err = bb.Modify(func(state *models.State) error {
+	err = bb.ModifyOp("repair_review_ownership", func(state *models.State) error {
 		for i := range state.Tasks {
 			task := &state.Tasks[i]
 
@@ -55,6 +55,7 @@ func RepairInvalidReviewOwnership(statePath, projectRoot, logPath, reason string
 			}
 			task.ReviewingBy = nil
 			task.ReviewLeaseExpires = nil
+			releaseReviewerClaimRecord(state, task.ID)
 
 			if reviewerID != "" {
 				if agent, ok := state.Agents[reviewerID]; ok {

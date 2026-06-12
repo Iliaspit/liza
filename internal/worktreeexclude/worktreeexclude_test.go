@@ -137,6 +137,12 @@ type gitRepoFixture struct {
 func newGitRepoWithWorktrees(t *testing.T, names ...string) gitRepoFixture {
 	t.Helper()
 
+	// Isolate from host-level git config: a user's global core.excludesFile
+	// (e.g. ~/.gitignore_global) would otherwise surface as an unexpected
+	// "effective core.excludesFile already configured" conflict.
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	t.Setenv("GIT_CONFIG_SYSTEM", os.DevNull)
+
 	parent := t.TempDir()
 	repo := filepath.Join(parent, "repo")
 	if err := os.MkdirAll(repo, 0o755); err != nil {

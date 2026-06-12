@@ -178,7 +178,7 @@ func Proceed(projectRoot, taskID, transitionName string) (*ProceedResult, error)
 		TransitionName: transitionName,
 	}
 
-	err = blackboard.Modify(func(s *models.State) error {
+	err = blackboard.ModifyOp("proceed", func(s *models.State) error {
 		// Validate sprint is COMPLETED
 		if s.Sprint.Status != models.SprintStatusCompleted {
 			return fmt.Errorf("sprint must be COMPLETED before proceeding (current: %s)", s.Sprint.Status)
@@ -1009,7 +1009,7 @@ func ExecuteAvailableTransitions(projectRoot string, triggerFilter string) ([]Pr
 	now := time.Now().UTC()
 	var results []ProceedResult
 
-	err = blackboard.Modify(func(s *models.State) error {
+	err = blackboard.ModifyOp("execute_transitions", func(s *models.State) error {
 		var pending []pendingTx
 		origIdx := 0
 

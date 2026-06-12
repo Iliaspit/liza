@@ -249,6 +249,11 @@ func BuildTaskByStatus(taskID string, status models.TaskStatus, now time.Time) m
 		reviewCommit := "review123"
 		task.ReviewCommit = &reviewCommit
 		task.Iteration = 1
+		// Rejection never clears base_commit in production: the task has
+		// carried it since the original claim, and same-coder reclaim with a
+		// preserved worktree relies on it for the review boundary.
+		baseCommit := "abc1234"
+		task.BaseCommit = &baseCommit
 		worktree := ".worktrees/" + taskID
 		task.Worktree = &worktree
 

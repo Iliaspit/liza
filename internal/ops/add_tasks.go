@@ -149,7 +149,7 @@ func AddTask(statePath, logPath string, input *AddTaskInput, orchestratorID stri
 	}
 
 	var postValidationErr error
-	err = bb.Modify(func(state *models.State) error {
+	err = bb.ModifyOp("add_task", func(state *models.State) error {
 		if state.FindTask(input.ID) != nil {
 			return &PreconditionError{Reason: fmt.Sprintf("task '%s' already exists", input.ID)}
 		}

@@ -114,7 +114,7 @@ func SupersedeTaskWithOptions(projectRoot, taskID string, replacementIDs []strin
 
 	// Phase 2: Atomic State Update
 	hadWorktree := task.Worktree != nil
-	err = bb.Modify(func(state *models.State) error {
+	err = bb.ModifyOp("supersede_task", func(state *models.State) error {
 		currentTask := state.FindTask(taskID)
 		if currentTask == nil {
 			return &errors.NotFoundError{Entity: "task", ID: taskID}
@@ -139,6 +139,8 @@ func SupersedeTaskWithOptions(projectRoot, taskID string, replacementIDs []strin
 		currentTask.LeaseExpires = nil
 		currentTask.ReviewingBy = nil
 		currentTask.ReviewLeaseExpires = nil
+		releaseDoerClaimRecord(state, taskID)
+		releaseReviewerClaimRecord(state, taskID)
 		currentTask.Worktree = nil
 		clearAttemptState(currentTask, attemptStateRetire)
 

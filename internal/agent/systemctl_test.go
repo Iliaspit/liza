@@ -852,20 +852,20 @@ func TestOrchestratorProgressSignature(t *testing.T) {
 
 // TestOrchestratorSpinningTracker verifies spinning detection for orchestrator.
 func TestOrchestratorSpinningTracker(t *testing.T) {
-	tracker := newSpinningTracker()
+	ledger := newProgressLedger()
 	sig := "sprint:IN_PROGRESS:1:tasks:3:planned:3"
 
 	// Same signature N times → count increases
 	for i := 1; i <= 5; i++ {
-		count := tracker.Track("orchestrator", sig)
+		count := ledger.Observe("orchestrator", classSpin, sig)
 		if count != i {
-			t.Errorf("Track() = %d, want %d", count, i)
+			t.Errorf("Observe() = %d, want %d", count, i)
 		}
 	}
 
 	// Different signature → resets
-	count := tracker.Track("orchestrator", "sprint:CHECKPOINT:1:tasks:3:planned:3")
+	count := ledger.Observe("orchestrator", classSpin, "sprint:CHECKPOINT:1:tasks:3:planned:3")
 	if count != 1 {
-		t.Errorf("Track() after signature change = %d, want 1", count)
+		t.Errorf("Observe() after signature change = %d, want 1", count)
 	}
 }

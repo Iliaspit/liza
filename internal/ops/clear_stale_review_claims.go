@@ -31,7 +31,7 @@ func ClearStaleReviewClaims(projectRoot string) (int, error) {
 	cleared := 0
 	now := time.Now().UTC()
 
-	err = bb.Modify(func(state *models.State) error {
+	err = bb.ModifyOp("clear_stale_review_claims", func(state *models.State) error {
 		for i := range state.Tasks {
 			task := &state.Tasks[i]
 
@@ -52,6 +52,7 @@ func ClearStaleReviewClaims(projectRoot string) (int, error) {
 					staleReviewer := *task.ReviewingBy
 					task.ReviewingBy = nil
 					task.ReviewLeaseExpires = nil
+					releaseReviewerClaimRecord(state, task.ID)
 
 					if a, ok := state.Agents[staleReviewer]; ok {
 						if a.CurrentTask != nil && *a.CurrentTask == task.ID {
@@ -94,6 +95,7 @@ func ClearStaleReviewClaims(projectRoot string) (int, error) {
 			}
 			task.ReviewingBy = nil
 			task.ReviewLeaseExpires = nil
+			releaseReviewerClaimRecord(state, task.ID)
 
 			if a, ok := state.Agents[staleReviewer]; ok {
 				if a.CurrentTask != nil && *a.CurrentTask == task.ID {

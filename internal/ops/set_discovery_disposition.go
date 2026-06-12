@@ -34,7 +34,7 @@ func SetDiscoveryDisposition(projectRoot, discoveryID, disposition string) error
 
 	isTaskRef := !validDispositionSentinels[disposition]
 
-	return bb.Modify(func(state *models.State) error {
+	return bb.ModifyOp("set_discovery_disposition", func(state *models.State) error {
 		// Verify referenced task exists when disposition is a task ID.
 		if isTaskRef && state.FindTask(disposition) == nil {
 			return &PreconditionError{Reason: fmt.Sprintf("disposition references task %q which does not exist", disposition)}

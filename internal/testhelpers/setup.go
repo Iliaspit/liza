@@ -58,6 +58,7 @@ var (
 func SetupTestGitRepo(t *testing.T, tmpDir string) {
 	t.Helper()
 
+	isolateGitConfigEnv(t)
 	if err := prepareGitFixtureDir(tmpDir); err != nil {
 		t.Fatalf("Failed to prepare test git repo directory: %v", err)
 	}
@@ -74,6 +75,7 @@ func SetupTestGitRepo(t *testing.T, tmpDir string) {
 func SetupBasicTestGitRepo(t *testing.T, tmpDir string) {
 	t.Helper()
 
+	isolateGitConfigEnv(t)
 	if err := prepareGitFixtureDir(tmpDir); err != nil {
 		t.Fatalf("Failed to prepare basic test git repo directory: %v", err)
 	}
@@ -82,6 +84,26 @@ func SetupBasicTestGitRepo(t *testing.T, tmpDir string) {
 		t.Fatalf("Failed to copy basic test git repo template: %v", err)
 	}
 	configureTestGitRepo(t, tmpDir)
+}
+
+// isolateGitConfigEnv points global and system git config at os.DevNull so
+// host-level configuration (e.g. core.excludesFile in ~/.gitconfig) cannot leak
+// into test repositories or into subprocesses spawned by the code under test
+// (which inherit the test process environment via gitenv.Env / exec.Command).
+//
+// Values already present in the environment are preserved: tests that
+// intentionally exercise global-config behavior set GIT_CONFIG_GLOBAL via
+// t.Setenv before calling the setup helpers, and that override must win.
+// t.Setenv also guards against misuse from parallel tests.
+func isolateGitConfigEnv(t *testing.T) {
+	t.Helper()
+
+	if _, ok := os.LookupEnv("GIT_CONFIG_GLOBAL"); !ok {
+		t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	}
+	if _, ok := os.LookupEnv("GIT_CONFIG_SYSTEM"); !ok {
+		t.Setenv("GIT_CONFIG_SYSTEM", os.DevNull)
+	}
 }
 
 func gitRepoTemplateDir(t *testing.T, template *preparedGitRepoTemplate, includeIntegrationBranch bool) string {

@@ -126,7 +126,7 @@ func ensureReviewerWorktree(projectRoot string, bb *db.Blackboard, taskID, agent
 	}
 
 	// Record recovery in history.
-	if modErr := bb.Modify(func(s *models.State) error {
+	if modErr := bb.ModifyOp("ensure_reviewer_worktree", func(s *models.State) error {
 		t := s.FindTask(taskID)
 		if t != nil {
 			agentPtr := agentID
@@ -149,7 +149,7 @@ func ensureReviewerWorktree(projectRoot string, bb *db.Blackboard, taskID, agent
 // transition validation. This handles the exceptional case where a reviewer
 // task's worktree is unrecoverable and no valid transition path to BLOCKED exists.
 func blockReviewerTask(bb *db.Blackboard, taskID, agentID, reason string) {
-	if err := bb.Modify(func(state *models.State) error {
+	if err := bb.ModifyOp("block_reviewer_task", func(state *models.State) error {
 		t := state.FindTask(taskID)
 		if t == nil {
 			return nil
@@ -171,6 +171,7 @@ func blockReviewerTask(bb *db.Blackboard, taskID, agentID, reason string) {
 		// Clear reviewer claim.
 		t.ReviewingBy = nil
 		t.ReviewLeaseExpires = nil
+		state.ReleaseClaimRecord(t.ID, models.ClaimKindReviewer)
 
 		now := time.Now().UTC()
 		t.History = append(t.History, models.TaskHistoryEntry{

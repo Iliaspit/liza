@@ -176,7 +176,7 @@ func RecoverTaskWithOptions(projectRoot, taskID string, reason string, opts Reco
 	}
 
 	now := time.Now().UTC()
-	err = bb.Modify(func(state *models.State) error {
+	err = bb.ModifyOp("recover_task", func(state *models.State) error {
 		task := state.FindTask(taskID)
 		if task == nil {
 			return nil
@@ -203,6 +203,7 @@ func RecoverTaskWithOptions(projectRoot, taskID string, reason string, opts Reco
 			task.Status = statuses.Initial
 			task.ReviewingBy = nil
 			task.ReviewLeaseExpires = nil
+			releaseReviewerClaimRecord(state, taskID)
 			clearAttemptState(task, attemptStateInitialReset)
 			result.Warnings = append(result.Warnings,
 				fmt.Sprintf("reset %s to %s: missing review_commit", taskID, statuses.Initial))
@@ -465,7 +466,7 @@ func recoverTaskFreshReset(bb *db.Blackboard, gitWrapper *git.Git, taskID, reaso
 	baseCommit := ""
 	var freshCreateErr error
 	now := time.Now().UTC()
-	err = bb.Modify(func(state *models.State) error {
+	err = bb.ModifyOp("recover_task", func(state *models.State) error {
 		task := state.FindTask(taskID)
 		if task == nil {
 			return fmt.Errorf("task %s not found in state", taskID)
@@ -501,6 +502,8 @@ func recoverTaskFreshReset(bb *db.Blackboard, gitWrapper *git.Git, taskID, reaso
 		task.LeaseExpires = nil
 		task.ReviewingBy = nil
 		task.ReviewLeaseExpires = nil
+		releaseDoerClaimRecord(state, task.ID)
+		releaseReviewerClaimRecord(state, task.ID)
 		task.RejectionReason = nil
 		if outcome.ClearBlocked {
 			task.BlockedReason = nil
@@ -560,6 +563,8 @@ func recoverTaskMarkFreshCreationFailure(state *models.State, task *models.Task,
 	task.LeaseExpires = nil
 	task.ReviewingBy = nil
 	task.ReviewLeaseExpires = nil
+	releaseDoerClaimRecord(state, task.ID)
+	releaseReviewerClaimRecord(state, task.ID)
 	task.RejectionReason = nil
 	task.RepairRequest = nil
 	task.Worktree = nil
@@ -672,6 +677,7 @@ func releaseRecoverTaskAgent(state *models.State, task *models.Task, agentID str
 	}
 	task.AssignedTo = nil
 	task.LeaseExpires = nil
+	releaseDoerClaimRecord(state, task.ID)
 }
 
 func releaseRecoverTaskReviewerAgent(state *models.State, task *models.Task, agentID string) {
@@ -682,6 +688,7 @@ func releaseRecoverTaskReviewerAgent(state *models.State, task *models.Task, age
 	}
 	task.ReviewingBy = nil
 	task.ReviewLeaseExpires = nil
+	releaseReviewerClaimRecord(state, task.ID)
 }
 
 func recoverTaskNeedsReviewCommitReset(task *models.Task, statuses recoverTaskStatusSet) bool {

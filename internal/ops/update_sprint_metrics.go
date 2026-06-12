@@ -27,7 +27,7 @@ func UpdateSprintMetrics(projectRoot string) (models.SprintMetrics, error) {
 	}
 	metrics := state.ComputeSprintMetricsWithTerminalStates(terminalStates)
 
-	err = blackboard.Modify(func(s *models.State) error {
+	err = blackboard.ModifyOp("update_sprint_metrics", func(s *models.State) error {
 		s.Sprint.Metrics = metrics
 		return nil
 	})

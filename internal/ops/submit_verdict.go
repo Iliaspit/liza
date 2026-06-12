@@ -213,7 +213,7 @@ func SubmitVerdict(projectRoot, taskID, verdict, reason, agentID, impact string)
 		testSubmitVerdictHooks.beforeModify()
 	}
 
-	err = bb.Modify(func(state *models.State) error {
+	err = bb.ModifyOp("submit_verdict", func(state *models.State) error {
 		task := state.FindTask(taskID)
 		if task == nil {
 			return &errors.NotFoundError{Entity: "task", ID: taskID}
@@ -345,6 +345,7 @@ func SubmitVerdict(projectRoot, taskID, verdict, reason, agentID, impact string)
 						}
 					}
 					task.AssignedTo = nil
+					releaseDoerClaimRecord(state, taskID)
 
 					task.History = append(task.History, models.TaskHistoryEntry{
 						Time:   now,
@@ -362,6 +363,7 @@ func SubmitVerdict(projectRoot, taskID, verdict, reason, agentID, impact string)
 
 		task.ReviewingBy = nil
 		task.ReviewLeaseExpires = nil
+		releaseReviewerClaimRecord(state, taskID)
 		state.ReleaseAgent(agentID)
 
 		return nil
@@ -423,7 +425,7 @@ func recordSubmitVerdictFailureAnomaly(bb *db.Blackboard, taskID, agentID, verdi
 		return nil
 	}
 
-	return bb.Modify(func(state *models.State) error {
+	return bb.ModifyOp("submit_verdict_failure_anomaly", func(state *models.State) error {
 		state.Anomalies = append(state.Anomalies, models.Anomaly{
 			Timestamp: time.Now().UTC(),
 			Task:      taskID,
@@ -483,7 +485,7 @@ func isReviewingStatus(status, expectedReviewingStatus, expectedReviewing2Status
 
 func recordStaleVerdictAnomaly(bb *db.Blackboard, taskID, agentID, verdict, reason, impact string, expectedReviewingStatus, expectedReviewing2Status models.TaskStatus) error {
 	now := time.Now().UTC()
-	return bb.Modify(func(state *models.State) error {
+	return bb.ModifyOp("stale_verdict_anomaly", func(state *models.State) error {
 		task := state.FindTask(taskID)
 		if task == nil {
 			return &errors.NotFoundError{Entity: "task", ID: taskID}

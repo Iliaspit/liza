@@ -163,7 +163,7 @@ func DeleteTask(projectRoot, taskID string, force, deleteWorktree bool, reason s
 	}
 
 	// Atomic state update
-	err = bb.Modify(func(state *models.State) error {
+	err = bb.ModifyOp("delete_task", func(state *models.State) error {
 		taskIndex := state.FindTaskIndex(taskID)
 		if taskIndex == -1 {
 			return &errors.NotFoundError{Entity: "task", ID: taskID}
@@ -194,6 +194,10 @@ func DeleteTask(projectRoot, taskID string, force, deleteWorktree bool, reason s
 
 		// Remove task from state.Tasks slice
 		state.Tasks = append(state.Tasks[:taskIndex], state.Tasks[taskIndex+1:]...)
+
+		// Remove claim records — claims must not reference a deleted task.
+		releaseDoerClaimRecord(state, taskID)
+		releaseReviewerClaimRecord(state, taskID)
 
 		// Remove task from sprint scope
 		state.Sprint.Scope.Planned = slices.DeleteFunc(state.Sprint.Scope.Planned, func(id string) bool { return id == taskID })

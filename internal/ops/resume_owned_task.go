@@ -114,7 +114,7 @@ func resumeOwnedCandidate(bb *db.Blackboard, taskID, agentID string, pr models.P
 	now := time.Now().UTC()
 	var worktree string
 
-	err := bb.Modify(func(state *models.State) error {
+	err := bb.ModifyOp("resume_owned_task", func(state *models.State) error {
 		task := state.FindTask(taskID)
 		if task == nil {
 			return &lizaerrors.NotFoundError{Entity: "task", ID: taskID}
@@ -167,7 +167,7 @@ func blockOwnedResumeCandidate(
 	blocked := false
 	questions := []string{"Repair or recreate the task worktree, then unblock the task."}
 
-	err := bb.Modify(func(state *models.State) error {
+	err := bb.ModifyOp("block_owned_resume_candidate", func(state *models.State) error {
 		task := state.FindTask(taskID)
 		if task == nil {
 			return &lizaerrors.NotFoundError{Entity: "task", ID: taskID}
@@ -183,6 +183,7 @@ func blockOwnedResumeCandidate(
 		task.BlockedQuestions = questions
 		task.AssignedTo = nil
 		task.LeaseExpires = nil
+		releaseDoerClaimRecord(state, taskID)
 		releaseAgentsForTask(state, taskID)
 		task.History = append(task.History, models.TaskHistoryEntry{
 			Time:   now,

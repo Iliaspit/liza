@@ -1118,68 +1118,91 @@ func TestExit42RestartTracker_BlocksNonCoderRoles(t *testing.T) {
 	}
 }
 
-func TestCrashRestartTracker_BlocksAfterThreshold(t *testing.T) {
-	tracker := newCrashRestartTracker()
+func TestProgressLedger_CrashClass_BlocksAfterThreshold(t *testing.T) {
+	ledger := newProgressLedger()
 	threshold := 3
 
 	// Same signature (no progress) — count accumulates.
 	for i := 1; i <= threshold; i++ {
-		count := tracker.Increment("task-1", "same-sig")
+		count := ledger.Observe("task-1", classCrash, "same-sig")
 		if count != i {
-			t.Fatalf("Increment() = %d, want %d", count, i)
+			t.Fatalf("Observe() = %d, want %d", count, i)
 		}
 	}
 
 	// Over threshold.
-	count := tracker.Increment("task-1", "same-sig")
+	count := ledger.Observe("task-1", classCrash, "same-sig")
 	if count != threshold+1 {
-		t.Fatalf("Increment() = %d, want %d", count, threshold+1)
+		t.Fatalf("Observe() = %d, want %d", count, threshold+1)
 	}
 
 	// Reset clears.
-	tracker.reset("task-1")
-	count = tracker.Increment("task-1", "same-sig")
+	ledger.Reset("task-1", classCrash)
+	count = ledger.Observe("task-1", classCrash, "same-sig")
 	if count != 1 {
-		t.Fatalf("after reset, Increment() = %d, want 1", count)
+		t.Fatalf("after reset, Observe() = %d, want 1", count)
 	}
 }
 
-func TestCrashRestartTracker_ResetsOnProgress(t *testing.T) {
-	tracker := newCrashRestartTracker()
+func TestProgressLedger_CrashClass_ResetsOnProgress(t *testing.T) {
+	ledger := newProgressLedger()
 
-	tracker.Increment("task-1", "sig-a")
-	tracker.Increment("task-1", "sig-a")
+	ledger.Observe("task-1", classCrash, "sig-a")
+	ledger.Observe("task-1", classCrash, "sig-a")
 
 	// Signature changes — progress detected, counter resets.
-	count := tracker.Increment("task-1", "sig-b")
+	count := ledger.Observe("task-1", classCrash, "sig-b")
 	if count != 1 {
-		t.Fatalf("Increment() after progress = %d, want 1", count)
+		t.Fatalf("Observe() after progress = %d, want 1", count)
 	}
 }
 
-func TestSpinningTracker_BlocksAfterThreshold(t *testing.T) {
-	tracker := newSpinningTracker()
+func TestProgressLedger_SpinClass_CountsConsecutiveExecutions(t *testing.T) {
+	ledger := newProgressLedger()
 	threshold := 5
 
 	for i := 1; i <= threshold+1; i++ {
-		count := tracker.Track("task-1", "same-sig")
+		count := ledger.Observe("task-1", classSpin, "same-sig")
 		if count != i {
-			t.Fatalf("Track() = %d, want %d", count, i)
+			t.Fatalf("Observe() = %d, want %d", count, i)
 		}
 	}
 }
 
-func TestSpinningTracker_ResetsOnProgress(t *testing.T) {
-	tracker := newSpinningTracker()
+func TestProgressLedger_SpinClass_ResetsOnProgress(t *testing.T) {
+	ledger := newProgressLedger()
 
-	tracker.Track("task-1", "sig-a")
-	tracker.Track("task-1", "sig-a")
-	tracker.Track("task-1", "sig-a")
+	ledger.Observe("task-1", classSpin, "sig-a")
+	ledger.Observe("task-1", classSpin, "sig-a")
+	ledger.Observe("task-1", classSpin, "sig-a")
 
 	// Progress detected.
-	count := tracker.Track("task-1", "sig-b")
+	count := ledger.Observe("task-1", classSpin, "sig-b")
 	if count != 1 {
-		t.Fatalf("Track() after progress = %d, want 1", count)
+		t.Fatalf("Observe() after progress = %d, want 1", count)
+	}
+}
+
+func TestProgressLedger_ClassesAreIndependent(t *testing.T) {
+	ledger := newProgressLedger()
+
+	ledger.Observe("task-1", classSpin, "sig-a")
+	ledger.Observe("task-1", classSpin, "sig-a")
+	ledger.Observe("task-1", classCrash, "sig-a")
+
+	// Resetting one class must not disturb another.
+	ledger.Reset("task-1", classCrash)
+	if count := ledger.Observe("task-1", classSpin, "sig-a"); count != 3 {
+		t.Fatalf("spin count after crash reset = %d, want 3", count)
+	}
+	if count := ledger.Observe("task-1", classCrash, "sig-a"); count != 1 {
+		t.Fatalf("crash count after reset = %d, want 1", count)
+	}
+
+	// Reset with no classes clears everything for the subject.
+	ledger.Reset("task-1")
+	if count := ledger.Observe("task-1", classSpin, "sig-a"); count != 1 {
+		t.Fatalf("spin count after full reset = %d, want 1", count)
 	}
 }
 
@@ -1244,20 +1267,20 @@ func TestDetectObservedRuntimeFailure_CodexCommandEventAggregatedOutput(t *testi
 	}
 }
 
-func TestRuntimeFailureTracker_ResetsOnDifferentFailure(t *testing.T) {
-	tracker := newRuntimeFailureTracker()
+func TestProgressLedger_RuntimeFailureClass_ResetsOnDifferentFailure(t *testing.T) {
+	ledger := newProgressLedger()
 
 	first := observedRuntimeFailure{Command: "submit-verdict", Code: "internal"}
 	second := observedRuntimeFailure{Command: "submit-verdict", Code: "permission_denied"}
 
-	if count := tracker.Track("task-1", first); count != 1 {
-		t.Fatalf("first Track() = %d, want 1", count)
+	if count := ledger.Observe("task-1", classRuntimeFailure, first.key()); count != 1 {
+		t.Fatalf("first Observe() = %d, want 1", count)
 	}
-	if count := tracker.Track("task-1", first); count != 2 {
-		t.Fatalf("second Track() = %d, want 2", count)
+	if count := ledger.Observe("task-1", classRuntimeFailure, first.key()); count != 2 {
+		t.Fatalf("second Observe() = %d, want 2", count)
 	}
-	if count := tracker.Track("task-1", second); count != 1 {
-		t.Fatalf("Track() after different failure = %d, want 1", count)
+	if count := ledger.Observe("task-1", classRuntimeFailure, second.key()); count != 1 {
+		t.Fatalf("Observe() after different failure = %d, want 1", count)
 	}
 }
 
@@ -1286,24 +1309,23 @@ func TestObservedRuntimeFailureRetry_BlocksWithoutGenericSpin(t *testing.T) {
 		StatePath:   statePath,
 		CLIName:     "codex",
 	}
-	spinTracker := newSpinningTracker()
-	runtimeTracker := newRuntimeFailureTracker()
+	ledger := newProgressLedger()
 	failure := observedRuntimeFailure{Command: "submit-verdict", Code: "internal"}
 	signature := "same-task-state"
 
 	for i := 1; i <= state.Config.SpinningRestartThreshold; i++ {
-		if count := spinTracker.Track(taskID, signature); count != 1 {
+		if count := ledger.Observe(taskID, classSpin, signature); count != 1 {
 			t.Fatalf("spin count before runtime failure %d = %d, want 1", i, count)
 		}
-		if blocked := handleObservedRuntimeFailureRetry(bb, config, taskID, state.Config, failure, runtimeTracker, spinTracker); blocked {
+		if blocked := handleObservedRuntimeFailureRetry(bb, config, taskID, state.Config, failure, ledger); blocked {
 			t.Fatalf("runtime failure attempt %d blocked, want below threshold", i)
 		}
 	}
 
-	if count := spinTracker.Track(taskID, signature); count != 1 {
+	if count := ledger.Observe(taskID, classSpin, signature); count != 1 {
 		t.Fatalf("spin count before blocking runtime failure = %d, want 1", count)
 	}
-	if blocked := handleObservedRuntimeFailureRetry(bb, config, taskID, state.Config, failure, runtimeTracker, spinTracker); !blocked {
+	if blocked := handleObservedRuntimeFailureRetry(bb, config, taskID, state.Config, failure, ledger); !blocked {
 		t.Fatal("runtime failure over threshold did not block task")
 	}
 

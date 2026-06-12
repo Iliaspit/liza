@@ -54,7 +54,7 @@ func Replan(projectRoot string, input *ReplanInput) (*ReplanResult, error) {
 
 	var result ReplanResult
 
-	err = bb.Modify(func(state *models.State) error {
+	err = bb.ModifyOp("replan", func(state *models.State) error {
 		// Resolve target task
 		task, resolveErr := resolveReplanTarget(state, input.TaskID, planningPairs)
 		if resolveErr != nil {

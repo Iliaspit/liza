@@ -251,7 +251,7 @@ func checkpointCmd(projectRoot string) tea.Cmd {
 func toggleAutoResumeCmd(bb *db.Blackboard) tea.Cmd {
 	return func() tea.Msg {
 		var newVal bool
-		err := bb.Modify(func(s *models.State) error {
+		err := bb.ModifyOp("toggle_auto_resume", func(s *models.State) error {
 			s.Config.AutoResume = !s.Config.AutoResume
 			newVal = s.Config.AutoResume
 			return nil

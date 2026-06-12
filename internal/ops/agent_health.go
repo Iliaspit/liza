@@ -56,7 +56,7 @@ func MarkAgentDegraded(input MarkAgentDegradedInput) error {
 
 	bb := db.For(paths.New(input.ProjectRoot).StatePath())
 	now := time.Now().UTC()
-	return bb.Modify(func(state *models.State) error {
+	return bb.ModifyOp("mark_agent_degraded", func(state *models.State) error {
 		agent, hasAgent := state.Agents[input.AgentID]
 		if state.AgentHealth == nil {
 			state.AgentHealth = make(map[string]models.AgentHealth)
@@ -117,7 +117,7 @@ func ClearAgentDegraded(projectRoot, agentID string) error {
 		return &PreconditionError{Reason: "agent ID is required"}
 	}
 	bb := db.For(paths.New(projectRoot).StatePath())
-	return bb.Modify(func(state *models.State) error {
+	return bb.ModifyOp("clear_agent_degraded", func(state *models.State) error {
 		if state.AgentHealth == nil {
 			return nil
 		}

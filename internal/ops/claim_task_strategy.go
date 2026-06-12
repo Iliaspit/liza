@@ -21,6 +21,10 @@ type claimContext struct {
 	previousAssignee  string
 	baseCommit        string
 	leaseExpires      time.Time
+	// worktreeRecreated is set after the worktree phase when the strategy
+	// rebuilt the worktree from the current integration HEAD (rather than
+	// preserving an existing one).
+	worktreeRecreated bool
 }
 
 type claimStrategy interface {
@@ -219,7 +223,18 @@ func (rejectedClaimStrategy) shouldRunPostWorktreeCmd(claimWorktreePhaseResult) 
 	return true
 }
 
-func (rejectedClaimStrategy) mutateTask(_ *models.Task, _ *claimContext) {}
+func (rejectedClaimStrategy) mutateTask(task *models.Task, ctx *claimContext) {
+	// Preserved worktree (same-coder reclaim): the original worktree and
+	// base_commit still describe the work — leave them untouched. Recreated
+	// worktree (reassignment or missing/orphaned state): the new worktree
+	// branches from the current integration HEAD, so the task metadata must
+	// follow or reviewers would diff against a stale base.
+	if !ctx.worktreeRecreated {
+		return
+	}
+	task.Worktree = &ctx.worktreeRel
+	task.BaseCommit = &ctx.baseCommit
+}
 
 func (rejectedClaimStrategy) historyEntry(now time.Time, ctx *claimContext) models.TaskHistoryEntry {
 	agentPtr := &ctx.agentID

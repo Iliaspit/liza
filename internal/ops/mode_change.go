@@ -43,7 +43,7 @@ func changeMode(projectRoot, reason, changedBy string, target models.SystemMode)
 	timestamp := time.Now()
 	var previousMode models.SystemMode
 
-	err := blackboard.Modify(func(s *models.State) error {
+	err := blackboard.ModifyOp("mode_change", func(s *models.State) error {
 		previousMode = s.Config.Mode
 		if previousMode == "" {
 			previousMode = models.SystemModeRunning
@@ -182,7 +182,7 @@ func Resume(projectRoot, changedBy string) (*ResumeResult, error) {
 	var advanceResult *AdvanceSprintResult
 	runTransitionsAfterResume := false
 
-	err := blackboard.Modify(func(s *models.State) error {
+	err := blackboard.ModifyOp("resume", func(s *models.State) error {
 		currentMode := s.Config.Mode
 		if currentMode == "" {
 			currentMode = models.SystemModeRunning
@@ -259,7 +259,7 @@ func Resume(projectRoot, changedBy string) (*ResumeResult, error) {
 func clearTransitionCheckpointTrigger(projectRoot string) error {
 	statePath := paths.New(projectRoot).StatePath()
 	blackboard := db.For(statePath)
-	return blackboard.Modify(func(s *models.State) error {
+	return blackboard.ModifyOp("clear_transition_checkpoint", func(s *models.State) error {
 		if models.IsTransitionCheckpointTrigger(s.Sprint.CheckpointTrigger) {
 			s.Sprint.CheckpointTrigger = ""
 		}

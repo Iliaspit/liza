@@ -10,7 +10,7 @@ import (
 func SetAutoResume(projectRoot string, enabled bool) error {
 	lp := paths.New(projectRoot)
 	bb := db.For(lp.StatePath())
-	return bb.Modify(func(s *models.State) error {
+	return bb.ModifyOp("set_auto_resume", func(s *models.State) error {
 		s.Config.AutoResume = enabled
 		return nil
 	})

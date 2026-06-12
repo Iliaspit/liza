@@ -49,7 +49,7 @@ func CancelTask(projectRoot, taskID, reason, agentID string) (*CancelResult, err
 	originalStatus := task.Status
 
 	// Atomic State Update
-	err = bb.Modify(func(state *models.State) error {
+	err = bb.ModifyOp("cancel_task", func(state *models.State) error {
 		currentTask := state.FindTask(taskID)
 		if currentTask == nil {
 			return &errors.NotFoundError{Entity: "task", ID: taskID}
@@ -68,6 +68,8 @@ func CancelTask(projectRoot, taskID, reason, agentID string) (*CancelResult, err
 		currentTask.LeaseExpires = nil
 		currentTask.ReviewingBy = nil
 		currentTask.ReviewLeaseExpires = nil
+		releaseDoerClaimRecord(state, taskID)
+		releaseReviewerClaimRecord(state, taskID)
 		currentTask.Worktree = nil
 		clearAttemptState(currentTask, attemptStateRetire)
 

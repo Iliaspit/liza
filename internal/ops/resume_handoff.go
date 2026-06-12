@@ -70,7 +70,7 @@ func resumeHandoffWithState(bb *db.Blackboard, state *models.State, agentID stri
 		id := task.ID
 		wt := *task.Worktree
 
-		err := bb.Modify(func(s *models.State) error {
+		err := bb.ModifyOp("resume_handoff", func(s *models.State) error {
 			t := s.FindTask(id)
 			if t == nil {
 				return &lizaerrors.NotFoundError{Entity: "task", ID: id}

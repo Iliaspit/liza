@@ -135,7 +135,7 @@ func UnblockTaskWithOptions(projectRoot, taskID, reason, agentID string, opts Un
 	}
 
 	var result UnblockTaskResult
-	err = bb.Modify(func(state *models.State) error {
+	err = bb.ModifyOp("unblock_task", func(state *models.State) error {
 		task := state.FindTask(taskID)
 		if task == nil {
 			return &errors.NotFoundError{Entity: "task", ID: taskID}
@@ -217,6 +217,7 @@ func UnblockTaskWithOptions(projectRoot, taskID, reason, agentID string, opts Un
 			historyExtra["assigned_to"] = opts.AssignTo
 			task.AssignedTo = &opts.AssignTo
 			task.LeaseExpires = &leaseExpires
+			recordDoerClaim(state, taskID, opts.AssignTo, leaseExpires)
 			agent.Status = models.AgentStatusWorking
 			agent.CurrentTask = &taskID
 			agent.LeaseExpires = &leaseExpires
@@ -241,6 +242,7 @@ func UnblockTaskWithOptions(projectRoot, taskID, reason, agentID string, opts Un
 			task.Status = targetStatus
 			task.AssignedTo = nil
 			task.LeaseExpires = nil
+			releaseDoerClaimRecord(state, taskID)
 		}
 		task.BlockedReason = nil
 		task.BlockedQuestions = nil
@@ -444,7 +446,7 @@ func markUnblockRebaseConflict(bb *db.Blackboard, taskID, agentID string, snapsh
 		"stdout_stderr_excerpt": excerpt,
 		"recovery_hint":         "resolve the unblock-time rebase conflict in the task worktree, then retry unblock-task",
 	}
-	return bb.Modify(func(state *models.State) error {
+	return bb.ModifyOp("unblock_rebase_conflict", func(state *models.State) error {
 		task := state.FindTask(taskID)
 		if task == nil {
 			return &errors.NotFoundError{Entity: "task", ID: taskID}

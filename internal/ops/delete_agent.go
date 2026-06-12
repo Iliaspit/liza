@@ -261,7 +261,7 @@ func DeleteAgent(projectRoot, agentID string, force, allowRunningPID bool, reaso
 		}
 	}
 
-	err = bb.Modify(func(state *models.State) error {
+	err = bb.ModifyOp("delete_agent", func(state *models.State) error {
 		agent, exists := state.Agents[agentID]
 		if !exists {
 			return &errors.NotFoundError{Entity: "agent", ID: agentID}

@@ -80,7 +80,7 @@ func SetTaskOutput(projectRoot string, input *SetTaskOutputInput) error {
 		}
 	}
 
-	return bb.Modify(func(state *models.State) error {
+	return bb.ModifyOp("set_task_output", func(state *models.State) error {
 		task := state.FindTask(input.TaskID)
 		if task == nil {
 			return fmt.Errorf("task %s not found", input.TaskID)

@@ -110,7 +110,7 @@ func UpdateReviewCommit(projectRoot, taskID, changedBy string) (*UpdateReviewCom
 	now := time.Now().UTC()
 	reviewerReleased := false
 
-	err = bb.Modify(func(state *models.State) error {
+	err = bb.ModifyOp("update_review_commit", func(state *models.State) error {
 		task := state.FindTask(taskID)
 		if task == nil {
 			return &errors.NotFoundError{Entity: "task", ID: taskID}
@@ -139,6 +139,7 @@ func UpdateReviewCommit(projectRoot, taskID, changedBy string) (*UpdateReviewCom
 			}
 			task.ReviewingBy = nil
 			task.ReviewLeaseExpires = nil
+			releaseReviewerClaimRecord(state, taskID)
 			reviewerReleased = true
 
 			if err := task.TransitionWith(submittedStatus, pipelineTransitions); err != nil {

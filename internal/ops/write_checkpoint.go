@@ -67,7 +67,7 @@ func WriteCheckpoint(projectRoot string, input *WriteCheckpointInput) error {
 
 	now := time.Now().UTC()
 
-	return bb.Modify(func(state *models.State) error {
+	return bb.ModifyOp("write_checkpoint", func(state *models.State) error {
 		task := state.FindTask(input.TaskID)
 		if task == nil {
 			return fmt.Errorf("task %s not found", input.TaskID)

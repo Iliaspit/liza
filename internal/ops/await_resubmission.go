@@ -234,7 +234,7 @@ func checkLastRejectingReviewer(task *models.Task, agentID string) error {
 // the task, and sets the agent's status to WAITING with CurrentTask.
 func acquireReviewOwnership(bb *db.Blackboard, agentID, taskID string, timeout time.Duration) error {
 	leaseExpiry := time.Now().Add(timeout + reviewOwnershipLeaseMargin)
-	return bb.Modify(func(s *models.State) error {
+	return bb.ModifyOp("acquire_review_ownership", func(s *models.State) error {
 		agent, ok := s.Agents[agentID]
 		if !ok {
 			return &errors.NotFoundError{Entity: "agent", ID: agentID}
@@ -246,6 +246,7 @@ func acquireReviewOwnership(bb *db.Blackboard, agentID, taskID string, timeout t
 
 		task.ReviewingBy = &agentID
 		task.ReviewLeaseExpires = &leaseExpiry
+		recordReviewerClaim(s, taskID, agentID, leaseExpiry)
 		agent.Status = models.AgentStatusWaiting
 		agent.CurrentTask = &taskID
 		s.Agents[agentID] = agent
@@ -257,7 +258,7 @@ func acquireReviewOwnership(bb *db.Blackboard, agentID, taskID string, timeout t
 // and the agent. Agent status is intentionally left unchanged — the
 // supervisor's resetAgentAfterExit handles status transitions.
 func releaseReviewOwnership(bb *db.Blackboard, agentID, taskID string) error {
-	return bb.Modify(func(s *models.State) error {
+	return bb.ModifyOp("release_review_ownership", func(s *models.State) error {
 		if agent, ok := s.Agents[agentID]; ok {
 			agent.CurrentTask = nil
 			s.Agents[agentID] = agent
@@ -266,6 +267,7 @@ func releaseReviewOwnership(bb *db.Blackboard, agentID, taskID string) error {
 		if task != nil {
 			task.ReviewingBy = nil
 			task.ReviewLeaseExpires = nil
+			releaseReviewerClaimRecord(s, taskID)
 		}
 		return nil
 	})
@@ -336,7 +338,7 @@ func reclaimForReview(projectRoot string, bb *db.Blackboard, taskID, agentID str
 	var reviewCycle int
 	var reviewBoundaryErr error
 
-	modErr := bb.Modify(func(s *models.State) error {
+	modErr := bb.ModifyOp("reclaim_for_review", func(s *models.State) error {
 		task := s.FindTask(taskID)
 		if task == nil {
 			return &errors.NotFoundError{Entity: "task", ID: taskID}
@@ -357,6 +359,7 @@ func reclaimForReview(projectRoot string, bb *db.Blackboard, taskID, agentID str
 
 		task.ReviewLeaseExpires = &freshLease
 		// ReviewingBy stays set from acquireReviewOwnership.
+		recordReviewerClaim(s, taskID, agentID, freshLease)
 
 		if task.ReviewCommit != nil {
 			reviewCommit = *task.ReviewCommit

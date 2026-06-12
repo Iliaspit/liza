@@ -297,6 +297,7 @@ func completeClaimTaskAfterValidation(
 	}
 	worktreeCreated := worktreePhase.created
 	worktreeDeleted := worktreePhase.deleted
+	claimCtx.worktreeRecreated = worktreePhase.created
 
 	var envFileWarnings []string
 	if copyWorktreeEnvFiles {
@@ -340,7 +341,7 @@ func completeClaimTaskAfterValidation(
 		testClaimTaskHooks.beforePhase3Modify()
 	}
 
-	err = bb.Modify(func(state *models.State) error {
+	err = bb.ModifyOp("claim_task", func(state *models.State) error {
 		// Re-check task exists and status hasn't changed
 		task := state.FindTask(taskID)
 		if task == nil {
@@ -383,6 +384,7 @@ func completeClaimTaskAfterValidation(
 		}
 		task.AssignedTo = &agentID
 		task.LeaseExpires = &leaseExpires
+		recordDoerClaim(state, taskID, agentID, leaseExpires)
 
 		// Increment iteration (0 -> 1 on first claim, then 2, 3, etc.)
 		task.Iteration++
@@ -673,7 +675,7 @@ func enforceBlockedEscalation(
 ) error {
 	now := time.Now().UTC()
 
-	return bb.Modify(func(state *models.State) error {
+	return bb.ModifyOp("blocked_escalation", func(state *models.State) error {
 		task := state.FindTask(taskID)
 		if task == nil {
 			return &errors.NotFoundError{Entity: "task", ID: taskID}
@@ -713,6 +715,7 @@ func enforceBlockedEscalation(
 			}
 		}
 		task.AssignedTo = nil
+		releaseDoerClaimRecord(state, task.ID)
 
 		agentPtr := &agentID
 		reasonPtr := &blockedReason

@@ -39,7 +39,7 @@ func Analyze(projectRoot string) (*AnalyzeResult, error) {
 	result, consideredAnomalies, suppressedCount := analysis.DetectUnacknowledgedPatterns(state)
 
 	if !result.Triggered {
-		err := blackboard.Modify(func(s *models.State) error {
+		err := blackboard.ModifyOp("analyze", func(s *models.State) error {
 			s.CircuitBreaker.LastCheck = timestamp
 			s.CircuitBreaker.Status = "OK"
 			s.CircuitBreaker.CurrentTrigger = nil
@@ -76,7 +76,7 @@ func Analyze(projectRoot string) (*AnalyzeResult, error) {
 		return nil, fmt.Errorf("failed to write report: %w", err)
 	}
 
-	err = blackboard.Modify(func(s *models.State) error {
+	err = blackboard.ModifyOp("analyze", func(s *models.State) error {
 		s.CircuitBreaker.LastCheck = timestamp
 		s.CircuitBreaker.Status = "TRIGGERED"
 		s.CircuitBreaker.CurrentTrigger = &models.CircuitBreakerTrigger{

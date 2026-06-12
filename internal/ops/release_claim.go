@@ -23,13 +23,19 @@ type ReleaseClaimResult struct {
 
 // claimRelease describes the field access pattern for one role's claim on a task.
 type claimRelease struct {
-	hasClaimFn      func(*models.Task) bool
-	agentFieldFn    func(*models.Task) *string
-	leaseFieldFn    func(*models.Task) *time.Time
-	activeStatus    models.TaskStatus
-	releasedStatus  models.TaskStatus
-	eventName       string
-	clearFn         func(*models.Task)
+	hasClaimFn     func(*models.Task) bool
+	agentFieldFn   func(*models.Task) *string
+	leaseFieldFn   func(*models.Task) *time.Time
+	activeStatus   models.TaskStatus
+	releasedStatus models.TaskStatus
+	eventName      string
+	// claimKind selects which first-class claim record (state.Claims) is
+	// released alongside the legacy fields (strangler dual-write).
+	claimKind string
+	// clearFn clears the role's claim fields. transitioned reports whether
+	// this release moved the task from activeStatus back to releasedStatus —
+	// attempt-scoped state may only be wiped in that case.
+	clearFn         func(task *models.Task, transitioned bool)
 	missingLeaseMsg string
 	activeLeaseMsg  string
 }
@@ -41,7 +47,8 @@ var reviewerRelease = claimRelease{
 	activeStatus:    models.TaskStatusReviewing,
 	releasedStatus:  models.TaskStatusReadyForReview,
 	eventName:       "review_claim_released",
-	clearFn:         func(t *models.Task) { t.ReviewingBy = nil; t.ReviewLeaseExpires = nil },
+	claimKind:       models.ClaimKindReviewer,
+	clearFn:         func(t *models.Task, _ bool) { t.ReviewingBy = nil; t.ReviewLeaseExpires = nil },
 	missingLeaseMsg: "review lease expires missing for task %s, use --force to clear",
 	activeLeaseMsg:  "review lease still valid until %s, use --force to clear",
 }
@@ -53,9 +60,18 @@ var doerRelease = claimRelease{
 	activeStatus:   models.TaskStatusImplementing,
 	releasedStatus: models.TaskStatusReady,
 	eventName:      "doer_claim_released",
-	clearFn: func(t *models.Task) {
+	claimKind:      models.ClaimKindDoer,
+	clearFn: func(t *models.Task, transitioned bool) {
 		t.AssignedTo = nil
 		t.LeaseExpires = nil
+		if !transitioned {
+			// The task stays in a submitted/reviewing-family status: the
+			// submission (worktree, base_commit, review_commit, output) is
+			// still the artifact under review and must survive the release.
+			// Wiping it here used to strand tasks as submitted-with-nothing-
+			// to-review zombies.
+			return
+		}
 		t.Worktree = nil
 		t.BaseCommit = nil
 		t.Iteration = 0
@@ -177,10 +193,12 @@ func releaseOneClaim(state *models.State, task *models.Task, cfg claimRelease, p
 		}
 	}
 
+	transitioned := false
 	if task.Status == cfg.activeStatus && pipelineTransitions != nil {
 		if err := task.TransitionWith(cfg.releasedStatus, pipelineTransitions); err != nil {
 			return false, err
 		}
+		transitioned = true
 	}
 
 	if agent != nil {
@@ -191,7 +209,10 @@ func releaseOneClaim(state *models.State, task *models.Task, cfg claimRelease, p
 		}
 	}
 
-	cfg.clearFn(task)
+	cfg.clearFn(task, transitioned)
+	if cfg.claimKind != "" {
+		state.ReleaseClaimRecord(task.ID, cfg.claimKind)
+	}
 
 	task.History = append(task.History, models.TaskHistoryEntry{
 		Time:   now,
@@ -237,7 +258,7 @@ func ReleaseClaim(projectRoot, taskID, role string, force bool, reason, agentID 
 	}
 	pipelineTransitions := BuildPipelineTransitions(resolver)
 
-	err := bb.Modify(func(state *models.State) error {
+	err := bb.ModifyOp("release_claim", func(state *models.State) error {
 		task := state.FindTask(taskID)
 		if task == nil {
 			return &errors.NotFoundError{Entity: "task", ID: taskID}

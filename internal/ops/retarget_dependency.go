@@ -67,7 +67,7 @@ func RetargetDependency(projectRoot, taskID, oldDependency string, newDependenci
 	var result RetargetDependencyResult
 	now := time.Now().UTC()
 
-	err = bb.Modify(func(state *models.State) error {
+	err = bb.ModifyOp("retarget_dependency", func(state *models.State) error {
 		task := state.FindTask(taskID)
 		if task == nil {
 			return &errors.NotFoundError{Entity: "task", ID: taskID}

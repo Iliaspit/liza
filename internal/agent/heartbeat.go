@@ -94,13 +94,25 @@ func (h *Heartbeat) beat() error {
 			if task := state.FindTask(*agent.CurrentTask); task != nil {
 				if task.AssignedTo != nil && *task.AssignedTo == h.agentID && task.LeaseExpires != nil {
 					task.LeaseExpires = &newLease
+					renewClaimLease(state, task.ID, models.ClaimKindDoer, h.agentID, newLease)
 				}
 				if task.ReviewingBy != nil && *task.ReviewingBy == h.agentID && task.ReviewLeaseExpires != nil {
 					task.ReviewLeaseExpires = &newLease
+					renewClaimLease(state, task.ID, models.ClaimKindReviewer, h.agentID, newLease)
 				}
 			}
 		}
 
 		return nil
 	})
+}
+
+// renewClaimLease bumps the lease expiry of the matching claim record in
+// lockstep with the legacy task lease fields (strangler dual-write). Old
+// state files have no claims, so a missing claim is simply skipped.
+func renewClaimLease(state *models.State, taskID, kind, agentID string, expires time.Time) {
+	if c := state.FindClaim(taskID, kind); c != nil && c.AgentID == agentID {
+		exp := expires
+		c.ExpiresAt = &exp
+	}
 }

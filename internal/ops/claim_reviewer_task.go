@@ -80,7 +80,7 @@ func ClaimReviewerTask(input ClaimReviewerTaskInput) (*ClaimReviewerTaskResult, 
 	}
 	pr := pb.pr
 
-	err = bb.Modify(func(state *models.State) error {
+	err = bb.ModifyOp("claim_reviewer_task", func(state *models.State) error {
 		claimingAgent, err := requireRegisteredClaimAgent(state, input.AgentID, role)
 		if err != nil {
 			return err
@@ -158,6 +158,7 @@ func ClaimReviewerTask(input ClaimReviewerTaskInput) (*ClaimReviewerTaskResult, 
 			}
 			task.ReviewingBy = &input.AgentID
 			task.ReviewLeaseExpires = &leaseExpires
+			recordReviewerClaim(state, task.ID, input.AgentID, leaseExpires)
 
 			agent := claimingAgent
 			agent.Status = models.AgentStatusReviewing

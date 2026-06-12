@@ -78,7 +78,7 @@ func Handoff(input *HandoffInput) (*HandoffResult, error) {
 		succeeded = []string{input.Summary}
 	}
 
-	err = bb.Modify(func(state *models.State) error {
+	err = bb.ModifyOp("handoff", func(state *models.State) error {
 		task := state.FindTask(input.TaskID)
 		if task == nil {
 			return &errors.NotFoundError{Entity: "task", ID: input.TaskID}

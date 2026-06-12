@@ -75,7 +75,7 @@ func (s *orchestratorStrategy) PreWork(_ context.Context, bb *db.Blackboard, con
 
 	// Clear trigger even if transitions failed — the human approved, so don't
 	// re-checkpoint. Transition errors are logged; retry is manual.
-	if err := bb.Modify(func(s *models.State) error {
+	if err := bb.ModifyOp("clear_checkpoint_trigger", func(s *models.State) error {
 		s.Sprint.CheckpointTrigger = ""
 		return nil
 	}); err != nil {

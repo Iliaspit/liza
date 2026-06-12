@@ -262,6 +262,7 @@ func releaseTaskClaim(state *models.State, task *models.Task, role, agentID stri
 		}
 		task.AssignedTo = nil
 		task.LeaseExpires = nil
+		state.ReleaseClaimRecord(task.ID, models.ClaimKindDoer)
 
 	case "reviewer":
 		if task.ReviewingBy != nil && *task.ReviewingBy == agentID {
@@ -276,6 +277,7 @@ func releaseTaskClaim(state *models.State, task *models.Task, role, agentID stri
 			}
 			task.ReviewingBy = nil
 			task.ReviewLeaseExpires = nil
+			state.ReleaseClaimRecord(task.ID, models.ClaimKindReviewer)
 		}
 
 	default:
@@ -287,6 +289,7 @@ func releaseTaskClaim(state *models.State, task *models.Task, role, agentID stri
 			}
 			task.AssignedTo = nil
 			task.LeaseExpires = nil
+			state.ReleaseClaimRecord(task.ID, models.ClaimKindDoer)
 		} else if task.ReviewingBy != nil && *task.ReviewingBy == agentID {
 			activeReviewing, releasedSubmitted, err := resolveReviewerRelease()
 			if err != nil {
@@ -299,6 +302,7 @@ func releaseTaskClaim(state *models.State, task *models.Task, role, agentID stri
 			}
 			task.ReviewingBy = nil
 			task.ReviewLeaseExpires = nil
+			state.ReleaseClaimRecord(task.ID, models.ClaimKindReviewer)
 		} else {
 			return nil
 		}

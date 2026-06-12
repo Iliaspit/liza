@@ -31,7 +31,7 @@ func RepairInvalidDoerOwnership(statePath, projectRoot, logPath, reason string) 
 	var refusals []string
 	now := time.Now().UTC()
 
-	err = bb.Modify(func(state *models.State) error {
+	err = bb.ModifyOp("repair_doer_ownership", func(state *models.State) error {
 		for i := range state.Tasks {
 			task := &state.Tasks[i]
 
@@ -72,7 +72,7 @@ func RepairInvalidDoerOwnership(statePath, projectRoot, logPath, reason string) 
 			if err := task.TransitionWith(revertStatus, pb.transitions); err != nil {
 				return err
 			}
-			clearDoerClaimFields(task)
+			clearDoerClaimFields(state, task)
 
 			if doerID != "" {
 				if agent, ok := state.Agents[doerID]; ok {
@@ -164,9 +164,10 @@ func invalidActiveDoerOwnershipReason(state *models.State, task *models.Task, pr
 	return models.ActiveDoerOwnershipReason(state, task, doerID, pr)
 }
 
-func clearDoerClaimFields(task *models.Task) {
+func clearDoerClaimFields(state *models.State, task *models.Task) {
 	task.AssignedTo = nil
 	task.LeaseExpires = nil
+	releaseDoerClaimRecord(state, task.ID)
 	task.Worktree = nil
 	task.BaseCommit = nil
 	task.Iteration = 0

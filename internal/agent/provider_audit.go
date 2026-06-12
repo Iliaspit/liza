@@ -77,7 +77,7 @@ func handleProviderAuditDegraded(bb *db.Blackboard, config SupervisorConfig, tas
 	}
 
 	if bb != nil {
-		if err := bb.Modify(func(state *models.State) error {
+		if err := bb.ModifyOp("provider_audit_degraded", func(state *models.State) error {
 			state.Anomalies = append(state.Anomalies, models.Anomaly{
 				Timestamp: time.Now().UTC(),
 				Task:      taskID,

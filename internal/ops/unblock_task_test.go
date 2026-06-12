@@ -25,6 +25,7 @@ func TestUnblockTask_RestoresExecutingStateAndAssignment(t *testing.T) {
 	task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusBlocked, now)
 	task.RolePair = "code-planning-pair"
 	task.Worktree = testhelpers.StringPtr(".worktrees/task-1")
+	task.BaseCommit = testhelpers.StringPtr("abc1234")
 	task.RepairRequest = &models.RepairRequest{
 		Operation:  "restore_git_write_access",
 		Target:     ".git/worktrees/task-1",
@@ -108,6 +109,7 @@ func TestUnblockTask_AllowsAssignToWithoutLiveProcess(t *testing.T) {
 	task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusBlocked, now)
 	task.RolePair = "code-planning-pair"
 	task.Worktree = testhelpers.StringPtr(".worktrees/task-1")
+	task.BaseCommit = testhelpers.StringPtr("abc1234")
 	state.Tasks = []models.Task{task}
 	testhelpers.WriteInitialState(t, stateFile, state)
 
@@ -509,6 +511,7 @@ func TestUnblockTask_RejectsUnmetDependencies(t *testing.T) {
 	task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusBlocked, now)
 	task.RolePair = "code-planning-pair"
 	task.Worktree = testhelpers.StringPtr(".worktrees/task-1")
+	task.BaseCommit = testhelpers.StringPtr("abc1234")
 	task.DependsOn = []string{"dep-1"}
 	dep := testhelpers.BuildTaskByStatus("dep-1", models.TaskStatusImplementing, now)
 	state.Tasks = []models.Task{task, dep}
@@ -538,6 +541,7 @@ func TestUnblockTask_AllowsMergedDependency(t *testing.T) {
 	task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusBlocked, now)
 	task.RolePair = "code-planning-pair"
 	task.Worktree = testhelpers.StringPtr(".worktrees/task-1")
+	task.BaseCommit = testhelpers.StringPtr("abc1234")
 	task.DependsOn = []string{"dep-1"}
 	dep := testhelpers.BuildTaskByStatus("dep-1", models.TaskStatusMerged, now)
 	state.Tasks = []models.Task{task, dep}
@@ -564,6 +568,7 @@ func TestUnblockTask_RejectsUnknownAssignTo(t *testing.T) {
 	task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusBlocked, now)
 	task.RolePair = "code-planning-pair"
 	task.Worktree = testhelpers.StringPtr(".worktrees/task-1")
+	task.BaseCommit = testhelpers.StringPtr("abc1234")
 	state.Tasks = []models.Task{task}
 	testhelpers.WriteInitialState(t, stateFile, state)
 
@@ -587,6 +592,7 @@ func TestUnblockTask_RejectsWrongDoerRole(t *testing.T) {
 	task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusBlocked, now)
 	task.RolePair = "code-planning-pair"
 	task.Worktree = testhelpers.StringPtr(".worktrees/task-1")
+	task.BaseCommit = testhelpers.StringPtr("abc1234")
 	state.Tasks = []models.Task{task}
 	testhelpers.WriteInitialState(t, stateFile, state)
 

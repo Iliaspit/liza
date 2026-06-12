@@ -140,7 +140,7 @@ func markIntegrationFailedWithDiagnostic(
 	if pb != nil {
 		pr = pb.pr
 	}
-	return bb.Modify(func(s *models.State) error {
+	return bb.ModifyOp("integration_failed", func(s *models.State) error {
 		t := s.FindTask(taskID)
 		if t == nil {
 			return &lizaerrors.NotFoundError{Entity: "task", ID: taskID}
@@ -704,7 +704,7 @@ func MergeWorktree(projectRoot, taskID, agentID string, mergeExtra ...map[string
 	// worktree still exists for investigation; reverse order would lose the worktree
 	// while state still says APPROVED)
 	var autoConfiguredPostWorktreeCmd bool
-	err = bb.Modify(func(s *models.State) error {
+	err = bb.ModifyOp("wt_merge", func(s *models.State) error {
 		t := s.FindTask(taskID)
 		if t == nil {
 			return &lizaerrors.NotFoundError{Entity: "task", ID: taskID}

@@ -42,7 +42,7 @@ func AssessHypothesisExhausted(projectRoot, taskID, note, agentID string) (*Asse
 	}
 	pipelineTransitions := BuildPipelineTransitions(resolver)
 
-	err = bb.Modify(func(state *models.State) error {
+	err = bb.ModifyOp("assess_hypothesis_exhausted", func(state *models.State) error {
 		task := state.FindTask(taskID)
 		if task == nil {
 			return &errors.NotFoundError{Entity: "task", ID: taskID}

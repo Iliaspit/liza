@@ -38,32 +38,32 @@ type SupervisorConfig struct {
 
 var waitWhilePausedForSupervisor = waitWhilePaused
 
-type exit42RestartState struct {
-	RestartCount int
-	Signature    string
-}
-
 type exit42RestartOutcome struct {
 	Delay        time.Duration
 	RestartCount int
 	BlockedTask  bool
 }
 
+// exit42RestartTracker layers exit-42 policy (exponential backoff, persisted
+// restart count, blocking the task once the limit is exceeded) on top of the
+// shared progressLedger counting mechanism.
 type exit42RestartTracker struct {
-	byKey map[string]exit42RestartState
+	ledger *progressLedger
 }
 
 func newExit42RestartTracker() *exit42RestartTracker {
-	return &exit42RestartTracker{
-		byKey: make(map[string]exit42RestartState),
-	}
+	return &exit42RestartTracker{ledger: newProgressLedger()}
+}
+
+func newExit42RestartTrackerWithLedger(ledger *progressLedger) *exit42RestartTracker {
+	return &exit42RestartTracker{ledger: ledger}
 }
 
 func (t *exit42RestartTracker) reset(taskID string) {
 	if taskID == "" {
 		return
 	}
-	delete(t.byKey, "task:"+taskID)
+	t.ledger.Reset("task:"+taskID, classExit42)
 }
 
 func (t *exit42RestartTracker) Handle(bb *db.Blackboard, projectRoot, role, taskID, agentID string) (exit42RestartOutcome, error) {
@@ -72,10 +72,8 @@ func (t *exit42RestartTracker) Handle(bb *db.Blackboard, projectRoot, role, task
 		return exit42RestartOutcome{}, fmt.Errorf("read state for exit-42 tracking: %w", err)
 	}
 
-	maxBackoff := effectiveExit42MaxBackoff(state.Config)
-	restartLimit := effectiveExit42RestartLimit(state.Config)
+	restartLimit := thresholdFor(classExit42, state.Config)
 	key := exit42TrackerKey(taskID, role, agentID)
-	prev := t.byKey[key]
 
 	var signature string
 	if taskID != "" {
@@ -85,20 +83,15 @@ func (t *exit42RestartTracker) Handle(bb *db.Blackboard, projectRoot, role, task
 		}
 	}
 
-	if prev.Signature != "" && signature != "" && prev.Signature != signature {
-		prev.RestartCount = 0
-	}
-
-	prev.RestartCount++
-	prev.Signature = signature
+	restartCount := t.ledger.Observe(key, classExit42, signature)
 
 	outcome := exit42RestartOutcome{
-		Delay:        computeExit42BackoffDelay(prev.RestartCount, maxBackoff),
-		RestartCount: prev.RestartCount,
+		Delay:        exit42Backoff(restartCount, state.Config),
+		RestartCount: restartCount,
 	}
 
 	blockedTask := false
-	if err := bb.Modify(func(s *models.State) error {
+	if err := bb.ModifyOp("block_task_supervisor", func(s *models.State) error {
 		if taskID == "" {
 			return nil
 		}
@@ -153,6 +146,8 @@ func (t *exit42RestartTracker) Handle(bb *db.Blackboard, projectRoot, role, task
 		task.LeaseExpires = nil
 		task.ReviewingBy = nil
 		task.ReviewLeaseExpires = nil
+		s.ReleaseClaimRecord(taskID, models.ClaimKindDoer)
+		s.ReleaseClaimRecord(taskID, models.ClaimKindReviewer)
 		task.History = append(task.History, models.TaskHistoryEntry{
 			Time:   now,
 			Event:  models.TaskEventBlocked,
@@ -168,11 +163,8 @@ func (t *exit42RestartTracker) Handle(bb *db.Blackboard, projectRoot, role, task
 	outcome.BlockedTask = blockedTask
 	if blockedTask {
 		outcome.Delay = 0
-		delete(t.byKey, key)
-		return outcome, nil
+		t.ledger.Reset(key, classExit42)
 	}
-
-	t.byKey[key] = prev
 	return outcome, nil
 }
 
@@ -318,7 +310,7 @@ func blockTaskFromSupervisor(bb *db.Blackboard, projectRoot, taskID, agentID, re
 		return
 	}
 
-	if err := bb.Modify(func(s *models.State) error {
+	if err := bb.ModifyOp("block_task_supervisor", func(s *models.State) error {
 		task := s.FindTask(taskID)
 		if task == nil {
 			return nil
@@ -336,6 +328,8 @@ func blockTaskFromSupervisor(bb *db.Blackboard, projectRoot, taskID, agentID, re
 		task.LeaseExpires = nil
 		task.ReviewingBy = nil
 		task.ReviewLeaseExpires = nil
+		s.ReleaseClaimRecord(taskID, models.ClaimKindDoer)
+		s.ReleaseClaimRecord(taskID, models.ClaimKindReviewer)
 		task.History = append(task.History, models.TaskHistoryEntry{
 			Time:   now,
 			Event:  models.TaskEventBlocked,
@@ -358,70 +352,6 @@ func blockTaskFromSupervisor(bb *db.Blackboard, projectRoot, taskID, agentID, re
 	}
 }
 
-// --- Crash restart tracker ---
-
-type crashRestartState struct {
-	Count     int
-	Signature string
-}
-
-type crashRestartTracker struct {
-	byTask map[string]crashRestartState
-}
-
-func newCrashRestartTracker() *crashRestartTracker {
-	return &crashRestartTracker{byTask: make(map[string]crashRestartState)}
-}
-
-func (t *crashRestartTracker) reset(taskID string) {
-	delete(t.byTask, taskID)
-}
-
-// Increment records a crash for the task and returns the new count.
-// Resets the counter if task state has changed (progress detected).
-func (t *crashRestartTracker) Increment(taskID string, currentSignature string) int {
-	prev := t.byTask[taskID]
-	if prev.Signature != "" && currentSignature != "" && prev.Signature != currentSignature {
-		prev.Count = 0
-	}
-	prev.Count++
-	prev.Signature = currentSignature
-	t.byTask[taskID] = prev
-	return prev.Count
-}
-
-// --- Spinning (same-task re-execution) tracker ---
-
-type spinningState struct {
-	Count     int
-	Signature string
-}
-
-type spinningTracker struct {
-	byTask map[string]spinningState
-}
-
-func newSpinningTracker() *spinningTracker {
-	return &spinningTracker{byTask: make(map[string]spinningState)}
-}
-
-// Track records an execution for the task and returns the new count.
-// Resets when task ID changes (caller responsibility) or task state progresses.
-func (t *spinningTracker) Track(taskID string, currentSignature string) int {
-	prev := t.byTask[taskID]
-	if prev.Signature != "" && currentSignature != "" && prev.Signature != currentSignature {
-		prev.Count = 0
-	}
-	prev.Count++
-	prev.Signature = currentSignature
-	t.byTask[taskID] = prev
-	return prev.Count
-}
-
-func (t *spinningTracker) reset(taskID string) {
-	delete(t.byTask, taskID)
-}
-
 const unknownLizaJSONCommand = "liza-json-envelope"
 
 type observedRuntimeFailure struct {
@@ -429,37 +359,10 @@ type observedRuntimeFailure struct {
 	Code    string
 }
 
+// key is the runtime-failure progress signature: a different failing
+// command/code pair counts as progress and restarts the counter.
 func (f observedRuntimeFailure) key() string {
 	return f.Command + "\x00" + f.Code
-}
-
-type runtimeFailureState struct {
-	Count int
-	Key   string
-}
-
-type runtimeFailureTracker struct {
-	byTask map[string]runtimeFailureState
-}
-
-func newRuntimeFailureTracker() *runtimeFailureTracker {
-	return &runtimeFailureTracker{byTask: make(map[string]runtimeFailureState)}
-}
-
-func (t *runtimeFailureTracker) Track(taskID string, failure observedRuntimeFailure) int {
-	prev := t.byTask[taskID]
-	key := failure.key()
-	if prev.Key != "" && prev.Key != key {
-		prev.Count = 0
-	}
-	prev.Count++
-	prev.Key = key
-	t.byTask[taskID] = prev
-	return prev.Count
-}
-
-func (t *runtimeFailureTracker) reset(taskID string) {
-	delete(t.byTask, taskID)
 }
 
 func detectObservedRuntimeFailure(output string) *observedRuntimeFailure {
@@ -568,17 +471,18 @@ func handleObservedRuntimeFailureRetry(
 	taskID string,
 	runtimeConfig models.Config,
 	failure observedRuntimeFailure,
-	runtimeTracker *runtimeFailureTracker,
-	spinTracker *spinningTracker,
+	ledger *progressLedger,
 ) bool {
 	if taskID == "" {
 		return false
 	}
 
-	spinTracker.reset(taskID)
+	// An observed structured failure is an expected-retry situation; it must
+	// not also count toward the generic spin detector.
+	ledger.Reset(taskID, classSpin)
 
-	count := runtimeTracker.Track(taskID, failure)
-	threshold := effectiveSpinningRestartThreshold(runtimeConfig)
+	count := ledger.Observe(taskID, classRuntimeFailure, failure.key())
+	threshold := thresholdFor(classRuntimeFailure, runtimeConfig)
 	if count <= threshold {
 		GetLogger().Warn("Observed structured CLI/runtime failure; suppressing no-progress spin count",
 			"task_id", taskID,
@@ -602,8 +506,7 @@ func handleObservedRuntimeFailureRetry(
 		GetLogger().Warn("Failed to write tool failure retry alert", "error", alertErr)
 	}
 	blockTaskFromSupervisor(bb, config.ProjectRoot, taskID, config.AgentID, reason)
-	runtimeTracker.reset(taskID)
-	spinTracker.reset(taskID)
+	ledger.Reset(taskID, classRuntimeFailure, classSpin)
 	return true
 }
 
@@ -737,11 +640,10 @@ func RunSupervisor(ctx context.Context, config SupervisorConfig) error {
 		config.ExecutionProgressTimeout = effectiveAgentProgressTimeout(state.Config)
 	}
 
-	exit42Tracker := newExit42RestartTracker()
-	crashTracker := newCrashRestartTracker()
-	spinTracker := newSpinningTracker()
-	successNoProgressTracker := newSpinningTracker()
-	runtimeFailureTracker := newRuntimeFailureTracker()
+	// Single non-progress ledger backing every loop-detection class
+	// (exit-42, crash, spin, success-no-progress, runtime-failure).
+	ledger := newProgressLedger()
+	exit42Tracker := newExit42RestartTrackerWithLedger(ledger)
 	readSuccessProgressSnapshot := func(taskID string) (string, bool) {
 		if taskID == "" {
 			return "", false
@@ -855,8 +757,8 @@ func RunSupervisor(ctx context.Context, config SupervisorConfig) error {
 			if task := stateBefore.FindTask(effectiveTask); task != nil {
 				sig = exit42TaskProgressSignature(task)
 			}
-			spinCount := spinTracker.Track(effectiveTask, sig)
-			spinThreshold := effectiveSpinningRestartThreshold(stateBefore.Config)
+			spinCount := ledger.Observe(effectiveTask, classSpin, sig)
+			spinThreshold := thresholdFor(classSpin, stateBefore.Config)
 			if spinCount > spinThreshold {
 				reason := fmt.Sprintf("spinning detected: %d consecutive executions for task %s without progress (threshold=%d)",
 					spinCount, effectiveTask, spinThreshold)
@@ -868,7 +770,7 @@ func RunSupervisor(ctx context.Context, config SupervisorConfig) error {
 					GetLogger().Warn("Failed to write spinning alert", "error", alertErr)
 				}
 				blockTaskFromSupervisor(bb, config.ProjectRoot, effectiveTask, config.AgentID, reason)
-				spinTracker.reset(effectiveTask)
+				ledger.Reset(effectiveTask, classSpin)
 				continue
 			}
 		} else {
@@ -876,8 +778,8 @@ func RunSupervisor(ctx context.Context, config SupervisorConfig) error {
 			// signature. If the orchestrator keeps executing without changing
 			// sprint status, sprint number, or task count, it is spinning.
 			sig := orchestratorProgressSignature(stateBefore)
-			spinCount := spinTracker.Track("orchestrator", sig)
-			spinThreshold := effectiveSpinningRestartThreshold(stateBefore.Config)
+			spinCount := ledger.Observe("orchestrator", classSpin, sig)
+			spinThreshold := thresholdFor(classSpin, stateBefore.Config)
 			if spinCount > spinThreshold {
 				reason := fmt.Sprintf("orchestrator spinning detected: %d consecutive executions without state progress (threshold=%d)",
 					spinCount, spinThreshold)
@@ -903,8 +805,7 @@ func RunSupervisor(ctx context.Context, config SupervisorConfig) error {
 					"task_id", claimedTaskID,
 					"error", err)
 				blockTaskFromSupervisor(bb, config.ProjectRoot, claimedTaskID, config.AgentID, reason)
-				spinTracker.reset(effectiveTask)
-				successNoProgressTracker.reset(effectiveTask)
+				ledger.Reset(effectiveTask, classSpin, classSuccessNoProgress)
 				continue
 			}
 			return fmt.Errorf("failed to build prompt: %w", err)
@@ -927,13 +828,12 @@ func RunSupervisor(ctx context.Context, config SupervisorConfig) error {
 
 		if exitCode == 0 && effectiveTask != "" {
 			if failure := detectObservedRuntimeFailure(currentOutput); failure != nil {
-				handleObservedRuntimeFailureRetry(bb, config, effectiveTask, stateBefore.Config, *failure, runtimeFailureTracker, spinTracker)
-				successNoProgressTracker.reset(effectiveTask)
+				handleObservedRuntimeFailureRetry(bb, config, effectiveTask, stateBefore.Config, *failure, ledger)
+				ledger.Reset(effectiveTask, classSuccessNoProgress, classCrash)
 				if err := resetAgentAfterExit(bb, config.AgentID, config.ProjectRoot); err != nil {
 					GetLogger().Warn("Failed to reset agent status after runtime failure", "error", err, "agent_id", config.AgentID)
 				}
 				exit42Tracker.reset(taskID)
-				crashTracker.reset(effectiveTask)
 				continue
 			}
 		}
@@ -956,7 +856,7 @@ func RunSupervisor(ctx context.Context, config SupervisorConfig) error {
 		switch exitCode {
 		case 0:
 			if effectiveTask != "" {
-				runtimeFailureTracker.reset(effectiveTask)
+				ledger.Reset(effectiveTask, classRuntimeFailure)
 			}
 
 			GetLogger().Info("Agent completed, checking for more work")
@@ -966,8 +866,8 @@ func RunSupervisor(ctx context.Context, config SupervisorConfig) error {
 			if effectiveTask != "" {
 				successSignature := successfulTurnProgressSignature(config.CLIName, currentOutput, postSuccessSnapshot)
 				if postSuccessEligible && successSignature != "" {
-					noProgressCount := successNoProgressTracker.Track(effectiveTask, successSignature)
-					spinThreshold := effectiveSpinningRestartThreshold(stateBefore.Config)
+					noProgressCount := ledger.Observe(effectiveTask, classSuccessNoProgress, successSignature)
+					spinThreshold := thresholdFor(classSuccessNoProgress, stateBefore.Config)
 					if noProgressCount > spinThreshold {
 						reason := fmt.Sprintf("successful no-progress loop detected: %d consecutive successful executions for task %s without task, state, or worktree progress (threshold=%d)",
 							noProgressCount, effectiveTask, spinThreshold)
@@ -979,22 +879,21 @@ func RunSupervisor(ctx context.Context, config SupervisorConfig) error {
 							GetLogger().Warn("Failed to write no-progress alert", "error", alertErr)
 						}
 						blockTaskFromSupervisor(bb, config.ProjectRoot, effectiveTask, config.AgentID, reason)
-						successNoProgressTracker.reset(effectiveTask)
-						spinTracker.reset(effectiveTask)
+						ledger.Reset(effectiveTask, classSuccessNoProgress, classSpin)
 						continue
 					}
 				} else {
-					successNoProgressTracker.reset(effectiveTask)
+					ledger.Reset(effectiveTask, classSuccessNoProgress)
 				}
 			}
 			exit42Tracker.reset(taskID)
-			crashTracker.reset(effectiveTask)
+			ledger.Reset(effectiveTask, classCrash)
 		case 42:
 			restartTaskID := claimedTaskID
 			if restartTaskID == "" {
 				restartTaskID = taskID
 			}
-			runtimeFailureTracker.reset(restartTaskID)
+			ledger.Reset(restartTaskID, classRuntimeFailure)
 
 			outcome, trackErr := exit42Tracker.Handle(bb, config.ProjectRoot, config.Role, restartTaskID, config.AgentID)
 			if trackErr != nil {
@@ -1024,7 +923,7 @@ func RunSupervisor(ctx context.Context, config SupervisorConfig) error {
 			}
 		default:
 			exit42Tracker.reset(taskID)
-			runtimeFailureTracker.reset(effectiveTask)
+			ledger.Reset(effectiveTask, classRuntimeFailure)
 
 			// Check if crash was caused by a provider-scoped failure.
 			if handleClassifiedProviderCrash(config, currentOutput) {
@@ -1039,8 +938,8 @@ func RunSupervisor(ctx context.Context, config SupervisorConfig) error {
 						sig = exit42TaskProgressSignature(task)
 					}
 				}
-				crashCount := crashTracker.Increment(effectiveTask, sig)
-				crashThreshold := effectiveCrashRestartThreshold(stateBefore.Config)
+				crashCount := ledger.Observe(effectiveTask, classCrash, sig)
+				crashThreshold := thresholdFor(classCrash, stateBefore.Config)
 				if crashCount > crashThreshold {
 					reason := fmt.Sprintf("crash restart loop detected: %d consecutive crashes for task %s without progress (threshold=%d, last exit code=%d)",
 						crashCount, effectiveTask, crashThreshold, exitCode)
@@ -1053,7 +952,7 @@ func RunSupervisor(ctx context.Context, config SupervisorConfig) error {
 						GetLogger().Warn("Failed to write crash alert", "error", alertErr)
 					}
 					blockTaskFromSupervisor(bb, config.ProjectRoot, effectiveTask, config.AgentID, reason)
-					crashTracker.reset(effectiveTask)
+					ledger.Reset(effectiveTask, classCrash)
 					continue
 				}
 			}

@@ -101,7 +101,7 @@ func RecoverAgent(projectRoot, agentID string, force bool, reason string) (*Reco
 
 	// Phase 3: State modify (atomic)
 	now := time.Now().UTC()
-	err = bb.Modify(func(state *models.State) error {
+	err = bb.ModifyOp("recover_agent", func(state *models.State) error {
 		currentDoerTaskIDs, currentReviewerTaskIDs := TaskClaimsForAgent(state, agentID)
 		agentStillExists := false
 		if _, ok := state.Agents[agentID]; ok {

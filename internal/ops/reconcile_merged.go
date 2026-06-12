@@ -61,7 +61,7 @@ func ReconcileMerged(projectRoot, taskID, mergeCommit, prURL, reason, agentID st
 	}
 
 	now := time.Now().UTC()
-	err = bb.Modify(func(state *models.State) error {
+	err = bb.ModifyOp("reconcile_merged", func(state *models.State) error {
 		currentTask := state.FindTask(taskID)
 		if currentTask == nil {
 			return &errors.NotFoundError{Entity: "task", ID: taskID}
@@ -79,6 +79,8 @@ func ReconcileMerged(projectRoot, taskID, mergeCommit, prURL, reason, agentID st
 		currentTask.LeaseExpires = nil
 		currentTask.ReviewingBy = nil
 		currentTask.ReviewLeaseExpires = nil
+		releaseDoerClaimRecord(state, taskID)
+		releaseReviewerClaimRecord(state, taskID)
 		currentTask.MergeCommit = &resolvedCommit
 		currentTask.IntegrationFailure = nil
 

@@ -61,7 +61,7 @@ func TransitionToNewAttempt(projectRoot, taskID, reason string) (*TransitionAtte
 	)
 
 	// Phase 1: mark attempt boundary, block claims via sentinel.
-	err = bb.Modify(func(state *models.State) error {
+	err = bb.ModifyOp("transition_attempt", func(state *models.State) error {
 		task := state.FindTask(taskID)
 		if task == nil {
 			return &errors.NotFoundError{Entity: "task", ID: taskID}
@@ -104,6 +104,8 @@ func TransitionToNewAttempt(projectRoot, taskID, reason string) (*TransitionAtte
 
 		sentinel := transitioning
 		task.AssignedTo = &sentinel
+		// The sentinel is not an agent — the previous doer's claim ends here.
+		releaseDoerClaimRecord(state, task.ID)
 
 		now := time.Now().UTC()
 		task.History = append(task.History, models.TaskHistoryEntry{
@@ -146,7 +148,7 @@ func TransitionToNewAttempt(projectRoot, taskID, reason string) (*TransitionAtte
 	pb.transitions[originalStatus] = append(pb.transitions[originalStatus], initialStatus)
 
 	// Phase 3: release sentinel, make task claimable.
-	err = bb.Modify(func(state *models.State) error {
+	err = bb.ModifyOp("transition_attempt", func(state *models.State) error {
 		task := state.FindTask(taskID)
 		if task == nil {
 			return &errors.NotFoundError{Entity: "task", ID: taskID}
@@ -172,6 +174,8 @@ func TransitionToNewAttempt(projectRoot, taskID, reason string) (*TransitionAtte
 		task.BaseCommit = nil
 		task.ReviewingBy = nil
 		task.ReviewLeaseExpires = nil
+		releaseDoerClaimRecord(state, task.ID)
+		releaseReviewerClaimRecord(state, task.ID)
 		clearAttemptState(task, attemptStateInitialReset)
 
 		return task.TransitionWith(initialStatus, pb.transitions)

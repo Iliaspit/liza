@@ -448,7 +448,7 @@ func handleCleanTaskCleanup(projectRoot string) error {
 		// Finalize: mirror non-git cleanup from the merge path.
 		// Records completion handoff event and releases the assigned agent.
 		taskID := task.ID
-		if err := bb.Modify(func(s *models.State) error {
+		if err := bb.ModifyOp("clean_task_cleanup", func(s *models.State) error {
 			t := s.FindTask(taskID)
 			if t == nil {
 				return nil

@@ -86,7 +86,7 @@ func MarkBlockedWithOptions(projectRoot, taskID, reason string, questions []stri
 	}
 	pipelineTransitions := BuildPipelineTransitions(resolver)
 
-	err = bb.Modify(func(state *models.State) error {
+	err = bb.ModifyOp("mark_blocked", func(state *models.State) error {
 		task := state.FindTask(taskID)
 		if task == nil {
 			return &errors.NotFoundError{Entity: "task", ID: taskID}
@@ -116,6 +116,7 @@ func MarkBlockedWithOptions(projectRoot, taskID, reason string, questions []stri
 		releaseAgentsForTask(state, taskID)
 		task.AssignedTo = nil
 		task.LeaseExpires = nil
+		releaseDoerClaimRecord(state, taskID)
 
 		task.History = append(task.History, models.TaskHistoryEntry{
 			Time:   now,

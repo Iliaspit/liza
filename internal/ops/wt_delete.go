@@ -70,7 +70,7 @@ func DeleteWorktree(projectRoot, taskID string) (*DeleteWorktreeResult, error) {
 		}
 	}
 
-	err = bb.Modify(func(state *models.State) error {
+	err = bb.ModifyOp("wt_delete", func(state *models.State) error {
 		task := state.FindTask(taskID)
 		if task == nil {
 			return &errors.NotFoundError{Entity: "task", ID: taskID}
