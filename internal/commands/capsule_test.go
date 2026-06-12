@@ -39,7 +39,7 @@ func TestCapsuleListCommandWithWriter(t *testing.T) {
 	// Test that writer parameter is accepted
 	projectRoot := t.TempDir()
 	storeRoot := t.TempDir()
-	
+
 	_, err := CapsuleListCommand(projectRoot, storeRoot, nil)
 	if err != nil {
 		t.Fatalf("CapsuleListCommand failed: %v", err)
@@ -58,7 +58,6 @@ func TestCapsuleStartCommandUsesContextForDaytonaTimeout(t *testing.T) {
 		ProjectRoot: projectRoot,
 		Runtime:     capsule.RuntimeDaytona,
 		StoreRoot:   storeRoot,
-		NoProvision: true,
 	})
 	if err != nil {
 		t.Fatalf("create capsule: %v", err)

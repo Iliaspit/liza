@@ -36,19 +36,22 @@ func BuildProjectLizaArchive(projectLizaDir string) ([]byte, error) {
 		if walkErr != nil {
 			return walkErr
 		}
+		rel, err := filepath.Rel(projectLizaDir, path)
+		if err != nil {
+			return err
+		}
+		if rel == "." {
+			return nil
+		}
 		if d.IsDir() {
 			// Skip sensitive directories before descending
-			if shouldExcludeCapsuleSyncPath(path) {
+			if shouldExcludeCapsuleSyncPath(rel) {
 				return filepath.SkipDir
 			}
 			return nil
 		}
-		if shouldExcludeCapsuleSyncPath(path) {
+		if shouldExcludeCapsuleSyncPath(rel) {
 			return nil
-		}
-		rel, err := filepath.Rel(projectLizaDir, path)
-		if err != nil {
-			return err
 		}
 		info, err := d.Info()
 		if err != nil {
@@ -90,7 +93,11 @@ func hasSyncableFiles(root string) bool {
 		if err != nil || d.IsDir() {
 			return nil
 		}
-		if !shouldExcludeCapsuleSyncPath(path) {
+		rel, relErr := filepath.Rel(root, path)
+		if relErr != nil {
+			return nil
+		}
+		if !shouldExcludeCapsuleSyncPath(rel) {
 			found = true
 			return filepath.SkipAll
 		}
@@ -114,12 +121,12 @@ func copyFilteredDir(source, target string) error {
 		destination := filepath.Join(target, rel)
 		if d.IsDir() {
 			// Skip sensitive directories before descending
-			if shouldExcludeCapsuleSyncPath(path) {
+			if shouldExcludeCapsuleSyncPath(rel) {
 				return filepath.SkipDir
 			}
 			return os.MkdirAll(destination, 0755)
 		}
-		if shouldExcludeCapsuleSyncPath(path) {
+		if shouldExcludeCapsuleSyncPath(rel) {
 			return nil
 		}
 		if err := os.MkdirAll(filepath.Dir(destination), 0755); err != nil {
