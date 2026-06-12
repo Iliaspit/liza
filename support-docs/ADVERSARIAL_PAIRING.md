@@ -16,7 +16,9 @@ The doer session is the only coding/control session and still stops at normal
 Pairing approval gates before state changes unless started with `yolo`.
 Reviewer sessions run autonomously: they read the blackboard, inspect submitted
 artifacts, and write review notes or verdicts without asking the human for each
-review action.
+review action. When a reviewer session registers, it also adds itself to
+`required_reviewers`; late reviewers therefore block the active gate until they
+record a verdict for the current revision or round.
 
 Use it as:
 
@@ -117,6 +119,12 @@ Typical flow:
 4. The doer submits the candidate diff for code review.
 5. Reviewers request changes or approve. Follow-up rounds continue until approval.
 6. After reviewer approval, the doer commits, rebases, merges, then deletes the dedicated worktree and merged topic branch. Without `yolo`, the doer asks before those git state changes; with `yolo`, it proceeds unless a stop condition applies.
+
+The skill includes `skills/adversarial-pairing/scripts/blackboard_state.py` for
+agent-side polling and status decisions. Agents use it instead of hand-parsing
+frontmatter; it reports phase, `yolo`, required reviewers, agent status, active
+review target, missing or stale verdicts, the recorded worktree, and the next
+actor.
 
 For debugging work, the blackboard can require explicit root-cause analysis and
 red-test gates before implementation. That gives you the MAS-style discipline of

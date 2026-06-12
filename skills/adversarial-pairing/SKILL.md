@@ -29,15 +29,22 @@ These rules are always active for this skill:
 - The provided `blackboard-path` is authoritative. Do not use sibling or similarly named blackboards as fallbacks when the provided path is missing.
 - While `phase` is non-terminal, agents remain active and keep frontmatter-only polling unless this protocol requires the agent to stop and ask the user, or the user explicitly tells that agent to stop.
 - Unexpected events are interruptions, not completion. After a write conflict, protocol violation, interrupted repair, or user-guided recovery is resolved, re-read frontmatter and resume polling if `phase` is still non-terminal.
+- Frontmatter decisions MUST use `skills/adversarial-pairing/scripts/blackboard_state.py`. Do not write ad hoc YAML/frontmatter parsers with `grep`, `sed`, `awk`, shell pipelines, or one-off scripts.
 - Every blackboard write MUST use `skills/adversarial-pairing/scripts/blackboard_write.py`; do not manually edit lock state or bypass the sidecar OS lock.
 - Each logical blackboard update must be one helper write. Do not split a status/phase update from the matching body artifact, worklog, or review notes.
 - Every helper write MUST update the writing agent's frontmatter status and timestamp fields to match the body artifact or action. Stale status blocks the pipeline because agents poll frontmatter to decide whether work is available.
-- Field ownership is strict: the doer must preserve reviewer-owned agent entries exactly, and reviewers must write only their own agent entry plus authorized claim transitions.
+- Field ownership is strict: the doer must preserve reviewer-owned agent entries exactly, and reviewers must write only their own agent entry, their own `required_reviewers` addition, plus authorized claim transitions.
 - Phase gates are mandatory. Do not advance to a later phase, create artifacts for a later phase, create a coding worktree, or implement unless the current phase's approval predicate is satisfied, `yolo: true` waives a doer-side human approval prompt, or the user explicitly waives that exact gate.
 
 # Polling Loop
 
-Poll only the frontmatter every 60 seconds while waiting for work. Read the Markdown body only when the polled state indicates this agent has work to do.
+Poll only the frontmatter every 60 seconds while waiting for work. Use the state helper:
+
+```bash
+python3 skills/adversarial-pairing/scripts/blackboard_state.py --path <blackboard-path> --role-or-reviewer-id <role-or-reviewer-id> --json
+```
+
+Read the Markdown body only when the helper output says this agent has work to do. The helper output includes the current SHA-256 for locked writes, current phase, `yolo`, `worktree`, registered and required reviewers, this agent's status, active review target, stale or missing verdicts, working/waiting agents, and the next actor/handoff.
 
 For doers, submitting an artifact for review is not task completion. After moving to `ANALYSIS_SUBMITTED`, `PLANNING_SUBMITTED`, `RED_TEST_SUBMITTED`, `CODE_SUBMITTED`, or `FOLLOWUP_REVIEW`, the doer MUST continue frontmatter-only polling until reviewer verdicts require action or `phase` becomes terminal. Do not stop after submission, report `WAITING` as completion, or summarize review-wait state as completion.
 
@@ -107,14 +114,17 @@ Worktree rules:
 - Do not implement in the main checkout unless the user explicitly approves a no-worktree workflow.
 - Once `worktree` is set, run all implementation, staging, validation, and review diff commands from that path.
 - Reviewers must run code review diff commands from `worktree`.
+- Before file edits, staging, validation, or code-review diffs, re-run `blackboard_state.py --json` and use its absolute `worktree` value as the command working directory. If `worktree` is null, do not edit code.
+- Codex MUST set shell `workdir` to the parsed `worktree` before implementation/review commands and MUST apply patches only to files under that worktree. If `pwd` or `git rev-parse --show-toplevel` shows the main checkout during coding, stop before editing.
 - The blackboard may remain outside the worktree.
 
 Reviewer registration:
 
-- If invoked as a reviewer and no agent entry exists for you, choose a stable human-readable ID and self-register under `agents.<id>`. Self-registration is a reviewer-owned blackboard write authorized by this skill; do not ask for additional human approval unless identity is ambiguous. Self-registration MUST follow the lock protocol.
-- Do not add yourself directly to `required_reviewers` unless the user explicitly names you as required.
-- Before the first reviewable artifact is submitted, the doer snapshots registered reviewer agents into `required_reviewers`.
-- Once populated, `required_reviewers` changes only by explicit user instruction.
+- If invoked as a reviewer and no agent entry exists for you, choose a stable human-readable ID and self-register under `agents.<id>` AND add the same ID to `required_reviewers` in the same locked write. This reviewer-owned write is authorized by this skill; do not ask for additional human approval unless identity is ambiguous.
+- If your agent entry exists but your ID is absent from `required_reviewers`, add yourself to `required_reviewers` in the same locked write as your status/last_seen update. This covers late reviewer joins, including `yolo` doer runs.
+- Do not add, remove, reorder, or normalize any other reviewer in `required_reviewers` unless the user explicitly names that change.
+- Once a reviewer is required, they remain required unless explicit user instruction removes them.
+- A late reviewer who becomes required during a submitted/reviewing phase blocks that current gate until they record a current verdict for the active revision or round.
 
 Allowed values:
 
@@ -129,7 +139,8 @@ Allowed values:
 
 Field ownership:
 
-- The doer owns `phase`, counters, `yolo`, `work_type`, gate booleans, `required_reviewers`, and `worktree`, except reviewer-owned claim transitions listed below.
+- The doer owns `phase`, counters, `yolo`, `work_type`, gate booleans, and `worktree`, except reviewer-owned claim transitions listed below.
+- Reviewers may add only their own ID to `required_reviewers` during reviewer registration or required-registration repair. All other `required_reviewers` changes require explicit user instruction.
 - Each agent owns only its own `agents.<id>` status, timestamps, reviewed counters, and verdicts.
 - Reviewers may move `ANALYSIS_SUBMITTED -> REVIEWING_ANALYSIS`, `PLANNING_SUBMITTED -> REVIEWING_PLAN`, `RED_TEST_SUBMITTED -> REVIEWING_RED_TEST`, and `CODE_SUBMITTED -> REVIEWING_CODE` when claiming review work.
 - Reviewers may move `CODE_CHANGES_REQUESTED -> FOLLOWUP_REVIEW` only after the doer has updated `code_review_round` and submitted follow-up changes.
@@ -138,14 +149,14 @@ Field ownership:
 
 Lock protocol:
 
-Prepare the complete intended blackboard content in a temporary file. Claude MUST create that temporary file with its `Write` tool. Do not use Bash `cat <<EOF`, heredocs, `printf`, or shell inline file-writing snippets to write the temporary content. Then run:
+Run `blackboard_state.py --json` first and copy the `sha256` value from its output. Prepare the complete intended blackboard content in a temporary file. Claude MUST create that temporary file with its `Write` tool.
+
+Claude Bash commands MUST be one simple executable invocation at a time. Do not use `&&`, `;`, heredocs, shell variables, environment-prefix assignments, command substitution, process substitution, glob expansion, brace expansion, line continuations, `cat`, `printf`, or inline shell file-writing snippets to create content or compute arguments. Replace placeholders with literal paths, hashes, and operation names before running the command.
+
+Run this simple command with literal paths and hashes:
 
 ```bash
-python3 skills/adversarial-pairing/scripts/blackboard_write.py \
-  --path <blackboard-path> \
-  --content-file <tmp-content-file> \
-  --operation <short-operation-name> \
-  --expect-sha256 <sha256-read-before-edit>
+python3 skills/adversarial-pairing/scripts/blackboard_write.py --path <blackboard-path> --content-file <tmp-content-file> --operation <short-operation-name> --expect-sha256 <sha256-read-before-edit>
 ```
 
 - For creating a missing doer-authorized blackboard, use `--create-if-missing` instead of `--expect-sha256`.
@@ -201,7 +212,7 @@ Completion predicates:
 
 # Transition Rules
 
-The doer submits artifacts for review. Reviewers may mark the global phase as `REVIEWING_*` when claiming work, but both `*_SUBMITTED` and the matching `REVIEWING_*` phase remain reviewable until all required reviewers have recorded current verdicts.
+The doer submits artifacts for review. Reviewers may mark the global phase as `REVIEWING_*` when claiming work, but both `*_SUBMITTED` and the matching `REVIEWING_*` phase remain reviewable until all required reviewers have recorded current verdicts. Reviewer self-registration during those phases adds that reviewer to the current gate.
 
 Do not submit a reviewable artifact while `required_reviewers` is empty unless the user explicitly approves a no-review workflow.
 
@@ -226,12 +237,14 @@ When the user asks to stop or abort the workflow, move `phase` to `STOPPED`. All
 
 On invocation:
 
+- Immediately run `blackboard_state.py --json` if the blackboard exists. Use that output for phase, SHA-256, worktree, registration, and next-action decisions.
 - If invoked as the doer and the blackboard file does not exist, create it only when the user asked the doer to create it.
 - New blackboard creation is a write and MUST use `blackboard_write.py --create-if-missing` with the complete initial file content. If the file appears during creation, re-read it instead of overwriting it.
 - If invoked as the doer and the blackboard file is missing but the user did not ask for creation, stop and ask whether to create it.
 - If invoked as the doer with `yolo`, create or update the blackboard with `yolo: true`. If invoked without `yolo`, create new blackboards with `yolo: false` and do not downgrade an existing `yolo: true` value unless the user explicitly asks.
 - If invoked as a reviewer with `yolo`, stop and report that `yolo` is doer-only.
 - If invoked as a reviewer and the blackboard file does not exist, fail fast: report that the doer must create the blackboard before reviewers start, then stop instead of creating or polling.
+- If invoked as a reviewer and the state helper reports `needs_registration` or `needs_required_registration`, perform that registration write before waiting for review work unless `phase` is terminal.
 
 # Doer Protocol
 
@@ -277,20 +290,24 @@ When `phase` is `RED_TEST_SUBMITTED` or `REVIEWING_RED_TEST`, review the test or
 
 When `phase` is `CODE_SUBMITTED` or `REVIEWING_CODE`, review staged changes by default:
 
+Run each line as a separate command:
+
 ```bash
-git diff --cached --name-only
-git diff --cached --stat
-git diff --cached
+git -C <worktree-from-blackboard_state> diff --cached --name-only
+git -C <worktree-from-blackboard_state> diff --cached --stat
+git -C <worktree-from-blackboard_state> diff --cached
 ```
 
 Record the round reviewed in `reviewed_code_round` and set `code_verdict`.
 
 When `phase: FOLLOWUP_REVIEW`, review unstaged follow-up changes by default:
 
+Run each line as a separate command:
+
 ```bash
-git diff --name-only
-git diff --stat
-git diff
+git -C <worktree-from-blackboard_state> diff --name-only
+git -C <worktree-from-blackboard_state> diff --stat
+git -C <worktree-from-blackboard_state> diff
 ```
 
 Record the round reviewed in `reviewed_code_round` and set `code_verdict`.
