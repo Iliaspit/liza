@@ -5,292 +5,248 @@ description: Coordinate Pairing-mode doer/reviewer sessions through a Markdown b
 
 # Invocation
 
-Use as:
-
 ```text
 /adversarial-pairing <role-or-reviewer-id> <blackboard-path> [yolo]
 ```
 
-`role-or-reviewer-id` is `doer`, `reviewer`, or `reviewer-<id>`.
-`reviewer-<id>` means reviewer role with `<id>` as the stable agent entry to use when registering in the blackboard, for example `reviewer-codex` or `reviewer-claude`.
-`blackboard-path` may be untracked and must not be committed unless the user explicitly asks.
-`yolo` is doer-only. It records `yolo: true` in the blackboard and waives doer-side human approval prompts. It does not waive reviewer approval predicates, stop conditions, validation, merge-conflict handling, or user stop instructions.
+`role-or-reviewer-id` is `doer`, `reviewer`, or `reviewer-<id>`. `reviewer-<id>` gives the reviewer its stable blackboard ID, for example `reviewer-codex`.
 
-# Operating Model
+`blackboard-path` is authoritative, may be untracked, and must not be committed unless the user explicitly asks.
 
-This skill creates a lightweight Pairing-mode coordination loop. The blackboard is shared coordination state; the human remains the approval authority unless the doer is explicitly invoked with `yolo`.
+`yolo` is doer-only. It sets `yolo: true` and waives doer-side human approval prompts. It does not waive reviewer approvals, validation, stop conditions, merge-conflict handling, unsafe cleanup checks, or user stop instructions.
 
-The YAML frontmatter is machine-pollable state. The Markdown body is durable context: goal, evidence, plans, reviewer comments, decisions, validation output, and review rounds.
+# Core Rules
 
-# Invariants
+- Use this as a Pairing-mode coordination loop: one doer, zero or more reviewers, one shared Markdown blackboard.
+- The provided `blackboard-path` is authoritative. Do not use sibling or similarly named blackboards as fallbacks.
+- Treat YAML frontmatter as machine-pollable state; treat the Markdown body as durable context for goals, evidence, plans, review notes, validation, and decisions.
+- Poll while `phase` is non-terminal unless this protocol says to stop and ask, the state helper says this reviewer may stop at `COMMITTED`, or the user explicitly stops the agent.
+- Unexpected events are interruptions, not completion. After write conflicts, protocol violations, interrupted repair, or user-guided recovery, re-read state and resume polling if `phase` is still non-terminal.
+- Use `skills/adversarial-pairing/scripts/blackboard_state.py` for frontmatter decisions. Do not parse frontmatter with ad hoc shell/YAML snippets.
+- Prefer `skills/adversarial-pairing/scripts/blackboard_op.py` for creation, reviewer registration, review claims, artifact submission, verdicts, coding entry, commit/merge/cleanup milestones, block, and stop.
+- Every blackboard write must use `blackboard_op.py` or `blackboard_write.py`; never bypass the sidecar OS lock.
+- Helper command contracts in this skill and `blackboard_op.py <operation> --help` are authoritative. Do not inspect helper source during normal operation unless debugging/changing helpers or resolving observed doc/helper contradiction.
+- One logical update equals one helper write: body note/artifact plus matching phase, counter, status, timestamp, and verdict changes.
+- Respect field ownership. Preserve peer comments and peer-owned agent entries exactly.
+- Phase gates are mandatory. Do not advance, create later artifacts, create a coding worktree, or implement unless the current gate is satisfied, `yolo: true` waives only a doer-side human prompt, or the user explicitly waives that exact gate.
+- Skill source is `skills/adversarial-pairing/SKILL.md` in the repo. Installed copies under `~/.liza/skills/` are derived; edit/sync them only after normal diff, approval, validation, and commit.
 
-These rules are always active for this skill:
+# Polling
 
-- The provided `blackboard-path` is authoritative. Do not use sibling or similarly named blackboards as fallbacks when the provided path is missing.
-- While `phase` is non-terminal, agents remain active and keep frontmatter-only polling unless this protocol requires the agent to stop and ask the user, or the user explicitly tells that agent to stop.
-- Unexpected events are interruptions, not completion. After a write conflict, protocol violation, interrupted repair, or user-guided recovery is resolved, re-read frontmatter and resume polling if `phase` is still non-terminal.
-- Frontmatter decisions MUST use `skills/adversarial-pairing/scripts/blackboard_state.py`. Do not write ad hoc YAML/frontmatter parsers with `grep`, `sed`, `awk`, shell pipelines, or one-off scripts.
-- Every blackboard write MUST use `skills/adversarial-pairing/scripts/blackboard_write.py`; do not manually edit lock state or bypass the sidecar OS lock.
-- Each logical blackboard update must be one helper write. Do not split a status/phase update from the matching body artifact, worklog, or review notes.
-- Every helper write MUST update the writing agent's frontmatter status and timestamp fields to match the body artifact or action. Stale status blocks the pipeline because agents poll frontmatter to decide whether work is available.
-- Field ownership is strict: the doer must preserve reviewer-owned agent entries exactly, and reviewers must write only their own agent entry, their own `required_reviewers` addition, plus authorized claim transitions.
-- Phase gates are mandatory. Do not advance to a later phase, create artifacts for a later phase, create a coding worktree, or implement unless the current phase's approval predicate is satisfied, `yolo: true` waives a doer-side human approval prompt, or the user explicitly waives that exact gate.
-
-# Polling Loop
-
-Poll only the frontmatter every 60 seconds while waiting for work. Use the state helper:
+Poll frontmatter every 60 seconds:
 
 ```bash
 python3 skills/adversarial-pairing/scripts/blackboard_state.py --path <blackboard-path> --role-or-reviewer-id <role-or-reviewer-id> --json
 ```
 
-Read the Markdown body only when the helper output says this agent has work to do. The helper output includes the current SHA-256 for locked writes, current phase, `yolo`, `worktree`, registered and required reviewers, this agent's status, active review target, stale or missing verdicts, working/waiting agents, and the next actor/handoff.
+Use the JSON as the routing authority:
 
-For doers, submitting an artifact for review is not task completion. After moving to `ANALYSIS_SUBMITTED`, `PLANNING_SUBMITTED`, `RED_TEST_SUBMITTED`, `CODE_SUBMITTED`, or `FOLLOWUP_REVIEW`, the doer MUST continue frontmatter-only polling until reviewer verdicts require action or `phase` becomes terminal. Do not stop after submission, report `WAITING` as completion, or summarize review-wait state as completion.
+- `terminal: true`: stop.
+- Reviewer at `COMMITTED` with helper stop instruction: may stop; doer owns merge/cleanup.
+- `next.actor` or `next.handoff_to` names this agent: do the indicated work.
+- Otherwise: keep frontmatter-only polling.
 
-For reviewers, startup registration is not task completion. After registering or confirming an existing agent entry, continue frontmatter-only polling until a reviewable phase appears or `phase` becomes terminal. Do not stop after registration, report `WAITING` as completion, or summarize idle state as completion.
+Do not report `WAITING`, `IDLE`, registration, artifact submission, or review-wait state as completion.
 
-Stop polling when `phase` is terminal: `COMMITTED`, `BLOCKED`, or `STOPPED`.
+Keep yourself scheduled with the available harness mechanism, such as wake/scheduler/background loop or staying in the command loop. Never make the human type `poll`; emit updates only on state changes, blockers, or user status requests.
 
 # Context Hygiene
 
-Between plan approval and coding, compact or refresh the active context before starting implementation work or implementation review. Keep: goal, current phase, current frontmatter, approved plan revision, unresolved reviewer constraints, required gates, next intended action, validation commands, and active invariants. Drop obsolete plan drafts, resolved plan-review discussion, and stale hypotheses unless needed to explain a retained constraint.
+Between plan approval and coding, compact or refresh context. Keep goal, current phase/frontmatter, approved plan revision, unresolved reviewer constraints, gates, next action, validation commands, and active invariants. Drop resolved drafts and stale hypotheses. Re-read this skill after compaction. Compaction does not satisfy gates or authorize writes.
 
-After compaction, re-read this skill before starting implementation work or implementation review.
+# Blackboard State
 
-Compaction is context hygiene only; it does not satisfy approval gates, change phase, authorize writes, or authorize implementation.
+Use `blackboard_op.py create` for new blackboards. It owns the initial frontmatter shape. Required concepts:
 
-# Blackboard Ownership
-
-- The doer owns phase transitions and workflow fields listed in `Field ownership`.
-- Reviewers append review notes to the Markdown body and update only their own agent entry, plus authorized claim transitions.
-- Reviewer-owned blackboard writes authorized by this skill do not require an additional human approval gate. They still MUST follow the lock protocol and field ownership rules.
-- Before any write, re-read the blackboard and verify the revision or round being edited is still current.
-- Never overwrite another agent's comments or status.
-- If two writes conflict or the file changed unexpectedly, stop and ask the user how to reconcile. After reconciliation, re-read frontmatter and resume polling if `phase` is still non-terminal.
-
-# Frontmatter Contract
-
-The blackboard frontmatter is the coordination contract. It must be valid YAML and must include these fields when a new blackboard is created:
-
-```yaml
----
-phase: DRAFT
-yolo: false
-work_type: feature
-rca_required: false
-red_test_required: false
-required_reviewers: []
-plan_revision: 0
-analysis_revision: 0
-red_test_round: 0
-code_review_round: 0
-phase_updated_at: "YYYY-MM-DDTHH:MM:SSZ"
-worktree: null
-agents:
-  doer:
-    role: doer
-    status: DRAFT
-    last_seen: null
-    reviewed_analysis_revision: null
-    analysis_verdict: null
-    reviewed_plan_revision: null
-    plan_verdict: null
-    reviewed_red_test_round: null
-    red_test_verdict: null
-    reviewed_code_round: null
-    code_verdict: null
----
-```
-
-Agent IDs should be stable and human-readable. If the invocation is `reviewer-<id>`, use `<id>` as the reviewer agent ID. If absent, register yourself by adding an entry for your role after asking the user if identity is ambiguous.
-
-Worktree rules:
-
-- Before entering `CODING`, after all prior gates are satisfied, the doer must create or select a dedicated git worktree and set `worktree` to its absolute path.
-- If `worktree` is null before `CODING`, derive the default path as `<repo-root>/.worktrees/<blackboard-stem>`, where `<repo-root>` comes from `git rev-parse --show-toplevel` and `<blackboard-stem>` is the basename of `blackboard-path` with one trailing `.md` removed.
-- Before creating the default worktree, ask the user for approval using the derived absolute path. If `yolo: true`, use the derived default path without pausing for approval. If the user provides a different path, use their path instead.
-- Reject or stop and ask if the derived stem is empty, contains unsafe path characters, resolves outside `<repo-root>/.worktrees/`, or collides with an existing path that is not the intended worktree.
-- Do not implement in the main checkout unless the user explicitly approves a no-worktree workflow.
-- Once `worktree` is set, run all implementation, staging, validation, and review diff commands from that path.
-- Reviewers must run code review diff commands from `worktree`.
-- Before file edits, staging, validation, or code-review diffs, re-run `blackboard_state.py --json` and use its absolute `worktree` value as the command working directory. If `worktree` is null, do not edit code.
-- Codex MUST set shell `workdir` to the parsed `worktree` before implementation/review commands and MUST apply patches only to files under that worktree. If `pwd` or `git rev-parse --show-toplevel` shows the main checkout during coding, stop before editing.
-- The blackboard may remain outside the worktree.
-
-Reviewer registration:
-
-- If invoked as a reviewer and no agent entry exists for you, choose a stable human-readable ID and self-register under `agents.<id>` AND add the same ID to `required_reviewers` in the same locked write. This reviewer-owned write is authorized by this skill; do not ask for additional human approval unless identity is ambiguous.
-- If your agent entry exists but your ID is absent from `required_reviewers`, add yourself to `required_reviewers` in the same locked write as your status/last_seen update. This covers late reviewer joins, including `yolo` doer runs.
-- Do not add, remove, reorder, or normalize any other reviewer in `required_reviewers` unless the user explicitly names that change.
-- Once a reviewer is required, they remain required unless explicit user instruction removes them.
-- A late reviewer who becomes required during a submitted/reviewing phase blocks that current gate until they record a current verdict for the active revision or round.
+- `phase`: see `Phases`; terminal phases are `CLEANED_UP`, `BLOCKED`, `STOPPED`.
+- `yolo`, `work_type`, `rca_required`, `red_test_required`.
+- counters: `analysis_revision`, `plan_revision`, `red_test_round`, `code_review_round`.
+- audit/worktree fields: `repo_root`, `base_branch`, `base_sha`, `topic_branch`, `commit_sha`, `merged_at`, `merged_into`, `worktree`, `worktree_path`, `worktree_removed`.
+- `required_reviewers`: reviewer IDs currently required for gates.
+- `agents.<id>`: `role`, `status`, `last_seen`, reviewed counters, and verdict fields.
 
 Allowed values:
 
-- `phase`: one of the phases listed in `Phases`.
-- terminal `phase`: `COMMITTED`, `BLOCKED`, or `STOPPED`.
-- `yolo`: boolean. `true` means the doer proceeds through doer-side human approval prompts without pausing; reviewer approval predicates and stop conditions still apply.
-- `work_type`: `feature`, `debugging`, `refactor`, `docs`, `spike`, or another explicit user-defined type.
-- `rca_required`, `red_test_required`: booleans.
 - `role`: `doer` or `reviewer`.
-- `status`: `DRAFT`, `IDLE`, `WAITING`, `WORKING`, `REVIEWING`, `APPROVED`, `CHANGES_REQUESTED`, `BLOCKED`, or `STOPPED`.
-- verdict fields: `APPROVED`, `CHANGES_REQUESTED`, `COMMENT`, or `null`.
+- `status`: `DRAFT`, `IDLE`, `WAITING`, `WORKING`, `REVIEWING`, `APPROVED`, `CHANGES_REQUESTED`, `BLOCKED`, `STOPPED`.
+- verdicts: `APPROVED`, `CHANGES_REQUESTED`, `COMMENT`, or `null`.
 
-Field ownership:
+# Ownership
 
-- The doer owns `phase`, counters, `yolo`, `work_type`, gate booleans, and `worktree`, except reviewer-owned claim transitions listed below.
-- Reviewers may add only their own ID to `required_reviewers` during reviewer registration or required-registration repair. All other `required_reviewers` changes require explicit user instruction.
-- Each agent owns only its own `agents.<id>` status, timestamps, reviewed counters, and verdicts.
-- Reviewers may move `ANALYSIS_SUBMITTED -> REVIEWING_ANALYSIS`, `PLANNING_SUBMITTED -> REVIEWING_PLAN`, `RED_TEST_SUBMITTED -> REVIEWING_RED_TEST`, and `CODE_SUBMITTED -> REVIEWING_CODE` when claiming review work.
-- Reviewers may move `CODE_CHANGES_REQUESTED -> FOLLOWUP_REVIEW` only after the doer has updated `code_review_round` and submitted follow-up changes.
-- Any agent may set `phase: STOPPED` after a direct user stop or abort instruction.
-- Any agent may set its own `status: BLOCKED`; setting global `phase: BLOCKED` requires a concrete workflow blocker in the Markdown body.
+- Doer owns workflow phase/counters, `yolo`, `work_type`, gate booleans, audit fields, and worktree fields except reviewer claim transitions.
+- Reviewers own only their own `agents.<id>` fields and may add only their own ID to `required_reviewers` during registration/repair.
+- Other `required_reviewers` changes require explicit user instruction.
+- Any agent may set `STOPPED` after direct user stop/abort.
+- Any agent may set its own `status: BLOCKED`; global `BLOCKED` requires a concrete blocker note in the body.
+- Reviewer-owned writes authorized here need no extra human approval, but still use helper/lock rules.
+- Before any write, re-read state and verify the target revision/round is current.
+- If two writes conflict or a write would overwrite peer state/comments, stop and ask the user how to reconcile.
 
-Lock protocol:
+# Worktree Rules
 
-Run `blackboard_state.py --json` first and copy the `sha256` value from its output. Prepare the complete intended blackboard content in a temporary file. Claude MUST create that temporary file with its `Write` tool.
+- Before `CODING`, after prior gates, the doer must create/select a dedicated git worktree and record its absolute path in `worktree`.
+- If `worktree` is null before `CODING`, derive `<repo-root>/.worktrees/<blackboard-stem>` from `git rev-parse --show-toplevel` and the blackboard basename without one trailing `.md`.
+- Ask before creating that default path unless `yolo: true`. Use a user-provided alternative if given.
+- Stop/ask if the derived stem is empty, has unsafe path characters, resolves outside `<repo-root>/.worktrees/`, or collides with an unintended path.
+- Do not implement in the main checkout unless the user explicitly approves a no-worktree workflow.
+- Once `worktree` is set, run implementation, staging, validation, and review diff commands from that path. Reviewers also diff from `worktree`.
+- Before edits, staging, validation, or review diffs, re-run `blackboard_state.py --json` and use its absolute `worktree`. If null, do not edit code.
+- Codex: set shell `workdir` to the recorded worktree and apply patches only under that worktree. If `pwd` or `git rev-parse --show-toplevel` shows the main checkout during coding/follow-up, stop before editing.
+- `apply_patch` is path-sensitive. Do not patch the main checkout and copy changes later. If a patch lands in the main checkout, stop, report affected files, and wait for explicit repair direction.
+- The blackboard may remain outside the worktree.
 
-Claude Bash commands MUST be one simple executable invocation at a time. Do not use `&&`, `;`, heredocs, shell variables, environment-prefix assignments, command substitution, process substitution, glob expansion, brace expansion, line continuations, `cat`, `printf`, or inline shell file-writing snippets to create content or compute arguments. Replace placeholders with literal paths, hashes, and operation names before running the command.
+# Reviewer Registration
 
-Run this simple command with literal paths and hashes:
+- If invoked as `reviewer-<id>`, use `<id>`.
+- If invoked as `reviewer` and identity is ambiguous, ask before registering.
+- If no own agent entry exists, self-register under `agents.<id>` and add the same ID to `required_reviewers` in one locked write.
+- If your agent entry exists but your ID is absent from `required_reviewers`, add yourself in the same locked write as status/last_seen update.
+- Do not ask for human approval for this self-registration unless identity is ambiguous.
+- Once required, a reviewer remains required unless explicit user instruction removes them.
+- The doer usually does not know reviewer IDs before registration and must not invent them.
+- If the user/launcher supplies expected reviewer IDs at creation, record them in `required_reviewers`. If any remain absent at a gate, wait. Proceeding requires explicit user/no-review waiver; record a body note naming absent IDs and remove those IDs from `required_reviewers` in the same locked write.
+- Late reviewer during submitted/reviewing phase blocks that current gate until they record a current verdict.
+- Late reviewer during doer-owned work phase becomes required for the next reviewable gate and all later gates.
+
+# Lock Fallback
+
+Use raw full-file writes only for operations not covered by `blackboard_op.py`.
+
+1. Run `blackboard_state.py --json`; copy `sha256`.
+2. Copy current blackboard to a temp file and make a scoped edit there.
+3. Validate temp content with `blackboard_state.py --json`.
+4. Write with:
 
 ```bash
 python3 skills/adversarial-pairing/scripts/blackboard_write.py --path <blackboard-path> --content-file <tmp-content-file> --operation <short-operation-name> --expect-sha256 <sha256-read-before-edit>
 ```
 
-- For creating a missing doer-authorized blackboard, use `--create-if-missing` instead of `--expect-sha256`.
-- `--expect-sha256` is the SHA-256 of the uncommitted working-tree file content read before editing; it is not a git commit hash. Use it for every write to an existing blackboard.
-- The helper acquires an OS file lock on `<blackboard-path>.lock`, re-reads the blackboard under lock, verifies the expected SHA-256, atomically replaces the Markdown file, and releases the lock. If it reports stale content or lock timeout, re-read and restart the write from current state.
-- New blackboards do not include in-document lock fields; lock authority is `<blackboard-path>.lock` plus `<blackboard-path>.lock.owner.json` diagnostics.
-- Use UTC ISO-8601 timestamps ending in `Z`.
-- Within a logical write, update the Markdown body first and the frontmatter status/phase last in the prepared content.
-- Before running the helper, verify the prepared frontmatter reflects the new phase, status, verdict, and counter state. A body-only update is incomplete and can leave the pipeline blocked.
-- Writing without the helper is a protocol violation. Stop and report the violation if it happens; do not make a second unlocked write to repair it.
+For authorized creation, use `--create-if-missing`.
 
-Completion predicates:
+The writer locks `<blackboard-path>.lock`, re-reads under lock, checks SHA, atomically replaces, and writes owner diagnostics. If stale/timeout occurs, re-read and restart from current state. After repeated SHA conflicts, stop blind retries; wait for a quiet phase, switch to a semantic helper, or ask for coordination. Failed writes/retries are failed attempts; report them honestly.
 
-- RCA approved: every `required_reviewers` entry has `analysis_verdict: APPROVED` and `reviewed_analysis_revision` equal to current `analysis_revision`.
-- RCA changes requested: any required reviewer has `analysis_verdict: CHANGES_REQUESTED` for current `analysis_revision`.
-- Plan approved: every required reviewer has `plan_verdict: APPROVED` and `reviewed_plan_revision` equal to current `plan_revision`.
-- Plan changes requested: any required reviewer has `plan_verdict: CHANGES_REQUESTED` for current `plan_revision`.
-- Red test approved: every required reviewer has `red_test_verdict: APPROVED` and `reviewed_red_test_round` equal to current `red_test_round`.
-- Red test changes requested: any required reviewer has `red_test_verdict: CHANGES_REQUESTED` for current `red_test_round`.
-- Code approved: every required reviewer has `code_verdict: APPROVED` and `reviewed_code_round` equal to current `code_review_round`.
-- Code changes requested: any required reviewer has `code_verdict: CHANGES_REQUESTED` for current `code_review_round`.
-- Missing or stale required reviewer records mean the review is incomplete; do not advance to an approved or changes-requested phase yet.
+Use UTC ISO-8601 timestamps ending in `Z`. Update body first and frontmatter last in prepared content. Verify prepared frontmatter has matching phase/status/verdict/counter before writing. Never hand-author a complete blackboard from scratch when preserving peer content matters.
+
+Claude: create temp content with the Write tool. Bash commands must be one simple executable invocation; no compound shell, heredocs, command substitution, shell variables, glob/brace expansion, `cat`, `printf`, or inline file-writing snippets.
+
+# Helper Operations
+
+Use:
+
+```bash
+python3 skills/adversarial-pairing/scripts/blackboard_op.py <operation> --help
+```
+
+Supported operations:
+
+- `create`
+- `register-reviewer`
+- `claim-review`
+- `submit-artifact --target analysis|plan|red-test|code`
+- `submit-followup-review`
+- `submit-verdict`
+- `request-changes`
+- `enter-coding`
+- `ready-to-commit`
+- `mark-committed`
+- `mark-merged`
+- `mark-cleaned-up`
+- `block`
+- `stop`
+
+Semantic ops lock, re-read, apply scoped deltas, enforce operation-specific phase/role/counter predicates, validate through the state parser, write atomically, and return summarized state. They do not prove caller identity or retry semantic deltas beyond lock acquisition; callers still follow the contention rule. Pairing-mode agents are trusted to pass their own ID.
 
 # Phases
 
-| Phase | Meaning |
-|-------|---------|
-| `DRAFT` | Blackboard exists but the doer has not started planning. |
-| `ANALYZING` | Doer is performing root cause analysis before planning. |
-| `ANALYSIS_SUBMITTED` | RCA is ready for adversarial review. |
-| `REVIEWING_ANALYSIS` | Reviewers are checking evidence, falsifiability, and root cause quality. |
-| `ANALYSIS_CHANGES_REQUESTED` | RCA needs revision before planning. |
-| `ANALYSIS_APPROVED` | RCA is approved; planning may begin. |
-| `PLANNING` | Doer is preparing a plan. |
-| `PLANNING_SUBMITTED` | Plan revision is ready for reviewer review. |
-| `REVIEWING_PLAN` | One or more reviewers are reviewing the submitted plan. |
-| `PLAN_CHANGES_REQUESTED` | Reviewer comments require a revised plan. |
-| `PLAN_APPROVED` | Reviewers have no blocking plan comments. |
-| `RED_TESTING` | Doer is writing a failing test or reproduction for the approved diagnosis. |
-| `RED_TEST_SUBMITTED` | Red test has been shown failing for the expected reason and is ready for review. |
-| `REVIEWING_RED_TEST` | Reviewers are checking that the test proves the bug, not the implementation. |
-| `RED_TEST_CHANGES_REQUESTED` | Red test needs revision before fix implementation. |
-| `RED_TEST_APPROVED` | Red test is approved; fix implementation may begin. |
-| `CODING` | Doer is implementing the approved plan. |
-| `CODE_SUBMITTED` | Doer has staged the candidate changes for review. |
-| `REVIEWING_CODE` | Reviewers are reviewing the current staged diff. |
-| `CODE_CHANGES_REQUESTED` | Doer is addressing review comments in unstaged changes. |
-| `FOLLOWUP_REVIEW` | Reviewers are reviewing the unstaged follow-up diff. |
-| `READY_TO_COMMIT` | Reviewers have no remaining blocking comments. |
-| `COMMITTED` | Commit, merge, and post-merge cleanup are complete. |
-| `BLOCKED` | Work cannot proceed without user input. |
-| `STOPPED` | User asked to stop or abort the workflow. |
+Lifecycle:
 
-# Transition Rules
+`DRAFT` -> `ANALYZING` -> `ANALYSIS_SUBMITTED`/`REVIEWING_ANALYSIS` -> `ANALYSIS_APPROVED` or `ANALYSIS_CHANGES_REQUESTED` -> `PLANNING` -> `PLANNING_SUBMITTED`/`REVIEWING_PLAN` -> `PLAN_APPROVED` or `PLAN_CHANGES_REQUESTED` -> optional `RED_TESTING` -> `RED_TEST_SUBMITTED`/`REVIEWING_RED_TEST` -> `RED_TEST_APPROVED` or `RED_TEST_CHANGES_REQUESTED` -> `CODING` -> `CODE_SUBMITTED`/`REVIEWING_CODE` -> `CODE_CHANGES_REQUESTED`/`FOLLOWUP_REVIEW` until approved -> `READY_TO_COMMIT` -> `COMMITTED` -> `MERGED` -> `CLEANED_UP`.
 
-The doer submits artifacts for review. Reviewers may mark the global phase as `REVIEWING_*` when claiming work, but both `*_SUBMITTED` and the matching `REVIEWING_*` phase remain reviewable until all required reviewers have recorded current verdicts. Reviewer self-registration during those phases adds that reviewer to the current gate.
+Terminal/error phases: `CLEANED_UP`, `BLOCKED`, `STOPPED`.
 
-Do not submit a reviewable artifact while `required_reviewers` is empty unless the user explicitly approves a no-review workflow.
+Phase meanings:
 
-The doer resolves requested changes and resubmits. Increment the relevant counter on each submission or resubmission:
+- `DRAFT`: blackboard exists; doer has not started planning.
+- `ANALYZING`: doer performs RCA.
+- `*_SUBMITTED`: artifact is ready for review.
+- `REVIEWING_*`: reviewer has claimed/checking current artifact.
+- `*_CHANGES_REQUESTED`: doer revises current artifact.
+- `*_APPROVED`: required reviewers have no blocking comments for that gate.
+- `RED_TESTING`: doer writes failing test/reproduction.
+- `CODING`: doer implements approved plan in recorded worktree.
+- `CODE_CHANGES_REQUESTED`: doer addresses code review comments as unstaged follow-up changes.
+- `FOLLOWUP_REVIEW`: reviewers inspect unstaged follow-up diff.
+- `READY_TO_COMMIT`: code review complete; doer owns commit/rebase/merge/cleanup.
+- `COMMITTED`: reviewed commit exists on topic branch.
+- `MERGED`: base branch contains reviewed commit.
+- `CLEANED_UP`: dedicated worktree removed and merged topic branch deleted.
+- `BLOCKED`: user input/external change required.
+- `STOPPED`: user stopped/aborted workflow.
 
-- `analysis_revision` for RCA artifacts.
-- `plan_revision` for plans.
-- `red_test_round` for red tests or reproductions.
-- `code_review_round` for the initial staged code submission and each follow-up review submission.
+# Review Gates
 
-For submissions and resubmissions, counter increments, Markdown artifact updates, and phase transitions to `*_SUBMITTED` or `FOLLOWUP_REVIEW` must happen in the same helper write.
-
-Doer submission and resubmission writes MUST NOT reset, normalize, or otherwise edit reviewer-owned agent fields. If the doer accidentally changes reviewer-owned fields, stop and report the ownership violation; do not perform a doer-side repair of those fields unless the user gives an explicit ownership-waiver repair instruction naming the exact fields.
-
-If follow-up review requests changes, move back to `CODE_CHANGES_REQUESTED`; repeat until code is approved or the workflow stops.
-
-`work_type` describes the default workflow shape. `rca_required` and `red_test_required` are independent gates. `work_type: debugging` should normally set both to `true`, but other work types may enable either gate explicitly.
-
-When the user asks to stop or abort the workflow, move `phase` to `STOPPED`. All agents stop polling terminal phases.
-
-# Startup Protocol
-
-On invocation:
-
-- Immediately run `blackboard_state.py --json` if the blackboard exists. Use that output for phase, SHA-256, worktree, registration, and next-action decisions.
-- If invoked as the doer and the blackboard file does not exist, create it only when the user asked the doer to create it.
-- New blackboard creation is a write and MUST use `blackboard_write.py --create-if-missing` with the complete initial file content. If the file appears during creation, re-read it instead of overwriting it.
-- If invoked as the doer and the blackboard file is missing but the user did not ask for creation, stop and ask whether to create it.
-- If invoked as the doer with `yolo`, create or update the blackboard with `yolo: true`. If invoked without `yolo`, create new blackboards with `yolo: false` and do not downgrade an existing `yolo: true` value unless the user explicitly asks.
-- If invoked as a reviewer with `yolo`, stop and report that `yolo` is doer-only.
-- If invoked as a reviewer and the blackboard file does not exist, fail fast: report that the doer must create the blackboard before reviewers start, then stop instead of creating or polling.
-- If invoked as a reviewer and the state helper reports `needs_registration` or `needs_required_registration`, perform that registration write before waiting for review work unless `phase` is terminal.
+- Reviewable phases remain reviewable until all required reviewers record current verdicts for the active revision/round.
+- Missing/stale required reviewer records mean incomplete review.
+- `APPROVED`: all required reviewers approved current revision/round.
+- `CHANGES_REQUESTED`: at least one required reviewer requested changes for current revision/round.
+- `COMMENT`: non-approving/non-blocking; no approval predicate is satisfied by comments alone.
+- `submit-verdict`/`request-changes` moves completed analysis/plan/red-test gates to `*_APPROVED` or `*_CHANGES_REQUESTED`, and moves code changes to `CODE_CHANGES_REQUESTED`. Code approval is followed by `ready-to-commit`. The doer must not perform verdict-owned transitions separately.
+- The doer may submit before reviewers register. If `required_reviewers` stays empty in a submitted/reviewing phase, wait for registration or obtain explicit no-review approval before advancing.
 
 # Doer Protocol
 
-Mandatory human gates when `yolo` is false or missing:
+Startup:
 
-1. Before leaving `DRAFT` for `ANALYZING` or `PLANNING`, ask the user for approval to begin from the blackboard contents.
-2. Before `ANALYZING -> ANALYSIS_SUBMITTED`, show the RCA and ask the user for approval to submit it for adversarial review.
-3. Before `PLANNING -> PLANNING_SUBMITTED`, show the plan and ask the user for approval to submit it for adversarial review.
+- If blackboard exists, immediately run `blackboard_state.py --json`.
+- If missing, create it only when the user asked the doer to create it; otherwise stop and ask.
+- Creation must use `blackboard_op.py create` or `blackboard_write.py --create-if-missing`; if the file appears meanwhile, re-read instead of overwriting.
+- With `yolo`, create/update with `yolo: true`. Without `yolo`, create with `yolo: false` and do not downgrade an existing `yolo: true` unless the user explicitly asks.
 
-No human approval is required for `RED_TESTING -> RED_TEST_SUBMITTED`; submitting the red test is part of the approved debugging workflow.
+Human gates when `yolo` is false/missing:
 
-When `yolo: true`, the doer does not pause at doer-side human approval gates. The doer must still write the same artifacts to the blackboard, wait for required reviewer approvals, run validation, honor stop conditions, and stop for merge conflicts or unsafe cleanup.
+1. Before leaving `DRAFT` for `ANALYZING` or `PLANNING`, ask approval to begin from blackboard contents.
+2. Before submitting RCA, show RCA and ask approval to submit for adversarial review.
+3. Before submitting plan, show plan and ask approval to submit for adversarial review.
+4. After `PLAN_APPROVED`, ask before coding unless prior approval explicitly included permission to proceed after reviewer approval.
+5. Before each post-review git state change: commit, rebase, merge, worktree deletion, topic-branch deletion.
 
-For `work_type: debugging`, use the debugging skill and treat RCA as a distinct artifact before planning when `rca_required: true`.
+Workflow:
 
-Do not enter `PLANNING` from `ANALYSIS_SUBMITTED`; enter planning only from `ANALYSIS_APPROVED` unless the user explicitly waives the RCA approval gate.
+- For debugging work, use the debugging skill; treat RCA as distinct before planning when `rca_required: true`.
+- Do not enter `PLANNING` from `ANALYSIS_SUBMITTED` unless the user explicitly waives the RCA approval gate.
+- No extra human approval is required for `RED_TESTING -> RED_TEST_SUBMITTED`; it is part of the approved debugging workflow.
+- If `red_test_required: true`, do not implement until a test/reproduction fails for the expected reason and reviewers approve it. If none is practical, ask user to approve an alternate validation path.
+- During coding, follow normal Pairing approval/validation rules. If `yolo: true`, treat doer-side approval prompts as pre-approved.
+- Do not address review comments until all required reviewers complete the current round.
+- When a code round requests changes, stage the reviewed baseline before follow-up edits so reviewers can compare staged baseline vs unstaged follow-up. This workflow-specific staging needs no extra user intervention.
+- Do not stage follow-up changes; reviewers inspect unstaged diff in `FOLLOWUP_REVIEW`.
+- `APPROVED` means no blocking findings. Before commit, implement low-risk, in-scope, validation-covered suggestions or record deferral rationale. Implemented suggestions require `FOLLOWUP_REVIEW` and all required reviewers approving the new round.
+- After final code approval, commit on topic branch, rebase onto base, merge into base, then delete dedicated worktree and merged topic branch.
+- If cleanup fails after `MERGED`, move to `BLOCKED` with a note that merge succeeded and cleanup failed.
 
-After all reviewers approve the plan and `phase` is `PLAN_APPROVED`, ask the user before coding unless `yolo: true` or the previous approval explicitly included permission to proceed after reviewer approval. Only `yolo: true` or an explicit user instruction to waive the plan approval gate may bypass it.
+Merge/validation details:
 
-When `red_test_required: true`, do not implement the fix until a red test or reproduction has failed for the expected reason and reviewers have approved it. If no practical red test exists, ask the user to approve an alternate validation path.
-
-During coding, follow the normal Pairing-mode approval and validation rules. If `yolo: true`, treat doer-side approval prompts as pre-approved by the invocation. Stage only when the user asks, when `yolo: true`, or when the approved workflow explicitly says to stage for review.
-
-Do not begin addressing review comments until all required reviewers have completed the current review round.
-
-When all reviewers complete a review round and changes are requested, stage the reviewed changes before making follow-up edits. This preserves the already-reviewed baseline in the index so follow-up edits are isolated in the unstaged diff for the next review round. No user intervention is required for this workflow-specific staging step; outside this workflow scope, the normal Pairing-mode git policy applies.
-
-When addressing code-review comments, do not stage follow-up changes. Reviewers use staged diff for the first pass and unstaged diff for follow-up passes.
-
-After reviewers approve the code, the doer MUST commit, rebase the worktree onto the base branch, merge the worktree back into that base branch, then delete both the dedicated worktree and the merged topic branch after the merge succeeds. If `yolo: false`, ask before each git state change. If `yolo: true`, proceed without those approval prompts. Stop instead of deleting if the worktree is dirty, the topic branch identity is ambiguous, the branch was not successfully merged, or cleanup would affect anything outside the dedicated worktree and merged topic branch.
+- Before merge, inspect the base checkout. Stop for tracked dirty files unless explicitly known safe. For untracked files, compare incoming changed paths against untracked base paths; stop on path collision.
+- Record the environment wrapper that made validation pass and reuse it for commit hooks. Keep stack-agnostic; Go `GOPATH`/`GOCACHE` is only an example.
+- Report merge command exit status separately from post-merge hook/index diagnostics. Record hook command/source when known, warning output verbatim, and classification.
 
 # Reviewer Protocol
 
-Reviewer verdict submission appends review notes to the bottom of the relevant Markdown body section and updates the reviewer frontmatter fields in one logical write. Do not insert new review notes directly under the section heading or before older entries; review sections stay chronological oldest-to-newest.
+Startup:
 
-Do not ask for additional human approval before reviewer-owned claim transitions, review-note appends, or reviewer verdict/status updates authorized by this protocol.
+- If invoked with `yolo`, stop: `yolo` is doer-only.
+- If blackboard is missing, poll for creation. After the configured retry budget/timeout, set own status `BLOCKED` if possible or report idle/blocker state with the missing path.
+- If state helper says `needs_registration` or `needs_required_registration`, register before waiting for review work unless phase is terminal.
 
-When `phase` is `ANALYSIS_SUBMITTED` or `REVIEWING_ANALYSIS`, review the RCA artifact, not the fix plan. Check root-cause quality, evidence, contradictions, falsifiability, and whether the reported failure would become impossible if this cause were fixed. Record the revision reviewed in `reviewed_analysis_revision` and set `analysis_verdict`.
+Review:
 
-When `phase` is `PLANNING_SUBMITTED` or `REVIEWING_PLAN`, review the latest plan revision. Record the revision reviewed in `reviewed_plan_revision` and set `plan_verdict`.
-
-When `phase` is `RED_TEST_SUBMITTED` or `REVIEWING_RED_TEST`, review the test or reproduction. Check that it fails on current code for the expected reason, would pass if the bug were fixed, tests behavior rather than implementation, and does not corrupt existing expectations. Record the round reviewed in `reviewed_red_test_round` and set `red_test_verdict`.
-
-When `phase` is `CODE_SUBMITTED` or `REVIEWING_CODE`, review staged changes by default:
-
-Run each line as a separate command:
+- Use `claim-review` when taking a submitted artifact.
+- Append notes chronologically to the relevant body section and update own frontmatter fields in one helper write. Do not insert newest notes before older entries.
+- Reviewer claim transitions, notes, and verdict/status updates authorized here need no human approval.
+- For `ANALYSIS_SUBMITTED`/`REVIEWING_ANALYSIS`, review RCA quality: evidence, contradictions, falsifiability, root cause, and whether fixing the cause would make the failure impossible.
+- For `PLANNING_SUBMITTED`/`REVIEWING_PLAN`, review the latest plan revision.
+- For `RED_TEST_SUBMITTED`/`REVIEWING_RED_TEST`, verify the test/reproduction fails for the expected reason, would pass if fixed, tests behavior, and does not corrupt expectations.
+- For `CODE_SUBMITTED`/`REVIEWING_CODE`, review staged changes:
 
 ```bash
 git -C <worktree-from-blackboard_state> diff --cached --name-only
@@ -298,11 +254,7 @@ git -C <worktree-from-blackboard_state> diff --cached --stat
 git -C <worktree-from-blackboard_state> diff --cached
 ```
 
-Record the round reviewed in `reviewed_code_round` and set `code_verdict`.
-
-When `phase: FOLLOWUP_REVIEW`, review unstaged follow-up changes by default:
-
-Run each line as a separate command:
+- For `FOLLOWUP_REVIEW`, review unstaged follow-up changes:
 
 ```bash
 git -C <worktree-from-blackboard_state> diff --name-only
@@ -310,80 +262,26 @@ git -C <worktree-from-blackboard_state> diff --stat
 git -C <worktree-from-blackboard_state> diff
 ```
 
-Record the round reviewed in `reviewed_code_round` and set `code_verdict`.
-
-Use the `code-review` skill for code review passes. Label every review with the reviewed target: plan revision, staged diff round, or unstaged follow-up round.
-
-# Blackboard Template
-
-When creating a blackboard from a prompt, create both the frontmatter and Markdown body in one file. Include debugging-only body sections only when `work_type: debugging`, `rca_required: true`, or `red_test_required: true`.
-
-Keep this template in sync with `Frontmatter Contract`; it is intentionally duplicated so agents can bootstrap a blackboard without assembling fields from multiple sections.
-
-```markdown
----
-phase: DRAFT
-yolo: false
-work_type: feature
-rca_required: false
-red_test_required: false
-required_reviewers: []
-plan_revision: 0
-analysis_revision: 0
-red_test_round: 0
-code_review_round: 0
-phase_updated_at: "YYYY-MM-DDTHH:MM:SSZ"
-worktree: null
-agents:
-  doer:
-    role: doer
-    status: DRAFT
-    last_seen: null
-    reviewed_analysis_revision: null
-    analysis_verdict: null
-    reviewed_plan_revision: null
-    plan_verdict: null
-    reviewed_red_test_round: null
-    red_test_verdict: null
-    reviewed_code_round: null
-    code_verdict: null
----
-
-# Adversarial Pairing Blackboard
-
-## Goal
-
-## Evidence
-
-## Plan Revisions
-
-## Plan Reviews
-
-## Implementation Notes
-
-## Code Review Rounds
-
-## Validation
-
-## Decisions
-```
+- Use the `code-review` skill for code review. Label reviews with target: analysis revision, plan revision, red-test round, staged code round, or unstaged follow-up round.
 
 # Markdown Body
 
-Include `Root Cause Analysis` and `Red Tests` only when `work_type: debugging` or the corresponding gates are enabled. For non-debugging work, omit empty debugging-only sections.
+Use body sections for durable context. Standard sections: `Goal`, `Evidence`, `Plan Revisions`, `Plan Reviews`, `Implementation Notes`, `Code Review Rounds`, `Validation`, `Decisions`. Include `Root Cause Analysis` and `Red Tests` only when debugging or when corresponding gates are enabled.
 
-Append new entries to the bottom of the relevant section; do not insert newest entries directly under a section heading or before older entries. Do not rewrite history except to fix obvious formatting before reviewers have acted on it.
+Append new entries at the bottom of the relevant section. Do not rewrite history except obvious formatting before reviewers act.
 
 # Stop Conditions
 
 Stop and ask the user if:
 
-- The blackboard phase and Markdown body contradict.
-- Frontmatter is missing required fields or contains invalid enum values.
-- Reviewable phase has empty `required_reviewers` and no explicit user-approved no-review workflow.
-- Required reviewer records are missing, stale, or contradictory for the current revision or round.
-- A reviewer reviewed an obsolete artifact revision or round.
-- The doer needs to transition through a mandatory human gate and `yolo` is false or missing.
-- The current diff scope is ambiguous: staged, unstaged, or full pending state.
-- The blackboard path appears to point outside the intended repository or worktree.
-- A write would overwrite another agent's state or comments.
+- phase and body contradict;
+- frontmatter is missing required fields or has invalid enum values;
+- reviewable phase has empty `required_reviewers` and no explicit user-approved no-review workflow;
+- required reviewer records are missing, stale, or contradictory for current revision/round;
+- a reviewer reviewed an obsolete artifact revision/round;
+- doer needs a mandatory human gate and `yolo` is false/missing;
+- diff scope is ambiguous: staged, unstaged, or full pending state;
+- blackboard path appears outside intended repo/worktree;
+- write would overwrite another agent's state/comments;
+- derived worktree is unsafe or collides;
+- merge conflicts, dirty worktree cleanup risk, ambiguous branch identity, or cleanup outside dedicated worktree/topic branch occurs.

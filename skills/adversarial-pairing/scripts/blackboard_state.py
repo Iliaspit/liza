@@ -11,7 +11,7 @@ import sys
 from pathlib import Path
 from typing import Any, TypedDict
 
-TERMINAL_PHASES = {"COMMITTED", "BLOCKED", "STOPPED"}
+TERMINAL_PHASES = {"CLEANED_UP", "BLOCKED", "STOPPED"}
 
 
 class ReviewTarget(TypedDict):
@@ -108,6 +108,8 @@ DOER_WORK_ACTIONS = {
     "CODING": "implement from the approved plan in the recorded worktree",
     "CODE_CHANGES_REQUESTED": "address code-review comments as unstaged follow-up changes",
     "READY_TO_COMMIT": "commit, rebase, merge, and clean up after final review approval",
+    "COMMITTED": "merge the topic commit into the base branch",
+    "MERGED": "clean up the dedicated worktree and merged topic branch",
 }
 
 
@@ -253,6 +255,8 @@ def agent_entry_template(role: str) -> dict[str, Any]:
 
 
 def summarize(path: Path, role: str | None, agent_id: str | None) -> dict[str, Any]:
+    if not path.exists() and role == "reviewer":
+        return summarize_missing_blackboard(path, role, agent_id)
     frontmatter_text, raw_data = read_frontmatter(path)
     frontmatter = parse_frontmatter(frontmatter_text)
 
@@ -262,6 +266,7 @@ def summarize(path: Path, role: str | None, agent_id: str | None) -> dict[str, A
 
     required_reviewers = normalize_string_list(frontmatter.get("required_reviewers"))
     worktree = normalize_worktree(frontmatter.get("worktree"))
+    worktree_path = normalize_worktree(frontmatter.get("worktree_path"))
     registered_reviewers = sorted(
         agent for agent, entry in agents.items() if isinstance(entry, dict) and entry.get("role") == "reviewer"
     )
@@ -269,15 +274,27 @@ def summarize(path: Path, role: str | None, agent_id: str | None) -> dict[str, A
     review = summarize_review(phase, frontmatter, agents, required_reviewers)
     agent_summary = summarize_agent(role, agent_id, agents, required_reviewers)
     next_action = decide_next_action(phase, frontmatter, review, agent_summary)
+    terminal = phase in TERMINAL_PHASES or is_legacy_committed(frontmatter)
 
     return {
         "path": str(path),
         "sha256": hashlib.sha256(raw_data).hexdigest(),
         "phase": phase,
-        "terminal": phase in TERMINAL_PHASES,
+        "terminal": terminal,
         "yolo": bool(frontmatter.get("yolo")),
         "work_type": frontmatter.get("work_type"),
         "worktree": worktree,
+        "worktree_path": worktree_path,
+        "audit": {
+            "repo_root": frontmatter.get("repo_root"),
+            "base_branch": frontmatter.get("base_branch"),
+            "base_sha": frontmatter.get("base_sha"),
+            "topic_branch": frontmatter.get("topic_branch"),
+            "commit_sha": frontmatter.get("commit_sha"),
+            "merged_at": frontmatter.get("merged_at"),
+            "merged_into": frontmatter.get("merged_into"),
+            "worktree_removed": frontmatter.get("worktree_removed"),
+        },
         "counters": {
             "analysis_revision": frontmatter.get("analysis_revision"),
             "plan_revision": frontmatter.get("plan_revision"),
@@ -298,12 +315,61 @@ def summarize(path: Path, role: str | None, agent_id: str | None) -> dict[str, A
     }
 
 
+def summarize_missing_blackboard(path: Path, role: str | None, agent_id: str | None) -> dict[str, Any]:
+    return {
+        "path": str(path),
+        "sha256": None,
+        "phase": "MISSING",
+        "terminal": False,
+        "yolo": False,
+        "work_type": None,
+        "worktree": None,
+        "worktree_path": None,
+        "audit": {},
+        "counters": {
+            "analysis_revision": None,
+            "plan_revision": None,
+            "red_test_round": None,
+            "code_review_round": None,
+        },
+        "required_reviewers": [],
+        "registered_reviewers": [],
+        "missing_required_agent_records": [],
+        "unrequired_registered_reviewers": [],
+        "working_agents": [],
+        "waiting_agents": [agent_id] if agent_id else [],
+        "agent": {
+            "id": agent_id,
+            "role": role,
+            "status": "WAITING",
+            "exists": False,
+            "is_required": False,
+            "needs_registration": False,
+            "needs_required_registration": False,
+            "registration_entry": agent_entry_template("reviewer"),
+        },
+        "review": None,
+        "next": {
+            "actor": "reviewer",
+            "action": "wait for the doer to create the blackboard, then register",
+            "handoff_to": [agent_id or "reviewer"],
+        },
+    }
+
+
 def normalize_string_list(value: Any) -> list[str]:
     if value is None:
         return []
     if not isinstance(value, list):
         raise ValueError("required_reviewers must be a list")
     return [str(item) for item in value]
+
+
+def is_legacy_committed(frontmatter: dict[str, Any]) -> bool:
+    if frontmatter.get("phase") != "COMMITTED":
+        return False
+    lifecycle_fields = {"commit_sha", "merged_at", "merged_into", "worktree_path", "worktree_removed"}
+    return lifecycle_fields.isdisjoint(frontmatter.keys())
 
 
 def normalize_worktree(value: Any) -> str | None:
@@ -435,6 +501,14 @@ def decide_next_action(
 ) -> dict[str, Any]:
     if phase in TERMINAL_PHASES:
         return {"actor": "none", "action": "stop polling; phase is terminal", "handoff_to": []}
+    if is_legacy_committed(frontmatter):
+        return {"actor": "none", "action": "stop polling; legacy COMMITTED phase is terminal", "handoff_to": []}
+    if phase == "COMMITTED" and agent is not None and agent.get("role") == "reviewer":
+        return {
+            "actor": "none",
+            "action": "reviewer may stop polling; doer owns merge and cleanup",
+            "handoff_to": [],
+        }
 
     if agent is not None and agent.get("needs_registration"):
         return {
@@ -454,9 +528,7 @@ def decide_next_action(
         if not frontmatter.get("required_reviewers"):
             return {
                 "actor": "doer",
-                "action": (
-                    "register required reviewers or obtain explicit no-review approval before submission can proceed"
-                ),
+                "action": ("wait for reviewer registration or obtain explicit no-review approval before advancing"),
                 "handoff_to": ["doer"],
             }
         if review["pending_reviewers"]:
