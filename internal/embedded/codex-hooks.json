@@ -9,7 +9,8 @@
             "timeout": 5,
             "type": "command"
           }
-        ]
+        ],
+        "matcher": "^startup$"
       }
     ],
     "PreToolUse": [

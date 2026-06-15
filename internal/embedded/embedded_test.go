@@ -1978,6 +1978,7 @@ func TestWriteCodexProjectHooks_NewFile(t *testing.T) {
 	for _, want := range []string{
 		`"SessionStart"`,
 		`.codex/hooks/session-context.sh`,
+		`"matcher": "^startup$"`,
 		`.codex/hooks/enforce-init.sh`,
 		`"matcher": "^Bash$"`,
 	} {
