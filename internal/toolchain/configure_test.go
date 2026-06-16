@@ -54,6 +54,32 @@ func TestConfigureWritesProfileAndEnv(t *testing.T) {
 	if strings.Contains(env, "\nexport HF_HUB_OFFLINE=\"1\"") {
 		t.Fatalf("env should not assert Semble offline readiness before validation:\n%s", env)
 	}
+	if strings.Contains(env, "LIZA_ENABLE_BASH_POLICY") {
+		t.Fatalf("balanced env should not enable bash-policy:\n%s", env)
+	}
+}
+
+func TestConfigureFullProfileEnablesBashPolicy(t *testing.T) {
+	got, err := Configure(ConfigureOptions{
+		Profile:    ProfileFull,
+		GlobalDir:  t.TempDir(),
+		InstallDir: filepath.Join(t.TempDir(), "bin"),
+	})
+	if err != nil {
+		t.Fatalf("Configure() error = %v", err)
+	}
+
+	envData, err := os.ReadFile(got.EnvPath)
+	if err != nil {
+		t.Fatalf("read env: %v", err)
+	}
+	env := string(envData)
+	if !strings.Contains(env, `export LIZA_ENABLE_BASH_POLICY='1'`) {
+		t.Fatalf("full env missing bash-policy activation:\n%s", env)
+	}
+	if !contains(got.SelectedTools, "bash-policy") {
+		t.Fatalf("SelectedTools missing bash-policy: %v", got.SelectedTools)
+	}
 }
 
 func TestConfigureShellQuotesGeneratedEnvAndProfileSource(t *testing.T) {

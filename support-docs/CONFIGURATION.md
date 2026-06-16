@@ -77,8 +77,10 @@ Depending on selected providers and options, `liza init` writes or updates:
 - `.liza/state.yaml`, `.liza/log.yaml`, and `.liza/pipeline.yaml` for a MAS
   workspace
 - the configured integration branch for MAS runs
-- optional indexing activation artifacts when `LIZA_ENABLE_STACKLIT`,
+- optional tool activation artifacts when `LIZA_ENABLE_STACKLIT`,
   `LIZA_ENABLE_SCIP_SEARCH`, or `LIZA_ENABLE_SEMBLE` is enabled
+- standalone bash-policy provider hooks when `LIZA_ENABLE_BASH_POLICY` is enabled
+  and the `bash-policy` CLI is installed
 
 For brownfield projects that already have their own `CLAUDE.md`, `AGENTS.md`,
 or `GEMINI.md`, Liza does not overwrite the repo-root file. It uses the
@@ -284,7 +286,7 @@ Supported CLI names are `claude`, `codex`, `codex-acp`, `opencode`,
 | `auto_checkpoint_summary` | true | — | — | boolean | Auto-runs checkpoint-summary after successful merges and writes `.liza/checkpoint-summary.md` |
 | `scip_search` | (none) | — | — | language list | Durable allowlist of SCIP languages Liza may index when `LIZA_ENABLE_SCIP_SEARCH` is truthy |
 
-## Optional Indexing Activation
+## Optional Tool Activation
 
 [Stacklit](https://github.com/liza-mas/stacklit-cli),
 [SCIP Search](https://github.com/liza-mas/scip-search/),
@@ -656,6 +658,32 @@ architecture exports, wire Functional Clusters into Git hooks, auto-refresh
 `functional-clusters.json`, infer alternate artifact locations, or inject MAS
 prompt guidance for this milestone.
 
+### Bash Policy (`LIZA_ENABLE_BASH_POLICY`)
+
+`bash-policy` is an optional standalone CLI that installs provider-aware bash
+command policy hooks for Claude and Codex. Liza does not vendor or implement the
+policy engine; it only calls the installed executable during `liza init` when
+explicitly enabled.
+
+`LIZA_ENABLE_BASH_POLICY` is process-local activation, not durable project state.
+Values are trimmed and compared case-insensitively:
+
+| Value | Meaning |
+|-------|---------|
+| `1`, `true` | Ask `liza init` to run `bash-policy init` for the selected Claude/Codex providers |
+| unset, empty, `0`, `false` | Keep bash-policy disabled for the current init process |
+
+When enabled, `liza init` runs:
+
+```bash
+bash-policy init --provider <claude|codex|all> --policy-artifact-root <project_root>
+```
+
+Pairing init derives the provider from selected agents. Full workspace init uses
+Claude by default and adds Codex when `--codex` is selected. If the executable is
+missing or the command fails, `liza init` prints a warning and continues with the
+rest of initialization.
+
 ### Agent Execution Timeouts
 
 | Role | Timeout | Rationale |
@@ -866,6 +894,7 @@ project configuration belongs in `.liza/state.yaml`.
 |----------|----------|---------|---------|
 | `LIZA_AGENT_ID` | For agent commands | -- | Agent identifier input (format: `{role}-{number}`). `liza agent` also exports the resolved ID to spawned provider CLIs so hooks select MAS mode. |
 | `LIZA_DISABLE_CLAUDE_SUBAGENTS` | No | unset | Set to `1` to launch Claude Code agents with `--disallowedTools Task`, disabling Claude subagent delegation. Use only when intentionally waiving Claude subagent delegation; agents may be unable to satisfy contract delegation triggers while this is set. |
+| `LIZA_ENABLE_BASH_POLICY` | No | unset | Strict opt-in activation gate for standalone bash-policy. In pairing init, truthy values run `bash-policy init` for selected Claude/Codex providers when the CLI is installed. In full workspace init, truthy values run it for Claude and for Codex when `--codex` is selected. Missing or failing bash-policy setup is warning-only. Unset, empty, `0`, and `false` disable it. Values are trimmed and parsed case-insensitively. |
 | `LIZA_ENABLE_SCIP_SEARCH` | No | unset | Strict opt-in activation gate for SCIP. In pairing init, truthy values enable project-local hook planning and installation for detected or selected languages. In MAS, truthy values enable indexing and `scip-search` prompt guidance only when `config.scip_search` also allows a detected language. Unset, empty, `0`, and `false` disable it. Values are trimmed and parsed case-insensitively. |
 | `LIZA_ENABLE_SEMBLE` | No | unset | Strict opt-in activation gate for Semble. In pairing init, truthy values enable project-root `.sembleignore` safety setup before SessionStart advertisement. In MAS, truthy values enable prewarm/offline validation and prompt guidance only when Semble is installed, offline-ready, and safe for the target root. Unset, empty, `0`, and `false` disable it. Values are trimmed and parsed case-insensitively. |
 | `LIZA_ENABLE_STACKLIT` | No | unset | Strict opt-in activation gate for Stacklit. In pairing init, truthy values enable project-local hook setup for repo-root `stacklit.json` refresh. In MAS, truthy values enable target-local `stacklit.json` refresh and prompt guidance when an index is available. Unset, empty, `0`, and `false` disable it. Values are trimmed and parsed case-insensitively. |

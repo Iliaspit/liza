@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	bashpolicycli "github.com/liza-mas/liza/internal/bash-policy-cli"
 	"github.com/liza-mas/liza/internal/db"
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/pairingindex"
@@ -28,6 +29,7 @@ func setupGlobalLiza(t *testing.T) string {
 	unsetEnvForTest(t, stacklit.EnvEnableStacklit)
 	unsetEnvForTest(t, scipsearch.EnvEnableScipSearch)
 	unsetEnvForTest(t, semble.EnvEnableSemble)
+	unsetEnvForTest(t, bashpolicycli.EnvEnableBashPolicy)
 	return fakeHome
 }
 
@@ -890,6 +892,57 @@ func TestInitCommand_CreatesContractSymlinks(t *testing.T) {
 		}
 	}
 	verifyCodexHooks(t, gitDir)
+}
+
+func TestInitCommandWithConfig_BashPolicyProviderScope(t *testing.T) {
+	tests := []struct {
+		name      string
+		agents    []string
+		provider  string
+		wantCodex bool
+	}{
+		{name: "claude only by default", provider: bashpolicycli.ProviderClaude},
+		{name: "claude and codex when codex selected", agents: []string{"codex"}, provider: bashpolicycli.ProviderAll, wantCodex: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gitDir := setupGitRepo(t)
+			defer os.RemoveAll(gitDir)
+			setupGlobalLiza(t)
+			t.Setenv(bashpolicycli.EnvEnableBashPolicy, "1")
+
+			runner := &initBashPolicyTestRunner{}
+			restore := setInitBashPolicyHooksForTest(
+				func(name string) (string, error) {
+					return filepath.Join(gitDir, "bin", name), nil
+				},
+				runner,
+			)
+			defer restore()
+
+			originalDir, _ := os.Getwd()
+			defer os.Chdir(originalDir)
+			os.Chdir(gitDir)
+			testhelpers.CreateCommittedSpecFile(t, gitDir, "vision.md", "# Vision\n")
+
+			if err := InitCommandWithConfig(InitParams{
+				Description: "Test goal",
+				SpecRef:     "specs/vision.md",
+				Agents:      tt.agents,
+			}); err != nil {
+				t.Fatalf("InitCommandWithConfig() error = %v", err)
+			}
+
+			if len(runner.commands) != 1 {
+				t.Fatalf("bash-policy commands = %d, want 1", len(runner.commands))
+			}
+			assertBashPolicyCommand(t, runner.commands[0], gitDir, tt.provider)
+			if tt.wantCodex {
+				verifyCodexHooks(t, gitDir)
+			}
+		})
+	}
 }
 
 func TestInitCommand_OpenCodeCreatesAgentsContractWithoutCodexHooks(t *testing.T) {
@@ -2538,6 +2591,147 @@ func TestInitPairingCommand_MultipleAgents(t *testing.T) {
 	verifyCodexHooks(t, gitDir)
 }
 
+func TestInitPairingCommand_BashPolicyDisabledSkipsLookup(t *testing.T) {
+	gitDir := setupGitRepo(t)
+	defer os.RemoveAll(gitDir)
+	setupGlobalLiza(t)
+
+	originalDir, _ := os.Getwd()
+	defer os.Chdir(originalDir)
+	os.Chdir(gitDir)
+
+	var lookups int
+	restore := setInitBashPolicyHooksForTest(
+		func(name string) (string, error) {
+			lookups++
+			return filepath.Join(gitDir, "bin", name), nil
+		},
+		&initBashPolicyTestRunner{},
+	)
+	defer restore()
+
+	if err := InitPairingCommand(InitPairingParams{Agents: []string{"claude", "codex"}}); err != nil {
+		t.Fatalf("InitPairingCommand() error = %v", err)
+	}
+	if lookups != 0 {
+		t.Fatalf("bash-policy lookups = %d, want zero when gate disabled", lookups)
+	}
+}
+
+func TestInitPairingCommand_BashPolicyProviderScope(t *testing.T) {
+	tests := []struct {
+		name     string
+		agents   []string
+		provider string
+		wantRun  bool
+	}{
+		{name: "claude", agents: []string{"claude"}, provider: bashpolicycli.ProviderClaude, wantRun: true},
+		{name: "codex", agents: []string{"codex"}, provider: bashpolicycli.ProviderCodex, wantRun: true},
+		{name: "all", agents: []string{"claude", "codex"}, provider: bashpolicycli.ProviderAll, wantRun: true},
+		{name: "unsupported providers only", agents: []string{"gemini", "opencode"}, wantRun: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gitDir := setupGitRepo(t)
+			defer os.RemoveAll(gitDir)
+			setupGlobalLiza(t)
+			t.Setenv(bashpolicycli.EnvEnableBashPolicy, "true")
+
+			runner := &initBashPolicyTestRunner{}
+			restore := setInitBashPolicyHooksForTest(
+				func(name string) (string, error) {
+					return filepath.Join(gitDir, "bin", name), nil
+				},
+				runner,
+			)
+			defer restore()
+
+			originalDir, _ := os.Getwd()
+			defer os.Chdir(originalDir)
+			os.Chdir(gitDir)
+
+			if err := InitPairingCommand(InitPairingParams{Agents: tt.agents}); err != nil {
+				t.Fatalf("InitPairingCommand() error = %v", err)
+			}
+			if !tt.wantRun {
+				if len(runner.commands) != 0 {
+					t.Fatalf("bash-policy commands = %d, want zero", len(runner.commands))
+				}
+				return
+			}
+			if len(runner.commands) != 1 {
+				t.Fatalf("bash-policy commands = %d, want 1", len(runner.commands))
+			}
+			assertBashPolicyCommand(t, runner.commands[0], gitDir, tt.provider)
+		})
+	}
+}
+
+func TestInitPairingCommand_BashPolicyWarnsWhenMissing(t *testing.T) {
+	gitDir := setupGitRepo(t)
+	defer os.RemoveAll(gitDir)
+	setupGlobalLiza(t)
+	t.Setenv(bashpolicycli.EnvEnableBashPolicy, "1")
+
+	restore := setInitBashPolicyHooksForTest(
+		func(string) (string, error) {
+			return "", errors.New("not found")
+		},
+		&initBashPolicyTestRunner{},
+	)
+	defer restore()
+
+	originalDir, _ := os.Getwd()
+	defer os.Chdir(originalDir)
+	os.Chdir(gitDir)
+
+	stderr, err := captureStderrForTest(func() error {
+		return InitPairingCommand(InitPairingParams{Agents: []string{"claude"}})
+	})
+	if err != nil {
+		t.Fatalf("InitPairingCommand() error = %v", err)
+	}
+	if !strings.Contains(stderr, "bash-policy requested by LIZA_ENABLE_BASH_POLICY") {
+		t.Fatalf("stderr missing bash-policy missing warning:\n%s", stderr)
+	}
+}
+
+func TestInitPairingCommand_BashPolicyWarnsWhenInitFails(t *testing.T) {
+	gitDir := setupGitRepo(t)
+	defer os.RemoveAll(gitDir)
+	setupGlobalLiza(t)
+	t.Setenv(bashpolicycli.EnvEnableBashPolicy, "true")
+
+	runner := &initBashPolicyTestRunner{
+		output: bashpolicycli.CommandOutput{Stderr: "policy failure detail"},
+		err:    errors.New("exit status 2"),
+	}
+	restore := setInitBashPolicyHooksForTest(
+		func(name string) (string, error) {
+			return filepath.Join(gitDir, "bin", name), nil
+		},
+		runner,
+	)
+	defer restore()
+
+	originalDir, _ := os.Getwd()
+	defer os.Chdir(originalDir)
+	os.Chdir(gitDir)
+
+	stderr, err := captureStderrForTest(func() error {
+		return InitPairingCommand(InitPairingParams{Agents: []string{"claude", "codex"}})
+	})
+	if err != nil {
+		t.Fatalf("InitPairingCommand() error = %v", err)
+	}
+	for _, want := range []string{"failed to initialize bash-policy hooks", "policy failure detail"} {
+		if !strings.Contains(stderr, want) {
+			t.Fatalf("stderr missing %q:\n%s", want, stderr)
+		}
+	}
+}
+
 func TestInitPairingCommand_DisabledIndexGatesPreserveProviderHooksOnly(t *testing.T) {
 	gitDir := setupGitRepo(t)
 	defer os.RemoveAll(gitDir)
@@ -3707,6 +3901,42 @@ func setInitSembleHooksForTest(lookPath semble.ExecutableLookup, runner semble.C
 	return func() {
 		initSembleLookPath = previousLookPath
 		initSembleRunner = previousRunner
+	}
+}
+
+type initBashPolicyTestRunner struct {
+	commands []bashpolicycli.Command
+	output   bashpolicycli.CommandOutput
+	err      error
+}
+
+func (r *initBashPolicyTestRunner) Run(command bashpolicycli.Command) (bashpolicycli.CommandOutput, error) {
+	r.commands = append(r.commands, command)
+	return r.output, r.err
+}
+
+func setInitBashPolicyHooksForTest(lookPath bashpolicycli.ExecutableLookup, runner bashpolicycli.CommandRunner) func() {
+	previousLookPath := initBashPolicyLookPath
+	previousRunner := initBashPolicyRunner
+	initBashPolicyLookPath = lookPath
+	initBashPolicyRunner = runner
+	return func() {
+		initBashPolicyLookPath = previousLookPath
+		initBashPolicyRunner = previousRunner
+	}
+}
+
+func assertBashPolicyCommand(t *testing.T, command bashpolicycli.Command, projectRoot, provider string) {
+	t.Helper()
+	if command.Path != filepath.Join(projectRoot, "bin", "bash-policy") {
+		t.Fatalf("bash-policy path = %q", command.Path)
+	}
+	if command.Dir != projectRoot {
+		t.Fatalf("bash-policy dir = %q, want %q", command.Dir, projectRoot)
+	}
+	wantArgs := strings.Join([]string{"init", "--provider", provider, "--policy-artifact-root", projectRoot}, "\x00")
+	if strings.Join(command.Args, "\x00") != wantArgs {
+		t.Fatalf("bash-policy args = %v", command.Args)
 	}
 }
 

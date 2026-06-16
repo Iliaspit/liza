@@ -191,6 +191,41 @@ func TestScipSearchCatalogDeclaresSourceFallback(t *testing.T) {
 	}
 }
 
+func TestBashPolicyCatalogPlansStandaloneInstaller(t *testing.T) {
+	selection, err := ResolveSelection(ProfileFull, []string{"bash-policy"}, allToolIDsExcept("bash-policy"))
+	if err != nil {
+		t.Fatalf("ResolveSelection() error = %v", err)
+	}
+	tool := selection.Tools[0]
+	if tool.InstallKind != InstallScript {
+		t.Fatalf("install kind = %q, want script", tool.InstallKind)
+	}
+	if tool.InstallURL != "https://raw.githubusercontent.com/liza-mas/bash-policy/main/install.sh" {
+		t.Fatalf("install URL = %q", tool.InstallURL)
+	}
+	if tool.SourceRepo != "https://github.com/liza-mas/bash-policy" || tool.SourcePackage != "./cmd/bash-policy" {
+		t.Fatalf("bash-policy fallback = repo %q package %q", tool.SourceRepo, tool.SourcePackage)
+	}
+	if strings.Join(tool.VersionArgs, " ") != "--version" {
+		t.Fatalf("VersionArgs = %v", tool.VersionArgs)
+	}
+
+	installDir := filepath.Join(t.TempDir(), "bin")
+	command, err := installCommand(tool, installDir, &fakeRunner{})
+	if err != nil {
+		t.Fatalf("installCommand() error = %v", err)
+	}
+	if command.Name != "bash" {
+		t.Fatalf("command name = %q, want bash", command.Name)
+	}
+	if command.Env["LIZA_TOOL_INSTALL_URL"] != tool.InstallURL {
+		t.Fatalf("LIZA_TOOL_INSTALL_URL = %q", command.Env["LIZA_TOOL_INSTALL_URL"])
+	}
+	if command.Env["INSTALL_DIR"] != installDir {
+		t.Fatalf("INSTALL_DIR = %q, want %q", command.Env["INSTALL_DIR"], installDir)
+	}
+}
+
 func allToolIDsExcept(keep ...string) []string {
 	var ids []string
 	for _, tool := range Catalog() {

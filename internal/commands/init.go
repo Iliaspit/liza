@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	bashpolicycli "github.com/liza-mas/liza/internal/bash-policy-cli"
 	"github.com/liza-mas/liza/internal/db"
 	"github.com/liza-mas/liza/internal/embedded"
 	"github.com/liza-mas/liza/internal/envgate"
@@ -28,6 +29,9 @@ import (
 var (
 	initSembleLookPath semble.ExecutableLookup
 	initSembleRunner   semble.CommandRunner
+
+	initBashPolicyLookPath bashpolicycli.ExecutableLookup
+	initBashPolicyRunner   bashpolicycli.CommandRunner
 )
 
 // InitParams holds the parameters for InitCommand.
@@ -198,6 +202,8 @@ func InitPairingCommand(params InitPairingParams) error {
 			fmt.Fprintf(os.Stderr, "Warning: failed to write codex hooks: %v\n", err)
 		}
 	}
+
+	runBashPolicyInit(projectRoot, bashPolicyProvider(hasClaude, hasCodex), stdin)
 
 	if hasOpenCode {
 		if err := embedded.WriteOpenCodeExecTool(projectRoot); err != nil {
@@ -613,6 +619,37 @@ func writeSembleDiagnostic(diagnostic semble.Diagnostic) {
 	fmt.Fprintln(os.Stderr, message)
 }
 
+func bashPolicyProvider(hasClaude, hasCodex bool) string {
+	switch {
+	case hasClaude && hasCodex:
+		return bashpolicycli.ProviderAll
+	case hasClaude:
+		return bashpolicycli.ProviderClaude
+	case hasCodex:
+		return bashpolicycli.ProviderCodex
+	default:
+		return ""
+	}
+}
+
+func runBashPolicyInit(projectRoot, provider string, stdin io.Reader) {
+	result := bashpolicycli.InitHooks(bashpolicycli.InitHooksOptions{
+		ProjectRoot: projectRoot,
+		Provider:    provider,
+		Stdin:       stdin,
+		Stdout:      os.Stdout,
+		Stderr:      os.Stderr,
+		LookPath:    initBashPolicyLookPath,
+		Runner:      initBashPolicyRunner,
+	})
+	switch result.Status {
+	case bashpolicycli.StatusMissing:
+		fmt.Fprintf(os.Stderr, "Warning: bash-policy requested by %s but bash-policy was not found on PATH; run 'liza toolchain install --profile full --yes' and source ~/.liza/toolchain/env.sh before re-running liza init.\n", bashpolicycli.EnvEnableBashPolicy)
+	case bashpolicycli.StatusFailed:
+		fmt.Fprintf(os.Stderr, "Warning: failed to initialize bash-policy hooks: %s\n", result.Diagnostic())
+	}
+}
+
 // InitCommandWithConfig initializes a workspace with optional pipeline config.
 func InitCommandWithConfig(params InitParams) error {
 	description := params.Description
@@ -775,6 +812,8 @@ func InitCommandWithConfig(params InitParams) error {
 			fmt.Fprintf(os.Stderr, "Warning: failed to write codex hooks: %v\n", err)
 		}
 	}
+
+	runBashPolicyInit(lizaPaths.ProjectRoot(), bashPolicyProvider(true, slices.Contains(params.Agents, "codex")), stdin)
 
 	if slices.Contains(params.Agents, "opencode") {
 		if err := embedded.WriteOpenCodeExecTool(lizaPaths.ProjectRoot()); err != nil {

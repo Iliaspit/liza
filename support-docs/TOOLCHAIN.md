@@ -29,6 +29,7 @@ Selected by default:
 Unchecked by default:
 
 - `functional-clusters`
+- `bash-policy` (selected by the `full` profile)
 - MCP/provider capabilities such as filesystem, context7, Ref, fetch,
   Perplexity, DeepWiki, Morph, and postgres.
 
@@ -90,6 +91,10 @@ prewarmed and offline validation succeeds, operators may add:
 export HF_HUB_OFFLINE=1
 ```
 
+The `full` profile also installs `bash-policy` and exports
+`LIZA_ENABLE_BASH_POLICY=1`. Source that env file before `liza init` when the
+project should receive standalone bash-policy provider hooks.
+
 ## Project Activation
 
 After the machine-local toolchain is installed and configured, run normal
@@ -108,17 +113,19 @@ liza toolchain configure --profile balanced --project . --agents claude,codex
 ```
 
 Project-local activation still belongs to `liza init`: Stacklit hooks, SCIP hook
-plans, `.sembleignore`, provider symlinks, and OpenCode exec tools are written
-there. Global `AGENT_TOOLS.md` remains generic and must not contain stale
+plans, `.sembleignore`, provider symlinks, bash-policy provider hooks, and
+OpenCode exec tools are written there. If `LIZA_ENABLE_BASH_POLICY` is truthy but
+the standalone `bash-policy` CLI is unavailable or fails, `liza init` warns and
+continues. Global `AGENT_TOOLS.md` remains generic and must not contain stale
 project-specific index paths.
 
 ## Install Fallbacks
 
 Most tools are installed through package managers, upstream install scripts,
 `go install`, npm, or `uv tool install`. Some upstream install scripts can be
-temporarily unavailable even when the source builds cleanly. For `mdtoc` and
-`scip-search`, `liza toolchain install` falls back to cloning the official
-source repository and running `go install ./cmd/<tool>` into the selected
-install directory.
+temporarily unavailable even when the source builds cleanly. For `mdtoc`,
+`scip-search`, and `bash-policy`, `liza toolchain install` falls back to cloning
+the official source repository and running `go install ./cmd/<tool>` into the
+selected install directory.
 
 The source fallback requires `git` and `go` on `PATH`.
