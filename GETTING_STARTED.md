@@ -114,6 +114,14 @@ provider or MCP host.
 See [Liza Toolchain](support-docs/TOOLCHAIN.md) for profiles, include/exclude
 flags, and project activation.
 
+`bash-policy` is the optional (installed by toolchain --profile full) standalone command-policy layer for agent shell
+use. When `LIZA_ENABLE_BASH_POLICY=1` is set before `liza init`, Liza delegates
+to the installed `bash-policy` CLI to install provider-aware bash hooks for
+Claude and Codex in the project, then continues initialization if the executable
+is missing or fails. For the full setup, activation, tuning, and update
+lifecycle, see the
+[bash-policy configuration guide](https://github.com/liza-mas/bash-policy/blob/main/docs/CONFIGURATION.md).
+
 If you keep the default SCIP guidance, install `scip-search` plus the language
 indexers for the stacks you want Liza to index. Installing `scip-search` alone
 is not enough:

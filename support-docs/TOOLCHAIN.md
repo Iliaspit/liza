@@ -93,7 +93,9 @@ export HF_HUB_OFFLINE=1
 
 The `full` profile also installs `bash-policy` and exports
 `LIZA_ENABLE_BASH_POLICY=1`. Source that env file before `liza init` when the
-project should receive standalone bash-policy provider hooks.
+project should receive standalone bash-policy provider hooks. For the full
+usage lifecycle, see the
+[bash-policy configuration guide](https://github.com/liza-mas/bash-policy/blob/main/docs/CONFIGURATION.md).
 
 ## Project Activation
 
