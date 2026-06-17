@@ -24,6 +24,7 @@ import (
 	"github.com/liza-mas/liza/internal/scipsearch"
 	"github.com/liza-mas/liza/internal/semble"
 	"github.com/liza-mas/liza/internal/stacklit"
+	"github.com/liza-mas/liza/internal/trovex"
 )
 
 var (
@@ -215,6 +216,16 @@ func InitPairingCommand(params InitPairingParams) error {
 	if projectRoot != "" {
 		if err := embedded.CleanStaleMCPEntry(projectRoot); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: failed to clean stale .mcp.json entry: %v\n", err)
+		}
+	}
+
+	// Write trovex MCP server entry and default .trovexignore when trovex is enabled
+	if projectRoot != "" && trovex.RuntimeEnabled() {
+		if err := embedded.WriteTrovexMCPEntry(projectRoot, trovex.MCPEndpointURL(trovex.DefaultServePort)); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to write trovex .mcp.json entry: %v\n", err)
+		}
+		if err := embedded.WriteTrovexIgnore(projectRoot); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to write .trovexignore: %v\n", err)
 		}
 	}
 
@@ -824,6 +835,16 @@ func InitCommandWithConfig(params InitParams) error {
 	// Remove stale liza MCP server entry from .mcp.json (written by older Liza versions)
 	if err := embedded.CleanStaleMCPEntry(lizaPaths.ProjectRoot()); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: failed to clean stale .mcp.json entry: %v\n", err)
+	}
+
+	// Write trovex MCP server entry and default .trovexignore when trovex is enabled
+	if trovex.RuntimeEnabled() {
+		if err := embedded.WriteTrovexMCPEntry(lizaPaths.ProjectRoot(), trovex.MCPEndpointURL(trovex.DefaultServePort)); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to write trovex .mcp.json entry: %v\n", err)
+		}
+		if err := embedded.WriteTrovexIgnore(lizaPaths.ProjectRoot()); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to write .trovexignore: %v\n", err)
+		}
 	}
 
 	// Create contract symlinks only for explicitly requested providers

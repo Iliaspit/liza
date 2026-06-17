@@ -18,16 +18,18 @@ import (
 	"github.com/liza-mas/liza/internal/scipsearch"
 	"github.com/liza-mas/liza/internal/semble"
 	"github.com/liza-mas/liza/internal/stacklit"
+	"github.com/liza-mas/liza/internal/trovex"
 )
 
 var (
 	buildSemblePromptMetadata = semble.BuildPromptMetadata
+	buildTrovexPromptMetadata = trovex.BuildPromptMetadata
 	scipAvailableIndexes      = scipsearch.AvailableIndexes
 	stacklitAvailableIndexes  = stacklit.AvailableIndexes
 )
 
 // baseConfigFrom constructs the BasePromptConfig shared by all roles.
-func baseConfigFrom(state *models.State, config SupervisorConfig, taskID string, scipIndexes []prompts.ScipSearchIndex, stacklitIndexes []prompts.StacklitIndex, sembleSearch prompts.SembleSearchMetadata) prompts.BasePromptConfig {
+func baseConfigFrom(state *models.State, config SupervisorConfig, taskID string, scipIndexes []prompts.ScipSearchIndex, stacklitIndexes []prompts.StacklitIndex, sembleSearch prompts.SembleSearchMetadata, trovexSearch prompts.TrovexSearchMetadata) prompts.BasePromptConfig {
 	return prompts.BasePromptConfig{
 		Role:              config.Role,
 		AgentID:           config.AgentID,
@@ -40,6 +42,7 @@ func baseConfigFrom(state *models.State, config SupervisorConfig, taskID string,
 		ScipSearchIndexes: scipIndexes,
 		StacklitIndexes:   stacklitIndexes,
 		SembleSearch:      sembleSearch,
+		TrovexSearch:      trovexSearch,
 	}
 }
 
@@ -63,6 +66,7 @@ func buildPromptWithContext(state *models.State, config SupervisorConfig, taskID
 		toBasePromptScipSearchIndexes(data.ScipIndexes),
 		toBasePromptStacklitIndexes(data.StacklitIndexes),
 		availablePromptSembleSearchMetadata(data.Worktree, semble.TargetKindTaskWorktree),
+		availablePromptTrovexSearchMetadata(data.Worktree),
 	))
 	if err != nil {
 		return "", fmt.Errorf("building base prompt: %w", err)
@@ -106,6 +110,7 @@ func buildOrchestratorPromptContext(state *models.State, config SupervisorConfig
 		toBasePromptScipSearchIndexes(data.ScipIndexes),
 		toBasePromptStacklitIndexes(data.StacklitIndexes),
 		availablePromptSembleSearchMetadata(config.ProjectRoot, semble.TargetKindProjectRoot),
+		availablePromptTrovexSearchMetadata(config.ProjectRoot),
 	))
 	if err != nil {
 		return "", fmt.Errorf("building base prompt: %w", err)
@@ -253,6 +258,22 @@ func availablePromptSembleSearchMetadata(targetRoot string, kind semble.TargetKi
 		return prompts.SembleSearchMetadata{}
 	}
 	return prompts.SembleSearchMetadata{
+		TargetRoot:      metadata.TargetRoot,
+		ShellTargetRoot: metadata.ShellTargetRoot,
+	}
+}
+
+func availablePromptTrovexSearchMetadata(targetRoot string) prompts.TrovexSearchMetadata {
+	if targetRoot == "" {
+		return prompts.TrovexSearchMetadata{}
+	}
+	metadata, ok := buildTrovexPromptMetadata(trovex.PromptMetadataOptions{
+		TargetRoot: targetRoot,
+	})
+	if !ok {
+		return prompts.TrovexSearchMetadata{}
+	}
+	return prompts.TrovexSearchMetadata{
 		TargetRoot:      metadata.TargetRoot,
 		ShellTargetRoot: metadata.ShellTargetRoot,
 	}

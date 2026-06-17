@@ -52,10 +52,30 @@
         ]
       },
       {
+        "matcher": "Read",
+        "hooks": [
+          {
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/trovex-md-read-guard.sh\"",
+            "timeout": 5,
+            "type": "command"
+          }
+        ]
+      },
+      {
         "matcher": "Write",
         "hooks": [
           {
             "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/worktree-path-guard.sh\"",
+            "timeout": 5,
+            "type": "command"
+          }
+        ]
+      },
+      {
+        "matcher": "Write",
+        "hooks": [
+          {
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/trovex-md-guard.sh\"",
             "timeout": 5,
             "type": "command"
           }
@@ -72,10 +92,30 @@
         ]
       },
       {
+        "matcher": "Edit",
+        "hooks": [
+          {
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/trovex-md-guard.sh\"",
+            "timeout": 5,
+            "type": "command"
+          }
+        ]
+      },
+      {
         "matcher": "MultiEdit",
         "hooks": [
           {
             "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/worktree-path-guard.sh\"",
+            "timeout": 5,
+            "type": "command"
+          }
+        ]
+      },
+      {
+        "matcher": "MultiEdit",
+        "hooks": [
+          {
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/trovex-md-guard.sh\"",
             "timeout": 5,
             "type": "command"
           }
@@ -150,6 +190,12 @@
       "mcp__morph-mcp__codebase_search",
       "mcp__morph-mcp__edit_file",
       "mcp__perplexity__perplexity_ask",
+      "mcp__trovex__trovex",
+      "mcp__trovex__trovex_write",
+      "mcp__trovex__trovex_read",
+      "mcp__trovex__trovex_search",
+      "mcp__trovex__trovex_tag",
+      "mcp__trovex__trovex_delete",
 
       "Bash(liza:*)",
       "Bash(curl:*)",

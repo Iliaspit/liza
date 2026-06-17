@@ -142,4 +142,21 @@ Semble is available for semantic repository search in this target root:
 
 Use `~/.liza/AGENT_TOOLS.md` for Semble command syntax, content modes, routing rules, and proof requirements.
 {{- end }}
+
+{{- if .TrovexSearch }}
+
+=== TROVEX DOC SEARCH ===
+Trovex MCP server is available for markdown documentation search in this project:
+{{ .TrovexSearch.ShellTargetRoot }}
+
+Use Trovex MCP tools instead of reading .md files directly:
+- `trovex(q)` — find canonical docs for a query (token-minimal routing)
+- `trovex_search(query, k)` — semantic chunk search with reranking
+- `trovex_read(query, doc_id, section)` — read specific doc or section
+- `trovex_write(content, kind, doc_id, tags)` — write/update docs in the store
+
+Prefer Trovex MCP tools over `cat`/`Read` for .md files — they return targeted passages
+with freshness markers and save 50-80% of doc tokens. Hooks will redirect .md
+read/write operations through Trovex when the server is reachable.
+{{- end }}
 {{- end -}}

@@ -24,6 +24,7 @@ type BasePromptConfig struct {
 	ScipSearchIndexes []ScipSearchIndex
 	StacklitIndexes   []StacklitIndex
 	SembleSearch      SembleSearchMetadata
+	TrovexSearch      TrovexSearchMetadata
 }
 
 // ScipSearchIndex is prompt-safe metadata for one successful generated SCIP index.
@@ -43,11 +44,18 @@ type SembleSearchMetadata struct {
 	ShellTargetRoot string
 }
 
+// TrovexSearchMetadata is prompt-safe metadata for Trovex documentation search.
+type TrovexSearchMetadata struct {
+	TargetRoot      string
+	ShellTargetRoot string
+}
+
 type basePromptTemplateData struct {
 	BasePromptConfig
 	ScipSearchIndexes []scipSearchPromptIndex
 	StacklitIndexes   []stacklitPromptIndex
 	SembleSearch      *SembleSearchMetadata
+	TrovexSearch      *TrovexSearchMetadata
 }
 
 type scipSearchPromptIndex struct {
@@ -80,11 +88,20 @@ func BuildBasePrompt(config BasePromptConfig) (string, error) {
 		ScipSearchIndexes: buildScipSearchPromptIndexes(config.ScipSearchIndexes),
 		StacklitIndexes:   buildStacklitPromptIndexes(config.StacklitIndexes),
 		SembleSearch:      buildSembleSearchPromptMetadata(config.SembleSearch),
+		TrovexSearch:      buildTrovexSearchPromptMetadata(config.TrovexSearch),
 	}
 	return executeTemplate("base_prompt", data)
 }
 
 func buildSembleSearchPromptMetadata(metadata SembleSearchMetadata) *SembleSearchMetadata {
+	if metadata.TargetRoot == "" || metadata.ShellTargetRoot == "" {
+		return nil
+	}
+	copy := metadata
+	return &copy
+}
+
+func buildTrovexSearchPromptMetadata(metadata TrovexSearchMetadata) *TrovexSearchMetadata {
 	if metadata.TargetRoot == "" || metadata.ShellTargetRoot == "" {
 		return nil
 	}

@@ -209,6 +209,26 @@ if truthy_env "${LIZA_ENABLE_SEMBLE:-}" && root_sembleignore_safe && semble_offl
   shell_project_dir=$(quote_for_shell "$project_dir")
 fi
 
+trovex_enabled=false
+if truthy_env "${LIZA_ENABLE_TROVEX:-}" && ! command -v trovex >/dev/null 2>&1; then
+  echo "Warning: LIZA_ENABLE_TROVEX is set but trovex is not installed. Run 'liza toolchain install' or 'uvx install trovex' to enable Trovex doc routing." >&2
+fi
+if truthy_env "${LIZA_ENABLE_TROVEX:-}" && command -v trovex >/dev/null 2>&1; then
+  trovex_url="${TROVEX_URL:-http://localhost:8765}"
+  if ! curl -fsS -m 1 "$trovex_url/healthz" >/dev/null 2>&1; then
+    trovex_log="${TMPDIR:-/tmp}/trovex-serve.log"
+    if [ -z "${TROVEX_EMBED_MODEL:-}" ] && [ -z "${OPENAI_API_KEY:-}" ]; then
+      TROVEX_EMBED_MODEL="BAAI/bge-small-en-v1.5" TROVEX_EMBED_DIM="384" \
+        nohup trovex serve --port 8765 >> "$trovex_log" 2>&1 &
+    else
+      nohup trovex serve --port 8765 >> "$trovex_log" 2>&1 &
+    fi
+  fi
+  if curl -fsS -m 2 "$trovex_url/healthz" >/dev/null 2>&1; then
+    trovex_enabled=true
+  fi
+fi
+
 functional_clusters_enabled=false
 functional_clusters_path="$project_dir/functional-clusters.json"
 if truthy_env "${LIZA_ENABLE_FUNCTIONAL_CLUSTERS:-}" && [[ -f "$functional_clusters_path" ]]; then
@@ -221,7 +241,7 @@ if [[ -d "$project_dir/specs/architecture/ADR" ]]; then
   adr_dir_available=true
 fi
 
-if [[ -z "${shell_stacklit_path:-}" && "${#scip_files[@]}" -eq 0 && "$semble_enabled" != "true" && "$functional_clusters_enabled" != "true" && "$adr_dir_available" != "true" ]]; then
+if [[ -z "${shell_stacklit_path:-}" && "${#scip_files[@]}" -eq 0 && "$semble_enabled" != "true" && "$trovex_enabled" != "true" && "$functional_clusters_enabled" != "true" && "$adr_dir_available" != "true" ]]; then
   printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"%s"}}\n' "$(json_escape "$context")"
   exit 0
 fi
@@ -301,6 +321,17 @@ if [[ "$functional_clusters_enabled" == "true" ]]; then
  // functional-clusters list --clusters $shell_functional_clusters_path
  // functional-clusters explain --clusters $shell_functional_clusters_path '<exact-member-symbol>'
  // Functional clusters are advisory and may be stale; verify against source files before editing."
+fi
+
+if [[ "$trovex_enabled" == "true" ]]; then
+  context+="
+ // Trovex MCP server is running. Use trovex MCP tools for .md documentation:
+ // trovex(q) — find canonical docs for a query (token-minimal routing)
+ // trovex_search(query, k) — semantic chunk search with reranking
+ // trovex_read(query, doc_id, section) — read specific doc or section
+ // trovex_write(content, kind, doc_id, tags) — write/update docs in the store
+ // Hooks redirect .md read/write through trovex automatically.
+ // Files in .trovexignore are exempt and read/written raw."
 fi
 
 printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"%s"}}\n' "$(json_escape "$context")"

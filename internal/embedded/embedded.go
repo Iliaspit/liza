@@ -65,6 +65,12 @@ var rtkGuardHookContent []byte
 //go:embed "hooks/worktree-path-guard.sh"
 var worktreePathGuardHookContent []byte
 
+//go:embed "hooks/trovex-md-guard.sh"
+var trovexMdGuardHookContent []byte
+
+//go:embed "hooks/trovex-md-read-guard.sh"
+var trovexMdReadGuardHookContent []byte
+
 // Git-level pre-commit hook for task worktrees. Deliberately NOT in hooks/
 // — that directory holds Claude Code PreToolUse hooks that get written to
 // .claude/hooks/ and referenced from claude-settings.json. This one is a
@@ -1088,6 +1094,77 @@ func CleanStaleMCPEntry(projectRoot string) error {
 	return os.WriteFile(mcpPath, append(output, '\n'), 0644)
 }
 
+// WriteTrovexMCPEntry writes or merges a trovex MCP server entry into
+// .mcp.json at the project root. The entry uses streamable-http transport
+// pointing at the given endpoint URL. Existing non-trovex entries are preserved.
+func WriteTrovexMCPEntry(projectRoot, endpointURL string) error {
+	mcpPath := filepath.Join(projectRoot, ".mcp.json")
+	var doc map[string]any
+
+	if data, err := os.ReadFile(mcpPath); err == nil {
+		if err := json.Unmarshal(data, &doc); err != nil {
+			doc = make(map[string]any)
+		}
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("reading .mcp.json: %w", err)
+	} else {
+		doc = make(map[string]any)
+	}
+
+	servers, _ := doc["mcpServers"].(map[string]any)
+	if servers == nil {
+		servers = make(map[string]any)
+	}
+	servers["trovex"] = map[string]any{
+		"url": endpointURL,
+	}
+	doc["mcpServers"] = servers
+
+	output, err := json.MarshalIndent(doc, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshaling .mcp.json: %w", err)
+	}
+	return os.WriteFile(mcpPath, append(output, '\n'), 0644)
+}
+
+// defaultTrovexIgnorePatterns lists file patterns that should be read/written
+// directly on disk rather than routed through trovex MCP tools. These are
+// operational files that agents read at startup or that git tracks as config.
+var defaultTrovexIgnorePatterns = []string{
+	"CLAUDE.md",
+	"CLAUDE.local.md",
+	"AGENTS.md",
+	"GEMINI.md",
+	"GUARDRAILS.md",
+	"REPOSITORY.md",
+	"README.md",
+	"CONTRIBUTING.md",
+	"CHANGELOG.md",
+	"LICENSE.md",
+	".liza/*.md",
+	".liza/**/*.md",
+	"specs/**/*.md",
+	"docs/USAGE.md",
+}
+
+// WriteTrovexIgnore writes a default .trovexignore to the project root.
+// Only writes if the file doesn't already exist.
+func WriteTrovexIgnore(projectRoot string) error {
+	ignorePath := filepath.Join(projectRoot, ".trovexignore")
+	if _, err := os.Stat(ignorePath); err == nil {
+		return nil
+	}
+
+	var buf strings.Builder
+	buf.WriteString("# Files exempt from trovex MCP routing (read/written directly on disk).\n")
+	buf.WriteString("# Patterns use shell glob syntax against repo-relative paths.\n\n")
+	for _, pattern := range defaultTrovexIgnorePatterns {
+		buf.WriteString(pattern)
+		buf.WriteByte('\n')
+	}
+	return os.WriteFile(ignorePath, []byte(buf.String()), 0644)
+}
+
 // mergeSettings merges liza settings into existing settings.
 // Existing settings take precedence (user customizations preserved).
 // Special handling for permissions.allow (union) and hooks.PreToolUse (union).
@@ -1380,11 +1457,13 @@ func WriteHooks(projectRoot string) error {
 	}
 
 	for name, content := range map[string][]byte{
-		"enforce-init.sh":        enforceInitHookContent,
-		"session-context.sh":     sessionContextHookContent,
-		"git-guard.sh":           gitGuardHookContent,
-		"rtk-guard.sh":           rtkGuardHookContent,
-		"worktree-path-guard.sh": worktreePathGuardHookContent,
+		"enforce-init.sh":          enforceInitHookContent,
+		"session-context.sh":       sessionContextHookContent,
+		"git-guard.sh":             gitGuardHookContent,
+		"rtk-guard.sh":             rtkGuardHookContent,
+		"worktree-path-guard.sh":   worktreePathGuardHookContent,
+		"trovex-md-guard.sh":       trovexMdGuardHookContent,
+		"trovex-md-read-guard.sh":  trovexMdReadGuardHookContent,
 	} {
 		hookPath := filepath.Join(hooksDir, name)
 		if err := os.WriteFile(hookPath, content, 0755); err != nil {
@@ -1404,10 +1483,12 @@ func WriteCodexHooks(projectRoot string) error {
 	}
 
 	for name, content := range map[string][]byte{
-		"enforce-init.sh":        enforceInitHookContent,
-		"session-context.sh":     sessionContextHookContent,
-		"git-guard.sh":           gitGuardHookContent,
-		"worktree-path-guard.sh": worktreePathGuardHookContent,
+		"enforce-init.sh":          enforceInitHookContent,
+		"session-context.sh":       sessionContextHookContent,
+		"git-guard.sh":             gitGuardHookContent,
+		"worktree-path-guard.sh":   worktreePathGuardHookContent,
+		"trovex-md-guard.sh":       trovexMdGuardHookContent,
+		"trovex-md-read-guard.sh":  trovexMdReadGuardHookContent,
 	} {
 		hookPath := filepath.Join(hooksDir, name)
 		if err := os.WriteFile(hookPath, content, 0755); err != nil {

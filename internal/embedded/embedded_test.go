@@ -2516,3 +2516,102 @@ func TestCleanStaleMCPEntry(t *testing.T) {
 		}
 	})
 }
+
+func TestWriteTrovexMCPEntry(t *testing.T) {
+	t.Run("creates new file", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := WriteTrovexMCPEntry(dir, "http://localhost:8765/mcp"); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		data, err := os.ReadFile(filepath.Join(dir, ".mcp.json"))
+		if err != nil {
+			t.Fatalf("file not created: %v", err)
+		}
+		var doc map[string]any
+		if err := json.Unmarshal(data, &doc); err != nil {
+			t.Fatalf("invalid JSON: %v", err)
+		}
+		servers := doc["mcpServers"].(map[string]any)
+		entry := servers["trovex"].(map[string]any)
+		if entry["url"] != "http://localhost:8765/mcp" {
+			t.Errorf("url = %v, want http://localhost:8765/mcp", entry["url"])
+		}
+	})
+
+	t.Run("preserves existing entries", func(t *testing.T) {
+		dir := t.TempDir()
+		mcpPath := filepath.Join(dir, ".mcp.json")
+		os.WriteFile(mcpPath, []byte(`{"mcpServers": {"other": {"command": "x"}}}`), 0644)
+
+		if err := WriteTrovexMCPEntry(dir, "http://localhost:9000/mcp"); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		data, _ := os.ReadFile(mcpPath)
+		var doc map[string]any
+		json.Unmarshal(data, &doc)
+		servers := doc["mcpServers"].(map[string]any)
+		if _, hasOther := servers["other"]; !hasOther {
+			t.Error("other entry should be preserved")
+		}
+		entry := servers["trovex"].(map[string]any)
+		if entry["url"] != "http://localhost:9000/mcp" {
+			t.Errorf("url = %v, want http://localhost:9000/mcp", entry["url"])
+		}
+	})
+
+	t.Run("updates existing trovex entry", func(t *testing.T) {
+		dir := t.TempDir()
+		mcpPath := filepath.Join(dir, ".mcp.json")
+		os.WriteFile(mcpPath, []byte(`{"mcpServers": {"trovex": {"url": "http://old:1234/mcp"}}}`), 0644)
+
+		if err := WriteTrovexMCPEntry(dir, "http://localhost:8765/mcp"); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		data, _ := os.ReadFile(mcpPath)
+		var doc map[string]any
+		json.Unmarshal(data, &doc)
+		servers := doc["mcpServers"].(map[string]any)
+		entry := servers["trovex"].(map[string]any)
+		if entry["url"] != "http://localhost:8765/mcp" {
+			t.Errorf("url = %v, want http://localhost:8765/mcp", entry["url"])
+		}
+	})
+}
+
+func TestWriteTrovexIgnore(t *testing.T) {
+	t.Run("creates file with default patterns", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := WriteTrovexIgnore(dir); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		data, err := os.ReadFile(filepath.Join(dir, ".trovexignore"))
+		if err != nil {
+			t.Fatalf("file not created: %v", err)
+		}
+		content := string(data)
+		for _, pattern := range []string{"CLAUDE.md", "GUARDRAILS.md", "README.md", ".liza/*.md", "specs/**/*.md"} {
+			if !strings.Contains(content, pattern) {
+				t.Errorf("missing pattern %q in .trovexignore", pattern)
+			}
+		}
+	})
+
+	t.Run("does not overwrite existing file", func(t *testing.T) {
+		dir := t.TempDir()
+		ignorePath := filepath.Join(dir, ".trovexignore")
+		os.WriteFile(ignorePath, []byte("custom\n"), 0644)
+
+		if err := WriteTrovexIgnore(dir); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		data, _ := os.ReadFile(ignorePath)
+		if string(data) != "custom\n" {
+			t.Errorf("existing file was overwritten: got %q", string(data))
+		}
+	})
+}

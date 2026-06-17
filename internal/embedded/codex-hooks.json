@@ -45,6 +45,28 @@
             "type": "command"
           }
         ]
+      },
+      {
+        "matcher": "^apply_patch$|^mcp__filesystem__write_file$|^mcp__morph-mcp__edit_file$",
+        "hooks": [
+          {
+            "command": "root=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0; hook=\"$root/.codex/hooks/trovex-md-guard.sh\"; [ -x \"$hook\" ] || exit 0; bash \"$hook\"",
+            "statusMessage": "Checking trovex doc routing",
+            "timeout": 5,
+            "type": "command"
+          }
+        ]
+      },
+      {
+        "matcher": "^mcp__filesystem__read_file$|^mcp__filesystem__read_multiple_files$",
+        "hooks": [
+          {
+            "command": "root=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0; hook=\"$root/.codex/hooks/trovex-md-read-guard.sh\"; [ -x \"$hook\" ] || exit 0; bash \"$hook\"",
+            "statusMessage": "Checking trovex doc routing",
+            "timeout": 5,
+            "type": "command"
+          }
+        ]
       }
     ]
   }

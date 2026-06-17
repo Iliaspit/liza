@@ -40,11 +40,12 @@ type InstallHooksOptions struct {
 }
 
 // InstallActivationOptions configures the combined pairing index activation hook
-// setup for Stacklit and SCIP project-root refresh.
+// setup for Stacklit, SCIP, and Trovex project-root refresh.
 type InstallActivationOptions struct {
 	RepoRoot       string
 	Hooks          []string
 	EnableStacklit bool
+	EnableTrovex   bool
 	ScipPlans      []scipsearch.LanguageAggregatePlan
 }
 
@@ -147,6 +148,7 @@ func InstallActivation(opts InstallActivationOptions) (InstallActivationResult, 
 	content, err := renderIndexScript(renderIndexScriptOptions{
 		RepoRoot:       opts.RepoRoot,
 		EnableStacklit: opts.EnableStacklit,
+		EnableTrovex:   opts.EnableTrovex,
 		ScipPlans:      opts.ScipPlans,
 	})
 	if err != nil {
@@ -244,6 +246,7 @@ func RenderIndexScript(repoRoot string) (string, error) {
 type renderIndexScriptOptions struct {
 	RepoRoot       string
 	EnableStacklit bool
+	EnableTrovex   bool
 	ScipPlans      []scipsearch.LanguageAggregatePlan
 }
 
@@ -317,6 +320,29 @@ else
 	fi
 fi
 `, shellWord(stacklitPlan.Name), stacklitPlan.Name, shellWord(stacklitPlan.Name), stacklitGenerateCommand, shellWord(stacklitPlan.Name), shellWord(stacklitPlan.Name), stacklitGenerateCommand))
+	}
+	if opts.EnableTrovex {
+		body.WriteString(`if ! command -v trovex >/dev/null 2>&1; then
+	echo "liza-index.sh: trovex not found; skipping Trovex refresh" >&2
+else
+	needs_trovex=0
+	trovex_db="${HOME}/.trovex-data/trovex.db"
+	if [ ! -f "$trovex_db" ]; then
+		needs_trovex=1
+	elif find "$repo_root" -name '*.md' -not -path '*/.git/*' -not -path '*/.worktrees/*' -not -path '*/node_modules/*' -newer "$trovex_db" -print -quit | grep -q .; then
+		needs_trovex=1
+	fi
+	if [ "$needs_trovex" = "1" ]; then
+		echo "Trovex Indexing..."
+		if [ -z "${TROVEX_EMBED_MODEL:-}" ] && [ -z "${OPENAI_API_KEY:-}" ]; then
+			export TROVEX_EMBED_MODEL="BAAI/bge-small-en-v1.5"
+			export TROVEX_EMBED_DIM="384"
+		fi
+		trovex index "$repo_root"
+		echo "Trovex index updated"
+	fi
+fi
+`)
 	}
 	return body.String(), nil
 }

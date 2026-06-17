@@ -184,6 +184,13 @@ func Catalog() []Tool {
 			VersionArgs: []string{"--version"}, FullDefault: true,
 			ActivationEnv: []string{"LIZA_ENABLE_BASH_POLICY=1"},
 		},
+		{
+			ID: "trovex", Name: "Trovex", Binary: "trovex", Category: CategoryNavigation,
+			Purpose:     "Routes markdown documentation queries to minimal relevant sections.",
+			InstallKind: InstallUVTool, UVPackage: "trovex",
+			VersionArgs: []string{"--help"}, ActivationEnv: []string{"LIZA_ENABLE_TROVEX=1"},
+			BalancedDefault: true, FullDefault: true,
+		},
 		manualTool("filesystem-mcp", "filesystem MCP", "Batch local filesystem reads through provider MCP configuration."),
 		manualTool("context7", "context7 MCP", "Structured current library documentation lookup through MCP."),
 		manualTool("ref", "Ref MCP", "Broad documentation and guide lookup through MCP."),
