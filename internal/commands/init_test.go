@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"bufio"
 	"encoding/json"
 	"errors"
 	"io"
@@ -2665,6 +2666,54 @@ func TestInitPairingCommand_BashPolicyProviderScope(t *testing.T) {
 			}
 			assertBashPolicyCommand(t, runner.commands[0], gitDir, tt.provider)
 		})
+	}
+}
+
+func TestBashPolicySubprocessStdinKeepsBufferedReaderForScriptedInput(t *testing.T) {
+	raw := strings.NewReader("y\n")
+	buffered := bufio.NewReader(raw)
+
+	got := bashPolicySubprocessStdin(raw, buffered)
+
+	if got != buffered {
+		t.Fatalf("stdin = %T, want shared buffered reader for scripted input", got)
+	}
+}
+
+func TestBashPolicySubprocessStdinKeepsBufferedReaderForRegularFiles(t *testing.T) {
+	file, err := os.CreateTemp(t.TempDir(), "stdin-*")
+	if err != nil {
+		t.Fatalf("create temp stdin: %v", err)
+	}
+	defer file.Close()
+	buffered := bufio.NewReader(file)
+
+	got := bashPolicySubprocessStdin(file, buffered)
+
+	if got != buffered {
+		t.Fatalf("stdin = %T, want shared buffered reader for regular file input", got)
+	}
+}
+
+func TestBashPolicySubprocessStdinUsesRawCharacterDevice(t *testing.T) {
+	file, err := os.Open(os.DevNull)
+	if err != nil {
+		t.Fatalf("open os.DevNull: %v", err)
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		t.Fatalf("stat os.DevNull: %v", err)
+	}
+	if info.Mode()&os.ModeCharDevice == 0 {
+		t.Skip("os.DevNull is not reported as a character device on this platform")
+	}
+	buffered := bufio.NewReader(file)
+
+	got := bashPolicySubprocessStdin(file, buffered)
+
+	if got != file {
+		t.Fatalf("stdin = %T, want raw character device", got)
 	}
 }
 

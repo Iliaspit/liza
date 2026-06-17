@@ -33,10 +33,12 @@ const (
 type ExecutableLookup func(string) (string, error)
 
 type Command struct {
-	Path  string
-	Args  []string
-	Dir   string
-	Stdin io.Reader
+	Path   string
+	Args   []string
+	Dir    string
+	Stdin  io.Reader
+	Stdout io.Writer
+	Stderr io.Writer
 }
 
 type CommandOutput struct {
@@ -94,8 +96,10 @@ func InitHooks(opts InitHooksOptions) InitHooksResult {
 			"--provider", opts.Provider,
 			"--policy-artifact-root", opts.ProjectRoot,
 		},
-		Dir:   opts.ProjectRoot,
-		Stdin: opts.Stdin,
+		Dir:    opts.ProjectRoot,
+		Stdin:  opts.Stdin,
+		Stdout: opts.Stdout,
+		Stderr: opts.Stderr,
 	}
 	runner := opts.Runner
 	if runner == nil {
@@ -113,8 +117,6 @@ func InitHooks(opts InitHooksOptions) InitHooksResult {
 		result.Status = StatusFailed
 		return result
 	}
-	writeCommandOutput(opts.Stdout, output.Stdout)
-	writeCommandOutput(opts.Stderr, output.Stderr)
 	return result
 }
 
@@ -146,17 +148,17 @@ func (realRunner) Run(command Command) (CommandOutput, error) {
 	cmd.Stdin = command.Stdin
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	cmd.Stdout = captureAndStream(&stdout, command.Stdout)
+	cmd.Stderr = captureAndStream(&stderr, command.Stderr)
 	err := cmd.Run()
 	return CommandOutput{Stdout: stdout.String(), Stderr: stderr.String()}, err
 }
 
-func writeCommandOutput(writer io.Writer, output string) {
-	if writer == nil || output == "" {
-		return
+func captureAndStream(capture io.Writer, stream io.Writer) io.Writer {
+	if stream == nil {
+		return capture
 	}
-	_, _ = io.WriteString(writer, output)
+	return io.MultiWriter(capture, stream)
 }
 
 func trimDiagnostic(value string) string {

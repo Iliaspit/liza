@@ -2,6 +2,9 @@ package bashpolicycli
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -14,6 +17,12 @@ type fakeCommandRunner struct {
 
 func (f *fakeCommandRunner) Run(command Command) (CommandOutput, error) {
 	f.commands = append(f.commands, command)
+	if command.Stdout != nil {
+		_, _ = command.Stdout.Write([]byte(f.output.Stdout))
+	}
+	if command.Stderr != nil {
+		_, _ = command.Stderr.Write([]byte(f.output.Stderr))
+	}
 	return f.output, f.err
 }
 
@@ -98,8 +107,43 @@ func TestInitHooksRunsProviderAwareInit(t *testing.T) {
 	if command.Stdin != stdin {
 		t.Fatalf("stdin was not preserved")
 	}
+	if command.Stdout != &stdout {
+		t.Fatalf("stdout writer was not preserved")
+	}
+	if command.Stderr != &stderr {
+		t.Fatalf("stderr writer was not preserved")
+	}
 	if stdout.String() != "installed\n" || stderr.String() != "diagnostic\n" {
 		t.Fatalf("stdout/stderr = %q/%q", stdout.String(), stderr.String())
+	}
+}
+
+func TestRealRunnerStreamsAndCapturesOutput(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell script helper is unix-only")
+	}
+
+	scriptPath := filepath.Join(t.TempDir(), "bash-policy-helper")
+	script := "#!/bin/sh\nprintf 'visible prompt'\nprintf 'visible diagnostic' >&2\n"
+	if err := os.WriteFile(scriptPath, []byte(script), 0755); err != nil {
+		t.Fatalf("write helper script: %v", err)
+	}
+
+	var stdout strings.Builder
+	var stderr strings.Builder
+	output, err := realRunner{}.Run(Command{
+		Path:   scriptPath,
+		Stdout: &stdout,
+		Stderr: &stderr,
+	})
+	if err != nil {
+		t.Fatalf("run helper script: %v", err)
+	}
+	if output.Stdout != "visible prompt" || stdout.String() != "visible prompt" {
+		t.Fatalf("stdout captured/streamed = %q/%q", output.Stdout, stdout.String())
+	}
+	if output.Stderr != "visible diagnostic" || stderr.String() != "visible diagnostic" {
+		t.Fatalf("stderr captured/streamed = %q/%q", output.Stderr, stderr.String())
 	}
 }
 

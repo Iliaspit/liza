@@ -203,7 +203,7 @@ func InitPairingCommand(params InitPairingParams) error {
 		}
 	}
 
-	runBashPolicyInit(projectRoot, bashPolicyProvider(hasClaude, hasCodex), stdin)
+	runBashPolicyInit(projectRoot, bashPolicyProvider(hasClaude, hasCodex), bashPolicySubprocessStdin(rawStdin, stdin))
 
 	if hasOpenCode {
 		if err := embedded.WriteOpenCodeExecTool(projectRoot); err != nil {
@@ -632,6 +632,18 @@ func bashPolicyProvider(hasClaude, hasCodex bool) string {
 	}
 }
 
+func bashPolicySubprocessStdin(rawStdin io.Reader, bufferedStdin *bufio.Reader) io.Reader {
+	file, ok := rawStdin.(*os.File)
+	if !ok {
+		return bufferedStdin
+	}
+	info, err := file.Stat()
+	if err != nil || info.Mode()&os.ModeCharDevice == 0 {
+		return bufferedStdin
+	}
+	return file
+}
+
 func runBashPolicyInit(projectRoot, provider string, stdin io.Reader) {
 	result := bashpolicycli.InitHooks(bashpolicycli.InitHooksOptions{
 		ProjectRoot: projectRoot,
@@ -813,7 +825,7 @@ func InitCommandWithConfig(params InitParams) error {
 		}
 	}
 
-	runBashPolicyInit(lizaPaths.ProjectRoot(), bashPolicyProvider(true, slices.Contains(params.Agents, "codex")), stdin)
+	runBashPolicyInit(lizaPaths.ProjectRoot(), bashPolicyProvider(true, slices.Contains(params.Agents, "codex")), bashPolicySubprocessStdin(rawStdin, stdin))
 
 	if slices.Contains(params.Agents, "opencode") {
 		if err := embedded.WriteOpenCodeExecTool(lizaPaths.ProjectRoot()); err != nil {
