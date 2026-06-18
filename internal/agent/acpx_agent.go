@@ -91,6 +91,22 @@ func (a *ACPXAgent) Run(ctx context.Context, req LLMAgentRunRequest) (LLMAgentRu
 		return LLMAgentRunResult{ExitCode: 1, Output: output.Text, Usage: usage, WarmUsage: warm, SessionID: sessionName}, maskedErr
 	}
 
+	if qe := DetectQuotaExhaustion(output.Text, acpxAgent); qe != nil {
+		emitLLMAgentEvent(ctx, req.EventSink, LLMAgentEvent{
+			Kind:        LLMAgentEventCompleted,
+			BackendName: req.BackendName,
+			AgentID:     req.AgentID,
+			TaskID:      req.TaskID,
+			SessionID:   sessionName,
+			Message:     qe.Message,
+			Payload: map[string]any{
+				"exit_code": 1,
+				"quota":     true,
+			},
+		})
+		return LLMAgentRunResult{ExitCode: 1, Output: output.Text, Usage: usage, WarmUsage: warm, SessionID: sessionName}, nil
+	}
+
 	emitLLMAgentEvent(ctx, req.EventSink, LLMAgentEvent{
 		Kind:        LLMAgentEventCompleted,
 		BackendName: req.BackendName,
@@ -104,8 +120,8 @@ func (a *ACPXAgent) Run(ctx context.Context, req LLMAgentRunRequest) (LLMAgentRu
 	return LLMAgentRunResult{ExitCode: 0, Output: output.Text, Usage: usage, WarmUsage: warm, SessionID: sessionName}, nil
 }
 
-func (a *ACPXAgent) RunInteractive(context.Context, LLMAgentInteractiveRequest) (int, error) {
-	return 1, fmt.Errorf("interactive mode is not supported by ACPXAgent")
+func (a *ACPXAgent) RunInteractive(ctx context.Context, req LLMAgentInteractiveRequest) (int, error) {
+	return NewCLIAgent(a.outputsDir).RunInteractive(ctx, req)
 }
 
 func (a *ACPXAgent) ensureSession(ctx context.Context, cwd, agentID, acpxAgent, sessionName string) error {

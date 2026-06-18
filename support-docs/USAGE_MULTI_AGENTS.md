@@ -199,8 +199,8 @@ CMUX equivalents provide the same pane layouts as WezTerm but in a CMUX workspac
 
 
 Supported CLI names for `--cli`, `--default-cli`, `--default-doer-cli`, and
-`--default-reviewer-cli` are `claude`, `codex`, `codex-acp`, `opencode`,
-`opencode-acp`, `gemini`, `mistral`, and `kimi`.
+`--default-reviewer-cli` are `claude`, `codex`, `codex-acp`, `cursor-acp`,
+`opencode`, `opencode-acp`, `gemini`, `mistral`, and `kimi`.
 
 For OpenCode, run both `liza setup --opencode` and `liza init --opencode`
 before spawning agents. Init installs Liza's managed
@@ -251,8 +251,9 @@ Use `liza launch wezterm mas --preset general-objective`. This launches all func
 
 **Integration phase** agents (integration-analyst, integration-reviewer) are spawned by the orchestrator after all coding tasks for a goal complete. They are not needed at startup — spawn them when the orchestrator triggers the integration sub-pipeline.
 
-Each agent command accepts a `--cli` flag to select the coding agent CLI: `claude`, `codex`, `codex-acp`, `opencode`, `opencode-acp`, `gemini`, `mistral`, or `kimi`. When `--cli` is omitted, the default is resolved from role-specific config (`config.default_doer_cli` for doers and orchestrators, `config.default_reviewer_cli` for reviewers), then role-specific env (`LIZA_DEFAULT_DOER_CLI` for doers and orchestrators, `LIZA_DEFAULT_REVIEWER_CLI` for reviewers), then `config.default_cli`, then `LIZA_DEFAULT_CLI`, then `claude`. Set defaults at init time with `liza init --default-cli codex --default-reviewer-cli gemini "..."`, or edit `state.yaml` directly.
+Each agent command accepts a `--cli` flag to select the coding agent CLI: `claude`, `codex`, `codex-acp`, `cursor-acp`, `opencode`, `opencode-acp`, `gemini`, `mistral`, or `kimi`. When `--cli` is omitted, the default is resolved from role-specific config (`config.default_doer_cli` for doers and orchestrators, `config.default_reviewer_cli` for reviewers), then role-specific env (`LIZA_DEFAULT_DOER_CLI` for doers and orchestrators, `LIZA_DEFAULT_REVIEWER_CLI` for reviewers), then `config.default_cli`, then `LIZA_DEFAULT_CLI`, then `claude`. Set defaults at init time with `liza init --default-cli codex --default-reviewer-cli gemini "..."`, or edit `state.yaml` directly.
 `codex-acp` is an opt-in ACPX-backed Codex runtime. It requires the `acpx` executable on the spawned agent's `PATH`; install it with `npm install -g acpx`. Liza preflights this prerequisite before direct `liza agent` execution and before TUI/API agent spawning, so a missing binary fails before the ACP session is started. `codex-acp` uses Codex's `AGENTS.md` contract setup and runs ACPX non-interactively with auto-approved provider prompts inside Liza's supervised task worktree. During `acpx prompt`, stdout JSON-RPC and stderr diagnostics are streamed to `.liza/agent-outputs/`; parsed message chunks are returned to the supervisor and lifecycle/usage metadata is logged. Short ACPX session control calls are not transcript-logged.
+`cursor-acp` uses the same ACPX-backed runtime path and selects ACPX's Cursor target. It requires `acpx` on `PATH` and an authenticated Cursor CLI (`cursor-agent`). It reuses the shared `AGENTS.md` contract setup.
 In the TUI, `s` spawns with the configured default CLI; `S` prompts for CLI selection.
 
 For CLI-backed runtimes, agent output is automatically streamed to `.liza/agent-outputs/` while the CLI runs (stdout as `.txt`, stderr as `.err`). Pass `--no-log` to disable. Persisted files are automatically masked — secret values from environment variables (API keys, tokens, passwords) are replaced with `***`. Live terminal output remains unmasked. Logging is automatically disabled in `-i` (interactive) mode. Raw provider transcripts and `item.completed` payloads stay in these logs; `state.yaml` stores only bounded summaries and references back to log evidence.

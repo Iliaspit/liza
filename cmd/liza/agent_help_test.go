@@ -28,6 +28,7 @@ func TestContractInitFlagForCLI(t *testing.T) {
 		"claude":       "claude",
 		"codex":        "codex",
 		"codex-acp":    "codex",
+		"cursor-acp":   "codex",
 		"opencode":     "opencode",
 		"opencode-acp": "opencode",
 		"kimi":         "claude",

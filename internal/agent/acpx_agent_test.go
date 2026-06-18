@@ -124,6 +124,39 @@ func TestACPXAgentRunUsesOpenCodeTarget(t *testing.T) {
 	}
 }
 
+func TestACPXAgentRunUsesCursorTarget(t *testing.T) {
+	binDir := t.TempDir()
+	logPath := filepath.Join(t.TempDir(), "acpx.log")
+	writeFakeACPX(t, filepath.Join(binDir, "acpx"), logPath)
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	req := LLMAgentRunRequest{
+		BackendName: "cursor-acp",
+		AgentID:     "coder-1",
+		Prompt:      "implement the requested change",
+		ProjectRoot: t.TempDir(),
+	}
+
+	result, err := NewACPXAgent("").Run(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0", result.ExitCode)
+	}
+
+	log := readTextForTest(t, logPath)
+	for _, want := range []string{
+		"ARGS:--cwd " + req.ProjectRoot + " cursor sessions ensure --name liza-coder-1",
+		"ARGS:--cwd " + req.ProjectRoot + " --format json --approve-all cursor prompt -s liza-coder-1 --file -",
+		"STDIN:implement the requested change",
+	} {
+		if !strings.Contains(log, want) {
+			t.Fatalf("fake acpx log missing %q:\n%s", want, log)
+		}
+	}
+}
+
 func TestACPXAgentMasksReturnedOutputAndEvents(t *testing.T) {
 	binDir := t.TempDir()
 	logPath := filepath.Join(t.TempDir(), "acpx.log")
@@ -186,6 +219,83 @@ func TestACPXAgentMasksReturnedErrors(t *testing.T) {
 	var exitErr *exec.ExitError
 	if !errors.As(err, &exitErr) {
 		t.Fatalf("errors.As(*exec.ExitError) = false for %T: %v", err, err)
+	}
+}
+
+func TestACPXAgentTreatsQuotaMessageAsFailure(t *testing.T) {
+	binDir := t.TempDir()
+	logPath := filepath.Join(t.TempDir(), "acpx.log")
+	writeFakeACPX(t, filepath.Join(binDir, "acpx"), logPath)
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	result, err := NewACPXAgent("").Run(context.Background(), LLMAgentRunRequest{
+		BackendName: "cursor-acp",
+		AgentID:     "coder-1",
+		TaskID:      "task-acp",
+		Prompt:      "cursor quota",
+		ProjectRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode == 0 {
+		t.Fatalf("ExitCode = 0, want non-zero for quota message; output=%q", result.Output)
+	}
+	if !strings.Contains(result.Output, "Upgrade your plan to continue") {
+		t.Fatalf("Output = %q, want Cursor quota message", result.Output)
+	}
+}
+
+func TestACPXAgentDetectsQuotaWithUnderlyingAgentName(t *testing.T) {
+	binDir := t.TempDir()
+	logPath := filepath.Join(t.TempDir(), "acpx.log")
+	writeFakeACPX(t, filepath.Join(binDir, "acpx"), logPath)
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	result, err := NewACPXAgent("").Run(context.Background(), LLMAgentRunRequest{
+		BackendName: "codex-acp",
+		AgentID:     "coder-1",
+		TaskID:      "task-acp",
+		Prompt:      "codex quota",
+		ProjectRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode == 0 {
+		t.Fatalf("ExitCode = 0, want non-zero for quota message; output=%q", result.Output)
+	}
+	if !strings.Contains(result.Output, "You've hit your usage limit") {
+		t.Fatalf("Output = %q, want Codex quota message", result.Output)
+	}
+}
+
+func TestACPXAgentRunInteractiveDelegatesToUnderlyingCLI(t *testing.T) {
+	binDir := t.TempDir()
+	logPath := filepath.Join(t.TempDir(), "cursor-agent.log")
+	writeFakeExecutable(t, filepath.Join(binDir, "cursor-agent"), logPath)
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	exitCode, err := NewACPXAgent("").RunInteractive(context.Background(), LLMAgentInteractiveRequest{
+		BackendName: "cursor-acp",
+		AgentID:     "coder-1",
+		ProjectRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("RunInteractive() error = %v", err)
+	}
+	if exitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0", exitCode)
+	}
+
+	log := readTextForTest(t, logPath)
+	for _, want := range []string{
+		"ARGS:",
+		"ENV_LIZA_AGENT_ID:coder-1",
+	} {
+		if !strings.Contains(log, want) {
+			t.Fatalf("fake cursor-agent log missing %q:\n%s", want, log)
+		}
 	}
 }
 
@@ -325,6 +435,10 @@ case "$*" in
       exit 7
     elif [ "$prompt" = "emit secret" ]; then
       printf '%s\n' '{"params":{"update":{"sessionUpdate":"agent_message_chunk","content":{"text":"secret sk-acpx-secret"}}}}'
+    elif [ "$prompt" = "cursor quota" ]; then
+      printf '%s\n' '{"params":{"update":{"sessionUpdate":"agent_message_chunk","content":{"text":"\n\nUpgrade your plan to continue"}}}}'
+    elif [ "$prompt" = "codex quota" ]; then
+      printf '%s\n' '{"params":{"update":{"sessionUpdate":"agent_message_chunk","content":{"text":"You'\''ve hit your usage limit. Upgrade to Pro."}}}}'
     else
       printf '%s\n' '{"params":{"update":{"sessionUpdate":"agent_message_chunk","content":{"text":"done from acpx"}}}}'
     fi
@@ -340,6 +454,18 @@ esac
 `
 	if err := os.WriteFile(path, []byte(script), 0755); err != nil {
 		t.Fatalf("write fake acpx: %v", err)
+	}
+}
+
+func writeFakeExecutable(t *testing.T, path, logPath string) {
+	t.Helper()
+	script := `#!/bin/sh
+printf 'ARGS:%s\n' "$*" >> "` + logPath + `"
+printf 'ENV_LIZA_AGENT_ID:%s\n' "$LIZA_AGENT_ID" >> "` + logPath + `"
+exit 0
+`
+	if err := os.WriteFile(path, []byte(script), 0755); err != nil {
+		t.Fatalf("write fake executable: %v", err)
 	}
 }
 

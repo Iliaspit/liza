@@ -216,6 +216,8 @@ func contractInitFlagForCLI(cliName string) string {
 		return "claude" // kimi uses Claude's config
 	case "codex-acp":
 		return "codex" // codex-acp uses Codex's config
+	case "cursor-acp":
+		return "codex" // cursor-acp uses the shared AGENTS.md contract setup
 	case "opencode-acp":
 		return "opencode" // opencode-acp uses OpenCode's config
 	default:

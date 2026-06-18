@@ -15,7 +15,7 @@ import (
 
 // quotaPattern defines a provider-specific pattern that indicates quota exhaustion.
 type quotaPattern struct {
-	// Provider is the CLIName (e.g. "codex", "claude", "gemini").
+	// Provider is the canonical provider name (e.g. "codex", "claude", "cursor").
 	Provider string
 	// Pattern matches a single output line that indicates quota exhaustion.
 	Pattern *regexp.Regexp
@@ -25,6 +25,9 @@ type quotaPattern struct {
 // Add new entries here when a new provider's quota message is observed.
 var quotaPatterns = []quotaPattern{
 	{Provider: "codex", Pattern: regexp.MustCompile(`You've hit your .*limit`)},
+	{Provider: "cursor", Pattern: regexp.MustCompile(`Upgrade your plan to continue`)},
+	{Provider: "cursor", Pattern: regexp.MustCompile(`You've hit your .*usage limit`)},
+	{Provider: "cursor", Pattern: regexp.MustCompile(`set a Spend Limit to continue`)},
 	{Provider: "claude", Pattern: regexp.MustCompile(`You're out of extra usage`)},
 	{Provider: "claude", Pattern: regexp.MustCompile(`You've hit your .*limit`)},
 }
@@ -38,9 +41,10 @@ type QuotaExhaustion struct {
 // DetectQuotaExhaustion scans agent output for quota-exhaustion patterns.
 // Returns non-nil if a known pattern is found.
 func DetectQuotaExhaustion(output, cliName string) *QuotaExhaustion {
+	provider := canonicalQuotaProvider(cliName)
 	for _, line := range strings.Split(output, "\n") {
 		for _, p := range quotaPatterns {
-			if p.Provider != cliName {
+			if p.Provider != provider {
 				continue
 			}
 			if p.Pattern.MatchString(line) {
@@ -58,7 +62,7 @@ const quotaSignalPrefix = "provider-quota-exhausted-"
 
 // QuotaSignalPath returns the path to the quota signal file for a provider.
 func QuotaSignalPath(projectRoot, provider string) string {
-	return filepath.Join(projectRoot, paths.LizaDirName, quotaSignalPrefix+provider)
+	return filepath.Join(projectRoot, paths.LizaDirName, quotaSignalPrefix+canonicalQuotaProvider(provider))
 }
 
 // QuotaSignalGlob returns a glob pattern matching all quota signal files.
@@ -74,6 +78,7 @@ func ProviderFromSignalFile(path string) string {
 // WriteQuotaSignal creates a signal file that tells all supervisors using
 // this provider to terminate gracefully.
 func WriteQuotaSignal(projectRoot, provider, message string) error {
+	provider = canonicalQuotaProvider(provider)
 	signalPath := QuotaSignalPath(projectRoot, provider)
 	content := fmt.Sprintf("provider: %s\ndetected: %s\nmessage: %s\n",
 		provider,
@@ -129,6 +134,10 @@ func ClearQuotaSignal(projectRoot, provider string) error {
 		return nil
 	}
 	return err
+}
+
+func canonicalQuotaProvider(cliName string) string {
+	return acpxAgentName(cliName)
 }
 
 // tailReadSize is the maximum bytes to read from the end of an output file.

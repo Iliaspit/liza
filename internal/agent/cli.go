@@ -7,7 +7,7 @@ import (
 )
 
 // validCLIs is the canonical list of supported agent backends.
-var validCLIs = []string{"claude", "codex", "codex-acp", "opencode", "opencode-acp", "gemini", "mistral", "kimi"}
+var validCLIs = []string{"claude", "codex", "codex-acp", "cursor-acp", "opencode", "opencode-acp", "gemini", "mistral", "kimi"}
 
 // ValidCLIs returns the supported CLI backends. Returns a fresh copy to prevent mutation.
 func ValidCLIs() []string {
@@ -21,6 +21,8 @@ func CLIExecutableName(cliName string) string {
 	switch cliName {
 	case "codex-acp":
 		return "codex"
+	case "cursor-acp":
+		return "cursor-agent"
 	case "opencode-acp":
 		return "opencode"
 	case "mistral":
@@ -55,7 +57,7 @@ func CheckCLIPrerequisites(cliName string) error {
 }
 
 func isACPXCLI(cliName string) bool {
-	return cliName == "codex-acp" || cliName == "opencode-acp"
+	return cliName == "codex-acp" || cliName == "cursor-acp" || cliName == "opencode-acp"
 }
 
 // DefaultCLI is the CLI used when none is specified.

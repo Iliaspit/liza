@@ -12,6 +12,9 @@ func TestValidCLIsIncludesCodexACP(t *testing.T) {
 	if !slices.Contains(ValidCLIs(), "codex-acp") {
 		t.Fatalf("ValidCLIs() = %v, want codex-acp", ValidCLIs())
 	}
+	if !slices.Contains(ValidCLIs(), "cursor-acp") {
+		t.Fatalf("ValidCLIs() = %v, want cursor-acp", ValidCLIs())
+	}
 	if !slices.Contains(ValidCLIs(), "opencode") {
 		t.Fatalf("ValidCLIs() = %v, want opencode", ValidCLIs())
 	}
@@ -23,6 +26,9 @@ func TestValidCLIsIncludesCodexACP(t *testing.T) {
 func TestNewLLMAgentForCLI(t *testing.T) {
 	if _, ok := NewLLMAgentForCLI("codex-acp", "").(*ACPXAgent); !ok {
 		t.Fatalf("NewLLMAgentForCLI(codex-acp) did not return *ACPXAgent")
+	}
+	if _, ok := NewLLMAgentForCLI("cursor-acp", "").(*ACPXAgent); !ok {
+		t.Fatalf("NewLLMAgentForCLI(cursor-acp) did not return *ACPXAgent")
 	}
 	if _, ok := NewLLMAgentForCLI("opencode-acp", "").(*ACPXAgent); !ok {
 		t.Fatalf("NewLLMAgentForCLI(opencode-acp) did not return *ACPXAgent")
@@ -40,6 +46,7 @@ func TestCLIExecutableNameMapsConfiguredNamesToBinaries(t *testing.T) {
 		"claude":       "claude",
 		"codex":        "codex",
 		"codex-acp":    "codex",
+		"cursor-acp":   "cursor-agent",
 		"opencode":     "opencode",
 		"opencode-acp": "opencode",
 		"gemini":       "gemini",
@@ -70,7 +77,7 @@ func TestCheckCLIPrerequisitesIgnoresPlainCLIs(t *testing.T) {
 func TestCheckCLIPrerequisitesRequiresACPXForCodexACP(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 
-	for _, cliName := range []string{"codex-acp", "opencode-acp"} {
+	for _, cliName := range []string{"codex-acp", "cursor-acp", "opencode-acp"} {
 		t.Run(cliName, func(t *testing.T) {
 			err := CheckCLIPrerequisites(cliName)
 			if err == nil {
@@ -96,6 +103,9 @@ func TestCheckCLIPrerequisitesAcceptsACPXOnPath(t *testing.T) {
 
 	if err := CheckCLIPrerequisites("codex-acp"); err != nil {
 		t.Fatalf("CheckCLIPrerequisites(codex-acp) error = %v, want nil", err)
+	}
+	if err := CheckCLIPrerequisites("cursor-acp"); err != nil {
+		t.Fatalf("CheckCLIPrerequisites(cursor-acp) error = %v, want nil", err)
 	}
 }
 

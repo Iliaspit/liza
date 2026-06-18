@@ -1484,6 +1484,32 @@ func TestCheckContractConfigured_CodexACPUsesCodexContract(t *testing.T) {
 	}
 }
 
+func TestCheckContractConfigured_CursorACPUsesAgentsContract(t *testing.T) {
+	dir := t.TempDir()
+	fakeHome := t.TempDir()
+	t.Setenv("HOME", fakeHome)
+
+	lizaDir := filepath.Join(fakeHome, ".liza")
+	if err := os.MkdirAll(lizaDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	coreFile := filepath.Join(lizaDir, "CORE.md")
+	if err := os.WriteFile(coreFile, []byte("core"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(coreFile, filepath.Join(dir, "AGENTS.md")); err != nil {
+		t.Fatal(err)
+	}
+
+	got := CheckContractConfigured(dir, "cursor-acp")
+	if got == "" {
+		t.Fatal("expected CheckContractConfigured to find AGENTS.md for cursor-acp")
+	}
+	if filepath.Base(got) != "AGENTS.md" {
+		t.Errorf("found %q, expected AGENTS.md", got)
+	}
+}
+
 func TestCheckContractConfigured_OpenCodeUsesAgentsContract(t *testing.T) {
 	dir := t.TempDir()
 	fakeHome := t.TempDir()

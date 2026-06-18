@@ -292,7 +292,7 @@ func CheckContractConfigured(projectRoot, cliName string) string {
 	effectiveCLI := cliName
 	if cliName == "kimi" {
 		effectiveCLI = "claude"
-	} else if cliName == "codex-acp" {
+	} else if cliName == "codex-acp" || cliName == "cursor-acp" {
 		effectiveCLI = "codex"
 	} else if cliName == "opencode-acp" {
 		effectiveCLI = "opencode"

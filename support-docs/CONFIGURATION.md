@@ -261,8 +261,8 @@ task before relying on it for unattended work.
 ## Configuration Matrix
 
 All configuration lives in `.liza/state.yaml` under the `config` section.
-Supported CLI names are `claude`, `codex`, `codex-acp`, `opencode`,
-`opencode-acp`, `gemini`, `mistral`, and `kimi`.
+Supported CLI names are `claude`, `codex`, `codex-acp`, `cursor-acp`,
+`opencode`, `opencode-acp`, `gemini`, `mistral`, and `kimi`.
 
 | Parameter | Default | Min | Max | Unit | Purpose |
 |-----------|---------|-----|-----|------|---------|
@@ -852,6 +852,7 @@ Headless watch automatically runs the repair-agent-pool behavior when a task is 
 | `claude` | Claude Code (fallback default when no config is set) |
 | `codex` | OpenAI Codex CLI |
 | `codex-acp` | OpenAI Codex through ACPX. Requires the `acpx` executable on the spawned agent's `PATH`; install it with `npm install -g acpx`. Liza preflights this prerequisite before direct `liza agent` execution and before TUI/API agent spawning. `codex-acp` reuses Codex `AGENTS.md` contract setup and runs ACPX with non-interactive auto-approval inside Liza task worktrees. During `acpx prompt`, streams stdout JSON-RPC and stderr diagnostics to `.liza/agent-outputs/`, returns parsed message chunks to the supervisor, and logs lifecycle/usage metadata. Short ACPX session control calls are not transcript-logged. |
+| `cursor-acp` | Cursor through ACPX. Requires `acpx` on `PATH` and an authenticated Cursor CLI (`cursor-agent`). Reuses the shared `AGENTS.md` contract setup and selects the ACPX Cursor target; it is not a Cursor executable name. |
 | `opencode` | OpenCode CLI through `opencode run`. Requires `liza setup --opencode` and `liza init --opencode` for contract and skill activation. Logged runs add JSON output. |
 | `opencode-acp` | OpenCode through ACPX. Requires `acpx` on `PATH`, reuses OpenCode `AGENTS.md` contract setup, and selects the ACPX OpenCode target; it is not an OpenCode executable name. |
 | `gemini` | Google Gemini CLI |

@@ -84,6 +84,21 @@ func TestDetectQuotaExhaustion_ClaudeHitYourLimitWithoutResetMatches(t *testing.
 	}
 }
 
+func TestDetectQuotaExhaustion_CursorACPUpgradePlanMatch(t *testing.T) {
+	output := "\n\nUpgrade your plan to continue"
+
+	result := DetectQuotaExhaustion(output, "cursor-acp")
+	if result == nil {
+		t.Fatal("expected quota exhaustion detected, got nil")
+	}
+	if result.Provider != "cursor" {
+		t.Errorf("Provider = %q, want %q", result.Provider, "cursor")
+	}
+	if !strings.Contains(result.Message, "Upgrade your plan") {
+		t.Errorf("Message = %q, want Cursor upgrade message", result.Message)
+	}
+}
+
 func TestDetectQuotaExhaustion_WrongProvider(t *testing.T) {
 	output := `{"type":"error","message":"You're out of extra usage."}`
 
@@ -139,6 +154,35 @@ func TestQuotaSignal_WriteCheckClear(t *testing.T) {
 
 	if CheckQuotaSignal(projectRoot, "codex") {
 		t.Fatal("signal should not exist after clear")
+	}
+}
+
+func TestQuotaSignal_NormalizesACPXProviderAliases(t *testing.T) {
+	projectRoot := t.TempDir()
+	lizaDir := filepath.Join(projectRoot, ".liza")
+	if err := os.MkdirAll(lizaDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	if QuotaSignalPath(projectRoot, "codex-acp") != QuotaSignalPath(projectRoot, "codex") {
+		t.Fatalf("codex-acp quota signal path should use canonical codex provider")
+	}
+
+	if err := WriteQuotaSignal(projectRoot, "codex-acp", "You've hit your usage limit"); err != nil {
+		t.Fatalf("WriteQuotaSignal failed: %v", err)
+	}
+	if !CheckQuotaSignal(projectRoot, "codex") {
+		t.Fatal("codex signal should exist after codex-acp write")
+	}
+	if !CheckQuotaSignal(projectRoot, "codex-acp") {
+		t.Fatal("codex-acp should find canonical codex signal")
+	}
+
+	if err := ClearQuotaSignal(projectRoot, "codex-acp"); err != nil {
+		t.Fatalf("ClearQuotaSignal failed: %v", err)
+	}
+	if CheckQuotaSignal(projectRoot, "codex") {
+		t.Fatal("canonical codex signal should not exist after clearing codex-acp")
 	}
 }
 
