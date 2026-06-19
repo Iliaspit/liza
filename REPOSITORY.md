@@ -108,6 +108,7 @@ Specialized protocols agents load conditionally. Each contains a single `SKILL.m
 | `testing/` | When writing or analyzing tests (mandatory) |
 | `code-review/` | When reviewing PRs or pending changes |
 | `adversarial-pairing/` | Coordinating doer/reviewer pairing sessions through a Markdown blackboard |
+| `gandalf-review/` | Running local adversarial QA fix/review loops with metrics, pre-PR hooks, progress bars, and aggregate archives |
 | `architecture-planning/` | Defining architecture for a change (architect role) |
 | `software-architecture-review/` | Implementation planning, structural concerns |
 | `clean-code/` | Pre-commit refactoring (Python-focused) |

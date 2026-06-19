@@ -1,6 +1,6 @@
 version: 1
 repository: "git@github.com:liza-mas/liza.git"
-last_updated: "2026-02-22T17:11:25Z"
+last_updated: "2026-06-19T00:00:00Z"
 code_classification:
   "cmd/liza/main.go": {type: functional, confidence: confirmed}
   "internal/commands/claim_task.go": {type: functional, confidence: confirmed}
@@ -37,6 +37,11 @@ code_classification:
   skills/debugging/SKILL.md: {type: functional, confidence: confirmed}
   skills/feynman/SKILL.md: {type: functional, confidence: confirmed}
   skills/generic-subagent/SKILL.md: {type: functional, confidence: confirmed}
+  skills/gandalf-review/SKILL.md: {type: functional, confidence: confirmed}
+  skills/gandalf-review/scripts/gandalf_codex_fast_home.py: {type: functional, confidence: confirmed}
+  skills/gandalf-review/scripts/gandalf_metrics.py: {type: functional, confidence: confirmed}
+  skills/gandalf-review/scripts/gandalf_progress.py: {type: functional, confidence: confirmed}
+  skills/gandalf-review/scripts/gandalf_squash.py: {type: functional, confidence: confirmed}
   skills/have-you-considered/SKILL.md: {type: functional, confidence: confirmed}
   skills/lesson-capture/SKILL.md: {type: functional, confidence: confirmed}
   skills/software-architecture-review/SKILL.md: {type: functional, confidence: confirmed}
@@ -553,6 +558,51 @@ mappings:
     confidence: confirmed
     conflict_details: null
     last_verified: "2026-02-22"
+  skills/gandalf-review/SKILL.md:
+    status: new
+    code_sha: null
+    spec_sha: null
+    spec_path: specs/functional/1.6 - Skills.md
+    spec_title: Skills
+    confidence: unverified
+    conflict_details: null
+    last_verified: null
+  skills/gandalf-review/scripts/gandalf_codex_fast_home.py:
+    status: new
+    code_sha: null
+    spec_sha: null
+    spec_path: specs/functional/1.6 - Skills.md
+    spec_title: Skills
+    confidence: unverified
+    conflict_details: null
+    last_verified: null
+  skills/gandalf-review/scripts/gandalf_metrics.py:
+    status: new
+    code_sha: null
+    spec_sha: null
+    spec_path: specs/functional/1.6 - Skills.md
+    spec_title: Skills
+    confidence: unverified
+    conflict_details: null
+    last_verified: null
+  skills/gandalf-review/scripts/gandalf_progress.py:
+    status: new
+    code_sha: null
+    spec_sha: null
+    spec_path: specs/functional/1.6 - Skills.md
+    spec_title: Skills
+    confidence: unverified
+    conflict_details: null
+    last_verified: null
+  skills/gandalf-review/scripts/gandalf_squash.py:
+    status: new
+    code_sha: null
+    spec_sha: null
+    spec_path: specs/functional/1.6 - Skills.md
+    spec_title: Skills
+    confidence: unverified
+    conflict_details: null
+    last_verified: null
   skills/have-you-considered/SKILL.md:
     status: aligned
     code_sha: 6ea75a8
@@ -1482,6 +1532,11 @@ specs:
       - skills/debugging/SKILL.md
       - skills/feynman/SKILL.md
       - skills/generic-subagent/SKILL.md
+      - skills/gandalf-review/SKILL.md
+      - skills/gandalf-review/scripts/gandalf_codex_fast_home.py
+      - skills/gandalf-review/scripts/gandalf_metrics.py
+      - skills/gandalf-review/scripts/gandalf_progress.py
+      - skills/gandalf-review/scripts/gandalf_squash.py
       - skills/have-you-considered/SKILL.md
       - skills/lesson-capture/SKILL.md
       - skills/software-architecture-review/SKILL.md

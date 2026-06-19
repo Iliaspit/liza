@@ -68,6 +68,32 @@ liza submit-for-review task-1 HEAD --agent-id coder-1
 
 Watch daemon alerts on high review cycles (>= 5). Check with `liza get tasks task-1`.
 
+## Run Gandalf Before Opening a PR
+
+Use the `gandalf-review` skill as a local PR-readiness gate when a change
+has passed implementation tests but still needs adversarial QA before GitHub
+review. This is useful when repeated push/mention/fix cycles are slowing down
+review.
+
+Git does not provide a native pre-open-PR hook. Prefer an opt-in wrapper such as
+`scripts/pr-ready`, a `gh pr create` wrapper, or a team-approved `pre-push` hook:
+
+```bash
+# 1. Finish implementation and local validation.
+git status --short
+
+# 2. Ask the agent to run:
+# "Use gandalf-review against this branch before I open the PR."
+
+# 3. Open the PR only after the run summary reports APPROVED.
+# Full run detail stays under ~/.liza/gandalf-review/.
+```
+
+During the loop, each fix iteration may be committed separately for recovery.
+After approval, squash those iteration commits into one clean PR commit while
+preserving the Gandalf archive and aggregate metrics. The skill includes helper
+scripts for task-local Codex Fast Mode and final squashing.
+
 ## Recovering from Agent Crashes
 
 **Recover by task ID** (recommended — you usually know the task):
