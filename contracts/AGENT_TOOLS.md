@@ -141,9 +141,6 @@ semble find-related <file_path> <line> <target-root>
 
 - **`mdtoc` for Markdown navigation**: For long Markdown specs, plans, and architecture docs, use `rg` only to identify candidate files or exact hits. Do not jump from `rg` hits to guessed `sed` windows unless the hit itself fully answers the question. Once a candidate file is identified, run `mdtoc <file> [<file>...]` to get heading-scoped `FILE:START-END` ranges and mdq selectors, then read the exact relevant section with `sed -n '<start>,<end>p' <file>` or `mdq`. Prefer this `rg` -> `mdtoc` -> `sed`/`mdq` flow because section-scoped reads are more reliable than nearby line windows and reduce repeated reads. Treat line ranges as immediate-session navigation aids; use heading names or selectors to keep repeated reads anchored to the same section. Fallback: `rg '^#{1,6} ' <file>` when `mdtoc` is unavailable.
 - **`jq` / `yq` for structured data**: Use `jq` for JSON and `yq` for YAML/TOML. Prefer over `Read` + manual parsing when extracting specific fields from structured data files.
-- **`gh` (GitHub CLI)**: Use `gh` for GitHub issues, PRs, releases, and GitHub API queries when repository context and authentication are available. Prefer `gh` over raw `curl` calls to GitHub APIs.
-  - For long issue/PR body edits, do not use `gh pr edit --body-file -` or generate API JSON through stdout redirected from `rtk jq`; both patterns can produce empty or truncated bodies while reporting success. Write the intended Markdown to a temp file, create the JSON payload by writing directly to a file, patch with `gh api ... --input <payload.json>`, then read the body back and check for exact sentinel phrases before claiming success.
-  - Do not probe `gh pr edit` syntax by appending `--help` to a partially formed edit command. Run `gh pr edit --help` as a standalone command before constructing the state-changing command.
 
 ### Tool Details
 
@@ -168,6 +165,20 @@ semble find-related <file_path> <line> <target-root>
 ### Batching
 
 Batch related operations within same MCP server when possible.
+
+### GitHub and PRs
+
+PR title MUST follow Conventional Commits.
+
+Codex: DO NOT use `codex_apps.github`.
+
+Use `gh` (GitHub CLI) for GitHub issues, PRs, releases, and GitHub API queries when repository context and authentication are available. Prefer `gh` over raw `curl` calls to GitHub APIs.
+
+For any GitHub write that sends Markdown body text (issue/PR descriptions, comments, reviews, releases), DO write the intended Markdown to a temp file and pass that file to `gh` with `--body-file` or through a JSON payload file. Do not stream the body through stdin. After writing, read the body back with `gh api` and verify one or more unique exact phrases from the intended Markdown before claiming success.
+
+DO NOT use `gh pr edit --body-file -` or generate API JSON through stdout redirected from `rtk jq`; both patterns can produce empty or truncated bodies while reporting success.
+
+DO NOT probe `gh pr edit` syntax by appending `--help` to a partially formed edit command. Run `gh pr edit --help` as a standalone command before constructing the state-changing command.
 
 ### Claude-specific operational notes
 
