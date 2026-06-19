@@ -318,6 +318,14 @@ def write_aggregate_files(root: Path, entries: list[dict[str, Any]]) -> None:
     write_text_atomic(root / AGGREGATE_FILE, "\n".join(aggregate))
 
 
+def validate_aggregate_entries(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    for index, entry in enumerate(entries, start=1):
+        run_id = entry.get("run_id")
+        if not isinstance(run_id, str) or not run_id:
+            raise ValueError(f"{INDEX_FILE}:{index} must contain a non-empty run_id")
+    return entries
+
+
 def write_aggregate(root: Path) -> list[dict[str, Any]]:
     entries = collect_run_entries(root, rewrite_summaries=True)
     write_aggregate_files(root, entries)
@@ -327,7 +335,11 @@ def write_aggregate(root: Path) -> list[dict[str, Any]]:
 def update_aggregate_entry(root: Path, entry: dict[str, Any]) -> list[dict[str, Any]]:
     index_path = root / INDEX_FILE
     try:
-        entries = read_jsonl(index_path) if index_path.exists() else collect_run_entries(root, rewrite_summaries=False)
+        entries = (
+            validate_aggregate_entries(read_jsonl(index_path))
+            if index_path.exists()
+            else collect_run_entries(root, rewrite_summaries=False)
+        )
     except (OSError, json.JSONDecodeError, TypeError, ValueError):
         entries = collect_run_entries(root, rewrite_summaries=False)
 

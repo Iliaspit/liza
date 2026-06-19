@@ -80,7 +80,16 @@ def command_squash(args: argparse.Namespace) -> None:
         return
 
     git(repo, "reset", "--soft", merge_base)
-    git(repo, *commit_args(args))
+    try:
+        git(repo, *commit_args(args))
+    except subprocess.CalledProcessError as error:
+        try:
+            git(repo, "reset", "--hard", head_before)
+        except subprocess.CalledProcessError as restore_error:
+            detail = restore_error.stderr.strip() or str(restore_error)
+            raise SystemExit(f"commit failed and restoring HEAD failed: {detail}") from error
+        detail = error.stderr.strip() or str(error)
+        raise SystemExit(f"commit failed; restored HEAD to {head_before}: {detail}") from error
     head_after = git(repo, "rev-parse", "HEAD")
     print(
         json.dumps(

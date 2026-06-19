@@ -246,6 +246,32 @@ def test_duplicate_run_id_exits_without_traceback(tmp_path: Path) -> None:
     assert "Traceback" not in completed.stderr
 
 
+def test_start_recovers_from_malformed_cached_index(tmp_path: Path) -> None:
+    root = tmp_path / "gandalf"
+    root.mkdir()
+    (root / "index.jsonl").write_text("{}\n")
+
+    started = run_metrics(
+        root,
+        "start",
+        "--run-id",
+        "healthy",
+        "--repo",
+        "liza",
+        "--branch",
+        "feature/index",
+        "--base-ref",
+        "main",
+        "--goal",
+        "Recover aggregate cache",
+    )
+
+    assert started["run_id"] == "healthy"
+    index = read_jsonl(root / "index.jsonl")
+    assert [entry["run_id"] for entry in index] == ["healthy"]
+    assert "healthy" in (root / "aggregate.md").read_text()
+
+
 def test_concurrent_records_keep_metrics_and_aggregate_consistent(tmp_path: Path) -> None:
     root = tmp_path / "gandalf"
     run_metrics(
@@ -717,3 +743,41 @@ def test_squash_helper_accepts_message_file(tmp_path: Path) -> None:
     assert result["commit_count"] == 2
     assert git(repo, "rev-list", "--count", "main..HEAD") == "1"
     assert git(repo, "log", "-1", "--pretty=%B") == message_file.read_text().strip()
+
+
+def test_squash_helper_restores_head_when_commit_fails(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    git(repo, "init", "-b", "main")
+    git(repo, "config", "user.email", "gandalf@example.test")
+    git(repo, "config", "user.name", "Gandalf Test")
+    commit_file(repo, "README.md", "base\n", "chore: base")
+    git(repo, "checkout", "-b", "feature/gandalf")
+    commit_file(repo, "one.txt", "one\n", "fix(gandalf): iteration 1 repair")
+    commit_file(repo, "two.txt", "two\n", "fix(gandalf): iteration 2 repair")
+    head_before = git(repo, "rev-parse", "HEAD")
+    hook = repo / ".git/hooks/pre-commit"
+    hook.write_text("#!/bin/sh\necho failing hook >&2\nexit 1\n")
+    hook.chmod(0o755)
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(SQUASH_SCRIPT),
+            "--repo",
+            str(repo),
+            "--base-ref",
+            "main",
+            "--message",
+            "feat(gandalf): final approval loop",
+        ],
+        check=False,
+        text=True,
+        capture_output=True,
+    )
+
+    assert completed.returncode != 0
+    assert "commit failed; restored HEAD" in completed.stderr
+    assert git(repo, "rev-parse", "HEAD") == head_before
+    assert git(repo, "rev-list", "--count", "main..HEAD") == "2"
+    assert git(repo, "status", "--porcelain") == ""
