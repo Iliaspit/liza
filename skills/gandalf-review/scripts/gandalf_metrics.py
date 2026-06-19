@@ -330,7 +330,7 @@ def validate_aggregate_entries(entries: list[dict[str, Any]]) -> list[dict[str, 
         missing = [field for field in required_int_fields if field not in entry]
         if missing:
             raise ValueError(f"{INDEX_FILE}:{index} missing fields: {', '.join(missing)}")
-        wrong_type = [field for field in required_int_fields if not isinstance(entry[field], int)]
+        wrong_type = [field for field in required_int_fields if type(entry[field]) is not int]
         if wrong_type:
             raise ValueError(f"{INDEX_FILE}:{index} fields must be integers: {', '.join(wrong_type)}")
     return entries
