@@ -165,6 +165,147 @@ def test_export_command_receives_generic_paths(tmp_path: Path) -> None:
     assert exported[4] == "export-run"
 
 
+def test_export_failure_warns_without_failing_core_archive(tmp_path: Path) -> None:
+    root = tmp_path / "gandalf"
+    env = os.environ.copy()
+    env["GANDALF_REVIEW_EXPORT_CMD"] = f'{sys.executable} -c "import sys; sys.exit(7)"'
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "--root",
+            str(root),
+            "start",
+            "--run-id",
+            "export-fails",
+            "--repo",
+            "liza",
+            "--branch",
+            "feature/export",
+            "--base-ref",
+            "main",
+            "--goal",
+            "Check export warning",
+        ],
+        check=True,
+        text=True,
+        capture_output=True,
+        env=env,
+    )
+
+    assert json.loads(completed.stdout)["run_id"] == "export-fails"
+    assert "warning: GANDALF_REVIEW_EXPORT_CMD failed" in completed.stderr
+    assert (root / "runs/export-fails/metrics.jsonl").exists()
+    assert (root / "index.jsonl").exists()
+
+
+def test_duplicate_run_id_exits_without_traceback(tmp_path: Path) -> None:
+    root = tmp_path / "gandalf"
+    run_metrics(
+        root,
+        "start",
+        "--run-id",
+        "duplicate",
+        "--repo",
+        "liza",
+        "--branch",
+        "feature/duplicate",
+        "--base-ref",
+        "main",
+        "--goal",
+        "First run",
+    )
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "--root",
+            str(root),
+            "start",
+            "--run-id",
+            "duplicate",
+            "--repo",
+            "liza",
+            "--branch",
+            "feature/duplicate",
+            "--base-ref",
+            "main",
+            "--goal",
+            "Second run",
+        ],
+        check=False,
+        text=True,
+        capture_output=True,
+    )
+
+    assert completed.returncode != 0
+    assert completed.stdout == ""
+    assert "run id already exists: duplicate" in completed.stderr
+    assert "Traceback" not in completed.stderr
+
+
+def test_concurrent_records_keep_metrics_and_aggregate_consistent(tmp_path: Path) -> None:
+    root = tmp_path / "gandalf"
+    run_metrics(
+        root,
+        "start",
+        "--run-id",
+        "concurrent",
+        "--repo",
+        "liza",
+        "--branch",
+        "feature/concurrent",
+        "--base-ref",
+        "main",
+        "--goal",
+        "Check concurrent records",
+    )
+
+    commands = [
+        [
+            sys.executable,
+            str(SCRIPT),
+            "--root",
+            str(root),
+            "record",
+            "--run-id",
+            "concurrent",
+            "--kind",
+            "fix_finished",
+            "--iteration",
+            str(iteration),
+            "--duration-kind",
+            "fix",
+            "--duration-ms",
+            "10",
+            "--summary",
+            f"fix {iteration}",
+        ]
+        for iteration in range(1, 9)
+    ]
+
+    processes = [
+        subprocess.Popen(command, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE) for command in commands
+    ]
+    results = [process.communicate(timeout=10) + (process.returncode,) for process in processes]
+
+    for stdout, stderr, returncode in results:
+        assert returncode == 0, stderr
+        assert json.loads(stdout)["kind"] == "fix_finished"
+
+    events = read_jsonl(root / "runs/concurrent/metrics.jsonl")
+    fix_events = [event for event in events if event["kind"] == "fix_finished"]
+    assert len(fix_events) == 8
+    assert {event["iteration"] for event in fix_events} == set(range(1, 9))
+
+    index = read_jsonl(root / "index.jsonl")
+    assert index[0]["run_id"] == "concurrent"
+    assert index[0]["iterations"] == 8
+    assert index[0]["fix_duration_ms"] == 80
+
+
 def test_custom_run_id_is_confined_to_runs_root(tmp_path: Path) -> None:
     root = tmp_path / "gandalf"
 
@@ -461,6 +602,8 @@ def test_squash_helper_collapses_iteration_commits(tmp_path: Path) -> None:
             "main",
             "--message",
             "feat(gandalf): final approval loop",
+            "--body",
+            "Why: collapse reviewed repair commits.\n\nWhat: preserve the approved final tree.",
         ],
         check=True,
         text=True,
@@ -472,5 +615,45 @@ def test_squash_helper_collapses_iteration_commits(tmp_path: Path) -> None:
     assert result["no_op"] is False
     assert git(repo, "rev-list", "--count", "main..HEAD") == "1"
     assert git(repo, "log", "-1", "--pretty=%s") == "feat(gandalf): final approval loop"
+    assert "Why: collapse reviewed repair commits." in git(repo, "log", "-1", "--pretty=%B")
     assert (repo / "one.txt").read_text() == "one\n"
     assert (repo / "two.txt").read_text() == "two\n"
+
+
+def test_squash_helper_accepts_message_file(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    git(repo, "init", "-b", "main")
+    git(repo, "config", "user.email", "gandalf@example.test")
+    git(repo, "config", "user.name", "Gandalf Test")
+    commit_file(repo, "README.md", "base\n", "chore: base")
+    git(repo, "checkout", "-b", "feature/gandalf")
+    commit_file(repo, "one.txt", "one\n", "fix(gandalf): iteration 1 repair")
+    commit_file(repo, "two.txt", "two\n", "fix(gandalf): iteration 2 repair")
+    message_file = tmp_path / "commit-message.txt"
+    message_file.write_text(
+        "feat(gandalf): final approval loop\n\n"
+        "Why: preserve reviewability during fixes and ship one clean PR commit.\n\n"
+        "What: squash iteration commits after both reviewers approve.\n"
+    )
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(SQUASH_SCRIPT),
+            "--repo",
+            str(repo),
+            "--base-ref",
+            "main",
+            "--message-file",
+            str(message_file),
+        ],
+        check=True,
+        text=True,
+        capture_output=True,
+    )
+
+    result = json.loads(completed.stdout)
+    assert result["commit_count"] == 2
+    assert git(repo, "rev-list", "--count", "main..HEAD") == "1"
+    assert git(repo, "log", "-1", "--pretty=%B") == message_file.read_text().strip()

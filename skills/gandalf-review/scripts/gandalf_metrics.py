@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import fcntl
 import hashlib
 import json
 import os
@@ -12,6 +13,10 @@ import re
 import shlex
 import shutil
 import subprocess
+import sys
+import tempfile
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -39,6 +44,33 @@ def safe_run_id(value: str) -> str:
 
 def json_line(data: dict[str, Any]) -> str:
     return json.dumps(data, sort_keys=True, separators=(",", ":")) + "\n"
+
+
+def write_text_atomic(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+    tmp_path = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp_path, path)
+    except Exception:
+        tmp_path.unlink(missing_ok=True)
+        raise
+
+
+@contextmanager
+def locked_archive(root: Path) -> Iterator[None]:
+    root.mkdir(parents=True, exist_ok=True)
+    lock_path = root / ".gandalf_metrics.lock"
+    with lock_path.open("w", encoding="utf-8") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock, fcntl.LOCK_UN)
 
 
 def read_json(path: Path) -> dict[str, Any]:
@@ -137,7 +169,7 @@ def write_summary(root: Path, run_id: str) -> dict[str, Any]:
         lines.append(f"- {event['timestamp']} `{event['kind']}`{suffix} {detail}".rstrip())
     lines.append("")
 
-    summary_path(root, run_id).write_text("\n".join(lines), encoding="utf-8")
+    write_text_atomic(summary_path(root, run_id), "\n".join(lines))
     return entry
 
 
@@ -245,7 +277,7 @@ def write_aggregate(root: Path) -> list[dict[str, Any]]:
             entries.append(entry)
 
     root.mkdir(parents=True, exist_ok=True)
-    (root / INDEX_FILE).write_text("".join(json_line(entry) for entry in entries), encoding="utf-8")
+    write_text_atomic(root / INDEX_FILE, "".join(json_line(entry) for entry in entries))
 
     completed = [entry for entry in entries if entry["final_verdict"] in {"APPROVED", "BLOCKED", "STOPPED"}]
     approved = [entry for entry in completed if entry["final_verdict"] == "APPROVED"]
@@ -276,8 +308,16 @@ def write_aggregate(root: Path) -> list[dict[str, Any]]:
             f"fix_ms={entry['fix_duration_ms']}"
         )
     aggregate.append("")
-    (root / AGGREGATE_FILE).write_text("\n".join(aggregate), encoding="utf-8")
+    write_text_atomic(root / AGGREGATE_FILE, "\n".join(aggregate))
     return entries
+
+
+def exporter_failure_message(error: Exception) -> str:
+    if isinstance(error, subprocess.CalledProcessError):
+        return f"exit {error.returncode}"
+    if isinstance(error, subprocess.TimeoutExpired):
+        return "timed out"
+    return str(error)
 
 
 def export_event(root: Path, run_id: str, event: dict[str, Any], *, no_export: bool) -> None:
@@ -290,7 +330,7 @@ def export_event(root: Path, run_id: str, event: dict[str, Any], *, no_export: b
     export_dir = run_dir(root, run_id) / "export"
     export_dir.mkdir(parents=True, exist_ok=True)
     event_path = export_dir / "latest_event.json"
-    event_path.write_text(json.dumps(event, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    write_text_atomic(event_path, json.dumps(event, indent=2, sort_keys=True) + "\n")
 
     env = os.environ.copy()
     env.update(
@@ -303,7 +343,13 @@ def export_event(root: Path, run_id: str, event: dict[str, Any], *, no_export: b
             "GANDALF_REVIEW_RUN_ID": run_id,
         }
     )
-    subprocess.run(shlex.split(command), check=True, env=env, text=True, timeout=60)
+    try:
+        subprocess.run(shlex.split(command), check=True, env=env, text=True, timeout=60)
+    except (FileNotFoundError, OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
+        print(
+            f"warning: GANDALF_REVIEW_EXPORT_CMD failed: {command!r}: {exporter_failure_message(error)}",
+            file=sys.stderr,
+        )
 
 
 def command_start(args: argparse.Namespace) -> None:
@@ -311,7 +357,6 @@ def command_start(args: argparse.Namespace) -> None:
     started_at = utc_now()
     run_id = safe_run_id(args.run_id) if args.run_id else make_run_id(args.repo, args.branch, started_at)
     directory = run_dir(root, run_id)
-    directory.mkdir(parents=True, exist_ok=False)
 
     metadata = {
         "run_id": run_id,
@@ -321,11 +366,16 @@ def command_start(args: argparse.Namespace) -> None:
         "goal": args.goal,
         "started_at": started_at,
     }
-    metadata_path(root, run_id).write_text(json.dumps(metadata, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     event = {"kind": "run_started", "timestamp": started_at, "run_id": run_id, "summary": args.goal}
-    append_jsonl(metrics_path(root, run_id), event)
-    write_summary(root, run_id)
-    write_aggregate(root)
+    with locked_archive(root):
+        try:
+            directory.mkdir(parents=True, exist_ok=False)
+        except FileExistsError:
+            raise SystemExit(f"run id already exists: {run_id}") from None
+        write_text_atomic(metadata_path(root, run_id), json.dumps(metadata, indent=2, sort_keys=True) + "\n")
+        append_jsonl(metrics_path(root, run_id), event)
+        write_summary(root, run_id)
+        write_aggregate(root)
     export_event(root, run_id, event, no_export=args.no_export)
     print(json.dumps({"run_id": run_id, "run_dir": str(directory)}, sort_keys=True))
 
@@ -333,8 +383,6 @@ def command_start(args: argparse.Namespace) -> None:
 def command_record(args: argparse.Namespace) -> None:
     root = Path(args.root).expanduser()
     run_id = safe_run_id(args.run_id)
-    if not metadata_path(root, run_id).exists():
-        raise SystemExit(f"unknown run id: {run_id}")
     event = {
         "kind": args.kind,
         "timestamp": utc_now(),
@@ -344,12 +392,15 @@ def command_record(args: argparse.Namespace) -> None:
         value = getattr(args, field)
         if value is not None:
             event[field] = value
-    artifact_path = copy_artifact(root, run_id, args)
-    if artifact_path:
-        event["artifact_path"] = artifact_path
-    append_jsonl(metrics_path(root, run_id), event)
-    write_summary(root, run_id)
-    write_aggregate(root)
+    with locked_archive(root):
+        if not metadata_path(root, run_id).exists():
+            raise SystemExit(f"unknown run id: {run_id}")
+        artifact_path = copy_artifact(root, run_id, args)
+        if artifact_path:
+            event["artifact_path"] = artifact_path
+        append_jsonl(metrics_path(root, run_id), event)
+        write_summary(root, run_id)
+        write_aggregate(root)
     export_event(root, run_id, event, no_export=args.no_export)
     print(json.dumps(event, sort_keys=True))
 
@@ -357,8 +408,6 @@ def command_record(args: argparse.Namespace) -> None:
 def command_finish(args: argparse.Namespace) -> None:
     root = Path(args.root).expanduser()
     run_id = safe_run_id(args.run_id)
-    if not metadata_path(root, run_id).exists():
-        raise SystemExit(f"unknown run id: {run_id}")
     kind = "run_blocked" if args.final_verdict == "BLOCKED" else "run_finished"
     event = {
         "kind": kind,
@@ -369,16 +418,20 @@ def command_finish(args: argparse.Namespace) -> None:
     }
     if args.blocker:
         event["blocker"] = args.blocker
-    append_jsonl(metrics_path(root, run_id), event)
-    entry = write_summary(root, run_id)
-    write_aggregate(root)
+    with locked_archive(root):
+        if not metadata_path(root, run_id).exists():
+            raise SystemExit(f"unknown run id: {run_id}")
+        append_jsonl(metrics_path(root, run_id), event)
+        entry = write_summary(root, run_id)
+        write_aggregate(root)
     export_event(root, run_id, event, no_export=args.no_export)
     print(json.dumps(entry, sort_keys=True))
 
 
 def command_aggregate(args: argparse.Namespace) -> None:
     root = Path(args.root).expanduser()
-    entries = write_aggregate(root)
+    with locked_archive(root):
+        entries = write_aggregate(root)
     print(json.dumps({"runs": len(entries), "index": str(root / INDEX_FILE)}, sort_keys=True))
 
 

@@ -75,8 +75,9 @@ has passed implementation tests but still needs adversarial QA before GitHub
 review. This is useful when repeated push/mention/fix cycles are slowing down
 review.
 
-Git does not provide a native pre-open-PR hook. Prefer an opt-in wrapper such as
-`scripts/pr-ready`, a `gh pr create` wrapper, or a team-approved `pre-push` hook:
+Git does not provide a native pre-open-PR hook. Run the skill explicitly before
+creating the PR, or use an existing team-approved wrapper or `pre-push` hook that
+already lives in the project:
 
 ```bash
 # 1. Finish implementation and local validation.
@@ -92,7 +93,7 @@ git status --short
 During the loop, each fix iteration may be committed separately for recovery.
 After approval, squash those iteration commits into one clean PR commit while
 preserving the Gandalf archive and aggregate metrics. The skill includes helper
-scripts for task-local Codex Fast Mode and final squashing.
+scripts for task-local reviewer setup and final squashing.
 
 ## Recovering from Agent Crashes
 

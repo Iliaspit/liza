@@ -30,7 +30,18 @@ def commit_count(repo: Path, base_ref: str) -> int:
     return int(count or "0")
 
 
+def commit_args(args: argparse.Namespace) -> list[str]:
+    if args.message_file:
+        return ["commit", "-F", str(Path(args.message_file).expanduser())]
+    command = ["commit", "-m", args.message]
+    if args.body:
+        command.extend(["-m", args.body])
+    return command
+
+
 def command_squash(args: argparse.Namespace) -> None:
+    if args.message_file and args.body:
+        raise SystemExit("--body can only be used with --message")
     repo = Path(args.repo).expanduser().resolve()
     ensure_clean(repo)
     count = commit_count(repo, args.base_ref)
@@ -69,7 +80,7 @@ def command_squash(args: argparse.Namespace) -> None:
         return
 
     git(repo, "reset", "--soft", merge_base)
-    git(repo, "commit", "-m", args.message)
+    git(repo, *commit_args(args))
     head_after = git(repo, "rev-parse", "HEAD")
     print(
         json.dumps(
@@ -90,7 +101,10 @@ def parser() -> argparse.ArgumentParser:
     base = argparse.ArgumentParser(description=__doc__)
     base.add_argument("--repo", default=".", help="repository to squash")
     base.add_argument("--base-ref", default="main", help="base ref to squash commits onto")
-    base.add_argument("--message", required=True, help="final squashed commit message")
+    message = base.add_mutually_exclusive_group(required=True)
+    message.add_argument("--message", help="final squashed commit subject")
+    message.add_argument("--message-file", help="file containing the full final squashed commit message")
+    base.add_argument("--body", help="final squashed commit body; only valid with --message")
     base.add_argument("--dry-run", action="store_true", help="report what would be squashed without rewriting history")
     base.set_defaults(func=command_squash)
     return base

@@ -7,6 +7,8 @@ import argparse
 import json
 from pathlib import Path
 
+REASONING_EFFORT_VALUES = ("minimal", "low", "medium", "high", "xhigh")
+
 
 def config_text(model: str, reasoning_effort: str) -> str:
     return f"""model = "{model}"
@@ -63,8 +65,9 @@ def parser() -> argparse.ArgumentParser:
     base.add_argument("--model", default="gpt-5.5", help="Codex model for the fast reviewer")
     base.add_argument(
         "--reasoning-effort",
+        choices=REASONING_EFFORT_VALUES,
         default="minimal",
-        help="Codex reasoning effort for fast reviews; Liza config validation accepts minimal",
+        help="Codex reasoning effort for fast reviews",
     )
     base.add_argument("--auth-source", default="~/.codex/auth.json", help="auth file to symlink without reading")
     base.add_argument("--no-auth-link", action="store_true", help="do not symlink an auth file into CODEX_HOME")
