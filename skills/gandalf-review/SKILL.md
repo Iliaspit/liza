@@ -30,6 +30,8 @@ Archive layout:
 - `~/.liza/gandalf-review/index.jsonl` — global aggregate, one JSON object per run.
 - `~/.liza/gandalf-review/aggregate.md` — human aggregate summary.
 
+`start`, `record`, and `finish` update the current run summary and replace that run's index entry. Use `aggregate` when you need a full rebuild across historical runs or to quarantine corrupt historical data.
+
 If `GANDALF_REVIEW_EXPORT_CMD` is set, the helper runs it after each event and automatically sets these environment variables for that exporter. Do not set them manually:
 
 - `GANDALF_REVIEW_EVENT_PATH`

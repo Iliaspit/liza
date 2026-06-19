@@ -306,6 +306,66 @@ def test_concurrent_records_keep_metrics_and_aggregate_consistent(tmp_path: Path
     assert index[0]["fix_duration_ms"] == 80
 
 
+def test_record_updates_current_run_without_rewriting_historical_summaries(tmp_path: Path) -> None:
+    root = tmp_path / "gandalf"
+    run_metrics(
+        root,
+        "start",
+        "--run-id",
+        "historical",
+        "--repo",
+        "liza",
+        "--branch",
+        "main",
+        "--base-ref",
+        "main",
+        "--goal",
+        "Historical run",
+    )
+    run_metrics(
+        root,
+        "start",
+        "--run-id",
+        "active",
+        "--repo",
+        "liza",
+        "--branch",
+        "feature/perf",
+        "--base-ref",
+        "main",
+        "--goal",
+        "Active run",
+    )
+    historical_summary = root / "runs/historical/summary.md"
+    historical_summary.write_text("sentinel historical summary\n")
+
+    run_metrics(
+        root,
+        "record",
+        "--run-id",
+        "active",
+        "--kind",
+        "fix_finished",
+        "--iteration",
+        "1",
+        "--duration-kind",
+        "fix",
+        "--duration-ms",
+        "25",
+        "--summary",
+        "incremental fix",
+    )
+
+    assert historical_summary.read_text() == "sentinel historical summary\n"
+    index = {entry["run_id"]: entry for entry in read_jsonl(root / "index.jsonl")}
+    assert index["historical"]["final_verdict"] == "IN_PROGRESS"
+    assert index["active"]["iterations"] == 1
+    assert index["active"]["fix_duration_ms"] == 25
+    aggregate = (root / "aggregate.md").read_text()
+    assert "`historical` IN_PROGRESS" in aggregate
+    assert "`active` IN_PROGRESS iterations=1 review_ms=0 fix_ms=25" in aggregate
+
+
 def test_custom_run_id_is_confined_to_runs_root(tmp_path: Path) -> None:
     root = tmp_path / "gandalf"
 

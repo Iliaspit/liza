@@ -253,7 +253,7 @@ def corrupt_run_entry(run_id: str, child: Path, error: Exception) -> dict[str, A
     }
 
 
-def write_aggregate(root: Path) -> list[dict[str, Any]]:
+def collect_run_entries(root: Path, *, rewrite_summaries: bool) -> list[dict[str, Any]]:
     entries: list[dict[str, Any]] = []
     runs_root = root / "runs"
     if runs_root.exists():
@@ -266,15 +266,22 @@ def write_aggregate(root: Path) -> list[dict[str, Any]]:
                 continue
             run_id = safe_run_id(child.name)
             try:
-                metadata = read_json(metadata_file)
-                events = read_jsonl(metrics_file)
-                entry = summarize_run(metadata, events, root, run_id)
-                summary_path(root, run_id).parent.mkdir(parents=True, exist_ok=True)
-                write_summary(root, run_id)
+                if rewrite_summaries:
+                    summary_path(root, run_id).parent.mkdir(parents=True, exist_ok=True)
+                    entry = write_summary(root, run_id)
+                else:
+                    metadata = read_json(metadata_file)
+                    events = read_jsonl(metrics_file)
+                    entry = summarize_run(metadata, events, root, run_id)
             except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError) as error:
                 entries.append(corrupt_run_entry(run_id, child, error))
                 continue
             entries.append(entry)
+    return entries
+
+
+def write_aggregate_files(root: Path, entries: list[dict[str, Any]]) -> None:
+    entries = sorted(entries, key=lambda entry: entry["run_id"])
 
     root.mkdir(parents=True, exist_ok=True)
     write_text_atomic(root / INDEX_FILE, "".join(json_line(entry) for entry in entries))
@@ -309,6 +316,32 @@ def write_aggregate(root: Path) -> list[dict[str, Any]]:
         )
     aggregate.append("")
     write_text_atomic(root / AGGREGATE_FILE, "\n".join(aggregate))
+
+
+def write_aggregate(root: Path) -> list[dict[str, Any]]:
+    entries = collect_run_entries(root, rewrite_summaries=True)
+    write_aggregate_files(root, entries)
+    return entries
+
+
+def update_aggregate_entry(root: Path, entry: dict[str, Any]) -> list[dict[str, Any]]:
+    index_path = root / INDEX_FILE
+    try:
+        entries = read_jsonl(index_path) if index_path.exists() else collect_run_entries(root, rewrite_summaries=False)
+    except (OSError, json.JSONDecodeError, TypeError, ValueError):
+        entries = collect_run_entries(root, rewrite_summaries=False)
+
+    run_id = entry["run_id"]
+    updated = False
+    for index, existing in enumerate(entries):
+        if existing.get("run_id") == run_id:
+            entries[index] = entry
+            updated = True
+            break
+    if not updated:
+        entries.append(entry)
+
+    write_aggregate_files(root, entries)
     return entries
 
 
@@ -374,8 +407,8 @@ def command_start(args: argparse.Namespace) -> None:
             raise SystemExit(f"run id already exists: {run_id}") from None
         write_text_atomic(metadata_path(root, run_id), json.dumps(metadata, indent=2, sort_keys=True) + "\n")
         append_jsonl(metrics_path(root, run_id), event)
-        write_summary(root, run_id)
-        write_aggregate(root)
+        entry = write_summary(root, run_id)
+        update_aggregate_entry(root, entry)
     export_event(root, run_id, event, no_export=args.no_export)
     print(json.dumps({"run_id": run_id, "run_dir": str(directory)}, sort_keys=True))
 
@@ -399,8 +432,8 @@ def command_record(args: argparse.Namespace) -> None:
         if artifact_path:
             event["artifact_path"] = artifact_path
         append_jsonl(metrics_path(root, run_id), event)
-        write_summary(root, run_id)
-        write_aggregate(root)
+        entry = write_summary(root, run_id)
+        update_aggregate_entry(root, entry)
     export_event(root, run_id, event, no_export=args.no_export)
     print(json.dumps(event, sort_keys=True))
 
@@ -423,7 +456,7 @@ def command_finish(args: argparse.Namespace) -> None:
             raise SystemExit(f"unknown run id: {run_id}")
         append_jsonl(metrics_path(root, run_id), event)
         entry = write_summary(root, run_id)
-        write_aggregate(root)
+        update_aggregate_entry(root, entry)
     export_event(root, run_id, event, no_export=args.no_export)
     print(json.dumps(entry, sort_keys=True))
 
