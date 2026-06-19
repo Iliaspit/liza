@@ -298,6 +298,44 @@ def test_start_recovers_from_incomplete_cached_index_entry(tmp_path: Path) -> No
     assert "healthy" in (root / "aggregate.md").read_text()
 
 
+def test_start_recovers_from_wrong_type_cached_index_entry(tmp_path: Path) -> None:
+    root = tmp_path / "gandalf"
+    root.mkdir()
+    (root / "index.jsonl").write_text(
+        json.dumps(
+            {
+                "run_id": "bad",
+                "final_verdict": "APPROVED",
+                "iterations": 0,
+                "review_duration_ms": "oops",
+                "fix_duration_ms": 0,
+                "validation_duration_ms": 0,
+            }
+        )
+        + "\n"
+    )
+
+    started = run_metrics(
+        root,
+        "start",
+        "--run-id",
+        "healthy",
+        "--repo",
+        "liza",
+        "--branch",
+        "feature/index",
+        "--base-ref",
+        "main",
+        "--goal",
+        "Recover wrong-type aggregate cache",
+    )
+
+    assert started["run_id"] == "healthy"
+    index = read_jsonl(root / "index.jsonl")
+    assert [entry["run_id"] for entry in index] == ["healthy"]
+    assert "healthy" in (root / "aggregate.md").read_text()
+
+
 def test_concurrent_records_keep_metrics_and_aggregate_consistent(tmp_path: Path) -> None:
     root = tmp_path / "gandalf"
     run_metrics(
