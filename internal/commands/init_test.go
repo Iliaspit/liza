@@ -3012,6 +3012,27 @@ func TestInitPairingCommand_ScipSearchEnabledWithNoLanguagesSkipsInertHooks(t *t
 	}
 }
 
+func TestInitPairingCommand_ScipSearchSkipsStrayTypeScriptWithoutTSConfig(t *testing.T) {
+	gitDir := setupGitRepo(t)
+	defer os.RemoveAll(gitDir)
+	setupGlobalLiza(t)
+	t.Setenv(scipsearch.EnvEnableScipSearch, "true")
+	writeTrackedFile(t, gitDir, "internal/embedded/opencode-tools/exec.ts", "export const exec = 1\n")
+	testhelpers.MustGit(t, gitDir, "add", "internal/embedded/opencode-tools/exec.ts")
+	testhelpers.MustGit(t, gitDir, "commit", "-m", "Add embedded TypeScript helper")
+
+	originalDir, _ := os.Getwd()
+	defer os.Chdir(originalDir)
+	os.Chdir(gitDir)
+
+	if err := InitPairingCommand(InitPairingParams{Agents: []string{"codex"}}); err != nil {
+		t.Fatalf("InitPairingCommand() error = %v", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(gitDir, ".git", "hooks", "liza-index.sh")); !os.IsNotExist(statErr) {
+		t.Fatalf("liza-index.sh stat err = %v, want missing with only stray TypeScript source", statErr)
+	}
+}
+
 func TestInitPairingCommand_ScipSearchMultiRootInstallsAggregateHooks(t *testing.T) {
 	gitDir := setupGitRepo(t)
 	defer os.RemoveAll(gitDir)

@@ -983,9 +983,6 @@ func goRootCandidates(targetRoot string, files []string) []string {
 func pairingTypeScriptCommandInputs(targetRoot string, files []string) []typeScriptCommandInputs {
 	rootConfigs := typeScriptRootConfigCandidates(files)
 	if len(rootConfigs) == 0 {
-		if languageDetected(files, "typescript") {
-			return []typeScriptCommandInputs{{Cwd: targetRoot, ProjectRoot: targetRoot}}
-		}
 		return nil
 	}
 

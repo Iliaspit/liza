@@ -185,6 +185,34 @@ func TestPairingCommandPlanningBuildsConcreteSingleRootPlans(t *testing.T) {
 	}
 }
 
+func TestPairingCommandPlanningSkipsTypeScriptWithoutTSConfig(t *testing.T) {
+	target := t.TempDir()
+
+	result, err := PlanPairingCommands(PairingPlanOptions{
+		ProjectRoot:    target,
+		SkipUnresolved: true,
+		GitFiles: func(string) ([]string, error) {
+			return []string{
+				"go.mod",
+				"cmd/main.go",
+				"internal/embedded/opencode-tools/exec.ts",
+			}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("PlanPairingCommands() error = %v", err)
+	}
+	if got, want := planLanguages(result.Plans), []string{"go"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("plan languages = %v, want %v", got, want)
+	}
+	if got, want := len(result.Skips), 1; got != want {
+		t.Fatalf("skips = %d, want %d", got, want)
+	}
+	if skip := result.Skips[0]; skip.Language != "typescript" || skip.Reason != PairingPlanSkipNoCandidates {
+		t.Fatalf("skip = %#v, want typescript no-candidates skip", skip)
+	}
+}
+
 func TestPairingCommandPlanningExplicitLanguageFiltersDoNotSelectRoots(t *testing.T) {
 	target := t.TempDir()
 
