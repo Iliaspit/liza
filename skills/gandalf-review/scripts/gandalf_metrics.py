@@ -319,10 +319,21 @@ def write_aggregate_files(root: Path, entries: list[dict[str, Any]]) -> None:
 
 
 def validate_aggregate_entries(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    required_fields = {
+        "run_id",
+        "final_verdict",
+        "iterations",
+        "review_duration_ms",
+        "fix_duration_ms",
+        "validation_duration_ms",
+    }
     for index, entry in enumerate(entries, start=1):
         run_id = entry.get("run_id")
         if not isinstance(run_id, str) or not run_id:
             raise ValueError(f"{INDEX_FILE}:{index} must contain a non-empty run_id")
+        missing = sorted(required_fields.difference(entry))
+        if missing:
+            raise ValueError(f"{INDEX_FILE}:{index} missing fields: {', '.join(missing)}")
     return entries
 
 
