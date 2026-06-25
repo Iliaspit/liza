@@ -109,6 +109,30 @@ func TestRenderHeader_ContainsGoalDescription(t *testing.T) {
 	}
 }
 
+func TestRenderHeader_TruncatesLongGoalDescription(t *testing.T) {
+	m := newTestModel()
+	m.width = 80
+	m.styles = NewStyles(80)
+	m.state = &models.State{
+		Goal: models.Goal{Description: strings.Repeat("very long goal ", 20)},
+		Sprint: models.Sprint{
+			ID: "sprint-1",
+		},
+		Config: models.Config{Mode: models.SystemModeRunning},
+	}
+
+	got := m.renderHeader()
+	if lipgloss.Width(got) > m.width {
+		t.Fatalf("renderHeader() width = %d, want <= %d; got %q", lipgloss.Width(got), m.width, got)
+	}
+	assertContains(t, got, "⚡  LIZA  |", "header should preserve branded prefix")
+	assertContains(t, got, "sprint:", "header should preserve sprint label")
+	assertContains(t, got, "sprint-1", "header should preserve sprint ID")
+	assertContains(t, got, "system:", "header should preserve system label")
+	assertContains(t, got, "RUNNING", "header should preserve system status")
+	assertContains(t, got, "…", "header should show truncated goal")
+}
+
 func TestRenderHeader_ContainsSprintID(t *testing.T) {
 	m := newTestModel()
 	m.width = 120

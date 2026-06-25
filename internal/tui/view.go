@@ -137,15 +137,19 @@ func (m Model) renderHeader() string {
 	sprintLabel := m.styles.HeaderLabel.Render("sprint:")
 	systemLabel := m.styles.HeaderLabel.Render("system:")
 
-	content := fmt.Sprintf("⚡  %s  |  %s  |  %s %s %s  |  %s %s",
-		nameUpper,
-		m.state.Goal.Description,
+	prefix := fmt.Sprintf("⚡  %s  |  ", nameUpper)
+	suffix := fmt.Sprintf("  |  %s %s %s  |  %s %s",
 		sprintLabel,
 		m.state.Sprint.ID,
 		coloredSprintStatus,
 		systemLabel,
 		coloredSystemStatus,
 	)
+	contentWidth := max(m.width-2, 0) // HeaderBar adds one-cell left/right padding.
+	goalWidth := max(contentWidth-lipgloss.Width(prefix)-lipgloss.Width(suffix), 0)
+	goal := truncateVisual(m.state.Goal.Description, goalWidth)
+
+	content := prefix + goal + suffix
 
 	return m.styles.HeaderBar.Render(content)
 }
@@ -703,8 +707,14 @@ func (m Model) formatActivityEntry(e ActivityEntry) string {
 
 // truncateVisual truncates s to at most maxWidth visual cells, appending "…" if truncated.
 func truncateVisual(s string, maxWidth int) string {
+	if maxWidth <= 0 {
+		return ""
+	}
 	if runewidth.StringWidth(s) <= maxWidth {
 		return s
+	}
+	if maxWidth == 1 {
+		return "…"
 	}
 	return runewidth.Truncate(s, maxWidth-1, "…")
 }
