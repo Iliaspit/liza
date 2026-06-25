@@ -9,24 +9,43 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/liza-mas/liza/internal/brand"
 	"github.com/liza-mas/liza/internal/gitenv"
 	"github.com/liza-mas/liza/internal/scipsearch"
 	"github.com/liza-mas/liza/internal/stacklit"
 )
 
-// ManagedHookMarker identifies hook files owned by Liza's pairing index plumbing.
-const ManagedHookMarker = "# LIZA-PAIRING-INDEX-HOOK: managed"
+// ManagedHookMarker identifies hook files owned by pairing index plumbing.
+const ManagedHookMarker = "# PAIRING-INDEX-HOOK: managed"
 
-// ManagedIndexScriptMarker identifies liza-index.sh files owned by Liza.
-const ManagedIndexScriptMarker = "# LIZA-PAIRING-INDEX-SCRIPT: managed"
+// ManagedIndexScriptMarker identifies pairing index scripts owned by this tool.
+const ManagedIndexScriptMarker = "# PAIRING-INDEX-SCRIPT: managed"
 
-const defaultScriptName = "liza-index.sh"
-const defaultHookDispatcherName = "liza-index-hook.sh"
+const legacyManagedIndexScriptMarker = "# LIZA-PAIRING-INDEX-SCRIPT: managed"
+
 const stacklitArtifactName = "stacklit.json"
 const stacklitInsightsArtifactName = "stacklit-insights.json"
+const defaultScriptName = "liza-index.sh"
+const defaultHookDispatcherName = "liza-index-hook.sh"
 
 var defaultLifecycleHooks = []string{"post-commit", "post-checkout", "post-merge", "post-rewrite"}
 var stacklitArtifactExcludeMu sync.Mutex
+
+func scriptName() string {
+	binaryName := brand.RuntimeValues().BinaryName
+	if binaryName == "liza" {
+		return defaultScriptName
+	}
+	return binaryName + "-index.sh"
+}
+
+func hookDispatcherName() string {
+	binaryName := brand.RuntimeValues().BinaryName
+	if binaryName == "liza" {
+		return defaultHookDispatcherName
+	}
+	return binaryName + "-index-hook.sh"
+}
 
 // DefaultLifecycleHooks returns the Git lifecycle hooks used for pairing index refresh.
 func DefaultLifecycleHooks() []string {
@@ -86,7 +105,7 @@ type HookCollision struct {
 	Path string
 }
 
-// InstallIndexScriptOptions configures liza-index.sh installation for one repository.
+// InstallIndexScriptOptions configures pairing index script installation for one repository.
 type InstallIndexScriptOptions struct {
 	RepoRoot        string
 	DisableStacklit bool
@@ -106,17 +125,17 @@ type HookCollisionError struct {
 
 func (e *HookCollisionError) Error() string {
 	if e == nil || len(e.Collisions) == 0 {
-		return "Liza-managed pairing index hook collision"
+		return fmt.Sprintf("%s-managed pairing index hook collision", brand.NameTitle)
 	}
 
 	parts := make([]string, 0, len(e.Collisions))
 	for _, collision := range e.Collisions {
-		parts = append(parts, fmt.Sprintf("%s at %s already exists and is not Liza-managed", collision.Hook, collision.Path))
+		parts = append(parts, fmt.Sprintf("%s at %s already exists and is not %s-managed", collision.Hook, collision.Path, brand.NameTitle))
 	}
-	return "Liza-managed pairing index hook collision: " + strings.Join(parts, "; ")
+	return fmt.Sprintf("%s-managed pairing index hook collision: %s", brand.NameTitle, strings.Join(parts, "; "))
 }
 
-// InstallActivation installs or verifies the managed liza-index.sh entrypoint
+// InstallActivation installs or verifies the managed pairing index entrypoint
 // and lifecycle hooks after preflighting collisions.
 func InstallActivation(opts InstallActivationOptions) (InstallActivationResult, error) {
 	hooks := opts.Hooks
@@ -143,7 +162,7 @@ func InstallActivation(opts InstallActivationOptions) (InstallActivationResult, 
 		return result, err
 	}
 
-	scriptPath := filepath.Join(hooksDir, defaultScriptName)
+	scriptPath := filepath.Join(hooksDir, scriptName())
 	content, err := renderIndexScript(renderIndexScriptOptions{
 		RepoRoot:       opts.RepoRoot,
 		EnableStacklit: opts.EnableStacklit,
@@ -157,7 +176,7 @@ func InstallActivation(opts InstallActivationOptions) (InstallActivationResult, 
 		return result, err
 	}
 	result.Script = InstallIndexScriptResult{Path: scriptPath, Action: action}
-	if _, err := installManagedHookDispatcher(filepath.Join(hooksDir, defaultHookDispatcherName)); err != nil {
+	if _, err := installManagedHookDispatcher(filepath.Join(hooksDir, hookDispatcherName())); err != nil {
 		return result, err
 	}
 
@@ -217,7 +236,7 @@ func InstallLifecycleHooks(opts InstallHooksOptions) (InstallHooksResult, error)
 	if err := rejectHookCollisions(hooksDir, hooks); err != nil {
 		return result, err
 	}
-	if _, err := installManagedHookDispatcher(filepath.Join(hooksDir, defaultHookDispatcherName)); err != nil {
+	if _, err := installManagedHookDispatcher(filepath.Join(hooksDir, hookDispatcherName())); err != nil {
 		return result, err
 	}
 
@@ -236,7 +255,7 @@ func InstallLifecycleHooks(opts InstallHooksOptions) (InstallHooksResult, error)
 	return result, nil
 }
 
-// RenderIndexScript returns the managed Stacklit liza-index.sh script content for repoRoot.
+// RenderIndexScript returns the managed Stacklit index script content for repoRoot.
 func RenderIndexScript(repoRoot string) (string, error) {
 	return renderIndexScript(renderIndexScriptOptions{RepoRoot: repoRoot, EnableStacklit: true})
 }
@@ -281,7 +300,7 @@ fi
 	if opts.EnableStacklit {
 		stacklitGenerateCommand := shellCommand(stacklitPlan.Name, append(stacklitPlan.Args, "--parse-workers", "3"))
 		body.WriteString(fmt.Sprintf(`if ! command -v %s >/dev/null 2>&1; then
-	echo "liza-index.sh: %s not found; skipping Stacklit refresh" >&2
+	echo "%s: %s not found; skipping Stacklit refresh" >&2
 else
 	cd "$repo_root"
 	code=0
@@ -316,12 +335,12 @@ else
 		echo "Wrote stacklit.json"
 	fi
 fi
-`, shellWord(stacklitPlan.Name), stacklitPlan.Name, shellWord(stacklitPlan.Name), stacklitGenerateCommand, shellWord(stacklitPlan.Name), shellWord(stacklitPlan.Name), stacklitGenerateCommand))
+`, shellWord(stacklitPlan.Name), scriptName(), stacklitPlan.Name, shellWord(stacklitPlan.Name), stacklitGenerateCommand, shellWord(stacklitPlan.Name), shellWord(stacklitPlan.Name), stacklitGenerateCommand))
 	}
 	return body.String(), nil
 }
 
-// InstallIndexScript installs or verifies the managed liza-index.sh entrypoint.
+// InstallIndexScript installs or verifies the managed pairing index entrypoint.
 func InstallIndexScript(opts InstallIndexScriptOptions) (InstallIndexScriptResult, error) {
 	if !opts.DisableStacklit {
 		if err := ensureStacklitArtifactCleanliness(opts.RepoRoot); err != nil {
@@ -340,7 +359,7 @@ func InstallIndexScript(opts InstallIndexScriptOptions) (InstallIndexScriptResul
 		return InstallIndexScriptResult{}, err
 	}
 
-	scriptPath := filepath.Join(hooksDir, defaultScriptName)
+	scriptPath := filepath.Join(hooksDir, scriptName())
 	content, err := renderIndexScript(renderIndexScriptOptions{
 		RepoRoot:       opts.RepoRoot,
 		EnableStacklit: !opts.DisableStacklit,
@@ -384,20 +403,20 @@ if [ ! -f %s ]; then
 	checked := map[string]bool{"scip-search": true}
 	fmt.Fprintf(&commandChecks, `%s=0
 if [ "$%s" -eq 1 ] && ! command -v scip-search >/dev/null 2>&1; then
-	echo "liza-index.sh: scip-search not found; skipping %s SCIP refresh" >&2
+	echo "%s: scip-search not found; skipping %s SCIP refresh" >&2
 	%s=1
 fi
-`, missingVar, needsVar, plan.Language, missingVar)
+`, missingVar, needsVar, scriptName(), plan.Language, missingVar)
 	for _, indexPlan := range plan.IndexPlans {
 		if checked[indexPlan.Name] {
 			continue
 		}
 		checked[indexPlan.Name] = true
 		fmt.Fprintf(&commandChecks, `if [ "$%s" -eq 1 ] && ! command -v %s >/dev/null 2>&1; then
-	echo "liza-index.sh: %s not found; skipping %s SCIP refresh" >&2
+	echo "%s: %s not found; skipping %s SCIP refresh" >&2
 	%s=1
 fi
-`, needsVar, shellWord(indexPlan.Name), indexPlan.Name, plan.Language, missingVar)
+`, needsVar, shellWord(indexPlan.Name), scriptName(), indexPlan.Name, plan.Language, missingVar)
 	}
 
 	var commands strings.Builder
@@ -410,14 +429,14 @@ fi
 	fmt.Fprintf(&commands, "\t\t%s\n", shellAggregateCommand(plan, indexPaths))
 
 	return fmt.Sprintf(`%s%sif [ "$%s" -eq 1 ] && [ "$%s" -eq 0 ]; then
-	%s="$(mktemp -d "${TMPDIR:-/tmp}/liza-scip-%s.XXXXXX")"
+	%s="$(mktemp -d "${TMPDIR:-/tmp}/%s-scip-%s.XXXXXX")"
 	%s() { rm -rf "$%s"; }
 	trap %s EXIT HUP INT TERM
 	cd %s
 %s	%s
 	trap - EXIT HUP INT TERM
 fi
-`, freshness.String(), commandChecks.String(), needsVar, missingVar, tmpVar, shellIdentifier(plan.Language), cleanupFunc, tmpVar, cleanupFunc, shellQuote(plan.ProjectRoot), commands.String(), cleanupFunc)
+`, freshness.String(), commandChecks.String(), needsVar, missingVar, tmpVar, brand.RuntimeValues().BinaryName, shellIdentifier(plan.Language), cleanupFunc, tmpVar, cleanupFunc, shellQuote(plan.ProjectRoot), commands.String(), cleanupFunc)
 }
 
 func scipFindSourceExpression(language string) string {
@@ -679,35 +698,41 @@ func ensureHooksDir(hooksDir string) error {
 }
 
 func installManagedIndexScript(scriptPath, want string) (HookAction, error) {
+	name := scriptName()
 	current, err := os.ReadFile(scriptPath)
 	if os.IsNotExist(err) {
 		if err := os.WriteFile(scriptPath, []byte(want), 0755); err != nil {
-			return "", fmt.Errorf("install %s: %w", defaultScriptName, err)
+			return "", fmt.Errorf("install %s: %w", name, err)
 		}
 		return HookActionInstalled, nil
 	}
 	if err != nil {
-		return "", fmt.Errorf("read %s: %w", defaultScriptName, err)
+		return "", fmt.Errorf("read %s: %w", name, err)
 	}
-	if !strings.Contains(string(current), ManagedIndexScriptMarker) {
+	if !managedIndexScriptOwned(string(current)) {
 		if looksLikeLegacyIndexScript(string(current)) {
-			return "", fmt.Errorf("%s at %s already exists and appears to be a legacy Liza index hook; move it aside and rerun init: mv %s %s.backup", defaultScriptName, scriptPath, scriptPath, scriptPath)
+			return "", fmt.Errorf("%s at %s already exists and appears to be a legacy managed index hook; move it aside and rerun %s: mv %s %s.backup", name, scriptPath, brand.Command("init"), scriptPath, scriptPath)
 		}
-		return "", fmt.Errorf("%s at %s already exists and is not Liza-managed", defaultScriptName, scriptPath)
+		return "", fmt.Errorf("%s at %s already exists and is not managed by %s", name, scriptPath, brand.NameTitle)
 	}
 	if string(current) == want {
 		if err := os.Chmod(scriptPath, 0755); err != nil {
-			return "", fmt.Errorf("chmod %s: %w", defaultScriptName, err)
+			return "", fmt.Errorf("chmod %s: %w", name, err)
 		}
 		return HookActionVerified, nil
 	}
 	if err := os.WriteFile(scriptPath, []byte(want), 0755); err != nil {
-		return "", fmt.Errorf("update %s: %w", defaultScriptName, err)
+		return "", fmt.Errorf("update %s: %w", name, err)
 	}
 	if err := os.Chmod(scriptPath, 0755); err != nil {
-		return "", fmt.Errorf("chmod %s: %w", defaultScriptName, err)
+		return "", fmt.Errorf("chmod %s: %w", name, err)
 	}
 	return HookActionUpdated, nil
+}
+
+func managedIndexScriptOwned(content string) bool {
+	return strings.Contains(content, ManagedIndexScriptMarker) ||
+		strings.Contains(content, legacyManagedIndexScriptMarker)
 }
 
 func rejectHookCollisions(hooksDir string, hooks []string) error {
@@ -738,7 +763,7 @@ func managedLifecycleHookExists(hookPath string) (bool, error) {
 		if err != nil {
 			return false, err
 		}
-		if filepath.Base(target) == defaultHookDispatcherName {
+		if filepath.Base(target) == hookDispatcherName() {
 			return true, nil
 		}
 	}
@@ -754,30 +779,31 @@ func managedLifecycleHookExists(hookPath string) (bool, error) {
 
 func installManagedHookDispatcher(dispatcherPath string) (HookAction, error) {
 	want := managedHookDispatcherContent()
+	name := hookDispatcherName()
 	current, err := os.ReadFile(dispatcherPath)
 	if os.IsNotExist(err) {
 		if err := os.WriteFile(dispatcherPath, []byte(want), 0755); err != nil {
-			return "", fmt.Errorf("install %s: %w", defaultHookDispatcherName, err)
+			return "", fmt.Errorf("install %s: %w", name, err)
 		}
 		return HookActionInstalled, nil
 	}
 	if err != nil {
-		return "", fmt.Errorf("read %s: %w", defaultHookDispatcherName, err)
+		return "", fmt.Errorf("read %s: %w", name, err)
 	}
 	if string(current) == want {
 		if err := os.Chmod(dispatcherPath, 0755); err != nil {
-			return "", fmt.Errorf("chmod %s: %w", defaultHookDispatcherName, err)
+			return "", fmt.Errorf("chmod %s: %w", name, err)
 		}
 		return HookActionVerified, nil
 	}
 	if !strings.Contains(string(current), ManagedHookMarker) && !looksLikeLegacyHookDispatcher(string(current)) {
-		return "", fmt.Errorf("%s at %s already exists and is not Liza-managed", defaultHookDispatcherName, dispatcherPath)
+		return "", fmt.Errorf("%s at %s already exists and is not managed by %s", name, dispatcherPath, brand.NameTitle)
 	}
 	if err := os.WriteFile(dispatcherPath, []byte(want), 0755); err != nil {
-		return "", fmt.Errorf("update %s: %w", defaultHookDispatcherName, err)
+		return "", fmt.Errorf("update %s: %w", name, err)
 	}
 	if err := os.Chmod(dispatcherPath, 0755); err != nil {
-		return "", fmt.Errorf("chmod %s: %w", defaultHookDispatcherName, err)
+		return "", fmt.Errorf("chmod %s: %w", name, err)
 	}
 	return HookActionUpdated, nil
 }
@@ -785,7 +811,7 @@ func installManagedHookDispatcher(dispatcherPath string) (HookAction, error) {
 func installManagedHook(hookPath, hook string) (HookAction, error) {
 	info, err := os.Lstat(hookPath)
 	if os.IsNotExist(err) {
-		if err := os.Symlink(defaultHookDispatcherName, hookPath); err != nil {
+		if err := os.Symlink(hookDispatcherName(), hookPath); err != nil {
 			return installManagedHookWrapper(hookPath, hook)
 		}
 		return HookActionInstalled, nil
@@ -798,7 +824,7 @@ func installManagedHook(hookPath, hook string) (HookAction, error) {
 		if err != nil {
 			return "", fmt.Errorf("read %s hook symlink: %w", hook, err)
 		}
-		if filepath.Base(target) == defaultHookDispatcherName {
+		if filepath.Base(target) == hookDispatcherName() {
 			return HookActionVerified, nil
 		}
 	}
@@ -808,12 +834,12 @@ func installManagedHook(hookPath, hook string) (HookAction, error) {
 		return "", fmt.Errorf("read %s hook: %w", hook, err)
 	}
 	if !managed {
-		return "", fmt.Errorf("%s at %s already exists and is not Liza-managed", hook, hookPath)
+		return "", fmt.Errorf("%s at %s already exists and is not managed by %s", hook, hookPath, brand.NameTitle)
 	}
 	if err := os.Remove(hookPath); err != nil {
 		return "", fmt.Errorf("replace %s hook wrapper: %w", hook, err)
 	}
-	if err := os.Symlink(defaultHookDispatcherName, hookPath); err != nil {
+	if err := os.Symlink(hookDispatcherName(), hookPath); err != nil {
 		return installManagedHookWrapper(hookPath, hook)
 	}
 	return HookActionUpdated, nil
@@ -856,7 +882,7 @@ if [ -x "$dispatcher" ]; then
 	"$dispatcher" "$@"
 fi
 exit 0
-		`, ManagedHookMarker, hook, defaultHookDispatcherName)
+		`, ManagedHookMarker, hook, hookDispatcherName())
 }
 
 func managedHookDispatcherContent() string {
@@ -888,7 +914,7 @@ fi
 
 cd "$repo_root"
 "$script"
-`, ManagedHookMarker, defaultScriptName)
+`, ManagedHookMarker, scriptName())
 }
 
 func looksLikeLegacyHookDispatcher(content string) bool {

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/liza-mas/liza/internal/brand"
 	"github.com/liza-mas/liza/internal/paths"
 )
 
@@ -62,12 +63,12 @@ const quotaSignalPrefix = "provider-quota-exhausted-"
 
 // QuotaSignalPath returns the path to the quota signal file for a provider.
 func QuotaSignalPath(projectRoot, provider string) string {
-	return filepath.Join(projectRoot, paths.LizaDirName, quotaSignalPrefix+canonicalQuotaProvider(provider))
+	return filepath.Join(paths.New(projectRoot).LizaDir(), quotaSignalPrefix+canonicalQuotaProvider(provider))
 }
 
 // QuotaSignalGlob returns a glob pattern matching all quota signal files.
 func QuotaSignalGlob(projectRoot string) string {
-	return filepath.Join(projectRoot, paths.LizaDirName, quotaSignalPrefix+"*")
+	return filepath.Join(paths.New(projectRoot).LizaDir(), quotaSignalPrefix+"*")
 }
 
 // ProviderFromSignalFile extracts the provider name from a quota signal file path.
@@ -96,7 +97,7 @@ func CheckQuotaSignal(projectRoot, provider string) bool {
 
 // LogAlert appends an alert line to alerts.log.
 func LogAlert(projectRoot, level, category, message string) error {
-	alertsPath := filepath.Join(projectRoot, paths.LizaDirName, paths.AlertsLogFileName)
+	alertsPath := paths.New(projectRoot).AlertsLogPath()
 	f, err := os.OpenFile(alertsPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		return fmt.Errorf("open alerts log: %w", err)
@@ -122,12 +123,12 @@ func RaiseQuotaExhaustion(projectRoot string, qe *QuotaExhaustion) error {
 
 // LogQuotaSpawnBlockedAlert appends an alert when a stale quota signal blocks spawn.
 func LogQuotaSpawnBlockedAlert(projectRoot, provider, role string) error {
-	message := fmt.Sprintf("%s: refused to spawn %s while quota signal is set; delete the flag file or run liza pause then liza resume before spawning again", provider, role)
+	message := fmt.Sprintf("%s: refused to spawn %s while quota signal is set; delete the flag file or run %s then %s before spawning again", provider, role, brand.Command("pause"), brand.Command("resume"))
 	return LogAlert(projectRoot, "🚨", "PROVIDER QUOTA SPAWN BLOCKED", message)
 }
 
 // ClearQuotaSignal removes the quota signal file for a provider.
-// Intended for use by `liza resume` or manual recovery.
+// Intended for use by the resume command or manual recovery.
 func ClearQuotaSignal(projectRoot, provider string) error {
 	err := os.Remove(QuotaSignalPath(projectRoot, provider))
 	if os.IsNotExist(err) {

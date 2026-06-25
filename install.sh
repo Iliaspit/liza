@@ -1,6 +1,6 @@
 #!/bin/bash
-# Liza installation script
-# Downloads and installs the latest release of liza, or builds from a branch
+# Installation script
+# Downloads and installs the latest release, or builds from a branch
 
 set -e
 
@@ -11,8 +11,87 @@ YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
 # Configuration
-REPO="liza-mas/liza"
-BINARY_NAME="liza"
+BRAND_NAME_LOWER="${BRAND_NAME_LOWER:-liza}"
+derive_brand_upper() {
+    printf '%s' "$1" | tr '[:lower:]-' '[:upper:]_'
+}
+derive_brand_title() {
+    printf '%s' "$1" | awk -F- 'BEGIN{OFS=" "} {for (i=1;i<=NF;i++) $i=toupper(substr($i,1,1)) substr($i,2); print}'
+}
+brand_config_error() {
+    local name="$1"
+    local why="$2"
+    echo -e "${RED}Error: ${name} invalid: ${why}${NC}" >&2
+    exit 1
+}
+require_match() {
+    local name="$1"
+    local value="$2"
+    local pattern="$3"
+    local why="$4"
+    if [[ ! "$value" =~ $pattern ]]; then
+        brand_config_error "$name" "$why"
+    fi
+}
+validate_brand_title() {
+    local value="$1"
+    local pattern='^[A-Za-z0-9][A-Za-z0-9 ._/-]*$'
+    if [ -z "$value" ] || [[ "$value" == *$'\n'* ]] || [[ "$value" == *$'\r'* ]] || [[ ! "$value" =~ $pattern ]]; then
+        brand_config_error "BRAND_NAME_TITLE" "must be non-empty printable text with only shell-safe characters"
+    fi
+}
+validate_dir_name() {
+    local name="$1"
+    local value="$2"
+    if [ -z "$value" ] || [ "$value" = "." ] || [ "$value" = ".." ]; then
+        brand_config_error "$name" "must be a single directory name"
+    fi
+    if [[ "$value" == */* ]] || [[ "$value" == *\\* ]]; then
+        brand_config_error "$name" "must not contain path separators"
+    fi
+    require_match "$name" "$value" '^[A-Za-z0-9._-]+$' "contains characters unsafe for generated shell/config snippets"
+}
+validate_https_url() {
+    local name="$1"
+    local value="$2"
+    if [ -z "$value" ] || [[ "$value" =~ [[:space:]] ]] || [[ ! "$value" =~ ^https://[^/[:space:]]+($|/) ]]; then
+        brand_config_error "$name" "must be an absolute https:// URL with no whitespace"
+    fi
+    if [[ "$value" == *\"* || "$value" == *"'"* || "$value" == *\`* || "$value" == *\$* || "$value" == *\\* ]]; then
+        brand_config_error "$name" "contains characters unsafe for generated shell/config snippets"
+    fi
+}
+BRAND_NAME_UPPER="${BRAND_NAME_UPPER:-$(derive_brand_upper "$BRAND_NAME_LOWER")}"
+BRAND_NAME_TITLE="${BRAND_NAME_TITLE:-$(derive_brand_title "$BRAND_NAME_LOWER")}"
+BRAND_REPO="${BRAND_REPO:-liza-mas/liza}"
+BRAND_INSTALL_REPO="${BRAND_INSTALL_REPO:-$BRAND_REPO}"
+REPO="$BRAND_INSTALL_REPO"
+BINARY_NAME="${BRAND_BINARY_NAME:-$BRAND_NAME_LOWER}"
+SOURCE_DIR_NAME="${BRAND_SOURCE_DIR_NAME:-$BRAND_NAME_LOWER}"
+BRAND_GLOBAL_DIRNAME="${BRAND_GLOBAL_DIRNAME:-.${BRAND_NAME_LOWER}}"
+BRAND_PROJECT_DIRNAME="${BRAND_PROJECT_DIRNAME:-.${BRAND_NAME_LOWER}}"
+BRAND_ENV_PREFIX="${BRAND_ENV_PREFIX:-$BRAND_NAME_UPPER}"
+BRAND_ARCHIVE_PREFIX="${BRAND_ARCHIVE_PREFIX:-$BINARY_NAME}"
+BRAND_RELEASE_REPO="${BRAND_RELEASE_REPO:-$BRAND_REPO}"
+BRAND_RELEASE_BASE_URL="${BRAND_RELEASE_BASE_URL:-https://github.com/${BRAND_RELEASE_REPO}/releases/download}"
+BRAND_CHECKSUM_BASE_URL="${BRAND_CHECKSUM_BASE_URL:-$BRAND_RELEASE_BASE_URL}"
+validate_brand_config() {
+    require_match "BRAND_NAME_LOWER" "$BRAND_NAME_LOWER" '^[a-z][a-z0-9-]*$' "must match ^[a-z][a-z0-9-]*$"
+    require_match "BRAND_NAME_UPPER" "$BRAND_NAME_UPPER" '^[A-Z][A-Z0-9_]*$' "must match ^[A-Z][A-Z0-9_]*$"
+    require_match "BRAND_ENV_PREFIX" "$BRAND_ENV_PREFIX" '^[A-Z][A-Z0-9_]*$' "must match ^[A-Z][A-Z0-9_]*$"
+    require_match "BRAND_BINARY_NAME" "$BINARY_NAME" '^[A-Za-z0-9][A-Za-z0-9._-]*$' "must match ^[A-Za-z0-9][A-Za-z0-9._-]*$"
+    require_match "BRAND_ARCHIVE_PREFIX" "$BRAND_ARCHIVE_PREFIX" '^[A-Za-z0-9][A-Za-z0-9._-]*$' "must match ^[A-Za-z0-9][A-Za-z0-9._-]*$"
+    require_match "BRAND_REPO" "$BRAND_REPO" '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$' "must use owner/repo form with no URL scheme"
+    require_match "BRAND_RELEASE_REPO" "$BRAND_RELEASE_REPO" '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$' "must use owner/repo form with no URL scheme"
+    require_match "BRAND_INSTALL_REPO" "$BRAND_INSTALL_REPO" '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$' "must use owner/repo form with no URL scheme"
+    validate_brand_title "$BRAND_NAME_TITLE"
+    validate_dir_name "BRAND_GLOBAL_DIRNAME" "$BRAND_GLOBAL_DIRNAME"
+    validate_dir_name "BRAND_PROJECT_DIRNAME" "$BRAND_PROJECT_DIRNAME"
+    validate_dir_name "BRAND_SOURCE_DIR_NAME" "$SOURCE_DIR_NAME"
+    validate_https_url "BRAND_RELEASE_BASE_URL" "$BRAND_RELEASE_BASE_URL"
+    validate_https_url "BRAND_CHECKSUM_BASE_URL" "$BRAND_CHECKSUM_BASE_URL"
+}
+validate_brand_config
 if [ -z "${INSTALL_DIR:-}" ]; then
     INSTALL_DIR="$HOME/.local/bin"
     if ! echo "$PATH" | tr ':' '\n' | grep -qxF "$INSTALL_DIR"; then
@@ -33,7 +112,7 @@ detect_platform() {
         Darwin*)    os="darwin";;
         MINGW*|MSYS*|CYGWIN*)
             echo -e "${RED}Error: Native Windows is not supported.${NC}"
-            echo "Run liza under WSL2 and run this installer from the WSL2 shell."
+            echo "Run ${BINARY_NAME} under WSL2 and run this installer from the WSL2 shell."
             exit 1
             ;;
         *)
@@ -71,7 +150,7 @@ get_latest_version() {
 # Remove old binaries from /usr/local/bin if installing elsewhere
 cleanup_old_binaries() {
     if [ "$INSTALL_DIR" != "/usr/local/bin" ]; then
-        for old_bin in liza; do
+        for old_bin in "$BINARY_NAME"; do
             old_path="/usr/local/bin/$old_bin"
             if [ -f "$old_path" ]; then
                 echo -e "${YELLOW}Removing old $old_bin from /usr/local/bin...${NC}"
@@ -86,13 +165,13 @@ cleanup_old_binaries() {
 }
 
 # Download and install
-install_liza() {
+install_release() {
     local platform=$1
     local version=$2
     local tmp_dir
     local version_bare="${version#v}"
 
-    echo -e "${GREEN}Installing liza...${NC}"
+    echo -e "${GREEN}Installing ${BINARY_NAME}...${NC}"
     echo "  Version: ${version}"
     echo "  Platform: ${platform}"
     echo "  Install directory: ${INSTALL_DIR}"
@@ -103,8 +182,8 @@ install_liza() {
     trap "rm -rf ${tmp_dir}" EXIT
 
     # Download archive (goreleaser produces tar.gz for linux/darwin)
-    local archive_name="${BINARY_NAME}-${version_bare}-${platform}.tar.gz"
-    local download_url="https://github.com/${REPO}/releases/download/${version}/${archive_name}"
+    local archive_name="${BRAND_ARCHIVE_PREFIX}-${version_bare}-${platform}.tar.gz"
+    local download_url="${BRAND_RELEASE_BASE_URL%/}/${version}/${archive_name}"
     echo "Downloading from ${download_url}..."
 
     if ! curl -fsSL "${download_url}" -o "${tmp_dir}/${archive_name}"; then
@@ -147,15 +226,15 @@ install_liza() {
 
     echo -e "${GREEN}✓ Installation complete!${NC}"
     echo ""
-    echo "Run 'liza version' to verify installation"
-    echo "Run 'liza help' to get started"
+    echo "Run '${BINARY_NAME} version' to verify installation"
+    echo "Run '${BINARY_NAME} help' to get started"
 }
 
 # Build from source and install
 install_from_source() {
     local branch=$1
 
-    echo -e "${GREEN}Installing liza from branch '${branch}'...${NC}"
+    echo -e "${GREEN}Installing ${BINARY_NAME} from branch '${branch}'...${NC}"
     echo "  Install directory: ${INSTALL_DIR}"
     echo ""
 
@@ -181,14 +260,26 @@ install_from_source() {
 
     # Clone
     echo "Cloning branch '${branch}'..."
-    if ! git clone --depth 1 --branch "$branch" -- "https://github.com/${REPO}.git" "${tmp_dir}/liza"; then
+    if ! git clone --depth 1 --branch "$branch" -- "https://github.com/${REPO}.git" "${tmp_dir}/${SOURCE_DIR_NAME}"; then
         echo -e "${RED}Error: Failed to clone branch '${branch}'${NC}"
         exit 1
     fi
 
     # Build and install via Makefile
     echo "Building from source..."
-    if ! make -C "${tmp_dir}/liza" install INSTALL_DIR="$INSTALL_DIR"; then
+    if ! make -C "${tmp_dir}/${SOURCE_DIR_NAME}" install INSTALL_DIR="$INSTALL_DIR" \
+        BRAND_NAME_TITLE="$BRAND_NAME_TITLE" \
+        BRAND_NAME_LOWER="$BRAND_NAME_LOWER" \
+        BRAND_NAME_UPPER="$BRAND_NAME_UPPER" \
+        BRAND_REPO="$BRAND_REPO" \
+        BRAND_BINARY_NAME="$BINARY_NAME" \
+        BRAND_GLOBAL_DIRNAME="$BRAND_GLOBAL_DIRNAME" \
+        BRAND_PROJECT_DIRNAME="$BRAND_PROJECT_DIRNAME" \
+        BRAND_ENV_PREFIX="$BRAND_ENV_PREFIX" \
+        BRAND_ARCHIVE_PREFIX="$BRAND_ARCHIVE_PREFIX" \
+        BRAND_RELEASE_REPO="$BRAND_RELEASE_REPO" \
+        BRAND_RELEASE_BASE_URL="$BRAND_RELEASE_BASE_URL" \
+        BRAND_CHECKSUM_BASE_URL="$BRAND_CHECKSUM_BASE_URL"; then
         echo -e "${RED}Error: Build failed${NC}"
         exit 1
     fi
@@ -199,14 +290,14 @@ install_from_source() {
     echo -e "${GREEN}✓ Installation complete!${NC}"
     echo ""
     "${INSTALL_DIR}/${BINARY_NAME}" version 2>/dev/null || true
-    echo "Run 'liza help' to get started"
+    echo "Run '${BINARY_NAME} help' to get started"
 }
 
 # Main
 main() {
     echo ""
-    echo "Liza Installer"
-    echo "=============="
+    echo "${BRAND_NAME_TITLE} Installer"
+    printf '%*s\n' "${#BRAND_NAME_TITLE}" '' | tr ' ' '='
     echo ""
 
     local branch="${BRANCH:-}"
@@ -232,12 +323,12 @@ main() {
     fi
 
     # Install
-    install_liza "$platform" "$version"
+    install_release "$platform" "$version"
 }
 
 # Show help
 if [ "$1" = "-h" ] || [ "$1" = "--help" ]; then
-    echo "Liza Installation Script"
+    echo "${BRAND_NAME_TITLE} Installation Script"
     echo ""
     echo "Usage: $0 [OPTIONS]"
     echo ""

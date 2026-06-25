@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/liza-mas/liza/internal/brand"
 	"github.com/liza-mas/liza/internal/scipsearch"
 )
 
@@ -316,6 +317,37 @@ func TestInstallIndexScriptWritesExecutableManagedScript(t *testing.T) {
 	}
 	if got := readFile(t, wantPath); !strings.Contains(got, ManagedIndexScriptMarker) {
 		t.Fatalf("installed script missing managed marker:\n%s", got)
+	}
+}
+
+func TestInstallIndexScriptUpdatesLegacyManagedScript(t *testing.T) {
+	repo := initGitRepo(t)
+	scriptPath := filepath.Join(repo, ".git", "hooks", "liza-index.sh")
+	legacyScript := "#!/bin/sh\n" + legacyManagedIndexScriptMarker + "\necho stale\n"
+	if err := os.WriteFile(scriptPath, []byte(legacyScript), 0644); err != nil {
+		t.Fatalf("write legacy managed script: %v", err)
+	}
+
+	result, err := InstallIndexScript(InstallIndexScriptOptions{RepoRoot: repo})
+	if err != nil {
+		t.Fatalf("InstallIndexScript() error = %v", err)
+	}
+	if result.Action != HookActionUpdated {
+		t.Fatalf("script action = %q, want %q", result.Action, HookActionUpdated)
+	}
+	updated := readFile(t, scriptPath)
+	if !strings.Contains(updated, ManagedIndexScriptMarker) {
+		t.Fatalf("updated script missing new managed marker:\n%s", updated)
+	}
+	if strings.Contains(updated, legacyManagedIndexScriptMarker) {
+		t.Fatalf("updated script retained legacy marker:\n%s", updated)
+	}
+	info, err := os.Stat(scriptPath)
+	if err != nil {
+		t.Fatalf("updated script missing: %v", err)
+	}
+	if info.Mode()&0111 == 0 {
+		t.Fatalf("updated script is not executable: mode=%v", info.Mode())
 	}
 }
 
@@ -664,7 +696,7 @@ func TestInstallLifecycleHooksReportsExistingHookCollision(t *testing.T) {
 	if collision.Collisions[0].Hook != "post-commit" || collision.Collisions[0].Path != collidingHook {
 		t.Fatalf("collision = %#v, want post-commit at %s", collision.Collisions[0], collidingHook)
 	}
-	if !strings.Contains(err.Error(), "post-commit") || !strings.Contains(err.Error(), "not Liza-managed") {
+	if !strings.Contains(err.Error(), "post-commit") || !strings.Contains(err.Error(), "not "+brand.NameTitle+"-managed") {
 		t.Fatalf("error = %v, want explicit hook collision diagnostic", err)
 	}
 	if _, err := os.Stat(filepath.Join(hooksDir, "post-checkout")); err == nil {

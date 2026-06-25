@@ -18,6 +18,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/liza-mas/liza/internal/brand"
 	"github.com/liza-mas/liza/internal/codexconfig"
 	"github.com/liza-mas/liza/internal/paths"
 )
@@ -87,19 +88,37 @@ var pipelineConfigContent []byte
 
 const supportDocEmbeddedPath = "support-docs/SUPPORT.md"
 
+const openCodeExecToolManagedHeaderTemplate = "// __BRAND_NAME_UPPER__ MANAGED FILE: OpenCode exec compatibility tool. Safe for __BRAND_NAME_TITLE__ to overwrite."
+
 // OpenCodeExecToolManagedHeader identifies the project-local OpenCode exec
-// compatibility tool as owned by Liza.
-const OpenCodeExecToolManagedHeader = "// LIZA MANAGED FILE: OpenCode exec compatibility tool. Safe for Liza to overwrite."
+// compatibility tool as owned by the current brand.
+func OpenCodeExecToolManagedHeader() string {
+	return string(renderEmbeddedAsset([]byte(openCodeExecToolManagedHeaderTemplate)))
+}
 
 // OpenCodeExecToolContent returns the embedded OpenCode exec compatibility tool.
 func OpenCodeExecToolContent() []byte {
-	return bytes.Clone(opencodeExecToolContent)
+	return renderEmbeddedAsset(opencodeExecToolContent)
 }
 
 // PipelineConfigContent returns the raw embedded pipeline.yaml content.
 // Used by init to auto-freeze when --config is not provided.
 func PipelineConfigContent() []byte {
 	return pipelineConfigContent
+}
+
+func renderEmbeddedAsset(content []byte) []byte {
+	values := brand.RuntimeValues()
+	replacer := strings.NewReplacer(
+		"__BRAND_NAME_LOWER__", values.NameLower,
+		"__BRAND_NAME_UPPER__", values.NameUpper,
+		"__BRAND_NAME_TITLE__", values.NameTitle,
+		"__BRAND_BINARY_NAME__", values.BinaryName,
+		"__BRAND_GLOBAL_DIRNAME__", values.GlobalDirName,
+		"__BRAND_PROJECT_DIRNAME__", values.ProjectDirName,
+		"__BRAND_ENV_PREFIX__", values.EnvPrefix,
+	)
+	return []byte(replacer.Replace(string(content)))
 }
 
 type embeddedCorpus struct {
@@ -215,8 +234,8 @@ func writeEmbeddedFS(embeddedFS embed.FS, targetDir string, skipFiles map[string
 
 // PrependFrontmatter merges version metadata into existing YAML frontmatter,
 // or prepends a new frontmatter block if none exists.
-// Existing non-liza fields (e.g., skill name/description) are preserved;
-// old liza_* fields are replaced with current build values.
+// Existing non-brand fields (e.g., skill name/description) are preserved;
+// old brand metadata fields are replaced with current build values.
 func PrependFrontmatter(content []byte) []byte {
 	prefix := []byte("---\n")
 	if !bytes.HasPrefix(content, prefix) {
@@ -232,8 +251,9 @@ func PrependFrontmatter(content []byte) []byte {
 	existingBlock := string(existingBlockBytes)
 
 	var kept []string
+	metadataPrefix := brand.MetadataPrefix() + "_"
 	for line := range strings.SplitSeq(existingBlock, "\n") {
-		if !strings.HasPrefix(line, "liza_") {
+		if !strings.HasPrefix(line, "liza_") && !strings.HasPrefix(line, metadataPrefix) {
 			kept = append(kept, line)
 		}
 	}
@@ -273,10 +293,12 @@ func stripFrontmatter(content []byte) []byte {
 	return after
 }
 
-// versionFields returns the liza_* key-value lines without YAML delimiters.
+// versionFields returns the brand-prefixed key-value lines without YAML delimiters.
 func versionFields() string {
-	return fmt.Sprintf("liza_version: \"%s\"\nliza_git_commit: \"%s\"\nliza_build_date: \"%s\"\n",
-		Version, GitCommit, BuildDate)
+	return fmt.Sprintf("%s: \"%s\"\n%s: \"%s\"\n%s: \"%s\"\n",
+		brand.MetadataKey("version"), Version,
+		brand.MetadataKey("git_commit"), GitCommit,
+		brand.MetadataKey("build_date"), BuildDate)
 }
 
 // frontmatter generates a complete YAML frontmatter block from build-time variables.
@@ -355,7 +377,7 @@ func WriteClaudeSettings(projectRoot string, reader *bufio.Reader) error {
 
 	var existingSettings map[string]any
 	if existingData, err := os.ReadFile(settingsPath); err == nil {
-		ok, err := confirmMerge("Should the Liza claude settings be merged into the existing settings file? (y/n): ", reader)
+		ok, err := confirmMerge(fmt.Sprintf("Should the %s claude settings be merged into the existing settings file? (y/n): ", brand.NameTitle), reader)
 		if err != nil {
 			return err
 		}
@@ -373,7 +395,7 @@ func WriteClaudeSettings(projectRoot string, reader *bufio.Reader) error {
 	}
 
 	var lizaSettings map[string]any
-	if err := json.Unmarshal(claudeSettingsContent, &lizaSettings); err != nil {
+	if err := json.Unmarshal(renderEmbeddedAsset(claudeSettingsContent), &lizaSettings); err != nil {
 		return fmt.Errorf("failed to parse embedded claude-settings.json: %w", err)
 	}
 
@@ -444,7 +466,7 @@ func WriteCodexProjectPermissions(projectRoot string, reader *bufio.Reader) erro
 		return nil
 	}
 
-	ok, err := confirmMerge("Should Liza update ~/.codex/config.toml with this project's Codex permissions? (y/n): ", reader)
+	ok, err := confirmMerge(fmt.Sprintf("Should %s update ~/.codex/config.toml with this project's Codex permissions? (y/n): ", brand.NameTitle), reader)
 	if err != nil {
 		return err
 	}
@@ -544,7 +566,7 @@ func prepareCodexHooksFeature(configPath string, reader *bufio.Reader) (bool, st
 		return true, "", nil
 	}
 
-	ok, err := confirmMerge("Should Liza enable Codex hooks in .codex/config.toml? (y/n): ", reader)
+	ok, err := confirmMerge(fmt.Sprintf("Should %s enable Codex hooks in .codex/config.toml? (y/n): ", brand.NameTitle), reader)
 	if err != nil {
 		return false, "", err
 	}
@@ -581,13 +603,13 @@ func mergeCodexHooksFeature(content string) (string, bool) {
 
 func renderCodexHooksJSON(hooksPath string, reader *bufio.Reader) ([]byte, bool, error) {
 	var lizaHooks map[string]any
-	if err := json.Unmarshal(codexHooksContent, &lizaHooks); err != nil {
+	if err := json.Unmarshal(renderEmbeddedAsset(codexHooksContent), &lizaHooks); err != nil {
 		return nil, false, fmt.Errorf("failed to parse embedded codex-hooks.json: %w", err)
 	}
 
 	finalHooks := lizaHooks
 	if existingData, err := os.ReadFile(hooksPath); err == nil {
-		ok, err := confirmMerge("Should the Liza Codex hooks be merged into .codex/hooks.json? (y/n): ", reader)
+		ok, err := confirmMerge(fmt.Sprintf("Should the %s Codex hooks be merged into .codex/hooks.json? (y/n): ", brand.NameTitle), reader)
 		if err != nil {
 			return nil, false, err
 		}
@@ -971,7 +993,7 @@ func warnIncompleteCodexBaseline(content string) {
 	if codexBaselineLooksComplete(content) {
 		return
 	}
-	fmt.Fprintln(os.Stderr, "Warning: Codex config is missing part of the recommended Liza baseline. For the full recommended Codex setup, see support-docs/CONFIGURATION.md#codex-project-permissions.")
+	fmt.Fprintf(os.Stderr, "Warning: Codex config is missing part of the recommended %s baseline. For the full recommended Codex setup, see support-docs/CONFIGURATION.md#codex-project-permissions.\n", brand.NameTitle)
 }
 
 func codexBaselineLooksComplete(content string) bool {
@@ -997,7 +1019,7 @@ func codexBaselineLooksComplete(content string) bool {
 	}
 	requiredSnippets := []string{
 		".codex",
-		".liza",
+		paths.GlobalDirName(),
 		".npm",
 		".pyenv",
 	}
@@ -1318,7 +1340,7 @@ func WriteGuardrails(projectRoot string) error {
 		// File already exists, don't overwrite
 		return nil
 	}
-	if err := os.WriteFile(guardrailsPath, guardrailsTemplateContent, 0644); err != nil {
+	if err := os.WriteFile(guardrailsPath, renderEmbeddedAsset(guardrailsTemplateContent), 0644); err != nil {
 		return fmt.Errorf("failed to write GUARDRAILS.md: %w", err)
 	}
 	return nil
@@ -1333,7 +1355,7 @@ func WriteClaudeIgnore(projectRoot string, reader *bufio.Reader) error {
 		if reader == nil {
 			return nil
 		}
-		ok, err := confirmMerge(".claudeignore already exists. Overwrite with Liza template? (y/n): ", reader)
+		ok, err := confirmMerge(fmt.Sprintf(".claudeignore already exists. Overwrite with %s template? (y/n): ", brand.NameTitle), reader)
 		if err != nil {
 			return err
 		}
@@ -1341,7 +1363,7 @@ func WriteClaudeIgnore(projectRoot string, reader *bufio.Reader) error {
 			return nil
 		}
 	}
-	if err := os.WriteFile(ignorePath, claudeIgnoreContent, 0644); err != nil {
+	if err := os.WriteFile(ignorePath, renderEmbeddedAsset(claudeIgnoreContent), 0644); err != nil {
 		return fmt.Errorf("failed to write .claudeignore: %w", err)
 	}
 	return nil
@@ -1368,7 +1390,7 @@ func WriteSupportDoc(lizaDir string) error {
 func RenderWorktreePreCommitHook(lizaBin, taskID string) []byte {
 	out := bytes.ReplaceAll(worktreePreCommitHookContent, []byte("__LIZA_BIN__"), []byte(lizaBin))
 	out = bytes.ReplaceAll(out, []byte("__TASK_ID__"), []byte(taskID))
-	return out
+	return renderEmbeddedAsset(out)
 }
 
 // WriteHooks writes embedded hook scripts to .claude/hooks/ in the project root.
@@ -1387,7 +1409,7 @@ func WriteHooks(projectRoot string) error {
 		"worktree-path-guard.sh": worktreePathGuardHookContent,
 	} {
 		hookPath := filepath.Join(hooksDir, name)
-		if err := os.WriteFile(hookPath, content, 0755); err != nil {
+		if err := os.WriteFile(hookPath, renderEmbeddedAsset(content), 0755); err != nil {
 			return fmt.Errorf("failed to write %s: %w", name, err)
 		}
 	}
@@ -1410,7 +1432,7 @@ func WriteCodexHooks(projectRoot string) error {
 		"worktree-path-guard.sh": worktreePathGuardHookContent,
 	} {
 		hookPath := filepath.Join(hooksDir, name)
-		if err := os.WriteFile(hookPath, content, 0755); err != nil {
+		if err := os.WriteFile(hookPath, renderEmbeddedAsset(content), 0755); err != nil {
 			return fmt.Errorf("failed to write %s: %w", name, err)
 		}
 	}
@@ -1425,7 +1447,7 @@ func WriteOpenCodeExecTool(projectRoot string) error {
 	toolPath := filepath.Join(projectRoot, ".opencode", "tools", "exec.ts")
 	existing, err := os.ReadFile(toolPath)
 	if err == nil {
-		if !bytes.HasPrefix(existing, []byte(OpenCodeExecToolManagedHeader)) {
+		if !bytes.HasPrefix(existing, []byte(OpenCodeExecToolManagedHeader())) {
 			return nil
 		}
 	} else if !os.IsNotExist(err) {
@@ -1435,7 +1457,7 @@ func WriteOpenCodeExecTool(projectRoot string) error {
 	if err := os.MkdirAll(filepath.Dir(toolPath), 0755); err != nil {
 		return fmt.Errorf("failed to create .opencode/tools directory: %w", err)
 	}
-	if err := os.WriteFile(toolPath, opencodeExecToolContent, 0644); err != nil {
+	if err := os.WriteFile(toolPath, renderEmbeddedAsset(opencodeExecToolContent), 0644); err != nil {
 		return fmt.Errorf("failed to write opencode exec tool: %w", err)
 	}
 	return nil

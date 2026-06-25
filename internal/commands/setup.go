@@ -10,7 +10,9 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/liza-mas/liza/internal/brand"
 	"github.com/liza-mas/liza/internal/embedded"
+	"github.com/liza-mas/liza/internal/paths"
 )
 
 // userCustomizableFiles are files that users are expected to edit.
@@ -22,7 +24,7 @@ var userCustomizableFiles = map[string]bool{
 
 // SetupParams holds all parameters for the setup command.
 type SetupParams struct {
-	TargetDir      string    // target directory (typically ~/.liza/)
+	TargetDir      string    // target directory (typically the branded global directory)
 	Force          bool      // overwrite existing files
 	AgentToolsPath string    // path to custom AGENT_TOOLS.md (empty = use embedded)
 	Agents         []string  // agent names to create skill symlinks for (e.g. "claude", "codex", "opencode")
@@ -31,7 +33,7 @@ type SetupParams struct {
 }
 
 // SetupCommand performs one-time global setup by writing contracts and skills
-// to the target directory (typically ~/.liza/).
+// to the target directory.
 func SetupCommand(params SetupParams) error {
 	rawStdin := params.Stdin
 	if rawStdin == nil {
@@ -54,6 +56,7 @@ func SetupCommand(params SetupParams) error {
 	if err := os.MkdirAll(params.TargetDir, 0755); err != nil {
 		return fmt.Errorf("failed to create directory %s: %w", params.TargetDir, err)
 	}
+	warnLegacyGlobalRoot(params.HomeDir, params.TargetDir)
 
 	planned := embedded.PlanGlobalFiles(params.TargetDir)
 	existing, fresh := partitionByExistence(planned)
@@ -127,6 +130,43 @@ func SetupCommand(params SetupParams) error {
 
 	printSetupSummary(params.TargetDir, written, skipFiles, autoReplaced, params.Agents)
 	return nil
+}
+
+func warnLegacyGlobalRoot(homeDir, targetDir string) {
+	if brand.RuntimeValues().GlobalDirName == paths.LizaDirName {
+		return
+	}
+	if homeDir == "" {
+		var err error
+		homeDir, err = os.UserHomeDir()
+		if err != nil {
+			return
+		}
+	}
+	legacyDir := filepath.Join(homeDir, paths.LizaDirName)
+	if sameCleanPath(legacyDir, targetDir) {
+		return
+	}
+	if _, err := os.Stat(legacyDir); err == nil {
+		fmt.Fprintf(os.Stderr, "Warning: legacy global root %s detected; using %s. Legacy state is ignored until explicitly migrated.\n", legacyDir, targetDir)
+	}
+}
+
+func warnLegacyProjectRoot(projectRoot, activeDir string) {
+	if paths.ProjectDirName() == paths.LizaDirName {
+		return
+	}
+	legacyDir := filepath.Join(projectRoot, paths.LizaDirName)
+	if sameCleanPath(legacyDir, activeDir) {
+		return
+	}
+	if _, err := os.Stat(legacyDir); err == nil {
+		fmt.Fprintf(os.Stderr, "Warning: legacy project root %s detected; using %s. Legacy state is ignored until explicitly migrated.\n", legacyDir, activeDir)
+	}
+}
+
+func sameCleanPath(left, right string) bool {
+	return filepath.Clean(left) == filepath.Clean(right)
 }
 
 // partitionByExistence splits paths into those that exist on disk and those that don't.
@@ -211,7 +251,7 @@ func confirmOverwrites(existing, fresh []string, force bool, targetDir string, r
 // printSetupSummary prints the final setup results to stdout.
 // autoReplaced tracks files replaced by custom versions (not "kept existing").
 func printSetupSummary(targetDir string, written []string, skipFiles map[string]bool, autoReplaced []string, agents []string) {
-	fmt.Printf("Liza global config written to %s (%d files + pipeline.yaml):\n", targetDir, len(written))
+	fmt.Printf("%s global config written to %s (%d files + pipeline.yaml):\n", brand.NameTitle, targetDir, len(written))
 	for _, p := range written {
 		fmt.Printf("  %s\n", relDisplay(targetDir, p))
 	}
@@ -243,17 +283,17 @@ func printSetupSummary(targetDir string, written []string, skipFiles map[string]
 	}
 	if hasNonClaude {
 		fmt.Printf("\nSome agents require manual configuration.\n")
-		fmt.Printf("See: https://github.com/liza-mas/liza/blob/main/GETTING_STARTED.md\n")
+		fmt.Printf("See: https://github.com/%s/blob/main/GETTING_STARTED.md\n", brand.Repo)
 	}
 
 	docPath := relDisplay(targetDir, filepath.Join(targetDir, "support-docs", "CUSTOMIZING_AGENT_TOOLS.md"))
-	content := fmt.Sprintf(`Liza global setup complete
+	content := fmt.Sprintf(`%s global setup complete
 
 Next steps:
   1. Customize agent tools for your project:
        %s
-  2. Enable Liza in a project:
-       cd your-project && liza init --claude`, docPath)
+  2. Enable %s in a project:
+       cd your-project && %s init --claude`, brand.NameTitle, docPath, brand.NameTitle, brand.BinaryName)
 
 	style := lipgloss.NewStyle().
 		BorderStyle(lipgloss.RoundedBorder()).
@@ -273,8 +313,8 @@ func backupFile(src string) error {
 
 // agentExtraLink describes an additional symlink to create beyond skills.
 type agentExtraLink struct {
-	target string // source path relative to lizaDir (e.g. "CORE.md")
-	name   string // destination path relative to configDir (e.g. "prompts/liza.md")
+	target string // source path relative to the global config dir (e.g. "CORE.md")
+	name   string // destination path relative to configDir
 }
 
 // agentConfig describes how to set up symlinks for a particular agent CLI.
@@ -286,28 +326,30 @@ type agentConfig struct {
 }
 
 // agentConfigs maps agent flag names to their configuration.
-var agentConfigs = map[string]agentConfig{
-	"claude":   {configDir: ".claude", skillsDir: "skills"},
-	"codex":    {configDir: ".codex", skillsDir: "skills"},
-	"opencode": {configDir: filepath.Join(".config", "opencode"), skillsDir: "skills"},
-	"gemini":   {configDir: ".gemini", skillsDir: "skills"},
-	"mistral": {
-		configDir: ".vibe",
-		skillsDir: "skills",
-		extraDirs: []string{"prompts"},
-		extraLinks: []agentExtraLink{
-			{target: "CORE.md", name: "prompts/liza.md"},
+func agentConfigs() map[string]agentConfig {
+	return map[string]agentConfig{
+		"claude":   {configDir: ".claude", skillsDir: "skills"},
+		"codex":    {configDir: ".codex", skillsDir: "skills"},
+		"opencode": {configDir: filepath.Join(".config", "opencode"), skillsDir: "skills"},
+		"gemini":   {configDir: ".gemini", skillsDir: "skills"},
+		"mistral": {
+			configDir: ".vibe",
+			skillsDir: "skills",
+			extraDirs: []string{"prompts"},
+			extraLinks: []agentExtraLink{
+				{target: "CORE.md", name: filepath.Join("prompts", brand.CanonicalMistralPromptID+".md")},
+			},
 		},
-	},
+	}
 }
 
 // setupAgentSymlinks creates skill symlinks in each agent's config directory.
-// For each agent, it symlinks every entry in lizaDir/skills/ into the agent's
+// For each agent, it symlinks every entry in the global skills directory into the agent's
 // skills directory, plus any extra links defined in the agent config.
 func setupAgentSymlinks(homeDir, lizaDir string, agents []string, reader *bufio.Reader) error {
 
 	for _, agent := range agents {
-		cfg, ok := agentConfigs[agent]
+		cfg, ok := agentConfigs()[agent]
 		if !ok {
 			return fmt.Errorf("unknown agent: %s", agent)
 		}
@@ -413,7 +455,7 @@ func createSymlinkIdempotent(target, linkPath string, reader *bufio.Reader, prom
 	return nil
 }
 
-// relDisplay returns a display path like "~/.liza/CORE.md" using the targetDir as prefix.
+// relDisplay returns a display path using the targetDir as prefix.
 func relDisplay(targetDir, path string) string {
 	rel, err := filepath.Rel(targetDir, path)
 	if err != nil {
