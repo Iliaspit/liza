@@ -95,6 +95,35 @@ func TestValidateCommandWithOptions_FailsOnZombieAgent(t *testing.T) {
 	testhelpers.AssertErrorContains(t, err, "liza get agents --zombies")
 }
 
+func TestValidateCommandWithOptions_RecentlySpawnedPIDDoesNotSuppressOtherZombies(t *testing.T) {
+	originalFind := findZombieAgents
+	t.Cleanup(func() { findZombieAgents = originalFind })
+
+	findZombieAgents = func(procscan.ZombieScanOptions) ([]procscan.ZombieProcess, error) {
+		return []procscan.ZombieProcess{
+			{PID: 222, Role: "coder", Reason: "not_registered_in_state"},
+			{PID: 333, Role: "reviewer", Reason: "not_registered_in_state"},
+		}, nil
+	}
+
+	tmpDir := t.TempDir()
+	statePath, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	testhelpers.SetupPipelineConfig(t, tmpDir)
+	testhelpers.WriteInitialState(t, statePath, testhelpers.CreateValidState())
+
+	err := ValidateCommandWithOptions(statePath, ValidateOptions{
+		SkipSpecFileCheck:        true,
+		RecentlySpawnedAgentPIDs: []int{222},
+	})
+	if err == nil {
+		t.Fatal("ValidateCommandWithOptions() error = nil, want non-recent zombie validation failure")
+	}
+	testhelpers.AssertErrorContains(t, err, "pid 333 role reviewer")
+	if strings.Contains(err.Error(), "pid 222 role coder") {
+		t.Fatalf("recently spawned PID appeared in validation error: %v", err)
+	}
+}
+
 func TestValidateCommandWithOptions_SkipProcessChecks(t *testing.T) {
 	originalFind := findZombieAgents
 	t.Cleanup(func() { findZombieAgents = originalFind })

@@ -75,10 +75,11 @@ func ParseAlertLine(line string) (Alert, bool) {
 }
 
 type WatchConfig struct {
-	ProjectRoot   string
-	CheckInterval time.Duration
-	AlertsLog     string
-	WarnWriter    io.Writer
+	ProjectRoot              string
+	CheckInterval            time.Duration
+	AlertsLog                string
+	WarnWriter               io.Writer
+	RecentlySpawnedAgentPIDs []int
 	// StateCache is used to track seen alerts across checks
 	StateCache map[string]time.Time
 }
@@ -140,6 +141,7 @@ func runChecks(ctx context.Context, config WatchConfig) error {
 	}
 
 	repairOutcome := RunAutoRepairAgentPool(ctx, state, config)
+	config.RecentlySpawnedAgentPIDs = spawnedAgentPIDs(repairOutcome.Spawned)
 	snapshot := RunChecksWithStateSnapshot(state, config)
 	alerts := FilterAlertsAfterAutoRepair(snapshot.Alerts, repairOutcome)
 	alerts = append(alerts, repairOutcome.Alerts...)
@@ -233,6 +235,16 @@ func RunAutoRepairAgentPool(ctx context.Context, state *models.State, config Wat
 		Message:   message,
 	})
 	return outcome
+}
+
+func spawnedAgentPIDs(spawned []SpawnedAgent) []int {
+	pids := make([]int, 0, len(spawned))
+	for _, agent := range spawned {
+		if agent.PID > 0 {
+			pids = append(pids, agent.PID)
+		}
+	}
+	return pids
 }
 
 func autoRepairDueRoles(missing []MissingRoleWork, cache map[string]time.Time, now time.Time) []string {
@@ -484,8 +496,9 @@ func RunChecksWithStateSnapshot(state *models.State, config WatchConfig) AlertSn
 
 	statePath := lizaPaths.StatePath()
 	if err := ValidateCommandWithOptions(statePath, ValidateOptions{
-		SkipSpecFileCheck: true,
-		WarnWriter:        config.WarnWriter,
+		SkipSpecFileCheck:        true,
+		WarnWriter:               config.WarnWriter,
+		RecentlySpawnedAgentPIDs: config.RecentlySpawnedAgentPIDs,
 	}); err != nil {
 		alerts = append(alerts, Alert{
 			Timestamp: time.Now().UTC(),

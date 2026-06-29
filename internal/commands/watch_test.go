@@ -3315,6 +3315,51 @@ func TestRunAutoRepairAgentPool_LogsSuccessfulSpawnWithoutAlert(t *testing.T) {
 	}
 }
 
+func TestRunChecks_AutoRepairSpawnDoesNotRaiseZombieAlert(t *testing.T) {
+	unsetAutoRepairAgentPoolEnv(t)
+	now := time.Now().UTC()
+	projectRoot, _ := setupAutoRepairMissingArchitectState(t, now)
+	alertsLog := paths.New(projectRoot).AlertsLogPath()
+
+	originalSpawn := repairAgentPoolSpawn
+	repairAgentPoolSpawn = func(projectRoot, role, cli string) (int, error) {
+		if role != "architect" {
+			t.Fatalf("role = %q, want architect", role)
+		}
+		return 4242, nil
+	}
+	t.Cleanup(func() { repairAgentPoolSpawn = originalSpawn })
+
+	originalFind := findZombieAgents
+	findZombieAgents = func(opts procscan.ZombieScanOptions) ([]procscan.ZombieProcess, error) {
+		return []procscan.ZombieProcess{{
+			PID:    4242,
+			Role:   "architect",
+			Reason: "not_registered_in_state",
+		}}, nil
+	}
+	t.Cleanup(func() { findZombieAgents = originalFind })
+
+	var warnings bytes.Buffer
+	err := runChecks(context.Background(), WatchConfig{
+		ProjectRoot: projectRoot,
+		AlertsLog:   alertsLog,
+		StateCache:  make(map[string]time.Time),
+		WarnWriter:  &warnings,
+	})
+	if err != nil {
+		t.Fatalf("runChecks() error = %v", err)
+	}
+
+	alertData, err := os.ReadFile(alertsLog)
+	if err != nil && !os.IsNotExist(err) {
+		t.Fatalf("read alerts log: %v", err)
+	}
+	if strings.Contains(string(alertData), "INVALID STATE") || strings.Contains(string(alertData), "zombie") {
+		t.Fatalf("alerts log contains transient zombie alert:\n%s", string(alertData))
+	}
+}
+
 func TestRunAutoRepairAgentPool_ReportsSpawnFailure(t *testing.T) {
 	unsetAutoRepairAgentPoolEnv(t)
 	now := time.Now().UTC()

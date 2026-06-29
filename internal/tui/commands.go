@@ -126,6 +126,7 @@ func runChecksCmd(projectRoot, alertsLogPath string, state *models.State, cache 
 		}
 
 		repairOutcome := commands.RunAutoRepairAgentPool(context.Background(), state, config)
+		config.RecentlySpawnedAgentPIDs = recentlySpawnedAgentPIDs(repairOutcome.Spawned)
 		snapshot := commands.RunChecksWithStateSnapshot(state, config)
 		snapshot.Alerts = commands.FilterAlertsAfterAutoRepair(snapshot.Alerts, repairOutcome)
 		snapshot.Alerts = append(snapshot.Alerts, repairOutcome.Alerts...)
@@ -161,6 +162,16 @@ func runChecksCmd(projectRoot, alertsLogPath string, state *models.State, cache 
 			WriteErr:        writeErr,
 		}
 	}
+}
+
+func recentlySpawnedAgentPIDs(spawned []commands.SpawnedAgent) []int {
+	pids := make([]int, 0, len(spawned))
+	for _, agent := range spawned {
+		if agent.PID > 0 {
+			pids = append(pids, agent.PID)
+		}
+	}
+	return pids
 }
 
 // tickCmd returns a tea.Cmd that fires a TickMsg after 10 seconds.

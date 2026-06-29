@@ -29,10 +29,11 @@ func SetWarnWriter(w io.Writer) {
 
 // ValidateOptions controls live and offline validation behavior.
 type ValidateOptions struct {
-	SkipSpecFileCheck bool
-	SkipProcessChecks bool
-	Repair            bool
-	WarnWriter        io.Writer
+	SkipSpecFileCheck        bool
+	SkipProcessChecks        bool
+	Repair                   bool
+	WarnWriter               io.Writer
+	RecentlySpawnedAgentPIDs []int
 }
 
 // ValidateCommand validates the state.yaml file against all schema rules.
@@ -87,14 +88,14 @@ func ValidateCommandWithOptions(statePath string, opts ValidateOptions) error {
 		return &lizaerrors.ValidationError{Message: err.Error(), Err: err}
 	}
 	if !opts.SkipProcessChecks {
-		if err := validateNoZombieAgents(state, projectRoot, warnings); err != nil {
+		if err := validateNoZombieAgents(state, projectRoot, warnings, opts.RecentlySpawnedAgentPIDs); err != nil {
 			return &lizaerrors.ValidationError{Message: err.Error(), Err: err}
 		}
 	}
 	return nil
 }
 
-func validateNoZombieAgents(state *models.State, projectRoot string, warnings io.Writer) error {
+func validateNoZombieAgents(state *models.State, projectRoot string, warnings io.Writer, recentlySpawnedPIDs []int) error {
 	zombies, err := findZombieAgents(procscan.ZombieScanOptions{
 		ProjectRoot:    projectRoot,
 		GoalID:         state.Goal.ID,
@@ -110,6 +111,10 @@ func validateNoZombieAgents(state *models.State, projectRoot string, warnings io
 	if len(zombies) == 0 {
 		return nil
 	}
+	zombies = filterRecentlySpawnedZombies(zombies, recentlySpawnedPIDs)
+	if len(zombies) == 0 {
+		return nil
+	}
 
 	parts := make([]string, 0, len(zombies))
 	for _, zombie := range zombies {
@@ -120,6 +125,31 @@ func validateNoZombieAgents(state *models.State, projectRoot string, warnings io
 		parts = append(parts, fmt.Sprintf("pid %d role %s", zombie.PID, role))
 	}
 	return fmt.Errorf("zombie %s agent process detected: %s not registered in state.yaml (use %q to inspect, or %q for offline validation)", brand.BinaryName, strings.Join(parts, ", "), brand.Command("get", "agents", "--zombies"), brand.Command("validate", "--skip-process-checks"))
+}
+
+func filterRecentlySpawnedZombies(zombies []procscan.ZombieProcess, recentlySpawnedPIDs []int) []procscan.ZombieProcess {
+	if len(zombies) == 0 || len(recentlySpawnedPIDs) == 0 {
+		return zombies
+	}
+
+	recent := make(map[int]bool, len(recentlySpawnedPIDs))
+	for _, pid := range recentlySpawnedPIDs {
+		if pid > 0 {
+			recent[pid] = true
+		}
+	}
+	if len(recent) == 0 {
+		return zombies
+	}
+
+	filtered := zombies[:0]
+	for _, zombie := range zombies {
+		if recent[zombie.PID] {
+			continue
+		}
+		filtered = append(filtered, zombie)
+	}
+	return filtered
 }
 
 func validateAgentInvariants(state *models.State, projectRoot string, skipSpecFileCheck bool) error {
