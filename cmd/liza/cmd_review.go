@@ -466,6 +466,21 @@ func init() {
 	rootCmd.AddCommand(awaitVerdictCmd)
 	rootCmd.AddCommand(awaitResubmissionCmd)
 	rootCmd.AddCommand(updateReviewCommitCmd)
+	submitForReviewCmd.ValidArgsFunction = completeTaskIDArgs(1)
+	handoffCmd.ValidArgsFunction = completeTaskIDArgs(1)
+	submitVerdictCmd.ValidArgsFunction = func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		if len(args) == 0 {
+			return completeTaskIDs(cmd, args, toComplete)
+		}
+		if len(args) == 1 {
+			return completeValues("APPROVED", "REJECTED")(cmd, args, toComplete)
+		}
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	releaseClaimCmd.ValidArgsFunction = completeTaskIDArgs(1)
+	awaitVerdictCmd.ValidArgsFunction = completeTaskIDArgs(1)
+	awaitResubmissionCmd.ValidArgsFunction = completeTaskIDArgs(1)
+	updateReviewCommitCmd.ValidArgsFunction = completeTaskIDArgs(1)
 
 	addAgentIDFlag(submitForReviewCmd)
 	addAgentIDFlag(handoffCmd)
@@ -488,6 +503,7 @@ func init() {
 	// Release-claim command flags
 	releaseClaimCmd.Flags().String("role", roles.ClaimReviewer, "claim type to release (doer, reviewer, both)")
 	releaseClaimCmd.Flags().Bool("full", false, "release both doer and reviewer claims (alias for --role both)")
+	registerCompletion(releaseClaimCmd, "role", completeValues(roles.ClaimDoer, roles.ClaimReviewer, roles.ClaimBoth))
 	releaseClaimCmd.Flags().Bool("force", false, "force release even if lease is still valid")
 	releaseClaimCmd.Flags().String("reason", "manual release", "reason for releasing the claim")
 

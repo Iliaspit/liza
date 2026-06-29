@@ -213,6 +213,18 @@ func renderEnvFile(installDir string, activation []string) string {
 		b.WriteString("# After Semble has been prewarmed and verified offline, operators may add:\n")
 		b.WriteString("# export HF_HUB_OFFLINE=\"1\"\n")
 	}
+	fmt.Fprintf(&b, "# Register %s shell completions for interactive shells.\n", brand.NameTitle)
+	b.WriteString("case \"$-\" in\n")
+	b.WriteString("  *i*)\n")
+	fmt.Fprintf(&b, "    if command -v %s >/dev/null 2>&1; then\n", brand.BinaryName)
+	b.WriteString("      if [ -n \"${BASH_VERSION:-}\" ]; then\n")
+	fmt.Fprintf(&b, "        eval \"$(%s completion bash 2>/dev/null)\"\n", brand.BinaryName)
+	b.WriteString("      elif [ -n \"${ZSH_VERSION:-}\" ]; then\n")
+	fmt.Fprintf(&b, "        autoload -Uz compinit 2>/dev/null || true; compinit -i 2>/dev/null || true; eval \"$(%s completion zsh 2>/dev/null)\"\n", brand.BinaryName)
+	b.WriteString("      fi\n")
+	b.WriteString("    fi\n")
+	b.WriteString("    ;;\n")
+	b.WriteString("esac\n")
 	return b.String()
 }
 

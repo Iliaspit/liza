@@ -167,7 +167,12 @@ func init() {
 	rootCmd.AddCommand(wtDeleteCmd)
 	rootCmd.AddCommand(wtMergeCmd)
 
+	wtCreateCmd.ValidArgsFunction = completeTaskIDArgs(1)
+	wtDeleteCmd.ValidArgsFunction = completeTaskIDArgs(1)
+	wtMergeCmd.ValidArgsFunction = completeTaskIDArgs(1)
+
 	addAgentIDFlag(wtMergeCmd)
+	registerCompletion(wtMergeCmd, "agent-id", completeAgentIDs)
 
 	// Wt-create command flags
 	wtCreateCmd.Flags().Bool("fresh", false, "delete existing worktree before creating (for task reassignment)")
