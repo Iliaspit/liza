@@ -1,10 +1,14 @@
 {
   "purpose": {
+    ".opencode/tools": "TypeScript helper tooling for Opencode command execution in the workspace.",
     "cmd/liza": "CLI entrypoint, root command wiring, RBAC checks, and dispatch into command handlers.",
     "internal/agent": "Agent runtime supervision, prompt construction, provider CLI execution, leases, heartbeats, claiming, and role strategies.",
     "internal/alerts": "Structured alert parsing, keying, and persistence for orchestration anomalies.",
     "internal/analysis": "Pattern detection and reporting over anomalies in the shared state.",
     "internal/bash-policy-cli": "Wrapper for initializing and running bash-policy hooks for supported agent providers.",
+    "internal/brand": "Centralized Liza naming, environment prefix, command, archive, and branding constants.",
+    "internal/brandrender": "Renders and validates brand-templated embedded contract and support files.",
+    "internal/brandrender/cmd/sync-embedded": "Small sync-embedded command for regenerating branded embedded assets.",
     "internal/codexconfig": "Codex workspace filesystem permission rendering and provider launch configuration helpers.",
     "internal/commands": "User-facing command handlers that validate CLI input and delegate lifecycle operations.",
     "internal/db": "Blackboard state access layer with locking, watchers, metrics, and model persistence.",
@@ -75,6 +79,6 @@
     ]
   },
   "architecture": {
-    "ai_summary": "Liza is a Go CLI orchestration system centered on a file-backed blackboard. cmd/liza builds the executable and routes user input into internal/commands; internal/commands performs CLI validation and output shaping, then delegates durable behavior to internal/ops. internal/models defines shared state objects, internal/db serializes access through file locks, and internal/statevalidate protects schema, artifact, role, dependency, sprint, and pipeline invariants.\n\nAgent execution is organized around configurable role pipelines. internal/pipeline defines roles, role pairs, task statuses, transitions, review policy, context sections, and timeouts; internal/agent claims tasks, builds prompts through internal/prompts, runs provider CLIs, manages leases and heartbeats, masks secrets, and invokes git, pre-commit, SCIP, Semble, and Stacklit support when enabled. Data flows from CLI or TUI input into commands, through ops, into db-backed model updates, with logs, alerts, validation, and prompt rendering feeding operator views and future agent context.\n\nInfrastructure is split into focused support packages: git/gitenv for repository operations, paths for canonical artifact locations, process/procscan for agent lifecycle, render/jsonout/log for output surfaces, secretmask for safe text handling, and pairingindex/scipsearch/stacklit/semble for optional repository indexing. Feature work should preserve these boundaries because most behavior crosses CLI, ops, state validation, persistence, and prompt or operator surfaces."
+    "ai_summary": "Liza is a Go CLI orchestration system built around a file-backed blackboard. cmd/liza routes user input into internal/commands, commands validate and shape CLI or JSON behavior, and internal/ops owns the durable task, agent, review, merge, worktree, indexing, and state mutations. internal/models defines the shared state schema, internal/db serializes access with file locks and watchers, and internal/statevalidate protects schema, artifact, dependency, sprint, role, and pipeline invariants.\n\nAgent execution is organized by configurable role pipelines. internal/pipeline defines role pairs, states, transitions, review policies, context sections, and timeouts; internal/agent claims work, builds prompts through internal/prompts, runs provider CLIs, maintains leases and heartbeats, masks secrets, and calls pre-commit, git, Stacklit, SCIP, and Semble support when enabled. Operator feedback flows through internal/log, internal/alerts, internal/analysis, jsonout, and the TUI.\n\nInfrastructure packages keep cross-cutting behavior narrow: git/gitenv wrap repository commands, paths centralizes artifact locations, process/procscan manage agent processes, envgate gates optional capabilities, and render/jsonout format user surfaces. Feature changes usually cross CLI wiring, ops behavior, state models, validation rules, and tests, so preserving these boundaries is the main architectural constraint."
   }
 }
