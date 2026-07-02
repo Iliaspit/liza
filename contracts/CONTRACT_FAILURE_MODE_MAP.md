@@ -91,6 +91,7 @@
 | COD-7 | N+1 patterns / performance issues | Think Consequences (performance, complexity) | 403-408 |
 | COD-8 | Copy-paste errors / duplication | Scope Discipline (scan for duplication after implementing) | 382 |
 | COD-9 | Test corruption to pass CI | T0.3 (No test corruption), Test Protocol references skill | 35, 592-596 |
+| COD-10 | Drive-by edits / speculative complexity | Self-Review Gate changed-line provenance; Rule 6 minimum solution and clean-up-only-current-change discipline | 238-239, 330-346 |
 
 ---
 

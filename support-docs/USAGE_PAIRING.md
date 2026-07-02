@@ -126,6 +126,10 @@ Task completion requires evidence, not claims:
 - Validation commands executed with output captured
 - The validation must exercise the *changed behavior* — running unrelated green tests doesn't count
 
+### How to tell the contract is working
+
+Healthy sessions produce small, explainable diffs: changed lines trace to the approved intent, clarification happens before implementation, speculative abstractions stay out, and validation targets the changed behavior. If unrelated cleanup appears or the goal gets vague, call "Scope check" or "Show your assumptions."
+
 ### The agent admits when stuck
 
 When struggling (random attempts, repeated failures, unclear rationale), the agent immediately stops and surfaces a structured sync request:

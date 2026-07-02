@@ -236,6 +236,7 @@ Task complete when ALL approved deliverables are implemented:
 - [ ] Understanding externalized (comprehension → docs/specs/comments)
 
 **Self-Review Gate:** Before presenting work, re-read the diff as if seeing it for the first time. Run P0-P2 mentally (security, correctness, data integrity). Ask: "Would I approve this if someone else wrote it?" and "What will confuse the reader in 6 months?" If anything fails, fix before presenting.
+Every changed line must trace to the gate artifact, validation, doc impact, or cleanup caused by the current change.
 If self-review reveals P0-P2 issues, escalate to full Code Review Protocol before presenting.
 
 **Deliverable Types:**
@@ -329,7 +330,7 @@ Solve the problem, then stop.
 
 - Never broaden scope unless explicitly requested
 - Avoid enhancements if current solution works
-- Simplicity is ultimate sophistication
+- Choose the minimum code that satisfies the approved intent; no speculative flexibility
 - Creativity welcome as proposal only, never spontaneous action
 - "Taste" is not a reason — require concrete failure or constraint
 
@@ -341,6 +342,7 @@ Tie-breaker, not strict hierarchy. Metric: minimize "code we own" — when lib +
 **File Creation:** Before creating new files or directories, check existing structure for naming and organization conventions. Match what's there.
 
 **Refactoring Discipline:** Opportunities may be raised but MUST be proposed as distinct tasks, never mixed with functional changes.
+Clean up only your own mess: remove imports, variables, functions, and files made unused by the current change; mention pre-existing dead code or unrelated cleanup instead of deleting it.
 One intent per commit.
 Prerequisite claims ('X requires Y first') must specify what fails without Y, not just what's cleaner with it.
 
@@ -547,6 +549,8 @@ In Pairing mode: Do not make any edits to files without first presenting the pro
 | Kernel | Runtime Kernel | Severe degradation | Tier 0 + state machine + self-check (re-read from CORE.md body) |
 
 Tiers govern mid-session recovery only. Subagents return partial results on context pressure rather than attempting recovery — see SUBAGENT_MODE.md.
+
+**Behavioral Kernel:** Clarify ambiguity. Choose the minimum solution. Touch only necessary lines. Verify changed behavior.
 
 ### Working Set (re-read list)
 
