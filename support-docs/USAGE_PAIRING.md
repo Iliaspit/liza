@@ -128,7 +128,8 @@ Task completion requires evidence, not claims:
 
 ### How to tell the contract is working
 
-Healthy sessions produce small, explainable diffs: changed lines trace to the approved intent, clarification happens before implementation, speculative abstractions stay out, and validation targets the changed behavior. If unrelated cleanup appears or the goal gets vague, call "Scope check" or "Show your assumptions."
+Healthy sessions produce small, explainable diffs: changed lines trace to the approved intent, existing code is reused before custom code, unrequested or speculative abstractions stay out, clarification happens before
+implementation, deliberate simplifications name their ceiling, safety checks are not simplified away, and validation targets the changed behavior. If unrelated cleanup appears or the goal gets vague, call "Scope check" or "Show your assumptions."
 
 ### The agent admits when stuck
 

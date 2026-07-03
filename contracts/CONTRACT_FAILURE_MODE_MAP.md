@@ -80,18 +80,21 @@
 
 ## Code Generation Failure Modes
 
-| ID | Failure Mode | Contract Clause | Lines |
-|----|--------------|-----------------|-------|
-| COD-1 | Introducing bugs while "fixing" | Rule 11 (Root Cause Before Symptoms), TDD in Debugging skill | 463-473, 587 |
-| COD-2 | Incomplete refactoring | Batch Edit Protocol, Refactoring Discipline | 287-291, 378-382 |
-| COD-3 | Breaking unrelated functionality | Security Checklist (regression awareness) | 614-622 |
-| COD-4 | Accepting invalid inputs silently | Security Checklist (input validation) | 615-616 |
-| COD-5 | Type signature mismatch | Test Protocol (contract mandates skill compliance) | 592-596 |
-| COD-6 | Edge case blindness | Test Protocol (contract mandates skill compliance) | 592-596 |
-| COD-7 | N+1 patterns / performance issues | Think Consequences (performance, complexity) | 403-408 |
-| COD-8 | Copy-paste errors / duplication | Scope Discipline (scan for duplication after implementing) | 382 |
-| COD-9 | Test corruption to pass CI | T0.3 (No test corruption), Test Protocol references skill | 35, 592-596 |
-| COD-10 | Drive-by edits / speculative complexity | Self-Review Gate changed-line provenance; Rule 6 minimum solution and clean-up-only-current-change discipline | 238-239, 330-346 |
+| ID | Failure Mode | Contract Clause | Lines                          |
+|----|--------------|-----------------|--------------------------------|
+| COD-1 | Introducing bugs while "fixing" | Rule 11 (Root Cause Before Symptoms), TDD in Debugging skill | 463-473, 587                   |
+| COD-2 | Incomplete refactoring | Batch Edit Protocol, Refactoring Discipline | 287-291, 378-382               |
+| COD-3 | Breaking unrelated functionality | Security Checklist (regression awareness) | 614-622                        |
+| COD-4 | Accepting invalid inputs silently | Security Checklist (input validation) | 615-616                        |
+| COD-5 | Type signature mismatch | Test Protocol (contract mandates skill compliance) | 592-596                        |
+| COD-6 | Edge case blindness | Test Protocol (contract mandates skill compliance) | 592-596                        |
+| COD-7 | N+1 patterns / performance issues | Think Consequences (performance, complexity) | 403-408                        |
+| COD-8 | Copy-paste errors / duplication | Scope Discipline (scan for duplication after implementing) | 382                            |
+| COD-9 | Test corruption to pass CI | T0.3 (No test corruption), Test Protocol references skill | 35, 592-596                    |
+| COD-10 | Drive-by edits / speculative complexity | Self-Review Gate changed-line provenance; Rule 6 Minimality Ladder and clean-up-only-current-change discipline; small-simplification ceiling comments | 238-239, 277, 334-350, 354-355 |
+| COD-11 | Minimal diff in the wrong place | Rule 6 minimality-after-comprehension; Rule 11 Minimal RCA | 340-348, 455-456               |
+| COD-12 | Unrequested abstractions / boilerplate | Rule 6 no-unrequested-abstractions and smallest-useful-version clauses | 335-336                        |
+| COD-13 | Over-minimization removing required safety | Rule 6 minimum-safe-boundary clause; Security Checklist | 349, 631-640                   |
 
 ---
 

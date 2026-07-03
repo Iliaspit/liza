@@ -274,6 +274,7 @@ Deferral triggers Post-Hoc Discovery Protocol (Rule 7).
 When deferring, making trade-offs, or accepting concerns:
 - Record in `TECH_DEBT.md`: what, why deferred, trigger for payback
 - Debt with no payback trigger is not debt — it's denial
+- For small local simplifications that do not create project-level debt, document the ceiling inline: what breaks first, and what triggers the upgrade.
 
 ### Rule 4: FAST PATH (Task)
 
@@ -331,13 +332,22 @@ Solve the problem, then stop.
 - Never broaden scope unless explicitly requested
 - Avoid enhancements if current solution works
 - Choose the minimum code that satisfies the approved intent; no speculative flexibility
+- No unrequested abstractions: no interface with one implementation, factory with one product, or config for a value that does not vary
+- For broad requests, propose the smallest useful version first; ask before building the full/general version
 - Creativity welcome as proposal only, never spontaneous action
 - "Taste" is not a reason — require concrete failure or constraint
 
-**Build Order:** stdlib → codebase → established lib → custom (last resort)
+**Minimality Ladder:** After tracing the touched flow, prefer the first rung that holds:
+1. Does this need to exist at all? If speculative, skip it or propose no-op.
+2. Stdlib or native platform feature covers it.
+3. Existing code, helper, type, or pattern covers it.
+4. Installed dependency covers it.
+5. Write the minimum custom code.
 
-Tie-breaker, not strict hierarchy. Metric: minimize "code we own" — when lib + 20 lines beats stdlib + 200 lines, lib wins.
-**Perplexity trigger**: About to write 30+ lines for a generic need? Check for libraries first.
+Tie-breaker, not strict hierarchy: choose the option that minimizes code we own while preserving correctness. A clean stdlib call beats a mediocre in-repo helper; an installed dependency plus 20 lines beats 200 lines of custom code.
+Minimality starts after comprehension: the shortest diff in the wrong place is a second bug.
+Never simplify away trust-boundary validation, data-loss prevention, security controls, accessibility basics, explicitly requested behavior, or the reading needed to understand the touched flow.
+**Perplexity trigger**: Before adding a new dependency or writing 30+ lines for a generic need, check for libraries first.
 
 **File Creation:** Before creating new files or directories, check existing structure for naming and organization conventions. Match what's there.
 
@@ -443,6 +453,7 @@ When encountering problems, resist fixing visible issues first.
 - Root cause: system/code/process creating the problem
 
 **Protocol:** Set symptom aside → investigate root cause → fix root cause → clean up symptoms → propose countermeasures.
+**Minimal RCA:** For code bugs, inspect relevant callers and sibling paths before patching the reported path. Prefer one fix at the shared boundary over repeated guards in callers.
 
 If fixing A breaks B and fixing B breaks A → broken spec, not broken code. Stop and surface the conflict.
 
