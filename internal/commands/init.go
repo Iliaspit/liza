@@ -208,7 +208,14 @@ func InitPairingCommand(params InitPairingParams) error {
 		}
 	}
 
-	runBashPolicyInit(projectRoot, bashPolicyProvider(hasClaude, hasCodex), bashPolicySubprocessStdin(rawStdin, stdin))
+	bashPolicyProviderName := bashPolicyProvider(hasClaude, hasCodex)
+	if projectRoot != "" && bashPolicyProviderName != "" && bashpolicycli.RuntimeEnabled() {
+		if err := embedded.WriteBashPolicyConfig(projectRoot, stdin); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to write .bash-policy.yaml: %v\n", err)
+		}
+	}
+
+	runBashPolicyInit(projectRoot, bashPolicyProviderName, bashPolicySubprocessStdin(rawStdin, stdin))
 
 	if hasOpenCode {
 		if err := embedded.WriteOpenCodeExecTool(projectRoot); err != nil {
@@ -834,7 +841,14 @@ func InitCommandWithConfig(params InitParams) error {
 		}
 	}
 
-	runBashPolicyInit(lizaPaths.ProjectRoot(), bashPolicyProvider(true, slices.Contains(params.Agents, "codex")), bashPolicySubprocessStdin(rawStdin, stdin))
+	fullBashPolicyProviderName := bashPolicyProvider(true, slices.Contains(params.Agents, "codex"))
+	if lizaPaths.ProjectRoot() != "" && fullBashPolicyProviderName != "" && bashpolicycli.RuntimeEnabled() {
+		if err := embedded.WriteBashPolicyConfig(lizaPaths.ProjectRoot(), stdin); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to write .bash-policy.yaml: %v\n", err)
+		}
+	}
+
+	runBashPolicyInit(lizaPaths.ProjectRoot(), fullBashPolicyProviderName, bashPolicySubprocessStdin(rawStdin, stdin))
 
 	if slices.Contains(params.Agents, "opencode") {
 		if err := embedded.WriteOpenCodeExecTool(lizaPaths.ProjectRoot()); err != nil {

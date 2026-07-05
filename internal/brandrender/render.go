@@ -75,6 +75,9 @@ func ExpectedEmbeddedFiles(repoRoot string, values brand.Values) ([]RenderedFile
 	if err := appendTopLevelMarkdown(&out, repoRoot, values, "support-docs", "support-docs"); err != nil {
 		return nil, err
 	}
+	if err := appendBashPolicyFile(&out, repoRoot, values); err != nil {
+		return nil, err
+	}
 	return out, nil
 }
 
@@ -118,6 +121,18 @@ func appendTopLevelMarkdown(out *[]RenderedFile, repoRoot string, values brand.V
 		}
 		*out = append(*out, file)
 	}
+	return nil
+}
+
+func appendBashPolicyFile(out *[]RenderedFile, repoRoot string, values brand.Values) error {
+	srcPath := filepath.Join(repoRoot, ".bash-policy.yaml")
+	file, err := renderSourceFile(srcPath, "bash-policy.yaml", values)
+	if err != nil {
+		return err
+	}
+	values = valuesFromDefaults(values)
+	file.Content = bytes.ReplaceAll(file.Content, []byte("Bash(liza:*)"), []byte("Bash("+values.BinaryName+":*)"))
+	*out = append(*out, file)
 	return nil
 }
 

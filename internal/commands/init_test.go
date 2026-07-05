@@ -941,10 +941,71 @@ func TestInitCommandWithConfig_BashPolicyProviderScope(t *testing.T) {
 				t.Fatalf("bash-policy commands = %d, want 1", len(runner.commands))
 			}
 			assertBashPolicyCommand(t, runner.commands[0], gitDir, tt.provider)
+			if _, err := os.Stat(filepath.Join(gitDir, ".bash-policy.yaml")); err != nil {
+				t.Fatalf(".bash-policy.yaml was not created for full init: %v", err)
+			}
 			if tt.wantCodex {
 				verifyCodexHooks(t, gitDir)
 			}
 		})
+	}
+}
+
+func TestInitCommandWithConfig_BashPolicyPromptPreservesLaterInput(t *testing.T) {
+	gitDir := setupGitRepo(t)
+	defer os.RemoveAll(gitDir)
+	setupGlobalLiza(t)
+	t.Setenv(bashpolicycli.EnvEnableBashPolicy, "1")
+
+	runner := &initBashPolicyTestRunner{readStdinLine: true}
+	restore := setInitBashPolicyHooksForTest(
+		func(name string) (string, error) {
+			return filepath.Join(gitDir, "bin", name), nil
+		},
+		runner,
+	)
+	defer restore()
+
+	originalDir, _ := os.Getwd()
+	defer os.Chdir(originalDir)
+	os.Chdir(gitDir)
+	testhelpers.CreateCommittedSpecFile(t, gitDir, "vision.md", "# Vision\n")
+
+	policyPath := filepath.Join(gitDir, ".bash-policy.yaml")
+	originalPolicy := []byte("rules: []\n")
+	if err := os.WriteFile(policyPath, originalPolicy, 0644); err != nil {
+		t.Fatal(err)
+	}
+	ignorePath := filepath.Join(gitDir, ".claudeignore")
+	originalIgnore := []byte("# existing ignore\n")
+	if err := os.WriteFile(ignorePath, originalIgnore, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := InitCommandWithConfig(InitParams{
+		Description: "Test goal",
+		SpecRef:     "specs/vision.md",
+		Stdin:       strings.NewReader("n\ny\ny\n"),
+	}); err != nil {
+		t.Fatalf("InitCommandWithConfig() error = %v", err)
+	}
+
+	policyContent, err := os.ReadFile(policyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(policyContent, originalPolicy) {
+		t.Fatalf(".bash-policy.yaml changed despite decline:\n%s", string(policyContent))
+	}
+	if runner.stdinLine != "y\n" {
+		t.Fatalf("bash-policy subprocess stdin = %q, want second answer", runner.stdinLine)
+	}
+	ignoreContent, err := os.ReadFile(ignorePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if slices.Equal(ignoreContent, originalIgnore) {
+		t.Fatalf(".claudeignore was not overwritten by later prompt")
 	}
 }
 
@@ -2645,6 +2706,9 @@ func TestInitPairingCommand_BashPolicyDisabledSkipsLookup(t *testing.T) {
 	if lookups != 0 {
 		t.Fatalf("bash-policy lookups = %d, want zero when gate disabled", lookups)
 	}
+	if _, err := os.Stat(filepath.Join(gitDir, ".bash-policy.yaml")); !os.IsNotExist(err) {
+		t.Fatalf(".bash-policy.yaml state = %v, want absent when gate disabled", err)
+	}
 }
 
 func TestInitPairingCommand_BashPolicyProviderScope(t *testing.T) {
@@ -2687,12 +2751,18 @@ func TestInitPairingCommand_BashPolicyProviderScope(t *testing.T) {
 				if len(runner.commands) != 0 {
 					t.Fatalf("bash-policy commands = %d, want zero", len(runner.commands))
 				}
+				if _, err := os.Stat(filepath.Join(gitDir, ".bash-policy.yaml")); !os.IsNotExist(err) {
+					t.Fatalf(".bash-policy.yaml state = %v, want absent without supported provider", err)
+				}
 				return
 			}
 			if len(runner.commands) != 1 {
 				t.Fatalf("bash-policy commands = %d, want 1", len(runner.commands))
 			}
 			assertBashPolicyCommand(t, runner.commands[0], gitDir, tt.provider)
+			if _, err := os.Stat(filepath.Join(gitDir, ".bash-policy.yaml")); err != nil {
+				t.Fatalf(".bash-policy.yaml was not created for supported provider: %v", err)
+			}
 		})
 	}
 }
@@ -4005,13 +4075,23 @@ func setInitSembleHooksForTest(lookPath semble.ExecutableLookup, runner semble.C
 }
 
 type initBashPolicyTestRunner struct {
-	commands []bashpolicycli.Command
-	output   bashpolicycli.CommandOutput
-	err      error
+	commands      []bashpolicycli.Command
+	output        bashpolicycli.CommandOutput
+	err           error
+	readStdinLine bool
+	stdinLine     string
 }
 
 func (r *initBashPolicyTestRunner) Run(command bashpolicycli.Command) (bashpolicycli.CommandOutput, error) {
 	r.commands = append(r.commands, command)
+	if r.readStdinLine && command.Stdin != nil {
+		if reader, ok := command.Stdin.(*bufio.Reader); ok {
+			r.stdinLine, _ = reader.ReadString('\n')
+		} else {
+			reader := bufio.NewReader(command.Stdin)
+			r.stdinLine, _ = reader.ReadString('\n')
+		}
+	}
 	return r.output, r.err
 }
 

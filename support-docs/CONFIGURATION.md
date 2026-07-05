@@ -79,8 +79,9 @@ Depending on selected providers and options, `§BRAND_BINARY_NAME§ init` writes
 - the configured integration branch for MAS runs
 - optional tool activation artifacts when `§BRAND_ENV_PREFIX§_ENABLE_STACKLIT`,
   `§BRAND_ENV_PREFIX§_ENABLE_SCIP_SEARCH`, or `§BRAND_ENV_PREFIX§_ENABLE_SEMBLE` is enabled
-- standalone bash-policy provider hooks when `§BRAND_ENV_PREFIX§_ENABLE_BASH_POLICY` is enabled
-  and the `bash-policy` CLI is installed
+- standalone `.bash-policy.yaml` defaults and provider hooks when
+  `§BRAND_ENV_PREFIX§_ENABLE_BASH_POLICY` is enabled; hook installation also
+  requires the `bash-policy` CLI
 
 For brownfield projects that already have their own `CLAUDE.md`, `AGENTS.md`,
 or `GEMINI.md`, §BRAND_NAME_TITLE§ does not overwrite the repo-root file. It uses the
@@ -674,16 +675,19 @@ or make cluster membership authoritative.
 ### Bash Policy (`§BRAND_ENV_PREFIX§_ENABLE_BASH_POLICY`)
 
 `bash-policy` is an optional standalone CLI that installs provider-aware bash
-command policy hooks for Claude and Codex. §BRAND_NAME_TITLE§ does not vendor or implement the
-policy engine; it only calls the installed executable during `§BRAND_BINARY_NAME§ init` when
-explicitly enabled.
+command policy hooks for Claude and Codex. When explicitly enabled,
+`§BRAND_BINARY_NAME§ init` writes the embedded default project policy to
+`.bash-policy.yaml`; if that file already exists, init asks before overwriting
+it. §BRAND_NAME_TITLE§ does not vendor or implement the policy engine; it only
+calls the installed executable during `§BRAND_BINARY_NAME§ init` when explicitly
+enabled.
 
 `§BRAND_ENV_PREFIX§_ENABLE_BASH_POLICY` is process-local activation, not durable project state.
 Values are trimmed and compared case-insensitively:
 
 | Value | Meaning |
 |-------|---------|
-| `1`, `true` | Ask `§BRAND_BINARY_NAME§ init` to run `bash-policy init` for the selected Claude/Codex providers |
+| `1`, `true` | Ask `§BRAND_BINARY_NAME§ init` to write `.bash-policy.yaml` and run `bash-policy init` for the selected Claude/Codex providers |
 | unset, empty, `0`, `false` | Keep bash-policy disabled for the current init process |
 
 When enabled, `§BRAND_BINARY_NAME§ init` runs:

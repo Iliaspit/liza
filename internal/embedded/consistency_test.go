@@ -63,6 +63,7 @@ func TestArtifactConsistencyRendersNonDefaultBrand(t *testing.T) {
 	writeConsistencyFile(t, filepath.Join(repoRoot, "contracts", "CORE.md"), "You are a §BRAND_NAME_TITLE§ agent.\n")
 	writeConsistencyFile(t, filepath.Join(repoRoot, "skills", "liza-logs", "SKILL.md"), "name: §BRAND_NAME_LOWER§-logs\n")
 	writeConsistencyFile(t, filepath.Join(repoRoot, "support-docs", "USAGE.md"), "Run §BRAND_BINARY_NAME§.\n")
+	writeConsistencyFile(t, filepath.Join(repoRoot, ".bash-policy.yaml"), "rules: []\n")
 
 	values := brand.ValuesFromEnv(func(key string) string {
 		switch key {

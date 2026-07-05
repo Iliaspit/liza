@@ -48,6 +48,9 @@ var codexConfigContent []byte
 //go:embed "codex-hooks.json"
 var codexHooksContent []byte
 
+//go:embed "bash-policy.yaml"
+var bashPolicyContent []byte
+
 //go:embed "opencode-tools/exec.ts"
 var opencodeExecToolContent []byte
 
@@ -1365,6 +1368,30 @@ func WriteClaudeIgnore(projectRoot string, reader *bufio.Reader) error {
 	}
 	if err := os.WriteFile(ignorePath, renderEmbeddedAsset(claudeIgnoreContent), 0644); err != nil {
 		return fmt.Errorf("failed to write .claudeignore: %w", err)
+	}
+	return nil
+}
+
+// WriteBashPolicyConfig writes the embedded bash-policy.yaml to .bash-policy.yaml
+// in the project root. Existing files are overwritten only after confirmation.
+func WriteBashPolicyConfig(projectRoot string, reader *bufio.Reader) error {
+	if reader == nil {
+		reader = bufio.NewReader(os.Stdin)
+	}
+	policyPath := filepath.Join(projectRoot, ".bash-policy.yaml")
+	if _, err := os.Stat(policyPath); err == nil {
+		ok, err := confirmMerge(fmt.Sprintf(".bash-policy.yaml already exists. Overwrite with %s template? (y/n): ", brand.NameTitle), reader)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return nil
+		}
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("checking .bash-policy.yaml: %w", err)
+	}
+	if err := os.WriteFile(policyPath, bashPolicyContent, 0644); err != nil {
+		return fmt.Errorf("failed to write .bash-policy.yaml: %w", err)
 	}
 	return nil
 }

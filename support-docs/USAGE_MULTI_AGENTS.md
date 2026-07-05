@@ -146,6 +146,9 @@ cat §BRAND_PROJECT_DIRNAME§/state.yaml
 - `.claude/settings.json` — Claude Code project permissions (§BRAND_NAME_TITLE§ CLI, skills, git/build commands)
 - `CLAUDE.md`, `AGENTS.md`, `GEMINI.md` — Symlinks to `~/§BRAND_GLOBAL_DIRNAME§/CORE.md`
 - `GUARDRAILS.md` — Project-specific constraints template (if not already present)
+- `.bash-policy.yaml` when `§BRAND_ENV_PREFIX§_ENABLE_BASH_POLICY=1` is set
+  before init; standalone provider hooks when the `bash-policy` CLI is installed
+  and hook installation succeeds
 - Integration branch (default `integration`, configurable via `--branch`) — For merging completed work
 
 Contracts and skills live in `~/§BRAND_GLOBAL_DIRNAME§/` (global, from `§BRAND_BINARY_NAME§ setup`), not in the project.

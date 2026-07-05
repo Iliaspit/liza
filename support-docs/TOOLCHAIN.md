@@ -93,9 +93,10 @@ export HF_HUB_OFFLINE=1
 ```
 
 The `full` profile also installs `bash-policy` and exports
-`§BRAND_ENV_PREFIX§_ENABLE_BASH_POLICY=1`. Source that env file before `§BRAND_BINARY_NAME§ init` when the
-project should receive standalone bash-policy provider hooks. For the full
-usage lifecycle, see your bash-policy distribution's configuration guide.
+`§BRAND_ENV_PREFIX§_ENABLE_BASH_POLICY=1`. Source that env file before
+`§BRAND_BINARY_NAME§ init` when the project should receive `.bash-policy.yaml`
+and standalone bash-policy provider hooks. For the full usage lifecycle, see
+your bash-policy distribution's configuration guide.
 
 ## Project Activation
 
@@ -115,11 +116,13 @@ files and optional indexing hooks:
 ```
 
 Project-local activation still belongs to `§BRAND_BINARY_NAME§ init`: Stacklit hooks, SCIP hook
-plans, `.sembleignore`, provider symlinks, bash-policy provider hooks, and
-OpenCode exec tools are written there. If `§BRAND_ENV_PREFIX§_ENABLE_BASH_POLICY` is truthy but
-the standalone `bash-policy` CLI is unavailable or fails, `§BRAND_BINARY_NAME§ init` warns and
-continues. Global `AGENT_TOOLS.md` remains generic and must not contain stale
-project-specific index paths.
+plans, `.sembleignore`, provider symlinks, bash-policy policy files and
+provider hooks, and OpenCode exec tools are written there. If
+`§BRAND_ENV_PREFIX§_ENABLE_BASH_POLICY` is truthy but the standalone
+`bash-policy` CLI is unavailable or fails, `§BRAND_BINARY_NAME§ init` warns and
+continues; `.bash-policy.yaml` is written before that CLI call. Global
+`AGENT_TOOLS.md` remains generic and must not contain stale project-specific
+index paths.
 
 ## Install Fallbacks
 

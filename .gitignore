@@ -36,6 +36,7 @@ internal/embedded/*
 !internal/embedded/guardrails-template.md
 !internal/embedded/pipeline.yaml
 !internal/embedded/support.md
+!internal/embedded/bash-policy.yaml
 !internal/embedded/claude-settings.json
 !internal/embedded/codex-config.toml
 !internal/embedded/codex-hooks.json

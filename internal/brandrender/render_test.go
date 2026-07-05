@@ -76,6 +76,13 @@ func TestExpectedEmbeddedFilesRendersMacros(t *testing.T) {
 	writeFile(t, filepath.Join(root, "contracts", "CORE.md"), "# §BRAND_NAME_TITLE§\n")
 	writeFile(t, filepath.Join(root, "skills", "liza-logs", "SKILL.md"), "name: §BRAND_NAME_LOWER§\n")
 	writeFile(t, filepath.Join(root, "support-docs", "USAGE.md"), "run §BRAND_BINARY_NAME§\n")
+	writeFile(t, filepath.Join(root, ".bash-policy.yaml"), strings.Join([]string{
+		"rules:",
+		"- kind: permission-family",
+		"  identity: Bash(liza:*)",
+		"  status: resolved",
+		"",
+	}, "\n"))
 
 	values := brand.RuntimeValues()
 	values.NameLower = "acme-agent"
@@ -87,9 +94,20 @@ func TestExpectedEmbeddedFilesRendersMacros(t *testing.T) {
 		t.Fatalf("ExpectedEmbeddedFiles: %v", err)
 	}
 	var sawRenamedSkill bool
+	var sawBrandedBashPolicy bool
 	for _, file := range files {
 		if strings.Contains(file.RelPath, "acme-agent-logs") {
 			sawRenamedSkill = true
+		}
+		if file.RelPath == "bash-policy.yaml" {
+			rendered := string(file.Content)
+			if !strings.Contains(rendered, "Bash(acme-agent:*)") {
+				t.Fatalf("bash-policy.yaml missing branded binary permission:\n%s", rendered)
+			}
+			if strings.Contains(rendered, "Bash(liza:*)") {
+				t.Fatalf("bash-policy.yaml kept default binary permission:\n%s", rendered)
+			}
+			sawBrandedBashPolicy = true
 		}
 		if strings.Contains(string(file.Content), "§") || strings.Contains(string(file.Content), "BRAND_") {
 			t.Fatalf("unrendered macro in %s: %s", file.RelPath, file.Content)
@@ -97,6 +115,9 @@ func TestExpectedEmbeddedFilesRendersMacros(t *testing.T) {
 	}
 	if !sawRenamedSkill {
 		t.Fatalf("expected generated skill path rename, got %+v", files)
+	}
+	if !sawBrandedBashPolicy {
+		t.Fatalf("expected generated bash-policy.yaml, got %+v", files)
 	}
 }
 

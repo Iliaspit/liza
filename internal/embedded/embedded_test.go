@@ -73,6 +73,7 @@ func TestRuntimeEmbeddedAssetBrandPlaceholdersAreKnownAndRendered(t *testing.T) 
 		"__BRAND_ENV_PREFIX__":      true,
 	}
 	assets := map[string][]byte{
+		"bash-policy.yaml":                 bashPolicyContent,
 		"claude-settings.json":             claudeSettingsContent,
 		"codex-hooks.json":                 codexHooksContent,
 		"opencode-tools/exec.ts":           opencodeExecToolContent,
@@ -1021,6 +1022,63 @@ func TestWriteClaudeSettings_NewFile(t *testing.T) {
 	}
 	if !foundLizaCLI {
 		t.Errorf("Expected Bash(liza:*) in allow array")
+	}
+}
+
+func TestWriteBashPolicyConfig_NewFile(t *testing.T) {
+	projectRoot := t.TempDir()
+
+	if err := WriteBashPolicyConfig(projectRoot, bufio.NewReader(strings.NewReader(""))); err != nil {
+		t.Fatalf("WriteBashPolicyConfig failed: %v", err)
+	}
+
+	content, err := os.ReadFile(filepath.Join(projectRoot, ".bash-policy.yaml"))
+	if err != nil {
+		t.Fatalf("failed to read .bash-policy.yaml: %v", err)
+	}
+	if !bytes.Equal(content, bashPolicyContent) {
+		t.Fatalf(".bash-policy.yaml content does not match embedded source")
+	}
+}
+
+func TestWriteBashPolicyConfig_OverwriteDeclined(t *testing.T) {
+	projectRoot := t.TempDir()
+	policyPath := filepath.Join(projectRoot, ".bash-policy.yaml")
+	original := []byte("rules: []\n")
+	if err := os.WriteFile(policyPath, original, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := WriteBashPolicyConfig(projectRoot, bufio.NewReader(strings.NewReader("n\n"))); err != nil {
+		t.Fatalf("WriteBashPolicyConfig failed: %v", err)
+	}
+
+	content, err := os.ReadFile(policyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(content, original) {
+		t.Fatalf(".bash-policy.yaml was overwritten after decline:\n%s", string(content))
+	}
+}
+
+func TestWriteBashPolicyConfig_OverwriteAccepted(t *testing.T) {
+	projectRoot := t.TempDir()
+	policyPath := filepath.Join(projectRoot, ".bash-policy.yaml")
+	if err := os.WriteFile(policyPath, []byte("rules: []\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := WriteBashPolicyConfig(projectRoot, bufio.NewReader(strings.NewReader("y\n"))); err != nil {
+		t.Fatalf("WriteBashPolicyConfig failed: %v", err)
+	}
+
+	content, err := os.ReadFile(policyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(content, bashPolicyContent) {
+		t.Fatalf(".bash-policy.yaml content does not match embedded source")
 	}
 }
 
