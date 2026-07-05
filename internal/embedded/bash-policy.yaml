@@ -235,6 +235,261 @@ rules:
   - kind: command-shape
     identity: "true"
     decision: allow
+  - kind: command-shape
+    identity: basename <pattern>
+    decision: allow
+  - kind: command-shape
+    identity: cat <safe-path>...
+    decision: allow
+  - kind: command-shape
+    identity: cut -d <pattern> -f <number> <pattern>
+    decision: allow
+  - kind: command-shape
+    identity: cut -f <number> <pattern>
+    decision: allow
+  - kind: command-shape
+    identity: date
+    decision: allow
+  - kind: command-shape
+    identity: diff <pattern> <pattern>
+    decision: allow
+  - kind: command-shape
+    identity: diff -u <pattern> <pattern>
+    decision: allow
+  - kind: command-shape
+    identity: dirname <pattern>
+    decision: allow
+  - kind: command-shape
+    identity: file <pattern>
+    decision: allow
+  - kind: command-shape
+    identity: gh auth status
+    decision: allow
+  - kind: command-shape
+    identity: gh pr diff <number> --name-only
+    decision: allow
+  - kind: command-shape
+    identity: gh pr diff <number> --patch
+    decision: allow
+  - kind: command-shape
+    identity: gh pr diff <number> --patch -- <pattern>
+    decision: allow
+  - kind: command-shape
+    identity: gh pr list --head <pattern> --base <pattern> --json <fields>
+    decision: allow
+  - kind: command-shape
+    identity: gh repo view --json <fields>
+    decision: allow
+  - kind: command-shape
+    identity: git branch --show-current
+    decision: allow
+  - kind: command-shape
+    identity: git diff --cached --check
+    decision: allow
+  - kind: command-shape
+    identity: git diff --cached --name-only
+    decision: allow
+  - kind: command-shape
+    identity: git diff --check
+    decision: allow
+  - kind: command-shape
+    identity: git diff --name-only
+    decision: allow
+  - kind: command-shape
+    identity: git diff --name-status
+    decision: allow
+  - kind: command-shape
+    identity: git rev-parse HEAD
+    decision: allow
+  - kind: command-shape
+    identity: go test <safe-path>...
+    decision: allow
+  - kind: command-shape
+    identity: go test <safe-path> -count=1
+    decision: allow
+  - kind: command-shape
+    identity: go test <safe-path> -run <pattern>
+    decision: allow
+  - kind: command-shape
+    identity: go test <safe-path> -run <pattern> -count=1
+    decision: allow
+  - kind: command-shape
+    identity: go test -race <safe-path>
+    decision: allow
+  - kind: command-shape
+    identity: go test -race <safe-path> -count=1
+    decision: allow
+  - kind: command-shape
+    identity: gofmt -w <safe-path>...
+    decision: allow
+  - kind: command-shape
+    identity: head <safe-path>
+    decision: allow
+  - kind: command-shape
+    identity: head -n <number> <safe-path>
+    decision: allow
+  - kind: command-shape
+    identity: jq empty <pattern>
+    decision: allow
+  - kind: command-shape
+    identity: jq keys <pattern>
+    decision: allow
+  - kind: command-shape
+    identity: jq -r <pattern> <pattern>
+    decision: allow
+  - kind: command-shape
+    identity: ls
+    decision: allow
+  - kind: command-shape
+    identity: ls <safe-path>...
+    decision: allow
+  - kind: command-shape
+    identity: ls -l <safe-path>...
+    decision: allow
+  - kind: command-shape
+    identity: ls -la <safe-path>...
+    decision: allow
+  - kind: command-shape
+    identity: make build
+    decision: allow
+  - kind: command-shape
+    identity: make lint
+    decision: allow
+  - kind: command-shape
+    identity: make test
+    decision: allow
+  - kind: command-shape
+    identity: mdq <pattern> <pattern>
+    decision: allow
+  - kind: command-shape
+    identity: mdtoc <pattern>
+    decision: allow
+  - kind: command-shape
+    identity: pre-commit run --files <safe-path>...
+    decision: allow
+  - kind: command-shape
+    identity: pytest -q <safe-path>...
+    decision: allow
+  - kind: command-shape
+    identity: python3 -m py_compile <safe-path>...
+    decision: allow
+  - kind: command-shape
+    identity: python3 -m pytest -q <safe-path>...
+    decision: allow
+  - kind: command-shape
+    identity: realpath <pattern>
+    decision: allow
+  - kind: command-shape
+    identity: rg <pattern> <safe-path>...
+    decision: allow
+  - kind: command-shape
+    identity: rg --files
+    decision: allow
+  - kind: command-shape
+    identity: rg --files <safe-path>...
+    decision: allow
+  - kind: command-shape
+    identity: rg -n <pattern> <safe-path>...
+    decision: allow
+  - kind: command-shape
+    identity: ruff check <safe-path>...
+    decision: allow
+  - kind: command-shape
+    identity: ruff format --check <safe-path>...
+    decision: allow
+  - kind: command-shape
+    identity: scip-search graph --index <pattern> --symbol <pattern> --markdown
+    decision: allow
+  - kind: command-shape
+    identity: scip-search impact --index <pattern> --symbol <pattern> --one-line
+    decision: allow
+  - kind: command-shape
+    identity: scip-search implementations --index <pattern> --name <pattern> --one-line
+    decision: allow
+  - kind: command-shape
+    identity: scip-search packages --index <pattern> --prefix <pattern>
+    decision: allow
+  - kind: command-shape
+    identity: scip-search references --index <pattern> --name <pattern> --one-line
+    decision: allow
+  - kind: command-shape
+    identity: scip-search references --index <pattern> --symbol <pattern> --location-only
+    decision: allow
+  - kind: command-shape
+    identity: scip-search symbols --index <pattern> --name <pattern>
+    decision: allow
+  - kind: command-shape
+    identity: scip-search symbols --index <pattern> --name <pattern> --nested-json
+    decision: allow
+  - kind: command-shape
+    identity: semble find-related <pattern> <number> <pattern>
+    decision: allow
+  - kind: command-shape
+    identity: semble search <pattern> <pattern>
+    decision: allow
+  - kind: command-shape
+    identity: semble search <pattern> <pattern> --content <pattern>
+    decision: allow
+  - kind: command-shape
+    identity: semble search <pattern> <pattern> --content <pattern> --top-k <number>
+    decision: allow
+  - kind: command-shape
+    identity: sha256sum <pattern>
+    decision: allow
+  - kind: command-shape
+    identity: shellcheck <pattern>
+    decision: allow
+  - kind: command-shape
+    identity: sort <pattern>
+    decision: allow
+  - kind: command-shape
+    identity: stacklit find-module <pattern> -i <pattern>
+    decision: allow
+  - kind: command-shape
+    identity: stacklit get-dependencies <pattern> -i <pattern>
+    decision: allow
+  - kind: command-shape
+    identity: stacklit get-hints -i <pattern>
+    decision: allow
+  - kind: command-shape
+    identity: stacklit get-hot-files -i <pattern>
+    decision: allow
+  - kind: command-shape
+    identity: stacklit get-module <pattern> -i <pattern>
+    decision: allow
+  - kind: command-shape
+    identity: tail <safe-path>
+    decision: allow
+  - kind: command-shape
+    identity: tail -n <number> <safe-path>
+    decision: allow
+  - kind: command-shape
+    identity: test ! -d <safe-path>
+    decision: allow
+  - kind: command-shape
+    identity: tree <pattern>
+    decision: allow
+  - kind: command-shape
+    identity: uniq <pattern>
+    decision: allow
+  - kind: command-shape
+    identity: wc -c <safe-path>...
+    decision: allow
+  - kind: command-shape
+    identity: wc -l <safe-path>...
+    decision: allow
+  - kind: command-shape
+    identity: which <pattern>
+    decision: allow
+  - kind: command-shape
+    identity: yq keys <pattern>
+    decision: allow
+  - kind: command-shape
+    identity: yq <pattern> <pattern>
+    decision: allow
+  - kind: command-shape
+    identity: yq -r <pattern> <pattern>
+    decision: allow
 
   # Export bookkeeping only. Resolved permission families suppress broad Claude
   # Bash(...) candidate noise; they do not authorize runtime commands.

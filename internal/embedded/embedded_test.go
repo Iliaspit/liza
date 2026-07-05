@@ -1281,6 +1281,41 @@ func TestEmbeddedClaudeSettingsScipSearchPermissions(t *testing.T) {
 	assertClaudeSettingsToolPermissions(t, allow)
 }
 
+func TestEmbeddedBashPolicyDefinesRuntimeCommandShapesForClaudeBashTools(t *testing.T) {
+	var settings map[string]any
+	if err := json.Unmarshal(renderEmbeddedAsset(claudeSettingsContent), &settings); err != nil {
+		t.Fatalf("embedded claude-settings.json is invalid JSON: %v", err)
+	}
+
+	allowSet := stringSet(claudeSettingsAllowPermissions(t, settings))
+	policyShapes := bashPolicyCommandShapeIdentities(t, renderEmbeddedAsset(bashPolicyContent))
+	required := map[string]string{
+		"Bash(cat:*)":        "cat <safe-path>...",
+		"Bash(gh:*)":         "gh pr diff <number> --name-only",
+		"Bash(go test:*)":    "go test <safe-path>...",
+		"Bash(gofmt:*)":      "gofmt -w <safe-path>...",
+		"Bash(jq:*)":         "jq -r <pattern> <pattern>",
+		"Bash(make test)":    "make test",
+		"Bash(mdtoc:*)":      "mdtoc <pattern>",
+		"Bash(pre-commit:*)": "pre-commit run --files <safe-path>...",
+		"Bash(rg:*)":         "rg <pattern> <safe-path>...",
+		"Bash(scip-search:*)": "scip-search impact --index <pattern> " +
+			"--symbol <pattern> --one-line",
+		"Bash(semble:*)":   "semble search <pattern> <pattern>",
+		"Bash(stacklit:*)": "stacklit get-module <pattern> -i <pattern>",
+		"Bash(yq:*)":       "yq -r <pattern> <pattern>",
+	}
+
+	for permission, shape := range required {
+		if !allowSet[permission] {
+			t.Fatalf("test fixture drift: embedded claude-settings.json no longer contains %s", permission)
+		}
+		if !policyShapes[shape] {
+			t.Errorf("bash-policy.yaml missing runtime command-shape %q for %s", shape, permission)
+		}
+	}
+}
+
 func TestEmbeddedClaudeSettingsSkillPermissionsIncludeInputReadiness(t *testing.T) {
 	var settings map[string]any
 	if err := json.Unmarshal(renderEmbeddedAsset(claudeSettingsContent), &settings); err != nil {
@@ -1447,6 +1482,30 @@ func stringSet(values []string) map[string]bool {
 		set[value] = true
 	}
 	return set
+}
+
+func bashPolicyCommandShapeIdentities(t *testing.T, content []byte) map[string]bool {
+	t.Helper()
+
+	identities := make(map[string]bool)
+	inCommandShape := false
+	for _, rawLine := range strings.Split(string(content), "\n") {
+		line := strings.TrimSpace(rawLine)
+		switch {
+		case line == "- kind: command-shape":
+			inCommandShape = true
+		case strings.HasPrefix(line, "- kind: "):
+			inCommandShape = false
+		case inCommandShape && strings.HasPrefix(line, "identity: "):
+			identity := strings.TrimPrefix(line, "identity: ")
+			identities[strings.Trim(identity, `"`)] = true
+		}
+	}
+
+	if len(identities) == 0 {
+		t.Fatal("bash-policy.yaml contains no command-shape identities")
+	}
+	return identities
 }
 
 func assertClaudeSettingsToolPermissions(t *testing.T, allow []string) {
