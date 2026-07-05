@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/liza-mas/liza/internal/db"
+	"github.com/liza-mas/liza/internal/functionalclusters"
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/ops"
 	"github.com/liza-mas/liza/internal/pipeline"
@@ -23,8 +24,9 @@ type orchestratorStrategy struct {
 }
 
 var (
-	orchestratorScipRefresh     = scipsearch.RefreshIndexes
-	orchestratorStacklitRefresh = stacklit.RefreshIndex
+	orchestratorScipRefresh               = scipsearch.RefreshIndexes
+	orchestratorStacklitRefresh           = stacklit.RefreshIndex
+	orchestratorFunctionalClustersRefresh = functionalclusters.RefreshIndex
 )
 
 const defaultOrchestratorTimeout = 4 * time.Hour
@@ -116,6 +118,7 @@ func (s *orchestratorStrategy) PreExecution(bb *db.Blackboard, config Supervisor
 	}
 	refreshOrchestratorProjectRootScipIndexes(bb, config)
 	refreshOrchestratorProjectRootStacklitIndex(config)
+	refreshOrchestratorProjectRootFunctionalClustersIndex(bb, config)
 	return nil
 }
 
@@ -229,6 +232,34 @@ func refreshOrchestratorProjectRootStacklitIndex(config SupervisorConfig) {
 	}
 	for _, failure := range result.Failures {
 		logger.Warn("Orchestrator Stacklit indexer failed",
+			"diagnostic", failure.Diagnostic)
+	}
+}
+
+func refreshOrchestratorProjectRootFunctionalClustersIndex(bb *db.Blackboard, config SupervisorConfig) {
+	logger := GetLogger()
+	state, err := bb.Read()
+	if err != nil {
+		logger.Warn("Failed to read state for orchestrator Functional Clusters refresh", "error", err)
+		return
+	}
+
+	configuredLanguages := state.Config.ScipSearch
+	if !functionalclusters.RefreshEnabled(configuredLanguages) {
+		return
+	}
+
+	result, err := orchestratorFunctionalClustersRefresh(functionalclusters.RefreshOptions{
+		TargetRoot:          config.ProjectRoot,
+		TargetKind:          functionalclusters.TargetKindProjectRoot,
+		ConfiguredLanguages: configuredLanguages,
+	})
+	if err != nil {
+		logger.Warn("Orchestrator Functional Clusters refresh failed", "error", err)
+		return
+	}
+	for _, failure := range result.Failures {
+		logger.Warn("Orchestrator Functional Clusters build failed",
 			"diagnostic", failure.Diagnostic)
 	}
 }

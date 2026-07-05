@@ -11,6 +11,7 @@ import (
 
 	"github.com/liza-mas/liza/internal/agent"
 	"github.com/liza-mas/liza/internal/embedded"
+	"github.com/liza-mas/liza/internal/functionalclusters"
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/pipeline"
 	"github.com/liza-mas/liza/internal/scipsearch"
@@ -31,6 +32,7 @@ func disableOptionalIndexingForTest(t *testing.T) {
 
 	t.Setenv(stacklit.EnvEnableStacklit, "false")
 	t.Setenv(scipsearch.EnvEnableScipSearch, "false")
+	t.Setenv(functionalclusters.EnvEnableFunctionalClusters, "false")
 	t.Setenv(semble.EnvEnableSemble, "false")
 }
 
@@ -82,6 +84,7 @@ func sessionStartEnv(projectDir string) []string {
 		"LIZA_AGENT_ID",
 		stacklit.EnvEnableStacklit,
 		scipsearch.EnvEnableScipSearch,
+		functionalclusters.EnvEnableFunctionalClusters,
 		semble.EnvEnableSemble,
 	}
 	env := make([]string, 0, len(os.Environ())+4)
@@ -96,6 +99,7 @@ func sessionStartEnv(projectDir string) []string {
 		"CLAUDE_PROJECT_DIR="+projectDir,
 		stacklit.EnvEnableStacklit+"=false",
 		scipsearch.EnvEnableScipSearch+"=false",
+		functionalclusters.EnvEnableFunctionalClusters+"=false",
 		semble.EnvEnableSemble+"=false",
 	)
 	return env
@@ -109,6 +113,7 @@ func buildDisabledOptionalIndexPrompt(t *testing.T, projectRoot string) string {
 	taskWorktree := filepath.Join(projectRoot, worktree)
 	writeIndexingActivationFile(t, filepath.Join(taskWorktree, "stacklit.json"), `{"project":{"name":"stale"}}`)
 	writeIndexingActivationFile(t, filepath.Join(taskWorktree, ".liza", "scip", "go.scip"), "stale go index")
+	writeIndexingActivationFile(t, filepath.Join(taskWorktree, "functional-clusters.json"), "{}\n")
 	writeIndexingActivationFile(t, filepath.Join(taskWorktree, ".sembleignore"), semble.DefaultIgnorePayload())
 
 	state := &models.State{

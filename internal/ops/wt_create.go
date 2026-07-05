@@ -93,6 +93,7 @@ func CreateWorktree(projectRoot, taskID string, fresh bool) (*CreateWorktreeResu
 			result.Warnings = append(result.Warnings, PrepareSembleWorktreeIgnore(worktreeDir)...)
 			result.Warnings = append(result.Warnings, refreshTaskWorktreeScipIndexes(worktreeDir, scipSearchLanguages)...)
 			result.Warnings = append(result.Warnings, refreshTaskWorktreeStacklitIndex(worktreeDir)...)
+			result.Warnings = append(result.Warnings, refreshTaskWorktreeFunctionalClustersIndex(worktreeDir, scipSearchLanguages)...)
 			return result, nil
 		}
 	}
@@ -150,6 +151,7 @@ func CreateWorktree(projectRoot, taskID string, fresh bool) (*CreateWorktreeResu
 	result.Warnings = append(result.Warnings, PrepareSembleWorktreeIgnore(worktreeDir)...)
 	result.Warnings = append(result.Warnings, refreshTaskWorktreeScipIndexes(worktreeDir, scipSearchLanguages)...)
 	result.Warnings = append(result.Warnings, refreshTaskWorktreeStacklitIndex(worktreeDir)...)
+	result.Warnings = append(result.Warnings, refreshTaskWorktreeFunctionalClustersIndex(worktreeDir, scipSearchLanguages)...)
 
 	return result, nil
 }

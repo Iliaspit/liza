@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/liza-mas/liza/internal/errors"
+	"github.com/liza-mas/liza/internal/functionalclusters"
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/ops"
 	"github.com/liza-mas/liza/internal/paths"
@@ -21,25 +22,27 @@ import (
 )
 
 var (
-	buildSemblePromptMetadata = semble.BuildPromptMetadata
-	scipAvailableIndexes      = scipsearch.AvailableIndexes
-	stacklitAvailableIndexes  = stacklit.AvailableIndexes
+	buildSemblePromptMetadata          = semble.BuildPromptMetadata
+	scipAvailableIndexes               = scipsearch.AvailableIndexes
+	stacklitAvailableIndexes           = stacklit.AvailableIndexes
+	functionalClustersAvailableIndexes = functionalclusters.AvailableIndexes
 )
 
 // baseConfigFrom constructs the BasePromptConfig shared by all roles.
-func baseConfigFrom(state *models.State, config SupervisorConfig, taskID string, scipIndexes []prompts.ScipSearchIndex, stacklitIndexes []prompts.StacklitIndex, sembleSearch prompts.SembleSearchMetadata) prompts.BasePromptConfig {
+func baseConfigFrom(state *models.State, config SupervisorConfig, taskID string, scipIndexes []prompts.ScipSearchIndex, stacklitIndexes []prompts.StacklitIndex, functionalClusterIndexes []prompts.FunctionalClusterIndex, sembleSearch prompts.SembleSearchMetadata) prompts.BasePromptConfig {
 	return prompts.BasePromptConfig{
-		Role:              config.Role,
-		AgentID:           config.AgentID,
-		TaskID:            taskID,
-		SpecsDir:          config.SpecsDir,
-		ProjectRoot:       config.ProjectRoot,
-		StatePath:         config.StatePath,
-		GoalDesc:          state.Goal.Description,
-		GoalSpecRef:       state.Goal.SpecRef,
-		ScipSearchIndexes: scipIndexes,
-		StacklitIndexes:   stacklitIndexes,
-		SembleSearch:      sembleSearch,
+		Role:               config.Role,
+		AgentID:            config.AgentID,
+		TaskID:             taskID,
+		SpecsDir:           config.SpecsDir,
+		ProjectRoot:        config.ProjectRoot,
+		StatePath:          config.StatePath,
+		GoalDesc:           state.Goal.Description,
+		GoalSpecRef:        state.Goal.SpecRef,
+		ScipSearchIndexes:  scipIndexes,
+		StacklitIndexes:    stacklitIndexes,
+		FunctionalClusters: functionalClusterIndexes,
+		SembleSearch:       sembleSearch,
 	}
 }
 
@@ -62,6 +65,7 @@ func buildPromptWithContext(state *models.State, config SupervisorConfig, taskID
 		taskID,
 		toBasePromptScipSearchIndexes(data.ScipIndexes),
 		toBasePromptStacklitIndexes(data.StacklitIndexes),
+		toBasePromptFunctionalClusterIndexes(data.FunctionalClusters),
 		availablePromptSembleSearchMetadata(data.Worktree, semble.TargetKindTaskWorktree),
 	))
 	if err != nil {
@@ -105,6 +109,7 @@ func buildOrchestratorPromptContext(state *models.State, config SupervisorConfig
 		"",
 		toBasePromptScipSearchIndexes(data.ScipIndexes),
 		toBasePromptStacklitIndexes(data.StacklitIndexes),
+		toBasePromptFunctionalClusterIndexes(data.FunctionalClusters),
 		availablePromptSembleSearchMetadata(config.ProjectRoot, semble.TargetKindProjectRoot),
 	))
 	if err != nil {
@@ -137,24 +142,26 @@ func buildOrchestratorRoleContextData(state *models.State, config SupervisorConf
 
 	availableIndexes := availablePromptScipIndexRefs(state, config.ProjectRoot)
 	availableStacklitIndexes := availablePromptStacklitIndexRefs(config.ProjectRoot)
+	availableFunctionalClusters := availablePromptFunctionalClusterIndexRefs(config.ProjectRoot)
 
 	skills, _ := resolver.Skills(config.Role)
 	mandatoryDocs, _ := resolver.MandatoryDocs(config.Role)
 
 	return &prompts.RoleContextData{
-		Role:            config.Role,
-		AgentID:         config.AgentID,
-		RoleType:        "orchestrator",
-		DashboardOutput: dashboard,
-		WakeInstruction: wakeInstruction,
-		ScipIndexes:     availableIndexes,
-		StacklitIndexes: availableStacklitIndexes,
-		ProjectRoot:     config.ProjectRoot,
-		StatePath:       config.StatePath,
-		SpecsDir:        config.SpecsDir,
-		GoalDesc:        state.Goal.Description,
-		Skills:          skills,
-		MandatoryDocs:   mandatoryDocs,
+		Role:               config.Role,
+		AgentID:            config.AgentID,
+		RoleType:           "orchestrator",
+		DashboardOutput:    dashboard,
+		WakeInstruction:    wakeInstruction,
+		ScipIndexes:        availableIndexes,
+		StacklitIndexes:    availableStacklitIndexes,
+		FunctionalClusters: availableFunctionalClusters,
+		ProjectRoot:        config.ProjectRoot,
+		StatePath:          config.StatePath,
+		SpecsDir:           config.SpecsDir,
+		GoalDesc:           state.Goal.Description,
+		Skills:             skills,
+		MandatoryDocs:      mandatoryDocs,
 	}, nil
 }
 
@@ -165,6 +172,17 @@ func toPromptStacklitIndexRefs(indexes []stacklit.IndexRef) []prompts.StacklitIn
 	refs := make([]prompts.StacklitIndexRef, 0, len(indexes))
 	for _, index := range indexes {
 		refs = append(refs, prompts.StacklitIndexRef{Path: index.Path})
+	}
+	return refs
+}
+
+func toPromptFunctionalClusterIndexRefs(indexes []functionalclusters.IndexRef) []prompts.FunctionalClusterIndexRef {
+	if len(indexes) == 0 {
+		return nil
+	}
+	refs := make([]prompts.FunctionalClusterIndexRef, 0, len(indexes))
+	for _, index := range indexes {
+		refs = append(refs, prompts.FunctionalClusterIndexRef{Path: index.Path})
 	}
 	return refs
 }
@@ -210,6 +228,19 @@ func toBasePromptStacklitIndexes(indexes []prompts.StacklitIndexRef) []prompts.S
 	return refs
 }
 
+func toBasePromptFunctionalClusterIndexes(indexes []prompts.FunctionalClusterIndexRef) []prompts.FunctionalClusterIndex {
+	if len(indexes) == 0 {
+		return nil
+	}
+	refs := make([]prompts.FunctionalClusterIndex, 0, len(indexes))
+	for _, index := range indexes {
+		refs = append(refs, prompts.FunctionalClusterIndex{
+			IndexPath: index.Path,
+		})
+	}
+	return refs
+}
+
 func availablePromptScipIndexRefs(state *models.State, targetRoot string) []prompts.ScipIndexRef {
 	if targetRoot == "" || !scipsearch.RuntimeEnabled(state.Config.ScipSearch) {
 		return nil
@@ -235,6 +266,19 @@ func availablePromptStacklitIndexRefs(targetRoot string) []prompts.StacklitIndex
 		return nil
 	}
 	return toPromptStacklitIndexRefs(availableIndexes)
+}
+
+func availablePromptFunctionalClusterIndexRefs(targetRoot string) []prompts.FunctionalClusterIndexRef {
+	if targetRoot == "" || !functionalclusters.RuntimeEnabled() {
+		return nil
+	}
+	availableIndexes, err := functionalClustersAvailableIndexes(functionalclusters.RuntimePlanOptions{
+		TargetRoot: targetRoot,
+	})
+	if err != nil {
+		return nil
+	}
+	return toPromptFunctionalClusterIndexRefs(availableIndexes)
 }
 
 func availablePromptSembleSearchMetadata(targetRoot string, kind semble.TargetKind) prompts.SembleSearchMetadata {
@@ -310,6 +354,7 @@ func buildTaskRoleContextData(task *models.Task, state *models.State, config Sup
 
 	data.ScipIndexes = availablePromptScipIndexRefs(state, data.Worktree)
 	data.StacklitIndexes = availablePromptStacklitIndexRefs(data.Worktree)
+	data.FunctionalClusters = availablePromptFunctionalClusterIndexRefs(data.Worktree)
 
 	// Prior rejection
 	if task.Iteration > 1 && task.RejectionReason != nil && *task.RejectionReason != "" && *task.RejectionReason != "null" {

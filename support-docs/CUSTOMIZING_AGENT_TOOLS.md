@@ -80,14 +80,12 @@ export §BRAND_ENV_PREFIX§_ENABLE_FUNCTIONAL_CLUSTERS=1
 ```
 This should be done before running `§BRAND_BINARY_NAME§ init`.
 
-Scip and Stacklit rely on indexes on every branch (repo root and worktrees) that are updated via git hooks. This slow down the git operations but speed up agents and greatly reduce token consumption.
+Scip, Stacklit, and Functional Clusters rely on indexes on every branch (repo root and worktrees). Stacklit and SCIP are refreshed directly; Functional Clusters is refreshed from their generated exports when all three gates are enabled. This slows down git operations but speeds up agents and greatly reduces token consumption.
 
-The `functional-clusters.json` is not refreshed automatically as of today.
-You have to do this manually after a major structural change. Script example
-(adapt it to the project languages):
+`functional-clusters.json` is refreshed by §BRAND_NAME_TITLE§ after Stacklit and SCIP refreshes when `§BRAND_ENV_PREFIX§_ENABLE_FUNCTIONAL_CLUSTERS`, `§BRAND_ENV_PREFIX§_ENABLE_STACKLIT`, and `§BRAND_ENV_PREFIX§_ENABLE_SCIP_SEARCH` are truthy and the configured SCIP languages are available. The internal sequence is:
 
 ```bash
-stacklit export-architecture -o stacklit-architecture.json
+stacklit export-architecture -i stacklit.json -o stacklit-architecture.json
 scip-search graph-export --index go.scip -o go-scip-graph.json
 scip-search graph-export --index python.scip -o python-scip-graph.json
 scip-search graph-export --index typescript.scip -o typescript-scip-graph.json
@@ -98,6 +96,8 @@ functional-clusters build \
   --stacklit-architecture stacklit-architecture.json \
   -o functional-clusters.json
 ```
+
+§BRAND_NAME_TITLE§ writes the Stacklit architecture and SCIP graph exports in a temporary directory and exposes only the final `functional-clusters.json` artifact to agents.
 
 Semble doesn't rely on an index but on a local LLM model that is automatically downloaded once.
 Run `§BRAND_BINARY_NAME§ init --spec` with Semble installed so §BRAND_NAME_TITLE§ can prewarm and

@@ -14,6 +14,7 @@ import (
 
 	"github.com/liza-mas/liza/internal/db"
 	"github.com/liza-mas/liza/internal/errors"
+	"github.com/liza-mas/liza/internal/functionalclusters"
 	"github.com/liza-mas/liza/internal/git"
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/paths"
@@ -1504,6 +1505,57 @@ func TestClaimTask_ScipFailedIndexerWarningOnly(t *testing.T) {
 	assertGitStatusClean(t, worktreeDir)
 }
 
+func TestClaimTask_FunctionalClustersFailedBuildWarningReturned(t *testing.T) {
+	tmpDir := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, tmpDir)
+	addTrackedGoSourceForClaimScipTest(t, tmpDir)
+	if err := os.WriteFile(filepath.Join(tmpDir, ".gitignore"), []byte("stacklit.json\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(.gitignore) error: %v", err)
+	}
+	testhelpers.MustGit(t, tmpDir, "add", ".gitignore")
+	testhelpers.MustGit(t, tmpDir, "commit", "-m", "Ignore Stacklit index")
+	testhelpers.MustGit(t, tmpDir, "branch", "-f", "integration", "HEAD")
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	t.Setenv(scipsearch.EnvEnableScipSearch, "true")
+	t.Setenv(stacklit.EnvEnableStacklit, "true")
+	t.Setenv(functionalclusters.EnvEnableFunctionalClusters, "true")
+
+	now := time.Now().UTC()
+	state := testhelpers.CreateValidState()
+	registerClaimTaskTestAgents(state)
+	state.Config.ScipSearch = []string{"go"}
+	state.Tasks = []models.Task{
+		testhelpers.BuildTaskByStatus("task-1", models.TaskStatusReady, now),
+	}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	withClaimTaskScipRuntimeRunner(t, func(plan scipsearch.RuntimeCommandPlan) (string, error) {
+		return writeClaimScipIndex(plan, []byte(plan.Dir))
+	})
+	withClaimTaskStacklitRuntimeRunner(t, func(plan stacklit.RuntimeCommandPlan) (string, error) {
+		if err := os.WriteFile(plan.OutputPath, []byte("stacklit index\n"), 0o644); err != nil {
+			return "", err
+		}
+		return "", nil
+	})
+	withClaimTaskFunctionalClustersRuntimeRunner(t, func(functionalclusters.RuntimeCommandPlan) (string, error) {
+		return "functional-clusters stderr", stderrors.New("functional clusters boom")
+	})
+
+	result, err := ClaimTask(tmpDir, "task-1", "coder-1")
+	if err != nil {
+		t.Fatalf("ClaimTask() should succeed on Functional Clusters failure, got: %v", err)
+	}
+	if len(result.Warnings) != 1 ||
+		!strings.Contains(result.Warnings[0], "functional-clusters:") ||
+		!strings.Contains(result.Warnings[0], "functional clusters boom") {
+		t.Fatalf("ClaimTask() warnings = %v, want Functional Clusters warning with diagnostic", result.Warnings)
+	}
+
+	worktreeDir := filepath.Join(tmpDir, paths.WorktreesDirName, "task-1")
+	assertGitStatusClean(t, worktreeDir)
+}
+
 func TestClaimTaskSembleIgnorePreparationWarningsAreBounded(t *testing.T) {
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
@@ -1963,6 +2015,34 @@ func withClaimTaskScipRuntimeRunner(t *testing.T, runner scipsearch.RuntimeRunne
 		scipRuntimeRunnerMu.Lock()
 		scipRuntimeRunner = previous
 		scipRuntimeRunnerMu.Unlock()
+	})
+}
+
+func withClaimTaskStacklitRuntimeRunner(t *testing.T, runner stacklit.RuntimeRunner) {
+	t.Helper()
+	stacklitRuntimeRunnerMu.Lock()
+	previous := stacklitRuntimeRunner
+	stacklitRuntimeRunner = runner
+	stacklitRuntimeRunnerMu.Unlock()
+
+	t.Cleanup(func() {
+		stacklitRuntimeRunnerMu.Lock()
+		stacklitRuntimeRunner = previous
+		stacklitRuntimeRunnerMu.Unlock()
+	})
+}
+
+func withClaimTaskFunctionalClustersRuntimeRunner(t *testing.T, runner functionalclusters.RuntimeRunner) {
+	t.Helper()
+	functionalClustersRuntimeRunnerMu.Lock()
+	previous := functionalClustersRuntimeRunner
+	functionalClustersRuntimeRunner = runner
+	functionalClustersRuntimeRunnerMu.Unlock()
+
+	t.Cleanup(func() {
+		functionalClustersRuntimeRunnerMu.Lock()
+		functionalClustersRuntimeRunner = previous
+		functionalClustersRuntimeRunnerMu.Unlock()
 	})
 }
 

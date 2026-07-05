@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/liza-mas/liza/internal/agent"
+	"github.com/liza-mas/liza/internal/functionalclusters"
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/scipsearch"
 	"github.com/liza-mas/liza/internal/semble"
@@ -80,6 +81,7 @@ func TestIndexingActivationMASPromptsRenderEnabledMetadataFromRoleTargetRoots(t 
 			prompt := buildIndexingActivationMASPrompt(t, projectRoot, tt.role, tt.agentID, tt.taskID, tt.worktreeRel)
 			stacklitIndex := filepath.Join(tt.targetRoot, "stacklit.json")
 			scipIndex := filepath.Join(tt.targetRoot, ".liza", "scip", "go.scip")
+			functionalClustersArtifact := filepath.Join(tt.targetRoot, "functional-clusters.json")
 
 			assertIndexingActivationContainsAll(t, prompt,
 				"=== STACKLIT INDEX ===",
@@ -88,6 +90,9 @@ func TestIndexingActivationMASPromptsRenderEnabledMetadataFromRoleTargetRoots(t 
 				"=== SCIP-SEARCH INDEXES ===",
 				"Go index: "+shellQuoteForIndexingActivationTest(scipIndex),
 				"Use `~/.liza/AGENT_TOOLS.md` for `scip-search` command syntax, routing rules, and freshness caveats.",
+				"=== FUNCTIONAL CLUSTERS ===",
+				"Functional Clusters artifact: "+shellQuoteForIndexingActivationTest(functionalClustersArtifact),
+				"Use `~/.liza/AGENT_TOOLS.md` for Functional Clusters command syntax, routing rules, and freshness caveats.",
 				"=== SEMBLE SEARCH ===",
 				shellQuoteForIndexingActivationTest(tt.targetRoot),
 				"Use `~/.liza/AGENT_TOOLS.md` for Semble command syntax, content modes, routing rules, and proof requirements.",
@@ -110,9 +115,11 @@ func TestIndexingActivationMASPromptsOmitDisabledSectionsDespiteStaleArtifacts(t
 			assertIndexingActivationContainsNone(t, prompt, append(optionalIndexCommandBlocks(),
 				"=== STACKLIT INDEX ===",
 				"=== SCIP-SEARCH INDEXES ===",
+				"=== FUNCTIONAL CLUSTERS ===",
 				"=== SEMBLE SEARCH ===",
 				filepath.Join(targetRoot, "stacklit.json"),
 				filepath.Join(targetRoot, ".liza", "scip", "go.scip"),
+				filepath.Join(targetRoot, "functional-clusters.json"),
 			)...)
 		})
 	}
@@ -123,6 +130,7 @@ func TestIndexingActivationMASPromptsOmitFailedOptionalToolOnly(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Setenv(stacklit.EnvEnableStacklit, "true")
 			t.Setenv(scipsearch.EnvEnableScipSearch, "true")
+			t.Setenv(functionalclusters.EnvEnableFunctionalClusters, "false")
 			t.Setenv(semble.EnvEnableSemble, "false")
 			projectRoot := t.TempDir()
 			targetRoot := indexingActivationMASTargetRoot(projectRoot, tt.worktreeRel)
@@ -190,6 +198,7 @@ func enableOptionalIndexingForTest(t *testing.T) {
 
 	t.Setenv(stacklit.EnvEnableStacklit, "true")
 	t.Setenv(scipsearch.EnvEnableScipSearch, "true")
+	t.Setenv(functionalclusters.EnvEnableFunctionalClusters, "true")
 	t.Setenv(semble.EnvEnableSemble, "true")
 }
 
@@ -216,6 +225,7 @@ func prepareOptionalIndexTargetRoot(t *testing.T, targetRoot string) {
 	testhelpers.MustGit(t, targetRoot, "commit", "-m", "Add go module")
 	writeIndexingActivationFile(t, filepath.Join(targetRoot, "stacklit.json"), `{"project":{"name":"target"}}`)
 	writeIndexingActivationFile(t, filepath.Join(targetRoot, ".liza", "scip", "go.scip"), "target go index")
+	writeIndexingActivationFile(t, filepath.Join(targetRoot, "functional-clusters.json"), "{}\n")
 	writeIndexingActivationFile(t, filepath.Join(targetRoot, ".sembleignore"), semble.DefaultIgnorePayload())
 }
 

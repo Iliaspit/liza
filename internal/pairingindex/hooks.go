@@ -25,6 +25,8 @@ const legacyManagedIndexScriptMarker = "# LIZA-PAIRING-INDEX-SCRIPT: managed"
 
 const stacklitArtifactName = "stacklit.json"
 const stacklitInsightsArtifactName = "stacklit-insights.json"
+const stacklitArchitectureArtifactName = "stacklit-architecture.json"
+const functionalClustersArtifactName = "functional-clusters.json"
 const defaultScriptName = "liza-index.sh"
 const defaultHookDispatcherName = "liza-index-hook.sh"
 
@@ -61,10 +63,11 @@ type InstallHooksOptions struct {
 // InstallActivationOptions configures the combined pairing index activation hook
 // setup for Stacklit and SCIP project-root refresh.
 type InstallActivationOptions struct {
-	RepoRoot       string
-	Hooks          []string
-	EnableStacklit bool
-	ScipPlans      []scipsearch.LanguageAggregatePlan
+	RepoRoot                 string
+	Hooks                    []string
+	EnableStacklit           bool
+	EnableFunctionalClusters bool
+	ScipPlans                []scipsearch.LanguageAggregatePlan
 }
 
 // InstallActivationResult reports the installed script and lifecycle hooks.
@@ -107,9 +110,10 @@ type HookCollision struct {
 
 // InstallIndexScriptOptions configures pairing index script installation for one repository.
 type InstallIndexScriptOptions struct {
-	RepoRoot        string
-	DisableStacklit bool
-	ScipPlans       []scipsearch.LanguageAggregatePlan
+	RepoRoot                 string
+	DisableStacklit          bool
+	EnableFunctionalClusters bool
+	ScipPlans                []scipsearch.LanguageAggregatePlan
 }
 
 // InstallIndexScriptResult reports the generated script location and action.
@@ -161,12 +165,19 @@ func InstallActivation(opts InstallActivationOptions) (InstallActivationResult, 
 	if err := ensureScipArtifactCleanliness(opts.RepoRoot, opts.ScipPlans); err != nil {
 		return result, err
 	}
+	enableFunctionalClusters := opts.EnableFunctionalClusters && opts.EnableStacklit && len(opts.ScipPlans) > 0
+	if enableFunctionalClusters {
+		if err := ensureFunctionalClustersArtifactCleanliness(opts.RepoRoot); err != nil {
+			return result, err
+		}
+	}
 
 	scriptPath := filepath.Join(hooksDir, scriptName())
 	content, err := renderIndexScript(renderIndexScriptOptions{
-		RepoRoot:       opts.RepoRoot,
-		EnableStacklit: opts.EnableStacklit,
-		ScipPlans:      opts.ScipPlans,
+		RepoRoot:                 opts.RepoRoot,
+		EnableStacklit:           opts.EnableStacklit,
+		EnableFunctionalClusters: enableFunctionalClusters,
+		ScipPlans:                opts.ScipPlans,
 	})
 	if err != nil {
 		return result, err
@@ -261,9 +272,10 @@ func RenderIndexScript(repoRoot string) (string, error) {
 }
 
 type renderIndexScriptOptions struct {
-	RepoRoot       string
-	EnableStacklit bool
-	ScipPlans      []scipsearch.LanguageAggregatePlan
+	RepoRoot                 string
+	EnableStacklit           bool
+	EnableFunctionalClusters bool
+	ScipPlans                []scipsearch.LanguageAggregatePlan
 }
 
 func renderIndexScript(opts renderIndexScriptOptions) (string, error) {
@@ -337,6 +349,9 @@ else
 fi
 `, shellWord(stacklitPlan.Name), scriptName(), stacklitPlan.Name, shellWord(stacklitPlan.Name), stacklitGenerateCommand, shellWord(stacklitPlan.Name), shellWord(stacklitPlan.Name), stacklitGenerateCommand))
 	}
+	if opts.EnableFunctionalClusters && opts.EnableStacklit && len(opts.ScipPlans) > 0 {
+		body.WriteString(renderFunctionalClustersCommand(stacklitPlan.Dir, opts.ScipPlans))
+	}
 	return body.String(), nil
 }
 
@@ -350,6 +365,12 @@ func InstallIndexScript(opts InstallIndexScriptOptions) (InstallIndexScriptResul
 	if err := ensureScipArtifactCleanliness(opts.RepoRoot, opts.ScipPlans); err != nil {
 		return InstallIndexScriptResult{}, err
 	}
+	enableFunctionalClusters := opts.EnableFunctionalClusters && !opts.DisableStacklit && len(opts.ScipPlans) > 0
+	if enableFunctionalClusters {
+		if err := ensureFunctionalClustersArtifactCleanliness(opts.RepoRoot); err != nil {
+			return InstallIndexScriptResult{}, err
+		}
+	}
 
 	hooksDir, err := ResolveEffectiveHooksDir(opts.RepoRoot)
 	if err != nil {
@@ -361,9 +382,10 @@ func InstallIndexScript(opts InstallIndexScriptOptions) (InstallIndexScriptResul
 
 	scriptPath := filepath.Join(hooksDir, scriptName())
 	content, err := renderIndexScript(renderIndexScriptOptions{
-		RepoRoot:       opts.RepoRoot,
-		EnableStacklit: !opts.DisableStacklit,
-		ScipPlans:      opts.ScipPlans,
+		RepoRoot:                 opts.RepoRoot,
+		EnableStacklit:           !opts.DisableStacklit,
+		EnableFunctionalClusters: enableFunctionalClusters,
+		ScipPlans:                opts.ScipPlans,
 	})
 	if err != nil {
 		return InstallIndexScriptResult{}, err
@@ -437,6 +459,80 @@ fi
 	trap - EXIT HUP INT TERM
 fi
 `, freshness.String(), commandChecks.String(), needsVar, missingVar, tmpVar, brand.RuntimeValues().BinaryName, shellIdentifier(plan.Language), cleanupFunc, tmpVar, cleanupFunc, shellQuote(plan.ProjectRoot), commands.String(), cleanupFunc)
+}
+
+func renderFunctionalClustersCommand(repoRoot string, plans []scipsearch.LanguageAggregatePlan) string {
+	needsVar := "needs_functional_clusters"
+	missingVar := "missing_functional_clusters"
+	tmpVar := "tmp_functional_clusters"
+	cleanupFunc := "cleanup_functional_clusters"
+
+	var freshness strings.Builder
+	fmt.Fprintf(&freshness, `%s=0
+if [ ! -f %s ]; then
+	%s=1
+elif [ -f %s ] && [ %s -nt %s ]; then
+	%s=1
+`, needsVar, shellQuote(functionalClustersArtifactName), needsVar, shellQuote(stacklitArtifactName), shellQuote(stacklitArtifactName), shellQuote(functionalClustersArtifactName), needsVar)
+	for _, plan := range plans {
+		fmt.Fprintf(&freshness, `elif [ -f %s ] && [ %s -nt %s ]; then
+	%s=1
+`, shellQuote(plan.OutputPath), shellQuote(plan.OutputPath), shellQuote(functionalClustersArtifactName), needsVar)
+	}
+	freshness.WriteString("fi\n")
+
+	var prerequisites strings.Builder
+	fmt.Fprintf(&prerequisites, `%s=0
+if [ "$%s" -eq 1 ] && ! command -v functional-clusters >/dev/null 2>&1; then
+	echo "%s: functional-clusters not found; skipping Functional Clusters refresh" >&2
+	%s=1
+fi
+if [ "$%s" -eq 1 ] && ! command -v stacklit >/dev/null 2>&1; then
+	echo "%s: stacklit not found; skipping Functional Clusters refresh" >&2
+	%s=1
+fi
+if [ "$%s" -eq 1 ] && ! command -v scip-search >/dev/null 2>&1; then
+	echo "%s: scip-search not found; skipping Functional Clusters refresh" >&2
+	%s=1
+fi
+if [ "$%s" -eq 1 ] && [ ! -f %s ]; then
+	echo "%s: stacklit.json missing; skipping Functional Clusters refresh" >&2
+	%s=1
+fi
+`, missingVar, needsVar, scriptName(), missingVar, needsVar, scriptName(), missingVar, needsVar, scriptName(), missingVar, needsVar, shellQuote(stacklitArtifactName), scriptName(), missingVar)
+	for _, plan := range plans {
+		fmt.Fprintf(&prerequisites, `if [ "$%s" -eq 1 ] && [ ! -f %s ]; then
+	echo "%s: %s SCIP index missing; skipping Functional Clusters refresh" >&2
+	%s=1
+fi
+`, needsVar, shellQuote(plan.OutputPath), scriptName(), plan.Language, missingVar)
+	}
+
+	var commands strings.Builder
+	fmt.Fprintf(&commands, "\tstacklit export-architecture -i %s -o \"$%s/%s\"\n", shellQuote(stacklitArtifactName), tmpVar, stacklitArchitectureArtifactName)
+	graphPathExprs := make([]string, 0, len(plans))
+	for _, plan := range plans {
+		graphPathExpr := fmt.Sprintf("\"$%s/%s-scip-graph.json\"", tmpVar, shellIdentifier(plan.Language))
+		graphPathExprs = append(graphPathExprs, graphPathExpr)
+		fmt.Fprintf(&commands, "\tscip-search graph-export --index %s -o %s\n", shellQuote(plan.OutputPath), graphPathExpr)
+	}
+	commands.WriteString("\tfunctional-clusters build")
+	for _, graphPathExpr := range graphPathExprs {
+		fmt.Fprintf(&commands, " --scip-graph %s", graphPathExpr)
+	}
+	fmt.Fprintf(&commands, " --stacklit-architecture \"$%s/%s\" -o %s\n", tmpVar, stacklitArchitectureArtifactName, shellQuote(functionalClustersArtifactName))
+
+	return fmt.Sprintf(`cd %s
+%s%sif [ "$%s" -eq 1 ] && [ "$%s" -eq 0 ]; then
+	%s="$(mktemp -d "${TMPDIR:-/tmp}/%s-functional-clusters.XXXXXX")"
+	%s() { rm -rf "$%s"; }
+	trap %s EXIT HUP INT TERM
+	echo "Functional Clusters Indexing..."
+%s	echo "Wrote %s"
+	trap - EXIT HUP INT TERM
+	%s
+fi
+`, shellQuote(repoRoot), freshness.String(), prerequisites.String(), needsVar, missingVar, tmpVar, brand.RuntimeValues().BinaryName, cleanupFunc, tmpVar, cleanupFunc, commands.String(), functionalClustersArtifactName, cleanupFunc)
 }
 
 func scipFindSourceExpression(language string) string {
@@ -564,6 +660,14 @@ func ensureStacklitArtifactCleanliness(repoRoot string) error {
 		return err
 	}
 	return ensureGeneratedArtifactCleanliness(repoRoot, stacklitInsightsArtifactName)
+}
+
+func ensureFunctionalClustersArtifactCleanliness(repoRoot string) error {
+	repoRoot, err := filepath.Abs(repoRoot)
+	if err != nil {
+		return fmt.Errorf("resolve repository root: %w", err)
+	}
+	return ensureGeneratedArtifactCleanliness(repoRoot, functionalClustersArtifactName)
 }
 
 func ensureScipArtifactCleanliness(repoRoot string, plans []scipsearch.LanguageAggregatePlan) error {

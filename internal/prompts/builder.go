@@ -21,9 +21,10 @@ type BasePromptConfig struct {
 	GoalDesc    string
 	GoalSpecRef string
 
-	ScipSearchIndexes []ScipSearchIndex
-	StacklitIndexes   []StacklitIndex
-	SembleSearch      SembleSearchMetadata
+	ScipSearchIndexes  []ScipSearchIndex
+	StacklitIndexes    []StacklitIndex
+	FunctionalClusters []FunctionalClusterIndex
+	SembleSearch       SembleSearchMetadata
 }
 
 // ScipSearchIndex is prompt-safe metadata for one successful generated SCIP index.
@@ -37,6 +38,11 @@ type StacklitIndex struct {
 	IndexPath string
 }
 
+// FunctionalClusterIndex is prompt-safe metadata for one generated Functional Clusters artifact.
+type FunctionalClusterIndex struct {
+	IndexPath string
+}
+
 // SembleSearchMetadata is prompt-safe metadata for one authorized Semble target root.
 type SembleSearchMetadata struct {
 	TargetRoot      string
@@ -45,9 +51,10 @@ type SembleSearchMetadata struct {
 
 type basePromptTemplateData struct {
 	BasePromptConfig
-	ScipSearchIndexes []scipSearchPromptIndex
-	StacklitIndexes   []stacklitPromptIndex
-	SembleSearch      *SembleSearchMetadata
+	ScipSearchIndexes  []scipSearchPromptIndex
+	StacklitIndexes    []stacklitPromptIndex
+	FunctionalClusters []functionalClusterPromptIndex
+	SembleSearch       *SembleSearchMetadata
 }
 
 type scipSearchPromptIndex struct {
@@ -64,6 +71,11 @@ type stacklitPromptIndex struct {
 	ShellIndexPath string
 }
 
+type functionalClusterPromptIndex struct {
+	IndexPath      string
+	ShellIndexPath string
+}
+
 // SiblingTaskSummary provides minimal context about phase dependency tasks.
 type SiblingTaskSummary struct {
 	ID          string
@@ -76,10 +88,11 @@ type SiblingTaskSummary struct {
 // BuildBasePrompt creates the base bootstrap prompt for all agents
 func BuildBasePrompt(config BasePromptConfig) (string, error) {
 	data := basePromptTemplateData{
-		BasePromptConfig:  config,
-		ScipSearchIndexes: buildScipSearchPromptIndexes(config.ScipSearchIndexes),
-		StacklitIndexes:   buildStacklitPromptIndexes(config.StacklitIndexes),
-		SembleSearch:      buildSembleSearchPromptMetadata(config.SembleSearch),
+		BasePromptConfig:   config,
+		ScipSearchIndexes:  buildScipSearchPromptIndexes(config.ScipSearchIndexes),
+		StacklitIndexes:    buildStacklitPromptIndexes(config.StacklitIndexes),
+		FunctionalClusters: buildFunctionalClusterPromptIndexes(config.FunctionalClusters),
+		SembleSearch:       buildSembleSearchPromptMetadata(config.SembleSearch),
 	}
 	return executeTemplate("base_prompt", data)
 }
@@ -99,6 +112,20 @@ func buildStacklitPromptIndexes(indexes []StacklitIndex) []stacklitPromptIndex {
 			continue
 		}
 		promptIndexes = append(promptIndexes, stacklitPromptIndex{
+			IndexPath:      index.IndexPath,
+			ShellIndexPath: shellQuote(index.IndexPath),
+		})
+	}
+	return promptIndexes
+}
+
+func buildFunctionalClusterPromptIndexes(indexes []FunctionalClusterIndex) []functionalClusterPromptIndex {
+	promptIndexes := make([]functionalClusterPromptIndex, 0, len(indexes))
+	for _, index := range indexes {
+		if index.IndexPath == "" {
+			continue
+		}
+		promptIndexes = append(promptIndexes, functionalClusterPromptIndex{
 			IndexPath:      index.IndexPath,
 			ShellIndexPath: shellQuote(index.IndexPath),
 		})

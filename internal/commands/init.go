@@ -15,6 +15,7 @@ import (
 	"github.com/liza-mas/liza/internal/db"
 	"github.com/liza-mas/liza/internal/embedded"
 	"github.com/liza-mas/liza/internal/envgate"
+	"github.com/liza-mas/liza/internal/functionalclusters"
 	gitpkg "github.com/liza-mas/liza/internal/gitenv"
 	"github.com/liza-mas/liza/internal/initcheck"
 	"github.com/liza-mas/liza/internal/models"
@@ -137,6 +138,7 @@ func InitPairingCommand(params InitPairingParams) error {
 	var projectRoot string
 	stacklitEnabled := stacklit.RuntimeEnabled()
 	scipEnabled := pairingScipEnabled()
+	functionalClustersEnabled := functionalclusters.RuntimeEnabled()
 	sembleEnabled := semble.RuntimeEnabled()
 	if len(repoRootAgents) > 0 || hasClaude {
 		lizaPaths, err := paths.LizaPathsFromGit()
@@ -176,9 +178,10 @@ func InitPairingCommand(params InitPairingParams) error {
 		}
 		if stacklitEnabled || len(scipPlans) > 0 {
 			if _, err := pairingindex.InstallActivation(pairingindex.InstallActivationOptions{
-				RepoRoot:       projectRoot,
-				EnableStacklit: stacklitEnabled,
-				ScipPlans:      scipPlans,
+				RepoRoot:                 projectRoot,
+				EnableStacklit:           stacklitEnabled,
+				EnableFunctionalClusters: functionalClustersEnabled && stacklitEnabled,
+				ScipPlans:                scipPlans,
 			}); err != nil {
 				return fmt.Errorf("pairing index activation failed: %w", err)
 			}

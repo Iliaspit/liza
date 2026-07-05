@@ -622,27 +622,42 @@ separately.
 ### Functional Clusters (`§BRAND_ENV_PREFIX§_ENABLE_FUNCTIONAL_CLUSTERS`)
 
 `functional-clusters` is an optional external repository-analysis tool. It is
-strict opt-in and consumes operator-generated artifacts; §BRAND_NAME_TITLE§ does not generate
-or refresh them.
+strict opt-in and consumes §BRAND_NAME_TITLE§-generated artifacts when Stacklit and SCIP
+prerequisites are also active.
 
 `§BRAND_ENV_PREFIX§_ENABLE_FUNCTIONAL_CLUSTERS` is process-local activation, not durable
 project state. Values are trimmed and compared case-insensitively:
 
 | Value | Meaning |
 |-------|---------|
-| `1`, `true` | Enable Pairing SessionStart guidance when the repo-root artifact exists |
+| `1`, `true` | Enable Functional Clusters artifact generation, refresh, and prompt guidance when prerequisites are available |
 | unset, empty, `0`, `false` | Keep Functional Clusters disabled for the current process |
 
-The standard artifact path is:
+The standard artifact path is target-local:
 
 ```text
 <project_root>/functional-clusters.json
+<worktree_root>/functional-clusters.json
 ```
 
-Pairing SessionStart advertises Functional Clusters only when
-`§BRAND_ENV_PREFIX§_ENABLE_FUNCTIONAL_CLUSTERS` is truthy and
-`<project_root>/functional-clusters.json` exists. It supplies the explicit
-artifact path for:
+Refresh requires all of these to be true for the current process:
+
+- `§BRAND_ENV_PREFIX§_ENABLE_FUNCTIONAL_CLUSTERS` is truthy.
+- `§BRAND_ENV_PREFIX§_ENABLE_STACKLIT` is truthy and `stacklit.json` is available for the target.
+- `§BRAND_ENV_PREFIX§_ENABLE_SCIP_SEARCH` is truthy and `config.scip_search` allows at least one detected SCIP language.
+
+§BRAND_NAME_TITLE§ refreshes Functional Clusters after Stacklit and SCIP. The build uses
+temporary exports in this order:
+
+```bash
+stacklit export-architecture -i stacklit.json -o <tmp>/stacklit-architecture.json
+scip-search graph-export --index <language>.scip -o <tmp>/<language>-scip-graph.json
+functional-clusters build --scip-graph <tmp>/<language>-scip-graph.json --stacklit-architecture <tmp>/stacklit-architecture.json -o functional-clusters.json
+```
+
+Pairing SessionStart and MAS prompts advertise Functional Clusters only when
+`§BRAND_ENV_PREFIX§_ENABLE_FUNCTIONAL_CLUSTERS` is truthy and the target-local
+`functional-clusters.json` exists. They supply the explicit artifact path for:
 
 ```bash
 functional-clusters list --clusters <project_root>/functional-clusters.json
@@ -652,11 +667,9 @@ functional-clusters explain --clusters <project_root>/functional-clusters.json '
 The artifact is advisory and may be stale. Agents must verify behavior against
 source files before editing or claiming success.
 
-Explicit non-goals: §BRAND_NAME_TITLE§ does not install `functional-clusters`, run
-`functional-clusters build`, generate SCIP graph exports, generate Stacklit
-architecture exports, wire Functional Clusters into Git hooks, auto-refresh
-`functional-clusters.json`, infer alternate artifact locations, or inject MAS
-prompt guidance for this milestone.
+§BRAND_NAME_TITLE§ does not install `functional-clusters`, infer alternate artifact
+locations, expose temporary Stacklit architecture or SCIP graph exports to agents,
+or make cluster membership authoritative.
 
 ### Bash Policy (`§BRAND_ENV_PREFIX§_ENABLE_BASH_POLICY`)
 
@@ -899,7 +912,7 @@ project configuration belongs in `§BRAND_PROJECT_DIRNAME§/state.yaml`.
 | `§BRAND_ENV_PREFIX§_ENABLE_SCIP_SEARCH` | No | unset | Strict opt-in activation gate for SCIP. In pairing init, truthy values enable project-local hook planning and installation for detected or selected languages. In MAS, truthy values enable indexing and `scip-search` prompt guidance only when `config.scip_search` also allows a detected language. Unset, empty, `0`, and `false` disable it. Values are trimmed and parsed case-insensitively. |
 | `§BRAND_ENV_PREFIX§_ENABLE_SEMBLE` | No | unset | Strict opt-in activation gate for Semble. In pairing init, truthy values enable project-root `.sembleignore` safety setup before SessionStart advertisement. In MAS, truthy values enable prewarm/offline validation and prompt guidance only when Semble is installed, offline-ready, and safe for the target root. Unset, empty, `0`, and `false` disable it. Values are trimmed and parsed case-insensitively. |
 | `§BRAND_ENV_PREFIX§_ENABLE_STACKLIT` | No | unset | Strict opt-in activation gate for Stacklit. In pairing init, truthy values enable project-local hook setup for repo-root `stacklit.json` refresh. In MAS, truthy values enable target-local `stacklit.json` refresh and prompt guidance when an index is available. Unset, empty, `0`, and `false` disable it. Values are trimmed and parsed case-insensitively. |
-| `§BRAND_ENV_PREFIX§_ENABLE_FUNCTIONAL_CLUSTERS` | No | unset | Strict opt-in activation gate for Functional Clusters. In Pairing SessionStart, truthy values enable guidance only when repo-root `functional-clusters.json` exists. §BRAND_NAME_TITLE§ does not generate, refresh, or hook this artifact. Unset, empty, `0`, and `false` disable it. Values are trimmed and parsed case-insensitively. |
+| `§BRAND_ENV_PREFIX§_ENABLE_FUNCTIONAL_CLUSTERS` | No | unset | Strict opt-in activation gate for Functional Clusters. Truthy values enable target-local `functional-clusters.json` refresh and prompt guidance when Stacklit and SCIP prerequisites are also active and an artifact is available. Unset, empty, `0`, and `false` disable it. Values are trimmed and parsed case-insensitively. |
 | `§BRAND_ENV_PREFIX§_ALLOW_DESTRUCTIVE_DB` | Per marked validation command | unset | Break-glass marker for task or `output[]` validation declared with `destructive_db: true`. It is not a global configuration switch: every destructive DB validation command must start with `§BRAND_ENV_PREFIX§_ALLOW_DESTRUCTIVE_DB=1 ` or `env §BRAND_ENV_PREFIX§_ALLOW_DESTRUCTIVE_DB=1 `. |
 | `§BRAND_ENV_PREFIX§_CODEX_VERSION` | No | unset | Process-local fallback for `config.codex_package_version` when launching headless Codex agents |
 | `§BRAND_ENV_PREFIX§_SPECS` | No | `specs/` | Path to specs directory (relative to project root) |

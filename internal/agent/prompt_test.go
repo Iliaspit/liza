@@ -12,6 +12,7 @@ import (
 
 	"github.com/liza-mas/liza/internal/embedded"
 	"github.com/liza-mas/liza/internal/errors"
+	"github.com/liza-mas/liza/internal/functionalclusters"
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/paths"
 	"github.com/liza-mas/liza/internal/pipeline"
@@ -454,6 +455,64 @@ func TestBuildPromptWithContextStacklitIndexUsesTaskWorktree(t *testing.T) {
 	}
 	if strings.Contains(prompt, projectStacklitIndex) {
 		t.Fatalf("prompt contains project-root Stacklit index path %q for task prompt", projectStacklitIndex)
+	}
+}
+
+func TestBuildPromptWithContextFunctionalClustersUsesTaskWorktree(t *testing.T) {
+	projectRoot := t.TempDir()
+	testhelpers.SetupPipelineConfig(t, projectRoot)
+	taskWorktree := filepath.Join(projectRoot, ".worktrees", "task-1")
+	if err := os.MkdirAll(taskWorktree, 0o755); err != nil {
+		t.Fatalf("MkdirAll(%q): %v", taskWorktree, err)
+	}
+	t.Setenv(functionalclusters.EnvEnableFunctionalClusters, "true")
+
+	taskArtifact := filepath.Join(taskWorktree, "functional-clusters.json")
+	projectArtifact := filepath.Join(projectRoot, "functional-clusters.json")
+	writePromptTestFile(t, taskArtifact, "{}\n")
+	writePromptTestFile(t, projectArtifact, "{}\n")
+
+	worktree := ".worktrees/task-1"
+	state := &models.State{
+		Goal: models.Goal{
+			Description: "Test goal",
+			SpecRef:     "specs/goal.md",
+		},
+		Tasks: []models.Task{
+			{
+				ID:          "task-1",
+				Description: "Test task",
+				Status:      models.TaskStatusImplementing,
+				DoneWhen:    "Task is complete",
+				Worktree:    &worktree,
+			},
+		},
+		Config: models.Config{IntegrationBranch: "main"},
+	}
+	config := SupervisorConfig{
+		Role:        "coder",
+		AgentID:     "coder-1",
+		ProjectRoot: projectRoot,
+		SpecsDir:    filepath.Join(projectRoot, "specs"),
+		StatePath:   filepath.Join(projectRoot, ".liza", "state.yaml"),
+	}
+
+	prompt, err := buildPromptWithContext(state, config, "task-1", testResolver(t))
+	if err != nil {
+		t.Fatalf("buildPromptWithContext() error = %v", err)
+	}
+
+	if !strings.Contains(prompt, "Functional Clusters artifact: "+shellQuoteForTest(taskArtifact)) {
+		t.Fatalf("prompt missing task worktree Functional Clusters artifact path %q", taskArtifact)
+	}
+	if !strings.Contains(prompt, "Use `~/.liza/AGENT_TOOLS.md` for Functional Clusters command syntax, routing rules, and freshness caveats.") {
+		t.Fatalf("prompt missing AGENT_TOOLS Functional Clusters usage pointer")
+	}
+	if strings.Contains(prompt, "functional-clusters list --clusters") {
+		t.Fatalf("prompt contains reusable Functional Clusters command syntax")
+	}
+	if strings.Contains(prompt, projectArtifact) {
+		t.Fatalf("prompt contains project-root Functional Clusters artifact path %q for task prompt", projectArtifact)
 	}
 }
 
@@ -1254,6 +1313,49 @@ func TestBuildOrchestratorPromptContextStacklitIndexRendersFromProjectRoot(t *te
 	}
 	if strings.Contains(prompt, taskStacklitIndex) {
 		t.Fatalf("prompt contains task worktree Stacklit index path %q for orchestrator prompt", taskStacklitIndex)
+	}
+}
+
+func TestBuildOrchestratorPromptContextFunctionalClustersRendersFromProjectRoot(t *testing.T) {
+	tmpDir := t.TempDir()
+	testhelpers.SetupPipelineConfig(t, tmpDir)
+	t.Setenv(functionalclusters.EnvEnableFunctionalClusters, "true")
+
+	projectArtifact := filepath.Join(tmpDir, "functional-clusters.json")
+	writePromptTestFile(t, projectArtifact, "{}\n")
+	taskArtifact := filepath.Join(tmpDir, ".worktrees", "task-1", "functional-clusters.json")
+	writePromptTestFile(t, taskArtifact, "{}\n")
+
+	state := &models.State{
+		Goal: models.Goal{
+			Description: "Test goal",
+			SpecRef:     "specs/goal.md",
+		},
+	}
+	config := SupervisorConfig{
+		Role:        "orchestrator",
+		AgentID:     "orchestrator-1",
+		ProjectRoot: tmpDir,
+		SpecsDir:    filepath.Join(tmpDir, "specs"),
+		StatePath:   filepath.Join(tmpDir, ".liza", "state.yaml"),
+	}
+
+	prompt, err := buildOrchestratorPromptContext(state, config, testResolver(t))
+	if err != nil {
+		t.Fatalf("buildOrchestratorPromptContext() error = %v", err)
+	}
+
+	if !strings.Contains(prompt, "Functional Clusters artifact: "+shellQuoteForTest(projectArtifact)) {
+		t.Fatalf("prompt missing project-root Functional Clusters artifact path %q", projectArtifact)
+	}
+	if !strings.Contains(prompt, "Use `~/.liza/AGENT_TOOLS.md` for Functional Clusters command syntax, routing rules, and freshness caveats.") {
+		t.Fatalf("prompt missing AGENT_TOOLS Functional Clusters usage pointer")
+	}
+	if strings.Contains(prompt, "functional-clusters list --clusters") {
+		t.Fatalf("prompt contains reusable Functional Clusters command syntax")
+	}
+	if strings.Contains(prompt, taskArtifact) {
+		t.Fatalf("prompt contains task worktree Functional Clusters artifact path %q for orchestrator prompt", taskArtifact)
 	}
 }
 

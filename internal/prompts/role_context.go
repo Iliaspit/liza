@@ -79,6 +79,12 @@ type StacklitIndexRef struct {
 	Path string
 }
 
+// FunctionalClusterIndexRef carries prompt-safe metadata for one available
+// Functional Clusters artifact.
+type FunctionalClusterIndexRef struct {
+	Path string
+}
+
 // RoleContextData is the unified template data type for all role template blocks.
 // Each field group is populated as appropriate for the role being rendered.
 // Fields not relevant to a particular role remain at their zero value.
@@ -147,16 +153,17 @@ type RoleContextData struct {
 	HandoffNote    *models.HandoffEvent
 
 	// Orchestrator-specific (pre-rendered content strings)
-	DashboardOutput   string
-	WakeInstruction   string
-	AgentStates       string
-	SprintMetrics     string
-	ActivePolicies    string
-	BlockedTasks      string
-	CheckpointSummary string
-	PipelineConfig    string
-	ScipIndexes       []ScipIndexRef
-	StacklitIndexes   []StacklitIndexRef
+	DashboardOutput    string
+	WakeInstruction    string
+	AgentStates        string
+	SprintMetrics      string
+	ActivePolicies     string
+	BlockedTasks       string
+	CheckpointSummary  string
+	PipelineConfig     string
+	ScipIndexes        []ScipIndexRef
+	StacklitIndexes    []StacklitIndexRef
+	FunctionalClusters []FunctionalClusterIndexRef
 
 	// Config/state
 	ProjectRoot string

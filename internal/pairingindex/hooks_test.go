@@ -293,6 +293,28 @@ func TestInstallActivationWritesScipCommandsWithoutStacklit(t *testing.T) {
 	}
 }
 
+func TestInstallActivationOmitsFunctionalClustersWhenStacklitDisabled(t *testing.T) {
+	repo := initGitRepo(t)
+	outputPath := filepath.Join(repo, "go.scip")
+
+	result, err := InstallActivation(InstallActivationOptions{
+		RepoRoot:                 repo,
+		Hooks:                    []string{"post-commit"},
+		EnableFunctionalClusters: true,
+		ScipPlans:                []scipsearch.LanguageAggregatePlan{goAggregatePlan(repo, outputPath)},
+	})
+	if err != nil {
+		t.Fatalf("InstallActivation() error = %v", err)
+	}
+
+	script := readFile(t, result.Script.Path)
+	if strings.Contains(script, "functional-clusters build") ||
+		strings.Contains(script, "stacklit export-architecture") ||
+		strings.Contains(script, "scip-search graph-export") {
+		t.Fatalf("script contains Functional Clusters commands despite Stacklit being disabled:\n%s", script)
+	}
+}
+
 func TestInstallIndexScriptWritesExecutableManagedScript(t *testing.T) {
 	repo := initGitRepo(t)
 
@@ -605,6 +627,75 @@ func TestInstalledIndexScriptUsesScipCommandRootForFreshness(t *testing.T) {
 	}
 }
 
+func TestInstalledIndexScriptRefreshesFunctionalClustersJSON(t *testing.T) {
+	repo := initGitRepo(t)
+	sourcePath := filepath.Join(repo, "main.go")
+	writeFile(t, sourcePath, "package main\n", 0644)
+	commitPath(t, repo, "main.go", "Add Go source")
+	outputPath := filepath.Join(repo, "go.scip")
+	result, err := InstallIndexScript(InstallIndexScriptOptions{
+		RepoRoot:                 repo,
+		EnableFunctionalClusters: true,
+		ScipPlans:                []scipsearch.LanguageAggregatePlan{goAggregatePlan(repo, outputPath)},
+	})
+	if err != nil {
+		t.Fatalf("InstallIndexScript() error = %v", err)
+	}
+	stacklitLogPath := filepath.Join(t.TempDir(), "stacklit.log")
+	scipLogPath := filepath.Join(t.TempDir(), "scip.log")
+	functionalClustersLogPath := filepath.Join(t.TempDir(), "functional-clusters.log")
+	stacklitDir := writeFakeStacklit(t)
+	scipDir := writeFakeScipGo(t)
+	functionalClustersDir := writeFakeFunctionalClusters(t)
+
+	cmd := exec.Command(result.Path)
+	cmd.Dir = t.TempDir()
+	cmd.Env = append(os.Environ(),
+		"PATH="+stacklitDir+string(os.PathListSeparator)+scipDir+string(os.PathListSeparator)+functionalClustersDir+string(os.PathListSeparator)+os.Getenv("PATH"),
+		"LIZA_TEST_STACKLIT_LOG="+stacklitLogPath,
+		"LIZA_TEST_SCIP_LOG="+scipLogPath,
+		"LIZA_TEST_FUNCTIONAL_CLUSTERS_LOG="+functionalClustersLogPath,
+	)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("liza-index.sh failed: %v\n%s", err, output)
+	}
+
+	if got := readFile(t, stacklitLogPath); !containsAll(got,
+		"generate-json -o stacklit.json --parse-workers 3",
+		"export-architecture -i stacklit.json -o ",
+		"stacklit-architecture.json",
+	) {
+		t.Fatalf("stacklit calls = %q, want generate plus architecture export", got)
+	}
+	if got := readFile(t, scipLogPath); !containsAll(got,
+		"scip-go index --module-root "+repo+" --output ",
+		"scip-search aggregate-index --project-root "+repo+" --root . --index ",
+		"scip-search graph-export --index "+outputPath+" -o ",
+		"go-scip-graph.json",
+	) {
+		t.Fatalf("scip calls = %q, want index plus graph export", got)
+	}
+	if got := readFile(t, functionalClustersLogPath); !containsAll(got,
+		"functional-clusters build --scip-graph ",
+		"go-scip-graph.json",
+		" --stacklit-architecture ",
+		"stacklit-architecture.json",
+		" -o functional-clusters.json",
+	) {
+		t.Fatalf("functional-clusters calls = %q, want build from exports", got)
+	}
+	if got := readFile(t, filepath.Join(repo, "functional-clusters.json")); got != "generated functional clusters\n" {
+		t.Fatalf("functional-clusters.json = %q, want generated artifact", got)
+	}
+	if got := runGitOutput(t, repo, "status", "--porcelain"); got != "" {
+		t.Fatalf("git status --porcelain = %q, want clean generated artifacts", got)
+	}
+	if got := runGitOutput(t, repo, "check-ignore", "functional-clusters.json"); got != "functional-clusters.json" {
+		t.Fatalf("git check-ignore functional-clusters.json = %q, want private exclude", got)
+	}
+}
+
 func TestManagedLifecycleHookInvokesInstalledIndexScriptWithoutAI(t *testing.T) {
 	repo := initGitRepo(t)
 	hookResult, err := InstallLifecycleHooks(InstallHooksOptions{
@@ -836,6 +927,19 @@ func writeFakeStacklit(t *testing.T) string {
 	if [ "$1" = "init-insights" ]; then
 		printf '%s\n' "generated insights" > "$PWD/stacklit-insights.json"
 	fi
+	if [ "$1" = "export-architecture" ]; then
+		output=""
+		while [ "$#" -gt 0 ]; do
+			if [ "$1" = "-o" ]; then
+				shift
+				output="$1"
+			fi
+			shift
+		done
+		if [ -n "$output" ]; then
+			printf '%s\n' "generated architecture" > "$output"
+		fi
+	fi
 	if [ "$1" = "ai-summary" ] && [ ! -f "$PWD/stacklit.json" ]; then
 		echo "stacklit generate-json must run before ai-summary" >&2
 		exit 7
@@ -905,21 +1009,56 @@ func writeFakeScipSearch(t *testing.T, dir string) {
 	path := filepath.Join(dir, "scip-search")
 	script := `#!/bin/sh
 printf '%s\n' "scip-search $*" >> "$LIZA_TEST_SCIP_LOG"
+command="${1:-}"
 output=""
 while [ "$#" -gt 0 ]; do
 	if [ "$1" = "--out" ]; then
 		shift
 		output="$1"
 	fi
+	if [ "$1" = "-o" ]; then
+		shift
+		output="$1"
+	fi
 	shift
 done
 if [ -n "$output" ]; then
-	printf '%s\n' "aggregated scip index" > "$output"
+	if [ "$command" = "graph-export" ]; then
+		printf '%s\n' "generated scip graph" > "$output"
+	else
+		printf '%s\n' "aggregated scip index" > "$output"
+	fi
 fi
 `
 	if err := os.WriteFile(path, []byte(script), 0755); err != nil {
 		t.Fatalf("write fake scip-search: %v", err)
 	}
+}
+
+func writeFakeFunctionalClusters(t *testing.T) string {
+	t.Helper()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "functional-clusters")
+	script := `#!/bin/sh
+printf '%s\n' "functional-clusters $*" >> "$LIZA_TEST_FUNCTIONAL_CLUSTERS_LOG"
+command="${1:-}"
+output=""
+while [ "$#" -gt 0 ]; do
+	if [ "$1" = "-o" ]; then
+		shift
+		output="$1"
+	fi
+	shift
+done
+if [ "$command" = "build" ] && [ -n "$output" ]; then
+	printf '%s\n' "generated functional clusters" > "$output"
+fi
+`
+	if err := os.WriteFile(path, []byte(script), 0755); err != nil {
+		t.Fatalf("write fake functional-clusters: %v", err)
+	}
+	return dir
 }
 
 func goAggregatePlan(repo, outputPath string) scipsearch.LanguageAggregatePlan {

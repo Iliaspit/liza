@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/liza-mas/liza/internal/db"
+	"github.com/liza-mas/liza/internal/functionalclusters"
 	"github.com/liza-mas/liza/internal/git"
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/ops"
@@ -22,9 +23,10 @@ import (
 var errTaskBlocked = errors.New("task blocked")
 
 var (
-	reviewerWorktreeRefreshIndexes       = scipsearch.RefreshIndexes
-	reviewerWorktreeRefreshStacklitIndex = stacklit.RefreshIndex
-	reviewerWorktreePrepareSembleIgnore  = ops.PrepareSembleWorktreeIgnore
+	reviewerWorktreeRefreshIndexes                 = scipsearch.RefreshIndexes
+	reviewerWorktreeRefreshStacklitIndex           = stacklit.RefreshIndex
+	reviewerWorktreeRefreshFunctionalClustersIndex = functionalclusters.RefreshIndex
+	reviewerWorktreePrepareSembleIgnore            = ops.PrepareSembleWorktreeIgnore
 )
 
 // ensureReviewerWorktree verifies the worktree exists for a reviewer task.
@@ -120,6 +122,21 @@ func ensureReviewerWorktree(projectRoot string, bb *db.Blackboard, taskID, agent
 	for _, failure := range stacklitResult.Failures {
 		logger.Warn(
 			"stacklit indexer failed after worktree recovery",
+			"task_id", taskID,
+			"diagnostic", failure.Diagnostic,
+		)
+	}
+	functionalClustersResult, functionalClustersErr := reviewerWorktreeRefreshFunctionalClustersIndex(functionalclusters.RefreshOptions{
+		TargetRoot:          wtPath,
+		TargetKind:          functionalclusters.TargetKindTaskWorktree,
+		ConfiguredLanguages: state.Config.ScipSearch,
+	})
+	if functionalClustersErr != nil {
+		logger.Warn("functional-clusters refresh failed after worktree recovery", "task_id", taskID, "error", functionalClustersErr)
+	}
+	for _, failure := range functionalClustersResult.Failures {
+		logger.Warn(
+			"functional-clusters build failed after worktree recovery",
 			"task_id", taskID,
 			"diagnostic", failure.Diagnostic,
 		)

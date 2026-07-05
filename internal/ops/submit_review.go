@@ -11,6 +11,7 @@ import (
 	"github.com/liza-mas/liza/internal/brand"
 	"github.com/liza-mas/liza/internal/db"
 	"github.com/liza-mas/liza/internal/errors"
+	"github.com/liza-mas/liza/internal/functionalclusters"
 	gitpkg "github.com/liza-mas/liza/internal/git"
 	"github.com/liza-mas/liza/internal/identity"
 	"github.com/liza-mas/liza/internal/models"
@@ -30,8 +31,9 @@ type SubmitForReviewResult struct {
 }
 
 var (
-	submitReviewRefreshIndexes       = scipsearch.RefreshIndexes
-	submitReviewRefreshStacklitIndex = stacklit.RefreshIndex
+	submitReviewRefreshIndexes                 = scipsearch.RefreshIndexes
+	submitReviewRefreshStacklitIndex           = stacklit.RefreshIndex
+	submitReviewRefreshFunctionalClustersIndex = functionalclusters.RefreshIndex
 )
 
 // SubmitForReview validates that commitRef resolves to the worktree HEAD before rebase,
@@ -274,6 +276,7 @@ func SubmitForReview(projectRoot, taskID, commitRef, agentID string) (*SubmitFor
 
 	indexWarnings := refreshSubmitReviewScipIndexes(wtPath, state.Config.ScipSearch)
 	indexWarnings = append(indexWarnings, refreshSubmitReviewStacklitIndex(wtPath)...)
+	indexWarnings = append(indexWarnings, refreshSubmitReviewFunctionalClustersIndex(wtPath, state.Config.ScipSearch)...)
 
 	// Phase 3: Atomic update with new commit SHA
 	now := time.Now().UTC()
@@ -374,6 +377,19 @@ func refreshSubmitReviewStacklitIndex(worktreePath string) []string {
 	warnings := stacklitRefreshWarnings(result)
 	if err != nil {
 		warnings = append(warnings, fmt.Sprintf("stacklit: %v", err))
+	}
+	return warnings
+}
+
+func refreshSubmitReviewFunctionalClustersIndex(worktreePath string, configuredLanguages []string) []string {
+	result, err := submitReviewRefreshFunctionalClustersIndex(functionalclusters.RefreshOptions{
+		TargetRoot:          worktreePath,
+		TargetKind:          functionalclusters.TargetKindTaskWorktree,
+		ConfiguredLanguages: configuredLanguages,
+	})
+	warnings := functionalClustersRefreshWarnings(result)
+	if err != nil {
+		warnings = append(warnings, fmt.Sprintf("functional-clusters: %v", err))
 	}
 	return warnings
 }

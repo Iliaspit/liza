@@ -466,6 +466,44 @@ func TestBuildBasePromptStacklitAndScipUnifiedQueryRouting(t *testing.T) {
 	}
 }
 
+func TestBuildBasePromptFunctionalClustersRendersSuppliedArtifact(t *testing.T) {
+	artifactPath := "/abs/worktree with spaces/functional-clusters.json"
+	quotedPath := "'/abs/worktree with spaces/functional-clusters.json'"
+	config := BasePromptConfig{
+		Role:        "code-coder",
+		AgentID:     "coder-1",
+		TaskID:      "task-1",
+		SpecsDir:    "/project/specs",
+		ProjectRoot: "/project",
+		StatePath:   "/project/.liza/state.yaml",
+		GoalDesc:    "Build a web API",
+		GoalSpecRef: "specs/vision.md",
+		FunctionalClusters: []FunctionalClusterIndex{
+			{IndexPath: artifactPath},
+		},
+	}
+
+	prompt, err := BuildBasePrompt(config)
+	if err != nil {
+		t.Fatalf("BuildBasePrompt() error: %v", err)
+	}
+
+	for _, want := range []string{
+		"=== FUNCTIONAL CLUSTERS ===",
+		"Functional Clusters artifact: " + quotedPath,
+		"Functional Clusters artifacts are available for this target. They are advisory capability snapshots that may lag behind current edits or failed refresh attempts; use them for orientation, then verify against source files before editing.",
+		"Use `~/.liza/AGENT_TOOLS.md` for Functional Clusters command syntax, routing rules, and freshness caveats.",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("BuildBasePrompt() missing expected Functional Clusters content:\n%q", want)
+		}
+	}
+	if strings.Contains(prompt, "functional-clusters list --clusters "+quotedPath) ||
+		strings.Contains(prompt, "functional-clusters explain --clusters "+quotedPath) {
+		t.Fatalf("BuildBasePrompt() rendered reusable Functional Clusters command syntax:\n%s", prompt)
+	}
+}
+
 func TestBuildBasePromptSembleSearchOmittedWhenNoMetadata(t *testing.T) {
 	config := BasePromptConfig{
 		Role:        "code-coder",

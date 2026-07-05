@@ -330,6 +330,10 @@ func completeClaimTaskAfterValidation(
 	for _, warning := range stacklitWarnings {
 		log.Printf("WARNING: claim-task %s: %s", taskID, warning)
 	}
+	functionalClustersWarnings := refreshTaskWorktreeFunctionalClustersIndex(claimCtx.worktreeDir, scipSearchLanguages)
+	for _, warning := range functionalClustersWarnings {
+		log.Printf("WARNING: claim-task %s: %s", taskID, warning)
+	}
 
 	// --- Phase 3: Re-validate and Commit ---
 	now := time.Now().UTC()
@@ -433,6 +437,7 @@ func completeClaimTaskAfterValidation(
 	warnings = append(warnings, sembleWarnings...)
 	warnings = append(warnings, scipWarnings...)
 	warnings = append(warnings, stacklitWarnings...)
+	warnings = append(warnings, functionalClustersWarnings...)
 
 	return &ClaimResult{
 		TaskID:            taskID,

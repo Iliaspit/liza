@@ -15,6 +15,7 @@ import (
 
 	bashpolicycli "github.com/liza-mas/liza/internal/bash-policy-cli"
 	"github.com/liza-mas/liza/internal/db"
+	"github.com/liza-mas/liza/internal/functionalclusters"
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/pairingindex"
 	"github.com/liza-mas/liza/internal/paths"
@@ -29,6 +30,7 @@ func setupGlobalLiza(t *testing.T) string {
 	fakeHome := testhelpers.SetupGlobalLiza(t)
 	unsetEnvForTest(t, stacklit.EnvEnableStacklit)
 	unsetEnvForTest(t, scipsearch.EnvEnableScipSearch)
+	unsetEnvForTest(t, functionalclusters.EnvEnableFunctionalClusters)
 	unsetEnvForTest(t, semble.EnvEnableSemble)
 	unsetEnvForTest(t, bashpolicycli.EnvEnableBashPolicy)
 	return fakeHome
@@ -2812,6 +2814,7 @@ func TestInitPairingCommand_DisabledIndexGatesPreserveProviderHooksOnly(t *testi
 	defer os.RemoveAll(gitDir)
 	unsetEnvForTest(t, stacklit.EnvEnableStacklit)
 	unsetEnvForTest(t, scipsearch.EnvEnableScipSearch)
+	unsetEnvForTest(t, functionalclusters.EnvEnableFunctionalClusters)
 	unsetEnvForTest(t, semble.EnvEnableSemble)
 	setupGlobalLiza(t)
 
@@ -2861,6 +2864,7 @@ func TestInitPairingCommand_DisabledScipGateIgnoresExplicitLanguageFilter(t *tes
 	defer os.RemoveAll(gitDir)
 	unsetEnvForTest(t, stacklit.EnvEnableStacklit)
 	unsetEnvForTest(t, scipsearch.EnvEnableScipSearch)
+	unsetEnvForTest(t, functionalclusters.EnvEnableFunctionalClusters)
 	unsetEnvForTest(t, semble.EnvEnableSemble)
 	setupGlobalLiza(t)
 	writeTrackedFile(t, gitDir, "go.mod", "module example.com/project\n")

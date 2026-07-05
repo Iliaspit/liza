@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/liza-mas/liza/internal/commands"
+	"github.com/liza-mas/liza/internal/functionalclusters"
 	"github.com/liza-mas/liza/internal/scipsearch"
 	"github.com/liza-mas/liza/internal/semble"
 	"github.com/liza-mas/liza/internal/stacklit"
@@ -97,6 +98,7 @@ func TestIndexingActivationDisabledMASPromptOmitsOptionalSectionsWithStaleArtifa
 	assertIndexingActivationContainsNone(t, prompt, append(optionalIndexCommandBlocks(),
 		"=== STACKLIT INDEX ===",
 		"=== SCIP-SEARCH INDEXES ===",
+		"=== FUNCTIONAL CLUSTERS ===",
 		"=== SEMBLE SEARCH ===",
 	)...)
 }
@@ -132,10 +134,13 @@ func optionalIndexCommandBlocks() []string {
 		"stacklit get-module",
 		"scip-search symbols",
 		"scip-search references",
+		"functional-clusters list",
+		"functional-clusters explain",
 		"semble search",
 		"semble find-related",
 		stacklit.EnvEnableStacklit + "=true",
 		scipsearch.EnvEnableScipSearch + "=true",
+		functionalclusters.EnvEnableFunctionalClusters + "=true",
 		semble.EnvEnableSemble + "=true",
 	}
 }
