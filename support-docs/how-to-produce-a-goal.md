@@ -99,6 +99,13 @@ Address the feedback and iterate until the reviewer agent approves.
 
 If you have multiple provider subscriptions, it is highly recommended to make different models review the goal spec.
 
+Before initializing, run a cold readiness check against the entry point you plan to use:
+```
+/check-§BRAND_NAME_LOWER§-input-readiness path/to/your-goal.md general-objective
+```
+
+For lower-level inputs, use `functional-spec` when architecture still needs to be produced, or `technical-spec` when the architecture is already specified and §BRAND_BINARY_NAME§ should start at code planning.
+
 Do a final pass with the systemic-thinking skill:
 ```bash
 /systemic-thinking path/to/your-goal.md

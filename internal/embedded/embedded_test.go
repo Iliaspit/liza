@@ -1223,6 +1223,18 @@ func TestEmbeddedClaudeSettingsScipSearchPermissions(t *testing.T) {
 	assertClaudeSettingsToolPermissions(t, allow)
 }
 
+func TestEmbeddedClaudeSettingsSkillPermissionsIncludeInputReadiness(t *testing.T) {
+	var settings map[string]any
+	if err := json.Unmarshal(renderEmbeddedAsset(claudeSettingsContent), &settings); err != nil {
+		t.Fatalf("embedded claude-settings.json is invalid JSON: %v", err)
+	}
+
+	allowSet := stringSet(claudeSettingsAllowPermissions(t, settings))
+	if !allowSet["Skill(check-liza-input-readiness)"] {
+		t.Fatalf("permissions.allow missing Skill(check-liza-input-readiness)")
+	}
+}
+
 func TestEmbeddedClaudeSettingsTmpPermissions(t *testing.T) {
 	var settings map[string]any
 	if err := json.Unmarshal(renderEmbeddedAsset(claudeSettingsContent), &settings); err != nil {

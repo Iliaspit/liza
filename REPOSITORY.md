@@ -104,6 +104,7 @@ Specialized protocols agents load conditionally. Each contains a single `SKILL.m
 
 | Skill | Trigger |
 |-------|---------|
+| `check-liza-input-readiness/` | Assessing whether an input document is ready for a chosen Liza MAS entry point |
 | `debugging/` | Before any debugging (mandatory) |
 | `testing/` | When writing or analyzing tests (mandatory) |
 | `code-review/` | When reviewing PRs or pending changes |

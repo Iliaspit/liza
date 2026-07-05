@@ -49,8 +49,8 @@ func TestRenderPathAppliesGeneratedNameMap(t *testing.T) {
 	values.NameLower = "acme-agent"
 	values.BinaryName = "acme-agent"
 	values.ProjectDirName = ".acme-agent"
-	got := RenderPath("liza-logs/tools/liza-session-analyzer.html/scripts/liza-index.sh/.liza-hooks/pre-commit", values)
-	if got != "acme-agent-logs/tools/acme-agent-session-analyzer.html/scripts/acme-agent-index.sh/.acme-agent-hooks/pre-commit" {
+	got := RenderPath("check-liza-input-readiness/SKILL.md/liza-logs/tools/liza-session-analyzer.html/scripts/liza-index.sh/.liza-hooks/pre-commit", values)
+	if got != "check-acme-agent-input-readiness/SKILL.md/acme-agent-logs/tools/acme-agent-session-analyzer.html/scripts/acme-agent-index.sh/.acme-agent-hooks/pre-commit" {
 		t.Fatalf("RenderPath = %q", got)
 	}
 }
