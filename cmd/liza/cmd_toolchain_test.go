@@ -139,6 +139,9 @@ func TestToolchainConfigureWritesFiles(t *testing.T) {
 	if !strings.Contains(string(env), installDir) {
 		t.Fatalf("env.sh missing install dir:\n%s", env)
 	}
+	if want := "Run: source " + shellQuote(filepath.Join(globalDir, "toolchain", "env.sh")); !strings.Contains(out.String(), want) {
+		t.Fatalf("configure output missing source instruction %q:\n%s", want, out.String())
+	}
 }
 
 func TestToolchainConfigureRequiresProjectAndAgentsTogether(t *testing.T) {
