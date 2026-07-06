@@ -18,14 +18,17 @@ provider flag. Provider flags add provider-specific integrations in the user's
 CLI config directories. For Claude, Codex, OpenCode, and Gemini, setup creates
 skill symlinks under `~/.claude/skills/`, `~/.codex/skills/`,
 `~/.config/opencode/skills/`, or `~/.gemini/skills/` pointing to
-`~/§BRAND_GLOBAL_DIRNAME§/skills/`. Mistral/Vibe also gets its prompt link under
-`~/.vibe/prompts/`. Project hooks and runtime provider settings are handled by
-`§BRAND_BINARY_NAME§ init`. Built-in shortcut flags remain supported; catalog
-providers use repeatable `--provider <id>`:
+`~/§BRAND_GLOBAL_DIRNAME§/skills/`. `--cursor` is a convenience shortcut for the
+Claude and Codex global setup Cursor relies on; it does not write Cursor project
+rules or MCP configuration. Mistral/Vibe also gets its prompt link under
+`~/.vibe/prompts/`. Project hooks, Cursor project activation, and runtime
+provider settings are handled by `§BRAND_BINARY_NAME§ init`. Built-in shortcut
+flags remain supported; catalog providers use repeatable `--provider <id>`:
 
 ```bash
 §BRAND_BINARY_NAME§ setup --claude
 §BRAND_BINARY_NAME§ setup --codex
+§BRAND_BINARY_NAME§ setup --cursor
 §BRAND_BINARY_NAME§ setup --opencode
 §BRAND_BINARY_NAME§ setup --gemini
 §BRAND_BINARY_NAME§ setup --mistral

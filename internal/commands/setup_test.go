@@ -572,6 +572,67 @@ func TestSetupCommand_AgentOpenCode(t *testing.T) {
 	}
 }
 
+func TestSetupCommand_AgentCursor(t *testing.T) {
+	lizaDir, homeDir := setupWithAgents(t, []string{"cursor"})
+	sourceEntries, _ := os.ReadDir(filepath.Join(lizaDir, "skills"))
+
+	for _, agent := range []struct {
+		name      string
+		configDir string
+	}{
+		{"claude", ".claude"},
+		{"codex", ".codex"},
+	} {
+		skillsDir := filepath.Join(homeDir, agent.configDir, "skills")
+		entries, err := os.ReadDir(skillsDir)
+		if err != nil {
+			t.Fatalf("agent %s: failed to read skills dir: %v", agent.name, err)
+		}
+		if len(entries) != len(sourceEntries) {
+			t.Fatalf("agent %s: got %d symlinks, want %d", agent.name, len(entries), len(sourceEntries))
+		}
+		for _, entry := range entries {
+			linkPath := filepath.Join(skillsDir, entry.Name())
+			target, err := os.Readlink(linkPath)
+			if err != nil {
+				t.Errorf("agent %s: %s is not a symlink: %v", agent.name, entry.Name(), err)
+				continue
+			}
+			expectedTarget := filepath.Join(lizaDir, "skills", entry.Name())
+			if target != expectedTarget {
+				t.Errorf("agent %s: symlink %s points to %s, want %s", agent.name, entry.Name(), target, expectedTarget)
+			}
+		}
+	}
+
+	if _, err := os.Stat(filepath.Join(homeDir, ".cursor")); !os.IsNotExist(err) {
+		t.Fatalf("~/.cursor state = %v, want absent because setup --cursor has no Cursor-global file API", err)
+	}
+}
+
+func TestSetupCommand_ProviderCursorStaysCatalogRequest(t *testing.T) {
+	lizaDir := t.TempDir()
+	homeDir := t.TempDir()
+
+	err := SetupCommand(SetupParams{
+		TargetDir:   lizaDir,
+		HomeDir:     homeDir,
+		ProviderIDs: []string{"cursor"},
+	})
+	if err == nil {
+		t.Fatal("SetupCommand() error = nil, want cursor-acp setup error")
+	}
+	if !strings.Contains(err.Error(), "provider cursor-acp does not define setup skill symlinks") {
+		t.Fatalf("SetupCommand() error = %q, want cursor-acp setup error", err)
+	}
+
+	for _, configDir := range []string{".claude", ".codex"} {
+		if _, statErr := os.Stat(filepath.Join(homeDir, configDir)); !os.IsNotExist(statErr) {
+			t.Fatalf("%s state = %v, want absent because --provider cursor must not expand to shortcut setup", configDir, statErr)
+		}
+	}
+}
+
 func TestSetupCommand_AgentMistral(t *testing.T) {
 	lizaDir, homeDir := setupWithAgents(t, []string{"mistral"})
 

@@ -65,12 +65,15 @@ Provider flags add provider-specific integrations in the user's CLI config
 directories. For Claude, Codex, OpenCode, and Gemini, setup creates skill
 symlinks under `~/.claude/skills/`, `~/.codex/skills/`,
 `~/.config/opencode/skills/`, or `~/.gemini/skills/` pointing to
-`~/.liza/skills/`. Mistral/Vibe also gets its prompt link under
-`~/.vibe/prompts/`. Catalog-backed providers use repeatable `--provider <id>`
-without requiring a new Liza binary. Project hooks and runtime provider settings
-are handled by `liza init`:
+`~/.liza/skills/`. `--cursor` is a convenience shortcut for the Claude and Codex
+global setup Cursor relies on; it does not write Cursor project rules or MCP
+configuration. Mistral/Vibe also gets its prompt link under `~/.vibe/prompts/`.
+Catalog-backed providers use repeatable `--provider <id>` without requiring a
+new Liza binary. Project hooks, Cursor project activation, and runtime provider
+settings are handled by `liza init`:
 
 ```bash
+liza setup --cursor
 liza setup --claude --codex
 liza setup --claude --codex --opencode --gemini --mistral
 liza setup --provider qwen

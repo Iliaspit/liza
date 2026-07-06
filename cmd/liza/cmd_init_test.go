@@ -171,6 +171,37 @@ func TestCollectAgentFlagsIncludesCursor(t *testing.T) {
 	}
 }
 
+func TestSetupCommandRegistersCursorFlag(t *testing.T) {
+	resetRootCmdForTest(t)
+
+	if setupCmd.Flags().Lookup("cursor") == nil {
+		t.Fatal("setup command missing --cursor flag")
+	}
+}
+
+func TestCollectSetupProviderFlagsSeparatesProviderCursorFromShortcut(t *testing.T) {
+	resetRootCmdForTest(t)
+	defer resetRootCmdForTest(t)
+
+	if err := setupCmd.Flags().Set("provider", "cursor"); err != nil {
+		t.Fatalf("set provider flag: %v", err)
+	}
+	if err := setupCmd.Flags().Set("cursor", "true"); err != nil {
+		t.Fatalf("set cursor flag: %v", err)
+	}
+
+	providerIDs, agents, err := collectSetupProviderFlags(setupCmd)
+	if err != nil {
+		t.Fatalf("collectSetupProviderFlags() error = %v", err)
+	}
+	if !reflect.DeepEqual(providerIDs, []string{"cursor"}) {
+		t.Fatalf("providerIDs = %v, want [cursor]", providerIDs)
+	}
+	if !reflect.DeepEqual(agents, []string{"cursor"}) {
+		t.Fatalf("agents = %v, want [cursor]", agents)
+	}
+}
+
 func TestInitDispatch_NoSembleFlagsOrInitParams(t *testing.T) {
 	resetRootCmdForTest(t)
 	defer resetRootCmdForTest(t)

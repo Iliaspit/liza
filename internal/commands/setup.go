@@ -28,7 +28,8 @@ type SetupParams struct {
 	TargetDir      string    // target directory (typically the branded global directory)
 	Force          bool      // overwrite existing files
 	AgentToolsPath string    // path to custom AGENT_TOOLS.md (empty = use embedded)
-	Agents         []string  // agent names to create skill symlinks for (e.g. "claude", "codex", "opencode")
+	ProviderIDs    []string  // explicit catalog provider IDs from --provider
+	Agents         []string  // shortcut agent flags to create skill symlinks for (e.g. "claude", "codex", "opencode")
 	HomeDir        string    // home directory override (empty = os.UserHomeDir())
 	Stdin          io.Reader // input for interactive prompts (nil = os.Stdin)
 }
@@ -71,7 +72,9 @@ func SetupCommand(params SetupParams) error {
 		}
 	}
 	catalog := loadProviderCatalog()
-	selectedProviders, err := resolveCatalogProviders(catalog, params.Agents)
+	setupProviderIDs := append([]string{}, params.ProviderIDs...)
+	setupProviderIDs = append(setupProviderIDs, canonicalSetupProviderIDs(params.Agents)...)
+	selectedProviders, err := resolveCatalogProviders(catalog, setupProviderIDs)
 	if err != nil {
 		return err
 	}
@@ -134,8 +137,31 @@ func SetupCommand(params SetupParams) error {
 		}
 	}
 
-	printSetupSummary(params.TargetDir, written, skipFiles, autoReplaced, params.Agents)
+	printSetupSummary(params.TargetDir, written, skipFiles, autoReplaced, setupProviderIDs)
 	return nil
+}
+
+func canonicalSetupProviderIDs(ids []string) []string {
+	out := make([]string, 0, len(ids)+1)
+	seen := make(map[string]bool, len(ids)+1)
+	appendID := func(id string) {
+		if seen[id] {
+			return
+		}
+		seen[id] = true
+		out = append(out, id)
+	}
+	for _, id := range ids {
+		// Cursor's global setup path reuses Claude/Codex skill discovery; project-local
+		// Cursor hooks and contract activation stay in init --cursor.
+		if id == "cursor" {
+			appendID("claude")
+			appendID("codex")
+			continue
+		}
+		appendID(id)
+	}
+	return out
 }
 
 func warnLegacyGlobalRoot(homeDir, targetDir string) {

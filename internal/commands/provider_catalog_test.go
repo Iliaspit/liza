@@ -18,9 +18,9 @@ func TestSetupCommand_ProviderFromCatalog(t *testing.T) {
 	homeDir := t.TempDir()
 
 	if err := SetupCommand(SetupParams{
-		TargetDir: lizaDir,
-		HomeDir:   homeDir,
-		Agents:    []string{"qwen"},
+		TargetDir:   lizaDir,
+		HomeDir:     homeDir,
+		ProviderIDs: []string{"qwen"},
 	}); err != nil {
 		t.Fatalf("SetupCommand() error = %v", err)
 	}

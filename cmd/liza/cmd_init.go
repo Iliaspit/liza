@@ -67,7 +67,7 @@ Use --agent-tools to install a custom AGENT_TOOLS.md instead of the embedded def
 		force, _ := cmd.Flags().GetBool("force")
 		agentToolsPath, _ := cmd.Flags().GetString("agent-tools")
 
-		agents, err := collectSetupProviderFlags(cmd)
+		providerIDs, agents, err := collectSetupProviderFlags(cmd)
 		if err != nil {
 			return err
 		}
@@ -76,6 +76,7 @@ Use --agent-tools to install a custom AGENT_TOOLS.md instead of the embedded def
 			TargetDir:      targetDir,
 			Force:          force,
 			AgentToolsPath: agentToolsPath,
+			ProviderIDs:    providerIDs,
 			Agents:         agents,
 			Stdin:          os.Stdin,
 		})
@@ -458,11 +459,17 @@ func validateDefaultCLIFlag(name, value string) error {
 	return nil
 }
 
-// collectAgentFlags returns the agent names whose boolean flags are set on cmd.
+// collectAgentFlags returns explicit provider IDs followed by boolean agent flags.
 func collectAgentFlags(cmd *cobra.Command) []string {
 	var agents []string
 	providers, _ := cmd.Flags().GetStringArray("provider")
 	agents = append(agents, providers...)
+	agents = append(agents, collectBooleanAgentFlags(cmd)...)
+	return agents
+}
+
+func collectBooleanAgentFlags(cmd *cobra.Command) []string {
+	var agents []string
 	for _, name := range agentFlagNames {
 		if v, _ := cmd.Flags().GetBool(name); v {
 			agents = append(agents, name)
@@ -471,12 +478,14 @@ func collectAgentFlags(cmd *cobra.Command) []string {
 	return agents
 }
 
-func collectSetupProviderFlags(cmd *cobra.Command) ([]string, error) {
-	agents := collectAgentFlags(cmd)
-	if len(agents) > 0 || !interactive.IsInteractive() {
-		return agents, nil
+func collectSetupProviderFlags(cmd *cobra.Command) ([]string, []string, error) {
+	providerIDs, _ := cmd.Flags().GetStringArray("provider")
+	agents := collectBooleanAgentFlags(cmd)
+	if len(providerIDs) > 0 || len(agents) > 0 || !interactive.IsInteractive() {
+		return providerIDs, agents, nil
 	}
-	return promptDetectedProviders(os.Stdin, cmd.OutOrStdout())
+	promptedProviderIDs, err := promptDetectedProviders(os.Stdin, cmd.OutOrStdout())
+	return promptedProviderIDs, nil, err
 }
 
 func promptDetectedProviders(in io.Reader, out io.Writer) ([]string, error) {
@@ -587,6 +596,7 @@ func init() {
 	setupCmd.Flags().StringArray("provider", nil, "create setup links for provider catalog id (repeatable)")
 	setupCmd.Flags().Bool("claude", false, "create skill symlinks in ~/.claude/")
 	setupCmd.Flags().Bool("codex", false, "create skill symlinks in ~/.codex/")
+	setupCmd.Flags().Bool("cursor", false, "create Claude/Codex skill symlinks Cursor relies on")
 	setupCmd.Flags().Bool("opencode", false, "create skill symlinks in ~/.config/opencode/")
 	setupCmd.Flags().Bool("gemini", false, "create skill symlinks in ~/.gemini/")
 	setupCmd.Flags().Bool("mistral", false, "create skill symlinks in ~/.vibe/")
