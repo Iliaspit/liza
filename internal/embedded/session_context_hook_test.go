@@ -8,6 +8,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/liza-mas/liza/internal/brand"
 )
 
 func TestSessionContextHook_EmitsSessionStartContextForIndexedRepo(t *testing.T) {
@@ -358,6 +360,30 @@ func TestSessionContextHook_EmitsFunctionalClustersWhenEnabledAndArtifactExists(
 	}
 }
 
+func TestSessionContextHook_EmptyBrandedFunctionalClustersGateSuppressesLegacyAlias(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not available")
+	}
+	restore := setSessionContextHookBrandEnvPrefix(t, "ACME_AGENT")
+	defer restore()
+
+	hookPath := writeSessionContextHook(t)
+	projectRoot := t.TempDir()
+	clustersPath := filepath.Join(projectRoot, "functional-clusters.json")
+	if err := os.WriteFile(clustersPath, []byte("{}\n"), 0644); err != nil {
+		t.Fatalf("write functional clusters artifact: %v", err)
+	}
+
+	output := runSessionContextHook(t, hookPath, sessionStartPayload(t, projectRoot), []string{
+		"ACME_AGENT_ENABLE_FUNCTIONAL_CLUSTERS=",
+		"LIZA_ENABLE_FUNCTIONAL_CLUSTERS=true",
+	}, 0)
+	context := sessionStartAdditionalContext(t, output)
+	if strings.Contains(context, "Functional clusters artifact:") {
+		t.Fatalf("startup context should omit functional clusters when branded gate is explicitly empty, got:\n%s", context)
+	}
+}
+
 func TestSessionContextHook_OmitsFunctionalClustersWithoutGateOrArtifact(t *testing.T) {
 	if _, err := exec.LookPath("bash"); err != nil {
 		t.Skip("bash not available")
@@ -473,6 +499,32 @@ func TestSessionContextHook_EmitsSembleWhenEnabledSafeAndOfflineReady(t *testing
 	}
 }
 
+func TestSessionContextHook_EmptyBrandedSembleGateSuppressesLegacyAlias(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not available")
+	}
+	if runtime.GOOS == "windows" {
+		t.Skip("shell script test")
+	}
+	restore := setSessionContextHookBrandEnvPrefix(t, "ACME_AGENT")
+	defer restore()
+
+	hookPath := writeSessionContextHook(t)
+	projectRoot := t.TempDir()
+	writeRootSembleIgnore(t, projectRoot)
+	binDir := writeFakeSembleTools(t, true)
+
+	output := runSessionContextHook(t, hookPath, sessionStartPayload(t, projectRoot), []string{
+		"PATH=" + binDir + string(os.PathListSeparator) + os.Getenv("PATH"),
+		"ACME_AGENT_ENABLE_SEMBLE=",
+		"LIZA_ENABLE_SEMBLE=true",
+	}, 0)
+	context := sessionStartAdditionalContext(t, output)
+	if strings.Contains(context, "Semble semantic search is available") {
+		t.Fatalf("startup context should omit Semble when branded gate is explicitly empty, got:\n%s", context)
+	}
+}
+
 func TestSessionContextHook_OmitsSembleWithoutRootIgnore(t *testing.T) {
 	if _, err := exec.LookPath("bash"); err != nil {
 		t.Skip("bash not available")
@@ -564,6 +616,15 @@ func TestSessionContextHook_SuppressesSembleForLizaAgentSessions(t *testing.T) {
 	context := sessionStartAdditionalContext(t, output)
 	if strings.Contains(context, "Semble semantic search is available") {
 		t.Fatalf("Liza agent context should not include Pairing Semble guidance, got:\n%s", context)
+	}
+}
+
+func setSessionContextHookBrandEnvPrefix(t *testing.T, prefix string) func() {
+	t.Helper()
+	previous := brand.EnvPrefix
+	brand.EnvPrefix = prefix
+	return func() {
+		brand.EnvPrefix = previous
 	}
 }
 

@@ -95,6 +95,17 @@ truthy_env() {
   [[ "$value" == "1" || "$value" == "true" ]]
 }
 
+branded_env_gate() {
+  local branded_name="$1"
+  local legacy_name="$2"
+
+  if [[ "${!branded_name+x}" == "x" ]]; then
+    printf '%s' "${!branded_name}"
+    return 0
+  fi
+  printf '%s' "${!legacy_name:-}"
+}
+
 semble_offline_ready() {
   local tmpdir status
 
@@ -208,7 +219,7 @@ fi
 
 semble_enabled=false
 brand_semble_gate_var="__BRAND_ENV_PREFIX__""_ENABLE_SEMBLE"
-semble_gate="${!brand_semble_gate_var:-${LIZA_ENABLE_SEMBLE:-}}"
+semble_gate=$(branded_env_gate "$brand_semble_gate_var" "LIZA_ENABLE_SEMBLE")
 if truthy_env "$semble_gate" && root_sembleignore_safe && semble_offline_ready; then
   semble_enabled=true
   shell_project_dir=$(quote_for_shell "$project_dir")
@@ -217,7 +228,7 @@ fi
 functional_clusters_enabled=false
 functional_clusters_path="$project_dir/functional-clusters.json"
 brand_functional_clusters_gate_var="__BRAND_ENV_PREFIX__""_ENABLE_FUNCTIONAL_CLUSTERS"
-functional_clusters_gate="${!brand_functional_clusters_gate_var:-${LIZA_ENABLE_FUNCTIONAL_CLUSTERS:-}}"
+functional_clusters_gate=$(branded_env_gate "$brand_functional_clusters_gate_var" "LIZA_ENABLE_FUNCTIONAL_CLUSTERS")
 if truthy_env "$functional_clusters_gate" && [[ -f "$functional_clusters_path" ]]; then
   functional_clusters_enabled=true
   shell_functional_clusters_path=$(quote_for_shell "$functional_clusters_path")

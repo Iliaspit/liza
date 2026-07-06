@@ -17,6 +17,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/liza-mas/liza/internal/brand"
 	"github.com/liza-mas/liza/internal/envgate"
 	"github.com/liza-mas/liza/internal/gitenv"
 	"github.com/liza-mas/liza/internal/scipsearch"
@@ -24,7 +25,7 @@ import (
 	"github.com/liza-mas/liza/internal/worktreeexclude"
 )
 
-const EnvEnableFunctionalClusters = "LIZA_ENABLE_FUNCTIONAL_CLUSTERS"
+var EnvEnableFunctionalClusters = brand.EnvName("ENABLE_FUNCTIONAL_CLUSTERS")
 
 const outputArtifactName = "functional-clusters.json"
 const stacklitArchitectureArtifactName = "stacklit-architecture.json"

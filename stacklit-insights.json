@@ -34,6 +34,7 @@
     "internal/procscan": "Process table scanning for zombie or matching Liza agent processes.",
     "internal/projectdetect": "Project toolchain and package-manager detection for setup and optional post-worktree commands.",
     "internal/prompts": "Base prompt, role context, wake prompt, dashboard, and truncation rendering for agents.",
+    "internal/providers": "Providers",
     "internal/render": "Reusable formatting helpers for templates, tables, durations, JSON, YAML, and values.",
     "internal/roles": "Canonical role names, claim modes, and role metadata constants.",
     "internal/scipsearch": "Optional SCIP index planning, generation, discovery, and runtime gating.",

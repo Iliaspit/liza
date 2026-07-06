@@ -92,7 +92,7 @@ const (
 	DefaultAgentProgressTimeoutSec  = 1800 // 30 minutes
 )
 
-const EnvEnableCopyWorktreeEnvFiles = "LIZA_ENABLE_COPY_ENV_FILES"
+var EnvEnableCopyWorktreeEnvFiles = brand.EnvName("ENABLE_COPY_ENV_FILES")
 
 // Bounds for heartbeat interval validation.
 const (

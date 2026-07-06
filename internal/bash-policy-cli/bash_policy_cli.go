@@ -8,12 +8,13 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/liza-mas/liza/internal/brand"
 	"github.com/liza-mas/liza/internal/envgate"
 )
 
-const (
-	EnvEnableBashPolicy = "LIZA_ENABLE_BASH_POLICY"
+var EnvEnableBashPolicy = brand.EnvName("ENABLE_BASH_POLICY")
 
+const (
 	ProviderClaude = "claude"
 	ProviderCodex  = "codex"
 	ProviderAll    = "all"

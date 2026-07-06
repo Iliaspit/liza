@@ -9,11 +9,12 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/liza-mas/liza/internal/brand"
 	"github.com/liza-mas/liza/internal/envgate"
 	"github.com/liza-mas/liza/internal/gitenv"
 )
 
-const EnvEnableStacklit = "LIZA_ENABLE_STACKLIT"
+var EnvEnableStacklit = brand.EnvName("ENABLE_STACKLIT")
 
 const maxFailureDiagnosticBytes = 1024
 

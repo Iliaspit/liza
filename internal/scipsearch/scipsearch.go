@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/liza-mas/liza/internal/brand"
 	"github.com/liza-mas/liza/internal/envgate"
 	"github.com/liza-mas/liza/internal/gitenv"
 	"github.com/liza-mas/liza/internal/paths"
@@ -18,7 +19,7 @@ import (
 	"github.com/tailscale/hujson"
 )
 
-const EnvEnableScipSearch = "LIZA_ENABLE_SCIP_SEARCH"
+var EnvEnableScipSearch = brand.EnvName("ENABLE_SCIP_SEARCH")
 
 const maxFailureDiagnosticBytes = 1024
 const outputPathPlaceholder = "__LIZA_SCIP_OUTPUT__"

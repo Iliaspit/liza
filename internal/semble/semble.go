@@ -17,7 +17,7 @@ import (
 	"github.com/liza-mas/liza/internal/envgate"
 )
 
-const EnvEnableSemble = "LIZA_ENABLE_SEMBLE"
+var EnvEnableSemble = brand.EnvName("ENABLE_SEMBLE")
 
 const (
 	sembleExecutableName      = "semble"

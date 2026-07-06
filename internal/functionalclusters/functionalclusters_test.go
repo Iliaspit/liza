@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/liza-mas/liza/internal/paths"
 	"github.com/liza-mas/liza/internal/scipsearch"
 	"github.com/liza-mas/liza/internal/stacklit"
 	"github.com/liza-mas/liza/internal/testhelpers"
@@ -72,7 +73,7 @@ func TestRefreshIndexBuildsFunctionalClustersAfterExports(t *testing.T) {
 	testhelpers.MustGit(t, projectRoot, "add", "go.mod")
 	testhelpers.MustGit(t, projectRoot, "commit", "-m", "Add go module")
 	writeFile(t, filepath.Join(projectRoot, "stacklit.json"), "{}\n")
-	writeFile(t, filepath.Join(projectRoot, ".liza", "scip", "go.scip"), "go index\n")
+	writeFile(t, filepath.Join(projectRoot, paths.ProjectDirName(), "scip", "go.scip"), "go index\n")
 	t.Setenv(EnvEnableFunctionalClusters, "true")
 	t.Setenv(stacklit.EnvEnableStacklit, "true")
 	t.Setenv(scipsearch.EnvEnableScipSearch, "true")
@@ -134,14 +135,14 @@ func TestRefreshIndexTaskWorktreeGeneratedArtifactIsPromptLocalAndClean(t *testi
 	projectRoot := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, projectRoot)
 	testhelpers.MustGit(t, projectRoot, "checkout", "integration")
-	writeFile(t, filepath.Join(projectRoot, ".gitignore"), "stacklit.json\n.liza/scip/\n")
+	writeFile(t, filepath.Join(projectRoot, ".gitignore"), "stacklit.json\n"+paths.ProjectDirName()+"/scip/\n")
 	writeFile(t, filepath.Join(projectRoot, "go.mod"), "module example.com/project\n")
 	testhelpers.MustGit(t, projectRoot, "add", ".gitignore", "go.mod")
 	testhelpers.MustGit(t, projectRoot, "commit", "-m", "Add indexed Go project")
 	testhelpers.CreateTestWorktree(t, projectRoot, "task-1")
 	worktreeRoot := filepath.Join(projectRoot, ".worktrees", "task-1")
 	writeFile(t, filepath.Join(worktreeRoot, "stacklit.json"), "{}\n")
-	writeFile(t, filepath.Join(worktreeRoot, ".liza", "scip", "go.scip"), "go index\n")
+	writeFile(t, filepath.Join(worktreeRoot, paths.ProjectDirName(), "scip", "go.scip"), "go index\n")
 	t.Setenv(EnvEnableFunctionalClusters, "true")
 	t.Setenv(stacklit.EnvEnableStacklit, "true")
 	t.Setenv(scipsearch.EnvEnableScipSearch, "true")
