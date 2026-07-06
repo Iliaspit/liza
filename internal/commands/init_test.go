@@ -3158,7 +3158,7 @@ func TestInitPairingCommand_BashPolicyWarnsWhenInitFails(t *testing.T) {
 	if err != nil {
 		t.Fatalf("InitPairingCommand() error = %v", err)
 	}
-	for _, want := range []string{"failed to initialize bash-policy hooks", "policy failure detail"} {
+	for _, want := range []string{"failed to initialize or activate bash-policy hooks", "policy failure detail"} {
 		if !strings.Contains(stderr, want) {
 			t.Fatalf("stderr missing %q:\n%s", want, stderr)
 		}
@@ -4371,7 +4371,7 @@ type initBashPolicyTestRunner struct {
 
 func (r *initBashPolicyTestRunner) Run(command bashpolicycli.Command) (bashpolicycli.CommandOutput, error) {
 	r.commands = append(r.commands, command)
-	if r.readStdinLine && command.Stdin != nil {
+	if r.readStdinLine && len(command.Args) > 0 && command.Args[0] == "init" && command.Stdin != nil {
 		reader, ok := command.Stdin.(*bufio.Reader)
 		if !ok {
 			return r.output, r.err
@@ -4396,7 +4396,7 @@ func setInitBashPolicyHooksForTest(lookPath bashpolicycli.ExecutableLookup, runn
 	}
 }
 
-func assertBashPolicyCommand(t *testing.T, command bashpolicycli.Command, projectRoot, provider string) {
+func assertBashPolicyCommand(t *testing.T, command bashpolicycli.Command, projectRoot string, args []string) {
 	t.Helper()
 	if command.Path != filepath.Join(projectRoot, "bin", "bash-policy") {
 		t.Fatalf("bash-policy path = %q", command.Path)
@@ -4404,7 +4404,7 @@ func assertBashPolicyCommand(t *testing.T, command bashpolicycli.Command, projec
 	if command.Dir != projectRoot {
 		t.Fatalf("bash-policy dir = %q, want %q", command.Dir, projectRoot)
 	}
-	wantArgs := strings.Join([]string{"init", "--provider", provider, "--policy-artifact-root", projectRoot}, "\x00")
+	wantArgs := strings.Join(args, "\x00")
 	if strings.Join(command.Args, "\x00") != wantArgs {
 		t.Fatalf("bash-policy args = %v", command.Args)
 	}
@@ -4412,11 +4412,21 @@ func assertBashPolicyCommand(t *testing.T, command bashpolicycli.Command, projec
 
 func assertBashPolicyCommands(t *testing.T, commands []bashpolicycli.Command, projectRoot string, providers []string) {
 	t.Helper()
-	if len(commands) != len(providers) {
-		t.Fatalf("bash-policy commands = %d, want %d", len(commands), len(providers))
+	if len(commands) != len(providers)*2 {
+		t.Fatalf("bash-policy commands = %d, want %d", len(commands), len(providers)*2)
 	}
 	for i, provider := range providers {
-		assertBashPolicyCommand(t, commands[i], projectRoot, provider)
+		commandOffset := i * 2
+		assertBashPolicyCommand(t, commands[commandOffset], projectRoot, []string{
+			"init",
+			"--provider", provider,
+			"--policy-artifact-root", projectRoot,
+		})
+		assertBashPolicyCommand(t, commands[commandOffset+1], projectRoot, []string{
+			"activation", "on",
+			"--provider", provider,
+			"--policy-artifact-root", projectRoot,
+		})
 	}
 }
 

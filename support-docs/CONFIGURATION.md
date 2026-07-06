@@ -683,10 +683,11 @@ or make cluster membership authoritative.
 ### Bash Policy (`§BRAND_ENV_PREFIX§_ENABLE_BASH_POLICY`)
 
 `bash-policy` is an optional standalone CLI that installs provider-aware bash
-command policy hooks. `§BRAND_BINARY_NAME§ init` runs `bash-policy init` only
-when `§BRAND_ENV_PREFIX§_ENABLE_BASH_POLICY` is truthy. Selected providers are
-delegated to the standalone CLI; §BRAND_NAME_TITLE§ prints a warning and
-continues when the executable is missing or the command fails.
+command policy hooks. `§BRAND_BINARY_NAME§ init` runs `bash-policy init`, then
+`bash-policy activation on`, only when `§BRAND_ENV_PREFIX§_ENABLE_BASH_POLICY`
+is truthy. Selected providers are delegated to the standalone CLI;
+§BRAND_NAME_TITLE§ prints a warning and continues when the executable is missing
+or either command fails.
 §BRAND_NAME_TITLE§ does not vendor or implement the policy engine.
 
 `§BRAND_ENV_PREFIX§_ENABLE_BASH_POLICY` is process-local activation, not durable project state.
@@ -694,18 +695,19 @@ Values are trimmed and compared case-insensitively:
 
 | Value | Meaning |
 |-------|---------|
-| `1`, `true` | Ask `§BRAND_BINARY_NAME§ init` to write `.bash-policy.yaml` and run `bash-policy init` for selected providers |
-| unset, empty, `0`, `false` | Skip all `bash-policy init` calls for the current init process |
+| `1`, `true` | Ask `§BRAND_BINARY_NAME§ init` to write `.bash-policy.yaml`, run `bash-policy init`, and run `bash-policy activation on` for selected providers |
+| unset, empty, `0`, `false` | Skip all `bash-policy init` and activation calls for the current init process |
 
 When enabled, `§BRAND_BINARY_NAME§ init` runs:
 
 ```bash
 bash-policy init --provider <selected_provider> --policy-artifact-root <project_root>
+bash-policy activation on --provider <selected_provider> --policy-artifact-root <project_root>
 ```
 
 Pairing init derives the provider from selected agents. Full workspace init
 includes Claude by default and adds selected provider flags. If the executable
-is missing or the command fails,
+is missing or either command fails,
 `§BRAND_BINARY_NAME§ init` prints a warning and continues with the rest of
 initialization.
 
@@ -974,7 +976,7 @@ project configuration belongs in `§BRAND_PROJECT_DIRNAME§/state.yaml`.
 |----------|----------|---------|---------|
 | `§BRAND_ENV_PREFIX§_AGENT_ID` | For agent commands | -- | Agent identifier input (format: `{role}-{number}`). `§BRAND_BINARY_NAME§ agent` also exports the resolved ID to spawned provider CLIs so hooks select MAS mode. |
 | `§BRAND_ENV_PREFIX§_DISABLE_CLAUDE_SUBAGENTS` | No | unset | Set to `1` to launch Claude Code agents with `--disallowedTools Task`, disabling Claude subagent delegation. Use only when intentionally waiving Claude subagent delegation; agents may be unable to satisfy contract delegation triggers while this is set. |
-| `§BRAND_ENV_PREFIX§_ENABLE_BASH_POLICY` | No | unset | Strict opt-in activation gate for standalone bash-policy init. Truthy values write `.bash-policy.yaml` and run `bash-policy init` for selected providers when the CLI is installed. Full workspace init includes Claude by default and adds selected provider flags. Missing or failing bash-policy setup is warning-only. Unset, empty, `0`, and `false` skip all `bash-policy init` calls. Values are trimmed and parsed case-insensitively. |
+| `§BRAND_ENV_PREFIX§_ENABLE_BASH_POLICY` | No | unset | Strict opt-in activation gate for standalone bash-policy init. Truthy values write `.bash-policy.yaml`, run `bash-policy init`, and run `bash-policy activation on` for selected providers when the CLI is installed. Full workspace init includes Claude by default and adds selected provider flags. Missing or failing bash-policy setup is warning-only. Unset, empty, `0`, and `false` skip all bash-policy init and activation calls. Values are trimmed and parsed case-insensitively. |
 | `§BRAND_ENV_PREFIX§_ENABLE_SCIP_SEARCH` | No | unset | Strict opt-in activation gate for SCIP. In pairing init, truthy values enable project-local hook planning and installation for detected or selected languages. In MAS, truthy values enable indexing and `scip-search` prompt guidance only when `config.scip_search` also allows a detected language. Unset, empty, `0`, and `false` disable it. Values are trimmed and parsed case-insensitively. |
 | `§BRAND_ENV_PREFIX§_ENABLE_SEMBLE` | No | unset | Strict opt-in activation gate for Semble. In pairing init, truthy values enable project-root `.sembleignore` safety setup before SessionStart advertisement. In MAS, truthy values enable prewarm/offline validation and prompt guidance only when Semble is installed, offline-ready, and safe for the target root. Unset, empty, `0`, and `false` disable it. Values are trimmed and parsed case-insensitively. |
 | `§BRAND_ENV_PREFIX§_ENABLE_STACKLIT` | No | unset | Strict opt-in activation gate for Stacklit. In pairing init, truthy values enable project-local hook setup for repo-root `stacklit.json` refresh. In MAS, truthy values enable target-local `stacklit.json` refresh and prompt guidance when an index is available. Unset, empty, `0`, and `false` disable it. Values are trimmed and parsed case-insensitively. |

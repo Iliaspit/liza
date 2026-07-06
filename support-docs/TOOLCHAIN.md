@@ -111,8 +111,8 @@ source ~/§BRAND_GLOBAL_DIRNAME§/toolchain/env.sh
 Use `--cursor` when the project should activate Cursor's project-local setup;
 it includes the Claude and Codex project setup Cursor relies on.
 When `§BRAND_ENV_PREFIX§_ENABLE_BASH_POLICY=1` is set before init, selected
-provider hooks are delegated to `bash-policy`. If `bash-policy` is not on `PATH`
-or the command fails, init warns and continues.
+provider hook initialization and activation are delegated to `bash-policy`. If
+`bash-policy` is not on `PATH` or setup fails, init warns and continues.
 
 Or use `configure --project` to invoke pairing activation for provider contract
 files and optional indexing hooks:
@@ -125,8 +125,8 @@ Project-local activation still belongs to `§BRAND_BINARY_NAME§ init`: Stacklit
 plans, `.sembleignore`, provider symlinks, bash-policy policy files, delegated
 provider hooks, and OpenCode exec tools are written there. If
 `§BRAND_ENV_PREFIX§_ENABLE_BASH_POLICY` is truthy but the standalone
-`bash-policy` CLI is unavailable or fails, `§BRAND_BINARY_NAME§ init` warns and
-continues; `.bash-policy.yaml` is written before that CLI call. Global
+`bash-policy` CLI is unavailable or setup fails, `§BRAND_BINARY_NAME§ init`
+warns and continues; `.bash-policy.yaml` is written before those CLI calls. Global
 `AGENT_TOOLS.md` remains generic and must not contain stale project-specific
 index paths.
 

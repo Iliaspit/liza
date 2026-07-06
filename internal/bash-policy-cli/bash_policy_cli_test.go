@@ -10,20 +10,34 @@ import (
 )
 
 type fakeCommandRunner struct {
-	commands []Command
-	output   CommandOutput
-	err      error
+	commands        []Command
+	output          CommandOutput
+	outputByCommand map[string]CommandOutput
+	err             error
+	errByCommand    map[string]error
 }
 
 func (f *fakeCommandRunner) Run(command Command) (CommandOutput, error) {
 	f.commands = append(f.commands, command)
+	output := f.output
+	if len(command.Args) > 0 {
+		if commandOutput, ok := f.outputByCommand[command.Args[0]]; ok {
+			output = commandOutput
+		}
+	}
 	if command.Stdout != nil {
-		_, _ = command.Stdout.Write([]byte(f.output.Stdout))
+		_, _ = command.Stdout.Write([]byte(output.Stdout))
 	}
 	if command.Stderr != nil {
-		_, _ = command.Stderr.Write([]byte(f.output.Stderr))
+		_, _ = command.Stderr.Write([]byte(output.Stderr))
 	}
-	return f.output, f.err
+	err := f.err
+	if len(command.Args) > 0 {
+		if commandErr, ok := f.errByCommand[command.Args[0]]; ok {
+			err = commandErr
+		}
+	}
+	return output, err
 }
 
 func TestInitHooksDisabledSkipsLookup(t *testing.T) {
@@ -65,7 +79,7 @@ func TestInitHooksMissingExecutable(t *testing.T) {
 	}
 }
 
-func TestInitHooksRunsProviderAwareInit(t *testing.T) {
+func TestInitHooksRunsProviderAwareInitThenActivation(t *testing.T) {
 	t.Setenv(EnvEnableBashPolicy, "1")
 	stdin := strings.NewReader("input\n")
 	projectRoot := t.TempDir()
@@ -90,30 +104,34 @@ func TestInitHooksRunsProviderAwareInit(t *testing.T) {
 	if got.Status != StatusInstalled {
 		t.Fatalf("status = %s, want installed", got.Status)
 	}
-	if len(runner.commands) != 1 {
-		t.Fatalf("commands = %d, want 1", len(runner.commands))
+	if len(runner.commands) != 2 {
+		t.Fatalf("commands = %d, want 2", len(runner.commands))
 	}
-	command := runner.commands[0]
-	if command.Path != "/custom/bin/bash-policy" {
-		t.Fatalf("path = %q", command.Path)
+	wantArgs := [][]string{
+		{"init", "--provider", "claude", "--policy-artifact-root", projectRoot},
+		{"activation", "on", "--provider", "claude", "--policy-artifact-root", projectRoot},
 	}
-	wantArgs := strings.Join([]string{"init", "--provider", "claude", "--policy-artifact-root", projectRoot}, "\x00")
-	if strings.Join(command.Args, "\x00") != wantArgs {
-		t.Fatalf("args = %v", command.Args)
+	for i, command := range runner.commands {
+		if command.Path != "/custom/bin/bash-policy" {
+			t.Fatalf("command %d path = %q", i, command.Path)
+		}
+		if strings.Join(command.Args, "\x00") != strings.Join(wantArgs[i], "\x00") {
+			t.Fatalf("command %d args = %v", i, command.Args)
+		}
+		if command.Dir != projectRoot {
+			t.Fatalf("command %d dir = %q, want %q", i, command.Dir, projectRoot)
+		}
+		if command.Stdin != stdin {
+			t.Fatalf("command %d stdin was not preserved", i)
+		}
+		if command.Stdout != &stdout {
+			t.Fatalf("command %d stdout writer was not preserved", i)
+		}
+		if command.Stderr != &stderr {
+			t.Fatalf("command %d stderr writer was not preserved", i)
+		}
 	}
-	if command.Dir != projectRoot {
-		t.Fatalf("dir = %q, want %q", command.Dir, projectRoot)
-	}
-	if command.Stdin != stdin {
-		t.Fatalf("stdin was not preserved")
-	}
-	if command.Stdout != &stdout {
-		t.Fatalf("stdout writer was not preserved")
-	}
-	if command.Stderr != &stderr {
-		t.Fatalf("stderr writer was not preserved")
-	}
-	if stdout.String() != "installed\n" || stderr.String() != "diagnostic\n" {
+	if stdout.String() != "installed\ninstalled\n" || stderr.String() != "diagnostic\ndiagnostic\n" {
 		t.Fatalf("stdout/stderr = %q/%q", stdout.String(), stderr.String())
 	}
 }
@@ -166,8 +184,45 @@ func TestInitHooksFailureDiagnosticIncludesCapturedOutput(t *testing.T) {
 	if got.Status != StatusFailed {
 		t.Fatalf("status = %s, want failed", got.Status)
 	}
+	if len(runner.commands) != 1 {
+		t.Fatalf("commands = %d, want init failure to skip activation", len(runner.commands))
+	}
 	diagnostic := got.Diagnostic()
 	for _, want := range []string{"exit status 2", "policy failed", "partial stdout"} {
+		if !strings.Contains(diagnostic, want) {
+			t.Fatalf("diagnostic %q missing %q", diagnostic, want)
+		}
+	}
+}
+
+func TestInitHooksActivationFailureDiagnosticIncludesCapturedOutput(t *testing.T) {
+	t.Setenv(EnvEnableBashPolicy, "true")
+	runner := &fakeCommandRunner{
+		outputByCommand: map[string]CommandOutput{
+			"activation": {Stdout: "activation stdout", Stderr: "activation failed"},
+		},
+		errByCommand: map[string]error{
+			"activation": errors.New("exit status 3"),
+		},
+	}
+
+	got := InitHooks(InitHooksOptions{
+		ProjectRoot: t.TempDir(),
+		Provider:    ProviderCodex,
+		LookPath: func(name string) (string, error) {
+			return "/bin/" + name, nil
+		},
+		Runner: runner,
+	})
+
+	if got.Status != StatusFailed {
+		t.Fatalf("status = %s, want failed", got.Status)
+	}
+	if len(runner.commands) != 2 {
+		t.Fatalf("commands = %d, want init then activation", len(runner.commands))
+	}
+	diagnostic := got.Diagnostic()
+	for _, want := range []string{"bash-policy activation failed", "exit status 3", "activation failed", "activation stdout"} {
 		if !strings.Contains(diagnostic, want) {
 			t.Fatalf("diagnostic %q missing %q", diagnostic, want)
 		}

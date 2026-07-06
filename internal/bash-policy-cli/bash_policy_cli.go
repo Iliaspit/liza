@@ -89,7 +89,7 @@ func InitHooks(opts InitHooksOptions) InitHooksResult {
 		return InitHooksResult{Status: StatusMissing, Err: err}
 	}
 
-	command := Command{
+	initCommand := Command{
 		Path: executable,
 		Args: []string{
 			"init",
@@ -105,17 +105,33 @@ func InitHooks(opts InitHooksOptions) InitHooksResult {
 	if runner == nil {
 		runner = realRunner{}
 	}
-	output, err := runner.Run(command)
-	result := InitHooksResult{
-		Status:     StatusInstalled,
-		Executable: executable,
-		Command:    command,
-		Output:     output,
-		Err:        err,
+	activationCommand := Command{
+		Path: executable,
+		Args: []string{
+			"activation", "on",
+			"--provider", opts.Provider,
+			"--policy-artifact-root", opts.ProjectRoot,
+		},
+		Dir:    opts.ProjectRoot,
+		Stdin:  opts.Stdin,
+		Stdout: opts.Stdout,
+		Stderr: opts.Stderr,
 	}
-	if err != nil {
-		result.Status = StatusFailed
-		return result
+	var result InitHooksResult
+	for _, command := range []Command{initCommand, activationCommand} {
+		output, err := runner.Run(command)
+		result = InitHooksResult{
+			Status:     StatusInstalled,
+			Executable: executable,
+			Command:    command,
+			Output:     output,
+			Err:        err,
+		}
+		if err != nil {
+			result.Status = StatusFailed
+			result.Err = fmt.Errorf("bash-policy %s failed: %w", command.Args[0], err)
+			return result
+		}
 	}
 	return result
 }

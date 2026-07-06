@@ -744,7 +744,7 @@ func runBashPolicyInit(projectRoot, provider string, stdin io.Reader) bashpolicy
 	case bashpolicycli.StatusMissing:
 		fmt.Fprintf(os.Stderr, "Warning: bash-policy requested by %s but bash-policy was not found on PATH; run '%s toolchain install --profile full --yes' and source ~/%s/toolchain/env.sh before re-running %s init.\n", bashpolicycli.EnvEnableBashPolicy, brand.BinaryName, brand.GlobalDirName, brand.BinaryName)
 	case bashpolicycli.StatusFailed:
-		fmt.Fprintf(os.Stderr, "Warning: failed to initialize bash-policy hooks: %s\n", result.Diagnostic())
+		fmt.Fprintf(os.Stderr, "Warning: failed to initialize or activate bash-policy hooks: %s\n", result.Diagnostic())
 	}
 	return result.Status
 }

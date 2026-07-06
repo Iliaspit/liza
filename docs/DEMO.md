@@ -136,7 +136,7 @@ This creates:
 - `GUARDRAILS.md` — project-specific constraints template
 - `.bash-policy.yaml` and standalone provider hooks when
   `LIZA_ENABLE_BASH_POLICY=1` is set before init, the `bash-policy` CLI is
-  installed, and hook installation succeeds
+  installed, and hook setup succeeds
 - `integration` branch — where approved work lands
 
 Verify:

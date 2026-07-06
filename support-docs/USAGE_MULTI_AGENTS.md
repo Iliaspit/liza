@@ -148,7 +148,7 @@ cat §BRAND_PROJECT_DIRNAME§/state.yaml
 - `GUARDRAILS.md` — Project-specific constraints template (if not already present)
 - `.bash-policy.yaml` and standalone provider hooks when
   `§BRAND_ENV_PREFIX§_ENABLE_BASH_POLICY=1` is set before init, the
-  `bash-policy` CLI is installed, and hook installation succeeds
+  `bash-policy` CLI is installed, and hook setup succeeds
 - Integration branch (default `integration`, configurable via `--branch`) — For merging completed work
 
 Contracts and skills live in `~/§BRAND_GLOBAL_DIRNAME§/` (global, from `§BRAND_BINARY_NAME§ setup`), not in the project.
