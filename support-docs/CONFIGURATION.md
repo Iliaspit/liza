@@ -301,8 +301,9 @@ Stacklit,
 SCIP Search,
 [Semble](https://github.com/MinishLab/semble/), and
 Functional Clusters are optional navigation aids.
-They are external tools that users install and maintain separately; §BRAND_NAME_TITLE§ only
-activates prompt/index guidance when the configured gates and runtime checks pass.
+They are external tools; `§BRAND_BINARY_NAME§ toolchain` can install and verify
+the local CLIs it manages, while §BRAND_NAME_TITLE§ activates prompt/index
+guidance only when the configured gates and runtime checks pass.
 Set the corresponding `§BRAND_ENV_PREFIX§_ENABLE_*` environment variable before running the
 `§BRAND_BINARY_NAME§ setup` or `§BRAND_BINARY_NAME§ init` command that should activate that tool.
 §BRAND_NAME_TITLE§ separates their activation across setup, pairing init, and MAS runtime:
@@ -676,9 +677,9 @@ functional-clusters explain --clusters <project_root>/functional-clusters.json '
 The artifact is advisory and may be stale. Agents must verify behavior against
 source files before editing or claiming success.
 
-§BRAND_NAME_TITLE§ does not install `functional-clusters`, infer alternate artifact
-locations, expose temporary Stacklit architecture or SCIP graph exports to agents,
-or make cluster membership authoritative.
+§BRAND_BINARY_NAME§ toolchain can install `functional-clusters`; §BRAND_NAME_TITLE§ does
+not infer alternate artifact locations, expose temporary Stacklit architecture or
+SCIP graph exports to agents, or make cluster membership authoritative.
 
 ### Bash Policy (`§BRAND_ENV_PREFIX§_ENABLE_BASH_POLICY`)
 
@@ -686,8 +687,9 @@ or make cluster membership authoritative.
 command policy hooks. `§BRAND_BINARY_NAME§ init` runs `bash-policy init`, then
 `bash-policy activation on`, only when `§BRAND_ENV_PREFIX§_ENABLE_BASH_POLICY`
 is truthy. Selected providers are delegated to the standalone CLI;
-§BRAND_NAME_TITLE§ prints a warning and continues when the executable is missing
-or either command fails.
+`§BRAND_BINARY_NAME§ toolchain` selects `bash-policy` in the `balanced` and
+`full` profiles. §BRAND_NAME_TITLE§ prints a warning and continues when the
+executable is missing or either command fails.
 §BRAND_NAME_TITLE§ does not vendor or implement the policy engine.
 
 `§BRAND_ENV_PREFIX§_ENABLE_BASH_POLICY` is process-local activation, not durable project state.

@@ -21,7 +21,7 @@ func TestToolchainListShowsBalancedTools(t *testing.T) {
 		t.Fatalf("toolchain list failed: %v", err)
 	}
 	text := out.String()
-	for _, want := range []string{"rtk", "stacklit", "scip-search", "balanced"} {
+	for _, want := range []string{"rtk", "stacklit", "scip-search", "bash-policy", "functional-clusters", "balanced"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("toolchain list output missing %q:\n%s", want, text)
 		}

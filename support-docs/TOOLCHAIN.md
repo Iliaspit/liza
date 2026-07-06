@@ -1,8 +1,8 @@
 # §BRAND_NAME_TITLE§ Toolchain
 
-`§BRAND_BINARY_NAME§ toolchain` installs and verifies optional local tools that reduce context
-usage and improve repository navigation. It does not install secrets, provider
-accounts, or MCP credentials.
+`§BRAND_BINARY_NAME§ toolchain` installs and verifies optional local tools used
+by §BRAND_NAME_TITLE§ agents and project activation. It does not install
+secrets, provider accounts, or MCP credentials.
 
 ## Default Install
 
@@ -25,11 +25,11 @@ Selected by default:
 - `jq`, `yq`
 - `gh`
 - `pre-commit`
+- `bash-policy`
 
 Unchecked by default:
 
-- `functional-clusters`
-- `bash-policy` (selected by the `full` profile)
+- `functional-clusters` (selected by the `full` profile)
 - MCP/provider capabilities such as filesystem, context7, Ref, fetch,
   Perplexity, DeepWiki, Morph, and postgres.
 
@@ -92,7 +92,7 @@ prewarmed and offline validation succeeds, operators may add:
 export HF_HUB_OFFLINE=1
 ```
 
-The `full` profile also installs `bash-policy` and exports
+The `balanced` and `full` profiles install `bash-policy` and export
 `§BRAND_ENV_PREFIX§_ENABLE_BASH_POLICY=1`. Source that env file before
 `§BRAND_BINARY_NAME§ init` when the project should receive `.bash-policy.yaml`
 and standalone bash-policy provider hooks. For the full usage lifecycle, see
@@ -135,8 +135,9 @@ index paths.
 Most tools are installed through package managers, upstream install scripts,
 `go install`, npm, or `uv tool install`. Some upstream install scripts can be
 temporarily unavailable even when the source builds cleanly. For `mdtoc`,
-`scip-search`, and `bash-policy`, `§BRAND_BINARY_NAME§ toolchain install` falls back to cloning
-the official source repository and running `go install ./cmd/<tool>` into the
-selected install directory.
+`scip-search`, `functional-clusters`, and `bash-policy`,
+`§BRAND_BINARY_NAME§ toolchain install` falls back to cloning the official
+source repository and running `go install ./cmd/<tool>` into the selected
+install directory.
 
 The source fallback requires `git` and `go` on `PATH`.

@@ -12,12 +12,12 @@ func TestResolveSelectionBalancedDefaults(t *testing.T) {
 	}
 
 	ids := selectionIDs(selection.Tools)
-	for _, want := range []string{"rtk", "stacklit", "scip-search", "semble", "rg", "ast-grep", "mdtoc", "mdq", "jq", "yq", "gh", "pre-commit"} {
+	for _, want := range []string{"rtk", "stacklit", "scip-search", "semble", "rg", "ast-grep", "mdtoc", "mdq", "jq", "yq", "gh", "pre-commit", "bash-policy"} {
 		if !slices.Contains(ids, want) {
 			t.Fatalf("balanced profile missing %q in %v", want, ids)
 		}
 	}
-	for _, unwanted := range []string{"functional-clusters", "bash-policy", "claude-usage", "postgres-mcp"} {
+	for _, unwanted := range []string{"functional-clusters", "claude-usage", "postgres-mcp"} {
 		if slices.Contains(ids, unwanted) {
 			t.Fatalf("balanced profile unexpectedly selected %q in %v", unwanted, ids)
 		}

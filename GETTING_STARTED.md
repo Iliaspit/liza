@@ -117,7 +117,7 @@ provider or MCP host.
 See [Liza Toolchain](support-docs/TOOLCHAIN.md) for profiles, include/exclude
 flags, and project activation.
 
-`bash-policy` is the optional (installed by toolchain --profile full)
+`bash-policy` is the optional (installed by toolchain --profile balanced)
 standalone command-policy layer for agent shell use. When
 `LIZA_ENABLE_BASH_POLICY=1` is set before `liza init`, Liza writes
 `.bash-policy.yaml`, then delegates to the installed `bash-policy` CLI to

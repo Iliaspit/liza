@@ -51,11 +51,11 @@ func TestConfigureWritesProfileAndEnv(t *testing.T) {
 	if !strings.Contains(env, `export LIZA_ENABLE_STACKLIT='1'`) {
 		t.Fatalf("env missing stacklit activation:\n%s", env)
 	}
+	if !strings.Contains(env, `export LIZA_ENABLE_BASH_POLICY='1'`) {
+		t.Fatalf("balanced env missing bash-policy activation:\n%s", env)
+	}
 	if strings.Contains(env, "\nexport HF_HUB_OFFLINE=\"1\"") {
 		t.Fatalf("env should not assert Semble offline readiness before validation:\n%s", env)
-	}
-	if strings.Contains(env, "LIZA_ENABLE_BASH_POLICY") {
-		t.Fatalf("balanced env should not enable bash-policy:\n%s", env)
 	}
 	for _, want := range []string{
 		`case "$-" in`,
@@ -89,8 +89,14 @@ func TestConfigureFullProfileEnablesBashPolicy(t *testing.T) {
 	if !strings.Contains(env, `export LIZA_ENABLE_BASH_POLICY='1'`) {
 		t.Fatalf("full env missing bash-policy activation:\n%s", env)
 	}
+	if !strings.Contains(env, `export LIZA_ENABLE_FUNCTIONAL_CLUSTERS='1'`) {
+		t.Fatalf("full env missing functional-clusters activation:\n%s", env)
+	}
 	if !contains(got.SelectedTools, "bash-policy") {
 		t.Fatalf("SelectedTools missing bash-policy: %v", got.SelectedTools)
+	}
+	if !contains(got.SelectedTools, "functional-clusters") {
+		t.Fatalf("SelectedTools missing functional-clusters: %v", got.SelectedTools)
 	}
 }
 

@@ -191,6 +191,17 @@ func TestScipSearchCatalogDeclaresSourceFallback(t *testing.T) {
 	}
 }
 
+func TestFunctionalClustersCatalogDeclaresSourceFallback(t *testing.T) {
+	selection, err := ResolveSelection(ProfileFull, []string{"functional-clusters"}, allToolIDsExcept("functional-clusters"))
+	if err != nil {
+		t.Fatalf("ResolveSelection() error = %v", err)
+	}
+	tool := selection.Tools[0]
+	if tool.SourceRepo != "https://github.com/liza-mas/functional-clusters" || tool.SourcePackage != "./cmd/functional-clusters" {
+		t.Fatalf("functional-clusters fallback = repo %q package %q", tool.SourceRepo, tool.SourcePackage)
+	}
+}
+
 func TestBashPolicyCatalogPlansStandaloneInstaller(t *testing.T) {
 	selection, err := ResolveSelection(ProfileFull, []string{"bash-policy"}, allToolIDsExcept("bash-policy"))
 	if err != nil {

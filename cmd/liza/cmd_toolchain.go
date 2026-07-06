@@ -20,7 +20,7 @@ import (
 var toolchainCmd = &cobra.Command{
 	Use:   "toolchain",
 	Short: fmt.Sprintf("Install and configure optional %s support tools", brand.NameTitle),
-	Long:  fmt.Sprintf("Install, verify, and configure optional local tools that reduce %s context usage and improve navigation.", brand.NameTitle),
+	Long:  fmt.Sprintf("Install, verify, and configure optional local tools used by %s agents and project activation.", brand.NameTitle),
 }
 
 var toolchainListCmd = &cobra.Command{
