@@ -77,7 +77,7 @@ func TestInitHooksRunsProviderAwareInit(t *testing.T) {
 
 	got := InitHooks(InitHooksOptions{
 		ProjectRoot: projectRoot,
-		Provider:    ProviderAll,
+		Provider:    ProviderClaude,
 		Stdin:       stdin,
 		Stdout:      &stdout,
 		Stderr:      &stderr,
@@ -97,7 +97,7 @@ func TestInitHooksRunsProviderAwareInit(t *testing.T) {
 	if command.Path != "/custom/bin/bash-policy" {
 		t.Fatalf("path = %q", command.Path)
 	}
-	wantArgs := strings.Join([]string{"init", "--provider", "all", "--policy-artifact-root", projectRoot}, "\x00")
+	wantArgs := strings.Join([]string{"init", "--provider", "claude", "--policy-artifact-root", projectRoot}, "\x00")
 	if strings.Join(command.Args, "\x00") != wantArgs {
 		t.Fatalf("args = %v", command.Args)
 	}

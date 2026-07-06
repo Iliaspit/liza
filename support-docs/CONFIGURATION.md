@@ -63,14 +63,12 @@ Depending on selected providers and options, `§BRAND_BINARY_NAME§ init` writes
 - root contract discovery files such as `CLAUDE.md`, `AGENTS.md`, and
   `GEMINI.md`, usually as symlinks to `~/§BRAND_GLOBAL_DIRNAME§/CORE.md`
 - project-local provider hooks and settings, such as `.claude/settings.json`,
-  `.codex/` hook configuration, and `.cursor/hooks.json`
-- `.claude/hooks/`, `.codex/hooks/`, and `.cursor/hooks/` scripts that enforce session
+  `.codex/` hook configuration, and standalone `bash-policy` provider hooks
+- `.claude/hooks/` and `.codex/hooks/` scripts that enforce session
   initialization, inject project context, guard Git usage, route RTK, and catch
   wrong-worktree paths for providers that support hooks
 - `.codex/config.toml` and `.codex/hooks.json` for project-local Codex hook
   activation
-- `.cursor/hooks.json` and `.cursor/hooks/cursor-bash-policy.sh` when Cursor is
-  selected; the Cursor `beforeShellExecution` hook runs `bash-policy evaluate`
 - global `~/.codex/config.toml` entries for Codex's project root, project `.git`
   directory, support/cache writable roots, and noninteractive workspace baseline
 - global fallback contract symlinks such as `~/.claude/CLAUDE.md` or
@@ -83,9 +81,8 @@ Depending on selected providers and options, `§BRAND_BINARY_NAME§ init` writes
 - the configured integration branch for MAS runs
 - optional tool activation artifacts when `§BRAND_ENV_PREFIX§_ENABLE_STACKLIT`,
   `§BRAND_ENV_PREFIX§_ENABLE_SCIP_SEARCH`, or `§BRAND_ENV_PREFIX§_ENABLE_SEMBLE` is enabled
-- standalone `.bash-policy.yaml` defaults; Claude/Codex provider hooks are
-  installed when `§BRAND_ENV_PREFIX§_ENABLE_BASH_POLICY` is enabled, and Cursor
-  project hooks are installed when `--cursor` is selected
+- standalone `.bash-policy.yaml` defaults and selected provider hooks when
+  `§BRAND_ENV_PREFIX§_ENABLE_BASH_POLICY` is enabled
 
 For brownfield projects that already have their own `CLAUDE.md`, `AGENTS.md`,
 or `GEMINI.md`, §BRAND_NAME_TITLE§ does not overwrite the repo-root file. It uses the
@@ -337,7 +334,7 @@ managed `§BRAND_BINARY_NAME§-index.sh` entrypoint in Git's effective hooks dir
 `post-checkout`, `post-merge`, and `post-rewrite` so repo-root Pairing indexes
 stay fresh after normal local history changes. The wrappers skip task worktrees
 and file-only checkout events. This Git hook plumbing is separate from
-Claude/Codex provider hooks.
+standalone `bash-policy` provider hooks.
 
 ### Stacklit (`§BRAND_ENV_PREFIX§_ENABLE_STACKLIT`)
 
@@ -683,16 +680,13 @@ source files before editing or claiming success.
 locations, expose temporary Stacklit architecture or SCIP graph exports to agents,
 or make cluster membership authoritative.
 
-### Bash Policy (`§BRAND_ENV_PREFIX§_ENABLE_BASH_POLICY`, `--cursor`)
+### Bash Policy (`§BRAND_ENV_PREFIX§_ENABLE_BASH_POLICY`)
 
 `bash-policy` is an optional standalone CLI that installs provider-aware bash
-command policy hooks. For Claude and Codex, `§BRAND_BINARY_NAME§ init` runs
-`bash-policy init` only when `§BRAND_ENV_PREFIX§_ENABLE_BASH_POLICY` is truthy.
-For Cursor, `§BRAND_BINARY_NAME§ init --cursor` writes project-local
-`.cursor/hooks.json` and a managed wrapper script that runs
-`bash-policy evaluate` from Cursor's `beforeShellExecution` hook. §BRAND_NAME_TITLE§
-preflights `bash-policy` on `PATH` after installing the hook and prints a
-warning when it is missing.
+command policy hooks. `§BRAND_BINARY_NAME§ init` runs `bash-policy init` only
+when `§BRAND_ENV_PREFIX§_ENABLE_BASH_POLICY` is truthy. Selected providers are
+delegated to the standalone CLI; §BRAND_NAME_TITLE§ prints a warning and
+continues when the executable is missing or the command fails.
 §BRAND_NAME_TITLE§ does not vendor or implement the policy engine.
 
 `§BRAND_ENV_PREFIX§_ENABLE_BASH_POLICY` is process-local activation, not durable project state.
@@ -700,52 +694,20 @@ Values are trimmed and compared case-insensitively:
 
 | Value | Meaning |
 |-------|---------|
-| `1`, `true` | Ask `§BRAND_BINARY_NAME§ init` to write `.bash-policy.yaml` and run `bash-policy init` for the selected Claude/Codex providers |
-| unset, empty, `0`, `false` | Skip Claude/Codex `bash-policy init` for the current init process; `--cursor` still writes project-local Cursor hooks |
+| `1`, `true` | Ask `§BRAND_BINARY_NAME§ init` to write `.bash-policy.yaml` and run `bash-policy init` for selected providers |
+| unset, empty, `0`, `false` | Skip all `bash-policy init` calls for the current init process |
 
 When enabled, `§BRAND_BINARY_NAME§ init` runs:
 
 ```bash
-bash-policy init --provider <claude|codex|all> --policy-artifact-root <project_root>
+bash-policy init --provider <selected_provider> --policy-artifact-root <project_root>
 ```
 
-Pairing init derives the provider from selected agents. Full workspace init uses
-Claude by default and adds Codex when `--codex` is selected. If the executable is
-missing or the command fails, `§BRAND_BINARY_NAME§ init` prints a warning and continues with the
-rest of initialization.
-
-Cursor activation is project-local and does not write `~/.cursor/hooks.json`:
-
-```bash
-§BRAND_BINARY_NAME§ init --cursor
-```
-
-This writes `.cursor/hooks.json` with:
-
-```json
-{
-  "version": 1,
-  "hooks": {
-    "beforeShellExecution": [
-      {
-        "command": "bash .cursor/hooks/cursor-bash-policy.sh",
-        "failClosed": true
-      }
-    ]
-  }
-}
-```
-
-The managed script invokes `bash-policy evaluate --provider claude --mode on
---policy-artifact-root <project_root> --safe-root <project_root> --json` so
-Claude Bash allow/deny settings can inform Cursor shell execution. Claude
-settings are optional; when neither `~/.claude/settings.json` nor
-`[project_root]/.claude/settings.json` exists, `bash-policy` evaluates against
-the built-in policy and `.bash-policy.yaml`. The wrapper returns Cursor `allow`
-only when the decision is `allow` or `no-op`; all other results return Cursor
-`deny`. If `bash-policy` is not available when Cursor runs the hook, shell
-execution is blocked until `bash-policy` is installed or `.cursor/hooks.json` is
-removed.
+Pairing init derives the provider from selected agents. Full workspace init
+includes Claude by default and adds selected provider flags. If the executable
+is missing or the command fails,
+`§BRAND_BINARY_NAME§ init` prints a warning and continues with the rest of
+initialization.
 
 ### Agent Execution Timeouts
 
@@ -939,7 +901,7 @@ Headless watch automatically runs the repair-agent-pool behavior when a task is 
 | `claude` | Claude Code (fallback default when no config is set) |
 | `codex` | OpenAI Codex CLI |
 | `codex-acp` | OpenAI Codex through ACPX. Requires the `acpx` executable on the spawned agent's `PATH`; install it with `npm install -g acpx`. §BRAND_NAME_TITLE§ preflights this prerequisite before direct `§BRAND_BINARY_NAME§ agent` execution and before TUI/API agent spawning. `codex-acp` reuses Codex `AGENTS.md` contract setup and runs ACPX with non-interactive auto-approval inside §BRAND_NAME_TITLE§ task worktrees. During `acpx prompt`, streams stdout JSON-RPC and stderr diagnostics to `§BRAND_PROJECT_DIRNAME§/agent-outputs/`, returns parsed message chunks to the supervisor, and logs lifecycle/usage metadata. Short ACPX session control calls are not transcript-logged. |
-| `cursor-acp` | Cursor through ACPX. Requires `acpx` on `PATH` and an authenticated Cursor CLI (`cursor-agent`). Reuses the shared `AGENTS.md` contract setup and selects the ACPX Cursor target; it is not a Cursor executable name. Use `§BRAND_BINARY_NAME§ init --cursor` for contract setup and Cursor shell-policy hooks. |
+| `cursor-acp` | Cursor through ACPX. Requires `acpx` on `PATH` and an authenticated Cursor CLI (`cursor-agent`). Reuses the shared `AGENTS.md` contract setup and selects the ACPX Cursor target; it is not a Cursor executable name. Use `§BRAND_BINARY_NAME§ init --cursor` for contract setup. Set `§BRAND_ENV_PREFIX§_ENABLE_BASH_POLICY=1` before init when selected providers should receive standalone bash-policy hooks. |
 | `opencode` | OpenCode CLI through `opencode run`. Requires `§BRAND_BINARY_NAME§ setup --opencode` and `§BRAND_BINARY_NAME§ init --opencode` for contract and skill activation. Logged runs add JSON output. |
 | `opencode-acp` | OpenCode through ACPX. Requires `acpx` on `PATH`, reuses OpenCode `AGENTS.md` contract setup, and selects the ACPX OpenCode target; it is not an OpenCode executable name. |
 | `gemini` | Google Gemini CLI |
@@ -1012,7 +974,7 @@ project configuration belongs in `§BRAND_PROJECT_DIRNAME§/state.yaml`.
 |----------|----------|---------|---------|
 | `§BRAND_ENV_PREFIX§_AGENT_ID` | For agent commands | -- | Agent identifier input (format: `{role}-{number}`). `§BRAND_BINARY_NAME§ agent` also exports the resolved ID to spawned provider CLIs so hooks select MAS mode. |
 | `§BRAND_ENV_PREFIX§_DISABLE_CLAUDE_SUBAGENTS` | No | unset | Set to `1` to launch Claude Code agents with `--disallowedTools Task`, disabling Claude subagent delegation. Use only when intentionally waiving Claude subagent delegation; agents may be unable to satisfy contract delegation triggers while this is set. |
-| `§BRAND_ENV_PREFIX§_ENABLE_BASH_POLICY` | No | unset | Strict opt-in activation gate for standalone Claude/Codex bash-policy init. In pairing init, truthy values run `bash-policy init` for selected Claude/Codex providers when the CLI is installed. In full workspace init, truthy values run it for Claude and for Codex when `--codex` is selected. Cursor hooks are controlled by `--cursor` and run `bash-policy evaluate` at shell-execution time. Missing or failing bash-policy setup is warning-only. Unset, empty, `0`, and `false` disable Claude/Codex init. Values are trimmed and parsed case-insensitively. |
+| `§BRAND_ENV_PREFIX§_ENABLE_BASH_POLICY` | No | unset | Strict opt-in activation gate for standalone bash-policy init. Truthy values write `.bash-policy.yaml` and run `bash-policy init` for selected providers when the CLI is installed. Full workspace init includes Claude by default and adds selected provider flags. Missing or failing bash-policy setup is warning-only. Unset, empty, `0`, and `false` skip all `bash-policy init` calls. Values are trimmed and parsed case-insensitively. |
 | `§BRAND_ENV_PREFIX§_ENABLE_SCIP_SEARCH` | No | unset | Strict opt-in activation gate for SCIP. In pairing init, truthy values enable project-local hook planning and installation for detected or selected languages. In MAS, truthy values enable indexing and `scip-search` prompt guidance only when `config.scip_search` also allows a detected language. Unset, empty, `0`, and `false` disable it. Values are trimmed and parsed case-insensitively. |
 | `§BRAND_ENV_PREFIX§_ENABLE_SEMBLE` | No | unset | Strict opt-in activation gate for Semble. In pairing init, truthy values enable project-root `.sembleignore` safety setup before SessionStart advertisement. In MAS, truthy values enable prewarm/offline validation and prompt guidance only when Semble is installed, offline-ready, and safe for the target root. Unset, empty, `0`, and `false` disable it. Values are trimmed and parsed case-insensitively. |
 | `§BRAND_ENV_PREFIX§_ENABLE_STACKLIT` | No | unset | Strict opt-in activation gate for Stacklit. In pairing init, truthy values enable project-local hook setup for repo-root `stacklit.json` refresh. In MAS, truthy values enable target-local `stacklit.json` refresh and prompt guidance when an index is available. Unset, empty, `0`, and `false` disable it. Values are trimmed and parsed case-insensitively. |

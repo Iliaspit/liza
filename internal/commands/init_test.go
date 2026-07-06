@@ -948,11 +948,12 @@ func TestInitCommandWithConfig_BashPolicyProviderScope(t *testing.T) {
 	tests := []struct {
 		name      string
 		agents    []string
-		provider  string
+		providers []string
 		wantCodex bool
 	}{
-		{name: "claude only by default", provider: bashpolicycli.ProviderClaude},
-		{name: "claude and codex when codex selected", agents: []string{"codex"}, provider: bashpolicycli.ProviderAll, wantCodex: true},
+		{name: "claude only by default", providers: []string{bashpolicycli.ProviderClaude}},
+		{name: "claude and codex when codex selected", agents: []string{"codex"}, providers: []string{bashpolicycli.ProviderClaude, bashpolicycli.ProviderCodex}, wantCodex: true},
+		{name: "claude and cursor when cursor selected", agents: []string{"cursor"}, providers: []string{bashpolicycli.ProviderClaude, bashpolicycli.ProviderCursor}},
 	}
 
 	for _, tt := range tests {
@@ -984,10 +985,7 @@ func TestInitCommandWithConfig_BashPolicyProviderScope(t *testing.T) {
 				t.Fatalf("InitCommandWithConfig() error = %v", err)
 			}
 
-			if len(runner.commands) != 1 {
-				t.Fatalf("bash-policy commands = %d, want 1", len(runner.commands))
-			}
-			assertBashPolicyCommand(t, runner.commands[0], gitDir, tt.provider)
+			assertBashPolicyCommands(t, runner.commands, gitDir, tt.providers)
 			if _, err := os.Stat(filepath.Join(gitDir, ".bash-policy.yaml")); err != nil {
 				t.Fatalf(".bash-policy.yaml was not created for full init: %v", err)
 			}
@@ -998,7 +996,7 @@ func TestInitCommandWithConfig_BashPolicyProviderScope(t *testing.T) {
 	}
 }
 
-func TestInitCommandWithConfig_CursorConfiguresCursorHooksWithoutBashPolicyGate(t *testing.T) {
+func TestInitCommandWithConfig_CursorSkipsBashPolicyWhenGateDisabled(t *testing.T) {
 	gitDir := setupGitRepo(t)
 	defer os.RemoveAll(gitDir)
 	fakeHome := setupGlobalLiza(t)
@@ -1028,16 +1026,15 @@ func TestInitCommandWithConfig_CursorConfiguresCursorHooksWithoutBashPolicyGate(
 		t.Fatalf("InitCommandWithConfig() error = %v", err)
 	}
 
-	if lookups != 1 {
-		t.Fatalf("bash-policy lookups = %d, want one Cursor preflight lookup", lookups)
+	if lookups != 0 {
+		t.Fatalf("bash-policy lookups = %d, want zero when gate disabled", lookups)
 	}
 	if len(runner.commands) != 0 {
 		t.Fatalf("bash-policy commands = %d, want zero when gate disabled", len(runner.commands))
 	}
-	if _, err := os.Stat(filepath.Join(gitDir, ".bash-policy.yaml")); err != nil {
-		t.Fatalf(".bash-policy.yaml was not created for cursor init: %v", err)
+	if _, err := os.Stat(filepath.Join(gitDir, ".bash-policy.yaml")); !os.IsNotExist(err) {
+		t.Fatalf(".bash-policy.yaml state = %v, want absent when gate disabled", err)
 	}
-	verifyCursorHooks(t, gitDir)
 	if _, err := os.Stat(filepath.Join(gitDir, ".codex", "hooks.json")); !os.IsNotExist(err) {
 		t.Fatalf(".codex/hooks.json state = %v, want absent for cursor-only init", err)
 	}
@@ -1098,6 +1095,41 @@ func TestInitCommandWithConfig_BashPolicyPromptPreservesLaterInput(t *testing.T)
 	}
 	if slices.Equal(ignoreContent, originalIgnore) {
 		t.Fatalf(".claudeignore was not overwritten by later prompt")
+	}
+}
+
+func TestInitCommandWithConfig_MultiProviderBashPolicyUsesSharedBufferedInput(t *testing.T) {
+	gitDir := setupGitRepo(t)
+	defer os.RemoveAll(gitDir)
+	setupGlobalLiza(t)
+	t.Setenv(bashpolicycli.EnvEnableBashPolicy, "1")
+
+	runner := &initBashPolicyTestRunner{readStdinLine: true}
+	restore := setInitBashPolicyHooksForTest(
+		func(name string) (string, error) {
+			return filepath.Join(gitDir, "bin", name), nil
+		},
+		runner,
+	)
+	defer restore()
+
+	originalDir, _ := os.Getwd()
+	defer os.Chdir(originalDir)
+	os.Chdir(gitDir)
+	testhelpers.CreateCommittedSpecFile(t, gitDir, "vision.md", "# Vision\n")
+
+	if err := InitCommandWithConfig(InitParams{
+		Description: "Test goal",
+		SpecRef:     "specs/vision.md",
+		Agents:      []string{"codex"},
+		Stdin:       strings.NewReader("line-a\nline-b\n"),
+	}); err != nil {
+		t.Fatalf("InitCommandWithConfig() error = %v", err)
+	}
+
+	assertBashPolicyCommands(t, runner.commands, gitDir, []string{bashpolicycli.ProviderClaude, bashpolicycli.ProviderCodex})
+	if strings.Join(runner.stdinLines, "") != "line-a\nline-b\n" {
+		t.Fatalf("bash-policy subprocess stdin lines = %q", runner.stdinLines)
 	}
 }
 
@@ -2803,7 +2835,7 @@ func TestInitPairingCommand_BashPolicyDisabledSkipsLookup(t *testing.T) {
 	}
 }
 
-func TestInitPairingCommand_CursorConfiguresCursorHooksWithoutBashPolicyGate(t *testing.T) {
+func TestInitPairingCommand_CursorSkipsBashPolicyWhenGateDisabled(t *testing.T) {
 	gitDir := setupGitRepo(t)
 	defer os.RemoveAll(gitDir)
 	fakeHome := setupGlobalLiza(t)
@@ -2835,16 +2867,15 @@ func TestInitPairingCommand_CursorConfiguresCursorHooksWithoutBashPolicyGate(t *
 	if want := filepath.Join(fakeHome, ".liza", "CORE.md"); target != want {
 		t.Fatalf("AGENTS.md target = %q, want %q", target, want)
 	}
-	if lookups != 1 {
-		t.Fatalf("bash-policy lookups = %d, want one Cursor preflight lookup", lookups)
+	if lookups != 0 {
+		t.Fatalf("bash-policy lookups = %d, want zero when gate disabled", lookups)
 	}
 	if len(runner.commands) != 0 {
 		t.Fatalf("bash-policy commands = %d, want zero when gate disabled", len(runner.commands))
 	}
-	if _, err := os.Stat(filepath.Join(gitDir, ".bash-policy.yaml")); err != nil {
-		t.Fatalf(".bash-policy.yaml was not created for cursor init: %v", err)
+	if _, err := os.Stat(filepath.Join(gitDir, ".bash-policy.yaml")); !os.IsNotExist(err) {
+		t.Fatalf(".bash-policy.yaml state = %v, want absent when gate disabled", err)
 	}
-	verifyCursorHooks(t, gitDir)
 	if _, err := os.Stat(filepath.Join(gitDir, ".codex", "hooks.json")); !os.IsNotExist(err) {
 		t.Fatalf(".codex/hooks.json state = %v, want absent for cursor-only pairing init", err)
 	}
@@ -2855,6 +2886,7 @@ func TestInitPairingCommand_CursorWarnsWhenBashPolicyMissing(t *testing.T) {
 	defer os.RemoveAll(gitDir)
 	fakeHome := setupGlobalLiza(t)
 	writeOldCachedCursorProviderCatalog(t, fakeHome)
+	t.Setenv(bashpolicycli.EnvEnableBashPolicy, "1")
 
 	originalDir, _ := os.Getwd()
 	defer os.Chdir(originalDir)
@@ -2875,19 +2907,20 @@ func TestInitPairingCommand_CursorWarnsWhenBashPolicyMissing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("InitPairingCommand() error = %v", err)
 	}
-	if !strings.Contains(stderr, "Cursor shell policy hook installed but bash-policy was not found") {
+	if !strings.Contains(stderr, "bash-policy requested by LIZA_ENABLE_BASH_POLICY") {
 		t.Fatalf("stderr missing Cursor bash-policy warning:\n%s", stderr)
 	}
 	if len(runner.commands) != 0 {
-		t.Fatalf("bash-policy commands = %d, want zero when gate disabled", len(runner.commands))
+		t.Fatalf("bash-policy commands = %d, want zero when executable is missing", len(runner.commands))
 	}
 }
 
-func TestInitPairingCommand_CursorDoesNotWarnWhenHookMergeDeclined(t *testing.T) {
+func TestInitPairingCommand_CursorDoesNotTouchExistingHooksWhenBashPolicyMissing(t *testing.T) {
 	gitDir := setupGitRepo(t)
 	defer os.RemoveAll(gitDir)
 	fakeHome := setupGlobalLiza(t)
 	writeOldCachedCursorProviderCatalog(t, fakeHome)
+	t.Setenv(bashpolicycli.EnvEnableBashPolicy, "1")
 	cursorDir := filepath.Join(gitDir, ".cursor")
 	if err := os.MkdirAll(cursorDir, 0755); err != nil {
 		t.Fatal(err)
@@ -2918,27 +2951,35 @@ func TestInitPairingCommand_CursorDoesNotWarnWhenHookMergeDeclined(t *testing.T)
 	if err != nil {
 		t.Fatalf("InitPairingCommand() error = %v", err)
 	}
-	if strings.Contains(stderr, "Cursor shell policy hook installed") {
-		t.Fatalf("stderr claimed Cursor hook install after declined merge:\n%s", stderr)
+	if !strings.Contains(stderr, "bash-policy requested by LIZA_ENABLE_BASH_POLICY") {
+		t.Fatalf("stderr missing Cursor bash-policy warning:\n%s", stderr)
 	}
 	if _, err := os.Stat(filepath.Join(cursorDir, "hooks", "cursor-bash-policy.sh")); !os.IsNotExist(err) {
-		t.Fatalf("Cursor hook script state = %v, want absent after declined merge", err)
+		t.Fatalf("Cursor hook script state = %v, want absent because Liza no longer writes it", err)
+	}
+	content, err := os.ReadFile(filepath.Join(cursorDir, "hooks.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(content) != `{"version":1,"hooks":{}}` {
+		t.Fatalf("Cursor hooks.json changed despite bash-policy missing:\n%s", string(content))
 	}
 	if len(runner.commands) != 0 {
-		t.Fatalf("bash-policy commands = %d, want zero when gate disabled", len(runner.commands))
+		t.Fatalf("bash-policy commands = %d, want zero when executable is missing", len(runner.commands))
 	}
 }
 
 func TestInitPairingCommand_BashPolicyProviderScope(t *testing.T) {
 	tests := []struct {
-		name     string
-		agents   []string
-		provider string
-		wantRun  bool
+		name      string
+		agents    []string
+		providers []string
+		wantRun   bool
 	}{
-		{name: "claude", agents: []string{"claude"}, provider: bashpolicycli.ProviderClaude, wantRun: true},
-		{name: "codex", agents: []string{"codex"}, provider: bashpolicycli.ProviderCodex, wantRun: true},
-		{name: "all", agents: []string{"claude", "codex"}, provider: bashpolicycli.ProviderAll, wantRun: true},
+		{name: "claude", agents: []string{"claude"}, providers: []string{bashpolicycli.ProviderClaude}, wantRun: true},
+		{name: "codex", agents: []string{"codex"}, providers: []string{bashpolicycli.ProviderCodex}, wantRun: true},
+		{name: "cursor", agents: []string{"cursor"}, providers: []string{bashpolicycli.ProviderCursor}, wantRun: true},
+		{name: "claude and codex", agents: []string{"claude", "codex"}, providers: []string{bashpolicycli.ProviderClaude, bashpolicycli.ProviderCodex}, wantRun: true},
 		{name: "unsupported providers only", agents: []string{"gemini", "opencode"}, wantRun: false},
 	}
 
@@ -2974,10 +3015,7 @@ func TestInitPairingCommand_BashPolicyProviderScope(t *testing.T) {
 				}
 				return
 			}
-			if len(runner.commands) != 1 {
-				t.Fatalf("bash-policy commands = %d, want 1", len(runner.commands))
-			}
-			assertBashPolicyCommand(t, runner.commands[0], gitDir, tt.provider)
+			assertBashPolicyCommands(t, runner.commands, gitDir, tt.providers)
 			if _, err := os.Stat(filepath.Join(gitDir, ".bash-policy.yaml")); err != nil {
 				t.Fatalf(".bash-policy.yaml was not created for supported provider: %v", err)
 			}
@@ -4298,16 +4336,20 @@ type initBashPolicyTestRunner struct {
 	err           error
 	readStdinLine bool
 	stdinLine     string
+	stdinLines    []string
 }
 
 func (r *initBashPolicyTestRunner) Run(command bashpolicycli.Command) (bashpolicycli.CommandOutput, error) {
 	r.commands = append(r.commands, command)
 	if r.readStdinLine && command.Stdin != nil {
-		if reader, ok := command.Stdin.(*bufio.Reader); ok {
-			r.stdinLine, _ = reader.ReadString('\n')
-		} else {
-			reader := bufio.NewReader(command.Stdin)
-			r.stdinLine, _ = reader.ReadString('\n')
+		reader, ok := command.Stdin.(*bufio.Reader)
+		if !ok {
+			return r.output, r.err
+		}
+		line, _ := reader.ReadString('\n')
+		r.stdinLines = append(r.stdinLines, line)
+		if r.stdinLine == "" {
+			r.stdinLine = line
 		}
 	}
 	return r.output, r.err
@@ -4335,6 +4377,16 @@ func assertBashPolicyCommand(t *testing.T, command bashpolicycli.Command, projec
 	wantArgs := strings.Join([]string{"init", "--provider", provider, "--policy-artifact-root", projectRoot}, "\x00")
 	if strings.Join(command.Args, "\x00") != wantArgs {
 		t.Fatalf("bash-policy args = %v", command.Args)
+	}
+}
+
+func assertBashPolicyCommands(t *testing.T, commands []bashpolicycli.Command, projectRoot string, providers []string) {
+	t.Helper()
+	if len(commands) != len(providers) {
+		t.Fatalf("bash-policy commands = %d, want %d", len(commands), len(providers))
+	}
+	for i, provider := range providers {
+		assertBashPolicyCommand(t, commands[i], projectRoot, provider)
 	}
 }
 
@@ -4463,43 +4515,6 @@ func verifyCodexHooks(t *testing.T, projectRoot string) {
 		}
 		if info.Mode()&0111 == 0 {
 			t.Errorf("Codex hook %s should be executable, got %o", name, info.Mode())
-		}
-	}
-}
-
-func verifyCursorHooks(t *testing.T, projectRoot string) {
-	t.Helper()
-
-	hooksPath := filepath.Join(projectRoot, ".cursor", "hooks.json")
-	hooksContent, err := os.ReadFile(hooksPath)
-	if err != nil {
-		t.Fatalf("Cursor hooks.json not created: %v", err)
-	}
-	var hooks map[string]any
-	if err := json.Unmarshal(hooksContent, &hooks); err != nil {
-		t.Fatalf("Cursor hooks.json is invalid JSON: %v", err)
-	}
-	for _, want := range []string{"beforeShellExecution", "bash .cursor/hooks/cursor-bash-policy.sh", `"failClosed": true`} {
-		if !strings.Contains(string(hooksContent), want) {
-			t.Errorf("Cursor hooks.json missing %q:\n%s", want, string(hooksContent))
-		}
-	}
-
-	hookPath := filepath.Join(projectRoot, ".cursor", "hooks", "cursor-bash-policy.sh")
-	info, err := os.Stat(hookPath)
-	if err != nil {
-		t.Fatalf("Cursor hook script not created: %v", err)
-	}
-	if info.Mode()&0111 == 0 {
-		t.Errorf("Cursor hook script should be executable, got %o", info.Mode())
-	}
-	hookContent, err := os.ReadFile(hookPath)
-	if err != nil {
-		t.Fatalf("read Cursor hook script: %v", err)
-	}
-	for _, want := range []string{"bash-policy evaluate", "--provider claude", "--json", `"permission":"deny"`, `printf '%s' "$input"`} {
-		if !strings.Contains(string(hookContent), want) {
-			t.Errorf("Cursor hook script missing %q:\n%s", want, string(hookContent))
 		}
 	}
 }

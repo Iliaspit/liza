@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -228,23 +227,15 @@ func InitPairingCommand(params InitPairingParams) error {
 		}
 	}
 
-	bashPolicyProviderName := bashPolicyProvider(hasBashPolicyClaude, hasBashPolicyCodex)
-	if projectRoot != "" && ((bashPolicyProviderName != "" && bashpolicycli.RuntimeEnabled()) || hasCursor) {
+	bashPolicyProviderNames := bashPolicyProviders(hasBashPolicyClaude, hasBashPolicyCodex, hasCursor)
+	if projectRoot != "" && len(bashPolicyProviderNames) > 0 && bashpolicycli.RuntimeEnabled() {
 		if err := embedded.WriteBashPolicyConfig(projectRoot, stdin); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: failed to write .bash-policy.yaml: %v\n", err)
 		}
 	}
 
-	runBashPolicyInit(projectRoot, bashPolicyProviderName, bashPolicySubprocessStdin(rawStdin, stdin))
-
-	if hasCursor {
-		installed, err := embedded.WriteCursorProjectHooks(projectRoot, stdin)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: failed to write cursor hooks: %v\n", err)
-		} else if installed {
-			warnCursorBashPolicyMissing()
-		}
-	}
+	bashPolicyStdin := bashPolicySubprocessStdin(rawStdin, stdin)
+	runBashPolicyInits(projectRoot, bashPolicyProviderNames, bashPolicyStdin)
 
 	if hasOpenCode {
 		if err := embedded.WriteOpenCodeExecTool(projectRoot); err != nil {
@@ -659,17 +650,18 @@ func writeSembleDiagnostic(diagnostic semble.Diagnostic) {
 	fmt.Fprintln(os.Stderr, message)
 }
 
-func bashPolicyProvider(hasClaude, hasCodex bool) string {
-	switch {
-	case hasClaude && hasCodex:
-		return bashpolicycli.ProviderAll
-	case hasClaude:
-		return bashpolicycli.ProviderClaude
-	case hasCodex:
-		return bashpolicycli.ProviderCodex
-	default:
-		return ""
+func bashPolicyProviders(hasClaude, hasCodex, hasCursor bool) []string {
+	providers := []string{}
+	if hasClaude {
+		providers = append(providers, bashpolicycli.ProviderClaude)
 	}
+	if hasCodex {
+		providers = append(providers, bashpolicycli.ProviderCodex)
+	}
+	if hasCursor {
+		providers = append(providers, bashpolicycli.ProviderCursor)
+	}
+	return providers
 }
 
 func providerHasAsset(items []providers.Provider, match func(providers.ActivationAssets) bool) bool {
@@ -706,18 +698,6 @@ func canonicalInitProviderIDs(ids []string) []string {
 	return out
 }
 
-func warnCursorBashPolicyMissing() {
-	lookPath := initBashPolicyLookPath
-	if lookPath == nil {
-		lookPath = exec.LookPath
-	}
-	executable, err := lookPath("bash-policy")
-	if err == nil && executable != "" {
-		return
-	}
-	fmt.Fprintln(os.Stderr, "Warning: Cursor shell policy hook installed but bash-policy was not found on PATH; Cursor shell execution will be blocked until bash-policy is installed or .cursor/hooks.json is removed.")
-}
-
 func bashPolicySubprocessStdin(rawStdin io.Reader, bufferedStdin *bufio.Reader) io.Reader {
 	file, ok := rawStdin.(*os.File)
 	if !ok {
@@ -730,7 +710,15 @@ func bashPolicySubprocessStdin(rawStdin io.Reader, bufferedStdin *bufio.Reader) 
 	return file
 }
 
-func runBashPolicyInit(projectRoot, provider string, stdin io.Reader) {
+func runBashPolicyInits(projectRoot string, providers []string, stdin io.Reader) {
+	for _, provider := range providers {
+		if runBashPolicyInit(projectRoot, provider, stdin) == bashpolicycli.StatusMissing {
+			return
+		}
+	}
+}
+
+func runBashPolicyInit(projectRoot, provider string, stdin io.Reader) bashpolicycli.Status {
 	result := bashpolicycli.InitHooks(bashpolicycli.InitHooksOptions{
 		ProjectRoot: projectRoot,
 		Provider:    provider,
@@ -746,6 +734,7 @@ func runBashPolicyInit(projectRoot, provider string, stdin io.Reader) {
 	case bashpolicycli.StatusFailed:
 		fmt.Fprintf(os.Stderr, "Warning: failed to initialize bash-policy hooks: %s\n", result.Diagnostic())
 	}
+	return result.Status
 }
 
 // InitCommandWithConfig initializes a workspace with optional pipeline config.
@@ -921,23 +910,15 @@ func InitCommandWithConfig(params InitParams) error {
 		}
 	}
 
-	bashPolicyProviderName := bashPolicyProvider(true, hasCodex)
-	if lizaPaths.ProjectRoot() != "" && ((bashPolicyProviderName != "" && bashpolicycli.RuntimeEnabled()) || hasCursor) {
+	bashPolicyProviderNames := bashPolicyProviders(true, hasCodex, hasCursor)
+	if lizaPaths.ProjectRoot() != "" && len(bashPolicyProviderNames) > 0 && bashpolicycli.RuntimeEnabled() {
 		if err := embedded.WriteBashPolicyConfig(lizaPaths.ProjectRoot(), stdin); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: failed to write .bash-policy.yaml: %v\n", err)
 		}
 	}
 
-	runBashPolicyInit(lizaPaths.ProjectRoot(), bashPolicyProviderName, bashPolicySubprocessStdin(rawStdin, stdin))
-
-	if hasCursor {
-		installed, err := embedded.WriteCursorProjectHooks(lizaPaths.ProjectRoot(), stdin)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: failed to write cursor hooks: %v\n", err)
-		} else if installed {
-			warnCursorBashPolicyMissing()
-		}
-	}
+	bashPolicyStdin := bashPolicySubprocessStdin(rawStdin, stdin)
+	runBashPolicyInits(lizaPaths.ProjectRoot(), bashPolicyProviderNames, bashPolicyStdin)
 
 	if providerHasAsset(selectedProviders, func(a providers.ActivationAssets) bool { return a.OpenCodeExecTool }) {
 		if err := embedded.WriteOpenCodeExecTool(lizaPaths.ProjectRoot()); err != nil {

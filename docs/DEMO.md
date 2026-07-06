@@ -134,12 +134,9 @@ This creates:
 - `.claude/settings.json` — Claude Code project permissions
 - `CLAUDE.md`, `AGENTS.md`, `GEMINI.md` — symlinks to `~/.liza/CORE.md`
 - `GUARDRAILS.md` — project-specific constraints template
-- `.bash-policy.yaml` when `LIZA_ENABLE_BASH_POLICY=1` is set before init;
-  standalone provider hooks when the `bash-policy` CLI is installed and hook
-  installation succeeds
-- `.cursor/hooks.json` and `.cursor/hooks/cursor-bash-policy.sh` when
-  `liza init --cursor` is selected; Cursor runs `bash-policy evaluate` before
-  shell execution and blocks if the CLI is missing
+- `.bash-policy.yaml` and standalone provider hooks when
+  `LIZA_ENABLE_BASH_POLICY=1` is set before init, the `bash-policy` CLI is
+  installed, and hook installation succeeds
 - `integration` branch — where approved work lands
 
 Verify:

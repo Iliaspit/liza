@@ -17,7 +17,7 @@ var EnvEnableBashPolicy = brand.EnvName("ENABLE_BASH_POLICY")
 const (
 	ProviderClaude = "claude"
 	ProviderCodex  = "codex"
-	ProviderAll    = "all"
+	ProviderCursor = "cursor"
 )
 
 type Status string

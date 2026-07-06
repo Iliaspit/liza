@@ -111,7 +111,7 @@ PAIRING MODE: Use agent flags without a description to create only the contract
 symlinks needed for pairing (no %[2]s/ workspace):
   %[4]s init --claude           # creates CLAUDE.md -> ~/%[3]s/CORE.md
   %[4]s init --claude --codex   # creates CLAUDE.md + AGENTS.md and repo hooks
-  %[4]s init --cursor           # creates AGENTS.md and Cursor shell hooks
+  %[4]s init --cursor           # creates AGENTS.md -> ~/%[3]s/CORE.md
   %[4]s init --opencode         # creates AGENTS.md -> ~/%[3]s/CORE.md`, brand.NameTitle, brand.ProjectDirName, brand.GlobalDirName, brand.BinaryName),
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -608,7 +608,7 @@ func init() {
 	initCmd.Flags().StringArray("provider", nil, "activate provider catalog id (repeatable)")
 	initCmd.Flags().Bool("claude", false, fmt.Sprintf("create CLAUDE.md symlink to ~/%s/CORE.md", brand.GlobalDirName))
 	initCmd.Flags().Bool("codex", false, fmt.Sprintf("create AGENTS.md symlink to ~/%s/CORE.md and configure repo hooks", brand.GlobalDirName))
-	initCmd.Flags().Bool("cursor", false, fmt.Sprintf("create AGENTS.md symlink to ~/%s/CORE.md and configure Cursor shell hooks", brand.GlobalDirName))
+	initCmd.Flags().Bool("cursor", false, fmt.Sprintf("create AGENTS.md symlink to ~/%s/CORE.md", brand.GlobalDirName))
 	initCmd.Flags().Bool("opencode", false, fmt.Sprintf("create AGENTS.md symlink to ~/%s/CORE.md", brand.GlobalDirName))
 	initCmd.Flags().Bool("gemini", false, fmt.Sprintf("create GEMINI.md symlink to ~/%s/CORE.md", brand.GlobalDirName))
 	initCmd.Flags().Bool("mistral", false, fmt.Sprintf("set up ~/.vibe/ for %s contract", brand.NameTitle))
