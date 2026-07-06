@@ -163,7 +163,7 @@ Example:
 		// Warn if no product contract symlink is configured for this CLI.
 		if contractKey != "" && contractKey != "none" && commands.CheckContractConfigured(projectRoot, contractKey) == "" {
 			fmt.Fprintf(os.Stderr, "Warning: no %s contract symlink found for %s. Agents may not find the behavioral contract.\n", brand.NameTitle, cliName)
-			fmt.Fprintf(os.Stderr, "  Run '%s' to create one.\n", contractInitCommandForProvider(contractKey))
+			fmt.Fprintf(os.Stderr, "  Run '%s' to create one.\n", contractInitCommandForMissingContract(cliName, contractKey))
 		}
 
 		specsLookup := brand.LookupEnv(os.Getenv, "SPECS")
@@ -276,14 +276,21 @@ func contractInitCommandForProvider(cliName string) string {
 	case "codex-acp":
 		return "liza init --codex" // codex-acp uses Codex's config
 	case "cursor-acp":
-		return "liza init --codex" // cursor-acp uses the shared AGENTS.md contract setup
+		return "liza init --cursor" // cursor-acp uses the shared AGENTS.md contract setup plus Cursor hooks
 	case "opencode-acp":
 		return "liza init --opencode" // opencode-acp uses OpenCode's config
-	case "claude", "codex", "opencode", "gemini", "mistral":
+	case "claude", "codex", "cursor", "opencode", "gemini", "mistral":
 		return "liza init --" + cliName
 	default:
 		return "liza init --provider " + cliName
 	}
+}
+
+func contractInitCommandForMissingContract(cliName, contractKey string) string {
+	if cliName != "" {
+		return contractInitCommandForProvider(cliName)
+	}
+	return contractInitCommandForProvider(contractKey)
 }
 
 var recoverTaskCmd = &cobra.Command{
