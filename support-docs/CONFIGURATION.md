@@ -736,12 +736,16 @@ This writes `.cursor/hooks.json` with:
 }
 ```
 
-The managed script invokes `bash-policy evaluate --provider codex --mode on
---policy-artifact-root <project_root> --safe-root <project_root> --json` and
-returns Cursor `allow` only when the decision is `allow` or `no-op`; all other
-results return Cursor `deny`. If `bash-policy` is not available when Cursor
-runs the hook, shell execution is blocked until `bash-policy` is installed or
-`.cursor/hooks.json` is removed.
+The managed script invokes `bash-policy evaluate --provider claude --mode on
+--policy-artifact-root <project_root> --safe-root <project_root> --json` so
+Claude Bash allow/deny settings can inform Cursor shell execution. Claude
+settings are optional; when neither `~/.claude/settings.json` nor
+`[project_root]/.claude/settings.json` exists, `bash-policy` evaluates against
+the built-in policy and `.bash-policy.yaml`. The wrapper returns Cursor `allow`
+only when the decision is `allow` or `no-op`; all other results return Cursor
+`deny`. If `bash-policy` is not available when Cursor runs the hook, shell
+execution is blocked until `bash-policy` is installed or `.cursor/hooks.json` is
+removed.
 
 ### Agent Execution Timeouts
 

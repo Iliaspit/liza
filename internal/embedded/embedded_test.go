@@ -2700,7 +2700,7 @@ func assertCursorHookScript(t *testing.T, hookPath string) {
 	if !bytes.Equal(content, renderEmbeddedAsset(cursorBashPolicyHookContent)) {
 		t.Errorf("Cursor hook content does not match embedded source")
 	}
-	for _, want := range []string{`"permission":"deny"`, `printf '%s' "$input"`} {
+	for _, want := range []string{`--provider claude`, `"permission":"deny"`, `printf '%s' "$input"`} {
 		if !bytes.Contains(content, []byte(want)) {
 			t.Errorf("Cursor hook content missing %q:\n%s", want, string(content))
 		}

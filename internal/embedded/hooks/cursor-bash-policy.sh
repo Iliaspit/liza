@@ -15,7 +15,7 @@ if ! command -v bash-policy >/dev/null 2>&1; then
   exit 0
 fi
 
-if ! output="$(printf '%s' "$input" | bash-policy evaluate --provider codex --mode on --policy-artifact-root "$root" --safe-root "$root" --json)"; then
+if ! output="$(printf '%s' "$input" | bash-policy evaluate --provider claude --mode on --policy-artifact-root "$root" --safe-root "$root" --json)"; then
   deny
   exit 0
 fi

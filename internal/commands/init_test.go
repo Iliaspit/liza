@@ -4497,7 +4497,7 @@ func verifyCursorHooks(t *testing.T, projectRoot string) {
 	if err != nil {
 		t.Fatalf("read Cursor hook script: %v", err)
 	}
-	for _, want := range []string{"bash-policy evaluate", "--provider codex", "--json", `"permission":"deny"`, `printf '%s' "$input"`} {
+	for _, want := range []string{"bash-policy evaluate", "--provider claude", "--json", `"permission":"deny"`, `printf '%s' "$input"`} {
 		if !strings.Contains(string(hookContent), want) {
 			t.Errorf("Cursor hook script missing %q:\n%s", want, string(hookContent))
 		}
