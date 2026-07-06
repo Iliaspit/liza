@@ -173,7 +173,8 @@ selected providers, and Liza project state when a goal is supplied.
 
 For Claude, this writes project-local `.claude/settings.json` and `.claude/hooks/`.
 For Codex, it writes project-local `.codex/` hooks and updates global
-`~/.codex/config.toml` with the project and `.git` writable roots. Brownfield
+`~/.codex/config.toml` with the project and `.git` writable roots. Cursor init
+includes the Claude and Codex project setup Cursor relies on. Brownfield
 fallbacks may also create global contract discovery symlinks such as
 `~/.claude/CLAUDE.md` or `~/.codex/AGENTS.md`. For OpenCode, it creates the
 shared `AGENTS.md` contract symlink without Codex hooks or settings; brownfield

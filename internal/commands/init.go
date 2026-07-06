@@ -687,13 +687,25 @@ func providerNeedsCursorHooks(provider providers.Provider) bool {
 }
 
 func canonicalInitProviderIDs(ids []string) []string {
-	out := make([]string, 0, len(ids))
+	out := make([]string, 0, len(ids)+2)
+	seen := make(map[string]bool, len(ids)+2)
+	appendID := func(id string) {
+		if seen[id] {
+			return
+		}
+		seen[id] = true
+		out = append(out, id)
+	}
 	for _, id := range ids {
+		// The --cursor convenience flag prepares Cursor's harness dependencies;
+		// explicit provider IDs such as cursor-acp remain exact catalog requests.
 		if id == "cursor" {
-			out = append(out, "cursor-acp")
+			appendID("claude")
+			appendID("codex")
+			appendID("cursor-acp")
 			continue
 		}
-		out = append(out, id)
+		appendID(id)
 	}
 	return out
 }

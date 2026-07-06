@@ -83,6 +83,39 @@ providers:
 	}
 }
 
+func TestCanonicalInitProviderIDs_CursorExpansion(t *testing.T) {
+	tests := []struct {
+		name string
+		ids  []string
+		want []string
+	}{
+		{
+			name: "cursor convenience flag expands dependencies",
+			ids:  []string{"cursor"},
+			want: []string{"claude", "codex", "cursor-acp"},
+		},
+		{
+			name: "cursor-acp catalog provider stays exact",
+			ids:  []string{"cursor-acp"},
+			want: []string{"cursor-acp"},
+		},
+		{
+			name: "cursor expansion deduplicates explicit dependencies",
+			ids:  []string{"claude", "cursor", "codex"},
+			want: []string{"claude", "codex", "cursor-acp"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := canonicalInitProviderIDs(tt.ids)
+			if !slices.Equal(got, tt.want) {
+				t.Fatalf("canonicalInitProviderIDs(%v) = %v, want %v", tt.ids, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestInitCommand(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -953,7 +986,7 @@ func TestInitCommandWithConfig_BashPolicyProviderScope(t *testing.T) {
 	}{
 		{name: "claude only by default", providers: []string{bashpolicycli.ProviderClaude}},
 		{name: "claude and codex when codex selected", agents: []string{"codex"}, providers: []string{bashpolicycli.ProviderClaude, bashpolicycli.ProviderCodex}, wantCodex: true},
-		{name: "claude and cursor when cursor selected", agents: []string{"cursor"}, providers: []string{bashpolicycli.ProviderClaude, bashpolicycli.ProviderCursor}},
+		{name: "claude, codex, and cursor when cursor selected", agents: []string{"cursor"}, providers: []string{bashpolicycli.ProviderClaude, bashpolicycli.ProviderCodex, bashpolicycli.ProviderCursor}, wantCodex: true},
 	}
 
 	for _, tt := range tests {
@@ -1035,9 +1068,7 @@ func TestInitCommandWithConfig_CursorSkipsBashPolicyWhenGateDisabled(t *testing.
 	if _, err := os.Stat(filepath.Join(gitDir, ".bash-policy.yaml")); !os.IsNotExist(err) {
 		t.Fatalf(".bash-policy.yaml state = %v, want absent when gate disabled", err)
 	}
-	if _, err := os.Stat(filepath.Join(gitDir, ".codex", "hooks.json")); !os.IsNotExist(err) {
-		t.Fatalf(".codex/hooks.json state = %v, want absent for cursor-only init", err)
-	}
+	verifyCodexHooks(t, gitDir)
 }
 
 func TestInitCommandWithConfig_BashPolicyPromptPreservesLaterInput(t *testing.T) {
@@ -2876,9 +2907,8 @@ func TestInitPairingCommand_CursorSkipsBashPolicyWhenGateDisabled(t *testing.T) 
 	if _, err := os.Stat(filepath.Join(gitDir, ".bash-policy.yaml")); !os.IsNotExist(err) {
 		t.Fatalf(".bash-policy.yaml state = %v, want absent when gate disabled", err)
 	}
-	if _, err := os.Stat(filepath.Join(gitDir, ".codex", "hooks.json")); !os.IsNotExist(err) {
-		t.Fatalf(".codex/hooks.json state = %v, want absent for cursor-only pairing init", err)
-	}
+	verifyClaudeArtifacts(t, gitDir)
+	verifyCodexHooks(t, gitDir)
 }
 
 func TestInitPairingCommand_CursorWarnsWhenBashPolicyMissing(t *testing.T) {
@@ -2978,7 +3008,7 @@ func TestInitPairingCommand_BashPolicyProviderScope(t *testing.T) {
 	}{
 		{name: "claude", agents: []string{"claude"}, providers: []string{bashpolicycli.ProviderClaude}, wantRun: true},
 		{name: "codex", agents: []string{"codex"}, providers: []string{bashpolicycli.ProviderCodex}, wantRun: true},
-		{name: "cursor", agents: []string{"cursor"}, providers: []string{bashpolicycli.ProviderCursor}, wantRun: true},
+		{name: "cursor", agents: []string{"cursor"}, providers: []string{bashpolicycli.ProviderClaude, bashpolicycli.ProviderCodex, bashpolicycli.ProviderCursor}, wantRun: true},
 		{name: "claude and codex", agents: []string{"claude", "codex"}, providers: []string{bashpolicycli.ProviderClaude, bashpolicycli.ProviderCodex}, wantRun: true},
 		{name: "unsupported providers only", agents: []string{"gemini", "opencode"}, wantRun: false},
 	}
@@ -4479,6 +4509,24 @@ func runGitOutputForTest(t *testing.T, dir string, args ...string) string {
 		t.Fatalf("git %s in %s failed: %v\n%s", strings.Join(args, " "), dir, err, output)
 	}
 	return strings.TrimSpace(string(output))
+}
+
+func verifyClaudeArtifacts(t *testing.T, projectRoot string) {
+	t.Helper()
+
+	settingsPath := filepath.Join(projectRoot, ".claude", "settings.json")
+	if _, err := os.Stat(settingsPath); err != nil {
+		t.Fatalf("Claude settings.json not created: %v", err)
+	}
+
+	hookPath := filepath.Join(projectRoot, ".claude", "hooks", "enforce-init.sh")
+	hookInfo, err := os.Stat(hookPath)
+	if err != nil {
+		t.Fatalf("Claude enforce-init.sh not created: %v", err)
+	}
+	if hookInfo.Mode()&0111 == 0 {
+		t.Errorf("Claude enforce-init.sh should be executable, got %o", hookInfo.Mode())
+	}
 }
 
 func verifyCodexHooks(t *testing.T, projectRoot string) {

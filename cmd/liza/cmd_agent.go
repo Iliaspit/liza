@@ -276,7 +276,7 @@ func contractInitCommandForProvider(cliName string) string {
 	case "codex-acp":
 		return "liza init --codex" // codex-acp uses Codex's config
 	case "cursor-acp":
-		return "liza init --cursor" // cursor-acp uses the shared AGENTS.md contract setup plus Cursor hooks
+		return "liza init --cursor" // cursor-acp uses the Cursor convenience setup
 	case "opencode-acp":
 		return "liza init --opencode" // opencode-acp uses OpenCode's config
 	case "claude", "codex", "cursor", "opencode", "gemini", "mistral":

@@ -108,7 +108,8 @@ source ~/§BRAND_GLOBAL_DIRNAME§/toolchain/env.sh
 §BRAND_BINARY_NAME§ init --claude --codex
 ```
 
-Add `--cursor` when the project should activate Cursor's project-local setup.
+Use `--cursor` when the project should activate Cursor's project-local setup;
+it includes the Claude and Codex project setup Cursor relies on.
 When `§BRAND_ENV_PREFIX§_ENABLE_BASH_POLICY=1` is set before init, selected
 provider hooks are delegated to `bash-policy`. If `bash-policy` is not on `PATH`
 or the command fails, init warns and continues.
