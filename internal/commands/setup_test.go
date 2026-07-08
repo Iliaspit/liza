@@ -192,6 +192,54 @@ func TestSetupCommand_ExistingWithForce(t *testing.T) {
 	}
 }
 
+func TestSetupCommand_ExistingWithForceAutoConfirm(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	oldCore := []byte("old core")
+	oldTools := []byte("my custom tools")
+	oldPipeline := []byte("pipeline: old\n")
+	for rel, content := range map[string][]byte{
+		"CORE.md":        oldCore,
+		"AGENT_TOOLS.md": oldTools,
+		"pipeline.yaml":  oldPipeline,
+	} {
+		if err := os.WriteFile(filepath.Join(tmpDir, rel), content, 0644); err != nil {
+			t.Fatalf("write %s: %v", rel, err)
+		}
+	}
+
+	err := SetupCommand(SetupParams{
+		TargetDir:   tmpDir,
+		Force:       true,
+		AutoConfirm: true,
+		Stdin:       strings.NewReader(""),
+	})
+	if err != nil {
+		t.Fatalf("SetupCommand with auto-confirm failed: %v", err)
+	}
+
+	for rel, oldContent := range map[string][]byte{
+		"CORE.md":        oldCore,
+		"AGENT_TOOLS.md": oldTools,
+		"pipeline.yaml":  oldPipeline,
+	} {
+		content, err := os.ReadFile(filepath.Join(tmpDir, rel))
+		if err != nil {
+			t.Fatalf("read %s: %v", rel, err)
+		}
+		if bytes.Equal(content, oldContent) {
+			t.Fatalf("%s was not overwritten by auto-confirm setup", rel)
+		}
+		bakContent, err := os.ReadFile(filepath.Join(tmpDir, rel+".bak"))
+		if err != nil {
+			t.Fatalf("%s.bak not created: %v", rel, err)
+		}
+		if !bytes.Equal(bakContent, oldContent) {
+			t.Fatalf("%s.bak = %q, want %q", rel, string(bakContent), string(oldContent))
+		}
+	}
+}
+
 func TestSetupCommand_CustomizableFileSkipped(t *testing.T) {
 	tmpDir := t.TempDir()
 

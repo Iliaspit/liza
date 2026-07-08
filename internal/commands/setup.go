@@ -27,6 +27,7 @@ var userCustomizableFiles = map[string]bool{
 type SetupParams struct {
 	TargetDir      string    // target directory (typically the branded global directory)
 	Force          bool      // overwrite existing files
+	AutoConfirm    bool      // auto-confirm interactive approval prompts
 	AgentToolsPath string    // path to custom AGENT_TOOLS.md (empty = use embedded)
 	ProviderIDs    []string  // explicit catalog provider IDs from --provider
 	Agents         []string  // shortcut agent flags to create skill symlinks for (e.g. "claude", "codex", "opencode")
@@ -79,7 +80,7 @@ func SetupCommand(params SetupParams) error {
 		return err
 	}
 
-	skipFiles, err := confirmOverwrites(existing, fresh, params.Force, params.TargetDir, stdin, autoSkip)
+	skipFiles, err := confirmOverwrites(existing, fresh, params.Force, params.AutoConfirm, params.TargetDir, stdin, autoSkip)
 	if err != nil {
 		return err
 	}
@@ -118,7 +119,7 @@ func SetupCommand(params SetupParams) error {
 		autoReplaced = append(autoReplaced, agentToolsTarget)
 	}
 
-	if err := embedded.WritePipelineConfig(params.TargetDir, stdin); err != nil {
+	if err := embedded.WritePipelineConfigWithOptions(params.TargetDir, stdin, embedded.ConfirmOptions{AutoConfirm: params.AutoConfirm}); err != nil {
 		return fmt.Errorf("failed to write pipeline.yaml: %w", err)
 	}
 
@@ -132,7 +133,7 @@ func SetupCommand(params SetupParams) error {
 				return fmt.Errorf("failed to determine home directory: %w", err)
 			}
 		}
-		if err := setupAgentSymlinks(homeDir, params.TargetDir, selectedProviders, stdin); err != nil {
+		if err := setupAgentSymlinks(homeDir, params.TargetDir, selectedProviders, stdin, params.AutoConfirm); err != nil {
 			return fmt.Errorf("agent symlink setup failed: %w", err)
 		}
 	}
@@ -217,7 +218,7 @@ func partitionByExistence(paths []string) (existing, fresh []string) {
 // Returns the set of files to skip (user-customizable files the user declined to overwrite,
 // plus any auto-skipped files from the autoSkip set).
 // Files in autoSkip are added to skipFiles without prompting (e.g., when replaced by --agent-tools).
-func confirmOverwrites(existing, fresh []string, force bool, targetDir string, reader *bufio.Reader, autoSkip map[string]bool) (map[string]bool, error) {
+func confirmOverwrites(existing, fresh []string, force bool, autoConfirm bool, targetDir string, reader *bufio.Reader, autoSkip map[string]bool) (map[string]bool, error) {
 	skipFiles := make(map[string]bool)
 
 	// Seed with auto-skipped files (no prompt needed).
@@ -243,13 +244,17 @@ func confirmOverwrites(existing, fresh []string, force bool, targetDir string, r
 	}
 	fmt.Printf("\nOverwrite? (y/n): ")
 
-	response, err := reader.ReadString('\n')
-	if err != nil {
-		return nil, fmt.Errorf("failed to read input: %w", err)
-	}
-	response = strings.TrimSpace(strings.ToLower(response))
-	if response != "y" && response != "yes" {
-		return nil, fmt.Errorf("aborted by user")
+	if autoConfirm {
+		fmt.Println("yes")
+	} else {
+		response, err := reader.ReadString('\n')
+		if err != nil {
+			return nil, fmt.Errorf("failed to read input: %w", err)
+		}
+		response = strings.TrimSpace(strings.ToLower(response))
+		if response != "y" && response != "yes" {
+			return nil, fmt.Errorf("aborted by user")
+		}
 	}
 	fmt.Println()
 
@@ -264,6 +269,10 @@ func confirmOverwrites(existing, fresh []string, force bool, targetDir string, r
 		}
 		fmt.Fprintf(os.Stderr, "%s is user-customizable and has local changes.\n", base)
 		fmt.Fprintf(os.Stderr, "Overwrite %s? (y/n): ", relDisplay(targetDir, p))
+		if autoConfirm {
+			fmt.Fprintln(os.Stderr, "yes")
+			continue
+		}
 		response, err := reader.ReadString('\n')
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: failed to read input for %s: %v\n", base, err)
@@ -346,7 +355,7 @@ func backupFile(src string) error {
 // setupAgentSymlinks creates skill symlinks in each agent's config directory.
 // For each agent, it symlinks every entry in the global skills directory into the agent's
 // skills directory, plus any extra links defined in the agent config.
-func setupAgentSymlinks(homeDir, lizaDir string, agents []providers.Provider, reader *bufio.Reader) error {
+func setupAgentSymlinks(homeDir, lizaDir string, agents []providers.Provider, reader *bufio.Reader, autoConfirm bool) error {
 
 	for _, provider := range agents {
 		cfg := provider.Setup
@@ -379,7 +388,7 @@ func setupAgentSymlinks(homeDir, lizaDir string, agents []providers.Provider, re
 			target := filepath.Join(sourceSkillsDir, entry.Name())
 			linkPath := filepath.Join(skillsDir, entry.Name())
 
-			if err := createSymlinkIdempotent(target, linkPath, reader, false); err != nil {
+			if err := createSymlinkIdempotent(target, linkPath, reader, false, autoConfirm); err != nil {
 				return err
 			}
 		}
@@ -393,7 +402,7 @@ func setupAgentSymlinks(homeDir, lizaDir string, agents []providers.Provider, re
 				return fmt.Errorf("failed to create parent dir for %s: %w", linkPath, err)
 			}
 
-			if err := createSymlinkIdempotent(target, linkPath, reader, false); err != nil {
+			if err := createSymlinkIdempotent(target, linkPath, reader, false, autoConfirm); err != nil {
 				return err
 			}
 		}
@@ -409,7 +418,7 @@ func setupAgentSymlinks(homeDir, lizaDir string, agents []providers.Provider, re
 // If a symlink exists pointing elsewhere, prompts user before replacing.
 // If a regular file/dir exists: when promptRegularFiles is true, prompts to
 // overwrite; when false, warns and skips.
-func createSymlinkIdempotent(target, linkPath string, reader *bufio.Reader, promptRegularFiles bool) error {
+func createSymlinkIdempotent(target, linkPath string, reader *bufio.Reader, promptRegularFiles bool, autoConfirm bool) error {
 	fi, err := os.Lstat(linkPath)
 	if err == nil {
 		// Something exists at linkPath
@@ -435,14 +444,18 @@ func createSymlinkIdempotent(target, linkPath string, reader *bufio.Reader, prom
 			return nil
 		}
 
-		response, err := reader.ReadString('\n')
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: failed to read input, skipping %s\n", linkPath)
-			return nil
-		}
-		response = strings.TrimSpace(strings.ToLower(response))
-		if response != "y" && response != "yes" {
-			return nil
+		if autoConfirm {
+			fmt.Fprintln(os.Stderr, "yes")
+		} else {
+			response, err := reader.ReadString('\n')
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: failed to read input, skipping %s\n", linkPath)
+				return nil
+			}
+			response = strings.TrimSpace(strings.ToLower(response))
+			if response != "y" && response != "yes" {
+				return nil
+			}
 		}
 		if err := os.Remove(linkPath); err != nil {
 			return fmt.Errorf("failed to remove %s: %w", linkPath, err)

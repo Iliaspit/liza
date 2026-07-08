@@ -57,6 +57,7 @@ type InitParams struct {
 	Stdin                io.Reader
 	ForceInteractive     bool   // bypass TTY check (for testing)
 	ContractAction       string // "global", "rename", "skip", or "" (default behavior)
+	AutoConfirm          bool   // auto-confirm interactive approval prompts
 }
 
 // InitAgentRepoSymlinks maps agent flag names to the repo-root symlink filename.
@@ -88,6 +89,7 @@ type InitPairingParams struct {
 	ScipSearchPlans []string  // --scip-search-plan: pairing SCIP root overrides
 	Stdin           io.Reader // input for interactive prompts (nil = os.Stdin)
 	ContractAction  string    // "global", "rename", "skip", or "" (default behavior)
+	AutoConfirm     bool      // auto-confirm interactive approval prompts
 }
 
 // InitPairingCommand creates agent-specific contract symlinks without
@@ -101,6 +103,7 @@ func InitPairingCommand(params InitPairingParams) error {
 		rawStdin = os.Stdin
 	}
 	stdin := bufio.NewReader(rawStdin)
+	confirmOptions := embedded.ConfirmOptions{AutoConfirm: params.AutoConfirm}
 
 	globalDir, err := paths.GlobalLizaDir()
 	if err != nil {
@@ -213,23 +216,23 @@ func InitPairingCommand(params InitPairingParams) error {
 
 	// Write/merge .claude/settings.json and deploy hooks
 	if hasClaude {
-		if err := embedded.WriteClaudeSettings(projectRoot, stdin); err != nil {
+		if err := embedded.WriteClaudeSettingsWithOptions(projectRoot, stdin, confirmOptions); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: failed to write claude-settings.json: %v\n", err)
 		}
 	}
 
 	if hasCodex {
-		if err := embedded.WriteCodexProjectPermissions(projectRoot, stdin); err != nil {
+		if err := embedded.WriteCodexProjectPermissionsWithOptions(projectRoot, stdin, confirmOptions); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: failed to write codex config: %v\n", err)
 		}
-		if err := embedded.WriteCodexProjectHooks(projectRoot, stdin); err != nil {
+		if err := embedded.WriteCodexProjectHooksWithOptions(projectRoot, stdin, confirmOptions); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: failed to write codex hooks: %v\n", err)
 		}
 	}
 
 	bashPolicyProviderNames := bashPolicyProviders(hasBashPolicyClaude, hasBashPolicyCodex, hasCursor)
 	if projectRoot != "" && len(bashPolicyProviderNames) > 0 && bashpolicycli.RuntimeEnabled() {
-		if err := embedded.WriteBashPolicyConfig(projectRoot, stdin); err != nil {
+		if err := embedded.WriteBashPolicyConfigWithOptions(projectRoot, stdin, confirmOptions); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: failed to write .bash-policy.yaml: %v\n", err)
 		}
 	}
@@ -252,13 +255,13 @@ func InitPairingCommand(params InitPairingParams) error {
 
 	// Write .claudeignore template (Claude-specific, non-fatal, prompts if exists)
 	if hasClaude {
-		if err := embedded.WriteClaudeIgnore(projectRoot, stdin); err != nil {
+		if err := embedded.WriteClaudeIgnoreWithOptions(projectRoot, stdin, confirmOptions); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: failed to write .claudeignore: %v\n", err)
 		}
 	}
 
 	if hasMistral {
-		if err := setupMistralContract(coreFile, stdin); err != nil {
+		if err := setupMistralContract(coreFile, stdin, params.AutoConfirm); err != nil {
 			return fmt.Errorf("mistral setup failed: %w", err)
 		}
 	}
@@ -510,7 +513,7 @@ func createContractSymlinksForProviders(projectRoot, contractTarget string, agen
 }
 
 // setupMistralContract creates a Mistral prompt symlink to CORE.md and sets system_prompt_id in config.toml.
-func setupMistralContract(coreFile string, reader *bufio.Reader) error {
+func setupMistralContract(coreFile string, reader *bufio.Reader, autoConfirm bool) error {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return fmt.Errorf("failed to determine home directory: %w", err)
@@ -526,13 +529,13 @@ func setupMistralContract(coreFile string, reader *bufio.Reader) error {
 
 	// Create prompts/<prompt-id>.md symlink (with confirmation for overwrites)
 	linkPath := filepath.Join(promptsDir, promptID+".md")
-	if err := createSymlinkIdempotent(coreFile, linkPath, reader, true); err != nil {
+	if err := createSymlinkIdempotent(coreFile, linkPath, reader, true, autoConfirm); err != nil {
 		return fmt.Errorf("failed to create %s.md symlink: %w", promptID, err)
 	}
 
 	// Update config.toml with the canonical provider prompt ID.
 	configPath := filepath.Join(vibeDir, "config.toml")
-	if err := setMistralSystemPrompt(configPath, reader, promptID); err != nil {
+	if err := setMistralSystemPrompt(configPath, reader, promptID, autoConfirm); err != nil {
 		return err
 	}
 
@@ -541,7 +544,7 @@ func setupMistralContract(coreFile string, reader *bufio.Reader) error {
 
 // setMistralSystemPrompt ensures system_prompt_id is set in ~/.vibe/config.toml.
 // Prompts user before modifying an existing file.
-func setMistralSystemPrompt(configPath string, reader *bufio.Reader, promptID string) error {
+func setMistralSystemPrompt(configPath string, reader *bufio.Reader, promptID string, autoConfirm bool) error {
 	promptLine := fmt.Sprintf("system_prompt_id = %q", promptID)
 	content, err := os.ReadFile(configPath)
 	if err != nil {
@@ -567,15 +570,19 @@ func setMistralSystemPrompt(configPath string, reader *bufio.Reader, promptID st
 	// Needs modification — ask user
 	fmt.Fprintf(os.Stderr, "%s exists and system_prompt_id is not set to %q.\n", configPath, promptID)
 	fmt.Fprintf(os.Stderr, "Set system_prompt_id = %q? (y/n): ", promptID)
-	response, err := reader.ReadString('\n')
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: failed to read input, skipping config.toml update\n")
-		return nil
-	}
-	response = strings.TrimSpace(strings.ToLower(response))
-	if response != "y" && response != "yes" {
-		fmt.Fprintf(os.Stderr, "  Skipped %s\n", configPath)
-		return nil
+	if autoConfirm {
+		fmt.Fprintln(os.Stderr, "yes")
+	} else {
+		response, err := reader.ReadString('\n')
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to read input, skipping config.toml update\n")
+			return nil
+		}
+		response = strings.TrimSpace(strings.ToLower(response))
+		if response != "y" && response != "yes" {
+			fmt.Fprintf(os.Stderr, "  Skipped %s\n", configPath)
+			return nil
+		}
 	}
 
 	// Replace existing system_prompt_id line
@@ -774,6 +781,7 @@ func InitCommandWithConfig(params InitParams) error {
 	// Single shared buffered reader — avoids multiple bufio.NewReader instances
 	// consuming from the same underlying reader (which causes EOF for later readers).
 	stdin := bufio.NewReader(rawStdin)
+	confirmOptions := embedded.ConfirmOptions{AutoConfirm: params.AutoConfirm}
 	catalog := loadProviderCatalog()
 	selectedProviders, err := resolveCatalogProviders(catalog, canonicalInitProviderIDs(params.Agents))
 	if err != nil {
@@ -905,7 +913,7 @@ func InitCommandWithConfig(params InitParams) error {
 	// Write/merge Claude Code settings and deploy hooks to .claude/
 	// This is non-fatal - if it fails, just warn
 	// Note: This may prompt user for input if settings file exists
-	if err := embedded.WriteClaudeSettings(lizaPaths.ProjectRoot(), stdin); err != nil {
+	if err := embedded.WriteClaudeSettingsWithOptions(lizaPaths.ProjectRoot(), stdin, confirmOptions); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: failed to write claude-settings.json: %v\n", err)
 	}
 
@@ -914,17 +922,17 @@ func InitCommandWithConfig(params InitParams) error {
 		return a.CodexConfig || a.CodexHooks
 	})
 	if hasCodex {
-		if err := embedded.WriteCodexProjectPermissions(lizaPaths.ProjectRoot(), stdin); err != nil {
+		if err := embedded.WriteCodexProjectPermissionsWithOptions(lizaPaths.ProjectRoot(), stdin, confirmOptions); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: failed to write codex config: %v\n", err)
 		}
-		if err := embedded.WriteCodexProjectHooks(lizaPaths.ProjectRoot(), stdin); err != nil {
+		if err := embedded.WriteCodexProjectHooksWithOptions(lizaPaths.ProjectRoot(), stdin, confirmOptions); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: failed to write codex hooks: %v\n", err)
 		}
 	}
 
 	bashPolicyProviderNames := bashPolicyProviders(true, hasCodex, hasCursor)
 	if lizaPaths.ProjectRoot() != "" && len(bashPolicyProviderNames) > 0 && bashpolicycli.RuntimeEnabled() {
-		if err := embedded.WriteBashPolicyConfig(lizaPaths.ProjectRoot(), stdin); err != nil {
+		if err := embedded.WriteBashPolicyConfigWithOptions(lizaPaths.ProjectRoot(), stdin, confirmOptions); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: failed to write .bash-policy.yaml: %v\n", err)
 		}
 	}
@@ -962,22 +970,27 @@ func InitCommandWithConfig(params InitParams) error {
 	}
 
 	// Write .claudeignore template (non-fatal, prompts if exists)
-	if err := embedded.WriteClaudeIgnore(lizaPaths.ProjectRoot(), stdin); err != nil {
+	if err := embedded.WriteClaudeIgnoreWithOptions(lizaPaths.ProjectRoot(), stdin, confirmOptions); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: failed to write .claudeignore: %v\n", err)
 	}
 
 	// Auto-suggest post_worktree_cmd if not explicitly set and stdin is a terminal
 	postWorktreeCmd := params.PostWorktreeCmd
-	if postWorktreeCmd == "" && (params.ForceInteractive || isInteractive(rawStdin)) {
+	if postWorktreeCmd == "" && (params.ForceInteractive || params.AutoConfirm || isInteractive(rawStdin)) {
 		root := lizaPaths.ProjectRoot()
 		if suggested := detectPostWorktreeCmd(root); suggested != "" {
 			fmt.Fprintf(os.Stderr, "Detected %s — set post_worktree_cmd to %q?\n", detectPkgManagerContext(root), suggested)
 			fmt.Fprintf(os.Stderr, "This runs after every worktree creation so agents have dependencies. (y/n): ")
-			response, err := stdin.ReadString('\n')
-			if err == nil {
-				response = strings.TrimSpace(strings.ToLower(response))
-				if response == "y" || response == "yes" {
-					postWorktreeCmd = suggested
+			if params.AutoConfirm {
+				fmt.Fprintln(os.Stderr, "yes")
+				postWorktreeCmd = suggested
+			} else {
+				response, err := stdin.ReadString('\n')
+				if err == nil {
+					response = strings.TrimSpace(strings.ToLower(response))
+					if response == "y" || response == "yes" {
+						postWorktreeCmd = suggested
+					}
 				}
 			}
 		} else if subdirs := detectNodeSubdirs(root); len(subdirs) > 1 {

@@ -35,9 +35,10 @@ flags remain supported; catalog providers use repeatable `--provider <id>`:
 §BRAND_BINARY_NAME§ setup --provider qwen
 ```
 
-Use `--force` to refresh existing global files after an upgrade. Use
-`--agent-tools <path>` to install a custom `AGENT_TOOLS.md` instead of the
-embedded default.
+Use `--force` to refresh existing global files after an upgrade; combine it
+with `--yes` to accept overwrite prompts non-interactively. `--yes` also
+accepts provider symlink replacement prompts. Use `--agent-tools <path>` to
+install a custom `AGENT_TOOLS.md` instead of the embedded default.
 
 ## Update Preferences
 
@@ -59,7 +60,9 @@ provided.
 
 Run `§BRAND_BINARY_NAME§ init` in each project where §BRAND_NAME_TITLE§ should activate the contract. The
 interactive wizard walks through mode selection, provider selection, and
-project-local setup.
+project-local setup. Add `--yes` when using explicit init arguments to
+auto-confirm approval prompts such as provider config merges, template
+overwrites, and detected `post_worktree_cmd` suggestions.
 
 Depending on selected providers and options, `§BRAND_BINARY_NAME§ init` writes or updates:
 

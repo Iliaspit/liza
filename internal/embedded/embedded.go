@@ -93,6 +93,11 @@ const supportDocEmbeddedPath = "support-docs/SUPPORT.md"
 
 const openCodeExecToolManagedHeaderTemplate = "// __BRAND_NAME_UPPER__ MANAGED FILE: OpenCode exec compatibility tool. Safe for __BRAND_NAME_TITLE__ to overwrite."
 
+// ConfirmOptions controls yes/no approval prompts in embedded file writers.
+type ConfirmOptions struct {
+	AutoConfirm bool
+}
+
 // OpenCodeExecToolManagedHeader identifies the project-local OpenCode exec
 // compatibility tool as owned by the current brand.
 func OpenCodeExecToolManagedHeader() string {
@@ -357,9 +362,12 @@ func BackupFile(src string) error {
 	return out.Close()
 }
 
-// confirmMerge prompts the user for yes/no confirmation and returns true if accepted.
-func confirmMerge(prompt string, reader *bufio.Reader) (bool, error) {
+func confirmMergeWithOptions(prompt string, reader *bufio.Reader, opts ConfirmOptions) (bool, error) {
 	fmt.Print(prompt)
+	if opts.AutoConfirm {
+		fmt.Println("yes")
+		return true, nil
+	}
 	response, err := reader.ReadString('\n')
 	if err != nil {
 		return false, fmt.Errorf("failed to read user input: %w", err)
@@ -374,13 +382,17 @@ func confirmMerge(prompt string, reader *bufio.Reader) (bool, error) {
 // Returns nil on success or if user declines merge.
 // The stdin parameter allows for injected input in tests; pass os.Stdin for CLI usage.
 func WriteClaudeSettings(projectRoot string, reader *bufio.Reader) error {
+	return WriteClaudeSettingsWithOptions(projectRoot, reader, ConfirmOptions{})
+}
+
+func WriteClaudeSettingsWithOptions(projectRoot string, reader *bufio.Reader, opts ConfirmOptions) error {
 	lizaPaths := paths.New(projectRoot)
 	claudeDir := lizaPaths.ClaudeDir()
 	settingsPath := lizaPaths.ClaudeSettingsPath()
 
 	var existingSettings map[string]any
 	if existingData, err := os.ReadFile(settingsPath); err == nil {
-		ok, err := confirmMerge(fmt.Sprintf("Should the %s claude settings be merged into the existing settings file? (y/n): ", brand.NameTitle), reader)
+		ok, err := confirmMergeWithOptions(fmt.Sprintf("Should the %s claude settings be merged into the existing settings file? (y/n): ", brand.NameTitle), reader, opts)
 		if err != nil {
 			return err
 		}
@@ -430,6 +442,10 @@ func WriteClaudeSettings(projectRoot string, reader *bufio.Reader) error {
 // directory, and Liza's noninteractive workspace permission baseline into
 // ~/.codex/config.toml. Project-local Codex config remains reserved for hooks.
 func WriteCodexProjectPermissions(projectRoot string, reader *bufio.Reader) error {
+	return WriteCodexProjectPermissionsWithOptions(projectRoot, reader, ConfirmOptions{})
+}
+
+func WriteCodexProjectPermissionsWithOptions(projectRoot string, reader *bufio.Reader, opts ConfirmOptions) error {
 	if reader == nil {
 		reader = bufio.NewReader(os.Stdin)
 	}
@@ -469,7 +485,7 @@ func WriteCodexProjectPermissions(projectRoot string, reader *bufio.Reader) erro
 		return nil
 	}
 
-	ok, err := confirmMerge(fmt.Sprintf("Should %s update ~/.codex/config.toml with this project's Codex permissions? (y/n): ", brand.NameTitle), reader)
+	ok, err := confirmMergeWithOptions(fmt.Sprintf("Should %s update ~/.codex/config.toml with this project's Codex permissions? (y/n): ", brand.NameTitle), reader, opts)
 	if err != nil {
 		return err
 	}
@@ -488,6 +504,10 @@ func WriteCodexProjectPermissions(projectRoot string, reader *bufio.Reader) erro
 // scripts to .codex/. Codex also requires the hooks feature flag in an
 // active config layer, so this manages the project-local config.toml feature.
 func WriteCodexProjectHooks(projectRoot string, reader *bufio.Reader) error {
+	return WriteCodexProjectHooksWithOptions(projectRoot, reader, ConfirmOptions{})
+}
+
+func WriteCodexProjectHooksWithOptions(projectRoot string, reader *bufio.Reader, opts ConfirmOptions) error {
 	if reader == nil {
 		reader = bufio.NewReader(os.Stdin)
 	}
@@ -497,14 +517,14 @@ func WriteCodexProjectHooks(projectRoot string, reader *bufio.Reader) error {
 	}
 
 	configPath := filepath.Join(codexDir, "config.toml")
-	install, configContent, err := prepareCodexHooksFeature(configPath, reader)
+	install, configContent, err := prepareCodexHooksFeature(configPath, reader, opts)
 	if err != nil {
 		return err
 	}
 	if !install {
 		return nil
 	}
-	hooksOutput, installed, err := renderCodexHooksJSON(filepath.Join(codexDir, "hooks.json"), reader)
+	hooksOutput, installed, err := renderCodexHooksJSON(filepath.Join(codexDir, "hooks.json"), reader, opts)
 	if err != nil {
 		return err
 	}
@@ -559,7 +579,7 @@ func ensureProviderDir(dir string) error {
 	return os.MkdirAll(dir, 0755)
 }
 
-func prepareCodexHooksFeature(configPath string, reader *bufio.Reader) (bool, string, error) {
+func prepareCodexHooksFeature(configPath string, reader *bufio.Reader, opts ConfirmOptions) (bool, string, error) {
 	existing, err := os.ReadFile(configPath)
 	if os.IsNotExist(err) {
 		return true, "[features]\nhooks = true\n", nil
@@ -573,7 +593,7 @@ func prepareCodexHooksFeature(configPath string, reader *bufio.Reader) (bool, st
 		return true, "", nil
 	}
 
-	ok, err := confirmMerge(fmt.Sprintf("Should %s enable Codex hooks in .codex/config.toml? (y/n): ", brand.NameTitle), reader)
+	ok, err := confirmMergeWithOptions(fmt.Sprintf("Should %s enable Codex hooks in .codex/config.toml? (y/n): ", brand.NameTitle), reader, opts)
 	if err != nil {
 		return false, "", err
 	}
@@ -608,7 +628,7 @@ func mergeCodexHooksFeature(content string) (string, bool) {
 	return ensureTrailingNewline(strings.Join(lines, "\n")), true
 }
 
-func renderCodexHooksJSON(hooksPath string, reader *bufio.Reader) ([]byte, bool, error) {
+func renderCodexHooksJSON(hooksPath string, reader *bufio.Reader, opts ConfirmOptions) ([]byte, bool, error) {
 	var lizaHooks map[string]any
 	if err := json.Unmarshal(renderEmbeddedAsset(codexHooksContent), &lizaHooks); err != nil {
 		return nil, false, fmt.Errorf("failed to parse embedded codex-hooks.json: %w", err)
@@ -616,7 +636,7 @@ func renderCodexHooksJSON(hooksPath string, reader *bufio.Reader) ([]byte, bool,
 
 	finalHooks := lizaHooks
 	if existingData, err := os.ReadFile(hooksPath); err == nil {
-		ok, err := confirmMerge(fmt.Sprintf("Should the %s Codex hooks be merged into .codex/hooks.json? (y/n): ", brand.NameTitle), reader)
+		ok, err := confirmMergeWithOptions(fmt.Sprintf("Should the %s Codex hooks be merged into .codex/hooks.json? (y/n): ", brand.NameTitle), reader, opts)
 		if err != nil {
 			return nil, false, err
 		}
@@ -1316,12 +1336,16 @@ func unionStringArrays(a, b []any) []any {
 // If the file exists and stdin is nil, skips silently (test callers).
 // If the file exists and stdin is non-nil, prompts the user to overwrite.
 func WritePipelineConfig(targetDir string, stdin *bufio.Reader) error {
+	return WritePipelineConfigWithOptions(targetDir, stdin, ConfirmOptions{})
+}
+
+func WritePipelineConfigWithOptions(targetDir string, stdin *bufio.Reader, opts ConfirmOptions) error {
 	pipelinePath := filepath.Join(targetDir, "pipeline.yaml")
 	if _, err := os.Stat(pipelinePath); err == nil {
 		if stdin == nil {
 			return nil
 		}
-		ok, err := confirmMerge("pipeline.yaml already exists. Overwrite with embedded version? (y/n): ", stdin)
+		ok, err := confirmMergeWithOptions("pipeline.yaml already exists. Overwrite with embedded version? (y/n): ", stdin, opts)
 		if err != nil {
 			return err
 		}
@@ -1360,12 +1384,16 @@ func WriteGuardrails(projectRoot string) error {
 // If the file already exists, prompts the user to overwrite.
 // reader may be nil (non-interactive/test callers) — skips silently if file exists.
 func WriteClaudeIgnore(projectRoot string, reader *bufio.Reader) error {
+	return WriteClaudeIgnoreWithOptions(projectRoot, reader, ConfirmOptions{})
+}
+
+func WriteClaudeIgnoreWithOptions(projectRoot string, reader *bufio.Reader, opts ConfirmOptions) error {
 	ignorePath := filepath.Join(projectRoot, ".claudeignore")
 	if _, err := os.Stat(ignorePath); err == nil {
 		if reader == nil {
 			return nil
 		}
-		ok, err := confirmMerge(fmt.Sprintf(".claudeignore already exists. Overwrite with %s template? (y/n): ", brand.NameTitle), reader)
+		ok, err := confirmMergeWithOptions(fmt.Sprintf(".claudeignore already exists. Overwrite with %s template? (y/n): ", brand.NameTitle), reader, opts)
 		if err != nil {
 			return err
 		}
@@ -1382,12 +1410,16 @@ func WriteClaudeIgnore(projectRoot string, reader *bufio.Reader) error {
 // WriteBashPolicyConfig writes the embedded bash-policy.yaml to .bash-policy.yaml
 // in the project root. Existing files are overwritten only after confirmation.
 func WriteBashPolicyConfig(projectRoot string, reader *bufio.Reader) error {
+	return WriteBashPolicyConfigWithOptions(projectRoot, reader, ConfirmOptions{})
+}
+
+func WriteBashPolicyConfigWithOptions(projectRoot string, reader *bufio.Reader, opts ConfirmOptions) error {
 	if reader == nil {
 		reader = bufio.NewReader(os.Stdin)
 	}
 	policyPath := filepath.Join(projectRoot, ".bash-policy.yaml")
 	if _, err := os.Stat(policyPath); err == nil {
-		ok, err := confirmMerge(fmt.Sprintf(".bash-policy.yaml already exists. Overwrite with %s template? (y/n): ", brand.NameTitle), reader)
+		ok, err := confirmMergeWithOptions(fmt.Sprintf(".bash-policy.yaml already exists. Overwrite with %s template? (y/n): ", brand.NameTitle), reader, opts)
 		if err != nil {
 			return err
 		}

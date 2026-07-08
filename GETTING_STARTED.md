@@ -80,8 +80,10 @@ liza setup --provider qwen
 liza setup --provider devin
 ```
 
-Use `--force` after an upgrade when you want to refresh existing global files.
-Use `--agent-tools` if you maintain your own tool contract:
+Use `--force` after an upgrade when you want to refresh existing global files;
+combine it with `--yes` to accept overwrite prompts non-interactively. `--yes`
+also accepts provider symlink replacement prompts. Use `--agent-tools` if you
+maintain your own tool contract:
 
 ```bash
 liza setup --agent-tools ~/my-agent-tools.md
@@ -285,7 +287,7 @@ roles, checkpoints, worktrees, TUI controls, and review flow.
 liza setup --claude --codex
 liza setup --opencode
 liza setup --agent-tools ~/my-agent-tools.md
-liza init --claude --codex
+liza init --claude --codex --yes
 liza init --cursor
 liza init --opencode
 liza init "Project goal" --spec specs/vision.md

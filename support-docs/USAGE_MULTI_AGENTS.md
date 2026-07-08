@@ -106,6 +106,9 @@ Use this section once the global setup is complete.
 # MAS run initialization: creates §BRAND_PROJECT_DIRNAME§/state.yaml from a goal/spec.
 §BRAND_BINARY_NAME§ init "[Goal description]" --spec [spec_ref]
 
+# Auto-confirm init approval prompts such as config merges and setup suggestions.
+§BRAND_BINARY_NAME§ init "[Goal description]" --yes
+
 # spec_ref: Path to goal specification (default: specs/vision.md)
 # .pre-commit-config.yaml must exist on the configured integration branch.
 # Examples:
@@ -456,8 +459,8 @@ Use `§BRAND_BINARY_NAME§ -C <project-root> ...` to select a §BRAND_NAME_TITLE
 | Command | Purpose                                                                                                              |
 |---------|----------------------------------------------------------------------------------------------------------------------|
 | **Setup & Init** |                                                                                                                      |
-| `§BRAND_BINARY_NAME§ setup` | One-time global setup of contracts, skills and support docs to `~/§BRAND_GLOBAL_DIRNAME§/`                                            |
-| `§BRAND_BINARY_NAME§ init <goal> --spec <spec_ref> [--branch <name>]` | Initialize `§BRAND_PROJECT_DIRNAME§/` directory with blackboard (spec_ref defaults to specs/vision.md, branch defaults to integration) |
+| `§BRAND_BINARY_NAME§ setup [--yes]` | One-time global setup of contracts, skills and support docs to `~/§BRAND_GLOBAL_DIRNAME§/`; `--yes` auto-confirms approval prompts |
+| `§BRAND_BINARY_NAME§ init <goal> [--spec <spec_ref>] [--branch <name>] [--yes]` | Initialize `§BRAND_PROJECT_DIRNAME§/` directory with blackboard; `--yes` auto-confirms init approval prompts |
 | **Agents & Monitoring** |                                                                                                                      |
 | `§BRAND_BINARY_NAME§ agent <role> [--agent-id <id>]` | Agent supervisor (start, restart, backoff loop; ID auto-assigned if omitted)                                         |
 | `§BRAND_BINARY_NAME§ launch wezterm mas --preset <name>` | Launch `§BRAND_BINARY_NAME§ tui` plus a MAS role preset in one WezTerm window                                                     |

@@ -3660,6 +3660,43 @@ func TestInitPairingCommand_MistralReplacesExistingPromptID(t *testing.T) {
 	}
 }
 
+func TestInitPairingCommand_MistralAutoConfirmReplacesExistingPromptID(t *testing.T) {
+	fakeHome := setupGlobalLiza(t)
+
+	vibeDir := filepath.Join(fakeHome, ".vibe")
+	if err := os.MkdirAll(vibeDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(vibeDir, "config.toml")
+	if err := os.WriteFile(configPath, []byte("system_prompt_id = \"cli\"\nother_setting = true\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	err := InitPairingCommand(InitPairingParams{
+		Agents:      []string{"mistral"},
+		Stdin:       strings.NewReader(""),
+		AutoConfirm: true,
+	})
+	if err != nil {
+		t.Fatalf("InitPairingCommand failed: %v", err)
+	}
+
+	content, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(content)
+	if !strings.Contains(text, `system_prompt_id = "liza"`) {
+		t.Errorf("system_prompt_id not replaced, got:\n%s", text)
+	}
+	if strings.Contains(text, `system_prompt_id = "cli"`) {
+		t.Errorf("old system_prompt_id = \"cli\" still present, got:\n%s", text)
+	}
+	if !strings.Contains(text, "other_setting = true") {
+		t.Error("other settings were lost during config.toml update")
+	}
+}
+
 func TestInitPairingCommand_MistralDeclinesOverwrite(t *testing.T) {
 	fakeHome := setupGlobalLiza(t)
 
@@ -3993,6 +4030,52 @@ func TestInitCommandWithConfig_NonInteractiveSkipsAutoDetect(t *testing.T) {
 	}
 	if state.Config.PostWorktreeCmd != nil {
 		t.Errorf("state.Config.PostWorktreeCmd = %q, want nil (non-interactive should skip)", *state.Config.PostWorktreeCmd)
+	}
+}
+
+func TestInitCommandWithConfig_AutoConfirmAcceptsPostWorktreeSuggestion(t *testing.T) {
+	tmpDir := setupGitRepo(t)
+	defer os.RemoveAll(tmpDir)
+	setupGlobalLiza(t)
+
+	originalDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(originalDir)
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatal(err)
+	}
+
+	testhelpers.CreateCommittedSpecFile(t, tmpDir, "vision.md", "# Vision\n")
+
+	if err := os.WriteFile(filepath.Join(tmpDir, "package.json"), []byte(`{"name":"test"}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, "yarn.lock"), []byte(""), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	err = InitCommandWithConfig(InitParams{
+		Description: "Goal with auto-confirmed post-worktree-cmd",
+		SpecRef:     "specs/vision.md",
+		Stdin:       strings.NewReader(""),
+		AutoConfirm: true,
+	})
+	if err != nil {
+		t.Fatalf("InitCommandWithConfig() error = %v", err)
+	}
+
+	bb := db.New(filepath.Join(tmpDir, ".liza", "state.yaml"))
+	state, err := bb.Read()
+	if err != nil {
+		t.Fatalf("Failed to read state: %v", err)
+	}
+	if state.Config.PostWorktreeCmd == nil {
+		t.Fatal("state.Config.PostWorktreeCmd is nil, want non-nil")
+	}
+	if *state.Config.PostWorktreeCmd != "yarn install" {
+		t.Errorf("state.Config.PostWorktreeCmd = %q, want %q", *state.Config.PostWorktreeCmd, "yarn install")
 	}
 }
 

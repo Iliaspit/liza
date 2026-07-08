@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -179,9 +180,21 @@ func TestSetupCommandRegistersCursorFlag(t *testing.T) {
 	}
 }
 
+func TestSetupAndInitRegisterYesFlags(t *testing.T) {
+	resetRootCmdForTest(t)
+
+	if setupCmd.Flags().Lookup("yes") == nil {
+		t.Fatal("setup command missing --yes flag")
+	}
+	if initCmd.Flags().Lookup("yes") == nil {
+		t.Fatal("init command missing --yes flag")
+	}
+}
+
 func TestCollectSetupProviderFlagsSeparatesProviderCursorFromShortcut(t *testing.T) {
 	resetRootCmdForTest(t)
 	defer resetRootCmdForTest(t)
+	t.Cleanup(func() { resetFlagIfPresent(setupCmd, "cursor") })
 
 	if err := setupCmd.Flags().Set("provider", "cursor"); err != nil {
 		t.Fatalf("set provider flag: %v", err)
@@ -190,7 +203,7 @@ func TestCollectSetupProviderFlagsSeparatesProviderCursorFromShortcut(t *testing
 		t.Fatalf("set cursor flag: %v", err)
 	}
 
-	providerIDs, agents, err := collectSetupProviderFlags(setupCmd)
+	providerIDs, agents, err := collectSetupProviderFlags(setupCmd, false)
 	if err != nil {
 		t.Fatalf("collectSetupProviderFlags() error = %v", err)
 	}
@@ -199,6 +212,45 @@ func TestCollectSetupProviderFlagsSeparatesProviderCursorFromShortcut(t *testing
 	}
 	if !reflect.DeepEqual(agents, []string{"cursor"}) {
 		t.Fatalf("agents = %v, want [cursor]", agents)
+	}
+}
+
+func TestCollectSetupProviderFlagsAutoConfirmAcceptsDetectedDefaults(t *testing.T) {
+	resetRootCmdForTest(t)
+	defer resetRootCmdForTest(t)
+	resetFlagIfPresent(setupCmd, "cursor")
+
+	providerIDs, agents, err := collectSetupProviderFlagsWithDetector(setupCmd, true, func() ([]string, error) {
+		return []string{"qwen"}, nil
+	})
+	if err != nil {
+		t.Fatalf("collectSetupProviderFlags() error = %v", err)
+	}
+	if !reflect.DeepEqual(providerIDs, []string{"qwen"}) {
+		t.Fatalf("providerIDs = %v, want detected qwen default", providerIDs)
+	}
+	if len(agents) != 0 {
+		t.Fatalf("agents = %v, want none", agents)
+	}
+}
+
+func TestCollectSetupProviderFlagsAutoConfirmReturnsDetectorError(t *testing.T) {
+	resetRootCmdForTest(t)
+	defer resetRootCmdForTest(t)
+	resetFlagIfPresent(setupCmd, "cursor")
+
+	wantErr := errors.New("catalog unavailable")
+	providerIDs, agents, err := collectSetupProviderFlagsWithDetector(setupCmd, true, func() ([]string, error) {
+		return nil, wantErr
+	})
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("collectSetupProviderFlags() error = %v, want %v", err, wantErr)
+	}
+	if len(providerIDs) != 0 {
+		t.Fatalf("providerIDs = %v, want none", providerIDs)
+	}
+	if len(agents) != 0 {
+		t.Fatalf("agents = %v, want none", agents)
 	}
 }
 
@@ -237,6 +289,18 @@ func TestInitDispatch_NoSembleFlagsOrInitParams(t *testing.T) {
 	}
 	if strings.Contains(strings.ToLower(help), "semble") {
 		t.Fatalf("init --help mentions Semble; flags=%v help:\n%s", flagNames, help)
+	}
+}
+
+func TestHasExplicitInitFlags_YesDoesNotForceWorkspaceInit(t *testing.T) {
+	resetRootCmdForTest(t)
+	defer resetRootCmdForTest(t)
+
+	if err := initCmd.Flags().Set("yes", "true"); err != nil {
+		t.Fatalf("set yes flag: %v", err)
+	}
+	if hasExplicitInitFlags(initCmd) {
+		t.Fatal("hasExplicitInitFlags() = true for --yes, want false because it only controls approval prompts")
 	}
 }
 

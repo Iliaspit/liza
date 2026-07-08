@@ -65,9 +65,10 @@ Use --agent-tools to install a custom AGENT_TOOLS.md instead of the embedded def
 			return err
 		}
 		force, _ := cmd.Flags().GetBool("force")
+		yes, _ := cmd.Flags().GetBool("yes")
 		agentToolsPath, _ := cmd.Flags().GetString("agent-tools")
 
-		providerIDs, agents, err := collectSetupProviderFlags(cmd)
+		providerIDs, agents, err := collectSetupProviderFlags(cmd, yes)
 		if err != nil {
 			return err
 		}
@@ -75,6 +76,7 @@ Use --agent-tools to install a custom AGENT_TOOLS.md instead of the embedded def
 		return commands.SetupCommand(commands.SetupParams{
 			TargetDir:      targetDir,
 			Force:          force,
+			AutoConfirm:    yes,
 			AgentToolsPath: agentToolsPath,
 			ProviderIDs:    providerIDs,
 			Agents:         agents,
@@ -125,6 +127,7 @@ symlinks needed for pairing (no %[2]s/ workspace):
 		scipSearch, _ := cmd.Flags().GetStringArray("scip-search")
 		scipSearchPlans, _ := cmd.Flags().GetStringArray("scip-search-plan")
 		copyWorktreeEnvFiles, _ := cmd.Flags().GetBool("copy-worktree-env-files")
+		yes, _ := cmd.Flags().GetBool("yes")
 		if err := validateDefaultCLIFlag("default-cli", defaultCLI); err != nil {
 			return err
 		}
@@ -174,6 +177,7 @@ symlinks needed for pairing (no %[2]s/ workspace):
 					ScipSearchPlans: scipSearchPlans,
 					Stdin:           os.Stdin,
 					ContractAction:  result.ContractAction,
+					AutoConfirm:     yes,
 				}); err != nil {
 					return err
 				}
@@ -198,6 +202,7 @@ symlinks needed for pairing (no %[2]s/ workspace):
 				Agents:               result.Agents,
 				Stdin:                os.Stdin,
 				ContractAction:       result.ContractAction,
+				AutoConfirm:          yes,
 			}); err != nil {
 				return err
 			}
@@ -224,6 +229,7 @@ symlinks needed for pairing (no %[2]s/ workspace):
 				ScipSearch:      scipSearch,
 				ScipSearchPlans: scipSearchPlans,
 				Stdin:           os.Stdin,
+				AutoConfirm:     yes,
 			}); err != nil {
 				return err
 			}
@@ -255,6 +261,7 @@ symlinks needed for pairing (no %[2]s/ workspace):
 			ScipSearchPlans:      scipSearchPlans,
 			Agents:               agents,
 			Stdin:                os.Stdin,
+			AutoConfirm:          yes,
 		}); err != nil {
 			return err
 		}
@@ -478,14 +485,37 @@ func collectBooleanAgentFlags(cmd *cobra.Command) []string {
 	return agents
 }
 
-func collectSetupProviderFlags(cmd *cobra.Command) ([]string, []string, error) {
+func collectSetupProviderFlags(cmd *cobra.Command, autoConfirm bool) ([]string, []string, error) {
+	return collectSetupProviderFlagsWithDetector(cmd, autoConfirm, defaultDetectedSetupProviderIDs)
+}
+
+func collectSetupProviderFlagsWithDetector(cmd *cobra.Command, autoConfirm bool, defaultProviderIDs func() ([]string, error)) ([]string, []string, error) {
 	providerIDs, _ := cmd.Flags().GetStringArray("provider")
 	agents := collectBooleanAgentFlags(cmd)
-	if len(providerIDs) > 0 || len(agents) > 0 || !interactive.IsInteractive() {
+	if len(providerIDs) > 0 || len(agents) > 0 {
+		return providerIDs, agents, nil
+	}
+	if autoConfirm {
+		detectedProviderIDs, err := defaultProviderIDs()
+		if err != nil {
+			return nil, nil, err
+		}
+		return detectedProviderIDs, nil, nil
+	}
+	if !interactive.IsInteractive() {
 		return providerIDs, agents, nil
 	}
 	promptedProviderIDs, err := promptDetectedProviders(os.Stdin, cmd.OutOrStdout())
 	return promptedProviderIDs, nil, err
+}
+
+func defaultDetectedSetupProviderIDs() ([]string, error) {
+	cat, err := providercatalog.Load(cmdContext(), providercatalog.LoadOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("load provider catalog: %w", err)
+	}
+	results := providercatalog.Detect(cat, nil)
+	return detectedProviderIDs(setupDetectableProviders(cat, results)), nil
 }
 
 func promptDetectedProviders(in io.Reader, out io.Writer) ([]string, error) {
@@ -533,14 +563,21 @@ func setupDetectableProviders(cat providercatalog.Catalog, results []providercat
 }
 
 func detectedProviderPickerOptions(installed []providercatalog.DetectionResult) ([]string, []huh.Option[string]) {
-	selected := make([]string, 0, len(installed))
+	selected := detectedProviderIDs(installed)
 	options := make([]huh.Option[string], 0, len(installed))
 	for _, result := range installed {
-		selected = append(selected, result.ID)
 		label := fmt.Sprintf("%s (%s)", result.DisplayName, result.ID)
 		options = append(options, huh.NewOption(label, result.ID).Selected(true))
 	}
 	return selected, options
+}
+
+func detectedProviderIDs(installed []providercatalog.DetectionResult) []string {
+	ids := make([]string, 0, len(installed))
+	for _, result := range installed {
+		ids = append(ids, result.ID)
+	}
+	return ids
 }
 
 func promptDetectedProvidersText(installed []providercatalog.DetectionResult, in io.Reader, out io.Writer) ([]string, error) {
@@ -592,6 +629,7 @@ func init() {
 
 	// Setup command flags
 	setupCmd.Flags().Bool("force", false, "overwrite existing global config")
+	setupCmd.Flags().Bool("yes", false, "auto-confirm setup approval prompts")
 	setupCmd.Flags().String("agent-tools", "", "path to custom AGENT_TOOLS.md (replaces embedded default)")
 	setupCmd.Flags().StringArray("provider", nil, "create setup links for provider catalog id (repeatable)")
 	setupCmd.Flags().Bool("claude", false, "create skill symlinks in ~/.claude/")
@@ -610,6 +648,7 @@ func init() {
 	initCmd.Flags().Bool("copy-worktree-env-files", false, "copy ignored root env files into worktrees before setup commands")
 	initCmd.Flags().Bool("auto-resume", false, "automatically resume at checkpoint and sprint completion")
 	initCmd.Flags().Bool("no-follow-up", false, "run only the entry-point subpipeline by suppressing top-level pipeline transitions")
+	initCmd.Flags().Bool("yes", false, "auto-confirm init approval prompts")
 	initCmd.Flags().String("default-cli", "", "default CLI for agent spawning ("+providerCLIHelpHint+")")
 	initCmd.Flags().String("default-doer-cli", "", "default CLI for doer and orchestrator agent spawning ("+providerCLIHelpHint+")")
 	initCmd.Flags().String("default-reviewer-cli", "", "default CLI for reviewer agent spawning ("+providerCLIHelpHint+")")
