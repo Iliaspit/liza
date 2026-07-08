@@ -58,6 +58,7 @@ type InitHooksOptions struct {
 	Stderr      io.Writer
 	LookPath    ExecutableLookup
 	Runner      CommandRunner
+	AutoConfirm bool
 }
 
 type InitHooksResult struct {
@@ -97,7 +98,7 @@ func InitHooks(opts InitHooksOptions) InitHooksResult {
 			"--policy-artifact-root", opts.ProjectRoot,
 		},
 		Dir:    opts.ProjectRoot,
-		Stdin:  opts.Stdin,
+		Stdin:  initHooksStdin(opts.Stdin, opts.AutoConfirm),
 		Stdout: opts.Stdout,
 		Stderr: opts.Stderr,
 	}
@@ -113,7 +114,7 @@ func InitHooks(opts InitHooksOptions) InitHooksResult {
 			"--policy-artifact-root", opts.ProjectRoot,
 		},
 		Dir:    opts.ProjectRoot,
-		Stdin:  opts.Stdin,
+		Stdin:  initHooksStdin(opts.Stdin, opts.AutoConfirm),
 		Stdout: opts.Stdout,
 		Stderr: opts.Stderr,
 	}
@@ -134,6 +135,13 @@ func InitHooks(opts InitHooksOptions) InitHooksResult {
 		}
 	}
 	return result
+}
+
+func initHooksStdin(stdin io.Reader, autoConfirm bool) io.Reader {
+	if !autoConfirm {
+		return stdin
+	}
+	return strings.NewReader(strings.Repeat("yes\n", 16))
 }
 
 func (r InitHooksResult) Diagnostic() string {

@@ -238,7 +238,7 @@ func InitPairingCommand(params InitPairingParams) error {
 	}
 
 	bashPolicyStdin := bashPolicySubprocessStdin(rawStdin, stdin)
-	runBashPolicyInits(projectRoot, bashPolicyProviderNames, bashPolicyStdin)
+	runBashPolicyInits(projectRoot, bashPolicyProviderNames, bashPolicyStdin, params.AutoConfirm)
 
 	if hasOpenCode {
 		if err := embedded.WriteOpenCodeExecTool(projectRoot); err != nil {
@@ -729,15 +729,15 @@ func bashPolicySubprocessStdin(rawStdin io.Reader, bufferedStdin *bufio.Reader) 
 	return file
 }
 
-func runBashPolicyInits(projectRoot string, providers []string, stdin io.Reader) {
+func runBashPolicyInits(projectRoot string, providers []string, stdin io.Reader, autoConfirm bool) {
 	for _, provider := range providers {
-		if runBashPolicyInit(projectRoot, provider, stdin) == bashpolicycli.StatusMissing {
+		if runBashPolicyInit(projectRoot, provider, stdin, autoConfirm) == bashpolicycli.StatusMissing {
 			return
 		}
 	}
 }
 
-func runBashPolicyInit(projectRoot, provider string, stdin io.Reader) bashpolicycli.Status {
+func runBashPolicyInit(projectRoot, provider string, stdin io.Reader, autoConfirm bool) bashpolicycli.Status {
 	result := bashpolicycli.InitHooks(bashpolicycli.InitHooksOptions{
 		ProjectRoot: projectRoot,
 		Provider:    provider,
@@ -746,6 +746,7 @@ func runBashPolicyInit(projectRoot, provider string, stdin io.Reader) bashpolicy
 		Stderr:      os.Stderr,
 		LookPath:    initBashPolicyLookPath,
 		Runner:      initBashPolicyRunner,
+		AutoConfirm: autoConfirm,
 	})
 	switch result.Status {
 	case bashpolicycli.StatusMissing:
@@ -938,7 +939,7 @@ func InitCommandWithConfig(params InitParams) error {
 	}
 
 	bashPolicyStdin := bashPolicySubprocessStdin(rawStdin, stdin)
-	runBashPolicyInits(lizaPaths.ProjectRoot(), bashPolicyProviderNames, bashPolicyStdin)
+	runBashPolicyInits(lizaPaths.ProjectRoot(), bashPolicyProviderNames, bashPolicyStdin, params.AutoConfirm)
 
 	if providerHasAsset(selectedProviders, func(a providers.ActivationAssets) bool { return a.OpenCodeExecTool }) {
 		if err := embedded.WriteOpenCodeExecTool(lizaPaths.ProjectRoot()); err != nil {

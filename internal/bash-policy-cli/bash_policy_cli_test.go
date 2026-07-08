@@ -2,6 +2,7 @@ package bashpolicycli
 
 import (
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -133,6 +134,39 @@ func TestInitHooksRunsProviderAwareInitThenActivation(t *testing.T) {
 	}
 	if stdout.String() != "installed\ninstalled\n" || stderr.String() != "diagnostic\ndiagnostic\n" {
 		t.Fatalf("stdout/stderr = %q/%q", stdout.String(), stderr.String())
+	}
+}
+
+func TestInitHooksAutoConfirmPassesYesInputToEachSubprocess(t *testing.T) {
+	t.Setenv(EnvEnableBashPolicy, "1")
+	projectRoot := t.TempDir()
+	runner := &fakeCommandRunner{}
+
+	got := InitHooks(InitHooksOptions{
+		ProjectRoot: projectRoot,
+		Provider:    ProviderClaude,
+		Stdin:       strings.NewReader(""),
+		LookPath: func(name string) (string, error) {
+			return "/custom/bin/" + name, nil
+		},
+		Runner:      runner,
+		AutoConfirm: true,
+	})
+
+	if got.Status != StatusInstalled {
+		t.Fatalf("status = %s, want installed", got.Status)
+	}
+	if len(runner.commands) != 2 {
+		t.Fatalf("commands = %d, want 2", len(runner.commands))
+	}
+	for i, command := range runner.commands {
+		content, err := io.ReadAll(command.Stdin)
+		if err != nil {
+			t.Fatalf("read command %d stdin: %v", i, err)
+		}
+		if string(content) != strings.Repeat("yes\n", 16) {
+			t.Fatalf("command %d stdin = %q, want scripted yes input", i, string(content))
+		}
 	}
 }
 

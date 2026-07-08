@@ -3053,6 +3053,45 @@ func TestInitPairingCommand_BashPolicyProviderScope(t *testing.T) {
 	}
 }
 
+func TestInitPairingCommand_BashPolicyAutoConfirmPassesYesToSubprocesses(t *testing.T) {
+	gitDir := setupGitRepo(t)
+	defer os.RemoveAll(gitDir)
+	setupGlobalLiza(t)
+	t.Setenv(bashpolicycli.EnvEnableBashPolicy, "true")
+
+	runner := &initBashPolicyTestRunner{}
+	restore := setInitBashPolicyHooksForTest(
+		func(name string) (string, error) {
+			return filepath.Join(gitDir, "bin", name), nil
+		},
+		runner,
+	)
+	defer restore()
+
+	originalDir, _ := os.Getwd()
+	defer os.Chdir(originalDir)
+	os.Chdir(gitDir)
+
+	if err := InitPairingCommand(InitPairingParams{
+		Agents:      []string{"claude", "codex"},
+		Stdin:       strings.NewReader(""),
+		AutoConfirm: true,
+	}); err != nil {
+		t.Fatalf("InitPairingCommand() error = %v", err)
+	}
+
+	assertBashPolicyCommands(t, runner.commands, gitDir, []string{bashpolicycli.ProviderClaude, bashpolicycli.ProviderCodex})
+	for i, command := range runner.commands {
+		content, err := io.ReadAll(command.Stdin)
+		if err != nil {
+			t.Fatalf("read command %d stdin: %v", i, err)
+		}
+		if string(content) != strings.Repeat("yes\n", 16) {
+			t.Fatalf("command %d stdin = %q, want scripted yes input", i, string(content))
+		}
+	}
+}
+
 func TestBashPolicySubprocessStdinKeepsBufferedReaderForScriptedInput(t *testing.T) {
 	raw := strings.NewReader("y\n")
 	buffered := bufio.NewReader(raw)
