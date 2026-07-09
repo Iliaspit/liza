@@ -153,6 +153,7 @@
       "mcp__perplexity__perplexity_ask",
 
       "Bash(__BRAND_BINARY_NAME__:*)",
+      "Bash(bash-policy:*)",
       "Bash(curl:*)",
       "Bash(wget:*)",
       "Bash(jq:*)",
