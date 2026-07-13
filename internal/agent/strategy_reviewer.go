@@ -105,6 +105,20 @@ func (s *reviewerStrategy) WaitForWork(ctx context.Context, bb *db.Blackboard, c
 	pr := loadResolver(config.ProjectRoot)
 	return waitForWorkEventDriven(ctx, bb, config.ProjectRoot, pollInterval, maxWait,
 		func(state *models.State) (bool, string) {
+			if config.InitialTask != "" {
+				task := state.FindTask(config.InitialTask)
+				if task == nil {
+					return false, fmt.Sprintf("Initial review task %s not found", config.InitialTask)
+				}
+				if !task.IsClaimable(s.role, state.Tasks, pr) {
+					return false, fmt.Sprintf("Initial review task %s is not %s-reviewable", config.InitialTask, s.role)
+				}
+				if task.HasApprovalFromAgent(config.AgentID) {
+					return false, fmt.Sprintf("Initial review task %s was already approved by %s", config.InitialTask, config.AgentID)
+				}
+				return true, fmt.Sprintf("Found initial %s-reviewable task %s", s.role, config.InitialTask)
+			}
+
 			// Use agent-aware count so a reviewer that just approved a task
 			// doesn't keep seeing it as "reviewable" — round-2 must go to a
 			// different reviewer (see filterAlreadyApprovedByAgent in ops).
@@ -124,7 +138,7 @@ func (s *reviewerStrategy) WaitForWork(ctx context.Context, bb *db.Blackboard, c
 func (s *reviewerStrategy) ClaimTask(config SupervisorConfig, bb *db.Blackboard) (string, string, error) {
 	logger := GetLogger()
 
-	taskID, _, reviewCommit, err := claimReviewerTaskForRole(config.ProjectRoot, config.AgentID, s.role, 1800, bb)
+	taskID, _, reviewCommit, err := claimReviewerTaskForRole(config.ProjectRoot, config.AgentID, s.role, config.InitialTask, 1800, bb)
 	if err != nil {
 		return "", "", err
 	}
@@ -162,5 +176,29 @@ func (s *reviewerStrategy) BuildPrompt(state *models.State, config SupervisorCon
 }
 
 func (s *reviewerStrategy) PostExecution(_ *db.Blackboard, _ SupervisorConfig, _, _ string, _ *models.State) error {
+	return nil
+}
+
+func ensureReviewerPromptClaimed(state *models.State, agentID, taskID string, resolver *pipeline.Resolver) error {
+	task := state.FindTask(taskID)
+	if task == nil {
+		return fmt.Errorf("review prompt requires claimed task %s, but the task was not found", taskID)
+	}
+	if task.RolePair == "" {
+		return fmt.Errorf("review prompt for task %s requires role_pair", taskID)
+	}
+
+	reviewing, err := resolver.ReviewingStatus(task.RolePair)
+	if err != nil {
+		return fmt.Errorf("review prompt for task %s cannot resolve reviewing status: %w", taskID, err)
+	}
+	reviewing2, reviewing2Err := resolver.Reviewing2Status(task.RolePair)
+	inReviewingState := task.Status == reviewing || (reviewing2Err == nil && task.Status == reviewing2)
+	if !inReviewingState {
+		return fmt.Errorf("review prompt for task %s requires reviewing state; current status: %s", taskID, task.Status)
+	}
+	if task.ReviewingBy == nil || *task.ReviewingBy != agentID {
+		return fmt.Errorf("review prompt for task %s requires reviewer claim by %s", taskID, agentID)
+	}
 	return nil
 }

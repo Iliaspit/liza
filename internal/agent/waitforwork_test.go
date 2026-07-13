@@ -102,6 +102,7 @@ func TestWaitForReviewerWork(t *testing.T) {
 	tests := []struct {
 		name        string
 		tasks       []models.Task
+		initialTask string
 		wantWork    bool
 		wantCleared bool
 	}{
@@ -130,6 +131,15 @@ func TestWaitForReviewerWork(t *testing.T) {
 			},
 			wantWork: false,
 		},
+		{
+			name: "initial task unavailable ignores other reviewable tasks",
+			tasks: []models.Task{
+				testhelpers.BuildTaskByStatus("task-target", models.TaskStatusImplementing, now),
+				testhelpers.BuildTaskByStatus("task-other", models.TaskStatusReadyForReview, now),
+			},
+			initialTask: "task-target",
+			wantWork:    false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -147,6 +157,8 @@ func TestWaitForReviewerWork(t *testing.T) {
 			config := SupervisorConfig{
 				StatePath:   statePath,
 				ProjectRoot: projectRoot,
+				AgentID:     "code-reviewer-1",
+				InitialTask: tt.initialTask,
 			}
 
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)

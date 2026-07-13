@@ -645,6 +645,68 @@ func TestClaimReviewerTask_PrioritySelection(t *testing.T) {
 	}
 }
 
+func TestClaimReviewerTask_TargetTaskIDOverridesPrioritySelection(t *testing.T) {
+	tmpDir := t.TempDir()
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+
+	now := time.Now().UTC()
+	state := testhelpers.CreateValidState()
+	registerClaimReviewerTaskTestAgents(state)
+	lowReviewCommit := "low-review"
+	highReviewCommit := "high-review"
+	state.Tasks = []models.Task{
+		{
+			ID:           "task-low",
+			Status:       models.TaskStatusReadyForReview,
+			RolePair:     "coding-pair",
+			Priority:     3,
+			ReviewCommit: &lowReviewCommit,
+			Created:      now,
+		},
+		{
+			ID:           "task-high",
+			Status:       models.TaskStatusReadyForReview,
+			RolePair:     "coding-pair",
+			Priority:     1,
+			ReviewCommit: &highReviewCommit,
+			Created:      now,
+		},
+	}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	result, err := ClaimReviewerTask(ClaimReviewerTaskInput{
+		ProjectRoot:   tmpDir,
+		AgentID:       "code-reviewer-1",
+		TaskID:        "task-low",
+		LeaseDuration: 1800,
+	})
+	if err != nil {
+		t.Fatalf("ClaimReviewerTask() error: %v", err)
+	}
+	if result.TaskID != "task-low" {
+		t.Fatalf("TaskID = %q, want targeted task-low", result.TaskID)
+	}
+
+	readState, err := db.New(stateFile).Read()
+	if err != nil {
+		t.Fatalf("Read() error: %v", err)
+	}
+	low := readState.FindTask("task-low")
+	if low == nil {
+		t.Fatal("task-low not found")
+	}
+	if low.Status != models.TaskStatusReviewing {
+		t.Fatalf("task-low status = %s, want %s", low.Status, models.TaskStatusReviewing)
+	}
+	high := readState.FindTask("task-high")
+	if high == nil {
+		t.Fatal("task-high not found")
+	}
+	if high.Status != models.TaskStatusReadyForReview {
+		t.Fatalf("task-high status = %s, want %s", high.Status, models.TaskStatusReadyForReview)
+	}
+}
+
 func TestClaimReviewerTask_TieBreaking(t *testing.T) {
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)

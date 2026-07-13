@@ -138,13 +138,14 @@ func shuffledByPriorityTier(candidates []*models.Task) []*models.Task {
 	return tier
 }
 
-func claimReviewerTaskForRole(projectRoot, agentID, role string, leaseDuration int, bb *db.Blackboard) (taskID, worktree, reviewCommit string, err error) {
+func claimReviewerTaskForRole(projectRoot, agentID, role, targetTaskID string, leaseDuration int, bb *db.Blackboard) (taskID, worktree, reviewCommit string, err error) {
 	logger := GetLogger()
 
 	result, err := ops.ClaimReviewerTask(ops.ClaimReviewerTaskInput{
 		ProjectRoot:   projectRoot,
 		AgentID:       agentID,
 		Role:          role,
+		TaskID:        targetTaskID,
 		LeaseDuration: leaseDuration,
 	})
 	if err != nil {
@@ -157,7 +158,7 @@ func claimReviewerTaskForRole(projectRoot, agentID, role string, leaseDuration i
 
 // claimReviewerTask wraps claimReviewerTaskForRole for backward compatibility.
 func claimReviewerTask(projectRoot, agentID string, leaseDuration int, bb *db.Blackboard) (taskID, worktree, reviewCommit string, err error) {
-	return claimReviewerTaskForRole(projectRoot, agentID, models.RoleCodeReviewer, leaseDuration, bb)
+	return claimReviewerTaskForRole(projectRoot, agentID, models.RoleCodeReviewer, "", leaseDuration, bb)
 }
 
 // releaseReviewerClaimQuietly releases a reviewer claim, logging but not

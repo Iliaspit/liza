@@ -896,6 +896,12 @@ func RunSupervisor(ctx context.Context, config SupervisorConfig) error {
 			}
 		}
 
+		if reviewer, ok := strategy.(*reviewerStrategy); ok {
+			if err := ensureReviewerPromptClaimed(stateBefore, config.AgentID, taskID, reviewer.resolver); err != nil {
+				return fmt.Errorf("stale reviewer claim before prompt launch: %w", err)
+			}
+		}
+
 		prompt, err := strategy.BuildPrompt(stateBefore, config, taskID)
 		if err != nil {
 			if claimedTaskID != "" && errors.Is(err, precommit.ErrContextBuild) {

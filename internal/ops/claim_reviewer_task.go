@@ -9,6 +9,7 @@ import (
 
 	"github.com/liza-mas/liza/internal/brand"
 	"github.com/liza-mas/liza/internal/db"
+	lizaerrors "github.com/liza-mas/liza/internal/errors"
 	"github.com/liza-mas/liza/internal/identity"
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/paths"
@@ -26,6 +27,7 @@ type ClaimReviewerTaskInput struct {
 	ProjectRoot   string
 	AgentID       string
 	Role          string
+	TaskID        string
 	LeaseDuration int
 }
 
@@ -87,11 +89,24 @@ func ClaimReviewerTask(input ClaimReviewerTaskInput) (*ClaimReviewerTaskResult, 
 			return err
 		}
 
-		// Find reviewable task with highest priority
 		var candidates []*models.Task
-		for i := range state.Tasks {
-			if state.Tasks[i].IsClaimable(role, state.Tasks, pr) {
-				candidates = append(candidates, &state.Tasks[i])
+		if input.TaskID != "" {
+			task := state.FindTask(input.TaskID)
+			if task == nil {
+				return &lizaerrors.NotFoundError{Entity: "task", ID: input.TaskID}
+			}
+			if !task.IsClaimable(role, state.Tasks, pr) {
+				return &PreconditionError{
+					Reason: fmt.Sprintf("task %s is not reviewable by %s (current status: %s)", input.TaskID, role, task.Status),
+				}
+			}
+			candidates = append(candidates, task)
+		} else {
+			// Find reviewable task with highest priority.
+			for i := range state.Tasks {
+				if state.Tasks[i].IsClaimable(role, state.Tasks, pr) {
+					candidates = append(candidates, &state.Tasks[i])
+				}
 			}
 		}
 
