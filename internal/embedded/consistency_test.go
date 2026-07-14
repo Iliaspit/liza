@@ -61,14 +61,16 @@ func TestArtifactConsistencyRendersNonDefaultBrand(t *testing.T) {
 	mkdirAllConsistency(t, filepath.Join(repoRoot, "skills", "liza-logs"))
 	mkdirAllConsistency(t, filepath.Join(repoRoot, "support-docs"))
 	writeConsistencyFile(t, filepath.Join(repoRoot, "contracts", "CORE.md"), "You are a §BRAND_NAME_TITLE§ agent.\n")
-	writeConsistencyFile(t, filepath.Join(repoRoot, "skills", "liza-logs", "SKILL.md"), "name: §BRAND_NAME_LOWER§-logs\n")
+	writeConsistencyFile(t, filepath.Join(repoRoot, "skills", "liza-logs", "SKILL.md"), "name: §BRAND_BINARY_NAME§-logs\n")
 	writeConsistencyFile(t, filepath.Join(repoRoot, "support-docs", "USAGE.md"), "Run §BRAND_BINARY_NAME§.\n")
 	writeConsistencyFile(t, filepath.Join(repoRoot, ".bash-policy.yaml"), "rules: []\n")
 
 	values := brand.ValuesFromEnv(func(key string) string {
 		switch key {
-		case "BRAND_NAME_LOWER", "BRAND_BINARY_NAME":
+		case "BRAND_NAME_LOWER":
 			return "acme-agent"
+		case "BRAND_BINARY_NAME":
+			return "acme-cli"
 		case "BRAND_NAME_UPPER", "BRAND_ENV_PREFIX":
 			return "ACME_AGENT"
 		case "BRAND_NAME_TITLE":
@@ -86,8 +88,11 @@ func TestArtifactConsistencyRendersNonDefaultBrand(t *testing.T) {
 	}
 	var sawRenamedSkill bool
 	for _, file := range expected {
-		if strings.Contains(file.RelPath, "acme-agent-logs") {
+		if strings.Contains(file.RelPath, "acme-cli-logs") {
 			sawRenamedSkill = true
+		}
+		if strings.Contains(file.RelPath, "acme-agent-logs") || strings.Contains(string(file.Content), "acme-agent-logs") {
+			t.Fatalf("%s contains name-lower logs skill artifact", file.RelPath)
 		}
 		if strings.Contains(string(file.Content), "§") || strings.Contains(string(file.Content), "BRAND_") {
 			t.Fatalf("unrendered macro in %s: %s", file.RelPath, file.Content)

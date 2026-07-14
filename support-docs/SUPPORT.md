@@ -182,16 +182,16 @@ When enabled, agents auto-call `§BRAND_BINARY_NAME§ resume` on CHECKPOINT or C
 
 Agent logs (`§BRAND_PROJECT_DIRNAME§/agent-outputs/`) are the primary diagnostic tool.
 
-**LLM-assisted** — use `/§BRAND_NAME_LOWER§-logs` in any pairing agent session to cross-correlate logs, diagnose patterns, and propose fixes.
+**LLM-assisted** — use `/§BRAND_BINARY_NAME§-logs` in any pairing agent session to cross-correlate logs, diagnose patterns, and propose fixes.
 
 **CLI analyzer** (stdlib Python 3.12+):
 ```bash
-python3 ~/§BRAND_GLOBAL_DIRNAME§/skills/§BRAND_NAME_LOWER§-logs/scripts/analyze-log.py §BRAND_PROJECT_DIRNAME§/agent-outputs/*.txt
+python3 ~/§BRAND_GLOBAL_DIRNAME§/skills/§BRAND_BINARY_NAME§-logs/scripts/analyze-log.py §BRAND_PROJECT_DIRNAME§/agent-outputs/*.txt
 ```
 
 **Browser analyzer** — drag-and-drop visual charts:
 ```bash
-open ~/§BRAND_GLOBAL_DIRNAME§/skills/§BRAND_NAME_LOWER§-logs/tools/§BRAND_BINARY_NAME§-session-analyzer.html   # or xdg-open on Linux
+open ~/§BRAND_GLOBAL_DIRNAME§/skills/§BRAND_BINARY_NAME§-logs/tools/§BRAND_BINARY_NAME§-session-analyzer.html   # or xdg-open on Linux
 ```
 
 ## state.yaml

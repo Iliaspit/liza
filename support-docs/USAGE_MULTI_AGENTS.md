@@ -34,7 +34,7 @@ initialization. For setup/configuration details, see
     ├── code-review/SKILL.md
     ├── context-engineering/SKILL.md
     ├── debugging/SKILL.md
-    ├── §BRAND_NAME_LOWER§-logs/SKILL.md
+    ├── §BRAND_BINARY_NAME§-logs/SKILL.md
     └── ...
 
 <project>/
@@ -555,7 +555,7 @@ Rationale:
 > | Node.js | `node`, `npm`, `npx`, `yarn`, `pnpm`, `bun`, `eslint`, `prettier`, `tsc` |
 >
 > If your project uses tools not in this list, add them to `.claude/settings.json` before
-> spawning agents. Run `/§BRAND_NAME_LOWER§-logs` after your first sprint to catch any remaining
+> spawning agents. Run `/§BRAND_BINARY_NAME§-logs` after your first sprint to catch any remaining
 > permission denials. Run `/context-engineering` when logs point to prompt bloat,
 > missing context, or poor handoffs.
 
@@ -565,17 +565,17 @@ The settings template is embedded into the binary. `§BRAND_BINARY_NAME§ init` 
 
 ### Analyzing Agent Logs
 
-Agent logs are your primary diagnostic tool for understanding what agents actually did and where they got stuck. **Use `/§BRAND_NAME_LOWER§-logs` early and often** — it cross-correlates logs across agents, surfaces patterns that slow down the execution and increase token usage, and proposes actionable fixes. Use `/context-engineering` when the likely cause is prompt payload shape, context bloat, missing or duplicated context, cacheability, or weak handoff fit.
+Agent logs are your primary diagnostic tool for understanding what agents actually did and where they got stuck. **Use `/§BRAND_BINARY_NAME§-logs` early and often** — it cross-correlates logs across agents, surfaces patterns that slow down the execution and increase token usage, and proposes actionable fixes. Use `/context-engineering` when the likely cause is prompt payload shape, context bloat, missing or duplicated context, cacheability, or weak handoff fit.
 
 #### Identifying Frictions
 
 Log analysis serves different purposes depending on where you are in your §BRAND_NAME_TITLE§ journey:
 
-**New users — misconfiguration detection.** Most early failures come from setup issues, not agent logic. Common culprits: incomplete `AGENT_TOOLS.md` (missing tool permissions, wrong MCP server names), missing `GUARDRAILS.md` constraints, incorrect `--post-worktree-cmd`, or stale `~/§BRAND_GLOBAL_DIRNAME§/` files after an upgrade. Run `/§BRAND_NAME_LOWER§-logs` after your first sprint — it will flag permission denials, tool failures, and initialization errors that point straight to the misconfiguration.
+**New users — misconfiguration detection.** Most early failures come from setup issues, not agent logic. Common culprits: incomplete `AGENT_TOOLS.md` (missing tool permissions, wrong MCP server names), missing `GUARDRAILS.md` constraints, incorrect `--post-worktree-cmd`, or stale `~/§BRAND_GLOBAL_DIRNAME§/` files after an upgrade. Run `/§BRAND_BINARY_NAME§-logs` after your first sprint — it will flag permission denials, tool failures, and initialization errors that point straight to the misconfiguration.
 
-**Seasoned users — regression and drift detection.** Once your setup is stable, log analysis shifts to catching new frictions: provider CLI updates that change output formats or break flags, context budget regressions from prompt growth, new tool failure patterns, or behavioral drift after contract changes. Run `/§BRAND_NAME_LOWER§-logs` when a previously-smooth pipeline starts producing unexpected checkpoints, rejections, or BLOCKED tasks.
+**Seasoned users — regression and drift detection.** Once your setup is stable, log analysis shifts to catching new frictions: provider CLI updates that change output formats or break flags, context budget regressions from prompt growth, new tool failure patterns, or behavioral drift after contract changes. Run `/§BRAND_BINARY_NAME§-logs` when a previously-smooth pipeline starts producing unexpected checkpoints, rejections, or BLOCKED tasks.
 
-In both cases, the pattern is the same: run the analysis, read the friction report, fix the root cause, re-run. Logs are cheap; debugging blind is expensive. When `/§BRAND_NAME_LOWER§-logs` shows token pressure, repeated broad searches, or handoff/rejection patterns, follow with `/context-engineering` to inspect the paired `§BRAND_PROJECT_DIRNAME§/agent-prompts/` and `§BRAND_PROJECT_DIRNAME§/agent-outputs/` evidence.
+In both cases, the pattern is the same: run the analysis, read the friction report, fix the root cause, re-run. Logs are cheap; debugging blind is expensive. When `/§BRAND_BINARY_NAME§-logs` shows token pressure, repeated broad searches, or handoff/rejection patterns, follow with `/context-engineering` to inspect the paired `§BRAND_PROJECT_DIRNAME§/agent-prompts/` and `§BRAND_PROJECT_DIRNAME§/agent-outputs/` evidence.
 
 #### Log Format
 
@@ -591,7 +591,7 @@ Both analysis tools auto-detect the format.
 **LLM-assisted analysis** — use a coding agent to cross-correlate logs, diagnose patterns and propose fixes:
 
 ```
-/§BRAND_NAME_LOWER§-logs
+/§BRAND_BINARY_NAME§-logs
 ```
 
 This works with any coding agent (Claude Code, Codex, etc.) in pairing mode. The agent runs the analyzer, reads the reports, correlates errors across agents, and suggests actionable fixes.
@@ -604,14 +604,14 @@ For prompt/context-specific diagnosis, run:
 
 That skill pairs prompts and outputs by role and timestamp, then audits context quality, cacheability, load-on-demand opportunities, tool-output pressure, and cross-agent handoff fit. Its corpus indexer supports both Claude rich stream-json logs and Codex sparse `item.completed` logs.
 
-**CLI analyzer** (`~/§BRAND_GLOBAL_DIRNAME§/skills/§BRAND_NAME_LOWER§-logs/scripts/analyze-log.py`) — stdlib-only Python 3.12+, for batch/CI use:
+**CLI analyzer** (`~/§BRAND_GLOBAL_DIRNAME§/skills/§BRAND_BINARY_NAME§-logs/scripts/analyze-log.py`) — stdlib-only Python 3.12+, for batch/CI use:
 
 ```bash
 # Single file
-python3 ~/§BRAND_GLOBAL_DIRNAME§/skills/§BRAND_NAME_LOWER§-logs/scripts/analyze-log.py §BRAND_PROJECT_DIRNAME§/agent-outputs/orchestrator-1-*.txt
+python3 ~/§BRAND_GLOBAL_DIRNAME§/skills/§BRAND_BINARY_NAME§-logs/scripts/analyze-log.py §BRAND_PROJECT_DIRNAME§/agent-outputs/orchestrator-1-*.txt
 
 # Multiple files
-python3 ~/§BRAND_GLOBAL_DIRNAME§/skills/§BRAND_NAME_LOWER§-logs/scripts/analyze-log.py §BRAND_PROJECT_DIRNAME§/agent-outputs/*.txt
+python3 ~/§BRAND_GLOBAL_DIRNAME§/skills/§BRAND_BINARY_NAME§-logs/scripts/analyze-log.py §BRAND_PROJECT_DIRNAME§/agent-outputs/*.txt
 ```
 
 Report sections: session header, token summary (fresh/cached/output, cache hit rate), content breakdown by type (chars, estimated tokens, share %), top 10 items by size, tool call frequency. Rich format adds per-turn context growth and cost breakdown.
@@ -619,7 +619,7 @@ Report sections: session header, token summary (fresh/cached/output, cache hit r
 **Browser analyzer** (`§BRAND_BINARY_NAME§-session-analyzer.html`) — drag-and-drop, visual charts:
 
 ```bash
-open ~/§BRAND_GLOBAL_DIRNAME§/skills/§BRAND_NAME_LOWER§-logs/tools/§BRAND_BINARY_NAME§-session-analyzer.html   # or xdg-open on Linux
+open ~/§BRAND_GLOBAL_DIRNAME§/skills/§BRAND_BINARY_NAME§-logs/tools/§BRAND_BINARY_NAME§-session-analyzer.html   # or xdg-open on Linux
 ```
 
 Drop one or more log files. Produces the same analysis with bar charts for content breakdown and context growth.
@@ -636,7 +636,7 @@ jq -c 'select(.type == "assistant") | {id: .message.id, usage: .message.usage}' 
   §BRAND_PROJECT_DIRNAME§/agent-outputs/orchestrator-1-*.txt
 ```
 
-**Interactive diagnosis** — open a regular coding agent session (`claude`, `codex`, etc.) in the project directory. It can read `§BRAND_PROJECT_DIRNAME§/state.yaml`, agent logs, and prompts — everything needed to diagnose issues interactively. The `/§BRAND_NAME_LOWER§-logs` and `/context-engineering` skills work this way.
+**Interactive diagnosis** — open a regular coding agent session (`claude`, `codex`, etc.) in the project directory. It can read `§BRAND_PROJECT_DIRNAME§/state.yaml`, agent logs, and prompts — everything needed to diagnose issues interactively. The `/§BRAND_BINARY_NAME§-logs` and `/context-engineering` skills work this way.
 
 ### Submit, Await Verdict, Handle Result
 

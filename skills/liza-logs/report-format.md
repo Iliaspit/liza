@@ -1,6 +1,6 @@
 # §BRAND_NAME_TITLE§ Logs Report Format
 
-Use this format for `/§BRAND_NAME_LOWER§-logs` findings. Combine analyzer output from
+Use this format for `/§BRAND_BINARY_NAME§-logs` findings. Combine analyzer output from
 `§BRAND_PROJECT_DIRNAME§/agent-outputs/*.txt`, task friction evidence from `§BRAND_PROJECT_DIRNAME§/state.yaml`, and
 raw log excerpts only when needed to validate a specific claim.
 
@@ -156,9 +156,9 @@ Group recommendations by root cause, not by individual task.
 ### Commands Run
 
 ```bash
-python3 ~/§BRAND_GLOBAL_DIRNAME§/skills/§BRAND_NAME_LOWER§-logs/scripts/analyze-log.py §BRAND_PROJECT_DIRNAME§/agent-outputs/*.txt
-python3 ~/§BRAND_GLOBAL_DIRNAME§/skills/§BRAND_NAME_LOWER§-logs/scripts/analyze-log.py --summary-by-role §BRAND_PROJECT_DIRNAME§/agent-outputs/*.txt
-python3 ~/§BRAND_GLOBAL_DIRNAME§/skills/§BRAND_NAME_LOWER§-logs/scripts/analyze-state.py §BRAND_PROJECT_DIRNAME§/state.yaml
+python3 ~/§BRAND_GLOBAL_DIRNAME§/skills/§BRAND_BINARY_NAME§-logs/scripts/analyze-log.py §BRAND_PROJECT_DIRNAME§/agent-outputs/*.txt
+python3 ~/§BRAND_GLOBAL_DIRNAME§/skills/§BRAND_BINARY_NAME§-logs/scripts/analyze-log.py --summary-by-role §BRAND_PROJECT_DIRNAME§/agent-outputs/*.txt
+python3 ~/§BRAND_GLOBAL_DIRNAME§/skills/§BRAND_BINARY_NAME§-logs/scripts/analyze-state.py §BRAND_PROJECT_DIRNAME§/state.yaml
 ```
 
 ### Raw Evidence Pointers

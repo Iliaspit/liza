@@ -9,9 +9,9 @@ Two log formats are supported:
   - Sparse (Format B): first event type is "thread.started". Aggregate usage only.
 
 Usage:
-    python3 ~/§BRAND_GLOBAL_DIRNAME§/skills/§BRAND_NAME_LOWER§-logs/scripts/analyze-log.py \
+    python3 ~/§BRAND_GLOBAL_DIRNAME§/skills/§BRAND_BINARY_NAME§-logs/scripts/analyze-log.py \
         §BRAND_PROJECT_DIRNAME§/agent-outputs/orchestrator-*.txt
-    python3 ~/§BRAND_GLOBAL_DIRNAME§/skills/§BRAND_NAME_LOWER§-logs/scripts/analyze-log.py \
+    python3 ~/§BRAND_GLOBAL_DIRNAME§/skills/§BRAND_BINARY_NAME§-logs/scripts/analyze-log.py \
         §BRAND_PROJECT_DIRNAME§/agent-outputs/*.txt
 """
 

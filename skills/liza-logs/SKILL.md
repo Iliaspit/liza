@@ -1,5 +1,5 @@
 ---
-name: §BRAND_NAME_LOWER§-logs
+name: §BRAND_BINARY_NAME§-logs
 description: Analyze §BRAND_NAME_TITLE§ agents logs
 ---
 
@@ -16,9 +16,9 @@ correlate state symptoms with log evidence; propose fixes.
 PROTOCOL:
 1. Start by running the analyzer:
 ```bash
-python3 ~/§BRAND_GLOBAL_DIRNAME§/skills/§BRAND_NAME_LOWER§-logs/scripts/analyze-log.py §BRAND_PROJECT_DIRNAME§/agent-outputs/coder-*.txt        # all coder agents
-python3 ~/§BRAND_GLOBAL_DIRNAME§/skills/§BRAND_NAME_LOWER§-logs/scripts/analyze-log.py §BRAND_PROJECT_DIRNAME§/agent-outputs/coder-1-*.txt # single agent
-python3 ~/§BRAND_GLOBAL_DIRNAME§/skills/§BRAND_NAME_LOWER§-logs/scripts/analyze-log.py --summary-by-role §BRAND_PROJECT_DIRNAME§/agent-outputs/*.txt
+python3 ~/§BRAND_GLOBAL_DIRNAME§/skills/§BRAND_BINARY_NAME§-logs/scripts/analyze-log.py §BRAND_PROJECT_DIRNAME§/agent-outputs/coder-*.txt        # all coder agents
+python3 ~/§BRAND_GLOBAL_DIRNAME§/skills/§BRAND_BINARY_NAME§-logs/scripts/analyze-log.py §BRAND_PROJECT_DIRNAME§/agent-outputs/coder-1-*.txt # single agent
+python3 ~/§BRAND_GLOBAL_DIRNAME§/skills/§BRAND_BINARY_NAME§-logs/scripts/analyze-log.py --summary-by-role §BRAND_PROJECT_DIRNAME§/agent-outputs/*.txt
 ```
 By default, run the analyzer **per role**.
 Use `--summary-by-role` when you need cross-role aggregate token, tool, MCP,
@@ -26,7 +26,7 @@ error, and skill-invocation totals.
 
 2. Inspect `§BRAND_PROJECT_DIRNAME§/state.yaml` for task-level frictions before drawing conclusions:
 ```bash
-python3 ~/§BRAND_GLOBAL_DIRNAME§/skills/§BRAND_NAME_LOWER§-logs/scripts/analyze-state.py §BRAND_PROJECT_DIRNAME§/state.yaml
+python3 ~/§BRAND_GLOBAL_DIRNAME§/skills/§BRAND_BINARY_NAME§-logs/scripts/analyze-state.py §BRAND_PROJECT_DIRNAME§/state.yaml
 ```
    - tasks with `review_cycles_total >= 4`
    - tasks whose status is `INTEGRATION_FAILED`, `BLOCKED`, `SUPERSEDED`, or `ABANDONED`
@@ -64,7 +64,7 @@ their fix surfaces differ.
    raw log files. Use `query-log.py` to extract trimmed evidence windows for
    specific questions, for example:
 ```bash
-python3 ~/§BRAND_GLOBAL_DIRNAME§/skills/§BRAND_NAME_LOWER§-logs/scripts/query-log.py §BRAND_PROJECT_DIRNAME§/agent-outputs/coder-3-*.txt --around-errors 3 --task architecture-4-code-planning-0-b-repair-0-coding-1
+python3 ~/§BRAND_GLOBAL_DIRNAME§/skills/§BRAND_BINARY_NAME§-logs/scripts/query-log.py §BRAND_PROJECT_DIRNAME§/agent-outputs/coder-3-*.txt --around-errors 3 --task architecture-4-code-planning-0-b-repair-0-coding-1
 ```
    - Manual raw-log reads are a last resort only when the query helper cannot
      answer a concrete evidence question; state the gap before doing so.
@@ -76,7 +76,7 @@ python3 ~/§BRAND_GLOBAL_DIRNAME§/skills/§BRAND_NAME_LOWER§-logs/scripts/quer
    - Read one agent prompt of the relevant role in `§BRAND_PROJECT_DIRNAME§/agent-prompts/`
    - Check the contract files in `~/§BRAND_GLOBAL_DIRNAME§/` (CORE.md, AGENT_TOOLS.md, MULTI_AGENT_MODE.md)
 
-5. Write the final report using `skills/§BRAND_NAME_LOWER§-logs/report-format.md`.
+5. Write the final report using `skills/§BRAND_BINARY_NAME§-logs/report-format.md`.
 
 6. Propose fixes whenever possible.
 
@@ -86,4 +86,4 @@ FALSE POSITIVES:
 - **Contract/prompt volume**: Contract and guardrail files are stable, load-bearing context and are often cacheable. Do not report their size as waste by itself. Parametric role/task prompts are expected to vary and may not cache well; flag only avoidable duplication, poor ordering that defeats stable-prefix reuse, prompt growth across retries, or dynamic artifacts that should have been referenced instead of embedded.
 
 NOTE:
-The skill contains a web tool for humans to inspect logs: ~/§BRAND_GLOBAL_DIRNAME§/skills/§BRAND_NAME_LOWER§-logs/tools/§BRAND_BINARY_NAME§-session-analyzer.html
+The skill contains a web tool for humans to inspect logs: ~/§BRAND_GLOBAL_DIRNAME§/skills/§BRAND_BINARY_NAME§-logs/tools/§BRAND_BINARY_NAME§-session-analyzer.html

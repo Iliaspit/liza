@@ -47,10 +47,10 @@ func TestValidateRenderedFileParsesJSONAndTOML(t *testing.T) {
 func TestRenderPathAppliesGeneratedNameMap(t *testing.T) {
 	values := brand.RuntimeValues()
 	values.NameLower = "acme-agent"
-	values.BinaryName = "acme-agent"
+	values.BinaryName = "acme-cli"
 	values.ProjectDirName = ".acme-agent"
 	got := RenderPath("check-liza-input-readiness/SKILL.md/liza-logs/tools/liza-session-analyzer.html/scripts/liza-index.sh/.liza-hooks/pre-commit", values)
-	if got != "check-acme-agent-input-readiness/SKILL.md/acme-agent-logs/tools/acme-agent-session-analyzer.html/scripts/acme-agent-index.sh/.acme-agent-hooks/pre-commit" {
+	if got != "check-acme-agent-input-readiness/SKILL.md/acme-cli-logs/tools/acme-cli-session-analyzer.html/scripts/acme-cli-index.sh/.acme-agent-hooks/pre-commit" {
 		t.Fatalf("RenderPath = %q", got)
 	}
 }
@@ -74,7 +74,7 @@ func TestExpectedEmbeddedFilesRendersMacros(t *testing.T) {
 	mkdirAll(t, filepath.Join(root, "skills", "liza-logs"))
 	mkdirAll(t, filepath.Join(root, "support-docs"))
 	writeFile(t, filepath.Join(root, "contracts", "CORE.md"), "# §BRAND_NAME_TITLE§\n")
-	writeFile(t, filepath.Join(root, "skills", "liza-logs", "SKILL.md"), "name: §BRAND_NAME_LOWER§\n")
+	writeFile(t, filepath.Join(root, "skills", "liza-logs", "SKILL.md"), "name: §BRAND_BINARY_NAME§-logs\n")
 	writeFile(t, filepath.Join(root, "support-docs", "USAGE.md"), "run §BRAND_BINARY_NAME§\n")
 	writeFile(t, filepath.Join(root, ".bash-policy.yaml"), strings.Join([]string{
 		"rules:",
@@ -87,7 +87,7 @@ func TestExpectedEmbeddedFilesRendersMacros(t *testing.T) {
 	values := brand.RuntimeValues()
 	values.NameLower = "acme-agent"
 	values.NameTitle = "Acme Agent"
-	values.BinaryName = "acme-agent"
+	values.BinaryName = "acme-cli"
 
 	files, err := ExpectedEmbeddedFiles(root, values)
 	if err != nil {
@@ -96,12 +96,12 @@ func TestExpectedEmbeddedFilesRendersMacros(t *testing.T) {
 	var sawRenamedSkill bool
 	var sawBrandedBashPolicy bool
 	for _, file := range files {
-		if strings.Contains(file.RelPath, "acme-agent-logs") {
+		if strings.Contains(file.RelPath, "acme-cli-logs") {
 			sawRenamedSkill = true
 		}
 		if file.RelPath == "bash-policy.yaml" {
 			rendered := string(file.Content)
-			if !strings.Contains(rendered, "Bash(acme-agent:*)") {
+			if !strings.Contains(rendered, "Bash(acme-cli:*)") {
 				t.Fatalf("bash-policy.yaml missing branded binary permission:\n%s", rendered)
 			}
 			if strings.Contains(rendered, "Bash(liza:*)") {
@@ -124,8 +124,10 @@ func TestExpectedEmbeddedFilesRendersMacros(t *testing.T) {
 func TestExpectedEmbeddedFilesUseNonDefaultBrand(t *testing.T) {
 	files, err := ExpectedEmbeddedFiles(findRepoRoot(t), brand.ValuesFromEnv(func(key string) string {
 		switch key {
-		case "BRAND_NAME_LOWER", "BRAND_BINARY_NAME", "BRAND_ARCHIVE_PREFIX", "BRAND_MISTRAL_PROMPT_ID":
+		case "BRAND_NAME_LOWER", "BRAND_ARCHIVE_PREFIX", "BRAND_MISTRAL_PROMPT_ID":
 			return "acme-agent"
+		case "BRAND_BINARY_NAME":
+			return "acme-cli"
 		case "BRAND_NAME_UPPER", "BRAND_ENV_PREFIX":
 			return "ACME_AGENT"
 		case "BRAND_NAME_TITLE":
@@ -141,11 +143,21 @@ func TestExpectedEmbeddedFilesUseNonDefaultBrand(t *testing.T) {
 	}
 
 	rawDefaultRE := regexp.MustCompile(`(?i)(^|[^A-Za-z])liza($|[^A-Za-z0-9])|liza-mas/liza`)
+	var sawBinaryLogsSkill bool
 	for _, file := range files {
 		rendered := string(file.Content)
+		if strings.Contains(file.RelPath, "acme-cli-logs") {
+			sawBinaryLogsSkill = true
+		}
+		if strings.Contains(file.RelPath, "acme-agent-logs") || strings.Contains(rendered, "acme-agent-logs") {
+			t.Fatalf("%s contains name-lower logs skill artifact", file.RelPath)
+		}
 		if match := rawDefaultRE.FindString(rendered); match != "" {
 			t.Fatalf("%s contains raw default brand token %q", file.RelPath, match)
 		}
+	}
+	if !sawBinaryLogsSkill {
+		t.Fatalf("expected generated logs skill path to use binary name")
 	}
 }
 

@@ -212,7 +212,7 @@ func RenderPath(rel string, values brand.Values) string {
 		new string
 	}{
 		{"check-liza-input-readiness", "check-" + values.NameLower + "-input-readiness"},
-		{"liza-logs", values.NameLower + "-logs"},
+		{"liza-logs", values.BinaryName + "-logs"},
 		{"liza-index", values.BinaryName + "-index"},
 		{"liza-session", values.BinaryName + "-session"},
 		{".liza-hooks", values.ProjectDirName + "-hooks"},

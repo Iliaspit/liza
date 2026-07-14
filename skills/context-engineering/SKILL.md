@@ -9,7 +9,7 @@ description: "Analyze §BRAND_NAME_TITLE§ `§BRAND_PROJECT_DIRNAME§/agent-prom
 
 Analyze only `§BRAND_PROJECT_DIRNAME§/agent-prompts/` and `§BRAND_PROJECT_DIRNAME§/agent-outputs/` unless the user names other artifacts.
 
-This skill is complementary to `§BRAND_NAME_LOWER§-logs`: `§BRAND_NAME_LOWER§-logs` finds operational failures and token/tool patterns; this skill explains whether the prompt and context design caused or amplified those patterns.
+This skill is complementary to `§BRAND_BINARY_NAME§-logs`: `§BRAND_BINARY_NAME§-logs` finds operational failures and token/tool patterns; this skill explains whether the prompt and context design caused or amplified those patterns.
 
 ## Protocol
 
@@ -37,9 +37,9 @@ python3 skills/context-engineering/scripts/context-corpus-index.py §BRAND_PROJE
 - Use `--max-pair-minutes` to control how strict same-role timestamp pairing should be.
 - Use `--sample-limit` to expand or shrink top lists and the sampling plan.
 
-If a `§BRAND_NAME_LOWER§-logs` report or analyzer output is available, use it as the first sampling guide. Prioritize roles, runs, or timestamps with repeated tool failures, broad tool-result volume, duplicated task-local material, growing prompts, low cache reuse for expected-stable prefixes, or blocked/rejected task outcomes.
+If a `§BRAND_BINARY_NAME§-logs` report or analyzer output is available, use it as the first sampling guide. Prioritize roles, runs, or timestamps with repeated tool failures, broad tool-result volume, duplicated task-local material, growing prompts, low cache reuse for expected-stable prefixes, or blocked/rejected task outcomes.
 
-If `§BRAND_NAME_LOWER§-logs` and context-engineering evidence disagree, report the disagreement explicitly and keep the narrower claim supported by direct prompt/output evidence. Example: `§BRAND_NAME_LOWER§-logs` may correctly flag token pressure while prompt shape is not the cause.
+If `§BRAND_BINARY_NAME§-logs` and context-engineering evidence disagree, report the disagreement explicitly and keep the narrower claim supported by direct prompt/output evidence. Example: `§BRAND_BINARY_NAME§-logs` may correctly flag token pressure while prompt shape is not the cause.
 
 Before opening raw prompt/output files, use the index's **Sampling Plan** plus the sections relevant to the question: **Largest Prompts**, **Largest Outputs**, **High Tool-Output Pressure**, **Outcome Signal Mentions**, **Role Distribution**, **Prompt Size Trends**, **Common Tools**, **MCP Usage**, and **Pairing**.
 

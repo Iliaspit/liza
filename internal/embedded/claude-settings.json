@@ -112,7 +112,7 @@
       "Skill(generic-subagent)",
       "Skill(have-you-considered)",
       "Skill(lesson-capture)",
-      "Skill(__BRAND_NAME_LOWER__-logs)",
+      "Skill(__BRAND_BINARY_NAME__-logs)",
       "Skill(software-architecture-review)",
       "Skill(spec-backfill)",
       "Skill(spec-review)",
