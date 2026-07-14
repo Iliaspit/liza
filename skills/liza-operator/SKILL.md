@@ -124,10 +124,16 @@ on a few. At planning/architecture checkpoints, when the goal is "validate again
 - **Hold the line** — `§BRAND_BINARY_NAME§ pause` for a hard stop. Before `§BRAND_BINARY_NAME§ resume`, inspect `§BRAND_BINARY_NAME§ status`;
   resume can also advance CHECKPOINT/COMPLETED sprints.
 - **Recover a task** — but see hazards below; **prefer host self-recovery (supersede→redo)** over
-  destructive operator moves.
+  destructive operator moves. Before trusting a clean/claimable state, use `/§BRAND_BINARY_NAME§-logs`
+  on the agents that already touched the task; blackboard task data alone is not enough.
 - **Re-run** a flaky validation **once** before believing a red.
 
 # Recovery patterns & hazards
+- **Clean state is not recovery evidence** — if a task was BLOCKED, rejected repeatedly,
+  superseded, abandoned, integration-failed, or recovered after multiple agent attempts, analyze the
+  involved agent logs with `/§BRAND_BINARY_NAME§-logs` before reassigning. If the same failure mode
+  recurs across agents, prefer rescope/supersede, environment repair, or human escalation over
+  another unchanged claim.
 - **Verdict deadlock** — REJECTED recorded (`submit-verdict` returns `ok:true`) but the task stays in a
   submitted/reviewing state and both doer (`await-verdict`) and reviewer (`await-resubmission`) hang `WAITING`:
   `§BRAND_BINARY_NAME§ release-claim <task> --role reviewer --force` (non-destructive; no worktree loss).
