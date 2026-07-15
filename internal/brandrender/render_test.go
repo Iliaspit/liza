@@ -49,8 +49,8 @@ func TestRenderPathAppliesGeneratedNameMap(t *testing.T) {
 	values.NameLower = "acme-agent"
 	values.BinaryName = "acme-cli"
 	values.ProjectDirName = ".acme-agent"
-	got := RenderPath("check-liza-input-readiness/SKILL.md/liza-logs/tools/liza-session-analyzer.html/scripts/liza-index.sh/.liza-hooks/pre-commit", values)
-	if got != "check-acme-agent-input-readiness/SKILL.md/acme-cli-logs/tools/acme-cli-session-analyzer.html/scripts/acme-cli-index.sh/.acme-agent-hooks/pre-commit" {
+	got := RenderPath("check-liza-input-readiness/SKILL.md/liza-logs/tools/liza-session-analyzer.html/scripts/liza-index.sh/liza-operator/.liza-hooks/pre-commit", values)
+	if got != "check-acme-agent-input-readiness/SKILL.md/acme-cli-logs/tools/acme-cli-session-analyzer.html/scripts/acme-cli-index.sh/acme-agent-operator/.acme-agent-hooks/pre-commit" {
 		t.Fatalf("RenderPath = %q", got)
 	}
 }
@@ -144,10 +144,17 @@ func TestExpectedEmbeddedFilesUseNonDefaultBrand(t *testing.T) {
 
 	rawDefaultRE := regexp.MustCompile(`(?i)(^|[^A-Za-z])liza($|[^A-Za-z0-9])|liza-mas/liza`)
 	var sawBinaryLogsSkill bool
+	var sawNameLowerOperatorSkill bool
 	for _, file := range files {
 		rendered := string(file.Content)
 		if strings.Contains(file.RelPath, "acme-cli-logs") {
 			sawBinaryLogsSkill = true
+		}
+		if strings.Contains(file.RelPath, "acme-agent-operator") {
+			sawNameLowerOperatorSkill = true
+		}
+		if strings.Contains(file.RelPath, "liza-operator") {
+			t.Fatalf("%s contains raw default operator skill path", file.RelPath)
 		}
 		if strings.Contains(file.RelPath, "acme-agent-logs") || strings.Contains(rendered, "acme-agent-logs") {
 			t.Fatalf("%s contains name-lower logs skill artifact", file.RelPath)
@@ -158,6 +165,9 @@ func TestExpectedEmbeddedFilesUseNonDefaultBrand(t *testing.T) {
 	}
 	if !sawBinaryLogsSkill {
 		t.Fatalf("expected generated logs skill path to use binary name")
+	}
+	if !sawNameLowerOperatorSkill {
+		t.Fatalf("expected generated operator skill path to use name-lower")
 	}
 }
 

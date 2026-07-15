@@ -59,9 +59,11 @@ func TestArtifactConsistencyRendersNonDefaultBrand(t *testing.T) {
 	repoRoot := t.TempDir()
 	mkdirAllConsistency(t, filepath.Join(repoRoot, "contracts"))
 	mkdirAllConsistency(t, filepath.Join(repoRoot, "skills", "liza-logs"))
+	mkdirAllConsistency(t, filepath.Join(repoRoot, "skills", "liza-operator"))
 	mkdirAllConsistency(t, filepath.Join(repoRoot, "support-docs"))
 	writeConsistencyFile(t, filepath.Join(repoRoot, "contracts", "CORE.md"), "You are a §BRAND_NAME_TITLE§ agent.\n")
 	writeConsistencyFile(t, filepath.Join(repoRoot, "skills", "liza-logs", "SKILL.md"), "name: §BRAND_BINARY_NAME§-logs\n")
+	writeConsistencyFile(t, filepath.Join(repoRoot, "skills", "liza-operator", "SKILL.md"), "name: §BRAND_BINARY_NAME§-operator\n")
 	writeConsistencyFile(t, filepath.Join(repoRoot, "support-docs", "USAGE.md"), "Run §BRAND_BINARY_NAME§.\n")
 	writeConsistencyFile(t, filepath.Join(repoRoot, ".bash-policy.yaml"), "rules: []\n")
 
@@ -87,9 +89,16 @@ func TestArtifactConsistencyRendersNonDefaultBrand(t *testing.T) {
 		t.Fatalf("building expected embedded files: %v", err)
 	}
 	var sawRenamedSkill bool
+	var sawRenamedOperatorSkill bool
 	for _, file := range expected {
 		if strings.Contains(file.RelPath, "acme-cli-logs") {
 			sawRenamedSkill = true
+		}
+		if strings.Contains(file.RelPath, "acme-agent-operator") {
+			sawRenamedOperatorSkill = true
+		}
+		if strings.Contains(file.RelPath, "liza-operator") {
+			t.Fatalf("%s contains raw default operator skill path", file.RelPath)
 		}
 		if strings.Contains(file.RelPath, "acme-agent-logs") || strings.Contains(string(file.Content), "acme-agent-logs") {
 			t.Fatalf("%s contains name-lower logs skill artifact", file.RelPath)
@@ -100,6 +109,9 @@ func TestArtifactConsistencyRendersNonDefaultBrand(t *testing.T) {
 	}
 	if !sawRenamedSkill {
 		t.Fatalf("expected rendered skill path rename, got %+v", expected)
+	}
+	if !sawRenamedOperatorSkill {
+		t.Fatalf("expected rendered operator skill path rename, got %+v", expected)
 	}
 }
 
