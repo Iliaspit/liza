@@ -166,9 +166,28 @@ semble find-related <file_path> <line> <target-root>
 
 Batch related operations within same MCP server when possible.
 
-### GitHub and PRs
+### PR
 
 PR title MUST follow Conventional Commits.
+
+For non-trivial changes, synthesize the body from task context, specs/issues, existing behavior, diff, and validation evidence.
+
+Prefer these sections when relevant:
+- Summary
+- Problem / Why
+- Existing Context
+- Approach
+- Change Map
+- Reviewer Focus
+- Validation
+- Risks / Rollback
+- Not in Scope
+
+Reference specs/issues in Summary or Problem when present.
+
+For trivial changes, use a compact body, but still include why and validation.
+
+### GitHub
 
 Codex: DO NOT use `codex_apps.github`.
 
