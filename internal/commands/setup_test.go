@@ -756,6 +756,55 @@ func TestSetupCommand_AgentIdempotent(t *testing.T) {
 	}
 }
 
+func TestSetupCommand_RemovesRetiredSkillAfterRename(t *testing.T) {
+	lizaDir, homeDir := setupWithAgents(t, []string{"claude"})
+
+	retiredSkillDir := filepath.Join(lizaDir, "skills", "code-cleaning")
+	if err := os.Mkdir(retiredSkillDir, 0755); err != nil {
+		t.Fatalf("create retired skill directory: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(retiredSkillDir, "SKILL.md"), []byte("legacy skill"), 0644); err != nil {
+		t.Fatalf("write retired skill: %v", err)
+	}
+
+	retiredLink := filepath.Join(homeDir, ".claude", "skills", "code-cleaning")
+	if err := os.Symlink(retiredSkillDir, retiredLink); err != nil {
+		t.Fatalf("create retired skill symlink: %v", err)
+	}
+	userSkillTarget := t.TempDir()
+	userSkillLink := filepath.Join(homeDir, ".codex", "skills", "code-cleaning")
+	if err := os.MkdirAll(filepath.Dir(userSkillLink), 0755); err != nil {
+		t.Fatalf("create user skill parent directory: %v", err)
+	}
+	if err := os.Symlink(userSkillTarget, userSkillLink); err != nil {
+		t.Fatalf("create user skill symlink: %v", err)
+	}
+
+	err := SetupCommand(SetupParams{
+		TargetDir:   lizaDir,
+		Agents:      []string{"claude", "codex"},
+		HomeDir:     homeDir,
+		Force:       true,
+		AutoConfirm: true,
+	})
+	if err != nil {
+		t.Fatalf("SetupCommand failed: %v", err)
+	}
+
+	if _, err := os.Lstat(retiredSkillDir); !os.IsNotExist(err) {
+		t.Fatalf("retired global skill = %v, want absent", err)
+	}
+	if _, err := os.Lstat(retiredLink); !os.IsNotExist(err) {
+		t.Fatalf("retired agent skill symlink = %v, want absent", err)
+	}
+	if target, err := os.Readlink(userSkillLink); err != nil || target != userSkillTarget {
+		t.Fatalf("user skill symlink = %q, %v; want %q, nil", target, err, userSkillTarget)
+	}
+	if _, err := os.Stat(filepath.Join(lizaDir, "skills", "clean-code", "SKILL.md")); err != nil {
+		t.Fatalf("renamed skill = %v, want installed", err)
+	}
+}
+
 func TestSetupCommand_AgentExistingWrongSymlink(t *testing.T) {
 	lizaDir, homeDir := setupWithAgents(t, []string{"claude"})
 

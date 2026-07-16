@@ -24,6 +24,12 @@ var userCustomizableFiles = map[string]bool{
 	"AGENT_TOOLS.md": true,
 }
 
+// retiredSkillNames are formerly deployed skills that setup removes during an
+// upgrade. Keeping this list explicit prevents deleting user-created skills.
+var retiredSkillNames = []string{
+	"code-cleaning",
+}
+
 // SetupParams holds all parameters for the setup command.
 type SetupParams struct {
 	TargetDir      string    // target directory (typically the branded global directory)
@@ -99,6 +105,16 @@ func SetupCommand(params SetupParams) error {
 	if err != nil {
 		return fmt.Errorf("failed to write global files: %w", err)
 	}
+	homeDir := params.HomeDir
+	if len(selectedProviders) > 0 && homeDir == "" {
+		homeDir, err = os.UserHomeDir()
+		if err != nil {
+			return fmt.Errorf("failed to determine home directory: %w", err)
+		}
+	}
+	if err := removeRetiredSkills(params.TargetDir, homeDir, selectedProviders); err != nil {
+		return fmt.Errorf("failed to remove retired skills: %w", err)
+	}
 
 	// Write custom AGENT_TOOLS.md, replacing the embedded version.
 	var autoReplaced []string
@@ -126,14 +142,6 @@ func SetupCommand(params SetupParams) error {
 
 	// Create agent skill symlinks (after main setup so sources exist).
 	if len(selectedProviders) > 0 {
-		homeDir := params.HomeDir
-		if homeDir == "" {
-			var err error
-			homeDir, err = os.UserHomeDir()
-			if err != nil {
-				return fmt.Errorf("failed to determine home directory: %w", err)
-			}
-		}
 		if err := setupAgentSymlinks(homeDir, params.TargetDir, selectedProviders, stdin, params.AutoConfirm); err != nil {
 			return fmt.Errorf("agent symlink setup failed: %w", err)
 		}
@@ -409,6 +417,49 @@ func setupAgentSymlinks(homeDir, lizaDir string, agents []providers.Provider, re
 		}
 
 		fmt.Printf("Agent %s: skill symlinks created in %s\n", provider.ID, configDir)
+	}
+
+	return nil
+}
+
+// removeRetiredSkills removes legacy global skill directories and matching
+// provider symlinks. The global skills directory is Liza-managed, while
+// provider paths are removed only when they target the retired global skill.
+func removeRetiredSkills(lizaDir, homeDir string, agents []providers.Provider) error {
+	sourceSkillsDir := filepath.Join(lizaDir, "skills")
+	for _, skillName := range retiredSkillNames {
+		if err := os.RemoveAll(filepath.Join(sourceSkillsDir, skillName)); err != nil {
+			return err
+		}
+	}
+	for _, provider := range agents {
+		cfg := provider.Setup
+		if cfg.ConfigDir == "" || cfg.SkillsDir == "" {
+			continue
+		}
+		skillsDir := filepath.Join(homeDir, cfg.ConfigDir, cfg.SkillsDir)
+		for _, skillName := range retiredSkillNames {
+			linkPath := filepath.Join(skillsDir, skillName)
+			info, err := os.Lstat(linkPath)
+			if os.IsNotExist(err) {
+				continue
+			}
+			if err != nil {
+				return fmt.Errorf("inspect retired skill link %s: %w", linkPath, err)
+			}
+			if info.Mode()&os.ModeSymlink == 0 {
+				continue
+			}
+			target, err := os.Readlink(linkPath)
+			if err != nil {
+				return fmt.Errorf("read retired skill link %s: %w", linkPath, err)
+			}
+			if target == filepath.Join(sourceSkillsDir, skillName) {
+				if err := os.Remove(linkPath); err != nil {
+					return fmt.Errorf("remove retired skill link %s: %w", linkPath, err)
+				}
+			}
+		}
 	}
 
 	return nil
