@@ -1,7 +1,7 @@
 version: 1
 repository: "/home/tangi/Workspace/liza"
 started_at: "2026-02-01T12:00:00Z"
-last_updated: "2026-06-03T16:30:00+02:00"
+last_updated: "2026-07-16T00:00:00+02:00"
 
 file_classification:
   # Tier 0 - Dependency manifests
@@ -1224,12 +1224,110 @@ clusters:
       rationale: "Opt-in provisioning preserves worktree isolation while making setup reproducible enough."
       limitations: "Credential-sensitive copy path; stale copies and ignore-status edge cases."
     note: "Extends ADR-0031 and complements brownfield-safe initialization."
+# --- Post-ADR-0085: 2026-06-11 to 2026-07-05 ---
+  - id: 86
+    title: "Local Support Toolchain"
+    commit_shas: ["88b7eb35"]
+    date_range: "2026-06-11"
+    confidence: 0.95
+    status: "adr_generated"
+    adr_path: "specs/architecture/ADR/0086-local-support-toolchain.md"
+    cluster_path: "specs/architecture/ADR/adr-backfill-clusters/0086-local-support-toolchain.md"
+  - id: 87
+    title: "Terminal-Multiplexer Launchers"
+    commit_shas: ["836e33d4"]
+    date_range: "2026-06-11"
+    confidence: 0.95
+    status: "adr_generated"
+    adr_path: "specs/architecture/ADR/0087-terminal-multiplexer-launchers.md"
+    cluster_path: "specs/architecture/ADR/adr-backfill-clusters/0087-terminal-multiplexer-launchers.md"
+  - id: 88
+    title: "Aggregate SCIP Indexes Across Language Roots"
+    commit_shas: ["c950158b"]
+    date_range: "2026-06-11"
+    confidence: 0.90
+    status: "adr_generated"
+    adr_path: "specs/architecture/ADR/0088-aggregate-scip-indexes-across-language-roots.md"
+    cluster_path: "specs/architecture/ADR/adr-backfill-clusters/0088-aggregate-scip-indexes-across-language-roots.md"
+  - id: 89
+    title: "Explicit Project-Root Selection"
+    commit_shas: ["6d2f69d3"]
+    date_range: "2026-06-12"
+    confidence: 0.90
+    status: "adr_generated"
+    adr_path: "specs/architecture/ADR/0089-explicit-project-root-selection.md"
+    cluster_path: "specs/architecture/ADR/adr-backfill-clusters/0089-explicit-project-root-selection.md"
+  - id: 90
+    title: "Opt-In Update Checks and Self-Update"
+    commit_shas: ["e02d2cde"]
+    date_range: "2026-06-12"
+    confidence: 0.90
+    status: "adr_generated"
+    adr_path: "specs/architecture/ADR/0090-opt-in-update-checks-and-self-update.md"
+    cluster_path: "specs/architecture/ADR/adr-backfill-clusters/0090-opt-in-update-checks-and-self-update.md"
+  - id: 91
+    title: "Optional Bash-Policy Initialization"
+    commit_shas: ["4a9bb770"]
+    date_range: "2026-06-16"
+    confidence: 0.90
+    status: "adr_generated"
+    adr_path: "specs/architecture/ADR/0091-optional-bash-policy-initialization.md"
+    cluster_path: "specs/architecture/ADR/adr-backfill-clusters/0091-optional-bash-policy-initialization.md"
+  - id: 92
+    title: "Build-Time White-Label Branding"
+    commit_shas: ["905e606e"]
+    source_files: ["specs/goals/20260621-white-label.md"]
+    date_range: "2026-06-25"
+    confidence: 1.0
+    status: "adr_generated"
+    adr_path: "specs/architecture/ADR/0092-build-time-white-label-branding.md"
+    cluster_path: "specs/architecture/ADR/adr-backfill-clusters/0092-build-time-white-label-branding.md"
+  - id: 93
+    title: "Shell Completion From Command Metadata"
+    commit_shas: ["809eb9f2"]
+    date_range: "2026-07-05"
+    confidence: 0.95
+    status: "adr_generated"
+    adr_path: "specs/architecture/ADR/0093-shell-completion-from-command-metadata.md"
+    cluster_path: "specs/architecture/ADR/adr-backfill-clusters/0093-shell-completion-from-command-metadata.md"
+  - id: 94
+    title: "Entry-Point Input-Readiness Assessment"
+    commit_shas: ["18046a64"]
+    date_range: "2026-07-05"
+    confidence: 0.95
+    status: "adr_generated"
+    adr_path: "specs/architecture/ADR/0094-entry-point-input-readiness-assessment.md"
+    cluster_path: "specs/architecture/ADR/adr-backfill-clusters/0094-entry-point-input-readiness-assessment.md"
+  - id: 95
+    title: "Functional-Cluster Index Lifecycle"
+    commit_shas: ["58405d35"]
+    date_range: "2026-07-05"
+    confidence: 0.95
+    status: "adr_generated"
+    adr_path: "specs/architecture/ADR/0095-functional-cluster-index-lifecycle.md"
+    cluster_path: "specs/architecture/ADR/adr-backfill-clusters/0095-functional-cluster-index-lifecycle.md"
+  - id: 96
+    title: "Catalog-Backed Provider Registry"
+    commit_shas: ["61adbb10"]
+    date_range: "2026-07-05"
+    confidence: 0.90
+    status: "adr_generated"
+    adr_path: "specs/architecture/ADR/0096-catalog-backed-provider-registry.md"
+    cluster_path: "specs/architecture/ADR/adr-backfill-clusters/0096-catalog-backed-provider-registry.md"
+  - id: 97
+    title: "Cursor Secondary-Provider Policy Hooks"
+    commit_shas: ["2b63bbb7"]
+    date_range: "2026-07-06"
+    confidence: 0.90
+    status: "adr_generated"
+    adr_path: "specs/architecture/ADR/0097-cursor-secondary-provider-policy-hooks.md"
+    cluster_path: "specs/architecture/ADR/adr-backfill-clusters/0097-cursor-secondary-provider-policy-hooks.md"
 
 processing_cursor:
-  step: "ordering"
-  substep: "wave_14_generated"
-  cluster_index: 82
-  note: "Wave 14 ADRs generated for Semble semantic search, claimable rebase unblock, indexing activation, and worktree env-file provisioning. ADR-0069 remains skipped by user selection."
+  step: "complete"
+  substep: "post_adr_0085_generated"
+  cluster_index: 97
+  note: "ADRs 0086-0097 generated from post-ADR-0085 history. The minimality-contract candidate was skipped by user selection; ADR-0069 remains skipped by prior user selection."
 
 non_adr_findings:
   - title: "Init Preflight Requires Committed Spec and Valid Integration Branch"

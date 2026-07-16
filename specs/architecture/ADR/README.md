@@ -86,3 +86,15 @@
 | [0083 — Preserve-by-Default recover-task](0083-preserve-by-default-recover-task.md) | Preserve or validate recoverable task work by default; require explicit `--fresh` for destructive reset. |
 | [0084 — Destructive DB Validation Marker](0084-destructive-db-validation-marker.md) | Add `destructive_db` metadata requiring a leading break-glass marker on every destructive DB validation command. |
 | [0085 — LLMAgent Boundary and ACP Observability](0085-llm-agent-boundary-and-acp-observability.md) | Add a provider-neutral LLMAgent boundary with CLIAgent as the OSS backend and an event stream for ACP trajectory observability. |
+| [0086 — Local Support Toolchain](0086-local-support-toolchain.md) | Add profile-based installation, diagnostics, and shell activation for local support tools. |
+| [0087 — Terminal-Multiplexer Launchers](0087-terminal-multiplexer-launchers.md) | Launch MAS and adversarial-pairing sessions through supported terminal multiplexers. |
+| [0088 — Aggregate SCIP Indexes Across Language Roots](0088-aggregate-scip-indexes-across-language-roots.md) | Aggregate per-root SCIP indexes so multi-root repositories receive usable language indexes. |
+| [0089 — Explicit Project-Root Selection](0089-explicit-project-root-selection.md) | Resolve Liza project roots independently of CWD for supported task-worktree execution. |
+| [0090 — Opt-In Update Checks and Self-Update](0090-opt-in-update-checks-and-self-update.md) | Add persisted update settings and verified self-update behavior to the CLI. |
+| [0091 — Optional Bash-Policy Initialization](0091-optional-bash-policy-initialization.md) | Delegate AST-based provider policy setup to the standalone bash-policy CLI. |
+| [0092 — Build-Time White-Label Branding](0092-build-time-white-label-branding.md) | Parameterize end-user branding while preserving Liza's structural Go identity. |
+| [0093 — Shell Completion From Command Metadata](0093-shell-completion-from-command-metadata.md) | Add command-aware shell completion with toolchain-managed activation. |
+| [0094 — Entry-Point Input-Readiness Assessment](0094-entry-point-input-readiness-assessment.md) | Review whether an input is ready for its selected MAS entry point before initialization. |
+| [0095 — Functional-Cluster Index Lifecycle](0095-functional-cluster-index-lifecycle.md) | Refresh optional target-local functional-cluster artifacts alongside Stacklit and SCIP indexes. |
+| [0096 — Catalog-Backed Provider Registry](0096-catalog-backed-provider-registry.md) | Move provider behavior from hardcoded branches into declarative catalog metadata. |
+| [0097 — Cursor Secondary-Provider Policy Hooks](0097-cursor-secondary-provider-policy-hooks.md) | Configure Cursor's dependent provider setup and policy hooks during initialization. |
