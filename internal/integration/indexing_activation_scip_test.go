@@ -28,7 +28,9 @@ func TestIndexingActivationScipPairingInitWritesAggregateCommands(t *testing.T) 
 			wantRootArgs: []string{
 				"index --module-root ${PROJECT}",
 				`--output "$tmp_go_scip/go-0.scip"`,
-				`scip-search aggregate-index --project-root ${PROJECT} --root . --index "$tmp_go_scip/go-0.scip" --out ${PROJECT}/go.scip`,
+				`set -- scip-search aggregate-index --project-root ${PROJECT}`,
+				`--root . --index "$tmp_go_scip/go-0.scip"`,
+				`--out ${PROJECT}/go.scip`,
 			},
 		},
 		{
@@ -41,7 +43,9 @@ func TestIndexingActivationScipPairingInitWritesAggregateCommands(t *testing.T) 
 			wantRootArgs: []string{
 				"index --cwd ${PROJECT}/web/src",
 				`--output "$tmp_typescript_scip/typescript-0.scip" ${PROJECT}/web`,
-				`scip-search aggregate-index --project-root ${PROJECT} --root web/src --index "$tmp_typescript_scip/typescript-0.scip" --out ${PROJECT}/typescript.scip`,
+				`set -- scip-search aggregate-index --project-root ${PROJECT}`,
+				`--root web/src --index "$tmp_typescript_scip/typescript-0.scip"`,
+				`--out ${PROJECT}/typescript.scip`,
 			},
 		},
 		{
@@ -54,7 +58,9 @@ func TestIndexingActivationScipPairingInitWritesAggregateCommands(t *testing.T) 
 			wantRootArgs: []string{
 				"index --cwd ${PROJECT}/service",
 				`--output "$tmp_python_scip/python-0.scip" --target-only=src`,
-				`scip-search aggregate-index --project-root ${PROJECT} --root service --index "$tmp_python_scip/python-0.scip" --out ${PROJECT}/python.scip`,
+				`set -- scip-search aggregate-index --project-root ${PROJECT}`,
+				`--root service --index "$tmp_python_scip/python-0.scip"`,
+				`--out ${PROJECT}/python.scip`,
 			},
 		},
 	} {
@@ -104,8 +110,9 @@ func TestIndexingActivationScipLanguageFiltersExcludeOtherDetectedLanguages(t *t
 	assertIndexingActivationContainsAll(t, script,
 		"scip-go index --module-root "+projectDir,
 		`--output "$tmp_go_scip/go-0.scip"`,
-		"scip-search aggregate-index --project-root "+projectDir,
-		`--root . --index "$tmp_go_scip/go-0.scip" --out `+filepath.Join(projectDir, "go.scip"),
+		"set -- scip-search aggregate-index --project-root "+projectDir,
+		`--root . --index "$tmp_go_scip/go-0.scip"`,
+		"--out "+filepath.Join(projectDir, "go.scip"),
 	)
 	assertIndexingActivationContainsNone(t, script, "scip-typescript", "scip-python")
 }
@@ -135,7 +142,7 @@ func TestIndexingActivationScipLanguageFilterAggregatesFilteredRoots(t *testing.
 	assertIndexingActivationContainsAll(t, script,
 		"scip-go index --module-root "+filepath.Join(projectDir, "services", "api"),
 		"scip-go index --module-root "+filepath.Join(projectDir, "services", "worker"),
-		"scip-search aggregate-index --project-root "+projectDir,
+		"set -- scip-search aggregate-index --project-root "+projectDir,
 		"--root services/api --index",
 		"--root services/worker --index",
 		"--out "+filepath.Join(projectDir, "go.scip"),
@@ -161,7 +168,7 @@ func TestIndexingActivationScipMonorepoRootsAggregate(t *testing.T) {
 			wants: []string{
 				"scip-typescript index --cwd ${PROJECT}/apps/admin/src",
 				"scip-typescript index --cwd ${PROJECT}/apps/web/src",
-				"scip-search aggregate-index --project-root ${PROJECT}",
+				"set -- scip-search aggregate-index --project-root ${PROJECT}",
 				"--root apps/admin/src --index",
 				"--root apps/web/src --index",
 				"--out ${PROJECT}/typescript.scip",
@@ -178,7 +185,7 @@ func TestIndexingActivationScipMonorepoRootsAggregate(t *testing.T) {
 			wants: []string{
 				"scip-python index --cwd ${PROJECT}/apps/api",
 				"scip-python index --cwd ${PROJECT}/apps/worker",
-				"scip-search aggregate-index --project-root ${PROJECT}",
+				"set -- scip-search aggregate-index --project-root ${PROJECT}",
 				"--root apps/api --index",
 				"--root apps/worker --index",
 				"--out ${PROJECT}/python.scip",

@@ -627,6 +627,58 @@ func TestInstalledIndexScriptUsesScipCommandRootForFreshness(t *testing.T) {
 	}
 }
 
+func TestInstalledIndexScriptAggregatesSuccessfulTypeScriptRootsWhenAnotherFails(t *testing.T) {
+	repo := initGitRepo(t)
+	workingSrc := filepath.Join(repo, "apps", "web", "src")
+	failingSrc := filepath.Join(repo, "apps", "mobile", "src")
+	if err := os.MkdirAll(workingSrc, 0755); err != nil {
+		t.Fatalf("MkdirAll(%q) error = %v", workingSrc, err)
+	}
+	if err := os.MkdirAll(failingSrc, 0755); err != nil {
+		t.Fatalf("MkdirAll(%q) error = %v", failingSrc, err)
+	}
+	writeFile(t, filepath.Join(workingSrc, "App.tsx"), "export const app = 1\n", 0644)
+	writeFile(t, filepath.Join(failingSrc, "App.tsx"), "export const app = 2\n", 0644)
+	outputPath := filepath.Join(repo, "typescript.scip")
+	plan := typescriptAggregatePlan(repo, outputPath, workingSrc, filepath.Join(repo, "apps", "web"))
+	plan.IndexPlans = append(plan.IndexPlans, scipsearch.RuntimeCommandPlan{
+		Language:   "typescript",
+		Name:       "scip-typescript",
+		Args:       []string{"index", "--cwd", failingSrc, "--output", "__LIZA_SCIP_OUTPUT__", filepath.Join(repo, "apps", "mobile")},
+		Dir:        repo,
+		OutputPath: "__LIZA_SCIP_OUTPUT__",
+		Root:       "apps/mobile/src",
+	})
+	result, err := InstallIndexScript(InstallIndexScriptOptions{
+		RepoRoot:        repo,
+		DisableStacklit: true,
+		ScipPlans:       []scipsearch.LanguageAggregatePlan{plan},
+	})
+	if err != nil {
+		t.Fatalf("InstallIndexScript() error = %v", err)
+	}
+	logPath := filepath.Join(t.TempDir(), "scip.log")
+	pathDir := writeFakeScipTypeScript(t)
+
+	runIndexScriptWithPath(t, result.Path, pathDir,
+		"LIZA_TEST_SCIP_LOG="+logPath,
+		"LIZA_TEST_SCIP_TYPESCRIPT_FAIL_ROOT="+filepath.Join(repo, "apps", "mobile"),
+	)
+
+	if got := readFile(t, logPath); !containsAll(got,
+		"scip-typescript index --cwd "+workingSrc,
+		"scip-typescript index --cwd "+failingSrc,
+		"scip-search aggregate-index --project-root "+repo+" --root apps/web/src --index ",
+	) {
+		t.Fatalf("SCIP calls = %q, want the successful TypeScript root aggregated", got)
+	} else if strings.Contains(got, "--root apps/mobile/src --index") {
+		t.Fatalf("SCIP calls = %q, want the failed TypeScript root excluded from aggregation", got)
+	}
+	if got := readFile(t, outputPath); got != "aggregated scip index\n" {
+		t.Fatalf("typescript.scip = %q, want aggregate from successful root", got)
+	}
+}
+
 func TestInstalledIndexScriptRefreshesFunctionalClustersJSON(t *testing.T) {
 	repo := initGitRepo(t)
 	sourcePath := filepath.Join(repo, "main.go")
@@ -986,13 +1038,18 @@ func writeFakeScipTypeScript(t *testing.T) string {
 	script := `#!/bin/sh
 printf '%s\n' "scip-typescript $*" >> "$LIZA_TEST_SCIP_LOG"
 output=""
+target=""
 while [ "$#" -gt 0 ]; do
 	if [ "$1" = "--output" ]; then
 		shift
 		output="$1"
 	fi
+	target="$1"
 	shift
 done
+if [ -n "${LIZA_TEST_SCIP_TYPESCRIPT_FAIL_ROOT:-}" ] && [ "$target" = "$LIZA_TEST_SCIP_TYPESCRIPT_FAIL_ROOT" ]; then
+	exit 1
+fi
 if [ -n "$output" ]; then
 	printf '%s\n' "generated scip index" > "$output"
 fi

@@ -402,6 +402,8 @@ func renderScipCommand(plan scipsearch.LanguageAggregatePlan) string {
 	missingVar := "missing_" + shellIdentifier(plan.Language) + "_scip"
 	tmpVar := "tmp_" + shellIdentifier(plan.Language) + "_scip"
 	cleanupFunc := "cleanup_" + shellIdentifier(plan.Language) + "_scip"
+	aggregateFunc := "aggregate_" + shellIdentifier(plan.Language) + "_scip"
+	indexedVar := "indexed_" + shellIdentifier(plan.Language) + "_roots"
 
 	var freshness strings.Builder
 	fmt.Fprintf(&freshness, `%s=0
@@ -442,13 +444,23 @@ fi
 	}
 
 	var commands strings.Builder
-	indexPaths := make([]string, 0, len(plan.IndexPlans))
+	fmt.Fprintf(&commands, "\t\t%s() {\n", aggregateFunc)
+	fmt.Fprintf(&commands, "\t\t\tset -- scip-search aggregate-index --project-root %s\n", shellWord(plan.ProjectRoot))
+	fmt.Fprintf(&commands, "\t\t\t%s=0\n", indexedVar)
 	for i, indexPlan := range plan.IndexPlans {
 		outputExpr := fmt.Sprintf("\"$%s/%s-%d.scip\"", tmpVar, plan.Language, i)
-		indexPaths = append(indexPaths, outputExpr)
-		fmt.Fprintf(&commands, "\t\t%s\n", shellCommandWithOutput(indexPlan, outputExpr))
+		fmt.Fprintf(&commands, "\t\t\tif %s; then\n", shellCommandWithOutput(indexPlan, outputExpr))
+		fmt.Fprintf(&commands, "\t\t\t\tset -- \"$@\" --root %s --index %s\n", shellWord(indexPlan.Root), outputExpr)
+		fmt.Fprintf(&commands, "\t\t\t\t%s=$((%s + 1))\n", indexedVar, indexedVar)
+		fmt.Fprintf(&commands, "\t\t\telse\n\t\t\t\techo \"%s: failed to index %s SCIP root %s; skipping it\" >&2\n\t\t\tfi\n", scriptName(), plan.Language, shellWord(indexPlan.Root))
 	}
-	fmt.Fprintf(&commands, "\t\t%s\n", shellAggregateCommand(plan, indexPaths))
+	fmt.Fprintf(&commands, "\t\t\tif [ \"$%s\" -gt 0 ]; then\n", indexedVar)
+	fmt.Fprintf(&commands, "\t\t\t\t\"$@\" --out %s\n", shellWord(plan.OutputPath))
+	fmt.Fprintf(&commands, "\t\t\telif [ -f %s ]; then\n", shellQuote(plan.OutputPath))
+	fmt.Fprintf(&commands, "\t\t\t\techo \"%s: no %s SCIP roots indexed; retaining existing index\" >&2\n", scriptName(), plan.Language)
+	fmt.Fprintf(&commands, "\t\t\telse\n\t\t\t\techo \"%s: no %s SCIP roots indexed; no index produced\" >&2\n\t\t\tfi\n", scriptName(), plan.Language)
+	commands.WriteString("\t\t}\n")
+	fmt.Fprintf(&commands, "\t\t%s\n", aggregateFunc)
 
 	return fmt.Sprintf(`%s%sif [ "$%s" -eq 1 ] && [ "$%s" -eq 0 ]; then
 	%s="$(mktemp -d "${TMPDIR:-/tmp}/%s-scip-%s.XXXXXX")"
@@ -603,20 +615,6 @@ func shellCommandWithOutput(plan scipsearch.RuntimeCommandPlan, outputExpr strin
 		}
 		parts = append(parts, shellWord(arg))
 	}
-	return strings.Join(parts, " ")
-}
-
-func shellAggregateCommand(plan scipsearch.LanguageAggregatePlan, indexPathExprs []string) string {
-	parts := []string{
-		"scip-search",
-		"aggregate-index",
-		"--project-root",
-		shellWord(plan.ProjectRoot),
-	}
-	for i, indexPlan := range plan.IndexPlans {
-		parts = append(parts, "--root", shellWord(indexPlan.Root), "--index", indexPathExprs[i])
-	}
-	parts = append(parts, "--out", shellWord(plan.OutputPath))
 	return strings.Join(parts, " ")
 }
 
