@@ -1546,12 +1546,12 @@ func TestRenderFooter_InlineMode_ContainsInlineHints(t *testing.T) {
 
 func TestRenderFooter_ConfirmationMode_ContainsConfirmHints(t *testing.T) {
 	m := Model{
-		width:       120,
-		height:      40,
-		inputMode:   InputModeInline,
+		width:        120,
+		height:       40,
+		inputMode:    InputModeInline,
 		inlineAction: InlineActionStopConfirm,
-		keys:        NewKeyMap(),
-		styles:      NewStyles(120),
+		keys:         NewKeyMap(),
+		styles:       NewStyles(120),
 	}
 	got := m.renderFooter()
 
