@@ -13,20 +13,10 @@ on:
         required: false
         default: true
         type: boolean
-      codecov_on_pr:
-        description: Upload public-repository pull request coverage to Codecov
-        required: false
-        default: true
-        type: boolean
     outputs:
       verified_sha:
         description: Commit checked out and verified by the Linux CI job
         value: ${{ jobs.linux.outputs.verified_sha }}
-    secrets:
-      CODECOV_TOKEN:
-        description: Optional token for main-branch Codecov uploads
-        required: false
-
 permissions:
   contents: read
 
@@ -108,15 +98,6 @@ jobs:
 
       - name: Build
         run: make build-nosync
-
-      - name: Upload coverage to Codecov
-        if: ${{ (github.event_name == 'pull_request' && inputs.codecov_on_pr) || (github.event_name == 'push' && github.ref == 'refs/heads/main') }}
-        uses: codecov/codecov-action@b9fd7d16f6d7d1b5d2bec1a2887e65ceed900238 # v4
-        with:
-          files: ./coverage.out
-          fail_ci_if_error: true
-          token: ${{ secrets.CODECOV_TOKEN }}
-          version: v11.3.1
 
   macos:
     name: macOS compatibility
