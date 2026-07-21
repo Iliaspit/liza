@@ -164,7 +164,7 @@ semble find-related <file_path> <line> <target-root>
 
 ### Batching
 
-Batch related operations within same MCP server when possible.
+Batch related operations within the same MCP server when possible. Exception: during session initialization, read required documents one tool call at a time in the required order; do not batch or parallelize reads, invoke skills, or use other tools until the initialization gate clears.
 
 ### PR
 
@@ -210,8 +210,6 @@ The rules below apply only to Claude sessions and should not be generalized to o
 Parallel Read calls fail as a group if any one errors. Before fanning out,
 use **Glob** to check existence **FIRST**, THEN read only files that exist.
 Do NOT mix the check and the reads in the same batch.
-
-Session initialization has its own stricter read sequence.
 
 #### RTK (Rust Token Killer)
 
