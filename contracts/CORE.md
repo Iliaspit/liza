@@ -710,10 +710,12 @@ Never leave repository in inconsistent partial-change state without acknowledgme
 - **Breaking changes:** `!` after type/scope AND `BREAKING CHANGE:` footer stating what breaks and migration path
 
 **Selective Commits (committing specific files while preserving other changes):**
-1. `git stash -u` — stash everything (staged, unstaged, untracked)
-2. `git checkout stash -- <files-to-commit>` — restore only files to commit
+Leave untracked files untouched and restore the original staged state afterward:
+
+1. `git stash`
+2. `git checkout stash -- <files-to-commit>`
 3. `git add <files> && git commit`
-4. `git stash pop --index` — restore remaining changes, preserving staged state
+4. `git stash pop --index`
 
 **NEVER** use `git commit -- <pathspec>` with other uncommitted changes — it can discard them.
 
