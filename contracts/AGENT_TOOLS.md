@@ -164,7 +164,7 @@ semble find-related <file_path> <line> <target-root>
 
 ### Batching
 
-Batch related operations within the same MCP server when possible. Exception: during session initialization, read required documents one tool call at a time in the required order; do not batch or parallelize reads, invoke skills, or use other tools until the initialization gate clears.
+Batch related operations within the same MCP server when possible.
 
 ### PR
 

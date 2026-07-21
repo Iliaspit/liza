@@ -20,6 +20,8 @@ Yet it's a unique file. Agents SHOULD NOT consider it as distinct files to all r
 2. **Read selected mode contract completely** — contains Session Initialization protocol
 3. **Execute Session Initialization** from mode contract — includes reading project files, building mental models, greeting
 
+During session initialization, read required documents fully one tool call at a time in the required order. Do not batch or parallelize reads, invoke skills, or use other tools until initialization completes.
+
 DO NOT produce any response (including greetings) until Session Initialization is complete.
 
 ## Mode Selection Gate
