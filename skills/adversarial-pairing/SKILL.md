@@ -91,7 +91,9 @@ Allowed values:
 - Do not implement in the main checkout unless the user explicitly approves a no-worktree workflow.
 - Once `worktree` is set, run implementation, staging, validation, and review diff commands from that path. Reviewers also diff from `worktree`.
 - Before edits, staging, validation, or review diffs, re-run `blackboard_state.py --json` and use its absolute `worktree`. If null, do not edit code.
-- Codex: set shell `workdir` to the recorded worktree and apply patches only under that worktree. If `pwd` or `git rev-parse --show-toplevel` shows the main checkout during coding/follow-up, stop before editing.
+- Codex shell commands: set `workdir` to the recorded worktree. If `pwd` or `git rev-parse --show-toplevel` shows the main checkout during coding/follow-up, stop before editing.
+- Codex `apply_patch`: when the patch capability exposes no `workdir`, a shell `workdir` does not apply. Resolve each target from the exact recorded absolute worktree plus its repo-relative path, express that target from the patch tool's actual root, and verify that it remains under the recorded worktree. Stop before editing if the capability cannot reach it.
+- Before the first edit, for every target snapshot the corresponding main-checkout path's existence and content hash. After each patch, verify the intended worktree diff and compare those snapshots; if any main-checkout path changed, stop and follow the misplaced-patch rule below.
 - `apply_patch` is path-sensitive. Do not patch the main checkout and copy changes later. If a patch lands in the main checkout, stop, report affected files, and wait for explicit repair direction.
 - The blackboard may remain outside the worktree.
 
