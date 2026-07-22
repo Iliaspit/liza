@@ -22,6 +22,7 @@ func TestEnforceInitHook_AllowsCodexBashDocReads(t *testing.T) {
 	stateDir := filepath.Join(os.TempDir(), "liza-init-gate-"+sessionID)
 	defer os.RemoveAll(stateDir)
 
+	runHook(t, hookPath, `{"session_id":"`+sessionID+`","cwd":"`+projectRoot+`","tool_name":"Bash","tool_input":{"command":"cat ~/.liza/CORE.md"}}`, 0)
 	runHook(t, hookPath, `{"session_id":"`+sessionID+`","cwd":"`+projectRoot+`","tool_name":"Bash","tool_input":{"command":"sed -n '1,120p' ~/.liza/AGENT_TOOLS.md"}}`, 0)
 	runHook(t, hookPath, `{"session_id":"`+sessionID+`","cwd":"`+projectRoot+`","tool_name":"Bash","tool_input":{"command":"cat ~/.liza/PAIRING_MODE.md"}}`, 0)
 	runHook(t, hookPath, `{"session_id":"`+sessionID+`","cwd":"`+projectRoot+`","tool_name":"Bash","tool_input":{"command":"sed -n '1,260p' `+projectRoot+`/REPOSITORY.md"}}`, 0)

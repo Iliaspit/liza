@@ -175,6 +175,7 @@ is_required_doc_path() {
 
 is_session_init_doc_path() {
   case "$1" in
+    "~/__BRAND_GLOBAL_DIRNAME__/CORE.md"|"$HOME"/__BRAND_GLOBAL_DIRNAME__/CORE.md) return 0 ;;
     REPOSITORY.md|./REPOSITORY.md|"$project_dir"/REPOSITORY.md) return 0 ;;
     docs/USAGE.md|./docs/USAGE.md|"$project_dir"/docs/USAGE.md) return 0 ;;
     "~/__BRAND_GLOBAL_DIRNAME__/COLLABORATION_CONTINUITY.md"|"$HOME"/__BRAND_GLOBAL_DIRNAME__/COLLABORATION_CONTINUITY.md) return 0 ;;
@@ -369,7 +370,7 @@ is_safe_guardrails_probe_wrapper() {
 # Codex currently exposes shell reads through the Bash hook surface. Allow a
 # narrow set of read-only commands for the mandatory docs so the gate can clear
 # even when MCP filesystem read tools are unavailable.
-if [[ "$tool_name" == "Bash" ]] && echo "$command" | grep -qE 'AGENT_TOOLS\.md|PAIRING_MODE\.md|MULTI_AGENT_MODE\.md|SUBAGENT_MODE\.md|GUARDRAILS\.md|REPOSITORY\.md|docs/USAGE\.md|COLLABORATION_CONTINUITY\.md'; then
+if [[ "$tool_name" == "Bash" ]] && echo "$command" | grep -qE 'CORE\.md|AGENT_TOOLS\.md|PAIRING_MODE\.md|MULTI_AGENT_MODE\.md|SUBAGENT_MODE\.md|GUARDRAILS\.md|REPOSITORY\.md|docs/USAGE\.md|COLLABORATION_CONTINUITY\.md'; then
   if ! is_safe_bash_init_read && ! is_safe_guardrails_conditional_read && ! is_safe_guardrails_existence_probe && ! is_safe_guardrails_probe_wrapper; then
     cat <<EOF >&2
 BLOCKED — session initialization allows Bash only for simple read-only doc commands.

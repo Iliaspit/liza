@@ -38,8 +38,8 @@ func TestSessionContextHook_EmitsSessionStartContextForIndexedRepo(t *testing.T)
 
 	context := got.HookSpecificOutput.AdditionalContext
 	for _, want := range []string{
-		"Liza session initialization is mandatory",
-		"~/.liza/PAIRING_MODE.md",
+		"MANDATORY: Read CORE.md and the documents listed as required. DO NOT fake reads. DO read them FULLY, one tool call at a time in the required order. DO NOT batch or parallelize reads. Complete the initialization sequence before doing ANYTHING else. User prompt is not a replacement and should be considered only after the init sequence is complete.",
+		"complete. ~/.liza/PAIRING_MODE.md",
 		"~/.liza/AGENT_TOOLS.md",
 		"REPOSITORY.md",
 		"docs/USAGE.md",
@@ -138,7 +138,7 @@ func TestSessionContextHook_StillEmitsContextWhenStacklitFails(t *testing.T) {
 		"PATH=" + binDir + string(os.PathListSeparator) + os.Getenv("PATH"),
 	}, 0)
 	context := sessionStartAdditionalContext(t, output)
-	if !strings.Contains(context, "Liza session initialization is mandatory") ||
+	if !strings.Contains(context, "MANDATORY: Read CORE.md") ||
 		!strings.Contains(context, "stacklit derive --ai-summary") {
 		t.Fatalf("startup context should remain useful after stacklit failure, got:\n%s", context)
 	}
@@ -182,7 +182,7 @@ func TestSessionContextHook_EmitsInitContextWithoutLizaIndexHook(t *testing.T) {
 
 	output := runSessionContextHook(t, hookPath, sessionStartPayload(t, projectRoot), nil, 0)
 	context := sessionStartAdditionalContext(t, output)
-	if !strings.Contains(context, "Liza session initialization is mandatory") {
+	if !strings.Contains(context, "MANDATORY: Read CORE.md") {
 		t.Fatalf("startup context should include initialization reminder, got:\n%s", context)
 	}
 	if strings.Contains(context, "Liza repository indexes detected") {
@@ -207,7 +207,7 @@ func TestSessionContextHook_EmitsInitContextWithoutIndexes(t *testing.T) {
 
 	output := runSessionContextHook(t, hookPath, sessionStartPayload(t, projectRoot), nil, 0)
 	context := sessionStartAdditionalContext(t, output)
-	if !strings.Contains(context, "Liza session initialization is mandatory") {
+	if !strings.Contains(context, "MANDATORY: Read CORE.md") {
 		t.Fatalf("startup context should include initialization reminder, got:\n%s", context)
 	}
 	if strings.Contains(context, "Liza repository indexes detected") {
@@ -453,7 +453,7 @@ func TestSessionContextHook_SuppressesRepoIndexesForLizaAgentSessions(t *testing
 		"LIZA_ENABLE_FUNCTIONAL_CLUSTERS=true",
 	}, 0)
 	context := sessionStartAdditionalContext(t, output)
-	if !strings.Contains(context, "Liza session initialization is mandatory") {
+	if !strings.Contains(context, "MANDATORY: Read CORE.md") {
 		t.Fatalf("startup context should include initialization reminder for Liza agents, got:\n%s", context)
 	}
 	if strings.Contains(context, "Liza repository indexes detected") {

@@ -82,7 +82,7 @@ func TestIndexingActivationDisabledSessionStartOmitsOptionalCommandBlocksWithSta
 
 	assertIndexingActivationContainsAll(t, output,
 		"SessionStart",
-		"Liza session initialization is mandatory",
+		"MANDATORY: Read CORE.md",
 	)
 	assertIndexingActivationContainsNone(t, output, optionalIndexCommandBlocks()...)
 }
