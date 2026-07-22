@@ -114,7 +114,7 @@ func InitPairingCommand(params InitPairingParams) error {
 	if _, err := os.Stat(coreFile); os.IsNotExist(err) {
 		return fmt.Errorf("global config not found at %s\nRun '%s setup' first", globalDir, brand.BinaryName)
 	}
-	catalog := loadProviderCatalog()
+	catalog := loadProviderCatalog("")
 	selectedProviders, err := resolveCatalogProviders(catalog, canonicalInitProviderIDs(params.Agents))
 	if err != nil {
 		return err
@@ -324,7 +324,7 @@ func isLizaSymlink(path, contractTarget string) bool {
 // given CLI name, at either the repo root or the CLI's global config directory.
 // Returns the path where it was found, or "" if not found.
 func CheckContractConfigured(projectRoot, cliName string) string {
-	catalog := loadProviderCatalog()
+	catalog := loadProviderCatalog("")
 	provider, ok := catalog.Resolve(cliName)
 	if !ok {
 		return ""
@@ -706,7 +706,8 @@ func canonicalInitProviderIDs(ids []string) []string {
 	}
 	for _, id := range ids {
 		// The --cursor convenience flag prepares Cursor's harness dependencies;
-		// explicit provider IDs such as cursor-acp remain exact catalog requests.
+		// cursor-acp is a synthesized ACP provider resolved from the base
+		// cursor provider's acp_runtime block.
 		if id == "cursor" {
 			appendID("claude")
 			appendID("codex")
@@ -784,7 +785,7 @@ func InitCommandWithConfig(params InitParams) error {
 	// consuming from the same underlying reader (which causes EOF for later readers).
 	stdin := bufio.NewReader(rawStdin)
 	confirmOptions := embedded.ConfirmOptions{AutoConfirm: params.AutoConfirm}
-	catalog := loadProviderCatalog()
+	catalog := loadProviderCatalog("")
 	selectedProviders, err := resolveCatalogProviders(catalog, canonicalInitProviderIDs(params.Agents))
 	if err != nil {
 		return err

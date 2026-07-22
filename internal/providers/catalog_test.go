@@ -17,17 +17,37 @@ import (
 func TestEmbeddedCatalogResolvesBuiltInsAndAliases(t *testing.T) {
 	cat := EmbeddedCatalog()
 
-	for _, id := range []string{"claude", "codex", "codex-acp", "cursor-acp", "opencode", "opencode-acp", "gemini", "mistral", "kimi"} {
+	for _, id := range []string{"claude", "codex", "codex-acp", "cursor", "cursor-acp", "opencode", "opencode-acp", "gemini", "mistral", "kimi"} {
 		if _, ok := cat.Resolve(id); !ok {
 			t.Fatalf("EmbeddedCatalog().Resolve(%q) = false", id)
 		}
 	}
 	cursor, ok := cat.Resolve("cursor")
-	if !ok || cursor.ID != "cursor-acp" {
-		t.Fatalf("Resolve(cursor) = %+v, %v; want cursor-acp", cursor, ok)
+	if !ok || cursor.ID != "cursor" {
+		t.Fatalf("Resolve(cursor) = %+v, %v; want cursor", cursor, ok)
 	}
 	if !cursor.Setup.ActivationAssets.CursorHooks {
-		t.Fatal("cursor-acp missing Cursor hook activation asset")
+		t.Fatal("cursor missing Cursor hook activation asset")
+	}
+	if cursor.ACPRuntime == nil {
+		t.Fatal("cursor missing acp_runtime")
+	}
+	// Cursor provider must use cursor-agent (documented Agent CLI entrypoint),
+	// not the `cursor` IDE binary. See https://docs.cursor.com/en/cli/overview
+	if cursor.Runtime.Executable != "cursor-agent" {
+		t.Fatalf("cursor runtime executable = %q, want cursor-agent", cursor.Runtime.Executable)
+	}
+	if !slices.Equal(cursor.Detection.Binaries, []string{"cursor-agent"}) {
+		t.Fatalf("cursor detection binaries = %v, want [cursor-agent]", cursor.Detection.Binaries)
+	}
+	if !slices.Equal(cursor.Runtime.RunArgs, []string{"-p"}) {
+		t.Fatalf("cursor run_args = %v, want [-p]", cursor.Runtime.RunArgs)
+	}
+	// logged_run_args must not include --verbose (undocumented Cursor CLI flag)
+	for _, arg := range cursor.Runtime.LoggedRunArgs {
+		if arg == "--verbose" {
+			t.Fatalf("cursor logged_run_args must not include --verbose (undocumented): %v", cursor.Runtime.LoggedRunArgs)
+		}
 	}
 	p, ok := cat.Resolve("vibe")
 	if !ok || p.ID != "mistral" {
@@ -57,11 +77,20 @@ func TestRepositoryCatalogAddsRemoteProviders(t *testing.T) {
 		t.Fatal("provider-catalog.yaml missing qwen")
 	}
 	cursor, ok := cat.Resolve("cursor")
-	if !ok || cursor.ID != "cursor-acp" {
-		t.Fatalf("provider-catalog.yaml Resolve(cursor) = %+v, %v; want cursor-acp", cursor, ok)
+	if !ok || cursor.ID != "cursor" {
+		t.Fatalf("provider-catalog.yaml Resolve(cursor) = %+v, %v; want cursor", cursor, ok)
 	}
 	if !cursor.Setup.ActivationAssets.CursorHooks {
-		t.Fatal("provider-catalog.yaml cursor-acp missing Cursor hook activation asset")
+		t.Fatal("provider-catalog.yaml cursor missing Cursor hook activation asset")
+	}
+	if cursor.ACPRuntime == nil {
+		t.Fatal("provider-catalog.yaml cursor missing acp_runtime")
+	}
+	if cursor.Runtime.Executable != "cursor-agent" {
+		t.Fatalf("provider-catalog.yaml cursor runtime executable = %q, want cursor-agent", cursor.Runtime.Executable)
+	}
+	if !slices.Equal(cursor.Detection.Binaries, []string{"cursor-agent"}) {
+		t.Fatalf("provider-catalog.yaml cursor detection binaries = %v, want [cursor-agent]", cursor.Detection.Binaries)
 	}
 	qwenACP, ok := cat.Resolve("qwen-acp")
 	if !ok {
@@ -250,7 +279,7 @@ providers:
       executable: qwen
       prompt_transport: telepathy
 `))
-		if err == nil || !strings.Contains(err.Error(), "unsupported prompt transport") {
+		if err == nil || !strings.Contains(err.Error(), "unsupported") || !strings.Contains(err.Error(), "prompt transport") {
 			t.Fatalf("ParseCatalog error = %v, want prompt transport error", err)
 		}
 	})
