@@ -697,6 +697,186 @@ rules:
   - kind: command-shape
     identity: grep -nF <pattern> <safe-path>...
     decision: allow
+  - kind: command-shape
+    identity: bash-policy validate --policy-artifact-root <safe-path>
+    decision: allow
+  - kind: command-shape
+    identity: cat -n
+    decision: allow
+  - kind: command-shape
+    identity: find <safe-path> -type f
+    decision: allow
+  - kind: command-shape
+    identity: find <safe-path> -maxdepth <number> -type f
+    decision: allow
+  - kind: command-shape
+    identity: find <safe-path> -iname <safe-glob>
+    decision: allow
+  - kind: command-shape
+    identity: find <safe-path> -iname <safe-glob> -maxdepth <number>
+    decision: allow
+  - kind: command-shape
+    identity: gh pr diff <number>
+    decision: allow
+  - kind: command-shape
+    identity: gh pr diff <number> -- <safe-path>...
+    decision: allow
+  - kind: command-shape
+    identity: git --no-pager diff --cached --name-only
+    decision: allow
+  - kind: command-shape
+    identity: git -C <safe-path> diff <safe-path>...
+    decision: allow
+  - kind: command-shape
+    identity: git -C <safe-path> diff --cached <safe-path>...
+    decision: allow
+  - kind: command-shape
+    identity: git diff --cached --no-color <safe-path>...
+    decision: allow
+  - kind: command-shape
+    identity: git diff <safe-path> -- <safe-path>...
+    decision: allow
+  - kind: command-shape
+    identity: git diff --numstat -- <safe-path>...
+    decision: allow
+  - kind: command-shape
+    identity: git diff HEAD --stat
+    decision: allow
+  - kind: command-shape
+    identity: git diff-tree --no-commit-id --name-only -r HEAD
+    decision: allow
+  - kind: command-shape
+    identity: git diff-tree --no-commit-id --stat -r HEAD
+    decision: allow
+  - kind: command-shape
+    identity: git grep -nI -e <pattern> -e <pattern> -e <pattern>
+    decision: allow
+  - kind: command-shape
+    identity: git grep -n <pattern> <safe-path>...
+    decision: allow
+  - kind: command-shape
+    identity: git grep -n <pattern> <safe-path> -- <safe-path>...
+    decision: allow
+  - kind: command-shape
+    identity: git log --all --oneline
+    decision: allow
+  - kind: command-shape
+    identity: git log --all --oneline -- <safe-path>...
+    decision: allow
+  - kind: command-shape
+    identity: git log --oneline --all
+    decision: allow
+  - kind: command-shape
+    identity: git log --oneline --all -- <safe-path>...
+    decision: allow
+  - kind: command-shape
+    identity: git log -1 --stat
+    decision: allow
+  - kind: command-shape
+    identity: git ls-files
+    decision: allow
+  - kind: command-shape
+    identity: git ls-files -s <safe-path>...
+    decision: allow
+  - kind: command-shape
+    identity: git ls-tree -r --name-only <safe-path>
+    decision: allow
+  - kind: command-shape
+    identity: git ls-tree -r --name-only <safe-path> -- <safe-path>...
+    decision: allow
+  - kind: command-shape
+    identity: git rev-list --count <safe-path>
+    decision: allow
+  - kind: command-shape
+    identity: git rev-parse --abbrev-ref HEAD
+    decision: allow
+  - kind: command-shape
+    identity: grep -nF -e <pattern> -e <pattern> <safe-path>...
+    decision: allow
+  - kind: command-shape
+    identity: grep -nF -e <pattern> -e <pattern> -e <pattern> <safe-path>...
+    decision: allow
+  - kind: command-shape
+    identity: grep -o <pattern>
+    decision: allow
+  - kind: command-shape
+    identity: grep -o <pattern> <safe-path>...
+    decision: allow
+  - kind: command-shape
+    identity: grep -rni -e <pattern> -e <pattern> -e <pattern> <safe-path>...
+    decision: allow
+  - kind: command-shape
+    identity: grep -rniE <pattern> <safe-path>...
+    decision: allow
+  - kind: command-shape
+    identity: grep -rln <pattern> <safe-path> <safe-path> --include=<safe-glob>
+    decision: allow
+  - kind: command-shape
+    identity: grep -rniE <pattern> <safe-path> --include=<safe-glob>
+    decision: allow
+  - kind: command-shape
+    identity: grep -rniE <pattern> <safe-path> --include=<safe-glob> --include=<safe-glob> --include=<safe-glob>
+    decision: allow
+  - kind: command-shape
+    identity: grep -rnE <pattern> <safe-path> --include=<safe-glob>
+    decision: allow
+  - kind: command-shape
+    identity: grep -rnE <pattern> <safe-path> <safe-path> --include=<safe-glob>
+    decision: allow
+  - kind: command-shape
+    identity: grep -n -i <pattern>
+    decision: allow
+  - kind: command-shape
+    identity: grep -n <pattern> -A <number>
+    decision: allow
+  - kind: command-shape
+    identity: grep -niE <pattern>
+    decision: allow
+  - kind: command-shape
+    identity: head -c <number>
+    decision: allow
+  - kind: command-shape
+    identity: rg -l <pattern> <safe-path>...
+    decision: allow
+  - kind: command-shape
+    identity: rg -ln <pattern> <safe-path>...
+    decision: allow
+  - kind: command-shape
+    identity: rg -rn <pattern> <safe-path>...
+    decision: allow
+  - kind: command-shape
+    identity: rg -n -A<number> <pattern> <safe-path>...
+    decision: allow
+  - kind: command-shape
+    identity: rg -n -B<number> -A<number> <pattern>
+    decision: allow
+  - kind: command-shape
+    identity: rg -rn <pattern> --type <pattern> <safe-path>...
+    decision: allow
+  - kind: command-shape
+    identity: rg -l <pattern> <safe-path> --type <pattern>
+    decision: allow
+  - kind: command-shape
+    identity: rg -n <pattern> <safe-path> -l
+    decision: allow
+  - kind: command-shape
+    identity: rg -ni <pattern> <safe-path> <safe-path> -g <safe-glob>
+    decision: allow
+  - kind: command-shape
+    identity: rg -rn <pattern> --glob <safe-glob> -g <safe-glob>
+    decision: allow
+  - kind: command-shape
+    identity: rg -rn <pattern> --glob <safe-glob> <safe-path>...
+    decision: allow
+  - kind: command-shape
+    identity: sed -n <number>p
+    decision: allow
+  - kind: command-shape
+    identity: yq e <pattern> <safe-path>
+    decision: allow
+  - kind: command-shape
+    identity: yq eval <pattern> <safe-path>
+    decision: allow
 
   # Export bookkeeping only. Resolved permission families suppress broad Claude
   # Bash(...) candidate noise; they do not authorize runtime commands.
