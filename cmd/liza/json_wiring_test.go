@@ -955,30 +955,6 @@ func TestJSON_InitialPlanningMissingMasterRendersOneSpecializedFallback(t *testi
 	assertOneInitialPlanningTask(t, simpleTasks, "architecture-pair", "architecture")
 }
 
-func TestJSON_InitialPlanningValidationMatrixDocumentsMasterPlanningCoverage(t *testing.T) {
-	planPath := filepath.Join("..", "..", "specs", "plans", "20260523-master-planning-task", "20260523-171755-architecture-5-code-planning-0.md")
-	content, err := os.ReadFile(planPath)
-	if err != nil {
-		t.Fatalf("read validation matrix plan: %v", err)
-	}
-	plan := string(content)
-
-	for _, want := range []string{
-		"| 1. Pipeline validation passes |",
-		"| 2. Entry-point routing |",
-		"| 8. Orchestrator simplification |",
-		"`liza validate --json`",
-		"`go test ./cmd/liza -run 'TestJSON_Validate.*MasterPlanning|TestInitDispatch_.*InitialPlanning|TestJSON_.*InitialPlanning'`",
-		"`go test ./cmd/liza -run 'TestJSON_Validate.*MasterPlanning'`",
-		"`go test ./cmd/liza -run 'TestInitDispatch_.*InitialPlanning|TestJSON_.*InitialPlanning'`",
-		"`go test ./internal/prompts/...`",
-	} {
-		if !strings.Contains(plan, want) {
-			t.Fatalf("validation matrix missing %q", want)
-		}
-	}
-}
-
 func TestJSON_Validate_DefaultStatePathAcceptsOwnTaskWorktreeRoot(t *testing.T) {
 	projectRoot, _ := setupMutationTestProject(t, nil)
 	taskID := "task-validate-worktree"

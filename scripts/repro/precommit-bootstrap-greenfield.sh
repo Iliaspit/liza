@@ -1,14 +1,12 @@
 #!/usr/bin/env bash
 #
 # Scaffolding for the greenfield reproduction procedure defined in
-#   specs/goals/20260417-precommit-bootstrap.md (§Greenfield Reproduction Procedure)
-# and operationalized by
-#   specs/arch-plan/20260417-145405-architecture-3.md (§5.3, §5.4).
+#   specs/goals/20260417-precommit-bootstrap.md (§Greenfield Reproduction Procedure).
 #
 # The script body may use standard shell features (including $(...) command
 # substitution and && chaining). BASH CONSTRAINTS in base_prompt.tmpl govern
 # the agent's direct shell invocations, not the contents of a script file the
-# agent commits. See arch plan §5.4.
+# agent commits.
 #
 # This script never installs anything host-level. It uses only git, mkdir,
 # cp, find, date, test, printf, and shell builtins. All writes land under
@@ -33,7 +31,8 @@ Phases:
             and the integration-branch presence of .pre-commit-config.yaml
             under REPRO_ROOT/observations/<cycle>/.
 
-See specs/arch-plan/20260417-145405-architecture-3.md §5.4 for responsibilities.
+See specs/goals/20260417-precommit-bootstrap.md §Greenfield Reproduction Procedure
+for workflow responsibilities.
 USAGE
     exit 2
 }

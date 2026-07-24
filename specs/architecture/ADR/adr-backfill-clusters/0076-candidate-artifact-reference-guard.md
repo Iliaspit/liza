@@ -5,8 +5,6 @@
 
 ## Source Material
 - `specs/goals/20260520-artifact-ref-protection.md`
-- `specs/arch-plan/20260520-artifact-ref-protection/`
-- `specs/plans/20260520-artifact-ref-protection/`
 
 ## Intent Hypothesis
 Prevent integration ref advancement when blackboard artifact refs would no longer resolve to regular files in the candidate Git tree.

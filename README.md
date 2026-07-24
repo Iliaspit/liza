@@ -396,7 +396,7 @@ Example of a task on the blackboard:
       approved_by: code-reviewer-1
       merge_commit: 2fa6399223262df6a87c6b1354dfc882b73114c5
       lease_expires: 2026-03-06T01:47:22.075108537Z
-      spec_ref: specs/plans/sub-pipelines-phase2.md
+      spec_ref: "specs/build/2 - Sub-pipelines and spec writing.md"
       done_when: ToWorkflow("epic-planner") returns "epic_planner" (and all 4 pairs); IsValidRuntime("us-writer") returns true; AllRuntime() returns 9 roles; Tests pass
       scope: internal/roles/roles.go, internal/roles/roles_test.go, internal/models/state.go
       created: 2026-03-06T01:17:00.99638669Z

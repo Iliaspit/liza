@@ -1,9 +1,0 @@
-[
-  {
-    "Desc": "Remove Liza MCP references from documentation, lessons, GUARDRAILS.md, and REPOSITORY.md",
-    "DoneWhen": "REPOSITORY.md contains no liza-mcp. GUARDRAILS.md does not reference mcp.json in the settings-master lesson trigger. docs/CONFIGURATION.md contains no liza-mcp, mcp__liza__, or Liza-specific .mcp.json references. docs/USAGE_MULTI_AGENTS.md contains no liza-mcp or mcp__liza__. docs/DEMO.md contains no liza-mcp. docs/TESTING.md does not reference internal/mcp/. lessons/agents/settings-master-not-derived.md does not reference mcp.json. Stale-reference scan (grep for liza-mcp, mcp__liza__, .mcp.json.*liza, WriteMCP, mergeMCP, mcpSettings) on the 7 in-scope *.md files returns empty.",
-    "Scope": "Modify docs/CONFIGURATION.md, docs/USAGE_MULTI_AGENTS.md, docs/DEMO.md, docs/TESTING.md, REPOSITORY.md, GUARDRAILS.md, lessons/agents/settings-master-not-derived.md. No Go code, no tests, no compilation. TDD not required: cosmetic-only documentation change.",
-    "SpecRef": "specs/arch-plan/20260412-124731-architecture-4a.md",
-    "PlanRef": "specs/plans/20260412-142009-architecture-4a-architecture-to-code-plan-2.md"
-  }
-]

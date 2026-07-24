@@ -1,8 +1,0 @@
-[
-  {
-    "desc": "Make scip-search init tests hermetic: the new explicit-persistence tests for `liza init --scip-search` currently exercise `ResolveInitConfig` through the default process runner, so their expected `config.scip_search` values depend on real `scip-search`, `scip-go`, and `scip-typescript` binaries being installed on the host.",
-    "done_when": "The scip-search init tests in `cmd/liza` and `internal/commands` use fakeable command runners or lower-level seams for every `scip-search --help`, `scip-search --version`, and language-indexer `--help` validation they rely on; the tests assert the expected persisted `config.scip_search` and runner calls without requiring real external scip tools; `go test ./cmd/liza ./internal/commands -run 'ScipSearch|FullInitValidates' -count=1` passes.",
-    "scope": "In scope: hermeticity fixes to `cmd/liza/cmd_init_test.go`, `internal/commands/init_test.go`, and minimal test-helper seams if needed. Out of scope: changing production init semantics, changing `ResolveInitConfig` language validation behavior, installing scip tools in the environment, and runtime indexing lifecycle code.",
-    "spec_ref": "specs/goals/20260517-use-scip-search.md#configuration-shape"
-  }
-]

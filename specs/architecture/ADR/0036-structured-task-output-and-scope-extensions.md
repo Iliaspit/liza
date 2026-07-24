@@ -75,7 +75,7 @@ type ScopeExtensionEntry struct {
 
 ### 2026-04-17 — Schema-extensibility policy revised
 
-**Trigger.** The pre-commit bootstrap goal (`specs/goals/20260417-precommit-bootstrap.md`, Q2) required adding a typed marker field `kind` to `OutputEntry` (and propagated to persisted `Task`) as the stable dedup primitive. The schema change itself is specified in the architecture plan for task `architecture-1`: `specs/arch-plan/20260417-141659-architecture-1.md` (§2.1 and §2.2).
+**Trigger.** The pre-commit bootstrap goal (`specs/goals/20260417-precommit-bootstrap.md`, Q2) required adding a typed marker field `kind` to `OutputEntry` (and propagated to persisted `Task`) as the stable dedup primitive. The resulting schema is represented directly by `OutputEntry.Kind`, `Task.Kind`, and `ValidateKind` in `internal/models/task.go`.
 
 **What changed.**
 
@@ -89,7 +89,7 @@ Actual prior `OutputEntry` schema-field additions (chronological):
 | `PlanRef string` | *none* — added via commit `ef80d629` ("feat(ops,prompts): add plan_ref propagation", 2026-03-17) | No ADR link declared; retroactively acknowledged here. |
 | `ArchRef string` | ADR-0056 (Architecture Step) | Yes — ADR-0056 line 116: `**Extends:** ADR-0036 ... arch_ref on output[].` |
 
-The `kind` field (see architecture-1's arch plan §2.1 for the exact struct tag and placement, and §2.2 for the propagated field on `Task`) is the fourth such additive extension, shipping with the pre-commit bootstrap goal.
+The `kind` field (`OutputEntry.Kind` and `Task.Kind` in `internal/models/task.go`) is the fourth such additive extension, shipping with the pre-commit bootstrap goal.
 
 Distinct category — *channel reuse, not schema growth*: ADR-0055 (Integration Sub-Pipeline) reuses `output[]` to create fix-tasks and declares `**Extends:** ADR-0036 ... output[] drives fix-task creation.` (ADR-0055 line 94), but it adds no new field to `OutputEntry` or `Task`. It is not counted among the schema-extension precedents above; it is a channel-reuse precedent that this policy does not govern directly.
 
@@ -111,7 +111,7 @@ Additive optional fields on `OutputEntry` and the propagated persisted `Task` ar
 
 **Cross-references.**
 - Goal: `specs/goals/20260417-precommit-bootstrap.md#q2-idempotency--plan-time-dedup-execution-time`
-- Schema delta (code-side): `specs/arch-plan/20260417-141659-architecture-1.md` §2.1 (`OutputEntry`), §2.2 (`Task`), §2.3 (propagation), §2.4 (replan propagation)
+- Schema delta (code-side): `internal/models/task.go` (`OutputEntry.Kind`, `Task.Kind`, and `ValidateKind`)
 - Prior extensions: ADR-0048, ADR-0055, ADR-0056
 
 ---
