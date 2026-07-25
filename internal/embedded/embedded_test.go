@@ -1349,14 +1349,14 @@ func TestEmbeddedClaudeSettingsTmpPermissions(t *testing.T) {
 
 	allow := claudeSettingsAllowPermissions(t, settings)
 	allowSet := stringSet(allow)
-	if !allowSet["Write(//tmp/**)"] {
-		t.Errorf("permissions.allow missing Write(//tmp/**)")
-	}
 	if !allowSet["Edit(//tmp/**)"] {
 		t.Errorf("permissions.allow missing Edit(//tmp/**)")
 	}
-	if allowSet["Write(/tmp/**)"] {
-		t.Errorf("permissions.allow must not use project-relative Write(/tmp/**)")
+	if allowSet["Write(//tmp/**)"] || allowSet["Write(/tmp/**)"] {
+		t.Errorf("permissions.allow must not include a separate Write rule for /tmp")
+	}
+	if allowSet["Edit(/tmp/**)"] {
+		t.Errorf("permissions.allow must not use project-relative Edit(//tmp/**)")
 	}
 }
 

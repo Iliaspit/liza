@@ -90,7 +90,6 @@
     "allow": [
       "Read(~/.claude/**)",
       "Read(~/__BRAND_GLOBAL_DIRNAME__/**)",
-      "Write(//tmp/**)",
       "Edit(//tmp/**)",
       "Monitor(*)",
 
