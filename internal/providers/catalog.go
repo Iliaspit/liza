@@ -40,21 +40,21 @@ type Catalog struct {
 }
 
 type Provider struct {
-	ID          string    `yaml:"id"`
-	DisplayName string    `yaml:"display_name"`
-	Aliases     []string  `yaml:"aliases,omitempty"`
-	Backend     string    `yaml:"backend"`
+	ID          string   `yaml:"id"`
+	DisplayName string   `yaml:"display_name"`
+	Aliases     []string `yaml:"aliases,omitempty"`
+	Backend     string   `yaml:"backend"`
 	// Disabled is informational: it marks providers that are not yet
 	// fully supported (e.g. missing stable CLI or ACP integration).
 	// Disabled providers remain resolvable and detectable; the flag is
 	// surfaced in `providers list` so users can see which providers are
 	// experimental. Enforcement (skipping detection/setup) may be added
 	// later.
-	Disabled    bool      `yaml:"disabled,omitempty"`
-	Detection   Detection `yaml:"detection,omitempty"`
-	Setup       Setup     `yaml:"setup,omitempty"`
-	Runtime     Runtime   `yaml:"runtime"`
-	ACPRuntime  *Runtime  `yaml:"acp_runtime,omitempty"`
+	Disabled   bool      `yaml:"disabled,omitempty"`
+	Detection  Detection `yaml:"detection,omitempty"`
+	Setup      Setup     `yaml:"setup,omitempty"`
+	Runtime    Runtime   `yaml:"runtime"`
+	ACPRuntime *Runtime  `yaml:"acp_runtime,omitempty"`
 }
 
 type Detection struct {
