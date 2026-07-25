@@ -1,422 +1,455 @@
 # Code Quality Assessment and Refactoring Roadmap
 
-* Date: 2026-04-13 (commit 672a7d95) *(reassessment 2026-04-13)*
-* Previous: 2026-03-24 (commit e94eb6f) — 50 commits since
+* Date: 2026-07-24 (commit `ffe89080`)
+* Previous: 2026-04-13 (commit `672a7d95`) — 424 commits since
 * Repository: liza
-* Author: Claude Code - Opus 4.6
-* Mode: Reassessment (after 2026-03-24 / e94eb6f)
+* Author: Codex
+* Mode: Reassessment
+
+## Document Role
+
+This assessment is a dated measurement and prioritization snapshot. [`architectural-issues.md`](architectural-issues.md#open-issues-summary) is the sole lifecycle authority for open and resolved architectural findings; duplicated roadmap items below link to their canonical registry anchors.
 
 ## Repository Metrics Dashboard
 
+Metrics cover tracked files only. Untracked working-tree files were excluded.
+
 | Metric | Previous | Current | Delta |
 |--------|----------|---------|-------|
-| Production LOC | 28,201 (200 files) | 32,788 (195 files) | +4,587 (+16%), -5 files |
-| Test LOC | 75,737 | 86,153 (166 files) | +10,416 (+14%) |
-| Test-to-production ratio | 2.69:1 | 2.63:1 | -0.06 |
-| Test functions | 1,327 | 1,649 | +322 (+24%) |
-| Files >500 LOC | 9 | 12 (10 non-declarative) | +3 |
-| Non-decl functions >150 LOC | 9 | 16 | +7 |
-| Specifications | 130 (51 ADRs) | 192 (60 ADRs) | +62 (+9 ADRs) |
-| Contracts | 11 | 9 | -2 (MCP removal) |
-| Skills | 23 | 22 | -1 |
-| Documentation | 24 guides | 36 guides | +12 |
-| Lessons | 5 | 6 | +1 |
-| Dependencies | 4 direct | 9 direct | +5 (Charmbracelet TUI) |
-| Code Hygiene | Zero across all | Zero across all | — |
+| Go production LOC | 32,788 (195 files) | 65,509 (284 files) | +32,721 (+100%), +89 files |
+| Go test LOC | 86,153 (166 files) | 150,683 (246 files) | +64,530 (+75%), +80 files |
+| Go test-to-production ratio | 2.63:1 | 2.30:1 | -0.33 |
+| Go test functions | 1,649 | 2,998 | +1,349 (+82%) |
+| Go benchmarks | — | 6 | — |
+| Go fuzz functions | 0 | 0 | — |
+| Python production LOC | Treated as vestigial | 5,114 (8 files) | Material production surface |
+| Python test LOC | — | 2,196 (6 files) | 0.43:1 ratio; 65 test functions |
+| TypeScript LOC | — | 132 (1 embedded tool) | — |
+| Shell LOC | — | 1,822 (10 files) | — |
+| Production Go files >500 LOC | 12 | 35 | +23 (+192%) |
+| Production Go functions/methods >150 LOC | 16 | 21 | +5 (+31%) |
+| Specifications | 192 | 219 Markdown files / 26,763 LOC, excluding this report | +27 files |
+| Active ADRs | 60 | 96 | +36 |
+| Documentation | 36 guides | 53 Markdown files / 15,105 LOC | Broader measurement |
+| Root contract files | 9 | 8 / 1,898 LOC | -1 |
+| Skills | 22 | 28 | +6 |
+| Lessons | 6 | 7 | +1 |
+| Direct Go dependencies | 9 | 13 | +4 |
+| External Go modules | — | 66 | — |
+| Python dependencies | — | 3 runtime + 5 development | — |
+| Pre-commit hooks | 23 | 22 | -1 |
 
-**Dependencies**: cobra, yaml.v3, flock, fsnotify — unchanged; +bubbles, bubbletea, huh, lipgloss, go-runewidth (Charmbracelet TUI stack) *(reassessment 2026-04-13)*
-**CI/CD**: Multi-platform (Linux + macOS), Codecov integration, 23 pre-commit hooks, E2E tests in CI — unchanged
-**Code Hygiene**: Zero TODOs, zero `nolint` directives, zero `panic()`, zero `interface{}` in production Go code; statuses, roles, and event names are typed constants — maintained through 50 more commits *(reassessment 2026-04-13)*
+### Largest Production Go Files
 
-**Note on file count**: Production files decreased 200→195 despite +4,587 LOC because the MCP server removal (ADR-0057) deleted ~15 files while new subsystems added ~10. Net production growth accounting for MCP removal is ~7,269 LOC of new code. *(reassessment 2026-04-13)*
+| LOC | File |
+|----:|------|
+| 1,566 | `internal/scipsearch/scipsearch.go` |
+| 1,530 | `internal/embedded/embedded.go` |
+| 1,500 | `internal/ops/proceed.go` |
+| 1,407 | `internal/commands/watch.go` |
+| 1,268 | `internal/commands/init.go` |
+| 1,259 | `internal/updater/updater.go` |
+| 1,258 | `cmd/liza/cmd_task.go` |
+| 1,142 | `cmd/liza/cmd_launch.go` |
+| 1,129 | `internal/agent/supervisor.go` |
+| 1,053 | `internal/pairingindex/hooks.go` |
+| 956 | `internal/agent/prompt.go` |
+| 893 | `internal/pipeline/resolver.go` |
+| 871 | `internal/tui/view.go` |
+| 853 | `internal/models/task.go` |
+| 806 | `internal/ops/wt_merge.go` |
+| 757 | `internal/ops/claim_task.go` |
+| 754 | `internal/semble/semble.go` |
+| 742 | `internal/tui/update.go` |
+| 736 | `internal/commands/inspect_tasks.go` |
+| 720 | `cmd/liza/cmd_system.go` |
+
+Sixty-seven production Go files exceed 300 LOC. Thirty-five exceed the 500 LOC investigation threshold. Declarative Cobra registration files account for part of this distribution, but the largest behavioral files show genuine responsibility concentration. *(reassessment 2026-07-24)*
+
+### Longest Production Go Functions
+
+Twenty-one production functions or methods exceed 150 LOC. The largest are:
+
+| LOC | Function | Location |
+|----:|----------|----------|
+| 442 | `RunSupervisor` | `internal/agent/supervisor.go:637` |
+| 405 | `InitCommandWithConfig` | `internal/commands/init.go:763` |
+| 316 | `MergeWorktree` | `internal/ops/wt_merge.go` |
+| 315 | `SubmitForReview` | `internal/ops/submit_review.go` |
+| 302 | `SubmitVerdict` | `internal/ops/submit_verdict.go` |
+| 222 | `InitProject` | `internal/commands/init.go` |
+| 218 | `ExecuteAvailableTransitions` | `internal/ops/proceed.go` |
+| 209 | `completeClaimTaskAfterValidation` | `internal/ops/claim_task.go` |
+| 204 | `renderTaskPanel` | `internal/tui/view.go` |
+| 194 | `Replan` | `internal/ops/replan.go` |
+
+### Dependencies
+
+The dependency surface remains moderate for a multi-provider terminal application: 13 direct Go dependencies and 66 external modules in the complete module graph. Python adds three runtime and five development dependencies.
+
+Two pinned Go dependencies merit compatibility review rather than an urgent security response: the repository uses `golang.org/x/mod` v0.22.0 while [pkg.go.dev lists v0.38.0](https://pkg.go.dev/golang.org/x/mod), and `go-runewidth` v0.0.16 while its [version history lists v0.0.24](https://pkg.go.dev/github.com/mattn/go-runewidth?tab=versions). `x/mod` is used only for semantic-version handling in the updater, which limits the review surface. *(reassessment 2026-07-24)*
+
+### Code Hygiene
+
+Positive signals:
+
+- No production Go or Python `TODO`, `FIXME`, or `HACK` markers.
+- No Go `nolint` or `nosec` suppressions.
+- No production use of the empty `interface{}` spelling.
+- Three Python `type: ignore` comments are scoped to optional or platform-specific imports.
+- Four `os.Exit` calls are confined to command entry points.
+
+Corrections to the previous assessment:
+
+- Production Go contains two `panic()` calls, in `cmd/liza/completion_values.go` and `internal/providers/catalog.go`. Both appear to protect embedded configuration invariants, but the count is not zero.
+- Roles, cardinalities, phase categories, and output formats are not consistently typed. Repeated raw values such as `"doer"`, `"reviewer"`, `"orchestrator"`, `"per-subtask"`, `"one-to-one"`, and `"many-to-one"` participate in control flow across packages despite partial ownership in `internal/roles` and `internal/pipeline`.
+- Uses of `any` are concentrated around JSON, YAML, ACP, and other dynamic boundaries; they are not a blanket hygiene concern.
 
 ## Executive Summary
 
-Liza is a hybrid multi-agent coding orchestrator: Go-based deterministic supervisors enforce invariants while LLM agents handle judgment. The codebase demonstrates **exceptional engineering discipline** in its core runtime — minimal dependencies, comprehensive testing, atomic state management — combined with an unusually thorough specification and contract corpus that forms the product's core IP.
+Liza remains a well-engineered, specification-driven multi-agent orchestrator with strong correctness infrastructure. Its Go runtime has extensive tests, race-enabled CI, meaningful integration coverage, explicit state validation, and disciplined error handling. Documentation depth—219 specifications and 96 active ADRs—is exceptional.
 
-The most significant architectural change this period was the **removal of the MCP server** (ADR-0057), eliminating a redundant parallel surface that caused reliability issues under memory pressure. This was replaced by CLI-native `--json` mode and `--agent-id` RBAC — a genuine simplification that reduced maintenance burden and agent context overhead.
+The codebase has nevertheless crossed from isolated large-file concerns into sustained structural-debt growth. Production Go LOC doubled across 424 commits, while files over 500 LOC grew from 12 to 35. The three P1 decomposition targets from the previous assessment all grew substantially without remediation. Python is now a material production surface, but CI does not install Python or run its tests, linter, or type checker.
 
-**Key Strengths:**
-- **Architectural courage**: MCP server removal deleted ~8,500 LOC (prod + test) of working but redundant code, replacing it with ~425 LOC of CLI-native access control. The decision was documented in ADR-0057 with clear rationale *(reassessment 2026-04-13)*
-- **Test discipline holding under growth**: 2.63:1 test-to-production ratio (was 2.69:1), with +10K test LOC tracking +4.6K production LOC across 50 commits of feature work (TUI, integration pipeline, quota detection, many-to-one transitions) *(reassessment 2026-04-13)*
-- **Pristine code hygiene**: Zero TODOs, zero `nolint`, zero `panic()`, zero untyped code in production — maintained through 50 commits including a major subsystem removal and TUI addition *(reassessment 2026-04-13)*
-- **Radical dependency minimalism** (qualified): 9 direct dependencies, up from 4. The 5 new deps are a single cohesive TUI framework (Charmbracelet). Still exceptional for Go ecosystem. *(reassessment 2026-04-13)*
-- **Specification-driven development**: 192 spec files + 60 ADRs — extraordinary traceability *(reassessment 2026-04-13)*
+### Key Strengths
 
-**Areas for Improvement:**
-- **Structural complexity acceleration unaddressed**: P1 decomposition recommendations from prior assessment (proceed.go, init.go) were not executed while those files grew further — proceed.go hit 1,200 LOC (+47%), init.go hit 854 (+13%). 12 files now exceed 500 LOC (was 9). 16 non-declarative functions exceed 150 LOC (was 9). The structural debt is compounding *(reassessment 2026-04-13)*
-- **supervisor.go approaching god-file territory**: 588→831 LOC (+41%) mixing restart tracking (exit-42, crash, spinning), CLI execution, and the supervisor loop *(reassessment 2026-04-13)*
-- **Coverage reporting gap**: Codecov configured but coverage threshold not enforced in CI — unchanged
-- **Test ratio slight decline**: 2.69→2.63 — production LOC grew slightly faster than test LOC for the first time *(reassessment 2026-04-13)*
+- **High testing investment:** 150,683 Go test LOC, 2,998 test functions, race-enabled unit runs, and 14 E2E files covering real supervisor and operations flows.
+- **Explicit correctness boundaries:** state mutation, pipeline resolution, persistence, and validation remain separated and heavily exercised.
+- **Traceable engineering decisions:** 219 specifications and 96 active ADRs preserve design intent at unusual depth.
+- **Dependency restraint:** 13 direct Go dependencies is reasonable for the feature surface; dynamic integrations remain isolated in dedicated packages.
+- **Clean source hygiene:** no production TODO backlog or broad suppression culture.
 
-**Overall Rating: A- (Excellent with concerns)** *(unchanged — reassessment 2026-04-13)*
+### Areas for Improvement
 
-The A- holds because architectural simplification (MCP removal), code hygiene, and test discipline counterbalance the structural complexity growth. The deduction from A is strengthened: files >500 LOC grew 9→12, functions >150 LOC nearly doubled (9→16), and all three P1 decomposition targets from the prior assessment grew further without being addressed. A further assessment without P1 progress would warrant a downgrade to B+.
+- **P1 structural debt compounded:** `proceed.go`, `init.go`, and `supervisor.go` grew to 1,500, 1,268, and 1,129 LOC respectively.
+- **New responsibility concentrations emerged:** `embedded.go` combines provider-specific and artifact-specific mutation; `watch.go` combines monitoring, diagnosis, repair, and reporting.
+- **CI and local quality gates diverge:** CI invokes `make lint`, but that target does not run staticcheck, goimports, duplicate detection, Python linting, Python typing, or Python tests.
+- **Python quality parity is incomplete:** four production Python modules exceed 500 LOC; two skill packages have no tests; the aggregate test ratio is 0.43:1.
+- **Control-flow vocabulary is only partially owned:** raw role, cardinality, phase, and format literals create cross-package typo and refactoring risk.
+
+## Overall Grade: B+ (Good)
+
+The foundation remains solid, and several subsystems are strong enough to support continued development. The deduction from A- to B+ is specifically for compounding structural complexity and incomplete enforcement of the repository's now multi-language quality contract.
+
+The previous assessment stated that another review without progress on the P1 decomposition targets would warrant this downgrade. All three targets grew:
+
+| Target | Previous | Current | Change |
+|--------|---------:|--------:|-------:|
+| `internal/ops/proceed.go` | 1,200 | 1,500 | +25% |
+| `internal/commands/init.go` | 854 | 1,268 | +48% |
+| `internal/agent/supervisor.go` | 831 | 1,129 | +36% |
+
+The grade does not fall further because testing depth, state invariants, documentation, and dependency discipline remain strong.
 
 ---
 
 ## Detailed Subsystem Analysis
 
-### State Machine & Models (`internal/models/`) ★★★★★
+### Domain State, Pipeline, Persistence, and Validation (`internal/models/`, `internal/pipeline/`, `internal/db/`, `internal/statevalidate/`) ★★★★☆
 
 **Strengths:**
-- **Explicit state machine**: Task states with pipeline-driven transitions via `TransitionWith()` — no implicit state changes possible
-- **Pipeline-driven extensibility**: Custom state names via YAML pipeline config with `Resolver` providing runtime query interface
-- **Complete audit trail**: Every task mutation appended to `History[]` with timestamps and actor IDs
-- **Lease-based concurrency**: Time-bounded claims with stale detection prevent zombie agents
-- **Thorough model tests**: 3,344 test LOC for 1,411 production LOC (2.37:1) *(reassessment 2026-04-13)*
-- **31 focused methods on Task**: task.go at 558 LOC but averaging 18 LOC per function — appropriate domain model density, not god-class behavior *(reassessment 2026-04-13)*
+
+- Test ratios remain strong: models 2.05:1, pipeline 2.97:1, database 4.43:1, and state validation 1.86:1.
+- Pipeline configuration and resolution provide a declarative state-machine boundary rather than distributing transition rules through CLI handlers.
+- State validation remains a distinct integrity layer rather than incidental checks inside operations.
+- Persistence has 2,729 test LOC for 616 production LOC.
 
 **Concerns:**
-- None at this time. task.go exceeds 500 LOC nominally but the 31 small methods are well-factored domain logic.
 
-### Operations Layer (`internal/ops/`) ★★★★☆
+- `pipeline/resolver.go` reached 893 LOC and `pipeline/config.go` 600 LOC. They remain reasonably cohesive, but their growth raises navigation cost.
+- `models/task.go` reached 853 LOC. Its methods remain focused, so this is structural density rather than a god-object finding.
+- Phase categories and related control-flow values sometimes bypass the typed vocabulary already present in the pipeline package.
+
+### Lifecycle Operations and Worktree Integration (`internal/ops/`, `internal/git/`) ★★★☆☆
 
 **Strengths:**
-- **Clean service layer**: Each operation is its own file with focused responsibility — now 49 production files
-- **Precondition-heavy design**: Operations validate extensively before mutating, failing fast with typed errors
-- **Strong test ratio**: 24,824 test LOC for 9,917 production LOC (2.50:1) *(reassessment 2026-04-13)*
-- **Claim strategy pattern**: `claimStrategy` interface eliminates boolean-flag dispatch
-- **Typed event constants**: `TaskEventName` typed constants used across all packages
-- **Integration pipeline**: many-to-one transitions, architecture step, cohort management *(reassessment 2026-04-13)*
+
+- `internal/ops` has 41,637 test LOC for 16,377 production LOC (2.54:1).
+- Operations retain explicit precondition checks and focused public entry points.
+- Git operations isolate worktree and merge mechanics behind a package boundary.
 
 **Concerns:**
-- `proceed.go` grew from 816→1,200 LOC (+47%) — **the largest production file in the codebase by a wide margin**. Contains 26 functions spanning: transition execution, many-to-one cohort management, phase-gate dependency propagation, topo-sorted execution, crash recovery, cycle detection (SCC algorithm), and child task construction. P1.8 decomposition was recommended in the prior assessment and not addressed *(reassessment 2026-04-13)*
-- `claim_task.go` (563 LOC) and `wt_merge.go` (520 LOC) both exceed 500 LOC — stable but not improving
-- 7 ops functions exceed 150 LOC: `InitCommandWithConfig` (315), `SubmitVerdict` (309), `MergeWorktree` (294), `ClaimTask` (282), `SubmitForReview` (221), `RecoverTask` (221), `ExecuteAvailableTransitions` (210) *(reassessment 2026-04-13)*
 
-### Agent Supervision (`internal/agent/`) ★★★★☆
+- `proceed.go` grew 1,200→1,500 LOC and combines transition execution, cohort handling, dependency propagation, graph algorithms, crash recovery, and child construction.
+- Seven operations files exceed 500 LOC.
+- Several state-changing functions are long: `MergeWorktree` 316 LOC, `SubmitForReview` 315, `SubmitVerdict` 302, and `ClaimTask` 187.
+- The volume and growth show that file-per-operation organization alone is no longer containing orchestration complexity.
+
+### Agent Supervision, Prompts, and Providers (`internal/agent/`, `internal/prompts/`, `internal/providers/`) ★★★☆☆
 
 **Strengths:**
-- **Deterministic supervisor**: Go process wraps LLM agent, enforcing restart limits, heartbeat, lease renewal
-- **Exit code 42 protocol**: Clean restart mechanism with exponential backoff tracking
-- **Strategy pattern**: Role-specific behavior cleanly separated into strategy files — each with `WaitConfig`
-- **Strong test ratio**: 11,454 test LOC for 3,874 production LOC (2.96:1) *(reassessment 2026-04-13)*
-- **Quota detection**: New `quota.go` (160 LOC) detects provider quota exhaustion *(reassessment 2026-04-13)*
-- **System control**: New `systemctl.go` (311 LOC) for system start/stop/pause/resume *(reassessment 2026-04-13)*
+
+- Agent tests remain substantial: 21,425 test LOC for 7,890 production LOC (2.72:1).
+- Prompt tests have a 4.46:1 ratio.
+- Provider catalog and runtime adapters remain separated from core state mutation.
 
 **Concerns:**
-- `supervisor.go` grew from 588→831 LOC (+41%) with 24 functions. Now mixes: exit-42 restart tracking, crash restart tracking, spinning detection, CLI execution (`DefaultCLIExecutor`), and the supervisor loop (`RunSupervisor` at 287 LOC, was 171). These are distinct responsibilities that share minimal state *(reassessment 2026-04-13)*
-- The restart tracking subsystem alone (exit42, crash, spinning trackers) accounts for ~300 LOC and is self-contained — extraction would be straightforward *(reassessment 2026-04-13)*
 
-### Terminal UI (`internal/tui/`) ★★★★☆ *(new subsystem — reassessment 2026-04-13)*
+- `supervisor.go` grew 831→1,129 LOC; `RunSupervisor` grew 287→442 LOC.
+- Restart tracking, process execution, lease behavior, and the main supervision loop remain co-located.
+- `prompt.go` reached 956 LOC and now contains repeated adapter plumbing for SCIP, Stacklit, functional clusters, and Semble.
+- Raw role literals are repeated across agent, command, operation, and pipeline packages despite an existing roles package.
+
+### Commands and CLI Wiring (`internal/commands/`, `cmd/liza/`) ★★★☆☆
 
 **Strengths:**
-- **Charmbracelet bubbletea architecture**: Clean Model-Update-View separation following the Elm pattern
-- **Well-organized**: 6 files with clear responsibilities — model.go (types), view.go (rendering), update.go (state transitions), commands.go (side effects), styles.go (theming), keymap.go (bindings)
-- **Tested**: 3,872 test LOC for 2,265 production LOC (1.71:1) with tests covering view rendering and update logic
+
+- `internal/commands` maintains a 3.31:1 test ratio.
+- Most Cobra handlers remain thin delegation layers.
+- Large `cmd/liza` files are partly declarative registration, which is less concerning than equivalent behavioral LOC.
 
 **Concerns:**
-- `view.go` (688 LOC) and `update.go` (643 LOC) both exceed 500 LOC already. For a new subsystem, this is early-stage structural debt — the same trajectory that other subsystems followed before becoming decomposition candidates
-- 1.71:1 test ratio is below project average (2.63:1), though reasonable for a UI layer
-- `renderTaskPanel` (206 LOC) and `Update` (164 LOC) are the two largest functions
 
-### Git Operations (`internal/git/`) ★★★★☆
+- `watch.go` grew 846→1,407 LOC and combines observation, anomaly diagnosis, automated repair, lifecycle decisions, and output.
+- `init.go` grew 854→1,268 LOC; `InitCommandWithConfig` is now 405 LOC.
+- `cmd_task.go` and `cmd_launch.go` exceed 1,100 LOC, increasing command-discovery and registration maintenance cost even where code is declarative.
+- Inspect commands repeat format switches for JSON, YAML, table, and scalar output. This is imperative ceremony suited to shared declarative dispatch.
+
+### Terminal UI and Interactive Flows (`internal/tui/`, `internal/interactive/`) ★★★★☆
 
 **Strengths:**
-- **Merge-tree strategy**: Merges without touching the working directory — prevents dirty-state conflicts
-- **Atomic ref updates**: Compare-and-swap on git refs prevents concurrent merge races
-- **Concern-based file organization**: `worktree.go` (CRUD), `merge.go`, `rebase.go`, `query.go`, `git.go` (helpers)
+
+- The Model-Update-View architecture remains recognizable.
+- TUI tests total 4,680 LOC for 2,663 production LOC (1.76:1).
+- View rendering and update behavior are tested separately.
 
 **Concerns:**
-- `merge.go` at 314 LOC — within acceptable range but above the 300 LOC attention threshold
 
-### State Validation (`internal/statevalidate/`) ★★★★★
+- `view.go` grew to 871 LOC and `update.go` to 742 LOC.
+- `renderTaskPanel` is 204 LOC and `Update` is 172 LOC.
+- Interactive setup has a lower 0.43:1 test ratio.
+
+The TUI remains strong because its large files are cohesive and follow the framework's shape. Split by panel or message family when extending it, rather than introducing abstractions solely to reduce LOC.
+
+### Tooling Integrations (`internal/scipsearch/`, `internal/semble/`, `internal/functionalclusters/`, `internal/pairingindex/`) ★★★☆☆
 
 **Strengths:**
-- **Comprehensive validation rules**: Every state mutation runs through extensive checks
-- **Rule separation from ops**: Validation is a distinct package, not mixed into business logic
-- **Pipeline-aware validation**: Rules adapt to custom pipeline states
-- **Improved test ratio**: 1,844 test LOC for 903 production LOC (2.04:1) *(reassessment 2026-04-13)*
+
+- External tools are isolated behind dedicated packages.
+- SCIP and Semble have meaningful tests with ratios of 1.22:1 and 1.09:1.
+- Pairing-index behavior is kept separate from core lifecycle operations.
 
 **Concerns:**
-- None at this time
 
-### CLI Entry Point (`cmd/liza/`) ★★★★☆
+- `scipsearch.go` is the largest production Go file at 1,566 LOC. It combines configuration, runtime refresh, worktree exclusions, command execution, and language-specific planning for Go, TypeScript, and Python.
+- The root cause in SCIP is variant dispatch, so a per-language planner strategy is more appropriate than a purely mechanical file split.
+- `pairingindex/hooks.go` reached 1,053 LOC and combines hook installation, exclude handling, and script generation.
+- Prompt and installation layers repeat integration-specific wiring, increasing the cost of adding another index provider.
+
+### Installation, Embedding, Branding, Updates, and Toolchain (`internal/embedded/`, `internal/updater/`, `internal/toolchain/`, `internal/brand/`) ★★★☆☆
 
 **Strengths:**
-- **Thin delegation**: Each command's `RunE` averages 5-15 lines — parses flags and delegates to `commands` or `ops`
-- **CLI-native RBAC**: `--agent-id` validation on state-mutating commands replaces MCP RBAC (ADR-0057) *(reassessment 2026-04-13)*
-- **JSON output wiring**: `--json` flag on read commands for structured output *(reassessment 2026-04-13)*
+
+- Installation artifacts are embedded and testable rather than fetched implicitly at runtime.
+- Updater behavior is isolated in a dedicated package with a 1.56:1 test ratio.
+- Toolchain discovery is separate from project state.
 
 **Concerns:**
-- `cmd_task.go` (910 LOC) and `cmd_system.go` (683 LOC) contain monolithic `init()` functions with all Cobra command registrations — declarative data, not control flow, so LOC is structural rather than concerning
-- The `init()` registration blocks must be maintained in sync with command definitions — no compile-time enforcement prevents a command from being defined but not registered
 
-### CLI Commands (`internal/commands/`) ★★★★☆
+- `embedded.go` reached 1,530 LOC and mixes global corpus writing, Claude JSON merging, Codex TOML and permission handling, hook installation, stale MCP cleanup, and project artifact generation.
+- These artifact families have different schemas and change drivers; their co-location is responsibility mixing, not merely a large cohesive module.
+- `updater.go` is 1,259 LOC. Its release/source/rollback responsibilities are related, but future growth should be partitioned by update source and transaction phase.
+
+### Python Skill Utilities (`skills/**/*.py`) ★★☆☆☆
 
 **Strengths:**
-- **Thin command layer**: Commands delegate to ops, never contain business logic
-- **Exceptional test ratio**: 19,521 test LOC for 5,297 production LOC (3.68:1) *(reassessment 2026-04-13)*
-- **Inspect subsystem**: Well-factored reporting with 5 dedicated inspect files (tasks, agents, metrics, anomalies, field) *(reassessment 2026-04-13)*
-- **Setup command**: New `setup.go` (403 LOC) for post-init configuration *(reassessment 2026-04-13)*
+
+- Existing adversarial-pairing and log-analysis tests are behavioral: they exercise subprocess contracts, state transitions, sparse events, and rich event parsing.
+- Dependencies remain small and explicit in `pyproject.toml`.
 
 **Concerns:**
-- `init.go` grew from 753→854 LOC (+13%) with `InitCommandWithConfig` at 315 LOC (was 294). P1.9 not addressed *(reassessment 2026-04-13)*
-- `watch.go` grew from 751→846 LOC (+13%). P2.8 not addressed *(reassessment 2026-04-13)*
 
-### Pipeline Configuration (`internal/pipeline/`) ★★★★☆
+- Production totals 5,114 LOC versus 2,196 test LOC (0.43:1).
+- `skills/liza-logs/scripts/analyze-log.py` is 1,924 LOC.
+- `context-corpus-index.py` is 968 LOC; `blackboard_op.py` and `blackboard_state.py` are 661 and 650 LOC.
+- The context-engineering and white-box-red-testing Python packages have no tests.
+- CI installs no Python environment and runs no pytest, ruff, or mypy checks.
+
+The previous characterization of Python tooling as vestigial is stale. It is now a maintained production surface and should receive the same enforcement expectations as Go.
+
+### Testing and Quality Infrastructure ★★★★☆
 
 **Strengths:**
-- **Declarative pipeline definition**: YAML-driven state machine configuration with role-pair schemas
-- **Improved test ratio**: 3,613 test LOC for 1,167 production LOC (3.10:1, was 2.75:1) *(reassessment 2026-04-13)*
-- **Migration support**: `MigrateOperations` (146 LOC) for pipeline config evolution *(reassessment 2026-04-13)*
+
+- Go has a 2.30:1 test-to-production ratio and 2,998 test functions.
+- `make test` enables the race detector and coverage collection.
+- Fourteen E2E files total 6,208 LOC.
+- Sampled integration tests execute the real supervisor and operations flows with the LLM boundary mocked, rather than only asserting internal helper behavior.
+- Test guards ratchet parallel usage and cap real sleeps.
 
 **Concerns:**
-- `resolver.go` at 642 LOC (was 571, +12%) — approaching the point where concern separation would help readability
-- `config.go` at 488 LOC — new file nearing 500 LOC threshold *(reassessment 2026-04-13)*
 
-### Prompt Building (`internal/prompts/`) ★★★★☆
+- Codecov upload is non-blocking and no coverage threshold or trend gate exists.
+- There are no Go fuzz tests despite concurrency, YAML parsing, graph operations, and state-transition inputs.
+- Fifteen `t.Parallel()` calls across 246 test files is limited adoption; the guard enforces a floor, not broad parallel-test discipline.
+- Ten real `time.Sleep` uses remain in tests, within the configured ceiling of eleven.
+- Python tests are absent from CI.
+
+### Pre-Commit and CI Pipeline ★★★☆☆
 
 **Strengths:**
-- **Template-based agent initialization**: Structured bootstrap prompts with embedded contracts, role definitions, and task context
-- **Strong test ratio**: 2,524 test LOC for 600 production LOC (4.21:1, was 3.70:1) *(reassessment 2026-04-13)*
-- **Provider-aware naming**: MCP tool naming adapts to CLI provider *(reassessment 2026-04-13)*
+
+- CI runs on Linux and macOS and executes lint, race-enabled unit tests, E2E tests, and builds.
+- The local pre-commit configuration includes 22 hooks covering Go, Python, file hygiene, duplicate detection, and commit conventions.
 
 **Concerns:**
-- None at this time
 
-### Supporting Infrastructure
+- CI's `make lint` runs embedded/test-helper checks, `go fmt`, and `go vet`; it does not execute the complete pre-commit suite.
+- Staticcheck, goimports verification, jscpd, ruff, mypy, and pytest are therefore not merge gates.
+- `goimports@latest` and `staticcheck@latest` make local tool resolution non-reproducible.
+- Codecov uses `fail_ci_if_error: false` and has no threshold.
 
-Focused infrastructure packages maintain the project's quality discipline:
+### Documentation and Specifications ★★★★☆
 
-| Package | Prod LOC | Test LOC | Ratio | Purpose |
-|---------|----------|----------|-------|---------|
-| `internal/testhelpers/` | 784 | 1,031 | 1.32:1 | Test fixtures and helpers |
-| `internal/db/` | 531 | 2,566 | 4.83:1 | Blackboard state persistence *(reassessment 2026-04-13)* |
-| `internal/filelock/` | 489 | 884 | 1.81:1 | File locking with metrics and typed errors |
-| `internal/paths/` | 346 | 522 | 1.51:1 | Path management *(new — reassessment 2026-04-13)* |
-| `internal/interactive/` | 238 | 109 | 0.46:1 | Init wizard *(new — reassessment 2026-04-13)* ⚠️ |
-| `internal/analysis/` | 224 | 404 | 1.80:1 | Pattern analysis *(new — reassessment 2026-04-13)* |
-| `internal/log/` | 211 | 678 | 3.21:1 | Structured agent logging |
-| `internal/render/` | 175 | 234 | 1.34:1 | Shared CLI formatting |
-| `internal/jsonout/` | 149 | 275 | 1.85:1 | JSON output *(new — reassessment 2026-04-13)* |
-| `internal/identity/` | 123 | 473 | 3.85:1 | Orchestrator identity resolution |
-| `internal/roles/` | 90 | 160 | 1.78:1 | Role type definitions and validation |
-| `internal/errors/` | 70 | 121 | 1.73:1 | Shared error types |
-| `internal/process/` | 67 | 0 | — | Process attributes *(new, no tests — reassessment 2026-04-13)* ⚠️ |
-| `internal/gitenv/` | 28 | 0 | — | Git locale env *(new, no tests — reassessment 2026-04-13)* ⚠️ |
+**Strengths:**
 
-⚠️ `interactive/` (0.46:1 ratio), `process/` (no tests), and `gitenv/` (no tests) break the project's testing pattern. All are small but noteworthy. *(reassessment 2026-04-13)*
+- The repository contains 219 specification files, 96 active ADRs, and 53 documentation files.
+- ADRs provide strong historical rationale and implementation traceability.
+- Operational lessons capture recurring tool and worktree failures.
+
+**Concerns:**
+
+- `specs/architecture/overview.md` shows only the orchestrator/coder/reviewer topology while the embedded pipeline defines 13 roles.
+- The overview lists four providers, while the provider catalog contains nine.
+- Corpus scale creates lifecycle risk: superseded architecture descriptions remain discoverable unless indexes and current-overview documents are actively maintained.
 
 ---
 
-## Behavioral Contracts & Skills ★★★★★
+## Previous Finding Disposition
 
-**Strengths:**
-- **Failure-mode-driven design**: 55+ documented LLM failure modes mapped to specific countermeasures in `CONTRACT_FAILURE_MODE_MAP.md`
-- **Tiered rule architecture**: Tier 0 (inviolable) through Tier 3 (preferences) with explicit degradation protocol
-- **Execution state machine**: States with forbidden transitions, model activation points, and stop triggers
-- **22 composable skills**: Domain-specific protocols that agents load on demand *(reassessment 2026-04-13)*
-- **Three collaboration modes**: Pairing (human-supervised), Multi-Agent (peer-supervised), Subagent (delegated) — each with explicit gate semantics
-- **Anti-gaming clause**: "Technically compliant is not compliant" — closes the most common loophole in agent governance
-
-**Concerns:**
-- Contract documents are necessarily large (CORE.md at 750 lines) — agents must read them fully, consuming context window budget
-- Skills lack versioning — when a skill protocol changes, all sessions see the new version immediately
-
----
-
-## Testing & Quality Infrastructure ★★★★★
-
-**Strengths:**
-- **2.63:1 test-to-production ratio** — slight decline from 2.69:1, first time production LOC grew faster than test LOC, but still excellent for Go ecosystem *(reassessment 2026-04-13)*
-- **1,649 test functions** (was 1,327) — +322 test functions tracking feature growth *(reassessment 2026-04-13)*
-- **Pure standard library testing**: No external test frameworks — reduces dependency surface
-- **Table-driven tests throughout**: Files use `t.Run()` subtests with structured test cases
-- **Race detection enabled by default**: `-race` flag in all CI runs
-- **Test quality enforcement**:
-  - `parallel_usage_test.go`: Ratcheting minimum for `t.Parallel()` calls
-  - `sleep_usage_test.go`: Prevents `time.Sleep` in tests — enforces real concurrency patterns
-  - `check-testhelpers`: Pre-commit hook ensures test utilities don't leak into production
-- **Integration tests expanded**: 7 E2E test files covering concurrent operations, lease expiry, sprint management, await workflows, and full end-to-end pipelines *(reassessment 2026-04-13)*
-
-**Concerns:**
-- No coverage threshold enforced in CI — Codecov is configured for reporting only
-- No mutation testing or fuzz testing
-- Three new packages (`process/`, `gitenv/`, `interactive/`) break the project's testing pattern *(reassessment 2026-04-13)*
+| Previous finding | Status | Current evidence |
+|------------------|--------|------------------|
+| [Decompose `proceed.go`](architectural-issues.md#decompose-proceedgo-1500-loc) | Worsened | 1,200→1,500 LOC |
+| [Decompose `init.go`](architectural-issues.md#decompose-initgo-1268-loc) | Worsened | 854→1,268 LOC; main function 405 LOC |
+| [Decompose `supervisor.go`](architectural-issues.md#decompose-supervisorgo-1129-loc) | Worsened | 831→1,129 LOC; main loop 442 LOC |
+| [Watch structural debt](architectural-issues.md#decompose-watchgo-1407-loc) | Worsened / elevated to P1 | 846→1,407 LOC |
+| TUI file size | Still relevant | view 871; update 742 |
+| Missing process/gitenv tests | Resolved | Both packages now have tests |
+| Interactive test gap | Still relevant | 0.43:1 ratio |
+| Coverage threshold | Still relevant | Reporting only |
+| Fuzz testing | Still relevant | Zero fuzz functions |
+| Spec-code automation | Partially addressed | Extensive specs, but overview drift remains |
+| Binary-size tracking | Still relevant | No automated budget |
+| Remove vestigial Python tooling | Stale / withdrawn | Python is now 5,114 production LOC |
 
 ---
 
-## Pre-Commit & CI Pipeline ★★★★☆
+## Prioritized Refactoring Roadmap
 
-**23 pre-commit hooks covering:**
-| Category | Hooks |
-|----------|-------|
-| **Go quality** | go-fmt, goimports, go-vet, staticcheck, go-mod-tidy |
-| **Python quality** | ruff (lint + format), mypy, debug-statements |
-| **Cross-language** | jscpd (duplicate detection), check-testhelpers |
-| **Git hygiene** | commitizen (Conventional Commits), check-merge-conflict, check-useless-excludes |
-| **File hygiene** | check-yaml, check-toml, check-json, end-of-file-fixer, trailing-whitespace, forbid-crlf, remove-crlf, check-hooks-apply |
+### P1: High Impact / Low Risk
 
-**CI pipeline:**
-- Multi-platform: ubuntu-latest + macos-latest
-- Sequential: lint → test (unit + e2e) → build
-- Coverage uploaded to Codecov (ubuntu only)
-- E2E tests run via `make test-e2e`
+#### 1.1 Decompose `internal/ops/proceed.go`
+- **Registry:** [Decompose proceed.go (1,500 LOC)](architectural-issues.md#decompose-proceedgo-1500-loc)
+- **What:** Separate transition execution, cohort management, graph algorithms, crash recovery, child construction, and available-transition scheduling along existing responsibility boundaries.
+- **Risk:** Low — structural relocation with existing test coverage.
+- **Impact:** Reduces the largest lifecycle coordination hotspot and makes state-transition reviews tractable.
+- **Depends on:** None.
 
-**Changes:** `check-embedded` hook removed (was for MCP embedded file consistency) *(reassessment 2026-04-13)*
+#### 1.2 Decompose `internal/commands/init.go`
+- **Registry:** [Decompose init.go (1,268 LOC)](architectural-issues.md#decompose-initgo-1268-loc)
+- **What:** Extract project detection, configuration generation, artifact setup, and interactive phases from `InitCommandWithConfig`.
+- **Risk:** Low — sequential phases already have identifiable data boundaries.
+- **Impact:** Makes brownfield initialization changes local and independently testable.
+- **Depends on:** None.
 
-**Concerns:**
-- Python pre-commit hooks still configured despite no Python source files in the repo — harmless but vestigial *(reassessment 2026-04-13)*
-- No binary size tracking
+#### 1.3 Decompose `internal/agent/supervisor.go`
+- **Registry:** [Decompose supervisor.go (1,129 LOC)](architectural-issues.md#decompose-supervisorgo-1129-loc)
+- **What:** Move restart/spin tracking and default CLI execution out of the core supervision loop.
+- **Risk:** Low — the tracker types are internally cohesive and heavily tested.
+- **Impact:** Narrows the 442 LOC main loop's context and separates policy from process execution.
+- **Depends on:** None.
 
----
+#### 1.4 Decompose `internal/commands/watch.go`
+- **Registry:** [Decompose watch.go (1,407 LOC)](architectural-issues.md#decompose-watchgo-1407-loc)
+- **What:** Separate observation, diagnosis, automated repair, lifecycle decisions, and rendering.
+- **Risk:** Low — preserve behavior and output contracts while relocating cohesive helpers.
+- **Impact:** Prevents the monitoring command from becoming a second orchestration engine.
+- **Depends on:** None.
 
-## Documentation & Specifications ★★★★★
+#### 1.5 Split `internal/embedded/embedded.go` by Artifact Family
+- **Registry:** [Split embedded.go by Artifact Family (1,530 LOC)](architectural-issues.md#split-embeddedgo-by-artifact-family-1530-loc)
+- **What:** Create focused implementation files for global corpus, Claude settings, Codex settings/permissions, hooks, project artifacts, and stale-artifact cleanup.
+- **Risk:** Low — package API can remain unchanged.
+- **Impact:** Aligns code ownership with independent schemas and change drivers.
+- **Depends on:** None.
 
-**Extraordinary specification depth:**
+#### 1.6 Enforce the Multi-Language Quality Contract in CI
+- **What:** Install the locked Python development environment; run pytest, ruff, and mypy; enforce the intended Go/static and duplicate-detection gates through a shared CI target or pre-commit invocation. Pin Go lint-tool versions.
+- **Risk:** Low — enforcement only; initial failures should be treated as discovered debt rather than bypassed.
+- **Impact:** Makes merge protection match the repository's actual language surface and local policy.
+- **Depends on:** None.
 
-| Category | Previous | Current | Delta |
-|----------|----------|---------|-------|
-| Specs | 130 (51 ADRs) | 192 (60 ADRs) | +62 (+9 ADRs) |
-| Contracts | 11 | 9 | -2 (MCP removal) |
-| Skills | 23 | 22 | -1 |
-| Docs | 24 | 36 | +12 |
-| Lessons | 5 | 6 | +1 |
+#### 1.7 Own Control-Flow Vocabulary
+- **What:** Define role, cardinality, and phase constants/types at their owning package boundaries and replace raw cross-package comparisons.
+- **Risk:** Low — behavior-preserving compile-time consolidation.
+- **Impact:** Removes typo-prone string coupling and makes vocabulary changes searchable and compiler-assisted.
+- **Depends on:** None.
 
-*(reassessment 2026-04-13)*
+### P2: Medium Impact / Medium Risk
 
-**Highlights:**
-- **60 Architecture Decision Records** — including ADR-0057 (MCP removal) documenting the most significant architectural change since inception *(reassessment 2026-04-13)*
-- **C4 diagrams** at context, container, and component levels
-- **Failure mode map** connecting each contract clause to the specific LLM failure it prevents
-- **Agent testimony** and **demo benchmarks** — real session transcripts showing the system in action
-- **Lessons system** — operational insights organized by audience (agents vs humans)
+#### 2.1 Introduce SCIP Language Planner Strategies
+- **What:** Move Go, TypeScript, and Python root/config planning behind a small planner interface or declarative registry.
+- **Risk:** Medium — changes dispatch structure around external tooling.
+- **Impact:** Addresses the design cause of `scipsearch.go` complexity instead of only moving lines.
+- **Depends on:** Stable integration contract tests.
 
-**Concerns:**
-- The sheer volume of documentation (192 specs + 36 docs + 9 contracts + 22 skills + 6 lessons) could overwhelm new contributors
-- Spec-to-implementation drift checking remains manual beyond the automated `consistency_test.go` for embedded artifacts
+#### 2.2 Restore Python Utility Test and Structure Parity
+- **What:** Add behavioral tests for context-engineering and white-box-red-testing utilities; split the 1,924 LOC log analyzer and other >500 LOC scripts around parsing, analysis, and rendering boundaries.
+- **Risk:** Medium — Python scripts expose CLI and serialized-output contracts.
+- **Impact:** Makes a material production surface safer to evolve.
+- **Depends on:** Recommendation 1.6.
 
----
+#### 2.3 Add Coverage Trend Enforcement
+- **What:** Establish an initial non-regression threshold or diff-coverage policy instead of selecting an aspirational absolute number.
+- **Risk:** Medium — poorly calibrated thresholds can reward gaming.
+- **Impact:** Converts coverage reporting into a useful regression signal.
+- **Depends on:** Python tests running in CI.
 
-## Refactoring Recommendations by Priority
+#### 2.4 Refresh the Current Architecture Overview
+- **What:** Update role topology and provider inventory; link historical diagrams explicitly to their validity period.
+- **Risk:** Low.
+- **Impact:** Restores the overview as a reliable onboarding source.
+- **Depends on:** None.
 
-### Completed (P1 — all resolved, prior assessments)
+#### 2.5 Centralize Inspect Output Dispatch
+- **What:** Express JSON, YAML, table, and scalar renderers through shared declarative format dispatch.
+- **Risk:** Medium — output compatibility must be preserved.
+- **Impact:** Removes repeated switch ceremony across inspect commands.
+- **Depends on:** Snapshot/contract tests for output formats.
 
-| # | Title | Commit(s) |
-|---|-------|-----------|
-| 1.1 | Decompose MCP handler monolith | `3544574`, `fd145e9` |
-| 1.2 | Split state model | `82258fe` |
-| 1.3 | Group validation rules | `d53a2f0` |
-| 1.4 | Add artifact consistency checks | `47e5597`, `bab9a78` |
-| 1.5 | Split CLI entry point | `7ac5ac8` |
-| 1.6 | Group `git/worktree.go` by concern | `35e5c6d` |
-| 1.7 | Replace raw event literals | `a815895` |
+#### 2.6 Review Stale Direct Dependencies
+- **What:** Compatibility-test current `x/mod` and `go-runewidth` releases, then update independently.
+- **Risk:** Medium — updater semantics and terminal-width behavior require targeted verification.
+- **Impact:** Reduces long-lived version drift without broad dependency churn.
+- **Depends on:** Existing updater and TUI tests.
 
-### Completed (P2 — resolved items, prior assessments)
+#### 2.7 Partition TUI Growth by Panel and Message Family
+- **What:** Split rendering and update handlers only where panels or message families are already cohesive.
+- **Risk:** Medium — premature abstraction would make Elm-style flow harder to follow.
+- **Impact:** Keeps extension cost bounded while preserving the framework's natural architecture.
+- **Depends on:** None.
 
-| # | Title | Commit(s) |
-|---|-------|-----------|
-| 2.2 | Extract command presentation logic | `internal/render/` package |
-| 2.4 | Improve `statevalidate` test ratio (0.75:1 → 2.04:1) | `3a54845` et al. |
-| 2.5a | Event name constants (26 typed constants) | `e2baae9` et al. |
-| 2.5b | Resolve hardcoded `"orchestrator-1"` identity | `40f407c` et al. |
-| 2.6 | Claim strategy pattern | `9d68a78` |
-| 2.7 | Declarative MCP tool registration | `5350e71` (subsystem since removed) |
+### P3: Strategic / Long-Term
 
-### Stale (removed)
+#### 3.1 Add Targeted Fuzz Tests
+- **What:** Fuzz state mutation inputs, pipeline YAML, graph transitions, and concurrency-relevant parsers.
+- **Risk:** Medium — requires stable invariants and deterministic seeds.
+- **Impact:** Exercises combinations that table-driven tests are unlikely to enumerate.
 
-| # | Title | Reason |
-|---|-------|--------|
-| 2.3 | Python test coverage | No Python source files remain in repo *(reassessment 2026-04-13)* |
+#### 3.2 Automate Spec and Overview Drift Signals
+- **What:** Generate or validate role/provider inventories and other enumerable architecture facts from canonical configuration.
+- **Risk:** Medium — generated documentation needs clear ownership.
+- **Impact:** Reduces staleness in a large specification corpus.
 
-### Priority 1: High Impact / Low Risk
-
-#### 1.8 Decompose `proceed.go` *(escalated — reassessment 2026-04-13)*
-- **What**: `proceed.go` at 1,200 LOC (was 816 at prior assessment, +47%) with 26 functions. Split by concern: transition execution (`Proceed`, `proceedInner`, `proceedManyToOneInner`), cohort management (`findManyToOneCohort`, `buildManyToOneChild`), child task construction (`buildChildTask`, `buildOneToOneChild`, `patchInheritedDeps`), graph algorithms (`topoSortPending`, `findSCCs`, `hasSelfLoop`), crash recovery (`recoverCrashedTransition`, `isTransitionIncomplete`), and the available-transitions engine (`ExecuteAvailableTransitions`, `buildTransitionDefFromPipeline`).
-- **Risk**: Low — concerns are already functionally separated within the file; extraction is structural
-- **Impact**: The largest production file is 2.4x the Go ecosystem norm (500 LOC). Six distinct responsibility clusters identified — each could be its own file.
-- **Depends on**: None
-- **Priority escalation**: This was P1 at the prior assessment. The file grew 47% further without decomposition. Next assessment without progress here directly impacts the grade.
-
-#### 1.9 Decompose `init.go`
-- **What**: `init.go` at 854 LOC (was 753, +13%) with `InitCommandWithConfig` at 315 LOC (was 294). Split by phase: project detection, symlink setup, config generation, and interactive prompts.
-- **Risk**: Low — phases are sequential with clear data boundaries
-- **Impact**: Second-largest commands file
-- **Depends on**: None
-
-#### 1.10 Decompose `supervisor.go` *(new — reassessment 2026-04-13)*
-- **What**: `supervisor.go` at 831 LOC (was 588, +41%) with 24 functions. Extract restart tracking subsystem (~300 LOC: `exit42RestartTracker`, `crashRestartTracker`, `spinningTracker` + their helpers) into `restart_tracking.go`. Extract `DefaultCLIExecutor` and related CLI functions (~150 LOC) into a dedicated file.
-- **Risk**: Low — restart trackers are self-contained structs with no shared mutable state; CLI executor is already an independent type
-- **Impact**: Reduces supervisor.go from 831 to ~380 LOC; makes restart tracking independently testable and navigable
-- **Depends on**: None
-
-### Priority 2: Medium Impact / Medium Risk (open)
-
-#### 2.1 Enforce Coverage Threshold
-- **What**: Add minimum coverage gate in CI (e.g., 70% with trend tracking); prevent coverage regression on PRs
-- **Risk**: Medium — may block PRs that touch hard-to-test code paths
-- **Impact**: Formalizes the already-strong testing culture
-
-#### 2.8 Decompose `watch.go`
-- **What**: `watch.go` at 846 LOC (was 751, +13%). Contains stale sentinel detection, orphaned rejection checks, approaching-limits warnings, and reassignment messaging. Extract check functions into a `checks.go` or similar.
-- **Risk**: Low — check functions are self-contained with clear inputs/outputs
-- **Impact**: Brings watch below 500 LOC; makes individual checks testable in isolation
-
-#### 2.9 Address TUI file sizes *(new — reassessment 2026-04-13)*
-- **What**: `view.go` (688 LOC) and `update.go` (643 LOC) both exceed 500 LOC in a new subsystem. Evaluate whether view rendering can be split by panel (task panel, agent panel, log panel) and whether update handlers can be grouped by message type.
-- **Risk**: Medium — bubbletea's Model-Update-View pattern centralizes naturally; splitting may require interface changes
-- **Impact**: Prevents the TUI from following the same growth trajectory as ops/commands
-- **Depends on**: None
-
-#### 2.10 Test coverage for new packages *(new — reassessment 2026-04-13)*
-- **What**: Add tests for `process/` (67 LOC, 0 tests), `gitenv/` (28 LOC, 0 tests), and improve `interactive/` (238 LOC, 0.46:1 ratio)
-- **Risk**: Low — additive only
-- **Impact**: Restores the project's pattern of universal test coverage; prevents silent breakage in process management and locale handling
-
-### Priority 3: Strategic / Long-term
-
-#### 3.1 Spec-Code Consistency Automation — partially done
-- `consistency_test.go` verifies byte-exact match of embedded artifacts vs repo masters
-- Higher-level drift detection (e.g., blackboard schema spec vs actual YAML structure) remains manual
-
-#### 3.2 Fuzz Testing for State Mutations
-- The atomic YAML state management is critical — fuzz testing concurrent reads/writes would surface edge cases
-- Go's built-in fuzzing (`go test -fuzz`) is well-suited for this
-
-#### 3.3 Binary Size Tracking (revised)
-- Track liza binary size in CI to detect bloat from embedded content growth
-- `console.sh` was removed *(reassessment 2026-04-13)* but contracts + skills + settings are still embedded *(reassessment 2026-04-13)*
-
-#### 3.4 `proceed.go` design-level review
-- After P1.8 structural decomposition, evaluate whether `ExecuteAvailableTransitions` (210 LOC) and the graph algorithm cluster would benefit from a strategy or visitor pattern
-- Contingent on P1.8 — assess after decomposition reveals the actual complexity shape
-
-#### 3.5 Clean up vestigial Python tooling *(new — reassessment 2026-04-13)*
-- **What**: Remove Python pre-commit hooks (ruff, mypy, debug-statements) and Python-related config now that no Python source files exist in the repo
-- **Risk**: Low — hooks are no-ops on zero matching files
-- **Impact**: Reduces pre-commit configuration noise; removes false signal that the project has a Python component
+#### 3.3 Track Release Binary Size
+- **What:** Record release artifact size and alert on significant unexplained growth.
+- **Risk:** Low.
+- **Impact:** Makes embedded-corpus and dependency growth visible.
 
 ---
 
-## Files >500 LOC *(updated — reassessment 2026-04-13)*
+## Conclusion
 
-| File | LOC | Delta | Nature |
-|------|-----|-------|--------|
-| `internal/ops/proceed.go` | 1,200 | +384 (+47%) | Transition engine, cohort, graph algos, crash recovery |
-| `cmd/liza/cmd_task.go` | 910 | *(new in list)* | Declarative Cobra init() — command registrations |
-| `internal/commands/init.go` | 854 | +101 (+13%) | Brownfield init, symlinks, Node.js detection |
-| `internal/commands/watch.go` | 846 | +95 (+13%) | Stale sentinels, attempt-aware messaging |
-| `internal/agent/supervisor.go` | 831 | +243 (+41%) | Restart tracking, CLI execution, supervisor loop |
-| `internal/tui/view.go` | 688 | *(new)* | TUI rendering — task/agent/log panels |
-| `cmd/liza/cmd_system.go` | 683 | +146 (+27%) | Declarative Cobra init() — command registrations |
-| `internal/tui/update.go` | 643 | *(new)* | TUI state transitions — message handlers |
-| `internal/pipeline/resolver.go` | 642 | +71 (+12%) | Pipeline query interface |
-| `internal/ops/claim_task.go` | 563 | +21 | Stable |
-| `internal/models/task.go` | 558 | *(new in list)* | 31 small domain methods (avg 18 LOC each) |
-| `internal/ops/wt_merge.go` | 520 | 0 | Stable |
+Liza's quality problem is not weak engineering practice; it is insufficient structural follow-through under rapid feature growth. The runtime remains reliable and heavily tested, but recurring concentration points are growing faster than they are decomposed, and CI has not caught up with the active Python surface.
 
-**Removed from list:** `internal/mcp/server_registration.go` (800 LOC) — subsystem deleted *(reassessment 2026-04-13)*
-
----
-
-## Summary
-
-Liza continues to demonstrate technically rigorous engineering with an unusually disciplined approach to testing, code hygiene, and specification. The most significant change this period was the **removal of the MCP server** — a courageous architectural simplification that deleted ~8,500 LOC of working but redundant code in favor of CLI-native access control. This was accompanied by a **new TUI subsystem** using the Charmbracelet stack, bringing direct dependencies from 4 to 9.
-
-The project's primary challenge remains **structural complexity accumulation**. Files exceeding 500 LOC grew from 9→12 (net, after MCP removal), non-declarative functions >150 LOC nearly doubled (9→16), and **all three P1 decomposition targets from the prior assessment grew further** without being addressed: proceed.go (+47%), init.go (+13%), watch.go (+13%). The test-to-production ratio dipped slightly (2.69→2.63) for the first time — production code grew 16% while test code grew 14%. Code hygiene remains perfect.
-
-**Overall Rating: A- (Excellent with concerns)** *(unchanged — reassessment 2026-04-13)*
-
-The A- holds on the strength of architectural simplification, pristine hygiene, and strong testing culture. The gap to A has widened: structural complexity is compounding while decomposition recommendations remain unaddressed. **A further assessment without P1 progress would warrant a downgrade to B+.** The gap to B+ is held by the consistent quality of new code (TUI, jsonout, paths, analysis all arrived tested), the MCP removal demonstrating willingness to simplify, and the 60 ADRs showing continued design discipline.
+The highest-return next step is a structural-debt iteration that performs the existing decompositions while aligning CI with the quality checks the repository already declares. Completing those items would provide a credible path back to A- without requiring an architectural rewrite.

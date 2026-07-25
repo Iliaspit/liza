@@ -60,9 +60,12 @@ Every token in `contracts/` and `internal/prompts/templates/` costs context budg
 
 ## Tier 3 (Preferences)
 
-### G3.1: ADR awareness for architectural changes
+### G3.1: Architecture record awareness
 
-When planning a change with architectural impact, read `specs/architecture/ADR/README.md` to understand prior decisions that may constrain or inform the design.
+When planning or reviewing a change with architectural impact:
+
+1. Read `specs/architecture/ADR/README.md` for prior decisions that may constrain or inform the design.
+2. Read the Update Policy and Open Issues Summary in `specs/architecture/architectural-issues.md`, then read the full sections for any relevant open issues.
 
 ---
 

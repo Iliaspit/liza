@@ -1,32 +1,37 @@
 # Architecture Review — Liza
 
-**Date:** 2026-04-13
-**Mode:** Adversarial (after pass 17, entry: new packages)
+**Date:** 2026-07-25
+**Mode:** Adversarial (after pass 22)
 **Reviewer:** software-architecture-review skill
 
 ---
 
 ## Update Policy
 
-1. `Phase 3: Recommendations` tracks open issues only.
-2. When an issue is fixed, remove it from Recommendations.
-
----
+1. This document is a current-state architecture snapshot, not a cumulative pass log.
+2. Git history preserves prior reviews and resolved findings.
+3. `Phase 3: Recommendations` contains only concerns verified against the current tree.
+4. [`architectural-issues.md`](architectural-issues.md#open-issues-summary) is the sole lifecycle authority for architectural findings. This review verifies and prioritizes current evidence; open/resolved status changes in the registry.
+5. File-size measurements are physical Go source lines from `cmd/` and `internal/`, including comments and blank lines. Aggregate repository LOC uses all tracked Go files and links its dated source. Both exclude non-Go artifacts such as prompt templates, so file-size tables alone under-report complexity — see 1.4.
+6. Coverage percentages are reported only from a complete, representative coverage run. Pass 20 used `go test -coverpkg=./... ./...` with blocks deduplicated by block key across test binaries, but the raw profiles and deduplication implementation were not retained. Those figures are historical evidence, not a reproducible current baseline — see 2.6.
+7. The Summary synthesizes current risks rather than retaining a paragraph-per-pass history; Git preserves pass evolution.
 
 ## Table of Contents
 
-- [Update Policy](#update-policy)
 - [Phase 1: Discovery](#phase-1-discovery)
-- [1.1 Overview](#11-overview)
-- [1.2 Component Walkthrough](#12-component-walkthrough)
-- [1.3 Dependency Map](#13-dependency-map)
-- [1.4 Coverage Checkpoint](#14-coverage-checkpoint)
+  - [1.1 Overview](#11-overview)
+  - [1.2 Component Walkthrough](#12-component-walkthrough)
+  - [1.3 Dependency Map](#13-dependency-map)
+  - [1.4 Coverage Checkpoint](#14-coverage-checkpoint)
+  - [1.5 Pass 22 Verification and Gap Analysis](#15-pass-22-verification-and-gap-analysis)
+  - [1.6 Adversarial Smell-Driven Gap Hunt](#16-adversarial-smell-driven-gap-hunt)
 - [Phase 2: Analysis](#phase-2-analysis)
-- [2.1 Analysis Framework](#21-analysis-framework)
-- [2.2 Strengths](#22-strengths)
-- [2.3 Smells](#23-smells)
-- [2.4 Patterns](#24-patterns)
-- [2.5 Test Coverage](#25-test-coverage)
+  - [2.1 Analysis Framework](#21-analysis-framework)
+  - [2.2 Strengths](#22-strengths)
+  - [2.3 Current Smells and Tensions](#23-current-smells-and-tensions)
+  - [2.4 Resolved Since the Prior Review](#24-resolved-since-the-prior-review)
+  - [2.5 Patterns](#25-patterns)
+  - [2.6 Test Coverage](#26-test-coverage)
 - [Phase 3: Recommendations](#phase-3-recommendations)
 - [Summary](#summary)
 - [Appendix: File Reference](#appendix-file-reference)
@@ -35,381 +40,288 @@
 
 ### 1.1 Overview
 
-Liza is a peer-supervised multi-agent coding system built in Go. Agents (Planner, Coder, Code Reviewer) coordinate through a shared YAML blackboard file, with each agent operating in its own terminal via a supervisor loop.
+Liza is a stack-agnostic, peer-supervised multi-agent orchestration system implemented in Go. It coordinates planning, execution, review, and integration through a YAML blackboard, declarative pipeline configuration, per-task Git worktrees, and supervisor-managed external coding agents.
 
+```text
+Requirements  →  Initialization  →  Task graph  →  Agent execution  →  Review  →  Integration
+     ↓                 ↓                ↓               ↓                ↓             ↓
+ specs/docs       pipeline config    state.yaml      worktrees       verdicts      target branch
 ```
-Human Input    →    Planner    →    Coder(s)    →    Code Reviewer    →    Merge
-     ↓                ↓               ↓                  ↓                 ↓
-  vision.md       state.yaml     git worktrees     review verdicts    integration branch
-```
 
-**Single binary:** `liza` CLI with 30+ cobra commands. *(health check: MCP server removed in `90c132d5` — see ADR-0057; `liza-mcp` binary deleted)*
+The primary runtime is the `liza` CLI. Cobra commands and the Bubble Tea TUI call application operations; those operations coordinate the domain model, blackboard persistence, Git worktrees, pipeline rules, provider profiles, and agent processes.
 
-**Source size:** ~33,400 LOC production Go, ~87,400 LOC test Go (2.6:1 test-to-code ratio). *(health check: was ~23,100/~55,600 (2.4:1); +44% production, +57% test — TUI, pipeline expansion, ops growth, new agent strategies)*
+**Dated size baseline**
+
+| Measure | Current value |
+|---------|---------------|
+| Go version | 1.25.5 |
+| Production Go source | 65,509 lines (2026-07-24) |
+| Test Go source | 150,683 lines (2026-07-24) |
+| Test-to-production ratio | 2.30:1 (2026-07-24) |
+| Primary binary | `cmd/liza/` |
+| State authority | `.liza/state.yaml` through `internal/db.Blackboard` |
+
+The former MCP server and `liza-mcp` binary are no longer part of the architecture (ADR-0057).
 
 ### 1.2 Component Walkthrough
 
-#### models (`internal/models/`) — ~1,410 LOC *(health check: was ~1,150)*
+#### Domain model (`internal/models/`, `internal/roles/`, `internal/taskkind/`)
 
-**Purpose:** Core domain model. Task lifecycle state machine, agent state, sprint tracking.
+**Purpose:** Defines task, agent, sprint, history, lease, configuration, and system-mode concepts.
 
-**Observations:**
-- `State` struct is the central data type — serialized to/from `state.yaml`. Split into `state.go` (70), `task.go` (558), `agent.go` (52), `sprint.go` (141), `config.go` (138), `history.go` (211), `diagnostics.go` (230), `lease.go` (8) *(health check: LOC updated; task.go +127, history.go +48, diagnostics.go +28)*
-- `Task` struct has 30+ fields covering full lifecycle
-- `TaskType` → role workflow registry (`taskWorkflows` map)
-- `IsClaimable()` encodes claiming rules with dependency checking
-- 12 task statuses with `IsValid()`, `IsTerminal()` methods
-- `models` now imports `internal/roles` (both `state.go` and `diagnostics.go`). `roles` is itself a leaf, so this is a shallow dependency, but `models` is no longer the zero-dependency foundation described in earlier passes *(pass 13)*
-- `diagnostics_test.go` exists. File grew to 202 LOC *(pass 13)*
-
-#### db (`internal/db/`) — ~530 LOC *(health check: was ~500)*
-
-**Purpose:** Thread-safe YAML state access with file locking via `internal/filelock`.
-
-**Pattern:** Repository pattern — `Blackboard` wraps file I/O with atomic read-modify-write.
+**Pattern:** State-machine-oriented domain model with pipeline-aware status interpretation.
 
 **Observations:**
-- `Read()`, `ReadCached()` (mtime-based), `Write()`, `Modify()` (atomic closure)
-- Atomic write via temp file + fsync + rename — correct durability pattern
-- Stale lock detection with PID checking
-- `LockError` with 5 classified types (Timeout, Permission, DiskFull, Filesystem, Stale)
-- `Watcher` uses fsnotify on directory (not file) to catch atomic renames
-- `Metrics` for lock acquisition timing
 
-#### agent (`internal/agent/`) — ~3,870 LOC *(health check: was ~2,580)*
+- `models.State` is the serialized blackboard aggregate.
+- Task lifecycle vocabulary is split between stable model types and declarative pipeline resolution.
+- Canonical role naming now lives in `internal/roles`; the former bidirectional runtime/workflow maps are gone.
+- Three pipeline-aware status helpers in `models/task.go` retain the same structural shape.
+- `SprintSummary` preserves only `TasksDone`, so other sprint metrics are lost when a sprint is archived.
 
-**Purpose:** Supervisor loop, heartbeat, work detection, logging.
+#### Persistence and validation (`internal/db/`, `internal/filelock/`, `internal/statevalidate/`)
 
-**Observations:**
-- 18 files: `supervisor.go` (831 LOC), `claiming.go` (448), `registration.go` (358), `prompt.go` (338), `systemctl.go` (311), `workdetection.go` (254), `waitforwork.go` (236), `strategy_reviewer.go` (163), `quota.go` (160), `worktree_check.go` (138), `strategy_orchestrator.go` (132), `strategy_doer.go` (122), `masker.go` (117), `heartbeat.go` (103), `strategy.go` (64), `cli.go` (39), `output.go` (32), `logging.go` (28) *(health check: 7 new files — strategy_*.go (4), quota.go, masker.go, cli.go; supervisor.go 831 (was 535), claiming.go 448 (was 241))*
-- `RunSupervisor()` (186 LOC, nesting depth 5): checkAbort → waitWhilePaused → handleApprovedMerges → waitForWork → claimTask → buildPrompt → executeAgent → handleExitCode *(pass 7, Complexity lens: nesting depth noted)*
-- `CLIExecutor` interface enables mock testing (supports claude, codex, gemini, vibe, kimi). `DefaultCLIExecutor` concrete implementation hardcodes per-CLI flag formats in a switch statement with `mistral → vibe` rename mapping *(pass 17, Coupling lens)*
-- `waitForWorkEventDriven()` (116 LOC) with fsnotify + polling fallback
-- `verifyPlannerStateChanges()` (137 LOC) — 6 switch cases with repetitive before/after counting structure *(pass 2, Complexity lens)*
-- `heartbeat.go`: independent Blackboard instance, 60s tick, extends lease
-- `workdetection.go` (~170 LOC): 6 planner wake trigger types, now declarative via `plannerWakeTriggerSpecs` (trigger → description → state predicate) replacing imperative branching. `DetectOrchestratorWakeTriggers()` is a pure state-query function consumed by both `agent/supervisor.go` and `commands/status.go` (the latter creating a cross-layer dependency) *(pass 14, Boundaries lens)*
-- `logging.go`: package-level singleton `slog.Logger`, hardcoded to stdout
-- **Core execution paths untested**: `Execute()`, `ExecuteInteractive()`, `handleApprovedMerges()`, `logTaskSubmissionIfCompleted()` at 0% statement coverage; `resumeHandoffTask()` at 11.4%. These are the actual agent loop entry points — tested indirectly via `TestSupervisorBasicLoop` with mock executor but not at statement level *(pass 4, Coverage lens)*
-- **`handleApprovedMerges` nesting**: 47 LOC (was 55) with max nesting depth ~4-5 (for-range → if-conditions → if-err → errors.As). Improved with cleaner early returns. Still has nested `IntegrationFailedError` field processing. `resumeHandoffTask` extracted to `ops.ResumeHandoff` *(pass 7, resolved: `ac4ce6f5`)*
-- **Role string literals**: `internal/roles` package introduced with `RuntimeCoder`, `RuntimeCodeReviewer`, `RuntimePlanner` constants and `ToWorkflow()`/`ToRuntime()` mapping. All agent/, cmd/, and ops/ files now import role constants *(pass 6, resolved: `a60c72e`)*
-- **Duplicated identity validation**: `registration.go:validateIdentity()` reimplements `identity.ValidateFormat()` + `identity.ValidateRole()` — same algorithm (split on last hyphen, validate numeric suffix, check role prefix) without importing the `identity` package *(pass 6, Coupling lens)*
-- **Hardcoded `"terminal-1"` and raw `1800`**: `supervisor.go:386` passes `"terminal-1"` literal and `1800` instead of `models.DefaultLeaseDurationSeconds`; `supervisor.go:501` also uses raw `1800` *(pass 6, Coupling lens; pass 13: line numbers updated)*
-- **waitForXWork refactored**: 2 generic functions (`waitForWorkEventDriven`, `waitForWorkPolling`) accepting a `workCheckFunc` callback. File is now 213 LOC (was 412). Adding a new role no longer requires new wait functions *(pass 13, resolved)*
-- **RoleStrategy pattern** *(Adversarial pass, new packages)*: `strategy.go` defines 7-method `RoleStrategy` interface; factory `NewRoleStrategy()` creates doer/reviewer/orchestrator from pipeline resolver role types. Strategies orchestrate wait→claim→build→execute→post cycles without owning business logic (delegates to ops/claiming/prompt). Reviewer is only strategy with mutable state (`mergeRetries` counter for merge retry loop). `ApplyYAMLTimeouts()` uses type-switch over all three strategy types instead of interface method — code smell
-- **quota.go** *(Adversarial pass, new packages)*: Self-contained quota exhaustion detection subsystem. Hardcoded patterns for known providers (claude, codex, gemini, etc.). Signal files in `.liza/` for cross-agent communication. Well-scoped utility, no business logic
-- **masker.go** *(Adversarial pass, new packages)*: Allowlist-based secret masking from `os.Environ()`. Filters short values (<8 chars), sorts longest-first for overlapping substrings. Pure stdlib, zero internal deps
-- **cli.go** *(Adversarial pass, new packages)*: CLI backend resolution chain (flag → env `LIZA_DEFAULT_CLI` → `DefaultCLI` const). 39 LOC, well-scoped
+**Purpose:** Provides process-safe blackboard access and state validation.
 
-#### statevalidate (`internal/statevalidate/`) — ~900 LOC *(health check: was ~660)*
-
-**Purpose:** Shared state validation pipeline, extracted from `commands/validate.go` to allow both CLI and ops to run identical validation without import cycles.
+**Pattern:** Repository-style `Blackboard` with `flock` authority, read-modify-write closures, and atomic replacement.
 
 **Observations:**
-- `ValidateStateFile()` runs 9 validators: required fields, task states, task invariants, dependencies, agent invariants, handoff, discovered, anomalies, sprint
-- Accepts `io.Writer` for non-fatal warnings (nil defaults to `io.Discard`)
-- Exported shims `ValidateAgentInvariants()` and `ValidateAnomalies()` expose individual validators for existing `commands/` test callsites
-- Used by: `commands/validate.go` (CLI `liza validate`), `ops/add_task.go` (post-write validation)
-- Split into `validate.go` (127), `validate_task.go` (411), `validate_agent.go` (42), `validate_deps.go` (84), `validate_entity.go` (128), `validate_sprint.go` (88), `validate_roles.go` (23) *(health check: LOC updated; new validate_roles.go)*
 
-#### ops (`internal/ops/`) — ~9,920 LOC production, ~24,820 LOC test *(health check: was ~5,900/~12,070)*
+- Writes use a temporary file, synchronization, and rename.
+- `Modify` keeps state mutation within the lock boundary.
+- Filesystem watching observes the containing directory so atomic renames are visible.
+- Validation is extensive, but direct tests for the top-level state-file entry points remain less visible than tests for inner validators.
+- `internal/statevalidate` measures 89.6% statement coverage over 924 statements; the earlier suspicion that its entry points were untested was a measurement artifact, not a gap. *(pass 20, Coverage lens)*
 
-**Purpose:** Pure business logic layer for all task workflow and system operations. Returns structured results with no terminal I/O side effects.
+#### Pipeline and prompt construction (`internal/pipeline/`, `internal/prompts/`, `internal/embedded/`)
 
-**Pattern:** Service layer — extracted from `commands` to break the agent→commands upward dependency and eliminate MCP protocol corruption risk.
+**Purpose:** Loads frozen pipeline configuration, resolves lifecycle behavior, builds agent prompts, and installs bundled assets.
 
-**Observations:**
-- 30+ operations covering all mutation commands, including new Phase 2 operations:
-  - Task workflow: `ClaimTask`, `ClaimReviewerTask`, `SubmitForReview`, `SubmitVerdict`, `Handoff`, `ResumeHandoff`, `MarkBlocked`, `ReleaseClaim`, `SupersedeTask`, `AddTask`, `CheckDeleteTask`, `DeleteTask`, `Proceed`, `AwaitVerdict`, `AwaitResubmission`, `Replan`, `RecoverTask`, `SetTaskOutput`
-  - Agent lifecycle: `DeleteAgent`, `IsAgentProcessRunning`
-  - System mode: `Start`, `Stop`, `Pause`, `Resume`
-  - Worktree: `CreateWorktree`, `DeleteWorktree`, `MergeWorktree`
-  - Sprint: `UpdateSprintMetrics`, `Checkpoint`, `Analyze`, `AdvanceSprint`, `SprintCheckpoint`
-  - Init: `InitProject`
-  - Maintenance: `ClearStaleReviewClaims`
-- Each function returns a typed result struct (e.g., `*VerdictResult`, `*HandoffResult`, `*ModeChangeResult`)
-- Zero `fmt.Print*` or `os.Stdin` calls — verified by grep
-- Two consumers: `agent/` (orchestration), `commands/` (CLI presentation) *(health check: was three — `mcp/` removed in `90c132d5`)*
-- Depends on: `db`, `models`, `git`, `log`, `paths`, `analysis`, `statevalidate`, `pipeline`, `roles`, `identity`, `errors` — same layer as `commands` minus presentation concerns
-- `wt_merge.go` (389 LOC): `MergeWorktree` — linear phased flow (validate → merge → integration tests → update state → cleanup). Now logs WARNING when integration test script is missing and persists `tests_ran` in merge history. Tri-state stat handling for test script presence *(pass 7, Complexity lens; `bce626d`, `52ceac5`)*
-- `helpers.go` provides `readTaskState()` for Read-path task lookup, but no equivalent exists for the Modify-callback path *(pass 5, Duplication lens)*
-- **Structural repetition within ops** *(pass 5, Duplication lens)*: Most ops functions share an identical skeleton — input validation → `paths.New(projectRoot)` + `db.For(lp.StatePath())` → `bb.Modify(func(state) { FindTask + nil check + status check + mutate + history append })` → wrap error → return result. Quantified: `if taskID == ""` guard in 10/21 files, `FindTask + NotFoundError` inside Modify in 10 files, `task.History = append(...)` in 12 files. See Duplication smell below.
-- **Inconsistent parameter conventions** *(pass 6, Coupling lens)*: Some ops functions take `projectRoot` and internally construct `paths.New()` + `db.For()` (ClaimTask, MergeWorktree, DeleteTask, SubmitReview, etc.), while others take `statePath`/`logPath` directly (AddTask). Callers must know which convention each function uses. See Coupling smell below.
-- **6 new ops files** *(Adversarial pass, new packages)*: `await_verdict.go` (445), `advance_sprint.go` (444), `await_resubmission.go` (403), `init_project.go` (279), `replan.go` (274), `recover_task.go` (246). All follow established patterns (projectRoot param, loadResolver, bb.Modify, FindTask guard). `await_verdict` and `await_resubmission` implement event-loop + polling fallback with ~40% structural overlap (see Duplication smell below). `recover_task` has well-documented multi-phase recovery (read → git cleanup → state cleanup). `advance_sprint` uses plan/apply separation with archive-before-mutate inside Modify() lock
-- **Pipeline config loaded per-operation from disk** *(pass 13, Complexity lens; health check: count updated)*: `loadResolver(projectRoot)` called from 54 sites in ops files — each operation independently reads and parses `pipeline.yaml` via `pipeline.LoadFrozen()`. A multi-step workflow (claim → build prompt → execute → submit → review → merge) reads the same file 6+ times. The overhead is negligible (small YAML file), but the pattern prevents session-level caching if performance becomes a concern. *(health check: grew from 16+ to 54 sites — magnitude tripled with ops expansion)*
-
-#### commands (`internal/commands/`) — ~5,300 LOC *(health check: was ~4,200)*
-
-**Purpose:** CLI presentation wrappers over `ops/` business logic, plus read-only query commands.
-
-**Pattern:** Thin wrapper per command: call `ops.*`, format and print result. Read-only commands (inspect, status, validate) retain their own logic since they already return structured data.
+**Pattern:** Declarative pipeline plus builder-oriented prompt assembly.
 
 **Observations:**
-- 30+ command implementations — mutation commands are thin wrappers (~20-75 LOC each), read-only commands retain logic
-- `watch.go` (846 LOC): health checks with alert deduplication, comprehensive monitoring *(health check: was 516)*
-- `validate.go` (28 LOC): thin wrapper delegating to `internal/statevalidate` package *(pass 2; pass 7: LOC updated; `6fe5bcc`: validation logic extracted to shared package)*
-- `format.go` (164 LOC): centralized JSON/YAML/table formatting
-- Templates in `commands/templates/`: status_dashboard, agent_value, metrics_value
-- **Self-constructing infrastructure** — each command function creates fresh `paths.New()`, `db.New()`, `git.New()` instances internally; no dependency injection *(pass 3, Boundaries lens)*
-- **Watch thresholds hardcoded** — 10 constants (`DefaultCheckInterval`, `LeaseGracePeriod`, `StallThreshold`, etc.) with no path to `models.Config`. Operationally tunable parameters hardcoded in source *(pass 6, Coupling lens)*
-- **Imports `internal/agent`** — `status.go:282` calls `agent.DetectOrchestratorWakeTriggers()` for wake trigger display. This breaks the intended peer relationship where `commands` and `agent` are both consumers of `ops`. See boundary smell *(pass 14, Boundaries lens)*
 
-#### cmd (`cmd/`) — ~3,090 LOC *(health check: was ~1,530)*
+- Pipeline configuration is loaded per operation, preserving self-contained command behavior.
+- Prompt construction still imports application logic from `internal/ops` for several read-only pipeline and planning queries.
+- `internal/embedded/embedded.go` is now 1,530 lines and contains multiple artifact families.
+- Direct named tests were not found for `PlanGlobalFiles`, `WritePipelineConfig`, and `WriteGuardrails`, but all three are reached indirectly: 90.9%, 100%, and 66.7% statement coverage respectively. Absence of a named test is not absence of coverage. *(pass 20, Coverage lens)*
+- Two prompt template blocks dominate the template tree: `blocks/review_instructions.tmpl` (392 lines, 26.7 KB) and `blocks/implementation_phase.tmpl` (240 lines, 20.8 KB), together about 36% of all template bytes and larger than `CORE.md`. *(pass 18, Complexity lens)*
+- Both are hardcoded `if/else if` chains over role names with no `else` fallback, so an unrecognized role renders an empty instruction block. *(pass 18, Complexity lens)*
 
-**Purpose:** Binary entry point (single binary).
+#### Agent runtime and external tools (`internal/agent/`, `internal/providers/`, `internal/toolchain/`, `internal/codexconfig/`)
 
-**Observations:**
-- Split into `main.go` + 6 `cmd_*.go` files: `cmd_task.go` (910), `cmd_system.go` (683), `cmd_review.go` (436), `cmd_init.go` (363), `cmd_agent.go` (241), `cmd_worktree.go` (123). Total ~3,089 LOC across 7+ files. Business logic delegates to `commands` package *(health check: cmd_task.go doubled, cmd_system.go +40%)*
-- `cmd/liza-mcp/` removed *(health check: MCP server deleted in `90c132d5`)*
+**Purpose:** Claims work, builds execution plans, launches external agents, monitors progress, and maps configured providers to tool invocations.
 
-#### mcp — REMOVED *(health check: entire `internal/mcp/` and `cmd/liza-mcp/` deleted in `90c132d5`; see ADR-0057)*
-
-Agents now interact via CLI `--json` mode instead of MCP JSON-RPC. All MCP findings from prior passes are stale.
-
-#### git (`internal/git/`) — ~740 LOC *(health check: was ~590)*
-
-**Purpose:** Git worktree and branch operations.
+**Pattern:** Strategy-based roles, `LLMAgent`/`CLIAgent` boundaries, provider catalog, and data-driven launch profiles.
 
 **Observations:**
-- `CreateWorktree()`, `RemoveWorktree()`, `MergeBranch()` (ff then no-ff), `RebaseOnto()`
-- Centralized `runGit()` / `runGitCombined()` helpers
-- `CalculateDrift()` for worktree-to-main divergence measurement
 
-#### prompts (`internal/prompts/`) — ~600 LOC + 9 templates *(health check: was ~633 + 14 templates)*
+- Interfaces include `RoleStrategy`, `LLMAgent`, `CLIExecutor`, state watchers, command runners, and candidate-tree lookups.
+- Provider launch behavior is primarily catalog/profile driven; the old monolithic five-tool executor switch is no longer an accurate description.
+- A few provider-specific policies remain intentionally explicit, including Claude subagent disabling and the Codex wrapper path.
+- The catalog is a launch/profile boundary, not a complete provider-extension boundary: activation assets are provider-named, initialization expands Cursor into Claude/Codex dependencies, and operational failure detectors remain Codex-specific outside the catalog. *(pass 22, Coupling lens)*
+- The catalog carries canonical `ProviderKey` metadata into `LaunchPlan`, but no production consumer reads it; supervisor registration persists the raw CLI name instead. *(Adversarial pass)*
+- `ApplyYAMLTimeouts` still switches over concrete strategy types instead of using the strategy interface.
+- `internal/agent/supervisor.go` is 1,129 lines and remains a high-change orchestration surface. Its complexity is concentrated: `RunSupervisor` alone is 442 lines, the longest function in the repository. *(pass 18, Complexity lens)*
+- `RunSupervisor` maintains five in-memory loop-detection trackers whose resets are hand-paired across six scattered, asymmetric call sites. All are process-local, so a restarted supervisor resets its own circuit breakers. *(pass 18, Complexity lens)*
+- `internal/agent/prompt.go` carries nine near-identical index-adapter functions and three near-identical type families for SCIP, Stacklit, and functional clusters, differing mainly by field name (`Path` vs `IndexPath`). *(pass 18, Complexity lens)*
+- The three `available*IndexRefs` helpers discard discovery errors and return `nil`, so agents can silently lose index references from their prompts with no operator signal. *(pass 18, Complexity lens)*
+- Quota and provider-unavailable stop signals duplicate the same path/glob/write/check/clear lifecycle in `quota.go` and `provider_unavailable.go`. *(pass 21, Duplication lens)*
+- Supervisor registration and heartbeat renewal use a fixed 1,800-second agent lease even when `state.Config.LeaseDuration` differs; registration also records every supervisor as `"terminal-1"`. *(pass 21, Duplication lens)*
 
-**Purpose:** Role-specific prompt generation using Go `text/template`.
+#### Application operations (`internal/ops/`)
 
-**Observations:**
-- Template-driven: all text in `.tmpl` files, clean logic/text separation
-- 9 templates: base prompt, 8 wake triggers *(health check: was 14 — restructured; templates in `templates/` dir)*
-- `executeTemplate()` panics on error rather than returning it
-- `PlannerContextConfig` replaced by `CodePlannerContextConfig`, `EpicPlannerContextConfig`, etc. with actual fields for Phase 2 roles *(pass 13, resolved)*
-- Template execution pattern (embed.FS + funcMap + template.Must + executeTemplate) is duplicated nearly identically in `commands/templates.go` *(pass 3, Boundaries lens)*
-- **Imports `internal/ops`** for 5+ utility functions: `LoadDetectionContext`, `IsPlanningPair`, `IsPlanningCompleteEligible`, `IsTransitionCycleBlocked`, `CountReadyManyToOneCohorts`, `ManyToOneTransitionInfo`. Dependency deepened since pass 14 (was 3 functions) — architecturally inverted (see boundary smell) *(pass 14, Boundaries lens; health check: worsened)*
+**Purpose:** Implements task lifecycle operations used by the CLI and agent runtime.
 
-#### embedded (`internal/embedded/`) — ~640 LOC *(health check: was ~500)*
-
-**Purpose:** `go:embed` for contracts and skills, Claude settings management.
-
-**Observations:**
-- Synced from source via `make sync-embedded` before build
-- `WriteClaudeSettings()` merges with existing settings; accepts `io.Reader` parameter
-- Frontmatter management for CLAUDE.md files
-- `PlanGlobalFiles()` — previously at 0% coverage due to stdin coupling *(pass 4, Coverage lens)*; stdin coupling now resolved via `io.Reader` injection
-- `consistency_test.go` (126 LOC): byte-exact comparison of repo masters vs embedded copies. Wired into `make check-embedded` → `make lint`
-- *(health check: `WriteMCPSettings()`, `mergeMCPSettings()` removed with MCP server)*
-
-#### paths (`internal/paths/`) — ~346 LOC *(health check: was ~276)*
-
-**Purpose:** Path resolution with worktree awareness.
+**Pattern:** Service layer around blackboard transactions, pipeline resolution, Git operations, and history recording.
 
 **Observations:**
-- `GetProjectRoot()` via `git rev-parse --show-toplevel`
-- `ValidateTaskID()` with path traversal protection
-- `TaskBranchPrefix = "task/"` constant — single source of truth for branch naming *(added: `59a8e3e`)*
-- All standard `.liza/` paths centralized
 
-#### pipeline (`internal/pipeline/`) — ~1,170 LOC *(health check: was 641)*
+- `internal/ops/proceed.go` is 1,500 lines and combines graph traversal, recovery, child construction, and dependency propagation.
+- `await_verdict.go` and `await_resubmission.go` retain parallel watcher/timer/polling loop structures.
+- `AddTasks` accepts state/log paths while most operations accept a project root.
+- `SetTaskOutput` accepts an empty `spec_ref`, while proceeding and validation require one. The CLI also describes it as optional.
+- Per-subtask fan-out still assigns priority `1`; one-to-one transitions preserve the parent priority.
+- The layer contains both the formal project logger and direct `log.Printf` calls.
+- Five of the ten longest functions in the repository are `ops` write-path transaction scripts of 200-320 lines (`MergeWorktree`, `SubmitForReview`, `SubmitVerdict`, `ExecuteAvailableTransitions`, `completeClaimTaskAfterValidation`). *(pass 18, Complexity lens)*
+- Their read/validate → external effects → mutate-under-lock ordering is expressed as a `// Phase N` comment convention present in only 9 of 73 production files, not as a shared transaction helper. *(pass 18, Complexity lens)*
+- Worktree intelligence refresh is assembled independently in claim, create, recovery, and review-submission paths. `wt_create.go` repeats the same four-call sequence in both its existing- and new-worktree branches. *(pass 21, Duplication lens)*
 
-**Purpose:** Declarative pipeline configuration — types, parsing, validation, and state resolution for multi-stage agent workflows defined in YAML.
+#### Git and worktrees (`internal/git/`, `internal/gitenv/`, `internal/worktreeexclude/`)
 
-**Pattern:** Configuration + Resolver — `PipelineConfig` defines the static structure (agent roles, role-pairs with 6-state lifecycles, sub-pipelines, transitions, entry points); `Resolver` wraps a validated config for runtime queries (status lookup, transition maps, sprint terminal states).
+**Purpose:** Creates, inspects, rebases, merges, excludes, and removes task worktrees.
 
-**Observations:**
-- `config.go` (488 LOC): YAML parsing with strict mode (`KnownFields(true)`), comprehensive validation *(health check: was 317 — +54%)*
-- `resolver.go` (642 LOC): Query interface over validated config — `TransitionMap()` generates full state machine, `AvailableTransitions()` filters by status + executed set, `SprintTerminalStates()` with lazy-cached `TransitionSourcePairs()` *(health check: was 324 — doubled)*
-- `migrate.go` (37 LOC): Pipeline migration support *(health check: new file)*
-- `LoadFrozen()` loads from `.liza/pipeline.yaml`
-- Imports only `models` — clean leaf-adjacent position in dependency graph
-- 7 consumers: `ops/`, `agent/` (registration), `commands/` (init), `statevalidate/`, `prompts/`
-- Well-tested: 3,613 LOC tests (3.1:1 ratio) *(health check: was 1,569 — test coverage investment increased)*
-
-#### tui (`internal/tui/`) — ~2,265 LOC *(Adversarial pass, new packages)*
-
-**Purpose:** Interactive terminal dashboard for agent monitoring via `liza system watch`.
-
-**Pattern:** Bubbletea Model-Update-View — message-driven update loop with stateless rendering.
+**Pattern:** Infrastructure adapters around Git commands and worktree naming.
 
 **Observations:**
-- 6 files: `view.go` (688), `update.go` (643), `commands.go` (342), `styles.go` (251), `model.go` (241), `keymap.go` (100)
-- Model struct has 47 fields (typical for TUI state)
-- 11 keybindings: spawn/terminate agents, pause/resume/stop system, add tasks, checkpoint, help
-- Responsive layout: 4 column tiers (≥80/120/160 cols)
-- Form-based task creation via Huh library
-- Alert management with 10s auto-dismiss, 200-entry activity feed cap
-- Imports: `agent`, `db`, `log`, `models`, `paths`, `commands`, `ops`, `pipeline`, `process`, `render`
-- Only consumer: `cmd/liza/cmd_system.go` — good isolation, no reverse dependencies
-- **Boundary compliance**: All state mutations delegate to ops/commands; no business logic in UI layer
-- **Large functions**: `Update()` 161 LOC (~31 control flow paths), `renderTaskPanel()` 199 LOC
-- **Well-tested**: 172 tests across 6 test files (view, update, commands, styles, keymap, model)
-- External deps: Bubbletea, Bubbles, Huh, Lipgloss
 
-#### New small packages *(Adversarial pass, new packages)*
+- Integration-test execution is bounded by `DefaultIntegrationTestTimeout`, `exec.CommandContext`, process-group termination, and `WaitDelay`.
+- Worktree-relative path construction is still duplicated at three inline call sites in addition to the shared helper.
+- Some cleanup removals remain best-effort and intentionally do not propagate secondary failures.
+- `wt_merge.go` still mixes UTC timestamps with two local `time.Now()` calls.
 
-- `interactive/` (~238 LOC, ~109 test): Init wizard for pairing/full mode setup. Imports only `commands` (for symlink mapping). Consumer: `cmd/liza/cmd_init.go`. Pure UI layer, clean boundary. Minor: hardcoded `"specs/vision.md"` path
-- `render/` (~175 LOC, ~234 test): Output formatting (JSON, YAML, tables, durations, templates). Zero internal imports — pure formatter. Consumers: `commands/inspect_*.go`, `tui/view.go`. Excellent boundary
-- `jsonout/` (~149 LOC, ~275 test): JSON response wrapping and error classification for `--json` mode. Imports `errors` and `ops` (for error type assertions in `ClassifyError()`). Consumer: `cmd/liza/main.go`. Acceptable boundary crossing — intentional error type mapping
-- `process/` (~67 LOC, no tests): Detached subprocess spawning with platform-specific attributes (`procattr_unix.go`, `procattr_windows.go`). Zero internal imports. Consumer: `tui/commands.go`. No test file *(Adversarial pass: test gap)*
-- `gitenv/` (~28 LOC, no tests): Forces `LC_ALL=C` for git commands to normalize locale-dependent output. Zero internal imports. Consumers: `git/`, `statevalidate/`. No test file *(Adversarial pass: test gap)*
+#### CLI and terminal UI (`cmd/liza/`, `internal/commands/`, `internal/tui/`, `internal/interactive/`)
 
-#### Other leaf packages
+**Purpose:** Exposes command-line, interactive initialization, and live terminal views.
 
-- `log/` (~210 LOC): YAML append log with flock (via shared `filelock` package). Now uses append-only writes (no O(n) rewrite) and bounded tail-window `GetLastTimestamp()` for sub-linear reads *(perf: `fe8de6b`)*
-- `filelock/` (~490 LOC): Shared file-locking with flock, diagnostic owner metadata, error classification, metrics
-- `analysis/` (~224 LOC): Circuit breaker pattern detection (6 patterns)
-- `identity/` (~123 LOC): Agent ID resolution and validation *(health check: was ~108)*
-- `errors/` (~70 LOC): Exit codes and `NotFoundError` type (with `Entity`, `ID`, `Field` fields) *(health check: was ~45)*
-- `roles/` (~90 LOC): Role constants with runtime↔workflow mapping *(health check: was ~60 — grew with Phase 2 roles)*
-- `testhelpers/` (~784 LOC): Fixtures, git setup, assertions, utilities *(health check: was ~700)*
+**Pattern:** Cobra command adapters plus Bubble Tea model/update/view.
+
+**Observations:**
+
+- Commands usually delegate mutations to `internal/ops`.
+- `supervision-model.md` still calls `commands` the shared implementation layer used by supervisors and CLI commands, contrary to ADR-0021 and the current `ops`-centered dependency shape. *(pass 22, Coupling lens)*
+- `commands/status.go`, `repair_agent_pool.go`, and `resume.go` import `internal/agent`, so the presentation/application boundary is not one-directional.
+- CLI and TUI resume adapters independently glob and clear both provider stop-signal families after `ops.Resume`; `ops.Resume` itself does not own that recovery semantic. *(pass 21, Duplication lens)*
+- `internal/commands/watch.go` is 1,407 lines and holds twelve top-level timing/retry constants in code.
+- `internal/commands/init.go` is 1,268 lines.
+- Formatting helpers use the standard library `slices.Sort`; the former hand-written bubble sort is gone.
+- `internal/tui/view.go` renders agent and task panels through two structurally duplicated routines (`renderAgentPanel`, 140 lines; `renderTaskPanel`, 204 lines), each declaring its own local `column` type with incompatible closure signatures. *(pass 18, Complexity lens)*
+- Both routines contain a verbatim-duplicated stringly-typed `c.header == "STATUS"` ANSI-padding special case. *(pass 18, Complexity lens)*
+- `internal/commands/init.go` and `internal/ops/init_project.go` are parallel initialization implementations with near-verbatim duplicated helpers; `InitCommandWithConfig` is 405 lines, the second-longest function in the repository. *(pass 18, Complexity lens)*
+- The two paths have diverged on Git invocation: `commands/init.go` uses `internal/gitenv`, while `ops/init_project.go` calls `exec.Command("git", ...)` directly, bypassing the `LC_ALL=C` and timeout guarantees `gitenv` exists to provide. Five raw-Git sites remain across two files versus sixteen files using `gitenv`. *(pass 18, Complexity lens)*
+
+#### Repository intelligence and optional tooling
+
+**Locations:** `internal/scipsearch/`, `internal/stacklit/`, `internal/semble/`, `internal/functionalclusters/`, `internal/pairingindex/`, `internal/statehygiene/`, `internal/envgate/`, `internal/projectdetect/`
+
+**Purpose:** Adds code indexing, semantic exploration, functional-cluster analysis, pairing hooks, environment readiness, state hygiene, and project detection.
+
+**Pattern:** Optional adapters and focused application services around the core orchestration flow.
+
+**Observations:**
+
+- SCIP and Stacklit integration is optional rather than a core blackboard dependency.
+- Semble and functional-cluster support add architecture-aware discovery without changing blackboard ownership.
+- Pairing-index hooks and environment gates expand initialization and session-start behavior.
+- SCIP, Stacklit, and functional clusters independently own similar plan/runner/result contracts; `functionalclusters` directly composes Stacklit and SCIP while `pairingindex` enumerates concrete backends. Adding another index backend therefore crosses several package boundaries. *(pass 22, Coupling lens)*
+- `internal/scipsearch/scipsearch.go` is currently the largest production Go file at 1,566 lines.
+- POSIX shell quoting has five local implementations; `outputSuffix` has five; bounded failure diagnostics have three with different truncation semantics; and SCIP/Semble duplicate truthy parsing already owned by `internal/envgate`. *(pass 21, Duplication lens)*
+
+#### Operational support packages
+
+**Locations:** `internal/updater/`, `internal/alerts/`, `internal/procscan/`, `internal/secretmask/`, `internal/brand/`, `internal/brandrender/`, `internal/bash-policy-cli/`, `internal/precommit/`, `internal/initcheck/`, `internal/testguard/`
+
+**Purpose:** Provides self-update, alerts, process inspection, secret masking, white-label rendering, bash-policy integration, initialization checks, and quality gates.
+
+**Observations:**
+
+- These packages represent deliberate product expansion since the prior review.
+- Provider catalogs, toolchain selection, branding, shell completion, readiness checks, and functional-cluster workflows are backed by ADRs 0085–0097.
+- They should be treated as first-class architecture, not omitted as incidental utilities.
+
+#### Shared leaf utilities
+
+**Locations:** `internal/paths/`, `internal/identity/`, `internal/errors/`, `internal/jsonout/`, `internal/render/`, `internal/log/`, `internal/process/`, `internal/termutil/`, `internal/analysis/`
+
+**Purpose:** Centralizes naming, identity parsing, errors, output formats, rendering, logging, process handling, terminal behavior, and pattern analysis.
+
+**Observations:**
+
+- The leaf-package strategy keeps common vocabulary out of larger application packages.
+- `agent/registration.go` still duplicates identity validation already owned by `internal/identity`.
+- The global project logger remains proportionate to a single-process CLI.
 
 ### 1.3 Dependency Map
 
-```
-models/ (stable, near-leaf → roles)  paths/ (stable, leaf)
-   ↑                                   ↑
-   ├── db/                             ├── db/
-   ├── agent/                          ├── agent/
-   ├── commands/                       ├── commands/
-   ├── ops/                            ├── ops/
-   ├── prompts/                        ├── git/
-   ├── analysis/                       └── embedded/
-   └── testhelpers/
+```text
+Presentation / entry points
+  cmd/liza ──► commands ──► ops
+       │  │       │          │
+       │  └───────┼──► ops   │        50 direct sites bypass commands
+       │          └──► agent │        known boundary crossing
+       └──────► tui          ▼
+Agent runtime ─────────────► ops ◄──── prompts
+      │         │             │           known inversion
+      │         └──► db ──────┤        13 .Modify sites bypass ops
+      ├──► providers          ├──► pipeline
+      ├──► toolchain          ├──► db ──► filelock
+      └──► prompts            ├──► git
+                              └──► models
 
-errors/ (stable, leaf)              log/ (stable, leaf)
-   ↑                                   ↑
-   ├── db/                             ├── commands/
-   ├── ops/                            └── ops/
-   ├── agent/
-   ├── commands/
-filelock/ (stable, leaf)
-   ↑
-   ├── db/
-   └── log/
+Stable vocabulary / leaf services
+  roles · taskkind · paths · identity · errors · render · log
 
-git/ (volatile)                     prompts/ (stable)
-   ↑                                   ↑
-   ├── commands/                       └── agent/
-   └── ops/
+Presentation with business dependency
+  jsonout ──► ops · filelock
 
-pipeline/ (stable, near-leaf — imports only models)
-   ↑
-   ├── ops/ (release_claim, pipeline_ops, proceed)
-   ├── agent/ (registration)
-   ├── commands/ (init)
-   ├── statevalidate/
-   └── prompts/
-
-db/ (stable core)
-   ↑
-   ├── agent/
-   ├── commands/
-   ├── ops/
-   └── testhelpers/
-
-ops/ (service layer — pure logic, no I/O)
-   ↑
-   ├── agent/ (orchestration — uses structured results)
-   └── commands/ (CLI — adds presentation)
-
-commands/ (volatile, high-level — also imports agent/)
-   ↑
-   └── cmd/liza (CLI entry point)
-
-prompts/ (stable — imports ops for queries, see boundary smell)
-   ↑
-   └── agent/
-
-tui/ (volatile, high-level)    jsonout/ (stable, leaf)
-   ↑                              ↑
-   └── cmd/liza                    └── agent/
+Optional repository intelligence
+  scipsearch · stacklit · semble · functionalclusters · pairingindex
 ```
 
-**No import cycles.** Dependency graph is a clean DAG. Leaf packages: `paths`, `errors`, `filelock`, `identity`, `jsonout`, `gitenv`, `process`, `render`. Near-leaf: `models` (imports only `roles`), `roles` (leaf). *(health check: `mcp/protocol` removed; new leaf packages added)*
+The dependency graph remains acyclic. *(pass 19, Boundaries lens)* Four direction exceptions are now visible rather than two: `prompts → ops`, `commands → agent`, `agent → db` (state mutation reaching persistence without passing through `ops`), and `jsonout → ops` (a presentation package importing the application layer to type-assert its errors). Read-only query logic is also distributed across `commands`, `agent`, and `ops`, which increases transitive coupling.
 
-**Single consumer of `commands`**: CLI (`cmd/liza`). *(health check: was two consumers — MCP server removed in `90c132d5`)*
+The Coupling lens finds that the expensive dependencies are behavioral rather than cyclic: provider onboarding, stop-state recovery, semantic state validation, and worktree-intelligence refresh each require coordinated changes across otherwise valid package boundaries. *(pass 22, Coupling lens)*
 
 ### 1.4 Coverage Checkpoint
 
-**What exists that shouldn't?**
-- `commands/format.go` has bubble-sort for map keys (functional but O(n^2); `sort.Strings` exists)
-- `dashboardSection` type with `"table"` format case is a no-op (line 155: just appends empty string)
+#### Largest production Go files
 
-**What's implicit that should be explicit?**
-- The "Blackboard must remain stateless beyond cache" constraint (documented in architectural-issues.md)
-- The contract between `commands` and its consumers — now single-transport (CLI) since MCP removal *(health check: was three transports)*
+| File | Lines |
+|------|------:|
+| `internal/scipsearch/scipsearch.go` | 1,566 |
+| `internal/embedded/embedded.go` | 1,530 |
+| `internal/ops/proceed.go` | 1,500 |
+| `internal/commands/watch.go` | 1,407 |
+| `internal/commands/init.go` | 1,268 |
+| `internal/updater/updater.go` | 1,259 |
+| `cmd/liza/cmd_task.go` | 1,258 |
+| `cmd/liza/cmd_launch.go` | 1,142 |
+| `internal/agent/supervisor.go` | 1,129 |
+| `internal/pairingindex/hooks.go` | 1,053 |
 
-**What's missing from the walkthrough?**
-- `db/metrics.go` (113 LOC): lock timing metrics — read and noted
-- `commands/status.go` (469 LOC): status dashboard rendering — read via templates
+#### Longest production Go functions *(pass 18, Complexity lens)*
 
-**What requires cross-file comparison?**
-- `derefString()` in prompts/builder.go duplicates `deref` template function
-- Template execution pattern in `commands/templates.go` vs `prompts/templates.go` — nearly identical: embed.FS + funcMap with `deref` + template.Must + executeTemplate that panics *(pass 3, Boundaries lens)*
-- **Worktree path helper not reused** *(pass 16, Duplication lens)*: `git.GetWorktreeRelPath(taskID)` at `worktree.go:304` is unused by 4 other call sites that inline the same `filepath.Join(paths.WorktreesDirName, taskID)` computation
-- **Ops Modify-callback boilerplate** *(pass 5, Duplication lens)*: `FindTask(taskID) + nil→NotFoundError` inside `bb.Modify` callbacks appears in 10 production files. The existing `readTaskState()` helper only works outside callbacks. The guard is identical in every file — see Smell below.
-- **Ops input validation** *(pass 5, Duplication lens)*: `if taskID == "" { return nil, fmt.Errorf("task ID is required") }` in 10/19 ops files; `if agentID == ""` in 7/19. Each function validates its own required parameters independently.
-- **Command test harness** *(pass 5, Duplication lens)*: 82 table-driven test loops across 34 command test files, 23 `initialState := &models.State{...}` constructions. The loop body (~15 lines: tmpDir → SetupLizaDir → create state → setup → WriteInitialState → call command → check error → validate state) is structurally identical.
-- **Test setup sequence** *(pass 5, Duplication lens)*: 625 occurrences of `testhelpers.{SetupLizaDir|CreateValidState|WriteInitialState}` across 55 test files. The 3-4 line setup is per-test-function, not per-file.
-- **Ops parameter convention split** *(pass 6, Coupling lens)*: `ClaimTask`, `MergeWorktree`, `DeleteTask`, `SubmitReview`, `Start`, `Stop`, `Pause`, `Resume`, `CreateWorktree`, `DeleteWorktree` take `projectRoot`; `AddTask` takes `statePath`/`logPath` directly — callers must track which convention each function uses
-- **Identity validation duplicated** *(pass 6, Coupling lens)*: `agent/registration.go:validateIdentity()` reimplements `identity.ValidateFormat()` + `identity.ValidateRole()` without importing the package
+| Function | Location | Lines |
+|----------|----------|------:|
+| `RunSupervisor` | `internal/agent/supervisor.go:637` | 442 |
+| `InitCommandWithConfig` | `internal/commands/init.go:763` | 405 |
+| `MergeWorktree` | `internal/ops/wt_merge.go:491` | 316 |
+| `SubmitForReview` | `internal/ops/submit_review.go:43` | 315 |
+| `SubmitVerdict` | `internal/ops/submit_verdict.go:93` | 302 |
+| `InitProject` | `internal/ops/init_project.go:49` | 222 |
+| `ExecuteAvailableTransitions` | `internal/ops/proceed.go:987` | 218 |
+| `completeClaimTaskAfterValidation` | `internal/ops/claim_task.go:246` | 209 |
+| `renderTaskPanel` | `internal/tui/view.go:402` | 204 |
+| `Replan` | `internal/ops/replan.go:35` | 194 |
 
-**Coverage lens statement-level data** *(pass 4)*:
+File size and function depth do not correlate here. The three largest files decompose well — `scipsearch.go` (1,566 lines) has no function above 63 lines, `pairingindex/hooks.go` above 76, `commands/watch.go` above 80, and `embedded.go` is an accessor family. Concentrated complexity sits instead in `supervisor.go`, `commands/init.go`, and the `ops` write path.
 
-| File/Area | Statement Coverage | Notes |
-|-----------|-------------------|-------|
-| **Total** | **75.3%** | From `go tool cover -func` |
-| `supervisor.Execute/ExecuteInteractive` | 0% | Core agent loop entry points |
-| `supervisor.handleApprovedMerges` | 0% | Merge orchestration |
-| `supervisor.resumeHandoffTask` | 11.4% | Complex handoff logic |
-| `supervisor.RunSupervisor` | 54.4% | Main loop |
-| `embedded.WritePipelineConfig` | 0% | I/O-coupled |
-| `validate.validateAnomalies` | 13.3% | Only first branch tested |
-| `validate.validateHandoff` | 33.3% | |
-| `inspect_field.getSprintMetricsField` | 29.4% | |
+#### Checkpoint questions
 
-**Files without any test file** *(pass 4, Coverage lens; health check: MCP entries removed)*:
-- `internal/prompts/templates.go` (42 LOC) — template execution
-- `internal/gitenv/gitenv.go` (28 LOC) — git environment *(health check: new package, no tests)*
-- `internal/process/` (67 LOC) — process spawning *(health check: new package, no tests)*
+| Question | Current assessment |
+|----------|--------------------|
+| What exists that should not? | `plugin/acp` (~450 production lines) is a public package under the module path whose only importers are two `internal/agent` performance tests. `plans/`, `plugin/`, and `scripts/` are tracked but absent from `REPOSITORY.md`, and `plugin/` is also outside this document's measurement scope. Coverage measurement adds two exported functions with no caller at all — `commands.UnblockTaskCommand` and `models.(*DependencyResolver).UnmetDependencies`. *(pass 20, Coverage lens)* Current C4 documentation also still models the removed `internal/mcp` subsystem. *(pass 21, Duplication lens)* |
+| What is implicit that should be explicit? | Review-submission cleanliness, verdict-time provider diversity, `spec_ref` requirements, and sprint-summary loss are not aligned across contracts and enforcement. Index-discovery failures in `agent/prompt.go` and the role coverage of the prompt template chains are silent at runtime. *(pass 18, Complexity lens)* The coverage contract is implicit throughout: no `-coverpkg`, no `codecov.yml`, no threshold, `fail_ci_if_error: false`. Nothing states what level of coverage the project intends to hold. *(pass 20, Coverage lens)* Worktree-intelligence refresh order and provider-signal cleanup are policies encoded only by repeated call sequences. *(pass 21, Duplication lens)* |
+| What was missing from the old walkthrough? | Provider catalogs, toolchains, update support, indexing, Semble, functional clusters, pairing hooks, branding, readiness gates, secret masking, and other post-ADR-0057 packages. |
+| What requires cross-file comparison? | Invariants versus operations, prompt queries versus ops ownership, command queries versus agent ownership, worktree path construction, await loops, timestamp handling, identity validation, provider-signal lifecycles, index-refresh sequences, and optional-tool shell/diagnostic helpers. |
 
-**Complexity lens metrics** *(pass 2; pass 7: updated with ops files, nesting depth, function LOC; health check: LOC updated)*:
+### 1.5 Pass 22 Verification and Gap Analysis
 
-| File | LOC | Longest Function (LOC) | Max Nesting Depth | Branch Density (ifs/LOC) | Notes |
-|------|-----|----------------------|-------------------|------------------------|-------|
-| **ops/proceed.go** | **1,200** | — | **4** | — | **Largest file — god file candidate** *(health check: was 533 — +125%)* |
-| cmd_task.go | 910 | — | 2 | — | CLI task command wiring *(health check: was 275 — tripled)* |
-| commands/init.go | 854 | — | — | — | **New god file candidate** *(health check: new entry)* |
-| watch.go | 846 | — | 3 | 1:10.4 (62 ifs) | Health checks *(health check: was 645)* |
-| supervisor.go | 831 | RunSupervisor (186) | 5 | 1:8.0 (80 ifs) | Main event loop *(health check: was 637)* |
-| cmd_system.go | 683 | — | 2 | — | CLI system command wiring *(health check: was 489)* |
-| **ops/claim_task.go** | **563** | **ClaimTask (~345)** | **6** | **1:7.3 (90 ifs)** | **Highest density** *(health check: was 655 — shrank, improved)* |
-| **ops/wt_merge.go** | **520** | **MergeWorktree (189)** | **4** | — | **Linear but many error-handling paths** *(health check: was 458)* |
-| claiming.go | 448 | — | 5 | — | *(health check: was 240 — grew with merge handling)* |
-| ops/await_verdict.go | 445 | — | — | — | *(health check: new file)* |
-| ops/advance_sprint.go | 444 | — | — | — | *(health check: new file)* |
-| inspect_field.go | 276 | — | 3 | — | **9 switch statements** — manual reflection *(health check: was 327 — shrank)* |
+Every recommendation in Phase 3 now carries `✓ verified`, `~ adjusted`, or `+ new`; that status column is the per-finding verification record required by the enrichment protocol.
 
-**Boundaries lens import analysis** *(pass 3)*:
+All 64 findings inherited from pass 21 were rechecked against the unchanged production tree. The five pass-21 `+ new` rows are now `✓ verified`, producing 56 verified and 8 adjusted existing findings; none is stale enough to remove.
 
-| Package | Internal Imports | External Imports | Consumers |
-|---------|-----------------|------------------|-----------|
-| `models` | 1 (roles) | 0 | 6 packages *(pass 13: was 0 internal imports — now imports `roles`)* |
-| `paths` | 0 | 0 | 6 packages |
-| `errors` | 0 | 0 | 6 packages (ops, db, agent, commands, testhelpers, prompts) *(health check: mcp removed)* |
-| `identity` | 0 | 0 | 1 binary |
-| `filelock` | 0 | flock | 2 packages |
-| `log` | filelock | yaml.v3 | 1 package |
-| `db` | models, filelock | fsnotify, yaml.v3 | 3 packages |
-| `git` | paths | 0 | 1 package |
-| `embedded` | paths | 0 | 1 (commands) *(health check: liza-mcp removed)* |
-| `analysis` | models | yaml.v3 | 1 package |
-| `pipeline` | models | yaml.v3 | 7 (ops, agent, commands, statevalidate, prompts) *(health check: updated)* |
-| `prompts` | models, **ops**, pipeline | 0 | 1 package *(pass 14: ops import was undocumented — see boundary smell below; health check: ops dependency deepened)* |
-| `statevalidate` | db, models, pipeline | 0 | 2 (ops, commands) |
-| `ops` | **11 packages** (analysis, db, errors, git, identity, log, models, paths, pipeline, roles, statevalidate) | 0 | 3 (agent, commands, prompts) *(health check: was 4 — mcp removed)* |
-| `commands` | **12 packages** (agent, analysis, db, embedded, errors, log, models, ops, paths, pipeline, statevalidate) | yaml.v3 | 1 (liza) *(health check: was 2 — mcp removed)* |
-| `agent` | **9+ packages** (db, errors, git, jsonout, models, ops, paths, pipeline, prompts, roles) | 0 | 2 (commands, liza) *(health check: added jsonout)* |
+**New finding from the pass:**
 
----
+- The provider catalog does not form the complete provider-extension boundary. Full support still spans catalog schema, initialization dependencies and assets, embedded writers, bash-policy mapping, and runtime output detectors.
+
+**Coupling refinements to existing findings:**
+
+- Direct `agent → db` mutation and off-write-path semantic validation are two sides of the same ownership problem: callers must know both persistence mechanics and which invariant subset to invoke.
+- Provider stop-state cleanup is coupled to presentation adapters, so calling `ops.Resume` directly does not perform the recovery semantics exposed by CLI and TUI.
+- Worktree refresh and optional-tool contracts make repository-intelligence extension a cross-package change rather than an adapter-local change.
+
+**Existing findings not rediscovered independently:** coverage instrumentation, sprint-summary loss, JSON error typing, several low-priority data-contract observations, and most test-structure findings. This was an attention shift rather than contrary evidence; each was rechecked after the merge. Pass-20 coverage figures remain historical evidence because no fresh complete coverage run was made.
+
+**Method limitation:** Phase 1 did not satisfy the strict contamination-free discovery guarantee. An exact repository search surfaced three existing-review snippets before the formal merge phase; the user explicitly waived that requirement and authorized continuation. Pass-22 conclusions are source-verified but are not claimed as fully unanchored discovery.
+
+### 1.6 Adversarial Smell-Driven Gap Hunt
+
+Entry smells were provider support crossing the catalog boundary, duplicated provider stop-state recovery, and provider-diversity enforcement drift.
+
+Forced comparisons covered catalog identity versus supervisor identity, quota versus provider-unavailable/audit normalization, and registration versus merge-gate provider semantics. Existing findings were not reverified or removed.
+
+The new gap is a missing canonical provider identity at runtime policy boundaries: the catalog models one, but registration, review diversity, provider-unavailable signals, and audit anomalies operate on raw tool names.
 
 ## Phase 2: Analysis
 
@@ -417,795 +329,510 @@ tui/ (volatile, high-level)    jsonout/ (stable, leaf)
 
 | # | Question | Assessment |
 |---|----------|------------|
-| 1 | **Problem being solved?** | Multi-agent coordination for coding tasks with peer review and human oversight |
-| 2 | **Change vectors?** | New task types (stable: models, volatile: commands/supervisor), new agent providers (volatile: supervisor.CLIExecutor), new CLI commands (volatile: cmd/commands) *(health check: MCP tools vector removed)* |
-| 3 | **Constraints?** | Solo developer, Go CLI, filesystem-based state, no external services |
-| 4 | **Cost of being wrong?** | State corruption is costly (manual recovery). Code changes are reversible (git). Agent misconfiguration wastes compute. |
-| 5 | **Error handling?** | Errors propagate via Go conventions. Lock errors classified. State mutation errors surface to supervisor. Partial failures can leave state stuck but not corrupt (flock protection). |
-| 6 | **Expected lifespan?** | Active development, evolving. v1 with accepted limitations documented. |
-| 7 | **Concurrency model?** | Multiple supervisor processes, single shared file with flock. No in-process concurrency beyond heartbeat goroutine. |
-| 8 | **Data ownership?** | `state.yaml` owned by Blackboard. Git state owned by worktree operations. Prompts are read-only derived. |
-| 9 | **Boundaries?** | Domain layer (`models`) clean. Persistence layer (`db`) clean. CLI entry (`cmd`) clean. Service layer (`ops`) clean — pure business logic, no I/O. Commands are thin presentation wrappers; agent imports `ops`. New `tui/` layer for terminal UI. *(health check: MCP transport removed; TUI added)* |
-| 10 | **Runtime constraints?** | Filesystem I/O bound. Lock contention under concurrent agents. Git operations can be slow on large repos. |
+| 1 | What problem is being solved? | Reliable orchestration of multiple external coding agents through a local, inspectable coordination model. |
+| 2 | What are the change vectors? | Provider/tool support, pipeline shapes, task transitions, repository intelligence, initialization, and operational recovery change frequently. Blackboard durability and Git isolation should remain stable. |
+| 3 | What are the constraints? | Stack-agnostic target projects, local filesystem/Git authority, multiple processes, human-readable state, and heterogeneous external CLIs. |
+| 4 | What is the cost of being wrong? | High for task state, worktree, integration, and recovery operations; lower for presentation and optional discovery tooling. |
+| 5 | How are failures handled? | Typed operational errors, blackboard transaction boundaries, history, watchdogs, alerts, and recovery commands. Some cleanup failures remain best-effort. |
+| 6 | What is the expected lifespan? | Long-lived product code with active subsystem expansion. |
+| 7 | What is the concurrency model? | Multiple OS processes coordinate through `flock`, leases, atomic state writes, filesystem watching, and Git worktrees. |
+| 8 | Who owns data and invariants? | `models` defines data; `db.Blackboard` owns persistence serialization and the lock boundary; `pipeline` defines configurable lifecycle semantics. `ops` is the *intended* mutation owner but not the exclusive one — `agent` and `commands` also write state directly. *(adjusted, pass 19)* |
+| 9 | Where are the boundaries? | CLI/TUI, agent runtime, operations, domain/pipeline, persistence/Git, providers/tooling, and optional repository intelligence. |
+| 10 | What are the runtime constraints? | Local filesystems, Git behavior, terminal processes, external CLI compatibility, bounded waits, and recoverability after interruption. |
 
 ### 2.2 Strengths
 
-#### Clean Dependency Architecture
+#### Durable, inspectable coordination
 
-Dependencies flow inward toward stability. No import cycles. Leaf packages (`models`, `paths`, `errors`) have zero internal dependencies. The `commands` package is correctly positioned as a high-level orchestrator. This enables confident refactoring — changing a leaf package has bounded impact.
+The YAML blackboard and per-task worktrees make coordination observable and recoverable without introducing a remote service. File locking, atomic replacement, leases, and history are appropriate safeguards for that constraint.
 
-#### Excellent Test Infrastructure
+#### Declarative lifecycle expansion
 
-2:1 test-to-code ratio with consistent patterns: table-driven tests, filesystem isolation via `t.TempDir()`, real git repos for integration, lightweight hand-written mocks. The `testhelpers` package (733 LOC) provides reusable primitives (`SetupLizaDir`, `CreateValidState`, `WriteInitialState`, `BuildTaskByStatus`, assertion helpers) used across 55 test files (625 call sites). Integration tests in `internal/integration/` verify complete workflows. All `internal/` packages have tests. *(pass 5: quantified testhelpers usage)*
+Pipeline configuration, role pairs, task kinds, and transition definitions allow new workflows without embedding every lifecycle in the domain model. Recent architecture, readiness, and functional-cluster pipelines demonstrate that the abstraction is carrying real variation.
 
-#### Atomic State Persistence
+#### Provider and execution boundaries have matured
 
-The `Blackboard.Modify()` pattern (read-lock-mutate-write-unlock) combined with temp file + fsync + rename provides correct durability guarantees. The `ReadCached()` mtime-based invalidation avoids unnecessary file reads. This is the right level of complexity for a file-based coordination mechanism.
+The provider catalog, toolchain configuration, launch plans, and `LLMAgent` boundary replace earlier tool-specific branching with data-driven configuration while preserving explicit escape hatches where CLIs genuinely differ.
 
-#### Comprehensive Health Monitoring
+Pass 22 narrows this strength: runtime launch is substantially data-driven, while setup dependencies, activation assets, and operational failure detection still expose provider identity across packages.
 
-`watch.go` implements 11 distinct health checks (expired leases, blocked tasks, orphaned rejections, review loops, integration failures, hypothesis exhaustion, reassignment, approaching limits, stall detection, stale drafts, immediate discoveries) with alert deduplication and throttling. This provides operational visibility appropriate for a system that runs unattended.
+#### Lock scope is respected in practice
 
-#### Template-Driven Prompt Generation
+`gitenv` warns that callers should avoid invoking Git while holding state locks. A scan of every `.Modify(func` closure in the tree found no Git or `exec` invocation inside the lock boundary, and the largest `ops` write paths sequence Git work explicitly outside it. The discipline is real, not merely documented. *(pass 18, Complexity lens)*
 
-All prompt text lives in `.tmpl` files, cleanly separated from Go logic. 14 templates cover all role contexts and wake trigger types. Adding new prompt content requires no Go code changes. The `prompts` package depends only on `models` — minimal coupling.
+#### Safety mechanisms cover the expensive paths
 
-#### Well-Classified Error System
+Merge integration tests are bounded, worktree operations have dedicated infrastructure, state validation is broad, state mutations occur under the blackboard lock, and watchdog/alert/recovery facilities address stalled or interrupted execution.
 
-The `LockError` taxonomy (5 types with `classifyLockError()` mapping syscall errors) provides actionable error information at system boundaries. Error wrapping with `%w` is used consistently.
+#### Strong test investment
 
-#### Clean Strategy Pattern for Role-Specific Behavior *(Adversarial pass, new packages)*
+The repository contains more than twice as much Go test source as production source. Large behavioral suites cover operations, prompts, initialization, watchers, embedded artifacts, supervisor behavior, configuration, and blackboard persistence. Measured correctly, this converts: 80.7% statement coverage repository-wide, with the domain and persistence core — `models` 90.5%, `pipeline` 90.6%, `statevalidate` 89.6%, `db` 86.5%, `filelock` 95.2% — above the application layer. The investment is concentrated where the cost of being wrong is highest, which is the right shape. *(pass 20, Coverage lens)*
 
-The `RoleStrategy` interface (7 methods) cleanly separates role-specific orchestration from the supervisor loop. Three implementations (doer, reviewer, orchestrator) are created via factory based on pipeline resolver role types. Strategies delegate all business logic to ops/claiming/prompt — they orchestrate, not implement. Adding a new role type requires only a new strategy implementation, no supervisor changes. Test coverage includes dedicated strategy tests + indirect testing through supervisor integration.
+#### Quality gates are mechanical, not aspirational *(pass 20, Coverage lens)*
 
-#### Well-Structured TUI with Clean Boundaries *(Adversarial pass, new packages)*
+The repository enforces test-suite properties in the suite itself. `internal/testguard` ratchets `t.Parallel()` as a floor and `time.Sleep` as a ceiling; `check-testhelpers` fails the build if production code imports the test-helper package; `check-embedded` asserts embedded artifacts match their sources. These are the same class of mechanism §2.3 recommends for import direction — the habit exists and is already load-bearing.
 
-The `tui` package (2,265 LOC, 172 tests) follows the Bubbletea Model-Update-View pattern precisely. Stateless rendering (View derived entirely from Model), non-blocking async I/O (all blocking ops in tea.Cmd closures), and proper delegation to ops/commands for all state mutations. No business logic leakage. 47-field Model struct is large but typical for interactive TUI state. Good isolation — only consumed by `cmd/liza/cmd_system.go`.
+### 2.3 Current Smells and Tensions
 
-### 2.3 Smells
+#### Contract enforcement gaps
 
-#### Smell: Hardcoded configuration — magic number 1800 *(mostly resolved — residual sites, pass 6)*
+**Smell:** Documentation and enforcement divergence.
 
-**Signal:** `leaseDuration = 1800` appeared as a fallback default in 3 locations, plus 6 more magic numbers in wait config (now `RoleStrategy.WaitConfig`).
+**Signals:**
 
-**Fix:** Defined `DefaultLeaseDurationSeconds` and `Default{Coder,Planner,Reviewer}{PollInterval,MaxWait}` constants in `internal/models/state.go` alongside `Config`. `heartbeat.DefaultLeaseDuration` derives from `models.DefaultLeaseDurationSeconds`.
+- `INVARIANTS.md` §7 promises a clean worktree before review, but `SubmitForReview` does not perform a porcelain-status cleanliness check.
+- `INVARIANTS.md` §6 describes provider diversity at verdict submission, but `SubmitVerdict` checks quorum only; diversity is handled during claiming and merge readiness.
+- `INVARIANTS.md` §12 omits valid `STOPPED` transitions and describes `TRIPPED → PAUSED`, while resume behavior returns `TRIPPED` to `RUNNING`.
+- `INVARIANTS.md` §3 uses legacy status vocabulary and attributes transition ownership to an obsolete location.
 
-**Residual** *(pass 6, Coupling lens)*: `supervisor.go:127` (`registerAgent(..., 1800)`) and `supervisor.go:221` (`claimReviewerTask(..., 1800, ...)`) still use raw `1800` instead of `models.DefaultLeaseDurationSeconds`. These were missed during the original extraction.
+**Impact:** Operators and agents can reason from guarantees that are not implemented at the stated boundary.
 
-#### Smell: Untested critical execution paths *(pass 4, Coverage lens — partially resolved)*
+**Direction:** Choose the intended behavior at each mismatch, then align the invariant and enforcement point.
 
-**Signal:** The system's most critical runtime paths have 0% statement coverage:
-- `supervisor.Execute()` and `ExecuteInteractive()` — the actual agent execution entry points that build `exec.Cmd`, set stdin/stdout, run the CLI, and handle exit codes
-- `supervisor.handleApprovedMerges()` — orchestrates post-approval merge workflow
-- `supervisor.logTaskSubmissionIfCompleted()` — completion logging
+#### Large multi-responsibility modules
 
-**Impact:** The tested code (helpers, validators, work detection) is exercised thoroughly, but the code that wires it all together at runtime has no direct tests. This creates a "tested parts, untested whole" pattern. If `Execute` mishandles an exit code, the supervisor loop misbehaves. The remaining untested paths are I/O-coupled functions requiring injection seams.
+**Smell:** God module / divergent change.
 
-The root cause is I/O coupling: functions at 0% are precisely those with hardwired `os.Stdin`, `os.Stdout`, or `os/exec.Command`. The `CLIExecutor` interface in supervisor was the right move — but it was the only such seam created.
+**Signals:** `proceed.go`, `embedded.go`, `watch.go`, `init.go`, `supervisor.go`, and `scipsearch.go` are all above 1,100 lines and combine multiple change reasons.
 
-**Direction:** For `supervisor.Execute`/`ExecuteInteractive`: already abstracted behind `CLIExecutor` interface, which is mocked in `TestSupervisorBasicLoop`, but the `DefaultCLIExecutor` concrete implementation is untested. *(health check: MCP server paths removed — no longer relevant)*
+**Refinement *(pass 18, Complexity lens)*:** Function-level measurement separates these. `scipsearch.go`, `embedded.go`, `watch.go`, and `pairingindex/hooks.go` are wide rather than deep — many small functions, no member above 80 lines — and are largely review-scope concerns. `supervisor.go`, `commands/init.go`, and the `ops` write path carry genuine single-function complexity of 200-442 lines and are where decomposition pays.
 
-#### Smell: Ops callback boilerplate — FindTask + guard + history *(pass 5, Duplication lens)*
+**Impact:** Review scope, merge-conflict probability, and regression surface grow as independent capabilities evolve. Where a single function exceeds 300 lines, that surface is also untestable in parts.
 
-**Signal:** Inside `bb.Modify` callbacks, 10 of 19 ops files repeat identical 3-line task lookup:
-```go
-task := state.FindTask(taskID)
-if task == nil {
-    return &errors.NotFoundError{Entity: "task", ID: taskID}
-}
-```
-The `readTaskState()` helper (helpers.go) only works outside callbacks (it calls `bb.Read()`). Inside callbacks, no helper exists.
+**Direction:** Extract only along demonstrated responsibility boundaries; avoid interface layers with a single speculative implementation. Prioritize by longest function, not by file size.
 
-Additionally, `task.History = append(task.History, models.TaskHistoryEntry{Time: now, Event: "...", Agent: &agentID})` appears in 12 locations with minor variations (some add `Reason`, `Note`, `PreviousAssignee`).
+#### Role extensibility stops at the prompt boundary *(pass 18, Complexity lens)*
 
-**Impact:** Low-medium. Each occurrence is small (3-5 lines), and the variations in history entries make full extraction non-trivial. The repetition is coincidental similarity rather than copy-paste — each file was independently authored with the same pattern. Risk: if the guard pattern changes (e.g., adding logging on not-found), 10 files need updating.
+**Smell:** Leaky abstraction / capability claim not carried through.
 
-**Direction:** A `modifyTask(bb, taskID, func(state, task) error) error` helper could encapsulate the Modify+FindTask+guard pattern. History append could get a `task.RecordEvent(time, event, agentID, opts...)` method. However, the current repetition is idiomatic Go — evaluate whether the abstraction adds clarity or obscures intent.
+**Signals:**
 
-#### Smell: `validateTaskInvariants` monolithic if-chain *(pass 7, Complexity lens)*
+- `supervisor.go:648-650` states that the resolver reads role definitions from pipeline YAML, "enabling custom YAML-defined roles without Go code changes".
+- Pipeline validation checks `role.Type` against `doer|reviewer|orchestrator` but never checks the role *name*; `agent/registration.go` validates only the `{role}-{number}` ID shape and never calls `roles.IsValid`.
+- The closed 13-role registry in `internal/roles` is consulted in exactly one production path, on an already-inferred role.
+- `review_instructions.tmpl` and `implementation_phase.tmpl` branch on hardcoded role names with no `else`.
 
-**Signal:** 142 LOC, ~15 sequential `if task.Status == X && field == nil` checks with no grouping. Each status's invariants are scattered across the function rather than grouped by status.
+**Impact:** A YAML-defined role validates, resolves, registers, and launches — then receives an empty instructions block. The failure is silent at every layer, and the declarative-lifecycle strength holds for the state machine but not for prompt content.
 
-**Impact:** Low. The function is simple despite its length — each check is independent and self-documenting. However, the lack of grouping means a developer adding a new status must scan the entire function to ensure all required invariants are covered.
+**Direction:** Decide whether custom roles are supported. If yes, give the templates a fallback and make role coverage checkable at config-load time; if no, validate role names where pipeline config is loaded and correct the comment.
 
-**Direction:** Group checks by status (all IMPLEMENTING invariants together, all REVIEWING together, etc.) — or use a `switch task.Status` with per-status validation functions. Not urgent; the function is correct and readable despite its length.
+#### Parallel implementations of the same capability *(pass 18, Complexity lens)*
 
-#### Smell: High nesting depth in `claiming.go` *(pass 7, Complexity lens)*
+**Smell:** Copy-paste divergence.
 
-**Signal:** `handleApprovedMerges` (55 LOC) reaches nesting depth 6: `for range → if status → if approved → if merge_commit → if err → errors.As`. `resumeHandoffTask` (63 LOC) reaches depth 5 inside its `bb.Modify` closure. Both functions are short enough that the nesting doesn't create horizontal scroll, but the depth-to-LOC ratio signals tightly packed control flow.
+**Signals:** `commands/init.go` and `ops/init_project.go` duplicate initialization helpers and have already diverged on Git invocation; `tui/view.go` duplicates panel table rendering including a verbatim ANSI-padding special case; `agent/prompt.go` triples index adapters and types across three tools.
 
-**Impact:** Low. Both functions are well-commented and the deep nesting follows natural error-handling patterns (check condition → attempt operation → classify error). The `handleApprovedMerges` pattern is particularly common in Go error handling.
+**Impact:** Fixes land in one copy. The `gitenv` divergence is the concrete instance: locale and timeout hardening applies to one initialization path and not the other.
 
-**Direction:** `handleApprovedMerges` could extract the inner merge-attempt body into a `tryMergeTask(projectRoot, task, agentID) error` helper, reducing the for-loop body to: filter + call + log. Low priority.
+**Direction:** Converge the Git call sites on `gitenv` first — that one is a correctness gap, not a tidiness preference. Treat the render and adapter duplication as lower-priority consolidation.
 
-#### Smell: Ops input validation boilerplate *(pass 5, Duplication lens)*
+#### Unobservable index-discovery failure *(pass 18, Complexity lens)*
 
-**Signal:** `if taskID == "" { return nil, fmt.Errorf("task ID is required") }` appears in 10 ops files. `if agentID == ""` appears in 7 files. Each function independently validates required string parameters with identical code.
+**Smell:** Silent failure.
 
-**Impact:** Low. The validation is trivial (1-3 lines per parameter) and self-documenting. The "cost" is mostly visual noise rather than maintenance risk.
+**Signals:** `availablePromptScipIndexRefs`, `availablePromptStacklitIndexRefs`, and `availablePromptFunctionalClusterIndexRefs` each return `nil` on error with no logging.
 
-**Direction:** A validation helper (`requireNonEmpty("task ID", taskID)`) or struct-based input with a `Validate()` method could reduce noise, but this is borderline — idiomatic Go favors explicit validation at function entry. Not worth abstracting unless the pattern grows beyond simple emptiness checks.
+**Impact:** Agents receive prompts missing their code-index references and behave as if none were configured. Degraded exploration is indistinguishable from an unindexed repository.
 
-#### Smell: Command test harness repetition *(pass 5, Duplication lens)*
+**Direction:** Log at warning level and keep the nil return; the degradation itself is acceptable, its invisibility is not.
 
-**Signal:** 34 command test files share a structurally identical test loop body (~15 lines): create tmpDir → `SetupLizaDir` → construct `initialState` with common config → apply `setupState` → `WriteInitialState` → call command → check error → validate state. The `initialState` construction (Config fields: IntegrationBranch, LeaseDuration, etc.) is repeated 23 times with near-identical values.
+#### Coverage measurement misreports the packages it is used to judge *(pass 20, Coverage lens)*
 
-**Impact:** Low. This is standard Go table-driven test boilerplate. The `testhelpers` package already extracts the reusable primitives. Further abstraction would need to handle the variety in command signatures (different parameter sets per command) — a generic harness would trade boilerplate for indirection.
+**Smell:** Instrument that reads wrong in the direction of complacency.
 
-**Direction:** A `testhelpers.RunCommandTest(t, CommandTestCase{...})` helper could encapsulate the common loop body, accepting the command-under-test as a function parameter. Alternatively, a `testhelpers.DefaultState()` function returning a pre-configured `*models.State` (with standard Config values) would eliminate the 23 repeated `initialState` constructions. The latter is lower-risk and higher-value.
+**Signals:**
 
-#### Smell: Duplicated identity validation *(pass 6, Coupling lens; health check: corrected — NOT dead code)*
+- `make test` runs `go test -race -coverprofile=coverage.out ./...` with no `-coverpkg`, so each package is credited only with coverage produced by its own test binary.
+- Under that default, `internal/alerts` and `internal/projectdetect` read 0.0% and `internal/errors` 12.7%. Measured with `-coverpkg=./...` they are 89.7%, 92.9%, and 91.1%. Neither package has a test file of its own; both are exercised thoroughly by their callers.
+- `models.ValidateDependsOn` reads 22.2% by default and 100% cross-package. Three prior passes recorded "untested entry point" findings that dissolve under correct measurement.
+- `.github/workflows/ci.yml` uploads this profile to Codecov with `fail_ci_if_error: false`, and the repository has no `codecov.yml` or threshold.
 
-**Signal:** `agent/registration.go:validateIdentity()` reimplements the same algorithm as `identity.ValidateFormat()` + `identity.ValidateRole()` without importing the `identity` package. Both: split on last hyphen, validate numeric suffix with `strconv.Atoi`, check role prefix match. Called from `supervisor.go:558` and has tests in `registration_test.go`. *(health check: prior verification pass incorrectly labeled this as dead code — it is actively used)*
+**Impact:** The published number is systematically wrong for exactly the packages this review keeps flagging — thin leaf packages consumed from elsewhere. It under-reports them, which is the harmless direction for the package but the harmful direction for the reviewer: three passes have now spent attention on false gaps, and the same artifact hides the real ones behind noise. Codecov is decorative, not a gate.
 
-**Impact:** Low-medium. If identity format rules change (e.g., allowing non-numeric suffixes), two implementations need updating independently. The `identity` package is the canonical source but the `agent` package doesn't know it exists.
+**Direction:** Add `-coverpkg=./...` to the `test` target. That single flag changes what every future coverage claim in this document means, so it should land before any coverage-driven work.
 
-**Direction:** Replace `validateIdentity()` call with `identity.ValidateFormat()` + `identity.ValidateRole()`. The `identity` package already returns structured errors.
+#### The human-readable CLI path is structurally unmeasured *(pass 20, Coverage lens)*
 
-#### Smell: Inconsistent ops parameter conventions *(pass 6, Coupling lens)*
+**Smell:** Untested branch of a deliberately duplicated path.
 
-**Signal:** Most ops functions take `projectRoot string` and internally construct `paths.New(projectRoot)` + `db.For(lp.StatePath())` (e.g., `ClaimTask`, `MergeWorktree`, `DeleteTask`, `Start`, `Stop`). But `AddTask` takes `statePath, logPath string` directly — the caller must construct these paths and pass them in.
+**Signals:**
 
-**Impact:** Low-medium. Callers must know which convention each function uses. The inconsistency creates a maintenance tax: if path derivation logic changes, functions using `projectRoot` auto-adapt (via `paths.New()`), but `AddTask` callers must update manually. New ops functions must decide which convention to follow with no documented guidance.
+- All 69 Cobra commands are package-level `var … = &cobra.Command{ RunE: func… }` literals. `go tool cover -func` walks `FuncDecl` only, so every `RunE` body is absent from per-function output — the standard gap-hunting tool cannot see the CLI's behavior. This alone accounts for the gap between `cmd/liza` at 62.4% by block arithmetic and 78.4% by `-func`.
+- Twelve exported `internal/commands` entry points sit at 0.0%: `AddTasksCommand`, `ProceedCommand`, `SetTaskOutputCommand`, `WriteCheckpointCommand`, `RecoverTaskCommand`, `RepairAgentPoolCommand`, `AwaitVerdictCommand`, `AwaitResubmissionCommand`, `MarkAgentDegradedCommand`, `ClearAgentDegradedCommand`, `AssessHypothesisExhaustedCommand`, `SetDiscoveryDispositionCommand`, along with seven unexported formatters (`formatTaskSummaryOutput`, `printProceedResult`, and siblings).
+- Each is called from exactly one `RunE` body and referenced by zero tests. `UnblockTaskCommand` is called from nowhere at all.
+- The `--json` sibling of each command routes to `internal/ops`, which is at 84.3% over 6,816 statements.
 
-**Direction:** Standardize on `projectRoot` parameter convention (majority pattern). Migrate `AddTask` to take `projectRoot` and derive paths internally, consistent with all other ops functions.
+**Impact:** The dual-path design documented in §1.3 and §2.5 has one path tested and one path not. Agents consume `--json` and are covered; humans consume the rendered path and are not. Output formatting, error phrasing, and result rendering for a dozen mutating commands can break without any test failing — and the tooling a reviewer would reach for to notice this reports `cmd/liza` 16 points higher than it is.
 
-#### Smell: Watch thresholds not configurable *(pass 6, Coupling lens)*
+**Direction:** Either test the render path — table-driven tests over the `*Command` functions are cheap, they already take a project root and return `error` — or collapse it, since the same finding read from the Boundaries lens says these adapters are optional. Delete `UnblockTaskCommand` regardless.
 
-**Signal:** `commands/watch.go` defines 10 hardcoded constants:
-- `DefaultCheckInterval = 10s`, `LeaseGracePeriod = 120s`, `StallThreshold = 30m`
-- `StaleDraftThreshold = 30m`, `CheckpointStaleThreshold = 30m`, `CheckpointStuckThreshold = 2h`
-- `CheckpointAbandonedThreshold = 8h`, `PauseStaleThreshold = 30m`, `PauseForgottenThreshold = 2h`
-- `OrphanedGracePeriod = 30s`
+#### Application/query boundary erosion
 
-These are operational tuning parameters with no path to `models.Config`.
+**Smell:** Dependency inversion and inappropriate intimacy.
 
-**Impact:** Low. The values are reasonable defaults and rarely need changing. However, the `models.Config` struct already exists as the configuration mechanism for other runtime parameters (`LeaseDuration`, `IntegrationBranch`, etc.). Watch thresholds are the only operational parameters that bypass this pattern entirely.
+**Signals:** Prompt construction imports `ops`; commands import agent runtime; read-only query logic spans all three layers.
 
-**Direction:** Add watch-related fields to `models.Config` (or a nested `WatchConfig` struct) with the current values as defaults. Not urgent — these are stable values.
+**Impact:** Presentation and prompt changes acquire unnecessary transitive dependencies on mutation-oriented application code.
 
-#### Smell: Hardcoded `"terminal-1"` in supervisor *(pass 6, Coupling lens)*
+**Direction:** Move stable read models and lifecycle queries toward their owning domain/pipeline package, or introduce a focused query boundary when another concrete consumer justifies it.
 
-**Signal:** `supervisor.go:127` passes `"terminal-1"` as a literal string to `registerAgent()`. The terminal field is recorded in agent state but always set to this fixed value regardless of the agent's actual terminal.
+#### State mutation authority is distributed, not owned *(pass 19, Boundaries lens)*
 
-**Impact:** Low. The terminal field is informational (used in status display). However, if multiple agents run in different terminals, they all report the same terminal ID, reducing operational visibility.
+**Smell:** Leaking encapsulation / bypassed authority boundary.
 
-**Direction:** Derive from `config.Terminal` or the agent's TTY, or remove the field if it's not providing value.
+**Signals:**
 
-#### Smell: No interface-based seams beyond CLIExecutor *(pass 3, Boundaries lens)*
+- `internal/agent` calls `bb.Modify` at 13 non-test sites: `claiming.go:452`, `heartbeat.go:82`, `provider_audit.go:80`, `registration.go` (×5), `strategy_orchestrator.go:80`, `supervisor.go:103,323`, `worktree_check.go:146,169`.
+- `commands/init.go:1113` and `commands/migrate.go:54` call `bb.Write` directly.
+- `worktree_check.go:165-204` documents the bypass in a comment: it forces `t.Status = TaskStatusBlocked` "bypassing normal transition validation" because "no valid transition exists from REVIEWING".
+- `claiming.go:449-470` reimplements the merge path's non-git finalization (agent release + handoff event) outside `ops`.
 
-**Signal:** The entire production codebase has exactly **one interface**: `CLIExecutor` in `agent/supervisor.go`. All other cross-package dependencies use concrete types: `*db.Blackboard`, `*git.Git`, `*log.Logger`, `paths.LizaPaths`. There is one test-only interface (`testingT` in `testhelpers/assertions.go`).
+**Impact:** Transition validation, history conventions, and post-write checks are enforced only on the `ops` path. The state machine is advisory for any caller that opens its own `Modify` scope, and duplicated finalization can drift from the authoritative implementation.
 
-**Impact:** This is a deliberate simplicity choice appropriate for v1 scope. However, it means testing any package that uses `db.Blackboard` requires real file I/O (creating temp directories, writing YAML files). The `testhelpers` package exists specifically to manage this overhead. If the system grows, introducing seams at the `db` and `git` boundaries would enable faster, more isolated tests.
+**Direction:** Decide whether `ops` is the mutation boundary. If yes, give `ops` an explicit forced-transition operation for the unrecoverable-worktree case rather than reaching past it, and route the `agent` write sites through named operations. If no, drop the claim from Q8 and document the second write path.
 
-**Direction:** No action for v1 — the current approach works. If test suite time becomes a concern, introduce interfaces at package boundaries (particularly `db` and `git`) to enable in-memory test doubles.
+#### Semantic validation sits off the write path *(pass 19, Boundaries lens)*
 
-#### Smell: Sprint governance Vision link is broken *(Adversarial pass, entry: specs/)*
+**Smell:** Validation placed where it can be skipped.
 
-**Signal:** `specs/protocols/sprint-governance.md` links to `../vision.md`, while canonical Vision in this repo is `specs/build/0 - Vision.md` (as indexed in `specs/README.md`).
+**Signals:**
 
-**Impact:** Low. Navigation drift weakens spec coherence and slows onboarding/review.
+- `internal/statevalidate` is 2,148 LOC and is imported by six non-test files: `commands/validate.go` and five `ops` write paths (`add_tasks`, `replan`, `retarget_dependency`, `set_task_output`, `wt_merge`). `internal/db` is not among them.
+- `db.marshalStateForWrite` calls `statehygiene.ValidateState` only — payload size and scrubbing, not invariants.
+- `PostWriteValidationError` is constructed at exactly one site, `ops/replan.go:224`.
 
-**Direction:** Update the related-doc link to the canonical Vision path.
+**Impact:** An invalid state can be written and persisted; it is detected later by `liza validate` or not at all. Validation strength depends on which operation was used rather than on what was written.
 
-#### Smell: Temporal test coupling and non-parallelizable suite *(Adversarial pass, entry: tests/ — partially resolved: `1914732`, `1ff88d2`)*
+**Direction:** Classify `statevalidate` checks into always-cheap invariants (candidates for the in-lock gate) and expensive/whole-corpus checks (keep on demand). Placing even a subset behind `Modify` would make the write boundary the enforcement boundary.
 
-**Signal:** Shared process-level globals exist (`db.instances` singleton map and package-level `rootCmd`), which encourages serial execution in packages that use them.
+#### Machine-readable error codes derive from prose *(pass 19, Boundaries lens)*
 
-**Partial fix:** `resetRootCmdForTest(t)` helper isolates `rootCmd` flag state and `db.For()` singletons between tests. `t.Parallel()` introduced in 15 call sites across 4 test files (stateless tests in `roles`, `errors`, `filelock/metrics`, `agent/prompt`). `time.Sleep()` calls reduced from 21 to 5 by replacing brittle sleep-based waits with event-driven synchronization (polling with condition checks) in watcher, heartbeat, and supervisor tests. `internal/testguard/` package (116 LOC) added with ratchet tests enforcing `t.Parallel()` floor (≥10 calls) and `time.Sleep()` ceiling (≤11 calls), preventing regression.
+**Smell:** Stringly-typed contract at an integration boundary.
 
-**Remaining:** Tests sharing process-global `rootCmd` (all `cmd/liza` tests) cannot use `t.Parallel()` due to `os.Chdir` and cobra flag state. Further parallelization requires either a `--project-root` flag on rootCmd or test-level process isolation.
+**Signals:**
 
-**Impact:** Low (downgraded from Medium). The ratchet tests and global-reset helpers address the structural concern; remaining serial tests are constrained by process-global state, not by missing infrastructure.
+- `jsonout/classify.go` maps errors to `code` values by substring match on the message: `"not found"`, `"must be"`, `"is required"`, `"validation failed"`, `"race condition"`, `"not IMPLEMENTING"`, and others.
+- `internal/ops` contains 319 non-test `fmt.Errorf` calls against 8 typed error types, of which 5 are handled in `classify.go`.
+- `jsonout` imports `ops` to perform those type assertions, making a presentation package depend on the application layer.
 
-#### Smell: `LIZA_LOG_LEVEL` is documented but not implemented *(Adversarial pass, entry: config/)*
+**Impact:** Agents consuming `--json` branch on a code derived from English phrasing. Rewording an error message is a silent contract change; a message that happens to contain "must be" is classified as a validation failure regardless of cause.
 
-**Signal:** Docs define `LIZA_LOG_LEVEL`, but no runtime code path reads it; agent logger is initialized at fixed `slog.LevelInfo`.
+**Direction:** Type the errors that agents actually branch on and delete the corresponding string rules. The prose table can remain as a fallback, but it should not be the primary classifier for codes the multi-agent protocol depends on.
 
-**Impact:** Low-medium. Documented observability control is a no-op, causing confusion during debugging/operations.
+#### Boundaries are documented but not mechanically enforced *(pass 19, Boundaries lens)*
 
-**Direction:** Either implement environment-driven level selection (with validation and defaults) or remove this variable from docs to keep contract-to-runtime alignment.
+**Smell:** Convention without a check.
 
-#### Smell: Cleanup failures are suppressed in rebase/worktree recovery paths *(Adversarial pass, entry: error handling — partially resolved: `729da05`)*
+**Signals:**
 
-**Signal:** Best-effort cleanup drops failures in multiple mutation flows.
+- Pre-commit and `make lint` already run `check-testhelpers` and `check-embedded` (`TestArtifactConsistency`) — the repository has the capability and the habit.
+- No equivalent check exists for import direction. `prompts → ops`, `commands → agent`, `agent → db`, and `jsonout → ops` are all documented in this review and none of them fails a build.
+- `INVARIANTS.md` carries 7 `**Enforced:**` anchors across 15 sections, and those anchors use bare filenames (`validate.go`, `claim_task.go`, `proceed.go`) that each resolve to two packages.
 
-**Partial fix:** `729da05` surfaced cleanup errors in `claim_task.go` — worktree/branch cleanup failures during claim failure recovery and worktree recreation recovery are now logged with context instead of silently dropped.
+**Impact:** Every layer violation in this document was found by review, not by CI, and each has survived multiple passes. Documented invariants drift because nothing binds the document to a code location precisely enough to break when the location moves.
 
-**Remaining:** `internal/ops/submit_review.go:88` ignores `AbortRebase` error. `internal/git/worktree.go` ignores cleanup errors in 3 locations. `internal/ops/wt_delete.go:61` ignores branch-deletion error.
+**Direction:** Add an import-direction check to `make lint` covering the four known crossings as an allowlist — new violations fail, existing ones are visible and countable. Separately, make `INVARIANTS.md` anchors package-qualified so a moved enforcement point is detectable.
 
-**Direction:** Keep best-effort semantics where appropriate, but surface cleanup outcomes as warning/error in result structs and command output. Escalate to error when cleanup failure can leave the system in a materially inconsistent state.
+#### `internal/brand` combines link-time globals with a value API *(pass 19, Boundaries lens)*
 
+**Smell:** Dual API over mutable global state.
 
-#### Smell: File existence checks often collapse non-existence with other stat failures *(Adversarial pass, entry: error handling)*
+**Signals:**
 
-**Signal:** Several paths only branch on `err == nil` or `os.IsNotExist(err)` (for example `internal/commands/setup.go:33`, `internal/commands/init.go:32`, `internal/commands/init.go:38`, `internal/git/worktree.go:162`) without explicit handling for permission/I/O errors.
+- `internal/brand` has the highest fan-in in the repository (28 packages).
+- Package-level variables are set at link time via `-ldflags -X` (`Makefile:27-38`) and remain writable at runtime.
+- A parallel `Values` struct exposes the same fields through methods, so call sites choose between two idioms for the same data.
+- Tests mutate `brand.EnvPrefix` directly rather than constructing a `Values`.
 
-**Impact:** Low-medium. Permission or transient filesystem errors can be misreported as simple presence/absence outcomes, producing misleading diagnostics and control flow.
+**Impact:** The most widely depended-upon package in the tree is mutable from anywhere. Test mutation of globals is order-dependent, and two API shapes mean white-labeling correctness has to be verified twice.
 
-**Direction:** Use explicit triage on `os.Stat` calls: exists, not-exist, and other-error (returned with context).
+**Direction:** Pick one. Either keep the link-time globals and delete `Values`, or make the globals a private seed for a single exported `Values` accessor. This is a low-risk consolidation with a wide blast radius, so it is worth doing deliberately rather than opportunistically.
 
-#### Smell: Pipeline config loaded per-operation *(pass 13, Complexity lens)*
+#### Provider support crosses the catalog boundary *(pass 22, Coupling lens)*
 
-**Signal:** `loadResolver(projectRoot)` called from 54 sites in ops files *(health check: was 16+ — tripled with ops expansion)*. Each invocation reads `pipeline.yaml` from disk via `pipeline.LoadFrozen()`. A multi-step workflow (claim → submit → review → merge) reads and parses the same unchanging file 6+ times.
+**Smell:** Incomplete abstraction / change amplification.
 
-**Impact:** Low. The file is small and parsing is fast. The pattern is correct (each op is independent and stateless). However, it prevents session-level caching and means pipeline config changes require no coordination — a feature, not a bug.
+**Signals:** `providers.ActivationAssets` contains provider-named fields; `commands/init.go` expands Cursor into Claude, Codex, and Cursor-ACP dependencies and maps bash-policy support through provider-specific booleans; `agent/provider_audit.go` and `agent/provider_unavailable.go` separately encode Codex output signatures.
 
-**Direction:** Accept as-is. If profiling shows I/O overhead, consider passing a `*pipeline.Resolver` as a parameter to ops functions. The current pattern's simplicity (each op is self-contained) outweighs the redundant reads.
+**Impact:** A provider can become catalog-resolvable and launchable without receiving complete initialization or operational-diagnostics support. Full onboarding requires coordinated edits across `providers`, `commands`, `embedded`, and `agent`, and omitted runtime signatures fail silently.
 
-#### Smell: `prompts → ops` dependency inversion *(pass 14, Boundaries lens; health check: worsened)*
+**Direction:** Keep genuinely behavioral failure parsers in code, but let the catalog own declarative dependencies and activation assets. Document one provider-extension checklist rather than claiming the catalog is a plug-in boundary.
 
-**Signal:** `prompts/builder.go` and `prompts/wake.go` import `internal/ops` for 5+ utility functions:
-- `ops.LoadDetectionContext(projectRoot)` — loads pipeline config from disk, returns detection context
-- `ops.IsPlanningPair(rolePair, planningPairs)` — simple predicate on planning pairs
-- `ops.IsPlanningCompleteEligible(task, planningPairs, state)` — planning completion check
-- `ops.IsTransitionCycleBlocked(task)` — transition cycle detection
-- `ops.CountReadyManyToOneCohorts(state, transitions)` — cohort counting
-- `ops.ManyToOneTransitionInfo` — type dependency
+#### Canonical provider identity is lost before policy enforcement *(Adversarial pass)*
 
-*(health check: was 3 functions — expanded to 5+ across 2 files; dependency deepened significantly)*
+**Smell:** Primitive obsession / leaky abstraction.
 
-The `ops` package is the business-logic-with-side-effects layer. `prompts` is a template-driven generation layer that should be downstream of ops, not dependent on it. The current import direction means prompt building cannot be tested without pulling in the entire ops dependency chain (db, git, models, etc.).
+**Signals:**
 
-**Impact:** Low-medium. The functions used are read-only queries, not mutations — the coupling is safe at runtime. However, the import direction is architecturally wrong: `agent → prompts → ops → db/git/...` creates a deep transitive chain where the prompt layer inherits all ops dependencies. The dependency has deepened since pass 14 — moving in the wrong direction.
+- The catalog populates `AgentToolConfig.ProviderKey`, and `ResolveLaunchPlan` copies it into `LaunchPlan.ProviderKey`, but production code never reads that field.
+- `RunSupervisor` receives only the raw `CLIName`; registration stores it as `Agent.Provider`, which approvals and the merge diversity gate compare as a string.
+- Quota handling canonicalizes `codex-acp` to `codex`, while provider-unavailable and audit-degradation handling compare and address raw CLI names.
+- The existing quota tests explicitly cover ACP canonicalization; the sibling provider-unavailable and audit tests do not.
 
-**Direction:** Move pipeline query functions (`IsPlanningPair`, `IsPlanningCompleteEligible`, `IsTransitionCycleBlocked`, `CountReadyManyToOneCohorts`) to `pipeline` or a dedicated query package. Pass `PipelineDetectionContext` as a parameter to prompt-building functions instead of having prompts load it from disk via `LoadDetectionContext`.
+**Impact:** `codex` and `codex-acp` can count as different providers despite sharing one provider backend, falsely satisfying preferred diversity. Conversely, a provider-unavailable signal for `codex` does not stop a `codex-acp` supervisor. Custom tools declaring the same `provider_key` are similarly fragmented across review, stop-state, and anomaly policy.
 
-#### Smell: `commands → agent` boundary crossing *(pass 14, Boundaries lens)*
+**Direction:** Carry both tool identity and canonical provider identity through `SupervisorConfig`. Use the canonical provider for registration, approvals, stop signals, and anomaly grouping; retain the tool name for launch behavior and tool-specific diagnostics.
 
-**Signal:** `commands/status.go:282` calls `agent.DetectOrchestratorWakeTriggers(state, pipelineTerminals, planningPairs)` to include orchestrator wake trigger information in the status dashboard. This creates a dependency from the CLI presentation layer to the agent supervisor layer.
+#### Provider stop-state recovery has multiple owners *(pass 21, Duplication lens; pass 22, Coupling lens)*
 
-The intended architecture is `cmd → commands → ops` and `cmd → agent → ops`, with `commands` and `agent` as peer consumers of `ops`. The `commands → agent` edge breaks this peer relationship.
+**Smell:** Shotgun surgery / duplicated application policy.
 
-**Impact:** Low. `DetectOrchestratorWakeTriggers` is a pure state-query function (no side effects) that happens to live in `agent/workdetection.go`. The function itself is well-placed for the agent's use, but the status command's cross-layer call reinforces the "No Query Layer" issue documented in `architectural-issues.md`.
+**Signals:** `agent/quota.go` and `agent/provider_unavailable.go` independently implement the same signal-file path, glob, provider extraction, write, check, and clear lifecycle. `commands/resume.go` and `tui/commands.go` then independently glob and clear both families after calling `ops.Resume`; both silently ignore glob errors and separately format clear failures.
 
-**Direction:** Move `DetectOrchestratorWakeTriggers` and its supporting functions to `ops` (or a future query package). This aligns with the existing trajectory issue. The function operates on `*models.State` and returns a pure result — it has no agent-specific dependencies.
+**Impact:** Adding another provider stop reason or changing cleanup semantics requires coordinated edits across the runtime, CLI, TUI, and their duplicated tests. A caller using `ops.Resume` directly resumes state without performing the cleanup that the user-facing adapters treat as part of resume.
 
-#### Smell: Query logic scattered across architectural layers *(pass 14, Boundaries lens)*
+**Direction:** Move the signal-file primitive out of `agent` to a small stable owner and make one application operation return structured cleanup outcomes. Preserve category-specific alert text; do not generalize unrelated provider failure detection.
 
-**Signal:** Read-only query functions are distributed across layers that were designed for different purposes:
-- `agent/workdetection.go` — `DetectOrchestratorWakeTriggers()` (state query consumed by `commands/status.go`)
-- `ops/pipeline_ops.go` — `LoadDetectionContext()`, `IsPlanningPair()` (pipeline queries consumed by `prompts/builder.go` and `agent/workdetection.go`)
-- `commands/inspect*.go`, `commands/status.go` — query+format logic
+#### Worktree intelligence refresh is orchestration-by-copy *(pass 21, Duplication lens; pass 22, Coupling lens)*
 
-This creates a cross-cutting query dependency chain: `commands → agent → ops`. Each arrow is technically correct in isolation, but the chain means the CLI status display transitively depends on the agent supervisor layer for query data. *(health check: MCP layer removed, but the commands → agent → ops chain remains)*
+**Smell:** Shotgun surgery.
 
-**Impact:** Low. All functions involved are stateless and side-effect-free, so the coupling is safe at runtime. The cost is architectural: adding a new query requires choosing which layer to put it in, with no clear guidance. The documented "No Query Layer" trajectory issue in `architectural-issues.md` captures this direction.
+**Signals:** Semble preparation plus SCIP, Stacklit, and functional-cluster refresh is sequenced in `ops/claim_task.go`, twice in `ops/wt_create.go`, through a second wrapper family in `ops/submit_review.go`, and through lower-level package calls in `agent/worktree_check.go`. The paths expose different warning shapes and test seams.
 
-**Direction:** This is the code-level manifestation of the "No Query Layer" issue already tracked in `specs/architecture/architectural-issues.md`. When a query layer is introduced, it should absorb: (1) inspect/status logic from `commands`, (2) `DetectOrchestratorWakeTriggers` from `agent`, (3) pipeline query functions from `ops`. Low priority — the current scatter works, but it will compound as the query surface grows.
+**Impact:** A fourth repository-intelligence tool, ordering change, or warning-policy fix must be propagated across claim, create, recovery, and submission. The current order dependency — functional clusters after SCIP and Stacklit — is carried by repetition rather than a named policy.
 
-#### Smell: Pipeline-aware status check triplication *(pass 16, Duplication lens)*
+**Direction:** Introduce one task-worktree refresh operation returning structured per-tool results, then let each caller choose presentation/logging. Keep submit-time versus provision-time activation explicit if their required tool sets differ.
 
-**Signal:** `models/state.go:215-239` — three functions (`IsApprovedForMerge`, `IsSubmittedStatus`, `IsExecutingStatus`) with identical 6-line structure:
-```go
-func IsXStatus(task *Task, pr PipelineResolver) bool {
-    if task.RolePair != "" && pr != nil {
-        status, err := pr.XStatus(task.RolePair)
-        return err == nil && task.Status == status
-    }
-    return task.Status == TaskStatusX || task.Status == TaskStatusY
-}
-```
-Only the resolver method name differs.
+#### Optional-tool boundary primitives have multiple owners *(pass 21, Duplication lens; pass 22, Coupling lens)*
 
-**Impact:** Low. Legacy fallback branches removed in `581d377` — all three functions now use pipeline resolver only. The structural triplication remains (three functions with identical shape differing by resolver method), but the legacy fallback half of each function is gone.
+**Smell:** Copy-paste divergence.
 
-**Direction:** A parameterized `checkPipelineStatus(task, pr, resolverFn)` helper would collapse three functions into one. Low priority — the pattern is unlikely to grow beyond ~5 variants.
+**Signals:** POSIX single-quote escaping exists in five packages; `outputSuffix` in five; bounded diagnostics in three; and SCIP/Semble repeat truthy parsing already represented by `internal/envgate`. The diagnostic implementations have already diverged: SCIP truncates to the byte limit without a marker, while Stacklit and functional clusters append `...(truncated)` after slicing to the limit.
 
-#### Smell: Worktree path construction duplication *(pass 16, Duplication lens)*
+**Impact:** Shell hardening and diagnostic-bound changes have a broad edit surface, and identically named limits do not guarantee identical output bounds.
 
-**Signal:** `filepath.Join(paths.WorktreesDirName, taskID)` + branch name derivation appears in 5 locations:
-- `ops/claim_task.go:55-56`
-- `ops/wt_create.go:34-35`
-- `git/worktree.go:133-135`
-- `git/worktree.go:203-205`
-- `git/worktree.go:305` (as `GetWorktreeRelPath()` helper — **exists but unused by the other 4 sites**)
+**Direction:** Consolidate only the proven primitives — POSIX quoting, bounded diagnostics, and truthy parsing — in leaf packages with direct edge-case tests. Leave tool-specific planning and error messages local.
 
-**Impact:** Low. The computation is trivial (one `filepath.Join`). However, `GetWorktreeRelPath()` was deliberately created to centralize this, suggesting the other sites predate or missed it. The branch name construction (`paths.TaskBranchPrefix + taskID`) is similarly repeated but has no helper.
+#### Supervisor registration bypasses configured runtime metadata *(pass 21, Duplication lens)*
 
-**Direction:** Use `git.GetWorktreeRelPath()` at the 4 remaining sites. Consider adding `GetWorktreeBranchName(taskID)` to `paths/` for the branch construction.
+**Smell:** Hardcoded configuration.
 
-#### Smell: Dual logging systems — structured Logger vs ad-hoc log.Printf *(pass 16, Duplication lens)*
+**Signals:** `RunSupervisor` passes `"terminal-1"` and `1800` directly to `registerAgent`. `NewHeartbeat` receives no `LeaseDuration`, so it falls back to the same default rather than `state.Config.LeaseDuration`, even though the schema says heartbeat extends leases by the configured duration. The fixed terminal string is stored as human-observation metadata.
 
-**Signal:** `internal/log/` provides a formal YAML append Logger (used for persistent task event logs via `ops/` → `log.Logger.Append()`). Alongside it, `ops/` contains 21+ `log.Printf()` calls (standard library) for runtime warnings and diagnostics — `claim_task.go` (7), `wt_merge.go` (7), `proceed.go` (3), `pipeline_ops.go` (2), `release_claim.go` (2), `submit_review.go` (1).
+**Impact:** Task leases follow configuration while agent registration and renewal do not. Non-default lease settings therefore produce two liveness policies, and every concurrent supervisor reports the same terminal identity.
 
-The two systems serve different purposes: formal Logger for persistent event audit trail, `log.Printf` for transient operational warnings. But the split is implicit — there's no documented contract for which to use when.
+**Direction:** Resolve agent lease duration from state once and pass it to registration and heartbeat. Either capture a real terminal identifier or remove the field from current operational claims.
 
-**Impact:** Low. Both systems work. However, the `log.Printf` messages go to stderr (via Go's default logger) while the formal Logger writes to `.liza/logs/`. An operator watching logs has two separate streams with inconsistent formatting. Agents running in supervisor mode see the `log.Printf` output mixed with their own output.
+#### Current documentation retains removed or undriven interfaces *(pass 21, Duplication lens; pass 22, Coupling lens)*
 
-**Direction:** Document the dual-purpose split (event log vs diagnostic log). Consider routing `log.Printf` warnings through a thin wrapper that adds structured context (task ID, operation name) for consistent formatting. Not urgent — the current approach works.
+**Smell:** Documentation and implementation divergence.
 
-#### Smell: statevalidate internal micro-duplication *(pass 16, Duplication lens)*
+**Signals:** `specs/architecture/c4/c4.md` and its diagrams still model the removed `internal/mcp` subsystem; `overview.md` still calls the supervision document an MCP-responsibility guide; `supervision-model.md` assigns the shared implementation role to `commands` rather than `ops`; generated `CONFIGURATION.md` advertises `LIZA_LOG_LEVEL`, while the agent logger is fixed at `slog.LevelInfo`.
 
-**Signal:** `statevalidate/validate.go` (658 LOC) contains three repeated micro-patterns:
-1. **statusClassifier methods** — 6 methods (`IsExecuting`, `IsInitial`, `IsSubmitted`, `IsReviewing`, `IsApproved`, `IsRejected`) with identical structure (hardcoded status check + `containsStatus` fallback), differing only by status name and field
-2. **Set uniqueness checks** — `map[string]bool` + loop + duplicate detection pattern repeated for `FailedBy` agents and `SprintHistory` IDs
-3. **Required field validation** — `if field == "" { return fmt.Errorf("missing required field '%s'", name) }` repeated ~5 times
+**Impact:** Current architecture and configuration guides direct readers toward components and controls that do not exist.
 
-**Impact:** Low. Each instance is 3-5 lines. The repetition is internal to a single file, not cross-file. Total: ~40 lines of structural repetition.
+**Direction:** Regenerate or retire the MCP C4 views, update the overview label, and either implement log-level parsing or remove the environment variable from generated documentation. Historical ADR references should remain unchanged.
 
-**Direction:** The `statusClassifier` methods could use a generic `IsStatus(s TaskStatus, hardcoded []TaskStatus, pipeline []TaskStatus) bool` but that trades clarity for terseness. The set uniqueness check could use a `checkUnique(items []string, context string) error` helper. Neither is urgent — the file is internally consistent.
+#### Repeated control-flow skeletons
 
-#### Smell: `ops/proceed.go` god file — 5 responsibilities in 1,200 LOC *(Adversarial pass, new packages)*
+**Smell:** Structural duplication.
 
-**Signal:** `proceed.go` grew from 533 to 1,200 LOC (+125%) to support 3 transition cardinalities (per-subtask, one-to-one, many-to-one). Now the largest file in the codebase with 26 functions and 107 `if` statements (0.089 if/LOC — highest density). Contains 5 distinct responsibilities:
-1. Manual transition execution (`Proceed`)
-2. Supervisor batch execution with cycle detection (`ExecuteAvailableTransitions`, 210 LOC — largest function)
-3. Crash recovery for all 3 cardinalities (`recoverCrashedTransition`, 108 LOC)
-4. Graph algorithms — topological sort + Tarjan's SCC (`topoSortPending` 92 LOC, `findSCCs` 61 LOC)
-5. Child task construction + dependency propagation (`buildChildTask`, `buildOneToOneChild`, `buildManyToOneChild`, `computeInheritedDeps`)
+**Signals:** Await operations repeat watcher/timer/polling orchestration; pipeline-aware status helpers repeat resolver-shaped logic; worktree paths are constructed both through a helper and inline.
 
-**Impact:** Medium. The file is well-tested (31 tests) and error handling is solid (16 wrapped errors, idempotency guards). But cognitive load is high — a developer modifying crash recovery must navigate past graph algorithms, and vice versa. The responsibilities are clearly separable.
+**Impact:** Behavioral fixes can land in one path but miss siblings.
 
-**Direction:** Extract into 4-5 cohesive files:
-- `proceed_graph.go` (~170 LOC): `topoSortPending`, `findSCCs`, `hasSelfLoop`, `hasCycleBlockedEvent`
-- `proceed_recovery.go` (~150 LOC): `recoverCrashedTransition`, `isTransitionIncomplete`
-- `proceed_builders.go` (~130 LOC): `buildChildTask`, `buildOneToOneChild`, `buildManyToOneChild`, `validateOutputEntry`, `patchInheritedDeps`
-- `proceed_deps.go` (~85 LOC): `computeInheritedDeps`, `extraToStringSlice`
-- `proceed.go` (~400 LOC): core orchestration (`Proceed`, `proceedInner`, `proceedManyToOneInner`, `ExecuteAvailableTransitions`)
+**Direction:** Consolidate shared policy only where one abstraction makes failure behavior clearer than the duplicated code.
 
-#### Smell: `await_verdict.go` / `await_resubmission.go` structural duplication *(Adversarial pass, new packages)*
+#### Configuration and time-policy scatter
 
-**Signal:** Two event-loop files (445 + 403 LOC) share ~180 LOC of structurally identical code (~40% overlap):
-- Main function skeleton: argument validation, path/blackboard setup, watcher creation with polling fallback, deadline/ticker setup — ~120 LOC identical
-- Polling fallback function: 37-39 LOC, 98% identical (only result type and status-check function differ)
-- Event loop structure: all 5 select cases (`ctx.Done`, `abortTicker`, `watcher.Events`, `watcher.Errors`, `deadlineTimer`) identical in structure
+**Smell:** Hardcoded configuration.
 
-Functional differences: verdict handles rejection reclaim + budget escalation (78 LOC result handler); resubmission handles lease renewal (15 LOC result handler, delegates to ops).
+**Signals:** Watch has twelve top-level timing/retry constants, timeouts and polling intervals live across packages, `wt_merge.go` mixes UTC and local timestamps, and supervisor agent leases bypass `Config.LeaseDuration`.
 
-Both hardcode `1 * time.Second` (abort ticker) and `5 * time.Second` (polling ticker).
+**Impact:** Operational tuning and temporal reasoning require code-wide knowledge.
 
-**Impact:** Low-medium. If the event-loop pattern changes (e.g., new select case, different watcher setup), both files need identical updates. The pattern will likely be reused if new await_* operations are added.
+**Direction:** Centralize values that operators need to tune; keep truly local implementation constants near their use.
 
-**Direction:** Extract `awaitWithWatcher(ctx, bb, taskID, agentID, timeout, acquireFn, checkStatusFn, handleResultFn)` helper (~150 LOC). Would reduce both files by ~120 LOC each. Evaluate whether the abstraction aids or obscures — the current duplication is readable.
+#### Data contract loss and ambiguity
 
-#### Smell: `ApplyYAMLTimeouts` type-switch in agent strategies *(Adversarial pass, new packages)*
+**Smell:** Leaky or unstable contract.
 
-**Signal:** `strategy_doer.go` exports `ApplyYAMLTimeouts(strategy RoleStrategy, ...)` which uses a `switch s := strategy.(type)` over all three concrete strategy types to inject YAML timeout overrides. Adding a new strategy type requires updating this switch.
+**Signals:** `SetTaskOutput` disagrees with validation/proceeding about `spec_ref`; sprint archival drops metrics other than `TasksDone`; fan-out overwrites subtask priority.
 
-**Impact:** Low. The strategy set is small (3 types) and stable. But the pattern violates the Strategy interface contract — a method on the interface would be cleaner.
+**Impact:** Data may be accepted at one boundary and rejected later, or silently lose scheduling/observability information.
 
-**Direction:** Add `ApplyTimeoutOverrides(executionTimeout, pollSec, maxWaitSec)` to the `RoleStrategy` interface. Each strategy applies to its own fields. Eliminates the type-switch.
+**Direction:** Define ownership and preservation rules before changing implementation.
 
-#### Smell: CLI Executor concrete implementation tightly coupled to CLI tools *(pass 17, Coupling lens)*
+#### Filesystem error and cleanup asymmetry
 
-**Signal:** `DefaultCLIExecutor.Execute()` in `agent/supervisor.go` has a `switch actualCLI` statement hardcoding 5 CLI tools ("claude", "codex", "gemini", "vibe", "kimi") with per-tool flag formats:
-- `claude`: `-p`, `--verbose`, `--output-format stream-json`
-- `codex`: `exec [prompt] --full-auto`, `--json` *(Adversarial pass: MCP reference removed — was `-c mcp_servers.liza.command=...`)*
-- `gemini`: `-p`, `--output-format stream-json`
-- `vibe`: `-p`, `--output streaming`
-- `kimi`: `-p`, `--verbose`, `--output-format stream-json`
+**Smell:** Inconsistent error semantics.
 
-The `mistral → vibe` rename mapping is still hardcoded. `ExecuteInteractive()` duplicates the same switch. Adding a new CLI tool requires modifying both functions.
+**Signals:** Some `os.Stat` presence checks distinguish only exists/missing, and some cleanup removal failures are suppressed.
 
-**Impact:** Low-medium. The `CLIExecutor` *interface* is clean — tests use `MockCLIExecutor` successfully. But the *concrete implementation* is a switch statement that couples the agent layer to specific external tool CLI APIs. If any tool changes its flag format, the supervisor needs updating. The pattern isn't extensible without code changes.
+**Impact:** Permission and I/O failures can look like absence, while secondary cleanup failures may be observable only indirectly.
 
-**Direction:** Consider a data-driven CLI profile (map/config of CLI name → flag templates) or a per-CLI adapter. Alternatively, accept this as intentional — the set of supported CLIs is small and stable, and the switch provides clear, readable per-CLI logic. Low priority unless the CLI set grows.
+**Direction:** Use tri-state existence handling at correctness boundaries and explicitly document best-effort cleanup boundaries.
 
-#### Smell: MCP access control, extractStringSlice, extractOutputEntries — REMOVED *(health check: MCP server deleted in `90c132d5`)*
+### 2.4 Resolved Since the Prior Review
 
-#### Smell: Timestamp inconsistency — `time.Now()` vs `time.Now().UTC()` in `wt_merge.go` *(Adversarial pass, data flow)*
+| Prior finding | Current status |
+|---------------|----------------|
+| Unbounded integration-test execution | Resolved: merge tests use a configured timeout, command context, process-group termination, and `WaitDelay`. |
+| Bidirectional role-map synchronization | Resolved: canonical role names and normalization live in `internal/roles`. |
+| Five-tool concrete CLI executor switch | Resolved/reframed: provider catalog and launch profiles own most tool variation. |
+| No interface-based seams | Stale: the runtime now exposes multiple focused interfaces, including `LLMAgent`, `CLIExecutor`, `RoleStrategy`, watchers, runners, and lookups. |
+| Broken sprint-governance Vision link | Resolved: the spec links the existing build Vision document. |
+| Hand-written bubble sort | Resolved: formatting uses `slices.Sort`. |
+| Hardcoded child task type | Resolved: transition definitions supply the child task type. |
+| Different-coder rejected-worktree recreation | Resolved by contract alignment: rejected worktrees are preserved after lease-expiry reassignment. |
+| Untested role Phase 2 query functions | Stale: those functions no longer exist. |
+| MCP runtime architecture findings | Obsolete: MCP was removed under ADR-0057. Current C4/overview references are a separate documentation-drift finding. *(adjusted, pass 21)* |
+| `format.go` file references | Stale path: current helpers live in `format_helpers.go`. |
+| "`coverage.out` is a narrow or partial run" | Adjusted at pass 21: the ignored local artifact is not a durable evidence source. Pass 20's figures came from a separate complete `-coverpkg` run; the current local profile reports 1.9% and is not used here. |
+| "Three packages have zero test files" (`alerts`, `projectdetect`, `taskkind`) | Adjusted at pass 20: accurate as stated, but not a coverage gap. `alerts` is 89.7% and `projectdetect` 92.9% from their callers; `taskkind` has no executable statements. |
+| Untested `statevalidate` and embedded entry points | Stale at pass 20: `statevalidate` 89.6%, `PlanGlobalFiles` 90.9%, `WritePipelineConfig` 100%. The finding was an artifact of same-package measurement. |
 
-**Signal:** `ops/wt_merge.go` uses `time.Now()` (local timezone) at 3 sites (lines 118, 451, 473) for `TaskHistoryEntry.Time` and `Timestamp`, while every other production ops file uses `time.Now().UTC()`. *(health check: was 2 sites — worsened to 3)* The pattern across 20+ ops files is consistently `.UTC()`:
-- `claim_task.go:258`, `submit_review.go:182,273`, `submit_verdict.go:119`, `proceed.go:76,257`, `release_claim.go:177`, `mark_blocked.go:42`, `delete_agent.go:38,95`, `recover_task.go:148`, etc.
+**Follow-through gap:** The [non-reproducible coverage basis](architectural-issues.md#coverage-basis-is-not-reproducible-by-repository-tooling) has remained High and verified through passes 20, 21, and 22. Reverification shows continued accuracy, not progress; the canonical registry owner makes later closure explicit.
 
-**Impact:** Low. On most servers, UTC and local time are the same. However, in development environments or non-UTC deployments, history entries from `wt_merge.go` will have different timezone offsets than entries from all other ops files, causing inconsistent timestamp sorting and display.
-
-**Direction:** Change `time.Now()` to `time.Now().UTC()` at lines 118, 451, and 473 in `wt_merge.go`. Three-line fix.
-
-#### Smell: Unbounded integration test execution in `MergeWorktree` *(Adversarial pass, data flow)*
-
-**Signal:** `ops/wt_merge.go` runs `scripts/integration-test.sh` via `exec.Command` with no timeout or context cancellation. If the test script hangs (network dependency, infinite loop, blocking I/O), the merge operation blocks indefinitely, which blocks the CAS retry loop, which prevents all further merges.
-
-The supervisor's execution timeout (default 30m, `agent/supervisor.go:403`) does not protect this path — `MergeWorktree` is called by agents during review, not by the supervisor loop.
-
-**Impact:** Medium. A hanging integration test is an unbounded operation that can stall the entire merge pipeline. Other merge candidates queue behind the stuck CAS lock. The only recovery is manual process termination.
-
-**Direction:** Use `exec.CommandContext` with a configurable timeout (e.g., `Config.IntegrationTestTimeout`, default 10m). The timeout should be generous enough for legitimate test suites but bounded enough to prevent indefinite hangs. Consider also adding a timeout to the CAS retry loop itself.
-
-#### Smell: Role mapping bidirectionality unverified *(pass 17, Coupling lens)*
-
-**Signal:** `roles/roles.go` maintains two maps that must stay synchronized:
-- `runtimeToWorkflow` (line 39): maps 9 runtime roles → workflow roles
-- `workflowToRuntime` (line 52): maps 9 workflow roles → runtime roles
-
-Both are hand-maintained `var` declarations. Adding a new role requires adding entries to both maps plus updating `AllRuntime()`, `AllWorkflow()`, and potentially `DoerRoles()` / `ReviewerRoles()`. No compile-time or startup verification catches a missing entry in either direction.
-
-**Impact:** Low. The maps are small (9 entries each), and the `roles_test.go` file exists with tests. However, adding Phase 2 roles (which already happened — us-writer, us-reviewer, epic-planner, etc.) requires touching 4-6 locations per role. A forgotten entry in `workflowToRuntime` would cause `ToRuntime()` to return an error for valid workflow roles, surfacing as a runtime failure during task claiming or review.
-
-**Direction:** Add a test that verifies bidirectionality: for each entry in `runtimeToWorkflow`, confirm the inverse exists in `workflowToRuntime` and vice versa. This is a 10-line test that prevents a class of bugs. Alternatively, generate one map from the other.
-
-#### Smell: Scattered timeout constants across packages *(pass 17, Coupling lens)*
-
-**Signal:** Beyond the documented watch thresholds (pass 6) and raw `1800` residuals (pass 6), timeout/interval constants are scattered across 5 packages with no centralized registry:
-
-| Package | Constant | Value | Location |
-|---------|----------|-------|----------|
-| `filelock` | `DefaultLockTimeout` | 10s | `filelock.go:14` |
-| `filelock` | `LockCheckInterval` | 100ms | `filelock.go:15` |
-| `db` | (inline debounce) | 50ms | `watcher.go:59` |
-| `agent` | (abort check) | 5s | `waitforwork.go:133` |
-| `agent` | (pause check) | 5s | `systemctl.go:41` |
-| `agent` | (execution timeout default) | 30m | `supervisor.go:403` |
-| `agent` | (exit42 initial backoff) | 2s | `supervisor.go:194` |
-
-The `models.Config` struct already centralizes heartbeat, poll, lease, and iteration parameters. These timeout/interval constants bypass that pattern entirely — some are package-level `const`, some are inline literals.
-
-**Impact:** Low. Each value is reasonable and unlikely to need per-environment tuning. The concern is discoverability: an operator troubleshooting a timeout-related issue has no single place to see all timing parameters. Values like the 5-second abort/pause checks are duplicated (same magic number in two packages) without sharing a constant.
-
-**Direction:** Document the timing constants as a reference table (this smell serves that purpose). Moving them to `models.Config` is low priority — most are infrastructure-level constants that don't benefit from runtime configurability. The inline 50ms debounce and 5s checks could be extracted to named constants for clarity.
-
-#### Smell: `statevalidate` composition gap — entry-point validators untested *(pass 15, Coverage lens)*
-
-**Signal:** `statevalidate` has the lowest coverage of any functional package at **55.1%** (27 functions, 9 at 0%). The 0% functions are precisely the entry-point validators that compose the inner checks: `ValidateStateFile`, `ValidateAgentInvariants`, `ValidateAnomalies`, `validateRequiredFields`, `validateAgentInvariants`, `validateHandoff`, `validateDiscovered`, `validateAnomalies`, `checkSpecFileExists`. Inner validators (`validateTaskStates` 92.9%, `validateDependencies` 91.3%, `checkCircular` 81.8%) are well-covered.
-
-**Impact:** Medium. This package validates data integrity — exactly the kind of code where "tested parts, untested whole" matters. The composition logic determines which validators run, in what order, and how errors aggregate. A bug in `ValidateStateFile` (the top-level entry point called by `liza validate`) could skip validators entirely without test detection.
-
-**Direction:** Table-driven tests calling `ValidateStateFile` with various malformed states would cover the composition layer cheaply. The inner validators' existing coverage means only the wiring needs testing.
-
-#### Smell: `models/state.go` governance helpers at 0% *(pass 15, Coverage lens)*
-
-**Signal:** Several task/system governance query methods have zero coverage: `IsApprovedForMerge`, `IsSubmittedStatus`, `IsExecutingStatus` (status classification), `ReleaseAgent` (agent cleanup), `ValidateTransition` (SystemMode transition validation), `NormalizeHeartbeatInterval`, `IsPipelineSprintTerminal`. Also `ValidTaskTypeNames` and `isBlockedByDepsPipeline`/`isInProgressPipeline` in diagnostics.go.
-
-**Impact:** Low-medium. These functions are simple (most are 5-15 line helpers) but they're called from the untested runtime orchestration layer — the same "tested parts, untested whole" pattern. `ValidateTransition` is notable: it governs the system mode state machine (RUNNING → PAUSED → STOPPED) with a transition table, and has no test at all.
-
-**Direction:** `ValidateTransition` deserves a table-driven test — it's a small, pure function governing system-level state transitions. The status-query helpers could be batch-tested. `NormalizeHeartbeatInterval` is a pure function with clear boundary conditions (≤0, >300, valid) — trivial to test.
-
-#### Smell: `SetTaskOutput` does not validate `spec_ref` *(Adversarial pass, data flow: role-pair-to-role-pair)*
-
-**Signal:** `set_task_output.go` validates `desc`, `done_when`, `scope` as non-empty but does NOT validate `spec_ref`:
-```go
-// set_task_output.go — validates 3 of 4 fields:
-if entry.Desc == "" { return fmt.Errorf("output[%d].desc is required", i) }
-if entry.DoneWhen == "" { return fmt.Errorf("output[%d].done_when is required", i) }
-if entry.Scope == "" { return fmt.Errorf("output[%d].scope is required", i) }
-// spec_ref NOT checked
-```
-By contrast, `proceed.go:validateOutputEntry` (line 405-418) requires all four fields including `spec_ref`. An agent can successfully set output entries with empty `spec_ref` via `liza_set_task_output`, then `liza proceed` fails at transition time.
-
-This is the ops-layer validation allowing empty `spec_ref` through.
-
-**Impact:** Low-medium. The failure surfaces at proceed time with a clear error message, so it's not silent. But the feedback is delayed — the agent's work is already merged and the sprint is checkpointed before the human discovers the validation failure. Fixing at that point requires manual state editing or re-running the planning pair.
-
-**Direction:** Add `spec_ref` validation to `SetTaskOutput`, consistent with `validateOutputEntry`. Alternatively, make `spec_ref` optional in `validateOutputEntry` since not all decompositions may reference a spec file.
-
-#### Smell: Sprint metrics lossy compression at sprint boundary *(Adversarial pass, data flow: sprint-to-sprint)*
-
-**Signal:** `applySprintAdvance` (advance_sprint.go:100-107) reduces the full 12-field `SprintMetrics` struct to a single `TasksDone` count in `SprintSummary`:
-```go
-s.SprintHistory = append(s.SprintHistory, models.SprintSummary{
-    // ... only TasksDone from Metrics survives:
-    TasksDone: plan.archivedSprint.Metrics.TasksDone,
-})
-s.Sprint = models.Sprint{
-    // ... new sprint gets zeroed metrics:
-    Metrics: models.SprintMetrics{},
-}
-```
-Fields lost: `TasksTotal`, `TasksAbandoned`, `AvgReviewIterations`, `MaxReviewIterations`, `ReviewApprovalRate`, `TasksBlockedCount`, `AnomaliesLogged`, `AvgTaskDurationMinutes`, `ContextExhaustionCount`, `IntegrationFailures`, `SupersededCount`. These are only preserved in the archive YAML on disk.
-
-`BuildOrchestratorContext` (builder.go:127) passes `state.SprintHistory` to orchestrator templates, but those summaries carry only `TasksDone`. The orchestrator cannot see cross-sprint performance trends (e.g., rising rejection rates, increasing iteration counts) without reading archive files — which no prompt template instructs it to do.
-
-**Impact:** Low-medium. The full archive is preserved on disk, so no data is permanently lost. However, the orchestrator's planning decisions for sprint N+1 cannot be informed by sprint N's performance metrics because the active state summary discards them. Distinct from the existing "Retrospective Findings Don't Feed Forward" issue (which covers qualitative findings) and "Metrics Collection Without Query Interface" (which covers the absence of a query layer).
-
-**Direction:** Extend `SprintSummary` with a small set of the most decision-relevant metrics (e.g., `AvgReviewIterations`, `ReviewApprovalRate`, `TasksBlockedCount`) or add a `MetricsSummary` sub-struct. Alternatively, have the orchestrator template reference archive files for the previous sprint. The archive path is deterministic: `.liza/archive/sprint-N.yaml`.
-
-#### Smell: Per-subtask child task priority flattened to 1 *(Adversarial pass, data flow: role-pair-to-role-pair)*
-
-**Signal:** `buildChildTask` (proceed.go:369) hardcodes `Priority: 1` for per-subtask children:
-```go
-func buildChildTask(...) models.Task {
-    return models.Task{
-        Priority: 1,  // hardcoded, parent priority ignored
-        // ...
-    }
-}
-```
-By contrast, `buildOneToOneChild` (proceed.go:395) correctly copies `parent.Priority`. This inconsistency means elevated-priority parent tasks pass priority through one-to-one transitions but not through per-subtask transitions.
-
-**Impact:** Low. Current priority usage is limited — the system doesn't have priority-based scheduling beyond ordering. However, it's a data flow inconsistency between the two transition modes that could cause surprising behavior if priority-aware scheduling is added.
-
-**Direction:** Pass parent priority (or the output entry's priority, if added to `OutputEntry`) to `buildChildTask`. At minimum, copy from the parent task as `buildOneToOneChild` does.
-
-#### Smell: `buildChildTask` hardcodes `Type: TaskTypeCoding` for all children *(Adversarial pass, data flow: role-pair-to-role-pair)*
-
-**Signal:** Both `buildChildTask` (proceed.go:365) and `buildOneToOneChild` (proceed.go:390) set `Type: models.TaskTypeCoding` regardless of the target role-pair. When the epic-to-us transition creates US Writer tasks from epic planner output, those children get `Type: coding` even though their role-pair is `us-writing-pair`.
-
-This is the concrete code-level manifestation of two existing issues in `architectural-issues.md`:
-- "Task Type Registry Only Supports Coding Workflows" (medium, TENSION)
-- "Task Type Registry is Partial Abstraction" (low, TRAJECTORY)
-
-**Impact:** Low (currently). The task type is used by `IsClaimable()` for role eligibility lookup, but pipeline-aware claiming bypasses the task type registry entirely — it uses role-pair status matching. The hardcoded type becomes a latent bug only if non-pipeline code paths start using task type to distinguish workflow behavior.
-
-**Direction:** Derive task type from the target role-pair (e.g., `us-writing-pair` → `specification` type, if added to the registry). Alternatively, accept `TaskTypeCoding` as the universal type until the registry is extended — but document this as an intentional simplification, not an oversight.
-
-#### Smell: INVARIANTS.md §7 clean worktree check not enforced at submission *(Adversarial pass, targeted: INVARIANTS.md)*
-
-**Signal:** INVARIANTS.md §7 states: "Clean sync: before READY_FOR_REVIEW, working tree must be clean (no staged, unstaged, or untracked files)." `submit_review.go` validates: commit SHA match (line 118-119), TDD enforcement (line 123-131), pre-execution checkpoint (line 89-91), rebase onto integration (line 147), and re-validates status/assignment under lock (line 189-199). But **no `git status` or working tree cleanliness check exists** in the submission path.
-
-**Impact:** Medium. A coder can submit work with uncommitted changes in the worktree — the reviewer sees only the committed code (via `review_commit`), but the coder may have relied on uncommitted files during local testing. The invariant document promises this protection but the code doesn't deliver it.
-
-**Direction:** Add a clean worktree check (no staged, unstaged, or untracked files) to `submit_review.go` before the rebase step. Alternatively, update INVARIANTS.md to remove the claim if this is intentionally deferred. The spec `worktree-management.md` should match whichever decision is made.
-
-#### Smell: INVARIANTS.md §6 provider diversity not enforced at verdict time *(Adversarial pass, targeted: INVARIANTS.md)*
-
-**Signal:** INVARIANTS.md §6 states: "Quorum enforcement: approval count tracked, provider diversity required (≥2 distinct providers for multi-reviewer quorum)" and attributes enforcement to `submit_verdict.go`. The code has all the building blocks:
-- `task.HasProviderDiversity()` (task.go:278) — checks if approvals come from ≥2 distinct providers
-- `resolver.ProviderDiversity()` (resolver.go:287) — returns the diversity setting per role-pair/impact
-- `filterDoerProviderDiversity()` (claim_reviewer_task.go:347) — filters reviewer candidates at claim time
-
-But `submit_verdict.go` **only checks `ApprovalCount() < effectiveQuorum`** (line 237) — it never calls `HasProviderDiversity()` or `ProviderDiversity()`. Provider diversity is actually enforced:
-1. At reviewer claim-filtering time (doer-vs-reviewer provider, `claim_reviewer_task.go:107`)
-2. At merge-readiness evaluation (soft "preferred" enforcement, `agent/claiming.go:151`)
-
-Neither matches the invariant's description of hard enforcement during verdict submission.
-
-**Impact:** Medium. If two reviewers from the same provider (e.g., both "claude") approve a task, the quorum count is met and the task transitions to APPROVED. The diversity check only applies to merge readiness (with "preferred" semantics that can be overridden), not to the approval itself. This is weaker than what the invariant document promises.
-
-**Direction:** Either (a) add provider diversity enforcement to `submit_verdict.go` — reject second approval from same provider when diversity is required, or (b) update INVARIANTS.md to accurately describe the current enforcement model: "provider diversity preferred at merge-readiness, not enforced at verdict time."
-
-#### Smell: INVARIANTS.md §12 system mode transition table inaccurate *(Adversarial pass, targeted: INVARIANTS.md)*
-
-**Signal:** INVARIANTS.md §12 states: "System mode transitions enforced: RUNNING↔PAUSED, any→CIRCUIT_BREAKER_TRIPPED, TRIPPED→PAUSED." The actual transition landscape:
-- RUNNING→PAUSED: ✓ via `ValidateTransition` (config.go:48)
-- PAUSED→RUNNING: via `Resume()` (mode_change.go:88-92), bypasses `ValidateTransition` — `ValidateTransition` rejects this with "use liza resume"
-- **TRIPPED→RUNNING**: via `Resume()` (mode_change.go:93-99) — invariant only lists TRIPPED→PAUSED
-- any→TRIPPED: via direct `s.Config.Mode = SystemModeCircuitBreakerTripped` (analyze.go:89) — not in transition table at all
-- RUNNING/PAUSED/TRIPPED→STOPPED: via `ValidateTransition` — not mentioned in invariant
-- STOPPED→RUNNING: via `ValidateTransition` — not mentioned in invariant
-
-The `ValidateTransition` map in config.go and the `Resume()` function in mode_change.go form a split implementation with no shared validation.
-
-**Impact:** Low. The transitions work correctly — the invariant description is simply incomplete. Operators relying on the invariant table for mode transition understanding would miss valid paths.
-
-**Direction:** Update INVARIANTS.md §12 with the complete transition graph including the Resume() path and the STOPPED mode.
-
-#### Smell: INVARIANTS.md §7 different-coder rejected worktree recreation not enforced *(Adversarial pass, targeted: INVARIANTS.md)*
-
-**Signal:** INVARIANTS.md §7 states: "Different coder reclaiming REJECTED task → delete and recreate fresh worktree." In `claim_task_strategy.go`, the `rejectedClaimStrategy.handleWorktree()` (line 120-126) delegates to `ensureRejectedWorktreeExists()` (claim_task.go:397-444), which preserves the existing worktree when both directory and branch exist — **regardless of whether the claimer is the same or a different coder**. Same-coder vs different-coder only affects the history event type (line 140-149 of claim_task_strategy.go). The worktree is recreated only when the directory or branch is missing (recovery from partial state, not policy enforcement).
-
-**Impact:** Low. The intent is to prevent "context contamination from failed work" (per the invariant). In practice, rejected tasks retain the prior coder's uncommitted state, which a different coder inherits. However, since the review process already identified the issues, and the new coder gets the rejection reason in context, the practical impact is limited.
-
-**Direction:** If the invariant is intentional, add a same-coder check to `ensureRejectedWorktreeExists()` and recreate from integration branch when a different coder claims. If the current behavior is preferred (preserve work for debugging), update INVARIANTS.md to reflect it.
-
-#### Smell: INVARIANTS.md §3.2 transition map attribution and §3.1 status naming drift *(Adversarial pass, targeted: INVARIANTS.md)*
-
-**Signal:** Two documentation drift issues in INVARIANTS.md §3:
-
-1. **§3.2** attributes the transition map to "`models/task.go` transition map." In reality, `task.go` only has `TransitionWith()` (line 309-318) which validates against a **provided** map. The actual map is built by `BuildPipelineTransitions()` in `ops/pipeline_ops.go:67-103` from pipeline config via `resolver.TransitionMap()`. No hardcoded transition map exists in task.go since commit `581d377`.
-
-2. **§3.1** uses legacy status names (DRAFT, IMPLEMENTING, READY_FOR_REVIEW, REVIEWING, APPROVED, REJECTED). The code uses pipeline-prefixed names: DRAFT_CODE, IMPLEMENTING_CODE, CODE_TO_REVIEW, REVIEWING_CODE, CODE_APPROVED, CODE_REJECTED. The coding-plan pair uses DRAFT_CODING_PLAN, CODE_PLANNING, etc. The legacy constants in `task.go:79-103` still exist but are mapped from pipeline-declared names via the resolver.
-
-**Impact:** Low. The invariants are conceptually correct — the enforcement exists, just at different locations and with different naming than documented. A developer using INVARIANTS.md to navigate the code would look in the wrong file.
-
-**Direction:** Update §3.2 enforcement to reference `ops/pipeline_ops.go:BuildPipelineTransitions` and `pipeline/resolver.go:TransitionMap`. Generalize §3.1 status names to use role-pair-qualified terminology or add a note that specific status names are pipeline-configured.
-
-### 2.4 Patterns
+### 2.5 Patterns
 
 | Pattern | Where Used | Purpose |
 |---------|------------|---------|
-| Repository (Blackboard) | `internal/db/` | Encapsulates file-based state persistence with locking |
-| Strategy (CLIExecutor) | `internal/agent/` | Pluggable agent CLI backend (claude, codex, gemini, vibe) |
-| Command | `internal/commands/` | Each CLI command is an independent function with uniform interface |
-| Template Method | `internal/prompts/` | Role-specific prompts built from shared templates |
-| Observer (Watcher) | `internal/db/watcher.go` | Event-driven state change notification via fsnotify |
-| Strategy (claimRelease) | `internal/ops/release_claim.go` | Parameterized coder/reviewer claim release — eliminates duplication between two nearly-identical release flows *(pass 5, Duplication lens: notable counterexample)* |
-| Registry | `internal/models/`, `internal/roles/` | Task type → role workflow mapping; unified role constants with runtime↔workflow mapping |
-| State Machine | `internal/models/`, `internal/ops/` | Pipeline-driven only: `TransitionWith()` using `BuildPipelineTransitions()` *(pass 2: added; `581d377`: hardcoded map removed)* |
-| Circuit Breaker | `internal/analysis/` | Pattern detection on anomalies triggers system pause |
-| Heartbeat/Lease | `internal/agent/heartbeat.go` | Agent liveness detection via periodic lease extension |
-| Embed | `internal/embedded/` | Contract/skill files embedded in binary via `go:embed` |
-| Strategy (role) | `internal/agent/strategy*.go` | Role-specific claim/work strategies (doer, reviewer, orchestrator) *(health check: new pattern)* |
+| Repository | `internal/db.Blackboard` | Serializes process-safe access to shared state. |
+| Unit of Work | `Blackboard.Modify` callbacks | Keeps mutation and payload-hygiene validation inside one lock scope; semantic invariant validation is outside it. *(adjusted, pass 19)* |
+| State | `models`, `pipeline`, `ops` | Governs task and system-mode transitions. |
+| Strategy | `internal/agent` role strategies | Varies behavior by role without duplicating the supervisor. |
+| Adapter | providers, toolchain, Git, SCIP, Stacklit | Isolates external CLI and repository-tool behavior. |
+| Catalog/Profile | `internal/providers` | Makes provider launch configuration data-driven. |
+| Builder | `internal/prompts` | Composes role- and pipeline-specific prompts. |
+| Observer | blackboard watcher and TUI | Reacts to atomic state-file changes. |
+| Command/Service | `internal/commands` → `internal/ops` | Separates user-facing parsing from mutations, but the layer is optional: tests excluded, package-qualified call expressions in production `cmd/liza` yield 31 calls to `ops` and 58 to `commands` (89 total). The count excludes type references and struct literals. *(adjusted, pass 19; re-counted 2026-07-25)* |
+| Transactional outbox analogue | task history in blackboard state | Records lifecycle changes with the authoritative state update. |
 
-### 2.5 Test Coverage
+### 2.6 Test Coverage
 
-**Overall:** ~33,400 source LOC, ~87,400 test LOC. 2.6:1 ratio. *(health check: was ~23,100/~55,600 (2.4:1); +44% production, +57% test; coverage % needs re-measurement after MCP removal and ops/tui growth)*
+The [2026-07-24 code quality assessment](code_quality_assessment.md#repository-metrics-dashboard) counted all tracked Go files at 150,683 test lines and 65,509 production lines, a 2.30:1 ratio. The previously quoted 150,414/65,061 total used the narrower `cmd/` + `internal/` scope: the exact difference is `plugin/acp` (269 test and 448 production lines). This dated ratio indicates substantial test investment but is not a statement-coverage percentage.
 
-**Well-covered:**
-| Package | Ratio | Notes |
-|---------|-------|-------|
-| prompts | 3.9:1 | Highest |
-| identity | 3.0:1 | |
-| db | 2.8:1 | Includes concurrency tests |
-| commands | 3.7:1 | 35+ test files, ~19,520 test LOC *(health check: was 2.1:1)* |
-| git | 1.7:1 | Real git repos in tests |
-| embedded | 1.9:1 | |
-| agent | 2.4:1 | MockCLIExecutor, supervisor tests |
-| pipeline | 2.4:1 | Config parsing + resolver tests *(health check: new)* |
-| ops | 2.5:1 | ~24,820 test LOC *(health check: was 2.0:1 — test investment grew faster than code)* |
-| models | 1.8:1 | |
+**Historical measurement basis *(pass 20, Coverage lens)*.** A separate complete `go test -coverpkg=./... ./...` run produced whole-module profiles for approximately 48 test binaries, then deduplicated blocks by block key. The raw profiles and deduplication implementation were not retained. The committed [2026-07-25 coverage summary](coverage-summary-2026-07-25.md) preserves the reviewed aggregate, per-package bands, and zero-function counts, but the figures remain historical until repository tooling regenerates the same basis. `coverage.out` is ignored, and `make test` still omits `-coverpkg` — see §2.3.
 
-**Gaps:**
-- `cmd/liza/main.go` (~3,089 LOC across 7 files): CLI wiring *(health check: was 1,462 — doubled; needs coverage re-measurement)*
-- `internal/models/diagnostics.go` (230 LOC): `diagnostics_test.go` exists *(pass 4 resolved: pass 13)*
-- `internal/statevalidate/` (903 LOC): 9 of 27 functions at 0% — lowest functional package *(pass 15, Coverage lens; health check: grew from 658)*
-- `internal/roles/` (60%): 4 Phase 2 role-query functions at 0% (`DoerRoles`, `ReviewerRoles`, `IsDoerRole`, `IsReviewerRole`) *(pass 15, Coverage lens)*
-- `internal/tui/` (~2,265 LOC, 172 tests): Well-tested via 6 test files. No integration/E2E tests for full Bubbletea program lifecycle *(Adversarial pass: assessed)*
-- `internal/process/` (67 LOC): No test file *(Adversarial pass: test gap)*
-- `internal/gitenv/` (28 LOC): No test file *(Adversarial pass: test gap)*
+The retained summary records **80.7%** over 26,178 statements by profile-block arithmetic and **82.6%** by `go tool cover -func`. The latter omits function literals outside a `FuncDecl`, including all 69 Cobra `RunE` bodies, so block arithmetic is the more complete historical total.
 
-**Critical 0% coverage paths** *(pass 4, Coverage lens; health check update)*:
-Uncovered code concentrates in three patterns:
-1. **Runtime orchestration** — `supervisor.Execute/ExecuteInteractive/RunSupervisor`, `systemctl.executeAgent/waitWhilePaused/checkAbort`, `claiming.handleApprovedMerges/handleAvailableTransitions` — the agent lifecycle loop
-2. **I/O-coupled functions** — `embedded.WritePipelineConfig/WriteGuardrails/PlanGlobalFiles`, `DefaultCLIExecutor` — hardwired to OS-level I/O *(health check: MCP stdio removed)*
-3. **Validation composition** — `statevalidate.ValidateStateFile/ValidateAgentInvariants/ValidateAnomalies/validateRequiredFields` + 5 inner validators — entry points at 0% while composed validators are well-covered *(pass 15, Coverage lens)*
+**Coverage by package (`-coverpkg` basis, statements in parentheses):**
 
-**468 functions at 0% total** *(pass 15, Coverage lens)*: Many are trivial (error type `.Error()` methods, path accessor one-liners), but the absolute count is useful as a trend metric. The significant zero-coverage functions cluster in the three patterns above.
+| Band | Packages |
+|------|----------|
+| ≥90% | `identity` 100 (48), `roles` 100 (5), `envgate` 96.0, `jsonout` 96.3 (81), `filelock` 95.2 (126), `analysis` 94.9, `secretmask` 94.6, `projectdetect` 92.9, `termutil` 91.7, `semble` 91.3, `errors` 91.1, `pipeline` 90.6 (663), `models` 90.5 (641) |
+| 80–90% | `alerts` 89.7, `statevalidate` 89.6 (924), `plugin/acp` 89.2, `paths` 88.5, `procscan` 88.3, `scipsearch` 87.9 (742), `render` 87.7, `codexconfig` 87.5, `brand` 86.6, `db` 86.5, `prompts` 85.6, `ops` 84.3 (6,816), `gitenv` 84.2, `embedded` 84.1 (731), `precommit` 83.3, `providers` 83.1, `testhelpers` 82.5, `tui` 82.0 (972), `git` 82.0, `toolchain` 80.1, `process` 80.0 |
+| 70–80% | `commands` 79.7 (3,343), `initcheck` 78.9, `agent` 78.8 (3,162), `pairingindex` 78.0, `statehygiene` 75.2, `worktreeexclude` 74.0, `stacklit` 73.5, `updater` 71.9 (629) |
+| <70% | `log` 69.0, `brandrender` 64.9, `functionalclusters` 64.1, **`cmd/liza` 62.4 (2,631)**, `interactive` 35.8 (67), `brandrender/cmd/sync-embedded` 0.0 (6) |
 
-**Partially covered functions of concern** *(pass 4; pass 15 update)*:
-| Function | Coverage | Status |
-|----------|----------|--------|
-| `statevalidate.validateStatusFields` | 27.0% | Status-specific field validation — many branches untested *(pass 15)* |
-| `statevalidate.validateTaskInvariants` | 45.5% | Core task invariant checks — partially covered *(pass 15)* |
-| `agent.verifyOrchestratorStateChanges` | 34.7% | Orchestrator verification — mostly uncovered *(pass 15)* |
-| `agent.waitForWorkPolling` | 52.4% | Polling fallback path *(pass 15)* |
+`internal/taskkind` does not appear because it contains no executable statements.
 
-**I/O coupling as testability barrier** *(pass 4, Coverage lens)*: Functions at 0% coverage strongly correlate with hardwired I/O — this is the Coverage lens perspective on the Boundaries smell (pass 3). The `CLIExecutor` interface demonstrates the solution pattern: abstracting one I/O boundary enabled comprehensive supervisor testing. *(health check: MCP StdioTransport no longer relevant — removed)*
+**Current structural observations:**
 
-**Integration tests:** `internal/integration/` (~4,120 LOC) covering concurrent operations, sprint/merge workflows, e2e command sequences, lease expiry. All files guarded by `testing.Short()` — skipped under `go test -short` *(health check: was 1,665 — +147% growth, significant investment)*.
-
-**Test patterns:** Table-driven (dominant), filesystem isolation, hand-written mocks (no frameworks), real git operations. No property-based or fuzz testing. *(pass 3: `os.Stdin` monkey-patching pattern noted as testing boundary smell — 8+ test files)*
-
-**Temporal coupling signal** *(Adversarial pass, entry: tests/ — partially resolved: `1914732`, `1ff88d2`)*: Now 5 `time.Sleep()` calls and 14 `t.Parallel()` uses across 118 test files *(pass 15: was 15/101)*. `resetRootCmdForTest(t)` isolates process-global state. `internal/testguard/` ratchet tests enforce `t.Parallel()` floor (≥10) and `time.Sleep()` ceiling (≤11), preventing regression. Remaining serial tests are constrained by process-global state (`rootCmd`, `os.Chdir`), not by missing infrastructure.
-
-**Per-package statement coverage** *(pass 15, Coverage lens)*:
-| Package | Avg Coverage | Zero-Coverage Funcs | Risk Level |
-|---------|-------------|--------------------:|------------|
-| analysis | 98.1% | 0 | Low |
-| errors | 100% | 0 | Low |
-| identity | 100% | 0 | Low |
-| db | 91.5% | 0 | Low |
-| filelock | 90.5% | 1 | Low |
-| prompts | 89.0% | 1 | Low |
-| pipeline | 86.4% | 0 | Low |
-| commands | 86.1% | 4 | Low |
-| ops | 85.9% | 4 | Low |
-| log | 79.5% | 0 | Low |
-| tui | — | — | Low *(Adversarial pass: 172 tests, 6 test files; no E2E)* |
-| main (cmd) | 71.1% | 1 | Low |
-| agent | 70.7% | 14 | **High** |
-| models | 70.6% | 11 | Medium |
-| git | 65.9% | 10 | Medium |
-| testhelpers | 65.8% | 5 | Low |
-| embedded | 64.0% | 5 | Medium |
-| paths | 63.7% | 9 | Low |
-| roles | 60.0% | 4 | Medium |
-| statevalidate | 55.1% | 9 | **High** |
-
-**`check-testhelpers` build guard** *(pass 4)*: Makefile target prevents `testhelpers` import in production code — good practice for maintaining test/production boundary.
-
----
+- The shape is healthy: the domain, pipeline, validation, and persistence core sits at 86–96%, and the two weakest substantial packages are the CLI wiring layer (`cmd/liza`, 62.4%) and the human-readable command adapters inside `internal/commands`. Depth of coverage tracks cost of being wrong.
+- 118 of 2,314 measured functions are at 0.0%, 59 of them exported. They cluster in `commands` (19), `ops` (17), `cmd/liza` (15), `updater` (10), and `agent` (10). This count excludes the 69 `RunE` bodies, which the measuring tool cannot see at all.
+- `internal/interactive` at 35.8% is small (67 statements) but sits on the first-run initialization path, where failure is user-visible and recovery is manual.
+- `git.ResetHard` is the only destructive Git helper at 0.0%; `MergeTree`, `CreateCommitFromTree`, and `AttachWorktree` are all covered.
+- The test tree currently contains seven `time.Sleep(` and twelve `t.Parallel()` occurrences outside the budget-guard source files. `internal/testguard` enforces an 11-sleep ceiling and a 9-parallel-call floor; it does not ratchet the current parallel count exactly. *(adjusted, pass 21)*
+- Twelve `t.Parallel()` calls across 246 test files means the suite is essentially serial; the large packages take 40–60 seconds each. The floor prevents a full regression but currently permits the count to fall from twelve to nine. *(adjusted, pass 21)*
+- `internal/embedded/opencode-tools/exec.ts` is shipped to users' `.opencode/tools/` directories, and no `package.json`, `tsconfig.json`, type-check, or lint step exists anywhere in the repository or CI. Its only assertions are content-identity checks in `embedded_test.go`, which verify that the bytes were copied, not that they run.
+- Integration coverage exists for multi-component task, Git, persistence, and execution flows; no new behavior is being added by this review.
 
 ## Phase 3: Recommendations
 
-| Priority | Issue | Rationale | Action |
-|----------|-------|-----------|--------|
-| **Medium** | INVARIANTS.md §7 clean worktree check not enforced *(Adversarial pass, targeted: INVARIANTS.md)* | `submit_review.go` validates commit SHA, TDD, rebase, checkpoint — but never checks working tree cleanliness; invariant promises this protection | Add `git status` check to submission, or update INVARIANTS.md |
-| **Medium** | INVARIANTS.md §6 provider diversity not enforced at verdict time *(Adversarial pass, targeted: INVARIANTS.md)* | `submit_verdict.go` only checks approval count, never calls `HasProviderDiversity()`; diversity enforced at claim-filtering (hard) and merge-readiness (soft "preferred") instead | Add diversity check to verdict, or update invariant to reflect actual enforcement model |
-| **Medium** | `ops/proceed.go` god file *(Adversarial pass, new packages)* | 1,200 LOC, 26 functions, 107 `if` statements, 5 distinct responsibilities. Largest file in codebase. Graph algorithms, crash recovery, child builders, dependency propagation all bundled together | Extract into 4-5 cohesive files (proceed_graph.go, proceed_recovery.go, proceed_builders.go, proceed_deps.go) |
-| **Low** | INVARIANTS.md §12 system mode transitions inaccurate *(Adversarial pass, targeted: INVARIANTS.md)* | Invariant says "TRIPPED→PAUSED" but Resume() goes TRIPPED→RUNNING; STOPPED mode transitions omitted entirely | Update §12 with complete transition graph |
-| **Low** | INVARIANTS.md §7 different-coder worktree recreation not enforced *(Adversarial pass, targeted: INVARIANTS.md)* | `ensureRejectedWorktreeExists()` preserves worktree regardless of claimer identity; invariant promises fresh worktree for different coders | Enforce same-coder check or update INVARIANTS.md |
-| **Low** | INVARIANTS.md §3 status naming and transition map attribution drift *(Adversarial pass, targeted: INVARIANTS.md)* | §3.2 cites `models/task.go transition map` but map lives in `ops/pipeline_ops.go:BuildPipelineTransitions`; §3.1 uses pre-pipeline status names | Update file references and generalize status names |
-| **Low** | `await_verdict` / `await_resubmission` structural duplication *(Adversarial pass, new packages)* | ~180 LOC overlap (40%) — identical event-loop skeleton, watcher setup, polling fallback. Will compound if new await_* ops are added | Extract shared `awaitWithWatcher()` helper; evaluate clarity vs abstraction |
-| **Low** | `ApplyYAMLTimeouts` type-switch *(Adversarial pass, new packages)* | Type-switch over 3 concrete strategy types instead of interface method; violates Strategy pattern contract | Add `ApplyTimeoutOverrides()` to `RoleStrategy` interface |
-| **Low** | Timestamp `time.Now()` inconsistency in `wt_merge.go` *(Adversarial pass, data flow; health check: 3 sites)* | Lines 118, 451, 473 use `time.Now()` while all other ops files use `time.Now().UTC()` — worsened from 2 to 3 sites | Change to `time.Now().UTC()` — three-line fix |
-| **Low** | Role mapping bidirectionality unverified *(pass 17, Coupling lens)* | `runtimeToWorkflow` / `workflowToRuntime` maps (9 entries each) manually synchronized; missing entry causes runtime failure | Add 10-line test verifying bidirectional consistency |
-| **Low** | CLI Executor concrete coupling *(pass 17, Coupling lens)* | `DefaultCLIExecutor.Execute()` switch statement hardcodes 5 CLI tools + per-tool flags; `mistral→vibe` rename hardcoded; adding CLIs requires code modification in two functions | Accept if CLI set is stable; consider data-driven profiles if growing |
-| **Low** | Scattered timeout constants *(pass 17, Coupling lens; health check: mcp/protocol removed)* | 7+ timeout/interval values across 4 packages (filelock, db, agent) bypass `models.Config` centralization pattern; some values duplicated (5s in two packages) | Document as reference table; extract inline values to named constants |
-| **Low** | Pipeline-aware status check triplication *(pass 16, Duplication lens — partially resolved `581d377`)* | 3 functions with identical shape differing only in resolver method; legacy fallback branches removed but structural triplication remains | Parameterize into `checkPipelineStatus(task, pr, resolverFn)` helper |
-| **Low** | Worktree path helper not reused *(pass 16, Duplication lens; verification: 8 sites now)* | 8 sites inline `filepath.Join(paths.WorktreesDirName, taskID)` (was 4) despite `git.GetWorktreeRelPath()` at `worktree.go:171` — worsened as new call sites were added without adopting the helper | Use `GetWorktreeRelPath()` at remaining sites; add `GetWorktreeBranchName()` to `paths/` |
-| **Low** | Dual logging undocumented *(pass 16, Duplication lens; verification: 19 calls)* | 19 `log.Printf` in `ops/` alongside formal `internal/log/` Logger; two streams (stderr vs `.liza/logs/`) with no documented contract | Document the dual-purpose split; consider structured wrapper for `log.Printf` warnings |
-| **Low** | `statevalidate` composition gap *(pass 15, Coverage lens)* | Data-integrity package at 55.1% — entry-point validators all at 0% while inner validators are well-covered | Table-driven tests calling `ValidateStateFile` with various malformed states |
-| **Low** | `models/state.go` `ValidateTransition` untested *(pass 15, Coverage lens)* | System mode transition table (RUNNING/PAUSED/STOPPED) with no test coverage — pure function, easy to test | Table-driven test covering valid transitions, known rejections, and unknown source modes |
-| **Low** | `roles` Phase 2 functions untested *(pass 15, Coverage lens)* | 4 role-query functions at 0% (`DoerRoles`, `ReviewerRoles`, `IsDoerRole`, `IsReviewerRole`) | Add simple assertions for these pure functions |
-| **Low** | `embedded` installation functions partially untested *(pass 15, Coverage lens; partially resolved; health check: MCP functions removed)* | `WriteGlobalFiles` (5 tests) and `WriteClaudeSettings` (4 tests) now covered. Still untested: `PlanGlobalFiles`, `WritePipelineConfig`, `WriteGuardrails` | Smoke tests for remaining untested functions |
-| **Low** | `prompts → ops` dependency inversion *(pass 14, Boundaries lens; health check: worsened to 5+ functions)* | Prompt layer depends on business-logic layer for 5+ utility functions; architecturally wrong direction, deepened since pass 14 | Move pipeline query functions to `pipeline` or query package; pass `PipelineDetectionContext` as parameter |
-| **Low** | `commands → agent` boundary crossing *(pass 14, Boundaries lens)* | Status command calls `agent.DetectOrchestratorWakeTriggers()`, breaking peer relationship | Move wake detection to `ops` or future query package |
-| **Low** | Import analysis table drift *(pass 14, Boundaries lens; health check: mcp row removed)* | Packages had undercounted imports; corrected in pass 14 | Corrected; mcp entries now stale |
-| **Low** | Residual raw `1800` in supervisor.go *(pass 6; verification: 1 site remains)* | 1 call site (supervisor.go:393) bypasses `models.DefaultLeaseDurationSeconds` constant | Replace with named constant |
-| **Low** | Duplicated identity validation *(pass 6; health check: NOT dead code — actively called from supervisor.go:558)* | `agent/registration.go:validateIdentity()` reimplements `identity` package logic; called at registration time with tests | Replace with `identity.ValidateFormat()` + `identity.ValidateRole()` imports |
-| **Low** | Inconsistent ops parameter conventions *(pass 6)* | `AddTask` takes `statePath`/`logPath` while 15+ others take `projectRoot` | Standardize on `projectRoot` |
-| **Low** | `LIZA_LOG_LEVEL` documentation drift *(Adversarial pass, entry: config/)* | Env var documented but no runtime reader; logger is fixed at INFO | Implement env-driven log level or remove from docs |
-| **Low** | `os.Stat` existence checks under-handle non-`IsNotExist` errors *(Adversarial pass, entry: error handling — partially resolved: `52ceac5`)* | Some presence checks classify only exists/missing and miss permission/I/O distinctions. `wt_merge.go` integration-test stat now handles tri-state correctly | Standardize tri-state handling in remaining sites |
-| **Low** | High nesting in `claiming.go` helpers *(pass 7, partially resolved: `ac4ce6f5`; verification: improved)* | `handleApprovedMerges` improved: now 47 LOC (was 55) with max depth ~4-5. Cleaner early returns. Still has nested `IntegrationFailedError` handling. `resumeHandoffTask` extracted to `ops.ResumeHandoff` | Accept current nesting or extract error-classification into helper |
-| **Low** | No interface-based seams *(pass 3)* | Deliberate simplicity; acceptable for v1 | Monitor test suite time; introduce seams if needed |
-| **Low** | Regenerate `coverage.out` *(pass 4)* | Report shows 0% for functions with thorough tests; may predate recent commits | Run `make test` to update |
-| **Low** | Broken Vision link in sprint governance spec *(Adversarial pass, entry: specs/)* | `../vision.md` target is missing; canonical Vision is under `specs/build/` | Fix link to canonical Vision path |
-| **Low** | Ops Modify-callback task guard *(pass 5, Duplication lens)* | 10 files repeat identical FindTask+NotFoundError inside Modify callbacks | Consider `modifyTask(bb, taskID, fn)` helper; evaluate clarity vs indirection |
-| **Low** | Command test `initialState` construction *(pass 5, Duplication lens)* | 23 near-identical State constructions with same Config values | Add `testhelpers.DefaultState()` returning pre-configured State |
-| **Low** | Watch thresholds not configurable *(pass 6)* | 10 operational constants bypass `models.Config` pattern | Add to Config with current values as defaults |
-| **Low** | Hardcoded `"terminal-1"` *(pass 6)* | All agents report same terminal regardless of actual TTY | Derive from config or actual terminal |
-| **None** | Pipeline config loaded per-operation *(pass 13; health check: 54 call sites)* | 54 call sites via `loadResolver` — correct, simple, negligible overhead. Tripled with ops expansion | Accept as-is; each op is self-contained |
-| **None** | Ops input validation boilerplate *(pass 5)* | 10 files with `if taskID == ""` — idiomatic Go, low risk | Not worth abstracting |
-| **None** | `task.History = append(...)` pattern *(pass 5)* | 12 occurrences with variations — coincidental similarity | Not worth abstracting |
-| **None** | statevalidate internal micro-patterns *(pass 16, Duplication lens)* | ~40 lines of structural repetition (6 identical classifier methods, set uniqueness, field checks) within single 658-LOC file | Not worth abstracting; file is internally consistent |
-| **None** | `formatKeyValue` bubble sort | Works, small data sets, not perf-sensitive | Not worth changing |
-| **None** | Global logger singleton | Acceptable for CLI scope | Not worth changing for v1 |
-
----
+| Priority | Status | Issue | Rationale | Direction |
+|----------|--------|-------|-----------|-----------|
+| **High** | ✓ verified | [`make test` has no `-coverpkg`](architectural-issues.md#coverage-basis-is-not-reproducible-by-repository-tooling) | Packages are credited only with their own tests, so the default profile understates caller-driven coverage and cannot regenerate the pass-20 basis. | Add `-coverpkg=./...` and retain a deterministic summary before any coverage-driven work. *(pass 20 Coverage finding verified in passes 21–22)* |
+| **Medium** | ~ adjusted | Human-readable CLI path is untested | Pass 20 found 12 exported `*Command` entry points and 7 formatters at 0.0%; no fresh complete coverage run was made in pass 21, while the structural gap remains. | Add table-driven tests over the `*Command` functions, or collapse the adapter layer — the Boundaries lens reaches the same place. *(pass 20, Coverage lens)* |
+| **Medium** | ✓ verified | `exec.ts` ships without a toolchain | A TypeScript file installed into users' `.opencode/tools/` has no type-check, lint, or test anywhere in the repo or CI; only byte-identity assertions. | Add a type-check step, or state explicitly that the file is vendored and unverified. *(pass 20, Coverage lens)* |
+| **Medium** | + new | Provider support crosses the catalog boundary | Provider launch is catalog-driven, but setup dependencies, activation assets, bash-policy integration, and runtime failure detection still require provider-specific edits across four packages. | Move declarative dependencies/assets into the catalog and document the remaining behavioral extension points. *(pass 22, Coupling lens)* |
+| **Medium** | + new | Canonical provider identity is dropped before runtime policy | Catalog-generated `ProviderKey` is unused while raw CLI names drive diversity, stop signals, and anomalies. `codex` and `codex-acp` can be treated as distinct providers, and unavailable signals do not cross aliases. | Propagate canonical `ProviderKey` through the supervisor and keep tool identity separate. *(Adversarial pass)* |
+| **Medium** | ✓ verified | Provider stop-signal recovery has multiple owners | Quota and provider-unavailable handling are encoded separately in agent helpers, CLI resume, and TUI resume, including duplicated cleanup and tests. | Give one operation ownership of signal inspection, policy evaluation, cleanup, and resume-state mutation; keep CLI/TUI as adapters. *(pass 21, Duplication lens; reverified pass 22)* |
+| **Medium** | ✓ verified | Worktree intelligence refresh has multiple owners | Create, claim, health-check, and review submission repeat slightly different SCIP/Stacklit/functional-clusters refresh sequences and warning policy. | Introduce one refresh coordinator with explicit trigger and failure-policy inputs; keep lifecycle decisions at callers. *(pass 21, Duplication lens; reverified pass 22)* |
+| **Medium** | ✓ verified | Review-submission cleanliness contract gap | `INVARIANTS.md` promises a clean worktree at a boundary that does not enforce it. | Decide whether to enforce cleanliness in `SubmitForReview` or narrow the invariant. |
+| **Medium** | ✓ verified | Verdict-time provider-diversity contract gap | The documented enforcement point and current quorum logic disagree. | Define whether diversity is required, preferred, or claim-time-only, then align contract and code. |
+| **Medium** | ✓ verified | [`ops/proceed.go` at 1,500 lines](architectural-issues.md#decompose-proceedgo-1500-loc) | Graph, recovery, construction, and propagation logic change for different reasons. | Split along existing responsibility boundaries. |
+| **Medium** | ✓ verified | `RunSupervisor` at 442 lines | The longest function in the repository interleaves setup, signal handling, strategy dispatch, exit-code routing, and five loop detectors. | Extract the exit-code dispatch and the loop-detection block; the trackers are a cohesive unit with hand-paired resets. *(pass 18, Complexity lens)* |
+| **Medium** | ✓ verified | Agent lease renewal ignores configured duration | Supervisor registration and heartbeat each rely on a literal/default 1,800-second lease, while runtime configuration says heartbeats extend the configured lease. | Pass the configured lease and terminal identity through one registration/heartbeat runtime context. *(pass 21, Duplication lens; reverified pass 22)* |
+| **Medium** | ✓ verified | Raw Git calls bypass `gitenv` | `ops/init_project.go` and `cmd/liza/cmd_launch.go` invoke `git` directly at five sites, losing `LC_ALL=C` and timeout bounds that sixteen other files get. | Route all Git invocation through `gitenv`. *(pass 18, Complexity lens)* |
+| **Medium** | ✓ verified | Custom roles render empty prompt blocks | Nothing validates role names, and both large template chains lack an `else` branch. | Add a fallback block or config-load-time role coverage validation, then correct the supervisor comment. *(pass 18, Complexity lens)* |
+| **Medium** | ✓ verified | Duplicate initialization implementations | `commands/init.go` and `ops/init_project.go` maintain near-verbatim helpers that have already diverged. | Establish one owner for initialization mechanics. *(pass 18, Complexity lens)* |
+| **Medium** | ~ adjusted | Other large orchestration/artifact modules | `embedded.go`, `watch.go`, and `scipsearch.go` remain large but decompose well internally; `init.go` and `supervisor.go` do not. | Decompose the latter two by longest function; treat the former three as review-scope only. *(adjusted, pass 18; reverified pass 21)* |
+| **Medium** | ✓ verified | Silent index-discovery failure | Three `agent/prompt.go` helpers swallow errors, so agents lose index references invisibly. | Log the failure; keep the graceful degradation. *(pass 18, Complexity lens)* |
+| **Medium** | ✓ verified | State mutation bypasses `ops` at 15 sites | `agent` (13 `.Modify`) and `commands` (2 `bb.Write`) write state without transition validation; `worktree_check.go` forces `BLOCKED` by comment-documented design. | Add an explicit forced-transition operation to `ops` and route agent writes through named operations, or stop claiming `ops` owns mutations. *(pass 19, Boundaries lens)* |
+| **Medium** | ✓ verified | Semantic validation is off the write path | `statevalidate` is not imported by `db`; the in-lock gate is `statehygiene` only, and `PostWriteValidationError` remains narrowly used. | Move the cheap invariant subset inside `Blackboard.Modify`. *(pass 19, Boundaries lens)* |
+| **Medium** | ✓ verified | `--json` error codes derive from message prose | `fmt.Errorf` remains dominant while `classify.go` substring-matches phrases such as `"must be"`, `"is required"`, and `"not found"`. Rewording can silently reclassify. | Type the errors agents branch on; keep prose rules as fallback only. *(pass 19, Boundaries lens)* |
+| **Medium** | ✓ verified | No mechanical import-direction check | Documented crossings remain buildable; existing repository checks prove that an allowlist-based boundary check is feasible. | Add an allowlist-based import check to `make lint`. *(pass 19, Boundaries lens)* |
+| **Medium** | ✓ verified | `spec_ref` contract conflict | CLI and mutation accept absence; validation and proceeding reject it. | Specify the lifecycle requirement and make every boundary consistent. |
+| **Medium** | ✓ verified | Sprint-summary metric loss | Archival preserves only `TasksDone`. | Specify which metrics must survive a sprint boundary before changing the model. |
+| **Low** | ✓ verified | System-mode and task-status invariant drift | Sections 3 and 12 no longer describe current ownership or transitions. | Update the invariant text after intended behavior is confirmed. |
+| **Low** | ✓ verified | `prompts → ops` dependency | Prompt assembly imports mutation-layer queries. | Relocate stable query policy toward pipeline/domain ownership. |
+| **Low** | ✓ verified | `commands → agent` dependency | Command adapters still import runtime orchestration, including provider-signal inspection. | Move read-only runtime inspection behind a narrower owner. |
+| **Low** | ✓ verified | Await-loop structural duplication | Verdict and resubmission waits share timer/watcher/polling shape. | Consider a shared wait primitive if it preserves explicit failure semantics. |
+| **Low** | ✓ verified | `ApplyYAMLTimeouts` concrete type switch | Timeout projection bypasses the role strategy abstraction. | Put the capability on the strategy boundary or isolate projection in a dedicated adapter. |
+| **Low** | ✓ verified | Pipeline-aware status triplication | Three helpers differ primarily by resolver method. | Parameterize only if it improves readability and type safety. |
+| **Low** | ✓ verified | Worktree path helper adoption | Three production call sites still construct the relative path inline. | Use one naming authority. |
+| **Low** | ✓ verified | Dual logging paths | Direct stderr logging and the project logger coexist without a concise contract. | Document purpose or route warnings through one structured boundary. |
+| **Low** | ✓ verified | Identity validation duplication | Registration repeats checks owned by `internal/identity`, and validates the ID shape without validating the role name. | Reuse the identity boundary; decide whether role-name validation belongs there or at config load. *(adjusted, pass 18)* |
+| **Low** | ✓ verified | Prompt template blocks at 392 and 240 lines | Two files hold about 36% of all template bytes as hardcoded per-role chains. | Split per role or per phase when the next role is added. *(pass 18, Complexity lens)* |
+| **Low** | ✓ verified | `ops` write-path transaction scripts | Five functions repeat a read/validate → external effects → mutate ordering carried mainly by phase comments. | Consider a shared transaction shape only if it makes the lock and effect boundaries harder to get wrong. *(pass 18, Complexity lens)* |
+| **Low** | ✓ verified | TUI panel render duplication | `renderAgentPanel` and `renderTaskPanel` duplicate column layout and an ANSI-padding special case verbatim. | Share one column renderer with a width-aware value type. *(pass 18, Complexity lens)* |
+| **Low** | ✓ verified | Index adapter triplication | Nine adapters and three type families differ mainly by field name. | Collapse to one type and one adapter when a fourth index tool appears. *(pass 18, Complexity lens)* |
+| **Low** | ✓ verified | Optional-tool boundary primitives have multiple owners | SCIP, Stacklit, functional-clusters, pairing-index, toolchain, and Semble repeat shell quoting, bounded diagnostics, output suffixes, and environment-gate parsing with small semantic differences. | Consolidate only the primitives whose semantics can be named precisely; do not hide tool-specific policy behind a generic helper. *(pass 21, Duplication lens; reverified pass 22)* |
+| **Low** | ✓ verified | `plugin/acp` has no production consumer | A public package of ~450 lines is imported only by two performance tests, and `plugin/` is outside both `REPOSITORY.md` and this document's measurement scope. | Confirm intended status; document it or move it under test scope. *(pass 18, Complexity lens)* |
+| **Low** | ✓ verified | Undocumented tracked directories | `plans/`, `plugin/`, and `scripts/` are absent from `REPOSITORY.md`. | Add them or explain the omission. *(pass 18, Complexity lens)* |
+| **Low** | ✓ verified | Current docs retain removed or undriven interfaces | The C4 model and overview still describe the removed MCP boundary, `supervision-model.md` assigns shared implementation to `commands`, and generated configuration advertises an undriven log-level setting. | Regenerate or correct current-state docs and remove configuration surfaces that have no runtime consumer. *(pass 21, Duplication lens; adjusted and reverified pass 22)* |
+| **Low** | ✓ verified | `jsonout` imports `ops` | Presentation depends on the application layer to type-assert errors; §1.3 previously misfiled it as a leaf service. | Move the ops-error contract to a shared error package, or accept and document the crossing. *(pass 19, Boundaries lens)* |
+| **Low** | ~ adjusted | `cmd/liza` bypasses `internal/commands` | Direct `ops` imports remain in six production command files while `internal/commands` is imported by seven; the adapter layer remains optional. | Decide whether `commands` is mandatory; if not, collapse the thin adapters. *(pass 19, Boundaries lens; counts rechecked pass 21)* |
+| **Low** | ✓ verified | 32 verbatim JSON-envelope guards in `cmd/liza` | Each copy repeats the `ErrAlreadyWritten` deferred write and mutates the global logger via `log.SetOutput(io.Discard)`. | Extract one `withJSONEnvelope` wrapper. *(pass 19, Boundaries lens)* |
+| **Low** | ✓ verified | `INVARIANTS.md` enforcement anchors are sparse and ambiguous | Anchors remain sparse, and bare filenames can resolve to multiple packages. | Package-qualify anchors and add them to the unanchored sections. *(pass 19, Boundaries lens)* |
+| **Low** | ✓ verified | `internal/brand` dual API over mutable globals | The high-fan-in package exposes link-time globals *and* a parallel `Values` struct; tests mutate globals directly. | Pick one shape. *(pass 19, Boundaries lens)* |
+| **Low** | ~ adjusted | Three packages have zero test files | `internal/alerts`, `internal/projectdetect`, and `internal/taskkind` still have no direct test files; pass 20 showed the first two are exercised by callers and the third has no executable statements. | Leave as is; add tests only if those packages acquire independent behavior. *(adjusted, pass 20; structural state rechecked pass 21)* |
+| **Low** | ✓ verified | [No coverage gate](architectural-issues.md#coverage-basis-is-not-reproducible-by-repository-tooling) | Codecov uploads with `fail_ci_if_error: false`, and no repository threshold exists. Coverage is published but never enforced. | Decide whether coverage is a gate or an observation, and configure accordingly. Meaningful only after `-coverpkg` lands. *(pass 20, Coverage lens)* |
+| **Low** | ~ adjusted | [118 zero-coverage functions, 59 exported](coverage-summary-2026-07-25.md#zero-coverage-functions) | This is a retained pass-20 full-profile measurement, not a claim derived from the current ignored `coverage.out`; the structural concentration in CLI and orchestration adapters remains relevant. | Triage the exported half after the default coverage command is corrected. *(pass 20, Coverage lens)* |
+| **Low** | ✓ verified | Two exported functions with no caller | `commands.UnblockTaskCommand` and `models.(*DependencyResolver).UnmetDependencies` still have no production caller. | Delete both. *(pass 20, Coverage lens)* |
+| **Low** | ~ adjusted | `internal/interactive` at 35.8% | The pass-20 full-profile measurement remains the latest complete figure; the small package is on first-run initialization, where failure is user-visible and recovery is manual. | Cover the prompt/response paths when initialization next changes. *(pass 20, Coverage lens)* |
+| **Low** | ~ adjusted | Serial test suite | There are now 12 `t.Parallel()` calls across 246 test files; the `testguard` floor is nine and the sleep ceiling is eleven, so the suite is ratcheted rather than broadly parallel. | Raise the ratchet opportunistically; no immediate action needed. *(adjusted, pass 20 finding remeasured pass 21)* |
+| **Low** | ✓ verified | Stale `specs/plans` reference in tooling | `.pre-commit-config.yaml` still ignores `**/specs/plans/**` after the directory was deleted. | Prune the obsolete ignore independently. *(pass 20, Coverage lens)* |
+| **Low** | ✓ verified | `.gitignore` embedded allowlist drift | `console.sh` and `support.md` are allowlisted but absent; `claudeignore` is tracked but not allowlisted. | Prune and add. *(pass 19, Boundaries lens)* |
+| **Low** | ✓ verified | Pure domain predicates trapped in `ops` | Domain predicates inside `ops` still force `prompts → ops`, while infrastructure probes also live in the same package. | Relocate pure predicates to `models`/`pipeline` and infrastructure probes to `process`. *(pass 19, Boundaries lens)* |
+| **Low** | ✓ verified | Inconsistent operation inputs | `AddTasks` accepts paths while most operations accept a project root. | Standardize when the next signature change occurs. |
+| **Low** | ✓ verified | Filesystem existence checks | Some sites collapse permission/I/O errors into presence logic. | Use tri-state checks at correctness boundaries. |
+| **Low** | ✓ verified | Timestamp inconsistency | Two merge timestamps use local time while surrounding state uses UTC. | Standardize persisted timestamps on UTC. |
+| **Low** | ✓ verified | Watch thresholds and timeout scatter | Operational values span several packages and multiple top-level watch timing/retry constants. | Externalize only values with a demonstrated tuning need. |
+| **Low** | ✓ verified | Fan-out priority flattening | Many-to-one child tasks receive priority `1`. | Specify priority inheritance for generated tasks. |
+| **Low** | ~ adjusted | Direct validation/embedded entry-point test visibility | Pass-20 full-package coverage measured the validation internals as exercised; the remaining concern is direct visibility of composition behavior, not a broad validation coverage gap. | Add a focused composition test only when that path next changes. |
+| **None** | ✓ verified | Pipeline resolver loaded per operation | The current call pattern keeps operations self-contained; overhead is negligible. | Accept. |
+| **None** | ✓ verified | Explicit operation input guards | Repeated empty-ID checks are idiomatic and readable. | Do not abstract. |
+| **None** | ✓ verified | Explicit history appends | The occurrences carry different event data and are clearer locally. | Do not abstract. |
+| **None** | ✓ verified | Small `statevalidate` classifier repetition | Current helpers already share `containsStatus`; further abstraction has little payoff. | Accept. |
+| **None** | ✓ verified | Global project logger | Appropriate for a CLI process. | Accept unless concurrent in-process consumers emerge. |
 
 ## Summary
 
-Liza's architecture is well-suited to its constraints: a file-based multi-agent coordination system for solo developers. The dependency graph is clean with no cycles. Test coverage is excellent (2.6:1 ratio, up from 2.4:1) with consistent patterns and strong helper infrastructure. The atomic state persistence via flock and fsync+rename is correctly implemented. Health monitoring is comprehensive. The task state machine is now explicit with a complete transition map.
+Liza’s architecture remains appropriate for a local, stack-agnostic multi-agent orchestrator: inspectable file-backed state, process-safe mutation, isolated Git worktrees, declarative pipelines, and increasingly data-driven provider execution. The system has expanded substantially since the prior review, particularly in repository intelligence, provider/toolchain support, initialization, readiness, updating, branding, and architecture workflows. The largest current risks are not missing foundations but drift between contracts and enforcement, a handful of very large multi-responsibility modules, and read/query logic crossing intended layer boundaries. Those concerns merit incremental correction; they do not justify a broad rewrite.
 
-**Pass 2 (Complexity lens)** identified monolithic command functions — `WtMergeCommand` and `ClaimTaskCommand` at 310-319 LOC each (since resolved via ops extraction). Task-lookup duplication (55+ inline loops) was also resolved via `State.FindTask()`.
-
-**Pass 3 (Boundaries lens)** identified the `commands` package as the system's central boundary concern. Business logic was extracted to `internal/ops/` service layer; agent now imports `ops` instead of `commands`. All stdin reads now accept `io.Reader` parameter. Domain/persistence boundaries are well-drawn. *(health check: MCP adapter layer removed in `90c132d5`)*
-
-**Pass 4 (Coverage lens)** adds quantitative depth: statement coverage overall concentrated uncovered code in two patterns — runtime orchestration code (supervisor Execute) and I/O-coupled functions. I/O coupling is the primary driver of untested critical paths — functions with hardwired `os.Stdin`/`os.Stdout`/`os/exec` account for the majority of the 0% coverage.
-
-All six primary structural concerns identified across passes 1-4 have been resolved: supervisor decomposition, commands/ops extraction, monolithic functions, MCP locking, MCP dispatch testing, and agent→commands dependency. The ops layer now contains ~9,920 LOC serving 2 consumers (agent, commands). *(health check: MCP consumer removed; ops grew 68%)*
-
-**Pass 5 (Duplication lens)** examined cross-file repetition patterns. The most significant duplication pattern is within the `ops/` package itself: 10 of 19 ops files repeat an identical 3-line FindTask+NotFoundError guard inside `bb.Modify` callbacks, and 12 files share structurally similar history-append code. The `readTaskState()` helper addresses this for the Read path but has no equivalent for the Modify path. This is idiomatic Go — each function is independently authored with the same pattern — and the impact is low (maintenance burden if the guard pattern changes). In test code, 23 command test files construct near-identical `initialState` objects; a `testhelpers.DefaultState()` helper would be a low-risk improvement. Overall, the codebase's earlier duplication issues (task-lookup loops 55×, file-locking, magic numbers) have been resolved. The remaining repetition is largely structural — Go's explicit style trading conciseness for clarity.
-
-**Pass 6 (Coupling lens)** focused on configuration hardcoding, tight dependencies, and hidden state sharing. Major items resolved: `"task/"` branch prefix centralized (`paths.TaskBranchPrefix`), role naming unified (`internal/roles` package), `GracePeriod` divergence unified (`models.LeaseExpiryGracePeriod`). Remaining open items: identity validation duplication, ops parameter convention split, watch threshold configurability, raw 1800 residuals in supervisor.go, and hardcoded `"terminal-1"`.
-
-**Pass 7 (Complexity lens)** revisits complexity with the benefit of 6 prior passes of context. `ClaimTask` complexity and `inspect_field.go` manual reflection have been resolved. `ops/wt_merge.go:MergeWorktree` at 520 LOC (file total) remains a complex function with phased flow. `ops/claim_task.go` shrank to 563 LOC (was 655) — improvement. *(health check: `ops/proceed.go` at 1,200 LOC is now the new complexity leader)*
-
-**Adversarial pass (entry: docs/)** forced a doc-first path and surfaced contract-level drift missed by prior code-centric passes. All items resolved: state-machine spec drift, troubleshooting branch naming, and testing-doc short-mode drift.
-
-**Adversarial pass (entry: specs/)** surfaced coherence gaps: (1) Pairing Session Initialization doc pointer drift resolved (`docs/USAGE.md` now exists as index file), and (2) sprint governance links Vision via `../vision.md` while canonical Vision lives in `specs/build/0 - Vision.md`. Watcher stall detection resolved (`61b16d5`).
-
-**Adversarial pass (entry: tests/)** CLI contract coverage gap resolved (`9d95c1c` — `mutation_wiring_test.go`). Temporal coupling partially resolved: `time.Sleep` reduced from 21 to 5, `t.Parallel()` introduced (15 uses), ratchet tests prevent regression. Remaining serial tests constrained by process-global state.
-
-**Adversarial pass (entry: config/)** exposed a config-contract gap cluster. Resolved: iteration limit enforcement, heartbeat interval wiring, config field projection. Remaining open config drift: `LIZA_LOG_LEVEL` remains unimplemented.
-
-**Adversarial pass (entry: error handling)** surfaced a reliability-observability gap cluster. MCP parse-error and stale-lock cleanup errors resolved. Remaining: rebase/worktree cleanup flows in `submit_review.go`, `git/worktree.go`, and `wt_delete.go` still suppress secondary failures. Some `os.Stat` checks still under-handle non-`IsNotExist` filesystem errors.
-
-**Adversarial pass (entry: data flow, first)** traced the task lifecycle. `DeleteTask` side-effect ordering resolved (`7dd05ce`). `submit-for-review` commit_sha semantics fixed (`d4c688e`) then regressed — needs re-verification.
-
-**Adversarial pass (entry: data flow, second)** traced input through handlers → ops → blackboard, focusing on data integrity and authorization. *(health check: MCP handler findings (1, 3, 4, 6) are now stale — MCP removed in `90c132d5`).* Remaining findings: (2) **Unbounded integration test execution** (Medium) — `MergeWorktree` runs `integration-test.sh` with no timeout; a hanging test blocks the entire merge pipeline indefinitely. (5) Timestamp inconsistency — `wt_merge.go` uses `time.Now()` (now 3 sites) while all other ops files use `.UTC()`.
-
-**Adversarial pass (entry: documented smells)** — all four items resolved: REJECTED reassignment atomicity, planner max-wait enforcement, watch/log O(n) growth, and MCP stdio frame-size guard. *(health check: MCP item now irrelevant — package removed)*
-
-**Pass 14 (Boundaries lens)** revisits import direction and layer violations with a complete production-only import graph. Key findings: (1) `prompts → ops` dependency inversion — prompt builder imports utility functions from the business-logic layer, creating a deep transitive dependency chain *(health check: worsened to 5+ functions)*. (2) `commands → agent` boundary crossing — `status.go` calls `agent.DetectOrchestratorWakeTriggers()`, breaking the intended peer relationship. (3) Query logic scattered across 3 architectural layers creates a transitive chain `commands → agent → ops` for read-only queries — the code-level manifestation of the "No Query Layer" trajectory issue. *(health check: MCP layer removed from chain)*
-
-**Pass 16 (Duplication lens)** revisits cross-file and intra-file duplication patterns. Four new findings: (1) `models/state.go:215-239` has three pipeline-aware status-check functions (`IsApprovedForMerge`, `IsSubmittedStatus`, `IsExecutingStatus`) with identical 6-line structure — parameterizable but low priority. (2) Worktree path construction (`filepath.Join(paths.WorktreesDirName, taskID)`) appears in 5 locations despite `git.GetWorktreeRelPath()` helper existing at `worktree.go:304` — the helper was created but never adopted by other call sites. (3) `ops/` contains 21+ `log.Printf()` calls alongside the formal `internal/log/` structured Logger, creating two undocumented logging streams (stderr vs `.liza/logs/`). (4) `statevalidate/validate.go` has ~40 lines of internal micro-duplication (6 identical `statusClassifier` methods, repeated set-uniqueness checks, field-presence patterns). All are Low or None priority. The pass 5 Duplication findings (ops callback boilerplate, test harness repetition) remain accurate and unchanged. Overall, the codebase's duplication posture is healthy — remaining repetition is idiomatic Go or below the abstraction threshold.
-
-**Pass 17 (Coupling lens)** revisits coupling with emphasis on configuration hardcoding, tight dependencies, and hidden state sharing. The import dependency graph was independently verified — clean acyclic DAG with one known inversion (`prompts → ops`, documented pass 14). Four new findings: (1) `DefaultCLIExecutor.Execute()` switch statement hardcodes 5 CLI tools and their specific flag formats — the `CLIExecutor` interface is clean but the concrete implementation is tightly coupled to specific external tool APIs, with `mistral → vibe` rename also hardcoded in two functions. (2) Dual transition system coupling — `models.taskTransitions` (hardcoded) and `pipeline.Resolver.TransitionMap()` (config-driven) coexist with manual branching in 7+ ops files; meta-state transitions are independently maintained in both systems without cross-validation. (3) `roles` package `runtimeToWorkflow` / `workflowToRuntime` maps are manually synchronized without startup verification — a missing entry would cause runtime failures during task claiming. (4) Timeout/interval constants scattered across 5 packages (8+ values from 50ms to 30m) bypass the `models.Config` centralization pattern used for other runtime parameters. All existing findings verified as still accurate. `loadResolver` call count updated from 14 to 16+.
-
-**Health check (after pass 12)** updated LOC figures across all components (~20,900 production / ~54,900 test, up 32% from prior review). Added `internal/pipeline/` package (641 LOC). Resolved High-priority recommendation (Pairing init doc pointer drift). All other open findings verified as still present.
-
-**Pass 13 (Complexity lens)** revisits complexity with fresh LOC and branch density metrics. Key findings: branch density quantified, `models` reclassified as near-leaf (imports `roles`), `waitforwork.go` refactored to generic callbacks, pipeline config loaded per-operation (now 54 call sites). *(health check: condensed)*
-
-**Pass 15 (Coverage lens)** revisits test coverage. Key findings: `statevalidate` lowest-coverage functional package at 55.1%, `models/state.go` governance helpers at 0%, `roles` at 60%, `embedded` installation functions partially untested. *(health check: `WriteMCPSettings` reference now stale — MCP removed; coverage % needs re-measurement)*
-
-**Verification pass (2026-03-11)** confirmed current state of all findings. 7 recommendations resolved: `cmd/liza/main.go` split into 7 files, `waitForXWork` refactored to generic callbacks, `validateTaskInvariants` decomposed with helpers, MCP dispatch layer tests added, template duplication eliminated, `derefString` consolidated, temporal test coupling at acceptable level. *(health check: `validateIdentity` was incorrectly labeled "dead code" — it is actively called from `supervisor.go:558`; MCP-related resolutions now moot)* 4 changed: `handleApprovedMerges` nesting improved, `embedded` installation partially covered, worktree path helper sites grew, raw `1800` reduced to 1. ~40 issues confirmed still present.
-
-**Health check (after pass 17, 2026-04-13)** — major structural change: MCP server removed (`90c132d5`, ADR-0057). `internal/mcp/` (~2,070 LOC) and `cmd/liza-mcp/` deleted. Agents now interact via CLI `--json` mode. Codebase grew 44% to ~33,400 production LOC / ~87,400 test LOC (2.6:1 ratio, improved from 2.4:1). Six new packages added: `tui/` (2,265 LOC — 3rd largest, TUI for agent monitoring), `interactive/`, `render/`, `jsonout/`, `process/`, `gitenv/`. Key file growth: `ops/proceed.go` doubled to 1,200 LOC (new largest file), `commands/init.go` at 854 LOC (new god file candidates). `ops/claim_task.go` shrank from 655→563 (improved). `prompts → ops` dependency worsened (3→5+ functions). `loadResolver` call sites tripled (16→54). `validateIdentity` corrected from "dead code" to actively used (called from `supervisor.go:558`). ~8 MCP-related findings removed as stale; all non-MCP findings verified still present. Integration tests grew 147% to ~4,120 LOC.
-
-**Adversarial pass (entry: new packages, 2026-04-13)** explored 6 new packages and new ops/agent files via targeted exploration. Key findings: (1) **`ops/proceed.go` god file** (Medium) — 1,200 LOC with 5 distinct responsibilities (manual transitions, batch execution, crash recovery, cycle detection/toposort, child builders), 26 functions, 107 `if` statements. Well-tested (31 tests) but cognitive load is high; extractable into 4-5 cohesive files. (2) **`await_verdict` / `await_resubmission` structural duplication** (Low) — ~180 LOC overlap (40%) in event-loop skeleton, watcher setup, and polling fallback. (3) **`ApplyYAMLTimeouts` type-switch** (Low) — violates Strategy interface contract. Two new strengths documented: RoleStrategy pattern (clean role-specific orchestration) and TUI boundary compliance (2,265 LOC, 172 tests, no business logic leakage). All 6 new packages assessed: `tui/` is well-structured Bubbletea MVC with proper delegation to ops/commands; `render/` and `gitenv/` are exemplary leaf packages with zero internal deps; `jsonout/` has acceptable boundary crossing for error classification; `process/` and `gitenv/` lack test files. New ops files (await_verdict, advance_sprint, await_resubmission, replan, recover_task, init_project — ~2,091 LOC total) follow established patterns consistently. CLI Executor codex flag updated — no longer references `mcp_servers` (stale smell description corrected).
-
-**Adversarial pass (targeted: INVARIANTS.md)** traced 10 specific invariant claims against enforcement code. Two Medium-severity gaps found: (1) **§7 clean worktree check** — `submit_review.go` does not check working tree cleanliness before submission despite the invariant promising this; the submission validates commit SHA, TDD, rebase, and checkpoint but not `git status`. (2) **§6 provider diversity** — `submit_verdict.go` checks approval count but never calls `HasProviderDiversity()`; diversity is enforced at reviewer claim-filtering (doer-vs-reviewer provider mismatch) and merge-readiness evaluation ("preferred" soft enforcement), not at verdict time as the invariant implies. Three Low-severity documentation gaps: (3) §12 system mode transitions incomplete — TRIPPED→RUNNING (via Resume) not listed, STOPPED transitions omitted, any→TRIPPED bypasses ValidateTransition entirely. (4) §7 different-coder rejected worktree recreation not enforced — `ensureRejectedWorktreeExists()` preserves worktree regardless of claimer identity. (5) §3 status naming uses pre-pipeline names and transition map attributed to `models/task.go` when it lives in `ops/pipeline_ops.go`. Additionally: §8 hypothesis exhaustion enforcement is spec-only (assess_blocked.go only records history, doesn't force rescope); §3.5 appendUniqueAgentID also called from submit_review.go, not just wt_merge.go. Overall: the invariant *concepts* are correct, but several enforcement claims are aspirational rather than implemented. The gap between documented invariants and code reality creates a false confidence surface.
-
----
+Passes 18–22 and the adversarial follow-up converge on three risks. First, complexity is concentrated in a few deep orchestration functions rather than every large file. Second, intended boundaries are not enforcement boundaries: mutation and validation ownership can be bypassed, and 31 of 89 direct `cmd/liza` package calls reach `ops` without `commands`. Third, evidence and policy lack closure owners: the retained coverage baseline is not reproducible by repository tooling, and provider identity, stop-state recovery, and worktree-intelligence refresh cross otherwise valid package boundaries. Later passes mostly strengthened these themes rather than opening new architectural fronts, supporting incremental ownership corrections rather than a rewrite.
 
 ## Appendix: File Reference
 
 | Component | Location |
 |-----------|----------|
+| CLI entry point | `cmd/liza/` |
 | Domain model | `internal/models/` |
-| State persistence | `internal/db/` |
-| Agent supervisor | `internal/agent/` |
-| Task operations | `internal/ops/` |
+| Roles and task kinds | `internal/roles/`, `internal/taskkind/` |
+| Blackboard persistence | `internal/db/`, `internal/filelock/` |
+| State validation and hygiene | `internal/statevalidate/`, `internal/statehygiene/` |
+| Application operations | `internal/ops/` |
 | CLI commands | `internal/commands/` |
-| Terminal UI | `internal/tui/` |
-| Git operations | `internal/git/` |
+| Terminal UI and interaction | `internal/tui/`, `internal/interactive/`, `internal/termutil/` |
+| Agent runtime | `internal/agent/` |
+| Provider and tool configuration | `internal/providers/`, `internal/toolchain/`, `internal/codexconfig/` |
 | Pipeline configuration | `internal/pipeline/` |
 | Prompt generation | `internal/prompts/` |
 | Embedded assets | `internal/embedded/` |
-| State validation | `internal/statevalidate/` |
-| Path utilities | `internal/paths/` |
-| Logging | `internal/log/` |
-| Pattern analysis | `internal/analysis/` |
-| Identity resolution | `internal/identity/` |
-| Role constants | `internal/roles/` |
-| Error types | `internal/errors/` |
-| JSON output | `internal/jsonout/` |
-| Output rendering | `internal/render/` |
-| Interactive init | `internal/interactive/` |
-| Process spawning | `internal/process/` |
-| Git environment | `internal/gitenv/` |
-| Test helpers | `internal/testhelpers/` |
-| CLI entry point | `cmd/liza/` |
-| Integration tests | `internal/integration/` |
+| Git and worktrees | `internal/git/`, `internal/gitenv/`, `internal/worktreeexclude/` |
+| Repository intelligence | `internal/scipsearch/`, `internal/stacklit/`, `internal/semble/` |
+| Functional clusters and pairing hooks | `internal/functionalclusters/`, `internal/pairingindex/` |
+| Project/environment detection | `internal/projectdetect/`, `internal/envgate/`, `internal/initcheck/` |
+| Updating and alerts | `internal/updater/`, `internal/alerts/` |
+| Process and secret safety | `internal/process/`, `internal/procscan/`, `internal/secretmask/` |
+| Branding and rendering | `internal/brand/`, `internal/brandrender/`, `internal/render/` |
+| Paths, identity, and errors | `internal/paths/`, `internal/identity/`, `internal/errors/` |
+| Output and logging | `internal/jsonout/`, `internal/log/` |
+| Analysis and quality gates | `internal/analysis/`, `internal/precommit/`, `internal/testguard/` |
+| Bash policy integration | `internal/bash-policy-cli/` |
+| Test helpers and integration suites | `internal/testhelpers/`, `internal/integration/` |
+| Architecture decisions | `specs/architecture/ADR/` |
+| Persistent architecture issues | `specs/architecture/architectural-issues.md` |
