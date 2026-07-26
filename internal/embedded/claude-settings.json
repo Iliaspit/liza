@@ -113,6 +113,7 @@
       "Skill(have-you-considered)",
       "Skill(lesson-capture)",
       "Skill(__BRAND_BINARY_NAME__-logs)",
+      "Skill(__BRAND_BINARY_NAME__-operator)",
       "Skill(software-architecture-review)",
       "Skill(spec-backfill)",
       "Skill(spec-review)",
