@@ -164,9 +164,6 @@ func TestInputModeEnum(t *testing.T) {
 	if InputModeInline != 1 {
 		t.Errorf("InputModeInline = %d, want 1", InputModeInline)
 	}
-	if InputModeForm != 2 {
-		t.Errorf("InputModeForm = %d, want 2", InputModeForm)
-	}
 }
 
 func TestInlineActionEnum(t *testing.T) {
@@ -216,10 +213,7 @@ func TestNewTextInputInitialized(t *testing.T) {
 	}
 	_ = m.textInput.Cursor
 
-	// Phase 4 fields that remain at zero values after New().
-	if m.huhForm != nil {
-		t.Error("huhForm should be nil by default")
-	}
+	// Input fields that remain at zero values after New().
 	if m.inlineAction != InlineActionNone {
 		t.Errorf("inlineAction = %d, want InlineActionNone", m.inlineAction)
 	}

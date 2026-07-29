@@ -1492,7 +1492,7 @@ func assertNotContains(t *testing.T, s, substr, msg string) {
 
 // --- Footer Tests ---
 
-func TestRenderFooter_NormalMode_ContainsAll8KeyLabels(t *testing.T) {
+func TestRenderFooter_NormalMode_ContainsExpectedKeyLabels(t *testing.T) {
 	m := Model{
 		width:     120,
 		height:    40,
@@ -1503,8 +1503,7 @@ func TestRenderFooter_NormalMode_ContainsAll8KeyLabels(t *testing.T) {
 
 	got := m.renderFooter()
 
-	// All 8 key labels per spec §Footer Bar
-	wantKeys := []string{"[s]", "[p]", "[r]", "[a]", "[c]", "[?]", "[q]", "[Q]"}
+	wantKeys := []string{"[s]", "[p]", "[r]", "[c]", "[?]", "[q]", "[Q]"}
 	for _, k := range wantKeys {
 		if !strings.Contains(got, k) {
 			t.Errorf("normal mode footer should contain %s, got: %q", k, got)
@@ -1512,7 +1511,7 @@ func TestRenderFooter_NormalMode_ContainsAll8KeyLabels(t *testing.T) {
 	}
 
 	// Descriptions
-	wantDescs := []string{"spawn", "pause", "resume", "add", "checkpoint", "help", "quit", "stop"}
+	wantDescs := []string{"spawn", "pause", "resume", "checkpoint", "help", "quit", "stop"}
 	for _, d := range wantDescs {
 		if !strings.Contains(got, d) {
 			t.Errorf("normal mode footer should contain %q description, got: %q", d, got)
@@ -1559,28 +1558,6 @@ func TestRenderFooter_ConfirmationMode_ContainsConfirmHints(t *testing.T) {
 	assertContains(t, got, "y/n", "confirmation mode should show 'y/n'")
 	assertContains(t, got, "confirm", "confirmation mode should show 'confirm'")
 	assertContains(t, got, "cancel", "confirmation mode should show 'cancel'")
-}
-
-func TestRenderFooter_FormMode_ContainsFormHints(t *testing.T) {
-	m := Model{
-		width:     120,
-		height:    40,
-		inputMode: InputModeForm,
-		keys:      NewKeyMap(),
-		styles:    NewStyles(120),
-	}
-
-	got := m.renderFooter()
-
-	wantHints := []string{"[Enter]", "[Esc]"}
-	for _, h := range wantHints {
-		if !strings.Contains(got, h) {
-			t.Errorf("form mode footer should contain %s, got: %q", h, got)
-		}
-	}
-
-	assertContains(t, got, "submit", "form mode should show 'submit'")
-	assertContains(t, got, "cancel", "form mode should show 'cancel'")
 }
 
 func TestRenderFooter_ActiveCmdResult_AppearsInOutput(t *testing.T) {
@@ -1653,7 +1630,7 @@ func TestRenderFooter_NilCmdResult_NoResultShown(t *testing.T) {
 
 // --- Help Overlay Tests ---
 
-func TestRenderHelpOverlay_ContainsAll8KeyLabels(t *testing.T) {
+func TestRenderHelpOverlay_ContainsExpectedKeyLabels(t *testing.T) {
 	m := Model{
 		width:      120,
 		height:     40,
@@ -1664,7 +1641,7 @@ func TestRenderHelpOverlay_ContainsAll8KeyLabels(t *testing.T) {
 
 	got := m.renderHelpOverlay(15)
 
-	wantKeys := []string{"[s]", "[p]", "[r]", "[a]", "[c]", "[?]", "[q]", "[Q]"}
+	wantKeys := []string{"[s]", "[p]", "[r]", "[c]", "[?]", "[q]", "[Q]"}
 	for _, k := range wantKeys {
 		if !strings.Contains(got, k) {
 			t.Errorf("help overlay should contain %s, got: %q", k, got)
@@ -1683,7 +1660,7 @@ func TestRenderHelpOverlay_ContainsDescriptions(t *testing.T) {
 
 	got := m.renderHelpOverlay(15)
 
-	wantDescs := []string{"spawn", "pause", "resume", "add", "checkpoint", "help", "quit", "stop"}
+	wantDescs := []string{"spawn", "pause", "resume", "checkpoint", "help", "quit", "stop"}
 	for _, d := range wantDescs {
 		if !strings.Contains(got, d) {
 			t.Errorf("help overlay should contain description %q, got: %q", d, got)
@@ -1702,11 +1679,10 @@ func TestRenderHelpOverlay_UsesGroupedLayout(t *testing.T) {
 
 	got := m.renderHelpOverlay(15)
 
-	// FullHelp() returns 3 groups. At 120 width, groups should be side-by-side.
+	// FullHelp() returns 2 groups. At 120 width, groups should be side-by-side.
 	// Verify group headers are present.
 	assertContains(t, got, "ACTIONS", "help overlay should show ACTIONS group header")
 	assertContains(t, got, "SYSTEM", "help overlay should show SYSTEM group header")
-	assertContains(t, got, "TASKS", "help overlay should show TASKS group header")
 }
 
 func TestRenderHelpOverlay_NarrowWidth_StacksVertically(t *testing.T) {
@@ -1720,8 +1696,8 @@ func TestRenderHelpOverlay_NarrowWidth_StacksVertically(t *testing.T) {
 
 	got := m.renderHelpOverlay(20)
 
-	// All 8 keys should still be present even at narrow width
-	wantKeys := []string{"[s]", "[p]", "[r]", "[a]", "[c]", "[?]", "[q]", "[Q]"}
+	// Expected keys should still be present even at narrow width.
+	wantKeys := []string{"[s]", "[p]", "[r]", "[c]", "[?]", "[q]", "[Q]"}
 	for _, k := range wantKeys {
 		if !strings.Contains(got, k) {
 			t.Errorf("narrow help overlay should contain %s, got: %q", k, got)
@@ -1819,53 +1795,11 @@ func TestRenderFooter_InlineMode_DoesNotContainNormalKeys(t *testing.T) {
 
 	got := m.renderFooter()
 	// Normal-mode specific keys should not appear in inline mode
-	normalOnlyKeys := []string{"[s]", "[p]", "[r]", "[a]", "[c]", "[Q]"}
+	normalOnlyKeys := []string{"[s]", "[p]", "[r]", "[c]", "[Q]"}
 	for _, k := range normalOnlyKeys {
 		if strings.Contains(got, k) {
 			t.Errorf("inline mode footer should NOT contain normal key %s, got: %q", k, got)
 		}
-	}
-}
-
-// ============================================================
-// Phase 4 Task 5: Huh form overlay view tests
-// ============================================================
-
-func TestView_FormOverlay_ReplacesActivityPanel(t *testing.T) {
-	m := newTestModel()
-	m.ready = true
-	m.width = 120
-	m.height = 40
-	m.styles = NewStyles(120)
-	m.state = &models.State{
-		Goal:   models.Goal{Description: "Test Goal"},
-		Sprint: models.Sprint{ID: "sprint-1"},
-		Config: models.Config{Mode: models.SystemModeRunning},
-	}
-	// Add a unique activity entry that should NOT appear in form mode
-	m.activities = []ActivityEntry{
-		{
-			Timestamp: time.Now(),
-			Source:    "log",
-			Agent:     "test-agent",
-			Action:    "unique_marker_12345",
-		},
-	}
-
-	// Build form and set form mode
-	form, data := m.buildAddTaskForm()
-	form.Init()
-	m.huhForm = form
-	m.formData = data
-	m.inputMode = InputModeForm
-
-	output := m.View()
-	if strings.Contains(output, "unique_marker_12345") {
-		t.Error("View() in form mode should not contain activity panel content")
-	}
-	// The form should be rendered instead — huh forms contain field titles
-	if !strings.Contains(output, "ID") {
-		t.Error("View() in form mode should contain form content (field title 'ID')")
 	}
 }
 

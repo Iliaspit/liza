@@ -10,7 +10,6 @@ type KeyMap struct {
 	Terminate  key.Binding // t — terminate agent
 	Pause      key.Binding // p — pause system
 	Resume     key.Binding // r — resume system
-	AddTask    key.Binding // a — add task (Huh form)
 	Checkpoint key.Binding // c — sprint checkpoint
 	Yolo       key.Binding // y — toggle auto-resume
 	Help       key.Binding // ? — toggle help overlay
@@ -41,10 +40,6 @@ func NewKeyMap() KeyMap {
 			key.WithKeys("r"),
 			key.WithHelp("r", "resume"),
 		),
-		AddTask: key.NewBinding(
-			key.WithKeys("a"),
-			key.WithHelp("a", "add"),
-		),
 		Checkpoint: key.NewBinding(
 			key.WithKeys("c"),
 			key.WithHelp("c", "checkpoint"),
@@ -69,7 +64,7 @@ func NewKeyMap() KeyMap {
 }
 
 // ShortHelp returns the key bindings shown in the footer bar.
-// Order matches spec §Footer Bar: s, p, r, a, c, y, ?, q, Q.
+// Normal-mode binding order: s, S, t, p, r, c, y, ?, q, Q.
 func (k KeyMap) ShortHelp() []key.Binding {
 	return []key.Binding{
 		k.Spawn,
@@ -77,7 +72,6 @@ func (k KeyMap) ShortHelp() []key.Binding {
 		k.Terminate,
 		k.Pause,
 		k.Resume,
-		k.AddTask,
 		k.Checkpoint,
 		k.Yolo,
 		k.Help,
@@ -87,14 +81,12 @@ func (k KeyMap) ShortHelp() []key.Binding {
 }
 
 // FullHelp returns grouped key bindings for the help overlay.
-// Groups: actions (spawn, pause, resume, checkpoint), system (quit, stop, help), navigation (add task).
+// Groups: actions (spawn, pause, resume, checkpoint), system (quit, stop, help).
 func (k KeyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		// Actions: commands that affect the running system
 		{k.Spawn, k.SpawnWith, k.Terminate, k.Pause, k.Resume, k.Checkpoint, k.Yolo},
 		// System: TUI lifecycle and help
 		{k.Quit, k.Stop, k.Help},
-		// Navigation: task management
-		{k.AddTask},
 	}
 }

@@ -18,7 +18,6 @@ import (
 	"github.com/liza-mas/liza/internal/log"
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/ops"
-	"github.com/liza-mas/liza/internal/paths"
 	"github.com/liza-mas/liza/internal/pipeline"
 	"github.com/liza-mas/liza/internal/process"
 	"gopkg.in/yaml.v3"
@@ -305,38 +304,7 @@ func terminateAgentCmd(projectRoot, agentID string) tea.Cmd {
 	}
 }
 
-// addTaskCmd adds a new task from form input.
-// Calls ops.AddTask() directly.
-// Returns CmdResultMsg with result.
-//
-//lint:ignore U1000 used by update.go
-func addTaskCmd(projectRoot string, input *commands.TaskInput) tea.Cmd {
-	return func() tea.Msg {
-		p := paths.New(projectRoot)
-		opsInput := &ops.AddTaskInput{
-			ID:          input.ID,
-			Type:        input.Type,
-			RolePair:    input.RolePair,
-			Description: input.Description,
-			SpecRef:     input.SpecRef,
-			DoneWhen:    input.DoneWhen,
-			Scope:       input.Scope,
-			Priority:    input.Priority,
-			DependsOn:   input.DependsOn,
-		}
-		result, err := ops.AddTask(p.StatePath(), p.LogPath(), opsInput, "operator")
-		if err != nil {
-			return CmdResultMsg{Success: false, Message: fmt.Sprintf("add task: %v", err)}
-		}
-		msg := "Task " + input.ID + " added"
-		if len(result.Warnings) > 0 {
-			msg += " (warning: " + strings.Join(result.Warnings, "; ") + ")"
-		}
-		return CmdResultMsg{Success: true, Message: msg}
-	}
-}
-
-// loadRolesCmd loads role and role-pair names from pipeline config.
+// loadRolesCmd loads role metadata from pipeline config.
 // Returns rolesMsg with sorted names.
 // Returns rolesMsg with nil fields if config not found (non-fatal).
 func loadRolesCmd(projectRoot string) tea.Cmd {
@@ -362,7 +330,6 @@ func loadRolesCmd(projectRoot string) tea.Cmd {
 		return rolesMsg{
 			Roles:           roles,
 			RoleTypes:       roleTypes,
-			RolePairs:       pr.RolePairNames(),
 			SprintTerminals: pr.SprintTerminalStates(),
 			StateCategories: pr.StateCategories(),
 		}

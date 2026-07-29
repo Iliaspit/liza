@@ -4,7 +4,6 @@ import (
 	"time"
 
 	"github.com/charmbracelet/bubbles/textinput"
-	"github.com/charmbracelet/huh"
 	"github.com/liza-mas/liza/internal/agent"
 	"github.com/liza-mas/liza/internal/db"
 	"github.com/liza-mas/liza/internal/log"
@@ -19,7 +18,6 @@ type InputMode int
 const (
 	InputModeNormal InputMode = iota // Normal keybinding mode
 	InputModeInline                  // Inline text prompt (spawn role, pause reason)
-	InputModeForm                    // Huh form overlay (add task)
 )
 
 // InlineAction identifies which command the inline input will execute on confirm.
@@ -36,11 +34,10 @@ const (
 	InlineActionTerminateConfirm              // t (phase 2) — collecting y/n confirmation
 )
 
-// rolesMsg carries loaded role and role-pair names from pipeline config.
+// rolesMsg carries loaded role metadata and terminal states from pipeline config.
 type rolesMsg struct {
 	Roles           []string
 	RoleTypes       map[string]string
-	RolePairs       []string
 	SprintTerminals []models.TaskStatus
 	StateCategories map[models.TaskStatus]pipeline.StateCategory
 }
@@ -175,13 +172,10 @@ type Model struct {
 	inputMode        InputMode         // current input mode
 	keys             KeyMap            // key bindings
 	textInput        textinput.Model   // Bubbles text input for inline prompts
-	huhForm          *huh.Form         // active Huh form (nil when no form)
-	formData         *addTaskFormData  // bound form data for Huh form fields
 	inlineAction     InlineAction      // which action inline input serves
 	inlineLabel      string            // prompt label shown before textinput (e.g., "Role: ")
 	roleCompletions  []string          // cached role names from pipeline config for tab-completion
 	roleTypes        map[string]string // cached role name to role type from pipeline config
-	rolePairNames    []string          // cached role-pair names from pipeline config for add-task form
 	sprintTerminals  []models.TaskStatus
 	stateCategories  map[models.TaskStatus]pipeline.StateCategory
 	agentCompletions []string // snapshot of agent IDs for tab-completion (built on 't' press)

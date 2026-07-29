@@ -2,7 +2,6 @@ package tui
 
 import (
 	"fmt"
-	"regexp"
 	"slices"
 	"sort"
 	"strings"
@@ -10,9 +9,6 @@ import (
 
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/huh"
-	"github.com/liza-mas/liza/internal/commands"
-	"github.com/liza-mas/liza/internal/models"
 )
 
 // Update handles all incoming messages and returns the updated model + next Cmd.
@@ -59,8 +55,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch m.inputMode {
 		case InputModeInline:
 			return m.handleInlineKey(msg)
-		case InputModeForm:
-			return m.handleFormKey(msg)
 		default:
 			return m.handleNormalKey(msg)
 		}
@@ -73,7 +67,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case rolesMsg:
 		m.roleCompletions = msg.Roles
 		m.roleTypes = msg.RoleTypes
-		m.rolePairNames = msg.RolePairs
 		m.sprintTerminals = msg.SprintTerminals
 		m.stateCategories = msg.StateCategories
 		return m, nil
@@ -183,9 +176,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	default:
-		if m.inputMode == InputModeForm && m.huhForm != nil {
-			return m.handleFormUpdate(msg)
-		}
 		return m, nil
 	}
 }
@@ -250,13 +240,6 @@ func (m Model) handleNormalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case key.Matches(msg, m.keys.Resume):
 		return m, resumeSystemCmd(m.projectRoot)
-
-	case key.Matches(msg, m.keys.AddTask):
-		form, data := m.buildAddTaskForm()
-		m.huhForm = form
-		m.formData = data
-		m.inputMode = InputModeForm
-		return m, m.huhForm.Init()
 
 	case key.Matches(msg, m.keys.Checkpoint):
 		return m, checkpointCmd(m.projectRoot)
@@ -496,180 +479,6 @@ func (m Model) cycleCompletion() Model {
 	m.textInput.SetValue(selected)
 	m.completionIdx++
 	return m
-}
-
-// addTaskFormData holds the bound values for the Huh add-task form fields.
-type addTaskFormData struct {
-	ID          string
-	Type        string
-	RolePair    string
-	Description string
-	SpecRef     string
-	DoneWhen    string
-	Scope       string
-	DependsOn   []string
-	Priority    int
-}
-
-// kebabCaseRe validates kebab-case identifiers.
-var kebabCaseRe = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
-
-// validateKebabCase returns an error if s is not valid kebab-case.
-func validateKebabCase(s string) error {
-	if !kebabCaseRe.MatchString(s) {
-		return fmt.Errorf("must be kebab-case (e.g. my-task-id)")
-	}
-	return nil
-}
-
-// validateRequired returns an error if s is empty.
-func validateRequired(s string) error {
-	if strings.TrimSpace(s) == "" {
-		return fmt.Errorf("required")
-	}
-	return nil
-}
-
-// buildAddTaskForm creates a Huh form for adding a task.
-// All fields required by ops.AddTask are collected here with inline validation
-// so errors are surfaced before the form exits.
-func (m Model) buildAddTaskForm() (*huh.Form, *addTaskFormData) {
-	data := &addTaskFormData{
-		Type:     string(models.TaskTypeCoding),
-		Priority: 1,
-	}
-
-	// Collect existing task IDs for duplicate check and depends_on
-	existingIDs := make(map[string]bool)
-	var taskIDs []string
-	if m.state != nil {
-		for _, t := range m.state.Tasks {
-			existingIDs[t.ID] = true
-			taskIDs = append(taskIDs, t.ID)
-		}
-		sort.Strings(taskIDs)
-	}
-
-	depOptions := make([]huh.Option[string], len(taskIDs))
-	for i, id := range taskIDs {
-		depOptions[i] = huh.NewOption(id, id)
-	}
-
-	// Role pair options from pipeline config
-	rpOptions := []huh.Option[string]{huh.NewOption("(none loaded)", "")}
-	if len(m.rolePairNames) > 0 {
-		rpOptions = make([]huh.Option[string], len(m.rolePairNames))
-		for i, name := range m.rolePairNames {
-			rpOptions[i] = huh.NewOption(name, name)
-		}
-	}
-
-	// Task type options
-	typeNames := models.ValidTaskTypeNames()
-	typeOptions := make([]huh.Option[string], len(typeNames))
-	for i, name := range typeNames {
-		typeOptions[i] = huh.NewOption(name, name)
-	}
-
-	form := huh.NewForm(
-		huh.NewGroup(
-			huh.NewInput().Title("ID").Value(&data.ID).
-				Validate(func(s string) error {
-					if err := validateKebabCase(s); err != nil {
-						return err
-					}
-					if existingIDs[s] {
-						return fmt.Errorf("task %q already exists", s)
-					}
-					return nil
-				}),
-			huh.NewInput().Title("Description").Value(&data.Description).
-				Validate(validateRequired),
-			huh.NewSelect[string]().Title("Type").
-				Options(typeOptions...).Value(&data.Type),
-			huh.NewSelect[string]().Title("Role pair").
-				Options(rpOptions...).Value(&data.RolePair),
-			huh.NewInput().Title("Spec ref").Value(&data.SpecRef).
-				Validate(validateRequired),
-			huh.NewInput().Title("Done when").Value(&data.DoneWhen).
-				Validate(validateRequired),
-			huh.NewInput().Title("Scope").Value(&data.Scope).
-				Validate(validateRequired),
-			huh.NewMultiSelect[string]().Title("Depends on").
-				Options(depOptions...).Value(&data.DependsOn),
-			huh.NewSelect[int]().Title("Priority").
-				Options(
-					huh.NewOption("1 (default)", 1),
-					huh.NewOption("2", 2),
-					huh.NewOption("3", 3),
-					huh.NewOption("4", 4),
-					huh.NewOption("5", 5),
-				).Value(&data.Priority),
-		),
-	)
-
-	return form, data
-}
-
-// extractFormData reads the Huh form's bound values and returns a TaskInput.
-func (m Model) extractFormData() *commands.TaskInput {
-	if m.formData == nil {
-		return nil
-	}
-	return &commands.TaskInput{
-		ID:          m.formData.ID,
-		Type:        m.formData.Type,
-		RolePair:    m.formData.RolePair,
-		Description: m.formData.Description,
-		SpecRef:     m.formData.SpecRef,
-		DoneWhen:    m.formData.DoneWhen,
-		Scope:       m.formData.Scope,
-		DependsOn:   m.formData.DependsOn,
-		Priority:    m.formData.Priority,
-	}
-}
-
-// handleFormKey handles key events in form mode.
-// Intercepts Esc for cancellation, then delegates to handleFormUpdate.
-func (m Model) handleFormKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	// Esc cancels the form
-	if msg.String() == "esc" {
-		m.inputMode = InputModeNormal
-		m.huhForm = nil
-		m.formData = nil
-		return m, nil
-	}
-
-	return m.handleFormUpdate(msg)
-}
-
-// handleFormUpdate forwards any tea.Msg to the Huh form and checks for
-// completion/cancellation. Called from handleFormKey for key events and
-// from Update's default case for Huh internal messages (focus, blink, etc.).
-func (m Model) handleFormUpdate(msg tea.Msg) (tea.Model, tea.Cmd) {
-	form, cmd := m.huhForm.Update(msg)
-	if f, ok := form.(*huh.Form); ok {
-		m.huhForm = f
-	}
-
-	// Check if form completed (submitted)
-	if m.huhForm.State == huh.StateCompleted {
-		m.inputMode = InputModeNormal
-		input := m.extractFormData()
-		m.huhForm = nil
-		m.formData = nil
-		return m, addTaskCmd(m.projectRoot, input)
-	}
-
-	// Check if form was aborted
-	if m.huhForm.State == huh.StateAborted {
-		m.inputMode = InputModeNormal
-		m.huhForm = nil
-		m.formData = nil
-		return m, nil
-	}
-
-	return m, cmd
 }
 
 // appendActivity appends an entry to the activity slice, capping at 200 entries.

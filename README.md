@@ -53,7 +53,7 @@ Liza is a **frontier Multi-Agent System**:
     that are AI generated but human reviewed.
   - Automatic task decomposition based on complexity with dependency management for parallel execution. Many-to-one transitions consolidate sibling tasks (e.g. N user stories → 1 architecture task).
   - Multi-sprints: agents are fully autonomous within a sprint, user steers between sprints via Liza CLI - review of produced artifacts, continuous improvement, and steering of the next sprint
-  - A TUI (`liza tui`) displays live system state and lets you spawn agents, pause/resume, add tasks, and trigger checkpoints.
+  - A TUI (`liza tui`) displays live system state and lets you spawn agents, pause/resume, and trigger checkpoints.
 - **Adversarial architecture:**
   - One Orchestrator role + 12 others across four pipeline phases.
   - Every activity is dual — a doer and a reviewer: epic planning, epic writing, US writing, code planning, coding - everything.

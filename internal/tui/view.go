@@ -92,11 +92,9 @@ func (m Model) View() string {
 	// Activity fills remaining space (Height pads to fill).
 	activityHeight := max(remaining-lipgloss.Height(tasks)-lipgloss.Height(agents), minActivity)
 
-	// Activity panel slot: form overlay > help overlay > activity panel
+	// Activity panel slot: help overlay > activity panel
 	var activity string
-	if m.inputMode == InputModeForm && m.huhForm != nil {
-		activity = m.huhForm.View()
-	} else if m.showHelp {
+	if m.showHelp {
 		activity = m.renderHelpOverlay(activityHeight)
 	} else {
 		activity = m.renderActivityPanel(activityHeight)
@@ -755,7 +753,7 @@ func (m Model) renderAlertBanner() string {
 }
 
 // renderFooter renders the context-sensitive footer bar.
-// Normal mode: keybinding hints. Inline mode: input-mode hints. Form mode: form hints.
+// Normal mode: keybinding hints. Inline mode: input-mode hints.
 // Includes transient command result display (3s visibility).
 func (m Model) renderFooter() string {
 	var hints string
@@ -765,8 +763,6 @@ func (m Model) renderFooter() string {
 		leftContent := m.inlineLabel + m.textInput.View()
 		rightContent := m.renderInlineHints()
 		hints = leftContent + "  " + rightContent
-	case InputModeForm:
-		hints = m.renderFormHints()
 	default:
 		hints = m.renderNormalHints()
 	}
@@ -785,7 +781,7 @@ func (m Model) renderFooter() string {
 	return m.styles.FooterBar.Render(hints)
 }
 
-// renderNormalHints renders the 8 keybinding hints for normal mode.
+// renderNormalHints renders the keybinding hints for normal mode.
 func (m Model) renderNormalHints() string {
 	bindings := m.keys.ShortHelp()
 	parts := make([]string, len(bindings))
@@ -806,11 +802,6 @@ func (m Model) renderInlineHints() string {
 	return m.renderHints([][2]string{{"Tab", "complete"}, {"Enter", "confirm"}, {"Esc", "cancel"}})
 }
 
-// renderFormHints renders hints for form input mode.
-func (m Model) renderFormHints() string {
-	return m.renderHints([][2]string{{"Enter", "submit"}, {"Esc", "cancel"}})
-}
-
 // renderHints formats key-description pairs as styled footer hints.
 func (m Model) renderHints(hints [][2]string) string {
 	parts := make([]string, len(hints))
@@ -825,7 +816,7 @@ func (m Model) renderHints(hints [][2]string) string {
 // Uses FullHelp() from KeyMap for grouped binding display.
 func (m Model) renderHelpOverlay(height int) string {
 	groups := m.keys.FullHelp()
-	groupNames := []string{"ACTIONS", "SYSTEM", "TASKS"}
+	groupNames := []string{"ACTIONS", "SYSTEM"}
 
 	// Render each group as a column
 	var columns []string

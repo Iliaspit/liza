@@ -19,7 +19,6 @@ func TestNewKeyMap_BindingsMatchExpectedKeys(t *testing.T) {
 		{"Terminate", km.Terminate, []string{"t"}},
 		{"Pause", km.Pause, []string{"p"}},
 		{"Resume", km.Resume, []string{"r"}},
-		{"AddTask", km.AddTask, []string{"a"}},
 		{"Checkpoint", km.Checkpoint, []string{"c"}},
 		{"Yolo", km.Yolo, []string{"y"}},
 		{"Help", km.Help, []string{"?"}},
@@ -45,7 +44,7 @@ func TestNewKeyMap_BindingsMatchExpectedKeys(t *testing.T) {
 func TestNewKeyMap_HelpTextMatchesSpec(t *testing.T) {
 	km := NewKeyMap()
 
-	// Spec §Footer Bar: [s] spawn  [p] pause  [r] resume  [a] add  [c] checkpoint  [?] help  [q] quit  [Q] stop
+	// Spec §Footer Bar: [s] spawn  [p] pause  [r] resume  [c] checkpoint  [?] help  [q] quit  [Q] stop
 	tests := []struct {
 		name     string
 		binding  key.Binding
@@ -57,7 +56,6 @@ func TestNewKeyMap_HelpTextMatchesSpec(t *testing.T) {
 		{"Terminate", km.Terminate, "t", "terminate"},
 		{"Pause", km.Pause, "p", "pause"},
 		{"Resume", km.Resume, "r", "resume"},
-		{"AddTask", km.AddTask, "a", "add"},
 		{"Checkpoint", km.Checkpoint, "c", "checkpoint"},
 		{"Yolo", km.Yolo, "y", "yolo"},
 		{"Help", km.Help, "?", "help"},
@@ -82,8 +80,8 @@ func TestShortHelp_ReturnsExpectedBindings(t *testing.T) {
 	km := NewKeyMap()
 	bindings := km.ShortHelp()
 
-	// Verify footer order: s, S, t, p, r, a, c, y, ?, q, Q
-	expectedKeys := []string{"s", "S", "t", "p", "r", "a", "c", "y", "?", "q", "Q"}
+	// Verify footer order: s, S, t, p, r, c, y, ?, q, Q
+	expectedKeys := []string{"s", "S", "t", "p", "r", "c", "y", "?", "q", "Q"}
 	if len(bindings) != len(expectedKeys) {
 		t.Fatalf("ShortHelp() returned %d bindings, want %d", len(bindings), len(expectedKeys))
 	}
@@ -113,9 +111,9 @@ func TestFullHelp_ReturnsNonEmptyGroups(t *testing.T) {
 		}
 	}
 
-	// Verify grouped by category: actions, system, navigation
-	if len(groups) != 3 {
-		t.Fatalf("FullHelp() returned %d groups, want 3 (actions, system, navigation)", len(groups))
+	// Verify grouped by category: actions and system
+	if len(groups) != 2 {
+		t.Fatalf("FullHelp() returned %d groups, want 2 (actions, system)", len(groups))
 	}
 
 	// Total bindings across all groups must match ShortHelp count
