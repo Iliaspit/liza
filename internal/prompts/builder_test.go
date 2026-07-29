@@ -1762,12 +1762,20 @@ func TestBuildRoleContext_AllRoles(t *testing.T) {
 			"exact failing command and stderr/error text",
 			"Do NOT submit the pre-change HEAD",
 			"COLLECTIVE PLAN SCOPING",
-			"PRIOR REJECTION FEEDBACK (MUST ADDRESS)",
+			"PRIOR REJECTION FEEDBACK",
+			"REQUIRED: blockers, overreach, and rejection-worthy concerns.",
+			"ADVISORY: suggestions and nits.",
+			"Suggestions must not grow the change",
+			"no new file, interface, dependency, or migration",
+			"record the\ndeferral in your submission commit message",
 			"Missing error handling",
 		} {
 			if !strings.Contains(output, key) {
 				t.Errorf("output missing key string %q", key)
 			}
+		}
+		if strings.Contains(output, "MUST ADDRESS") {
+			t.Error("prior rejection heading must not restore the blanket MUST ADDRESS framing")
 		}
 		if strings.Contains(output, "cd "+data.Worktree+" &&") {
 			t.Error("coder prompt must not teach cd && worktree commands")
@@ -1831,6 +1839,17 @@ func TestBuildRoleContext_AllRoles(t *testing.T) {
 			"VERDICT SUBMISSION",
 			"COLLECTIVE PLAN SCOPING",
 			"PRIOR REJECTION (iteration 1)",
+			"Closure condition: [observable state required for approval]",
+			"Possible approach: [advisory — the coder chooses the implementation]",
+			"Overreach: [count]",
+			"- RESOLVED: [prior issues now fixed]",
+			"- ACCEPTED: [rationale accepted, no code change]",
+			"- PARTIAL: [prior issues partially addressed]",
+			"- STILL PRESENT: [prior issues not addressed]",
+			"Which are ACCEPTED (rationale accepted, no code change)?",
+			"| Corrective fix larger than the finding required | scope_deviation | — |",
+			"not declared as a scope_extension is a finding",
+			"Read the submission commit message for deferral rationale",
 		} {
 			if !strings.Contains(output, key) {
 				t.Errorf("output missing key string %q", key)
@@ -1923,7 +1942,12 @@ func TestBuildRoleContext_AllRoles(t *testing.T) {
 			"Submission requires a new worktree commit for this task",
 			"Submission proof: `liza submit-for-review` is not optional bookkeeping",
 			"COLLECTIVE PLAN SCOPING",
-			"PRIOR REJECTION FEEDBACK (MUST ADDRESS)",
+			"PRIOR REJECTION FEEDBACK",
+			"REQUIRED: blockers, overreach, and rejection-worthy concerns.",
+			"ADVISORY: suggestions and nits.",
+			// rationale transport must reach non-coder doers, not just the coder branch
+			"Suggestions must not grow the change",
+			"record the\ndeferral in your submission commit message",
 		} {
 			if !strings.Contains(output, key) {
 				t.Errorf("output missing key string %q", key)
@@ -1976,6 +2000,9 @@ func TestBuildRoleContext_AllRoles(t *testing.T) {
 			"Inspect worktree changes by targeted path/hunk",
 			"git -C " + data.Worktree + " diff abc1234..def5678 -- <path>",
 			"VERDICT SUBMISSION",
+			// ACCEPTED and its rationale-read instruction must reach non-code reviewers too
+			"Which are ACCEPTED (rationale accepted, no code change)?",
+			"Read the submission commit message for deferral rationale",
 		} {
 			if !strings.Contains(output, key) {
 				t.Errorf("output missing key string %q", key)
@@ -2015,7 +2042,9 @@ func TestBuildRoleContext_AllRoles(t *testing.T) {
 			"Any validation[] command is satisfiable for the capability scope",
 			"Submission requires a new worktree commit for this task",
 			"Submission proof: `liza submit-for-review` must actually run successfully",
-			"PRIOR REJECTION FEEDBACK (MUST ADDRESS)",
+			"PRIOR REJECTION FEEDBACK",
+			"REQUIRED: blockers, overreach, and rejection-worthy concerns.",
+			"ADVISORY: suggestions and nits.",
 		} {
 			if !strings.Contains(output, key) {
 				t.Errorf("output missing key string %q", key)
@@ -2106,7 +2135,9 @@ func TestBuildRoleContext_AllRoles(t *testing.T) {
 			"Submission requires a new worktree commit for this task",
 			"PRE-SUBMIT SELF-CHECK (MANDATORY",
 			"COLLECTIVE PLAN SCOPING",
-			"PRIOR REJECTION FEEDBACK (MUST ADDRESS)",
+			"PRIOR REJECTION FEEDBACK",
+			"REQUIRED: blockers, overreach, and rejection-worthy concerns.",
+			"ADVISORY: suggestions and nits.",
 			"specs/epics/ep-001.md",
 			"#capability-cap-001---task-creation",
 		} {

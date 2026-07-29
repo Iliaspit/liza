@@ -29,7 +29,9 @@ INSTRUCTIONS:
    - Use targeted diffs: git -C {{.Worktree}} diff {{.BaseCommit}}..{{.ReviewCommit}} -- <path>
    - If total diff output would exceed ~80K chars or any single-file diff would exceed ~20K chars, do not read the full diff; inspect targeted paths, stats, and source line ranges instead.
    Each review is a fresh evaluation: "does this worktree satisfy the task?"
+   Inspect the full candidate for P0-P2 every round. On iteration 2+, only unresolved prior findings and new P0-P2 defects may block; new P3-P6 observations route to follow-up.
    Scope findings come exclusively from this scope/workmanship diff. Do not log `scope_deviation` unless the issue appears in this diff.
+   On iteration 2+, growth beyond task scope that was not declared as a scope_extension is a finding; declared and justified growth is not.
 5. Invoke skill: code-review, then apply it to the full scope/workmanship change set using the bounded review context from step 4
 6. If change touches specs/, introduces new abstractions, adds state/lifecycle, or spans 3+ modules: also invoke skill: systemic-thinking
 7. TDD QUALITY (code tasks): Tests must cover done_when criteria — REJECT if tests are superficial or don't exercise the actual requirements
@@ -69,13 +71,7 @@ CANONICAL VALIDATION:
 DOER VALIDATION PLAN: {{.ValidationPlan}}
 {{- end}}
 {{- if ne .PriorRejection ""}}
-
-PRIOR FEEDBACK REVIEW (MANDATORY for iteration 2+):
-Before submitting verdict, compare this iteration against prior rejection:
-- Which prior issues are now RESOLVED?
-- Which prior issues are STILL PRESENT?
-- Which prior issues are PARTIALLY ADDRESSED?
-Include this assessment in your rejection reason if rejecting.
+{{- template "prior-feedback-review" .}}
 {{- end}}
 
 POST-VERDICT (MANDATORY for REJECTED):
@@ -125,13 +121,7 @@ CANONICAL VALIDATION:
 DOER VALIDATION PLAN: {{.ValidationPlan}}
 {{- end}}
 {{- if ne .PriorRejection ""}}
-
-PRIOR FEEDBACK REVIEW (MANDATORY for iteration 2+):
-Before submitting verdict, compare this iteration against prior rejection:
-- Which prior issues are now RESOLVED?
-- Which prior issues are STILL PRESENT?
-- Which prior issues are PARTIALLY ADDRESSED?
-Include this assessment in your rejection reason if rejecting.
+{{- template "prior-feedback-review" .}}
 {{- end}}
 
 REVIEW PHASE:
@@ -183,13 +173,7 @@ REVIEW CHECKLIST:
 | Independence | Epic has unnecessary coupling to other epics — verify cross-epic dependencies are true ordering constraints |
 | Vision coverage | Epics collectively miss or exceed vision scope — reject with gap/scope-absorption note |
 {{- if ne .PriorRejection ""}}
-
-PRIOR FEEDBACK REVIEW (MANDATORY for iteration 2+):
-Before submitting verdict, compare this iteration against prior rejection:
-- Which prior issues are now RESOLVED?
-- Which prior issues are STILL PRESENT?
-- Which prior issues are PARTIALLY ADDRESSED?
-Include this assessment in your rejection reason if rejecting.
+{{- template "prior-feedback-review" .}}
 {{- end}}
 
 REVIEW PHASE:
@@ -239,13 +223,7 @@ QUALITY GATES:
 - Acceptance criteria must be user-observable
 - Assumptions are first-class outputs that resolve behavioral ambiguity
 {{- if ne .PriorRejection ""}}
-
-PRIOR FEEDBACK REVIEW (MANDATORY for iteration 2+):
-Before submitting verdict, compare this iteration against prior rejection:
-- Which prior issues are now RESOLVED?
-- Which prior issues are STILL PRESENT?
-- Which prior issues are PARTIALLY ADDRESSED?
-Include this assessment in your rejection reason if rejecting.
+{{- template "prior-feedback-review" .}}
 {{- end}}
 
 CAPABILITY SCOPING:
@@ -316,13 +294,7 @@ CANONICAL VALIDATION:
 DOER VALIDATION PLAN: {{.ValidationPlan}}
 {{- end}}
 {{- if ne .PriorRejection ""}}
-
-PRIOR FEEDBACK REVIEW (MANDATORY for iteration 2+):
-Before submitting verdict, compare this iteration against prior rejection:
-- Which prior issues are now RESOLVED?
-- Which prior issues are STILL PRESENT?
-- Which prior issues are PARTIALLY ADDRESSED?
-Include this assessment in your rejection reason if rejecting.
+{{- template "prior-feedback-review" .}}
 {{- end}}
 
 REVIEW PHASE:
@@ -371,13 +343,7 @@ INSTRUCTIONS:
    d. Missing findings: are there integration issues the analyst missed?
 6. If enrichment produces additional fix-tasks, include them in the rejection with specific task definitions.
 {{- if ne .PriorRejection ""}}
-
-PRIOR FEEDBACK REVIEW (MANDATORY for iteration 2+):
-Before submitting verdict, compare this iteration against prior rejection:
-- Which prior issues are now RESOLVED?
-- Which prior issues are STILL PRESENT?
-- Which prior issues are PARTIALLY ADDRESSED?
-Include this assessment in your rejection reason if rejecting.
+{{- template "prior-feedback-review" .}}
 {{- end}}
 
 POST-VERDICT (MANDATORY for REJECTED):

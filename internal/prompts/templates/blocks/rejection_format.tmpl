@@ -5,18 +5,25 @@ REJECTION FORMAT (if rejecting):
 Blockers: [count]
 - [blocker] file:line — Issue description
   Why it matters: [impact]
-  Suggestion: [fix]
+  Closure condition: [observable state required for approval]
+  Possible approach: [advisory — the coder chooses the implementation]
 
 Concerns: [count]
 - [concern] file:line — Issue description
+  Closure condition: [observable state required for approval]
+
+Overreach: [count]
+- [overreach] file:line — Beyond task scope, or a larger fix than the finding required
+  Smaller resolution: [what to revert or split out]
 
 Overall: [1-2 sentence assessment]
 {{- if gt .IterationNum 1}}
 
 Prior Feedback Status:
-- RESOLVED: [list issues from prior rejection now fixed]
-- STILL PRESENT: [list issues not addressed]
-- PARTIAL: [list issues partially addressed]
+- RESOLVED: [prior issues now fixed]
+- ACCEPTED: [rationale accepted, no code change]
+- PARTIAL: [prior issues partially addressed]
+- STILL PRESENT: [prior issues not addressed]
 {{- end}}
 ---
 {{- end -}}

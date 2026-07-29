@@ -101,7 +101,8 @@ tasks:
       Blockers: 1
       - [blocker] src/api/order.py:47 — Retry applied to non-idempotent POST
         Why it matters: Duplicate orders on network retry
-        Suggestion: Add idempotency key validation before retry. See spec section 3.2.
+        Closure condition: create_order() cannot retry without a validated idempotency key
+        Possible approach: Validate the key before retry. See spec section 3.2.
 
       Concerns: 0
 
@@ -495,26 +496,33 @@ rejection_reason: |
   Blockers: [count]
   - [blocker] file:line — Issue description
     Why it matters: [impact]
-    Suggestion: [fix]
+    Closure condition: [observable state required for approval]
+    Possible approach: [advisory — the coder chooses the implementation]
 
   Concerns: [count]
   - [concern] file:line — Issue description
+    Closure condition: [observable state required for approval]
+
+  Overreach: [count]
+  - [overreach] file:line — Beyond task scope, or a larger fix than the finding required
+    Smaller resolution: [what to revert or split out]
 
   Overall: [1-2 sentence assessment]
 
   Prior Feedback Status:  # Required for iteration 2+
-  - RESOLVED: [issues from prior rejection now fixed]
-  - STILL PRESENT: [issues not addressed]
-  - PARTIAL: [issues partially addressed]
+  - RESOLVED: [prior issues now fixed]
+  - ACCEPTED: [rationale accepted, no code change]
+  - PARTIAL: [prior issues partially addressed]
+  - STILL PRESENT: [prior issues not addressed]
 ```
 
 **Requirements:**
 - Blockers and Concerns must reference specific `file:line` locations
-- Each issue must include actionable suggestion
+- Each blocker and concern must include a closure condition; any suggested approach is advisory
 - For iteration 2+: Prior Feedback Status section is mandatory
 
 **Rationale:** Structured format enables:
-- Coder to address specific locations rather than interpreting prose
+- Coder to satisfy explicit closure conditions rather than interpreting prose
 - Reviewer to track feedback continuity across iterations
 - Watcher to detect oscillation patterns (issue flip-flopping between RESOLVED and STILL PRESENT)
 

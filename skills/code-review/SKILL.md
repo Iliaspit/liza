@@ -12,6 +12,7 @@ Before reviewing, establish context:
 - **Scope:** Default to staged files (`git diff --cached --name-only`, then `git diff --cached --stat`, then targeted path diffs). For PRs or commits, inspect changed files and stats before reading targeted hunks. Only broaden if explicitly asked.
 - **Local working tree:** For local reviews, triage unstaged and untracked files before review. If related but not staged, surface this explicitly and include only if the review target is "pending changes"; if unrelated, ignore; if unclear, ask before including.
 - **Intent:** Check ticket/description (PRs) or ask the author (pending). If unclear, clarify before reviewing.
+- **Initial scope:** Before reading the diff, record in one line what the change set out to do. This is the anchor for every later round: it bounds which *behavior* is required, not which code is inspected. Every submitted line is still reviewed for P0-P2 defects. Work beyond the initial scope is scope creep, not thoroughness — review it, then flag it `[overreach]`.
 - **Timing:** Is now the right time for this functionality? Half-baked or premature additions warrant a `[question]`.
 - **Approach:** For complex changes, was the approach discussed before implementation? Catch architectural misalignment early — complete rewrites are painful.
 - **Diff-first:** Read bounded diff context before source files. Prefer name-only/stat first, then targeted path or hunk diffs. Only read source when a finding needs surrounding context. Never pre-read the entire codebase.
@@ -59,6 +60,7 @@ Not exhaustive — a mental sweep, not a checkbox exercise.
 - [ ] No injection vectors (SQL, command, XSS)
 - [ ] Auth/authz not weakened
 - [ ] Sensitive data not logged or exposed
+- [ ] Worst realistic misuse considered
 
 **Correctness (P1):**
 - [ ] Logic matches stated intent
@@ -79,11 +81,8 @@ Not exhaustive — a mental sweep, not a checkbox exercise.
 - [ ] Public API changes intentional; backward compatibility considered
 - [ ] Dependency additions justified; version changes assessed for breaking behavior
 - [ ] Not relying on implicit/undocumented configuration
-- [ ] New env vars documented and added to templates
-- [ ] User-facing/operational changes documented; README/CHANGELOG updated
-- [ ] Deployment procedure defined if relevant (db change, breaking change)
-- [ ] Logs actionable (not noisy, not silent); errors include debug context
-- [ ] Metrics/tracing updated if behavior changes
+- [ ] Operational surface documented: new env vars, README/CHANGELOG, deployment steps for db/breaking changes
+- [ ] Observability intact: logs actionable with debug context; metrics/tracing updated if behavior changed
 - [ ] Feature flags/kill switches respected if applicable
 - [ ] Rollback path exists (code + data)
 
@@ -113,6 +112,7 @@ Not exhaustive — a mental sweep, not a checkbox exercise.
 | `[question]` | Clarify — reviewer may be missing context | No |
 | `[nit]` | Take or leave — style, naming preference | No |
 | `[appraisal]` | Acknowledge — good pattern, notable improvement | No |
+| `[overreach]` | Beyond initial scope, or a larger solution than the finding required — shrink or split | Yes, in corrective rounds |
 
 **Structure:**
 ```
@@ -122,6 +122,8 @@ Why it matters: [impact if not addressed]
 Suggestion: [concrete alternative, if any]
 ```
 For `[nit]` and trivial `[suggestion]`: one-liner is fine.
+
+On `[blocker]` and `[concern]`, add `Closure condition:` — the observable state required for approval. Any `Suggestion:` is advisory; the author chooses the implementation. For findings about a mismatch between code and docs/spec/description, name which side is authoritative — otherwise the response defaults to changing code. A stated impact assessment bounds the response: escalating above it needs the reviewer's explicit agreement.
 
 **Tone:** Avoid "you" — focus on code, not coder. Use "we" or omit the subject. "You forgot to close the handle" → "File handle left open" or "Can we close the handle here?"
 
@@ -146,6 +148,8 @@ Suggestion: Use parameterized query: cursor.execute("SELECT ... WHERE user = %s"
 - Demand perfection — good enough ships, perfect doesn't
 - Accept style changes mixed with functional changes — ask to split
 - Expand scope to untouched lines — file a bug or fix it yourself
+- Treat a larger fix as better compliance — a fix that grows the change set is a finding, not progress
+- Review states that exist only because the fix was oversized — flag the oversized fix instead
 
 **Do:**
 - Ask "How would I solve this?" — use the difference to guide feedback
@@ -172,6 +176,7 @@ Suggestion: Use parameterized query: cursor.execute("SELECT ... WHERE user = %s"
 
 **Request changes when:**
 - Blockers exist (P0-P2)
+- `[overreach]` findings remain in a corrective round
 - Significant concerns unaddressed without rationale
 - Intent unclear and author hasn't clarified
 
@@ -181,30 +186,29 @@ Suggestion: Use parameterized query: cursor.execute("SELECT ... WHERE user = %s"
 
 # Re-Review Protocol
 
-Iterative reviews converge by narrowing scope. A re-review after fixes is not a fresh review.
+Reviews converge by bounding the change set, not by narrowing inspection. Every round reviews the current change set in full — the change set is what cannot grow.
 
-**Re-review scope:**
+**Every round:**
 
-For round 2 after fixes, review only:
-- whether prior `[blocker]` / `[concern]` findings were fixed at root cause
-- whether the fix introduced new P0-P2 issues
-- tests/docs directly added to prove or document the fix
+1. Reconcile each prior finding and classify it: **RESOLVED**, **ACCEPTED** (rationale accepted, no code change), **PARTIALLY ADDRESSED**, or **STILL PRESENT**. Thread resolution, acknowledgement, and outdated diff markers are not evidence.
+2. Inspect the whole change set for P0-P2 every round. After round 1, only unresolved prior findings and new P0-P2 defects may block; new P3-P6 observations route to follow-up.
+3. Check the change set against the initial scope. Undeclared growth is a finding; declared and justified growth is not. File count alone is a signal, not a verdict.
+4. Report the ledger: `Round N — remaining X→Y, files A→B`.
 
-Do not broaden into unrelated code, re-derive the whole diff, or escalate methodology to match a prior reviewer. Review mode cannot exceed the original review mode unless the fix itself introduced new complexity or risk.
+Do not escalate methodology to match a prior reviewer. Review mode cannot exceed the original mode unless the change itself introduced new complexity or risk.
 
-**Convergence rule:**
+**Corrective commit review:**
 
-- **Round 1:** Full review according to selected mode.
-- **Round 2:** Focused verification of prior findings. New findings are allowed only if they are P0-P2 and introduced by the fix.
-- **Round 3+:** Only allowed with an explicit question, such as "is X fixed?", "does Y still apply?", or "did this test prove the failure mode?" Open-ended re-review is not permitted.
+A corrective commit answers findings. It is not an opportunity to improve the change.
 
-Stop when:
-- no `[blocker]` remains
-- `[concern]` items are fixed, accepted as tech debt, or explicitly deferred with rationale
-- validation evidence exercises the changed behavior
-- no new P0-P2 issue was introduced by the fix
+- **Scope bound:** the corrective diff defaults to files named in the findings it answers, plus those files' tests. Growth beyond that is `[overreach]` unless declared and justified — as a scope extension in multi-agent mode, or in the round record in Pairing. Undeclared growth is the finding: name each file and ask for it to be split out or reverted.
+- **Minimal-fix test:** for each finding, ask "what is the least change that makes this finding false?" If the submitted fix is materially larger, flag `[overreach]` and state the smaller fix. A new interface, dependency, migration, or abstraction introduced to answer a `[concern]` or `[suggestion]` is `[overreach]` by default.
+- **Collapse before extending:** when a finding concerns code that exists only because of the chosen fix, ask first whether shrinking the fix eliminates the finding. If it does, flag `[overreach]` on the fix rather than opening a round on the states it invented. Reviewing a surface the fix created is how loops fail to converge.
+- **Suggestions:** a `[suggestion]` is addressed when it is inside the initial scope, or is a no-behavior-change edit to a file already in the change set. Everything else routes to follow-up. Deferring a suggestion is safe; losing it is not.
 
-At that point, approve or comment. Remaining `[suggestion]`, `[nit]`, and low-risk `[question]` items do not justify another broad pass.
+Stop when no `[blocker]` or `[overreach]` remains, `[concern]` items are fixed or deferred with rationale, validation exercises the changed behavior, and no new P0-P2 issue was introduced. Remaining `[suggestion]`, `[nit]`, and low-risk `[question]` items do not justify another round.
+
+**Divergence:** files growing while remaining findings do not fall is non-convergence. Stop, restate the original finding set, escalate to the author or human.
 
 **Blast-radius proportionality:**
 
@@ -212,20 +216,11 @@ Review depth scales with blast radius, not with prior review depth.
 
 - **Low blast radius:** dev tooling, internal scripts, config, docs. At most one Standard review plus one focused verification pass.
 - **Medium blast radius:** production behavior without schema/auth/public API impact. Standard review plus focused re-reviews until blockers close.
-- **High blast radius:** auth, security, data integrity, migrations, public API, production runtime. Deep review is allowed; re-review still narrows to fixes unless the design changed.
+- **High blast radius:** auth, security, data integrity, migrations, public API, production runtime. Deep review is allowed; later rounds still reconcile rather than re-derive.
 
 **Anti-pattern:**
 
 **Methodological arms race:** matching or exceeding a prior review's rigor to appear credible rather than because the change warrants it. This creates non-converging review loops. Prefer a smaller, evidence-focused re-review over a broader, more impressive one.
-
-# Failure Mode Sweep
-
-Ask questions to surface risks — do not assume intent or invent scenarios. Before finalizing, ask:
-- If this breaks, how would we notice?
-- What's the blast radius?
-- What's the worst realistic misuse?
-
-If unsure, raise as `[question]` or `[concern]`, not `[blocker]`.
 
 # Review Summary Format
 
@@ -259,3 +254,6 @@ Next step: [e.g., "Merge after minor suggestions" | "Ready for another look"]
 | Mode announcement ("Adjust?") | Announce mode, no prompt |
 | "Ask the author" / "Clarify" | Check task spec and blackboard; if still unclear, note as `[question]` |
 | "Consider suggesting a split" | Note as `[concern]` — do not block review |
+| `[overreach]` finding | Also log a `scope_deviation` anomaly |
+| "Routes to follow-up" | Record in the verdict text — no anomaly. Reserve `debt_created` for a known deficiency retained in the implementation |
+| Non-convergence (see Divergence) | Log `scope_deviation`, or `retry_loop` when the coder is cycling; `review_budget_exhausted` is planner-owned at 5 cycles — do not preempt it |

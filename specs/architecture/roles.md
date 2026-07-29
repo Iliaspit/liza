@@ -492,27 +492,35 @@ Code Reviewer does NOT evaluate:
 Blockers: [count]
 - [blocker] file:line — Issue description
   Why it matters: [impact]
-  Suggestion: [fix]
+  Closure condition: [observable state required for approval]
+  Possible approach: [advisory — the coder chooses the implementation]
 
 Concerns: [count]
 - [concern] file:line — Issue description
+  Closure condition: [observable state required for approval]
+
+Overreach: [count]
+- [overreach] file:line — Beyond task scope, or a larger fix than the finding required
+  Smaller resolution: [what to revert or split out]
 
 Overall: [1-2 sentence assessment]
 
 Prior Feedback Status:  # Required for iteration 2+
-- RESOLVED: [issues from prior rejection now fixed]
-- STILL PRESENT: [issues not addressed]
-- PARTIAL: [issues partially addressed]
+- RESOLVED: [prior issues now fixed]
+- ACCEPTED: [rationale accepted, no code change]
+- PARTIAL: [prior issues partially addressed]
+- STILL PRESENT: [prior issues not addressed]
 ```
 
 **Rejection must include:**
 - Specific file and location (`file:line` format)
 - Specific defect or missing requirement (reference spec if applicable)
-- Actionable fix description (what to change, not just "this is wrong")
+- Closure condition for each blocker and concern (observable state required for approval); any suggested approach is advisory
 - **For iteration 2+:** Prior Feedback Status section comparing to previous rejection
 
-**Coder must address the specific feedback:**
-- Cannot reinterpret rejection
+**Coder must satisfy the closure condition:**
+- Cannot reinterpret or narrow the closure condition
+- May choose any implementation that satisfies it
 - Cannot work around rejection
 - Cannot negotiate via code comments
 

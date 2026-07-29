@@ -6,7 +6,9 @@
 {{.PriorRejection}}
 {{- else}}
 
-=== PRIOR REJECTION FEEDBACK (MUST ADDRESS) ===
+=== PRIOR REJECTION FEEDBACK ===
+REQUIRED: blockers, overreach, and rejection-worthy concerns.
+ADVISORY: suggestions and nits.
 {{.PriorRejection}}
 {{- if eq .Role "coder"}}
 
@@ -15,6 +17,13 @@ If the rejection cites an out-of-scope file modification that is genuinely requi
 {{binaryName}} write-checkpoint --json to declare and justify it rather than working around the scope
 boundary with inferior alternatives.
 {{- end}}
+
+Blockers, overreach, and rejection-worthy concerns must be addressed. Overreach means the fix
+was larger than the finding required: shrink or split it, do not extend it.
+Suggestions must not grow the change: act on one only if it is inside task scope, or is a
+no-behavior-change edit to a file already in your diff, and only if the fix is small enough
+to add no new file, interface, dependency, or migration. Otherwise leave it and record the
+deferral in your submission commit message — do not expand scope to satisfy a suggestion.
 {{- end}}
 {{- end}}
 {{- end -}}
