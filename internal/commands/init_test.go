@@ -1564,11 +1564,12 @@ func TestInitCommand_BrownfieldBothOccupiedWarns(t *testing.T) {
 	}
 }
 
-func TestInitCommand_BrownfieldDuplicateLizaWarns(t *testing.T) {
+func TestInitCommand_DuplicateClaudeSymlinkRemovesRepoCopy(t *testing.T) {
 	gitDir := setupGitRepo(t)
 	defer os.RemoveAll(gitDir)
 
 	fakeHome := setupGlobalLiza(t)
+	t.Setenv(providers.EnvCatalogURL, "://invalid")
 
 	originalDir, _ := os.Getwd()
 	defer os.Chdir(originalDir)
@@ -1584,10 +1585,94 @@ func TestInitCommand_BrownfieldDuplicateLizaWarns(t *testing.T) {
 	os.MkdirAll(filepath.Dir(globalClaude), 0755)
 	os.Symlink(coreFile, globalClaude)
 
-	// Capture stderr
-	oldStderr := os.Stderr
-	r, w, _ := os.Pipe()
-	os.Stderr = w
+	err := InitCommandWithConfig(InitParams{
+		Description: "Test goal",
+		SpecRef:     "specs/vision.md",
+		Agents:      []string{"claude"},
+	})
+	if err != nil {
+		t.Fatalf("InitCommand failed: %v", err)
+	}
+
+	if _, err := os.Lstat(filepath.Join(gitDir, "CLAUDE.md")); !os.IsNotExist(err) {
+		t.Errorf("repo CLAUDE.md should be removed when the global Claude contract symlink is active; got %v", err)
+	}
+	if target, err := os.Readlink(globalClaude); err != nil || target != coreFile {
+		t.Errorf("global CLAUDE.md changed; target = %q, err = %v", target, err)
+	}
+}
+
+func TestInitCommand_DuplicateNonClaudeSymlinksWarns(t *testing.T) {
+	gitDir := setupGitRepo(t)
+	defer os.RemoveAll(gitDir)
+
+	fakeHome := setupGlobalLiza(t)
+	t.Setenv(providers.EnvCatalogURL, "://invalid")
+
+	originalDir, _ := os.Getwd()
+	defer os.Chdir(originalDir)
+	os.Chdir(gitDir)
+
+	testhelpers.CreateCommittedSpecFile(t, gitDir, "vision.md", "# Vision\n")
+
+	coreFile := filepath.Join(fakeHome, ".liza", "CORE.md")
+	repoAgents := filepath.Join(gitDir, "AGENTS.md")
+	if err := os.Symlink(coreFile, repoAgents); err != nil {
+		t.Fatalf("create repo AGENTS.md symlink: %v", err)
+	}
+	globalAgents := filepath.Join(fakeHome, ".codex", "AGENTS.md")
+	if err := os.MkdirAll(filepath.Dir(globalAgents), 0755); err != nil {
+		t.Fatalf("create global Codex directory: %v", err)
+	}
+	if err := os.Symlink(coreFile, globalAgents); err != nil {
+		t.Fatalf("create global AGENTS.md symlink: %v", err)
+	}
+
+	stderr, err := captureStderrForTest(func() error {
+		return InitCommandWithConfig(InitParams{
+			Description: "Test goal",
+			SpecRef:     "specs/vision.md",
+			Agents:      []string{"codex"},
+		})
+	})
+	if err != nil {
+		t.Fatalf("InitCommand failed: %v", err)
+	}
+	if !strings.Contains(stderr, "Liza symlinks at both") {
+		t.Errorf("duplicate non-Claude symlinks should warn, got: %s", stderr)
+	}
+	for _, path := range []string{repoAgents, globalAgents} {
+		if target, err := os.Readlink(path); err != nil || target != coreFile {
+			t.Errorf("%s changed; target = %q, err = %v", path, target, err)
+		}
+	}
+}
+
+func TestInitCommand_GlobalClaudeSymlinkPreservesRepoRegularFile(t *testing.T) {
+	gitDir := setupGitRepo(t)
+	defer os.RemoveAll(gitDir)
+
+	fakeHome := setupGlobalLiza(t)
+	t.Setenv(providers.EnvCatalogURL, "://invalid")
+
+	originalDir, _ := os.Getwd()
+	defer os.Chdir(originalDir)
+	os.Chdir(gitDir)
+
+	testhelpers.CreateCommittedSpecFile(t, gitDir, "vision.md", "# Vision\n")
+
+	coreFile := filepath.Join(fakeHome, ".liza", "CORE.md")
+	repoClaude := filepath.Join(gitDir, "CLAUDE.md")
+	if err := os.WriteFile(repoClaude, []byte("@AGENTS.md\n"), 0644); err != nil {
+		t.Fatalf("write repo CLAUDE.md: %v", err)
+	}
+	globalClaude := filepath.Join(fakeHome, ".claude", "CLAUDE.md")
+	if err := os.MkdirAll(filepath.Dir(globalClaude), 0755); err != nil {
+		t.Fatalf("create global Claude directory: %v", err)
+	}
+	if err := os.Symlink(coreFile, globalClaude); err != nil {
+		t.Fatalf("create global CLAUDE.md symlink: %v", err)
+	}
 
 	err := InitCommandWithConfig(InitParams{
 		Description: "Test goal",
@@ -1595,18 +1680,15 @@ func TestInitCommand_BrownfieldDuplicateLizaWarns(t *testing.T) {
 		Agents:      []string{"claude"},
 	})
 	if err != nil {
-		w.Close()
-		os.Stderr = oldStderr
 		t.Fatalf("InitCommand failed: %v", err)
 	}
-	w.Close()
-	stderrBytes, _ := io.ReadAll(r)
-	os.Stderr = oldStderr
 
-	// Should warn about duplicate Liza symlinks
-	stderr := string(stderrBytes)
-	if !strings.Contains(stderr, "Liza symlinks at both") {
-		t.Errorf("Expected 'duplicate Liza' warning in stderr, got: %s", stderr)
+	content, err := os.ReadFile(repoClaude)
+	if err != nil {
+		t.Fatalf("read repo CLAUDE.md: %v", err)
+	}
+	if string(content) != "@AGENTS.md\n" {
+		t.Errorf("repo CLAUDE.md changed; got %q", content)
 	}
 }
 

@@ -80,6 +80,13 @@ type ContractLinks struct {
 	RepoFile       string `yaml:"repo_file,omitempty"`
 	GlobalFallback string `yaml:"global_fallback,omitempty"`
 	LocalFallback  string `yaml:"local_fallback,omitempty"`
+	// PreferGlobal selects the global managed link when both contract locations
+	// exist. A nil value allows stale catalogs to inherit the embedded default.
+	PreferGlobal *bool `yaml:"prefer_global,omitempty"`
+}
+
+func (c ContractLinks) PrefersGlobal() bool {
+	return c.PreferGlobal != nil && *c.PreferGlobal
 }
 
 type ActivationAssets struct {

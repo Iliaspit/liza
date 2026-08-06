@@ -852,6 +852,124 @@ func TestSetupCommand_AgentExistingWrongSymlink(t *testing.T) {
 	}
 }
 
+func TestSetupCommand_RepairsNameDerivedProviderContractSymlink(t *testing.T) {
+	previousNameLower, previousGlobalDirName := brand.NameLower, brand.GlobalDirName
+	brand.NameLower = "omni"
+	brand.GlobalDirName = ".omni-ee"
+	t.Cleanup(func() {
+		brand.NameLower = previousNameLower
+		brand.GlobalDirName = previousGlobalDirName
+	})
+
+	homeDir := t.TempDir()
+	targetDir := filepath.Join(homeDir, ".omni-ee")
+	if err := SetupCommand(SetupParams{TargetDir: targetDir, HomeDir: homeDir}); err != nil {
+		t.Fatalf("initial SetupCommand failed: %v", err)
+	}
+	contractLink := filepath.Join(homeDir, ".codex", "AGENTS.md")
+	if err := os.MkdirAll(filepath.Dir(contractLink), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(homeDir, ".omni", "CORE.md"), contractLink); err != nil {
+		t.Fatal(err)
+	}
+
+	err := SetupCommand(SetupParams{
+		TargetDir:   targetDir,
+		ProviderIDs: []string{"codex"},
+		HomeDir:     homeDir,
+		Force:       true,
+		AutoConfirm: true,
+	})
+	if err != nil {
+		t.Fatalf("SetupCommand failed: %v", err)
+	}
+
+	target, err := os.Readlink(contractLink)
+	if err != nil {
+		t.Fatalf("contract link is not a symlink: %v", err)
+	}
+	want := filepath.Join(targetDir, "CORE.md")
+	if target != want {
+		t.Fatalf("contract link target = %q, want %q", target, want)
+	}
+}
+
+func TestRepairExistingProviderContractSymlinkPreservesUnmanagedPaths(t *testing.T) {
+	previousNameLower, previousGlobalDirName := brand.NameLower, brand.GlobalDirName
+	brand.NameLower = "omni"
+	brand.GlobalDirName = ".omni-ee"
+	t.Cleanup(func() {
+		brand.NameLower = previousNameLower
+		brand.GlobalDirName = previousGlobalDirName
+	})
+
+	homeDir := t.TempDir()
+	targetDir := filepath.Join(homeDir, ".omni-ee")
+	catalog := loadProviderCatalog(homeDir)
+	codex, ok := catalog.Resolve("codex")
+	if !ok {
+		t.Fatal("codex provider missing")
+	}
+	contractLink := filepath.Join(homeDir, ".codex", "AGENTS.md")
+	if err := os.MkdirAll(filepath.Dir(contractLink), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("absent link", func(t *testing.T) {
+		if err := repairExistingProviderContractSymlink(homeDir, targetDir, codex); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := os.Lstat(contractLink); !os.IsNotExist(err) {
+			t.Fatalf("absent contract link changed: %v", err)
+		}
+	})
+
+	t.Run("unrelated symlink", func(t *testing.T) {
+		unrelated := filepath.Join(homeDir, ".custom", "CORE.md")
+		if err := os.Symlink(unrelated, contractLink); err != nil {
+			t.Fatal(err)
+		}
+		if err := repairExistingProviderContractSymlink(homeDir, targetDir, codex); err != nil {
+			t.Fatal(err)
+		}
+		if got, err := os.Readlink(contractLink); err != nil || got != unrelated {
+			t.Fatalf("unrelated symlink = %q, %v; want %q, nil", got, err, unrelated)
+		}
+		if err := os.Remove(contractLink); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	t.Run("correct symlink", func(t *testing.T) {
+		correct := filepath.Join(targetDir, "CORE.md")
+		if err := os.Symlink(correct, contractLink); err != nil {
+			t.Fatal(err)
+		}
+		if err := repairExistingProviderContractSymlink(homeDir, targetDir, codex); err != nil {
+			t.Fatal(err)
+		}
+		if got, err := os.Readlink(contractLink); err != nil || got != correct {
+			t.Fatalf("correct symlink = %q, %v; want %q, nil", got, err, correct)
+		}
+		if err := os.Remove(contractLink); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	t.Run("regular file", func(t *testing.T) {
+		if err := os.WriteFile(contractLink, []byte("custom\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		if err := repairExistingProviderContractSymlink(homeDir, targetDir, codex); err != nil {
+			t.Fatal(err)
+		}
+		if got, err := os.ReadFile(contractLink); err != nil || string(got) != "custom\n" {
+			t.Fatalf("regular file = %q, %v; want preserved", got, err)
+		}
+	})
+}
+
 func TestSetupCommand_MultipleAgents(t *testing.T) {
 	lizaDir, homeDir := setupWithAgents(t, []string{"claude", "codex"})
 

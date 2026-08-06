@@ -2,12 +2,14 @@ package commands
 
 import (
 	"context"
+	"encoding/json"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/liza-mas/liza/internal/providers"
 )
@@ -83,6 +85,67 @@ func TestInitPairingCommand_ProviderFromCatalogCreatesNestedContractParent(t *te
 	}
 	if want := filepath.Join(fakeHome, ".liza", "CORE.md"); target != want {
 		t.Fatalf(".windsurf/rules/liza.md = %q, want %q", target, want)
+	}
+}
+
+func TestCachedLegacyClaudeCatalogBackfillsPreferGlobal(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+	cachePath, metaPath := providers.CachePaths(homeDir)
+	if err := os.MkdirAll(filepath.Dir(cachePath), 0755); err != nil {
+		t.Fatalf("create provider cache directory: %v", err)
+	}
+	legacyCatalog := `version: 1
+providers:
+  - id: claude
+    display_name: Claude
+    backend: cli
+    setup:
+      contract:
+        repo_file: CLAUDE.md
+        global_fallback: .claude/CLAUDE.md
+    runtime:
+      executable: claude
+`
+	if err := os.WriteFile(cachePath, []byte(legacyCatalog), 0644); err != nil {
+		t.Fatalf("write legacy provider cache: %v", err)
+	}
+	const catalogURL = "https://example.test/provider-catalog.yaml"
+	meta, err := json.Marshal(providers.CacheMeta{URL: catalogURL, FetchedAt: time.Now()})
+	if err != nil {
+		t.Fatalf("marshal provider cache metadata: %v", err)
+	}
+	if err := os.WriteFile(metaPath, meta, 0644); err != nil {
+		t.Fatalf("write provider cache metadata: %v", err)
+	}
+	t.Setenv(providers.EnvCatalogURL, catalogURL)
+
+	catalog := loadProviderCatalog(homeDir)
+	selected, err := resolveCatalogProviders(catalog, []string{"claude"})
+	if err != nil {
+		t.Fatalf("resolve cached Claude provider: %v", err)
+	}
+	if len(selected) != 1 || !selected[0].Setup.Contract.PrefersGlobal() {
+		t.Fatalf("cached Claude contract = %+v, want embedded prefer_global default", selected)
+	}
+
+	projectRoot := t.TempDir()
+	contractTarget := filepath.Join(homeDir, ".liza", "CORE.md")
+	repoPath := filepath.Join(projectRoot, "CLAUDE.md")
+	globalPath := filepath.Join(homeDir, ".claude", "CLAUDE.md")
+	if err := os.MkdirAll(filepath.Dir(globalPath), 0755); err != nil {
+		t.Fatalf("create global Claude directory: %v", err)
+	}
+	if err := os.Symlink(contractTarget, repoPath); err != nil {
+		t.Fatalf("create repo Claude symlink: %v", err)
+	}
+	if err := os.Symlink(contractTarget, globalPath); err != nil {
+		t.Fatalf("create global Claude symlink: %v", err)
+	}
+
+	createContractSymlinksForProviders(projectRoot, contractTarget, selected, "")
+	if _, err := os.Lstat(repoPath); !os.IsNotExist(err) {
+		t.Fatalf("cached legacy catalog should remove duplicate repo CLAUDE.md; got %v", err)
 	}
 }
 

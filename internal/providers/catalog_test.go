@@ -43,6 +43,14 @@ func TestEmbeddedCatalogResolvesBuiltInsAndAliases(t *testing.T) {
 	if !slices.Equal(cursor.Runtime.RunArgs, []string{"-p"}) {
 		t.Fatalf("cursor run_args = %v, want [-p]", cursor.Runtime.RunArgs)
 	}
+	claude, ok := cat.Resolve("claude")
+	if !ok || !claude.Setup.Contract.PrefersGlobal() {
+		t.Fatalf("embedded Claude contract = %+v, %v; want prefer_global", claude.Setup.Contract, ok)
+	}
+	codex, ok := cat.Resolve("codex")
+	if !ok || codex.Setup.Contract.PrefersGlobal() {
+		t.Fatalf("embedded Codex contract = %+v, %v; want repo/global duplicate warning", codex.Setup.Contract, ok)
+	}
 	// logged_run_args must not include --verbose (undocumented Cursor CLI flag)
 	for _, arg := range cursor.Runtime.LoggedRunArgs {
 		if arg == "--verbose" {

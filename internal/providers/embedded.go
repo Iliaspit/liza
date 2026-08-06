@@ -16,6 +16,7 @@ providers:
         repo_file: CLAUDE.md
         global_fallback: .claude/CLAUDE.md
         local_fallback: CLAUDE.local.md
+        prefer_global: true
       activation_assets:
         claude_settings: true
         claude_ignore: true

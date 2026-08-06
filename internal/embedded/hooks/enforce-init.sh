@@ -62,6 +62,19 @@ json_val() {
   done
 }
 
+# Extract string entries from a JSON array without jq. MCP filesystem
+# read_multiple_files uses this shape for tool_input.paths. This deliberately
+# supports only compact arrays of simple strings: unsupported JSON shapes yield
+# no recognized paths, so the initialization gate remains closed.
+json_array_vals() {
+  local key="$1"
+
+  echo "$input" |
+    grep -o "\"$key\"[[:space:]]*:[[:space:]]*\\[[^]]*\\]" |
+    sed -n -E "1{s/^\"$key\"[[:space:]]*:[[:space:]]*\\[//;s/\\]$//;s/\",[[:space:]]*\"/\\
+/g;s/^\"//;s/\"$//;p;}"
+}
+
 tool_name=$(json_val tool_name)
 session_id=$(json_val session_id)
 cwd=$(json_val cwd)
@@ -109,37 +122,14 @@ mark_absent_project_docs_if_needed() {
 # Initialize: auto-clear optional project docs if absent from project root.
 mark_absent_project_docs_if_needed
 
+reset_invalid_bash_read_marker() {
+  rmdir "$STATE_DIR/INVALID_BASH_READ.seen" 2>/dev/null || true
+}
+
 # Read-only discovery tools: allow before gate clears.
 if [[ "$tool_name" == "ToolSearch" || "$tool_name" == "Glob" ]]; then
   exit 0
 fi
-
-mark_doc_reads_from_input() {
-  if echo "$input" | grep -q 'AGENT_TOOLS\.md'; then
-    touch "$STATE_DIR/AGENT_TOOLS.done"
-  fi
-  if echo "$input" | grep -q 'PAIRING_MODE\.md'; then
-    touch "$STATE_DIR/MODE.done" "$STATE_DIR/MODE_PAIRING.done"
-  fi
-  if echo "$input" | grep -q 'MULTI_AGENT_MODE\.md'; then
-    touch "$STATE_DIR/MODE.done" "$STATE_DIR/MODE_MULTI_AGENT.done"
-  fi
-  if echo "$input" | grep -q 'SUBAGENT_MODE\.md'; then
-    touch "$STATE_DIR/MODE.done" "$STATE_DIR/MODE_SUBAGENT.done"
-  fi
-  if echo "$input" | grep -q 'GUARDRAILS\.md'; then
-    touch "$STATE_DIR/GUARDRAILS.done"
-  fi
-  if echo "$input" | grep -q 'REPOSITORY\.md'; then
-    touch "$STATE_DIR/REPOSITORY.done"
-  fi
-  if echo "$input" | grep -q 'docs/USAGE\.md'; then
-    touch "$STATE_DIR/USAGE.done"
-  fi
-  if echo "$input" | grep -q 'COLLABORATION_CONTINUITY\.md'; then
-    touch "$STATE_DIR/COLLABORATION_CONTINUITY.done"
-  fi
-}
 
 requires_pairing_companion_docs() {
   [[ -f "$STATE_DIR/MODE_PAIRING.done" ]]
@@ -183,6 +173,27 @@ is_session_init_doc_path() {
   esac
 }
 
+mark_session_init_doc_path() {
+  local file_path="$1" base
+
+  is_session_init_doc_path "$file_path" || return 1
+  base=$(basename "$file_path")
+  case "$base" in
+    CORE.md)          ;;
+    AGENT_TOOLS.md)   touch "$STATE_DIR/AGENT_TOOLS.done" ;;
+    PAIRING_MODE.md)  touch "$STATE_DIR/MODE.done" "$STATE_DIR/MODE_PAIRING.done" ;;
+    MULTI_AGENT_MODE.md)
+                      touch "$STATE_DIR/MODE.done" "$STATE_DIR/MODE_MULTI_AGENT.done" ;;
+    SUBAGENT_MODE.md) touch "$STATE_DIR/MODE.done" "$STATE_DIR/MODE_SUBAGENT.done" ;;
+    GUARDRAILS.md)    touch "$STATE_DIR/GUARDRAILS.done" ;;
+    REPOSITORY.md)    touch "$STATE_DIR/REPOSITORY.done" ;;
+    USAGE.md)         touch "$STATE_DIR/USAGE.done" ;;
+    COLLABORATION_CONTINUITY.md)
+                      touch "$STATE_DIR/COLLABORATION_CONTINUITY.done" ;;
+    *) return 1 ;;
+  esac
+}
+
 SAFE_READ_TARGET=""
 is_safe_read_command_for_allowed_paths() {
   local allowed_path_fn="$1"
@@ -205,11 +216,9 @@ is_safe_read_command_for_allowed_paths() {
 
   case "$cmd" in
     cat)
-      [[ "$#" -ge 1 ]] || return 1
-      for path in "$@"; do
-        "$allowed_path_fn" "$path" || return 1
-        SAFE_READ_TARGET="$path"
-      done
+      [[ "$#" -eq 1 ]] || return 1
+      "$allowed_path_fn" "$1" || return 1
+      SAFE_READ_TARGET="$1"
       ;;
     sed)
       # Allow common print ranges only. Explicitly excludes -i and extra files.
@@ -223,40 +232,6 @@ is_safe_read_command_for_allowed_paths() {
       [[ "$range" =~ ^[0-9]+(,[0-9]+)?p$ ]] || return 1
       "$allowed_path_fn" "$3" || return 1
       SAFE_READ_TARGET="$3"
-      ;;
-    head|tail)
-      if [[ "$#" -ge 1 && "$1" != "-n" ]]; then
-        for path in "$@"; do
-          "$allowed_path_fn" "$path" || return 1
-          SAFE_READ_TARGET="$path"
-        done
-      elif [[ "$#" -ge 3 && "$1" == "-n" && "$2" =~ ^[0-9]+$ ]]; then
-        shift 2
-        [[ "$#" -ge 1 ]] || return 1
-        for path in "$@"; do
-          "$allowed_path_fn" "$path" || return 1
-          SAFE_READ_TARGET="$path"
-        done
-      else
-        return 1
-      fi
-      ;;
-    wc)
-      if [[ "$#" -ge 1 && "$1" != -* ]]; then
-        for path in "$@"; do
-          "$allowed_path_fn" "$path" || return 1
-          SAFE_READ_TARGET="$path"
-        done
-      elif [[ "$#" -ge 2 && "$1" =~ ^-[clmw]+$ ]]; then
-        shift
-        [[ "$#" -ge 1 ]] || return 1
-        for path in "$@"; do
-          "$allowed_path_fn" "$path" || return 1
-          SAFE_READ_TARGET="$path"
-        done
-      else
-        return 1
-      fi
       ;;
     *) return 1 ;;
   esac
@@ -372,16 +347,32 @@ is_safe_guardrails_probe_wrapper() {
 # even when MCP filesystem read tools are unavailable.
 if [[ "$tool_name" == "Bash" ]] && echo "$command" | grep -qE 'CORE\.md|AGENT_TOOLS\.md|PAIRING_MODE\.md|MULTI_AGENT_MODE\.md|SUBAGENT_MODE\.md|GUARDRAILS\.md|REPOSITORY\.md|docs/USAGE\.md|COLLABORATION_CONTINUITY\.md'; then
   if ! is_safe_bash_init_read && ! is_safe_guardrails_conditional_read && ! is_safe_guardrails_existence_probe && ! is_safe_guardrails_probe_wrapper; then
+    repeated_invalid_read=0
+    if ! mkdir "$STATE_DIR/INVALID_BASH_READ.seen" 2>/dev/null; then
+      repeated_invalid_read=1
+    fi
     cat <<EOF >&2
 BLOCKED — session initialization allows Bash only for simple read-only doc commands.
 
-Use cat, sed, head, tail, wc, an exact GUARDRAILS.md existence probe,
-or a narrow \`test -f GUARDRAILS.md && ... || ...\` wrapper, or an MCP filesystem read tool on the required docs.
+Use exactly one file per command and one command per tool call.
+Expected global contract root: ~/__BRAND_GLOBAL_DIRNAME__/
+Allowed commands: cat, sed, an exact GUARDRAILS.md existence
+probe, or a narrow \`test -f GUARDRAILS.md && ... || ...\` wrapper.
 EOF
+    if (( repeated_invalid_read )); then
+      cat <<EOF >&2
+
+STOP_RETRYING — another invalid initialization read was already rejected.
+Do not try command or path variations. Report the initialization-hook failure.
+EOF
+    fi
     exit 2
   fi
 
-  mark_doc_reads_from_input
+  reset_invalid_bash_read_marker
+  if [[ -n "$SAFE_READ_TARGET" ]]; then
+    mark_session_init_doc_path "$SAFE_READ_TARGET"
+  fi
   clear_if_ready
   exit 0
 fi
@@ -389,23 +380,21 @@ fi
 # Read calls always pass through; track mandatory doc reads. Codex filesystem
 # MCP tools use "path"/"paths" while Claude uses "file_path".
 if [[ "$tool_name" == "Read" || "$tool_name" =~ ^mcp__filesystem__read ]]; then
-  file_path=$(json_val file_path)
-  [[ -z "$file_path" ]] && file_path=$(json_val path)
-  base=$(basename "$file_path")
-
-  case "$base" in
-    AGENT_TOOLS.md)   touch "$STATE_DIR/AGENT_TOOLS.done" ;;
-    PAIRING_MODE.md)  touch "$STATE_DIR/MODE.done" "$STATE_DIR/MODE_PAIRING.done" ;;
-    MULTI_AGENT_MODE.md)
-                      touch "$STATE_DIR/MODE.done" "$STATE_DIR/MODE_MULTI_AGENT.done" ;;
-    SUBAGENT_MODE.md) touch "$STATE_DIR/MODE.done" "$STATE_DIR/MODE_SUBAGENT.done" ;;
-    GUARDRAILS.md)    touch "$STATE_DIR/GUARDRAILS.done" ;;
-    REPOSITORY.md)    touch "$STATE_DIR/REPOSITORY.done" ;;
-    USAGE.md)         touch "$STATE_DIR/USAGE.done" ;;
-    COLLABORATION_CONTINUITY.md)
-                      touch "$STATE_DIR/COLLABORATION_CONTINUITY.done" ;;
-  esac
-  mark_doc_reads_from_input
+  read_paths=$(printf '%s\n%s\n%s\n' \
+    "$(json_val file_path)" \
+    "$(json_val path)" \
+    "$(json_array_vals paths)" |
+    sed '/^$/d')
+  recognized_init_read=0
+  while IFS= read -r file_path; do
+    [[ -z "$file_path" ]] && continue
+    if mark_session_init_doc_path "$file_path"; then
+      recognized_init_read=1
+    fi
+  done <<< "$read_paths"
+  if (( recognized_init_read )); then
+    reset_invalid_bash_read_marker
+  fi
   clear_if_ready
 
   exit 0
@@ -439,6 +428,6 @@ You must Read these files before using any other tool:
 $missing
 
 Use Read, an MCP filesystem read tool, or a simple Bash read command
-(cat, sed, head, tail, wc) on each path above, then retry your action.
+(cat, sed) on each path above, then retry your action.
 EOF
 exit 2

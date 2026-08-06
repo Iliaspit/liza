@@ -104,7 +104,17 @@ provider global fallback when possible:
 If both the repo-root file and the global fallback are non-§BRAND_NAME_TITLE§ files, `§BRAND_BINARY_NAME§
 init` warns and skips that provider activation path. If a §BRAND_NAME_TITLE§ symlink already
 exists at either location, `§BRAND_BINARY_NAME§ init` reports it and does not create a
-duplicate.
+duplicate. When a provider catalog entry sets `contract.prefer_global`, managed
+symlinks at both locations are resolved by removing the redundant repo-root link;
+Claude uses this policy to keep `~/.claude/CLAUDE.md` active.
+
+During the initialization gate, shell fallbacks read one mandatory document per command;
+consecutive invalid reads instruct the agent to stop instead of trying path or command variants.
+
+Global setup repairs existing provider contract symlinks that still target the name-derived
+global root when `§BRAND_GLOBAL_DIRNAME§` differs. It preserves absent links, regular files,
+and unrelated symlinks. Codex writable roots include both `~/.§BRAND_NAME_LOWER§` and
+`~/§BRAND_GLOBAL_DIRNAME§` when those directories differ.
 
 ## Claude Code Settings
 

@@ -7,10 +7,13 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/liza-mas/liza/internal/brand"
 )
 
 func TestListEmbeddedFiles(t *testing.T) {
@@ -2305,6 +2308,105 @@ func TestWriteCodexProjectHooks_MergesExistingFiles(t *testing.T) {
 	for _, want := range []string{"echo done", ".codex/hooks/enforce-init.sh"} {
 		if !strings.Contains(string(hooksContent), want) {
 			t.Errorf("hooks.json missing %q:\n%s", want, string(hooksContent))
+		}
+	}
+}
+
+func TestMergeHooks_ReplacesStaleManagedCodexRegistrations(t *testing.T) {
+	previousNameLower, previousNameTitle, previousBinaryName := brand.NameLower, brand.NameTitle, brand.BinaryName
+	brand.NameLower = "omni"
+	brand.NameTitle = "Omni"
+	brand.BinaryName = "omni-ee"
+	t.Cleanup(func() {
+		brand.NameLower = previousNameLower
+		brand.NameTitle = previousNameTitle
+		brand.BinaryName = previousBinaryName
+	})
+
+	entry := func(command string, matcher ...string) any {
+		value := map[string]any{
+			"hooks": []any{
+				map[string]any{"type": "command", "command": command},
+			},
+		}
+		if len(matcher) == 1 {
+			value["matcher"] = matcher[0]
+		}
+		return value
+	}
+	currentCommand := generatedCodexHookCommand("enforce-init.sh")
+	staleCommands := []string{
+		brandedCodexHookCommand("enforce-init.sh", "Omni", "omni-ee"),
+		brandedCodexHookCommand("enforce-init.sh", "Omni", "omni"),
+		brandedCodexHookCommand("enforce-init.sh", "Liza", "liza"),
+		`bash "$(git rev-parse --show-toplevel)/.codex/hooks/enforce-init.sh"`,
+	}
+	customWrapper := `bash -lc 'echo custom; bash "$(git rev-parse --show-toplevel)/.codex/hooks/enforce-init.sh"'`
+	sharedCommand := `echo custom`
+	distinctMatcherEntries := []any{
+		entry(sharedCommand, "^Bash$"),
+		entry(sharedCommand, "^apply_patch$"),
+	}
+	current := map[string]any{"hooks": map[string]any{
+		"PreToolUse": []any{entry(currentCommand)},
+	}}
+	existing := map[string]any{"hooks": map[string]any{
+		"PreToolUse": []any{
+			entry(staleCommands[0]),
+			entry(staleCommands[1]),
+			entry(staleCommands[2]),
+			entry(staleCommands[3]),
+			entry(customWrapper),
+			distinctMatcherEntries[0],
+			distinctMatcherEntries[1],
+		},
+	}}
+
+	reconcileCodexHookRegistrations(current, existing)
+	merged := mergeSettings(current, existing)
+	hooks := merged["hooks"].(map[string]any)
+	entries := hooks["PreToolUse"].([]any)
+	if len(entries) != 4 {
+		t.Fatalf("managed hook reconciliation produced %d entries, want current plus three preserved entries: %#v", len(entries), entries)
+	}
+	wantEntries := []any{
+		entry(currentCommand),
+		entry(customWrapper),
+		distinctMatcherEntries[0],
+		distinctMatcherEntries[1],
+	}
+	if !reflect.DeepEqual(entries, wantEntries) {
+		t.Errorf("merged hooks = %#v, want %#v", entries, wantEntries)
+	}
+}
+
+func TestGeneratedCodexHookCommandsMatchEmbeddedAsset(t *testing.T) {
+	var settings map[string]any
+	if err := json.Unmarshal(renderEmbeddedAsset(codexHooksContent), &settings); err != nil {
+		t.Fatalf("parse rendered codex-hooks.json: %v", err)
+	}
+	hooks, ok := settings["hooks"].(map[string]any)
+	if !ok {
+		t.Fatalf("rendered codex-hooks.json has no hooks object: %#v", settings)
+	}
+
+	commands := make(map[string]bool)
+	for _, rawEntries := range hooks {
+		entries, ok := rawEntries.([]any)
+		if !ok {
+			continue
+		}
+		for _, entry := range entries {
+			for _, command := range hookEntryCommands(entry) {
+				commands[command] = true
+			}
+		}
+	}
+
+	for script := range codexHookContents {
+		want := generatedCodexHookCommand(script)
+		if !commands[want] {
+			t.Errorf("rendered codex-hooks.json command for %s drifted from reconciliation identity", script)
 		}
 	}
 }

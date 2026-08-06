@@ -70,6 +70,13 @@ var rtkGuardHookContent []byte
 //go:embed "hooks/worktree-path-guard.sh"
 var worktreePathGuardHookContent []byte
 
+var codexHookContents = map[string][]byte{
+	"enforce-init.sh":        enforceInitHookContent,
+	"session-context.sh":     sessionContextHookContent,
+	"git-guard.sh":           gitGuardHookContent,
+	"worktree-path-guard.sh": worktreePathGuardHookContent,
+}
+
 // Git-level pre-commit hook for task worktrees. Deliberately NOT in hooks/
 // — that directory holds Claude Code PreToolUse hooks that get written to
 // .claude/hooks/ and referenced from claude-settings.json. This one is a
@@ -648,6 +655,7 @@ func renderCodexHooksJSON(hooksPath string, reader *bufio.Reader, opts ConfirmOp
 		if err := json.Unmarshal(existingData, &existingHooks); err != nil {
 			return nil, false, fmt.Errorf("failed to parse existing codex hooks.json: %w", err)
 		}
+		reconcileCodexHookRegistrations(lizaHooks, existingHooks)
 		finalHooks = mergeSettings(lizaHooks, existingHooks)
 	} else if err != nil && !os.IsNotExist(err) {
 		return nil, false, fmt.Errorf("failed to read codex hooks.json: %w", err)
@@ -1242,39 +1250,124 @@ func mergeHooks(liza, existing map[string]any) map[string]any {
 	return result
 }
 
-// unionHookEntries deduplicates hook entries by the command string inside
-// each entry's hooks array or direct command field. Existing entries (b) take
-// precedence on command collision — preserving user customizations.
-func unionHookEntries(a, b []any) []any {
-	commandsOf := func(entry any) []string {
-		entryMap, ok := entry.(map[string]any)
+func generatedCodexHookCommand(script string) string {
+	return fmt.Sprintf(
+		`root=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0; bash "$root/.codex/hooks/%s"`,
+		script,
+	)
+}
+
+func brandedCodexHookCommand(script, nameTitle, binaryName string) string {
+	return fmt.Sprintf(
+		`root=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0; hook="$root/.codex/hooks/%s"; [ -x "$hook" ] || { echo "Missing %s Codex hook: $hook. Run '%s init --codex' to repair project hooks, or remove .codex/hooks.json to disable them." >&2; exit 1; }; bash "$hook"`,
+		script,
+		nameTitle,
+		binaryName,
+	)
+}
+
+func hookEntryCommands(entry any) []string {
+	entryMap, ok := entry.(map[string]any)
+	if !ok {
+		return nil
+	}
+	if cmd, ok := entryMap["command"].(string); ok {
+		return []string{cmd}
+	}
+	hooks, ok := entryMap["hooks"].([]any)
+	if !ok {
+		return nil
+	}
+	var commands []string
+	for _, hook := range hooks {
+		hookMap, ok := hook.(map[string]any)
 		if !ok {
-			return nil
+			continue
 		}
-		if cmd, ok := entryMap["command"].(string); ok {
-			return []string{cmd}
+		if cmd, ok := hookMap["command"].(string); ok {
+			commands = append(commands, cmd)
 		}
-		hooks, ok := entryMap["hooks"].([]any)
-		if !ok {
-			return nil
+	}
+	return commands
+}
+
+func currentGeneratedCodexHookID(command string) string {
+	for script := range codexHookContents {
+		if command == generatedCodexHookCommand(script) {
+			return script
 		}
-		var cmds []string
-		for _, h := range hooks {
-			hm, ok := h.(map[string]any)
-			if !ok {
-				continue
+	}
+	return ""
+}
+
+func obsoleteGeneratedCodexHookID(command string) string {
+	values := brand.RuntimeValues()
+	for script := range codexHookContents {
+		knownObsolete := []string{
+			fmt.Sprintf(`bash "$(git rev-parse --show-toplevel)/.codex/hooks/%s"`, script),
+			brandedCodexHookCommand(script, values.NameTitle, values.BinaryName),
+		}
+		if values.NameLower != values.BinaryName {
+			knownObsolete = append(knownObsolete, brandedCodexHookCommand(script, values.NameTitle, values.NameLower))
+		}
+		if values.NameTitle != "Liza" || values.BinaryName != "liza" {
+			knownObsolete = append(knownObsolete, brandedCodexHookCommand(script, "Liza", "liza"))
+		}
+		for _, known := range knownObsolete {
+			if command == known {
+				return script
 			}
-			if cmd, ok := hm["command"].(string); ok {
-				cmds = append(cmds, cmd)
-			}
 		}
-		return cmds
+	}
+	return ""
+}
+
+// reconcileCodexHookRegistrations removes only exact, known obsolete generated
+// registrations when the current Codex hook for the same event and script exists.
+func reconcileCodexHookRegistrations(current, existing map[string]any) {
+	currentHooks, currentOK := current["hooks"].(map[string]any)
+	existingHooks, existingOK := existing["hooks"].(map[string]any)
+	if !currentOK || !existingOK {
+		return
 	}
 
-	// Index existing (b) commands — these win on collision.
+	for event, existingValue := range existingHooks {
+		existingEntries, existingOK := existingValue.([]any)
+		currentEntries, currentOK := currentHooks[event].([]any)
+		if !existingOK || !currentOK {
+			continue
+		}
+
+		currentIDs := make(map[string]bool)
+		for _, entry := range currentEntries {
+			commands := hookEntryCommands(entry)
+			if len(commands) == 1 {
+				if id := currentGeneratedCodexHookID(commands[0]); id != "" {
+					currentIDs[id] = true
+				}
+			}
+		}
+
+		retained := make([]any, 0, len(existingEntries))
+		for _, entry := range existingEntries {
+			commands := hookEntryCommands(entry)
+			if len(commands) == 1 {
+				if id := obsoleteGeneratedCodexHookID(commands[0]); id != "" && currentIDs[id] {
+					continue
+				}
+			}
+			retained = append(retained, entry)
+		}
+		existingHooks[event] = retained
+	}
+}
+
+// unionHookEntries preserves every existing entry verbatim. Existing commands
+// take precedence over generated entries on exact collision.
+func unionHookEntries(a, b []any) []any {
 	existingCmds := make(map[string]bool)
 	for _, entry := range b {
-		for _, cmd := range commandsOf(entry) {
+		for _, cmd := range hookEntryCommands(entry) {
 			existingCmds[cmd] = true
 		}
 	}
@@ -1282,7 +1375,7 @@ func unionHookEntries(a, b []any) []any {
 	// Add liza entries whose commands don't collide with existing.
 	var result []any
 	for _, entry := range a {
-		cmds := commandsOf(entry)
+		cmds := hookEntryCommands(entry)
 		collides := false
 		for _, cmd := range cmds {
 			if existingCmds[cmd] {
@@ -1491,12 +1584,7 @@ func WriteCodexHooks(projectRoot string) error {
 		return fmt.Errorf("failed to create .codex/hooks directory: %w", err)
 	}
 
-	for name, content := range map[string][]byte{
-		"enforce-init.sh":        enforceInitHookContent,
-		"session-context.sh":     sessionContextHookContent,
-		"git-guard.sh":           gitGuardHookContent,
-		"worktree-path-guard.sh": worktreePathGuardHookContent,
-	} {
+	for name, content := range codexHookContents {
 		hookPath := filepath.Join(hooksDir, name)
 		if err := os.WriteFile(hookPath, renderEmbeddedAsset(content), 0755); err != nil {
 			return fmt.Errorf("failed to write %s: %w", name, err)

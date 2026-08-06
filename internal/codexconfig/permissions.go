@@ -13,9 +13,15 @@ import (
 func SupportWritableRoots(homeDir, cacheDir string) []string {
 	var roots []string
 	if homeDir != "" {
+		values := brand.RuntimeValues()
+		roots = append(roots, filepath.Join(homeDir, ".codex"))
+		if values.NameLower != "" {
+			roots = append(roots, filepath.Join(homeDir, "."+values.NameLower))
+		}
+		if values.GlobalDirName != "" {
+			roots = append(roots, filepath.Join(homeDir, values.GlobalDirName))
+		}
 		roots = append(roots,
-			filepath.Join(homeDir, ".codex"),
-			filepath.Join(homeDir, brand.RuntimeValues().GlobalDirName),
 			filepath.Join(homeDir, ".npm"),
 			filepath.Join(homeDir, ".pyenv", "shims"),
 		)

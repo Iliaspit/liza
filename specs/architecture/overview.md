@@ -191,17 +191,26 @@ TDD is mandatory for all code tasks in MAS. Tests must be written first against 
 
 **Contract Loading Chain:**
 
-User-level prompts (`~/.claude/CLAUDE.md`) are NOT reliably read by Claude Code. Repo-level prompts are systematically read on session start.
-
-Therefore, each project creates repo-level symlinks:
+Provider catalog entries declare a repo contract file plus optional local and
+global fallbacks. Initialization creates the managed repo symlink when that path
+is free. If a user-owned repo file already occupies it, initialization can use
+the provider's global fallback without overwriting the project file:
 ```
-<REPO_ROOT>/CLAUDE.md → ~/.liza/CORE.md   # Reliable loading
-<REPO_ROOT>/AGENTS.md → ~/.liza/CORE.md   # Alternative entry point
-<REPO_ROOT>/GEMINI.md → ~/.liza/CORE.md   # Provider-specific entry
+<REPO_ROOT>/CLAUDE.md → ~/.liza/CORE.md
+<REPO_ROOT>/AGENTS.md → ~/.liza/CORE.md
+<REPO_ROOT>/GEMINI.md → ~/.liza/CORE.md
+~/.claude/CLAUDE.md   → ~/.liza/CORE.md  # Claude global fallback
+~/.codex/AGENTS.md    → ~/.liza/CORE.md  # Codex global fallback
 ```
 
-1. Agent reads `<REPO_ROOT>/CLAUDE.md` (repo-level, systematic)
-2. Symlink resolves to `~/.liza/CORE.md` → `<project>/contracts/CORE.md`
+Existing managed links at either location are honored. If both locations contain
+managed links, provider metadata defines the resolution policy. Claude prefers
+its global link because Claude Code loads both locations, so initialization
+removes the redundant repo link; other providers retain both and emit a warning
+unless they opt into the same policy.
+
+1. The provider loads its active repo or global contract file.
+2. The symlink resolves to `~/.liza/CORE.md` → `<project>/contracts/CORE.md`.
 3. CORE.md contains universal rules and mode selection gate
 4. For Liza mode: read `~/.liza/MULTI_AGENT_MODE.md`. For Pairing mode: read `~/.liza/PAIRING_MODE.md`.
 

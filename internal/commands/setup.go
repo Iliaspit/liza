@@ -416,9 +416,60 @@ func setupAgentSymlinks(homeDir, lizaDir string, agents []providers.Provider, re
 			}
 		}
 
+		if err := repairExistingProviderContractSymlink(homeDir, lizaDir, provider); err != nil {
+			return err
+		}
+
 		fmt.Printf("Agent %s: skill symlinks created in %s\n", provider.ID, configDir)
 	}
 
+	return nil
+}
+
+// repairExistingProviderContractSymlink corrects the exact stale link shape
+// produced when the global contract root was derived from BRAND_NAME_LOWER
+// instead of BRAND_GLOBAL_DIRNAME. It does not create absent links or modify
+// regular files and unrelated symlinks.
+func repairExistingProviderContractSymlink(homeDir, globalDir string, provider providers.Provider) error {
+	globalFallback := provider.Setup.Contract.GlobalFallback
+	values := brand.RuntimeValues()
+	nameDerivedDir := "." + values.NameLower
+	if globalFallback == "" || values.NameLower == "" || nameDerivedDir == values.GlobalDirName {
+		return nil
+	}
+
+	linkPath := filepath.Join(homeDir, globalFallback)
+	info, err := os.Lstat(linkPath)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("inspect provider contract link %s: %w", linkPath, err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		return nil
+	}
+
+	existingTarget, err := os.Readlink(linkPath)
+	if err != nil {
+		return fmt.Errorf("read provider contract link %s: %w", linkPath, err)
+	}
+	staleTarget := filepath.Join(homeDir, nameDerivedDir, "CORE.md")
+	if filepath.Clean(existingTarget) != filepath.Clean(staleTarget) {
+		return nil
+	}
+
+	correctTarget := filepath.Join(globalDir, "CORE.md")
+	if err := os.Remove(linkPath); err != nil {
+		return fmt.Errorf("remove stale provider contract link %s: %w", linkPath, err)
+	}
+	if err := os.Symlink(correctTarget, linkPath); err != nil {
+		if restoreErr := os.Symlink(existingTarget, linkPath); restoreErr != nil {
+			return fmt.Errorf("correct provider contract link %s: %w; restore failed: %v", linkPath, err, restoreErr)
+		}
+		return fmt.Errorf("correct provider contract link %s: %w", linkPath, err)
+	}
+	fmt.Printf("%s → %s (corrected provider contract target)\n", linkPath, correctTarget)
 	return nil
 }
 

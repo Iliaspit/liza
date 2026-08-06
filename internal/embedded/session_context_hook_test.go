@@ -436,6 +436,38 @@ func TestSessionContextHook_FiltersMissingPairingProjectDocs(t *testing.T) {
 	}
 }
 
+func TestSessionContextHook_UsesGlobalDirNameWhenItDiffersFromNameLower(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not available")
+	}
+
+	previousNameLower, previousGlobalDirName := brand.NameLower, brand.GlobalDirName
+	brand.NameLower = "omni"
+	brand.GlobalDirName = ".omni-ee"
+	t.Cleanup(func() {
+		brand.NameLower = previousNameLower
+		brand.GlobalDirName = previousGlobalDirName
+	})
+
+	hookPath := writeSessionContextHook(t)
+	projectRoot := t.TempDir()
+	output := runSessionContextHook(t, hookPath, sessionStartPayload(t, projectRoot), nil, 0)
+	context := sessionStartAdditionalContext(t, output)
+
+	for _, want := range []string{
+		"~/.omni-ee/PAIRING_MODE.md",
+		"~/.omni-ee/AGENT_TOOLS.md",
+		"~/.omni-ee/COLLABORATION_CONTINUITY.md",
+	} {
+		if !strings.Contains(context, want) {
+			t.Errorf("startup context missing configured global path %q:\n%s", want, context)
+		}
+	}
+	if strings.Contains(context, "~/.omni/") {
+		t.Fatalf("startup context used name-derived global directory instead of BRAND_GLOBAL_DIRNAME:\n%s", context)
+	}
+}
+
 func TestSessionContextHook_SuppressesRepoIndexesForLizaAgentSessions(t *testing.T) {
 	if _, err := exec.LookPath("bash"); err != nil {
 		t.Skip("bash not available")

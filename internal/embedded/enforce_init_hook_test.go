@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/liza-mas/liza/internal/brand"
 )
 
 func TestEnforceInitHook_AllowsCodexBashDocReads(t *testing.T) {
@@ -26,7 +28,7 @@ func TestEnforceInitHook_AllowsCodexBashDocReads(t *testing.T) {
 	runHook(t, hookPath, `{"session_id":"`+sessionID+`","cwd":"`+projectRoot+`","tool_name":"Bash","tool_input":{"command":"sed -n '1,120p' ~/.liza/AGENT_TOOLS.md"}}`, 0)
 	runHook(t, hookPath, `{"session_id":"`+sessionID+`","cwd":"`+projectRoot+`","tool_name":"Bash","tool_input":{"command":"cat ~/.liza/PAIRING_MODE.md"}}`, 0)
 	runHook(t, hookPath, `{"session_id":"`+sessionID+`","cwd":"`+projectRoot+`","tool_name":"Bash","tool_input":{"command":"sed -n '1,260p' `+projectRoot+`/REPOSITORY.md"}}`, 0)
-	runHook(t, hookPath, `{"session_id":"`+sessionID+`","cwd":"`+projectRoot+`","tool_name":"Bash","tool_input":{"command":"head -n 20 `+projectRoot+`/docs/USAGE.md"}}`, 0)
+	runHook(t, hookPath, `{"session_id":"`+sessionID+`","cwd":"`+projectRoot+`","tool_name":"Bash","tool_input":{"command":"sed -n '1,20p' `+projectRoot+`/docs/USAGE.md"}}`, 0)
 	runHook(t, hookPath, `{"session_id":"`+sessionID+`","cwd":"`+projectRoot+`","tool_name":"Bash","tool_input":{"command":"cat ~/.liza/COLLABORATION_CONTINUITY.md"}}`, 0)
 
 	if _, err := os.Stat(filepath.Join(stateDir, "CLEARED")); err != nil {
@@ -34,6 +36,108 @@ func TestEnforceInitHook_AllowsCodexBashDocReads(t *testing.T) {
 	}
 
 	runHook(t, hookPath, `{"session_id":"`+sessionID+`","cwd":"`+projectRoot+`","tool_name":"Bash","tool_input":{"command":"git status --short"}}`, 0)
+}
+
+func TestEnforceInitHook_NativeReadsClearPairingGate(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not available")
+	}
+
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+	hookPath := writeEnforceInitHook(t)
+	projectRoot := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(projectRoot, "docs"), 0755); err != nil {
+		t.Fatalf("create project docs directory: %v", err)
+	}
+	for _, path := range []string{
+		filepath.Join(projectRoot, "GUARDRAILS.md"),
+		filepath.Join(projectRoot, "REPOSITORY.md"),
+		filepath.Join(projectRoot, "docs", "USAGE.md"),
+	} {
+		if err := os.WriteFile(path, []byte("required\n"), 0644); err != nil {
+			t.Fatalf("write required project document %s: %v", path, err)
+		}
+	}
+	sessionID := "test-native-pairing-init-" + strings.ReplaceAll(t.Name(), "/", "-") + "-" + time.Now().Format("150405.000000000")
+	stateDir := filepath.Join(os.TempDir(), "liza-init-gate-"+sessionID)
+	defer os.RemoveAll(stateDir)
+	for _, path := range []string{
+		filepath.Join(homeDir, ".liza", "AGENT_TOOLS.md"),
+		filepath.Join(homeDir, ".liza", "PAIRING_MODE.md"),
+		filepath.Join(projectRoot, "GUARDRAILS.md"),
+		filepath.Join(projectRoot, "REPOSITORY.md"),
+		filepath.Join(projectRoot, "docs", "USAGE.md"),
+		filepath.Join(homeDir, ".liza", "COLLABORATION_CONTINUITY.md"),
+	} {
+		payload, err := json.Marshal(map[string]any{
+			"session_id": sessionID,
+			"cwd":        projectRoot,
+			"tool_name":  "Read",
+			"tool_input": map[string]any{"file_path": path},
+		})
+		if err != nil {
+			t.Fatalf("marshal native read payload: %v", err)
+		}
+		runHook(t, hookPath, string(payload), 0)
+	}
+
+	if _, err := os.Stat(filepath.Join(stateDir, "CLEARED")); err != nil {
+		t.Fatalf("expected native Read calls to clear the Pairing init gate: %v", err)
+	}
+	runHook(t, hookPath, bashPayload(t, sessionID, projectRoot, "git status --short"), 0)
+}
+
+func TestEnforceInitHook_WrongPathDocumentBasenamesDoNotClearGate(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not available")
+	}
+
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+	hookPath := writeEnforceInitHook(t)
+	projectRoot := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(projectRoot, "docs"), 0755); err != nil {
+		t.Fatalf("create project docs directory: %v", err)
+	}
+	for _, path := range []string{
+		filepath.Join(projectRoot, "GUARDRAILS.md"),
+		filepath.Join(projectRoot, "REPOSITORY.md"),
+		filepath.Join(projectRoot, "docs", "USAGE.md"),
+	} {
+		if err := os.WriteFile(path, []byte("required\n"), 0644); err != nil {
+			t.Fatalf("write required project document %s: %v", path, err)
+		}
+	}
+
+	sessionID := "test-wrong-path-doc-basenames-" + strings.ReplaceAll(t.Name(), "/", "-") + "-" + time.Now().Format("150405.000000000")
+	stateDir := filepath.Join(os.TempDir(), "liza-init-gate-"+sessionID)
+	defer os.RemoveAll(stateDir)
+	wrongRoot := t.TempDir()
+	for _, path := range []string{
+		filepath.Join(wrongRoot, "AGENT_TOOLS.md"),
+		filepath.Join(wrongRoot, "PAIRING_MODE.md"),
+		filepath.Join(wrongRoot, "GUARDRAILS.md"),
+		filepath.Join(wrongRoot, "REPOSITORY.md"),
+		filepath.Join(wrongRoot, "docs", "USAGE.md"),
+		filepath.Join(wrongRoot, "COLLABORATION_CONTINUITY.md"),
+	} {
+		payload, err := json.Marshal(map[string]any{
+			"session_id": sessionID,
+			"cwd":        projectRoot,
+			"tool_name":  "Read",
+			"tool_input": map[string]any{"file_path": path},
+		})
+		if err != nil {
+			t.Fatalf("marshal wrong-path read payload: %v", err)
+		}
+		runHook(t, hookPath, string(payload), 0)
+	}
+
+	if _, err := os.Stat(filepath.Join(stateDir, "CLEARED")); !os.IsNotExist(err) {
+		t.Fatalf("wrong-path document basenames should not clear init gate, stat err: %v", err)
+	}
+	runHook(t, hookPath, bashPayload(t, sessionID, projectRoot, "git status --short"), 2)
 }
 
 func TestEnforceInitHook_AllowsConditionalGuardrailsRead(t *testing.T) {
@@ -51,7 +155,7 @@ func TestEnforceInitHook_AllowsConditionalGuardrailsRead(t *testing.T) {
 	runHook(t, hookPath, `{"session_id":"`+sessionID+`","cwd":"`+projectRoot+`","tool_name":"Bash","tool_input":{"command":"cat ~/.liza/PAIRING_MODE.md"}}`, 0)
 	runHook(t, hookPath, `{"session_id":"`+sessionID+`","cwd":"`+projectRoot+`","tool_name":"Bash","tool_input":{"command":"if [ -f `+projectRoot+`/GUARDRAILS.md ]; then sed -n '1,260p' `+projectRoot+`/GUARDRAILS.md; fi"}}`, 0)
 	runHook(t, hookPath, `{"session_id":"`+sessionID+`","cwd":"`+projectRoot+`","tool_name":"Bash","tool_input":{"command":"sed -n '1,260p' `+projectRoot+`/REPOSITORY.md"}}`, 0)
-	runHook(t, hookPath, `{"session_id":"`+sessionID+`","cwd":"`+projectRoot+`","tool_name":"Bash","tool_input":{"command":"head -n 20 `+projectRoot+`/docs/USAGE.md"}}`, 0)
+	runHook(t, hookPath, `{"session_id":"`+sessionID+`","cwd":"`+projectRoot+`","tool_name":"Bash","tool_input":{"command":"sed -n '1,20p' `+projectRoot+`/docs/USAGE.md"}}`, 0)
 	runHook(t, hookPath, `{"session_id":"`+sessionID+`","cwd":"`+projectRoot+`","tool_name":"Bash","tool_input":{"command":"cat ~/.liza/COLLABORATION_CONTINUITY.md"}}`, 0)
 
 	if _, err := os.Stat(filepath.Join(stateDir, "CLEARED")); err != nil {
@@ -73,7 +177,7 @@ func TestEnforceInitHook_AllowsPairingInitCompanionDocReadsBeforeGateClear(t *te
 	defer os.RemoveAll(stateDir)
 
 	runHook(t, hookPath, `{"session_id":"`+sessionID+`","cwd":"`+projectRoot+`","tool_name":"Bash","tool_input":{"command":"sed -n '1,260p' `+projectRoot+`/REPOSITORY.md"}}`, 0)
-	runHook(t, hookPath, `{"session_id":"`+sessionID+`","cwd":"`+projectRoot+`","tool_name":"Bash","tool_input":{"command":"head -n 20 `+projectRoot+`/docs/USAGE.md"}}`, 0)
+	runHook(t, hookPath, `{"session_id":"`+sessionID+`","cwd":"`+projectRoot+`","tool_name":"Bash","tool_input":{"command":"sed -n '1,20p' `+projectRoot+`/docs/USAGE.md"}}`, 0)
 	runHook(t, hookPath, `{"session_id":"`+sessionID+`","cwd":"`+projectRoot+`","tool_name":"Bash","tool_input":{"command":"cat ~/.liza/COLLABORATION_CONTINUITY.md"}}`, 0)
 
 	if _, err := os.Stat(filepath.Join(stateDir, "CLEARED")); !os.IsNotExist(err) {
@@ -81,7 +185,7 @@ func TestEnforceInitHook_AllowsPairingInitCompanionDocReadsBeforeGateClear(t *te
 	}
 }
 
-func TestEnforceInitHook_AllowsMultiFileInitDocReads(t *testing.T) {
+func TestEnforceInitHook_BlocksMultiFileInitDocReads(t *testing.T) {
 	if _, err := exec.LookPath("bash"); err != nil {
 		t.Skip("bash not available")
 	}
@@ -90,24 +194,20 @@ func TestEnforceInitHook_AllowsMultiFileInitDocReads(t *testing.T) {
 	projectRoot := t.TempDir()
 
 	cases := []struct {
-		name        string
-		command     string
-		expectClear bool
+		name    string
+		command string
 	}{
 		{
-			name:        "multi-file wc",
-			command:     "wc -l " + projectRoot + "/REPOSITORY.md " + projectRoot + "/docs/USAGE.md",
-			expectClear: false,
+			name:    "multi-file project cat",
+			command: "cat " + projectRoot + "/REPOSITORY.md " + projectRoot + "/docs/USAGE.md",
 		},
 		{
-			name:        "multi-file cat",
-			command:     "cat ~/.liza/AGENT_TOOLS.md ~/.liza/PAIRING_MODE.md",
-			expectClear: false,
+			name:    "multi-file global cat",
+			command: "cat ~/.liza/AGENT_TOOLS.md ~/.liza/PAIRING_MODE.md",
 		},
 		{
-			name:        "multi-file head",
-			command:     "head -n 5 " + projectRoot + "/REPOSITORY.md " + projectRoot + "/docs/USAGE.md",
-			expectClear: false,
+			name:    "multi-file sed",
+			command: "sed -n '1,5p' " + projectRoot + "/REPOSITORY.md " + projectRoot + "/docs/USAGE.md",
 		},
 	}
 
@@ -117,14 +217,175 @@ func TestEnforceInitHook_AllowsMultiFileInitDocReads(t *testing.T) {
 			stateDir := filepath.Join(os.TempDir(), "liza-init-gate-"+sessionID)
 			defer os.RemoveAll(stateDir)
 
-			runHook(t, hookPath, `{"session_id":"`+sessionID+`","cwd":"`+projectRoot+`","tool_name":"Bash","tool_input":{"command":"`+tc.command+`"}}`, 0)
-			_, err := os.Stat(filepath.Join(stateDir, "CLEARED"))
-			if tc.expectClear {
-				if err != nil {
-					t.Fatalf("multi-file init read should clear gate, stat err: %v", err)
-				}
-			} else if !os.IsNotExist(err) {
+			output := runHook(t, hookPath, `{"session_id":"`+sessionID+`","cwd":"`+projectRoot+`","tool_name":"Bash","tool_input":{"command":"`+tc.command+`"}}`, 2)
+			if !strings.Contains(output, "one file per command") {
+				t.Fatalf("multi-file read should explain the single-file rule, got:\n%s", output)
+			}
+			if _, err := os.Stat(filepath.Join(stateDir, "CLEARED")); !os.IsNotExist(err) {
 				t.Fatalf("multi-file init reads should not clear gate, stat err: %v", err)
+			}
+		})
+	}
+}
+
+func TestEnforceInitHook_RejectsStaleGlobalRootAndStopsRepeatedRetries(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not available")
+	}
+
+	previousNameLower, previousBinaryName, previousGlobalDirName := brand.NameLower, brand.BinaryName, brand.GlobalDirName
+	brand.NameLower = "omni"
+	brand.BinaryName = "omni-ee"
+	brand.GlobalDirName = ".omni-ee"
+	t.Cleanup(func() {
+		brand.NameLower = previousNameLower
+		brand.BinaryName = previousBinaryName
+		brand.GlobalDirName = previousGlobalDirName
+	})
+
+	hookPath := writeEnforceInitHook(t)
+	projectRoot := t.TempDir()
+	sessionID := "test-codex-stale-global-root-" + strings.ReplaceAll(t.Name(), "/", "-") + "-" + time.Now().Format("150405.000000000")
+	stateDir := filepath.Join(os.TempDir(), "liza-init-gate-"+sessionID)
+	defer os.RemoveAll(stateDir)
+	payload := bashPayload(t, sessionID, projectRoot, "cat ~/.omni/PAIRING_MODE.md")
+
+	first := runHook(t, hookPath, payload, 2)
+	if !strings.Contains(first, "Expected global contract root: ~/.omni-ee/") {
+		t.Fatalf("stale root rejection should name the authoritative root, got:\n%s", first)
+	}
+	if strings.Contains(first, "STOP_RETRYING") {
+		t.Fatalf("first invalid read should allow one correction, got:\n%s", first)
+	}
+
+	runHook(t, hookPath, bashPayload(t, sessionID, projectRoot, "cat ~/.omni-ee/PAIRING_MODE.md"), 0)
+
+	second := runHook(t, hookPath, payload, 2)
+	if strings.Contains(second, "STOP_RETRYING") {
+		t.Fatalf("invalid read after a successful correction should allow another correction, got:\n%s", second)
+	}
+
+	third := runHook(t, hookPath, payload, 2)
+	if !strings.Contains(third, "STOP_RETRYING") {
+		t.Fatalf("consecutive invalid read should stop further retries, got:\n%s", third)
+	}
+}
+
+func TestEnforceInitHook_SuccessfulNativeReadsResetRepeatedInvalidMarker(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not available")
+	}
+
+	hookPath := writeEnforceInitHook(t)
+	projectRoot := t.TempDir()
+	cases := []struct {
+		name      string
+		toolName  string
+		toolInput map[string]any
+	}{
+		{
+			name:      "native Read",
+			toolName:  "Read",
+			toolInput: map[string]any{"file_path": "~/.liza/AGENT_TOOLS.md"},
+		},
+		{
+			name:      "MCP filesystem read",
+			toolName:  "mcp__filesystem__read_text_file",
+			toolInput: map[string]any{"path": "~/.liza/AGENT_TOOLS.md"},
+		},
+		{
+			name:      "MCP filesystem multiple-file read",
+			toolName:  "mcp__filesystem__read_multiple_files",
+			toolInput: map[string]any{"paths": []string{projectRoot + "/unrelated.txt", "~/.liza/AGENT_TOOLS.md"}},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			sessionID := "test-codex-native-read-reset-" + strings.ReplaceAll(t.Name(), "/", "-") + "-" + time.Now().Format("150405.000000000")
+			stateDir := filepath.Join(os.TempDir(), "liza-init-gate-"+sessionID)
+			defer os.RemoveAll(stateDir)
+			invalidPayload := bashPayload(t, sessionID, projectRoot, "cat ~/.wrong/PAIRING_MODE.md")
+
+			first := runHook(t, hookPath, invalidPayload, 2)
+			if strings.Contains(first, "STOP_RETRYING") {
+				t.Fatalf("first invalid read should allow correction, got:\n%s", first)
+			}
+
+			payload, err := json.Marshal(map[string]any{
+				"session_id": sessionID,
+				"cwd":        projectRoot,
+				"tool_name":  tc.toolName,
+				"tool_input": tc.toolInput,
+			})
+			if err != nil {
+				t.Fatalf("marshal native read payload: %v", err)
+			}
+			runHook(t, hookPath, string(payload), 0)
+
+			second := runHook(t, hookPath, invalidPayload, 2)
+			if strings.Contains(second, "STOP_RETRYING") {
+				t.Fatalf("invalid read after successful %s should allow correction, got:\n%s", tc.name, second)
+			}
+
+			third := runHook(t, hookPath, invalidPayload, 2)
+			if !strings.Contains(third, "STOP_RETRYING") {
+				t.Fatalf("consecutive invalid read should stop further retries, got:\n%s", third)
+			}
+		})
+	}
+}
+
+func TestEnforceInitHook_UnrelatedNativeReadsDoNotResetRepeatedInvalidMarker(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not available")
+	}
+
+	hookPath := writeEnforceInitHook(t)
+	projectRoot := t.TempDir()
+	cases := []struct {
+		name      string
+		toolName  string
+		toolInput map[string]any
+	}{
+		{
+			name:      "native Read with matching basename at wrong path",
+			toolName:  "Read",
+			toolInput: map[string]any{"file_path": "/tmp/AGENT_TOOLS.md"},
+		},
+		{
+			name:      "MCP filesystem read",
+			toolName:  "mcp__filesystem__read_text_file",
+			toolInput: map[string]any{"path": projectRoot + "/unrelated.txt"},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			sessionID := "test-codex-unrelated-read-marker-" + strings.ReplaceAll(t.Name(), "/", "-") + "-" + time.Now().Format("150405.000000000")
+			stateDir := filepath.Join(os.TempDir(), "liza-init-gate-"+sessionID)
+			defer os.RemoveAll(stateDir)
+			invalidPayload := bashPayload(t, sessionID, projectRoot, "cat ~/.wrong/PAIRING_MODE.md")
+
+			first := runHook(t, hookPath, invalidPayload, 2)
+			if strings.Contains(first, "STOP_RETRYING") {
+				t.Fatalf("first invalid read should allow correction, got:\n%s", first)
+			}
+
+			payload, err := json.Marshal(map[string]any{
+				"session_id": sessionID,
+				"cwd":        projectRoot,
+				"tool_name":  tc.toolName,
+				"tool_input": tc.toolInput,
+			})
+			if err != nil {
+				t.Fatalf("marshal unrelated read payload: %v", err)
+			}
+			runHook(t, hookPath, string(payload), 0)
+
+			second := runHook(t, hookPath, invalidPayload, 2)
+			if !strings.Contains(second, "STOP_RETRYING") {
+				t.Fatalf("unrelated %s should not reset invalid-read marker, got:\n%s", tc.name, second)
 			}
 		})
 	}
@@ -225,10 +486,11 @@ func TestEnforceInitHook_GuardrailsWrapperClearsAfterRequiredDocs(t *testing.T) 
 	stateDir := filepath.Join(os.TempDir(), "liza-init-gate-"+sessionID)
 	defer os.RemoveAll(stateDir)
 
-	runHook(t, hookPath, `{"session_id":"`+sessionID+`","cwd":"`+projectRoot+`","tool_name":"Bash","tool_input":{"command":"cat ~/.liza/AGENT_TOOLS.md ~/.liza/PAIRING_MODE.md"}}`, 0)
+	runHook(t, hookPath, bashPayload(t, sessionID, projectRoot, "cat ~/.liza/AGENT_TOOLS.md"), 0)
+	runHook(t, hookPath, bashPayload(t, sessionID, projectRoot, "cat ~/.liza/PAIRING_MODE.md"), 0)
 	runHook(t, hookPath, bashPayload(t, sessionID, projectRoot, `test -f `+projectRoot+`/GUARDRAILS.md && cat `+projectRoot+`/GUARDRAILS.md || echo ABSENT`), 0)
 	runHook(t, hookPath, `{"session_id":"`+sessionID+`","cwd":"`+projectRoot+`","tool_name":"Bash","tool_input":{"command":"sed -n '1,260p' `+projectRoot+`/REPOSITORY.md"}}`, 0)
-	runHook(t, hookPath, `{"session_id":"`+sessionID+`","cwd":"`+projectRoot+`","tool_name":"Bash","tool_input":{"command":"head -n 20 `+projectRoot+`/docs/USAGE.md"}}`, 0)
+	runHook(t, hookPath, `{"session_id":"`+sessionID+`","cwd":"`+projectRoot+`","tool_name":"Bash","tool_input":{"command":"sed -n '1,20p' `+projectRoot+`/docs/USAGE.md"}}`, 0)
 	runHook(t, hookPath, `{"session_id":"`+sessionID+`","cwd":"`+projectRoot+`","tool_name":"Bash","tool_input":{"command":"cat ~/.liza/COLLABORATION_CONTINUITY.md"}}`, 0)
 
 	if _, err := os.Stat(filepath.Join(stateDir, "CLEARED")); err != nil {
@@ -316,7 +578,8 @@ func TestEnforceInitHook_PairingModeOmitsAbsentProjectCompanionDocs(t *testing.T
 	stateDir := filepath.Join(os.TempDir(), "liza-init-gate-"+sessionID)
 	defer os.RemoveAll(stateDir)
 
-	runHook(t, hookPath, bashPayload(t, sessionID, projectRoot, "cat ~/.liza/AGENT_TOOLS.md ~/.liza/PAIRING_MODE.md"), 0)
+	runHook(t, hookPath, bashPayload(t, sessionID, projectRoot, "cat ~/.liza/AGENT_TOOLS.md"), 0)
+	runHook(t, hookPath, bashPayload(t, sessionID, projectRoot, "cat ~/.liza/PAIRING_MODE.md"), 0)
 
 	output := runHook(t, hookPath, bashPayload(t, sessionID, projectRoot, "git diff --cached"), 2)
 	if strings.Contains(output, "REPOSITORY.md (repo root)") ||
@@ -431,6 +694,18 @@ func TestEnforceInitHook_BlocksUnsafeCodexBashDocReads(t *testing.T) {
 		command string
 	}{
 		{
+			name:    "head",
+			command: "head -n 20 ~/.liza/AGENT_TOOLS.md",
+		},
+		{
+			name:    "tail",
+			command: "tail -n 20 ~/.liza/AGENT_TOOLS.md",
+		},
+		{
+			name:    "wc",
+			command: "wc -l ~/.liza/AGENT_TOOLS.md",
+		},
+		{
 			name:    "cat extra operand",
 			command: "cat ~/.liza/AGENT_TOOLS.md /tmp/not-a-doc",
 		},
@@ -490,9 +765,10 @@ func writeEnforceInitHook(t *testing.T) string {
 func completePairingInit(t *testing.T, hookPath, sessionID, projectRoot string) {
 	t.Helper()
 
-	runHook(t, hookPath, bashPayload(t, sessionID, projectRoot, "cat ~/.liza/AGENT_TOOLS.md ~/.liza/PAIRING_MODE.md"), 0)
+	runHook(t, hookPath, bashPayload(t, sessionID, projectRoot, "cat ~/.liza/AGENT_TOOLS.md"), 0)
+	runHook(t, hookPath, bashPayload(t, sessionID, projectRoot, "cat ~/.liza/PAIRING_MODE.md"), 0)
 	runHook(t, hookPath, bashPayload(t, sessionID, projectRoot, "sed -n '1,260p' "+projectRoot+"/REPOSITORY.md"), 0)
-	runHook(t, hookPath, bashPayload(t, sessionID, projectRoot, "head -n 20 "+projectRoot+"/docs/USAGE.md"), 0)
+	runHook(t, hookPath, bashPayload(t, sessionID, projectRoot, "sed -n '1,20p' "+projectRoot+"/docs/USAGE.md"), 0)
 	runHook(t, hookPath, bashPayload(t, sessionID, projectRoot, "cat ~/.liza/COLLABORATION_CONTINUITY.md"), 0)
 }
 

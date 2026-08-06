@@ -398,6 +398,14 @@ func createContractSymlinksForProviders(projectRoot, contractTarget string, agen
 		globalIsLiza := hasGlobal && isLizaSymlink(globalPath, contractTarget)
 
 		if repoIsLiza && globalIsLiza {
+			if agent.Setup.Contract.PrefersGlobal() {
+				if err := os.Remove(repoPath); err != nil {
+					fmt.Fprintf(os.Stderr, "Warning: failed to remove redundant %s symlink at %s: %v\n", name, repoPath, err)
+				} else {
+					fmt.Printf("%s: removed redundant repo symlink; using %s\n", name, globalPath)
+				}
+				continue
+			}
 			fmt.Fprintf(os.Stderr, "Warning: %s has %s symlinks at both %s and %s; remove one to avoid confusion.\n", name, brand.NameTitle, repoPath, globalPath)
 			continue
 		}
