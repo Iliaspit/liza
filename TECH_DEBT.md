@@ -2,6 +2,21 @@
 
 Deliberate debt with payback triggers. See CORE.md Rule 3 (DoD) for policy.
 
+## Provider activation evidence paths duplicate setup-writer knowledge
+
+**What:** `hasRepoContractActivationEvidence` restates five repo-relative
+activation artifact paths independently of the code paths that write those
+artifacts. A writer-path change can therefore silently weaken legacy ownership
+attribution.
+
+**Why deferred:** The artifacts do not share one writer boundary. In particular,
+Cursor's hook artifact is not produced by the embedded-writer layer, so extracting
+one authoritative path table is not a local mechanical change.
+
+**Payback trigger:** The next time a provider activation artifact path or its
+writer changes, centralize the affected path metadata and consume it from both
+the writer and legacy activation-evidence detection.
+
 ## Retired task artifact refs are non-blocking during merge validation
 
 **What:** `ValidateArtifactRefs` and task invariant artifact-ref checks ignore refs on `SUPERSEDED` and `ABANDONED` tasks. This prevents stale superseded/WIP artifacts from blocking unrelated merges, but it also means retired task artifact loss is not enforced by global validation.

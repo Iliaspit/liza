@@ -117,13 +117,18 @@ basis for deleting an instruction link.
   the main repository Git directory. Initialization is serial per repository;
   atomic replacement protects against partial writes, not
   concurrent read-modify-write cycles. Later invocations preserve recorded paths,
-  while repo fallbacks used only by global-first providers can be deduplicated
-  once their preferred global path becomes available. Existing managed links
-  that predate this metadata are conservatively attributed to compatible
-  repo-only providers because their historical owner cannot be reconstructed.
-  Paths shared by providers selected together also remain because another
-  provider's global activation can fail at runtime. State integrity errors stop
-  initialization and require recovery of the file or its Git-directory access.
+  including a prior local fallback when the current placement attempt remains
+  unresolved. Once a preferred global path is verified, its prior managed repo
+  or local activation is removed only when no other provider owns that path.
+  Existing managed links
+  that predate this metadata are attributed to a compatible repo-only provider
+  when the path has a single catalog claimant. Shared paths require corroborating
+  repo-local activation artifacts, avoiding permanent attribution based only on
+  catalog membership. Paths shared by providers selected together also remain
+  because another provider's global activation can fail at runtime. Malformed,
+  semantically invalid, or unsupported-version state degrades to preserve-all
+  behavior for the current activation and is left unchanged for recovery. State
+  file access and write errors remain fatal.
 
 ## Supersedes
 

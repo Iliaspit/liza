@@ -120,23 +120,31 @@ activations are recorded at
 resolves the main repository root before locating its Git directory, so a later
 init preserves only paths used by providers activated in that repository.
 When this metadata is first introduced, existing managed repo links are
-conservatively attributed to compatible repo-only providers because their
-historical owner cannot be reconstructed. Paths shared by providers selected
-together also remain because another provider's global activation may fail at
-runtime. If the global path cannot be resolved or created, or is occupied by a
-user-owned file, the repo link is retained or created instead. Repo-only
-providers never receive an invented global fallback. Custom providers without
-`prefer_global` retain managed links at both declared locations and emit a
-duplicate warning.
+attributed directly when their contract path has only one catalog claimant.
+Shared paths require corroborating repo-local activation artifacts for the
+repo-only provider; otherwise the link is treated as an unowned global-first
+fallback and may be deduplicated. Kimi has no repo-local activation artifact, so
+a first post-upgrade Claude initialization may remove a legacy `CLAUDE.md` link
+whose Kimi ownership was never recorded; rerun
+`§BRAND_BINARY_NAME§ init --provider kimi` to restore it. Paths shared by
+providers selected together also remain because another provider's global
+activation may fail at runtime. If the global path cannot be resolved or
+created, or is occupied by a user-owned file, the repo link is retained or
+created instead. Reinitializing a provider also retains its previously recorded
+repo or local fallback when no authoritative placement succeeds. After the
+preferred global link is verified, that prior managed activation is removed only
+when no other provider owns it. Repo-only providers never receive an invented global fallback.
+Custom providers without `prefer_global` retain managed links at both declared
+locations and emit a duplicate warning.
 
-Provider activation metadata errors stop initialization. For malformed or
-unsupported metadata, resolve the main repository Git directory with
-`git rev-parse --git-common-dir`, delete the
-`§BRAND_NAME_LOWER§-provider-activations.json` file there, and rerun
-`§BRAND_BINARY_NAME§ init`; the command works from the main checkout or a linked
-worktree, and existing managed repo links are then reconstructed conservatively.
-For read or write permission errors, restore access to the main repository Git
-directory and rerun initialization.
+Malformed, semantically invalid, or unsupported-version activation metadata
+emits a warning instead of stopping initialization. The command leaves the
+untrusted metadata file unchanged and preserves every managed repo link that the
+current provider activation could otherwise remove. Delete the
+`§BRAND_NAME_LOWER§-provider-activations.json` file from the main repository Git
+directory to rebuild trusted metadata on a later run. Read or write permission
+errors still stop initialization; restore access to the Git directory and rerun
+the command.
 
 §BRAND_NAME_TITLE§ never overwrites user-owned contract files. If both the repo-root
 file and a declared global path are user-owned, `§BRAND_BINARY_NAME§ init` warns and

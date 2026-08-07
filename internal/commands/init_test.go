@@ -1274,7 +1274,7 @@ func TestInitCommand_OpenCodePreservesUserExecTool(t *testing.T) {
 	}
 }
 
-func TestInitCommand_PreservesManagedRepoSymlinkRequiredByRepoOnlyProvider(t *testing.T) {
+func TestInitCommand_PreservesManagedRepoSymlinkRecordedForRepoOnlyProvider(t *testing.T) {
 	gitDir := setupGitRepo(t)
 	defer os.RemoveAll(gitDir)
 
@@ -1296,6 +1296,16 @@ func TestInitCommand_PreservesManagedRepoSymlinkRequiredByRepoOnlyProvider(t *te
 	correctTarget := filepath.Join(globalDir, "CORE.md")
 	claudePath := filepath.Join(gitDir, "CLAUDE.md")
 	if err := os.Symlink(correctTarget, claudePath); err != nil {
+		t.Fatal(err)
+	}
+	statePath, err := repoContractActivationStatePath(gitDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writeRepoContractActivationState(statePath, repoContractActivationState{
+		Version:       repoContractActivationStateVersion,
+		ProviderPaths: map[string]string{"kimi": "CLAUDE.md"},
+	}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1622,7 +1632,7 @@ func TestInitCommand_BrownfieldBothOccupiedWarns(t *testing.T) {
 	}
 }
 
-func TestInitCommand_DuplicateClaudeSymlinkPreservesRepoCopyForKimi(t *testing.T) {
+func TestInitCommand_DuplicateClaudeSymlinkRemovesUnownedRepoCopy(t *testing.T) {
 	gitDir := setupGitRepo(t)
 	defer os.RemoveAll(gitDir)
 
@@ -1652,8 +1662,8 @@ func TestInitCommand_DuplicateClaudeSymlinkPreservesRepoCopyForKimi(t *testing.T
 		t.Fatalf("InitCommand failed: %v", err)
 	}
 
-	if target, err := os.Readlink(filepath.Join(gitDir, "CLAUDE.md")); err != nil || target != coreFile {
-		t.Errorf("repo CLAUDE.md target = %q, err = %v; want %q for Kimi", target, err, coreFile)
+	if _, err := os.Lstat(filepath.Join(gitDir, "CLAUDE.md")); !os.IsNotExist(err) {
+		t.Errorf("repo CLAUDE.md should be removed when no repo-only activation evidence exists; got %v", err)
 	}
 	if target, err := os.Readlink(globalClaude); err != nil || target != coreFile {
 		t.Errorf("global CLAUDE.md changed; target = %q, err = %v", target, err)
@@ -1677,6 +1687,13 @@ func TestInitCommand_DuplicateCodexSymlinkPreservesRepoCopyForCursor(t *testing.
 	repoAgents := filepath.Join(gitDir, "AGENTS.md")
 	if err := os.Symlink(coreFile, repoAgents); err != nil {
 		t.Fatalf("create repo AGENTS.md symlink: %v", err)
+	}
+	cursorDir := filepath.Join(gitDir, ".cursor")
+	if err := os.MkdirAll(cursorDir, 0755); err != nil {
+		t.Fatalf("create Cursor activation directory: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(cursorDir, "hooks.json"), []byte("{}\n"), 0644); err != nil {
+		t.Fatalf("create Cursor activation evidence: %v", err)
 	}
 	globalAgents := filepath.Join(fakeHome, ".codex", "AGENTS.md")
 	if err := os.MkdirAll(filepath.Dir(globalAgents), 0755); err != nil {

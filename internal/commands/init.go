@@ -363,16 +363,36 @@ func CheckContractConfigured(projectRoot, cliName string) string {
 // interactive wizard: "rename" backs up the existing file, "global" uses the
 // global fallback, "skip" skips creation. Empty string uses default behavior.
 type contractSymlinkOptions struct {
-	DefaultAction     string
-	ProviderActions   map[string]string
-	PreserveRepoPaths map[string]bool
+	DefaultAction           string
+	ProviderActions         map[string]string
+	PreserveRepoPaths       map[string]bool
+	SilentPreserveRepoPaths map[string]bool
 }
 
-func createContractSymlinksForProviders(projectRoot, contractTarget string, agents []providers.Provider, options contractSymlinkOptions) {
+func contractActionPlacesRepoContract(action string) bool {
+	return action == "rename" || action == "local"
+}
+
+func contractActionAllowsPreferredGlobal(action string) bool {
+	return !contractActionPlacesRepoContract(action) && action != "skip"
+}
+
+// createContractSymlinksForProviders returns canonical provider ID → normalized
+// repo-relative path effectively used after placement. Every repo or local
+// outcome must be recorded, including idempotent no-op branches; successful
+// global outcomes record nothing.
+func createContractSymlinksForProviders(projectRoot, contractTarget string, agents []providers.Provider, options contractSymlinkOptions) map[string]string {
+	repoActivations := make(map[string]string)
+	recordRepoActivation := func(providerID, candidate string) {
+		cleaned, err := normalizeRepoContractPath(candidate)
+		if err == nil {
+			repoActivations[providerID] = cleaned
+		}
+	}
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: cannot determine home directory: %v\n", err)
-		return
+		return repoActivations
 	}
 
 	repoPathSelectionCount := make(map[string]int)
@@ -402,22 +422,25 @@ func createContractSymlinksForProviders(projectRoot, contractTarget string, agen
 		// Step 1: product symlink already exists at either location?
 		repoIsLiza := isLizaSymlink(repoPath, contractTarget)
 		globalIsLiza := hasGlobal && isLizaSymlink(globalPath, contractTarget)
-		if agent.Setup.Contract.PrefersGlobal() &&
-			contractAction != "rename" && contractAction != "local" && contractAction != "skip" &&
+		if agent.Setup.Contract.PrefersGlobal() && contractActionAllowsPreferredGlobal(contractAction) &&
 			ensurePreferredGlobalContract(name, repoPath, globalPath, contractTarget, repoIsLiza, globalIsLiza,
-				repoPathSelectionCount[repoPath] > 1 || options.PreserveRepoPaths[repoPath]) {
+				repoPathSelectionCount[repoPath] > 1 || options.PreserveRepoPaths[repoPath], options.SilentPreserveRepoPaths[repoPath]) {
 			continue
 		}
 
 		if repoIsLiza && globalIsLiza {
+			if !agent.Setup.Contract.PrefersGlobal() {
+				recordRepoActivation(agent.ID, name)
+			}
 			fmt.Fprintf(os.Stderr, "Warning: %s has %s symlinks at both %s and %s; remove one to avoid confusion.\n", name, brand.NameTitle, repoPath, globalPath)
 			continue
 		}
 		if repoIsLiza {
+			recordRepoActivation(agent.ID, name)
 			fmt.Printf("%s: already correct\n", name)
 			continue
 		}
-		if globalIsLiza && contractAction != "rename" && contractAction != "local" {
+		if globalIsLiza && !contractActionPlacesRepoContract(contractAction) {
 			fmt.Printf("%s: skipping; %s symlink already exists at %s\n", name, brand.NameTitle, globalPath)
 			continue
 		}
@@ -438,6 +461,7 @@ func createContractSymlinksForProviders(projectRoot, contractTarget string, agen
 				fmt.Fprintf(os.Stderr, "Warning: failed to create %s symlink: %v\n", name, err)
 				fmt.Fprintf(os.Stderr, "  On Windows: enable Developer Mode (Settings > System > For developers) or run the shell as Administrator, then retry.\n")
 			} else {
+				recordRepoActivation(agent.ID, name)
 				fmt.Printf("%s → %s\n", name, contractTarget)
 			}
 			continue
@@ -453,6 +477,7 @@ func createContractSymlinksForProviders(projectRoot, contractTarget string, agen
 			localPath := filepath.Join(projectRoot, agent.Setup.Contract.LocalFallback)
 			if _, err := os.Lstat(localPath); err == nil {
 				if isLizaSymlink(localPath, contractTarget) {
+					recordRepoActivation(agent.ID, agent.Setup.Contract.LocalFallback)
 					fmt.Printf("%s: already correct\n", agent.Setup.Contract.LocalFallback)
 				} else {
 					fmt.Fprintf(os.Stderr, "Warning: %s already exists and is not a %s symlink.\n", agent.Setup.Contract.LocalFallback, brand.NameTitle)
@@ -466,6 +491,7 @@ func createContractSymlinksForProviders(projectRoot, contractTarget string, agen
 			if err := os.Symlink(contractTarget, localPath); err != nil {
 				fmt.Fprintf(os.Stderr, "Warning: failed to create %s symlink: %v\n", agent.Setup.Contract.LocalFallback, err)
 			} else {
+				recordRepoActivation(agent.ID, agent.Setup.Contract.LocalFallback)
 				fmt.Printf("%s → %s\n", agent.Setup.Contract.LocalFallback, contractTarget)
 			}
 			continue
@@ -491,6 +517,7 @@ func createContractSymlinksForProviders(projectRoot, contractTarget string, agen
 					fmt.Fprintf(os.Stderr, "Warning: failed to restore %s from backup: %v\n", name, restoreErr)
 				}
 			} else {
+				recordRepoActivation(agent.ID, name)
 				fmt.Printf("%s → %s\n", name, contractTarget)
 			}
 			continue
@@ -524,12 +551,13 @@ func createContractSymlinksForProviders(projectRoot, contractTarget string, agen
 		// Both locations occupied by non-product files.
 		fmt.Fprintf(os.Stderr, "Warning: %s exists at both repo root and %s; cannot place %s contract. Remove or rename one, then re-run.\n", name, globalPath, brand.NameTitle)
 	}
+	return repoActivations
 }
 
 // ensurePreferredGlobalContract makes the active global link authoritative. It
 // removes a managed repo link only when no catalog provider requires that repo
 // path, and returns false when global activation is unavailable.
-func ensurePreferredGlobalContract(name, repoPath, globalPath, contractTarget string, repoIsLiza, globalIsLiza, preserveRepo bool) bool {
+func ensurePreferredGlobalContract(name, repoPath, globalPath, contractTarget string, repoIsLiza, globalIsLiza, preserveRepo, silentPreserve bool) bool {
 	if globalPath == "" {
 		return false
 	}
@@ -560,7 +588,9 @@ func ensurePreferredGlobalContract(name, repoPath, globalPath, contractTarget st
 	}
 	if repoIsLiza {
 		if preserveRepo {
-			fmt.Printf("%s: retaining repo symlink required by another provider\n", name)
+			if !silentPreserve {
+				fmt.Printf("%s: retaining repo symlink required by another provider\n", name)
+			}
 		} else if err := os.Remove(repoPath); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: failed to remove redundant %s symlink at %s: %v\n", name, repoPath, err)
 		} else {
