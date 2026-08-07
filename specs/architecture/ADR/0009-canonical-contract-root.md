@@ -1,6 +1,6 @@
 # 9 - ~/.liza as Canonical Contract Root
 
-> **Current policy:** The canonical-root decision remains active. ADR-0098
+> **Current policy:** The canonical-root decision remains active. ADR-0111
 > supersedes this ADR's repo-first activation rationale: providers with a
 > documented global instruction path now prefer that active global path, with a
 > safe repo fallback.

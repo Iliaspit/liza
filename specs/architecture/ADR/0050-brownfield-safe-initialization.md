@@ -1,6 +1,6 @@
 # 50 - Brownfield-Safe Initialization
 
-> **Current policy:** ADR-0098 supersedes the repo-first/global-fallback ordering
+> **Current policy:** ADR-0111 supersedes the repo-first/global-fallback ordering
 > below. The no-overwrite brownfield invariant remains active, while supported
 > providers now prefer their documented global instruction paths.
 

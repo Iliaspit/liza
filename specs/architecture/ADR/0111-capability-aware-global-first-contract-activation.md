@@ -1,4 +1,4 @@
-# 98 - Capability-Aware Global-First Contract Activation
+# 111 - Capability-Aware Global-First Contract Activation
 
 ## Context and Problem Statement
 

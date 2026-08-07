@@ -98,4 +98,4 @@
 | [0095 — Functional-Cluster Index Lifecycle](0095-functional-cluster-index-lifecycle.md) | Refresh optional target-local functional-cluster artifacts alongside Stacklit and SCIP indexes. |
 | [0096 — Catalog-Backed Provider Registry](0096-catalog-backed-provider-registry.md) | Move provider behavior from hardcoded branches into declarative catalog metadata. |
 | [0097 — Cursor Secondary-Provider Policy Hooks](0097-cursor-secondary-provider-policy-hooks.md) | Configure Cursor's dependent provider setup and policy hooks during initialization. |
-| [0098 — Capability-Aware Global-First Contract Activation](0098-capability-aware-global-first-contract-activation.md) | Prefer documented active global instruction paths without deleting the only usable provider contract. |
+| [0111 — Capability-Aware Global-First Contract Activation](0111-capability-aware-global-first-contract-activation.md) | Prefer documented active global instruction paths without deleting the only usable provider contract. |

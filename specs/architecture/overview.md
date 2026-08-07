@@ -229,7 +229,7 @@ a warning.
 4. For Liza mode: read `~/.liza/MULTI_AGENT_MODE.md`. For Pairing mode: read `~/.liza/PAIRING_MODE.md`.
 
 Refer to `GETTING_STARTED.md` for activating Liza in a user project. See ADR-0009
-for the canonical contract root and ADR-0098 for active-path selection.
+for the canonical contract root and ADR-0111 for active-path selection.
 
 ### Go CLI (`liza`)
 
