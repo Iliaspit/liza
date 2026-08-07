@@ -2004,6 +2004,7 @@ func TestCheckContractConfigured_OpenCodeUsesAgentsContract(t *testing.T) {
 	dir := t.TempDir()
 	fakeHome := t.TempDir()
 	t.Setenv("HOME", fakeHome)
+	unsetEnvForTest(t, "XDG_CONFIG_HOME")
 
 	lizaDir := filepath.Join(fakeHome, ".liza")
 	if err := os.MkdirAll(lizaDir, 0755); err != nil {
