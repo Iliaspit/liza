@@ -1,5 +1,10 @@
 # 9 - ~/.liza as Canonical Contract Root
 
+> **Current policy:** The canonical-root decision remains active. ADR-0098
+> supersedes this ADR's repo-first activation rationale: providers with a
+> documented global instruction path now prefer that active global path, with a
+> safe repo fallback.
+
 ## Context and Problem Statement
 
 The behavioral contract needs to be accessible to agents. Initially, contracts were symlinked into each agent's config directory (e.g., `~/.claude/`). This created maintenance overhead and unclear precedence when repo-level and user-level prompts conflicted.

@@ -2,6 +2,7 @@ package commands
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -431,14 +432,19 @@ func setupAgentSymlinks(homeDir, lizaDir string, agents []providers.Provider, re
 // instead of BRAND_GLOBAL_DIRNAME. It does not create absent links or modify
 // regular files and unrelated symlinks.
 func repairExistingProviderContractSymlink(homeDir, globalDir string, provider providers.Provider) error {
-	globalFallback := provider.Setup.Contract.GlobalFallback
 	values := brand.RuntimeValues()
 	nameDerivedDir := "." + values.NameLower
-	if globalFallback == "" || values.NameLower == "" || nameDerivedDir == values.GlobalDirName {
+	if provider.Setup.Contract.GlobalFallback == "" || values.NameLower == "" || nameDerivedDir == values.GlobalDirName {
 		return nil
 	}
 
-	linkPath := filepath.Join(homeDir, globalFallback)
+	linkPath, err := provider.Setup.Contract.GlobalPath(homeDir)
+	if err != nil {
+		if errors.Is(err, providers.ErrUnstableGlobalRoot) {
+			return nil
+		}
+		return fmt.Errorf("resolve provider contract link for %s: %w", provider.ID, err)
+	}
 	info, err := os.Lstat(linkPath)
 	if os.IsNotExist(err) {
 		return nil

@@ -343,7 +343,7 @@ Warning: failed to create CLAUDE.md symlink: symlink ... A required privilege is
 
 | Command | Links created | Impact if missing |
 |---------|--------------|-------------------|
-| `§BRAND_BINARY_NAME§ init` | Repo-root contract files (`CLAUDE.md`, `AGENTS.md`, `GEMINI.md` → `~/§BRAND_GLOBAL_DIRNAME§/CORE.md`) | Agents cannot find the behavioral contract from the project directory |
+| `§BRAND_BINARY_NAME§ init` | Provider contract links to `~/§BRAND_GLOBAL_DIRNAME§/CORE.md`: documented global instruction paths for global-first providers, repo-root files for repo-only providers | The affected provider cannot discover the behavioral contract from its active instruction path |
 | `§BRAND_BINARY_NAME§ setup` | Skill links in CLI config dirs (`~/.claude/skills/`, `~/.codex/skills/`, etc.) → `~/§BRAND_GLOBAL_DIRNAME§/skills/` | Agents cannot load skills (debugging, testing, code review, etc.) |
 | `§BRAND_BINARY_NAME§ setup` | CLI-specific prompt files (e.g. `~/.vibe/prompts/§BRAND_BINARY_NAME§.md`) | CLI prompt activation fails for the affected CLI |
 

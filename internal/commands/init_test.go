@@ -34,6 +34,10 @@ func setupGlobalLiza(t *testing.T) string {
 	unsetEnvForTest(t, functionalclusters.EnvEnableFunctionalClusters)
 	unsetEnvForTest(t, semble.EnvEnableSemble)
 	unsetEnvForTest(t, bashpolicycli.EnvEnableBashPolicy)
+	unsetEnvForTest(t, "CLAUDE_CONFIG_DIR")
+	unsetEnvForTest(t, "CODEX_HOME")
+	unsetEnvForTest(t, "XDG_CONFIG_HOME")
+	unsetEnvForTest(t, "QWEN_HOME")
 	return fakeHome
 }
 
@@ -952,15 +956,19 @@ func TestInitCommand_CreatesContractSymlinks(t *testing.T) {
 	// Verify contract symlinks point to absolute global path
 	globalDir := filepath.Join(fakeHome, ".liza")
 	expectedTarget := filepath.Join(globalDir, "CORE.md")
-	for _, name := range []string{"CLAUDE.md", "AGENTS.md", "GEMINI.md"} {
-		linkPath := filepath.Join(gitDir, name)
+	for _, rel := range []string{
+		filepath.Join(".claude", "CLAUDE.md"),
+		filepath.Join(".codex", "AGENTS.md"),
+		filepath.Join(".gemini", "GEMINI.md"),
+	} {
+		linkPath := filepath.Join(fakeHome, rel)
 		target, err := os.Readlink(linkPath)
 		if err != nil {
-			t.Errorf("Symlink %s not created: %v", name, err)
+			t.Errorf("Symlink %s not created: %v", rel, err)
 			continue
 		}
 		if target != expectedTarget {
-			t.Errorf("Symlink %s target = %q, want %q", name, target, expectedTarget)
+			t.Errorf("Symlink %s target = %q, want %q", rel, target, expectedTarget)
 		}
 	}
 
@@ -1164,7 +1172,7 @@ func TestInitCommandWithConfig_MultiProviderBashPolicyUsesSharedBufferedInput(t 
 	}
 }
 
-func TestInitCommand_OpenCodeCreatesAgentsContractWithoutCodexHooks(t *testing.T) {
+func TestInitCommand_OpenCodeCreatesGlobalContractWithoutCodexHooks(t *testing.T) {
 	gitDir := setupGitRepo(t)
 	defer os.RemoveAll(gitDir)
 
@@ -1191,10 +1199,10 @@ func TestInitCommand_OpenCodeCreatesAgentsContractWithoutCodexHooks(t *testing.T
 	}
 
 	coreFile := filepath.Join(fakeHome, ".liza", "CORE.md")
-	agentsPath := filepath.Join(gitDir, "AGENTS.md")
+	agentsPath := filepath.Join(fakeHome, ".config", "opencode", "AGENTS.md")
 	target, err := os.Readlink(agentsPath)
 	if err != nil {
-		t.Fatalf("AGENTS.md symlink not created: %v", err)
+		t.Fatalf("global OpenCode AGENTS.md symlink not created: %v", err)
 	}
 	if target != coreFile {
 		t.Errorf("AGENTS.md → %q, want %q", target, coreFile)
@@ -1266,7 +1274,7 @@ func TestInitCommand_OpenCodePreservesUserExecTool(t *testing.T) {
 	}
 }
 
-func TestInitCommand_SkipsCorrectSymlinks(t *testing.T) {
+func TestInitCommand_MigratesManagedRepoSymlinkToPreferredGlobal(t *testing.T) {
 	gitDir := setupGitRepo(t)
 	defer os.RemoveAll(gitDir)
 
@@ -1291,18 +1299,59 @@ func TestInitCommand_SkipsCorrectSymlinks(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Run init
+	// Run init with Claude explicitly selected so contract migration is active.
+	if err := InitCommandWithConfig(InitParams{
+		Description: "Test goal",
+		SpecRef:     "specs/vision.md",
+		Agents:      []string{"claude"},
+	}); err != nil {
+		t.Fatalf("InitCommand failed: %v", err)
+	}
+
+	if _, err := os.Lstat(claudePath); !os.IsNotExist(err) {
+		t.Fatalf("repo CLAUDE.md should be removed after global activation; got %v", err)
+	}
+	target, err := os.Readlink(filepath.Join(fakeHome, ".claude", "CLAUDE.md"))
+	if err != nil {
+		t.Fatalf("global CLAUDE.md is not a symlink: %v", err)
+	}
+	if target != correctTarget {
+		t.Errorf("global CLAUDE.md target = %q, want %q", target, correctTarget)
+	}
+}
+
+func TestInitCommand_NoProvidersLeavesManagedRepoSymlinkUntouched(t *testing.T) {
+	gitDir := setupGitRepo(t)
+	defer os.RemoveAll(gitDir)
+
+	fakeHome := setupGlobalLiza(t)
+
+	originalDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(originalDir)
+	if err := os.Chdir(gitDir); err != nil {
+		t.Fatal(err)
+	}
+
+	testhelpers.CreateCommittedSpecFile(t, gitDir, "vision.md", "# Vision\n")
+
+	correctTarget := filepath.Join(fakeHome, ".liza", "CORE.md")
+	claudePath := filepath.Join(gitDir, "CLAUDE.md")
+	if err := os.Symlink(correctTarget, claudePath); err != nil {
+		t.Fatal(err)
+	}
+
 	if err := InitCommand("Test goal", "specs/vision.md", nil); err != nil {
 		t.Fatalf("InitCommand failed: %v", err)
 	}
 
-	// CLAUDE.md should still point to the same target (untouched)
-	target, err := os.Readlink(claudePath)
-	if err != nil {
-		t.Fatalf("CLAUDE.md is no longer a symlink: %v", err)
+	if target, err := os.Readlink(claudePath); err != nil || target != correctTarget {
+		t.Fatalf("repo CLAUDE.md changed; target = %q, err = %v, want %q", target, err, correctTarget)
 	}
-	if target != correctTarget {
-		t.Errorf("CLAUDE.md target changed; got %q, want %q", target, correctTarget)
+	if _, err := os.Lstat(filepath.Join(fakeHome, ".claude", "CLAUDE.md")); !os.IsNotExist(err) {
+		t.Fatalf("global CLAUDE.md should remain absent without provider selection; got %v", err)
 	}
 }
 
@@ -1359,11 +1408,18 @@ func TestInitCommand_BrownfieldFallsBackToGlobal(t *testing.T) {
 		t.Errorf("Global fallback → %q, want %q", target, coreFile)
 	}
 
-	// AGENTS.md and GEMINI.md should still be created at repo root (no conflict)
+	// Other selected providers also use their preferred global contracts.
+	for _, path := range []string{
+		filepath.Join(fakeHome, ".codex", "AGENTS.md"),
+		filepath.Join(fakeHome, ".gemini", "GEMINI.md"),
+	} {
+		if target, err := os.Readlink(path); err != nil || target != coreFile {
+			t.Errorf("global contract %s target = %q, err = %v; want %q", path, target, err, coreFile)
+		}
+	}
 	for _, name := range []string{"AGENTS.md", "GEMINI.md"} {
-		linkPath := filepath.Join(gitDir, name)
-		if _, err := os.Readlink(linkPath); err != nil {
-			t.Errorf("Symlink %s not created: %v", name, err)
+		if _, err := os.Lstat(filepath.Join(gitDir, name)); !os.IsNotExist(err) {
+			t.Errorf("repo %s should be absent for preferred global activation; got %v", name, err)
 		}
 	}
 }
@@ -1499,11 +1555,13 @@ func TestInitCommand_BrownfieldExistingLizaAtGlobalSkipsCreation(t *testing.T) {
 		t.Error("CLAUDE.md should not be created at repo root when global fallback already has Liza symlink")
 	}
 
-	// AGENTS.md and GEMINI.md should be created at repo root (no global fallback for them)
-	for _, name := range []string{"AGENTS.md", "GEMINI.md"} {
-		linkPath := filepath.Join(gitDir, name)
-		if _, err := os.Readlink(linkPath); err != nil {
-			t.Errorf("Symlink %s not created: %v", name, err)
+	// Other selected providers should also activate at their global paths.
+	for _, path := range []string{
+		filepath.Join(fakeHome, ".codex", "AGENTS.md"),
+		filepath.Join(fakeHome, ".gemini", "GEMINI.md"),
+	} {
+		if target, err := os.Readlink(path); err != nil || target != coreFile {
+			t.Errorf("global contract %s target = %q, err = %v; want %q", path, target, err, coreFile)
 		}
 	}
 }
@@ -1602,7 +1660,7 @@ func TestInitCommand_DuplicateClaudeSymlinkRemovesRepoCopy(t *testing.T) {
 	}
 }
 
-func TestInitCommand_DuplicateNonClaudeSymlinksWarns(t *testing.T) {
+func TestInitCommand_DuplicateCodexSymlinkRemovesRepoCopy(t *testing.T) {
 	gitDir := setupGitRepo(t)
 	defer os.RemoveAll(gitDir)
 
@@ -1628,23 +1686,155 @@ func TestInitCommand_DuplicateNonClaudeSymlinksWarns(t *testing.T) {
 		t.Fatalf("create global AGENTS.md symlink: %v", err)
 	}
 
-	stderr, err := captureStderrForTest(func() error {
-		return InitCommandWithConfig(InitParams{
-			Description: "Test goal",
-			SpecRef:     "specs/vision.md",
-			Agents:      []string{"codex"},
-		})
+	err := InitCommandWithConfig(InitParams{
+		Description: "Test goal",
+		SpecRef:     "specs/vision.md",
+		Agents:      []string{"codex"},
 	})
 	if err != nil {
 		t.Fatalf("InitCommand failed: %v", err)
 	}
-	if !strings.Contains(stderr, "Liza symlinks at both") {
-		t.Errorf("duplicate non-Claude symlinks should warn, got: %s", stderr)
+
+	if _, err := os.Lstat(repoAgents); !os.IsNotExist(err) {
+		t.Errorf("repo AGENTS.md should be removed when the global Codex contract symlink is active; got %v", err)
 	}
-	for _, path := range []string{repoAgents, globalAgents} {
-		if target, err := os.Readlink(path); err != nil || target != coreFile {
-			t.Errorf("%s changed; target = %q, err = %v", path, target, err)
-		}
+	if target, err := os.Readlink(globalAgents); err != nil || target != coreFile {
+		t.Errorf("global AGENTS.md changed; target = %q, err = %v", target, err)
+	}
+}
+
+func TestInitPairingCommand_PrefersActiveProviderGlobalRoot(t *testing.T) {
+	tests := []struct {
+		name         string
+		agent        string
+		envName      string
+		globalSuffix string
+		repoFile     string
+		defaultPath  string
+	}{
+		{name: "claude config dir", agent: "claude", envName: "CLAUDE_CONFIG_DIR", globalSuffix: "CLAUDE.md", repoFile: "CLAUDE.md", defaultPath: ".claude/CLAUDE.md"},
+		{name: "codex home", agent: "codex", envName: "CODEX_HOME", globalSuffix: "AGENTS.md", repoFile: "AGENTS.md", defaultPath: ".codex/AGENTS.md"},
+		{name: "opencode xdg config", agent: "opencode", envName: "XDG_CONFIG_HOME", globalSuffix: "opencode/AGENTS.md", repoFile: "AGENTS.md", defaultPath: ".config/opencode/AGENTS.md"},
+		{name: "qwen home", agent: "qwen", envName: "QWEN_HOME", globalSuffix: "QWEN.md", repoFile: "QWEN.md", defaultPath: ".qwen/QWEN.md"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gitDir := setupGitRepo(t)
+			defer os.RemoveAll(gitDir)
+			fakeHome := setupGlobalLiza(t)
+			activeRoot := t.TempDir()
+			t.Setenv(tt.envName, activeRoot)
+
+			originalDir, err := os.Getwd()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer os.Chdir(originalDir)
+			if err := os.Chdir(gitDir); err != nil {
+				t.Fatal(err)
+			}
+
+			if err := InitPairingCommand(InitPairingParams{Agents: []string{tt.agent}}); err != nil {
+				t.Fatalf("InitPairingCommand() error = %v", err)
+			}
+
+			contractTarget := filepath.Join(fakeHome, ".liza", "CORE.md")
+			activePath := filepath.Join(activeRoot, filepath.FromSlash(tt.globalSuffix))
+			if target, err := os.Readlink(activePath); err != nil || target != contractTarget {
+				t.Fatalf("active global contract target = %q, err = %v; want %q", target, err, contractTarget)
+			}
+			if _, err := os.Lstat(filepath.Join(gitDir, tt.repoFile)); !os.IsNotExist(err) {
+				t.Fatalf("repo %s should be absent after active global setup; got %v", tt.repoFile, err)
+			}
+			if _, err := os.Lstat(filepath.Join(fakeHome, filepath.FromSlash(tt.defaultPath))); !os.IsNotExist(err) {
+				t.Fatalf("inactive default global path should be absent; got %v", err)
+			}
+		})
+	}
+}
+
+func TestInitPairingCommand_QwenRelativeHomeRetainsRepoContractAcrossWorkingDirectories(t *testing.T) {
+	gitDir := setupGitRepo(t)
+	defer os.RemoveAll(gitDir)
+	fakeHome := setupGlobalLiza(t)
+	t.Setenv("QWEN_HOME", filepath.Join(".qwen-custom", "global"))
+
+	originalDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(originalDir)
+	if err := os.Chdir(gitDir); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := InitPairingCommand(InitPairingParams{Agents: []string{"qwen"}}); err != nil {
+		t.Fatalf("InitPairingCommand() error = %v", err)
+	}
+
+	contractTarget := filepath.Join(fakeHome, ".liza", "CORE.md")
+	repoPath := filepath.Join(gitDir, "QWEN.md")
+	if target, err := os.Readlink(repoPath); err != nil || target != contractTarget {
+		t.Fatalf("repo QWEN.md target = %q, err = %v; want %q", target, err, contractTarget)
+	}
+	initRelativePath := filepath.Join(gitDir, ".qwen-custom", "global", "QWEN.md")
+	if _, err := os.Lstat(initRelativePath); !os.IsNotExist(err) {
+		t.Fatalf("init-time relative QWEN_HOME path should remain absent; got %v", err)
+	}
+
+	nestedDir := filepath.Join(gitDir, "nested")
+	if err := os.MkdirAll(nestedDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(nestedDir); err != nil {
+		t.Fatal(err)
+	}
+	laterRelativePath := filepath.Join(nestedDir, ".qwen-custom", "global", "QWEN.md")
+	if _, err := os.Lstat(laterRelativePath); !os.IsNotExist(err) {
+		t.Fatalf("later cwd-relative QWEN_HOME path should remain absent; got %v", err)
+	}
+	if target, err := os.Readlink(repoPath); err != nil || target != contractTarget {
+		t.Fatalf("stable repo QWEN.md target = %q, err = %v; want %q", target, err, contractTarget)
+	}
+}
+
+func TestPreferredGlobalOccupiedRetainsManagedRepoContract(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+	t.Setenv("CODEX_HOME", "")
+	projectRoot := t.TempDir()
+	contractTarget := filepath.Join(homeDir, ".liza", "CORE.md")
+	repoPath := filepath.Join(projectRoot, "AGENTS.md")
+	globalPath := filepath.Join(homeDir, ".codex", "AGENTS.md")
+	if err := os.Symlink(contractTarget, repoPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(globalPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(globalPath, []byte("user instructions\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	provider, ok := providers.EmbeddedCatalog().Resolve("codex")
+	if !ok {
+		t.Fatal("embedded Codex provider missing")
+	}
+
+	stderr, err := captureStderrForTest(func() error {
+		createContractSymlinksForProviders(projectRoot, contractTarget, []providers.Provider{provider}, "")
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stderr, "retaining repo activation") {
+		t.Fatalf("stderr = %q, want safe fallback diagnostic", stderr)
+	}
+	if target, err := os.Readlink(repoPath); err != nil || target != contractTarget {
+		t.Fatalf("repo contract changed; target = %q, err = %v", target, err)
+	}
+	if content, err := os.ReadFile(globalPath); err != nil || string(content) != "user instructions\n" {
+		t.Fatalf("user global file changed; content = %q, err = %v", content, err)
 	}
 }
 
@@ -2843,10 +3033,10 @@ func TestInitPairingCommand_Claude(t *testing.T) {
 		t.Fatalf("InitPairingCommand failed: %v", err)
 	}
 
-	// CLAUDE.md should be a symlink to ~/.liza/CORE.md
-	target, err := os.Readlink(filepath.Join(gitDir, "CLAUDE.md"))
+	// Claude's documented global instruction path should point to ~/.liza/CORE.md.
+	target, err := os.Readlink(filepath.Join(fakeHome, ".claude", "CLAUDE.md"))
 	if err != nil {
-		t.Fatalf("CLAUDE.md not a symlink: %v", err)
+		t.Fatalf("global CLAUDE.md not a symlink: %v", err)
 	}
 	expected := filepath.Join(fakeHome, ".liza", "CORE.md")
 	if target != expected {
@@ -2902,11 +3092,11 @@ func TestInitPairingCommand_MultipleAgents(t *testing.T) {
 		agent string
 		file  string
 	}{
-		{"claude", "CLAUDE.md"},
-		{"codex", "AGENTS.md"},
-		{"gemini", "GEMINI.md"},
+		{"claude", filepath.Join(".claude", "CLAUDE.md")},
+		{"codex", filepath.Join(".codex", "AGENTS.md")},
+		{"gemini", filepath.Join(".gemini", "GEMINI.md")},
 	} {
-		target, err := os.Readlink(filepath.Join(gitDir, tc.file))
+		target, err := os.Readlink(filepath.Join(fakeHome, tc.file))
 		if err != nil {
 			t.Errorf("%s (%s): not a symlink: %v", tc.file, tc.agent, err)
 			continue
@@ -2991,6 +3181,115 @@ func TestInitPairingCommand_CursorSkipsBashPolicyWhenGateDisabled(t *testing.T) 
 	}
 	verifyClaudeArtifacts(t, gitDir)
 	verifyCodexHooks(t, gitDir)
+}
+
+func TestInitPairingCommand_CursorAndOpenCodeRetainSharedRepoContract(t *testing.T) {
+	gitDir := setupGitRepo(t)
+	defer os.RemoveAll(gitDir)
+	fakeHome := setupGlobalLiza(t)
+
+	originalDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(originalDir)
+	if err := os.Chdir(gitDir); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := InitPairingCommand(InitPairingParams{Agents: []string{"cursor", "opencode"}}); err != nil {
+		t.Fatalf("InitPairingCommand() error = %v", err)
+	}
+	contractTarget := filepath.Join(fakeHome, ".liza", "CORE.md")
+	repoPath := filepath.Join(gitDir, "AGENTS.md")
+	if target, err := os.Readlink(repoPath); err != nil || target != contractTarget {
+		t.Fatalf("shared repo AGENTS.md target = %q, err = %v; want %q", target, err, contractTarget)
+	}
+	globalPath := filepath.Join(fakeHome, ".config", "opencode", "AGENTS.md")
+	if target, err := os.Readlink(globalPath); err != nil || target != contractTarget {
+		t.Fatalf("OpenCode global AGENTS.md target = %q, err = %v; want %q", target, err, contractTarget)
+	}
+}
+
+func TestInitPairingCommand_SharedRepoContractSurvivesGlobalActivationFailure(t *testing.T) {
+	gitDir := setupGitRepo(t)
+	defer os.RemoveAll(gitDir)
+	fakeHome := setupGlobalLiza(t)
+	contractTarget := filepath.Join(fakeHome, ".liza", "CORE.md")
+	codexGlobalPath := filepath.Join(fakeHome, ".codex", "AGENTS.md")
+	if err := os.MkdirAll(filepath.Dir(codexGlobalPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(codexGlobalPath, []byte("user-owned Codex instructions\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	originalDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(originalDir)
+	if err := os.Chdir(gitDir); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := InitPairingCommand(InitPairingParams{Agents: []string{"codex", "opencode"}}); err != nil {
+		t.Fatalf("InitPairingCommand() error = %v", err)
+	}
+	repoPath := filepath.Join(gitDir, "AGENTS.md")
+	if target, err := os.Readlink(repoPath); err != nil || target != contractTarget {
+		t.Fatalf("shared repo AGENTS.md target = %q, err = %v; want %q", target, err, contractTarget)
+	}
+	opencodeGlobalPath := filepath.Join(fakeHome, ".config", "opencode", "AGENTS.md")
+	if target, err := os.Readlink(opencodeGlobalPath); err != nil || target != contractTarget {
+		t.Fatalf("OpenCode global AGENTS.md target = %q, err = %v; want %q", target, err, contractTarget)
+	}
+	if content, err := os.ReadFile(codexGlobalPath); err != nil || string(content) != "user-owned Codex instructions\n" {
+		t.Fatalf("user-owned Codex global content = %q, err = %v", content, err)
+	}
+}
+
+func TestCreateContractSymlinksForProviders_NormalizesSharedRepoPaths(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+	projectRoot := t.TempDir()
+	contractTarget := filepath.Join(homeDir, ".liza", "CORE.md")
+	blockedGlobalPath := filepath.Join(homeDir, ".first", "AGENTS.md")
+	if err := os.MkdirAll(filepath.Dir(blockedGlobalPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(blockedGlobalPath, []byte("user-owned instructions\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	preferGlobal := true
+	agents := []providers.Provider{
+		{
+			ID: "first",
+			Setup: providers.Setup{Contract: providers.ContractLinks{
+				RepoFile:       "AGENTS.md",
+				GlobalFallback: ".first/AGENTS.md",
+				PreferGlobal:   &preferGlobal,
+			}},
+		},
+		{
+			ID: "second",
+			Setup: providers.Setup{Contract: providers.ContractLinks{
+				RepoFile:       "./AGENTS.md",
+				GlobalFallback: ".second/AGENTS.md",
+				PreferGlobal:   &preferGlobal,
+			}},
+		},
+	}
+
+	createContractSymlinksForProviders(projectRoot, contractTarget, agents, "")
+	repoPath := filepath.Join(projectRoot, "AGENTS.md")
+	if target, err := os.Readlink(repoPath); err != nil || target != contractTarget {
+		t.Fatalf("normalized shared repo target = %q, err = %v; want %q", target, err, contractTarget)
+	}
+	secondGlobalPath := filepath.Join(homeDir, ".second", "AGENTS.md")
+	if target, err := os.Readlink(secondGlobalPath); err != nil || target != contractTarget {
+		t.Fatalf("second global target = %q, err = %v; want %q", target, err, contractTarget)
+	}
 }
 
 func TestInitPairingCommand_CursorWarnsWhenBashPolicyMissing(t *testing.T) {
@@ -3705,9 +4004,9 @@ func TestInitPairingCommand_Idempotent(t *testing.T) {
 		}
 	}
 
-	target, err := os.Readlink(filepath.Join(gitDir, "CLAUDE.md"))
+	target, err := os.Readlink(filepath.Join(fakeHome, ".claude", "CLAUDE.md"))
 	if err != nil {
-		t.Fatalf("CLAUDE.md not a symlink: %v", err)
+		t.Fatalf("global CLAUDE.md not a symlink: %v", err)
 	}
 	expected := filepath.Join(fakeHome, ".liza", "CORE.md")
 	if target != expected {

@@ -20,7 +20,12 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-var errCatalogNotModified = errors.New("provider catalog not modified")
+var (
+	errCatalogNotModified = errors.New("provider catalog not modified")
+	// ErrUnstableGlobalRoot identifies environment roots whose meaning changes
+	// with the provider process's working directory.
+	ErrUnstableGlobalRoot = errors.New("provider global root is unstable across working directories")
+)
 
 const (
 	DefaultCatalogURL     = "https://raw.githubusercontent.com/liza-mas/liza/main/provider-catalog.yaml"
@@ -77,9 +82,12 @@ type Symlink struct {
 }
 
 type ContractLinks struct {
-	RepoFile       string `yaml:"repo_file,omitempty"`
-	GlobalFallback string `yaml:"global_fallback,omitempty"`
-	LocalFallback  string `yaml:"local_fallback,omitempty"`
+	RepoFile                    string `yaml:"repo_file,omitempty"`
+	GlobalFallback              string `yaml:"global_fallback,omitempty"`
+	GlobalFallbackEnv           string `yaml:"global_fallback_env,omitempty"`
+	GlobalFallbackEnvSuffix     string `yaml:"global_fallback_env_suffix,omitempty"`
+	GlobalFallbackEnvExpandHome bool   `yaml:"global_fallback_env_expand_home,omitempty"`
+	LocalFallback               string `yaml:"local_fallback,omitempty"`
 	// PreferGlobal selects the global managed link when both contract locations
 	// exist. A nil value allows stale catalogs to inherit the embedded default.
 	PreferGlobal *bool `yaml:"prefer_global,omitempty"`
@@ -87,6 +95,35 @@ type ContractLinks struct {
 
 func (c ContractLinks) PrefersGlobal() bool {
 	return c.PreferGlobal != nil && *c.PreferGlobal
+}
+
+// GlobalPath resolves the contract path that the provider actually reads.
+// The catalog default is relative to the user's home directory. Providers
+// with a documented config-root override can replace it through an environment
+// variable while keeping the instruction filename catalog-owned.
+func (c ContractLinks) GlobalPath(homeDir string) (string, error) {
+	if c.GlobalFallback == "" {
+		return "", nil
+	}
+	if c.GlobalFallbackEnv != "" {
+		if root := strings.TrimSpace(os.Getenv(c.GlobalFallbackEnv)); root != "" {
+			if strings.HasPrefix(root, "~") && !c.GlobalFallbackEnvExpandHome {
+				return "", fmt.Errorf("%s must contain an absolute path", c.GlobalFallbackEnv)
+			}
+			if root == "~" {
+				root = homeDir
+			} else if strings.HasPrefix(root, "~/") || strings.HasPrefix(root, `~\`) {
+				root = filepath.Join(homeDir, root[2:])
+			} else if strings.HasPrefix(root, "~") {
+				return "", fmt.Errorf("%s contains unsupported home expansion %q", c.GlobalFallbackEnv, root)
+			}
+			if !filepath.IsAbs(root) {
+				return "", fmt.Errorf("%w: %s relative path %q", ErrUnstableGlobalRoot, c.GlobalFallbackEnv, root)
+			}
+			return filepath.Join(filepath.Clean(root), c.GlobalFallbackEnvSuffix), nil
+		}
+	}
+	return filepath.Join(homeDir, c.GlobalFallback), nil
 }
 
 type ActivationAssets struct {
@@ -263,11 +300,30 @@ func validateProvider(p Provider) error {
 		p.Setup.SkillsDir,
 		p.Setup.Contract.RepoFile,
 		p.Setup.Contract.GlobalFallback,
+		p.Setup.Contract.GlobalFallbackEnvSuffix,
 		p.Setup.Contract.LocalFallback,
 	} {
 		if path != "" && !validRelativePath(path) {
 			return fmt.Errorf("provider %s has invalid setup path %q", p.ID, path)
 		}
+	}
+	contract := p.Setup.Contract
+	if (contract.GlobalFallbackEnv == "") != (contract.GlobalFallbackEnvSuffix == "") {
+		return fmt.Errorf("provider %s must define both global_fallback_env and global_fallback_env_suffix", p.ID)
+	}
+	if contract.GlobalFallbackEnv != "" {
+		if contract.GlobalFallback == "" {
+			return fmt.Errorf("provider %s defines global_fallback_env without global_fallback", p.ID)
+		}
+		if !validEnvName(contract.GlobalFallbackEnv) {
+			return fmt.Errorf("provider %s has invalid global_fallback_env %q", p.ID, contract.GlobalFallbackEnv)
+		}
+	}
+	if contract.GlobalFallbackEnvExpandHome && contract.GlobalFallbackEnv == "" {
+		return fmt.Errorf("provider %s expands a global fallback environment home path without global_fallback_env", p.ID)
+	}
+	if contract.PrefersGlobal() && contract.GlobalFallback == "" {
+		return fmt.Errorf("provider %s prefers global contract without global_fallback", p.ID)
 	}
 	for _, path := range p.Setup.ExtraDirs {
 		if !validRelativePath(path) {
@@ -316,6 +372,19 @@ func validID(value string) bool {
 	}
 	for _, r := range value {
 		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func validEnvName(value string) bool {
+	if value == "" {
+		return false
+	}
+	for i, r := range value {
+		if (r >= 'A' && r <= 'Z') || r == '_' || (i > 0 && r >= '0' && r <= '9') {
 			continue
 		}
 		return false

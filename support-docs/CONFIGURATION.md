@@ -66,8 +66,9 @@ overwrites, and detected `post_worktree_cmd` suggestions.
 
 Depending on selected providers and options, `§BRAND_BINARY_NAME§ init` writes or updates:
 
-- root contract discovery files such as `CLAUDE.md`, `AGENTS.md`, and
-  `GEMINI.md`, usually as symlinks to `~/§BRAND_GLOBAL_DIRNAME§/CORE.md`
+- provider contract discovery links to `~/§BRAND_GLOBAL_DIRNAME§/CORE.md`.
+  Providers with documented global instruction files use those paths; Cursor,
+  Kimi, and Devin use repo-root files.
 - project-local provider hooks and settings, such as `.claude/settings.json`,
   `.codex/` hook configuration, and standalone `bash-policy` provider hooks
 - `.claude/hooks/` and `.codex/hooks/` scripts that enforce session
@@ -77,9 +78,9 @@ Depending on selected providers and options, `§BRAND_BINARY_NAME§ init` writes
   activation
 - global `~/.codex/config.toml` entries for Codex's project root, project `.git`
   directory, support/cache writable roots, and noninteractive workspace baseline
-- global fallback contract symlinks such as `~/.claude/CLAUDE.md` or
-  `~/.codex/AGENTS.md` when brownfield repo-root files prevent local symlink
-  creation. OpenCode uses `~/.config/opencode/AGENTS.md`.
+- global contract symlinks for global-first providers, including active
+  `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `XDG_CONFIG_HOME`, and `QWEN_HOME`
+  overrides
 - `.claudeignore` when absent or explicitly refreshed
 - `GUARDRAILS.md` when absent
 - `§BRAND_PROJECT_DIRNAME§/state.yaml`, `§BRAND_PROJECT_DIRNAME§/log.yaml`, and `§BRAND_PROJECT_DIRNAME§/pipeline.yaml` for a MAS
@@ -90,23 +91,31 @@ Depending on selected providers and options, `§BRAND_BINARY_NAME§ init` writes
 - standalone `.bash-policy.yaml` defaults and selected provider hooks when
   `§BRAND_ENV_PREFIX§_ENABLE_BASH_POLICY` is enabled
 
-For brownfield projects that already have their own `CLAUDE.md`, `AGENTS.md`,
-or `GEMINI.md`, §BRAND_NAME_TITLE§ does not overwrite the repo-root file. It uses the
-provider global fallback when possible:
+Provider catalog metadata defines the active contract location:
 
-| Repo root file | Global fallback |
-|---------------|-----------------|
-| `CLAUDE.md` | `~/.claude/CLAUDE.md` |
-| `AGENTS.md` (Codex or Cursor) | `~/.codex/AGENTS.md` |
-| `AGENTS.md` (OpenCode) | `~/.config/opencode/AGENTS.md` |
-| `GEMINI.md` | `~/.gemini/GEMINI.md` |
+| Provider | Active contract path |
+|----------|----------------------|
+| Claude | `${CLAUDE_CONFIG_DIR:-~/.claude}/CLAUDE.md` |
+| Codex | `${CODEX_HOME:-~/.codex}/AGENTS.md` |
+| OpenCode | `${XDG_CONFIG_HOME:-~/.config}/opencode/AGENTS.md` |
+| Gemini | `~/.gemini/GEMINI.md` |
+| Qwen | `${QWEN_HOME:-~/.qwen}/QWEN.md` for unset, absolute, or `~`-based values; `<repo>/QWEN.md` for relative values |
+| Cursor | `<repo>/AGENTS.md` |
+| Kimi | `<repo>/CLAUDE.md` |
+| Devin | Catalog-defined repo path |
 
-If both the repo-root file and the global fallback are non-§BRAND_NAME_TITLE§ files, `§BRAND_BINARY_NAME§
-init` warns and skips that provider activation path. If a §BRAND_NAME_TITLE§ symlink already
-exists at either location, `§BRAND_BINARY_NAME§ init` reports it and does not create a
-duplicate. When a provider catalog entry sets `contract.prefer_global`, managed
-symlinks at both locations are resolved by removing the redundant repo-root link;
-Claude uses this policy to keep `~/.claude/CLAUDE.md` active.
+Global-first providers set `contract.prefer_global`. Initialization creates or
+verifies the active global link before removing any managed repo link. A repo
+path shared by multiple selected providers remains because another provider's
+global activation may fail at runtime. If the global path cannot be resolved or
+created, or is occupied by a user-owned file, the repo link is retained or
+created instead. Repo-only providers never receive an invented global fallback.
+Custom providers without `prefer_global` retain managed links at both declared
+locations and emit a duplicate warning.
+
+§BRAND_NAME_TITLE§ never overwrites user-owned contract files. If both the repo-root
+file and a declared global path are user-owned, `§BRAND_BINARY_NAME§ init` warns and
+skips that provider activation path.
 
 During the initialization gate, shell fallbacks read one mandatory document per command;
 consecutive invalid reads instruct the agent to stop instead of trying path or command variants.

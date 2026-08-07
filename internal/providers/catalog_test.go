@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -16,6 +17,9 @@ import (
 
 func TestEmbeddedCatalogResolvesBuiltInsAndAliases(t *testing.T) {
 	cat := EmbeddedCatalog()
+	if cat.Version != 2 {
+		t.Fatalf("EmbeddedCatalog().Version = %d, want 2", cat.Version)
+	}
 
 	for _, id := range []string{"claude", "codex", "codex-acp", "cursor", "cursor-acp", "opencode", "opencode-acp", "gemini", "mistral", "kimi"} {
 		if _, ok := cat.Resolve(id); !ok {
@@ -43,13 +47,17 @@ func TestEmbeddedCatalogResolvesBuiltInsAndAliases(t *testing.T) {
 	if !slices.Equal(cursor.Runtime.RunArgs, []string{"-p"}) {
 		t.Fatalf("cursor run_args = %v, want [-p]", cursor.Runtime.RunArgs)
 	}
-	claude, ok := cat.Resolve("claude")
-	if !ok || !claude.Setup.Contract.PrefersGlobal() {
-		t.Fatalf("embedded Claude contract = %+v, %v; want prefer_global", claude.Setup.Contract, ok)
+	for _, id := range []string{"claude", "codex", "opencode", "gemini", "qwen"} {
+		provider, ok := cat.Resolve(id)
+		if !ok || !provider.Setup.Contract.PrefersGlobal() {
+			t.Fatalf("embedded %s contract = %+v, %v; want prefer_global", id, provider.Setup.Contract, ok)
+		}
 	}
-	codex, ok := cat.Resolve("codex")
-	if !ok || codex.Setup.Contract.PrefersGlobal() {
-		t.Fatalf("embedded Codex contract = %+v, %v; want repo/global duplicate warning", codex.Setup.Contract, ok)
+	for _, id := range []string{"cursor", "kimi", "devin"} {
+		provider, ok := cat.Resolve(id)
+		if !ok || provider.Setup.Contract.PrefersGlobal() || provider.Setup.Contract.GlobalFallback != "" {
+			t.Fatalf("embedded %s contract = %+v, %v; want repo-only activation", id, provider.Setup.Contract, ok)
+		}
 	}
 	// logged_run_args must not include --verbose (undocumented Cursor CLI flag)
 	for _, arg := range cursor.Runtime.LoggedRunArgs {
@@ -80,6 +88,17 @@ func TestRepositoryCatalogAddsRemoteProviders(t *testing.T) {
 	cat, err := ParseCatalog(data)
 	if err != nil {
 		t.Fatalf("ParseCatalog(provider-catalog.yaml) error = %v", err)
+	}
+	if cat.Version != 2 {
+		t.Fatalf("provider-catalog.yaml version = %d, want 2", cat.Version)
+	}
+	embedded := EmbeddedCatalog()
+	for _, id := range []string{"claude", "codex", "cursor", "opencode", "gemini", "kimi", "qwen", "devin"} {
+		publishedProvider, publishedOK := cat.Resolve(id)
+		embeddedProvider, embeddedOK := embedded.Resolve(id)
+		if !publishedOK || !embeddedOK || !reflect.DeepEqual(publishedProvider.Setup.Contract, embeddedProvider.Setup.Contract) {
+			t.Fatalf("published %s contract = %+v, %v; embedded = %+v, %v", id, publishedProvider.Setup.Contract, publishedOK, embeddedProvider.Setup.Contract, embeddedOK)
+		}
 	}
 	if _, ok := cat.Resolve("qwen"); !ok {
 		t.Fatal("provider-catalog.yaml missing qwen")
@@ -128,6 +147,88 @@ func TestRepositoryCatalogAddsRemoteProviders(t *testing.T) {
 	}
 	if !slices.Contains(tool.ACPXPromptArgs, "--agent") || !slices.Contains(tool.ACPXPromptArgs, "{{acpxAgent}}") {
 		t.Fatalf("devin-acp prompt args = %v, want raw agent command placeholder", tool.ACPXPromptArgs)
+	}
+}
+
+func TestContractLinksGlobalPath(t *testing.T) {
+	homeDir := t.TempDir()
+	links := ContractLinks{
+		GlobalFallback:          ".codex/AGENTS.md",
+		GlobalFallbackEnv:       "CODEX_HOME",
+		GlobalFallbackEnvSuffix: "AGENTS.md",
+	}
+
+	t.Run("default beneath home", func(t *testing.T) {
+		t.Setenv("CODEX_HOME", "")
+		got, err := links.GlobalPath(homeDir)
+		if err != nil {
+			t.Fatalf("GlobalPath() error = %v", err)
+		}
+		want := filepath.Join(homeDir, ".codex", "AGENTS.md")
+		if got != want {
+			t.Fatalf("GlobalPath() = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("documented environment override", func(t *testing.T) {
+		configDir := t.TempDir()
+		t.Setenv("CODEX_HOME", configDir)
+		got, err := links.GlobalPath(homeDir)
+		if err != nil {
+			t.Fatalf("GlobalPath() error = %v", err)
+		}
+		want := filepath.Join(configDir, "AGENTS.md")
+		if got != want {
+			t.Fatalf("GlobalPath() = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("relative override rejected", func(t *testing.T) {
+		t.Setenv("CODEX_HOME", "relative/codex")
+		if _, err := links.GlobalPath(homeDir); !errors.Is(err, ErrUnstableGlobalRoot) {
+			t.Fatalf("GlobalPath() relative-root error = %v, want working-directory stability diagnostic", err)
+		}
+
+		t.Setenv("CODEX_HOME", "~/.codex-alt")
+		if _, err := links.GlobalPath(homeDir); err == nil || !strings.Contains(err.Error(), "absolute path") {
+			t.Fatalf("GlobalPath() home-root error = %v, want absolute path diagnostic", err)
+		}
+	})
+}
+
+func TestContractLinksGlobalPathExpandsProviderHomeRoot(t *testing.T) {
+	homeDir := t.TempDir()
+
+	links := ContractLinks{
+		GlobalFallback:              ".qwen/QWEN.md",
+		GlobalFallbackEnv:           "QWEN_HOME",
+		GlobalFallbackEnvSuffix:     "QWEN.md",
+		GlobalFallbackEnvExpandHome: true,
+	}
+	tests := []struct {
+		name    string
+		env     string
+		wantDir string
+	}{
+		{name: "absolute", env: filepath.Join(homeDir, "qwen-absolute"), wantDir: filepath.Join(homeDir, "qwen-absolute")},
+		{name: "home expansion", env: "~/.qwen-alt", wantDir: filepath.Join(homeDir, ".qwen-alt")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("QWEN_HOME", tt.env)
+			got, err := links.GlobalPath(homeDir)
+			if err != nil {
+				t.Fatalf("GlobalPath() error = %v", err)
+			}
+			if want := filepath.Join(tt.wantDir, "QWEN.md"); got != want {
+				t.Fatalf("GlobalPath() = %q, want %q", got, want)
+			}
+		})
+	}
+
+	t.Setenv("QWEN_HOME", filepath.Join("config", "qwen"))
+	if _, err := links.GlobalPath(homeDir); !errors.Is(err, ErrUnstableGlobalRoot) {
+		t.Fatalf("GlobalPath() relative-root error = %v, want working-directory stability diagnostic", err)
 	}
 }
 
@@ -215,6 +316,37 @@ providers:
 `))
 				if err == nil || !strings.Contains(err.Error(), "invalid setup path") {
 					t.Fatalf("ParseCatalog error = %v, want invalid setup path error", err)
+				}
+			})
+		}
+	})
+
+	t.Run("invalid global override metadata", func(t *testing.T) {
+		tests := []struct {
+			name     string
+			contract string
+			want     string
+		}{
+			{name: "missing suffix", contract: "global_fallback: .codex/AGENTS.md\n        global_fallback_env: CODEX_HOME", want: "must define both"},
+			{name: "invalid environment name", contract: "global_fallback: .codex/AGENTS.md\n        global_fallback_env: codex-home\n        global_fallback_env_suffix: AGENTS.md", want: "invalid global_fallback_env"},
+			{name: "home expansion without environment", contract: "global_fallback: .qwen/QWEN.md\n        global_fallback_env_expand_home: true", want: "without global_fallback_env"},
+			{name: "preference without path", contract: "prefer_global: true", want: "without global_fallback"},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				_, err := ParseCatalog([]byte(`version: 2
+providers:
+  - id: codex
+    display_name: Codex
+    backend: cli
+    setup:
+      contract:
+        ` + tt.contract + `
+    runtime:
+      executable: codex
+`))
+				if err == nil || !strings.Contains(err.Error(), tt.want) {
+					t.Fatalf("ParseCatalog error = %v, want %q", err, tt.want)
 				}
 			})
 		}

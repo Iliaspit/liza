@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -53,9 +54,12 @@ func TestInitPairingCommand_ProviderFromCatalog(t *testing.T) {
 		t.Fatalf("InitPairingCommand() error = %v", err)
 	}
 
-	target, err := os.Readlink(filepath.Join(gitDir, "QWEN.md"))
+	if _, err := os.Lstat(filepath.Join(gitDir, "QWEN.md")); !os.IsNotExist(err) {
+		t.Fatalf("repo QWEN.md should be absent for preferred global activation; got %v", err)
+	}
+	target, err := os.Readlink(filepath.Join(fakeHome, ".qwen", "QWEN.md"))
 	if err != nil {
-		t.Fatalf("QWEN.md not a symlink: %v", err)
+		t.Fatalf("global QWEN.md not a symlink: %v", err)
 	}
 	if want := filepath.Join(fakeHome, ".liza", "CORE.md"); target != want {
 		t.Fatalf("QWEN.md = %q, want %q", target, want)
@@ -88,9 +92,11 @@ func TestInitPairingCommand_ProviderFromCatalogCreatesNestedContractParent(t *te
 	}
 }
 
-func TestCachedLegacyClaudeCatalogBackfillsPreferGlobal(t *testing.T) {
+func TestCachedLegacyCatalogMigratesBuiltInContractPolicy(t *testing.T) {
 	homeDir := t.TempDir()
 	t.Setenv("HOME", homeDir)
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	t.Setenv("CODEX_HOME", "")
 	cachePath, metaPath := providers.CachePaths(homeDir)
 	if err := os.MkdirAll(filepath.Dir(cachePath), 0755); err != nil {
 		t.Fatalf("create provider cache directory: %v", err)
@@ -106,6 +112,15 @@ providers:
         global_fallback: .claude/CLAUDE.md
     runtime:
       executable: claude
+  - id: codex
+    display_name: Codex
+    backend: cli
+    setup:
+      contract:
+        repo_file: AGENTS.md
+        global_fallback: .codex/AGENTS.md
+    runtime:
+      executable: codex
 `
 	if err := os.WriteFile(cachePath, []byte(legacyCatalog), 0644); err != nil {
 		t.Fatalf("write legacy provider cache: %v", err)
@@ -121,31 +136,235 @@ providers:
 	t.Setenv(providers.EnvCatalogURL, catalogURL)
 
 	catalog := loadProviderCatalog(homeDir)
-	selected, err := resolveCatalogProviders(catalog, []string{"claude"})
+	selected, err := resolveCatalogProviders(catalog, []string{"claude", "codex"})
 	if err != nil {
-		t.Fatalf("resolve cached Claude provider: %v", err)
+		t.Fatalf("resolve cached providers: %v", err)
 	}
-	if len(selected) != 1 || !selected[0].Setup.Contract.PrefersGlobal() {
-		t.Fatalf("cached Claude contract = %+v, want embedded prefer_global default", selected)
+	if len(selected) != 2 {
+		t.Fatalf("resolved providers = %+v, want Claude and Codex", selected)
+	}
+	for _, provider := range selected {
+		if !provider.Setup.Contract.PrefersGlobal() {
+			t.Fatalf("cached %s contract = %+v, want embedded v2 policy", provider.ID, provider.Setup.Contract)
+		}
 	}
 
 	projectRoot := t.TempDir()
 	contractTarget := filepath.Join(homeDir, ".liza", "CORE.md")
-	repoPath := filepath.Join(projectRoot, "CLAUDE.md")
-	globalPath := filepath.Join(homeDir, ".claude", "CLAUDE.md")
-	if err := os.MkdirAll(filepath.Dir(globalPath), 0755); err != nil {
-		t.Fatalf("create global Claude directory: %v", err)
+	links := []struct {
+		repoFile  string
+		globalRel string
+	}{
+		{repoFile: "CLAUDE.md", globalRel: filepath.Join(".claude", "CLAUDE.md")},
+		{repoFile: "AGENTS.md", globalRel: filepath.Join(".codex", "AGENTS.md")},
 	}
-	if err := os.Symlink(contractTarget, repoPath); err != nil {
-		t.Fatalf("create repo Claude symlink: %v", err)
-	}
-	if err := os.Symlink(contractTarget, globalPath); err != nil {
-		t.Fatalf("create global Claude symlink: %v", err)
+	for _, link := range links {
+		repoPath := filepath.Join(projectRoot, link.repoFile)
+		globalPath := filepath.Join(homeDir, link.globalRel)
+		if err := os.MkdirAll(filepath.Dir(globalPath), 0755); err != nil {
+			t.Fatalf("create global contract directory: %v", err)
+		}
+		if err := os.Symlink(contractTarget, repoPath); err != nil {
+			t.Fatalf("create repo %s symlink: %v", link.repoFile, err)
+		}
+		if err := os.Symlink(contractTarget, globalPath); err != nil {
+			t.Fatalf("create global %s symlink: %v", link.repoFile, err)
+		}
 	}
 
 	createContractSymlinksForProviders(projectRoot, contractTarget, selected, "")
-	if _, err := os.Lstat(repoPath); !os.IsNotExist(err) {
-		t.Fatalf("cached legacy catalog should remove duplicate repo CLAUDE.md; got %v", err)
+	for _, link := range links {
+		repoPath := filepath.Join(projectRoot, link.repoFile)
+		if _, err := os.Lstat(repoPath); !os.IsNotExist(err) {
+			t.Errorf("cached legacy catalog should remove duplicate repo %s; got %v", link.repoFile, err)
+		}
+		globalPath := filepath.Join(homeDir, link.globalRel)
+		if target, err := os.Readlink(globalPath); err != nil || target != contractTarget {
+			t.Errorf("global %s changed; target = %q, err = %v", link.repoFile, target, err)
+		}
+	}
+}
+
+func TestResolveCatalogProvidersPreservesCustomVersionOneBuiltInContract(t *testing.T) {
+	cat, err := providers.ParseCatalog([]byte(`version: 1
+providers:
+  - id: codex
+    display_name: Custom Codex
+    backend: cli
+    setup:
+      contract:
+        repo_file: CUSTOM_AGENTS.md
+        global_fallback: .custom-codex/instructions.md
+        local_fallback: .custom-codex/local.md
+        prefer_global: false
+    runtime:
+      executable: codex
+`))
+	if err != nil {
+		t.Fatalf("ParseCatalog() error = %v", err)
+	}
+
+	selected, err := resolveCatalogProviders(cat, []string{"codex"})
+	if err != nil {
+		t.Fatalf("resolveCatalogProviders() error = %v", err)
+	}
+	if len(selected) != 1 {
+		t.Fatalf("resolved providers = %+v, want one Codex provider", selected)
+	}
+	contract := selected[0].Setup.Contract
+	if contract.RepoFile != "CUSTOM_AGENTS.md" ||
+		contract.GlobalFallback != ".custom-codex/instructions.md" ||
+		contract.LocalFallback != ".custom-codex/local.md" {
+		t.Fatalf("custom v1 contract paths changed: %+v", contract)
+	}
+	if contract.PreferGlobal == nil || contract.PrefersGlobal() {
+		t.Fatalf("custom v1 prefer_global changed: %+v", contract.PreferGlobal)
+	}
+	if contract.GlobalFallbackEnv != "" || contract.GlobalFallbackEnvSuffix != "" || contract.GlobalFallbackEnvExpandHome {
+		t.Fatalf("custom v1 path inherited incompatible environment policy: %+v", contract)
+	}
+}
+
+func TestResolveCatalogProvidersMigratesKnownLegacyRepoOnlyContract(t *testing.T) {
+	cat, err := providers.ParseCatalog([]byte(`version: 1
+providers:
+  - id: cursor-acp
+    display_name: Cursor ACP
+    backend: acpx
+    setup:
+      contract:
+        repo_file: AGENTS.md
+        global_fallback: .codex/AGENTS.md
+    runtime:
+      executable: acpx
+`))
+	if err != nil {
+		t.Fatalf("ParseCatalog() error = %v", err)
+	}
+
+	selected, err := resolveCatalogProviders(cat, []string{"cursor-acp"})
+	if err != nil {
+		t.Fatalf("resolveCatalogProviders() error = %v", err)
+	}
+	if len(selected) != 1 {
+		t.Fatalf("resolved providers = %+v, want one Cursor ACP provider", selected)
+	}
+	contract := selected[0].Setup.Contract
+	if contract.RepoFile != "AGENTS.md" || contract.GlobalFallback != "" || contract.PreferGlobal != nil {
+		t.Fatalf("known legacy Cursor contract was not migrated to repo-only: %+v", contract)
+	}
+}
+
+func TestResolveCatalogProvidersPreservesCustomVersionOneRepoOnlyBuiltInContract(t *testing.T) {
+	cat, err := providers.ParseCatalog([]byte(`version: 1
+providers:
+  - id: cursor-acp
+    display_name: Custom Cursor ACP
+    backend: acpx
+    setup:
+      contract:
+        repo_file: CUSTOM_AGENTS.md
+        global_fallback: .custom-cursor/AGENTS.md
+        global_fallback_env: CUSTOM_CURSOR_HOME
+        global_fallback_env_suffix: AGENTS.md
+        global_fallback_env_expand_home: true
+        local_fallback: CUSTOM_AGENTS.local.md
+        prefer_global: true
+    runtime:
+      executable: acpx
+`))
+	if err != nil {
+		t.Fatalf("ParseCatalog() error = %v", err)
+	}
+
+	selected, err := resolveCatalogProviders(cat, []string{"cursor-acp"})
+	if err != nil {
+		t.Fatalf("resolveCatalogProviders() error = %v", err)
+	}
+	if len(selected) != 1 {
+		t.Fatalf("resolved providers = %+v, want one Cursor ACP provider", selected)
+	}
+	contract := selected[0].Setup.Contract
+	if contract.RepoFile != "CUSTOM_AGENTS.md" ||
+		contract.GlobalFallback != ".custom-cursor/AGENTS.md" ||
+		contract.GlobalFallbackEnv != "CUSTOM_CURSOR_HOME" ||
+		contract.GlobalFallbackEnvSuffix != "AGENTS.md" ||
+		!contract.GlobalFallbackEnvExpandHome ||
+		contract.LocalFallback != "CUSTOM_AGENTS.local.md" ||
+		!contract.PrefersGlobal() {
+		t.Fatalf("custom v1 Cursor contract changed: %+v", contract)
+	}
+}
+
+func TestResolveCatalogProvidersPreservesBaseCursorCodexPath(t *testing.T) {
+	cat, err := providers.ParseCatalog([]byte(`version: 1
+providers:
+  - id: cursor
+    display_name: Custom Cursor
+    backend: cli
+    setup:
+      contract:
+        repo_file: AGENTS.md
+        global_fallback: .codex/AGENTS.md
+        prefer_global: true
+    runtime:
+      executable: cursor-agent
+`))
+	if err != nil {
+		t.Fatalf("ParseCatalog() error = %v", err)
+	}
+
+	selected, err := resolveCatalogProviders(cat, []string{"cursor"})
+	if err != nil {
+		t.Fatalf("resolveCatalogProviders() error = %v", err)
+	}
+	if len(selected) != 1 {
+		t.Fatalf("resolved providers = %+v, want one Cursor provider", selected)
+	}
+	contract := selected[0].Setup.Contract
+	if contract.GlobalFallback != ".codex/AGENTS.md" || !contract.PrefersGlobal() {
+		t.Fatalf("base Cursor custom Codex path changed: %+v", contract)
+	}
+}
+
+func TestDuplicateNonPreferGlobalSymlinksWarnsAndRetainsBoth(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+	projectRoot := t.TempDir()
+	contractTarget := filepath.Join(homeDir, ".liza", "CORE.md")
+	repoPath := filepath.Join(projectRoot, "CUSTOM.md")
+	globalPath := filepath.Join(homeDir, ".custom", "CUSTOM.md")
+	if err := os.MkdirAll(filepath.Dir(globalPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(contractTarget, repoPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(contractTarget, globalPath); err != nil {
+		t.Fatal(err)
+	}
+	provider := providers.Provider{
+		ID: "custom",
+		Setup: providers.Setup{Contract: providers.ContractLinks{
+			RepoFile:       "CUSTOM.md",
+			GlobalFallback: ".custom/CUSTOM.md",
+		}},
+	}
+
+	stderr, err := captureStderrForTest(func() error {
+		createContractSymlinksForProviders(projectRoot, contractTarget, []providers.Provider{provider}, "")
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("capture stderr: %v", err)
+	}
+	if !strings.Contains(stderr, "symlinks at both") {
+		t.Fatalf("stderr = %q, want duplicate-symlink warning", stderr)
+	}
+	for _, path := range []string{repoPath, globalPath} {
+		if target, err := os.Readlink(path); err != nil || target != contractTarget {
+			t.Errorf("managed link %s changed; target = %q, err = %v", path, target, err)
+		}
 	}
 }
 

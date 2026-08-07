@@ -315,7 +315,7 @@ func TestHasExplicitInitFlags_SembleEnvDoesNotForceWorkspaceInit(t *testing.T) {
 
 	projectRoot := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, projectRoot)
-	testhelpers.SetupGlobalLiza(t)
+	fakeHome := testhelpers.SetupGlobalLiza(t)
 
 	err := executeRootCommand(t, projectRoot, "init", "--gemini")
 	if err != nil {
@@ -324,7 +324,7 @@ func TestHasExplicitInitFlags_SembleEnvDoesNotForceWorkspaceInit(t *testing.T) {
 	if _, statErr := os.Stat(filepath.Join(projectRoot, ".liza")); !os.IsNotExist(statErr) {
 		t.Fatalf(".liza stat error = %v, want missing so Semble env does not force full workspace init", statErr)
 	}
-	linkTarget, err := os.Readlink(filepath.Join(projectRoot, "GEMINI.md"))
+	linkTarget, err := os.Readlink(filepath.Join(fakeHome, ".gemini", "GEMINI.md"))
 	if err != nil {
 		t.Fatalf("GEMINI.md symlink missing after pairing init: %v", err)
 	}

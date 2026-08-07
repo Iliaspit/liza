@@ -112,10 +112,10 @@ files into task worktrees before post-worktree setup runs.
 
 PAIRING MODE: Use agent flags without a description to create only the contract
 symlinks needed for pairing (no %[2]s/ workspace):
-  %[4]s init --claude           # creates CLAUDE.md -> ~/%[3]s/CORE.md
-  %[4]s init --claude --codex   # creates CLAUDE.md + AGENTS.md and repo hooks
-  %[4]s init --cursor           # creates Claude + Codex setup Cursor relies on
-  %[4]s init --opencode         # creates AGENTS.md -> ~/%[3]s/CORE.md`, brand.NameTitle, brand.ProjectDirName, brand.GlobalDirName, brand.BinaryName),
+  %[4]s init --claude           # activates Claude's global contract
+  %[4]s init --claude --codex   # activates both global contracts and repo hooks
+  %[4]s init --cursor           # creates repo AGENTS.md plus dependent setup
+  %[4]s init --opencode         # activates OpenCode's global contract`, brand.NameTitle, brand.ProjectDirName, brand.GlobalDirName, brand.BinaryName),
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		agents := collectAgentFlags(cmd)
@@ -655,11 +655,11 @@ func init() {
 	initCmd.Flags().StringArray("scip-search", nil, "enable a SCIP language for indexing (repeatable)")
 	initCmd.Flags().StringArray("scip-search-plan", nil, "pairing SCIP root override: go=<module-root>, typescript=<cwd>,<project-root>, or python=<cwd>[,<target-only>] (repeatable)")
 	initCmd.Flags().StringArray("provider", nil, "activate provider catalog id (repeatable)")
-	initCmd.Flags().Bool("claude", false, fmt.Sprintf("create CLAUDE.md symlink to ~/%s/CORE.md", brand.GlobalDirName))
-	initCmd.Flags().Bool("codex", false, fmt.Sprintf("create AGENTS.md symlink to ~/%s/CORE.md and configure repo hooks", brand.GlobalDirName))
-	initCmd.Flags().Bool("cursor", false, "create Claude/Codex project setup Cursor relies on")
-	initCmd.Flags().Bool("opencode", false, fmt.Sprintf("create AGENTS.md symlink to ~/%s/CORE.md", brand.GlobalDirName))
-	initCmd.Flags().Bool("gemini", false, fmt.Sprintf("create GEMINI.md symlink to ~/%s/CORE.md", brand.GlobalDirName))
+	initCmd.Flags().Bool("claude", false, fmt.Sprintf("activate the global Claude contract from ~/%s/CORE.md", brand.GlobalDirName))
+	initCmd.Flags().Bool("codex", false, fmt.Sprintf("activate the global Codex contract from ~/%s/CORE.md and configure repo hooks", brand.GlobalDirName))
+	initCmd.Flags().Bool("cursor", false, "create the repo AGENTS.md contract and dependent Claude/Codex project setup")
+	initCmd.Flags().Bool("opencode", false, fmt.Sprintf("activate the global OpenCode contract from ~/%s/CORE.md", brand.GlobalDirName))
+	initCmd.Flags().Bool("gemini", false, fmt.Sprintf("activate the global Gemini contract from ~/%s/CORE.md", brand.GlobalDirName))
 	initCmd.Flags().Bool("mistral", false, fmt.Sprintf("set up ~/.vibe/ for %s contract", brand.NameTitle))
 	registerCompletion(initCmd, "entry-point", completeValues("general-objective", "functional-spec", "technical-spec", "detailed-spec"))
 	registerCompletion(initCmd, "default-cli", completeCLINames)

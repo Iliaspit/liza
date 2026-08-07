@@ -1,5 +1,9 @@
 # 50 - Brownfield-Safe Initialization
 
+> **Current policy:** ADR-0098 supersedes the repo-first/global-fallback ordering
+> below. The no-overwrite brownfield invariant remains active, while supported
+> providers now prefer their documented global instruction paths.
+
 ## Context and Problem Statement
 
 Liza requires its behavioral contract to be activated via symlinks at the repo root (`CLAUDE.md`, `AGENTS.md`, `GEMINI.md`). Brownfield projects — existing codebases already using these CLI tools — may already have their own versions of these files. Running `liza init` would either fail or overwrite user-managed contract files.

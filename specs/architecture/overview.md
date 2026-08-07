@@ -192,29 +192,44 @@ TDD is mandatory for all code tasks in MAS. Tests must be written first against 
 **Contract Loading Chain:**
 
 Provider catalog entries declare a repo contract file plus optional local and
-global fallbacks. Initialization creates the managed repo symlink when that path
-is free. If a user-owned repo file already occupies it, initialization can use
-the provider's global fallback without overwriting the project file:
+global paths. Providers whose CLIs document a global instruction file set
+`prefer_global`; initialization establishes that active global link before
+removing any managed repo link. Environment-root metadata resolves provider
+overrides such as `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, and `XDG_CONFIG_HOME`:
 ```
-<REPO_ROOT>/CLAUDE.md → ~/.liza/CORE.md
-<REPO_ROOT>/AGENTS.md → ~/.liza/CORE.md
-<REPO_ROOT>/GEMINI.md → ~/.liza/CORE.md
-~/.claude/CLAUDE.md   → ~/.liza/CORE.md  # Claude global fallback
-~/.codex/AGENTS.md    → ~/.liza/CORE.md  # Codex global fallback
+${CLAUDE_CONFIG_DIR:-~/.claude}/CLAUDE.md          → ~/.liza/CORE.md
+${CODEX_HOME:-~/.codex}/AGENTS.md                  → ~/.liza/CORE.md
+${XDG_CONFIG_HOME:-~/.config}/opencode/AGENTS.md   → ~/.liza/CORE.md
+~/.gemini/GEMINI.md                                → ~/.liza/CORE.md
+${QWEN_HOME:-~/.qwen}/QWEN.md                     → ~/.liza/CORE.md  # unset, absolute, or ~-based
+<REPO_ROOT>/QWEN.md                               → ~/.liza/CORE.md  # relative QWEN_HOME
+<REPO_ROOT>/AGENTS.md                              → ~/.liza/CORE.md  # Cursor
+<REPO_ROOT>/CLAUDE.md                              → ~/.liza/CORE.md  # Kimi
+<REPO_ROOT>/.windsurf/rules/liza.md                → ~/.liza/CORE.md  # Devin
 ```
 
-Existing managed links at either location are honored. If both locations contain
-managed links, provider metadata defines the resolution policy. Claude prefers
-its global link because Claude Code loads both locations, so initialization
-removes the redundant repo link; other providers retain both and emit a warning
-unless they opt into the same policy.
+Qwen accepts relative `QWEN_HOME` values, but resolves them from each process's
+current working directory. Liza therefore uses global-first activation only for
+unset, absolute, or home-relative (`~`) values and retains the repo contract for
+relative values so discovery remains stable across working directories.
+
+Global-first activation never overwrites a user-owned global file. If the active
+global path cannot be resolved, created, or verified, initialization retains or
+creates the repo link so it does not remove the provider's only usable contract.
+When selected providers share a repo filename, initialization retains any
+managed link at that path even if another provider establishes its preferred
+global link; another provider's global activation may still fail at runtime.
+Repo-only providers do not declare speculative global fallbacks. Custom providers
+without `prefer_global` retain managed links at both declared locations and emit
+a warning.
 
 1. The provider loads its active repo or global contract file.
 2. The symlink resolves to `~/.liza/CORE.md` → `<project>/contracts/CORE.md`.
 3. CORE.md contains universal rules and mode selection gate
 4. For Liza mode: read `~/.liza/MULTI_AGENT_MODE.md`. For Pairing mode: read `~/.liza/PAIRING_MODE.md`.
 
-Refer to `GETTING_STARTED.md` for activating Liza in a user project. See ADR-0009 for rationale.
+Refer to `GETTING_STARTED.md` for activating Liza in a user project. See ADR-0009
+for the canonical contract root and ADR-0098 for active-path selection.
 
 ### Go CLI (`liza`)
 

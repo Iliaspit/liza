@@ -61,10 +61,9 @@ type InitParams struct {
 	AutoConfirm          bool   // auto-confirm interactive approval prompts
 }
 
-// InitAgentRepoSymlinks maps agent flag names to the repo-root symlink filename.
-// These symlinks point to the global CORE.md and enable pairing mode.
-// Codex and OpenCode intentionally share AGENTS.md; provider-specific global
-// fallbacks remain separate when a brownfield repo already owns that file.
+// InitAgentRepoSymlinks maps agent flag names to their repo contract filename.
+// The wizard uses these names for conflict detection; the provider catalog
+// decides whether the active contract is global-first or repo-only.
 var InitAgentRepoSymlinks = map[string]string{
 	"claude":   "CLAUDE.md",
 	"codex":    "AGENTS.md",
@@ -73,12 +72,12 @@ var InitAgentRepoSymlinks = map[string]string{
 	"gemini":   "GEMINI.md",
 }
 
-// InitAgentGlobalFallbacks maps agent flag names to their CLI global fallback paths
-// (relative to home directory). Used when the repo root already has a non-Liza file.
+// InitAgentGlobalFallbacks exposes the built-in default global paths for legacy
+// callers. Runtime activation uses provider catalog metadata so environment
+// overrides such as CODEX_HOME and XDG_CONFIG_HOME remain authoritative.
 var InitAgentGlobalFallbacks = map[string]string{
 	"claude":   filepath.Join(".claude", "CLAUDE.md"),
 	"codex":    filepath.Join(".codex", "AGENTS.md"),
-	"cursor":   filepath.Join(".codex", "AGENTS.md"),
 	"opencode": filepath.Join(".config", "opencode", "AGENTS.md"),
 	"gemini":   filepath.Join(".gemini", "GEMINI.md"),
 }
@@ -96,7 +95,8 @@ type InitPairingParams struct {
 // InitPairingCommand creates agent-specific contract symlinks without
 // initializing a full branded workspace. This enables pairing mode.
 //
-// For claude/codex/gemini: creates repo-root symlinks (e.g. CLAUDE.md → CORE.md).
+// Contract location is provider-specific: documented global instruction paths
+// are preferred, while repo-only providers use their repo contract filename.
 // For mistral: creates a prompt symlink and sets system_prompt_id in config.toml.
 func InitPairingCommand(params InitPairingParams) error {
 	rawStdin := params.Stdin
@@ -360,8 +360,8 @@ func CheckContractConfigured(projectRoot, cliName string) string {
 
 	// Check global fallback
 	if contract.GlobalFallback != "" {
-		globalPath := filepath.Join(homeDir, contract.GlobalFallback)
-		if isLizaSymlink(globalPath, contractTarget) {
+		globalPath, err := contract.GlobalPath(homeDir)
+		if err == nil && isLizaSymlink(globalPath, contractTarget) {
 			return globalPath
 		}
 	}
@@ -369,9 +369,10 @@ func CheckContractConfigured(projectRoot, cliName string) string {
 	return ""
 }
 
-// createContractSymlinksForProviders creates repo-root symlinks to the contract.
-// When a non-Liza file already exists at the repo root, it falls back to the
-// CLI's global config directory (e.g. ~/.claude/CLAUDE.md).
+// createContractSymlinksForProviders activates each provider's contract at its
+// catalog-declared location. Global-first providers establish their active
+// global link before removing a managed repo link; repo-only providers retain
+// the repo link. User-owned files are never overwritten.
 //
 // The contractAction parameter controls conflict resolution when set by the
 // interactive wizard: "rename" backs up the existing file, "global" uses the
@@ -383,29 +384,36 @@ func createContractSymlinksForProviders(projectRoot, contractTarget string, agen
 		return
 	}
 
+	repoPathSelectionCount := make(map[string]int)
+	for _, agent := range agents {
+		if repoFile := agent.Setup.Contract.RepoFile; repoFile != "" {
+			repoPathSelectionCount[filepath.Join(projectRoot, repoFile)]++
+		}
+	}
+
 	for _, agent := range agents {
 		name := agent.Setup.Contract.RepoFile
 		if name == "" {
 			continue
 		}
 		repoPath := filepath.Join(projectRoot, name)
-		globalRel := agent.Setup.Contract.GlobalFallback
-		hasGlobal := globalRel != ""
-		globalPath := filepath.Join(homeDir, globalRel)
+		globalPath, globalPathErr := agent.Setup.Contract.GlobalPath(homeDir)
+		if globalPathErr != nil {
+			fmt.Fprintf(os.Stderr, "Warning: cannot resolve %s global contract path: %v; retaining repo activation.\n", agent.ID, globalPathErr)
+			globalPath = ""
+		}
+		hasGlobal := globalPath != ""
 
 		// Step 1: product symlink already exists at either location?
 		repoIsLiza := isLizaSymlink(repoPath, contractTarget)
 		globalIsLiza := hasGlobal && isLizaSymlink(globalPath, contractTarget)
+		if agent.Setup.Contract.PrefersGlobal() &&
+			contractAction != "rename" && contractAction != "local" && contractAction != "skip" &&
+			ensurePreferredGlobalContract(name, repoPath, globalPath, contractTarget, repoIsLiza, globalIsLiza, repoPathSelectionCount[repoPath] > 1) {
+			continue
+		}
 
 		if repoIsLiza && globalIsLiza {
-			if agent.Setup.Contract.PrefersGlobal() {
-				if err := os.Remove(repoPath); err != nil {
-					fmt.Fprintf(os.Stderr, "Warning: failed to remove redundant %s symlink at %s: %v\n", name, repoPath, err)
-				} else {
-					fmt.Printf("%s: removed redundant repo symlink; using %s\n", name, globalPath)
-				}
-				continue
-			}
 			fmt.Fprintf(os.Stderr, "Warning: %s has %s symlinks at both %s and %s; remove one to avoid confusion.\n", name, brand.NameTitle, repoPath, globalPath)
 			continue
 		}
@@ -418,7 +426,8 @@ func createContractSymlinksForProviders(projectRoot, contractTarget string, agen
 			continue
 		}
 
-		// Step 2: repo root free → create there (happy path)
+		// Step 2: create the repo activation when global preference is absent
+		// or could not be established safely.
 		_, repoErr := os.Lstat(repoPath)
 		if repoErr != nil && !os.IsNotExist(repoErr) {
 			fmt.Fprintf(os.Stderr, "Warning: cannot stat %s: %v\n", repoPath, repoErr)
@@ -519,6 +528,52 @@ func createContractSymlinksForProviders(projectRoot, contractTarget string, agen
 		// Both locations occupied by non-product files.
 		fmt.Fprintf(os.Stderr, "Warning: %s exists at both repo root and %s; cannot place %s contract. Remove or rename one, then re-run.\n", name, globalPath, brand.NameTitle)
 	}
+}
+
+// ensurePreferredGlobalContract makes the active global link authoritative. It
+// removes a managed repo link only when no other selected provider shares that
+// path, and returns false when global activation is unavailable.
+func ensurePreferredGlobalContract(name, repoPath, globalPath, contractTarget string, repoIsLiza, globalIsLiza, preserveRepo bool) bool {
+	if globalPath == "" {
+		return false
+	}
+	if !globalIsLiza {
+		info, err := os.Lstat(globalPath)
+		if err != nil && !os.IsNotExist(err) {
+			fmt.Fprintf(os.Stderr, "Warning: cannot stat %s: %v; retaining repo activation.\n", globalPath, err)
+			return false
+		}
+		if err == nil {
+			kind := "file"
+			if info.Mode()&os.ModeSymlink != 0 {
+				kind = "symlink"
+			}
+			fmt.Fprintf(os.Stderr, "Warning: %s is occupied by a non-%s %s; retaining repo activation.\n", globalPath, brand.NameTitle, kind)
+			return false
+		}
+		if err := os.MkdirAll(filepath.Dir(globalPath), 0755); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to create directory %s: %v; retaining repo activation.\n", filepath.Dir(globalPath), err)
+			return false
+		}
+		if err := os.Symlink(contractTarget, globalPath); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to create %s symlink: %v; retaining repo activation.\n", globalPath, err)
+			fmt.Fprintf(os.Stderr, "  On Windows: enable Developer Mode (Settings > System > For developers) or run the shell as Administrator, then retry.\n")
+			return false
+		}
+		fmt.Printf("%s → %s (preferred global contract)\n", globalPath, contractTarget)
+	}
+	if repoIsLiza {
+		if preserveRepo {
+			fmt.Printf("%s: retaining repo symlink shared by multiple selected providers\n", name)
+		} else if err := os.Remove(repoPath); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to remove redundant %s symlink at %s: %v\n", name, repoPath, err)
+		} else {
+			fmt.Printf("%s: removed redundant repo symlink; using %s\n", name, globalPath)
+		}
+	} else if globalIsLiza {
+		fmt.Printf("%s: skipping; %s symlink already exists at %s\n", name, brand.NameTitle, globalPath)
+	}
+	return true
 }
 
 // setupMistralContract creates a Mistral prompt symlink to CORE.md and sets system_prompt_id in config.toml.

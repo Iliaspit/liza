@@ -547,6 +547,10 @@ func assertAgentToolsOptionalIndexGuidance(t *testing.T, content string) {
 // using tmpDir as both the liza dir (TargetDir) and homeDir.
 func setupWithAgents(t *testing.T, agents []string) (lizaDir, homeDir string) {
 	t.Helper()
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	t.Setenv("CODEX_HOME", "")
+	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("QWEN_HOME", "")
 	lizaDir = t.TempDir()
 	homeDir = t.TempDir()
 
@@ -559,6 +563,67 @@ func setupWithAgents(t *testing.T, agents []string) (lizaDir, homeDir string) {
 		t.Fatalf("SetupCommand failed: %v", err)
 	}
 	return lizaDir, homeDir
+}
+
+func TestSetupCommand_QwenRelativeHomeSkipsGlobalContractRepair(t *testing.T) {
+	previousNameLower, previousGlobalDirName := brand.NameLower, brand.GlobalDirName
+	brand.NameLower = "omni"
+	brand.GlobalDirName = ".omni-ee"
+	t.Cleanup(func() {
+		brand.NameLower = previousNameLower
+		brand.GlobalDirName = previousGlobalDirName
+	})
+
+	homeDir := t.TempDir()
+	workingDir := t.TempDir()
+	t.Setenv("QWEN_HOME", filepath.Join(".qwen-custom", "global"))
+	originalDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(originalDir)
+	if err := os.Chdir(workingDir); err != nil {
+		t.Fatal(err)
+	}
+
+	err = SetupCommand(SetupParams{
+		TargetDir:   filepath.Join(homeDir, ".omni-ee"),
+		HomeDir:     homeDir,
+		Agents:      []string{"qwen"},
+		Force:       true,
+		AutoConfirm: true,
+	})
+	if err != nil {
+		t.Fatalf("SetupCommand() with relative QWEN_HOME error = %v", err)
+	}
+	relativeContract := filepath.Join(workingDir, ".qwen-custom", "global", "QWEN.md")
+	if _, err := os.Lstat(relativeContract); !os.IsNotExist(err) {
+		t.Fatalf("cwd-relative Qwen contract should remain absent; got %v", err)
+	}
+}
+
+func TestRepairExistingProviderContractSymlinkReturnsUnexpectedGlobalPathErrors(t *testing.T) {
+	previousNameLower, previousGlobalDirName := brand.NameLower, brand.GlobalDirName
+	brand.NameLower = "omni"
+	brand.GlobalDirName = ".omni-ee"
+	t.Cleanup(func() {
+		brand.NameLower = previousNameLower
+		brand.GlobalDirName = previousGlobalDirName
+	})
+
+	homeDir := t.TempDir()
+	t.Setenv("QWEN_HOME", "~another-user/qwen")
+	selected, err := resolveCatalogProviders(loadProviderCatalog(homeDir), []string{"qwen"})
+	if err != nil {
+		t.Fatalf("resolve Qwen provider: %v", err)
+	}
+	if len(selected) != 1 {
+		t.Fatalf("resolved providers = %+v, want one Qwen provider", selected)
+	}
+	err = repairExistingProviderContractSymlink(homeDir, filepath.Join(homeDir, ".omni-ee"), selected[0])
+	if err == nil || !strings.Contains(err.Error(), "unsupported home expansion") {
+		t.Fatalf("repair error = %v, want unsupported home expansion diagnostic", err)
+	}
 }
 
 func TestSetupCommand_AgentClaude(t *testing.T) {
@@ -862,11 +927,13 @@ func TestSetupCommand_RepairsNameDerivedProviderContractSymlink(t *testing.T) {
 	})
 
 	homeDir := t.TempDir()
+	codexHome := t.TempDir()
+	t.Setenv("CODEX_HOME", codexHome)
 	targetDir := filepath.Join(homeDir, ".omni-ee")
 	if err := SetupCommand(SetupParams{TargetDir: targetDir, HomeDir: homeDir}); err != nil {
 		t.Fatalf("initial SetupCommand failed: %v", err)
 	}
-	contractLink := filepath.Join(homeDir, ".codex", "AGENTS.md")
+	contractLink := filepath.Join(codexHome, "AGENTS.md")
 	if err := os.MkdirAll(filepath.Dir(contractLink), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -905,6 +972,7 @@ func TestRepairExistingProviderContractSymlinkPreservesUnmanagedPaths(t *testing
 	})
 
 	homeDir := t.TempDir()
+	t.Setenv("CODEX_HOME", "")
 	targetDir := filepath.Join(homeDir, ".omni-ee")
 	catalog := loadProviderCatalog(homeDir)
 	codex, ok := catalog.Resolve("codex")

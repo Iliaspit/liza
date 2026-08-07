@@ -173,21 +173,25 @@ liza init --cursor
 liza init --opencode
 ```
 
-`liza init` creates project-local contract discovery files, hooks/settings for
-selected providers, and Liza project state when a goal is supplied.
+`liza init` activates contract discovery, installs project-local hooks/settings
+for selected providers, and creates Liza project state when a goal is supplied.
 
 For Claude, this writes project-local `.claude/settings.json` and `.claude/hooks/`.
 For Codex, it writes project-local `.codex/` hooks and updates global
 `~/.codex/config.toml` with the project and `.git` writable roots. Cursor init
-includes the Claude and Codex project setup Cursor relies on. Brownfield
-fallbacks may also create global contract discovery symlinks such as
-`~/.claude/CLAUDE.md` or `~/.codex/AGENTS.md`. For OpenCode, it creates the
-shared `AGENTS.md` contract symlink without Codex hooks or settings; brownfield
-fallback uses `~/.config/opencode/AGENTS.md`.
+includes the Claude and Codex project setup Cursor relies on. Claude, Codex,
+OpenCode, Gemini, and Qwen prefer their documented global instruction files,
+including `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `XDG_CONFIG_HOME`, and `QWEN_HOME`
+overrides. Because Qwen resolves relative `QWEN_HOME` values from each process's
+current working directory, Liza retains the repo `QWEN.md` for those values;
+absolute and `~`-based values use global-first activation.
+Cursor remains repo-local through `AGENTS.md`; Kimi and Devin also retain
+repo-local activation because no supported global instruction file is declared.
+OpenCode activation does not install Codex hooks or settings.
 
-For brownfield repositories that already have `CLAUDE.md`, `AGENTS.md`, or
-`GEMINI.md`, Liza does not overwrite them. It uses the provider global fallback
-when possible, or warns if both the repo file and fallback are unavailable.
+Liza never overwrites user-owned contract files. If a preferred global path is
+occupied, initialization retains or creates the provider's repo contract. A
+managed repo link is removed only after the active global link is verified.
 
 ## Manual Provider Notes
 

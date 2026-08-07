@@ -100,7 +100,7 @@ Use this section once the global setup is complete.
 # Interactive wizard: walks through setup choices.
 §BRAND_BINARY_NAME§ init
 
-# Repo initialization only: creates provider contract links/hooks/config.
+# Project initialization only: activates provider contract links/hooks/config.
 §BRAND_BINARY_NAME§ init --claude --codex
 
 # MAS run initialization: creates §BRAND_PROJECT_DIRNAME§/state.yaml from a goal/spec.
@@ -147,7 +147,9 @@ cat §BRAND_PROJECT_DIRNAME§/state.yaml
 - `§BRAND_PROJECT_DIRNAME§/pipeline.yaml` — Frozen pipeline config (validated copy of the selected `--config`, default: `~/§BRAND_GLOBAL_DIRNAME§/pipeline.yaml`)
 - `§BRAND_PROJECT_DIRNAME§/log.yaml` — Activity log
 - `.claude/settings.json` — Claude Code project permissions (§BRAND_NAME_TITLE§ CLI, skills, git/build commands)
-- `CLAUDE.md`, `AGENTS.md`, `GEMINI.md` — Symlinks to `~/§BRAND_GLOBAL_DIRNAME§/CORE.md`
+- provider contract symlinks to `~/§BRAND_GLOBAL_DIRNAME§/CORE.md`: Claude,
+  Codex, OpenCode, Gemini, and Qwen prefer their documented global instruction
+  paths; Cursor, Kimi, and Devin use repo-root files
 - `GUARDRAILS.md` — Project-specific constraints template (if not already present)
 - `.bash-policy.yaml` and standalone provider hooks when
   `§BRAND_ENV_PREFIX§_ENABLE_BASH_POLICY=1` is set before init, the
