@@ -113,13 +113,17 @@ basis for deleting an instruction link.
 
 - Catalog schema version 2 requires compatibility migration for version-1
   built-ins and an upgrade for older binaries to resume remote catalog updates.
-- Initialization conservatively retains a managed repo link when any resolved
-  catalog provider requires that path, including a repo-only provider enabled by
-  an earlier init invocation. It also retains paths shared by providers selected
-  together because another provider's global activation can fail at runtime. A
-  global-first provider may therefore see the same contract at both repo and
-  global locations; preserving every provider's usable activation takes
-  precedence over deduplication.
+- Initialization records active repo-only provider paths in an atomic file under
+  the main repository Git directory. Initialization is serial per repository;
+  atomic replacement protects against partial writes, not
+  concurrent read-modify-write cycles. Later invocations preserve recorded paths,
+  while repo fallbacks used only by global-first providers can be deduplicated
+  once their preferred global path becomes available. Existing managed links
+  that predate this metadata are conservatively attributed to compatible
+  repo-only providers because their historical owner cannot be reconstructed.
+  Paths shared by providers selected together also remain because another
+  provider's global activation can fail at runtime. State integrity errors stop
+  initialization and require recovery of the file or its Git-directory access.
 
 ## Supersedes
 

@@ -114,15 +114,29 @@ The embedded Devin repo filename is rendered from the build-time product name.
 Paths declared by downloaded or operator-supplied catalogs remain literal.
 
 Global-first providers set `contract.prefer_global`. Initialization creates or
-verifies the active global link before removing any managed repo link. A managed
-repo path remains when any resolved catalog provider requires repo activation,
-including providers enabled by an earlier init invocation. Paths shared by
-multiple providers selected together also remain because another provider's
-global activation may fail at runtime. If the global path cannot be resolved or
-created, or is occupied by a user-owned file, the repo link is retained or
-created instead. Repo-only providers never receive an invented global fallback.
-Custom providers without `prefer_global` retain managed links at both declared
-locations and emit a duplicate warning.
+verifies the active global link before removing any managed repo link. Repo-only
+activations are recorded at
+`<main-repository-git-dir>/§BRAND_NAME_LOWER§-provider-activations.json`. §BRAND_NAME_TITLE§
+resolves the main repository root before locating its Git directory, so a later
+init preserves only paths used by providers activated in that repository.
+When this metadata is first introduced, existing managed repo links are
+conservatively attributed to compatible repo-only providers because their
+historical owner cannot be reconstructed. Paths shared by providers selected
+together also remain because another provider's global activation may fail at
+runtime. If the global path cannot be resolved or created, or is occupied by a
+user-owned file, the repo link is retained or created instead. Repo-only
+providers never receive an invented global fallback. Custom providers without
+`prefer_global` retain managed links at both declared locations and emit a
+duplicate warning.
+
+Provider activation metadata errors stop initialization. For malformed or
+unsupported metadata, resolve the main repository Git directory with
+`git rev-parse --git-common-dir`, delete the
+`§BRAND_NAME_LOWER§-provider-activations.json` file there, and rerun
+`§BRAND_BINARY_NAME§ init`; the command works from the main checkout or a linked
+worktree, and existing managed repo links are then reconstructed conservatively.
+For read or write permission errors, restore access to the main repository Git
+directory and rerun initialization.
 
 §BRAND_NAME_TITLE§ never overwrites user-owned contract files. If both the repo-root
 file and a declared global path are user-owned, `§BRAND_BINARY_NAME§ init` warns and

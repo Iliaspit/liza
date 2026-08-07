@@ -1898,10 +1898,10 @@ func TestInitCommand_ContractActionLocalCreatesCLAUDELocalMd(t *testing.T) {
 	os.WriteFile(filepath.Join(gitDir, "CLAUDE.md"), []byte("project"), 0644)
 
 	err := InitCommandWithConfig(InitParams{
-		Description:    "Test goal",
-		SpecRef:        "specs/vision.md",
-		Agents:         []string{"claude"},
-		ContractAction: "local",
+		Description:     "Test goal",
+		SpecRef:         "specs/vision.md",
+		Agents:          []string{"claude"},
+		ContractActions: map[string]string{"claude": "local"},
 	})
 	if err != nil {
 		t.Fatalf("InitCommand failed: %v", err)

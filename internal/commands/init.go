@@ -57,29 +57,8 @@ type InitParams struct {
 	Agents               []string // --claude, --codex, --cursor, --opencode, --gemini, --mistral
 	Stdin                io.Reader
 	ForceInteractive     bool              // bypass TTY check (for testing)
-	ContractAction       string            // default action: "global", "rename", "skip", or ""
 	ContractActions      map[string]string // provider-scoped wizard actions keyed by canonical provider ID
 	AutoConfirm          bool              // auto-confirm interactive approval prompts
-}
-
-// InitAgentRepoSymlinks exposes built-in repo contract filenames for legacy callers.
-// Runtime activation and wizard conflict detection use provider catalog metadata.
-var InitAgentRepoSymlinks = map[string]string{
-	"claude":   "CLAUDE.md",
-	"codex":    "AGENTS.md",
-	"cursor":   "AGENTS.md",
-	"opencode": "AGENTS.md",
-	"gemini":   "GEMINI.md",
-}
-
-// InitAgentGlobalFallbacks exposes the built-in default global paths for legacy
-// callers. Runtime activation uses provider catalog metadata so environment
-// overrides such as CODEX_HOME and XDG_CONFIG_HOME remain authoritative.
-var InitAgentGlobalFallbacks = map[string]string{
-	"claude":   filepath.Join(".claude", "CLAUDE.md"),
-	"codex":    filepath.Join(".codex", "AGENTS.md"),
-	"opencode": filepath.Join(".config", "opencode", "AGENTS.md"),
-	"gemini":   filepath.Join(".gemini", "GEMINI.md"),
 }
 
 // InitPairingParams holds the parameters for InitPairingCommand.
@@ -213,11 +192,12 @@ func InitPairingCommand(params InitPairingParams) error {
 	}
 
 	if len(repoRootAgents) > 0 {
-		createContractSymlinksForProviders(projectRoot, coreFile, repoRootAgents, contractSymlinkOptions{
-			DefaultAction:     params.ContractAction,
-			ProviderActions:   params.ContractActions,
-			PreserveRepoPaths: repoOnlyContractPaths(projectRoot, catalog),
-		})
+		if err := activateProviderContracts(projectRoot, coreFile, repoRootAgents, catalog, contractSymlinkOptions{
+			DefaultAction:   params.ContractAction,
+			ProviderActions: params.ContractActions,
+		}); err != nil {
+			return fmt.Errorf("activate provider contracts: %w", err)
+		}
 	}
 
 	// Write/merge .claude/settings.json and deploy hooks
@@ -1042,11 +1022,11 @@ func InitCommandWithConfig(params InitParams) error {
 			}
 		}
 		if len(agents) > 0 {
-			createContractSymlinksForProviders(lizaPaths.ProjectRoot(), filepath.Join(globalDir, "CORE.md"), agents, contractSymlinkOptions{
-				DefaultAction:     params.ContractAction,
-				ProviderActions:   params.ContractActions,
-				PreserveRepoPaths: repoOnlyContractPaths(lizaPaths.ProjectRoot(), catalog),
-			})
+			if err := activateProviderContracts(lizaPaths.ProjectRoot(), filepath.Join(globalDir, "CORE.md"), agents, catalog, contractSymlinkOptions{
+				ProviderActions: params.ContractActions,
+			}); err != nil {
+				return fmt.Errorf("activate provider contracts: %w", err)
+			}
 		}
 	}
 
