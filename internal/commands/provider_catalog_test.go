@@ -172,7 +172,7 @@ providers:
 		}
 	}
 
-	createContractSymlinksForProviders(projectRoot, contractTarget, selected, "")
+	createContractSymlinksForProviders(projectRoot, contractTarget, selected, contractSymlinkOptions{})
 	for _, link := range links {
 		repoPath := filepath.Join(projectRoot, link.repoFile)
 		if _, err := os.Lstat(repoPath); !os.IsNotExist(err) {
@@ -352,7 +352,7 @@ func TestDuplicateNonPreferGlobalSymlinksWarnsAndRetainsBoth(t *testing.T) {
 	}
 
 	stderr, err := captureStderrForTest(func() error {
-		createContractSymlinksForProviders(projectRoot, contractTarget, []providers.Provider{provider}, "")
+		createContractSymlinksForProviders(projectRoot, contractTarget, []providers.Provider{provider}, contractSymlinkOptions{})
 		return nil
 	})
 	if err != nil {
@@ -365,6 +365,61 @@ func TestDuplicateNonPreferGlobalSymlinksWarnsAndRetainsBoth(t *testing.T) {
 		if target, err := os.Readlink(path); err != nil || target != contractTarget {
 			t.Errorf("managed link %s changed; target = %q, err = %v", path, target, err)
 		}
+	}
+}
+
+func TestProviderScopedWizardActionOverridesManagedGlobalForNonPreferProvider(t *testing.T) {
+	for _, action := range []string{"rename", "local"} {
+		t.Run(action, func(t *testing.T) {
+			homeDir := t.TempDir()
+			t.Setenv("HOME", homeDir)
+			projectRoot := t.TempDir()
+			contractTarget := filepath.Join(homeDir, ".liza", "CORE.md")
+			repoPath := filepath.Join(projectRoot, "CUSTOM.md")
+			globalPath := filepath.Join(homeDir, ".custom", "CUSTOM.md")
+			if err := os.MkdirAll(filepath.Dir(globalPath), 0755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(repoPath, []byte("user-owned\n"), 0644); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(contractTarget, globalPath); err != nil {
+				t.Fatal(err)
+			}
+			provider := providers.Provider{
+				ID: "custom",
+				Setup: providers.Setup{Contract: providers.ContractLinks{
+					RepoFile:       "CUSTOM.md",
+					GlobalFallback: ".custom/CUSTOM.md",
+					LocalFallback:  "CUSTOM.local.md",
+				}},
+			}
+
+			createContractSymlinksForProviders(projectRoot, contractTarget, []providers.Provider{provider}, contractSymlinkOptions{
+				ProviderActions: map[string]string{"custom": action},
+			})
+
+			if target, err := os.Readlink(globalPath); err != nil || target != contractTarget {
+				t.Fatalf("managed global target = %q, err = %v; want %q", target, err, contractTarget)
+			}
+			switch action {
+			case "rename":
+				if target, err := os.Readlink(repoPath); err != nil || target != contractTarget {
+					t.Fatalf("renamed repo action target = %q, err = %v; want %q", target, err, contractTarget)
+				}
+				if content, err := os.ReadFile(repoPath + ".bak"); err != nil || string(content) != "user-owned\n" {
+					t.Fatalf("repo backup = %q, err = %v; want preserved content", content, err)
+				}
+			case "local":
+				if content, err := os.ReadFile(repoPath); err != nil || string(content) != "user-owned\n" {
+					t.Fatalf("repo file = %q, err = %v; want preserved content", content, err)
+				}
+				localPath := filepath.Join(projectRoot, "CUSTOM.local.md")
+				if target, err := os.Readlink(localPath); err != nil || target != contractTarget {
+					t.Fatalf("local action target = %q, err = %v; want %q", target, err, contractTarget)
+				}
+			}
+		})
 	}
 }
 

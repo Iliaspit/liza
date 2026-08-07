@@ -438,13 +438,31 @@ func repairExistingProviderContractSymlink(homeDir, globalDir string, provider p
 		return nil
 	}
 
-	linkPath, err := provider.Setup.Contract.GlobalPath(homeDir)
+	defaultPath := filepath.Join(homeDir, provider.Setup.Contract.GlobalFallback)
+	linkPaths := make([]string, 0, 2)
+	activePath, err := provider.Setup.Contract.GlobalPath(homeDir)
 	if err != nil {
-		if errors.Is(err, providers.ErrUnstableGlobalRoot) {
-			return nil
+		if !errors.Is(err, providers.ErrUnstableGlobalRoot) {
+			fmt.Fprintf(os.Stderr, "Warning: cannot resolve %s global contract path: %v; checking the default path only.\n", provider.ID, err)
 		}
-		return fmt.Errorf("resolve provider contract link for %s: %w", provider.ID, err)
+	} else if activePath != "" {
+		linkPaths = append(linkPaths, activePath)
 	}
+	if activePath == "" || filepath.Clean(activePath) != filepath.Clean(defaultPath) {
+		linkPaths = append(linkPaths, defaultPath)
+	}
+
+	staleTarget := filepath.Join(homeDir, nameDerivedDir, "CORE.md")
+	correctTarget := filepath.Join(globalDir, "CORE.md")
+	for _, linkPath := range linkPaths {
+		if err := repairProviderContractSymlinkAtPath(linkPath, staleTarget, correctTarget); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func repairProviderContractSymlinkAtPath(linkPath, staleTarget, correctTarget string) error {
 	info, err := os.Lstat(linkPath)
 	if os.IsNotExist(err) {
 		return nil
@@ -460,12 +478,10 @@ func repairExistingProviderContractSymlink(homeDir, globalDir string, provider p
 	if err != nil {
 		return fmt.Errorf("read provider contract link %s: %w", linkPath, err)
 	}
-	staleTarget := filepath.Join(homeDir, nameDerivedDir, "CORE.md")
 	if filepath.Clean(existingTarget) != filepath.Clean(staleTarget) {
 		return nil
 	}
 
-	correctTarget := filepath.Join(globalDir, "CORE.md")
 	if err := os.Remove(linkPath); err != nil {
 		return fmt.Errorf("remove stale provider contract link %s: %w", linkPath, err)
 	}

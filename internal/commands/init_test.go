@@ -1274,7 +1274,7 @@ func TestInitCommand_OpenCodePreservesUserExecTool(t *testing.T) {
 	}
 }
 
-func TestInitCommand_MigratesManagedRepoSymlinkToPreferredGlobal(t *testing.T) {
+func TestInitCommand_PreservesManagedRepoSymlinkRequiredByRepoOnlyProvider(t *testing.T) {
 	gitDir := setupGitRepo(t)
 	defer os.RemoveAll(gitDir)
 
@@ -1308,8 +1308,8 @@ func TestInitCommand_MigratesManagedRepoSymlinkToPreferredGlobal(t *testing.T) {
 		t.Fatalf("InitCommand failed: %v", err)
 	}
 
-	if _, err := os.Lstat(claudePath); !os.IsNotExist(err) {
-		t.Fatalf("repo CLAUDE.md should be removed after global activation; got %v", err)
+	if target, err := os.Readlink(claudePath); err != nil || target != correctTarget {
+		t.Fatalf("repo CLAUDE.md target = %q, err = %v; want %q for Kimi", target, err, correctTarget)
 	}
 	target, err := os.Readlink(filepath.Join(fakeHome, ".claude", "CLAUDE.md"))
 	if err != nil {
@@ -1622,7 +1622,7 @@ func TestInitCommand_BrownfieldBothOccupiedWarns(t *testing.T) {
 	}
 }
 
-func TestInitCommand_DuplicateClaudeSymlinkRemovesRepoCopy(t *testing.T) {
+func TestInitCommand_DuplicateClaudeSymlinkPreservesRepoCopyForKimi(t *testing.T) {
 	gitDir := setupGitRepo(t)
 	defer os.RemoveAll(gitDir)
 
@@ -1652,15 +1652,15 @@ func TestInitCommand_DuplicateClaudeSymlinkRemovesRepoCopy(t *testing.T) {
 		t.Fatalf("InitCommand failed: %v", err)
 	}
 
-	if _, err := os.Lstat(filepath.Join(gitDir, "CLAUDE.md")); !os.IsNotExist(err) {
-		t.Errorf("repo CLAUDE.md should be removed when the global Claude contract symlink is active; got %v", err)
+	if target, err := os.Readlink(filepath.Join(gitDir, "CLAUDE.md")); err != nil || target != coreFile {
+		t.Errorf("repo CLAUDE.md target = %q, err = %v; want %q for Kimi", target, err, coreFile)
 	}
 	if target, err := os.Readlink(globalClaude); err != nil || target != coreFile {
 		t.Errorf("global CLAUDE.md changed; target = %q, err = %v", target, err)
 	}
 }
 
-func TestInitCommand_DuplicateCodexSymlinkRemovesRepoCopy(t *testing.T) {
+func TestInitCommand_DuplicateCodexSymlinkPreservesRepoCopyForCursor(t *testing.T) {
 	gitDir := setupGitRepo(t)
 	defer os.RemoveAll(gitDir)
 
@@ -1695,8 +1695,8 @@ func TestInitCommand_DuplicateCodexSymlinkRemovesRepoCopy(t *testing.T) {
 		t.Fatalf("InitCommand failed: %v", err)
 	}
 
-	if _, err := os.Lstat(repoAgents); !os.IsNotExist(err) {
-		t.Errorf("repo AGENTS.md should be removed when the global Codex contract symlink is active; got %v", err)
+	if target, err := os.Readlink(repoAgents); err != nil || target != coreFile {
+		t.Errorf("repo AGENTS.md target = %q, err = %v; want %q for Cursor", target, err, coreFile)
 	}
 	if target, err := os.Readlink(globalAgents); err != nil || target != coreFile {
 		t.Errorf("global AGENTS.md changed; target = %q, err = %v", target, err)
@@ -1821,7 +1821,7 @@ func TestPreferredGlobalOccupiedRetainsManagedRepoContract(t *testing.T) {
 	}
 
 	stderr, err := captureStderrForTest(func() error {
-		createContractSymlinksForProviders(projectRoot, contractTarget, []providers.Provider{provider}, "")
+		createContractSymlinksForProviders(projectRoot, contractTarget, []providers.Provider{provider}, contractSymlinkOptions{})
 		return nil
 	})
 	if err != nil {
@@ -3212,6 +3212,97 @@ func TestInitPairingCommand_CursorAndOpenCodeRetainSharedRepoContract(t *testing
 	}
 }
 
+func TestInitPairingCommand_SequentialGlobalInitPreservesRepoOnlyProvider(t *testing.T) {
+	tests := []struct {
+		name         string
+		firstAgent   string
+		secondAgent  string
+		repoFile     string
+		globalTarget string
+	}{
+		{
+			name:         "Cursor then Codex",
+			firstAgent:   "cursor",
+			secondAgent:  "codex",
+			repoFile:     "AGENTS.md",
+			globalTarget: filepath.Join(".codex", "AGENTS.md"),
+		},
+		{
+			name:         "Kimi then Claude",
+			firstAgent:   "kimi",
+			secondAgent:  "claude",
+			repoFile:     "CLAUDE.md",
+			globalTarget: filepath.Join(".claude", "CLAUDE.md"),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gitDir := setupGitRepo(t)
+			fakeHome := setupGlobalLiza(t)
+			contractTarget := filepath.Join(fakeHome, ".liza", "CORE.md")
+
+			originalDir, err := os.Getwd()
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = os.Chdir(originalDir) })
+			if err := os.Chdir(gitDir); err != nil {
+				t.Fatal(err)
+			}
+
+			if err := InitPairingCommand(InitPairingParams{Agents: []string{tt.firstAgent}}); err != nil {
+				t.Fatalf("first InitPairingCommand(%s) error = %v", tt.firstAgent, err)
+			}
+			if err := InitPairingCommand(InitPairingParams{Agents: []string{tt.secondAgent}}); err != nil {
+				t.Fatalf("second InitPairingCommand(%s) error = %v", tt.secondAgent, err)
+			}
+
+			repoPath := filepath.Join(gitDir, tt.repoFile)
+			if target, err := os.Readlink(repoPath); err != nil || target != contractTarget {
+				t.Fatalf("repo-only provider contract target = %q, err = %v; want %q", target, err, contractTarget)
+			}
+			globalPath := filepath.Join(fakeHome, tt.globalTarget)
+			if target, err := os.Readlink(globalPath); err != nil || target != contractTarget {
+				t.Fatalf("preferred global contract target = %q, err = %v; want %q", target, err, contractTarget)
+			}
+		})
+	}
+}
+
+func TestInitPairingCommand_ProviderScopedConflictActionPreservesGlobalFirst(t *testing.T) {
+	gitDir := setupGitRepo(t)
+	fakeHome := setupGlobalLiza(t)
+	contractTarget := filepath.Join(fakeHome, ".liza", "CORE.md")
+	if err := os.WriteFile(filepath.Join(gitDir, "AGENTS.md"), []byte("user-owned\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	originalDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(originalDir) })
+	if err := os.Chdir(gitDir); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := InitPairingCommand(InitPairingParams{
+		Agents:          []string{"cursor"},
+		ContractActions: map[string]string{"cursor-acp": "rename"},
+	}); err != nil {
+		t.Fatalf("InitPairingCommand() error = %v", err)
+	}
+
+	globalPath := filepath.Join(fakeHome, ".codex", "AGENTS.md")
+	if target, err := os.Readlink(globalPath); err != nil || target != contractTarget {
+		t.Fatalf("Codex global contract target = %q, err = %v; want %q", target, err, contractTarget)
+	}
+	if content, err := os.ReadFile(filepath.Join(gitDir, "AGENTS.md.bak")); err != nil || string(content) != "user-owned\n" {
+		t.Fatalf("Cursor conflict backup = %q, err = %v; want preserved user content", content, err)
+	}
+}
+
 func TestInitPairingCommand_SharedRepoContractSurvivesGlobalActivationFailure(t *testing.T) {
 	gitDir := setupGitRepo(t)
 	defer os.RemoveAll(gitDir)
@@ -3282,7 +3373,7 @@ func TestCreateContractSymlinksForProviders_NormalizesSharedRepoPaths(t *testing
 		},
 	}
 
-	createContractSymlinksForProviders(projectRoot, contractTarget, agents, "")
+	createContractSymlinksForProviders(projectRoot, contractTarget, agents, contractSymlinkOptions{})
 	repoPath := filepath.Join(projectRoot, "AGENTS.md")
 	if target, err := os.Readlink(repoPath); err != nil || target != contractTarget {
 		t.Fatalf("normalized shared repo target = %q, err = %v; want %q", target, err, contractTarget)

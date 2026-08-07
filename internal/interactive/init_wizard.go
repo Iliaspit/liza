@@ -5,21 +5,23 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/charmbracelet/huh"
 	"github.com/liza-mas/liza/internal/brand"
 	"github.com/liza-mas/liza/internal/commands"
 	"github.com/liza-mas/liza/internal/paths"
+	"github.com/liza-mas/liza/internal/providers"
 )
 
 // InitWizardResult holds all choices made during the interactive init wizard.
 type InitWizardResult struct {
-	Mode           string   // "pairing" or "full"
-	Agents         []string // selected agents (e.g. "claude", "codex", "cursor")
-	Description    string   // project goal (full mode only)
-	SpecRef        string   // spec file path (full mode only)
-	EntryPoint     string   // entry point (full mode only)
-	ContractAction string   // "global", "rename", "skip" (only if conflict detected)
+	Mode            string            // "pairing" or "full"
+	Agents          []string          // selected agents (e.g. "claude", "codex", "cursor")
+	Description     string            // project goal (full mode only)
+	SpecRef         string            // spec file path (full mode only)
+	EntryPoint      string            // entry point (full mode only)
+	ContractActions map[string]string // provider-scoped conflict actions keyed by canonical provider ID
 }
 
 // RunInitWizard runs the interactive init wizard and returns the user's choices.
@@ -115,35 +117,113 @@ func abortOrError(err error) error {
 	return err
 }
 
-// DetectContractConflict checks whether any selected agent's contract file
-// conflicts with an existing non-brand file at the project root.
-// Returns the conflicting filename (e.g. "CLAUDE.md") or "" if no conflict.
-func DetectContractConflict(projectRoot string, agents []string, contractTarget string) string {
+type ContractConflict struct {
+	RepoPath        string
+	FileName        string
+	Providers       []providers.Provider
+	GlobalAvailable bool
+	LocalAvailable  bool
+	LocalFallback   string
+}
+
+// DetectContractConflicts returns only repo-file conflicts that can affect the
+// selected provider. A usable preferred global path makes an occupied repo file
+// irrelevant, while repo-only providers and unavailable global paths still
+// require an explicit choice.
+func DetectContractConflicts(projectRoot, homeDir string, agents []providers.Provider, contractTarget string) []ContractConflict {
+	if projectRoot == "" {
+		return nil
+	}
+	conflicts := make([]ContractConflict, 0)
+	conflictByPath := make(map[string]int)
 	for _, agent := range agents {
-		fileName, ok := commands.InitAgentRepoSymlinks[agent]
-		if !ok {
-			continue // mistral doesn't use repo-root symlinks
+		contract := agent.Setup.Contract
+		if contract.RepoFile == "" {
+			continue
 		}
-
-		repoPath := filepath.Join(projectRoot, fileName)
-
-		// Check if file exists and is NOT already a brand symlink.
-		fi, err := os.Lstat(repoPath)
-		if err != nil {
-			continue // doesn't exist, no conflict
+		repoPath := filepath.Clean(filepath.Join(projectRoot, contract.RepoFile))
+		if _, err := os.Lstat(repoPath); err != nil {
+			continue
 		}
-
-		// If it's already a brand symlink, skip.
-		if fi.Mode()&os.ModeSymlink != 0 {
-			target, readErr := os.Readlink(repoPath)
-			if readErr == nil && target == contractTarget {
-				continue // already correct
+		if isManagedContractSymlink(repoPath, contractTarget) {
+			continue
+		}
+		globalPath, globalErr := contract.GlobalPath(homeDir)
+		globalAvailable := globalErr == nil && contractPathAvailable(globalPath, contractTarget)
+		localAvailable := false
+		if contract.LocalFallback != "" {
+			localPath := filepath.Clean(filepath.Join(projectRoot, contract.LocalFallback))
+			localAvailable = contractPathAvailable(localPath, contractTarget)
+		}
+		if contract.PrefersGlobal() {
+			if globalAvailable {
+				continue
 			}
 		}
-
-		return fileName
+		if index, ok := conflictByPath[repoPath]; ok {
+			conflict := &conflicts[index]
+			conflict.Providers = append(conflict.Providers, agent)
+			conflict.GlobalAvailable = conflict.GlobalAvailable && globalAvailable
+			conflict.LocalAvailable = conflict.LocalAvailable && localAvailable
+			if conflict.LocalFallback != contract.LocalFallback {
+				conflict.LocalFallback = ""
+			}
+			continue
+		}
+		conflictByPath[repoPath] = len(conflicts)
+		conflicts = append(conflicts, ContractConflict{
+			RepoPath:        repoPath,
+			FileName:        contract.RepoFile,
+			Providers:       []providers.Provider{agent},
+			GlobalAvailable: globalAvailable,
+			LocalAvailable:  localAvailable,
+			LocalFallback:   contract.LocalFallback,
+		})
 	}
-	return ""
+	return conflicts
+}
+
+func contractPathAvailable(path, contractTarget string) bool {
+	if path == "" {
+		return false
+	}
+	if _, err := os.Lstat(path); os.IsNotExist(err) {
+		return true
+	}
+	return isManagedContractSymlink(path, contractTarget)
+}
+
+func isManagedContractSymlink(path, contractTarget string) bool {
+	info, err := os.Lstat(path)
+	if err != nil || info.Mode()&os.ModeSymlink == 0 {
+		return false
+	}
+	target, err := os.Readlink(path)
+	return err == nil && target == contractTarget
+}
+
+func contractConflictActions(conflict ContractConflict) []string {
+	actions := make([]string, 0, 4)
+	if conflict.GlobalAvailable {
+		actions = append(actions, "global")
+	}
+	actions = append(actions, "rename")
+	if conflict.LocalAvailable {
+		actions = append(actions, "local")
+	}
+	return append(actions, "skip")
+}
+
+func contractConflictProviderNames(conflict ContractConflict) string {
+	names := make([]string, 0, len(conflict.Providers))
+	for _, provider := range conflict.Providers {
+		name := provider.DisplayName
+		if name == "" {
+			name = provider.ID
+		}
+		names = append(names, name)
+	}
+	return strings.Join(names, ", ")
 }
 
 // resolveContractConflicts checks if any contract files conflict and prompts the user.
@@ -158,32 +238,46 @@ func resolveContractConflicts(projectRoot string, result *InitWizardResult) erro
 	}
 	contractTarget := filepath.Join(homeDir, paths.GlobalDirName(), "CORE.md")
 
-	conflicting := DetectContractConflict(projectRoot, result.Agents, contractTarget)
-	if conflicting == "" {
-		return nil
-	}
-
-	// Conflict detected — ask user
-	var action string
-	options := []huh.Option[string]{
-		huh.NewOption(fmt.Sprintf("Use global config instead (keeps your existing %s)", conflicting), "global"),
-		huh.NewOption(fmt.Sprintf("Rename existing to %s.bak and place %s contract at repo root", conflicting, brand.NameTitle), "rename"),
-	}
-	if conflicting == "CLAUDE.md" {
-		options = append(options, huh.NewOption("Use CLAUDE.local.md (local override, should be gitignored)", "local"))
-	}
-	options = append(options, huh.NewOption("Skip — don't create this contract", "skip"))
-
-	err = huh.NewSelect[string]().
-		Title(fmt.Sprintf("%s already exists. Where should %s place its contract?", conflicting, brand.NameTitle)).
-		Options(options...).
-		Value(&action).
-		Run()
+	agents, err := commands.ResolveInitProviders(homeDir, result.Agents)
 	if err != nil {
 		return err
 	}
+	conflicts := DetectContractConflicts(projectRoot, homeDir, agents, contractTarget)
+	if len(conflicts) == 0 {
+		return nil
+	}
 
-	// Use the first conflict's action for all (they'll likely all have the same issue)
-	result.ContractAction = action
+	result.ContractActions = make(map[string]string, len(conflicts))
+	for _, conflict := range conflicts {
+		var action string
+		options := make([]huh.Option[string], 0, 4)
+		for _, candidate := range contractConflictActions(conflict) {
+			switch candidate {
+			case "global":
+				options = append(options, huh.NewOption(fmt.Sprintf("Use global config instead (keeps your existing %s)", conflict.FileName), candidate))
+			case "rename":
+				options = append(options, huh.NewOption(fmt.Sprintf("Rename existing to %s.bak and place %s contract at repo root", conflict.FileName, brand.NameTitle), candidate))
+			case "local":
+				label := "Use each provider's local fallback"
+				if conflict.LocalFallback != "" {
+					label = fmt.Sprintf("Use %s", conflict.LocalFallback)
+				}
+				options = append(options, huh.NewOption(label+" (local override, should be gitignored)", candidate))
+			case "skip":
+				options = append(options, huh.NewOption("Skip — don't create this contract", candidate))
+			}
+		}
+
+		if err := huh.NewSelect[string]().
+			Title(fmt.Sprintf("%s already exists for %s. Where should %s place its contract?", conflict.FileName, contractConflictProviderNames(conflict), brand.NameTitle)).
+			Options(options...).
+			Value(&action).
+			Run(); err != nil {
+			return err
+		}
+		for _, provider := range conflict.Providers {
+			result.ContractActions[provider.ID] = action
+		}
+	}
 	return nil
 }

@@ -64,6 +64,12 @@ project-local setup. Add `--yes` when using explicit init arguments to
 auto-confirm approval prompts such as provider config merges, template
 overwrites, and detected `post_worktree_cmd` suggestions.
 
+An existing repo contract file does not trigger a conflict prompt when every
+affected global-first provider can use its preferred global path. When repo
+placement still requires a decision, the wizard asks once per shared repo path,
+identifies the affected providers, and offers only destinations that are
+currently available to all of them.
+
 Depending on selected providers and options, `§BRAND_BINARY_NAME§ init` writes or updates:
 
 - provider contract discovery links to `~/§BRAND_GLOBAL_DIRNAME§/CORE.md`.
@@ -97,16 +103,21 @@ Provider catalog metadata defines the active contract location:
 |----------|----------------------|
 | Claude | `${CLAUDE_CONFIG_DIR:-~/.claude}/CLAUDE.md` |
 | Codex | `${CODEX_HOME:-~/.codex}/AGENTS.md` |
-| OpenCode | `${XDG_CONFIG_HOME:-~/.config}/opencode/AGENTS.md` |
+| OpenCode | `${XDG_CONFIG_HOME:-~/.config}/opencode/AGENTS.md`; relative `XDG_CONFIG_HOME` values are invalid and fall back to `~/.config` |
 | Gemini | `~/.gemini/GEMINI.md` |
 | Qwen | `${QWEN_HOME:-~/.qwen}/QWEN.md` for unset, absolute, or `~`-based values; `<repo>/QWEN.md` for relative values |
 | Cursor | `<repo>/AGENTS.md` |
 | Kimi | `<repo>/CLAUDE.md` |
 | Devin | Catalog-defined repo path |
 
+The embedded Devin repo filename is rendered from the build-time product name.
+Paths declared by downloaded or operator-supplied catalogs remain literal.
+
 Global-first providers set `contract.prefer_global`. Initialization creates or
-verifies the active global link before removing any managed repo link. A repo
-path shared by multiple selected providers remains because another provider's
+verifies the active global link before removing any managed repo link. A managed
+repo path remains when any resolved catalog provider requires repo activation,
+including providers enabled by an earlier init invocation. Paths shared by
+multiple providers selected together also remain because another provider's
 global activation may fail at runtime. If the global path cannot be resolved or
 created, or is occupied by a user-owned file, the repo link is retained or
 created instead. Repo-only providers never receive an invented global fallback.
@@ -120,10 +131,11 @@ skips that provider activation path.
 During the initialization gate, shell fallbacks read one mandatory document per command;
 consecutive invalid reads instruct the agent to stop instead of trying path or command variants.
 
-Global setup repairs existing provider contract symlinks that still target the name-derived
-global root when `§BRAND_GLOBAL_DIRNAME§` differs. It preserves absent links, regular files,
-and unrelated symlinks. Codex writable roots include both `~/.§BRAND_NAME_LOWER§` and
-`~/§BRAND_GLOBAL_DIRNAME§` when those directories differ.
+Global setup repairs existing provider contract symlinks at both the active environment-resolved
+path and the provider's home-default path when they still target the name-derived global root and
+`§BRAND_GLOBAL_DIRNAME§` differs. An unresolvable provider root emits a warning without stopping
+setup. Repair preserves absent links, regular files, and unrelated symlinks. Codex writable roots
+include both `~/.§BRAND_NAME_LOWER§` and `~/§BRAND_GLOBAL_DIRNAME§` when those directories differ.
 
 ## Claude Code Settings
 

@@ -3,6 +3,7 @@ package commands
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 
 	"github.com/liza-mas/liza/internal/providers"
 )
@@ -36,6 +37,37 @@ func resolveCatalogProviders(cat providers.Catalog, ids []string) ([]providers.P
 		resolved = append(resolved, provider)
 	}
 	return resolved, nil
+}
+
+// ResolveInitProviders returns the catalog-backed providers used by init,
+// including the dependency expansion required by convenience flags such as
+// cursor. Interactive conflict detection uses the same resolved policy as the
+// execution path.
+func ResolveInitProviders(homeDir string, ids []string) ([]providers.Provider, error) {
+	return resolveCatalogProviders(loadProviderCatalog(homeDir), canonicalInitProviderIDs(ids))
+}
+
+func repoOnlyContractPaths(projectRoot string, cat providers.Catalog) map[string]bool {
+	providerIDs := make(map[string]bool)
+	for _, provider := range cat.ProvidersSorted() {
+		providerIDs[provider.ID] = true
+	}
+	for _, provider := range providers.EmbeddedCatalog().ProvidersSorted() {
+		providerIDs[provider.ID] = true
+	}
+
+	paths := make(map[string]bool)
+	for providerID := range providerIDs {
+		resolved, err := resolveCatalogProviders(cat, []string{providerID})
+		if err != nil || len(resolved) != 1 {
+			continue
+		}
+		contract := resolved[0].Setup.Contract
+		if contract.RepoFile != "" && !contract.PrefersGlobal() {
+			paths[filepath.Join(projectRoot, contract.RepoFile)] = true
+		}
+	}
+	return paths
 }
 
 // backfillLegacyContractPolicy reconciles v1 built-ins with v2 placement

@@ -13,6 +13,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/liza-mas/liza/internal/brand"
 )
 
 func TestEmbeddedCatalogResolvesBuiltInsAndAliases(t *testing.T) {
@@ -77,6 +79,45 @@ func TestEmbeddedCatalogResolvesBuiltInsAndAliases(t *testing.T) {
 	}
 	if tools["kimi"].ContractKey != "claude" {
 		t.Fatalf("kimi contract key = %q, want claude", tools["kimi"].ContractKey)
+	}
+}
+
+func TestEmbeddedCatalogBrandsDevinRepoFile(t *testing.T) {
+	previousNameLower := brand.NameLower
+	brand.NameLower = "acme-agent"
+	t.Cleanup(func() {
+		brand.NameLower = previousNameLower
+	})
+
+	devin, ok := EmbeddedCatalog().Resolve("devin")
+	if !ok {
+		t.Fatal("EmbeddedCatalog() missing devin")
+	}
+	want := filepath.Join(".windsurf", "rules", "acme-agent.md")
+	if got := devin.Setup.Contract.RepoFile; got != want {
+		t.Fatalf("devin contract repo file = %q, want %q", got, want)
+	}
+}
+
+func TestParseCatalogPreservesCustomDevinRepoFile(t *testing.T) {
+	previousNameLower := brand.NameLower
+	brand.NameLower = "acme-agent"
+	t.Cleanup(func() {
+		brand.NameLower = previousNameLower
+	})
+
+	data := strings.ReplaceAll(embeddedFallbackCatalogYAML, "§BRAND_NAME_LOWER§", "liza")
+	cat, err := ParseCatalog([]byte(data))
+	if err != nil {
+		t.Fatalf("ParseCatalog() error = %v", err)
+	}
+	devin, ok := cat.Resolve("devin")
+	if !ok {
+		t.Fatal("ParseCatalog() missing devin")
+	}
+	want := filepath.Join(".windsurf", "rules", "liza.md")
+	if got := devin.Setup.Contract.RepoFile; got != want {
+		t.Fatalf("custom Devin repo file = %q, want preserved %q", got, want)
 	}
 }
 
@@ -194,6 +235,29 @@ func TestContractLinksGlobalPath(t *testing.T) {
 			t.Fatalf("GlobalPath() home-root error = %v, want absolute path diagnostic", err)
 		}
 	})
+}
+
+func TestContractLinksGlobalPathIgnoresRelativeXDGConfigHome(t *testing.T) {
+	homeDir := t.TempDir()
+	links := ContractLinks{
+		GlobalFallback:          ".config/opencode/AGENTS.md",
+		GlobalFallbackEnv:       "XDG_CONFIG_HOME",
+		GlobalFallbackEnvSuffix: "opencode/AGENTS.md",
+	}
+
+	want := filepath.Join(homeDir, ".config", "opencode", "AGENTS.md")
+	for _, value := range []string{filepath.Join("relative", "config"), "~/.config"} {
+		t.Run(value, func(t *testing.T) {
+			t.Setenv("XDG_CONFIG_HOME", value)
+			got, err := links.GlobalPath(homeDir)
+			if err != nil {
+				t.Fatalf("GlobalPath() error = %v", err)
+			}
+			if got != want {
+				t.Fatalf("GlobalPath() = %q, want %q", got, want)
+			}
+		})
+	}
 }
 
 func TestContractLinksGlobalPathExpandsProviderHomeRoot(t *testing.T) {
@@ -392,6 +456,19 @@ providers:
 			})
 		}
 	})
+}
+
+func TestValidEnvNameAcceptsLowercase(t *testing.T) {
+	for _, name := range []string{"lowercase", "mixed_Case_2", "_private"} {
+		if !validEnvName(name) {
+			t.Errorf("validEnvName(%q) = false, want true", name)
+		}
+	}
+	for _, name := range []string{"2FAST", "has-hyphen", "has.dot"} {
+		if validEnvName(name) {
+			t.Errorf("validEnvName(%q) = true, want false", name)
+		}
+	}
 }
 
 func TestParseCatalogRejectsInvalidStructure(t *testing.T) {

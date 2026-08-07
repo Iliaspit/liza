@@ -56,14 +56,14 @@ type InitParams struct {
 	ScipSearchPlans      []string // --scip-search-plan: pairing SCIP root overrides
 	Agents               []string // --claude, --codex, --cursor, --opencode, --gemini, --mistral
 	Stdin                io.Reader
-	ForceInteractive     bool   // bypass TTY check (for testing)
-	ContractAction       string // "global", "rename", "skip", or "" (default behavior)
-	AutoConfirm          bool   // auto-confirm interactive approval prompts
+	ForceInteractive     bool              // bypass TTY check (for testing)
+	ContractAction       string            // default action: "global", "rename", "skip", or ""
+	ContractActions      map[string]string // provider-scoped wizard actions keyed by canonical provider ID
+	AutoConfirm          bool              // auto-confirm interactive approval prompts
 }
 
-// InitAgentRepoSymlinks maps agent flag names to their repo contract filename.
-// The wizard uses these names for conflict detection; the provider catalog
-// decides whether the active contract is global-first or repo-only.
+// InitAgentRepoSymlinks exposes built-in repo contract filenames for legacy callers.
+// Runtime activation and wizard conflict detection use provider catalog metadata.
 var InitAgentRepoSymlinks = map[string]string{
 	"claude":   "CLAUDE.md",
 	"codex":    "AGENTS.md",
@@ -84,12 +84,13 @@ var InitAgentGlobalFallbacks = map[string]string{
 
 // InitPairingParams holds the parameters for InitPairingCommand.
 type InitPairingParams struct {
-	Agents          []string  // agent names (e.g. "claude", "codex", "cursor", "opencode", "gemini", "mistral")
-	ScipSearch      []string  // --scip-search: enabled pairing SCIP languages
-	ScipSearchPlans []string  // --scip-search-plan: pairing SCIP root overrides
-	Stdin           io.Reader // input for interactive prompts (nil = os.Stdin)
-	ContractAction  string    // "global", "rename", "skip", or "" (default behavior)
-	AutoConfirm     bool      // auto-confirm interactive approval prompts
+	Agents          []string          // agent names (e.g. "claude", "codex", "cursor", "opencode", "gemini", "mistral")
+	ScipSearch      []string          // --scip-search: enabled pairing SCIP languages
+	ScipSearchPlans []string          // --scip-search-plan: pairing SCIP root overrides
+	Stdin           io.Reader         // input for interactive prompts (nil = os.Stdin)
+	ContractAction  string            // default action: "global", "rename", "skip", or ""
+	ContractActions map[string]string // provider-scoped wizard actions keyed by canonical provider ID
+	AutoConfirm     bool              // auto-confirm interactive approval prompts
 }
 
 // InitPairingCommand creates agent-specific contract symlinks without
@@ -212,7 +213,11 @@ func InitPairingCommand(params InitPairingParams) error {
 	}
 
 	if len(repoRootAgents) > 0 {
-		createContractSymlinksForProviders(projectRoot, coreFile, repoRootAgents, params.ContractAction)
+		createContractSymlinksForProviders(projectRoot, coreFile, repoRootAgents, contractSymlinkOptions{
+			DefaultAction:     params.ContractAction,
+			ProviderActions:   params.ContractActions,
+			PreserveRepoPaths: repoOnlyContractPaths(projectRoot, catalog),
+		})
 	}
 
 	// Write/merge .claude/settings.json and deploy hooks
@@ -377,7 +382,13 @@ func CheckContractConfigured(projectRoot, cliName string) string {
 // The contractAction parameter controls conflict resolution when set by the
 // interactive wizard: "rename" backs up the existing file, "global" uses the
 // global fallback, "skip" skips creation. Empty string uses default behavior.
-func createContractSymlinksForProviders(projectRoot, contractTarget string, agents []providers.Provider, contractAction string) {
+type contractSymlinkOptions struct {
+	DefaultAction     string
+	ProviderActions   map[string]string
+	PreserveRepoPaths map[string]bool
+}
+
+func createContractSymlinksForProviders(projectRoot, contractTarget string, agents []providers.Provider, options contractSymlinkOptions) {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: cannot determine home directory: %v\n", err)
@@ -397,6 +408,10 @@ func createContractSymlinksForProviders(projectRoot, contractTarget string, agen
 			continue
 		}
 		repoPath := filepath.Join(projectRoot, name)
+		contractAction := options.DefaultAction
+		if action, ok := options.ProviderActions[agent.ID]; ok {
+			contractAction = action
+		}
 		globalPath, globalPathErr := agent.Setup.Contract.GlobalPath(homeDir)
 		if globalPathErr != nil {
 			fmt.Fprintf(os.Stderr, "Warning: cannot resolve %s global contract path: %v; retaining repo activation.\n", agent.ID, globalPathErr)
@@ -409,7 +424,8 @@ func createContractSymlinksForProviders(projectRoot, contractTarget string, agen
 		globalIsLiza := hasGlobal && isLizaSymlink(globalPath, contractTarget)
 		if agent.Setup.Contract.PrefersGlobal() &&
 			contractAction != "rename" && contractAction != "local" && contractAction != "skip" &&
-			ensurePreferredGlobalContract(name, repoPath, globalPath, contractTarget, repoIsLiza, globalIsLiza, repoPathSelectionCount[repoPath] > 1) {
+			ensurePreferredGlobalContract(name, repoPath, globalPath, contractTarget, repoIsLiza, globalIsLiza,
+				repoPathSelectionCount[repoPath] > 1 || options.PreserveRepoPaths[repoPath]) {
 			continue
 		}
 
@@ -421,7 +437,7 @@ func createContractSymlinksForProviders(projectRoot, contractTarget string, agen
 			fmt.Printf("%s: already correct\n", name)
 			continue
 		}
-		if globalIsLiza {
+		if globalIsLiza && contractAction != "rename" && contractAction != "local" {
 			fmt.Printf("%s: skipping; %s symlink already exists at %s\n", name, brand.NameTitle, globalPath)
 			continue
 		}
@@ -531,7 +547,7 @@ func createContractSymlinksForProviders(projectRoot, contractTarget string, agen
 }
 
 // ensurePreferredGlobalContract makes the active global link authoritative. It
-// removes a managed repo link only when no other selected provider shares that
+// removes a managed repo link only when no catalog provider requires that repo
 // path, and returns false when global activation is unavailable.
 func ensurePreferredGlobalContract(name, repoPath, globalPath, contractTarget string, repoIsLiza, globalIsLiza, preserveRepo bool) bool {
 	if globalPath == "" {
@@ -564,7 +580,7 @@ func ensurePreferredGlobalContract(name, repoPath, globalPath, contractTarget st
 	}
 	if repoIsLiza {
 		if preserveRepo {
-			fmt.Printf("%s: retaining repo symlink shared by multiple selected providers\n", name)
+			fmt.Printf("%s: retaining repo symlink required by another provider\n", name)
 		} else if err := os.Remove(repoPath); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: failed to remove redundant %s symlink at %s: %v\n", name, repoPath, err)
 		} else {
@@ -1026,7 +1042,11 @@ func InitCommandWithConfig(params InitParams) error {
 			}
 		}
 		if len(agents) > 0 {
-			createContractSymlinksForProviders(lizaPaths.ProjectRoot(), filepath.Join(globalDir, "CORE.md"), agents, params.ContractAction)
+			createContractSymlinksForProviders(lizaPaths.ProjectRoot(), filepath.Join(globalDir, "CORE.md"), agents, contractSymlinkOptions{
+				DefaultAction:     params.ContractAction,
+				ProviderActions:   params.ContractActions,
+				PreserveRepoPaths: repoOnlyContractPaths(lizaPaths.ProjectRoot(), catalog),
+			})
 		}
 	}
 

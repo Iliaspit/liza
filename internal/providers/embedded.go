@@ -255,7 +255,7 @@ providers:
       config_dir: .config/devin
       skills_dir: skills
       contract:
-        repo_file: .windsurf/rules/liza.md
+        repo_file: .windsurf/rules/§BRAND_NAME_LOWER§.md
     runtime:
       provider_key: devin
       executable: devin

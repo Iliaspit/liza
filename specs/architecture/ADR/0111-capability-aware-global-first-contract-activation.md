@@ -44,9 +44,11 @@ Catalog schema version 2 describes global contract resolution with:
 
 Built-in global-first providers are Claude, Codex, OpenCode, Gemini, and Qwen.
 Claude respects `CLAUDE_CONFIG_DIR`, Codex respects `CODEX_HOME`, and OpenCode
-respects `XDG_CONFIG_HOME`. Qwen uses its global contract for unset, absolute,
-and `~`-based `QWEN_HOME` values. Relative `QWEN_HOME` is CWD-dependent, so Liza
-retains the repo activation instead. Cursor, Kimi, and Devin remain repo-only
+respects absolute `XDG_CONFIG_HOME` values; relative values are invalid under the
+XDG base-directory specification and fall back to `$HOME/.config`. Qwen uses its
+global contract for unset, absolute, and `~`-based `QWEN_HOME` values. Relative
+`QWEN_HOME` is CWD-dependent, so Liza retains the repo activation instead. Cursor,
+Kimi, and Devin remain repo-only
 because the catalog does not declare a supported file-based global instruction path for them.
 Mistral retains its native prompt configuration path.
 
@@ -101,17 +103,23 @@ basis for deleting an instruction link.
 - User files are preserved, including at preferred global paths.
 - Published and embedded provider metadata express the same setup policy.
 - Repo-only and custom non-prefer providers retain explicit regression coverage.
+- Interactive conflict decisions are grouped by repo path and limited to
+  destinations currently available to every affected provider. A free preferred
+  global path therefore avoids an irrelevant prompt for an occupied repo file.
+- The embedded Devin repo filename is rendered from the build-time product name;
+  externally supplied catalog paths remain literal operator data.
 
 **Trade-offs:**
 
 - Catalog schema version 2 requires compatibility migration for version-1
   built-ins and an upgrade for older binaries to resume remote catalog updates.
-- When selected providers share a repo filename, initialization conservatively
-  retains any managed link at that path because another provider's global
-  activation can still fail at runtime. A global-first provider may therefore
-  see the same contract at both repo and global locations in a mixed selection;
-  preserving every selected provider's usable fallback takes precedence over
-  deduplication.
+- Initialization conservatively retains a managed repo link when any resolved
+  catalog provider requires that path, including a repo-only provider enabled by
+  an earlier init invocation. It also retains paths shared by providers selected
+  together because another provider's global activation can fail at runtime. A
+  global-first provider may therefore see the same contract at both repo and
+  global locations; preserving every provider's usable activation takes
+  precedence over deduplication.
 
 ## Supersedes
 

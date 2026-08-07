@@ -586,15 +586,20 @@ func TestSetupCommand_QwenRelativeHomeSkipsGlobalContractRepair(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = SetupCommand(SetupParams{
-		TargetDir:   filepath.Join(homeDir, ".omni-ee"),
-		HomeDir:     homeDir,
-		Agents:      []string{"qwen"},
-		Force:       true,
-		AutoConfirm: true,
+	stderr := captureSetupStderr(t, func() {
+		err = SetupCommand(SetupParams{
+			TargetDir:   filepath.Join(homeDir, ".omni-ee"),
+			HomeDir:     homeDir,
+			Agents:      []string{"qwen"},
+			Force:       true,
+			AutoConfirm: true,
+		})
 	})
 	if err != nil {
 		t.Fatalf("SetupCommand() with relative QWEN_HOME error = %v", err)
+	}
+	if strings.Contains(stderr, "cannot resolve qwen global contract path") {
+		t.Fatalf("SetupCommand() emitted warning for supported relative QWEN_HOME: %q", stderr)
 	}
 	relativeContract := filepath.Join(workingDir, ".qwen-custom", "global", "QWEN.md")
 	if _, err := os.Lstat(relativeContract); !os.IsNotExist(err) {
@@ -602,7 +607,41 @@ func TestSetupCommand_QwenRelativeHomeSkipsGlobalContractRepair(t *testing.T) {
 	}
 }
 
-func TestRepairExistingProviderContractSymlinkReturnsUnexpectedGlobalPathErrors(t *testing.T) {
+func TestSetupCommand_UnexpandableClaudeConfigWarnsAndContinues(t *testing.T) {
+	previousNameLower, previousGlobalDirName := brand.NameLower, brand.GlobalDirName
+	brand.NameLower = "omni"
+	brand.GlobalDirName = ".omni-ee"
+	t.Cleanup(func() {
+		brand.NameLower = previousNameLower
+		brand.GlobalDirName = previousGlobalDirName
+	})
+
+	homeDir := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", "~/.claude")
+	t.Setenv("CODEX_HOME", "")
+	var setupErr error
+	stderr := captureSetupStderr(t, func() {
+		setupErr = SetupCommand(SetupParams{
+			TargetDir:   filepath.Join(homeDir, ".omni-ee"),
+			HomeDir:     homeDir,
+			Agents:      []string{"claude", "codex"},
+			Force:       true,
+			AutoConfirm: true,
+		})
+	})
+	if setupErr != nil {
+		t.Fatalf("SetupCommand() error = %v", setupErr)
+	}
+	if !strings.Contains(stderr, "cannot resolve claude global contract path") {
+		t.Fatalf("SetupCommand() stderr = %q, want Claude resolution warning", stderr)
+	}
+	codexSkill := filepath.Join(homeDir, ".codex", "skills", "code-review")
+	if _, err := os.Lstat(codexSkill); err != nil {
+		t.Fatalf("Codex skills were not installed after Claude warning: %v", err)
+	}
+}
+
+func TestRepairExistingProviderContractSymlinkWarnsOnUnexpectedGlobalPathErrors(t *testing.T) {
 	previousNameLower, previousGlobalDirName := brand.NameLower, brand.GlobalDirName
 	brand.NameLower = "omni"
 	brand.GlobalDirName = ".omni-ee"
@@ -620,9 +659,14 @@ func TestRepairExistingProviderContractSymlinkReturnsUnexpectedGlobalPathErrors(
 	if len(selected) != 1 {
 		t.Fatalf("resolved providers = %+v, want one Qwen provider", selected)
 	}
-	err = repairExistingProviderContractSymlink(homeDir, filepath.Join(homeDir, ".omni-ee"), selected[0])
-	if err == nil || !strings.Contains(err.Error(), "unsupported home expansion") {
-		t.Fatalf("repair error = %v, want unsupported home expansion diagnostic", err)
+	stderr := captureSetupStderr(t, func() {
+		err = repairExistingProviderContractSymlink(homeDir, filepath.Join(homeDir, ".omni-ee"), selected[0])
+	})
+	if err != nil {
+		t.Fatalf("repair error = %v, want best-effort success", err)
+	}
+	if !strings.Contains(stderr, "cannot resolve qwen global contract path") || !strings.Contains(stderr, "unsupported home expansion") {
+		t.Fatalf("repair warning = %q, want Qwen home-expansion diagnostic", stderr)
 	}
 }
 
@@ -959,6 +1003,45 @@ func TestSetupCommand_RepairsNameDerivedProviderContractSymlink(t *testing.T) {
 	want := filepath.Join(targetDir, "CORE.md")
 	if target != want {
 		t.Fatalf("contract link target = %q, want %q", target, want)
+	}
+}
+
+func TestSetupCommand_RepairsDefaultProviderContractPathWithEnvironmentOverride(t *testing.T) {
+	previousNameLower, previousGlobalDirName := brand.NameLower, brand.GlobalDirName
+	brand.NameLower = "omni"
+	brand.GlobalDirName = ".omni-ee"
+	t.Cleanup(func() {
+		brand.NameLower = previousNameLower
+		brand.GlobalDirName = previousGlobalDirName
+	})
+
+	homeDir := t.TempDir()
+	t.Setenv("CODEX_HOME", t.TempDir())
+	targetDir := filepath.Join(homeDir, ".omni-ee")
+	contractLink := filepath.Join(homeDir, ".codex", "AGENTS.md")
+	if err := os.MkdirAll(filepath.Dir(contractLink), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(homeDir, ".omni", "CORE.md"), contractLink); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := SetupCommand(SetupParams{
+		TargetDir:   targetDir,
+		ProviderIDs: []string{"codex"},
+		HomeDir:     homeDir,
+		Force:       true,
+		AutoConfirm: true,
+	}); err != nil {
+		t.Fatalf("SetupCommand() error = %v", err)
+	}
+
+	got, err := os.Readlink(contractLink)
+	if err != nil {
+		t.Fatalf("default Codex contract path is not a symlink: %v", err)
+	}
+	if want := filepath.Join(targetDir, "CORE.md"); got != want {
+		t.Fatalf("default Codex contract target = %q, want %q", got, want)
 	}
 }
 

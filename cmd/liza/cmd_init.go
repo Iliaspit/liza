@@ -176,7 +176,7 @@ symlinks needed for pairing (no %[2]s/ workspace):
 					ScipSearch:      scipSearch,
 					ScipSearchPlans: scipSearchPlans,
 					Stdin:           os.Stdin,
-					ContractAction:  result.ContractAction,
+					ContractActions: result.ContractActions,
 					AutoConfirm:     yes,
 				}); err != nil {
 					return err
@@ -201,7 +201,7 @@ symlinks needed for pairing (no %[2]s/ workspace):
 				ScipSearchPlans:      scipSearchPlans,
 				Agents:               result.Agents,
 				Stdin:                os.Stdin,
-				ContractAction:       result.ContractAction,
+				ContractActions:      result.ContractActions,
 				AutoConfirm:          yes,
 			}); err != nil {
 				return err

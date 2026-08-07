@@ -16,6 +16,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/liza-mas/liza/internal/brand"
+	"github.com/liza-mas/liza/internal/brandrender"
 	"github.com/liza-mas/liza/internal/models"
 	"gopkg.in/yaml.v3"
 )
@@ -107,6 +109,11 @@ func (c ContractLinks) GlobalPath(homeDir string) (string, error) {
 	}
 	if c.GlobalFallbackEnv != "" {
 		if root := strings.TrimSpace(os.Getenv(c.GlobalFallbackEnv)); root != "" {
+			// The XDG base-directory specification requires relative values to
+			// be ignored, so use the catalog's home-relative default instead.
+			if c.GlobalFallbackEnv == "XDG_CONFIG_HOME" && !filepath.IsAbs(root) {
+				return filepath.Join(homeDir, c.GlobalFallback), nil
+			}
 			if strings.HasPrefix(root, "~") && !c.GlobalFallbackEnvExpandHome {
 				return "", fmt.Errorf("%s must contain an absolute path", c.GlobalFallbackEnv)
 			}
@@ -183,7 +190,11 @@ type DetectionResult struct {
 }
 
 func EmbeddedCatalog() Catalog {
-	cat, err := ParseCatalog([]byte(embeddedFallbackCatalogYAML))
+	rendered, err := brandrender.RenderBytes([]byte(embeddedFallbackCatalogYAML), brand.RuntimeValues())
+	if err != nil {
+		panic(err)
+	}
+	cat, err := ParseCatalog(rendered)
 	if err != nil {
 		panic(err)
 	}
@@ -384,7 +395,7 @@ func validEnvName(value string) bool {
 		return false
 	}
 	for i, r := range value {
-		if (r >= 'A' && r <= 'Z') || r == '_' || (i > 0 && r >= '0' && r <= '9') {
+		if (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') || r == '_' || (i > 0 && r >= '0' && r <= '9') {
 			continue
 		}
 		return false
