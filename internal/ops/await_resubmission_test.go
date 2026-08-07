@@ -457,7 +457,7 @@ func TestAwaitResubmission_TaskDisappears(t *testing.T) {
 		result, awaitErr = AwaitResubmission(context.Background(), tmpDir, "task-1", "reviewer-1", 10*time.Second)
 	}()
 
-	testhelpers.WaitForAsyncSetup()
+	waitForReviewOwnership(t, bb, "task-1", "reviewer-1")
 	// Remove the task from state entirely.
 	if err := bb.Modify(func(s *models.State) error {
 		s.Tasks = []models.Task{}
