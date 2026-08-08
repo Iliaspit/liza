@@ -13,7 +13,7 @@ This skill is orthogonal to review and validation. It doesn't judge correctness;
 
 # Scope
 
-Applies to anything: specs, code, PRs, design docs, architecture, process. Invoked explicitly — not a default lens.
+Applies to anything: specs, code, PRs, design docs, architecture, process. Invoked explicitly, or by `code-review` at round 1 as its approach lens.
 
 # Domains
 
@@ -111,7 +111,7 @@ Prose libre. One suggestion per subject identified in scope.
 # Integration
 
 - **Standalone**: Invoke explicitly on any artifact
-- **With code-review**: Can follow a review to open horizons after correctness is established
+- **With code-review**: Round 1 applies this lens to the approach; waiting until correctness is established is too late to switch cheaply
 - **With spec work**: Can precede implementation to explore solution space
 - **With architecture-review**: Can surface alternatives during design phase
 

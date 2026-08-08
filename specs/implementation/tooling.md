@@ -175,7 +175,7 @@ CLI commands are divided into agent-callable and supervisor-only:
 | `liza get` | All agents | Read blackboard data |
 | `liza submit-for-review` | Coder | Request review (atomic state transition) |
 | `liza submit-verdict` | Code Reviewer | Approve/reject (atomic state transition) |
-| `liza mark-blocked` | Coder, Planner | Mark task as blocked |
+| `liza mark-blocked` | All doer roles | Mark task as blocked |
 | `liza assess-blocked` | Orchestrator | Record assessment of blocked task (prevents re-wake loops) |
 | `liza wt-merge` | Supervisor | Merge after Code Reviewer approves |
 | `liza wt-delete` | Planner | Clean up abandoned tasks |

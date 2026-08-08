@@ -1075,15 +1075,15 @@ Failure propagation and compound interaction effects.
 **Skill:** systemic-thinking
 **Category:** TENSION
 
-**Issue:** The Code Reviewer has binding approval/rejection authority but no structural accountability for verdict quality. The contract specifies detection of reviewer dysfunction in two modes: rubber-stamping (>95% approval-rate metric, `MULTI_AGENT_MODE.md`) and abandonment (review exhaustion — two reviewers exit without verdict). These remain contract-specified rather than supervisor-computed signals. The system cannot directly detect incorrect verdicts with plausible reasoning. A reviewer that rejects valid work forces implement-review cycles before Orchestrator evaluation, while a flawed approval may be caught by canonical validation or downstream integration review without being attributed back to the original verdict. Coders still have no structured appeal mechanism short of re-implementation and resubmission.
+**Issue:** The Code Reviewer has binding approval/rejection authority but no structural accountability for verdict quality. The contract specifies detection of reviewer dysfunction in two modes: rubber-stamping (>95% approval-rate metric, `MULTI_AGENT_MODE.md`) and abandonment (review exhaustion — two reviewers exit without verdict). These remain contract-specified rather than supervisor-computed signals. The system cannot directly detect incorrect verdicts with plausible reasoning. A reviewer that rejects valid work forces implement-review cycles before Orchestrator evaluation, while a flawed approval may be caught by canonical validation or downstream integration review without being attributed back to the original verdict. Coders can plead a contested finding and, absent consensus, mark the task BLOCKED for Orchestrator rescope (`MULTI_AGENT_MODE.md`, Iteration Protocol), but verdict quality itself remains unmeasured.
 
 **Implication:** Code review quality is the least observable dimension of system health, yet it gates all task completion — the system optimizes for reviewer throughput signals while reviewer accuracy remains unmeasured.
 
-**Current mitigation:** Task-declared canonical validation commands are rendered to reviewers, reviewer contracts require re-execution, and the deployed Integration Analyst/Integration Reviewer pair checks cross-task integration. These controls catch some bad approvals but do not measure reviewer accuracy or provide an appeal path.
+**Current mitigation:** Task-declared canonical validation commands are rendered to reviewers, reviewer contracts require re-execution, and the deployed Integration Analyst/Integration Reviewer pair checks cross-task integration. These controls catch some bad approvals but do not measure reviewer accuracy, and the bounded contest path is not a first-class persisted appeal.
 
 **Future options:**
 - Reviewer accuracy metric (compare rejected items against final merged state)
-- Coder appeal mechanism (structured objection triggers Orchestrator evaluation before 5 cycles)
+- First-class persisted appeal (objection recorded as state rather than prose, triggering Orchestrator evaluation before 5 cycles)
 - Attribute integration-validation failures back to the approving review cycle
 
 ### Restart/Lease Churn Under Load

@@ -54,9 +54,19 @@ Operational lessons from project experience. Read when a trigger matches.
 
 ### G2.2: Contract and prompt conciseness
 
-Every token in `contracts/` and `internal/prompts/templates/` costs context budget across all agents and sessions. Before adding text, ask: "Can I tighten existing wording instead?" Prefer rewriting over appending.
+Every token in `contracts/`, `skills/`, and `internal/prompts/templates/` costs context budget across all agents and sessions. Before adding text, ask: "Can I tighten existing wording instead?" Prefer rewriting over appending.
 
 **Test:** Compare before/after byte count. Growth should not exceed semantic content added.
+
+### G2.3: Removal is a systemic judgement
+
+G2.2 pushes toward cutting; this bounds it. Before removing text from a contract, skill, or prompt, ask what it does in combination — not whether it repeats something nearby. Three traps:
+
+- **Compound removal:** two cuts each justified by the other's presence. What you removed earlier in the session is part of the current cut's context.
+- **Coverage backstop:** a component can read as restatement while carrying the coverage that justified trimming something else.
+- **Unmeasured component of a working system:** removal risk is asymmetric — the saving is certain and small, the loss unknown. Neither keep nor cut on that basis alone: ask. Provenance, and whether a line has earned its place, live with the human rather than in the file. Batch candidates into one proposal rather than asking line by line; where no human is available, defer the cut instead of deciding it.
+
+**Test:** "What else did I justify by pointing at this?"
 
 ## Tier 3 (Preferences)
 

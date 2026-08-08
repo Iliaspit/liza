@@ -1,38 +1,38 @@
 ---
 name: code-review
-description: Code Review Protocol
+description: Two-sided code review protocol — reviewers raise findings, authors answer them. Use when reviewing code (PRs, pending changes) or when responding to review feedback, review comments, or a rejected verdict.
 ---
 
-Code review is risk mitigation, not gatekeeping.
-The goal is catching issues the author couldn't see — and occasionally sharing a better pattern when it genuinely helps.
+Code review is risk mitigation, not gatekeeping — catching what the author couldn't see, and occasionally sharing a better pattern when it genuinely helps.
+
+Two-sided protocol. Reviewers load it to raise findings; authors load it to answer
+them. Both sides read the whole file — a contested finding converges only when both
+agree what `[blocker]` means and what closes one. Everything through *Review Summary
+Format* is shared; *Answering Findings* is author-side.
 
 # Review Context
 
 Before reviewing, establish context:
 - **Scope:** Default to staged files (`git diff --cached --name-only`, then `git diff --cached --stat`, then targeted path diffs). For PRs or commits, inspect changed files and stats before reading targeted hunks. Only broaden if explicitly asked.
 - **Local working tree:** For local reviews, triage unstaged and untracked files before review. If related but not staged, surface this explicitly and include only if the review target is "pending changes"; if unrelated, ignore; if unclear, ask before including.
-- **Intent:** Check ticket/description (PRs) or ask the author (pending). If unclear, clarify before reviewing.
-- **Initial scope:** Before reading the diff, record in one line what the change set out to do. This is the anchor for every later round: it bounds which *behavior* is required, not which code is inspected. Every submitted line is still reviewed for P0-P2 defects. Work beyond the initial scope is scope creep, not thoroughness — review it, then flag it `[overreach]`.
+- **Initial scope:** Before reading the diff, record in one line what the change set out to do — take it from the author's stated intent when supplied (Pairing: Change Summary; multi-agent: task description and done-when; PRs: description and linked ticket), derive it only when it is not, and clarify with the author when it is unclear. This is the anchor for every later round: it bounds which *behavior* is required, not which code is inspected. Every submitted line is still reviewed for P0-P2 defects. Work beyond the initial scope is scope creep, not thoroughness — review it, then flag it `[overreach]`.
 - **Timing:** Is now the right time for this functionality? Half-baked or premature additions warrant a `[question]`.
-- **Approach:** For complex changes, was the approach discussed before implementation? Catch architectural misalignment early — complete rewrites are painful.
+- **Approach:** Round 1 only. Is the approach sound, not merely correct — would another team take this shape, and was the first workable rung of CORE's Minimality Ladder taken? Raise an alternative only when it is named and its benefit demonstrable (`have-you-considered`); "I'd have done it differently" is not a finding. `[question]` when exploratory, `[concern]` when materially cheaper and still cheap to switch. After round 1 the approach is settled — reopening it is relitigation.
+- **Absence:** Review what should be here and is not. Take the baseline from the author's declarations (Pairing: Change Summary success criteria, doc impact, test impact; multi-agent: done-when) and check each against the diff. Diff-first reading optimizes for what is present; absence has to be sought deliberately. Where no declarations exist, say so — it caps confidence.
 - **Diff-first:** Read bounded diff context before source files. Prefer name-only/stat first, then targeted path or hunk diffs. Only read source when a finding needs surrounding context. Never pre-read the entire codebase.
-- **Size:** If >800 lines or >20 files, consider suggesting a split (PR) or incremental commits (pending). Large diffs hide bugs.
-- **Large diffs:** If truncated, >800 lines, >20 files, >80K chars total, or >20K chars in one file, avoid unbounded full-diff reads; classify files and inspect targeted paths/hunks. Verify critical findings against source before tagging `[blocker]` or `[concern]`.
+- **Sources:** State what you have read before drawing conclusions, per CORE Rule 5, and extend it as you read. The summary line reports this list; it does not create it. A conclusion reached before its source was read is not grounded by reading that source afterwards.
+- **Size:** Beyond 800 lines, 20 files, 80K chars total, or 20K chars in one file — large diffs hide bugs. Consider suggesting a split (PR) or incremental commits (pending); avoid unbounded full-diff reads, classify files and inspect targeted paths or hunks, and verify critical findings against source before tagging `[blocker]` or `[concern]`.
 - **Reviewer limits:** If reviewing outside your expertise, say so. Make assumptions explicit.
 
 # Review Modes
 
-| Mode | Scope | When |
-|------|-------|------|
-| **Sanity** | Skim diff, obvious issues | Trivial changes, config, docs, low-risk |
-| **Standard** | Full change set via targeted diffs, P0-P3 checklist, spot-check tests | Most changes — balanced cost/coverage |
-| **Deep** | Targeted diffs + source context, all priorities, trace data flow | Security-sensitive, core architecture, unfamiliar domain |
+**Sanity** skims the diff for obvious issues — trivial changes, config, docs.
+**Standard** is the default: full change set via targeted diffs, P0-P3, spot-checked tests.
+**Deep** adds source context, all priorities, and data-flow tracing — security-sensitive
+work, core architecture, unfamiliar domains. Escalate to Deep if the review surfaces
+unexpected complexity.
 
-Announce mode: `"Reviewing in [mode] because [reason]. Adjust?"`
-
-Default to Standard. Escalate to Deep if review surfaces unexpected complexity.
-
-**Start high level, work down:** Focus on design and structure first. Defer naming, comments, and style until high-level issues are resolved — low-level notes often become moot after refactoring.
+Announce mode and scope: `"Reviewing [scope] in [mode] because [reason]. Adjust?"`
 
 # Review Hierarchy
 
@@ -48,55 +48,23 @@ Review in this order. Stop and flag blockers immediately.
 | P5 | **Maintainability** | Readability, naming, complexity, test quality |
 | P6 | **Style** | Only if egregious or violates established conventions |
 
-**Attention budget:** P0-P2 (70%) catch most production incidents — prioritize these. P3-P4 (20%) architectural and performance. P5-P6 (10%) only when egregious.
+**Attention budget:** P0-P2 (70%) catch most production incidents. P3-P4 (20%).
+P5-P6 (10%) only when egregious.
 
 # Review Checklist
 
-Not exhaustive — a mental sweep, not a checkbox exercise.
+Not a sweep of what review normally covers — you already do that. These are the
+checks that get skipped:
 
-**Security (P0):**
-- [ ] No hardcoded secrets
-- [ ] Input validated at boundaries
-- [ ] No injection vectors (SQL, command, XSS)
-- [ ] Auth/authz not weakened
-- [ ] Sensitive data not logged or exposed
-- [ ] Worst realistic misuse considered
-
-**Correctness (P1):**
-- [ ] Logic matches stated intent
-- [ ] Edge cases handled (null, empty, boundary values)
-- [ ] Error paths don't swallow failures silently
-- [ ] Return values / exceptions match contract
-- [ ] External calls/APIs verified to exist and behave as assumed
-- [ ] Impact of code removal assessed (callers, dependencies)
-- [ ] New behavior has tests; changed behavior has updated tests
-
-**Data (P2):**
-- [ ] Transactions wrap related mutations
+- [ ] Worst realistic misuse considered, not just declared inputs
+- [ ] External calls and APIs verified to exist and behave as assumed
+- [ ] Impact of code removal assessed — callers, dependencies
 - [ ] Concurrent access considered
-- [ ] Migrations reversible or safe; online-safe (no long-running locks on large tables)
-
-**Architecture & Operability (P3):**
-- [ ] Respects existing patterns; no unnecessary coupling
-- [ ] Public API changes intentional; backward compatibility considered
-- [ ] Dependency additions justified; version changes assessed for breaking behavior
-- [ ] Not relying on implicit/undocumented configuration
-- [ ] Operational surface documented: new env vars, README/CHANGELOG, deployment steps for db/breaking changes
-- [ ] Observability intact: logs actionable with debug context; metrics/tracing updated if behavior changed
-- [ ] Feature flags/kill switches respected if applicable
-- [ ] Rollback path exists (code + data)
-
-**Performance (P4):**
-- [ ] No N+1 queries or unbounded loops
-- [ ] Hot paths not degraded
-- [ ] No premature optimization — flag if complexity added for hypothetical gains
-
-**Maintainability (P5):**
-- [ ] Readable without author's context
-- [ ] Names reveal intent
-- [ ] Comments explain *why*, not *what* — if code needs explanation, simplify it
-- [ ] TODOs have ticket references — naked TODOs become stale
-- [ ] Complexity proportional to problem
+- [ ] Migrations reversible, and online-safe on large tables
+- [ ] Not relying on implicit or undocumented configuration
+- [ ] Operational surface documented — env vars, README/CHANGELOG, deployment steps
+- [ ] Observability intact — logs actionable, metrics updated if behavior changed
+- [ ] Rollback path exists, code and data
 - [ ] Tests validate intent, not implementation; would fail on regression
 - [ ] Mock-heavy implementation-testing flagged
 
@@ -113,27 +81,25 @@ Not exhaustive — a mental sweep, not a checkbox exercise.
 | `[nit]` | Take or leave — style, naming preference | No |
 | `[appraisal]` | Acknowledge — good pattern, notable improvement | No |
 | `[overreach]` | Beyond initial scope, or a larger solution than the finding required — shrink or split | Yes, in corrective rounds |
+| `[vestigial]` | Leftover from a superseded design — delete | Only when it worsens net value or risk |
 
 **Structure:**
 ```
 [tag] file:line — Brief issue
 
 Why it matters: [impact if not addressed]
+Likelihood: [how it is reached — entry point, input, condition]
 Suggestion: [concrete alternative, if any]
 ```
 For `[nit]` and trivial `[suggestion]`: one-liner is fine.
 
 On `[blocker]` and `[concern]`, add `Closure condition:` — the observable state required for approval. Any `Suggestion:` is advisory; the author chooses the implementation. For findings about a mismatch between code and docs/spec/description, name which side is authoritative — otherwise the response defaults to changing code. A stated impact assessment bounds the response: escalating above it needs the reviewer's explicit agreement.
 
-**Tone:** Avoid "you" — focus on code, not coder. Use "we" or omit the subject. "You forgot to close the handle" → "File handle left open" or "Can we close the handle here?"
-
-**Example:**
-```
-[blocker] auth/login.py:47 — SQL injection via username parameter
-
-Why it matters: Allows auth bypass and data exfiltration
-Suggestion: Use parameterized query: cursor.execute("SELECT ... WHERE user = %s", (username,))
-```
+**Severity requires evidence.** `[blocker]` requires a concrete failure path, a violated
+invariant, or a deterministic build or validation failure; a hypothetical naming none of
+these is `[concern]` at most. Severity is likelihood × impact, assessed before the tag is
+chosen, not defended after — and a low-likelihood failure that is catastrophic or
+irreversible can still block.
 
 **Repeated patterns:** Flag 2-3 occurrences, then ask the author to fix the pattern throughout.
 
@@ -143,28 +109,32 @@ Suggestion: Use parameterized query: cursor.execute("SELECT ... WHERE user = %s"
 - Invent requirements or failure modes not implied by the stated goal
 - Nitpick style without a style guide (let linters handle it)
 - Suggest rewrites when the code works and is readable
-- Block on "I would have done it differently" without concrete risk
-- Miss security issues while debating naming
+- Block on "I would have done it differently" without concrete risk or a demonstrably cheaper named alternative
 - Demand perfection — good enough ships, perfect doesn't
+- Fill the Approach line with something that sounds considered — "sound" with nothing named is an empty field. Name the alternative you weighed and why it lost, or write "no alternative considered" and let that be visible
+- Inflate severity to justify the review — a genuine nit can accompany an approval, but promoting one to `[concern]` or `[blocker]` costs a round it has not earned
 - Accept style changes mixed with functional changes — ask to split
 - Expand scope to untouched lines — file a bug or fix it yourself
-- Treat a larger fix as better compliance — a fix that grows the change set is a finding, not progress
-- Review states that exist only because the fix was oversized — flag the oversized fix instead
+- Stack a second guard on the same failure at the same trust boundary — that is `[overreach]`; independent controls at separate boundaries are defence in depth
 
 **Do:**
 - Ask "How would I solve this?" — use the difference to guide feedback
-- Frame findings as questions when uncertain — you might be missing context
-- Ask questions before demanding changes
+- Ask before demanding — frame findings as questions when uncertain, since you might be missing context
+- Offer alternatives as questions ("What about...?") — proposing is the exposed move and the one most often skipped; the question form makes it cheap
 - Distinguish preference from requirement
-- Consider author's experience level — teach, don't gatekeep
-- Offer alternatives as questions ("What about...?") — teaches without prescribing
 - Treat your own confusion as signal — future maintainers will struggle too
 - Document in code, not PR — future readers won't see PR discussions
-- Before posting: Is it true? (opinion ≠ truth) Is it necessary? (no nagging, no ego) Is it kind? (no shaming)
 - Acknowledge one good decision per substantial review when genuine (brief, no cheerleading)
-- Surface low-probability edge cases as `[suggestion]` with risk assessment (likelihood, impact, failure mode) — don't suppress legitimate findings; document the tradeoff
+- Surface low-probability edge cases as `[suggestion]` with risk assessment (likelihood, impact, failure mode) — unless the failure is catastrophic or irreversible, which can still block. Don't suppress legitimate findings; document the tradeoff
 
 # Approval Criteria
+
+**Net value gate — mandatory at the approval boundary.** A clean ledger is not
+approval. Every verdict states, in one concrete sentence, the benefit obtained, the
+complexity or risk retained, and the comparison with not merging. No verdict is
+exempt — the assessment is the forcing function, not the output. Marginal or negative
+also names what changed since the change set opened and produces a Decision Request,
+never a unilateral close. Run the vestigial sweep first; it feeds this gate.
 
 **Approve when:**
 - No blockers remain
@@ -172,11 +142,12 @@ Suggestion: Use parameterized query: cursor.execute("SELECT ... WHERE user = %s"
 - Code is better than before (not perfect, better)
 - You'd be comfortable debugging this at 2am
 - `[suggestion]`/`[nit]` don't block — unblock progress while noting improvements
-- "No notes" is valid — don't feel compelled to find something wrong
+- Confidence is part of the verdict — do not approve at low confidence. Take the deeper pass, or state the limitation and let the human accept it explicitly
+- "No notes" is the correct output for a clean change, not a failure to review. Approving fast is the effective strategy; genuine suggestions and nits ride along with the approval — only a blocking finding must be worth the round it costs
 
 **Request changes when:**
 - Blockers exist (P0-P2)
-- `[overreach]` findings remain in a corrective round
+- `[overreach]`, or blocking `[vestigial]`, findings remain in a corrective round
 - Significant concerns unaddressed without rationale
 - Intent unclear and author hasn't clarified
 
@@ -184,62 +155,159 @@ Suggestion: Use parameterized query: cursor.execute("SELECT ... WHERE user = %s"
 - Only suggestions/nits remain
 - Concerns acknowledged with reasonable deferral plan
 
+# Answering Findings
+
+Author-side. Load on receiving review feedback — a REJECTED verdict in
+multi-agent mode, review comments in Pairing.
+
+A corrective commit answers findings. It is not an opportunity to improve the
+change. Run the reviewer's tests against it before submitting:
+
+- **Minimal-fix test:** for each finding, what is the least change that makes it
+  false? If the intended fix is materially larger it is `[overreach]`, and the
+  reviewer will say so. Say it first. A new interface, dependency, migration, or
+  abstraction introduced to answer a `[concern]` or `[suggestion]` is `[overreach]`
+  by default.
+- **Scope bound:** files named in the findings, plus their tests. Growth beyond
+  that is declared and justified in the submission, or it becomes the next finding.
+  The finding's stated impact bounds the fix; a larger fix is not better compliance.
+
+**Contesting.** Complying with a finding that causes greater harm is not
+compliance — it is the next defect. A finding may be returned unfixed as
+`[contested]`, which requires a named concrete harm: the behavior that breaks,
+the invariant violated, the cost incurred. "This would be complex" is not a
+named harm and does not open a contest.
+
+**Comply and record.** Below contesting: implement the fix and record the objection —
+`trade_off` in multi-agent mode, the Change Summary trade-offs row in Pairing. It costs
+no round and blocks nothing, and it is the right move for a harm too diffuse to name:
+coupling introduced, future changes made harder, a shape that will be regretted. Silent
+compliance on a real objection is the failure mode, not contesting.
+
+A refuted contest is a successful contest. It surfaced evidence the reviewer had and the
+author didn't, which is the point — being answered is not being wrong (CORE Rule 14).
+
+The four permitted reviewer responses are defined in CORE Rule 12. Escalate's carrier
+here: Pairing a Decision Request; multi-agent, declared in the rejection verdict and
+carried to the human by the doer via `mark-blocked`.
+
+If fixing A breaks B and fixing B breaks A the spec is broken, not the code (CORE Rule 11):
+that is Escalate, not another round.
+
+# Transition Reference
+
+One definition for the review exchange. Contracts own state transitions and
+permissions; this table owns the response vocabulary and its carriers. Where they
+diverge, that is a defect in whichever change introduced it — fix both, do not pick.
+
+| Event | Actor | Permitted response | Pairing carrier | Multi-agent carrier | Closure |
+|-------|-------|--------------------|-----------------|---------------------|---------|
+| Finding raised | Reviewer | A tag per *Feedback Format* | Review output | Rejection reason on `submit-verdict REJECTED` | Author answers it |
+| Finding answered | Author | Fix; fix and record the objection; or contest naming a concrete harm | Reply to the review | Resubmission commit message; an empty commit when no code changes | Reviewer responds |
+| Contest received | Reviewer | Accept, Counter, Refute, Escalate — never bare restatement | Review output | Verdict text | One of the four is stated |
+| Contest accepted | Author | Record the trade-off | Change Summary, trade-offs row | Coder logs `trade_off` | Finding closed |
+| No consensus | Author | Escalate | Decision Request as the approval request's `Ask` | `mark-blocked` — harm in `blocked_reason`, disagreement in `blocked_questions` | Human or Orchestrator rescopes |
+| Reframe, or net value not positive | Reviewer | `Recommend Reframe` | Decision Request; its own comment on a PR | `submit-verdict REJECTED` whose reason declares the reframe | Author marks BLOCKED rather than resubmitting |
+
 # Re-Review Protocol
 
 Reviews converge by bounding the change set, not by narrowing inspection. Every round reviews the current change set in full — the change set is what cannot grow.
+
+**Continuation or independent.** A *continuation* is this reviewer's next round:
+reconcile prior findings, do not re-derive them. An *independent* review is round
+1 of its own whatever verdicts already exist — full change set, all findings
+published including P3-P6 even when the verdict is Approve, no downgrading to
+match an existing approval. Do not restate a finding another reviewer already raised
+— a second review earns its cost by complementing, not echoing. Speak to a prior
+finding only to disagree with its severity or its resolution.
+
+Prior rounds are the ones this reviewer ran in this session. In Pairing the
+session boundary is the reviewer boundary — a fresh session is an independent
+reviewer, and review notes found on disk are evidence, not its own rounds.
 
 **Every round:**
 
 1. Reconcile each prior finding and classify it: **RESOLVED**, **ACCEPTED** (rationale accepted, no code change), **PARTIALLY ADDRESSED**, or **STILL PRESENT**. Thread resolution, acknowledgement, and outdated diff markers are not evidence.
 2. Inspect the whole change set for P0-P2 every round. After round 1, only unresolved prior findings and new P0-P2 defects may block; new P3-P6 observations route to follow-up.
-3. Check the change set against the initial scope. Undeclared growth is a finding; declared and justified growth is not. File count alone is a signal, not a verdict.
+3. Check the change set against the initial scope — file count alone is a signal, not a verdict.
 4. Report the ledger: `Round N — remaining X→Y, files A→B`.
 
 Do not escalate methodology to match a prior reviewer. Review mode cannot exceed the original mode unless the change itself introduced new complexity or risk.
 
 **Corrective commit review:**
 
-A corrective commit answers findings. It is not an opportunity to improve the change.
+The author's obligations are in *Answering Findings*; judge against those.
 
-- **Scope bound:** the corrective diff defaults to files named in the findings it answers, plus those files' tests. Growth beyond that is `[overreach]` unless declared and justified — as a scope extension in multi-agent mode, or in the round record in Pairing. Undeclared growth is the finding: name each file and ask for it to be split out or reverted.
-- **Minimal-fix test:** for each finding, ask "what is the least change that makes this finding false?" If the submitted fix is materially larger, flag `[overreach]` and state the smaller fix. A new interface, dependency, migration, or abstraction introduced to answer a `[concern]` or `[suggestion]` is `[overreach]` by default.
+- **Undeclared growth is the finding:** name each file outside the answered findings' scope and ask for it to be split out or reverted. Declared and justified growth is not a finding — a scope extension in multi-agent mode, the round record in Pairing.
 - **Collapse before extending:** when a finding concerns code that exists only because of the chosen fix, ask first whether shrinking the fix eliminates the finding. If it does, flag `[overreach]` on the fix rather than opening a round on the states it invented. Reviewing a surface the fix created is how loops fail to converge.
+- **Vestigial sweep:** from round 3, or after any mid-review design change, read
+  the accumulated change set whole rather than round by round. Code is
+  `[vestigial]` on evidence that it exists only to serve a design since replaced
+  and no longer earns its complexity — not on a count of callers. Block only when
+  it worsens net value or creates correctness or security risk; otherwise raise a
+  `[concern]`. Rounds see deltas; nobody sees the sum unless this runs deliberately.
+- **Proportionality:** over-engineering accretes across rounds, not in the first
+  proposal — each round's fix was justified locally and the sum may not be. When the
+  sweep runs, ask whether the accumulated solution is still proportionate to the
+  problem. Good enough beats perfect, and the reviewer's own concerns are the usual
+  driver of the drift.
 - **Suggestions:** a `[suggestion]` is addressed when it is inside the initial scope, or is a no-behavior-change edit to a file already in the change set. Everything else routes to follow-up. Deferring a suggestion is safe; losing it is not.
 
-Stop when no `[blocker]` or `[overreach]` remains, `[concern]` items are fixed or deferred with rationale, validation exercises the changed behavior, and no new P0-P2 issue was introduced. Remaining `[suggestion]`, `[nit]`, and low-risk `[question]` items do not justify another round.
+Stop when no `[blocker]`, `[overreach]`, or blocking `[vestigial]` remains, `[concern]` items are fixed or deferred with rationale, validation exercises the changed behavior, and no new P0-P2 issue was introduced. Remaining `[suggestion]`, `[nit]`, and low-risk `[question]` items do not justify another round.
 
 **Divergence:** files growing while remaining findings do not fall is non-convergence. Stop, restate the original finding set, escalate to the author or human.
 
-**Blast-radius proportionality:**
+**Blast-radius proportionality:** depth scales with blast radius, not with prior review depth. Dev tooling, scripts, config and docs get at most one Standard review plus a focused verification pass. Production behavior without schema, auth or public API impact gets Standard plus focused re-reviews until blockers close. Auth, security, data integrity, migrations, public API and production runtime may have a Deep review, and later rounds still reconcile rather than re-derive.
 
-Review depth scales with blast radius, not with prior review depth.
+Matching or exceeding a prior review's rigor to appear credible — rather than because the change warrants it — is a methodological arms race, and it is how loops stop converging. Prefer a smaller, evidence-focused re-review over a broader, more impressive one.
 
-- **Low blast radius:** dev tooling, internal scripts, config, docs. At most one Standard review plus one focused verification pass.
-- **Medium blast radius:** production behavior without schema/auth/public API impact. Standard review plus focused re-reviews until blockers close.
-- **High blast radius:** auth, security, data integrity, migrations, public API, production runtime. Deep review is allowed; later rounds still reconcile rather than re-derive.
+# Decision Request
 
-**Anti-pattern:**
+When the loop is the problem rather than either side of it, the call belongs to
+the human. Both roles use this form.
 
-**Methodological arms race:** matching or exceeding a prior review's rigor to appear credible rather than because the change warrants it. This creates non-converging review loops. Prefer a smaller, evidence-focused re-review over a broader, more impressive one.
+**Signature:** findings not falling while the change set grows; each round's
+blockers landing in what the previous round's fix introduced; settled work held
+across rounds by an unsettled subsystem; net value marginal or negative.
+
+The format is the content:
+
+- **Adjacent to the decision.** In Pairing it is the last thing before the `Ask`,
+  and the `Ask` is the decision it requests. On a PR it is its own top-level comment.
+  What buries it is a soft heading and a list of fixes above it, not its position.
+- **One recommendation.** Alternatives only when genuinely competitive. Never
+  offer return-to-status-quo — if it were viable there would be no decision.
+- **Name the cost of not deciding,** in the reader's units: rounds spent,
+  verification budget, work held hostage.
+- **One softener maximum.** "That's your call" is the whole quota.
+- **Signal strength encodes need, not insistence.** A weak signal says "I can
+  handle this." A strong one says "I need you here." Calibrate each raise to the
+  actual need. A prior "no" is not a reason for the signal to drop — deference is
+  not new evidence. If the need is unchanged the signal is unchanged; if it grew,
+  so does the signal.
 
 # Review Summary Format
 
-**Compact** (Approve/Comment, zero blockers/concerns, ≤3 suggestions, ≤3 files, high confidence):
+**Compact** (Approve/Comment, zero blockers/concerns, ≤3 suggestions, approach sound, high confidence — size is not a criterion):
 ```
 Review: [mode] — Approve
+Net value: [one sentence: benefit obtained, complexity retained, versus not merging]
 ```
 
 **Full** (everything else):
 ```
-Review: [mode] — [verdict: Approve / Request Changes / Comment]
+Review: [mode] — [verdict: Approve / Request Changes / Comment / Recommend Reframe]
 
 Blockers: [count or "None"]
 Concerns: [count or "None"]
-Suggestions: [count]
+Suggestions: [count or "None"]   ← None/None/None is a complete review
 
 Overall: [1-2 sentence assessment]
+Approach: [round 1 — sound, or the named alternative and its benefit]
+Net value: [positive | marginal | negative — one line]
 Blast Radius: [Low: internal refactor | Medium: logic change | High: migration/public API]
 Confidence: [high: thorough | medium: focused on key areas | low: quick pass]
+Sources: [what was read — diff, source files, specs, ADRs and decision records, validation output]
 Next step: [e.g., "Merge after minor suggestions" | "Ready for another look"]
 ```
 
@@ -257,3 +325,9 @@ Next step: [e.g., "Merge after minor suggestions" | "Ready for another look"]
 | `[overreach]` finding | Also log a `scope_deviation` anomaly |
 | "Routes to follow-up" | Record in the verdict text — no anomaly. Reserve `debt_created` for a known deficiency retained in the implementation |
 | Non-convergence (see Divergence) | Log `scope_deviation`, or `retry_loop` when the coder is cycling; `review_budget_exhausted` is planner-owned at 5 cycles — do not preempt it |
+| `[vestigial]` finding | Same as `[overreach]` — also log a `scope_deviation` anomaly |
+| `[contested]` response | Reviewer answers in the verdict text and logs nothing. If the reviewer accepts, the coder logs `trade_off` (coder-owned). If no consensus follows, the doer marks the task BLOCKED — see `MULTI_AGENT_MODE.md` Iteration Protocol |
+| Decision Request | Not a reviewer artifact here. It reaches the human through the doer's `mark-blocked` reason and questions; the Orchestrator rescopes |
+| Net value marginal/negative | Record in the verdict text — no anomaly |
+| Low confidence blocks approval | Issue REJECTED with `"insufficient information to complete review"` and log `reviewer_loop` — the existing path in `MULTI_AGENT_MODE.md`. The reviewer has no `mark-blocked`; `submit-verdict` is its only channel |
+| `Recommend Reframe` verdict | Pairing and PR only. Submit REJECTED whose reason states the reframe and directs the doer to mark the task BLOCKED rather than resubmit |

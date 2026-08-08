@@ -18,7 +18,7 @@
 | ID | Failure Mode | % | Contract Clause | Lines |
 |----|--------------|---|-----------------|-------|
 | FM-1.1 | Disobey task specification | 10.98% | Rule 2 (DoR), Intent Gate, Execution Fidelity Rule | 217-259, 247-252, 559 |
-| FM-1.2 | Disobey role specification | 0.5% | Collaboration Modes, Mode Discipline (T3.2) | 138-156, 65 |
+| FM-1.2 | Disobey role specification | 0.5% | Collaboration Modes, Mode Discipline (T3.1) | 138-156, 65 |
 | FM-1.3 | Step repetition | 17.14% | Stop Triggers (same fix twice) | 113-126, 120 |
 | FM-1.4 | Loss of conversation history | 3.33% | Context Management, Token Budget, Drift Check | 673-690 |
 | FM-1.5 | Unaware of stopping conditions | 9.82% | Mental Models (Stop Conditions), Model Activation Points | 764-778, 94-106 |
@@ -51,7 +51,7 @@
 | ID | Failure Mode | Contract Clause | Lines |
 |----|--------------|-----------------|-------|
 | SYC-1 | Excessive agreement / validation-seeking | No Cheerleading Policy | 162-168 |
-| SYC-2 | Opinion mirroring on polarizing topics | Rule 13 (Constructive Contrarian — PAIRING_MODE.md), Mechanical Triggers | PAIRING_MODE.md:109-122 |
+| SYC-2 | Opinion mirroring on polarizing topics | Rule 13 (Constructive Contrarian), Mechanical Triggers | 479-491 |
 | SYC-3 | Prioritizing user satisfaction over accuracy | Anti-Gaming Clause, Rule 1 (Integrity) | 781-785, 181-192 |
 | SYC-4 | Softening critical feedback | Direct Response Rule, Challenge assumptions | 165-166 |
 | SYC-5 | Agreeing with incorrect user statements | Rule 5 (Validate Against Reality), Evidence contradicts hypothesis trigger | 342-361, 121 |

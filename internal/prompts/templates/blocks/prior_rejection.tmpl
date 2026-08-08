@@ -20,6 +20,13 @@ boundary with inferior alternatives.
 
 Blockers, overreach, and rejection-worthy concerns must be addressed. Overreach means the fix
 was larger than the finding required: shrink or split it, do not extend it.
+If a required fix would cause greater harm than the finding, contest it once in your submission
+commit message — an empty commit if you are changing no code — naming the concrete harm: the
+behavior that breaks, the invariant violated, the cost incurred. Complexity alone is not a harm.
+The reviewer decides. If its answer still cannot be reconciled with the harm, use
+{{binaryName}} mark-blocked rather than implementing a fix you judge harmful.
+If a rejection declares a reframe or an unresolved contest rather than a fix to make, do not
+implement it: use {{binaryName}} mark-blocked with the reviewer's rationale.
 Suggestions must not grow the change: act on one only if it is inside task scope, or is a
 no-behavior-change edit to a file already in your diff, and only if the fix is small enough
 to add no new file, interface, dependency, or migration. Otherwise leave it and record the

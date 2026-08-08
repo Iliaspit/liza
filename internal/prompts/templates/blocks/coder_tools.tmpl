@@ -4,10 +4,11 @@ CODER TOOLS:
 - {{binaryName}} submit-for-review — Submit completed work for review
   {{binaryName}} submit-for-review {{.TaskID}} HEAD --agent-id {{.AgentID}} --json
   Submission requires a new worktree commit for this task: stage the intended files, create the submission commit, confirm `git -C {{.Worktree}} status --short` is clean, then submit with HEAD. Do NOT submit the pre-change HEAD.
+  A contest that changes no code still submits: create an empty commit carrying the plea in its message, so the reviewer receives it.
 {{template "await-verdict-loop" .}}
 - {{binaryName}} handoff — Context near exhaustion (~90%)
   {{binaryName}} handoff {{.TaskID}} "<what is done>" "<exact next step>" --agent-id {{.AgentID}} --json
-- {{binaryName}} mark-blocked — Cannot proceed (spec ambiguity, missing dependency)
+- {{binaryName}} mark-blocked — Cannot proceed (spec ambiguity, missing dependency, or no consensus with the reviewer on a contested finding)
   {{binaryName}} mark-blocked {{.TaskID}} --agent-id {{.AgentID}} --reason "<what is blocking>" --questions "<q1>" --questions "<q2>" --json
   Add --depends-on "<task-id>" only when another concrete task blocks this task.
   If a command failure is the blocker, `--reason` MUST include the exact failing command and stderr/error text. Do NOT infer root cause without a captured failure.

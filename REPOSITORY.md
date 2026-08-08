@@ -107,7 +107,7 @@ Specialized protocols agents load conditionally. Each contains a single `SKILL.m
 | `check-liza-input-readiness/` | Assessing whether an input document is ready for a chosen Liza MAS entry point |
 | `debugging/` | Before any debugging (mandatory) |
 | `testing/` | When writing or analyzing tests (mandatory) |
-| `code-review/` | When reviewing PRs or pending changes |
+| `code-review/` | When reviewing PRs or pending changes, or answering review feedback |
 | `adversarial-pairing/` | Coordinating doer/reviewer pairing sessions through a Markdown blackboard |
 | `architecture-planning/` | Defining architecture for a change (architect role) |
 | `software-architecture-review/` | Implementation planning, structural concerns |

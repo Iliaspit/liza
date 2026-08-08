@@ -125,6 +125,21 @@ Iteration and review cycle limits are enforced by the blackboard (see `config.ma
 3. Implement fix
 4. Re-submit for review
 
+If the rejection reason declares a reframe or an unresolved contest rather than a
+fix to make, do not implement: mark the task BLOCKED with the reviewer's rationale
+in `blocked_reason`, and let the Orchestrator rescope.
+
+**Contested Finding:**
+The reviewer holds verdict authority. A doer that judges a required fix more harmful
+than the finding may plead once, naming the concrete harm — the behavior that breaks,
+the invariant violated, the cost incurred. Complexity alone is not a harm. Response
+vocabulary and carriers are defined in the `code-review` Transition Reference. The
+reviewer does not raise a Decision Request here; the doer carries the declaration to
+the human. If no consensus follows, the doer marks the task
+BLOCKED with the harm in `blocked_reason` and the disagreement in
+`blocked_questions`; the Orchestrator rescopes. Signal strength tracks need, not
+insistence — deference is not a reason to weaken it. Applies to every doer role.
+
 **Context Exhaustion Handoff (Coder only):**
 At ~90% context (heuristic: many tool calls, re-reading files, difficulty holding state):
 1. STOP at next safe point
