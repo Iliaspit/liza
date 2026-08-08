@@ -460,17 +460,22 @@ func TestAwaitVerdict_Rejected_ObservedByTickWhenWatcherSilent(t *testing.T) {
 	state.Agents["coder-1"] = testhelpers.RegisteredTestAgent("coder")
 	bb := testhelpers.WriteInitialState(t, stateFile, state)
 
+	// The budgets below are ceilings, not waits: the test proceeds as soon as
+	// each step happens. They were tight enough that the race detector, which
+	// slows everything down, pushed the tick past them and failed the test for
+	// timing rather than for behaviour. The tick interval above is 10ms, so
+	// there is no cost to being generous here.
 	var result *AwaitVerdictResult
 	var awaitErr error
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		result, awaitErr = AwaitVerdict(context.Background(), tmpDir, "task-1", "coder-1", 2*time.Second)
+		result, awaitErr = AwaitVerdict(context.Background(), tmpDir, "task-1", "coder-1", 30*time.Second)
 	}()
 
 	select {
 	case <-watcherReady:
-	case <-time.After(2 * time.Second):
+	case <-time.After(30 * time.Second):
 		t.Fatal("timed out waiting for silent watcher setup")
 	}
 
@@ -494,7 +499,7 @@ func TestAwaitVerdict_Rejected_ObservedByTickWhenWatcherSilent(t *testing.T) {
 
 	select {
 	case <-done:
-	case <-time.After(2 * time.Second):
+	case <-time.After(30 * time.Second):
 		t.Fatal("AwaitVerdict did not observe rejected verdict through periodic tick")
 	}
 	if awaitErr != nil {

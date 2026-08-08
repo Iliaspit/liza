@@ -1462,7 +1462,12 @@ func TestRunSupervisor_OpenCodeNoProgressBlocksBeforeSecondExecution(t *testing.
 	opencodeOutput := `{"type":"tool","name":"exec","input":{"cmd":"printf BRIDGE_EXEC_OK"},"output":"exit_code: 0\nstdout:\nBRIDGE_EXEC_OK"}`
 	mock := &MockCLIExecutor{ExitCode: 0, Output: opencodeOutput}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	// The supervisor has to get through two executions and then block the task
+	// before this deadline. It is a ceiling — RunSupervisor returns as soon as it
+	// blocks — and ten seconds proved to be within noise of what a slow
+	// filesystem costs: the test failed three times in a row with the second
+	// execution done but the block not yet recorded, then passed seven times.
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
 	err := RunSupervisor(ctx, SupervisorConfig{
