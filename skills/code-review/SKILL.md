@@ -161,9 +161,7 @@ never a unilateral close. Run the vestigial sweep first; it feeds this gate.
 # Answering Findings
 
 Author-side. Load on receiving review feedback — a REJECTED verdict in
-multi-agent mode, review comments in Pairing, a review on a PR. On a PR the carrier
-for your answer is defined in `pr-review` (*Answering Findings on a PR*): push the
-corrective commits, then post one comment mapping findings to commits.
+multi-agent mode, review comments in Pairing.
 
 A corrective commit answers findings. It is not an opportunity to improve the
 change. Run the reviewer's tests against it before submitting:
