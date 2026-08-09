@@ -37,6 +37,26 @@ When a change touches system state, concurrency, review flow, agent lifecycle, o
 
 **Test:** "Does this change preserve every invariant it touches?" If not, name the invariant and apply the tier-appropriate response.
 
+### G1.3: Preserve white-label boundaries
+
+Do not introduce raw default-brand identifiers (`Liza`, `LIZA`, `liza`, or
+`liza-mas/liza`) directly into end-user-visible code, templates, documentation,
+generated artifacts, CLI/log/error output, hooks, distribution surfaces, or
+advertised paths. Route Go presentation through `internal/brand`, render
+embedded assets with declared brand macros, and use relative links for
+same-repository targets.
+
+Permitted literals are limited to centralized default-brand definitions and
+ADR-0092's structural or compatibility categories: Go module/import paths,
+legacy `LIZA_*` aliases, license or attribution text, historical artifacts,
+tests intentionally asserting default-brand or legacy behavior, unverified
+provider identities, and intentionally pinned canonical upstream URLs.
+
+**Test:** For every touched presentation surface, validate a non-default-brand
+build or render and scan applicable outputs for raw default-brand literals
+outside the documented allowlist. Tie every retained literal to an allowed
+category.
+
 ## Tier 2 (Strong Defaults)
 
 ### G2.1: Lessons - Agents
@@ -68,14 +88,14 @@ G2.2 pushes toward cutting; this bounds it. Before removing text from a contract
 
 **Test:** "What else did I justify by pointing at this?"
 
-## Tier 3 (Preferences)
-
-### G3.1: Architecture record awareness
+### G2.4: Architecture record awareness
 
 When planning or reviewing a change with architectural impact:
 
 1. Read `specs/architecture/ADR/README.md` for prior decisions that may constrain or inform the design.
 2. Read the Update Policy and Open Issues Summary in `specs/architecture/architectural-issues.md`, then read the full sections for any relevant open issues.
+
+## Tier 3 (Preferences)
 
 ---
 
