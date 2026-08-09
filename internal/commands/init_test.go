@@ -2110,9 +2110,10 @@ func TestInitCommand_WritesClaudeSettings(t *testing.T) {
 		t.Fatalf("permissions field missing or invalid type")
 	}
 
-	// Verify defaultMode
-	if _, ok := perms["defaultMode"]; !ok {
-		t.Errorf("permissions.defaultMode field missing")
+	// Verify defaultMode is not written: project-scope settings do not reliably
+	// set the permission mode and would shadow the user's own Claude settings.
+	if mode, ok := perms["defaultMode"]; ok {
+		t.Errorf("permissions.defaultMode should not be written, got %v", mode)
 	}
 
 	// Verify allow array exists

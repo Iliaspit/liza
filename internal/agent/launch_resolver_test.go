@@ -1,12 +1,34 @@
 package agent
 
 import (
+	"os"
 	"slices"
 	"strings"
 	"testing"
 
 	"github.com/liza-mas/liza/internal/models"
+	"github.com/liza-mas/liza/internal/providers"
 )
+
+// TestMain pins the provider catalog to the embedded copy for this package.
+//
+// BuiltInAgentTools memoizes providers.Load, which resolves through the
+// on-disk cache and then the published catalog over the network. Tests that
+// assert built-in launch shapes would otherwise pass or fail according to
+// cache freshness and what is currently published, rather than according to
+// the catalog in this worktree. Seeding the memo here — before any test runs,
+// so the result does not depend on test order — makes those assertions
+// deterministic and keeps the package off the network.
+//
+// Asserting against the embedded catalog is equivalent to asserting against
+// the published one: TestRepositoryCatalogAddsRemoteProviders in
+// internal/providers fails if their launch args diverge. Cache and refresh
+// behavior is owned and tested by internal/providers.
+func TestMain(m *testing.M) {
+	runtimeCatalog = providers.EmbeddedCatalog()
+	runtimeCatalogOnce.Do(func() {})
+	os.Exit(m.Run())
+}
 
 func TestAgentToolRegistryMergesCustomTools(t *testing.T) {
 	config := models.Config{
@@ -111,8 +133,8 @@ func TestBuiltInLaunchPlansPreserveCurrentArgShapes(t *testing.T) {
 		wantArgs   []string
 		wantStdin  bool
 	}{
-		{name: "claude", wantExe: "claude", wantArgs: []string{"-p"}, wantStdin: true},
-		{name: "claude", outputsDir: "/logs", wantExe: "claude", wantArgs: []string{"-p", "--verbose", "--output-format", "stream-json"}, wantStdin: true},
+		{name: "claude", wantExe: "claude", wantArgs: []string{"-p", "--permission-mode", "auto"}, wantStdin: true},
+		{name: "claude", outputsDir: "/logs", wantExe: "claude", wantArgs: []string{"-p", "--permission-mode", "auto", "--verbose", "--output-format", "stream-json"}, wantStdin: true},
 		{name: "codex", wantExe: "codex", wantArgs: []string{"exec", "-"}, wantStdin: true},
 		{name: "codex", outputsDir: "/logs", wantExe: "codex", wantArgs: []string{"exec", "--json", "-"}, wantStdin: true},
 		{name: "opencode", wantExe: "opencode", wantArgs: []string{"run", "do it", "--dangerously-skip-permissions"}},
@@ -182,7 +204,7 @@ func TestResolveLaunchPlanInsertsClaudeSubagentDisableBeforeLoggingFlags(t *test
 		t.Fatalf("ResolveLaunchPlan() error = %v", err)
 	}
 
-	want := []string{"-p", "--disallowedTools", "Task", "--verbose", "--output-format", "stream-json"}
+	want := []string{"-p", "--permission-mode", "auto", "--disallowedTools", "Task", "--verbose", "--output-format", "stream-json"}
 	if !slices.Equal(plan.Args, want) {
 		t.Fatalf("args = %v, want %v", plan.Args, want)
 	}

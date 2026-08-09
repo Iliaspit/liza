@@ -85,7 +85,6 @@
   },
   "enableAllProjectMcpServers": true,
   "permissions": {
-    "defaultMode": "acceptEdits",
     "additionalDirectories": ["~/__BRAND_GLOBAL_DIRNAME__", "/tmp"],
     "allow": [
       "Read(~/.claude/**)",

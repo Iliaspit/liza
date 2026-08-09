@@ -649,46 +649,50 @@ func TestMergePermissions(t *testing.T) {
 		name     string
 		liza     map[string]any
 		existing map[string]any
-		wantMode string
 		wantLen  int // expected length of allow array
 	}{
 		{
-			name: "merge with different defaultMode",
+			name: "existing defaultMode is dropped, not preserved",
 			liza: map[string]any{
-				"defaultMode": "acceptEdits",
-				"allow":       []any{"Bash(liza:*)"},
+				"allow": []any{"Bash(liza:*)"},
 			},
 			existing: map[string]any{
 				"defaultMode": "prompt",
 				"allow":       []any{"Read(**)"},
 			},
-			wantMode: "prompt", // existing takes precedence
-			wantLen:  2,        // union of allows
+			wantLen: 2, // union of allows
 		},
 		{
 			name: "merge with overlapping permissions",
 			liza: map[string]any{
-				"defaultMode": "acceptEdits",
-				"allow":       []any{"Bash(liza:*)", "Bash(git:*)"},
+				"allow": []any{"Bash(liza:*)", "Bash(git:*)"},
 			},
 			existing: map[string]any{
-				"defaultMode": "acceptEdits",
-				"allow":       []any{"Bash(git:*)", "Read(**)"},
+				"allow": []any{"Bash(git:*)", "Read(**)"},
 			},
-			wantMode: "acceptEdits",
-			wantLen:  3, // Bash(liza:*), Bash(git:*), Read(**) - deduplicated
+			wantLen: 3, // Bash(liza:*), Bash(git:*), Read(**) - deduplicated
 		},
 		{
 			name: "existing has no allow",
+			liza: map[string]any{
+				"allow": []any{"Bash(liza:*)"},
+			},
+			existing: map[string]any{
+				"defaultMode": "prompt",
+			},
+			wantLen: 1, // only liza allows
+		},
+		{
+			name: "defaultMode from either side is dropped",
 			liza: map[string]any{
 				"defaultMode": "acceptEdits",
 				"allow":       []any{"Bash(liza:*)"},
 			},
 			existing: map[string]any{
-				"defaultMode": "prompt",
+				"defaultMode": "auto",
+				"allow":       []any{"Read(**)"},
 			},
-			wantMode: "prompt",
-			wantLen:  1, // only liza allows
+			wantLen: 2,
 		},
 	}
 
@@ -696,9 +700,10 @@ func TestMergePermissions(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			result := mergePermissions(tt.liza, tt.existing)
 
-			// Check defaultMode
-			if result["defaultMode"] != tt.wantMode {
-				t.Errorf("Expected defaultMode %q, got %q", tt.wantMode, result["defaultMode"])
+			// defaultMode must never survive a merge: project-scope settings
+			// shadow the mode the user set in their own Claude settings.
+			if mode, ok := result["defaultMode"]; ok {
+				t.Errorf("Expected defaultMode to be absent, got %q", mode)
 			}
 
 			// Check allow array length
@@ -759,9 +764,9 @@ func TestMergeSettings(t *testing.T) {
 					t.Fatalf("permissions is not map[string]any")
 				}
 
-				// defaultMode should be from existing
-				if perms["defaultMode"] != "prompt" {
-					t.Errorf("Expected defaultMode=prompt, got %v", perms["defaultMode"])
+				// defaultMode is dropped from both sides
+				if mode, ok := perms["defaultMode"]; ok {
+					t.Errorf("Expected defaultMode to be absent, got %v", mode)
 				}
 
 				// allow should be union
@@ -1150,13 +1155,18 @@ func TestWriteClaudeSettings_MergeAccepted(t *testing.T) {
 		t.Fatalf("Failed to parse merged JSON: %v", err)
 	}
 
-	// Verify existing defaultMode is preserved
+	// Verify the removal of an existing defaultMode was announced
+	if !strings.Contains(output, "defaultMode") {
+		t.Errorf("Expected defaultMode removal notice in output, got: %s", output)
+	}
+
+	// Verify existing defaultMode is removed, not preserved
 	perms, ok := merged["permissions"].(map[string]any)
 	if !ok {
 		t.Fatalf("permissions missing")
 	}
-	if perms["defaultMode"] != "prompt" {
-		t.Errorf("Expected defaultMode=prompt (from existing), got %v", perms["defaultMode"])
+	if mode, ok := perms["defaultMode"]; ok {
+		t.Errorf("Expected defaultMode to be removed, got %v", mode)
 	}
 
 	// Verify permissions are unioned

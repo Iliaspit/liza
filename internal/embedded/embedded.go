@@ -423,6 +423,9 @@ func WriteClaudeSettingsWithOptions(projectRoot string, reader *bufio.Reader, op
 
 	var finalSettings map[string]any
 	if existingSettings != nil {
+		if mode, ok := existingDefaultMode(existingSettings); ok {
+			fmt.Printf("Removing permissions.defaultMode (%q) from %s — project-scope settings do not reliably set the permission mode; set it in your own Claude settings instead.\n", mode, settingsPath)
+		}
 		finalSettings = mergeSettings(lizaSettings, existingSettings)
 	} else {
 		finalSettings = lizaSettings
@@ -1183,6 +1186,12 @@ func mergeSettings(liza, existing map[string]any) map[string]any {
 
 // mergePermissions merges permission objects.
 // Existing values override liza defaults, except "allow" which is unioned.
+//
+// "defaultMode" is dropped unconditionally: project-scope settings are only
+// inconsistently honored by Claude Code (some values activate, others are
+// ignored) and an entry here shadows the mode the user set in their own
+// settings. Agents get their mode from the launch flag instead — see the
+// claude entry in internal/providers/embedded.go.
 func mergePermissions(liza, existing map[string]any) map[string]any {
 	result := make(map[string]any)
 	maps.Copy(result, liza)
@@ -1201,8 +1210,20 @@ func mergePermissions(liza, existing map[string]any) map[string]any {
 			result[k] = v
 		}
 	}
+	delete(result, "defaultMode")
 
 	return result
+}
+
+// existingDefaultMode reports the permissions.defaultMode value already present
+// in a settings file, so the caller can tell the user it is being removed.
+func existingDefaultMode(settings map[string]any) (string, bool) {
+	perms, ok := settings["permissions"].(map[string]any)
+	if !ok {
+		return "", false
+	}
+	mode, ok := perms["defaultMode"].(string)
+	return mode, ok
 }
 
 func mergeTopLevelAdditionalDirectories(result map[string]any, value any) {

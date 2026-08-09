@@ -25,8 +25,8 @@ providers:
       provider_key: claude
       executable: claude
       prompt_transport: stdin
-      run_args: [-p]
-      logged_run_args: [-p, --verbose, --output-format, stream-json]
+      run_args: [-p, --permission-mode, auto]
+      logged_run_args: [-p, --permission-mode, auto, --verbose, --output-format, stream-json]
       env_files: [claude.env]
       contract_key: claude
 

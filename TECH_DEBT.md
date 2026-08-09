@@ -60,3 +60,13 @@ the writer and legacy activation-evidence detection.
 **Why deferred:** A correct preflight needs provider-specific readiness semantics that do not consume quota, create durable sessions unnecessarily, or depend on stack-specific project commands. The current fix bounds the production failure from an unbounded restart loop to one classified crash per provider failure, while preserving stack-agnostic runtime behavior.
 
 **Payback trigger:** Add a provider capability/preflight layer when a second provider-startup failure class is observed, or when Codex exposes a stable non-mutating readiness command for session-store accessibility.
+
+## No detection of auto-mode-incapable Claude models
+
+**What:** MAS agents are launched with `--permission-mode auto` (claude entry in `provider-catalog.yaml`, mirrored in `internal/providers/embedded.go`). Auto mode has documented model and organization requirements — see [permission modes](https://code.claude.com/docs/en/permission-modes) for the current list, which names Haiku, Sonnet 4.5, Opus 4.5, and claude-3 models as unsupported on every provider. Liza does not check whether the configured model meets them.
+
+Observed behavior when the model is unsupported (`claude -p --permission-mode auto --model claude-haiku-4-5-20251001`, 2026-08-09): no startup error; the run proceeded, refused its `Write` tool call with a request for permission, wrote no file, and exited 2. The identical invocation with `--permission-mode acceptEdits` created the file. Not established here: whether every unsupported model behaves this way, or whether any warning reaches stderr. An organization-level `permissions.disableAutoMode` is a separate and louder case — documented to reject `--permission-mode auto` at startup — so it is not part of this gap.
+
+**Why deferred:** Detecting it means parsing `--model` out of args and profiles and maintaining Anthropic's list of auto-capable models inside Liza — a vendor-owned list that drifts silently and would be wrong in exactly the cases that matter. Liza also does not set the model by default, so in the common configuration there is nothing to inspect. The constraint is documented in `support-docs/CONFIGURATION.md` instead.
+
+**Payback trigger:** First report of a MAS agent that runs but produces no edits. If Claude Code gains a queryable capability check (something like `claude auto-mode config` reporting gate status for the resolved model), use that rather than a hardcoded list.

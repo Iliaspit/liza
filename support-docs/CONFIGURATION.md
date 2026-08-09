@@ -169,7 +169,12 @@ include both `~/.§BRAND_NAME_LOWER§` and `~/§BRAND_GLOBAL_DIRNAME§` when tho
 - **`enableAllProjectMcpServers`** — enables any project MCP servers (for non-§BRAND_NAME_TITLE§ tools like filesystem, etc.)
 - **`Bash(§BRAND_BINARY_NAME§:*)`** — grants permission for agents to invoke §BRAND_NAME_TITLE§ CLI commands
 - **`Skill(...)`** — contract skills from `~/§BRAND_GLOBAL_DIRNAME§/skills/` (installed by `§BRAND_BINARY_NAME§ setup`)
-- **`defaultMode: acceptEdits`** — required for headless agent operation
+- **No `defaultMode`** — §BRAND_NAME_TITLE§ never writes one here, and removes any it finds when merging. Claude Code v2.1.142 and later deliberately ignore `auto` in `.claude/settings.json` and `.claude/settings.local.json` "so a repository cannot grant itself auto mode" ([permission modes](https://code.claude.com/docs/en/permission-modes)); a value that *is* honored here shadows the mode you set in your own `~/.claude/settings.json`. Set the mode you want for interactive sessions there. MAS agents do not read it: they are launched with `--permission-mode auto` from the provider catalog, so their mode is the same on every machine. Override it per project with an `agent_tools` entry that restates `run_args` and `logged_run_args` (see [Supported CLIs](#supported-clis)).
+
+  Two consequences worth knowing:
+
+  - **Auto mode has account and model requirements.** Per the [documented requirements](https://code.claude.com/docs/en/permission-modes), it needs Opus 4.6+, Sonnet 4.6+, or Fable 5 on the Anthropic API and Claude Platform on AWS, and Sonnet 5, Opus 4.7+, or Fable 5 on Bedrock, Agent Platform, Foundry, and gateway sessions; Haiku, Sonnet 4.5, Opus 4.5, and claude-3 models are unsupported on every provider. Organization administrators can also disable it via `permissions.disableAutoMode` in managed settings, which rejects `--permission-mode auto` at startup. When the model is merely unsupported there is no startup error: an agent run observed on `claude-haiku-4-5-20251001` proceeded normally and then refused its `Write` tool call, asking for permission and exiting non-zero with no file written — the same invocation with `--permission-mode acceptEdits` succeeded. In a MAS run that presents as an agent that works and produces nothing, so check the model first if agents stop making edits.
+  - **Auto mode ignores allow rules it treats as classifier-bypassing**, so the `allow` list below no longer fully determines what agents may do.
 - **`permissions.additionalDirectories`** — grants access to required non-project directories such as `~/§BRAND_GLOBAL_DIRNAME§` and `/tmp`
 
 ### Two-Layer Architecture

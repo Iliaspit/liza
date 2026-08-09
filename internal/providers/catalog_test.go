@@ -140,6 +140,16 @@ func TestRepositoryCatalogAddsRemoteProviders(t *testing.T) {
 		if !publishedOK || !embeddedOK || !reflect.DeepEqual(publishedProvider.Setup.Contract, embeddedProvider.Setup.Contract) {
 			t.Fatalf("published %s contract = %+v, %v; embedded = %+v, %v", id, publishedProvider.Setup.Contract, publishedOK, embeddedProvider.Setup.Contract, embeddedOK)
 		}
+		// Launch args must not drift between the two catalogs. The published
+		// file is what runtime fetches; the embedded copy is only the offline
+		// fallback, so a change applied to one and not the other silently
+		// changes behavior depending on which catalog wins.
+		if !reflect.DeepEqual(publishedProvider.Runtime.RunArgs, embeddedProvider.Runtime.RunArgs) {
+			t.Errorf("published %s run_args = %v; embedded = %v", id, publishedProvider.Runtime.RunArgs, embeddedProvider.Runtime.RunArgs)
+		}
+		if !reflect.DeepEqual(publishedProvider.Runtime.LoggedRunArgs, embeddedProvider.Runtime.LoggedRunArgs) {
+			t.Errorf("published %s logged_run_args = %v; embedded = %v", id, publishedProvider.Runtime.LoggedRunArgs, embeddedProvider.Runtime.LoggedRunArgs)
+		}
 	}
 	if _, ok := cat.Resolve("qwen"); !ok {
 		t.Fatal("provider-catalog.yaml missing qwen")
