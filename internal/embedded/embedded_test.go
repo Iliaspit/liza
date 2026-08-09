@@ -1576,11 +1576,9 @@ func TestWriteCodexProjectPermissions_NewFile(t *testing.T) {
 
 func expectedCodexPermissionSnippets() []string {
 	return []string{
-		`model = "gpt-5.5"`,
 		`approval_policy = "never"`,
+		`approvals_reviewer = "auto_review"`,
 		`sandbox_mode = "workspace-write"`,
-		`model_reasoning_effort = "high"`,
-		`personality = "pragmatic"`,
 		`[permissions.workspace.network]`,
 		`enabled = true`,
 		`network_access = true`,
@@ -1625,11 +1623,10 @@ func TestRenderCodexProjectConfig_RendersWritableRootsExactly(t *testing.T) {
 	writeRoots := codexSupportWritableRoots()
 
 	got := renderCodexProjectConfig(append([]string{projectRoot, gitDir}, append(writeRoots, "/tmp")...))
-	want := `model = "gpt-5.5"
-approval_policy = "never"
+	want := `approval_policy = "never"
+approvals_reviewer = "auto_review"
+
 sandbox_mode = "workspace-write"
-model_reasoning_effort = "high"
-personality = "pragmatic"
 
 [permissions.workspace.network]
 enabled = true
@@ -1662,11 +1659,10 @@ func TestRenderCodexProjectConfig_RemovesTmpPlaceholderWhenAbsent(t *testing.T) 
 	writeRoots := codexSupportWritableRoots()
 
 	got := renderCodexProjectConfig(append([]string{projectRoot, gitDir}, writeRoots...))
-	want := `model = "gpt-5.5"
-approval_policy = "never"
+	want := `approval_policy = "never"
+approvals_reviewer = "auto_review"
+
 sandbox_mode = "workspace-write"
-model_reasoning_effort = "high"
-personality = "pragmatic"
 
 [permissions.workspace.network]
 enabled = true
@@ -1751,8 +1747,7 @@ writable_roots = [
 	text := string(content)
 	snippets := append(expectedCodexRequiredSnippets(),
 		`model = "gpt-5"`,
-		`model_reasoning_effort = "high"`,
-		`personality = "pragmatic"`,
+		`approvals_reviewer = "auto_review"`,
 		"# keep this comment",
 		`"/home/test/.npm"`,
 	)
@@ -1826,6 +1821,11 @@ func TestWriteCodexProjectPermissions_AppendsMissingSection(t *testing.T) {
 			t.Errorf("config missing %q:\n%s", want, text)
 		}
 	}
+	for _, unwanted := range []string{"model =", "model_reasoning_effort =", "personality ="} {
+		if strings.Contains(text, unwanted) {
+			t.Errorf("config should not add optional preference %q:\n%s", unwanted, text)
+		}
+	}
 }
 
 func TestWriteCodexProjectPermissions_ReplacesManagedBaselineWithoutDuplicate(t *testing.T) {
@@ -1878,6 +1878,7 @@ exclude_slash_tmp = true
 	for _, want := range []string{
 		`model = "gpt-5"`,
 		`approval_policy = "never"`,
+		`approvals_reviewer = "auto_review"`,
 		`sandbox_mode = "workspace-write"`,
 		`model_reasoning_effort = "minimal"`,
 		`personality = "friendly"`,
@@ -1893,12 +1894,10 @@ exclude_slash_tmp = true
 	}
 }
 
-func TestCodexBaselineLooksComplete_AllowsUserPreferenceValues(t *testing.T) {
-	content := `model = "gpt-5"
-approval_policy = "never"
+func TestCodexBaselineLooksComplete_AllowsOptionalPreferencesToBeAbsent(t *testing.T) {
+	content := `approval_policy = "never"
+approvals_reviewer = "user"
 sandbox_mode = "workspace-write"
-model_reasoning_effort = "minimal"
-personality = "friendly"
 
 [permissions.workspace.network]
 enabled = true
@@ -1920,11 +1919,9 @@ writable_roots = [
 }
 
 func TestCodexBaselineLooksComplete_RequiresOperationalValues(t *testing.T) {
-	content := `model = "gpt-5"
-approval_policy = "on-failure"
+	content := `approval_policy = "on-failure"
+approvals_reviewer = "user"
 sandbox_mode = "workspace-write"
-model_reasoning_effort = "minimal"
-personality = "friendly"
 
 [permissions.workspace.network]
 enabled = true

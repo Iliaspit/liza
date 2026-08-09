@@ -191,13 +191,18 @@ For global setup and project activation, use `§BRAND_BINARY_NAME§ setup` and `
 
 `§BRAND_BINARY_NAME§ init --codex` manages the Codex settings §BRAND_NAME_TITLE§ needs for unattended
 supervisor tasks and pairing mode. It adds or corrects the global Codex
-baseline (`gpt-5.5`, noninteractive approvals, high reasoning effort,
-workspace-write sandboxing, and network access) and adds the active project root
+baseline (noninteractive approvals, the auto-review preference,
+workspace-write sandboxing, and network access). It does not manage model,
+reasoning effort, or personality settings. It also adds the active project root
 plus the active project `.git` directory to
 `sandbox_workspace_write.writable_roots` so Codex can edit project files and
 write Git metadata. It also adds Codex/§BRAND_NAME_TITLE§ support directories and user cache
 roots to `writable_roots`. If the file already exists, §BRAND_NAME_TITLE§ prompts before
 merging those entries and preserves unrelated settings.
+
+Earlier versions wrote `model`, `model_reasoning_effort`, and `personality`.
+Upgrades preserve those values because they may have been changed by the user;
+remove them from `~/.codex/config.toml` to return to Codex defaults.
 
 When launching headless MAS agents, §BRAND_NAME_TITLE§ relies on this global Codex
 configuration for sandbox mode, approval policy, network access, and writable
@@ -231,11 +236,10 @@ Interactive `§BRAND_BINARY_NAME§ agent -i` keeps using the installed Codex bin
 The recommended complete setup shape is:
 
 ```toml
-model = "gpt-5.5"
 approval_policy = "never"
+approvals_reviewer = "auto_review"
+
 sandbox_mode = "workspace-write"
-model_reasoning_effort = "high"
-personality = "pragmatic"
 
 [permissions.workspace.network]
 enabled = true

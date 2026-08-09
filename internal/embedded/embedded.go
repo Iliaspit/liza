@@ -718,9 +718,7 @@ func mergeCodexWorkspacePermissionBaseline(content string) (string, bool) {
 		key     string
 		value   string
 	}{
-		{"", "model", `"gpt-5.5"`},
-		{"", "model_reasoning_effort", `"high"`},
-		{"", "personality", `"pragmatic"`},
+		{"", "approvals_reviewer", `"auto_review"`},
 	}
 	requiredAssignments := []struct {
 		section string
@@ -1048,9 +1046,7 @@ func codexBaselineLooksComplete(content string) bool {
 		section string
 		key     string
 	}{
-		{"", "model"},
-		{"", "model_reasoning_effort"},
-		{"", "personality"},
+		{"", "approvals_reviewer"},
 	}
 	requiredSnippets := []string{
 		".codex",
