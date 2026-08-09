@@ -51,7 +51,7 @@
 | ID | Failure Mode | Contract Clause | Lines |
 |----|--------------|-----------------|-------|
 | SYC-1 | Excessive agreement / validation-seeking | No Cheerleading Policy | 162-168 |
-| SYC-2 | Opinion mirroring on polarizing topics | Rule 13 (Constructive Contrarian), Mechanical Triggers | 479-491 |
+| SYC-2 | Opinion mirroring on polarizing topics | Rule 13 (Constructive Contrarian), Mechanical Triggers | 482-494 |
 | SYC-3 | Prioritizing user satisfaction over accuracy | Anti-Gaming Clause, Rule 1 (Integrity) | 781-785, 181-192 |
 | SYC-4 | Softening critical feedback | Direct Response Rule, Challenge assumptions | 165-166 |
 | SYC-5 | Agreeing with incorrect user statements | Rule 5 (Validate Against Reality), Evidence contradicts hypothesis trigger | 342-361, 121 |

@@ -130,10 +130,13 @@ irreversible can still block.
 # Approval Criteria
 
 **Net value gate — mandatory at the approval boundary.** A clean ledger is not
-approval. Every verdict states, in one concrete sentence, the benefit obtained, the
-complexity or risk retained, and the comparison with not merging. No verdict is
-exempt — the assessment is the forcing function, not the output. Marginal or negative
-also names what changed since the change set opened and produces a Decision Request,
+approval. Every verdict states two values, one concrete sentence each: **as submitted**
+and **with the findings resolved** — benefit obtained, complexity or risk retained,
+versus not merging. No verdict is exempt; the assessment is the forcing function.
+
+The resolved value decides. Negative as submitted but positive resolved is ordinary
+Request Changes. Still marginal or negative once resolved means the change should not
+exist in this shape — name what changed since it opened and produce a Decision Request,
 never a unilateral close. Run the vestigial sweep first; it feeds this gate.
 
 **Approve when:**
@@ -158,7 +161,9 @@ never a unilateral close. Run the vestigial sweep first; it feeds this gate.
 # Answering Findings
 
 Author-side. Load on receiving review feedback — a REJECTED verdict in
-multi-agent mode, review comments in Pairing.
+multi-agent mode, review comments in Pairing, a review on a PR. On a PR the carrier
+for your answer is defined in `pr-review` (*Answering Findings on a PR*): push the
+corrective commits, then post one comment mapping findings to commits.
 
 A corrective commit answers findings. It is not an opportunity to improve the
 change. Run the reviewer's tests against it before submitting:
@@ -177,6 +182,12 @@ compliance — it is the next defect. A finding may be returned unfixed as
 `[contested]`, which requires a named concrete harm: the behavior that breaks,
 the invariant violated, the cost incurred. "This would be complex" is not a
 named harm and does not open a contest.
+
+**When the reviewer escalates.** A Decision Request or `Recommend Reframe` is not a
+finding to fix, and a corrective pass is not an answer to one. Address the decision on
+its merits — agree, or refute its premise with evidence — and leave the call with the
+human. Do not put your own approval request in front of the human while theirs is
+unanswered: that is two asks, and one of them quietly disappears.
 
 **Comply and record.** Below contesting: implement the fix and record the objection —
 `trade_off` in multi-agent mode, the Change Summary trade-offs row in Pairing. It costs
@@ -207,7 +218,7 @@ diverge, that is a defect in whichever change introduced it — fix both, do not
 | Contest received | Reviewer | Accept, Counter, Refute, Escalate — never bare restatement | Review output | Verdict text | One of the four is stated |
 | Contest accepted | Author | Record the trade-off | Change Summary, trade-offs row | Coder logs `trade_off` | Finding closed |
 | No consensus | Author | Escalate | Decision Request as the approval request's `Ask` | `mark-blocked` — harm in `blocked_reason`, disagreement in `blocked_questions` | Human or Orchestrator rescopes |
-| Reframe, or net value not positive | Reviewer | `Recommend Reframe` | Decision Request; its own comment on a PR | `submit-verdict REJECTED` whose reason declares the reframe | Author marks BLOCKED rather than resubmitting |
+| Reframe, or resolved net value not positive | Reviewer | `Recommend Reframe` | Decision Request; its own comment on a PR | `submit-verdict REJECTED` whose reason declares the reframe | Author marks BLOCKED rather than resubmitting |
 
 # Re-Review Protocol
 
@@ -268,7 +279,7 @@ the human. Both roles use this form.
 
 **Signature:** findings not falling while the change set grows; each round's
 blockers landing in what the previous round's fix introduced; settled work held
-across rounds by an unsettled subsystem; net value marginal or negative.
+across rounds by an unsettled subsystem; resolved net value marginal or negative.
 
 The format is the content:
 
@@ -304,7 +315,9 @@ Suggestions: [count or "None"]   ← None/None/None is a complete review
 
 Overall: [1-2 sentence assessment]
 Approach: [round 1 — sound, or the named alternative and its benefit]
-Net value: [positive | marginal | negative — one line]
+Absence: [baseline used — nothing missing, or what is]
+Sweep: [from round 3 or a mid-review design change — vestigial or disproportionate, or neither]
+Net value: [as submitted — one line] / [with findings resolved — one line]
 Blast Radius: [Low: internal refactor | Medium: logic change | High: migration/public API]
 Confidence: [high: thorough | medium: focused on key areas | low: quick pass]
 Sources: [what was read — diff, source files, specs, ADRs and decision records, validation output]
@@ -328,6 +341,6 @@ Next step: [e.g., "Merge after minor suggestions" | "Ready for another look"]
 | `[vestigial]` finding | Same as `[overreach]` — also log a `scope_deviation` anomaly |
 | `[contested]` response | Reviewer answers in the verdict text and logs nothing. If the reviewer accepts, the coder logs `trade_off` (coder-owned). If no consensus follows, the doer marks the task BLOCKED — see `MULTI_AGENT_MODE.md` Iteration Protocol |
 | Decision Request | Not a reviewer artifact here. It reaches the human through the doer's `mark-blocked` reason and questions; the Orchestrator rescopes |
-| Net value marginal/negative | Record in the verdict text — no anomaly |
+| Resolved net value marginal/negative | Record in the verdict text — no anomaly |
 | Low confidence blocks approval | Issue REJECTED with `"insufficient information to complete review"` and log `reviewer_loop` — the existing path in `MULTI_AGENT_MODE.md`. The reviewer has no `mark-blocked`; `submit-verdict` is its only channel |
 | `Recommend Reframe` verdict | Pairing and PR only. Submit REJECTED whose reason states the reframe and directs the doer to mark the task BLOCKED rather than resubmit |

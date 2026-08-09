@@ -59,14 +59,14 @@ implementation matches checkpoint intent.
 
 ---
 
-## Gate Semantics (Multi-Agent)
+## Gate Semantics
 
 The Execution State Machine is defined in ~/§BRAND_GLOBAL_DIRNAME§/CORE.md. In Multi-Agent mode:
 
 - **Gate artifact** = Pre-execution checkpoint written to blackboard (above)
 - **Gate cleared** = Checkpoint written (self-clearing — forces thinking, then proceed)
 
-## CORE Rule Overrides (Multi-Agent)
+## CORE Rule Overrides
 
 The following CORE.md rules have modified behavior in Multi-Agent Mode:
 
@@ -176,7 +176,7 @@ IN-scope items specify what may be touched. Touching OUT-scope files is a violat
 
 ---
 
-## Context Recovery (§BRAND_NAME_TITLE§)
+## Context Recovery
 
 When transitioning to Working Set tier (see CORE.md Context Management), re-read:
 
