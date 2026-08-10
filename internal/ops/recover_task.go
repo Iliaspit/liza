@@ -108,6 +108,16 @@ func RecoverTask(projectRoot, taskID string, force bool, reason string) (*Recove
 
 // RecoverTaskWithOptions performs task recovery with explicit reset options.
 func RecoverTaskWithOptions(projectRoot, taskID string, reason string, opts RecoverTaskOptions) (*RecoverTaskResult, error) {
+	var result *RecoverTaskResult
+	err := WithProjectLifecycleSharedLock(projectRoot, "task-recover-worktree", func() error {
+		var recoverErr error
+		result, recoverErr = recoverTaskWithOptions(projectRoot, taskID, reason, opts)
+		return recoverErr
+	})
+	return result, err
+}
+
+func recoverTaskWithOptions(projectRoot, taskID string, reason string, opts RecoverTaskOptions) (*RecoverTaskResult, error) {
 	if taskID == "" {
 		return nil, fmt.Errorf("task ID required")
 	}

@@ -648,7 +648,7 @@ func init() {
 	initCmd.Flags().Bool("copy-worktree-env-files", false, "copy ignored root env files into worktrees before setup commands")
 	initCmd.Flags().Bool("auto-resume", false, "automatically resume at checkpoint and sprint completion")
 	initCmd.Flags().Bool("no-follow-up", false, "run only the entry-point subpipeline by suppressing top-level pipeline transitions")
-	initCmd.Flags().Bool("yes", false, "auto-confirm init approval prompts")
+	initCmd.Flags().Bool("yes", false, "auto-confirm init prompts, including deletion of displayed existing workspace targets")
 	initCmd.Flags().String("default-cli", "", "default CLI for agent spawning ("+providerCLIHelpHint+")")
 	initCmd.Flags().String("default-doer-cli", "", "default CLI for doer and orchestrator agent spawning ("+providerCLIHelpHint+")")
 	initCmd.Flags().String("default-reviewer-cli", "", "default CLI for reviewer agent spawning ("+providerCLIHelpHint+")")

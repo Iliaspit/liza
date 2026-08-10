@@ -186,8 +186,12 @@ func TestSetupAndInitRegisterYesFlags(t *testing.T) {
 	if setupCmd.Flags().Lookup("yes") == nil {
 		t.Fatal("setup command missing --yes flag")
 	}
-	if initCmd.Flags().Lookup("yes") == nil {
+	initYes := initCmd.Flags().Lookup("yes")
+	if initYes == nil {
 		t.Fatal("init command missing --yes flag")
+	}
+	if !strings.Contains(initYes.Usage, "deletion") {
+		t.Fatalf("init --yes help does not disclose workspace deletion: %q", initYes.Usage)
 	}
 }
 

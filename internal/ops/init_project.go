@@ -87,9 +87,13 @@ func InitProject(projectRoot string, params InitProjectParams) error {
 
 	lp := paths.New(projectRoot)
 
-	// Validate project runtime directory doesn't already exist.
-	if _, err := os.Stat(lp.LizaDir()); !os.IsNotExist(err) {
-		return &PreconditionError{Reason: fmt.Sprintf("%s already exists at %s, remove or use existing", paths.ProjectDirName(), lp.LizaDir())}
+	// Non-interactive initialization never deletes existing project data.
+	cleanupPlan, err := PlanProjectCleanup(projectRoot)
+	if err != nil {
+		return fmt.Errorf("inspect existing project data: %w", err)
+	}
+	if !cleanupPlan.Empty() {
+		return &PreconditionError{Reason: fmt.Sprintf("workspace data already exists; run %q first", brand.Command("cleanup"))}
 	}
 
 	// Resolve and validate spec file

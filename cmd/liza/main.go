@@ -77,6 +77,26 @@ func requireProjectRoot() (string, error) {
 }
 
 func requireExplicitProjectRoot(root string) (string, error) {
+	projectRoot, err := requireExplicitGitProjectRoot(root)
+	if err != nil {
+		return "", err
+	}
+	projectDir := paths.New(projectRoot).LizaDir()
+	if info, err := os.Stat(projectDir); err != nil || !info.IsDir() {
+		if err == nil {
+			err = fmt.Errorf("path exists but is not a directory")
+		}
+		return "", &lizaerrors.ProjectRootError{
+			Message:      fmt.Sprintf("--project-root %s is not a %s project root: missing %s directory", projectRoot, brand.NameTitle, paths.ProjectDirName()),
+			Operation:    rootCmd.CommandPath(),
+			ExpectedRoot: projectRoot,
+			Err:          err,
+		}
+	}
+	return projectRoot, nil
+}
+
+func requireExplicitGitProjectRoot(root string) (string, error) {
 	absRoot, err := filepath.Abs(root)
 	if err != nil {
 		return "", &lizaerrors.ProjectRootError{
@@ -113,18 +133,6 @@ func requireExplicitProjectRoot(root string) (string, error) {
 			Operation:    rootCmd.CommandPath(),
 			ExpectedRoot: projectRoot,
 			Err:          fmt.Errorf("explicit project root is not repository root"),
-		}
-	}
-	projectDir := paths.New(projectRoot).LizaDir()
-	if info, err := os.Stat(projectDir); err != nil || !info.IsDir() {
-		if err == nil {
-			err = fmt.Errorf("path exists but is not a directory")
-		}
-		return "", &lizaerrors.ProjectRootError{
-			Message:      fmt.Sprintf("--project-root %s is not a %s project root: missing %s directory", projectRoot, brand.NameTitle, paths.ProjectDirName()),
-			Operation:    rootCmd.CommandPath(),
-			ExpectedRoot: projectRoot,
-			Err:          err,
 		}
 	}
 	return projectRoot, nil

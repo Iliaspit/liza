@@ -109,6 +109,15 @@ cat §BRAND_PROJECT_DIRNAME§/state.yaml.lock.owner.json   # Best-effort diagnos
 `.lock.owner.json` metadata may remain after a successful operation; their
 presence alone does not mean a lock is held. Owner metadata can be stale or
 ambiguous across process namespaces, so §BRAND_NAME_TITLE§ does not use it to release locks.
+For shared locks, owner metadata identifies only the most recent acquirer, not
+the complete set of current holders.
+
+Project cleanup also uses a project lifecycle lock stored in Git metadata.
+Agent registration and worktree provisioning or recovery hold this lock while
+they establish resources, including while configured post-worktree setup and
+indexing run. Cleanup waits up to 30 minutes for those operations rather than
+deleting a worktree during provisioning. If that wait times out, let the named
+lifecycle operations finish and retry cleanup.
 
 **Manual cleanup is rarely appropriate:** only remove lock metadata after
 confirming no `§BRAND_BINARY_NAME§` process is running and no process holds the flock.
@@ -326,11 +335,20 @@ Avoid running multiple `§BRAND_BINARY_NAME§ tui --headless` processes for the 
 
 ## Initialization Issues
 
-### Error: §BRAND_PROJECT_DIRNAME§ already exists
+### Existing initialization directories detected
 
-**Solutions:**
-1. **Continue with existing state** — just start the agents.
-2. **Reset completely:** `rm -rf §BRAND_PROJECT_DIRNAME§ .worktrees && §BRAND_BINARY_NAME§ init "New goal"` (requires prior `§BRAND_BINARY_NAME§ setup`)
+When `§BRAND_PROJECT_DIRNAME§/` or `.worktrees/` exists, full workspace init
+uses the same cleanup flow as `§BRAND_BINARY_NAME§ cleanup`: it lists runtime
+directories, owned task worktrees, and associated task branches before asking
+to delete them. Cleanup permanently removes runtime state, uncommitted
+worktree files, and the listed task branches.
+
+- To continue with the existing state, answer `n` and start the agents normally.
+- To clean without re-initializing, run `§BRAND_BINARY_NAME§ cleanup`.
+- To reset, answer `y`. For non-interactive cleanup or initialization, pass
+  `--yes` to authorize the displayed deletion explicitly.
+- Stop all agents first. Cleanup refuses live agents and any registered
+  worktree that does not match `.worktrees/<task-id>` on `task/<task-id>`.
 
 ### Symlink creation fails on Windows
 

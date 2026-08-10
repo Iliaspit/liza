@@ -12,6 +12,7 @@ import (
 
 	"github.com/liza-mas/liza/internal/db"
 	"github.com/liza-mas/liza/internal/models"
+	"github.com/liza-mas/liza/internal/paths"
 	"github.com/liza-mas/liza/internal/semble"
 	"github.com/liza-mas/liza/internal/testhelpers"
 )
@@ -448,6 +449,28 @@ func TestInitProject_AlreadyExists(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "already exists") {
 		t.Errorf("Error = %q, want to contain 'already exists'", err.Error())
+	}
+}
+
+func TestInitProject_WorktreesAlreadyExist(t *testing.T) {
+	projectRoot, specFile := setupInitTestDir(t)
+	worktreesDir := filepath.Join(projectRoot, paths.WorktreesDirName)
+	if err := os.Mkdir(worktreesDir, 0755); err != nil {
+		t.Fatalf("create worktrees directory: %v", err)
+	}
+
+	err := InitProject(projectRoot, InitProjectParams{
+		Description: "Test project",
+		SpecRef:     specFile,
+	})
+	if err == nil {
+		t.Fatal("InitProject() succeeded with an existing worktrees directory")
+	}
+	if !strings.Contains(err.Error(), "workspace data already exists") {
+		t.Fatalf("InitProject() error = %q, want cleanup precondition", err.Error())
+	}
+	if _, statErr := os.Stat(worktreesDir); statErr != nil {
+		t.Fatalf("InitProject() changed existing worktrees directory: %v", statErr)
 	}
 }
 

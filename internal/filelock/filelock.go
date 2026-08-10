@@ -19,6 +19,8 @@ const (
 )
 
 // FileLock provides file-based mutual exclusion with diagnostic owner metadata.
+// For shared locks, metadata records only the most recent acquirer, not the full
+// set of current holders.
 //
 // It wraps flock(2) with a polling acquisition loop, best-effort owner metadata,
 // classified error types, and optional metrics collection.
@@ -78,9 +80,15 @@ type ownerMetadata struct {
 	AcquiredAt string `json:"acquired_at"`
 }
 
-func (fl *FileLock) acquireLock(operation string) (*flock.Flock, error) {
+func (fl *FileLock) acquireLock(operation string, shared bool) (*flock.Flock, error) {
 	lock := flock.New(fl.lockPath)
-	acquired, err := lock.TryLock()
+	var acquired bool
+	var err error
+	if shared {
+		acquired, err = lock.TryRLock()
+	} else {
+		acquired, err = lock.TryLock()
+	}
 	if err != nil {
 		return nil, ClassifyLockError(err)
 	}
@@ -135,6 +143,17 @@ func (fl *FileLock) WithLock(fn func() error) error {
 // WithLockOperation executes fn while holding an exclusive file lock.
 // The operation name is recorded in metrics if enabled.
 func (fl *FileLock) WithLockOperation(operation string, fn func() error) error {
+	return fl.withLockOperation(operation, false, fn)
+}
+
+// WithSharedLockOperation executes fn while holding a shared file lock.
+// Multiple shared holders may run concurrently, while an exclusive holder
+// acquired through WithLockOperation waits for all shared holders to finish.
+func (fl *FileLock) WithSharedLockOperation(operation string, fn func() error) error {
+	return fl.withLockOperation(operation, true, fn)
+}
+
+func (fl *FileLock) withLockOperation(operation string, shared bool, fn func() error) error {
 	var lock *flock.Flock
 	var err error
 
@@ -143,7 +162,7 @@ func (fl *FileLock) WithLockOperation(operation string, fn func() error) error {
 	locked := false
 
 	for time.Now().Before(deadline) {
-		lock, err = fl.acquireLock(operation)
+		lock, err = fl.acquireLock(operation, shared)
 		if err == nil {
 			locked = true
 			break

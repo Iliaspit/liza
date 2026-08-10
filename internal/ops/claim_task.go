@@ -51,6 +51,16 @@ var testClaimTaskHooks *claimTaskTestHooks
 //
 // Returns a structured ClaimResult on success. No terminal I/O.
 func ClaimTask(projectRoot, taskID, agentID string) (*ClaimResult, error) {
+	var result *ClaimResult
+	err := WithProjectLifecycleSharedLock(projectRoot, "task-claim-worktree", func() error {
+		var claimErr error
+		result, claimErr = claimTask(projectRoot, taskID, agentID)
+		return claimErr
+	})
+	return result, err
+}
+
+func claimTask(projectRoot, taskID, agentID string) (*ClaimResult, error) {
 	if taskID == "" {
 		return nil, &PreconditionError{Reason: "task ID is required"}
 	}

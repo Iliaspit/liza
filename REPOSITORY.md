@@ -134,7 +134,7 @@ All Liza system mechanics are provided by the `liza` Go binary (assumed in PATH)
 
 Key command groups:
 
-**Initialization & validation:** `liza init`, `liza validate`
+**Initialization & validation subcommands:** `init`, `cleanup`, `validate`
 
 **Agent supervision:** `liza agent`, `liza tui`, `liza analyze`, `liza sprint-checkpoint`, `liza handoff`, `liza delete`
 

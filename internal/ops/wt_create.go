@@ -39,6 +39,16 @@ type CreateWorktreeResult struct {
 // task in an executing state and records its base_commit. When fresh is true,
 // deletes any existing worktree first (for reassignment). No terminal I/O.
 func CreateWorktree(projectRoot, taskID string, fresh bool) (*CreateWorktreeResult, error) {
+	var result *CreateWorktreeResult
+	err := WithProjectLifecycleSharedLock(projectRoot, "worktree-create", func() error {
+		var createErr error
+		result, createErr = createWorktree(projectRoot, taskID, fresh)
+		return createErr
+	})
+	return result, err
+}
+
+func createWorktree(projectRoot, taskID string, fresh bool) (*CreateWorktreeResult, error) {
 	if taskID == "" {
 		return nil, &PreconditionError{Reason: "task ID is required"}
 	}

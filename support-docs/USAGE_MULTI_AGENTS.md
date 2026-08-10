@@ -12,7 +12,7 @@ initialization. For setup/configuration details, see
 
 ### Key Concepts
 
-**Goal** — A §BRAND_NAME_TITLE§ workspace (`§BRAND_PROJECT_DIRNAME§/`) is bound to a single goal. The goal is defined at `§BRAND_BINARY_NAME§ init` with a description and a spec reference. All tasks, sprints, and agent activity within that workspace serve this goal. To pursue a different goal, remove `§BRAND_PROJECT_DIRNAME§/` and re-initialize. One project can only have one active goal at a time.
+**Goal** — A §BRAND_NAME_TITLE§ workspace (`§BRAND_PROJECT_DIRNAME§/`) is bound to a single goal. The goal is defined at `§BRAND_BINARY_NAME§ init` with a description and a spec reference. All tasks, sprints, and agent activity within that workspace serve this goal. To pursue a different goal, stop its agents and run `§BRAND_BINARY_NAME§ cleanup` before re-initializing; full init invokes the same cleanup flow when workspace data remains. One project can only have one active goal at a time.
 
 **Checkpoints** — Hard checkpoints halt execution so a human can review before the system continues. Transition checkpoints for planning output gate only downstream task creation: the orchestrator waits for `§BRAND_BINARY_NAME§ resume`, while doer/reviewer agents may continue already-available work in the current sprint. If you want uninterrupted transition execution, enable auto-resume (`§BRAND_BINARY_NAME§ init --auto-resume` or press `y` in the TUI).
 
@@ -320,12 +320,18 @@ By default, checkpoints and sprint completions require manual `§BRAND_BINARY_NA
 
 When auto-resume is enabled, agents automatically call `§BRAND_BINARY_NAME§ resume` when they detect CHECKPOINT or COMPLETED sprint status. Use `p` (pause) for a hard stop — pause is never auto-resumed.
 
-To start a completely fresh goal, remove the blackboard and re-initialize:
+To start a completely fresh goal, stop the agents, clean the existing
+workspace, and re-initialize:
 
 ```bash
-rm -rf §BRAND_PROJECT_DIRNAME§
+§BRAND_BINARY_NAME§ cleanup
 §BRAND_BINARY_NAME§ init "<new goal>" --spec <spec_ref>
 ```
+
+Full init calls the same cleanup flow when existing workspace data is present,
+so the separate cleanup command may be omitted when re-initializing immediately.
+Cleanup lists and confirms removal of runtime state, task worktrees,
+uncommitted worktree files, and associated task branches.
 
 ### Sprint Lifecycle & Human Gates
 
@@ -463,6 +469,7 @@ Use `§BRAND_BINARY_NAME§ -C <project-root> ...` to select a §BRAND_NAME_TITLE
 | **Setup & Init** |                                                                                                                      |
 | `§BRAND_BINARY_NAME§ setup [--yes]` | One-time global setup of contracts, skills and support docs to `~/§BRAND_GLOBAL_DIRNAME§/`; `--yes` auto-confirms approval prompts |
 | `§BRAND_BINARY_NAME§ init <goal> [--spec <spec_ref>] [--branch <name>] [--yes]` | Initialize `§BRAND_PROJECT_DIRNAME§/` directory with blackboard; `--yes` auto-confirms init approval prompts |
+| `§BRAND_BINARY_NAME§ cleanup [--yes]` | Remove runtime state, owned task worktrees, and associated task branches after checking for live agents and confirming exact targets |
 | **Agents & Monitoring** |                                                                                                                      |
 | `§BRAND_BINARY_NAME§ agent <role> [--agent-id <id>]` | Agent supervisor (start, restart, backoff loop; ID auto-assigned if omitted)                                         |
 | `§BRAND_BINARY_NAME§ launch wezterm mas --preset <name>` | Launch `§BRAND_BINARY_NAME§ tui` plus a MAS role preset in one WezTerm window                                                     |

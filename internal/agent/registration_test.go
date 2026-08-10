@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -213,6 +214,69 @@ func TestRegisterAgent(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestRegisterAgentWaitsForProjectCleanupExclusion(t *testing.T) {
+	projectRoot := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, projectRoot)
+	statePath, _ := testhelpers.SetupLizaDir(t, projectRoot)
+	state := testhelpers.CreateValidState()
+	bb := testhelpers.WriteInitialState(t, statePath, state)
+	resolver := testResolver(t)
+
+	exclusiveAcquired := make(chan struct{})
+	releaseExclusive := make(chan struct{})
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(releaseExclusive) }) }
+	t.Cleanup(release)
+	exclusiveDone := make(chan error, 1)
+	go func() {
+		exclusiveDone <- ops.WithProjectLifecycleExclusiveLock(projectRoot, "test-cleanup", func() error {
+			close(exclusiveAcquired)
+			<-releaseExclusive
+			return nil
+		})
+	}()
+	select {
+	case <-exclusiveAcquired:
+	case <-time.After(2 * time.Second):
+		t.Fatal("cleanup exclusion was not acquired")
+	}
+
+	registrationStarted := make(chan struct{})
+	registrationDone := make(chan error, 1)
+	go func() {
+		close(registrationStarted)
+		registrationDone <- registerAgent(bb, projectRoot, "coder-1", "coder", "terminal-1", 1800, "codex", resolver)
+	}()
+	<-registrationStarted
+	select {
+	case err := <-registrationDone:
+		t.Fatalf("registerAgent() completed during cleanup exclusion: %v", err)
+	case <-time.After(200 * time.Millisecond):
+	}
+	current, err := bb.Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := current.Agents["coder-1"]; exists {
+		t.Fatal("agent registered while cleanup exclusion was held")
+	}
+
+	release()
+	if err := <-exclusiveDone; err != nil {
+		t.Fatalf("cleanup exclusion error = %v", err)
+	}
+	if err := <-registrationDone; err != nil {
+		t.Fatalf("registerAgent() error after cleanup exclusion = %v", err)
+	}
+	current, err = bb.Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := current.Agents["coder-1"]; !exists {
+		t.Fatal("agent did not register after cleanup exclusion released")
 	}
 }
 

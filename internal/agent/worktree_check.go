@@ -34,6 +34,15 @@ var (
 // Returns (false, nil) if the worktree already exists.
 // Returns (false, error) if the task was blocked or recovery failed.
 func ensureReviewerWorktree(projectRoot string, bb *db.Blackboard, taskID, agentID string) (recovered bool, err error) {
+	err = ops.WithProjectLifecycleSharedLock(projectRoot, "reviewer-worktree-recover", func() error {
+		var recoverErr error
+		recovered, recoverErr = ensureReviewerWorktreeLocked(projectRoot, bb, taskID, agentID)
+		return recoverErr
+	})
+	return recovered, err
+}
+
+func ensureReviewerWorktreeLocked(projectRoot string, bb *db.Blackboard, taskID, agentID string) (recovered bool, err error) {
 	wtPath := filepath.Join(projectRoot, paths.WorktreesDirName, taskID)
 	if _, statErr := os.Stat(wtPath); statErr == nil {
 		return false, nil // exists, nothing to do

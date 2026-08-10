@@ -51,6 +51,12 @@ func validateIdentity(agentID, role string) error {
 // for review quorum provider-diversity checks.
 // resolver is used for role classification (singularity, reviewer detection).
 func registerAgent(bb *db.Blackboard, projectRoot, agentID, role, terminal string, leaseDuration int, provider string, resolver *pipeline.Resolver) error {
+	return ops.WithProjectLifecycleSharedLock(projectRoot, "agent-register", func() error {
+		return registerAgentLocked(bb, projectRoot, agentID, role, terminal, leaseDuration, provider, resolver)
+	})
+}
+
+func registerAgentLocked(bb *db.Blackboard, projectRoot, agentID, role, terminal string, leaseDuration int, provider string, resolver *pipeline.Resolver) error {
 	logger := GetLogger()
 	now := time.Now().UTC()
 	leaseExpires := now.Add(time.Duration(leaseDuration) * time.Second)

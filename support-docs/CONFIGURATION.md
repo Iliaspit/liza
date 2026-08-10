@@ -62,7 +62,12 @@ Run `§BRAND_BINARY_NAME§ init` in each project where §BRAND_NAME_TITLE§ shou
 interactive wizard walks through mode selection, provider selection, and
 project-local setup. Add `--yes` when using explicit init arguments to
 auto-confirm approval prompts such as provider config merges, template
-overwrites, and detected `post_worktree_cmd` suggestions.
+overwrites, detected `post_worktree_cmd` suggestions, and removal of existing
+workspace data before full initialization. Workspace cleanup lists
+`§BRAND_PROJECT_DIRNAME§/`, `.worktrees/`, and associated task branches before
+deleting them. `--yes` bypasses that confirmation, but never ownership or
+live-agent safety checks. Run `§BRAND_BINARY_NAME§ cleanup` to perform the same
+cleanup without immediately initializing another goal.
 
 An existing repo contract file does not trigger a conflict prompt when every
 affected global-first provider can use its preferred global path. When repo

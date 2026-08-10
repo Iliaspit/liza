@@ -126,6 +126,7 @@ func TestInitCommand(t *testing.T) {
 		description string
 		specRef     string
 		setup       func(t *testing.T, tmpDir string)
+		stdin       io.Reader
 		skipGlobal  bool // if true, don't set up global liza
 		wantErr     bool
 		errContains string
@@ -140,7 +141,7 @@ func TestInitCommand(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name:        ".liza already exists",
+			name:        ".liza removal declined",
 			description: "Test goal",
 			specRef:     "specs/vision.md",
 			setup: func(t *testing.T, tmpDir string) {
@@ -151,8 +152,9 @@ func TestInitCommand(t *testing.T) {
 					t.Fatal(err)
 				}
 			},
+			stdin:       strings.NewReader("n\n"),
 			wantErr:     true,
-			errContains: "already exists",
+			errContains: "initialization cancelled by user",
 		},
 		{
 			name:        "spec file does not exist",
@@ -204,7 +206,7 @@ func TestInitCommand(t *testing.T) {
 			tt.setup(t, tmpDir)
 
 			// Run init command
-			err = InitCommand(tt.description, tt.specRef, nil)
+			err = InitCommand(tt.description, tt.specRef, tt.stdin)
 
 			// Check error
 			if (err != nil) != tt.wantErr {

@@ -112,6 +112,62 @@ func TestFileLockConcurrent(t *testing.T) {
 	}
 }
 
+func TestSharedLocksRunConcurrentlyAndBlockExclusiveLock(t *testing.T) {
+	protectedPath := filepath.Join(t.TempDir(), "data.yaml")
+	sharedRelease := make(chan struct{})
+	sharedAcquired := make(chan struct{}, 2)
+	sharedDone := make(chan error, 2)
+
+	for range 2 {
+		go func() {
+			sharedDone <- New(protectedPath).WithSharedLockOperation("shared", func() error {
+				sharedAcquired <- struct{}{}
+				<-sharedRelease
+				return nil
+			})
+		}()
+	}
+	for range 2 {
+		select {
+		case <-sharedAcquired:
+		case <-time.After(2 * time.Second):
+			t.Fatal("shared lock was not acquired concurrently")
+		}
+	}
+
+	exclusiveStarted := make(chan struct{})
+	exclusiveAcquired := make(chan struct{})
+	exclusiveDone := make(chan error, 1)
+	go func() {
+		close(exclusiveStarted)
+		exclusiveDone <- New(protectedPath).WithLockOperation("exclusive", func() error {
+			close(exclusiveAcquired)
+			return nil
+		})
+	}()
+	<-exclusiveStarted
+	select {
+	case <-exclusiveAcquired:
+		t.Fatal("exclusive lock acquired while shared locks were held")
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	close(sharedRelease)
+	for range 2 {
+		if err := <-sharedDone; err != nil {
+			t.Fatalf("WithSharedLockOperation() error = %v", err)
+		}
+	}
+	select {
+	case err := <-exclusiveDone:
+		if err != nil {
+			t.Fatalf("WithLockOperation() error = %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("exclusive lock did not acquire after shared locks released")
+	}
+}
+
 func TestFileLockCreatesLockFile(t *testing.T) {
 	dir := t.TempDir()
 	protectedPath := filepath.Join(dir, "data.yaml")

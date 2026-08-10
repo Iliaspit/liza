@@ -2,6 +2,7 @@ package commands
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -920,10 +921,6 @@ func InitCommandWithConfig(params InitParams) error {
 		return fmt.Errorf("failed to setup paths: %w", err)
 	}
 
-	// Validate project runtime directory doesn't already exist.
-	if _, err := os.Stat(lizaPaths.LizaDir()); !os.IsNotExist(err) {
-		return fmt.Errorf("%s already exists at %s, remove or use existing", paths.ProjectDirName(), lizaPaths.LizaDir())
-	}
 	warnLegacyProjectRoot(lizaPaths.ProjectRoot(), lizaPaths.LizaDir())
 
 	// Resolve spec file relative to cwd (where user ran the command), not project root
@@ -974,6 +971,17 @@ func InitCommandWithConfig(params InitParams) error {
 		fmt.Fprintf(os.Stderr, "Warning: %s\n", warning)
 	}
 
+	if _, err := CleanupProjectCommand(CleanupParams{
+		ProjectRoot: lizaPaths.ProjectRoot(),
+		Stdin:       stdin,
+		Stderr:      os.Stderr,
+		AutoConfirm: params.AutoConfirm,
+	}); err != nil {
+		if errors.Is(err, ErrProjectCleanupDeclined) {
+			return fmt.Errorf("initialization cancelled by user")
+		}
+		return err
+	}
 	runSembleInitPrewarm(lizaPaths.ProjectRoot())
 
 	// Create directory structure
