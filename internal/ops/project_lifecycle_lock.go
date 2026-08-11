@@ -4,12 +4,9 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/liza-mas/liza/internal/filelock"
-	"github.com/liza-mas/liza/internal/paths"
 )
 
 const projectLifecycleLockTimeout = 30 * time.Minute
@@ -61,24 +58,5 @@ func withProjectLifecycleLock(lock *filelock.FileLock, operation string, shared 
 }
 
 func projectLifecycleLock(projectRoot string) (*filelock.FileLock, error) {
-	root, err := filepath.Abs(projectRoot)
-	if err != nil {
-		return nil, fmt.Errorf("resolve project root for lifecycle lock: %w", err)
-	}
-	root, err = filepath.EvalSymlinks(filepath.Clean(root))
-	if err != nil {
-		return nil, fmt.Errorf("resolve project root symlinks for lifecycle lock: %w", err)
-	}
-
-	gitDir := filepath.Join(root, paths.GitDirName)
-	info, err := os.Stat(gitDir)
-	if err != nil {
-		return nil, fmt.Errorf("inspect Git directory for lifecycle lock: %w", err)
-	}
-	if !info.IsDir() {
-		return nil, fmt.Errorf("git directory for lifecycle lock is not a directory: %s", gitDir)
-	}
-
-	lockName := strings.TrimPrefix(paths.ProjectDirName(), ".") + "-project-lifecycle"
-	return filelock.New(filepath.Join(gitDir, lockName)), nil
+	return projectFileLock(projectRoot, "project-lifecycle")
 }

@@ -2,6 +2,23 @@
 
 Deliberate debt with payback triggers. See CORE.md Rule 3 (DoD) for policy.
 
+## Concurrent merge sync/test/restore window is not fully isolated
+
+**What:** Each integration ref/index mutation is atomic across processes, but the
+integration mutation lock is released while integration tests run. Concurrent
+merges that modify the same repo-relative path can therefore interleave one
+merge's test window with another merge's sync or restore and leave the checked-out
+working tree stale even though the integration ref remains correct.
+
+**Why deferred:** Holding the lock across integration tests would serialize the
+full pipeline. Running tests in an isolated integration worktree avoids that cost
+but is a larger lifecycle change than the index-lock collision fix.
+
+**Payback trigger:** The first project where concurrent merges are observed or
+expected to modify the same repo-relative path. At that point, run integration
+tests in isolated worktrees or deliberately serialize the full sync/test/restore
+window.
+
 ## Provider activation evidence paths duplicate setup-writer knowledge
 
 **What:** `hasRepoContractActivationEvidence` restates five repo-relative

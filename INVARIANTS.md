@@ -149,6 +149,7 @@ Agent registration/unregistration, heartbeat, post-exit IDLE reset, orchestrator
 | All state modifications atomic via exclusive file lock | Race conditions, partial writes | code (`blackboard.go` `Modify()`) |
 | Three-phase claim: validate ownership/eligibility under lock → worktree outside lock → re-validate ownership/eligibility and commit under lock | TOCTOU races on claim | code (`claim_task.go`) |
 | CAS merge: `update-ref` uses compare-and-swap; retries up to 3× if ref moved | Concurrent merge corruption | spec (`worktree-management.md`), code (`wt_merge.go`) |
+| Integration ref advancement and every main-index sync/restore run under one project-scoped file lock; blackboard state writes happen after releasing it | Cross-process `index.lock` collisions, lock-order inversion | spec (`worktree-management.md`), code (`wt_merge.go`, `integration_mutation_lock.go`) |
 | Singleton Blackboard instances per state path | Cache coherence, fragmented locks | code (`blackboard.go` via `sync.Map`) |
 | Concurrent transition detection: re-validate status under lock before committing | Status changed between read and write | code (`wt_merge.go`, `submit_review.go`) |
 
@@ -181,7 +182,7 @@ Integration-fix claims clear active `output[]`, `review_commit`, approvals, `mer
 |-----------|------------------|----------|
 | Clean sync: before READY_FOR_REVIEW, working tree must be clean (no staged, unstaged, or untracked files) | Uncommitted work in review | spec (`worktree-management.md`), code (`submit_review.go`) |
 | Coders cannot commit to or merge to integration branch; only supervisor after reviewer approval | Uncontrolled integration branch | spec (`worktree-management.md`) |
-| Merge uses working-tree-less operations (merge-tree, commit-tree, update-ref) | Race conditions, checkout conflicts | spec, code (`wt_merge.go`) |
+| Merge constructs commits without a working tree (`merge-tree`, `commit-tree`); transient main-index sync/restore is serialized by the integration mutation lock | Race conditions, checkout conflicts, cross-process index collisions | spec, code (`wt_merge.go`, `integration_mutation_lock.go`) |
 | If submit/merge conflict detected → INTEGRATION_FAILED (must be reclaimed); unblock-time `--rebase-on` conflicts remain BLOCKED with repair metadata | Silent conflict resolution, wrong recovery path | spec, code |
 | Candidate-tree artifact guard validates protected blackboard artifact refs before `update-ref`; invalid candidates do not advance integration | Broken durable artifact refs propagating through normal merge control flow | spec (`worktree-management.md`), code (`wt_merge.go`, `validate.go`) |
 | If integration tests fail → rollback via `update-ref` to pre-merge HEAD | Failed integrations propagating | spec, code |

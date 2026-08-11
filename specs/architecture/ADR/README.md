@@ -99,3 +99,4 @@
 | [0096 — Catalog-Backed Provider Registry](0096-catalog-backed-provider-registry.md) | Move provider behavior from hardcoded branches into declarative catalog metadata. |
 | [0097 — Cursor Secondary-Provider Policy Hooks](0097-cursor-secondary-provider-policy-hooks.md) | Configure Cursor's dependent provider setup and policy hooks during initialization. |
 | [0111 — Capability-Aware Global-First Contract Activation](0111-capability-aware-global-first-contract-activation.md) | Prefer documented active global instruction paths without deleting the only usable provider contract. |
+| [0112 — Serialize Integration Working-Tree Mutations](0112-serialize-integration-working-tree-mutations.md) | Use a project-scoped file lock for integration ref advancement and shared-index sync/restore. |

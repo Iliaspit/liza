@@ -179,12 +179,12 @@ After APPROVED, **Code Reviewer** executes:
 
 1. Verify `review_commit` matches current HEAD
 2. Run `liza wt-merge task-N`
-3. Script performs working-tree-less merge:
+3. Script constructs the merge commit without a working tree:
    - Read integration HEAD without checkout (`git rev-parse refs/heads/integration`)
    - Detect fast-forward (task commit is descendant of integration)
    - For fast-forward: validate candidate artifact refs against the task commit before `git update-ref`
    - For true merge: compute tree via `git merge-tree`, create commit via `git commit-tree`, validate candidate artifact refs against the merge tree or commit tree before `git update-ref`, then update the ref
-   - Working tree files are transiently synced for integration test correctness, then restored if checked-out branch differs from integration
+   - Integration ref advancement and transient working-tree sync/restore run under a project-scoped file lock; files are restored if the checked-out branch differs from integration
 4. If conflict: task → INTEGRATION_FAILED, Code Reviewer reports
 5. If candidate artifact validation fails: reject before integration ref advancement, task → INTEGRATION_FAILED
 6. Validate post-merge blackboard artifact references with merge-scoped artifact validation against the synced tree and integration branch. Retired task refs (`SUPERSEDED`, `ABANDONED`) are non-blocking; goal refs, task-level refs, the merging task's output refs, and already-MERGED tasks' output refs remain protected. Unrelated in-flight task output refs are ignored because their artifacts may still exist only in sibling worktrees.
@@ -265,7 +265,7 @@ if task.base_commit != EXPECTED_BASE:
 
 ## Concurrent Merge Safety
 
-Multiple reviewers can merge approved tasks concurrently without race conditions:
+Multiple reviewers can merge approved tasks concurrently without lost ref updates or shared-index collisions:
 
 **Before (race-prone):**
 ```
@@ -273,13 +273,13 @@ reviewer A: git checkout integration → git merge task-1  [modifies working tre
 reviewer B: git checkout integration → git merge task-2  [concurrent modification → corruption]
 ```
 
-**After (working-tree-less):**
+**After (object-only construction plus serialized index mutation):**
 ```
-reviewer A: read HEAD → merge-tree → commit-tree → update-ref  [object operations only]
-reviewer B: read HEAD → merge-tree → commit-tree → update-ref  [safe concurrent execution]
+reviewer A: lock → read HEAD → merge-tree → commit-tree → update-ref → sync → unlock
+reviewer B: wait → lock → read HEAD → merge-tree → commit-tree → update-ref → sync → unlock
 ```
 
-Git object database operations are inherently safe for concurrent reads. Each `update-ref` uses compare-and-swap (CAS): `git update-ref <ref> <new> <old>`. If the ref moved since it was read (another merge landed), the CAS fails and the merge retries from the new HEAD. This prevents lost updates without requiring external locks.
+Git object construction is safe without a checkout. A project-scoped file lock serializes integration ref advancement and every operation that mutates the shared main index, including forward sync, rollback sync/restore, and success restore. Each `update-ref` still uses compare-and-swap (CAS): `git update-ref <ref> <new> <old>`. CAS protects against ref movement by external Git writers and retries from the new HEAD rather than losing an update.
 
 ## Related Documents
 

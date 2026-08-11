@@ -716,5 +716,21 @@ func TestConcurrentMerges(t *testing.T) {
 		}
 	}
 
+	// The integration ref must contain every merged file while the checked-out
+	// main working tree is restored after all concurrent merges complete.
+	treeCmd := exec.Command("git", "-C", projectDir, "ls-tree", "-r", "--name-only", "integration")
+	treeOutput, err := treeCmd.Output()
+	testhelpers.AssertNoError(t, err)
+	treeFiles := "\n" + string(treeOutput)
+	for _, taskID := range taskIDs {
+		featureFile := "feature-" + strings.TrimPrefix(taskID, "task-merge-") + ".txt"
+		if !strings.Contains(treeFiles, "\n"+featureFile+"\n") {
+			t.Errorf("Integration branch tree should contain %s", featureFile)
+		}
+		if _, statErr := os.Stat(filepath.Join(projectDir, featureFile)); !os.IsNotExist(statErr) {
+			t.Errorf("Checked-out main working tree should not contain %s after restore; stat error = %v", featureFile, statErr)
+		}
+	}
+
 	t.Log("✓ Concurrent merges test passed")
 }

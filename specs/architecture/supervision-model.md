@@ -23,7 +23,7 @@ Terminal 1: coder-1          Terminal 2: coder-2          Terminal 3: code-revie
 **Concurrency is safe because:**
 - Task claiming uses atomic file locking (`flock` on `state.yaml`)
 - Review claiming uses lease-based exclusive access
-- Merging uses working-tree-less git operations (no working tree conflicts)
+- Merging constructs commits without a working tree; a project-scoped file lock serializes integration ref advancement and transient main-index sync/restore
 
 See [Role Definitions](roles.md) for supported agent combinations.
 

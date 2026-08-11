@@ -268,27 +268,29 @@ func integrationFailureRecoveryHint(reason string) string {
 	}
 }
 
-func rollbackMergedCommit(gitWrapper *git.Git, integrationRef, preMergeHEAD, mergeCommit, restoreRef, taskID string) error {
-	if err := gitWrapper.UpdateRef(integrationRef, preMergeHEAD, mergeCommit); err != nil {
-		var casErr *git.RefConflictError
-		if errors.As(err, &casErr) {
-			log.Printf("wt-merge %s: skipping rollback — another merge landed on top of %s", taskID, shortSHA(mergeCommit))
-			return nil
+func rollbackMergedCommit(projectRoot string, gitWrapper *git.Git, integrationRef, preMergeHEAD, mergeCommit, restoreRef, taskID string) error {
+	return withIntegrationMutationLock(projectRoot, "rollback "+taskID, func() error {
+		if err := gitWrapper.UpdateRef(integrationRef, preMergeHEAD, mergeCommit); err != nil {
+			var casErr *git.RefConflictError
+			if errors.As(err, &casErr) {
+				log.Printf("wt-merge %s: skipping rollback — another merge landed on top of %s", taskID, shortSHA(mergeCommit))
+				return nil
+			}
+			return err
 		}
-		return err
-	}
 
-	// Ref rolled back — sync working tree to match pre-merge state. This
-	// reverse sync undoes the forward SyncMergedFiles step.
-	if syncErr := gitWrapper.SyncMergedFiles(mergeCommit, preMergeHEAD); syncErr != nil {
-		log.Printf("wt-merge %s: WARNING — failed to sync working tree after rollback: %v", taskID, syncErr)
-	}
-	if restoreRef != "" {
-		if restoreErr := gitWrapper.RestoreSyncedFiles(preMergeHEAD, mergeCommit, restoreRef); restoreErr != nil {
-			return fmt.Errorf("failed to restore working tree after rollback: %w", restoreErr)
+		// Ref rolled back — sync working tree to match pre-merge state. This
+		// reverse sync undoes the forward SyncMergedFiles step.
+		if syncErr := gitWrapper.SyncMergedFiles(mergeCommit, preMergeHEAD); syncErr != nil {
+			log.Printf("wt-merge %s: WARNING — failed to sync working tree after rollback: %v", taskID, syncErr)
 		}
-	}
-	return nil
+		if restoreRef != "" {
+			if restoreErr := gitWrapper.RestoreSyncedFiles(preMergeHEAD, mergeCommit, restoreRef); restoreErr != nil {
+				return fmt.Errorf("failed to restore working tree after rollback: %w", restoreErr)
+			}
+		}
+		return nil
+	})
 }
 
 func buildArtifactGuardHook(bb *db.Blackboard, projectRoot string, gitWrapper *git.Git, taskID string) func(candidateTreeish string) error {
@@ -563,7 +565,18 @@ func MergeWorktree(projectRoot, taskID, agentID string, mergeExtra ...map[string
 	integrationRef := "refs/heads/" + integrationBranch
 
 	artifactGuardHook := buildArtifactGuardHook(bb, projectRoot, gitWrapper, taskID)
-	outcome, err := performCASMerge(gitWrapper, integrationRef, expectedCommit, taskID, artifactGuardHook)
+	var outcome *casMergeOutcome
+	err = withIntegrationMutationLock(projectRoot, "forward "+taskID, func() error {
+		var mergeErr error
+		outcome, mergeErr = performCASMerge(gitWrapper, integrationRef, expectedCommit, taskID, artifactGuardHook)
+		if mergeErr != nil || outcome.conflict {
+			return mergeErr
+		}
+		if syncErr := gitWrapper.SyncMergedFiles(outcome.preMergeHEAD, outcome.mergeCommit); syncErr != nil {
+			return fmt.Errorf("failed to sync working tree after merge: %w", syncErr)
+		}
+		return nil
+	})
 	if err != nil {
 		var artifactErr *candidateArtifactGuardError
 		if errors.As(err, &artifactErr) {
@@ -585,17 +598,6 @@ func MergeWorktree(projectRoot, taskID, agentID string, mergeExtra ...map[string
 	mergeCommit := outcome.mergeCommit
 	preMergeHEAD := outcome.preMergeHEAD
 	fastForward := outcome.fastForward
-
-	// Sync files changed by the merge into the main working tree.
-	// update-ref only moves the ref pointer; without this, files added/modified
-	// by the merged commit are absent from the working directory. This is required
-	// both for integration test correctness (tests run in projectRoot) and so the
-	// working tree reflects what's committed after merge.
-	// Only touches merge-affected files — safe for working trees with unrelated
-	// pending changes (e.g. .liza/state.yaml).
-	if err := gitWrapper.SyncMergedFiles(preMergeHEAD, mergeCommit); err != nil {
-		return nil, fmt.Errorf("failed to sync working tree after merge: %w", err)
-	}
 
 	// Detect current branch early — needed for working tree restore on both
 	// success and rollback paths.
@@ -620,7 +622,7 @@ func MergeWorktree(projectRoot, taskID, agentID string, mergeExtra ...map[string
 		return nil, fmt.Errorf("failed to read state for post-merge artifact validation: %w", err)
 	}
 	if err := statevalidate.ValidateMergeArtifactRefs(currentState, projectRoot, taskID); err != nil {
-		rollbackErr := rollbackMergedCommit(gitWrapper, integrationRef, preMergeHEAD, mergeCommit, rollbackRestoreRef, taskID)
+		rollbackErr := rollbackMergedCommit(projectRoot, gitWrapper, integrationRef, preMergeHEAD, mergeCommit, rollbackRestoreRef, taskID)
 		diagnostic := integrationFailureDiagnosticWithDetail(IntegrationReasonStateInvalid, err.Error(), mergeCommit, "", rollbackErr)
 		if updateErr := markIntegrationFailedWithDiagnostic(bb, taskID, agentID, IntegrationReasonStateInvalid, mergeCommit, pb, diagnostic); updateErr != nil {
 			return nil, fmt.Errorf("failed to update state to INTEGRATION_FAILED: %w", updateErr)
@@ -659,7 +661,7 @@ func MergeWorktree(projectRoot, taskID, agentID string, mergeExtra ...map[string
 
 			// CAS rollback: only rewind if ref still points to our merge commit.
 			// If someone else merged on top, rewinding would drop their work.
-			rollbackErr := rollbackMergedCommit(gitWrapper, integrationRef, preMergeHEAD, mergeCommit, rollbackRestoreRef, taskID)
+			rollbackErr := rollbackMergedCommit(projectRoot, gitWrapper, integrationRef, preMergeHEAD, mergeCommit, rollbackRestoreRef, taskID)
 
 			diagnostic := integrationFailureDiagnostic(IntegrationReasonTestsFailed, mergeCommit, testOutput, rollbackErr)
 			if updateErr := markIntegrationFailedWithDiagnostic(bb, taskID, agentID, IntegrationReasonTestsFailed, mergeCommit, pb, diagnostic); updateErr != nil {
@@ -696,7 +698,10 @@ func MergeWorktree(projectRoot, taskID, agentID string, mergeExtra ...map[string
 
 	// Restore working tree when checked-out branch differs from integration.
 	if branchErr == nil && currentBranch != integrationBranch {
-		if syncErr := gitWrapper.RestoreSyncedFiles(preMergeHEAD, mergeCommit, "HEAD"); syncErr != nil {
+		syncErr := withIntegrationMutationLock(projectRoot, "restore "+taskID, func() error {
+			return gitWrapper.RestoreSyncedFiles(preMergeHEAD, mergeCommit, "HEAD")
+		})
+		if syncErr != nil {
 			warnings = append(warnings, fmt.Sprintf("failed to restore working tree: %v", syncErr))
 		}
 	}
