@@ -24,8 +24,10 @@ const (
 var templateExprRE = regexp.MustCompile(`\{\{([^{}]+)\}\}`)
 
 var (
-	runtimeCatalogOnce sync.Once
-	runtimeCatalog     providers.Catalog
+	runtimeCatalogOnce  sync.Once
+	runtimeCatalog      providers.Catalog
+	embeddedCatalogOnce sync.Once
+	embeddedCatalog     providers.Catalog
 )
 
 type ResolvedProfile struct {
@@ -52,6 +54,7 @@ type LaunchPlan struct {
 	ACPXSessionName      string
 	ACPXShowArgs         []string
 	ACPXEnsureArgs       []string
+	ACPXSetModeArgs      []string
 	ACPXPromptArgs       []string
 	ACPXEventMode        string
 }
@@ -73,11 +76,22 @@ type LaunchPlanRequest struct {
 }
 
 func BuiltInAgentTools() map[string]models.AgentToolConfig {
+	embeddedCatalogOnce.Do(func() {
+		embeddedCatalog = providers.EmbeddedCatalog()
+	})
 	runtimeCatalogOnce.Do(func() {
 		cat, _ := providers.Load(context.Background(), providers.LoadOptions{})
 		runtimeCatalog = cat
 	})
-	return runtimeCatalog.RuntimeTools()
+	return agentToolsFromCatalogs(embeddedCatalog, runtimeCatalog)
+}
+
+func agentToolsFromCatalogs(embedded, loaded providers.Catalog) map[string]models.AgentToolConfig {
+	registry := embedded.RuntimeTools()
+	for name, tool := range loaded.RuntimeTools() {
+		registry[name] = mergeAgentToolConfig(name, registry[name], tool)
+	}
+	return registry
 }
 
 func AgentToolRegistry(config models.Config) map[string]models.AgentToolConfig {
@@ -184,19 +198,19 @@ func ResolveLaunchPlan(req LaunchPlanRequest) (LaunchPlan, error) {
 	}
 	sessionTemplate := strings.TrimSpace(tool.ACPXSessionName)
 	if sessionTemplate == "" && backend == ToolBackendACPX {
-		sessionTemplate = "liza-{{agentID}}"
+		sessionTemplate = acpxSessionName("{{agentID}}")
 	}
 
 	vars := launchTemplateVars(req, toolName)
 	vars["acpxAgent"] = acpxAgent
-	acpxSessionName := ""
+	renderedSessionName := ""
 	if sessionTemplate != "" {
 		var err error
-		acpxSessionName, err = renderArg(sessionTemplate, vars)
+		renderedSessionName, err = renderArg(sessionTemplate, vars)
 		if err != nil {
 			return LaunchPlan{}, fmt.Errorf("%s acpx session name: %w", toolName, err)
 		}
-		vars["sessionName"] = acpxSessionName
+		vars["sessionName"] = renderedSessionName
 	}
 
 	renderedArgs, err := renderArgs(args, vars)
@@ -210,6 +224,10 @@ func ResolveLaunchPlan(req LaunchPlanRequest) (LaunchPlan, error) {
 	acpxEnsureArgs, err := renderArgs(tool.ACPXEnsureArgs, vars)
 	if err != nil {
 		return LaunchPlan{}, fmt.Errorf("%s acpx ensure args: %w", toolName, err)
+	}
+	acpxSetModeArgs, err := renderArgs(tool.ACPXSetModeArgs, vars)
+	if err != nil {
+		return LaunchPlan{}, fmt.Errorf("%s acpx set-mode args: %w", toolName, err)
 	}
 	acpxPromptArgs, err := renderArgs(tool.ACPXPromptArgs, vars)
 	if err != nil {
@@ -232,9 +250,10 @@ func ResolveLaunchPlan(req LaunchPlanRequest) (LaunchPlan, error) {
 		RequiresCodexWrapper: toolName == "codex",
 		ProviderKey:          strings.TrimSpace(tool.ProviderKey),
 		ACPXAgent:            acpxAgent,
-		ACPXSessionName:      acpxSessionName,
+		ACPXSessionName:      renderedSessionName,
 		ACPXShowArgs:         acpxShowArgs,
 		ACPXEnsureArgs:       acpxEnsureArgs,
+		ACPXSetModeArgs:      acpxSetModeArgs,
 		ACPXPromptArgs:       acpxPromptArgs,
 		ACPXEventMode:        strings.TrimSpace(tool.ACPXEventMode),
 	}, nil
@@ -283,6 +302,9 @@ func mergeAgentToolConfig(name string, base, override models.AgentToolConfig) mo
 	}
 	if len(override.ACPXEnsureArgs) > 0 {
 		out.ACPXEnsureArgs = append([]string(nil), override.ACPXEnsureArgs...)
+	}
+	if len(override.ACPXSetModeArgs) > 0 {
+		out.ACPXSetModeArgs = append([]string(nil), override.ACPXSetModeArgs...)
 	}
 	if len(override.ACPXPromptArgs) > 0 {
 		out.ACPXPromptArgs = append([]string(nil), override.ACPXPromptArgs...)
