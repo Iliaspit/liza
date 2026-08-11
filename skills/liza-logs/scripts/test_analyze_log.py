@@ -383,6 +383,29 @@ def test_rich_later_system_events_do_not_clear_session_model() -> None:
     assert report.meta.max_output_tokens == 64000
 
 
+def test_per_turn_growth_uses_reported_200k_context_window() -> None:
+    analyzer = load_analyzer()
+    report = analyzer.SessionReport()
+    report.meta.context_window = 200000
+    report.turns = [analyzer.TurnUsage(input_tokens=100000)]
+
+    rendered = analyzer.render_per_turn_growth(report)
+
+    assert "50.0%" in rendered
+    assert "n/a" not in rendered
+
+
+def test_per_turn_growth_does_not_assume_unknown_context_window() -> None:
+    analyzer = load_analyzer()
+    report = analyzer.SessionReport()
+    report.turns = [analyzer.TurnUsage(input_tokens=100000)]
+
+    rendered = analyzer.render_per_turn_growth(report)
+
+    assert "Context window unavailable; Fill% is n/a." in rendered
+    assert "50.0%" not in rendered
+
+
 def test_efficiency_insights_ignore_shared_prefix_non_duplicates() -> None:
     analyzer = load_analyzer()
     report = analyzer.SessionReport()

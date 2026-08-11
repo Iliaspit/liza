@@ -53,6 +53,9 @@ usage, efficiency insights, and struggle sequences. Rich format adds per-turn
 context growth, top longest turns, cost breakdown with system-prompt replay cost,
 and MCP server status. Sparse logs have aggregate usage only; do not infer exact
 per-turn growth or cost.
+Context-fill percentages are authoritative only when the provider records
+context-window metadata. Do not infer historical window size or compaction
+thresholds from the analyzer process environment.
 
 Permission/policy friction is operational setup friction, not ordinary task
 failure. Keep it near the top and separate it from command exit failures. Split

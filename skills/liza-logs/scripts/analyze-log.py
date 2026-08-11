@@ -1009,7 +1009,7 @@ def render_per_turn_growth(report: SessionReport) -> str:
     if not report.turns:
         return ""
 
-    ctx_window = report.meta.context_window or 200_000  # default if unknown
+    ctx_window = report.meta.context_window
 
     lines = [
         "",
@@ -1023,10 +1023,12 @@ def render_per_turn_growth(report: SessionReport) -> str:
         ),
         f"  {'-' * 3}  {'-' * 10}  {'-' * 12}  {'-' * 10}  {'-' * 8}  {'-' * 10}  {'-' * 6}",
     ]
+    if not ctx_window:
+        lines.append("  Context window unavailable; Fill% is n/a.")
 
     for i, turn in enumerate(report.turns, 1):
         total_in = turn.total_input
-        fill_pct = total_in / ctx_window * 100
+        fill = f"{total_in / ctx_window * 100:.1f}%" if ctx_window else "n/a"
         lines.append(
             f"  {i:>3d}  "
             f"{_fmt_tokens(turn.input_tokens):>10s}  "
@@ -1034,7 +1036,7 @@ def render_per_turn_growth(report: SessionReport) -> str:
             f"{_fmt_tokens(turn.cache_read_input_tokens):>10s}  "
             f"{_fmt_tokens(turn.output_tokens):>8s}  "
             f"{_fmt_tokens(total_in):>10s}  "
-            f"{fill_pct:>5.1f}%"
+            f"{fill:>6s}"
         )
 
     return "\n".join(lines) + "\n"
