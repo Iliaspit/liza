@@ -1443,7 +1443,7 @@ func TestRunSupervisor_CodexCommandRuntimeFailureBlocksWithoutGenericSpin(t *tes
 	}
 }
 
-func TestRunSupervisor_OpenCodeSuccessfulNoProgressBlocksAsSpinning(t *testing.T) {
+func TestRunSupervisor_OpenCodeNoProgressBlocksBeforeSecondExecution(t *testing.T) {
 	projectRoot := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, projectRoot)
 	statePath, _ := testhelpers.SetupLizaDir(t, projectRoot)
@@ -1480,8 +1480,11 @@ func TestRunSupervisor_OpenCodeSuccessfulNoProgressBlocksAsSpinning(t *testing.T
 		t.Fatalf("RunSupervisor() error = %v", err)
 	}
 
-	if calls := mock.GetCalls(); len(calls) != 2 {
-		t.Fatalf("Execute calls = %d, want 2 before no-progress guard blocks retry", len(calls))
+	// With claim-churn excluded from the progress signature (DEV-667), the
+	// pre-execution spin guard blocks on the second claim, before wasting a
+	// second execution.
+	if calls := mock.GetCalls(); len(calls) != 1 {
+		t.Fatalf("Execute calls = %d, want 1 before spin guard blocks re-claim", len(calls))
 	}
 
 	updated, err := bb.Read()
@@ -1498,8 +1501,63 @@ func TestRunSupervisor_OpenCodeSuccessfulNoProgressBlocksAsSpinning(t *testing.T
 	if task.BlockedReason == nil {
 		t.Fatal("BlockedReason = nil, want no-progress reason")
 	}
-	if !strings.Contains(*task.BlockedReason, "successful no-progress loop detected") {
-		t.Fatalf("BlockedReason = %q, want successful no-progress loop", *task.BlockedReason)
+	if !strings.Contains(*task.BlockedReason, "spinning detected") {
+		t.Fatalf("BlockedReason = %q, want spinning detected", *task.BlockedReason)
+	}
+}
+
+func TestRunSupervisor_NonzeroAgentErrorBlocksBeforeAutoRepairCanRespawn(t *testing.T) {
+	projectRoot := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, projectRoot)
+	statePath, _ := testhelpers.SetupLizaDir(t, projectRoot)
+	testhelpers.SetupPipelineConfig(t, projectRoot)
+
+	now := time.Now().UTC()
+	taskID := "task-acpx-prompt-error"
+	state := testhelpers.CreateValidState()
+	state.Config.CoderPollInterval = 1
+	state.Config.DoerMaxWait = 1
+	state.Config.LeaseDuration = 300
+	state.Config.CrashRestartThreshold = 1
+	state.Config.SpinningRestartThreshold = 10
+	state.Tasks = []models.Task{testhelpers.BuildTaskByStatus(taskID, models.TaskStatusReady, now)}
+	bb := testhelpers.WriteInitialState(t, statePath, state)
+
+	mock := &MockLLMAgent{ExitCode: 1, ExitError: stderrors.New("acpx prompt: exit status 1")}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	err := RunSupervisor(ctx, SupervisorConfig{
+		AgentID:          "coder-1",
+		Role:             models.RoleCoder,
+		ProjectRoot:      projectRoot,
+		StatePath:        statePath,
+		LogPath:          filepath.Join(projectRoot, ".liza", "log.yaml"),
+		SpecsDir:         filepath.Join(projectRoot, "specs"),
+		CLIName:          "codex-acp",
+		LLMAgent:         mock,
+		ExecutionTimeout: 10 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("RunSupervisor() error = %v, want crash-loop handling", err)
+	}
+	if calls := mock.GetCalls(); len(calls) != 2 {
+		t.Fatalf("Run calls = %d, want 2 before crash-loop block", len(calls))
+	}
+
+	updated, err := bb.Read()
+	if err != nil {
+		t.Fatalf("bb.Read() error = %v", err)
+	}
+	task := updated.FindTask(taskID)
+	if task == nil {
+		t.Fatalf("task %q not found", taskID)
+	}
+	if task.Status != models.TaskStatusBlocked {
+		t.Fatalf("task status = %s, want BLOCKED", task.Status)
+	}
+	if task.BlockedReason == nil || !strings.Contains(*task.BlockedReason, "crash restart loop detected") {
+		t.Fatalf("BlockedReason = %v, want crash-loop reason", task.BlockedReason)
 	}
 }
 
@@ -2373,5 +2431,21 @@ func TestNewDefaultCLIExecutorDelegatesToCLIAgent(t *testing.T) {
 	e := NewDefaultCLIExecutor(dir)
 	if e.outputsDir != dir {
 		t.Errorf("outputsDir = %q, want %q", e.outputsDir, dir)
+	}
+}
+
+func TestExit42TaskProgressSignatureIgnoresClaimIteration(t *testing.T) {
+	task := models.Task{ID: "task-1", Status: models.TaskStatusImplementing, Iteration: 3}
+	reClaimed := task
+	reClaimed.Iteration = 4
+
+	if exit42TaskProgressSignature(&task) != exit42TaskProgressSignature(&reClaimed) {
+		t.Fatal("signature changed on claim-only Iteration bump; spin/crash counters would reset every re-claim")
+	}
+
+	progressed := task
+	progressed.Status = models.TaskStatusReadyForReview
+	if exit42TaskProgressSignature(&task) == exit42TaskProgressSignature(&progressed) {
+		t.Fatal("signature must change on real status progress")
 	}
 }

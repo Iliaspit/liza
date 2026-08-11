@@ -236,12 +236,16 @@ func exit42TaskProgressSignature(task *models.Task) string {
 	snapshot.LeaseExpires = nil
 	snapshot.ReviewingBy = nil
 	snapshot.ReviewLeaseExpires = nil
+	// Iteration is bumped by every ClaimTask, including the no-progress
+	// re-claims this signature exists to detect; keeping it would reset the
+	// spin/crash counters on each cycle (DEV-667).
+	snapshot.Iteration = 0
 	snapshot.Exit42RestartCount = 0
 	snapshot.History = nil
 
 	payload, err := json.Marshal(snapshot)
 	if err != nil {
-		return fmt.Sprintf("%s|%d|%t", task.Status, task.Iteration, task.HandoffPending)
+		return fmt.Sprintf("%s|%t", task.Status, task.HandoffPending)
 	}
 	return string(payload)
 }
@@ -742,19 +746,7 @@ func RunSupervisor(ctx context.Context, config SupervisorConfig) error {
 	exit42Tracker := newExit42RestartTracker()
 	crashTracker := newCrashRestartTracker()
 	spinTracker := newSpinningTracker()
-	successNoProgressTracker := newSpinningTracker()
 	runtimeFailureTracker := newRuntimeFailureTracker()
-	readSuccessProgressSnapshot := func(taskID string) (string, bool) {
-		if taskID == "" {
-			return "", false
-		}
-		sig, eligible, err := readSuccessfulTurnProgressSnapshot(config.ProjectRoot, bb, taskID, config.AgentID, resolver)
-		if err != nil {
-			GetLogger().Warn("Successful no-progress snapshot failed", "error", err, "task_id", taskID)
-			return "", false
-		}
-		return sig, eligible
-	}
 
 	for {
 		if err := checkHeartbeat(); err != nil {
@@ -853,9 +845,17 @@ func RunSupervisor(ctx context.Context, config SupervisorConfig) error {
 			effectiveTask = taskID
 		}
 		if effectiveTask != "" {
-			var sig string
-			if task := stateBefore.FindTask(effectiveTask); task != nil {
-				sig = exit42TaskProgressSignature(task)
+			// Prefer the worktree-aware snapshot: genuine iteration on a task
+			// often progresses only in the worktree, and task-field signatures
+			// alone would count it as spinning (DEV-667).
+			sig, snapshotEligible, err := readSuccessfulTurnProgressSnapshot(config.ProjectRoot, bb, effectiveTask, config.AgentID, resolver)
+			if err != nil {
+				GetLogger().Warn("Successful no-progress snapshot failed", "error", err, "task_id", effectiveTask)
+			}
+			if !snapshotEligible || sig == "" {
+				if task := stateBefore.FindTask(effectiveTask); task != nil {
+					sig = exit42TaskProgressSignature(task)
+				}
 			}
 			spinCount := spinTracker.Track(effectiveTask, sig)
 			spinThreshold := effectiveSpinningRestartThreshold(stateBefore.Config)
@@ -912,7 +912,6 @@ func RunSupervisor(ctx context.Context, config SupervisorConfig) error {
 					"error", err)
 				blockTaskFromSupervisor(bb, config.ProjectRoot, claimedTaskID, config.AgentID, reason)
 				spinTracker.reset(effectiveTask)
-				successNoProgressTracker.reset(effectiveTask)
 				continue
 			}
 			return fmt.Errorf("failed to build prompt: %w", err)
@@ -936,7 +935,6 @@ func RunSupervisor(ctx context.Context, config SupervisorConfig) error {
 		if exitCode == 0 && effectiveTask != "" {
 			if failure := detectObservedRuntimeFailure(currentOutput); failure != nil {
 				handleObservedRuntimeFailureRetry(bb, config, effectiveTask, stateBefore.Config, *failure, runtimeFailureTracker, spinTracker)
-				successNoProgressTracker.reset(effectiveTask)
 				if err := resetAgentAfterExit(bb, config.AgentID, config.ProjectRoot); err != nil {
 					GetLogger().Warn("Failed to reset agent status after runtime failure", "error", err, "agent_id", config.AgentID)
 				}
@@ -944,12 +942,6 @@ func RunSupervisor(ctx context.Context, config SupervisorConfig) error {
 				crashTracker.reset(effectiveTask)
 				continue
 			}
-		}
-
-		postSuccessSnapshot := ""
-		postSuccessEligible := false
-		if exitCode == 0 && effectiveTask != "" {
-			postSuccessSnapshot, postSuccessEligible = readSuccessProgressSnapshot(effectiveTask)
 		}
 
 		// Reset runtime status after CLI exits, but preserve explicit command-driven
@@ -970,30 +962,6 @@ func RunSupervisor(ctx context.Context, config SupervisorConfig) error {
 			GetLogger().Info("Agent completed, checking for more work")
 			if err := strategy.PostExecution(bb, config, taskID, claimedTaskID, stateBefore); err != nil {
 				GetLogger().Warn("Post-execution error", "error", err)
-			}
-			if effectiveTask != "" {
-				successSignature := successfulTurnProgressSignature(config.CLIName, currentOutput, postSuccessSnapshot)
-				if postSuccessEligible && successSignature != "" {
-					noProgressCount := successNoProgressTracker.Track(effectiveTask, successSignature)
-					spinThreshold := effectiveSpinningRestartThreshold(stateBefore.Config)
-					if noProgressCount > spinThreshold {
-						reason := fmt.Sprintf("successful no-progress loop detected: %d consecutive successful executions for task %s without task, state, or worktree progress (threshold=%d)",
-							noProgressCount, effectiveTask, spinThreshold)
-						GetLogger().Error("Successful no-progress loop detected, blocking task",
-							"task_id", effectiveTask,
-							"agent_id", config.AgentID,
-							"count", noProgressCount)
-						if alertErr := LogAlert(config.ProjectRoot, "🚨", "SUCCESSFUL NO-PROGRESS LOOP", reason); alertErr != nil {
-							GetLogger().Warn("Failed to write no-progress alert", "error", alertErr)
-						}
-						blockTaskFromSupervisor(bb, config.ProjectRoot, effectiveTask, config.AgentID, reason)
-						successNoProgressTracker.reset(effectiveTask)
-						spinTracker.reset(effectiveTask)
-						continue
-					}
-				} else {
-					successNoProgressTracker.reset(effectiveTask)
-				}
 			}
 			exit42Tracker.reset(taskID)
 			crashTracker.reset(effectiveTask)

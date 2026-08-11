@@ -210,6 +210,22 @@ func ResolveLaunchPlan(req LaunchPlanRequest) (LaunchPlan, error) {
 		if err != nil {
 			return LaunchPlan{}, fmt.Errorf("%s acpx session name: %w", toolName, err)
 		}
+		// Scope the session to the task so context cannot accumulate across
+		// tasks: a session that spans tasks grows until the provider rejects
+		// every prompt, and auto-repair then respawns into the same poisoned
+		// session (DEV-667). Templates that already place {{taskID}} keep
+		// full control.
+		templateIncludesTaskID := false
+		for _, match := range templateExprRE.FindAllString(sessionTemplate, -1) {
+			name := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(match, "{{"), "}}"))
+			if name == "taskID" {
+				templateIncludesTaskID = true
+				break
+			}
+		}
+		if scope := acpxSessionTaskScope(req.TaskID); scope != "" && !templateIncludesTaskID {
+			renderedSessionName = renderedSessionName + "-" + scope
+		}
 		vars["sessionName"] = renderedSessionName
 	}
 
@@ -345,6 +361,16 @@ func validatePromptTransport(value string) error {
 	default:
 		return fmt.Errorf("unsupported prompt transport: %s", value)
 	}
+}
+
+// acpxSessionTaskScope preserves the validated task ID so session names stay
+// collision-free across distinct valid task IDs.
+func acpxSessionTaskScope(taskID string) string {
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" {
+		return ""
+	}
+	return taskID
 }
 
 func launchTemplateVars(req LaunchPlanRequest, toolName string) map[string]string {
