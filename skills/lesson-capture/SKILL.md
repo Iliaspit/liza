@@ -13,10 +13,10 @@ Lessons complement the contract: the contract governs *how to work* (behavioral,
 
 Lessons are split by audience:
 
-| Audience | Directory | Read During Init | Content |
-|----------|-----------|------------------|---------|
-| **Agents** | `lessons/agents/` | Yes | Project-specific gotchas agents hit repeatedly |
-| **Humans** | `lessons/humans/` | No | Workflow habits, domain pitfalls, invariants to preserve |
+| Audience | Directory | Discovery | Content |
+|----------|-----------|-----------|---------|
+| **Agents** | `lessons/agents/` | `GUARDRAILS.md` trigger index | Project-specific gotchas agents hit repeatedly |
+| **Humans** | `lessons/humans/` | `lessons/humans/README.md` | Workflow habits, domain pitfalls, invariants to preserve |
 
 If audience is ambiguous, ask.
 
@@ -68,18 +68,19 @@ date: YYYY-MM-DD
 | Agents   | `GUARDRAILS.md` (Tier 2)   |
 | Humans   | `lessons/humans/README.md` |
 
-
 ```markdown
-### G2.x: Lessons — [Agents|Humans]
+### G2.x: Lessons — Agents
 
 Operational lessons from project experience. Read when a trigger matches.
 
 | Trigger | File |
 |---------|------|
-| When ... | [filename.md](filename.md) |
+| When ... | [filename.md](lessons/agents/filename.md) |
 ```
 
-The index is the discovery mechanism. Agents read it during session initialization and consult full lessons when a trigger matches their current task.
+Human lesson indexes use the same table in `lessons/humans/README.md`, with file links relative to that directory.
+
+The agent index is the discovery mechanism. Agents read `GUARDRAILS.md` during session initialization and consult full lessons when a trigger matches their current task.
 
 # Process
 
@@ -119,9 +120,11 @@ Propose the lesson content in the standard format. Present for approval before w
 
 ## 4. Write
 
-After approval:
+After the mode-specific gate clears:
 1. Write the lesson file to the appropriate directory
-2. Update the directory's `README.md` index — append a row to the table
+2. Update the audience's index:
+   - **Agents**: append a trigger row to the Tier 2 lessons table in `GUARDRAILS.md`; create the section if absent
+   - **Humans**: append a row to `lessons/humans/README.md`; create the file if absent
 3. Announce: `"Lesson captured: [title] → lessons/[audience]/[filename]. Index updated."`
 
 ## 5. Maintain
@@ -138,9 +141,9 @@ When invoked on an existing lesson (update or delete):
 mistake/discovery → reflection → lesson-capture skill → lessons/ persisted
 ```
 
-Invoked manually by the human. May later support automated triggers (post-bug-fix, post-review-finding, post-struggle).
+Invoked explicitly by a human or when an agent's contract or prompt requires lesson capture.
 
-**Session initialization:** Agents read `lessons/agents/README.md` during init. When a trigger matches current work, read the full lesson file before proceeding.
+**Session initialization:** Agents read the lesson index in `GUARDRAILS.md`. When a trigger matches current work, read the linked file under `lessons/agents/` before proceeding.
 
 **Discovery limitation:** The trigger+keyword model relies on agents predicting which lessons are relevant. This handles known-unknowns (agent recognizes the trigger) but cannot surface unknown-unknowns (agent working on CSV export won't search for "file locking" until it's already hit the problem). Mitigation: write triggers and keywords broadly enough to match adjacent situations, not just the exact scenario where the lesson was learned.
 

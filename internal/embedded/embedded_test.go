@@ -64,6 +64,35 @@ func TestAgentToolsOptionalIndexGuidance(t *testing.T) {
 	assertAgentToolsOptionalIndexGuidance(t, string(content))
 }
 
+func TestLessonCaptureUsesGuardrailsAgentIndex(t *testing.T) {
+	content, err := skillsFS.ReadFile("skills/lesson-capture/SKILL.md")
+	if err != nil {
+		t.Fatalf("reading embedded lesson-capture skill: %v", err)
+	}
+
+	text := string(content)
+	for _, want := range []string{
+		"`GUARDRAILS.md` trigger index",
+		"append a trigger row to the Tier 2 lessons table in `GUARDRAILS.md`",
+		"Agents read the lesson index in `GUARDRAILS.md`",
+		"[filename.md](lessons/agents/filename.md)",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("embedded lesson-capture skill missing agent-index guidance: %q", want)
+		}
+	}
+
+	for _, stale := range []string{
+		"Update the directory's `README.md` index",
+		"Agents read `lessons/agents/README.md` during init",
+		"Invoked manually by the human",
+	} {
+		if strings.Contains(text, stale) {
+			t.Errorf("embedded lesson-capture skill retains stale guidance: %q", stale)
+		}
+	}
+}
+
 func TestRuntimeEmbeddedAssetBrandPlaceholdersAreKnownAndRendered(t *testing.T) {
 	placeholderRE := regexp.MustCompile(`__BRAND_[A-Z0-9_]+__`)
 	known := map[string]bool{

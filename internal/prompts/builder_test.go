@@ -129,8 +129,8 @@ func TestBuildBasePrompt(t *testing.T) {
 				"Use the assigned task JSON from step 2. Read its `spec_ref`",
 				"if it is repo-relative and the task has a worktree, read it from that worktree",
 				"If `spec_ref` is empty, run `liza get goal.spec_ref --json`",
-				"lessons/agents/",
-				"GUARDRAILS.md",
+				"lesson index in GUARDRAILS.md",
+				"matching files under lessons/agents/",
 			},
 			wantNotContain: []string{
 				// Role-specific tools should NOT be in base prompt
@@ -1209,8 +1209,8 @@ func TestBasePromptRegressionGuard(t *testing.T) {
 		"Read the current spec reference:",
 		"Use the assigned task JSON from step 2. Read its `spec_ref`",
 		"If `spec_ref` is empty, run `liza get goal.spec_ref --json`",
-		"lessons/agents/",
-		"GUARDRAILS.md",
+		"lesson index in GUARDRAILS.md",
+		"matching files under lessons/agents/",
 		"Execute your role's protocol",
 	})
 
@@ -1228,6 +1228,7 @@ func TestBasePromptRegressionGuard(t *testing.T) {
 
 	// --- NEGATIVE: role-specific content must NOT leak into base ---
 	assertAbsent("no-role-leak", []string{
+		"Future agents read lessons/agents/ at init.",
 		"liza_add_tasks",
 		"liza_submit_for_review",
 		"liza_submit_verdict",

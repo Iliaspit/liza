@@ -92,8 +92,7 @@ Project-specific operational lessons captured via the `lesson-capture` skill. Pr
 
 ```
 lessons/
-├── agents/              # Lessons for AI agents (read during session init)
-│   └── README.md        # Index: trigger + title for each lesson
+├── agents/              # Agent lessons; trigger index lives in GUARDRAILS.md Tier 2
 └── humans/              # Lessons for human developers
     └── README.md        # Index: trigger + title for each lesson
 ```
