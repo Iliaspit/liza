@@ -98,6 +98,28 @@ func TestValidateStateRejectsOversizedMessage(t *testing.T) {
 	}
 }
 
+func TestValidateStateRejectsOversizedRejectionReason(t *testing.T) {
+	oldBinaryName := brand.BinaryName
+	brand.BinaryName = "acme-agent"
+	t.Cleanup(func() {
+		brand.BinaryName = oldBinaryName
+	})
+
+	state := createState()
+	reason := strings.Repeat("x", MaxStateTextBytes+1)
+	state.Tasks[0].RejectionReason = &reason
+
+	err := ValidateState(state)
+	if err == nil {
+		t.Fatal("ValidateState() error = nil, want oversized rejection_reason rejection")
+	}
+	if !strings.Contains(err.Error(), "rejection_reason") ||
+		!strings.Contains(err.Error(), "exceeds 4096-byte state text limit") ||
+		!strings.Contains(err.Error(), `run "acme-agent migrate" to scrub legacy oversized fields`) {
+		t.Fatalf("ValidateState() error = %v, want oversized rejection_reason rejection", err)
+	}
+}
+
 func TestValidateStateAllowsOrdinaryShortMessages(t *testing.T) {
 	state := createState()
 	state.Tasks[0].History = []models.TaskHistoryEntry{

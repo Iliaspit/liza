@@ -1,6 +1,7 @@
 package ops
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -14,6 +15,7 @@ import (
 	activitylog "github.com/liza-mas/liza/internal/log"
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/paths"
+	"github.com/liza-mas/liza/internal/statehygiene"
 	"github.com/liza-mas/liza/internal/testhelpers"
 )
 
@@ -290,6 +292,74 @@ func TestSubmitVerdict_Rejected(t *testing.T) {
 	if len(task.Output) != 1 || task.Output[0].PlanRef != "specs/plans/stale.md" {
 		t.Fatalf("Output = %v, want preserved as rework context", task.Output)
 	}
+}
+
+func TestSubmitVerdict_RejectionReasonByteLimit(t *testing.T) {
+	setup := func(t *testing.T) (string, string) {
+		t.Helper()
+		projectRoot := t.TempDir()
+		stateFile, _ := testhelpers.SetupLizaDir(t, projectRoot)
+		now := time.Now().UTC()
+		state := testhelpers.CreateValidState()
+		state.Tasks = []models.Task{
+			testhelpers.BuildTaskByStatus("task-1", models.TaskStatusReviewing, now),
+		}
+		state.Agents["code-reviewer-1"] = models.Agent{
+			Role:   "code-reviewer",
+			Status: models.AgentStatusWorking,
+		}
+		testhelpers.WriteInitialState(t, stateFile, state)
+		return projectRoot, stateFile
+	}
+
+	t.Run("maximum accepted", func(t *testing.T) {
+		projectRoot, stateFile := setup(t)
+		reason := strings.Repeat("x", statehygiene.MaxStateTextBytes)
+
+		if _, err := SubmitVerdict(projectRoot, "task-1", "REJECTED", reason, "code-reviewer-1", ""); err != nil {
+			t.Fatalf("SubmitVerdict() error: %v", err)
+		}
+
+		state, err := db.New(stateFile).Read()
+		if err != nil {
+			t.Fatalf("Read() error: %v", err)
+		}
+		task := state.FindTask("task-1")
+		if task == nil || task.RejectionReason == nil || *task.RejectionReason != reason {
+			t.Fatal("4096-byte rejection reason was not persisted")
+		}
+	})
+
+	t.Run("oversized rejected before side effects", func(t *testing.T) {
+		projectRoot, stateFile := setup(t)
+		before, err := os.ReadFile(stateFile)
+		if err != nil {
+			t.Fatalf("ReadFile() before SubmitVerdict: %v", err)
+		}
+		reason := strings.Repeat("x", statehygiene.MaxStateTextBytes+1)
+
+		_, err = SubmitVerdict(projectRoot, "task-1", "REJECTED", reason, "code-reviewer-1", "")
+		precondition, ok := err.(*PreconditionError)
+		if !ok {
+			t.Fatalf("SubmitVerdict() error = %T %v, want *PreconditionError", err, err)
+		}
+		for _, part := range []string{"4097 bytes", "4096-byte maximum", ".liza/agent-outputs/", "bounded summary", "artifact reference"} {
+			if !strings.Contains(precondition.Reason, part) {
+				t.Errorf("PreconditionError.Reason = %q, want substring %q", precondition.Reason, part)
+			}
+		}
+
+		after, readErr := os.ReadFile(stateFile)
+		if readErr != nil {
+			t.Fatalf("ReadFile() after SubmitVerdict: %v", readErr)
+		}
+		if !bytes.Equal(after, before) {
+			t.Fatal("oversized rejection changed state")
+		}
+		if _, statErr := os.Stat(filepath.Join(projectRoot, ".liza", "log.yaml")); !os.IsNotExist(statErr) {
+			t.Fatalf("oversized rejection created activity log: %v", statErr)
+		}
+	})
 }
 
 func TestSubmitVerdict_RejectionThenResubmissionUsesFreshReviewMetadata(t *testing.T) {

@@ -13,6 +13,7 @@ import (
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/pipeline"
 	"github.com/liza-mas/liza/internal/prompts"
+	"github.com/liza-mas/liza/internal/statehygiene"
 	"github.com/liza-mas/liza/internal/testhelpers"
 )
 
@@ -136,6 +137,48 @@ func TestJSON_ClaimTask_Error(t *testing.T) {
 	}
 	if errObj["code"] != "not_found" {
 		t.Errorf("error code = %v, want not_found", errObj["code"])
+	}
+}
+
+func TestJSON_SubmitVerdict_OversizedReasonIsActionableAndSideEffectFree(t *testing.T) {
+	projectRoot, statePath := setupMutationTestProject(t, func(state *models.State) {
+		now := time.Now().UTC()
+		state.Tasks = []models.Task{
+			testhelpers.BuildTaskByStatus("task-json-review", models.TaskStatusReviewing, now),
+		}
+	})
+	before, err := os.ReadFile(statePath)
+	if err != nil {
+		t.Fatalf("ReadFile() before submit-verdict: %v", err)
+	}
+	reason := strings.Repeat("x", statehygiene.MaxStateTextBytes+1)
+
+	stdout, err := executeRootCommandCapture(t, projectRoot,
+		"submit-verdict", "task-json-review", "REJECTED",
+		"--reason", reason,
+		"--agent-id", "code-reviewer-1",
+		"--json",
+	)
+	if err == nil {
+		t.Fatal("expected oversized rejection reason error, got nil")
+	}
+	assertJSONError(t, stdout, "validation",
+		"4097 bytes",
+		"4096-byte maximum",
+		".liza/agent-outputs/",
+		"bounded summary",
+		"artifact reference",
+	)
+
+	after, readErr := os.ReadFile(statePath)
+	if readErr != nil {
+		t.Fatalf("ReadFile() after submit-verdict: %v", readErr)
+	}
+	if !bytes.Equal(after, before) {
+		t.Fatal("oversized rejection changed state")
+	}
+	if _, statErr := os.Stat(filepath.Join(projectRoot, ".liza", "log.yaml")); !os.IsNotExist(statErr) {
+		t.Fatalf("oversized rejection created activity log: %v", statErr)
 	}
 }
 

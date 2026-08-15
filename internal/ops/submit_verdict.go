@@ -17,6 +17,7 @@ import (
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/paths"
 	"github.com/liza-mas/liza/internal/secretmask"
+	"github.com/liza-mas/liza/internal/statehygiene"
 )
 
 // VerdictResult contains the outcome of a successful verdict submission.
@@ -112,6 +113,18 @@ func SubmitVerdict(projectRoot, taskID, verdict, reason, agentID, impact string)
 
 	if !IsValidImpact(impact) {
 		return nil, &PreconditionError{Reason: fmt.Sprintf("invalid impact value: %s (must be standard, significant, or architecture)", impact)}
+	}
+	if verdict == "REJECTED" {
+		reasonBytes := len([]byte(reason))
+		if reasonBytes > statehygiene.MaxStateTextBytes {
+			return nil, &PreconditionError{Reason: fmt.Sprintf(
+				"rejection reason is %d bytes, exceeds the %d-byte maximum; store raw evidence under %s/%s/ and submit a bounded summary with an artifact reference",
+				reasonBytes,
+				statehygiene.MaxStateTextBytes,
+				paths.ProjectDirName(),
+				paths.AgentOutputsDirName,
+			)}
+		}
 	}
 
 	lp := paths.New(projectRoot)

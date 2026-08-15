@@ -8,6 +8,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/liza-mas/liza/internal/brand"
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/paths"
 )
@@ -27,14 +28,15 @@ func scrubbedStateMessage() string {
 }
 
 var cappedTextFields = map[string]bool{
-	"message":    true,
-	"summary":    true,
-	"excerpt":    true,
-	"note":       true,
-	"reason":     true,
-	"command":    true,
-	"hypothesis": true,
-	"next_step":  true,
+	"message":          true,
+	"summary":          true,
+	"excerpt":          true,
+	"note":             true,
+	"reason":           true,
+	"rejection_reason": true,
+	"command":          true,
+	"hypothesis":       true,
+	"next_step":        true,
 }
 
 // ValidateState rejects transcript-shaped provider payloads and oversized
@@ -124,7 +126,7 @@ func validateValue(v reflect.Value, path, fieldName string) error {
 			return fmt.Errorf("%s contains raw provider transcript payload; store raw evidence under %s and keep only a bounded summary/log_ref in state.yaml", path, agentOutputsRelPath())
 		}
 		if isCappedTextField(fieldName) && len([]byte(value)) > MaxStateTextBytes {
-			return fmt.Errorf("%s is %d bytes, exceeds %d-byte state text limit; store raw evidence under %s and keep a bounded summary/log_ref in state.yaml", path, len([]byte(value)), MaxStateTextBytes, agentOutputsRelPath())
+			return fmt.Errorf("%s is %d bytes, exceeds %d-byte state text limit; store raw evidence under %s and keep a bounded summary/log_ref in state.yaml; for existing state, run %q to scrub legacy oversized fields", path, len([]byte(value)), MaxStateTextBytes, agentOutputsRelPath(), brand.Command("migrate"))
 		}
 	case reflect.Struct:
 		t := v.Type()

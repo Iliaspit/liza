@@ -1236,6 +1236,7 @@ func TestBasePromptRegressionGuard(t *testing.T) {
 		"IMPLEMENTATION PHASE",
 		"REVIEW CHECKLIST",
 		"VERDICT SUBMISSION",
+		"Rejection reasons are limited to 4096 bytes",
 	})
 }
 
@@ -1838,6 +1839,7 @@ func TestBuildRoleContext_AllRoles(t *testing.T) {
 			"Do not invent or log a new anomaly type for review-range drift",
 			"REJECTION FORMAT",
 			"VERDICT SUBMISSION",
+			"Rejection reasons are limited to 4096 bytes",
 			"COLLECTIVE PLAN SCOPING",
 			"PRIOR REJECTION (iteration 1)",
 			"Closure condition: [observable state required for approval]",
@@ -2001,6 +2003,7 @@ func TestBuildRoleContext_AllRoles(t *testing.T) {
 			"Inspect worktree changes by targeted path/hunk",
 			"git -C " + data.Worktree + " diff abc1234..def5678 -- <path>",
 			"VERDICT SUBMISSION",
+			"Rejection reasons are limited to 4096 bytes",
 			// ACCEPTED and its rationale-read instruction must reach non-code reviewers too
 			"Which are ACCEPTED (rationale accepted, no code change)?",
 			"Read the submission commit message for deferral rationale",
@@ -2092,6 +2095,7 @@ func TestBuildRoleContext_AllRoles(t *testing.T) {
 			"Inspect worktree changes by targeted path/hunk",
 			"git -C " + data.Worktree + " diff abc1234..def5678 -- <path>",
 			"VERDICT SUBMISSION",
+			"Rejection reasons are limited to 4096 bytes",
 		} {
 			if !strings.Contains(output, key) {
 				t.Errorf("output missing key string %q", key)
@@ -2193,6 +2197,7 @@ func TestBuildRoleContext_AllRoles(t *testing.T) {
 			"Inspect worktree changes by targeted path/hunk",
 			"git -C " + data.Worktree + " diff abc1234..def5678 -- <path>",
 			"VERDICT SUBMISSION",
+			"Rejection reasons are limited to 4096 bytes",
 			"specs/epics/ep-001.md",
 			"#capability-cap-001---task-creation",
 		} {
@@ -2291,6 +2296,7 @@ func TestBuildRoleContext_AllRoles(t *testing.T) {
 			"Inspect worktree changes by targeted path/hunk",
 			"git -C " + data.Worktree + " diff abc1234..def5678 -- <path>",
 			"VERDICT SUBMISSION",
+			"Rejection reasons are limited to 4096 bytes",
 		} {
 			if !strings.Contains(output, key) {
 				t.Errorf("output missing key string %q", key)

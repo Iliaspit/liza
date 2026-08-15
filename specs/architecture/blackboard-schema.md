@@ -520,6 +520,7 @@ rejection_reason: |
 - Blockers and Concerns must reference specific `file:line` locations
 - Each blocker and concern must include a closure condition; any suggested approach is advisory
 - For iteration 2+: Prior Feedback Status section is mandatory
+- The complete `rejection_reason` must not exceed 4096 bytes. Store longer raw evidence in the project runtime's `agent-outputs/` directory and include a bounded summary plus an artifact reference.
 
 **Rationale:** Structured format enables:
 - Coder to satisfy explicit closure conditions rather than interpreting prose

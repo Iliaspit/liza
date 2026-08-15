@@ -162,7 +162,7 @@ Used by reviewer agents to approve or reject work.
 Requirements:
   - Agent ID must be provided (via --agent-id flag or ` + brand.EnvName("AGENT_ID") + ` env var)
   - Task must be in a reviewing status (resolved from pipeline config)
-  - For REJECTED verdicts, a rejection reason is required (via --reason flag or positional arg)
+  - For REJECTED verdicts, a rejection reason of at most 4096 bytes is required (via --reason flag or positional arg)
 
 For APPROVED verdict:
   - status = role-pair's approved status (e.g. CODE_APPROVED, CODING_PLAN_APPROVED)
@@ -498,7 +498,7 @@ func init() {
 
 	// Submit-verdict flags
 	submitVerdictCmd.Flags().String("impact", "", "impact classification (standard, significant, architecture)")
-	submitVerdictCmd.Flags().String("reason", "", "rejection reason (alternative to positional argument, avoids shell quoting issues)")
+	submitVerdictCmd.Flags().String("reason", "", "rejection reason, at most 4096 bytes (alternative to positional argument, avoids shell quoting issues)")
 
 	// Release-claim command flags
 	releaseClaimCmd.Flags().String("role", roles.ClaimReviewer, "claim type to release (doer, reviewer, both)")

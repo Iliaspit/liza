@@ -2,11 +2,13 @@ package commands
 
 import (
 	"os"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/liza-mas/liza/internal/db"
 	"github.com/liza-mas/liza/internal/models"
+	"github.com/liza-mas/liza/internal/statehygiene"
 	"github.com/liza-mas/liza/internal/testhelpers"
 	"gopkg.in/yaml.v3"
 )
@@ -378,6 +380,49 @@ func TestMigrateCommand_ScrubsRawProviderAuditMessage(t *testing.T) {
 	}
 	if got := updated.Anomalies[1].Details["message"]; got != "Agent coder-2 deleted: terminated via TUI" {
 		t.Fatalf("ordinary message changed to %q", got)
+	}
+}
+
+func TestMigrateCommand_ScrubsOversizedLegacyRejectionReason(t *testing.T) {
+	tmpDir := t.TempDir()
+	statePath, _ := testhelpers.SetupLizaDir(t, tmpDir)
+
+	now := time.Now().UTC()
+	state := testhelpers.CreateValidState()
+	task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusRejected, now)
+	reason := strings.Repeat("x", statehygiene.MaxStateTextBytes+1)
+	task.RejectionReason = &reason
+	state.Tasks = []models.Task{task}
+	data, err := yaml.Marshal(state)
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+	if err := os.WriteFile(statePath, data, 0644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	changed, err := MigrateCommand(statePath)
+	if err != nil {
+		t.Fatalf("MigrateCommand() error = %v", err)
+	}
+	if !changed {
+		t.Fatal("MigrateCommand() changed = false, want true")
+	}
+
+	bb := db.New(statePath)
+	if err := bb.Modify(func(*models.State) error { return nil }); err != nil {
+		t.Fatalf("state write after migration failed: %v", err)
+	}
+	updated, err := bb.Read()
+	if err != nil {
+		t.Fatalf("Read() error = %v", err)
+	}
+	updatedTask := updated.FindTask("task-1")
+	if updatedTask == nil || updatedTask.RejectionReason == nil {
+		t.Fatal("migrated rejection_reason missing")
+	}
+	if got := *updatedTask.RejectionReason; !strings.Contains(got, "raw state payload omitted") || len([]byte(got)) > statehygiene.MaxStateTextBytes {
+		t.Fatalf("migrated rejection_reason = %q, want bounded scrub message", got)
 	}
 }
 

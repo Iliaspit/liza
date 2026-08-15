@@ -1,6 +1,7 @@
 {{- define "rejection-format" -}}
 
 REJECTION FORMAT (if rejecting):
+Rejection reasons are limited to 4096 bytes. Put raw evidence in {{projectDirName}}/agent-outputs/ and include a bounded summary plus an artifact reference.
 ---
 Blockers: [count]
 - [blocker] file:line — Issue description
