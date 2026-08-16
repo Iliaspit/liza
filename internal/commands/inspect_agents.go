@@ -3,6 +3,7 @@ package commands
 import (
 	stderrors "errors"
 	"fmt"
+	"io"
 	"sort"
 	"strings"
 	"time"
@@ -21,6 +22,7 @@ type inspectAgentsOptions struct {
 	Internal     bool   // Return structured data for composition
 	Zombies      bool   // Return live liza agent processes missing from state
 	ProjectRoot  string // Project root for live process scope checks
+	WarnWriter   io.Writer
 }
 
 // agentInfo represents agent information with computed fields
@@ -90,7 +92,7 @@ func inspectAgents(state *models.State, opts inspectAgentsOptions) (any, error) 
 }
 
 func inspectZombieAgents(state *models.State, opts inspectAgentsOptions) (any, error) {
-	zombies, err := findZombieAgents(procscan.ZombieScanOptions{
+	scan, err := findZombieAgents(procscan.ZombieScanOptions{
 		ProjectRoot:    opts.ProjectRoot,
 		GoalID:         state.Goal.ID,
 		RegisteredPIDs: registeredAgentPIDs(state),
@@ -102,14 +104,18 @@ func inspectZombieAgents(state *models.State, opts inspectAgentsOptions) (any, e
 		return nil, err
 	}
 
-	sort.Slice(zombies, func(i, j int) bool {
-		return zombies[i].PID < zombies[j].PID
+	sort.Slice(scan.Zombies, func(i, j int) bool {
+		return scan.Zombies[i].PID < scan.Zombies[j].PID
 	})
+	sort.Slice(scan.UnknownScope, func(i, j int) bool {
+		return scan.UnknownScope[i].PID < scan.UnknownScope[j].PID
+	})
+	writeUnknownScopeWarning(opts.WarnWriter, scan.UnknownScope)
 
 	if opts.Internal {
-		return zombies, nil
+		return scan.Zombies, nil
 	}
-	return formatZombieAgentsOutput(zombies, opts.Format)
+	return formatZombieAgentsOutput(scan.Zombies, opts.Format)
 }
 
 func registeredAgentPIDs(state *models.State) map[int]bool {
@@ -240,7 +246,7 @@ func formatZombieAgentsOutput(zombies []procscan.ZombieProcess, format string) (
 
 func formatZombieAgentsTable(zombies []procscan.ZombieProcess) string {
 	if len(zombies) == 0 {
-		return "No zombie agents found"
+		return "No verified zombie agents found"
 	}
 
 	headers := []string{"PID", "ROLE", "CLI", "GOAL", "CWD", "REASON"}

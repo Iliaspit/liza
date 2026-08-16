@@ -2,6 +2,7 @@ package commands
 
 import (
 	"fmt"
+	"io"
 	"slices"
 	"strings"
 
@@ -23,6 +24,7 @@ type InspectOptions struct {
 	OutputSummary bool   // If true, return compact task output entries
 	Active        bool   // If true, return only non-terminal tasks
 	Zombies       bool   // If true, return live agent processes missing from state
+	WarnWriter    io.Writer
 }
 
 // Validate checks if the inspect options are valid
@@ -159,6 +161,7 @@ func handleEntityQuery(state *models.State, entity string, args []string, opts I
 			Format:      opts.Format,
 			Zombies:     opts.Zombies,
 			ProjectRoot: opts.ProjectRoot,
+			WarnWriter:  opts.WarnWriter,
 		}
 		if len(args) > 0 {
 			if opts.Zombies {

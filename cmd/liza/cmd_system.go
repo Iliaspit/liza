@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -468,6 +469,8 @@ This is useful for:
 	},
 }
 
+var inspectCommand = commands.InspectCommand
+
 var getCmd = &cobra.Command{
 	Use:   "get <query>",
 	Short: "Query and get state data",
@@ -538,6 +541,7 @@ Examples:
 		}
 
 		if isJSON(cmd) {
+			var warnBuf bytes.Buffer
 			opts := commands.InspectOptions{
 				Format:        "json",
 				ProjectRoot:   projectRoot,
@@ -545,14 +549,15 @@ Examples:
 				OutputSummary: outputSummary,
 				Active:        active,
 				Zombies:       zombies,
+				WarnWriter:    &warnBuf,
 			}
-			resultStr, err := commands.InspectCommand(args, opts)
+			resultStr, err := inspectCommand(args, opts)
 			if err != nil {
 				return err // deferred guard handles JSON
 			}
 			var parsed any
 			_ = json.Unmarshal([]byte(resultStr), &parsed)
-			return jsonout.WriteResult(os.Stdout, parsed, nil, nil)
+			return jsonout.WriteResult(os.Stdout, parsed, warningLines(warnBuf.String()), nil)
 		}
 
 		opts := commands.InspectOptions{
@@ -562,9 +567,10 @@ Examples:
 			OutputSummary: outputSummary,
 			Active:        active,
 			Zombies:       zombies,
+			WarnWriter:    cmd.ErrOrStderr(),
 		}
 
-		result, err := commands.InspectCommand(args, opts)
+		result, err := inspectCommand(args, opts)
 		if err != nil {
 			return err
 		}

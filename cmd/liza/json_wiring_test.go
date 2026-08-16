@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/liza-mas/liza/internal/commands"
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/pipeline"
 	"github.com/liza-mas/liza/internal/prompts"
@@ -1475,6 +1476,41 @@ func TestJSON_SubmitForReviewFromOwnTaskWorktreeRoot(t *testing.T) {
 	}
 	if task.ReviewCommit == nil || *task.ReviewCommit == "" {
 		t.Fatalf("ReviewCommit = %v, want non-empty", task.ReviewCommit)
+	}
+}
+
+func TestJSON_GetZombieWarningsAreIncluded(t *testing.T) {
+	projectRoot, _ := setupMutationTestProject(t, nil)
+
+	originalInspect := inspectCommand
+	t.Cleanup(func() { inspectCommand = originalInspect })
+
+	const warning = "WARNING: Live liza agent process scan partial: unable to verify project scope for pid 3456 role architect (cwd_unreadable); these processes were not classified as zombies"
+	inspectCommand = func(args []string, opts commands.InspectOptions) (string, error) {
+		if !opts.Zombies {
+			t.Fatal("InspectOptions.Zombies = false, want true")
+		}
+		if opts.WarnWriter == nil {
+			t.Fatal("InspectOptions.WarnWriter = nil, want buffered warning writer")
+		}
+		if _, err := io.WriteString(opts.WarnWriter, warning+"\n"); err != nil {
+			t.Fatalf("write warning: %v", err)
+		}
+		return "[]", nil
+	}
+
+	stdout, err := executeRootCommandCapture(t, projectRoot, "get", "agents", "--zombies", "--json")
+	if err != nil {
+		t.Fatalf("get agents --zombies --json failed: %v", err)
+	}
+
+	env := parseEnvelope(t, stdout)
+	warnings, ok := env["warnings"].([]any)
+	if !ok {
+		t.Fatalf("warnings = %T, want array", env["warnings"])
+	}
+	if len(warnings) != 1 || warnings[0] != warning {
+		t.Fatalf("warnings = %#v, want [%q]", warnings, warning)
 	}
 }
 

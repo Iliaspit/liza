@@ -15,9 +15,10 @@ import (
 // usable by the scanner. Callers may treat this as a warning for live validation.
 var ErrProcessScanUnavailable = errors.New("process scan unavailable: procfs not found")
 
-// ZombieProcess describes a live process that can affect the current goal
-// but is not registered in state.yaml.
-type ZombieProcess struct {
+const ScopeReasonCWDUnreadable = "cwd_unreadable"
+
+// AgentProcess describes a confirmed live agent supervisor process.
+type AgentProcess struct {
 	PID     int      `json:"pid" yaml:"pid"`
 	Role    string   `json:"role,omitempty" yaml:"role,omitempty"`
 	CLI     string   `json:"cli,omitempty" yaml:"cli,omitempty"`
@@ -25,6 +26,17 @@ type ZombieProcess struct {
 	CWD     string   `json:"cwd,omitempty" yaml:"cwd,omitempty"`
 	Cmdline []string `json:"cmdline" yaml:"cmdline"`
 	Reason  string   `json:"reason" yaml:"reason"`
+}
+
+// ZombieProcess is a process verified to belong to the requested scope but
+// missing from state.yaml.
+type ZombieProcess = AgentProcess
+
+// ZombieScanResult separates verified zombies from processes whose project
+// scope could not be established.
+type ZombieScanResult struct {
+	Zombies      []ZombieProcess
+	UnknownScope []AgentProcess
 }
 
 // ZombieScanOptions controls live-process zombie detection.
@@ -37,7 +49,9 @@ type ZombieScanOptions struct {
 
 // FindZombieAgents enumerates /proc and returns live agent supervisors for
 // the current project/goal that are missing from the registered PID set.
-func FindZombieAgents(opts ZombieScanOptions) ([]ZombieProcess, error) {
+// With no project root, the scan is an exact goal filter rather than a
+// scan-all mode; candidates without matching goal metadata are omitted.
+func FindZombieAgents(opts ZombieScanOptions) (ZombieScanResult, error) {
 	procRoot := opts.ProcRoot
 	if procRoot == "" {
 		procRoot = "/proc"
@@ -45,14 +59,14 @@ func FindZombieAgents(opts ZombieScanOptions) ([]ZombieProcess, error) {
 
 	entries, err := os.ReadDir(procRoot)
 	if os.IsNotExist(err) {
-		return nil, ErrProcessScanUnavailable
+		return ZombieScanResult{}, ErrProcessScanUnavailable
 	}
 	if err != nil {
-		return nil, fmt.Errorf("scan procfs: %w", err)
+		return ZombieScanResult{}, fmt.Errorf("scan procfs: %w", err)
 	}
 
 	projectRoot := canonicalPath(opts.ProjectRoot)
-	var zombies []ZombieProcess
+	var result ZombieScanResult
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
@@ -79,17 +93,24 @@ func FindZombieAgents(opts ZombieScanOptions) ([]ZombieProcess, error) {
 			Cmdline: argv,
 			Reason:  "not_registered_in_state",
 		}
-		if cwd, err := os.Readlink(filepath.Join(procDir, "cwd")); err == nil {
-			zombie.CWD = cwd
-		}
-		if !matchesCurrentScope(zombie, projectRoot, opts.GoalID) {
+		cwd, err := os.Readlink(filepath.Join(procDir, "cwd"))
+		if projectRoot != "" && os.IsNotExist(err) {
 			continue
 		}
+		if err == nil {
+			zombie.CWD = cwd
+		}
 
-		zombies = append(zombies, zombie)
+		switch classifyScope(zombie, projectRoot, opts.GoalID) {
+		case scopeCurrent:
+			result.Zombies = append(result.Zombies, zombie)
+		case scopeUnknown:
+			zombie.Reason = ScopeReasonCWDUnreadable
+			result.UnknownScope = append(result.UnknownScope, zombie)
+		}
 	}
 
-	return zombies, nil
+	return result, nil
 }
 
 // IsLizaAgentArgv reports whether argv identifies an agent supervisor.
@@ -158,11 +179,28 @@ func flagValue(argv []string, name string) string {
 	return ""
 }
 
-func matchesCurrentScope(process ZombieProcess, projectRoot, goalID string) bool {
+type scopeClassification uint8
+
+const (
+	scopeForeign scopeClassification = iota
+	scopeCurrent
+	scopeUnknown
+)
+
+func classifyScope(process AgentProcess, projectRoot, goalID string) scopeClassification {
 	if projectRoot != "" {
-		return process.CWD != "" && canonicalPath(process.CWD) == projectRoot
+		if process.CWD == "" {
+			return scopeUnknown
+		}
+		if canonicalPath(process.CWD) == projectRoot {
+			return scopeCurrent
+		}
+		return scopeForeign
 	}
-	return goalID != "" && process.GoalID == goalID
+	if goalID != "" && process.GoalID == goalID {
+		return scopeCurrent
+	}
+	return scopeForeign
 }
 
 func canonicalPath(path string) string {

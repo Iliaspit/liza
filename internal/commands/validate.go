@@ -96,7 +96,7 @@ func ValidateCommandWithOptions(statePath string, opts ValidateOptions) error {
 }
 
 func validateNoZombieAgents(state *models.State, projectRoot string, warnings io.Writer, recentlySpawnedPIDs []int) error {
-	zombies, err := findZombieAgents(procscan.ZombieScanOptions{
+	scan, err := findZombieAgents(procscan.ZombieScanOptions{
 		ProjectRoot:    projectRoot,
 		GoalID:         state.Goal.ID,
 		RegisteredPIDs: registeredAgentPIDs(state),
@@ -108,16 +108,15 @@ func validateNoZombieAgents(state *models.State, projectRoot string, warnings io
 	if err != nil {
 		return fmt.Errorf("scan %s agent processes: %w", brand.BinaryName, err)
 	}
-	if len(zombies) == 0 {
-		return nil
-	}
-	zombies = filterRecentlySpawnedZombies(zombies, recentlySpawnedPIDs)
-	if len(zombies) == 0 {
+	scan.Zombies = filterRecentlySpawnedProcesses(scan.Zombies, recentlySpawnedPIDs)
+	scan.UnknownScope = filterRecentlySpawnedProcesses(scan.UnknownScope, recentlySpawnedPIDs)
+	writeUnknownScopeWarning(warnings, scan.UnknownScope)
+	if len(scan.Zombies) == 0 {
 		return nil
 	}
 
-	parts := make([]string, 0, len(zombies))
-	for _, zombie := range zombies {
+	parts := make([]string, 0, len(scan.Zombies))
+	for _, zombie := range scan.Zombies {
 		role := zombie.Role
 		if role == "" {
 			role = "unknown"
@@ -127,9 +126,9 @@ func validateNoZombieAgents(state *models.State, projectRoot string, warnings io
 	return fmt.Errorf("zombie %s agent process detected: %s not registered in state.yaml (use %q to inspect, or %q for offline validation)", brand.BinaryName, strings.Join(parts, ", "), brand.Command("get", "agents", "--zombies"), brand.Command("validate", "--skip-process-checks"))
 }
 
-func filterRecentlySpawnedZombies(zombies []procscan.ZombieProcess, recentlySpawnedPIDs []int) []procscan.ZombieProcess {
-	if len(zombies) == 0 || len(recentlySpawnedPIDs) == 0 {
-		return zombies
+func filterRecentlySpawnedProcesses(processes []procscan.AgentProcess, recentlySpawnedPIDs []int) []procscan.AgentProcess {
+	if len(processes) == 0 || len(recentlySpawnedPIDs) == 0 {
+		return processes
 	}
 
 	recent := make(map[int]bool, len(recentlySpawnedPIDs))
@@ -139,17 +138,38 @@ func filterRecentlySpawnedZombies(zombies []procscan.ZombieProcess, recentlySpaw
 		}
 	}
 	if len(recent) == 0 {
-		return zombies
+		return processes
 	}
 
-	filtered := zombies[:0]
-	for _, zombie := range zombies {
-		if recent[zombie.PID] {
+	filtered := processes[:0]
+	for _, process := range processes {
+		if recent[process.PID] {
 			continue
 		}
-		filtered = append(filtered, zombie)
+		filtered = append(filtered, process)
 	}
 	return filtered
+}
+
+func writeUnknownScopeWarning(w io.Writer, processes []procscan.AgentProcess) {
+	if w == nil || len(processes) == 0 {
+		return
+	}
+
+	parts := make([]string, 0, len(processes))
+	for _, process := range processes {
+		role := process.Role
+		if role == "" {
+			role = "unknown"
+		}
+		reason := process.Reason
+		if reason == "" {
+			reason = "scope_unavailable"
+		}
+		parts = append(parts, fmt.Sprintf("pid %d role %s (%s)", process.PID, role, reason))
+	}
+
+	fmt.Fprintf(w, "WARNING: Live %s agent process scan partial: unable to verify project scope for %s; these processes were not classified as zombies\n", brand.BinaryName, strings.Join(parts, ", "))
 }
 
 func validateAgentInvariants(state *models.State, projectRoot string, skipSpecFileCheck bool) error {

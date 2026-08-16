@@ -13,7 +13,7 @@ func TestFindZombieAgents_DetectsScopedUnregisteredSupervisor(t *testing.T) {
 	procRoot := t.TempDir()
 	writeProc(t, procRoot, 1234, projectRoot, []string{"liza", "agent", "coder", "--cli", "codex", "--goal-id", "goal-1"})
 
-	zombies, err := FindZombieAgents(ZombieScanOptions{
+	result, err := FindZombieAgents(ZombieScanOptions{
 		ProjectRoot: projectRoot,
 		GoalID:      "goal-1",
 		ProcRoot:    procRoot,
@@ -21,10 +21,10 @@ func TestFindZombieAgents_DetectsScopedUnregisteredSupervisor(t *testing.T) {
 	if err != nil {
 		t.Fatalf("FindZombieAgents() error = %v", err)
 	}
-	if len(zombies) != 1 {
-		t.Fatalf("zombie count = %d, want 1: %+v", len(zombies), zombies)
+	if len(result.Zombies) != 1 {
+		t.Fatalf("zombie count = %d, want 1: %+v", len(result.Zombies), result.Zombies)
 	}
-	got := zombies[0]
+	got := result.Zombies[0]
 	if got.PID != 1234 || got.Role != "coder" || got.CLI != "codex" || got.GoalID != "goal-1" {
 		t.Fatalf("zombie = %+v, want pid/role/cli/goal populated", got)
 	}
@@ -38,7 +38,7 @@ func TestFindZombieAgents_SkipsRegisteredPID(t *testing.T) {
 	procRoot := t.TempDir()
 	writeProc(t, procRoot, 1234, projectRoot, []string{"liza", "agent", "coder", "--cli", "codex"})
 
-	zombies, err := FindZombieAgents(ZombieScanOptions{
+	result, err := FindZombieAgents(ZombieScanOptions{
 		ProjectRoot:    projectRoot,
 		RegisteredPIDs: map[int]bool{1234: true},
 		ProcRoot:       procRoot,
@@ -46,8 +46,8 @@ func TestFindZombieAgents_SkipsRegisteredPID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("FindZombieAgents() error = %v", err)
 	}
-	if len(zombies) != 0 {
-		t.Fatalf("zombie count = %d, want 0: %+v", len(zombies), zombies)
+	if len(result.Zombies) != 0 {
+		t.Fatalf("zombie count = %d, want 0: %+v", len(result.Zombies), result.Zombies)
 	}
 }
 
@@ -57,7 +57,7 @@ func TestFindZombieAgents_SkipsOtherProjectWithoutGoalMatch(t *testing.T) {
 	procRoot := t.TempDir()
 	writeProc(t, procRoot, 1234, otherRoot, []string{"liza", "agent", "coder", "--cli", "codex", "--goal-id", "other-goal"})
 
-	zombies, err := FindZombieAgents(ZombieScanOptions{
+	result, err := FindZombieAgents(ZombieScanOptions{
 		ProjectRoot: projectRoot,
 		GoalID:      "goal-1",
 		ProcRoot:    procRoot,
@@ -65,8 +65,8 @@ func TestFindZombieAgents_SkipsOtherProjectWithoutGoalMatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("FindZombieAgents() error = %v", err)
 	}
-	if len(zombies) != 0 {
-		t.Fatalf("zombie count = %d, want 0: %+v", len(zombies), zombies)
+	if len(result.Zombies) != 0 {
+		t.Fatalf("zombie count = %d, want 0: %+v", len(result.Zombies), result.Zombies)
 	}
 }
 
@@ -76,7 +76,7 @@ func TestFindZombieAgents_SkipsOtherProjectWithSameGoalWhenCWDReadable(t *testin
 	procRoot := t.TempDir()
 	writeProc(t, procRoot, 1234, otherRoot, []string{"liza", "agent", "coder", "--cli", "codex", "--goal-id", "goal-1"})
 
-	zombies, err := FindZombieAgents(ZombieScanOptions{
+	result, err := FindZombieAgents(ZombieScanOptions{
 		ProjectRoot: projectRoot,
 		GoalID:      "goal-1",
 		ProcRoot:    procRoot,
@@ -84,17 +84,17 @@ func TestFindZombieAgents_SkipsOtherProjectWithSameGoalWhenCWDReadable(t *testin
 	if err != nil {
 		t.Fatalf("FindZombieAgents() error = %v", err)
 	}
-	if len(zombies) != 0 {
-		t.Fatalf("zombie count = %d, want 0: %+v", len(zombies), zombies)
+	if len(result.Zombies) != 0 {
+		t.Fatalf("zombie count = %d, want 0: %+v", len(result.Zombies), result.Zombies)
 	}
 }
 
-func TestFindZombieAgents_SkipsGoalMatchWhenProjectRootSetAndCWDUnreadable(t *testing.T) {
+func TestFindZombieAgents_ReportsUnknownScopeWhenProjectRootSetAndCWDUnreadable(t *testing.T) {
 	projectRoot := t.TempDir()
 	procRoot := t.TempDir()
-	writeProcWithoutCWD(t, procRoot, 1234, []string{"liza", "agent", "coder", "--cli", "codex", "--goal-id", "goal-1"})
+	writeProcWithUnreadableCWD(t, procRoot, 1234, []string{"liza", "agent", "coder", "--cli", "codex", "--goal-id", "goal-1"})
 
-	zombies, err := FindZombieAgents(ZombieScanOptions{
+	result, err := FindZombieAgents(ZombieScanOptions{
 		ProjectRoot: projectRoot,
 		GoalID:      "goal-1",
 		ProcRoot:    procRoot,
@@ -102,8 +102,76 @@ func TestFindZombieAgents_SkipsGoalMatchWhenProjectRootSetAndCWDUnreadable(t *te
 	if err != nil {
 		t.Fatalf("FindZombieAgents() error = %v", err)
 	}
-	if len(zombies) != 0 {
-		t.Fatalf("zombie count = %d, want 0: %+v", len(zombies), zombies)
+	if len(result.Zombies) != 0 {
+		t.Fatalf("zombie count = %d, want 0: %+v", len(result.Zombies), result.Zombies)
+	}
+	if len(result.UnknownScope) != 1 {
+		t.Fatalf("unknown-scope count = %d, want 1: %+v", len(result.UnknownScope), result.UnknownScope)
+	}
+	got := result.UnknownScope[0]
+	if got.PID != 1234 || got.Role != "coder" || got.GoalID != "goal-1" || got.Reason != ScopeReasonCWDUnreadable {
+		t.Fatalf("unknown scope = %+v, want pid/role/goal and cwd-unreadable reason", got)
+	}
+}
+
+func TestFindZombieAgents_SkipsProcessThatDisappearsBeforeCWDRead(t *testing.T) {
+	projectRoot := t.TempDir()
+	procRoot := t.TempDir()
+	writeProcWithoutCWD(t, procRoot, 1234, []string{"liza", "agent", "coder", "--goal-id", "goal-1"})
+
+	result, err := FindZombieAgents(ZombieScanOptions{
+		ProjectRoot: projectRoot,
+		GoalID:      "goal-1",
+		ProcRoot:    procRoot,
+	})
+	if err != nil {
+		t.Fatalf("FindZombieAgents() error = %v", err)
+	}
+	if len(result.Zombies) != 0 || len(result.UnknownScope) != 0 {
+		t.Fatalf("result = %+v, want vanished process excluded", result)
+	}
+}
+
+func TestFindZombieAgents_GoalFallbackWithoutProjectRootDoesNotRequireCWD(t *testing.T) {
+	procRoot := t.TempDir()
+	writeProcWithoutCWD(t, procRoot, 1234, []string{"liza", "agent", "coder", "--goal-id", "goal-1"})
+
+	result, err := FindZombieAgents(ZombieScanOptions{
+		GoalID:   "goal-1",
+		ProcRoot: procRoot,
+	})
+	if err != nil {
+		t.Fatalf("FindZombieAgents() error = %v", err)
+	}
+	if len(result.Zombies) != 1 || result.Zombies[0].PID != 1234 {
+		t.Fatalf("zombies = %+v, want pid 1234", result.Zombies)
+	}
+	if len(result.UnknownScope) != 0 {
+		t.Fatalf("unknown scope = %+v, want none", result.UnknownScope)
+	}
+}
+
+func TestFindZombieAgents_ClassifiesCurrentForeignAndUnknownScope(t *testing.T) {
+	projectRoot := t.TempDir()
+	otherRoot := t.TempDir()
+	procRoot := t.TempDir()
+	writeProc(t, procRoot, 1234, projectRoot, []string{"liza", "agent", "coder", "--goal-id", "goal-1"})
+	writeProc(t, procRoot, 2345, otherRoot, []string{"liza", "agent", "reviewer", "--goal-id", "goal-1"})
+	writeProcWithUnreadableCWD(t, procRoot, 3456, []string{"liza", "agent", "architect", "--goal-id", "goal-1"})
+
+	result, err := FindZombieAgents(ZombieScanOptions{
+		ProjectRoot: projectRoot,
+		GoalID:      "goal-1",
+		ProcRoot:    procRoot,
+	})
+	if err != nil {
+		t.Fatalf("FindZombieAgents() error = %v", err)
+	}
+	if len(result.Zombies) != 1 || result.Zombies[0].PID != 1234 {
+		t.Fatalf("zombies = %+v, want only pid 1234", result.Zombies)
+	}
+	if len(result.UnknownScope) != 1 || result.UnknownScope[0].PID != 3456 {
+		t.Fatalf("unknown scope = %+v, want only pid 3456", result.UnknownScope)
 	}
 }
 
@@ -112,7 +180,7 @@ func TestFindZombieAgents_LegacyCWDMatchWithoutGoalID(t *testing.T) {
 	procRoot := t.TempDir()
 	writeProc(t, procRoot, 1234, projectRoot, []string{"liza", "agent", "code-reviewer", "--cli=codex"})
 
-	zombies, err := FindZombieAgents(ZombieScanOptions{
+	result, err := FindZombieAgents(ZombieScanOptions{
 		ProjectRoot: projectRoot,
 		GoalID:      "goal-1",
 		ProcRoot:    procRoot,
@@ -120,11 +188,11 @@ func TestFindZombieAgents_LegacyCWDMatchWithoutGoalID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("FindZombieAgents() error = %v", err)
 	}
-	if len(zombies) != 1 {
-		t.Fatalf("zombie count = %d, want 1: %+v", len(zombies), zombies)
+	if len(result.Zombies) != 1 {
+		t.Fatalf("zombie count = %d, want 1: %+v", len(result.Zombies), result.Zombies)
 	}
-	if zombies[0].GoalID != "" || zombies[0].CLI != "codex" {
-		t.Fatalf("zombie = %+v, want legacy goal empty and cli parsed", zombies[0])
+	if result.Zombies[0].GoalID != "" || result.Zombies[0].CLI != "codex" {
+		t.Fatalf("zombie = %+v, want legacy goal empty and cli parsed", result.Zombies[0])
 	}
 }
 
@@ -261,6 +329,14 @@ func writeProc(t *testing.T, procRoot string, pid int, cwd string, argv []string
 func writeProcWithoutCWD(t *testing.T, procRoot string, pid int, argv []string) {
 	t.Helper()
 	writeProcCmdline(t, procRoot, pid, argv)
+}
+
+func writeProcWithUnreadableCWD(t *testing.T, procRoot string, pid int, argv []string) {
+	t.Helper()
+	procDir := writeProcCmdline(t, procRoot, pid, argv)
+	if err := os.Mkdir(filepath.Join(procDir, "cwd"), 0755); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func writeProcCmdline(t *testing.T, procRoot string, pid int, argv []string) string {

@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"strings"
@@ -366,7 +367,7 @@ func TestInspectAgents_Zombies(t *testing.T) {
 	originalFind := findZombieAgents
 	t.Cleanup(func() { findZombieAgents = originalFind })
 
-	findZombieAgents = func(opts procscan.ZombieScanOptions) ([]procscan.ZombieProcess, error) {
+	findZombieAgents = func(opts procscan.ZombieScanOptions) (procscan.ZombieScanResult, error) {
 		if opts.ProjectRoot != "/tmp/project" {
 			t.Fatalf("ProjectRoot = %q, want /tmp/project", opts.ProjectRoot)
 		}
@@ -376,7 +377,7 @@ func TestInspectAgents_Zombies(t *testing.T) {
 		if !opts.RegisteredPIDs[111] {
 			t.Fatalf("registered pid 111 missing: %+v", opts.RegisteredPIDs)
 		}
-		return []procscan.ZombieProcess{{
+		return procscan.ZombieScanResult{Zombies: []procscan.ZombieProcess{{
 			PID:     222,
 			Role:    "coder",
 			CLI:     "codex",
@@ -384,7 +385,7 @@ func TestInspectAgents_Zombies(t *testing.T) {
 			CWD:     "/tmp/project",
 			Cmdline: []string{"liza", "agent", "coder", "--cli", "codex", "--goal-id", "goal-1"},
 			Reason:  "not_registered_in_state",
-		}}, nil
+		}}}, nil
 	}
 
 	state := &models.State{
@@ -410,8 +411,8 @@ func TestInspectAgents_ZombiesJSON(t *testing.T) {
 	originalFind := findZombieAgents
 	t.Cleanup(func() { findZombieAgents = originalFind })
 
-	findZombieAgents = func(procscan.ZombieScanOptions) ([]procscan.ZombieProcess, error) {
-		return []procscan.ZombieProcess{{PID: 222, Role: "coder", Reason: "not_registered_in_state"}}, nil
+	findZombieAgents = func(procscan.ZombieScanOptions) (procscan.ZombieScanResult, error) {
+		return procscan.ZombieScanResult{Zombies: []procscan.ZombieProcess{{PID: 222, Role: "coder", Reason: "not_registered_in_state"}}}, nil
 	}
 
 	state := &models.State{Agents: map[string]models.Agent{}}
@@ -426,6 +427,32 @@ func TestInspectAgents_ZombiesJSON(t *testing.T) {
 	}
 	if len(parsed) != 1 || parsed[0].PID != 222 {
 		t.Fatalf("parsed zombies = %+v, want pid 222", parsed)
+	}
+}
+
+func TestInspectAgents_UnknownScopeWarnsAndDoesNotReportZombie(t *testing.T) {
+	originalFind := findZombieAgents
+	t.Cleanup(func() { findZombieAgents = originalFind })
+
+	findZombieAgents = func(procscan.ZombieScanOptions) (procscan.ZombieScanResult, error) {
+		return procscan.ZombieScanResult{UnknownScope: []procscan.AgentProcess{{
+			PID:    222,
+			Role:   "coder",
+			Reason: procscan.ScopeReasonCWDUnreadable,
+		}}}, nil
+	}
+
+	var warnings bytes.Buffer
+	state := &models.State{Agents: map[string]models.Agent{}}
+	result, err := inspectAgents(state, inspectAgentsOptions{Zombies: true, WarnWriter: &warnings})
+	if err != nil {
+		t.Fatalf("inspectAgents() error = %v", err)
+	}
+	if got := result.(string); got != "No verified zombie agents found" {
+		t.Fatalf("output = %q, want verified-empty message", got)
+	}
+	if !strings.Contains(warnings.String(), "pid 222 role coder (cwd_unreadable)") {
+		t.Fatalf("warning = %q, want unknown-scope process", warnings.String())
 	}
 }
 

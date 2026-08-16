@@ -1502,8 +1502,8 @@ func TestRunChecksWithStateSnapshotUsesConfiguredWarnWriterForProcessScanWarning
 	originalFind := findZombieAgents
 	t.Cleanup(func() { findZombieAgents = originalFind })
 
-	findZombieAgents = func(procscan.ZombieScanOptions) ([]procscan.ZombieProcess, error) {
-		return nil, procscan.ErrProcessScanUnavailable
+	findZombieAgents = func(procscan.ZombieScanOptions) (procscan.ZombieScanResult, error) {
+		return procscan.ZombieScanResult{}, procscan.ErrProcessScanUnavailable
 	}
 
 	var globalWarnings bytes.Buffer
@@ -1523,6 +1523,36 @@ func TestRunChecksWithStateSnapshotUsesConfiguredWarnWriterForProcessScanWarning
 
 	if strings.Contains(globalWarnings.String(), "process scan skipped") {
 		t.Fatalf("run checks leaked process scan warning to global warn writer:\n%s", globalWarnings.String())
+	}
+}
+
+func TestRunChecksWithStateSnapshotSuppressesRecentlySpawnedUnknownScopeWarning(t *testing.T) {
+	originalFind := findZombieAgents
+	t.Cleanup(func() { findZombieAgents = originalFind })
+
+	findZombieAgents = func(procscan.ZombieScanOptions) (procscan.ZombieScanResult, error) {
+		return procscan.ZombieScanResult{UnknownScope: []procscan.AgentProcess{{
+			PID:    4242,
+			Role:   "architect",
+			Reason: procscan.ScopeReasonCWDUnreadable,
+		}}}, nil
+	}
+
+	tmpDir := t.TempDir()
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	state := testhelpers.CreateValidState()
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	var warnings bytes.Buffer
+	RunChecksWithStateSnapshot(state, WatchConfig{
+		ProjectRoot:              tmpDir,
+		WarnWriter:               &warnings,
+		StateCache:               make(map[string]time.Time),
+		RecentlySpawnedAgentPIDs: []int{4242},
+	})
+
+	if strings.Contains(warnings.String(), "process scan partial") {
+		t.Fatalf("warnings = %q, want recently spawned unknown process suppressed", warnings.String())
 	}
 }
 
@@ -3331,12 +3361,12 @@ func TestRunChecks_AutoRepairSpawnDoesNotRaiseZombieAlert(t *testing.T) {
 	t.Cleanup(func() { repairAgentPoolSpawn = originalSpawn })
 
 	originalFind := findZombieAgents
-	findZombieAgents = func(opts procscan.ZombieScanOptions) ([]procscan.ZombieProcess, error) {
-		return []procscan.ZombieProcess{{
+	findZombieAgents = func(opts procscan.ZombieScanOptions) (procscan.ZombieScanResult, error) {
+		return procscan.ZombieScanResult{Zombies: []procscan.ZombieProcess{{
 			PID:    4242,
 			Role:   "architect",
 			Reason: "not_registered_in_state",
-		}}, nil
+		}}}, nil
 	}
 	t.Cleanup(func() { findZombieAgents = originalFind })
 

@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/liza-mas/liza/internal/brand"
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/ops"
 	"github.com/liza-mas/liza/internal/procscan"
@@ -67,15 +68,15 @@ func TestValidateCommandWithOptions_FailsOnZombieAgent(t *testing.T) {
 	originalFind := findZombieAgents
 	t.Cleanup(func() { findZombieAgents = originalFind })
 
-	findZombieAgents = func(opts procscan.ZombieScanOptions) ([]procscan.ZombieProcess, error) {
+	findZombieAgents = func(opts procscan.ZombieScanOptions) (procscan.ZombieScanResult, error) {
 		if opts.GoalID != "goal-1" {
 			t.Fatalf("GoalID = %q, want goal-1", opts.GoalID)
 		}
-		return []procscan.ZombieProcess{{
+		return procscan.ZombieScanResult{Zombies: []procscan.ZombieProcess{{
 			PID:    222,
 			Role:   "coder",
 			Reason: "not_registered_in_state",
-		}}, nil
+		}}}, nil
 	}
 
 	tmpDir := t.TempDir()
@@ -99,11 +100,11 @@ func TestValidateCommandWithOptions_RecentlySpawnedPIDDoesNotSuppressOtherZombie
 	originalFind := findZombieAgents
 	t.Cleanup(func() { findZombieAgents = originalFind })
 
-	findZombieAgents = func(procscan.ZombieScanOptions) ([]procscan.ZombieProcess, error) {
-		return []procscan.ZombieProcess{
+	findZombieAgents = func(procscan.ZombieScanOptions) (procscan.ZombieScanResult, error) {
+		return procscan.ZombieScanResult{Zombies: []procscan.ZombieProcess{
 			{PID: 222, Role: "coder", Reason: "not_registered_in_state"},
 			{PID: 333, Role: "reviewer", Reason: "not_registered_in_state"},
-		}, nil
+		}}, nil
 	}
 
 	tmpDir := t.TempDir()
@@ -124,14 +125,94 @@ func TestValidateCommandWithOptions_RecentlySpawnedPIDDoesNotSuppressOtherZombie
 	}
 }
 
+func TestValidateCommandWithOptions_UnknownScopeWarnsWithoutFailing(t *testing.T) {
+	originalFind := findZombieAgents
+	t.Cleanup(func() { findZombieAgents = originalFind })
+
+	findZombieAgents = func(procscan.ZombieScanOptions) (procscan.ZombieScanResult, error) {
+		return procscan.ZombieScanResult{UnknownScope: []procscan.AgentProcess{{
+			PID:    222,
+			Role:   "coder",
+			Reason: procscan.ScopeReasonCWDUnreadable,
+		}}}, nil
+	}
+
+	tmpDir := t.TempDir()
+	statePath, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	testhelpers.SetupPipelineConfig(t, tmpDir)
+	testhelpers.WriteInitialState(t, statePath, testhelpers.CreateValidState())
+
+	var warnings bytes.Buffer
+	err := ValidateCommandWithOptions(statePath, ValidateOptions{
+		SkipSpecFileCheck: true,
+		WarnWriter:        &warnings,
+	})
+	if err != nil {
+		t.Fatalf("ValidateCommandWithOptions() error = %v, want nil", err)
+	}
+	for _, want := range []string{"process scan partial", "pid 222 role coder", "cwd_unreadable", "not classified as zombies"} {
+		if !strings.Contains(warnings.String(), want) {
+			t.Fatalf("warning = %q, want %q", warnings.String(), want)
+		}
+	}
+}
+
+func TestWriteUnknownScopeWarningUsesConfiguredBrand(t *testing.T) {
+	originalBinaryName := brand.BinaryName
+	brand.BinaryName = "acme"
+	t.Cleanup(func() { brand.BinaryName = originalBinaryName })
+
+	var warnings bytes.Buffer
+	writeUnknownScopeWarning(&warnings, []procscan.AgentProcess{{
+		PID:    222,
+		Role:   "coder",
+		Reason: procscan.ScopeReasonCWDUnreadable,
+	}})
+
+	if !strings.Contains(warnings.String(), "Live acme agent process scan partial") {
+		t.Fatalf("warning = %q, want configured binary name", warnings.String())
+	}
+}
+
+func TestValidateCommandWithOptions_RecentlySpawnedPIDSuppressesUnknownScopeWarning(t *testing.T) {
+	originalFind := findZombieAgents
+	t.Cleanup(func() { findZombieAgents = originalFind })
+
+	findZombieAgents = func(procscan.ZombieScanOptions) (procscan.ZombieScanResult, error) {
+		return procscan.ZombieScanResult{UnknownScope: []procscan.AgentProcess{{
+			PID:    222,
+			Role:   "coder",
+			Reason: procscan.ScopeReasonCWDUnreadable,
+		}}}, nil
+	}
+
+	tmpDir := t.TempDir()
+	statePath, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	testhelpers.SetupPipelineConfig(t, tmpDir)
+	testhelpers.WriteInitialState(t, statePath, testhelpers.CreateValidState())
+
+	var warnings bytes.Buffer
+	err := ValidateCommandWithOptions(statePath, ValidateOptions{
+		SkipSpecFileCheck:        true,
+		WarnWriter:               &warnings,
+		RecentlySpawnedAgentPIDs: []int{222},
+	})
+	if err != nil {
+		t.Fatalf("ValidateCommandWithOptions() error = %v, want nil", err)
+	}
+	if warnings.Len() != 0 {
+		t.Fatalf("warning = %q, want none for recently spawned process", warnings.String())
+	}
+}
+
 func TestValidateCommandWithOptions_SkipProcessChecks(t *testing.T) {
 	originalFind := findZombieAgents
 	t.Cleanup(func() { findZombieAgents = originalFind })
 
 	called := false
-	findZombieAgents = func(procscan.ZombieScanOptions) ([]procscan.ZombieProcess, error) {
+	findZombieAgents = func(procscan.ZombieScanOptions) (procscan.ZombieScanResult, error) {
 		called = true
-		return []procscan.ZombieProcess{{PID: 222, Role: "coder"}}, nil
+		return procscan.ZombieScanResult{Zombies: []procscan.ZombieProcess{{PID: 222, Role: "coder"}}}, nil
 	}
 
 	tmpDir := t.TempDir()
@@ -155,8 +236,8 @@ func TestValidateCommandWithOptions_ProcessScanUnavailableWarns(t *testing.T) {
 	originalFind := findZombieAgents
 	t.Cleanup(func() { findZombieAgents = originalFind })
 
-	findZombieAgents = func(procscan.ZombieScanOptions) ([]procscan.ZombieProcess, error) {
-		return nil, procscan.ErrProcessScanUnavailable
+	findZombieAgents = func(procscan.ZombieScanOptions) (procscan.ZombieScanResult, error) {
+		return procscan.ZombieScanResult{}, procscan.ErrProcessScanUnavailable
 	}
 
 	var warnBuf bytes.Buffer

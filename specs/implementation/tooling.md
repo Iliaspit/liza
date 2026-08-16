@@ -391,8 +391,12 @@ liza agent coder --agent-id coder-1
 ```
 
 Agents spawned by Liza include `--goal-id` in their command line so live-process
-diagnostics can display the goal marker. Legacy/manual agents without
-`--goal-id` are still scoped by process cwd.
+diagnostics can display the goal marker. When a project root is supplied,
+process cwd is authoritative: a matching cwd verifies a current-project
+process, a different readable cwd verifies a foreign process, and unreadable
+cwd leaves scope unknown. Goal ID cannot override unreadable or conflicting cwd
+evidence. When no project root is supplied, goal matching remains the fallback
+scope.
 
 **liza claim-task** — Claim task (supervisor-only)
 ```bash
