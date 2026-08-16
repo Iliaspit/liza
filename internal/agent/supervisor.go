@@ -637,7 +637,27 @@ func effectiveAgentProgressTimeout(cfg models.Config) time.Duration {
 	return time.Duration(seconds) * time.Second
 }
 
-// RunSupervisor is the main entry point for the agent supervisor
+func startSupervisorHeartbeat(
+	ctx context.Context,
+	start func(context.Context) error,
+	onError func(error),
+) func() {
+	heartbeatCtx, cancelHeartbeat := context.WithCancel(ctx)
+	heartbeatDone := make(chan struct{})
+	go func() {
+		defer close(heartbeatDone)
+		if err := start(heartbeatCtx); err != nil && err != context.Canceled {
+			onError(err)
+		}
+	}()
+
+	return func() {
+		cancelHeartbeat()
+		<-heartbeatDone
+	}
+}
+
+// RunSupervisor is the main entry point for the agent supervisor.
 func RunSupervisor(ctx context.Context, config SupervisorConfig) error {
 	bb := db.For(config.StatePath)
 	lizaPaths := paths.New(config.ProjectRoot)
@@ -687,8 +707,6 @@ func RunSupervisor(ctx context.Context, config SupervisorConfig) error {
 	// the entire loop (including IDLE wait-for-work periods, not just
 	// during CLI execution). Without this, an IDLE agent's lease can
 	// expire, causing auto-assigned ID collision with new agents.
-	heartbeatCtx, cancelHeartbeat := context.WithCancel(supervisorCtx)
-	defer cancelHeartbeat()
 	heartbeatErrCh := make(chan error, 1)
 
 	hb := NewHeartbeat(HeartbeatConfig{
@@ -697,16 +715,15 @@ func RunSupervisor(ctx context.Context, config SupervisorConfig) error {
 		State:     state,
 	})
 
-	go func() {
-		if err := hb.Start(heartbeatCtx); err != nil && err != context.Canceled {
-			GetLogger().Error("Heartbeat error", "error", err, "agent_id", config.AgentID)
-			select {
-			case heartbeatErrCh <- err:
-			default:
-			}
-			cancelSupervisor()
+	stopHeartbeat := startSupervisorHeartbeat(supervisorCtx, hb.Start, func(err error) {
+		GetLogger().Error("Heartbeat error", "error", err, "agent_id", config.AgentID)
+		select {
+		case heartbeatErrCh <- err:
+		default:
 		}
-	}()
+		cancelSupervisor()
+	})
+	defer stopHeartbeat()
 	checkHeartbeat := func() error {
 		select {
 		case err := <-heartbeatErrCh:

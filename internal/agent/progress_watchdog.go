@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/liza-mas/liza/internal/db"
@@ -61,16 +62,18 @@ func startExecutionProgressWatchdog(ctx context.Context, config SupervisorConfig
 		resultCh <- runExecutionProgressWatchdog(watchCtx, bb, config.ProjectRoot, taskID, config.AgentID, config.ExecutionProgressTimeout, pr, progress, cancelExec)
 	}()
 
-	return func() executionProgressWatchdogResult {
-		cancelWatchdog()
-		select {
-		case result := <-resultCh:
-			return result
-		case <-time.After(2 * time.Second):
-			GetLogger().Warn("Progress watchdog did not stop promptly", "task_id", taskID, "agent_id", config.AgentID)
-			return executionProgressWatchdogResult{}
-		}
-	}
+	return newExecutionProgressWatchdogStop(cancelWatchdog, resultCh)
+}
+
+func newExecutionProgressWatchdogStop(cancelWatchdog context.CancelFunc, resultCh <-chan executionProgressWatchdogResult) func() executionProgressWatchdogResult {
+	return sync.OnceValue(func() executionProgressWatchdogResult {
+		return stopExecutionProgressWatchdog(cancelWatchdog, resultCh)
+	})
+}
+
+func stopExecutionProgressWatchdog(cancelWatchdog context.CancelFunc, resultCh <-chan executionProgressWatchdogResult) executionProgressWatchdogResult {
+	cancelWatchdog()
+	return <-resultCh
 }
 
 func runExecutionProgressWatchdog(
@@ -84,8 +87,11 @@ func runExecutionProgressWatchdog(
 	progress <-chan struct{},
 	cancelExec context.CancelFunc,
 ) executionProgressWatchdogResult {
-	lastSignature, eligible, err := readExecutionProgressSnapshot(projectRoot, bb, taskID, agentID, pr)
+	lastSignature, eligible, err := readExecutionProgressSnapshot(ctx, projectRoot, bb, taskID, agentID, pr)
 	if err != nil {
+		if ctx.Err() != nil {
+			return executionProgressWatchdogResult{}
+		}
 		GetLogger().Warn("Progress watchdog disabled: failed to read initial progress snapshot", "error", err, "task_id", taskID)
 		return executionProgressWatchdogResult{}
 	}
@@ -104,8 +110,11 @@ func runExecutionProgressWatchdog(
 		case <-progress:
 			lastProgress = time.Now()
 		case <-ticker.C:
-			signature, stillEligible, snapErr := readExecutionProgressSnapshot(projectRoot, bb, taskID, agentID, pr)
+			signature, stillEligible, snapErr := readExecutionProgressSnapshot(ctx, projectRoot, bb, taskID, agentID, pr)
 			if snapErr != nil {
+				if ctx.Err() != nil {
+					return executionProgressWatchdogResult{}
+				}
 				GetLogger().Warn("Progress watchdog snapshot failed", "error", snapErr, "task_id", taskID)
 			} else if !stillEligible {
 				return executionProgressWatchdogResult{}
@@ -117,6 +126,9 @@ func runExecutionProgressWatchdog(
 
 			if time.Since(lastProgress) < timeout {
 				continue
+			}
+			if ctx.Err() != nil {
+				return executionProgressWatchdogResult{}
 			}
 
 			reason := fmt.Sprintf("agent execution progress timeout: task %s had no observable state, worktree, or provider-output progress for %s", taskID, timeout)
@@ -130,8 +142,8 @@ func runExecutionProgressWatchdog(
 	}
 }
 
-func readExecutionProgressSnapshot(projectRoot string, bb *db.Blackboard, taskID string, agentID string, pr models.PipelineResolver) (string, bool, error) {
-	state, err := bb.Read()
+func readExecutionProgressSnapshot(ctx context.Context, projectRoot string, bb *db.Blackboard, taskID string, agentID string, pr models.PipelineResolver) (string, bool, error) {
+	state, err := bb.ReadContext(ctx)
 	if err != nil {
 		return "", false, err
 	}
@@ -142,8 +154,11 @@ func readExecutionProgressSnapshot(projectRoot string, bb *db.Blackboard, taskID
 
 	worktreeSignature := "none"
 	if task.Worktree != nil && *task.Worktree != "" {
-		sig, sigErr := lizagit.New(projectRoot).WorktreeProgressSignature(taskID)
+		sig, sigErr := lizagit.New(projectRoot).WorktreeProgressSignatureContext(ctx, taskID)
 		if sigErr != nil {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return "", false, ctxErr
+			}
 			worktreeSignature = "error:" + sigErr.Error()
 		} else {
 			worktreeSignature = sig

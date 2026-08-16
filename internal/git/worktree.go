@@ -1,6 +1,7 @@
 package git
 
 import (
+	"context"
 	"crypto/sha256"
 	"fmt"
 	"io"
@@ -191,48 +192,54 @@ func (g *Git) GetWorktreeRelPath(taskID string) string {
 // inside a task worktree: HEAD movement, porcelain status changes, and dirty
 // content changes for tracked and untracked files.
 func (g *Git) WorktreeProgressSignature(taskID string) (string, error) {
+	return g.WorktreeProgressSignatureContext(context.Background(), taskID)
+}
+
+// WorktreeProgressSignatureContext returns the progress signature and aborts
+// Git commands and dirty-file hashing when ctx is canceled.
+func (g *Git) WorktreeProgressSignatureContext(ctx context.Context, taskID string) (string, error) {
 	if err := paths.ValidateTaskID(taskID); err != nil {
 		return "", fmt.Errorf("invalid task ID: %w", err)
 	}
 	worktreePath := g.GetWorktreePath(taskID)
-	head, err := g.execInDir(worktreePath, "rev-parse", "HEAD")
+	head, err := g.execInDirContext(ctx, worktreePath, "rev-parse", "HEAD")
 	if err != nil {
 		return "", err
 	}
-	status, err := g.execInDir(worktreePath, "status", "--porcelain")
+	status, err := g.execInDirContext(ctx, worktreePath, "status", "--porcelain")
 	if err != nil {
 		return "", err
 	}
-	contentSig, err := g.worktreeDirtyContentSignature(worktreePath)
+	contentSig, err := g.worktreeDirtyContentSignature(ctx, worktreePath)
 	if err != nil {
 		return "", err
 	}
 	return head + "\n" + status + "\ncontent:" + contentSig, nil
 }
 
-func (g *Git) worktreeDirtyContentSignature(worktreePath string) (string, error) {
+func (g *Git) worktreeDirtyContentSignature(ctx context.Context, worktreePath string) (string, error) {
 	h := sha256.New()
 
-	tracked, err := gitenv.Output(worktreePath, "diff", "--name-only", "-z", "HEAD", "--")
+	tracked, err := gitenv.OutputContext(ctx, worktreePath, "diff", "--name-only", "-z", "HEAD", "--")
 	if err != nil {
 		return "", fmt.Errorf("git diff failed: %w\nOutput: %s", err, tracked)
 	}
 	h.Write([]byte("tracked\x00"))
 	h.Write(tracked)
 	for _, relPath := range nulRecords(tracked) {
-		if err := writeWorktreeFileSignature(h, worktreePath, relPath); err != nil {
+		if err := writeWorktreeFileSignature(ctx, h, worktreePath, relPath); err != nil {
 			return "", err
 		}
 	}
 
-	untracked, err := gitenv.Output(worktreePath, "ls-files", "-z", "--others", "--exclude-standard")
+	untracked, err := gitenv.OutputContext(ctx, worktreePath, "ls-files", "-z", "--others", "--exclude-standard")
 	if err != nil {
 		return "", fmt.Errorf("git ls-files failed: %w\nOutput: %s", err, untracked)
 	}
 	h.Write([]byte("\x00untracked\x00"))
 	h.Write(untracked)
 	for _, relPath := range nulRecords(untracked) {
-		if err := writeWorktreeFileSignature(h, worktreePath, relPath); err != nil {
+		if err := writeWorktreeFileSignature(ctx, h, worktreePath, relPath); err != nil {
 			return "", err
 		}
 	}
@@ -254,7 +261,10 @@ func nulRecords(output []byte) []string {
 	return nonEmpty
 }
 
-func writeWorktreeFileSignature(w io.Writer, worktreePath, relPath string) error {
+func writeWorktreeFileSignature(ctx context.Context, w io.Writer, worktreePath, relPath string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	fullPath := filepath.Join(worktreePath, filepath.FromSlash(relPath))
 	info, statErr := os.Lstat(fullPath)
 	fmt.Fprintf(w, "%s\x00", relPath)
@@ -286,7 +296,7 @@ func writeWorktreeFileSignature(w io.Writer, worktreePath, relPath string) error
 	}
 	defer file.Close()
 
-	written, copyErr := io.Copy(w, io.LimitReader(file, maxProgressSignatureFileBytes))
+	written, copyErr := io.Copy(w, io.LimitReader(contextReader{ctx: ctx, reader: file}, maxProgressSignatureFileBytes))
 	if copyErr != nil {
 		return fmt.Errorf("hash worktree file %s: %w", relPath, copyErr)
 	}
@@ -295,6 +305,18 @@ func writeWorktreeFileSignature(w io.Writer, worktreePath, relPath string) error
 		fmt.Fprint(w, "truncated\x00")
 	}
 	return nil
+}
+
+type contextReader struct {
+	ctx    context.Context
+	reader io.Reader
+}
+
+func (r contextReader) Read(p []byte) (int, error) {
+	if err := r.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return r.reader.Read(p)
 }
 
 // WorktreeStatusShort returns git status --short output for a worktree path.

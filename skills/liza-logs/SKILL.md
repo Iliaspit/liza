@@ -14,7 +14,17 @@ Find recurring task, review, integration, tool, context, and setup frictions;
 correlate state symptoms with log evidence; propose fixes.
 
 PROTOCOL:
-1. Start by running the analyzer:
+1. For supervisor lifecycle questions (registration, claiming, retry, shutdown,
+or automatic merge), first inspect bounded evidence from matching
+`supervisor-{role}-*.stdout.log` and `.stderr.log` files. A successful detached
+spawn confirms these files are open before returning; failures before that
+readiness point are reported synchronously to the spawning command or TUI and
+may not have a supervisor log. These masked runtime logs are not provider
+transcripts: do not pass them to `analyze-log.py`.
+Correlate their timestamps and task IDs with state history, then use the
+provider logs only if the question crosses into agent-session behavior.
+
+2. Start provider-session analysis by running the analyzer:
 ```bash
 python3 ~/§BRAND_GLOBAL_DIRNAME§/skills/§BRAND_BINARY_NAME§-logs/scripts/analyze-log.py §BRAND_PROJECT_DIRNAME§/agent-outputs/coder-*.txt        # all coder agents
 python3 ~/§BRAND_GLOBAL_DIRNAME§/skills/§BRAND_BINARY_NAME§-logs/scripts/analyze-log.py §BRAND_PROJECT_DIRNAME§/agent-outputs/coder-1-*.txt # single agent
@@ -24,7 +34,7 @@ By default, run the analyzer **per role**.
 Use `--summary-by-role` when you need cross-role aggregate token, tool, MCP,
 error, and skill-invocation totals.
 
-2. Inspect `§BRAND_PROJECT_DIRNAME§/state.yaml` for task-level frictions before drawing conclusions:
+3. Inspect `§BRAND_PROJECT_DIRNAME§/state.yaml` for task-level frictions before drawing conclusions:
 ```bash
 python3 ~/§BRAND_GLOBAL_DIRNAME§/skills/§BRAND_BINARY_NAME§-logs/scripts/analyze-state.py §BRAND_PROJECT_DIRNAME§/state.yaml
 ```
@@ -63,7 +73,7 @@ policy blocks, missing allowlist entries, shell-shape rejections, filesystem
 allowlist blocks, sleep/polling blocks, and §BRAND_NAME_TITLE§ project-root mismatches because
 their fix surfaces differ.
 
-3. Refine the analysis with the bounded query helper, not by manually reading
+4. Refine the analysis with the bounded query helper, not by manually reading
    raw log files. Use `query-log.py` to extract trimmed evidence windows for
    specific questions, for example:
 ```bash
@@ -75,13 +85,13 @@ python3 ~/§BRAND_GLOBAL_DIRNAME§/skills/§BRAND_BINARY_NAME§-logs/scripts/que
      (for example `coder-1-20260417-171454.txt`) so the reader can trace the claim
      back to the exact source log quickly.
 
-4. Before proposing a fix, check whether the fix is already implemented (e.g. an instruction already exists but agents ignore it):
+5. Before proposing a fix, check whether the fix is already implemented (e.g. an instruction already exists but agents ignore it):
    - Read one agent prompt of the relevant role in `§BRAND_PROJECT_DIRNAME§/agent-prompts/`
    - Check the contract files in `~/§BRAND_GLOBAL_DIRNAME§/` (CORE.md, AGENT_TOOLS.md, MULTI_AGENT_MODE.md)
 
-5. Write the final report using `skills/§BRAND_BINARY_NAME§-logs/report-format.md`.
+6. Write the final report using `skills/§BRAND_BINARY_NAME§-logs/report-format.md`.
 
-6. Propose fixes whenever possible.
+7. Propose fixes whenever possible.
 
 FALSE POSITIVES:
 - **Repeated contract reads** (~8KB per session): Agents read AGENT_TOOLS.md, GUARDRAILS.md, etc. during initialization. These are usually cache hits — negligible cost. Do not flag as waste unless the same payload is reread for no reason later in the session.

@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/liza-mas/liza/internal/agent"
 	"github.com/liza-mas/liza/internal/brand"
@@ -22,12 +24,43 @@ var agentSpawnGuard = struct {
 	inFlight map[string]bool
 }{inFlight: make(map[string]bool)}
 
-func buildSpawnCommand(projectRoot, role, cli string, extraArgs ...string) (*exec.Cmd, *os.File, error) {
+const (
+	supervisorBootstrapTimeout      = 5 * time.Second
+	supervisorBootstrapPollInterval = 10 * time.Millisecond
+)
+
+func buildSpawnCommand(projectRoot, role, cli string, extraArgs ...string) (*exec.Cmd, *os.File, string, error) {
 	args := []string{"agent", role, "--cli", cli}
 	if goalID := readGoalID(projectRoot); goalID != "" && !hasFlag(extraArgs, "--goal-id") {
 		args = append(args, "--goal-id", goalID)
 	}
 	args = append(args, extraArgs...)
+
+	outputsDir := paths.New(projectRoot).AgentOutputsDir()
+	if err := os.MkdirAll(outputsDir, 0755); err != nil {
+		return nil, nil, "", fmt.Errorf("create supervisor output directory: %w", err)
+	}
+	timestamp := time.Now().UTC().Format("20060102-150405.000000000")
+	filenameRole := strings.NewReplacer("/", "_", "\\", "_").Replace(role)
+	stdoutPath := filepath.Join(outputsDir, fmt.Sprintf("supervisor-%s-%s.stdout.log", filenameRole, timestamp))
+	stderrPath := filepath.Join(outputsDir, fmt.Sprintf("supervisor-%s-%s.stderr.log", filenameRole, timestamp))
+	readyFile, err := os.CreateTemp(outputsDir, ".supervisor-"+filenameRole+"-*.ready")
+	if err != nil {
+		return nil, nil, "", fmt.Errorf("create supervisor readiness file: %w", err)
+	}
+	readyPath := readyFile.Name()
+	if err := readyFile.Close(); err != nil {
+		os.Remove(readyPath)
+		return nil, nil, "", fmt.Errorf("close supervisor readiness file: %w", err)
+	}
+	if err := os.Remove(readyPath); err != nil {
+		return nil, nil, "", fmt.Errorf("release supervisor readiness path: %w", err)
+	}
+	args = append(args,
+		"--"+agent.SupervisorStdoutLogFlag, stdoutPath,
+		"--"+agent.SupervisorStderrLogFlag, stderrPath,
+		"--"+agent.SupervisorReadyFileFlag, readyPath,
+	)
 
 	cmd := exec.Command(brand.BinaryName, args...)
 	cmd.Dir = projectRoot
@@ -35,13 +68,14 @@ func buildSpawnCommand(projectRoot, role, cli string, extraArgs ...string) (*exe
 
 	devNull, err := os.OpenFile(os.DevNull, os.O_RDWR, 0)
 	if err != nil {
-		return nil, nil, fmt.Errorf("open devnull: %w", err)
+		os.Remove(readyPath)
+		return nil, nil, "", fmt.Errorf("open devnull: %w", err)
 	}
 	cmd.Stdin = devNull
 	cmd.Stdout = devNull
 	cmd.Stderr = devNull
 
-	return cmd, devNull, nil
+	return cmd, devNull, readyPath, nil
 }
 
 func readGoalID(projectRoot string) string {
@@ -64,9 +98,11 @@ func hasFlag(args []string, name string) bool {
 	return false
 }
 
-// SpawnAgent starts a detached agent subprocess with stdout/stderr
-// redirected to /dev/null. The child process is placed in its own process
-// group and a background goroutine reaps it to prevent zombie accumulation.
+// SpawnAgent starts a detached agent subprocess with parent-owned stdio bound to
+// /dev/null. It returns only after the child confirms that its masked supervisor
+// logs are open. The readiness file is then removed, leaving no lifetime channel
+// between the child and the spawning process. A background goroutine reaps the
+// child to prevent zombie accumulation while the parent remains alive.
 //
 // Returns the started command and an error. The caller owns lifecycle
 // management (the process is already started and will be reaped).
@@ -104,21 +140,103 @@ func SpawnAgent(projectRoot, role, cli string, extraArgs ...string) (*exec.Cmd, 
 		return nil, fmt.Errorf("spawn %s with %s: %w", role, cli, err)
 	}
 
-	cmd, devNull, err := buildSpawnCommand(projectRoot, role, cli, extraArgs...)
+	cmd, devNull, readyPath, err := buildSpawnCommand(projectRoot, role, cli, extraArgs...)
 	if err != nil {
 		return nil, err
 	}
 
 	if err := cmd.Start(); err != nil {
-		devNull.Close()
+		return nil, errors.Join(err, devNull.Close(), removeSupervisorReadyFile(readyPath))
+	}
+	waitCh := make(chan error, 1)
+	go func() {
+		waitCh <- errors.Join(cmd.Wait(), devNull.Close())
+	}()
+	if err := awaitSupervisorBootstrap(cmd, readyPath, waitCh); err != nil {
 		return nil, err
 	}
-	go func() {
-		cmd.Wait()
-		devNull.Close()
-	}()
 
 	return cmd, nil
+}
+
+func awaitSupervisorBootstrap(cmd *exec.Cmd, readyPath string, waitCh <-chan error) error {
+	timer := time.NewTimer(supervisorBootstrapTimeout)
+	defer timer.Stop()
+	ticker := time.NewTicker(supervisorBootstrapPollInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case waitErr := <-waitCh:
+			status, complete, statusErr := readSupervisorBootstrapStatus(readyPath)
+			removeSupervisorReadyFile(readyPath)
+			if complete && strings.HasPrefix(status, agent.SupervisorBootstrapErrorPrefix) {
+				message := strings.TrimSpace(strings.TrimPrefix(status, agent.SupervisorBootstrapErrorPrefix))
+				return errors.Join(fmt.Errorf("supervisor bootstrap failed: %s", message), waitErr, statusErr)
+			}
+			return errors.Join(fmt.Errorf("supervisor exited before bootstrap completed"), waitErr, statusErr)
+		case <-ticker.C:
+			status, complete, err := readSupervisorBootstrapStatus(readyPath)
+			if err != nil {
+				stopErr := stopSpawnedCommand(cmd, waitCh)
+				removeSupervisorReadyFile(readyPath)
+				return errors.Join(fmt.Errorf("read supervisor bootstrap status: %w", err), stopErr)
+			}
+			if !complete {
+				continue
+			}
+			removeSupervisorReadyFile(readyPath)
+			if status == agent.SupervisorBootstrapReadyStatus {
+				select {
+				case waitErr := <-waitCh:
+					return errors.Join(fmt.Errorf("supervisor exited immediately after bootstrap"), waitErr)
+				default:
+					return nil
+				}
+			}
+			message := strings.TrimSpace(strings.TrimPrefix(status, agent.SupervisorBootstrapErrorPrefix))
+			stopErr := stopSpawnedCommand(cmd, waitCh)
+			return errors.Join(fmt.Errorf("supervisor bootstrap failed: %s", message), stopErr)
+		case <-timer.C:
+			stopErr := stopSpawnedCommand(cmd, waitCh)
+			removeSupervisorReadyFile(readyPath)
+			return errors.Join(fmt.Errorf("timed out waiting for supervisor logging readiness"), stopErr)
+		}
+	}
+}
+
+func removeSupervisorReadyFile(path string) error {
+	err := os.Remove(path)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	return err
+}
+
+func readSupervisorBootstrapStatus(path string) (status string, complete bool, err error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", false, nil
+		}
+		return "", false, err
+	}
+	status = string(data)
+	if status == agent.SupervisorBootstrapReadyStatus {
+		return status, true, nil
+	}
+	if strings.HasPrefix(status, agent.SupervisorBootstrapErrorPrefix) && strings.HasSuffix(status, "\n") {
+		return status, true, nil
+	}
+	return "", false, nil
+}
+
+func stopSpawnedCommand(cmd *exec.Cmd, waitCh <-chan error) error {
+	killErr := cmd.Process.Kill()
+	if errors.Is(killErr, os.ErrProcessDone) {
+		killErr = nil
+	}
+	return errors.Join(killErr, <-waitCh)
 }
 
 func readRuntimeConfig(projectRoot string) models.Config {

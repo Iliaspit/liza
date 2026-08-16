@@ -193,6 +193,7 @@ func executeAgent(ctx context.Context, config SupervisorConfig, prompt string, a
 	}
 	execCtx = withExecutionProgressCallback(execCtx, markProgress)
 	stopWatchdog := startExecutionProgressWatchdog(execCtx, config, taskID, progressCh, cancelExec)
+	defer stopWatchdog()
 
 	// Heartbeat is managed by RunSupervisor for the full supervisor lifetime,
 	// so we don't start one here.

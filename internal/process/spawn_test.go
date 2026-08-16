@@ -2,33 +2,42 @@ package process
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/liza-mas/liza/internal/agent"
+	"github.com/liza-mas/liza/internal/brand"
+	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/testhelpers"
 )
 
 func TestBuildSpawnCommand_PassesExpectedArgs(t *testing.T) {
-	cmd, devNull, err := buildSpawnCommand("/tmp/project", "coder", "codex", "--agent-id", "coder-9")
+	projectRoot := t.TempDir()
+	cmd, devNull, readyPath, err := buildSpawnCommand(projectRoot, "coder", "codex", "--agent-id", "coder-9")
 	if err != nil {
 		t.Fatalf("buildSpawnCommand() error = %v", err)
 	}
 	defer devNull.Close()
+	defer os.Remove(readyPath)
 
+	args, logPaths := splitSupervisorLogArgs(t, cmd.Args)
 	wantArgs := []string{"liza", "agent", "coder", "--cli", "codex", "--agent-id", "coder-9"}
-	if len(cmd.Args) != len(wantArgs) {
-		t.Fatalf("len(args) = %d, want %d (%v)", len(cmd.Args), len(wantArgs), cmd.Args)
+	if len(args) != len(wantArgs) {
+		t.Fatalf("len(args) = %d, want %d (%v)", len(args), len(wantArgs), args)
 	}
 	for i, want := range wantArgs {
-		if cmd.Args[i] != want {
-			t.Fatalf("args[%d] = %q, want %q (all args: %v)", i, cmd.Args[i], want, cmd.Args)
+		if args[i] != want {
+			t.Fatalf("args[%d] = %q, want %q (all args: %v)", i, args[i], want, args)
 		}
 	}
+	assertSupervisorLogPaths(t, projectRoot, "coder", logPaths)
 
-	if cmd.Dir != "/tmp/project" {
-		t.Fatalf("Dir = %q, want %q", cmd.Dir, "/tmp/project")
+	if cmd.Dir != projectRoot {
+		t.Fatalf("Dir = %q, want %q", cmd.Dir, projectRoot)
 	}
 }
 
@@ -39,15 +48,17 @@ func TestBuildSpawnCommand_AddsGoalIDFromState(t *testing.T) {
 	state.Goal.ID = "goal-xyz"
 	testhelpers.WriteInitialState(t, statePath, state)
 
-	cmd, devNull, err := buildSpawnCommand(projectRoot, "coder", "codex")
+	cmd, devNull, readyPath, err := buildSpawnCommand(projectRoot, "coder", "codex")
 	if err != nil {
 		t.Fatalf("buildSpawnCommand() error = %v", err)
 	}
 	defer devNull.Close()
+	defer os.Remove(readyPath)
 
+	args, _ := splitSupervisorLogArgs(t, cmd.Args)
 	wantArgs := []string{"liza", "agent", "coder", "--cli", "codex", "--goal-id", "goal-xyz"}
-	if strings.Join(cmd.Args, " ") != strings.Join(wantArgs, " ") {
-		t.Fatalf("args = %v, want %v", cmd.Args, wantArgs)
+	if strings.Join(args, " ") != strings.Join(wantArgs, " ") {
+		t.Fatalf("args = %v, want %v", args, wantArgs)
 	}
 }
 
@@ -58,46 +69,232 @@ func TestBuildSpawnCommand_DoesNotOverrideExplicitGoalID(t *testing.T) {
 	state.Goal.ID = "goal-xyz"
 	testhelpers.WriteInitialState(t, statePath, state)
 
-	cmd, devNull, err := buildSpawnCommand(projectRoot, "coder", "codex", "--goal-id", "manual-goal")
+	cmd, devNull, readyPath, err := buildSpawnCommand(projectRoot, "coder", "codex", "--goal-id", "manual-goal")
 	if err != nil {
 		t.Fatalf("buildSpawnCommand() error = %v", err)
 	}
 	defer devNull.Close()
+	defer os.Remove(readyPath)
 
+	args, _ := splitSupervisorLogArgs(t, cmd.Args)
 	wantArgs := []string{"liza", "agent", "coder", "--cli", "codex", "--goal-id", "manual-goal"}
-	if strings.Join(cmd.Args, " ") != strings.Join(wantArgs, " ") {
-		t.Fatalf("args = %v, want %v", cmd.Args, wantArgs)
+	if strings.Join(args, " ") != strings.Join(wantArgs, " ") {
+		t.Fatalf("args = %v, want %v", args, wantArgs)
 	}
 }
 
 func TestBuildSpawnCommand_BindsAllStdioToDevNull(t *testing.T) {
-	cmd, devNull, err := buildSpawnCommand("/tmp/project", "coder", "codex")
+	projectRoot := t.TempDir()
+	cmd, devNull, readyPath, err := buildSpawnCommand(projectRoot, "coder", "codex")
 	if err != nil {
 		t.Fatalf("buildSpawnCommand() error = %v", err)
 	}
 	defer devNull.Close()
+	defer os.Remove(readyPath)
 
-	stdinFile, ok := cmd.Stdin.(*os.File)
-	if !ok {
-		t.Fatalf("Stdin type = %T, want *os.File", cmd.Stdin)
+	for name, stream := range map[string]any{
+		"stdin":  cmd.Stdin,
+		"stdout": cmd.Stdout,
+		"stderr": cmd.Stderr,
+	} {
+		file, ok := stream.(*os.File)
+		if !ok {
+			t.Fatalf("%s type = %T, want *os.File to preserve detached lifetime", name, stream)
+		}
+		if file.Name() != os.DevNull {
+			t.Fatalf("%s file = %q, want %q", name, file.Name(), os.DevNull)
+		}
 	}
-	stdoutFile, ok := cmd.Stdout.(*os.File)
-	if !ok {
-		t.Fatalf("Stdout type = %T, want *os.File", cmd.Stdout)
-	}
-	stderrFile, ok := cmd.Stderr.(*os.File)
-	if !ok {
-		t.Fatalf("Stderr type = %T, want *os.File", cmd.Stderr)
+}
+
+func TestBuildSpawnCommand_DetachedChildSurvivesSpawnerExit(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("helper uses a POSIX shell")
 	}
 
-	if stdinFile.Name() != os.DevNull {
-		t.Fatalf("stdin file = %q, want %q", stdinFile.Name(), os.DevNull)
+	projectRoot := t.TempDir()
+	binDir := t.TempDir()
+	sentinel := filepath.Join(t.TempDir(), "child-survived")
+	fakeBinary := filepath.Join(binDir, brand.BinaryName)
+	script := "#!/bin/sh\nset -e\nsleep 0.3\nprintf 'detached child output\\n'\nprintf survived > \"$LIZA_TEST_DETACHED_SENTINEL\"\n"
+	if err := os.WriteFile(fakeBinary, []byte(script), 0755); err != nil {
+		t.Fatalf("write fake agent binary: %v", err)
 	}
-	if stdoutFile.Name() != os.DevNull {
-		t.Fatalf("stdout file = %q, want %q", stdoutFile.Name(), os.DevNull)
+
+	spawner := exec.Command(os.Args[0], "-test.run=^TestDetachedSpawnerHelper$")
+	spawner.Env = append(os.Environ(),
+		"LIZA_TEST_DETACHED_SPAWNER=1",
+		"LIZA_TEST_DETACHED_PROJECT="+projectRoot,
+		"LIZA_TEST_DETACHED_SENTINEL="+sentinel,
+		"PATH="+binDir+string(os.PathListSeparator)+os.Getenv("PATH"),
+	)
+	if output, err := spawner.CombinedOutput(); err != nil {
+		t.Fatalf("helper spawner failed: %v\n%s", err, output)
 	}
-	if stderrFile.Name() != os.DevNull {
-		t.Fatalf("stderr file = %q, want %q", stderrFile.Name(), os.DevNull)
+
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		data, err := os.ReadFile(sentinel)
+		if err == nil {
+			if string(data) != "survived" {
+				t.Fatalf("sentinel = %q, want survived", data)
+			}
+			break
+		}
+		if !os.IsNotExist(err) {
+			t.Fatalf("read sentinel: %v", err)
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("detached child did not write after its spawner exited")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func TestDetachedSpawnerHelper(t *testing.T) {
+	if os.Getenv("LIZA_TEST_DETACHED_SPAWNER") != "1" {
+		return
+	}
+
+	cmd, devNull, _, err := buildSpawnCommand(os.Getenv("LIZA_TEST_DETACHED_PROJECT"), "coder", "codex")
+	if err != nil {
+		t.Fatalf("buildSpawnCommand() error = %v", err)
+	}
+	if err := cmd.Start(); err != nil {
+		devNull.Close()
+		t.Fatalf("start detached child: %v", err)
+	}
+	if err := devNull.Close(); err != nil {
+		t.Fatalf("close parent devnull: %v", err)
+	}
+}
+
+func TestSpawnAgentWaitsForChildLoggingReadiness(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake agent binary uses a POSIX shell")
+	}
+
+	readySentinel := filepath.Join(t.TempDir(), "child-ready")
+	projectRoot := setupSpawnHandshakeTest(t, `#!/bin/sh
+set -e
+ready_file=""
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = "--supervisor-ready-file" ]; then
+    ready_file="$2"
+    shift 2
+  else
+    shift
+  fi
+done
+sleep 0.3
+printf ready > "$LIZA_TEST_READY_SENTINEL"
+printf 'ready\n' > "$ready_file"
+sleep 2
+`)
+	t.Setenv("LIZA_TEST_READY_SENTINEL", readySentinel)
+
+	cmd, err := SpawnAgent(projectRoot, "coder", "fake")
+	if err != nil {
+		t.Fatalf("SpawnAgent() error = %v", err)
+	}
+	defer cmd.Process.Kill()
+	if data, err := os.ReadFile(readySentinel); err != nil || string(data) != "ready" {
+		t.Fatalf("SpawnAgent returned before child readiness marker: data=%q err=%v", data, err)
+	}
+}
+
+func TestSpawnAgentReturnsChildBootstrapFailure(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake agent binary uses a POSIX shell")
+	}
+
+	projectRoot := setupSpawnHandshakeTest(t, `#!/bin/sh
+set -e
+ready_file=""
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = "--supervisor-ready-file" ]; then
+    ready_file="$2"
+    shift 2
+  else
+    shift
+  fi
+done
+printf 'error: cannot open masked supervisor logs\n' > "$ready_file"
+exit 1
+`)
+
+	cmd, err := SpawnAgent(projectRoot, "coder", "fake")
+	if err == nil {
+		t.Fatal("SpawnAgent() error = nil, want bootstrap failure")
+	}
+	if cmd != nil {
+		t.Fatalf("SpawnAgent() command = %#v, want nil", cmd)
+	}
+	if !strings.Contains(err.Error(), "supervisor bootstrap failed: cannot open masked supervisor logs") {
+		t.Fatalf("SpawnAgent() error = %q, want child bootstrap detail", err)
+	}
+}
+
+func setupSpawnHandshakeTest(t *testing.T, script string) string {
+	t.Helper()
+	projectRoot := t.TempDir()
+	statePath, _ := testhelpers.SetupLizaDir(t, projectRoot)
+	state := testhelpers.CreateValidState()
+	state.Config.AgentTools = map[string]models.AgentToolConfig{
+		"fake": {
+			Executable:  "unused",
+			ContractKey: "none",
+		},
+	}
+	testhelpers.WriteInitialState(t, statePath, state)
+
+	binDir := t.TempDir()
+	fakeBinary := filepath.Join(binDir, brand.BinaryName)
+	if err := os.WriteFile(fakeBinary, []byte(script), 0755); err != nil {
+		t.Fatalf("write fake agent binary: %v", err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return projectRoot
+}
+
+func splitSupervisorLogArgs(t *testing.T, args []string) ([]string, map[string]string) {
+	t.Helper()
+	clean := make([]string, 0, len(args))
+	paths := make(map[string]string, 3)
+	for i := 0; i < len(args); i++ {
+		name := strings.TrimPrefix(args[i], "--")
+		if name == agent.SupervisorStdoutLogFlag || name == agent.SupervisorStderrLogFlag || name == agent.SupervisorReadyFileFlag {
+			if i+1 >= len(args) {
+				t.Fatalf("missing value after %s", args[i])
+			}
+			paths[name] = args[i+1]
+			i++
+			continue
+		}
+		clean = append(clean, args[i])
+	}
+	if len(paths) != 3 {
+		t.Fatalf("supervisor paths = %v, want stdout, stderr, and readiness", paths)
+	}
+	return clean, paths
+}
+
+func assertSupervisorLogPaths(t *testing.T, projectRoot, role string, logPaths map[string]string) {
+	t.Helper()
+	outputsDir := filepath.Join(projectRoot, ".liza", "agent-outputs")
+	for flag, suffix := range map[string]string{
+		agent.SupervisorStdoutLogFlag: ".stdout.log",
+		agent.SupervisorStderrLogFlag: ".stderr.log",
+		agent.SupervisorReadyFileFlag: ".ready",
+	} {
+		path := logPaths[flag]
+		if filepath.Dir(path) != outputsDir {
+			t.Fatalf("--%s directory = %q, want %q", flag, filepath.Dir(path), outputsDir)
+		}
+		base := strings.TrimPrefix(filepath.Base(path), ".")
+		if !strings.HasPrefix(base, "supervisor-"+role+"-") || !strings.HasSuffix(base, suffix) {
+			t.Fatalf("--%s path = %q, want .?supervisor-%s-*%s", flag, path, role, suffix)
+		}
 	}
 }
 

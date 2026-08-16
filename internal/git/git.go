@@ -2,6 +2,7 @@
 package git
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -39,6 +40,16 @@ func (g *Git) exec(args ...string) (string, error) {
 // execInDir runs a git command in a specific directory
 func (g *Git) execInDir(dir string, args ...string) (string, error) {
 	output, err := gitenv.CombinedOutput(dir, args...)
+	if err != nil {
+		return "", fmt.Errorf("git %v failed: %w\nOutput: %s", args, err, output)
+	}
+	return strings.TrimSpace(string(output)), nil
+}
+
+// execInDirContext runs a git command in a specific directory and aborts the
+// subprocess when ctx is canceled.
+func (g *Git) execInDirContext(ctx context.Context, dir string, args ...string) (string, error) {
+	output, err := gitenv.CombinedOutputContext(ctx, dir, args...)
 	if err != nil {
 		return "", fmt.Errorf("git %v failed: %w\nOutput: %s", args, err, output)
 	}

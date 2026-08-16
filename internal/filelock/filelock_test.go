@@ -1,6 +1,7 @@
 package filelock
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -109,6 +110,53 @@ func TestFileLockConcurrent(t *testing.T) {
 
 	if counter.Load() != numGoroutines {
 		t.Errorf("counter = %d, want %d", counter.Load(), numGoroutines)
+	}
+}
+
+func TestWithLockOperationContext_CancelsBlockedAcquisition(t *testing.T) {
+	protectedPath := filepath.Join(t.TempDir(), "data.yaml")
+	holderAcquired := make(chan struct{})
+	releaseHolder := make(chan struct{})
+	holderDone := make(chan error, 1)
+	go func() {
+		holderDone <- New(protectedPath).WithLockOperation("holder", func() error {
+			close(holderAcquired)
+			<-releaseHolder
+			return nil
+		})
+	}()
+	select {
+	case <-holderAcquired:
+	case <-time.After(2 * time.Second):
+		t.Fatal("holder did not acquire lock")
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	callbackRan := false
+	waiterDone := make(chan error, 1)
+	go func() {
+		waiterDone <- New(protectedPath).WithLockOperationContext(ctx, "waiter", func() error {
+			callbackRan = true
+			return nil
+		})
+	}()
+	cancel()
+
+	select {
+	case err := <-waiterDone:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("WithLockOperationContext() error = %v, want context.Canceled", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("context cancellation did not interrupt lock acquisition")
+	}
+	if callbackRan {
+		t.Fatal("lock callback ran after context cancellation")
+	}
+
+	close(releaseHolder)
+	if err := <-holderDone; err != nil {
+		t.Fatalf("holder error: %v", err)
 	}
 }
 

@@ -1,6 +1,7 @@
 package db
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -110,10 +111,22 @@ func (bb *Blackboard) GetMetricsRecorder() *filelock.MetricsRecorder {
 
 // Read returns the current state under an exclusive file lock.
 func (bb *Blackboard) Read() (*models.State, error) {
+	return bb.ReadContext(context.Background())
+}
+
+// ReadContext returns the current state under an exclusive file lock,
+// aborting lock acquisition when ctx is canceled.
+func (bb *Blackboard) ReadContext(ctx context.Context) (*models.State, error) {
 	var state models.State
-	err := bb.fileLock.WithLockOperation("read", func() error {
+	err := bb.fileLock.WithLockOperationContext(ctx, "read", func() error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		data, err := os.ReadFile(bb.statePath)
 		if err != nil {
+			return err
+		}
+		if err := ctx.Err(); err != nil {
 			return err
 		}
 

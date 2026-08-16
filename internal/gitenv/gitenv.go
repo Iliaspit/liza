@@ -61,14 +61,23 @@ func CombinedOutput(dir string, args ...string) ([]byte, error) {
 	return CombinedOutputWithTimeout(DefaultCommandTimeout, dir, args...)
 }
 
+// CombinedOutputContext runs git with the package default timeout and aborts
+// the subprocess when ctx is canceled.
+func CombinedOutputContext(ctx context.Context, dir string, args ...string) ([]byte, error) {
+	return combinedOutputContext(ctx, DefaultCommandTimeout, dir, args...)
+}
+
 // CombinedOutputWithTimeout runs git with a caller-specified timeout. It exists
 // primarily for tests and for operations with well-understood tighter bounds.
 func CombinedOutputWithTimeout(timeout time.Duration, dir string, args ...string) ([]byte, error) {
 	if timeout <= 0 {
 		timeout = DefaultCommandTimeout
 	}
+	return combinedOutputContext(context.Background(), timeout, dir, args...)
+}
 
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+func combinedOutputContext(parent context.Context, timeout time.Duration, dir string, args ...string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(parent, timeout)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, "git", args...)
@@ -77,7 +86,10 @@ func CombinedOutputWithTimeout(timeout time.Duration, dir string, args ...string
 	cmd.WaitDelay = DefaultCommandWaitDelay
 
 	output, err := cmd.CombinedOutput()
-	if ctx.Err() == context.DeadlineExceeded {
+	if err != nil && parent.Err() != nil {
+		return output, parent.Err()
+	}
+	if err != nil && ctx.Err() == context.DeadlineExceeded {
 		return output, &TimeoutError{
 			Args:    append([]string(nil), args...),
 			Dir:     dir,
@@ -93,14 +105,23 @@ func Output(dir string, args ...string) ([]byte, error) {
 	return OutputWithTimeout(DefaultCommandTimeout, dir, args...)
 }
 
+// OutputContext runs git with the package default timeout and aborts the
+// subprocess when ctx is canceled.
+func OutputContext(ctx context.Context, dir string, args ...string) ([]byte, error) {
+	return outputContext(ctx, DefaultCommandTimeout, dir, args...)
+}
+
 // OutputWithTimeout runs git with a caller-specified timeout and returns stdout
 // only. Use this when command semantics depend on stdout rather than stderr.
 func OutputWithTimeout(timeout time.Duration, dir string, args ...string) ([]byte, error) {
 	if timeout <= 0 {
 		timeout = DefaultCommandTimeout
 	}
+	return outputContext(context.Background(), timeout, dir, args...)
+}
 
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+func outputContext(parent context.Context, timeout time.Duration, dir string, args ...string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(parent, timeout)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, "git", args...)
@@ -109,7 +130,10 @@ func OutputWithTimeout(timeout time.Duration, dir string, args ...string) ([]byt
 	cmd.WaitDelay = DefaultCommandWaitDelay
 
 	output, err := cmd.Output()
-	if ctx.Err() == context.DeadlineExceeded {
+	if err != nil && parent.Err() != nil {
+		return output, parent.Err()
+	}
+	if err != nil && ctx.Err() == context.DeadlineExceeded {
 		return output, &TimeoutError{
 			Args:    append([]string(nil), args...),
 			Dir:     dir,

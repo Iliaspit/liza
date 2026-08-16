@@ -2,6 +2,8 @@ package git
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -395,6 +397,23 @@ func TestWorktreeProgressSignatureHandlesLargeUntrackedContent(t *testing.T) {
 	}
 	if first == second {
 		t.Fatalf("signature did not change after large untracked file changed:\n%s", first)
+	}
+}
+
+func TestWorktreeProgressSignatureContextHonorsCancellation(t *testing.T) {
+	repoDir := setupTestRepo(t)
+	g := New(repoDir)
+
+	taskID := "task-canceled-progress"
+	if _, err := g.CreateWorktree(taskID, "integration"); err != nil {
+		t.Fatalf("CreateWorktree() error = %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := g.WorktreeProgressSignatureContext(ctx, taskID)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("WorktreeProgressSignatureContext() error = %v, want context.Canceled", err)
 	}
 }
 

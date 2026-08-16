@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -71,7 +72,18 @@ Example:
   # Using %[1]s environment variable
   %[1]s=coder-1 %[2]s agent coder`, brand.EnvName("AGENT_ID"), brand.BinaryName, paths.ProjectDirName()),
 	Args: cobra.RangeArgs(1, 2),
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(cmd *cobra.Command, args []string) (runErr error) {
+		supervisorLogs, err := openSupervisorLogs(cmd)
+		if err != nil {
+			return errors.Join(err, writeSupervisorBootstrapError(cmd, err))
+		}
+		defer func() {
+			runErr = finishSupervisorRun(supervisorLogs, runErr, recover())
+		}()
+		if err := writeSupervisorBootstrapReady(cmd); err != nil {
+			return err
+		}
+
 		role := args[0]
 
 		initialTask := ""
@@ -124,7 +136,7 @@ Example:
 		bb := db.For(statePath)
 		state, stateErr := bb.Read()
 		if stateErr != nil {
-			fmt.Fprintf(os.Stderr, "Warning: could not read state for agent metadata: %v\n", stateErr)
+			fmt.Fprintf(supervisorLogs.stderr, "Warning: could not read state for agent metadata: %v\n", stateErr)
 		} else {
 			stateGoalID := state.Goal.ID
 			if goalID != "" && stateGoalID != "" && goalID != stateGoalID {
@@ -162,13 +174,13 @@ Example:
 		contractKey := agent.ContractKeyForCLI(cliName, runtimeConfig)
 		// Warn if no product contract symlink is configured for this CLI.
 		if contractKey != "" && contractKey != "none" && commands.CheckContractConfigured(projectRoot, contractKey) == "" {
-			fmt.Fprintf(os.Stderr, "Warning: no %s contract symlink found for %s. Agents may not find the behavioral contract.\n", brand.NameTitle, cliName)
-			fmt.Fprintf(os.Stderr, "  Run '%s' to create one.\n", contractInitCommandForMissingContract(cliName, contractKey))
+			fmt.Fprintf(supervisorLogs.stderr, "Warning: no %s contract symlink found for %s. Agents may not find the behavioral contract.\n", brand.NameTitle, cliName)
+			fmt.Fprintf(supervisorLogs.stderr, "  Run '%s' to create one.\n", contractInitCommandForMissingContract(cliName, contractKey))
 		}
 
 		specsLookup := brand.LookupEnv(os.Getenv, "SPECS")
 		if specsLookup.Warning != "" {
-			fmt.Fprintf(os.Stderr, "Warning: %s\n", specsLookup.Warning)
+			fmt.Fprintf(supervisorLogs.stderr, "Warning: %s\n", specsLookup.Warning)
 		}
 		specsDir := specsLookup.Value
 		if specsDir == "" {
@@ -191,7 +203,7 @@ Example:
 		if autoAssigned {
 			bb := db.For(statePath)
 			_, err = agent.AutoAssignAgentID(bb, role, 5, func(candidateID string) error {
-				fmt.Fprintf(os.Stderr, "Auto-assigned agent ID: %s\n", candidateID)
+				fmt.Fprintf(supervisorLogs.stderr, "Auto-assigned agent ID: %s\n", candidateID)
 				config := agent.SupervisorConfig{
 					AgentID:     candidateID,
 					Role:        role,
@@ -484,6 +496,18 @@ func init() {
 	agentCmd.Flags().String("goal-id", "", "goal identifier marker for process diagnostics (must match state goal.id when supplied)")
 	agentCmd.Flags().BoolP("interactive", "i", false, "Print prompt location, don't execute CLI")
 	agentCmd.Flags().Bool("no-log", false, "Disable saving agent output to "+paths.ProjectDirName()+"/agent-outputs/")
+	agentCmd.Flags().String(agent.SupervisorStdoutLogFlag, "", "internal path for detached supervisor stdout")
+	agentCmd.Flags().String(agent.SupervisorStderrLogFlag, "", "internal path for detached supervisor stderr")
+	agentCmd.Flags().String(agent.SupervisorReadyFileFlag, "", "internal bootstrap readiness path for detached supervisor")
+	if err := agentCmd.Flags().MarkHidden(agent.SupervisorStdoutLogFlag); err != nil {
+		panic(err)
+	}
+	if err := agentCmd.Flags().MarkHidden(agent.SupervisorStderrLogFlag); err != nil {
+		panic(err)
+	}
+	if err := agentCmd.Flags().MarkHidden(agent.SupervisorReadyFileFlag); err != nil {
+		panic(err)
+	}
 
 	// Recover-task command flags
 	recoverTaskCmd.Flags().Bool("force", false, "bypass live-PID checks; also clean git artifacts when task is not in state")

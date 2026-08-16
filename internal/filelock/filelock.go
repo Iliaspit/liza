@@ -1,6 +1,7 @@
 package filelock
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -146,6 +147,12 @@ func (fl *FileLock) WithLockOperation(operation string, fn func() error) error {
 	return fl.withLockOperation(operation, false, fn)
 }
 
+// WithLockOperationContext executes fn while holding an exclusive file lock,
+// aborting lock acquisition when ctx is canceled.
+func (fl *FileLock) WithLockOperationContext(ctx context.Context, operation string, fn func() error) error {
+	return fl.withLockOperationContext(ctx, operation, false, fn)
+}
+
 // WithSharedLockOperation executes fn while holding a shared file lock.
 // Multiple shared holders may run concurrently, while an exclusive holder
 // acquired through WithLockOperation waits for all shared holders to finish.
@@ -153,7 +160,17 @@ func (fl *FileLock) WithSharedLockOperation(operation string, fn func() error) e
 	return fl.withLockOperation(operation, true, fn)
 }
 
+// WithSharedLockOperationContext executes fn while holding a shared file lock,
+// aborting lock acquisition when ctx is canceled.
+func (fl *FileLock) WithSharedLockOperationContext(ctx context.Context, operation string, fn func() error) error {
+	return fl.withLockOperationContext(ctx, operation, true, fn)
+}
+
 func (fl *FileLock) withLockOperation(operation string, shared bool, fn func() error) error {
+	return fl.withLockOperationContext(context.Background(), operation, shared, fn)
+}
+
+func (fl *FileLock) withLockOperationContext(ctx context.Context, operation string, shared bool, fn func() error) error {
 	var lock *flock.Flock
 	var err error
 
@@ -162,6 +179,9 @@ func (fl *FileLock) withLockOperation(operation string, shared bool, fn func() e
 	locked := false
 
 	for time.Now().Before(deadline) {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
 		lock, err = fl.acquireLock(operation, shared)
 		if err == nil {
 			locked = true
@@ -175,10 +195,24 @@ func (fl *FileLock) withLockOperation(operation string, shared bool, fn func() e
 				return lockErr
 			}
 		}
-		time.Sleep(LockCheckInterval)
+		timer := time.NewTimer(LockCheckInterval)
+		select {
+		case <-ctx.Done():
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			return ctx.Err()
+		case <-timer.C:
+		}
 	}
 
 	if !locked {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
 		return NewLockTimeout(fmt.Errorf("lock unavailable after %v", fl.lockTimeout))
 	}
 
@@ -204,6 +238,9 @@ func (fl *FileLock) withLockOperation(operation string, shared bool, fn func() e
 			})
 		}
 	}()
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return ctxErr
+	}
 
 	return fn()
 }

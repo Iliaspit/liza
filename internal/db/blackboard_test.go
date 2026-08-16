@@ -1,7 +1,9 @@
 package db
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,6 +13,41 @@ import (
 
 	"github.com/liza-mas/liza/internal/models"
 )
+
+func TestReadContext_CancelsBlockedLockAcquisition(t *testing.T) {
+	statePath := filepath.Join(t.TempDir(), "state.yaml")
+	if err := os.WriteFile(statePath, []byte("tasks: []\n"), 0644); err != nil {
+		t.Fatalf("write state: %v", err)
+	}
+
+	holder := New(statePath)
+	holderAcquired := make(chan struct{})
+	releaseHolder := make(chan struct{})
+	holderDone := make(chan error, 1)
+	go func() {
+		holderDone <- holder.fileLock.WithLockOperation("holder", func() error {
+			close(holderAcquired)
+			<-releaseHolder
+			return nil
+		})
+	}()
+	select {
+	case <-holderAcquired:
+	case <-time.After(2 * time.Second):
+		t.Fatal("holder did not acquire state lock")
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := New(statePath).ReadContext(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("ReadContext() error = %v, want context.Canceled", err)
+	}
+
+	close(releaseHolder)
+	if err := <-holderDone; err != nil {
+		t.Fatalf("holder error: %v", err)
+	}
+}
 
 // TestFor verifies the process-level singleton behavior of For().
 func TestFor(t *testing.T) {
