@@ -183,6 +183,44 @@ func TestJSON_SubmitVerdict_OversizedReasonIsActionableAndSideEffectFree(t *test
 	}
 }
 
+func TestJSON_SubmitVerdict_ReasonConsumedJSONFlagIsActionableAndSideEffectFree(t *testing.T) {
+	projectRoot, statePath := setupMutationTestProject(t, func(state *models.State) {
+		now := time.Now().UTC()
+		state.Tasks = []models.Task{
+			testhelpers.BuildTaskByStatus("task-json-consumed-reason", models.TaskStatusReviewing, now),
+		}
+	})
+	before, err := os.ReadFile(statePath)
+	if err != nil {
+		t.Fatalf("ReadFile() before submit-verdict: %v", err)
+	}
+
+	// Reproduces an empty unquoted reason where --json becomes the consumed
+	// value. The root hook must still honor the intended JSON output mode.
+	stdout, err := executeRootCommandCapture(t, projectRoot,
+		"submit-verdict", "task-json-consumed-reason", "REJECTED",
+		"--reason", "--json",
+		"--agent-id", "code-reviewer-1",
+	)
+	if err == nil {
+		t.Fatal("expected consumed --json reason error, got nil")
+	}
+	assertJSONError(t, stdout, "validation",
+		"--reason",
+		"registered flag --json",
+		"empty shell expansion",
+		"Only registered flag tokens are detected",
+	)
+
+	after, readErr := os.ReadFile(statePath)
+	if readErr != nil {
+		t.Fatalf("ReadFile() after submit-verdict: %v", readErr)
+	}
+	if !bytes.Equal(after, before) {
+		t.Fatal("consumed --json rejection reason changed state")
+	}
+}
+
 func TestJSON_AddTask_CLIInputErrorsAreActionable(t *testing.T) {
 	projectRoot, _ := setupMutationTestProject(t, nil)
 

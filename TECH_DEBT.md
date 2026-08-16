@@ -2,6 +2,38 @@
 
 Deliberate debt with payback triggers. See CORE.md Rule 3 (DoD) for policy.
 
+## Free-text mutation flags can consume registered flag tokens
+
+**What:** The CLI guards `--reason` against an empty, unquoted shell variable
+causing it to consume the next registered flag token. Other free-text mutation
+inputs remain outside that guard:
+
+- `reconcile-merged --pr-url` — **source-verified, not runtime-reproduced**:
+  the same scalar-string shape as `--reason`, persisted without URL validation.
+  Extending the registered-token guard to this flag is a cheap follow-up;
+  validating URL syntax is separate semantic work.
+- `mark-blocked --questions` — **source-verified, not runtime-reproduced**:
+  a `StringSlice` whose operation validation checks count, not non-empty content,
+  so it needs per-element handling in addition to the token guard.
+- `mark-blocked --repair-*` text fields — **suspected by source inspection, not
+  runtime-reproduced**: their presence-oriented validation may accept consumed
+  flag tokens, but the interacting field set needs a dedicated reproduction.
+
+In contrast, `--impact` is domain-validated and `--merge-commit` must resolve
+locally before mutation.
+
+**Why deferred:** Adding `--pr-url` to the scalar registered-token guard is
+mechanically cheap but outside the reason-specific fix. Questions and repair
+fields have different value shapes and need field-specific behavioral tests.
+Semantic URL, question-content, and repair-request validation remains distinct
+from swallowed-token detection.
+
+**Payback trigger:** The next addition or modification of a free-text mutation
+flag, or the first report of swallowed-token corruption outside `--reason`.
+At that point, extend the scalar guard to `--pr-url`, census the remaining
+free-text flags, and add semantic boundary validation for the affected field
+family.
+
 ## Concurrent merge sync/test/restore window is not fully isolated
 
 **What:** Each integration ref/index mutation is atomic across processes, but the

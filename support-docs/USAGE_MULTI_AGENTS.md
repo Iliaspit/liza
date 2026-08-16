@@ -513,6 +513,13 @@ Use `§BRAND_BINARY_NAME§ -C <project-root> ...` to select a §BRAND_NAME_TITLE
 | `§BRAND_BINARY_NAME§ clear-stale-review-claims` | Clear expired review leases                                                                                          |
 | `§BRAND_BINARY_NAME§ get <query>` | Query state data (tasks, agents, etc.)                                                                               |
 
+When passing a shell variable to `--reason`, always quote it:
+`--reason "$reason"`. If an unquoted empty variable causes `--reason` to
+consume the next token, §BRAND_NAME_TITLE§ rejects the value when that token is
+a flag registered on the command. This guard intentionally does not reject
+unknown flag-shaped prose, and a literal one-token reason matching a registered
+flag or shorthand (for example `-C`) must be rewritten as descriptive prose.
+
 **Important:** The supervisor claims tasks *before* starting the agent CLI. This avoids interactive permission prompts in non-interactive mode. Agents receive their assigned task in the bootstrap prompt and should NOT call claim commands directly.
 
 See [Architecture Overview](../specs/architecture/overview.md) for detailed component descriptions.

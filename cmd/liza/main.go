@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 
 	"github.com/liza-mas/liza/internal/brand"
 	lizaerrors "github.com/liza-mas/liza/internal/errors"
@@ -33,8 +34,9 @@ var rootCmd = &cobra.Command{
 	Long: fmt.Sprintf(`%s is a multi-agent task execution system that uses a YAML-based
 "blackboard" pattern with file locking for state management, git worktrees
 for task isolation, and agent supervisors with restart logic.`, brand.NameTitle),
-	SilenceUsage:  true,
-	SilenceErrors: true,
+	SilenceUsage:      true,
+	SilenceErrors:     true,
+	PersistentPreRunE: validateCLIInputs,
 }
 
 var deleteCmd = &cobra.Command{
@@ -167,6 +169,65 @@ func cliValidationWrap(message string, err error) error {
 		Message: fmt.Sprintf("%s: %v", message, err),
 		Err:     err,
 	}
+}
+
+// validateCLIInputs rejects ambiguous free-text flag values before command
+// handlers can read state or perform mutations.
+func validateCLIInputs(cmd *cobra.Command, _ []string) error {
+	matchedFlag, err := validateReasonFlag(cmd)
+	if err == nil {
+		return nil
+	}
+	if isJSON(cmd) || matchedFlag == "--json" {
+		return jsonout.WriteResult(os.Stdout, nil, nil, err)
+	}
+	return err
+}
+
+// validateReasonFlag detects the shell-expansion failure mode where an empty,
+// unquoted variable causes --reason to consume the next registered flag token.
+// Unknown flag-shaped values remain valid because reasons may contain Markdown.
+func validateReasonFlag(cmd *cobra.Command) (string, error) {
+	reasonFlag := cmd.Flags().Lookup("reason")
+	if reasonFlag == nil || !reasonFlag.Changed {
+		return "", nil
+	}
+
+	reason, err := cmd.Flags().GetString("reason")
+	if err != nil {
+		return "", cliValidationWrap("failed to read --reason", err)
+	}
+	matchedFlag := registeredFlagToken(cmd, reason)
+	if matchedFlag == "" {
+		return "", nil
+	}
+
+	return matchedFlag, cliValidationError(fmt.Sprintf(
+		"--reason value %q matches registered flag %s and may have been consumed after an empty shell expansion; quote variables (for example, --reason \"$reason\"). Only registered flag tokens are detected",
+		reason,
+		matchedFlag,
+	))
+}
+
+func registeredFlagToken(cmd *cobra.Command, value string) string {
+	token, _, _ := strings.Cut(value, "=")
+	if strings.HasPrefix(token, "--") && len(token) > 2 {
+		if cmd.Flag(strings.TrimPrefix(token, "--")) != nil {
+			return token
+		}
+		return ""
+	}
+
+	if strings.HasPrefix(token, "-") && !strings.HasPrefix(token, "--") {
+		shorthand := strings.TrimPrefix(token, "-")
+		if len(shorthand) == 1 {
+			if cmd.Flags().ShorthandLookup(shorthand) != nil ||
+				cmd.InheritedFlags().ShorthandLookup(shorthand) != nil {
+				return token
+			}
+		}
+	}
+	return ""
 }
 
 func checkSupportedPlatform(goos string) error {

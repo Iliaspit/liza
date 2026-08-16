@@ -128,6 +128,46 @@ func TestMutationCommandWiring(t *testing.T) {
 		}
 	})
 
+	t.Run("submit-verdict rejects a registered flag consumed as reason", func(t *testing.T) {
+		projectRoot, statePath := setupMutationTestProject(t, func(state *models.State) {
+			now := time.Now().UTC()
+			state.Tasks = []models.Task{
+				testhelpers.BuildTaskByStatus("task-reason-consumed-flag", models.TaskStatusReviewing, now),
+			}
+		})
+		before := readState(t, statePath)
+		beforeTask := mustFindTask(t, before, "task-reason-consumed-flag")
+		beforeHistoryLen := len(beforeTask.History)
+
+		// Reproduces: --reason $empty --agent-id code-reviewer-8.
+		// pflag consumes --agent-id as the reason and leaves its value positional.
+		t.Setenv("LIZA_AGENT_ID", "code-reviewer-8")
+		err := executeRootCommand(t, projectRoot,
+			"submit-verdict", "task-reason-consumed-flag", "REJECTED",
+			"--reason", "--agent-id", "code-reviewer-8",
+		)
+		if err == nil {
+			t.Fatal("expected consumed registered flag to be rejected")
+		}
+		for _, want := range []string{"--reason", "registered flag --agent-id", "empty shell expansion"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Fatalf("error = %q, want substring %q", err, want)
+			}
+		}
+
+		after := readState(t, statePath)
+		afterTask := mustFindTask(t, after, "task-reason-consumed-flag")
+		if afterTask.Status != models.TaskStatusReviewing {
+			t.Fatalf("task status = %s, want unchanged %s", afterTask.Status, models.TaskStatusReviewing)
+		}
+		if afterTask.RejectionReason != nil {
+			t.Fatalf("rejection_reason = %v, want nil", afterTask.RejectionReason)
+		}
+		if len(afterTask.History) != beforeHistoryLen {
+			t.Fatalf("history length = %d, want unchanged %d", len(afterTask.History), beforeHistoryLen)
+		}
+	})
+
 	t.Run("wt-merge routes parsed args to merge handler", func(t *testing.T) {
 		projectRoot, _ := setupMutationTestProject(t, func(state *models.State) {
 			now := time.Now().UTC()
