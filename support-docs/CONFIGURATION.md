@@ -902,6 +902,46 @@ When `§BRAND_BINARY_NAME§ tui` triggers the circuit breaker, it also sets `spr
 
 `§BRAND_BINARY_NAME§ tui` also auto-checkpoints when all non-terminal planned tasks are BLOCKED (sprint stalled), since no agent can make further progress without human intervention.
 
+## Status Diagnostics
+
+`tasks.claimable` and `tasks.reviewable` are aggregate task-readiness counts
+across all configured doer and reviewer roles, respectively. Their role-level
+breakdowns are `tasks.claimable_by_role` and `tasks.reviewable_by_role`; each is
+a deterministic, role-sorted list of `role` and `count` entries, including
+configured roles whose count is zero. Each aggregate equals the sum of its
+role-level entries. Rejected doer work reserved by an unexpired ownership lease
+is not available to the role queue, although its current owner can reclaim it
+directly. Unowned work and work whose lease expired are ready again; an assigned
+task without `lease_expires` fails closed until repaired. Missing-role repair
+uses the same readiness boundary, so it does not start an agent for reserved or
+malformed ownership.
+
+The explicit legacy fields preserve the former built-in-role counts:
+`tasks.legacy_coder_claimable` reports coder work and
+`tasks.legacy_code_reviewer_reviewable` reports code-reviewer work. These fields
+and the legacy dashboard/work-queue lines are always present. Their historical
+lifecycle-level semantics do not account for rejected-task ownership and can
+therefore include work reserved by another agent. Use the aggregate and
+role-level fields for pipeline-wide scheduling decisions.
+
+Agent capacity is reported separately under `agent_capacity`: `live` counts
+current registrations, `free` counts live, non-degraded agents in `IDLE`, and
+`degraded` counts current degraded capacity. `agent_capacity.by_role` provides
+the same live/free/degraded values in deterministic role order. These capacity
+values describe agents, not task readiness, and never change the claimable or
+reviewable task counts.
+
+For a completed sprint with approved but unmerged planning output, the
+phase-handoff diagnostic uses `phase_handoff.merge_required`. It lists every
+blocking task as a `task_id` and an `action`; run the required
+`§BRAND_BINARY_NAME§ wt-merge <task-id>` operator action for each entry.
+This merge prerequisite is separate from wake-trigger reporting in
+`orchestrator_state.trigger`, so an idle wake trigger does not clear or conceal
+the handoff blocker.
+
+Status is read-only: it reports these diagnostics but performs no task or
+sprint transition and does not merge planning output.
+
 ## Checkpoint Summary
 
 After a successful merge, §BRAND_NAME_TITLE§ auto-invokes the configured default CLI with the

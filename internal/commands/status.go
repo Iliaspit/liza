@@ -32,10 +32,11 @@ type statusData struct {
 	Tasks              taskStatus                    `json:"tasks"`
 	Agents             []agentStatus                 `json:"agents"`
 	AgentHealth        map[string]models.AgentHealth `json:"agent_health,omitempty"`
+	AgentCapacity      agentCapacityStatus           `json:"agent_capacity" yaml:"agent_capacity"`
 	OrchestratorState  orchestratorStatus            `json:"orchestrator_state"`
 	WorkQueues         workQueuesStatus              `json:"work_queues"`
 	PendingTransitions []pendingTransition           `json:"pending_transitions,omitempty"`
-	PhaseHandoff       *phaseHandoffStatus           `json:"phase_handoff,omitempty"`
+	PhaseHandoff       *phaseHandoffStatus           `json:"phase_handoff,omitempty" yaml:"phase_handoff,omitempty"`
 	Anomalies          *[]string                     `json:"anomalies,omitempty"`
 	CircuitBreaker     *circuitBreakerStatus         `json:"circuit_breaker,omitempty"`
 }
@@ -46,11 +47,17 @@ type pendingTransition struct {
 }
 
 type phaseHandoffStatus struct {
-	State               string             `json:"state"`
-	Explanation         string             `json:"explanation"`
-	ReadyPlanningTasks  []string           `json:"ready_planning_tasks"`
-	BlockingTasks       []phaseHandoffTask `json:"blocking_tasks,omitempty"`
-	StaleAssignedAgents []phaseHandoffTask `json:"stale_assigned_agents,omitempty"`
+	State               string               `json:"state" yaml:"state"`
+	Explanation         string               `json:"explanation" yaml:"explanation"`
+	ReadyPlanningTasks  []string             `json:"ready_planning_tasks" yaml:"ready_planning_tasks"`
+	MergeRequired       []phaseMergeRequired `json:"merge_required,omitempty" yaml:"merge_required,omitempty"`
+	BlockingTasks       []phaseHandoffTask   `json:"blocking_tasks,omitempty" yaml:"blocking_tasks,omitempty"`
+	StaleAssignedAgents []phaseHandoffTask   `json:"stale_assigned_agents,omitempty" yaml:"stale_assigned_agents,omitempty"`
+}
+
+type phaseMergeRequired struct {
+	TaskID string `json:"task_id" yaml:"task_id"`
+	Action string `json:"action" yaml:"action"`
 }
 
 type phaseHandoffTask struct {
@@ -89,14 +96,32 @@ type configStatus struct {
 }
 
 type taskStatus struct {
-	Total         int            `json:"total"`
-	Active        int            `json:"active"`
-	Terminal      int            `json:"terminal"`
-	ByStatus      map[string]int `json:"by_status"`
-	Claimable     int            `json:"claimable"`
-	Reviewable    int            `json:"reviewable"`
-	Blocked       int            `json:"blocked"`
-	BlockedByDeps int            `json:"blocked_by_deps"`
+	Total                        int                        `json:"total"`
+	Active                       int                        `json:"active"`
+	Terminal                     int                        `json:"terminal"`
+	ByStatus                     map[string]int             `json:"by_status"`
+	Claimable                    int                        `json:"claimable"`
+	Reviewable                   int                        `json:"reviewable"`
+	ClaimableByRole              []models.RoleTaskReadiness `json:"claimable_by_role" yaml:"claimable_by_role"`
+	ReviewableByRole             []models.RoleTaskReadiness `json:"reviewable_by_role" yaml:"reviewable_by_role"`
+	LegacyCoderClaimable         int                        `json:"legacy_coder_claimable" yaml:"legacy_coder_claimable"`
+	LegacyCodeReviewerReviewable int                        `json:"legacy_code_reviewer_reviewable" yaml:"legacy_code_reviewer_reviewable"`
+	Blocked                      int                        `json:"blocked"`
+	BlockedByDeps                int                        `json:"blocked_by_deps"`
+}
+
+type agentCapacityStatus struct {
+	Live     int                 `json:"live"`
+	Free     int                 `json:"free"`
+	Degraded int                 `json:"degraded"`
+	ByRole   []roleAgentCapacity `json:"by_role" yaml:"by_role"`
+}
+
+type roleAgentCapacity struct {
+	Role     string `json:"role" yaml:"role"`
+	Live     int    `json:"live" yaml:"live"`
+	Free     int    `json:"free" yaml:"free"`
+	Degraded int    `json:"degraded" yaml:"degraded"`
 }
 
 type agentStatus struct {
@@ -127,7 +152,6 @@ type workQueuesStatus struct {
 
 type queueStatus struct {
 	Available int    `json:"available"`
-	Degraded  int    `json:"degraded,omitempty"`
 	Reason    string `json:"reason"`
 }
 
@@ -195,8 +219,9 @@ func BuildStatusData(state *models.State, detailed bool, projectRoot string, pr 
 	data.Tasks = buildTaskStatus(state, pr)
 	data.Agents = buildAgentStatuses(state)
 	data.AgentHealth = currentAgentHealth(state)
+	data.AgentCapacity = buildAgentCapacityStatus(state, pr)
 	data.OrchestratorState = buildOrchestratorStatus(state, projectRoot)
-	data.WorkQueues = buildWorkQueuesStatus(state, data.Tasks.Claimable, data.Tasks.Reviewable, pr)
+	data.WorkQueues = buildWorkQueuesStatus(state, data.Tasks.LegacyCoderClaimable, data.Tasks.LegacyCodeReviewerReviewable, pr)
 	data.PhaseHandoff = buildPhaseHandoffStatus(state, projectRoot)
 
 	for i := range state.Tasks {
@@ -276,14 +301,19 @@ func buildTaskStatus(state *models.State, pr models.PipelineResolver) taskStatus
 		}
 	}
 
-	ts.Claimable = models.CountClaimableTasks(state, models.RoleCoder, pr)
-	ts.Reviewable = models.CountReviewableTasks(state, models.RoleCodeReviewer, pr)
+	readiness := models.GetTaskReadiness(state, pr)
+	ts.Claimable = readiness.Claimable
+	ts.Reviewable = readiness.Reviewable
+	ts.ClaimableByRole = readiness.ClaimableByRole
+	ts.ReviewableByRole = readiness.ReviewableByRole
+	ts.LegacyCoderClaimable = models.CountClaimableTasks(state, models.RoleCoder, pr)
+	ts.LegacyCodeReviewerReviewable = models.CountReviewableTasks(state, models.RoleCodeReviewer, pr)
 
 	return ts
 }
 
 func buildPhaseHandoffStatus(state *models.State, projectRoot string) *phaseHandoffStatus {
-	detCtx, err := ops.LoadDetectionContext(projectRoot)
+	detCtx, err := ops.LoadPhaseHandoffDetectionContext(projectRoot)
 	if err != nil {
 		return nil
 	}
@@ -292,6 +322,11 @@ func buildPhaseHandoffStatus(state *models.State, projectRoot string) *phaseHand
 	var blockers []phaseHandoffTask
 	var stale []phaseHandoffTask
 	seenStale := make(map[string]bool)
+	approvedUnmerged := ops.ApprovedPlanningTasksWithUnmergedOutput(
+		state,
+		detCtx.PlanningPairs,
+		detCtx.PlanningApprovedStatuses,
+	)
 
 	for _, taskID := range state.Sprint.Scope.Planned {
 		task := state.FindTask(taskID)
@@ -335,6 +370,24 @@ func buildPhaseHandoffStatus(state *models.State, projectRoot string) *phaseHand
 			}
 		}
 		blockers = append(blockers, blocker)
+	}
+
+	if state.Sprint.Status == models.SprintStatusCompleted && len(approvedUnmerged) > 0 {
+		mergeRequired := make([]phaseMergeRequired, 0, len(approvedUnmerged))
+		for _, taskID := range approvedUnmerged {
+			mergeRequired = append(mergeRequired, phaseMergeRequired{
+				TaskID: taskID,
+				Action: brand.Command("wt-merge", taskID),
+			})
+		}
+		return &phaseHandoffStatus{
+			State:               "MERGE_REQUIRED",
+			Explanation:         fmt.Sprintf("%d approved planning task(s) must be merged before the completed sprint can advance.", len(mergeRequired)),
+			ReadyPlanningTasks:  ready,
+			MergeRequired:       mergeRequired,
+			BlockingTasks:       blockers,
+			StaleAssignedAgents: stale,
+		}
 	}
 
 	if len(ready) == 0 {
@@ -462,19 +515,65 @@ func buildOrchestratorStatus(state *models.State, projectRoot string) orchestrat
 
 // buildWorkQueuesStatus calculates work queue availability
 func buildWorkQueuesStatus(state *models.State, claimable, reviewable int, pr models.PipelineResolver) workQueuesStatus {
-	degradedByRole := currentDegradedAgentCountByRole(state)
 	return workQueuesStatus{
 		Coder: queueStatus{
 			Available: claimable,
-			Degraded:  degradedByRole[models.RoleCoder],
 			Reason:    models.GetCoderWorkDiagnostics(state, pr),
 		},
 		Reviewer: queueStatus{
 			Available: reviewable,
-			Degraded:  degradedByRole[models.RoleCodeReviewer],
 			Reason:    models.GetReviewerWorkDiagnostics(state, pr),
 		},
 	}
+}
+
+func buildAgentCapacityStatus(state *models.State, pr models.PipelineResolver) agentCapacityStatus {
+	byRole := make(map[string]*roleAgentCapacity)
+	ensureRole := func(role string) *roleAgentCapacity {
+		capacity, ok := byRole[role]
+		if !ok {
+			capacity = &roleAgentCapacity{Role: role}
+			byRole[role] = capacity
+		}
+		return capacity
+	}
+	if pr != nil {
+		for _, role := range pr.AllRoleNames() {
+			ensureRole(role)
+		}
+	}
+
+	now := time.Now()
+	nilLeaseHeartbeatWindow := models.NormalizeHeartbeatInterval(state.Config.HeartbeatInterval) + models.LeaseExpiryGracePeriod
+	for agentID, agentState := range state.Agents {
+		capacity := ensureRole(agentState.Role)
+		if !agentHasLiveRegistration(agentState, now, nilLeaseHeartbeatWindow) {
+			continue
+		}
+		capacity.Live++
+		if agentState.Status == models.AgentStatusIdle && !agentHealthIsCurrentDegraded(state.AgentHealth[agentID], agentState) {
+			capacity.Free++
+		}
+	}
+	for _, health := range currentAgentHealth(state) {
+		ensureRole(health.Role).Degraded++
+	}
+
+	roles := make([]string, 0, len(byRole))
+	for role := range byRole {
+		roles = append(roles, role)
+	}
+	slices.Sort(roles)
+
+	result := agentCapacityStatus{ByRole: make([]roleAgentCapacity, 0, len(roles))}
+	for _, role := range roles {
+		capacity := *byRole[role]
+		result.Live += capacity.Live
+		result.Free += capacity.Free
+		result.Degraded += capacity.Degraded
+		result.ByRole = append(result.ByRole, capacity)
+	}
+	return result
 }
 
 func currentAgentHealth(state *models.State) map[string]models.AgentHealth {
@@ -493,14 +592,6 @@ func currentAgentHealth(state *models.State) map[string]models.AgentHealth {
 		return nil
 	}
 	return current
-}
-
-func currentDegradedAgentCountByRole(state *models.State) map[string]int {
-	counts := make(map[string]int)
-	for _, health := range currentAgentHealth(state) {
-		counts[health.Role]++
-	}
-	return counts
 }
 
 type processStatusInfo struct {
@@ -543,11 +634,44 @@ func writeTasksSection(b *strings.Builder, tasks taskStatus) {
 
 	fmt.Fprintf(b, "\nClaimable: %d tasks\n", tasks.Claimable)
 	fmt.Fprintf(b, "Reviewable: %d tasks\n", tasks.Reviewable)
+	writeRoleTaskReadiness(b, "Claimable by role", tasks.ClaimableByRole)
+	writeRoleTaskReadiness(b, "Reviewable by role", tasks.ReviewableByRole)
+	fmt.Fprintf(b, "Legacy coder claimable: %d tasks\n", tasks.LegacyCoderClaimable)
+	fmt.Fprintf(b, "Legacy code-reviewer reviewable: %d tasks\n", tasks.LegacyCodeReviewerReviewable)
 	if tasks.Blocked > 0 {
 		fmt.Fprintf(b, "Blocked: %d tasks\n", tasks.Blocked)
 	}
 	if tasks.BlockedByDeps > 0 {
 		fmt.Fprintf(b, "Blocked by dependencies: %d tasks\n", tasks.BlockedByDeps)
+	}
+	b.WriteString("\n")
+}
+
+func writeRoleTaskReadiness(b *strings.Builder, label string, readiness []models.RoleTaskReadiness) {
+	if len(readiness) == 0 {
+		return
+	}
+	fmt.Fprintf(b, "%s:\n", label)
+	for _, role := range readiness {
+		fmt.Fprintf(b, "  %s: %d\n", role.Role, role.Count)
+	}
+}
+
+func writeAgentCapacitySection(b *strings.Builder, capacity agentCapacityStatus) {
+	b.WriteString("=== AGENT CAPACITY ===\n")
+	fmt.Fprintf(b, "Live: %d, Free: %d, Degraded: %d\n", capacity.Live, capacity.Free, capacity.Degraded)
+	if len(capacity.ByRole) > 0 {
+		rows := make([][]string, 0, len(capacity.ByRole))
+		for _, role := range capacity.ByRole {
+			rows = append(rows, []string{
+				role.Role,
+				fmt.Sprintf("%d", role.Live),
+				fmt.Sprintf("%d", role.Free),
+				fmt.Sprintf("%d", role.Degraded),
+			})
+		}
+		b.WriteString(render.FormatTable([]string{"Role", "Live", "Free", "Degraded"}, rows))
+		b.WriteString("\n")
 	}
 	b.WriteString("\n")
 }
@@ -623,6 +747,12 @@ func writePhaseHandoffSection(b *strings.Builder, handoff *phaseHandoffStatus) {
 			fmt.Fprintf(b, "  - %s\n", taskID)
 		}
 	}
+	if len(handoff.MergeRequired) > 0 {
+		b.WriteString("Merge required:\n")
+		for _, merge := range handoff.MergeRequired {
+			fmt.Fprintf(b, "  %s: %s\n", merge.TaskID, merge.Action)
+		}
+	}
 	if len(handoff.BlockingTasks) > 0 {
 		b.WriteString("Non-terminal planned tasks:\n")
 		b.WriteString(render.FormatTable(
@@ -675,6 +805,7 @@ type statusDashboardData struct {
 	statusData
 	TasksSection       string
 	AgentsSection      string
+	CapacitySection    string
 	HandoffSection     string
 	AnomalyList        []string
 	TransitionsSection string
@@ -683,10 +814,11 @@ type statusDashboardData struct {
 // formatStatusDashboard renders the status as a dashboard
 func formatStatusDashboard(data statusData) (string, error) {
 	// Pre-render imperative sections (table formatters stay as-is)
-	var tasksBuf, agentsBuf strings.Builder
+	var tasksBuf, agentsBuf, capacityBuf strings.Builder
 	writeTasksSection(&tasksBuf, data.Tasks)
 	writeAgentsSection(&agentsBuf, data.Agents)
 	writeAgentHealthSection(&agentsBuf, data.AgentHealth)
+	writeAgentCapacitySection(&capacityBuf, data.AgentCapacity)
 	var handoffBuf strings.Builder
 	writePhaseHandoffSection(&handoffBuf, data.PhaseHandoff)
 
@@ -710,6 +842,7 @@ func formatStatusDashboard(data statusData) (string, error) {
 		statusData:         data,
 		TasksSection:       tasksBuf.String(),
 		AgentsSection:      agentsBuf.String(),
+		CapacitySection:    capacityBuf.String(),
 		HandoffSection:     handoffBuf.String(),
 		AnomalyList:        anomalyList,
 		TransitionsSection: transitionsBuf.String(),

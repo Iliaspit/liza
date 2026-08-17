@@ -243,7 +243,7 @@ func FindMissingRolesWithClaimableWork(state *models.State, pr models.PipelineRe
 	}
 
 	registeredRoles := make(map[string]bool)
-	now := time.Now()
+	now := time.Now().UTC()
 	nilLeaseHeartbeatWindow := models.NormalizeHeartbeatInterval(state.Config.HeartbeatInterval) + models.LeaseExpiryGracePeriod
 	for agentID, agentState := range state.Agents {
 		if agentHasLiveRegistration(agentState, now, nilLeaseHeartbeatWindow) {
@@ -270,10 +270,10 @@ func FindMissingRolesWithClaimableWork(state *models.State, pr models.PipelineRe
 			continue
 		}
 
-		if !registeredRoles[doerRuntime] && task.IsClaimable(doerRuntime, state.Tasks, pr) {
+		if !registeredRoles[doerRuntime] && models.IsRoleTaskReady(state, task, doerRuntime, pr, now) {
 			missingRoleTasks[doerRuntime] = append(missingRoleTasks[doerRuntime], task.ID)
 		}
-		if !registeredRoles[reviewerRuntime] && task.IsClaimable(reviewerRuntime, state.Tasks, pr) {
+		if !registeredRoles[reviewerRuntime] && models.IsRoleTaskReady(state, task, reviewerRuntime, pr, now) {
 			missingRoleTasks[reviewerRuntime] = append(missingRoleTasks[reviewerRuntime], task.ID)
 		}
 	}

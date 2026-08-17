@@ -2,12 +2,107 @@ package models
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 )
 
-// CountClaimableTasks counts tasks claimable by the given role.
-// Uses IsClaimable which checks task type, status, and dependencies.
+// RoleTaskReadiness is the number of tasks currently claimable by one
+// configured pipeline role.
+type RoleTaskReadiness struct {
+	Role  string `json:"role" yaml:"role"`
+	Count int    `json:"count" yaml:"count"`
+}
+
+// TaskReadiness projects task availability independently of agent capacity.
+// Claimable contains doer work and Reviewable contains reviewer work.
+type TaskReadiness struct {
+	Claimable        int
+	Reviewable       int
+	ClaimableByRole  []RoleTaskReadiness
+	ReviewableByRole []RoleTaskReadiness
+}
+
+// GetTaskReadiness returns aggregate and per-role task availability for every
+// configured doer and reviewer role. Role counts use IsRoleTaskReady so this
+// projection shares lifecycle, dependency, and ownership semantics with task
+// selection.
+func GetTaskReadiness(state *State, pr PipelineResolver) TaskReadiness {
+	var readiness TaskReadiness
+	if state == nil || pr == nil {
+		return readiness
+	}
+
+	roles := slices.Clone(pr.AllRoleNames())
+	slices.Sort(roles)
+	roles = slices.Compact(roles)
+	now := time.Now().UTC()
+	for _, role := range roles {
+		roleType, err := pr.RoleType(role)
+		if err != nil {
+			continue
+		}
+
+		switch roleType {
+		case "doer":
+			count := countRoleReadyTasks(state, role, pr, now)
+			readiness.ClaimableByRole = append(readiness.ClaimableByRole, RoleTaskReadiness{Role: role, Count: count})
+			readiness.Claimable += count
+		case "reviewer":
+			count := countRoleReadyTasks(state, role, pr, now)
+			readiness.ReviewableByRole = append(readiness.ReviewableByRole, RoleTaskReadiness{Role: role, Count: count})
+			readiness.Reviewable += count
+		}
+	}
+
+	return readiness
+}
+
+// countRoleReadyTasks counts tasks immediately available to the given role.
+func countRoleReadyTasks(state *State, role string, pr PipelineResolver, now time.Time) int {
+	if state == nil {
+		return 0
+	}
+	count := 0
+	for i := range state.Tasks {
+		if IsRoleTaskReady(state, &state.Tasks[i], role, pr, now) {
+			count++
+		}
+	}
+	return count
+}
+
+// IsRoleTaskReady reports whether a task is immediately available to a role's
+// next claimant. A rejected doer task reserved by an active ownership lease is
+// available only to its current owner, not to the role queue; malformed
+// ownership without a lease fails closed.
+func IsRoleTaskReady(state *State, task *Task, role string, pr PipelineResolver, now time.Time) bool {
+	if state == nil || task == nil || pr == nil || !task.IsClaimable(role, state.Tasks, pr) {
+		return false
+	}
+
+	doerRole, err := pr.DoerRole(task.RolePair)
+	if err != nil {
+		return false
+	}
+	if role != doerRole {
+		return true
+	}
+	rejected, err := pr.RejectedStatus(task.RolePair)
+	if err != nil {
+		return false
+	}
+	if task.Status != rejected || task.AssignedTo == nil || *task.AssignedTo == "" {
+		return true
+	}
+	if task.LeaseExpires == nil {
+		return false
+	}
+	return !task.LeaseExpires.After(now)
+}
+
+// CountClaimableTasks preserves the legacy lifecycle-level count for a role.
+// It checks task status and dependencies but not rejected-task ownership.
 func CountClaimableTasks(state *State, role string, pr PipelineResolver) int {
 	count := 0
 	for i := range state.Tasks {
@@ -52,6 +147,9 @@ func DoerClaimBlockedReason(state *State, task *Task, role, agentID string, pr P
 	if task.AssignedTo == nil || *task.AssignedTo == "" {
 		return ""
 	}
+	if IsRoleTaskReady(state, task, role, pr, now) {
+		return ""
+	}
 
 	assignedTo := *task.AssignedTo
 	if strings.HasPrefix(assignedTo, "$") {
@@ -68,7 +166,7 @@ func DoerClaimBlockedReason(state *State, task *Task, role, agentID string, pr P
 			task.ID, assignedTo, task.LeaseExpires.UTC().Format(time.RFC3339), agentID)
 	}
 
-	return ""
+	return fmt.Sprintf("task %s is %s (not claimable by %s)", task.ID, task.Status, role)
 }
 
 // IsDoerClaimableByAgent is the agent-aware doer claimability predicate used by

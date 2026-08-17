@@ -2,6 +2,24 @@
 
 Deliberate debt with payback triggers. See CORE.md Rule 3 (DoD) for policy.
 
+## Legacy built-in readiness surface
+
+**What:** `tasks.legacy_coder_claimable`,
+`tasks.legacy_code_reviewer_reviewable`, and their dashboard/work-queue lines
+remain always-on for compatibility. They retain the former built-in,
+lifecycle-level semantics alongside the ownership-aware, configured-role
+`claimable_by_role` and `reviewable_by_role` fields.
+
+**Why deferred:** Removing or redefining the legacy fields can break unknown
+structured-output and dashboard consumers. Preserving their historical meaning
+keeps those consumers stable while the configured-role surface becomes the
+scheduling authority.
+
+**Payback trigger:** Once supported consumers have migrated to
+`claimable_by_role` and `reviewable_by_role`, and a repository/integration scan
+finds no remaining legacy field or work-queue consumers, announce deprecation
+and remove the legacy fields and lines in the next compatible release boundary.
+
 ## Free-text mutation flags can consume registered flag tokens
 
 **What:** The CLI guards `--reason` against an empty, unquoted shell variable

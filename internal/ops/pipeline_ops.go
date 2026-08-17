@@ -1,6 +1,7 @@
 package ops
 
 import (
+	"errors"
 	"fmt"
 	"log"
 
@@ -194,6 +195,25 @@ func LoadDetectionContext(projectRoot string) (*PipelineDetectionContext, error)
 		PlanningApprovedStatuses: planningApprovedStatuses,
 		ManyToOneTransitions:     m2oInfos,
 	}, nil
+}
+
+// LoadPhaseHandoffDetectionContext loads the pipeline context used to decide
+// whether planning output can advance to the next phase. A missing pipeline
+// config retains the legacy code-planning-pair policy used by completed-sprint
+// advance; malformed configs fail closed instead of silently using that policy.
+func LoadPhaseHandoffDetectionContext(projectRoot string) (*PipelineDetectionContext, error) {
+	detCtx, err := LoadDetectionContext(projectRoot)
+	if err != nil {
+		if errors.Is(err, pipeline.ErrConfigNotFound) {
+			return &PipelineDetectionContext{
+				PlanningApprovedStatuses: map[string]models.TaskStatus{
+					"code-planning-pair": models.TaskStatusCodingPlanApproved,
+				},
+			}, nil
+		}
+		return nil, fmt.Errorf("pipeline config failed to load: %w", err)
+	}
+	return detCtx, nil
 }
 
 // SprintTerminalStates returns pipeline-defined sprint-terminal states for a project.

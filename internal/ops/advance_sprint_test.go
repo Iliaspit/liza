@@ -585,11 +585,78 @@ func TestResumeWithSprintAdvance_BlocksApprovedUnmergedPlanning(t *testing.T) {
 	}
 }
 
-// TestResumeWithSprintAdvance_ExecutesTransitions is a regression test for fdcb19a.
+func TestApprovedPlanningTasksWithUnmergedOutput(t *testing.T) {
+	planningPairs := map[string]bool{
+		"code-planning-pair": true,
+		"epic-planning-pair": true,
+	}
+	approvedStatuses := map[string]models.TaskStatus{
+		"code-planning-pair": models.TaskStatusCodingPlanApproved,
+		"epic-planning-pair": models.TaskStatus("EPIC_PLAN_APPROVED"),
+	}
+	output := []models.OutputEntry{{Desc: "planned child"}}
+
+	t.Run("one eligible task", func(t *testing.T) {
+		state := testhelpers.CreateValidState()
+		state.Tasks = []models.Task{{
+			ID:       "code-plan-1",
+			RolePair: "code-planning-pair",
+			Status:   models.TaskStatusCodingPlanApproved,
+			Output:   output,
+		}}
+		state.Sprint.Scope.Planned = []string{"code-plan-1"}
+
+		got := ApprovedPlanningTasksWithUnmergedOutput(state, planningPairs, approvedStatuses)
+		if !slices.Equal(got, []string{"code-plan-1"}) {
+			t.Fatalf("ApprovedPlanningTasksWithUnmergedOutput() = %v, want [code-plan-1]", got)
+		}
+	})
+
+	t.Run("multiple eligible tasks preserve sprint order and exclude ineligible tasks", func(t *testing.T) {
+		state := testhelpers.CreateValidState()
+		state.Tasks = []models.Task{
+			{ID: "code-plan-1", RolePair: "code-planning-pair", Status: models.TaskStatusCodingPlanApproved, Output: output},
+			{ID: "epic-plan-1", RolePair: "epic-planning-pair", Status: models.TaskStatus("EPIC_PLAN_APPROVED"), Output: output},
+			{ID: "non-planning", RolePair: "coding-pair", Status: models.TaskStatusCodingPlanApproved, Output: output},
+			{ID: "no-output", RolePair: "code-planning-pair", Status: models.TaskStatusCodingPlanApproved},
+			{ID: "merged", RolePair: "code-planning-pair", Status: models.TaskStatusMerged, Output: output},
+			{ID: "wrong-status", RolePair: "code-planning-pair", Status: models.TaskStatusCodePlanning, Output: output},
+			{ID: "out-of-scope", RolePair: "code-planning-pair", Status: models.TaskStatusCodingPlanApproved, Output: output},
+		}
+		state.Sprint.Scope.Planned = []string{
+			"epic-plan-1",
+			"non-planning",
+			"no-output",
+			"merged",
+			"wrong-status",
+			"code-plan-1",
+		}
+		before, err := yaml.Marshal(state)
+		if err != nil {
+			t.Fatalf("yaml.Marshal(state) before query: %v", err)
+		}
+
+		got := ApprovedPlanningTasksWithUnmergedOutput(state, planningPairs, approvedStatuses)
+		if !slices.Equal(got, []string{"epic-plan-1", "code-plan-1"}) {
+			t.Fatalf("ApprovedPlanningTasksWithUnmergedOutput() = %v, want [epic-plan-1 code-plan-1]", got)
+		}
+
+		after, err := yaml.Marshal(state)
+		if err != nil {
+			t.Fatalf("yaml.Marshal(state) after query: %v", err)
+		}
+		if string(after) != string(before) {
+			t.Fatal("ApprovedPlanningTasksWithUnmergedOutput() mutated its input state")
+		}
+	})
+}
+
+// TestResumeWithSprintAdvance_AfterMergeExecutesPlanningHandoff is a regression
+// test for fdcb19a.
 // When advancing from COMPLETED, Resume must execute available transitions so
 // child tasks are created in the new sprint. Without this, merged planning tasks
 // with unconsumed output[] are carried forward indefinitely without creating children.
-func TestResumeWithSprintAdvance_ExecutesTransitions(t *testing.T) {
+func TestResumeWithSprintAdvance_AfterMergeExecutesPlanningHandoff(t *testing.T) {
 	tmpDir, stateFile := setupAdvanceTest(t)
 
 	now := time.Now().UTC()
@@ -608,6 +675,13 @@ func TestResumeWithSprintAdvance_ExecutesTransitions(t *testing.T) {
 
 	state.Tasks = []models.Task{planningTask}
 	state.Sprint.Scope.Planned = []string{"epic-planning-1"}
+	if got := ApprovedPlanningTasksWithUnmergedOutput(
+		state,
+		map[string]bool{"epic-planning-pair": true},
+		map[string]models.TaskStatus{"epic-planning-pair": models.TaskStatus("EPIC_PLAN_APPROVED")},
+	); len(got) != 0 {
+		t.Fatalf("ApprovedPlanningTasksWithUnmergedOutput() after merge = %v, want []", got)
+	}
 
 	testhelpers.WriteInitialState(t, stateFile, state)
 

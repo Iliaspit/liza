@@ -22,13 +22,14 @@ Reason: {{deref .Config.PauseReason}}
 {{- end}}
 {{- end}}
 
-{{.TasksSection}}{{.AgentsSection}}=== ORCHESTRATOR ===
+{{.TasksSection}}{{.AgentsSection}}{{.CapacitySection}}=== ORCHESTRATOR ===
 Wake Trigger: {{.OrchestratorState.Trigger}}
 {{- if gt .OrchestratorState.TriggerCount 0}} (count: {{.OrchestratorState.TriggerCount}}){{end}}
 Explanation: {{.OrchestratorState.Reason}}
 
 {{.HandoffSection -}}
 === WORK QUEUES ===
+Legacy role task readiness:
 Coder: {{.WorkQueues.Coder.Available}} available - {{.WorkQueues.Coder.Reason}}
 Reviewer: {{.WorkQueues.Reviewer.Available}} available - {{.WorkQueues.Reviewer.Reason}}
 

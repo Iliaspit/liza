@@ -57,6 +57,42 @@ func TestLoadDetectionContext_NoPipeline(t *testing.T) {
 	}
 }
 
+func TestLoadPhaseHandoffDetectionContext_NoPipelineUsesLegacyPlanning(t *testing.T) {
+	tmpDir := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, tmpDir)
+	testhelpers.SetupLizaDir(t, tmpDir)
+	if err := os.Remove(filepath.Join(tmpDir, ".liza", "pipeline.yaml")); err != nil && !os.IsNotExist(err) {
+		t.Fatalf("remove pipeline config: %v", err)
+	}
+
+	ctx, err := LoadPhaseHandoffDetectionContext(tmpDir)
+	if err != nil {
+		t.Fatalf("LoadPhaseHandoffDetectionContext() error: %v", err)
+	}
+	if !IsPlanningPair("code-planning-pair", ctx.PlanningPairs) {
+		t.Fatal("legacy code-planning-pair is not recognized")
+	}
+	if got := ctx.PlanningApprovedStatuses["code-planning-pair"]; got != models.TaskStatusCodingPlanApproved {
+		t.Fatalf("legacy approved status = %q, want %q", got, models.TaskStatusCodingPlanApproved)
+	}
+}
+
+func TestLoadPhaseHandoffDetectionContext_MalformedPipelineFailsClosed(t *testing.T) {
+	tmpDir, _ := setupPipelineTest(t)
+	pipelinePath := filepath.Join(tmpDir, ".liza", "pipeline.yaml")
+	if err := os.WriteFile(pipelinePath, []byte("pipeline: [not-valid"), 0644); err != nil {
+		t.Fatalf("write malformed pipeline config: %v", err)
+	}
+
+	ctx, err := LoadPhaseHandoffDetectionContext(tmpDir)
+	if err == nil {
+		t.Fatal("LoadPhaseHandoffDetectionContext() error = nil, want malformed config error")
+	}
+	if ctx != nil {
+		t.Fatalf("LoadPhaseHandoffDetectionContext() context = %+v, want nil on malformed config", ctx)
+	}
+}
+
 func TestLoadResolver_PipelineGoal(t *testing.T) {
 	tmpDir, _ := setupPipelineTest(t)
 

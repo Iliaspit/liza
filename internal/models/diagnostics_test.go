@@ -1,10 +1,248 @@
 package models
 
 import (
+	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 )
+
+func TestTaskReadinessConfiguredRoles(t *testing.T) {
+	resolver := &taskReadinessTestResolver{
+		roleNames: []string{
+			"plan-reviewer",
+			"coder",
+			"idle-reviewer",
+			"orchestrator",
+			"planner",
+			"planner",
+			"code-reviewer",
+			"idle-doer",
+		},
+		roleTypes: map[string]string{
+			"coder":         "doer",
+			"code-reviewer": "reviewer",
+			"planner":       "doer",
+			"plan-reviewer": "reviewer",
+			"idle-doer":     "doer",
+			"idle-reviewer": "reviewer",
+			"orchestrator":  "orchestrator",
+		},
+		pairs: map[string]taskReadinessTestPair{
+			"coding-pair": {
+				doer: RoleCoder, reviewer: RoleCodeReviewer,
+				initial: TaskStatusReady, rejected: TaskStatusRejected,
+				submitted: TaskStatusReadyForReview, reviewing: TaskStatusReviewing,
+				executing: TaskStatusImplementing, approved: TaskStatusApproved,
+			},
+			"planning-pair": {
+				doer: "planner", reviewer: "plan-reviewer",
+				initial: TaskStatusDraftCodingPlan, rejected: TaskStatusCodingPlanRejected,
+				submitted: TaskStatusCodingPlanToReview, reviewing: TaskStatusReviewingCodingPlan,
+				executing: TaskStatusCodePlanning, approved: TaskStatusCodingPlanApproved,
+			},
+			"alternate-planning-pair": {
+				doer: "planner", reviewer: "plan-reviewer",
+				initial: "ALT_PLAN_READY", rejected: "ALT_PLAN_REJECTED",
+				submitted: "ALT_PLAN_TO_REVIEW", reviewing: "ALT_PLAN_REVIEWING",
+				executing: "ALT_PLAN_EXECUTING", approved: "ALT_PLAN_APPROVED",
+			},
+			"idle-pair": {
+				doer: "idle-doer", reviewer: "idle-reviewer",
+				initial: "IDLE_READY", rejected: "IDLE_REJECTED",
+				submitted: "IDLE_TO_REVIEW", reviewing: "IDLE_REVIEWING",
+				executing: "IDLE_EXECUTING", approved: "IDLE_APPROVED",
+			},
+		},
+	}
+
+	state := &State{Tasks: []Task{
+		{ID: "merged-dependency", Status: TaskStatusMerged, RolePair: "coding-pair"},
+		{ID: "coding-ready", Status: TaskStatusReady, RolePair: "coding-pair"},
+		{ID: "coding-executing", Status: TaskStatusImplementing, RolePair: "coding-pair"},
+		{ID: "coding-submitted", Status: TaskStatusReadyForReview, RolePair: "coding-pair", ReviewCommit: strPtr("coding-sha")},
+		{ID: "planning-ready", Status: TaskStatusDraftCodingPlan, RolePair: "planning-pair", DependsOn: []string{"merged-dependency"}},
+		{ID: "planning-executing", Status: TaskStatusCodePlanning, RolePair: "planning-pair"},
+		{ID: "planning-blocked", Status: TaskStatusDraftCodingPlan, RolePair: "planning-pair", DependsOn: []string{"coding-executing"}},
+		{ID: "planning-submitted", Status: TaskStatusCodingPlanToReview, RolePair: "planning-pair", ReviewCommit: strPtr("planning-sha")},
+		{ID: "planning-reviewing", Status: TaskStatusReviewingCodingPlan, RolePair: "planning-pair", ReviewCommit: strPtr("planning-review-sha")},
+		{ID: "alternate-planning-ready", Status: "ALT_PLAN_READY", RolePair: "alternate-planning-pair"},
+		{ID: "alternate-planning-submitted", Status: "ALT_PLAN_TO_REVIEW", RolePair: "alternate-planning-pair", ReviewCommit: strPtr("alternate-planning-sha")},
+	}}
+
+	got := GetTaskReadiness(state, resolver)
+	wantClaimable := []RoleTaskReadiness{
+		{Role: "coder", Count: 1},
+		{Role: "idle-doer", Count: 0},
+		{Role: "planner", Count: 2},
+	}
+	wantReviewable := []RoleTaskReadiness{
+		{Role: "code-reviewer", Count: 1},
+		{Role: "idle-reviewer", Count: 0},
+		{Role: "plan-reviewer", Count: 2},
+	}
+	assertRoleTaskReadiness(t, "claimable", got.ClaimableByRole, wantClaimable)
+	assertRoleTaskReadiness(t, "reviewable", got.ReviewableByRole, wantReviewable)
+
+	if got.Claimable != sumRoleTaskReadiness(got.ClaimableByRole) {
+		t.Errorf("Claimable = %d, want sum of role counts %d", got.Claimable, sumRoleTaskReadiness(got.ClaimableByRole))
+	}
+	if got.Reviewable != sumRoleTaskReadiness(got.ReviewableByRole) {
+		t.Errorf("Reviewable = %d, want sum of role counts %d", got.Reviewable, sumRoleTaskReadiness(got.ReviewableByRole))
+	}
+
+	for _, roleReadiness := range append(got.ClaimableByRole, got.ReviewableByRole...) {
+		want := 0
+		for i := range state.Tasks {
+			if state.Tasks[i].IsClaimable(roleReadiness.Role, state.Tasks, resolver) {
+				want++
+			}
+		}
+		if roleReadiness.Count != want {
+			t.Errorf("readiness for role %q = %d, want IsClaimable count %d", roleReadiness.Role, roleReadiness.Count, want)
+		}
+	}
+}
+
+func TestTaskReadinessExcludesRejectedWorkReservedByOwnership(t *testing.T) {
+	pr := &mockPipelineResolver{
+		doer:      "coder",
+		reviewer:  "code-reviewer",
+		initial:   TaskStatusReady,
+		rejected:  TaskStatusRejected,
+		submitted: TaskStatusReadyForReview,
+		reviewing: TaskStatusReviewing,
+		executing: TaskStatusImplementing,
+		approved:  TaskStatusApproved,
+	}
+	now := time.Now().UTC()
+	owner := "coder-2"
+	futureLease := now.Add(time.Hour)
+	expiredLease := now.Add(-time.Hour)
+	state := &State{Tasks: []Task{
+		{ID: "unowned", Status: TaskStatusRejected, RolePair: "coding-pair"},
+		{ID: "expired", Status: TaskStatusRejected, RolePair: "coding-pair", AssignedTo: &owner, LeaseExpires: &expiredLease},
+		{ID: "protected", Status: TaskStatusRejected, RolePair: "coding-pair", AssignedTo: &owner, LeaseExpires: &futureLease},
+		{ID: "malformed", Status: TaskStatusRejected, RolePair: "coding-pair", AssignedTo: &owner},
+	}}
+
+	got := GetTaskReadiness(state, pr)
+	if got.Claimable != 2 {
+		t.Fatalf("Claimable = %d, want 2 unowned or expired rejected tasks", got.Claimable)
+	}
+	if want := []RoleTaskReadiness{{Role: RoleCoder, Count: 2}}; !slices.Equal(got.ClaimableByRole, want) {
+		t.Fatalf("ClaimableByRole = %#v, want %#v", got.ClaimableByRole, want)
+	}
+	if legacy := CountClaimableTasks(state, RoleCoder, pr); legacy != 4 {
+		t.Fatalf("legacy CountClaimableTasks = %d, want historical status-level count 4", legacy)
+	}
+}
+
+func assertRoleTaskReadiness(t *testing.T, name string, got, want []RoleTaskReadiness) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("%s role count length = %d, want %d: %#v", name, len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("%s[%d] = %#v, want %#v", name, i, got[i], want[i])
+		}
+	}
+}
+
+func sumRoleTaskReadiness(readiness []RoleTaskReadiness) int {
+	total := 0
+	for _, role := range readiness {
+		total += role.Count
+	}
+	return total
+}
+
+type taskReadinessTestPair struct {
+	doer      string
+	reviewer  string
+	initial   TaskStatus
+	rejected  TaskStatus
+	submitted TaskStatus
+	reviewing TaskStatus
+	executing TaskStatus
+	approved  TaskStatus
+}
+
+type taskReadinessTestResolver struct {
+	roleNames []string
+	roleTypes map[string]string
+	pairs     map[string]taskReadinessTestPair
+}
+
+func (r *taskReadinessTestResolver) RoleType(role string) (string, error) {
+	roleType, ok := r.roleTypes[role]
+	if !ok {
+		return "", fmt.Errorf("unknown role %q", role)
+	}
+	return roleType, nil
+}
+
+func (r *taskReadinessTestResolver) AllRoleNames() []string {
+	return r.roleNames
+}
+
+func (r *taskReadinessTestResolver) pair(rolePair string) (taskReadinessTestPair, error) {
+	pair, ok := r.pairs[rolePair]
+	if !ok {
+		return taskReadinessTestPair{}, fmt.Errorf("unknown role-pair %q", rolePair)
+	}
+	return pair, nil
+}
+
+func (r *taskReadinessTestResolver) DoerRole(rolePair string) (string, error) {
+	pair, err := r.pair(rolePair)
+	return pair.doer, err
+}
+
+func (r *taskReadinessTestResolver) ReviewerRole(rolePair string) (string, error) {
+	pair, err := r.pair(rolePair)
+	return pair.reviewer, err
+}
+
+func (r *taskReadinessTestResolver) InitialStatus(rolePair string) (TaskStatus, error) {
+	pair, err := r.pair(rolePair)
+	return pair.initial, err
+}
+
+func (r *taskReadinessTestResolver) RejectedStatus(rolePair string) (TaskStatus, error) {
+	pair, err := r.pair(rolePair)
+	return pair.rejected, err
+}
+
+func (r *taskReadinessTestResolver) SubmittedStatus(rolePair string) (TaskStatus, error) {
+	pair, err := r.pair(rolePair)
+	return pair.submitted, err
+}
+
+func (r *taskReadinessTestResolver) ReviewingStatus(rolePair string) (TaskStatus, error) {
+	pair, err := r.pair(rolePair)
+	return pair.reviewing, err
+}
+
+func (r *taskReadinessTestResolver) ExecutingStatus(rolePair string) (TaskStatus, error) {
+	pair, err := r.pair(rolePair)
+	return pair.executing, err
+}
+
+func (r *taskReadinessTestResolver) ApprovedStatus(rolePair string) (TaskStatus, error) {
+	pair, err := r.pair(rolePair)
+	return pair.approved, err
+}
+
+func (r *taskReadinessTestResolver) PartiallyApprovedStatus(string) (TaskStatus, error) {
+	return "", fmt.Errorf("no partially-approved state declared")
+}
+
+func (r *taskReadinessTestResolver) Reviewing2Status(string) (TaskStatus, error) {
+	return "", fmt.Errorf("no reviewing-2 state declared")
+}
 
 func TestCountClaimableTasks(t *testing.T) {
 	pr := &mockPipelineResolver{
@@ -142,6 +380,17 @@ func TestCountDoerClaimableTasksForAgent_RejectedOwnership(t *testing.T) {
 		agentID string
 		want    int
 	}{
+		{
+			name: "unowned rejected task allows any coder",
+			task: Task{
+				ID:       "t1",
+				Status:   TaskStatusRejected,
+				Type:     TaskTypeCoding,
+				RolePair: "coding-pair",
+			},
+			agentID: "coder-1",
+			want:    1,
+		},
 		{
 			name: "active lease blocks different coder",
 			task: Task{

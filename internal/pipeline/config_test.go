@@ -1971,6 +1971,68 @@ pipeline:
 	assertContains(t, err.Error(), "not found in roles")
 }
 
+func TestValidate_RolePairRoleTypeMatchesPosition(t *testing.T) {
+	tests := []struct {
+		name     string
+		doer     string
+		reviewer string
+		wantErr  string
+	}{
+		{
+			name:     "reviewer role in doer position",
+			doer:     "reviewer",
+			reviewer: "reviewer",
+			wantErr:  `role-pair "delivery-pair": doer role "reviewer" has type "reviewer", expected "doer"`,
+		},
+		{
+			name:     "doer role in reviewer position",
+			doer:     "doer",
+			reviewer: "doer",
+			wantErr:  `role-pair "delivery-pair": reviewer role "doer" has type "doer", expected "reviewer"`,
+		},
+		{
+			name:     "orchestrator role in doer position",
+			doer:     "orchestrator",
+			reviewer: "reviewer",
+			wantErr:  `role-pair "delivery-pair": doer role "orchestrator" has type "orchestrator", expected "doer"`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := PipelineConfig{Pipeline: Pipeline{
+				Roles: map[string]RoleDef{
+					"doer":         {Type: "doer"},
+					"reviewer":     {Type: "reviewer"},
+					"orchestrator": {Type: "orchestrator"},
+				},
+				RolePairs: map[string]RolePairDef{
+					"delivery-pair": {
+						Doer:     tt.doer,
+						Reviewer: tt.reviewer,
+						States: RolePairStates{
+							Initial:   "READY",
+							Executing: "EXECUTING",
+							Submitted: "SUBMITTED",
+							Reviewing: "REVIEWING",
+							Approved:  "APPROVED",
+							Rejected:  "REJECTED",
+						},
+					},
+				},
+			}}
+
+			err := validate(&cfg)
+			if err == nil {
+				t.Fatal("expected role-pair type mismatch error")
+			}
+			if err.Error() != tt.wantErr {
+				t.Fatalf("validate() error = %q, want %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestLoad_EmbeddedPipelineRoles(t *testing.T) {
 	data, err := os.ReadFile("../embedded/pipeline.yaml")
 	if err != nil {

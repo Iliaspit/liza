@@ -680,6 +680,13 @@ func TestClaimTask_RejectedMutateTask_NoCounterReset(t *testing.T) {
 	task.LeaseExpires = &expiredLease
 	state.Tasks = []models.Task{task}
 	testhelpers.WriteInitialState(t, stateFile, state)
+	resolver, _, err := loadResolver(tmpDir)
+	if err != nil {
+		t.Fatalf("loadResolver() error: %v", err)
+	}
+	if got := models.GetTaskReadiness(state, resolver).Claimable; got != 1 {
+		t.Fatalf("claimable readiness = %d, want 1 after rejected ownership lease expiry", got)
+	}
 
 	// Create worktree (required for claim to succeed).
 	gitWrapper := git.New(tmpDir)
@@ -719,8 +726,15 @@ func TestClaimTask_RejectedActiveLeaseBlocksDifferentCoder(t *testing.T) {
 	task.LeaseExpires = &futureLease
 	state.Tasks = []models.Task{task}
 	testhelpers.WriteInitialState(t, stateFile, state)
+	resolver, _, err := loadResolver(tmpDir)
+	if err != nil {
+		t.Fatalf("loadResolver() error: %v", err)
+	}
+	if got := models.GetTaskReadiness(state, resolver).Claimable; got != 0 {
+		t.Fatalf("claimable readiness = %d, want 0 while rejected work is reserved by another agent", got)
+	}
 
-	_, err := ClaimTask(tmpDir, "task-1", "coder-2")
+	_, err = ClaimTask(tmpDir, "task-1", "coder-2")
 	if err == nil {
 		t.Fatal("Expected active rejected ownership lease to block different coder")
 	}

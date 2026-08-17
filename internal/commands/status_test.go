@@ -1,15 +1,20 @@
 package commands
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/liza-mas/liza/internal/brand"
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/ops"
+	"github.com/liza-mas/liza/internal/pipeline"
+	"github.com/liza-mas/liza/internal/render"
 	"github.com/liza-mas/liza/internal/testhelpers"
 )
 
@@ -143,8 +148,11 @@ func TestBuildStatusData(t *testing.T) {
 				if data.Tasks.Terminal != 1 {
 					t.Errorf("expected 1 terminal task, got %d", data.Tasks.Terminal)
 				}
-				if data.Tasks.Claimable != 2 {
-					t.Errorf("expected 2 claimable tasks (READY + REJECTED), got %d", data.Tasks.Claimable)
+				if data.Tasks.Claimable != 1 {
+					t.Errorf("expected 1 role-ready task (READY; REJECTED is ownership-reserved), got %d", data.Tasks.Claimable)
+				}
+				if data.Tasks.LegacyCoderClaimable != 2 {
+					t.Errorf("expected legacy lifecycle count 2 (READY + REJECTED), got %d", data.Tasks.LegacyCoderClaimable)
 				}
 				if data.Tasks.Reviewable != 1 {
 					t.Errorf("expected 1 reviewable task, got %d", data.Tasks.Reviewable)
@@ -566,6 +574,315 @@ func TestBuildStatusData(t *testing.T) {
 	}
 }
 
+func TestBuildStatusDataPipelineReadinessMatchesClaimsAndMissingRoles(t *testing.T) {
+	pr := statusReadinessResolver()
+	state := statusReadinessState()
+
+	data := BuildStatusData(state, false, "", pr, nil)
+
+	wantClaimable := []models.RoleTaskReadiness{
+		{Role: "coder", Count: 1},
+		{Role: "custom-doer", Count: 2},
+		{Role: "idle-doer", Count: 0},
+	}
+	wantReviewable := []models.RoleTaskReadiness{
+		{Role: "code-reviewer", Count: 1},
+		{Role: "custom-reviewer", Count: 2},
+		{Role: "idle-reviewer", Count: 0},
+	}
+	if !reflect.DeepEqual(data.Tasks.ClaimableByRole, wantClaimable) {
+		t.Fatalf("ClaimableByRole = %#v, want %#v", data.Tasks.ClaimableByRole, wantClaimable)
+	}
+	if !reflect.DeepEqual(data.Tasks.ReviewableByRole, wantReviewable) {
+		t.Fatalf("ReviewableByRole = %#v, want %#v", data.Tasks.ReviewableByRole, wantReviewable)
+	}
+	if data.Tasks.Claimable != 3 || data.Tasks.Reviewable != 3 {
+		t.Fatalf("aggregate readiness = (%d, %d), want (3, 3)", data.Tasks.Claimable, data.Tasks.Reviewable)
+	}
+	if data.Tasks.LegacyCoderClaimable != 1 || data.Tasks.LegacyCodeReviewerReviewable != 1 {
+		t.Fatalf("legacy readiness = (%d, %d), want (1, 1)", data.Tasks.LegacyCoderClaimable, data.Tasks.LegacyCodeReviewerReviewable)
+	}
+	if data.WorkQueues.Coder.Available != 1 || data.WorkQueues.Reviewer.Available != 1 {
+		t.Fatalf("legacy work queues = (%d, %d), want (1, 1)", data.WorkQueues.Coder.Available, data.WorkQueues.Reviewer.Available)
+	}
+	claimableSum := 0
+	for _, role := range data.Tasks.ClaimableByRole {
+		claimableSum += role.Count
+	}
+	reviewableSum := 0
+	for _, role := range data.Tasks.ReviewableByRole {
+		reviewableSum += role.Count
+	}
+	if data.Tasks.Claimable != claimableSum || data.Tasks.Reviewable != reviewableSum {
+		t.Fatalf("aggregate readiness (%d, %d) does not match role sums (%d, %d)", data.Tasks.Claimable, data.Tasks.Reviewable, claimableSum, reviewableSum)
+	}
+
+	missing := FindMissingRolesWithClaimableWork(state, pr)
+	missingCounts := make(map[string]int, len(missing))
+	for _, entry := range missing {
+		missingCounts[entry.Role] = entry.TaskCount
+	}
+	selectionNow := time.Now().UTC()
+	for _, roleReadiness := range append(data.Tasks.ClaimableByRole, data.Tasks.ReviewableByRole...) {
+		direct := 0
+		for i := range state.Tasks {
+			if models.IsRoleTaskReady(state, &state.Tasks[i], roleReadiness.Role, pr, selectionNow) {
+				direct++
+			}
+		}
+		if roleReadiness.Count != direct {
+			t.Errorf("readiness for %q = %d, direct role-ready count = %d", roleReadiness.Role, roleReadiness.Count, direct)
+		}
+		if roleReadiness.Count != missingCounts[roleReadiness.Role] {
+			t.Errorf("readiness for %q = %d, missing-role count = %d", roleReadiness.Role, roleReadiness.Count, missingCounts[roleReadiness.Role])
+		}
+	}
+
+	dashboard, err := formatStatusDashboard(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"Claimable by role:", "custom-doer: 2", "Reviewable by role:", "custom-reviewer: 2",
+		"Legacy coder claimable: 1 tasks", "Legacy code-reviewer reviewable: 1 tasks",
+	} {
+		if !strings.Contains(dashboard, want) {
+			t.Errorf("dashboard missing %q:\n%s", want, dashboard)
+		}
+	}
+	encoded, err := json.Marshal(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`"claimable_by_role"`, `"reviewable_by_role"`,
+		`"legacy_coder_claimable":1`, `"legacy_code_reviewer_reviewable":1`,
+	} {
+		if !strings.Contains(string(encoded), want) {
+			t.Errorf("structured status missing %s: %s", want, encoded)
+		}
+	}
+	yamlStatus, err := render.FormatYAML(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"claimable_by_role:", "reviewable_by_role:", "legacy_coder_claimable: 1", "agent_capacity:"} {
+		if !strings.Contains(yamlStatus, want) {
+			t.Errorf("YAML status missing %q:\n%s", want, yamlStatus)
+		}
+	}
+}
+
+func TestBuildStatusDataAgentCapacityIsSeparateFromTaskReadiness(t *testing.T) {
+	pr := statusReadinessResolver()
+	state := statusReadinessState()
+	readinessBefore := BuildStatusData(state, false, "", pr, nil).Tasks
+	now := time.Now().UTC()
+	liveUntil := now.Add(time.Hour)
+	expired := now.Add(-time.Hour)
+	registered := now.Add(-time.Minute)
+	state.Agents = map[string]models.Agent{
+		"coder-1": {
+			Role: "coder", Status: models.AgentStatusIdle, LeaseExpires: &liveUntil,
+			Heartbeat: now, RegisteredAt: registered,
+		},
+		"custom-doer-1": {
+			Role: "custom-doer", Status: models.AgentStatusWorking, LeaseExpires: &liveUntil,
+			Heartbeat: now, RegisteredAt: registered,
+		},
+		"custom-reviewer-1": {
+			Role: "custom-reviewer", Status: models.AgentStatusIdle, LeaseExpires: &liveUntil,
+			Heartbeat: now, RegisteredAt: registered,
+		},
+		"code-reviewer-1": {
+			Role: "code-reviewer", Status: models.AgentStatusIdle, LeaseExpires: &expired,
+			Heartbeat: now.Add(-24 * time.Hour), RegisteredAt: registered,
+		},
+	}
+	state.AgentHealth = map[string]models.AgentHealth{
+		"custom-reviewer-1": {
+			State: models.AgentHealthDegraded, Role: "custom-reviewer", RegisteredAt: &registered,
+		},
+		"idle-reviewer-1": {
+			State: models.AgentHealthDegraded, Role: "idle-reviewer",
+		},
+	}
+
+	data := BuildStatusData(state, false, "", pr, nil)
+	if !reflect.DeepEqual(data.Tasks, readinessBefore) {
+		t.Fatalf("agent capacity changed task readiness:\nbefore: %#v\nafter:  %#v", readinessBefore, data.Tasks)
+	}
+	if data.AgentCapacity.Live != 3 || data.AgentCapacity.Free != 1 || data.AgentCapacity.Degraded != 2 {
+		t.Fatalf("AgentCapacity totals = %+v, want live=3 free=1 degraded=2", data.AgentCapacity)
+	}
+	wantByRole := []roleAgentCapacity{
+		{Role: "code-reviewer"},
+		{Role: "coder", Live: 1, Free: 1},
+		{Role: "custom-doer", Live: 1},
+		{Role: "custom-reviewer", Live: 1, Degraded: 1},
+		{Role: "idle-doer"},
+		{Role: "idle-reviewer", Degraded: 1},
+	}
+	if !reflect.DeepEqual(data.AgentCapacity.ByRole, wantByRole) {
+		t.Fatalf("AgentCapacity.ByRole = %#v, want %#v", data.AgentCapacity.ByRole, wantByRole)
+	}
+	dashboard, err := formatStatusDashboard(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"=== AGENT CAPACITY ===", "Live: 3, Free: 1, Degraded: 2", "custom-reviewer"} {
+		if !strings.Contains(dashboard, want) {
+			t.Errorf("dashboard missing %q:\n%s", want, dashboard)
+		}
+	}
+}
+
+func TestBuildStatusDataCompletedSprintRequiresPlanningMerges(t *testing.T) {
+	projectRoot := setupPipelineRoot(t)
+	pr, err := ops.LoadResolverForModels(projectRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	originalBinaryName := brand.BinaryName
+	brand.BinaryName = "acme"
+	t.Cleanup(func() { brand.BinaryName = originalBinaryName })
+
+	state := testhelpers.CreateValidState()
+	state.Sprint.Status = models.SprintStatusCompleted
+	state.Sprint.Scope.Planned = []string{"plan-b", "plan-a"}
+	state.Tasks = []models.Task{
+		planningTaskWithOutput("plan-a", models.TaskStatusCodingPlanApproved),
+		planningTaskWithOutput("plan-b", models.TaskStatusCodingPlanApproved),
+	}
+	before, err := json.Marshal(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	data := BuildStatusData(state, false, projectRoot, pr, nil)
+	after, err := json.Marshal(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != string(before) {
+		t.Fatal("BuildStatusData mutated state while reporting merge blockers")
+	}
+	if data.OrchestratorState.Trigger != "NONE" {
+		t.Fatalf("wake trigger = %q, want NONE", data.OrchestratorState.Trigger)
+	}
+	if data.PhaseHandoff == nil || data.PhaseHandoff.State != "MERGE_REQUIRED" {
+		t.Fatalf("PhaseHandoff = %+v, want MERGE_REQUIRED", data.PhaseHandoff)
+	}
+	wantMerges := []phaseMergeRequired{
+		{TaskID: "plan-b", Action: "acme wt-merge plan-b"},
+		{TaskID: "plan-a", Action: "acme wt-merge plan-a"},
+	}
+	if !reflect.DeepEqual(data.PhaseHandoff.MergeRequired, wantMerges) {
+		t.Fatalf("MergeRequired = %#v, want %#v", data.PhaseHandoff.MergeRequired, wantMerges)
+	}
+	yamlStatus, err := render.FormatYAML(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"phase_handoff:", "merge_required:", "task_id: plan-b", "action: acme wt-merge plan-b"} {
+		if !strings.Contains(yamlStatus, want) {
+			t.Errorf("YAML merge handoff missing %q:\n%s", want, yamlStatus)
+		}
+	}
+	dashboard, err := formatStatusDashboard(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"State: MERGE_REQUIRED", "plan-b: acme wt-merge plan-b", "plan-a: acme wt-merge plan-a", "Wake Trigger: NONE"} {
+		if !strings.Contains(dashboard, want) {
+			t.Errorf("dashboard missing %q:\n%s", want, dashboard)
+		}
+	}
+
+	for i := range state.Tasks {
+		state.Tasks[i].Status = models.TaskStatusMerged
+	}
+	afterMerge := BuildStatusData(state, false, projectRoot, pr, nil)
+	if afterMerge.PhaseHandoff == nil {
+		t.Fatal("merged planning output should retain the existing phase handoff")
+	}
+	if len(afterMerge.PhaseHandoff.MergeRequired) != 0 {
+		t.Fatalf("MergeRequired after merge = %#v, want none", afterMerge.PhaseHandoff.MergeRequired)
+	}
+	if !reflect.DeepEqual(afterMerge.PhaseHandoff.ReadyPlanningTasks, []string{"plan-b", "plan-a"}) {
+		t.Fatalf("ReadyPlanningTasks after merge = %v, want sprint-scope order", afterMerge.PhaseHandoff.ReadyPlanningTasks)
+	}
+	if afterMerge.OrchestratorState.Trigger != data.OrchestratorState.Trigger {
+		t.Fatalf("wake trigger changed after merge: before=%q after=%q", data.OrchestratorState.Trigger, afterMerge.OrchestratorState.Trigger)
+	}
+
+	single := testhelpers.CreateValidState()
+	single.Sprint.Status = models.SprintStatusCompleted
+	single.Sprint.Scope.Planned = []string{"plan-only"}
+	single.Tasks = []models.Task{planningTaskWithOutput("plan-only", models.TaskStatusCodingPlanApproved)}
+	singleData := BuildStatusData(single, false, projectRoot, pr, nil)
+	wantSingle := []phaseMergeRequired{{TaskID: "plan-only", Action: "acme wt-merge plan-only"}}
+	if singleData.PhaseHandoff == nil || !reflect.DeepEqual(singleData.PhaseHandoff.MergeRequired, wantSingle) {
+		t.Fatalf("single approved planning handoff = %+v, want %#v", singleData.PhaseHandoff, wantSingle)
+	}
+}
+
+func statusReadinessResolver() models.PipelineResolver {
+	roles := map[string]pipeline.RoleDef{
+		"coder":           {Type: "doer"},
+		"code-reviewer":   {Type: "reviewer"},
+		"custom-doer":     {Type: "doer"},
+		"custom-reviewer": {Type: "reviewer"},
+		"idle-doer":       {Type: "doer"},
+		"idle-reviewer":   {Type: "reviewer"},
+	}
+	pairs := map[string]pipeline.RolePairDef{
+		"coding-pair":           statusRolePair("coder", "code-reviewer", "DRAFT_CODE", "IMPLEMENTING_CODE", "CODE_TO_REVIEW", "REVIEWING_CODE", "CODE_APPROVED", "CODE_REJECTED"),
+		"custom-pair":           statusRolePair("custom-doer", "custom-reviewer", "CUSTOM_READY", "CUSTOM_EXECUTING", "CUSTOM_TO_REVIEW", "CUSTOM_REVIEWING", "CUSTOM_APPROVED", "CUSTOM_REJECTED"),
+		"alternate-custom-pair": statusRolePair("custom-doer", "custom-reviewer", "ALT_CUSTOM_READY", "ALT_CUSTOM_EXECUTING", "ALT_CUSTOM_TO_REVIEW", "ALT_CUSTOM_REVIEWING", "ALT_CUSTOM_APPROVED", "ALT_CUSTOM_REJECTED"),
+		"idle-pair":             statusRolePair("idle-doer", "idle-reviewer", "IDLE_READY", "IDLE_EXECUTING", "IDLE_TO_REVIEW", "IDLE_REVIEWING", "IDLE_APPROVED", "IDLE_REJECTED"),
+	}
+	return pipeline.NewResolver(&pipeline.PipelineConfig{Pipeline: pipeline.Pipeline{Roles: roles, RolePairs: pairs}})
+}
+
+func statusRolePair(doer, reviewer, initial, executing, submitted, reviewing, approved, rejected string) pipeline.RolePairDef {
+	return pipeline.RolePairDef{
+		Doer: doer, Reviewer: reviewer,
+		States: pipeline.RolePairStates{
+			Initial: initial, Executing: executing, Submitted: submitted,
+			Reviewing: reviewing, Approved: approved, Rejected: rejected,
+		},
+	}
+}
+
+func statusReadinessState() *models.State {
+	reservedOwner := "custom-doer-1"
+	reservedUntil := time.Now().UTC().Add(time.Hour)
+	return &models.State{
+		Tasks: []models.Task{
+			{ID: "merged-dependency", Status: models.TaskStatusMerged, RolePair: "coding-pair"},
+			{ID: "coding-ready", Status: "DRAFT_CODE", RolePair: "coding-pair"},
+			{ID: "coding-submitted", Status: "CODE_TO_REVIEW", RolePair: "coding-pair", ReviewCommit: stringPtr("coding-sha")},
+			{ID: "custom-ready", Status: "CUSTOM_READY", RolePair: "custom-pair", DependsOn: []string{"merged-dependency"}},
+			{ID: "custom-blocked", Status: "CUSTOM_READY", RolePair: "custom-pair", DependsOn: []string{"missing"}},
+			{ID: "custom-executing", Status: "CUSTOM_EXECUTING", RolePair: "custom-pair"},
+			{ID: "custom-submitted", Status: "CUSTOM_TO_REVIEW", RolePair: "custom-pair", ReviewCommit: stringPtr("custom-sha")},
+			{ID: "alternate-custom-ready", Status: "ALT_CUSTOM_READY", RolePair: "alternate-custom-pair"},
+			{ID: "alternate-custom-submitted", Status: "ALT_CUSTOM_TO_REVIEW", RolePair: "alternate-custom-pair", ReviewCommit: stringPtr("alternate-custom-sha")},
+			{ID: "custom-rejected-reserved", Status: "CUSTOM_REJECTED", RolePair: "custom-pair", AssignedTo: &reservedOwner, LeaseExpires: &reservedUntil},
+		},
+		Agents:      map[string]models.Agent{},
+		AgentHealth: map[string]models.AgentHealth{},
+	}
+}
+
+func planningTaskWithOutput(id string, status models.TaskStatus) models.Task {
+	return models.Task{
+		ID: id, Status: status, RolePair: "code-planning-pair",
+		Output: []models.OutputEntry{{Desc: "implement", DoneWhen: "done", Scope: "scope"}},
+	}
+}
+
 func TestBuildStatusData_NoFollowUpHidesPipelineTransitions(t *testing.T) {
 	now := time.Now().UTC()
 	projectRoot := setupPipelineRoot(t)
@@ -766,8 +1083,8 @@ func TestBuildStatusData_AgentHealth(t *testing.T) {
 	if len(data.Agents) != 1 || data.Agents[0].Health != string(models.AgentHealthDegraded) {
 		t.Fatalf("Agents = %+v, want degraded health on coder-1", data.Agents)
 	}
-	if data.WorkQueues.Coder.Degraded != 1 {
-		t.Fatalf("WorkQueues.Coder.Degraded = %d, want 1", data.WorkQueues.Coder.Degraded)
+	if data.AgentCapacity.Degraded != 1 {
+		t.Fatalf("AgentCapacity.Degraded = %d, want 1", data.AgentCapacity.Degraded)
 	}
 }
 
@@ -797,8 +1114,8 @@ func TestBuildStatusData_OrphanedAgentHealth(t *testing.T) {
 	if len(data.Agents) != 0 {
 		t.Fatalf("Agents = %+v, want no active agents", data.Agents)
 	}
-	if data.WorkQueues.Coder.Degraded != 1 {
-		t.Fatalf("WorkQueues.Coder.Degraded = %d, want 1", data.WorkQueues.Coder.Degraded)
+	if data.AgentCapacity.Degraded != 1 {
+		t.Fatalf("AgentCapacity.Degraded = %d, want 1", data.AgentCapacity.Degraded)
 	}
 }
 
@@ -1299,6 +1616,8 @@ func TestWriteTasksSection(t *testing.T) {
 				"  MERGED: 2\n" +
 				"\nClaimable: 2 tasks\n" +
 				"Reviewable: 0 tasks\n" +
+				"Legacy coder claimable: 0 tasks\n" +
+				"Legacy code-reviewer reviewable: 0 tasks\n" +
 				"\n",
 		},
 		{
@@ -1316,6 +1635,8 @@ func TestWriteTasksSection(t *testing.T) {
 				"  DRAFT_CODE: 3\n" +
 				"\nClaimable: 0 tasks\n" +
 				"Reviewable: 0 tasks\n" +
+				"Legacy coder claimable: 0 tasks\n" +
+				"Legacy code-reviewer reviewable: 0 tasks\n" +
 				"Blocked by dependencies: 2 tasks\n" +
 				"\n",
 		},
@@ -1336,6 +1657,8 @@ func TestWriteTasksSection(t *testing.T) {
 				"  DRAFT_CODE: 3\n" +
 				"\nClaimable: 0 tasks\n" +
 				"Reviewable: 0 tasks\n" +
+				"Legacy coder claimable: 0 tasks\n" +
+				"Legacy code-reviewer reviewable: 0 tasks\n" +
 				"Blocked: 2 tasks\n" +
 				"Blocked by dependencies: 3 tasks\n" +
 				"\n",
@@ -1353,6 +1676,8 @@ func TestWriteTasksSection(t *testing.T) {
 				"Total: 0 (0 active, 0 terminal)\n" +
 				"\nClaimable: 0 tasks\n" +
 				"Reviewable: 0 tasks\n" +
+				"Legacy coder claimable: 0 tasks\n" +
+				"Legacy code-reviewer reviewable: 0 tasks\n" +
 				"\n",
 		},
 	}

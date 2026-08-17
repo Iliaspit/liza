@@ -221,11 +221,19 @@ func validate(cfg *PipelineConfig) error {
 	}
 
 	for name, rp := range p.RolePairs {
-		if _, ok := p.Roles[rp.Doer]; !ok {
+		doer, ok := p.Roles[rp.Doer]
+		if !ok {
 			return fmt.Errorf("role-pair %q: doer %q not found in roles", name, rp.Doer)
 		}
-		if _, ok := p.Roles[rp.Reviewer]; !ok {
+		if doer.Type != "doer" {
+			return fmt.Errorf("role-pair %q: doer role %q has type %q, expected %q", name, rp.Doer, doer.Type, "doer")
+		}
+		reviewer, ok := p.Roles[rp.Reviewer]
+		if !ok {
 			return fmt.Errorf("role-pair %q: reviewer %q not found in roles", name, rp.Reviewer)
+		}
+		if reviewer.Type != "reviewer" {
+			return fmt.Errorf("role-pair %q: reviewer role %q has type %q, expected %q", name, rp.Reviewer, reviewer.Type, "reviewer")
 		}
 		if err := validateReviewPolicy(name, rp.ReviewPolicy); err != nil {
 			return err

@@ -1,7 +1,6 @@
 package ops
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -13,7 +12,6 @@ import (
 	"github.com/liza-mas/liza/internal/db"
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/paths"
-	"github.com/liza-mas/liza/internal/pipeline"
 	"gopkg.in/yaml.v3"
 )
 
@@ -166,7 +164,7 @@ func planSprintAdvanceFromCompleted(s *models.State, now time.Time, projectRoot 
 	if err != nil {
 		return nil, fmt.Errorf("cannot advance sprint: %w", err)
 	}
-	if blocked := collectApprovedPlanningWithUnmergedOutput(s, detCtx.planningPairs, detCtx.planningApprovedStatuses); len(blocked) > 0 {
+	if blocked := ApprovedPlanningTasksWithUnmergedOutput(s, detCtx.planningPairs, detCtx.planningApprovedStatuses); len(blocked) > 0 {
 		return nil, fmt.Errorf("cannot advance sprint: approved planning task(s) must be merged before output can be carried forward: %s (run `%s <task-id>` first)", strings.Join(blocked, ", "), brand.Command("wt-merge"))
 	}
 	return buildSprintAdvancePlan(s, now, detCtx)
@@ -317,7 +315,10 @@ func collectMergedPlanningWithUnconsumedOutput(state *models.State, planningPair
 	return carried
 }
 
-func collectApprovedPlanningWithUnmergedOutput(state *models.State, planningPairs map[string]bool, approvedStatuses map[string]models.TaskStatus) []string {
+// ApprovedPlanningTasksWithUnmergedOutput returns sprint-scoped planning task
+// IDs that have output and are approved but not yet merged. Results preserve
+// sprint scope order.
+func ApprovedPlanningTasksWithUnmergedOutput(state *models.State, planningPairs map[string]bool, approvedStatuses map[string]models.TaskStatus) []string {
 	var blocked []string
 	for _, taskID := range state.Sprint.Scope.Planned {
 		task := state.FindTask(taskID)
@@ -442,16 +443,9 @@ func collectMergedManyToOneWithUnfiredTransition(state *models.State, m2oTransit
 // Returns a non-nil error when the config exists but cannot be loaded (parse or
 // validation failure), preventing silent fallback that would drop non-legacy pairs.
 func loadDetectionContextForAdvance(projectRoot string) (*advanceDetectionContext, error) {
-	detCtx, err := LoadDetectionContext(projectRoot)
+	detCtx, err := LoadPhaseHandoffDetectionContext(projectRoot)
 	if err != nil {
-		if errors.Is(err, pipeline.ErrConfigNotFound) {
-			return &advanceDetectionContext{
-				planningApprovedStatuses: map[string]models.TaskStatus{
-					"code-planning-pair": models.TaskStatusCodingPlanApproved,
-				},
-			}, nil // legacy project
-		}
-		return nil, fmt.Errorf("pipeline config failed to load: %w", err)
+		return nil, err
 	}
 	return &advanceDetectionContext{
 		sprintTerminals:          detCtx.SprintTerminals,
