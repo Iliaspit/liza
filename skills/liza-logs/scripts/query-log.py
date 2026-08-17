@@ -10,12 +10,18 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
 _BENIGN_EXIT1_COMMANDS = frozenset({"rg", "grep", "egrep", "fgrep", "ag", "ack", "diff"})
+_PROVIDER_BACKGROUNDING_RE = re.compile(
+    r"\ACommand (?:did not complete within its \d+(?:\.\d+)?s timeout|timed out) "
+    r"and was moved to the background(?=$|[\s.!?:;])"
+)
 
 
 @dataclass
@@ -26,6 +32,7 @@ class EvidenceEvent:
     detail: str = ""
     result: str = ""
     is_error: bool = False
+    operational_friction: bool = False
 
     def searchable_text(self) -> str:
         return "\n".join((self.kind, self.label, self.detail, self.result))
@@ -47,6 +54,22 @@ def compact_json(value: Any) -> str:
     if isinstance(value, str):
         return value
     return json.dumps(value, ensure_ascii=False, sort_keys=True)
+
+
+def tool_result_text(block: dict[str, Any]) -> str:
+    """Normalize a rich tool-result payload to one text value."""
+    content = block.get("content", "")
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "\n".join(part.get("text", "") if isinstance(part, dict) else str(part) for part in content)
+    return str(content) if content is not None else ""
+
+
+def is_operational_friction(result_text: str) -> bool:
+    """Return whether bounded result text matches provider-forced backgrounding."""
+    normalized = " ".join(result_text.split())
+    return _PROVIDER_BACKGROUNDING_RE.match(normalized) is not None
 
 
 def command_name(command: str) -> str:
@@ -88,9 +111,16 @@ def parse_sparse(objects: list[dict[str, Any]]) -> list[EvidenceEvent]:
     result: list[EvidenceEvent] = []
     next_index = 1
 
-    def add(kind: str, label: str, detail: str = "", body: str = "", is_error: bool = False) -> None:
+    def add(
+        kind: str,
+        label: str,
+        detail: str = "",
+        body: str = "",
+        is_error: bool = False,
+        operational_friction: bool = False,
+    ) -> None:
         nonlocal next_index
-        result.append(EvidenceEvent(next_index, kind, label, detail, body, is_error))
+        result.append(EvidenceEvent(next_index, kind, label, detail, body, is_error, operational_friction))
         next_index += 1
 
     for obj in objects:
@@ -138,9 +168,16 @@ def parse_rich(objects: list[dict[str, Any]]) -> list[EvidenceEvent]:
     pending_tools: dict[str, tuple[str, str]] = {}
     next_index = 1
 
-    def add(kind: str, label: str, detail: str = "", body: str = "", is_error: bool = False) -> None:
+    def add(
+        kind: str,
+        label: str,
+        detail: str = "",
+        body: str = "",
+        is_error: bool = False,
+        operational_friction: bool = False,
+    ) -> None:
         nonlocal next_index
-        result.append(EvidenceEvent(next_index, kind, label, detail, body, is_error))
+        result.append(EvidenceEvent(next_index, kind, label, detail, body, is_error, operational_friction))
         next_index += 1
 
     for obj in objects:
@@ -166,12 +203,15 @@ def parse_rich(objects: list[dict[str, Any]]) -> list[EvidenceEvent]:
                     continue
                 tool_id = block.get("tool_use_id", "")
                 name, detail = pending_tools.pop(tool_id, ("tool_result", ""))
-                content = block.get("content", "")
-                if isinstance(content, list):
-                    body = "\n".join(part.get("text", "") if isinstance(part, dict) else str(part) for part in content)
-                else:
-                    body = str(content)
-                add("tool_result", name, detail, body, bool(block.get("is_error")))
+                body = tool_result_text(block)
+                add(
+                    "tool_result",
+                    name,
+                    detail,
+                    body,
+                    bool(block.get("is_error")),
+                    is_operational_friction(body),
+                )
 
     return result
 
@@ -196,10 +236,15 @@ def parse_events(path: Path) -> list[EvidenceEvent]:
     return []
 
 
-def windows_around_errors(events: list[EvidenceEvent], radius: int, task: str | None) -> list[list[EvidenceEvent]]:
+def _windows_around(
+    events: list[EvidenceEvent],
+    radius: int,
+    task: str | None,
+    is_center: Callable[[EvidenceEvent], bool],
+) -> list[list[EvidenceEvent]]:
     spans: list[tuple[int, int]] = []
     for i, event in enumerate(events):
-        if not event.is_error:
+        if not is_center(event):
             continue
         start = max(0, i - radius)
         end = min(len(events), i + radius + 1)
@@ -219,9 +264,19 @@ def windows_around_errors(events: list[EvidenceEvent], radius: int, task: str | 
     return [events[start:end] for start, end in merged_spans]
 
 
+def windows_around_errors(events: list[EvidenceEvent], radius: int, task: str | None) -> list[list[EvidenceEvent]]:
+    return _windows_around(events, radius, task, lambda event: event.is_error)
+
+
+def windows_around_operational_friction(
+    events: list[EvidenceEvent], radius: int, task: str | None
+) -> list[list[EvidenceEvent]]:
+    return _windows_around(events, radius, task, lambda event: event.operational_friction)
+
+
 def render_event(event: EvidenceEvent, center_index: int, max_field: int) -> str:
     offset = event.index - center_index
-    marker = "ERROR" if event.is_error else ""
+    marker = "OPERATIONAL FRICTION" if event.operational_friction else "ERROR" if event.is_error else ""
     lines = [f"{offset:+d} event {event.index}: {event.kind} {marker}".rstrip()]
     if event.label:
         lines.append(f"  label: {trim_text(event.label, max_field)}")
@@ -241,6 +296,21 @@ def render_error_windows(path: Path, windows: list[list[EvidenceEvent]], max_fie
         chunks.append(f"ERROR CLUSTER {number}")
         chunks.append(f"log: {path}")
         chunks.append(f"errors: {error_labels}")
+        chunks.append("")
+        chunks.extend(render_event(event, center.index, max_field) for event in window)
+        chunks.append("")
+    return "\n".join(chunks).rstrip()
+
+
+def render_operational_friction_windows(path: Path, windows: list[list[EvidenceEvent]], max_field: int) -> str:
+    chunks: list[str] = []
+    for number, window in enumerate(windows, 1):
+        frictions = [event for event in window if event.operational_friction]
+        center = frictions[0]
+        labels = ", ".join(f"{event.index}:{event.label}" for event in frictions)
+        chunks.append(f"OPERATIONAL FRICTION CLUSTER {number}")
+        chunks.append(f"log: {path}")
+        chunks.append(f"events: {labels}")
         chunks.append("")
         chunks.extend(render_event(event, center.index, max_field) for event in window)
         chunks.append("")
@@ -269,7 +339,14 @@ def render_json(path: Path, windows: list[list[EvidenceEvent]], max_field: int) 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("logs", nargs="+", help="NDJSON agent log files to query")
-    parser.add_argument("--around-errors", type=int, metavar="N", help="show N events before/after each error")
+    centers = parser.add_mutually_exclusive_group()
+    centers.add_argument("--around-errors", type=int, metavar="N", help="show N events before/after each error")
+    centers.add_argument(
+        "--around-operational-friction",
+        type=int,
+        metavar="N",
+        help="show N events before/after provider-forced foreground backgrounding",
+    )
     parser.add_argument("--task", help="only include windows whose bounded text mentions this task id")
     parser.add_argument("--max-field", type=int, default=800, help="maximum displayed chars per field")
     parser.add_argument("--json", action="store_true", help="emit JSON instead of text")
@@ -278,8 +355,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    if args.around_errors is None:
-        print("query-log.py currently requires --around-errors N", file=sys.stderr)
+    if args.around_errors is None and args.around_operational_friction is None:
+        print("query-log.py requires --around-errors or --around-operational-friction", file=sys.stderr)
         return 2
 
     outputs: list[str] = []
@@ -289,12 +366,20 @@ def main(argv: list[str] | None = None) -> int:
             print(f"WARNING: File not found: {path}", file=sys.stderr)
             continue
         events = parse_events(path)
-        windows = windows_around_errors(events, args.around_errors, args.task)
-        rendered = (
-            render_json(path, windows, args.max_field)
-            if args.json
-            else render_error_windows(path, windows, args.max_field)
-        )
+        if args.around_errors is not None:
+            windows = windows_around_errors(events, args.around_errors, args.task)
+            rendered = (
+                render_json(path, windows, args.max_field)
+                if args.json
+                else render_error_windows(path, windows, args.max_field)
+            )
+        else:
+            windows = windows_around_operational_friction(events, args.around_operational_friction, args.task)
+            rendered = (
+                render_json(path, windows, args.max_field)
+                if args.json
+                else render_operational_friction_windows(path, windows, args.max_field)
+            )
         if rendered:
             outputs.append(rendered)
 

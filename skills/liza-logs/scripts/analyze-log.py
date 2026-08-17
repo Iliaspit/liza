@@ -31,6 +31,17 @@ BRAND_BINARY_NAME = "§BRAND_BINARY_NAME§"
 BRAND_MCP_SERVER = "§BRAND_NAME_LOWER§"
 BRAND_NAME_TITLE = "§BRAND_NAME_TITLE§"
 SECRET_WORD_PREFIXES = (BRAND_NAME_TITLE, "Secret")
+_BREADCRUMB_SEARCH_TEXT_BLOCK_LIMIT = 5
+_AGGREGATE_USAGE_FIELDS = (
+    "input_tokens",
+    "cache_creation_input_tokens",
+    "cache_read_input_tokens",
+    "output_tokens",
+)
+_PROVIDER_BACKGROUNDING_RE = re.compile(
+    r"\ACommand (?:did not complete within its (?P<duration>\d+(?:\.\d+)?)s timeout|timed out) "
+    r"and was moved to the background(?=$|[\s.!?:;])"
+)
 
 # ---------------------------------------------------------------------------
 # Data classes
@@ -41,6 +52,7 @@ SECRET_WORD_PREFIXES = (BRAND_NAME_TITLE, "Secret")
 class SessionMeta:
     file: str = ""
     format: str = ""  # "rich" or "sparse"
+    provider: str = ""
     model: str = ""
     session_id: str = ""
     duration_ms: int = 0
@@ -91,7 +103,7 @@ class ContentItem:
 
 @dataclass
 class EmptyTurn:
-    """A turn/unit where the assistant produced no tool call."""
+    """A turn/unit where the assistant produced no meaningful text or tool call."""
 
     turn_num: int = 0
     item_type: str = ""
@@ -108,11 +120,12 @@ class SessionReport:
     total_cache_read: int = 0
     total_output_tokens: int = 0
     total_cost_usd: float = 0.0
+    aggregate_usage_source: str = "unknown"
     # Per-turn (rich only)
     turns: list[TurnUsage] = field(default_factory=list)
     # Content items (both formats)
     items: list[ContentItem] = field(default_factory=list)
-    # Tool/no-tool turn accounting (rich: API turns; sparse: Codex action turns)
+    # Tool/text/empty accounting across assistant API turns
     turn_units: int = 0
     tool_turn_units: int = 0
     empty_turns: list[EmptyTurn] = field(default_factory=list)
@@ -124,8 +137,11 @@ class SessionReport:
     mcp_servers: list[dict[str, str]] = field(default_factory=list)
     # Skill invocations (both formats)
     skill_invocations: dict[str, int] = field(default_factory=dict)
-    # Secret words (lines starting with the brand name or "Secret" in first assistant block)
+    # Secret words (lines starting with the brand name or "Secret" in early assistant content)
     secret_words_lines: list[str] = field(default_factory=list)
+    breadcrumb_applicability: str = "unknown"
+    # Provider-forced foreground timeout/backgrounding events
+    operational_frictions: list[OperationalFriction] = field(default_factory=list)
 
 
 @dataclass
@@ -137,6 +153,19 @@ class PermissionFriction:
     role: str
     tool_name: str
     detail: str
+    result_preview: str
+
+
+@dataclass
+class OperationalFriction:
+    """A provider-forced foreground timeout/backgrounding event."""
+
+    category: str
+    log_file: str
+    role: str
+    tool_name: str
+    command_preview: str
+    duration_ms: int
     result_preview: str
 
 
@@ -204,6 +233,42 @@ def _is_benign_exit(cmd_name: str, exit_code: int) -> bool:
 def _hash_result(text: str) -> str:
     """Return a stable digest for exact duplicate result detection."""
     return hashlib.sha256(text.encode("utf-8", errors="replace")).hexdigest() if text else ""
+
+
+def _tool_result_text(block: dict) -> str:
+    """Normalize a rich tool-result payload to one text value."""
+    content = block.get("content", "")
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "\n".join(part.get("text", "") if isinstance(part, dict) else str(part) for part in content)
+    return str(content) if content is not None else ""
+
+
+def _operational_friction_details(result_text: str) -> tuple[str, int]:
+    """Return the provider friction category and message-reported duration."""
+    normalized = " ".join(result_text.split())
+    match = _PROVIDER_BACKGROUNDING_RE.match(normalized)
+    if not match:
+        return "", 0
+    duration = match.group("duration")
+    try:
+        duration_ms = round(float(duration) * 1000) if duration else 0
+    except (OverflowError, ValueError):
+        duration_ms = 0
+    return "provider foreground timeout/backgrounding", duration_ms
+
+
+def _breadcrumb_applicability(report: SessionReport) -> str:
+    """Return whether initialization breadcrumbs apply to the detected agent."""
+    provider = report.meta.provider.lower()
+    # Claude stream-json is the only supported rich format that omits provider
+    # identity. Explicit providers always win over model branding.
+    if provider == "claude" or (report.meta.format == "rich" and not provider):
+        return "not required"
+    if provider or report.meta.format == "sparse":
+        return "required"
+    return "unknown"
 
 
 def _extract_secret_words_lines(text: str) -> list[str]:
@@ -347,17 +412,7 @@ def _measure_content_block(block: dict) -> ContentItem:
     elif block_type == "tool_use":
         text = json.dumps(block.get("input", {}))
     elif block_type == "tool_result":
-        content = block.get("content", "")
-        if isinstance(content, str):
-            text = content
-        elif isinstance(content, list):
-            parts = []
-            for part in content:
-                if isinstance(part, dict):
-                    parts.append(part.get("text", ""))
-                elif isinstance(part, str):
-                    parts.append(part)
-            text = "\n".join(parts)
+        text = _tool_result_text(block)
     return ContentItem(
         item_type=block_type,
         chars=len(text),
@@ -408,12 +463,14 @@ def parse_rich(lines: list[str]) -> SessionReport:
     # For correlating tool_use → tool_result
     pending_tool_uses: dict[str, tuple[str, str, int]] = {}  # id → (name, detail, turn_num)
     turn_has_tool: dict[str, bool] = {}
+    turn_has_meaningful_text: dict[str, bool] = {}
     turn_empty_detail: dict[str, EmptyTurn] = {}
     turn_order: list[str] = []
     first_assistant_texts: list[str] = []
     first_assistant_captured = False
     last_ts_ms = 0
     current_turn_duration_ms = 0
+    terminal_usage: dict | None = None
 
     for line in lines:
         line = line.strip()
@@ -440,8 +497,14 @@ def parse_rich(lines: list[str]) -> SessionReport:
         if event_type == "system":
             if obj.get("session_id"):
                 report.meta.session_id = obj.get("session_id", "")
+            if obj.get("provider"):
+                report.meta.provider = obj.get("provider", "")
             if obj.get("model"):
                 report.meta.model = obj.get("model", "")
+            elif obj.get("provider") and not report.meta.model:
+                # Display fallback only. Applicability uses provider/format
+                # identity and never treats a model label as an agent identity.
+                report.meta.model = obj.get("provider", "")
             if obj.get("mcp_servers"):
                 report.mcp_servers = [
                     {
@@ -455,7 +518,6 @@ def parse_rich(lines: list[str]) -> SessionReport:
             msg = obj.get("message", {})
             msg_id = msg.get("id", "")
             usage = msg.get("usage", {})
-
             # Dedup: only count usage once per message.id
             if msg_id and msg_id not in seen_message_ids:
                 turn = TurnUsage(
@@ -469,6 +531,7 @@ def parse_rich(lines: list[str]) -> SessionReport:
                 report.turns.append(turn)
                 turn_order.append(msg_id)
                 turn_has_tool[msg_id] = False
+                turn_has_meaningful_text[msg_id] = False
                 turn_empty_detail[msg_id] = EmptyTurn(
                     turn_num=len(report.turns),
                     item_type="assistant_message",
@@ -483,6 +546,9 @@ def parse_rich(lines: list[str]) -> SessionReport:
                 item = _measure_content_block(block)
                 if item.chars > 0:
                     report.items.append(item)
+                    raw_text = block.get("text", "") if block_type == "text" else block.get("thinking", "")
+                    if msg_id and block_type in ("text", "thinking") and raw_text.strip():
+                        turn_has_meaningful_text[msg_id] = True
                     if msg_id and not turn_empty_detail.get(msg_id, EmptyTurn()).preview:
                         turn_empty_detail[msg_id] = EmptyTurn(
                             turn_num=turn_empty_detail.get(msg_id, EmptyTurn()).turn_num or len(report.turns),
@@ -490,12 +556,15 @@ def parse_rich(lines: list[str]) -> SessionReport:
                             detail=msg_id,
                             preview=item.preview,
                         )
-                # Capture early assistant text blocks for secret words
+                # Tool-only envelopes may precede the initial contract-reading text.
                 if not first_assistant_captured and block.get("type") == "text":
                     raw = block.get("text", "")
                     if raw.strip():
                         first_assistant_texts.append(raw)
-                        if _extract_secret_words_lines(raw) or len(first_assistant_texts) >= 5:
+                        if (
+                            _extract_secret_words_lines(raw)
+                            or len(first_assistant_texts) >= _BREADCRUMB_SEARCH_TEXT_BLOCK_LIMIT
+                        ):
                             first_assistant_captured = True
                 if block.get("type") == "tool_use":
                     if msg_id:
@@ -523,93 +592,96 @@ def parse_rich(lines: list[str]) -> SessionReport:
         elif event_type == "user":
             msg = obj.get("message", {})
             for content_part in msg.get("content", []):
-                if isinstance(content_part, dict):
-                    item = _measure_content_block(content_part)
-                    if item.chars > 0:
-                        item.item_type = "tool_result"
-                        report.items.append(item)
+                if not isinstance(content_part, dict):
+                    continue
 
-                    # Correlate tool_result with pending tool_use for timeline
-                    tool_use_id = content_part.get("tool_use_id", "")
-                    is_error = bool(content_part.get("is_error"))
-                    nested = content_part.get("content", "")
-                    result_chars = 0
-                    result_preview = ""
-                    if isinstance(nested, str):
-                        result_chars = len(nested)
-                        result_preview = nested[:120].replace("\n", " ")
-                        if nested:
-                            report.items.append(
-                                ContentItem(
-                                    item_type="tool_result",
-                                    chars=result_chars,
-                                    preview=result_preview,
-                                )
-                            )
-                    elif isinstance(nested, list):
-                        parts_text = []
-                        for part in nested:
-                            if isinstance(part, dict):
-                                text = part.get("text", "")
-                                if text:
-                                    parts_text.append(text)
-                                    report.items.append(
-                                        ContentItem(
-                                            item_type="tool_result",
-                                            chars=len(text),
-                                            preview=text[:120].replace("\n", " "),
-                                        )
-                                    )
-                        combined = "\n".join(parts_text)
-                        result_chars = len(combined)
-                        result_preview = combined[:120].replace("\n", " ")
+                item = _measure_content_block(content_part)
+                if item.chars > 0:
+                    report.items.append(item)
+                if content_part.get("type") != "tool_result":
+                    continue
 
-                    if tool_use_id and tool_use_id in pending_tool_uses:
-                        name, detail, turn_num = pending_tool_uses.pop(tool_use_id)
-                        # For Bash commands, check if exit code 1 is benign
-                        # (e.g., rg/grep with no matches produce empty output)
-                        effective_error = is_error
-                        if is_error and name == "Bash" and detail:
-                            bash_cmd = _display_command_name(
-                                detail.strip().split()[0].rsplit("/", 1)[-1],
-                                detail,
-                            )
-                            if _is_benign_exit(bash_cmd, 1) and not result_preview.strip():
-                                effective_error = False
-                        report.actions.append(
-                            TurnAction(
-                                turn_num=turn_num,
-                                tool_name=name,
-                                detail=detail,
-                                result_chars=result_chars,
-                                is_error=effective_error,
-                                result_preview=result_preview,
-                                result_hash=_hash_result(combined if isinstance(nested, list) else str(nested or "")),
-                                duration_ms=current_turn_duration_ms,
-                            )
+                tool_use_id = content_part.get("tool_use_id", "")
+                if not tool_use_id or tool_use_id not in pending_tool_uses:
+                    continue
+
+                name, detail, turn_num = pending_tool_uses.pop(tool_use_id)
+                result_text = _tool_result_text(content_part)
+                result_preview = result_text[:120].replace("\n", " ")
+                is_error = bool(content_part.get("is_error"))
+                # For Bash commands, check if exit code 1 is benign
+                # (e.g., rg/grep with no matches produce empty output)
+                effective_error = is_error
+                if is_error and name == "Bash" and detail:
+                    bash_cmd = _display_command_name(
+                        detail.strip().split()[0].rsplit("/", 1)[-1],
+                        detail,
+                    )
+                    if _is_benign_exit(bash_cmd, 1) and not result_preview.strip():
+                        effective_error = False
+                report.actions.append(
+                    TurnAction(
+                        turn_num=turn_num,
+                        tool_name=name,
+                        detail=detail,
+                        result_chars=len(result_text),
+                        is_error=effective_error,
+                        result_preview=result_preview,
+                        result_hash=_hash_result(result_text),
+                        duration_ms=current_turn_duration_ms,
+                    )
+                )
+                friction_category, reported_duration_ms = _operational_friction_details(result_text)
+                if friction_category:
+                    report.operational_frictions.append(
+                        OperationalFriction(
+                            category=friction_category,
+                            log_file="",
+                            role="",
+                            tool_name=name,
+                            command_preview=detail[:120],
+                            duration_ms=current_turn_duration_ms or reported_duration_ms,
+                            result_preview=result_preview,
                         )
+                    )
 
         elif event_type == "result":
             report.meta.duration_ms = obj.get("duration_ms", 0)
             report.meta.num_turns = obj.get("num_turns", 0)
             report.total_cost_usd = obj.get("total_cost_usd", 0.0)
-            usage = obj.get("usage", {})
+            usage = obj.get("usage")
+            if isinstance(usage, dict):
+                token_values = [usage.get(field) for field in _AGGREGATE_USAGE_FIELDS]
+                if all(type(value) is int and value >= 0 for value in token_values):
+                    terminal_usage = usage
             model_usage = obj.get("modelUsage", {})
             for model_name, mu in model_usage.items():
                 report.meta.context_window = mu.get("contextWindow", 0)
                 report.meta.max_output_tokens = mu.get("maxOutputTokens", 0)
 
-    # Compute totals from deduped turns
-    for turn in report.turns:
-        report.total_input_tokens += turn.input_tokens
-        report.total_cache_creation += turn.cache_creation_input_tokens
-        report.total_cache_read += turn.cache_read_input_tokens
-        report.total_output_tokens += turn.output_tokens
+    if terminal_usage is not None:
+        report.total_input_tokens = terminal_usage.get("input_tokens", 0)
+        report.total_cache_creation = terminal_usage.get("cache_creation_input_tokens", 0)
+        report.total_cache_read = terminal_usage.get("cache_read_input_tokens", 0)
+        report.total_output_tokens = terminal_usage.get("output_tokens", 0)
+        report.aggregate_usage_source = "terminal"
+    else:
+        for turn in report.turns:
+            report.total_input_tokens += turn.input_tokens
+            report.total_cache_creation += turn.cache_creation_input_tokens
+            report.total_cache_read += turn.cache_read_input_tokens
+            report.total_output_tokens += turn.output_tokens
+        report.aggregate_usage_source = "envelope-partial"
 
     report.secret_words_lines = _extract_secret_words_lines("\n".join(first_assistant_texts))
     report.turn_units = len(turn_order)
     report.tool_turn_units = sum(1 for msg_id in turn_order if turn_has_tool.get(msg_id))
-    report.empty_turns = [turn_empty_detail[msg_id] for msg_id in turn_order if not turn_has_tool.get(msg_id)]
+    report.empty_turns = [
+        turn_empty_detail[msg_id]
+        for msg_id in turn_order
+        if not turn_has_tool.get(msg_id) and not turn_has_meaningful_text.get(msg_id)
+    ]
+    report.breadcrumb_applicability = _breadcrumb_applicability(report)
 
     return report
 
@@ -693,13 +765,46 @@ def parse_sparse(lines: list[str]) -> SessionReport:
     report.meta.format = "sparse"
     first_assistant_texts: list[str] = []
     first_assistant_captured = False
-    current_outer_turn_has_action = False
+    current_turn_open = False
+    current_turn_num = 0
+    current_turn_has_tool = False
+    current_turn_has_meaningful_text = False
+    current_turn_empty_detail: EmptyTurn | None = None
     sparse_outer_turns = 0
 
-    def count_action_turn() -> int:
+    def start_turn() -> None:
+        nonlocal current_turn_empty_detail
+        nonlocal current_turn_has_meaningful_text
+        nonlocal current_turn_has_tool
+        nonlocal current_turn_num
+        nonlocal current_turn_open
+
+        current_turn_num += 1
+        current_turn_open = True
+        current_turn_has_tool = False
+        current_turn_has_meaningful_text = False
+        current_turn_empty_detail = None
+
+    def finalize_turn(failed_msg: str = "") -> None:
+        nonlocal current_turn_open
+
+        if not current_turn_open:
+            return
+
         report.turn_units += 1
-        report.tool_turn_units += 1
-        return report.turn_units
+        if current_turn_has_tool:
+            report.tool_turn_units += 1
+        elif not current_turn_has_meaningful_text:
+            detail = current_turn_empty_detail
+            if detail is None:
+                detail = EmptyTurn(
+                    turn_num=current_turn_num,
+                    item_type="turn.failed" if failed_msg else "turn",
+                    detail="failed turn without completed actions" if failed_msg else "",
+                    preview=failed_msg[:120].replace("\n", " "),
+                )
+            report.empty_turns.append(detail)
+        current_turn_open = False
 
     for line in lines:
         line = line.strip()
@@ -714,30 +819,50 @@ def parse_sparse(lines: list[str]) -> SessionReport:
 
         if event_type == "thread.started":
             report.meta.session_id = obj.get("thread_id", "")
+            report.meta.provider = obj.get("provider", "")
+            # Display fallback only; provider remains the applicability identity.
+            report.meta.model = obj.get("model", "") or obj.get("provider", "")
 
         elif event_type == "turn.started":
+            if current_turn_open:
+                finalize_turn()
             sparse_outer_turns += 1
-            current_outer_turn_has_action = False
+            start_turn()
 
         elif event_type == "item.completed":
             item = obj.get("item", {})
             # Only count completed items (skip in_progress starts)
             if item.get("status") in ("completed", "failed", None):
+                if not current_turn_open:
+                    start_turn()
                 ci = _measure_sparse_item(item)
                 if ci.chars > 0:
                     report.items.append(ci)
-                # Capture early agent_message blocks for secret words
-                if not first_assistant_captured and item.get("type") == "agent_message":
+                # Empty message envelopes do not define the initial assistant content.
+                if item.get("type") == "agent_message":
                     raw = item.get("text", "")
-                    if raw.strip():
+                    if not first_assistant_captured and raw.strip():
                         first_assistant_texts.append(raw)
-                        if _extract_secret_words_lines(raw) or len(first_assistant_texts) >= 5:
+                        if (
+                            _extract_secret_words_lines(raw)
+                            or len(first_assistant_texts) >= _BREADCRUMB_SEARCH_TEXT_BLOCK_LIMIT
+                        ):
                             first_assistant_captured = True
                 # Track tool calls and build timeline actions
                 itype = item.get("type", "")
+                raw_text = item.get("text", "") if itype in ("agent_message", "reasoning") else ""
+                if raw_text.strip():
+                    current_turn_has_meaningful_text = True
+                elif itype not in ("command_execution", "mcp_tool_call", "file_change"):
+                    if current_turn_empty_detail is None:
+                        current_turn_empty_detail = EmptyTurn(
+                            turn_num=current_turn_num,
+                            item_type=itype or "unknown",
+                            detail=item.get("id", ""),
+                            preview=ci.preview,
+                        )
                 if itype == "command_execution":
-                    current_outer_turn_has_action = True
-                    turn_num = count_action_turn()
+                    current_turn_has_tool = True
                     cmd = item.get("command", "")
                     # Strip shell wrapper for detail
                     detail = cmd
@@ -752,7 +877,7 @@ def parse_sparse(lines: list[str]) -> SessionReport:
                     exit_code = item.get("exit_code", 0)
                     report.actions.append(
                         TurnAction(
-                            turn_num=turn_num,
+                            turn_num=current_turn_num,
                             tool_name=display_name,
                             detail=detail[:80],
                             result_chars=len(output),
@@ -762,8 +887,7 @@ def parse_sparse(lines: list[str]) -> SessionReport:
                         )
                     )
                 elif itype == "mcp_tool_call":
-                    current_outer_turn_has_action = True
-                    turn_num = count_action_turn()
+                    current_turn_has_tool = True
                     server = item.get("server", "")
                     tool = item.get("tool", "")
                     name = f"{server}/{tool}" if server else tool
@@ -785,7 +909,7 @@ def parse_sparse(lines: list[str]) -> SessionReport:
                     result_text = json.dumps(result) if isinstance(result, dict) else str(result)
                     report.actions.append(
                         TurnAction(
-                            turn_num=turn_num,
+                            turn_num=current_turn_num,
                             tool_name=name,
                             detail=detail,
                             result_chars=len(result_text),
@@ -795,13 +919,12 @@ def parse_sparse(lines: list[str]) -> SessionReport:
                         )
                     )
                 elif itype == "file_change":
-                    current_outer_turn_has_action = True
-                    turn_num = count_action_turn()
+                    current_turn_has_tool = True
                     changes = item.get("changes", [])
                     paths = [c.get("path", "").rsplit("/", 1)[-1] for c in changes]
                     report.actions.append(
                         TurnAction(
-                            turn_num=turn_num,
+                            turn_num=current_turn_num,
                             tool_name="file_change",
                             detail=", ".join(paths)[:80],
                             result_chars=0,
@@ -811,20 +934,15 @@ def parse_sparse(lines: list[str]) -> SessionReport:
                     )
 
         elif event_type == "turn.failed":
-            if not current_outer_turn_has_action:
-                report.turn_units += 1
-                err = obj.get("error", {})
-                msg = err.get("message", "") if isinstance(err, dict) else obj.get("message", "")
-                report.empty_turns.append(
-                    EmptyTurn(
-                        turn_num=report.turn_units,
-                        item_type="turn.failed",
-                        detail="failed turn without completed actions",
-                        preview=msg[:120].replace("\n", " "),
-                    )
-                )
+            if not current_turn_open:
+                start_turn()
+            err = obj.get("error", {})
+            msg = err.get("message", "") if isinstance(err, dict) else obj.get("message", "")
+            finalize_turn(msg)
 
         elif event_type == "turn.completed":
+            if current_turn_open:
+                finalize_turn()
             usage = obj.get("usage", {})
             total_in = usage.get("input_tokens", 0)
             cached = usage.get("cached_input_tokens", 0)
@@ -834,10 +952,15 @@ def parse_sparse(lines: list[str]) -> SessionReport:
             report.total_cache_read = cached
             report.total_output_tokens = usage.get("output_tokens", 0)
             report.total_cache_creation = 0  # not available in sparse format
+            report.aggregate_usage_source = "terminal"
+
+    if current_turn_open:
+        finalize_turn()
 
     report.meta.num_turns = sparse_outer_turns
 
     report.secret_words_lines = _extract_secret_words_lines("\n".join(first_assistant_texts))
+    report.breadcrumb_applicability = _breadcrumb_applicability(report)
 
     return report
 
@@ -921,6 +1044,31 @@ def render_permission_friction(report: SessionReport) -> str:
     return "\n".join(lines) + "\n"
 
 
+def render_operational_friction(report: SessionReport) -> str:
+    """Render provider-forced foreground timeout/backgrounding facts."""
+    if not report.operational_frictions:
+        return ""
+
+    lines = [
+        "",
+        "-" * 72,
+        "OPERATIONAL FRICTION",
+        "-" * 72,
+        f"  Events: {len(report.operational_frictions)}",
+        "",
+        f"  {'Category':<42s} {'Tool':<14s} {'Duration':>10s}",
+        f"  {'-' * 42} {'-' * 14} {'-' * 10}",
+    ]
+    for friction in report.operational_frictions:
+        duration = f"{friction.duration_ms / 1000:.1f}s" if friction.duration_ms else "n/a"
+        lines.append(f"  {friction.category:<42.42s} {friction.tool_name:<14.14s} {duration:>10s}")
+        lines.append(f"    Command: {friction.command_preview[:120]}")
+        lines.append(f"    Result:  {friction.result_preview[:120]}")
+        if friction.log_file:
+            lines.append(f"    Source:  {friction.log_file}")
+    return "\n".join(lines) + "\n"
+
+
 def render_token_summary(report: SessionReport) -> str:
     total_input = report.total_input_tokens + report.total_cache_creation + report.total_cache_read
     fresh = report.total_input_tokens
@@ -948,6 +1096,7 @@ def render_token_summary(report: SessionReport) -> str:
         ),
         f"  Output:          {_fmt_tokens(output):>10s}",
         f"  Cache Hit Rate:  {hit_rate:>9.1f}%",
+        f"  Usage Source:    {report.aggregate_usage_source}",
     ]
     return "\n".join(lines) + "\n"
 
@@ -1004,6 +1153,32 @@ def render_top_items(report: SessionReport, n: int = 10) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _turn_usage_coverage_lines(report: SessionReport) -> list[str]:
+    """Describe the provenance and aggregate coverage of rich per-turn usage."""
+    envelope_totals = (
+        sum(turn.input_tokens for turn in report.turns),
+        sum(turn.cache_creation_input_tokens for turn in report.turns),
+        sum(turn.cache_read_input_tokens for turn in report.turns),
+        sum(turn.output_tokens for turn in report.turns),
+    )
+    aggregate_totals = (
+        report.total_input_tokens,
+        report.total_cache_creation,
+        report.total_cache_read,
+        report.total_output_tokens,
+    )
+    source = report.aggregate_usage_source
+    lines = ["  Turn Usage Source: assistant message envelopes"]
+    if envelope_totals == aggregate_totals:
+        lines.append(f"  Coverage: rows reconcile with {source} aggregate usage")
+    else:
+        lines.append(
+            f"  Coverage: rows do not reconcile with {source} aggregate usage; "
+            "use TOKEN SUMMARY for authoritative totals"
+        )
+    return lines
+
+
 def render_per_turn_growth(report: SessionReport) -> str:
     """Rich format only: show per-API-call token progression."""
     if not report.turns:
@@ -1016,6 +1191,8 @@ def render_per_turn_growth(report: SessionReport) -> str:
         "-" * 72,
         "PER-TURN CONTEXT GROWTH",
         "-" * 72,
+        *_turn_usage_coverage_lines(report),
+        "",
         (
             f"  {'#':>3s}  {'Input':>10s}  {'CacheCreate':>12s}"
             f"  {'CacheRead':>10s}  {'Output':>8s}"
@@ -1059,6 +1236,8 @@ def render_longest_turns(report: SessionReport, n: int = 10) -> str:
         "-" * 132,
         f"TOP {n} LONGEST TURNS",
         "-" * 132,
+        *_turn_usage_coverage_lines(report),
+        "",
         f"  {'#':>3s}  {'Duration':>10s}  {'Input':>10s}  {'Output':>10s}  {'Detail'}",
         f"  {'-' * 3}  {'-' * 10}  {'-' * 10}  {'-' * 10}  {'-' * 80}",
     ]
@@ -1164,19 +1343,22 @@ def render_empty_turns(report: SessionReport) -> str:
 
     empty_count = len(report.empty_turns)
     tool_count = report.tool_turn_units
+    text_only_count = report.turn_units - tool_count - empty_count
     empty_ratio = empty_count / report.turn_units * 100
-    unit_label = "API turns" if report.meta.format == "rich" else "Codex action turns"
 
     lines = [
         "",
         "-" * 72,
         "EMPTY TURNS",
         "-" * 72,
-        f"  Unit basis: {unit_label}",
+        "  Unit basis: API turns",
         "",
-        f"  {'Total':>8s}  {'Tool':>8s}  {'Empty':>8s}  {'Empty %':>8s}",
-        f"  {'-' * 8}  {'-' * 8}  {'-' * 8}  {'-' * 8}",
-        f"  {report.turn_units:>8d}  {tool_count:>8d}  {empty_count:>8d}  {empty_ratio:>7.2f}%",
+        f"  {'Total':>8s}  {'Tool':>8s}  {'Text-only':>8s}  {'Empty':>8s}  {'Empty %':>8s}",
+        f"  {'-' * 8}  {'-' * 8}  {'-' * 8}  {'-' * 8}  {'-' * 8}",
+        (
+            f"  {report.turn_units:>8d}  {tool_count:>8d}  {text_only_count:>8d}"
+            f"  {empty_count:>8d}  {empty_ratio:>7.2f}%"
+        ),
         "",
         "  Empty turn details:",
     ]
@@ -1221,32 +1403,37 @@ def render_skill_invocations(report: SessionReport) -> str:
 def _parse_secret_words(line: str) -> list[str]:
     """Extract individual secret words from a line.
 
-    Secret words are capitalized or hyphenated tokens. Stops at the first
-    token that doesn't match (ignoring common prefixes like "Secret word:").
+    Secret words are capitalized or hyphenated tokens. Stops at sentence
+    punctuation or the first token that doesn't match (ignoring common prefixes).
     """
     if not line:
         return []
     # Strip "Secret word:" / "Secret words:" prefix if present
-    stripped = re.sub(r"^Secret\s+words?:\s*", "", line)
+    stripped = re.sub(r"^Secret\s+words?:\s*", "", line).replace("/", " ")
     words = []
     for token in stripped.split():
+        token_without_closer = token.rstrip("\"')]} ")
+        is_terminator = token_without_closer.endswith((".", ";", ":", "!", "?"))
         clean = token.rstrip(".,;:!?")
         if not clean:
             continue
         if clean[0].isupper() or "-" in clean:
             words.append(clean)
+            if is_terminator:
+                break
         else:
             break
     return words
 
 
 def render_secret_words(report: SessionReport) -> str:
-    """Secret words detection from the first assistant block."""
+    """Secret words detection from early assistant content."""
     lines = [
         "",
         "-" * 72,
         "SECRET WORDS",
         "-" * 72,
+        f"  Applicability: {report.breadcrumb_applicability}",
     ]
 
     if report.secret_words_lines:
@@ -1263,6 +1450,10 @@ def render_secret_words(report: SessionReport) -> str:
     else:
         lines.append(f"  (no lines starting with '{BRAND_NAME_TITLE}' or 'Secret' in first 30 lines)")
         lines.append("  Found: (none)")
+        if report.breadcrumb_applicability == "required":
+            lines.append("  Status: missing")
+        elif report.breadcrumb_applicability == "unknown":
+            lines.append("  Status: unknown")
 
     return "\n".join(lines) + "\n"
 
@@ -1635,6 +1826,7 @@ def render_report(report: SessionReport) -> str:
     """Assemble all report sections."""
     sections = [
         render_header(report),
+        render_operational_friction(report),
         render_permission_friction(report),
         render_token_summary(report),
         render_content_breakdown(report),
@@ -1698,6 +1890,10 @@ def analyze_file(filepath: str) -> SessionReport | None:
         report = parse_sparse(lines)
 
     report.meta.file = filepath
+    role = _role_from_log_path(filepath)
+    for friction in report.operational_frictions:
+        friction.log_file = path.name
+        friction.role = role
     return report
 
 
@@ -1735,6 +1931,7 @@ def render_role_summary(reports: list[SessionReport]) -> str:
     total_output = sum(report.total_output_tokens for report in reports)
     total_errors = sum(1 for report in reports for action in report.actions if action.is_error)
     format_counts = Counter(report.meta.format for report in reports)
+    usage_source_counts = Counter(report.aggregate_usage_source for report in reports)
 
     lines = [
         "=" * 72,
@@ -1742,6 +1939,7 @@ def render_role_summary(reports: list[SessionReport]) -> str:
         "=" * 72,
         f"  Logs:          {total_logs}",
         f"  Formats:       {', '.join(f'{name}:{count}' for name, count in sorted(format_counts.items()))}",
+        f"  Usage Sources: {', '.join(f'{name}:{count}' for name, count in sorted(usage_source_counts.items()))}",
         (
             f"  Total Input:   {_fmt_tokens(total_input)}"
             f"  (fresh: {_fmt_tokens(total_fresh)},"
@@ -1753,9 +1951,9 @@ def render_role_summary(reports: list[SessionReport]) -> str:
         "",
         (
             f"  {'Role':<28s} {'Logs':>5s} {'Input':>9s} {'Fresh':>9s}"
-            f" {'Cache':>9s} {'Output':>8s} {'Hit%':>6s} {'Err':>5s}"
+            f" {'Cache':>9s} {'Output':>8s} {'Hit%':>6s} {'Err':>5s} {'Partial':>7s}"
         ),
-        f"  {'-' * 28} {'-' * 5} {'-' * 9} {'-' * 9} {'-' * 9} {'-' * 8} {'-' * 6} {'-' * 5}",
+        (f"  {'-' * 28} {'-' * 5} {'-' * 9} {'-' * 9} {'-' * 9} {'-' * 8} {'-' * 6} {'-' * 5} {'-' * 7}"),
     ]
 
     for role, role_reports in sorted(by_role.items()):
@@ -1764,6 +1962,7 @@ def render_role_summary(reports: list[SessionReport]) -> str:
         role_cache = sum(report.total_cache_creation + report.total_cache_read for report in role_reports)
         role_output = sum(report.total_output_tokens for report in role_reports)
         role_errors = sum(1 for report in role_reports for action in report.actions if action.is_error)
+        role_partial = sum(report.aggregate_usage_source == "envelope-partial" for report in role_reports)
         weighted_hit = (
             sum(_cache_hit_rate(report) * _total_input_tokens(report) for report in role_reports) / role_input
             if role_input
@@ -1777,7 +1976,41 @@ def render_role_summary(reports: list[SessionReport]) -> str:
             f" {_fmt_tokens(role_output):>8s}"
             f" {weighted_hit:>5.1f}%"
             f" {role_errors:>5d}"
+            f" {role_partial:>7d}"
         )
+
+    operational_frictions = [friction for report in reports for friction in report.operational_frictions]
+    if operational_frictions:
+        by_category = Counter(friction.category for friction in operational_frictions)
+        by_role_friction = Counter(friction.role for friction in operational_frictions)
+        lines.extend(
+            [
+                "",
+                "OPERATIONAL FRICTION",
+                f"  Events: {len(operational_frictions)} ({len(by_category)} categories)",
+                "",
+                f"  {'Category':<42s} {'Count':>5s}",
+                f"  {'-' * 42} {'-' * 5}",
+            ]
+        )
+        for category, count in by_category.most_common():
+            lines.append(f"  {category:<42.42s} {count:>5d}")
+        lines.extend(["", f"  {'Role':<28s} {'Events':>6s}", f"  {'-' * 28} {'-' * 6}"])
+        for role, count in by_role_friction.most_common():
+            lines.append(f"  {role:<28s} {count:>6d}")
+        lines.extend(
+            [
+                "",
+                f"  {'Example log':<38s} {'Tool':<14s} {'Command':<60s}",
+                f"  {'-' * 38} {'-' * 14} {'-' * 60}",
+            ]
+        )
+        for operational_friction in operational_frictions[:5]:
+            lines.append(
+                f"  {operational_friction.log_file:<38.38s}"
+                f" {operational_friction.tool_name:<14.14s}"
+                f" {operational_friction.command_preview[:60]:<60s}"
+            )
 
     permission_frictions = [friction for report in reports for friction in _permission_frictions_for_report(report)]
     if permission_frictions:
@@ -1811,8 +2044,12 @@ def render_role_summary(reports: list[SessionReport]) -> str:
                 f"  {'-' * 38} {'-' * 32} {'-' * 60}",
             ]
         )
-        for friction in permission_frictions[:5]:
-            lines.append(f"  {friction.log_file:<38.38s} {friction.category:<32.32s} {friction.detail[:60]:<60s}")
+        for permission_friction in permission_frictions[:5]:
+            lines.append(
+                f"  {permission_friction.log_file:<38.38s}"
+                f" {permission_friction.category:<32.32s}"
+                f" {permission_friction.detail[:60]:<60s}"
+            )
 
     tool_chars: Counter[str] = Counter()
     tool_calls: Counter[str] = Counter()

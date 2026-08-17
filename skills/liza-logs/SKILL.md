@@ -32,7 +32,9 @@ python3 ~/§BRAND_GLOBAL_DIRNAME§/skills/§BRAND_BINARY_NAME§-logs/scripts/ana
 ```
 By default, run the analyzer **per role**.
 Use `--summary-by-role` when you need cross-role aggregate token, tool, MCP,
-error, and skill-invocation totals.
+error, and skill-invocation totals. Its `Usage Sources` and `Partial` columns
+show aggregate provenance, while `OPERATIONAL FRICTION` groups events by
+category and role and includes example source logs.
 
 3. Inspect `§BRAND_PROJECT_DIRNAME§/state.yaml` for task-level frictions before drawing conclusions:
 ```bash
@@ -67,6 +69,27 @@ Context-fill percentages are authoritative only when the provider records
 context-window metadata. Do not infer historical window size or compaction
 thresholds from the analyzer process environment.
 
+Interpret corrected rich-log diagnostics as follows:
+
+- `Usage Source: terminal` is authoritative for aggregate fresh input,
+  cache-create, cache-read, and output usage. Per-turn rows remain
+  envelope-derived; their `Turn Usage Source` and `Coverage` lines state whether
+  rows reconcile with terminal aggregates.
+- `Usage Source: envelope-partial` is partial aggregate evidence used when
+  terminal usage is absent. Do not infer unavailable terminal-only values.
+- `Usage Source: unknown` means no usable aggregate usage record exists;
+  displayed zeros may undercount rather than represent measured zero. The role
+  `Partial` column counts only `envelope-partial`; check `Usage Sources` for
+  `unknown` logs separately.
+- Each string- or list-encoded `tool_result` payload contributes exactly once
+  to content accounting. Ordinary user `text` remains text rather than a tool
+  result.
+- An empty turn has neither meaningful text nor tool activity. Meaningful
+  tool-free text is not empty.
+- In `SECRET WORDS`, breadcrumb applicability is `required`, `not required`,
+  or `unknown` from provider/model evidence. Missing breadcrumbs are a finding
+  only when required; unknown is neutral evidence, not a fabricated result.
+
 Permission/policy friction is operational setup friction, not ordinary task
 failure. Keep it near the top and separate it from command exit failures. Split
 policy blocks, missing allowlist entries, shell-shape rejections, filesystem
@@ -78,7 +101,12 @@ their fix surfaces differ.
    specific questions, for example:
 ```bash
 python3 ~/§BRAND_GLOBAL_DIRNAME§/skills/§BRAND_BINARY_NAME§-logs/scripts/query-log.py §BRAND_PROJECT_DIRNAME§/agent-outputs/coder-3-*.txt --around-errors 3 --task architecture-4-code-planning-0-b-repair-0-coding-1
+python3 ~/§BRAND_GLOBAL_DIRNAME§/skills/§BRAND_BINARY_NAME§-logs/scripts/query-log.py §BRAND_PROJECT_DIRNAME§/agent-outputs/coder-3-*.txt --around-operational-friction 3 --task architecture-4-code-planning-0-b-repair-0-coding-1
 ```
+   - Operational friction is provider-forced foreground
+     timeout/backgrounding, even when `is_error` is false. Keep it separate
+     from ordinary errors, permission/policy blocks, and deliberate background
+     commands. Refine either query with `--max-field` and `--json` when useful.
    - Manual raw-log reads are a last resort only when the query helper cannot
      answer a concrete evidence question; state the gap before doing so.
    - When referring to a specific session in your summary, include the log filename

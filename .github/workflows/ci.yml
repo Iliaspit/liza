@@ -22,11 +22,18 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          python-version: '3.12'
+
       - name: Run linters
         run: make lint
 
       - name: Run tests
         run: make test
+
+      - name: Run log analyzer tests
+        run: uv run --frozen python3 -m pytest skills/liza-logs/scripts
 
       - name: Run e2e tests
         run: make test-e2e

@@ -22,6 +22,25 @@ all later tool-error counts should be interpreted.
 | Priority | Friction | Evidence | Impact | Recommended fix |
 |----------|----------|----------|--------|-----------------|
 
+### Usage and Content Authority
+
+| Usage Source | Authority | Reporting rule |
+|--------------|-----------|----------------|
+| `terminal` | Authoritative aggregate fresh input, cache-create, cache-read, and output usage | Keep per-turn rows envelope-derived; do not reconstruct exact per-turn values from terminal totals |
+| `envelope-partial` | Partial aggregate evidence when terminal usage is absent | Do not infer terminal-only values or present the aggregate as complete |
+| `unknown` | No usable aggregate usage record; displayed zeros may be an undercount rather than measured zero | Treat aggregate token usage as unavailable and do not infer missing values |
+
+Rich per-turn tables identify `Turn Usage Source` as assistant message envelopes
+and state whether those rows reconcile with the aggregate. When they diverge,
+use `TOKEN SUMMARY` for authoritative aggregate totals rather than summing rows.
+
+For content accounting, count each string- or list-encoded `tool_result`
+payload exactly once. Preserve ordinary user `text` as text; it is not a tool
+result. In a `--summary-by-role` report, include `Usage Sources` and the
+per-role `Partial` count. `Partial` counts only `envelope-partial` logs;
+`unknown` logs remain visible in `Usage Sources` and must not be read as
+complete merely because they are excluded from `Partial`.
+
 ## 2. State Friction Inventory
 
 Source: `§BRAND_PROJECT_DIRNAME§/state.yaml`
@@ -101,6 +120,21 @@ Signals include struggle sequences, repeated tool errors, duplicate large
 results, low-value chatter, empty turns, large result volume, MCP failures,
 missing expected skill invocation, or missing initialization breadcrumbs.
 
+### Operational Friction
+
+Keep operational friction separate from errors and permission/policy blocks.
+It records provider-forced foreground timeout/backgrounding even when
+`is_error` is false; command syntax requesting deliberate background execution
+is not sufficient evidence.
+
+Use `query-log.py --around-operational-friction N` for a bounded evidence
+window. Add `--task`, `--max-field`, or `--json` when the question needs those
+refinements. `--summary-by-role` reports operational friction by category and
+role with example source logs.
+
+| Category | Role | Example log | Tool | Command | Duration | Bounded result evidence |
+|----------|------|-------------|------|---------|----------|-------------------------|
+
 ### Errors
 
 Summarize analyzer-reported errors before interpreting tool behavior.
@@ -123,6 +157,25 @@ large or repetitive payloads.
 Interpret high-volume tool output as friction only when it is unnecessary,
 duplicated, or prevents progress. Large output from a targeted diagnostic may be
 valid evidence rather than waste.
+
+### Empty Turns and Breadcrumb Applicability
+
+An empty turn has neither meaningful text nor tool activity; meaningful
+tool-free text is not empty. Use the analyzer's corrected empty-turn count and
+percentage rather than reclassifying turns from tool usage alone.
+
+In `SECRET WORDS`, record breadcrumb applicability as `required`,
+`not required`, or `unknown` according to agent/provider evidence. Native Claude
+rich streams omit provider identity and are exempt; an explicit `claude` provider
+is also exempt. Other identified providers and sparse logs require breadcrumbs,
+regardless of model branding. Unsupported or undetected formats remain unknown.
+Missing breadcrumbs are a finding only when required.
+Keep unknown neutral rather than fabricating applicability.
+
+Search only the first five non-empty assistant text blocks in rich logs or
+agent-message text items in sparse logs, stopping earlier when breadcrumbs are
+found. Tool-only and empty envelopes do not consume this initialization window;
+text after the fifth block is outside the breadcrumb search.
 
 ## 5. Cross-Correlation
 
@@ -159,6 +212,7 @@ Group recommendations by root cause, not by individual task.
 python3 ~/§BRAND_GLOBAL_DIRNAME§/skills/§BRAND_BINARY_NAME§-logs/scripts/analyze-log.py §BRAND_PROJECT_DIRNAME§/agent-outputs/*.txt
 python3 ~/§BRAND_GLOBAL_DIRNAME§/skills/§BRAND_BINARY_NAME§-logs/scripts/analyze-log.py --summary-by-role §BRAND_PROJECT_DIRNAME§/agent-outputs/*.txt
 python3 ~/§BRAND_GLOBAL_DIRNAME§/skills/§BRAND_BINARY_NAME§-logs/scripts/analyze-state.py §BRAND_PROJECT_DIRNAME§/state.yaml
+python3 ~/§BRAND_GLOBAL_DIRNAME§/skills/§BRAND_BINARY_NAME§-logs/scripts/query-log.py §BRAND_PROJECT_DIRNAME§/agent-outputs/*.txt --around-operational-friction 3
 ```
 
 ### Raw Evidence Pointers
