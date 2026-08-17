@@ -4,7 +4,6 @@ package integration
 // reject -> await_resubmission -> resubmit -> re-review -> approve -> merge flow.
 
 import (
-	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,6 +15,11 @@ import (
 	"github.com/liza-mas/liza/internal/ops"
 	"github.com/liza-mas/liza/internal/testhelpers"
 )
+
+type awaitResubmissionCall struct {
+	result *commands.AwaitResubmissionResult
+	err    error
+}
 
 // TestAwaitResubmission_RejectResubmitFlow exercises the full reject -> await
 // -> resubmit -> re-review -> approve -> merge lifecycle using a real
@@ -101,16 +105,13 @@ func TestAwaitResubmission_RejectResubmitFlow(t *testing.T) {
 	if task.Status != models.TaskStatusRejected {
 		t.Fatalf("Expected CODE_REJECTED after rejection, got %s", task.Status)
 	}
+	if task.BaseCommit == nil {
+		t.Fatal("Expected non-empty BaseCommit after rejection")
+	}
+	expectedBaseCommit := *task.BaseCommit
 
-	// --- Phase 3: Reviewer calls AwaitResubmission (blocks in goroutine) ---
-	var awaitResult *ops.AwaitResubmissionResult
-	var awaitErr error
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		awaitResult, awaitErr = ops.AwaitResubmission(
-			context.Background(), projectDir, "task-1", reviewerID, 30*time.Second)
-	}()
+	// --- Phase 3: Reviewer calls the public command adapter ---
+	awaitCall := startAwaitResubmission(projectDir, "task-1", reviewerID, 30*time.Second)
 
 	// Let AwaitResubmission start watching before coder acts
 	testhelpers.WaitForAsyncSetup()
@@ -137,15 +138,7 @@ func TestAwaitResubmission_RejectResubmitFlow(t *testing.T) {
 	}
 
 	// --- Phase 5: Verify AwaitResubmission returns RESUBMITTED ---
-	select {
-	case <-done:
-	case <-time.After(10 * time.Second):
-		t.Fatal("AwaitResubmission timed out waiting for resubmission")
-	}
-
-	if awaitErr != nil {
-		t.Fatalf("AwaitResubmission returned error: %v", awaitErr)
-	}
+	awaitResult := receiveAwaitResubmission(t, awaitCall, 10*time.Second)
 	if awaitResult.Verdict != ops.ResubmissionResubmitted {
 		t.Fatalf("Verdict = %q, want %q", awaitResult.Verdict, ops.ResubmissionResubmitted)
 	}
@@ -154,6 +147,9 @@ func TestAwaitResubmission_RejectResubmitFlow(t *testing.T) {
 	}
 	if awaitResult.ReviewCommit != newSHA {
 		t.Errorf("ReviewCommit = %q, want %q", awaitResult.ReviewCommit, newSHA)
+	}
+	if awaitResult.BaseCommit != expectedBaseCommit {
+		t.Errorf("BaseCommit = %q, want %q", awaitResult.BaseCommit, expectedBaseCommit)
 	}
 
 	// Verify task is now in REVIEWING state
@@ -182,5 +178,73 @@ func TestAwaitResubmission_RejectResubmitFlow(t *testing.T) {
 	}
 	if task.MergeCommit == nil {
 		t.Error("Expected merge commit to be set")
+	}
+}
+
+func TestAwaitResubmission_TerminalFlow(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	testhelpers.SetupGlobalLiza(t)
+	fixture := setupIsolatedAwaitProject(t)
+	rejectAwaitFixture(t, fixture)
+
+	awaitCall := startAwaitResubmission(
+		fixture.projectRoot, awaitTaskID, awaitReviewerID, 30*time.Second)
+	testhelpers.WaitForAsyncSetup()
+	if err := commands.ClaimTaskCommand(fixture.projectRoot, awaitTaskID, awaitCoderID); err != nil {
+		t.Fatalf("ClaimTask (reclaim) failed: %v", err)
+	}
+	if err := commands.MarkBlockedCommand(
+		fixture.projectRoot,
+		awaitTaskID,
+		"Spec ambiguity",
+		[]string{"Which behavior is required?"},
+		awaitCoderID,
+	); err != nil {
+		t.Fatalf("MarkBlocked failed: %v", err)
+	}
+
+	result := receiveAwaitResubmission(t, awaitCall, 10*time.Second)
+	if result.Verdict != ops.ResubmissionTerminal {
+		t.Fatalf("Verdict = %q, want %q", result.Verdict, ops.ResubmissionTerminal)
+	}
+	if result.TaskStatus != models.TaskStatusBlocked {
+		t.Fatalf("Task status = %q, want %q", result.TaskStatus, models.TaskStatusBlocked)
+	}
+	assertBoundedAwaitState(t, fixture, true)
+}
+
+func startAwaitResubmission(
+	projectRoot, taskID, agentID string,
+	remaining time.Duration,
+) <-chan awaitResubmissionCall {
+	result := make(chan awaitResubmissionCall, 1)
+	go func() {
+		awaitResult, err := commands.AwaitResubmission(projectRoot, taskID, agentID, remaining)
+		result <- awaitResubmissionCall{result: awaitResult, err: err}
+	}()
+	return result
+}
+
+func receiveAwaitResubmission(
+	t *testing.T,
+	call <-chan awaitResubmissionCall,
+	guard time.Duration,
+) *commands.AwaitResubmissionResult {
+	t.Helper()
+	select {
+	case outcome := <-call:
+		if outcome.err != nil {
+			t.Fatalf("AwaitResubmission returned error: %v", outcome.err)
+		}
+		if outcome.result == nil {
+			t.Fatal("AwaitResubmission returned a nil result")
+		}
+		return outcome.result
+	case <-time.After(guard):
+		t.Fatalf("AwaitResubmission caller did not return within %s", guard)
+		return nil
 	}
 }

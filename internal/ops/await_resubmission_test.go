@@ -3,6 +3,7 @@ package ops
 import (
 	"context"
 	stderrors "errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	"github.com/liza-mas/liza/internal/errors"
 	"github.com/liza-mas/liza/internal/git"
 	"github.com/liza-mas/liza/internal/models"
+	"github.com/liza-mas/liza/internal/statevalidate"
 	"github.com/liza-mas/liza/internal/testhelpers"
 )
 
@@ -529,6 +531,65 @@ func TestAwaitResubmission_Timeout(t *testing.T) {
 	agent := s.Agents["reviewer-1"]
 	if agent.CurrentTask != nil {
 		t.Errorf("expected CurrentTask=nil after timeout, got %q", *agent.CurrentTask)
+	}
+}
+
+func TestAwaitResubmission_DelayedWatcherErrorUsesOriginalDeadline(t *testing.T) {
+	tmpDir := t.TempDir()
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	testhelpers.CreateSpecFile(t, tmpDir, "vision.md", "# Vision\n")
+
+	now := time.Now().UTC()
+	state := testhelpers.CreateValidState()
+	task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusRejected, now)
+	task.SpecRef = state.Goal.SpecRef
+	task.History = append(task.History, models.TaskHistoryEntry{
+		Time:  now,
+		Event: models.TaskEventRejected,
+		Agent: strPtr("reviewer-1"),
+	})
+	state.Tasks = []models.Task{task}
+	state.Agents["reviewer-1"] = models.Agent{Role: "code-reviewer", Status: models.AgentStatusIdle}
+	bb := testhelpers.WriteInitialState(t, stateFile, state)
+
+	previousWatcher := newAwaitResubmissionWatcher
+	newAwaitResubmissionWatcher = func(*db.Blackboard) (awaitResubmissionWatcher, error) {
+		return newDelayedErrorWatcher(300 * time.Millisecond), nil
+	}
+	t.Cleanup(func() { newAwaitResubmissionWatcher = previousWatcher })
+
+	started := time.Now()
+	result, err := AwaitResubmission(context.Background(), tmpDir, "task-1", "reviewer-1", 500*time.Millisecond)
+	elapsed := time.Since(started)
+	if err != nil {
+		t.Fatalf("AwaitResubmission error: %v", err)
+	}
+	if result.Verdict != ResubmissionTimeout {
+		t.Errorf("Verdict = %q, want TIMEOUT", result.Verdict)
+	}
+	if elapsed < 400*time.Millisecond {
+		t.Errorf("returned before original deadline: elapsed = %s", elapsed)
+	}
+	if elapsed >= 800*time.Millisecond {
+		t.Errorf("returned after original deadline tolerance: elapsed = %s, want < 800ms", elapsed)
+	}
+
+	readState, readErr := bb.Read()
+	if readErr != nil {
+		t.Fatalf("failed to read state: %v", readErr)
+	}
+	readTask := readState.FindTask("task-1")
+	if readTask == nil {
+		t.Fatal("task-1 not found")
+	}
+	if readTask.ReviewingBy != nil {
+		t.Error("review ownership should be released after timeout")
+	}
+	if readState.Agents["reviewer-1"].CurrentTask != nil {
+		t.Error("reviewer ownership should be released after timeout")
+	}
+	if err := statevalidate.ValidateState(readState, tmpDir, false, io.Discard); err != nil {
+		t.Fatalf("state should validate after timeout: %v", err)
 	}
 }
 

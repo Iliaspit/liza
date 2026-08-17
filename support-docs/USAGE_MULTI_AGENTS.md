@@ -658,25 +658,29 @@ jq -c 'select(.type == "assistant") | {id: .message.id, usage: .message.usage}' 
 
 Doer agents (coders, planners, writers) use a blocking workflow for review cycles:
 
-1. `§BRAND_NAME_LOWER§_submit_for_review` — submit completed work
-2. `§BRAND_NAME_LOWER§_await_verdict` — block until reviewer issues verdict
+1. `§BRAND_BINARY_NAME§ submit-for-review <task-id> --agent-id <agent-id> --json` — submit completed work
+2. `§BRAND_BINARY_NAME§ await-verdict <task-id> --agent-id <agent-id> --json` — wait for the reviewer within the remaining overall budget; one foreground call lasts at most 100 seconds
 3. Handle verdict:
+  - **POLL**: Call `await-verdict` again in the foreground with the smaller returned `timeout_seconds`
   - **REJECTED**: Fix issues, resubmit (session stays alive — no cold restart)
-  - **APPROVED** / **NEW_ATTEMPT** / **TIMEOUT** / **ABORTED**: Exit normally
+  - **TIMEOUT**: The overall budget is exhausted; stop waiting and exit normally
+  - **APPROVED** / **NEW_ATTEMPT** / **ABORTED**: Exit normally
 
-This reduces per-rejection overhead from ~47s (cold restart) to near-zero. The call is budget-aware — it refuses if the iteration limit would be exceeded on rejection.
+`--timeout-seconds` is the remaining overall budget, not the duration of one blocking call. This reduces per-rejection overhead from ~47s (cold restart) to near-zero. The call is also iteration-budget-aware — it refuses if the iteration limit would be exceeded on rejection.
 
 ### Review, Reject, Await Resubmission
 
 Reviewer agents use a blocking workflow after non-terminal rejections:
 
-1. `§BRAND_NAME_LOWER§_submit_verdict` — issue REJECTED verdict with feedback
-2. `§BRAND_NAME_LOWER§_await_resubmission` — block until doer resubmits
+1. `§BRAND_BINARY_NAME§ submit-verdict <task-id> REJECTED --agent-id <agent-id> --reason <feedback> --json` — issue the rejection
+2. `§BRAND_BINARY_NAME§ await-resubmission <task-id> --agent-id <agent-id> --json` — wait for the doer within the remaining overall budget; one foreground call lasts at most 100 seconds
 3. Handle result:
+  - **POLL**: Call `await-resubmission` again in the foreground with the smaller returned `timeout_seconds`
   - **RESUBMITTED**: Review the new changes (session stays alive — no cold restart)
-  - **TERMINAL** / **TIMEOUT** / **ABORTED**: Exit normally
+  - **TIMEOUT**: The overall budget is exhausted; stop waiting and exit normally
+  - **TERMINAL** / **ABORTED**: Exit normally
 
-This mirrors the doer-side `§BRAND_NAME_LOWER§_await_verdict` flow, reducing per-rejection overhead from ~47s (cold restart) to near-zero for reviewers. Do not call after terminal rejections (`EscalatedToBlocked` or `NewAttemptTriggered`).
+`--timeout-seconds` has the same remaining-budget meaning as it does for `await-verdict`. This reduces per-rejection overhead from ~47s (cold restart) to near-zero for reviewers. Do not call after terminal rejections (`EscalatedToBlocked` or `NewAttemptTriggered`).
 
 ### Differences from Pairing Mode
 

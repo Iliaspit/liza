@@ -1,5 +1,12 @@
 # `liza_await_verdict` MCP Tool
 
+> **Historical implementation plan (superseded).** The MCP surface described below
+> was removed. The current `await-verdict` CLI treats `--timeout-seconds` as the
+> remaining overall budget, caps one foreground call at 100 seconds, returns `POLL`
+> with a smaller `timeout_seconds` while budget remains, and returns final `TIMEOUT`
+> when the budget is exhausted. Historical MCP names, `MCP_TIMEOUT`, and direct
+> 1,500-second blocking behavior below are retained only as implementation provenance.
+
 ## Context
 
 In the current Liza multi-agent system, each review rejection triggers a full cold restart: session exit → supervisor loop → new session spawn → contract initialization (~47s overhead per cycle). For doer agents iterating on rejections, this overhead compounds — up to 8 restarts per task (4 rejections × 2 attempts). A blocking MCP tool that keeps the session alive between submit and verdict eliminates this restart cost while preserving the agent's accumulated context about the code.
@@ -24,7 +31,9 @@ The tool preserves task ownership across the review cycle. The doer retains logi
 
 - **Heartbeat continuity**: The supervisor's heartbeat goroutine runs for the supervisor process lifetime, not per-agent-session. While the agent is blocked on the MCP tool, the supervisor process is alive (blocked on `executeAgent()`), so heartbeat continues and the supervisor lease doesn't expire. If heartbeat were changed to require agent-side signaling, this would break.
 - **No submit_for_review changes**: The await tool sets agent `CurrentTask` itself on entry. The window between submit (which clears CurrentTask) and await is within a single session — the supervisor is blocked on `executeAgent()` and can't observe the gap. No race exists, so submit_for_review stays unchanged.
-- **MCP timeout**: Claude Code's default MCP tool timeout is 30 min (`MCP_TIMEOUT` env var). The tool defaults to 1500s (25 min) to stay within this. For workspaces where reviews routinely exceed 25 min, configure `MCP_TIMEOUT` higher and pass a larger `timeout_seconds`. This is a known limitation, not a design flaw — the alternative (no await) is strictly worse.
+- **Historical MCP timeout (superseded)**: The original MCP tool defaulted to 1500s
+  (25 min) within Claude Code's 30-minute `MCP_TIMEOUT`. This is not the current CLI
+  invocation contract; see the supersession note above.
 
 ## Reuse
 

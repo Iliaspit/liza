@@ -41,6 +41,16 @@ const reviewOwnershipLeaseMargin = 5 * time.Minute
 // for re-review after a resubmission.
 const reclaimReviewLeaseDuration = 30 * time.Minute
 
+type awaitResubmissionWatcher interface {
+	Events() <-chan struct{}
+	Errors() <-chan error
+	Close() error
+}
+
+var newAwaitResubmissionWatcher = func(bb *db.Blackboard) (awaitResubmissionWatcher, error) {
+	return bb.WatchForChanges()
+}
+
 // AwaitResubmission blocks until a doer resubmits after a rejection.
 // It validates preconditions, acquires review ownership (ReviewingBy on task,
 // agent status=WAITING), then blocks on an event loop until the task status
@@ -111,14 +121,14 @@ func AwaitResubmission(ctx context.Context, projectRoot, taskID, agentID string,
 
 	// --- Event loop: block until resubmission or terminal state ---
 	rolePair := task.RolePair
+	deadline := time.Now().Add(timeout)
 
-	watcher, watchErr := bb.WatchForChanges()
+	watcher, watchErr := newAwaitResubmissionWatcher(bb)
 	if watchErr != nil {
-		return awaitResubmissionPolling(ctx, projectRoot, bb, taskID, agentID, timeout, resolver, rolePair)
+		return awaitResubmissionPolling(ctx, projectRoot, bb, taskID, agentID, deadline, task.Status, resolver, rolePair)
 	}
 	defer watcher.Close()
 
-	deadline := time.Now().Add(timeout)
 	deadlineTimer := time.NewTimer(time.Until(deadline))
 	defer deadlineTimer.Stop()
 
@@ -176,7 +186,7 @@ func AwaitResubmission(ctx context.Context, projectRoot, taskID, agentID string,
 		case watcherErr := <-watcher.Errors():
 			log.Printf("Watcher error, falling back to polling: %v", watcherErr)
 			watcher.Close()
-			return awaitResubmissionPolling(ctx, projectRoot, bb, taskID, agentID, timeout, resolver, rolePair)
+			return awaitResubmissionPolling(ctx, projectRoot, bb, taskID, agentID, deadline, task.Status, resolver, rolePair)
 
 		case <-deadlineTimer.C:
 			releaseReviewOwnership(bb, agentID, taskID)
@@ -398,10 +408,11 @@ func reclaimForReview(projectRoot string, bb *db.Blackboard, taskID, agentID str
 
 // awaitResubmissionPolling is the polling fallback for when fsnotify is unavailable.
 // It checks state every 5 seconds until a resubmission arrives or the deadline expires.
-func awaitResubmissionPolling(ctx context.Context, projectRoot string, bb *db.Blackboard, taskID, agentID string, timeout time.Duration, resolver *pipeline.Resolver, rolePair string) (*AwaitResubmissionResult, error) {
-	deadline := time.Now().Add(timeout)
+func awaitResubmissionPolling(ctx context.Context, projectRoot string, bb *db.Blackboard, taskID, agentID string, deadline time.Time, taskStatus models.TaskStatus, resolver *pipeline.Resolver, rolePair string) (*AwaitResubmissionResult, error) {
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
+	deadlineTimer := time.NewTimer(time.Until(deadline))
+	defer deadlineTimer.Stop()
 
 	for {
 		select {
@@ -426,13 +437,14 @@ func awaitResubmissionPolling(ctx context.Context, projectRoot string, bb *db.Bl
 					Reason:  "task disappeared from state",
 				}, nil
 			}
+			taskStatus = currentTask.Status
 			if rc := checkResubmissionStatus(currentTask, resolver, rolePair); rc != nil {
 				return handleResubmissionResult(projectRoot, bb, currentTask, agentID, resolver, rolePair)
 			}
-			if time.Now().After(deadline) {
-				releaseReviewOwnership(bb, agentID, taskID)
-				return &AwaitResubmissionResult{Verdict: ResubmissionTimeout, TaskStatus: currentTask.Status}, nil
-			}
+
+		case <-deadlineTimer.C:
+			releaseReviewOwnership(bb, agentID, taskID)
+			return &AwaitResubmissionResult{Verdict: ResubmissionTimeout, TaskStatus: taskStatus}, nil
 		}
 	}
 }

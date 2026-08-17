@@ -8,11 +8,299 @@ import (
 	"testing"
 	"time"
 
+	"github.com/liza-mas/liza/internal/commands"
 	"github.com/liza-mas/liza/internal/db"
 	"github.com/liza-mas/liza/internal/git"
 	"github.com/liza-mas/liza/internal/models"
+	"github.com/liza-mas/liza/internal/ops"
 	"github.com/liza-mas/liza/internal/testhelpers"
+	"github.com/spf13/cobra"
 )
+
+func TestAwaitCommands_TimeoutHelp(t *testing.T) {
+	tests := []struct {
+		name string
+		cmd  *cobra.Command
+	}{
+		{name: "verdict", cmd: awaitVerdictCmd},
+		{name: "resubmission", cmd: awaitResubmissionCmd},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			flag := tt.cmd.Flags().Lookup("timeout-seconds")
+			if flag == nil {
+				t.Fatal("--timeout-seconds flag is missing")
+			}
+			if flag.DefValue != "1500" {
+				t.Fatalf("--timeout-seconds default = %q, want 1500", flag.DefValue)
+			}
+			for _, phrase := range []string{"remaining total budget", "at most 100 seconds"} {
+				if !strings.Contains(flag.Usage, phrase) {
+					t.Errorf("--timeout-seconds help = %q, want phrase %q", flag.Usage, phrase)
+				}
+			}
+			if !strings.Contains(tt.cmd.Long, "POLL:") || !strings.Contains(tt.cmd.Long, "TIMEOUT:") {
+				t.Errorf("long help must list POLL and TIMEOUT separately:\n%s", tt.cmd.Long)
+			}
+		})
+	}
+}
+
+func TestAwaitVerdictCLI_BudgetAndOutput(t *testing.T) {
+	tests := []struct {
+		name            string
+		args            []string
+		result          *commands.AwaitVerdictResult
+		wantBudget      time.Duration
+		wantHumanOutput string
+		wantJSONVerdict string
+		wantJSONTimeout float64
+	}{
+		{
+			name: "json poll uses default remaining budget",
+			args: []string{"await-verdict", "task-await", "--agent-id", "coder-1", "--json"},
+			result: &commands.AwaitVerdictResult{
+				AwaitVerdictResult: &ops.AwaitVerdictResult{Verdict: ops.VerdictPoll, TaskStatus: models.TaskStatusReadyForReview},
+				TimeoutSeconds:     1400,
+			},
+			wantBudget:      1500 * time.Second,
+			wantJSONVerdict: ops.VerdictPoll,
+			wantJSONTimeout: 1400,
+		},
+		{
+			name: "json timeout uses caller remaining budget",
+			args: []string{"await-verdict", "task-await", "--agent-id", "coder-1", "--timeout-seconds", "80", "--json"},
+			result: &commands.AwaitVerdictResult{
+				AwaitVerdictResult: &ops.AwaitVerdictResult{Verdict: ops.VerdictTimeout, TaskStatus: models.TaskStatusReadyForReview},
+				TimeoutSeconds:     0,
+			},
+			wantBudget:      80 * time.Second,
+			wantJSONVerdict: ops.VerdictTimeout,
+			wantJSONTimeout: 0,
+		},
+		{
+			name: "human poll uses default remaining budget",
+			args: []string{"await-verdict", "task-await", "--agent-id", "coder-1"},
+			result: &commands.AwaitVerdictResult{
+				AwaitVerdictResult: &ops.AwaitVerdictResult{Verdict: ops.VerdictPoll, TaskStatus: models.TaskStatusReadyForReview},
+				TimeoutSeconds:     1400,
+			},
+			wantBudget:      1500 * time.Second,
+			wantHumanOutput: "Verdict: POLL\nStatus: CODE_TO_REVIEW\nTimeout seconds: 1400\n",
+		},
+		{
+			name: "human timeout uses caller remaining budget",
+			args: []string{"await-verdict", "task-await", "--agent-id", "coder-1", "--timeout-seconds", "80"},
+			result: &commands.AwaitVerdictResult{
+				AwaitVerdictResult: &ops.AwaitVerdictResult{Verdict: ops.VerdictTimeout, TaskStatus: models.TaskStatusReadyForReview},
+				TimeoutSeconds:     0,
+			},
+			wantBudget:      80 * time.Second,
+			wantHumanOutput: "Verdict: TIMEOUT\nStatus: CODE_TO_REVIEW\n",
+		},
+		{
+			name: "json immediate verdict omits wait-only budget",
+			args: []string{"await-verdict", "task-await", "--agent-id", "coder-1", "--json"},
+			result: &commands.AwaitVerdictResult{
+				AwaitVerdictResult: &ops.AwaitVerdictResult{Verdict: ops.VerdictApproved, TaskStatus: models.TaskStatusApproved},
+			},
+			wantBudget:      1500 * time.Second,
+			wantJSONVerdict: ops.VerdictApproved,
+		},
+		{
+			name: "human immediate verdict retains existing fields",
+			args: []string{"await-verdict", "task-await", "--agent-id", "coder-1"},
+			result: &commands.AwaitVerdictResult{
+				AwaitVerdictResult: &ops.AwaitVerdictResult{
+					Verdict:         ops.VerdictRejected,
+					TaskStatus:      models.TaskStatusRejected,
+					Reason:          "changes requested",
+					ReviewerAgent:   "reviewer-1",
+					ReviewCommit:    "review-commit",
+					CurrentAssignee: "coder-1",
+					SafeAction:      ops.SafeActionRevise,
+					Guidance:        "Revise and resubmit.",
+				},
+			},
+			wantBudget:      1500 * time.Second,
+			wantHumanOutput: "Verdict: REJECTED\nStatus: CODE_REJECTED\nReason: changes requested\nReviewer: reviewer-1\nReview commit: review-commit\nCurrent assignee: coder-1\nSafe action: revise\n\nRevise and resubmit.\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			projectRoot := setupAwaitCLIProject(t)
+			resetFlagIfPresent(awaitVerdictCmd, "timeout-seconds")
+			t.Cleanup(func() { resetFlagIfPresent(awaitVerdictCmd, "timeout-seconds") })
+
+			originalAwait := awaitVerdict
+			t.Cleanup(func() { awaitVerdict = originalAwait })
+			var gotBudget time.Duration
+			awaitVerdict = func(projectRoot, taskID, agentID string, remaining time.Duration) (*commands.AwaitVerdictResult, error) {
+				gotBudget = remaining
+				return tt.result, nil
+			}
+
+			stdout, err := executeRootCommandCapture(t, projectRoot, tt.args...)
+			if err != nil {
+				t.Fatalf("await-verdict failed: %v\n%s", err, stdout)
+			}
+			if gotBudget != tt.wantBudget {
+				t.Errorf("adapter remaining budget = %s, want %s", gotBudget, tt.wantBudget)
+			}
+			if tt.wantHumanOutput != "" {
+				if stdout != tt.wantHumanOutput {
+					t.Errorf("human output = %q, want %q", stdout, tt.wantHumanOutput)
+				}
+				return
+			}
+			assertAwaitJSONResult(t, stdout, tt.wantJSONVerdict, tt.wantJSONTimeout)
+		})
+	}
+}
+
+func TestAwaitResubmissionCLI_BudgetAndOutput(t *testing.T) {
+	tests := []struct {
+		name            string
+		args            []string
+		result          *commands.AwaitResubmissionResult
+		wantBudget      time.Duration
+		wantHumanOutput string
+		wantJSONVerdict string
+		wantJSONTimeout float64
+	}{
+		{
+			name: "json poll uses default remaining budget",
+			args: []string{"await-resubmission", "task-await", "--agent-id", "code-reviewer-1", "--json"},
+			result: &commands.AwaitResubmissionResult{
+				AwaitResubmissionResult: &ops.AwaitResubmissionResult{Verdict: ops.ResubmissionPoll, TaskStatus: models.TaskStatusRejected},
+				TimeoutSeconds:          1400,
+			},
+			wantBudget:      1500 * time.Second,
+			wantJSONVerdict: ops.ResubmissionPoll,
+			wantJSONTimeout: 1400,
+		},
+		{
+			name: "json timeout uses caller remaining budget",
+			args: []string{"await-resubmission", "task-await", "--agent-id", "code-reviewer-1", "--timeout-seconds", "80", "--json"},
+			result: &commands.AwaitResubmissionResult{
+				AwaitResubmissionResult: &ops.AwaitResubmissionResult{Verdict: ops.ResubmissionTimeout, TaskStatus: models.TaskStatusRejected},
+				TimeoutSeconds:          0,
+			},
+			wantBudget:      80 * time.Second,
+			wantJSONVerdict: ops.ResubmissionTimeout,
+			wantJSONTimeout: 0,
+		},
+		{
+			name: "human poll uses default remaining budget",
+			args: []string{"await-resubmission", "task-await", "--agent-id", "code-reviewer-1"},
+			result: &commands.AwaitResubmissionResult{
+				AwaitResubmissionResult: &ops.AwaitResubmissionResult{Verdict: ops.ResubmissionPoll, TaskStatus: models.TaskStatusRejected},
+				TimeoutSeconds:          1400,
+			},
+			wantBudget:      1500 * time.Second,
+			wantHumanOutput: "Verdict: POLL\nStatus: CODE_REJECTED\nTimeout seconds: 1400\n",
+		},
+		{
+			name: "human timeout uses caller remaining budget",
+			args: []string{"await-resubmission", "task-await", "--agent-id", "code-reviewer-1", "--timeout-seconds", "80"},
+			result: &commands.AwaitResubmissionResult{
+				AwaitResubmissionResult: &ops.AwaitResubmissionResult{Verdict: ops.ResubmissionTimeout, TaskStatus: models.TaskStatusRejected},
+				TimeoutSeconds:          0,
+			},
+			wantBudget:      80 * time.Second,
+			wantHumanOutput: "Verdict: TIMEOUT\nStatus: CODE_REJECTED\n",
+		},
+		{
+			name: "json immediate resubmission omits wait-only budget",
+			args: []string{"await-resubmission", "task-await", "--agent-id", "code-reviewer-1", "--json"},
+			result: &commands.AwaitResubmissionResult{
+				AwaitResubmissionResult: &ops.AwaitResubmissionResult{Verdict: ops.ResubmissionResubmitted, TaskStatus: models.TaskStatusReadyForReview},
+			},
+			wantBudget:      1500 * time.Second,
+			wantJSONVerdict: ops.ResubmissionResubmitted,
+		},
+		{
+			name: "human immediate resubmission retains existing fields",
+			args: []string{"await-resubmission", "task-await", "--agent-id", "code-reviewer-1"},
+			result: &commands.AwaitResubmissionResult{
+				AwaitResubmissionResult: &ops.AwaitResubmissionResult{
+					Verdict:      ops.ResubmissionResubmitted,
+					TaskStatus:   models.TaskStatusReadyForReview,
+					BaseCommit:   "base-commit",
+					ReviewCommit: "review-commit",
+					ReviewCycle:  2,
+				},
+			},
+			wantBudget:      1500 * time.Second,
+			wantHumanOutput: "Verdict: RESUBMITTED\nStatus: CODE_TO_REVIEW\nBase commit: base-commit\nReview commit: review-commit\nReview cycle: 2\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			projectRoot := setupAwaitCLIProject(t)
+			resetFlagIfPresent(awaitResubmissionCmd, "timeout-seconds")
+			t.Cleanup(func() { resetFlagIfPresent(awaitResubmissionCmd, "timeout-seconds") })
+
+			originalAwait := awaitResubmission
+			t.Cleanup(func() { awaitResubmission = originalAwait })
+			var gotBudget time.Duration
+			awaitResubmission = func(projectRoot, taskID, agentID string, remaining time.Duration) (*commands.AwaitResubmissionResult, error) {
+				gotBudget = remaining
+				return tt.result, nil
+			}
+
+			stdout, err := executeRootCommandCapture(t, projectRoot, tt.args...)
+			if err != nil {
+				t.Fatalf("await-resubmission failed: %v\n%s", err, stdout)
+			}
+			if gotBudget != tt.wantBudget {
+				t.Errorf("adapter remaining budget = %s, want %s", gotBudget, tt.wantBudget)
+			}
+			if tt.wantHumanOutput != "" {
+				if stdout != tt.wantHumanOutput {
+					t.Errorf("human output = %q, want %q", stdout, tt.wantHumanOutput)
+				}
+				return
+			}
+			assertAwaitJSONResult(t, stdout, tt.wantJSONVerdict, tt.wantJSONTimeout)
+		})
+	}
+}
+
+func assertAwaitJSONResult(t *testing.T, stdout, wantVerdict string, wantTimeout float64) {
+	t.Helper()
+	env := parseEnvelope(t, stdout)
+	result, ok := env["result"].(map[string]any)
+	if !ok {
+		t.Fatalf("result = %#v, want object", env["result"])
+	}
+	if result["verdict"] != wantVerdict {
+		t.Errorf("verdict = %#v, want %q", result["verdict"], wantVerdict)
+	}
+	gotTimeout, hasTimeout := result["timeout_seconds"]
+	if wantVerdict == ops.VerdictPoll || wantVerdict == ops.ResubmissionPoll {
+		if !hasTimeout || gotTimeout != wantTimeout {
+			t.Errorf("timeout_seconds = %#v, want %v", gotTimeout, wantTimeout)
+		}
+	} else if hasTimeout {
+		t.Errorf("non-POLL result contains timeout_seconds = %#v", gotTimeout)
+	}
+}
+
+func setupAwaitCLIProject(t *testing.T) string {
+	t.Helper()
+	projectRoot, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("resolve temp project root: %v", err)
+	}
+	testhelpers.SetupTestGitRepo(t, projectRoot)
+	statePath, _ := testhelpers.SetupLizaDir(t, projectRoot)
+	testhelpers.WriteInitialState(t, statePath, testhelpers.CreateValidState())
+	return projectRoot
+}
 
 func TestSubmitForReviewCLI_CommitRefHandling(t *testing.T) {
 	tests := []struct {

@@ -1,5 +1,12 @@
 # `liza_await_resubmission` MCP Tool
 
+> **Historical implementation plan (superseded).** The MCP surface described below
+> was removed. The current `await-resubmission` CLI treats `--timeout-seconds` as the
+> remaining overall budget, caps one foreground call at 100 seconds, returns `POLL`
+> with a smaller `timeout_seconds` while budget remains, and returns final `TIMEOUT`
+> when the budget is exhausted. Historical MCP names, `MCP_TIMEOUT`, and direct
+> 1,500-second blocking behavior below are retained only as implementation provenance.
+
 ## Context
 
 Mirror of `liza_await_verdict` for the reviewer side. After issuing a non-terminal
@@ -55,8 +62,9 @@ same session. No other reviewer can race on the resubmission.
   ownership. In quorum flows, reviews are sequential: if Reviewer1 approves (→
   PARTIALLY_APPROVED) and Reviewer2 rejects (→ REJECTED, clears all approvals), only
   Reviewer2 would call `await_resubmission`. No double-await conflict is possible.
-- **MCP timeout**: Same as `await_verdict` — defaults to 1500s (25 min) within Claude
-  Code's 30-min `MCP_TIMEOUT`.
+- **Historical MCP timeout (superseded)**: The original MCP tool defaulted to 1500s
+  (25 min) within Claude Code's 30-minute `MCP_TIMEOUT`. This is not the current CLI
+  invocation contract; see the supersession note above.
 - **Budget gate not needed**: If the task is in REJECTED status, `submit_verdict`
   did NOT escalate (NewAttempt or Blocked), which means the doer CAN iterate. The
   doer's `await_verdict` budget gate checks the same limits and won't trigger either

@@ -77,11 +77,13 @@ DOER VALIDATION PLAN: {{.ValidationPlan}}
 POST-VERDICT (MANDATORY for REJECTED):
 After submitting a REJECTED verdict, MUST run {{binaryName}} await-resubmission immediately:
    {{binaryName}} await-resubmission {{.TaskID}} --agent-id {{.AgentID}} --json
-Do NOT exit. It blocks ~100s per call, returning POLL with remaining timeout_seconds.
+Do NOT exit. One call lasts at most 100 seconds.
+`POLL` returns a smaller remaining budget in `timeout_seconds` for the next foreground invocation.
+`TIMEOUT` is final budget exhaustion.
+Harness backgrounding, a terminal/stop outcome, or exhausted retry policy means stop safely without custom polling or background execution.
 If the harness backgrounds await-resubmission and says it will notify on completion, end the turn; do NOT call Monitor, search for Monitor, ScheduleWakeup, or read/tail/sleep/poll the output file.
 - RESUBMITTED: discard prompt-time BASE COMMIT / REVIEW_COMMIT and re-review using the returned base_commit..review_commit boundary
-- POLL: call await-resubmission again with the timeout_seconds from the response
-- TERMINAL/TIMEOUT/ABORTED: exit normally
+- TERMINAL/ABORTED: exit normally
 {{- else if eq .Role "code-plan-reviewer"}}
 
 REVIEW CHECKLIST:
@@ -349,10 +351,12 @@ INSTRUCTIONS:
 POST-VERDICT (MANDATORY for REJECTED):
 After submitting a REJECTED verdict, MUST run {{binaryName}} await-resubmission immediately:
    {{binaryName}} await-resubmission {{.TaskID}} --agent-id {{.AgentID}} --json
-Do NOT exit. It blocks ~100s per call, returning POLL with remaining timeout_seconds.
+Do NOT exit. One call lasts at most 100 seconds.
+`POLL` returns a smaller remaining budget in `timeout_seconds` for the next foreground invocation.
+`TIMEOUT` is final budget exhaustion.
+Harness backgrounding, a terminal/stop outcome, or exhausted retry policy means stop safely without custom polling or background execution.
 If the harness backgrounds await-resubmission and says it will notify on completion, end the turn; do NOT call Monitor, search for Monitor, ScheduleWakeup, or read/tail/sleep/poll the output file.
 - RESUBMITTED: discard prompt-time BASE COMMIT / REVIEW_COMMIT and re-review using the returned base_commit..review_commit boundary
-- POLL: call await-resubmission again with the timeout_seconds from the response
-- TERMINAL/TIMEOUT/ABORTED: exit normally
+- TERMINAL/ABORTED: exit normally
 {{- end}}
 {{- end -}}

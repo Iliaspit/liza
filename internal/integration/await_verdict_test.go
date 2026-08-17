@@ -4,7 +4,7 @@ package integration
 // submit → await → rejected → fix → resubmit → approved → merge flow.
 
 import (
-	"context"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,10 +13,28 @@ import (
 	"time"
 
 	"github.com/liza-mas/liza/internal/commands"
+	"github.com/liza-mas/liza/internal/db"
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/ops"
+	"github.com/liza-mas/liza/internal/statevalidate"
 	"github.com/liza-mas/liza/internal/testhelpers"
 )
+
+const (
+	awaitTaskID     = "task-1"
+	awaitCoderID    = "coder-1"
+	awaitReviewerID = "code-reviewer-1"
+)
+
+type awaitIntegrationFixture struct {
+	projectRoot string
+	bb          *db.Blackboard
+}
+
+type awaitVerdictCall struct {
+	result *commands.AwaitVerdictResult
+	err    error
+}
 
 // TestAwaitVerdict_RejectionFlow exercises the full submit → await → rejected
 // → fix → resubmit → approved → merge lifecycle using a real AwaitVerdict
@@ -89,15 +107,8 @@ func TestAwaitVerdict_RejectionFlow(t *testing.T) {
 		t.Fatalf("Expected READY_FOR_REVIEW, got %s", task.Status)
 	}
 
-	// --- Phase 2: Coder calls AwaitVerdict (blocks in goroutine) ---
-	var awaitResult *ops.AwaitVerdictResult
-	var awaitErr error
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		awaitResult, awaitErr = ops.AwaitVerdict(
-			context.Background(), projectDir, "task-1", coderID, 30*time.Second)
-	}()
+	// --- Phase 2: Coder calls the public command adapter ---
+	awaitCall := startAwaitVerdict(projectDir, "task-1", coderID, 30*time.Second)
 
 	// Let AwaitVerdict start watching before reviewer acts
 	testhelpers.WaitForAsyncSetup()
@@ -109,15 +120,7 @@ func TestAwaitVerdict_RejectionFlow(t *testing.T) {
 	}
 
 	// --- Phase 4: Verify rejection result ---
-	select {
-	case <-done:
-	case <-time.After(10 * time.Second):
-		t.Fatal("AwaitVerdict timed out waiting for rejection verdict")
-	}
-
-	if awaitErr != nil {
-		t.Fatalf("AwaitVerdict returned error: %v", awaitErr)
-	}
+	awaitResult := receiveAwaitVerdict(t, awaitCall, 10*time.Second)
 	if awaitResult.Verdict != ops.VerdictRejected {
 		t.Fatalf("Verdict = %q, want %q", awaitResult.Verdict, ops.VerdictRejected)
 	}
@@ -153,10 +156,16 @@ func TestAwaitVerdict_RejectionFlow(t *testing.T) {
 		t.Fatalf("SubmitForReview (resubmit) failed: %v", err)
 	}
 
-	// --- Phase 6: Reviewer approves ---
+	// --- Phase 6: Coder awaits and reviewer approves ---
+	awaitCall = startAwaitVerdict(projectDir, "task-1", coderID, 30*time.Second)
+	testhelpers.WaitForAsyncSetup()
 	testhelpers.TransitionToReviewing(t, bb, "task-1", reviewerID)
 	if err := commands.SubmitVerdictCommand(projectDir, "task-1", "APPROVED", "", reviewerID, ""); err != nil {
 		t.Fatalf("SubmitVerdict (approve) failed: %v", err)
+	}
+	awaitResult = receiveAwaitVerdict(t, awaitCall, 10*time.Second)
+	if awaitResult.Verdict != ops.VerdictApproved {
+		t.Fatalf("Verdict = %q, want %q", awaitResult.Verdict, ops.VerdictApproved)
 	}
 
 	// --- Phase 7: Merge ---
@@ -172,6 +181,157 @@ func TestAwaitVerdict_RejectionFlow(t *testing.T) {
 	}
 	if task.MergeCommit == nil {
 		t.Error("Expected merge commit to be set")
+	}
+
+	// A post-transition caller must stop instead of re-entering the lifecycle.
+	awaitCall = startAwaitVerdict(projectDir, "task-1", coderID, 30*time.Second)
+	awaitResult = receiveAwaitVerdict(t, awaitCall, 10*time.Second)
+	if awaitResult.Verdict != ops.VerdictAlreadyTransitioned {
+		t.Fatalf("Post-merge verdict = %q, want %q", awaitResult.Verdict, ops.VerdictAlreadyTransitioned)
+	}
+	if awaitResult.SafeAction != ops.SafeActionStop {
+		t.Fatalf("Post-merge safe action = %q, want %q", awaitResult.SafeAction, ops.SafeActionStop)
+	}
+}
+
+func setupIsolatedAwaitProject(t *testing.T) awaitIntegrationFixture {
+	t.Helper()
+
+	projectRoot := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, projectRoot)
+	testhelpers.CreateCommittedSpecFileOnIntegration(t, projectRoot, "feature.md", "# Feature")
+	if err := ops.InitProject(projectRoot, ops.InitProjectParams{
+		Description: "Test goal",
+		SpecRef:     "specs/feature.md",
+	}); err != nil {
+		t.Fatalf("InitProject failed: %v", err)
+	}
+
+	statePath := filepath.Join(projectRoot, ".liza", "state.yaml")
+	logPath := filepath.Join(projectRoot, ".liza", "log.yaml")
+	bb := db.New(statePath)
+	if err := commands.AddTaskCommand(statePath, logPath, &commands.TaskInput{
+		ID:          awaitTaskID,
+		RolePair:    "coding-pair",
+		Description: "Test bounded await lifecycle",
+		DoneWhen:    "Done",
+		Scope:       "Feature",
+		Priority:    1,
+		SpecRef:     "specs/feature.md",
+		DependsOn:   []string{},
+	}, "orchestrator-1"); err != nil {
+		t.Fatalf("AddTask failed: %v", err)
+	}
+
+	testhelpers.RegisterTestAgent(t, bb, awaitCoderID, "coder")
+	testhelpers.RegisterTestAgent(t, bb, awaitReviewerID, "code-reviewer")
+	if err := commands.ClaimTaskCommand(projectRoot, awaitTaskID, awaitCoderID); err != nil {
+		t.Fatalf("ClaimTask failed: %v", err)
+	}
+
+	state, err := bb.Read()
+	testhelpers.AssertNoError(t, err)
+	task := state.FindTask(awaitTaskID)
+	if task == nil || task.Worktree == nil {
+		t.Fatal("claimed task has no worktree")
+	}
+	worktreePath := filepath.Join(projectRoot, *task.Worktree)
+	if err := os.WriteFile(filepath.Join(worktreePath, "feature.go"),
+		[]byte("package main\n\nfunc Feature() {}\n"), 0644); err != nil {
+		t.Fatalf("Failed to create feature.go: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(worktreePath, "feature_test.go"),
+		[]byte("package main\n"), 0644); err != nil {
+		t.Fatalf("Failed to create feature_test.go: %v", err)
+	}
+	if err := exec.Command("git", "-C", worktreePath, "add", "feature.go", "feature_test.go").Run(); err != nil {
+		t.Fatalf("git add failed: %v", err)
+	}
+	if err := exec.Command("git", "-C", worktreePath, "commit", "-m", "feat: initial implementation").Run(); err != nil {
+		t.Fatalf("git commit failed: %v", err)
+	}
+	if err := ops.WriteCheckpoint(projectRoot, &ops.WriteCheckpointInput{
+		TaskID: awaitTaskID, AgentID: awaitCoderID,
+		Intent: "Implement feature", ValidationPlan: "go test ./...",
+		FilesToModify: []string{"feature.go"},
+	}); err != nil {
+		t.Fatalf("WriteCheckpoint failed: %v", err)
+	}
+	if err := commands.SubmitForReviewCommand(
+		projectRoot, awaitTaskID, getHeadSHA(t, worktreePath), awaitCoderID,
+	); err != nil {
+		t.Fatalf("SubmitForReview failed: %v", err)
+	}
+
+	return awaitIntegrationFixture{projectRoot: projectRoot, bb: bb}
+}
+
+func rejectAwaitFixture(t *testing.T, fixture awaitIntegrationFixture) {
+	t.Helper()
+	testhelpers.TransitionToReviewing(t, fixture.bb, awaitTaskID, awaitReviewerID)
+	if err := commands.SubmitVerdictCommand(
+		fixture.projectRoot,
+		awaitTaskID,
+		ops.VerdictRejected,
+		"Missing error handling",
+		awaitReviewerID,
+		"",
+	); err != nil {
+		t.Fatalf("SubmitVerdict (reject) failed: %v", err)
+	}
+}
+
+func startAwaitVerdict(projectRoot, taskID, agentID string, remaining time.Duration) <-chan awaitVerdictCall {
+	result := make(chan awaitVerdictCall, 1)
+	go func() {
+		awaitResult, err := commands.AwaitVerdict(projectRoot, taskID, agentID, remaining)
+		result <- awaitVerdictCall{result: awaitResult, err: err}
+	}()
+	return result
+}
+
+func receiveAwaitVerdict(t *testing.T, call <-chan awaitVerdictCall, guard time.Duration) *commands.AwaitVerdictResult {
+	t.Helper()
+	select {
+	case outcome := <-call:
+		if outcome.err != nil {
+			t.Fatalf("AwaitVerdict returned error: %v", outcome.err)
+		}
+		if outcome.result == nil {
+			t.Fatal("AwaitVerdict returned a nil result")
+		}
+		return outcome.result
+	case <-time.After(guard):
+		t.Fatalf("AwaitVerdict caller did not return within %s", guard)
+		return nil
+	}
+}
+
+func assertBoundedAwaitState(t *testing.T, fixture awaitIntegrationFixture, reviewer bool) {
+	t.Helper()
+	state, err := fixture.bb.Read()
+	testhelpers.AssertNoError(t, err)
+	task := state.FindTask(awaitTaskID)
+	if task == nil {
+		t.Fatal("task not found after bounded await return")
+	}
+
+	if reviewer {
+		if state.Agents[awaitReviewerID].CurrentTask != nil {
+			t.Error("reviewer current_task should be nil after bounded await return")
+		}
+		if task.ReviewingBy != nil {
+			t.Error("task reviewing_by should be nil after bounded await return")
+		}
+		if task.ReviewLeaseExpires != nil {
+			t.Error("task review_lease_expires should be nil after bounded await return")
+		}
+	} else if state.Agents[awaitCoderID].CurrentTask != nil {
+		t.Error("doer current_task should be nil after bounded await return")
+	}
+
+	if err := statevalidate.ValidateState(state, fixture.projectRoot, false, io.Discard); err != nil {
+		t.Fatalf("state should validate after bounded await return: %v", err)
 	}
 }
 

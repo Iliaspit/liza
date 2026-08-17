@@ -458,7 +458,7 @@ The repository enforces test-suite properties in the suite itself. `internal/tes
 **Signals:**
 
 - All 69 Cobra commands are package-level `var … = &cobra.Command{ RunE: func… }` literals. `go tool cover -func` walks `FuncDecl` only, so every `RunE` body is absent from per-function output — the standard gap-hunting tool cannot see the CLI's behavior. This alone accounts for the gap between `cmd/liza` at 62.4% by block arithmetic and 78.4% by `-func`.
-- Twelve exported `internal/commands` entry points sit at 0.0%: `AddTasksCommand`, `ProceedCommand`, `SetTaskOutputCommand`, `WriteCheckpointCommand`, `RecoverTaskCommand`, `RepairAgentPoolCommand`, `AwaitVerdictCommand`, `AwaitResubmissionCommand`, `MarkAgentDegradedCommand`, `ClearAgentDegradedCommand`, `AssessHypothesisExhaustedCommand`, `SetDiscoveryDispositionCommand`, along with seven unexported formatters (`formatTaskSummaryOutput`, `printProceedResult`, and siblings).
+- Ten exported `internal/commands` entry points sit at 0.0%: `AddTasksCommand`, `ProceedCommand`, `SetTaskOutputCommand`, `WriteCheckpointCommand`, `RecoverTaskCommand`, `RepairAgentPoolCommand`, `MarkAgentDegradedCommand`, `ClearAgentDegradedCommand`, `AssessHypothesisExhaustedCommand`, `SetDiscoveryDispositionCommand`, along with seven unexported formatters (`formatTaskSummaryOutput`, `printProceedResult`, and siblings).
 - Each is called from exactly one `RunE` body and referenced by zero tests. `UnblockTaskCommand` is called from nowhere at all.
 - The `--json` sibling of each command routes to `internal/ops`, which is at 84.3% over 6,816 statements.
 

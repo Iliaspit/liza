@@ -158,6 +158,20 @@ When enabled, agents auto-call `§BRAND_BINARY_NAME§ resume` on CHECKPOINT or C
 
 ## Agent Review Cycles
 
+Both `§BRAND_BINARY_NAME§ await-verdict` and
+`§BRAND_BINARY_NAME§ await-resubmission` are foreground calls. Each invocation
+waits at most 100 seconds. `--timeout-seconds` is the remaining budget for the
+whole review wait, not a new per-call allowance.
+
+- **POLL**: Continue with another foreground invocation of the same command,
+  passing the returned `timeout_seconds` as its remaining budget. Do not add
+  custom polling or background execution.
+- **TIMEOUT**: The total budget is finally exhausted. Safe stop and exit
+  normally; do not invoke the command again.
+- If the execution harness backgrounds an await call and promises a completion
+  notification, safe stop by ending the agent turn. Do not monitor the process
+  or start another await call.
+
 ### Doer: Submit → Await → Handle
 
 ```
@@ -166,8 +180,8 @@ When enabled, agents auto-call `§BRAND_BINARY_NAME§ resume` on CHECKPOINT or C
 
 - **REJECTED**: Fix issues, resubmit (session stays alive — no cold restart)
 - **ALREADY_TRANSITIONED**: Verdict was recovered after the task moved onward; follow `safe_action` (`stop` means exit without more worktree commands, `revise` means you still own it)
-- **APPROVED** / **TERMINAL** with `safe_action: stop`: Exit normally; do not run more worktree commands because merge cleanup may remove the task worktree
-- **NEW_ATTEMPT** / **TIMEOUT** / **ABORTED**: Exit normally
+- **APPROVED** / **TERMINAL** with `safe_action: stop`: Safe stop and exit normally; do not run more worktree commands because merge cleanup may remove the task worktree
+- **NEW_ATTEMPT** / **ABORTED**: Safe stop and exit normally
 
 ### Reviewer: Verdict → Await → Re-review
 
@@ -176,7 +190,7 @@ When enabled, agents auto-call `§BRAND_BINARY_NAME§ resume` on CHECKPOINT or C
 ```
 
 - **RESUBMITTED**: Review again (session stays alive)
-- **TERMINAL** / **TIMEOUT** / **ABORTED**: Exit normally
+- **TERMINAL** / **ABORTED**: Safe stop and exit normally
 
 ## Agent Log Analysis
 

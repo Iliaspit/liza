@@ -3,6 +3,7 @@ package ops
 import (
 	"context"
 	stderrors "errors"
+	"io"
 	"strings"
 	"testing"
 	"time"
@@ -10,6 +11,7 @@ import (
 	"github.com/liza-mas/liza/internal/db"
 	"github.com/liza-mas/liza/internal/errors"
 	"github.com/liza-mas/liza/internal/models"
+	"github.com/liza-mas/liza/internal/statevalidate"
 	"github.com/liza-mas/liza/internal/testhelpers"
 )
 
@@ -692,6 +694,58 @@ func TestAwaitVerdict_Timeout(t *testing.T) {
 	agent := s.Agents["coder-1"]
 	if agent.CurrentTask != nil {
 		t.Errorf("expected CurrentTask=nil after timeout, got %q", *agent.CurrentTask)
+	}
+}
+
+func TestAwaitVerdict_DelayedWatcherErrorUsesOriginalDeadline(t *testing.T) {
+	tmpDir := t.TempDir()
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	testhelpers.CreateSpecFile(t, tmpDir, "vision.md", "# Vision\n")
+
+	now := time.Now().UTC()
+	state := testhelpers.CreateValidState()
+	task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusReadyForReview, now)
+	task.SpecRef = state.Goal.SpecRef
+	task.History = append(task.History, models.TaskHistoryEntry{
+		Time:  now,
+		Event: models.TaskEventSubmittedForReview,
+		Agent: strPtr("coder-1"),
+	})
+	state.Tasks = []models.Task{task}
+	state.Agents["coder-1"] = models.Agent{Role: "coder", Status: models.AgentStatusWaiting}
+	bb := testhelpers.WriteInitialState(t, stateFile, state)
+
+	previousWatcher := newAwaitVerdictWatcher
+	newAwaitVerdictWatcher = func(*db.Blackboard) (awaitVerdictWatcher, error) {
+		return newDelayedErrorWatcher(300 * time.Millisecond), nil
+	}
+	t.Cleanup(func() { newAwaitVerdictWatcher = previousWatcher })
+
+	started := time.Now()
+	result, err := AwaitVerdict(context.Background(), tmpDir, "task-1", "coder-1", 500*time.Millisecond)
+	elapsed := time.Since(started)
+	if err != nil {
+		t.Fatalf("AwaitVerdict error: %v", err)
+	}
+	if result.Verdict != VerdictTimeout {
+		t.Errorf("Verdict = %q, want TIMEOUT", result.Verdict)
+	}
+	if elapsed < 400*time.Millisecond {
+		t.Errorf("returned before original deadline: elapsed = %s", elapsed)
+	}
+	if elapsed >= 800*time.Millisecond {
+		t.Errorf("returned after original deadline tolerance: elapsed = %s, want < 800ms", elapsed)
+	}
+
+	readState, readErr := bb.Read()
+	if readErr != nil {
+		t.Fatalf("failed to read state: %v", readErr)
+	}
+	if readState.Agents["coder-1"].CurrentTask != nil {
+		t.Error("coder ownership should be released after timeout")
+	}
+	if err := statevalidate.ValidateState(readState, tmpDir, false, io.Discard); err != nil {
+		t.Fatalf("state should validate after timeout: %v", err)
 	}
 }
 
@@ -1445,3 +1499,23 @@ func (silentAwaitVerdictWatcher) Errors() <-chan error {
 func (silentAwaitVerdictWatcher) Close() error {
 	return nil
 }
+
+type delayedErrorWatcher struct {
+	events <-chan struct{}
+	errors <-chan error
+}
+
+func newDelayedErrorWatcher(delay time.Duration) *delayedErrorWatcher {
+	events := make(chan struct{})
+	errors := make(chan error, 1)
+	time.AfterFunc(delay, func() {
+		errors <- stderrors.New("delayed watcher failure")
+	})
+	return &delayedErrorWatcher{events: events, errors: errors}
+}
+
+func (w *delayedErrorWatcher) Events() <-chan struct{} { return w.events }
+
+func (w *delayedErrorWatcher) Errors() <-chan error { return w.errors }
+
+func (*delayedErrorWatcher) Close() error { return nil }

@@ -1,8 +1,8 @@
 package main
 
 import (
-	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"os"
@@ -15,6 +15,9 @@ import (
 	"github.com/liza-mas/liza/internal/roles"
 	"github.com/spf13/cobra"
 )
+
+var awaitVerdict = commands.AwaitVerdict
+var awaitResubmission = commands.AwaitResubmission
 
 var submitForReviewCmd = &cobra.Command{
 	Use:   "submit-for-review <task-id> [commit-ref]",
@@ -304,7 +307,8 @@ Possible outcomes:
   - APPROVED: work accepted, agent can exit
   - REJECTED: work needs revision, reason provided
   - ALREADY_TRANSITIONED: verdict was recovered after task moved onward; follow safe_action
-  - TIMEOUT: no verdict within timeout period
+  - POLL: the 100-second call cap expired; retry with returned timeout_seconds
+  - TIMEOUT: the remaining total budget expired without a verdict
   - NEW_ATTEMPT: task reassigned for fresh attempt
   - ABORTED: task was superseded or cancelled`,
 	Args: cobra.ExactArgs(1),
@@ -343,11 +347,15 @@ Possible outcomes:
 		timeoutSec, _ := cmd.Flags().GetInt("timeout-seconds")
 		timeout := time.Duration(timeoutSec) * time.Second
 
+		result, err := awaitVerdict(projectRoot, taskID, agentID, timeout)
 		if isJSON(cmd) {
-			result, err := ops.AwaitVerdict(context.Background(), projectRoot, taskID, agentID, timeout)
 			return jsonout.WriteResult(os.Stdout, result, nil, err)
 		}
-		return commands.AwaitVerdictCommand(projectRoot, taskID, agentID, timeout)
+		if err != nil {
+			return fmt.Errorf("await verdict: %w", err)
+		}
+		printAwaitVerdictResult(result)
+		return nil
 	},
 }
 
@@ -364,7 +372,8 @@ Requirements:
 
 Possible outcomes:
   - RESUBMITTED: doer submitted new changes; use returned base_commit..review_commit for re-review
-  - TIMEOUT: no resubmission within timeout period
+  - POLL: the 100-second call cap expired; retry with returned timeout_seconds
+  - TIMEOUT: the remaining total budget expired without a resubmission
   - TERMINAL: task reached a terminal state (superseded, abandoned)
   - ABORTED: task was cancelled or reassigned`,
 	Args: cobra.ExactArgs(1),
@@ -403,12 +412,57 @@ Possible outcomes:
 		timeoutSec, _ := cmd.Flags().GetInt("timeout-seconds")
 		timeout := time.Duration(timeoutSec) * time.Second
 
+		result, err := awaitResubmission(projectRoot, taskID, agentID, timeout)
 		if isJSON(cmd) {
-			result, err := ops.AwaitResubmission(context.Background(), projectRoot, taskID, agentID, timeout)
 			return jsonout.WriteResult(os.Stdout, result, nil, err)
 		}
-		return commands.AwaitResubmissionCommand(projectRoot, taskID, agentID, timeout)
+		if err != nil {
+			return fmt.Errorf("await resubmission: %w", err)
+		}
+		printAwaitResubmissionResult(result)
+		return nil
 	},
+}
+
+func printAwaitVerdictResult(result *commands.AwaitVerdictResult) {
+	fmt.Printf("Verdict: %s\nStatus: %s\n", result.Verdict, result.TaskStatus)
+	if result.Reason != "" {
+		fmt.Printf("Reason: %s\n", result.Reason)
+	}
+	if result.ReviewerAgent != "" {
+		fmt.Printf("Reviewer: %s\n", result.ReviewerAgent)
+	}
+	if result.ReviewCommit != "" {
+		fmt.Printf("Review commit: %s\n", result.ReviewCommit)
+	}
+	if result.CurrentAssignee != "" {
+		fmt.Printf("Current assignee: %s\n", result.CurrentAssignee)
+	}
+	if result.SafeAction != "" {
+		fmt.Printf("Safe action: %s\n", result.SafeAction)
+	}
+	if result.TimeoutSeconds > 0 {
+		fmt.Printf("Timeout seconds: %d\n", result.TimeoutSeconds)
+	}
+	if result.Guidance != "" {
+		fmt.Printf("\n%s\n", result.Guidance)
+	}
+}
+
+func printAwaitResubmissionResult(result *commands.AwaitResubmissionResult) {
+	fmt.Printf("Verdict: %s\nStatus: %s\n", result.Verdict, result.TaskStatus)
+	if result.ReviewCommit != "" {
+		if result.BaseCommit != "" {
+			fmt.Printf("Base commit: %s\n", result.BaseCommit)
+		}
+		fmt.Printf("Review commit: %s\nReview cycle: %d\n", result.ReviewCommit, result.ReviewCycle)
+	}
+	if result.Reason != "" {
+		fmt.Printf("Reason: %s\n", result.Reason)
+	}
+	if result.TimeoutSeconds > 0 {
+		fmt.Printf("Timeout seconds: %d\n", result.TimeoutSeconds)
+	}
 }
 
 // updateReviewCommitCmd is RBAC-exempt (--changed-by): operator recovery action,
@@ -490,11 +544,11 @@ func init() {
 
 	// Await-verdict flags
 	addAgentIDFlag(awaitVerdictCmd)
-	awaitVerdictCmd.Flags().Int("timeout-seconds", 1500, "total blocking timeout in seconds")
+	awaitVerdictCmd.Flags().Int("timeout-seconds", 1500, "remaining total budget in seconds; each invocation waits at most 100 seconds")
 
 	// Await-resubmission flags
 	addAgentIDFlag(awaitResubmissionCmd)
-	awaitResubmissionCmd.Flags().Int("timeout-seconds", 1500, "total blocking timeout in seconds")
+	awaitResubmissionCmd.Flags().Int("timeout-seconds", 1500, "remaining total budget in seconds; each invocation waits at most 100 seconds")
 
 	// Submit-verdict flags
 	submitVerdictCmd.Flags().String("impact", "", "impact classification (standard, significant, architecture)")

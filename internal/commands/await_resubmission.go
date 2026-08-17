@@ -2,29 +2,48 @@ package commands
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"github.com/liza-mas/liza/internal/ops"
 )
 
-// AwaitResubmissionCommand blocks until a doer resubmits after a rejection.
-// Delegates business logic to ops.AwaitResubmission.
-func AwaitResubmissionCommand(projectRoot, taskID, agentID string, timeout time.Duration) error {
-	result, err := ops.AwaitResubmission(context.Background(), projectRoot, taskID, agentID, timeout)
-	if err != nil {
-		return fmt.Errorf("await resubmission: %w", err)
-	}
+// AwaitResubmissionResult adds the remaining total wait budget to a POLL outcome.
+type AwaitResubmissionResult struct {
+	*ops.AwaitResubmissionResult
+	TimeoutSeconds int `json:"timeout_seconds,omitempty"`
+}
 
-	fmt.Printf("Verdict: %s\nStatus: %s\n", result.Verdict, result.TaskStatus)
-	if result.ReviewCommit != "" {
-		if result.BaseCommit != "" {
-			fmt.Printf("Base commit: %s\n", result.BaseCommit)
-		}
-		fmt.Printf("Review commit: %s\nReview cycle: %d\n", result.ReviewCommit, result.ReviewCycle)
+// AwaitResubmission applies the bounded foreground interval to one resubmission wait.
+func AwaitResubmission(projectRoot, taskID, agentID string, remaining time.Duration) (*AwaitResubmissionResult, error) {
+	return awaitResubmissionWithInterval(projectRoot, taskID, agentID, remaining, maxAwaitInterval)
+}
+
+func awaitResubmissionWithInterval(
+	projectRoot, taskID, agentID string,
+	remaining, maxInterval time.Duration,
+) (*AwaitResubmissionResult, error) {
+	return awaitResubmissionWithBudget(remaining, maxInterval, func(interval time.Duration) (*ops.AwaitResubmissionResult, error) {
+		return ops.AwaitResubmission(context.Background(), projectRoot, taskID, agentID, interval)
+	})
+}
+
+func awaitResubmissionWithBudget(
+	remaining time.Duration,
+	maxInterval time.Duration,
+	await func(time.Duration) (*ops.AwaitResubmissionResult, error),
+) (*AwaitResubmissionResult, error) {
+	result, timeoutSeconds, err := awaitWithBudget(
+		remaining,
+		maxInterval,
+		await,
+		func(result *ops.AwaitResubmissionResult) bool { return result.Verdict == ops.ResubmissionTimeout },
+		func(result *ops.AwaitResubmissionResult) { result.Verdict = ops.ResubmissionPoll },
+	)
+	if err != nil {
+		return nil, err
 	}
-	if result.Reason != "" {
-		fmt.Printf("Reason: %s\n", result.Reason)
+	if result.Verdict != ops.ResubmissionPoll {
+		timeoutSeconds = 0
 	}
-	return nil
+	return &AwaitResubmissionResult{AwaitResubmissionResult: result, TimeoutSeconds: timeoutSeconds}, nil
 }

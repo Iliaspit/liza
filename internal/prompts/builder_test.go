@@ -22,6 +22,16 @@ const awaitResubmissionBoundaryGuidance = "On RESUBMITTED, use the returned `bas
 const validationCommandShapeRule = "Forbidden validation command shapes: `cd ... &&`, command substitution/backticks, polling or tail pipelines, and task artifact paths outside the worktree."
 const validationFallback = "If a stored validation command violates BASH CONSTRAINTS, do not execute it literally; treat it as validation intent, run an equivalent single-purpose command from the worktree/tool working directory, and record both the original command and translated command in validation evidence."
 
+var boundedAwaitLifecycleGuidance = []string{
+	"One call lasts at most 100 seconds.",
+	"Harness backgrounding, a terminal/stop outcome, or exhausted retry policy means stop safely without custom polling or background execution.",
+}
+
+var reviewerAwaitOutcomeGuidance = []string{
+	"`POLL` returns a smaller remaining budget in `timeout_seconds` for the next foreground invocation.",
+	"`TIMEOUT` is final budget exhaustion.",
+}
+
 func withPromptBrandValues(t *testing.T, mutate func()) {
 	t.Helper()
 	oldNameTitle := brand.NameTitle
@@ -71,6 +81,16 @@ func assertAwaitResubmissionPassiveGuidance(t *testing.T, output string, wantGui
 	for _, line := range scheduleWakeupLines {
 		if !strings.Contains(strings.ToLower(line), "do not") {
 			t.Errorf("ScheduleWakeup guidance line is not negative: %q", line)
+		}
+	}
+}
+
+func assertBoundedAwaitLifecycleGuidance(t *testing.T, output string) {
+	t.Helper()
+
+	for _, guidance := range boundedAwaitLifecycleGuidance {
+		if !strings.Contains(output, guidance) {
+			t.Errorf("output missing bounded await lifecycle guidance %q", guidance)
 		}
 	}
 }
@@ -2327,6 +2347,8 @@ func TestBuildRoleContext_AwaitVerdictLoopRendersForAllDoers(t *testing.T) {
 		"liza await-verdict",
 		"POLL",
 		"timeout_seconds",
+		"call await-verdict again in the foreground with the returned",
+		"stop waiting and exit normally",
 		"sole polling primitive",
 		"Call await-verdict at most 3 times",
 		"If the harness backgrounds await-verdict and says it will notify on completion, end the turn; do NOT call Monitor, search for Monitor, ScheduleWakeup, or read/tail/sleep/poll the output file.",
@@ -2358,6 +2380,7 @@ func TestBuildRoleContext_AwaitVerdictLoopRendersForAllDoers(t *testing.T) {
 					t.Errorf("output missing await-verdict loop key %q", key)
 				}
 			}
+			assertBoundedAwaitLifecycleGuidance(t, output)
 			if tc.role == "integration-analyst" &&
 				!strings.Contains(output, "fix-task desc, done_when, or supporting artifact text") {
 				t.Fatalf("integration analyst prompt missing durable validation intent source, got:\n%s", output)
@@ -2385,6 +2408,80 @@ func TestBuildRoleContext_AwaitVerdictLoopRendersForAllDoers(t *testing.T) {
 			}
 			if !strings.Contains(strings.ToLower(scheduleWakeupLines[0]), "do not") {
 				t.Errorf("ScheduleWakeup guidance line is not negative: %q", scheduleWakeupLines[0])
+			}
+		})
+	}
+
+	t.Run("non-default-brand", func(t *testing.T) {
+		withPromptBrandValues(t, func() {
+			brand.NameTitle = "Acme"
+			brand.BinaryName = "acme"
+		})
+		data := &RoleContextData{
+			Role: "coder", AgentID: "coder-1", RoleType: "doer",
+			TaskID: "task-avl-brand", Worktree: projectRoot + "/.worktrees/task-avl-brand",
+		}
+		output, err := BuildRoleContext("coder", []string{"coder-tools"}, data)
+		if err != nil {
+			t.Fatalf("BuildRoleContext: %v", err)
+		}
+
+		assertBoundedAwaitLifecycleGuidance(t, output)
+		if !strings.Contains(output, "acme await-verdict") {
+			t.Error("output missing non-default-brand await-verdict command")
+		}
+		if strings.Contains(output, "liza") {
+			t.Error("output contains raw default-brand literal")
+		}
+	})
+}
+
+func TestBuildRoleContext_AwaitResubmissionLifecycleRendersForAllReviewers(t *testing.T) {
+	projectRoot := setupPipelineConfig(t)
+	resolver := testPipelineResolver(t)
+
+	for _, role := range []string{
+		"code-reviewer",
+		"integration-reviewer",
+		"code-plan-reviewer",
+		"epic-plan-reviewer",
+		"us-reviewer",
+		"architecture-reviewer",
+	} {
+		t.Run(role, func(t *testing.T) {
+			withPromptBrandValues(t, func() {
+				brand.NameTitle = "Acme"
+				brand.BinaryName = "acme"
+			})
+			data := &RoleContextData{
+				Role: role, AgentID: role + "-1", RoleType: "reviewer",
+				TaskID: "task-await-resubmission", Worktree: projectRoot + "/.worktrees/task-await-resubmission",
+				BaseCommit: "abc1234", ReviewCommit: "def5678", GoalBaseCommit: "abc1234",
+				IntegrationBranch: "integration", ProjectRoot: projectRoot,
+			}
+			sections, err := resolver.ContextSections(role)
+			if err != nil {
+				t.Fatalf("ContextSections: %v", err)
+			}
+			output, err := BuildRoleContext(role, sections, data)
+			if err != nil {
+				t.Fatalf("BuildRoleContext: %v", err)
+			}
+
+			assertBoundedAwaitLifecycleGuidance(t, output)
+			for _, guidance := range reviewerAwaitOutcomeGuidance {
+				if !strings.Contains(output, guidance) {
+					t.Errorf("output missing reviewer await outcome guidance %q", guidance)
+				}
+			}
+			if !strings.Contains(output, "RESUBMITTED") {
+				t.Error("output missing RESUBMITTED boundary guidance")
+			}
+			if !strings.Contains(output, "acme await-resubmission") {
+				t.Error("output missing non-default-brand await-resubmission command")
+			}
+			if strings.Contains(output, "liza await-resubmission") {
+				t.Error("output contains raw default-brand await-resubmission command")
 			}
 		})
 	}

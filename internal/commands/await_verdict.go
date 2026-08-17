@@ -2,38 +2,48 @@ package commands
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"github.com/liza-mas/liza/internal/ops"
 )
 
-// AwaitVerdictCommand blocks until a review verdict arrives for a submitted task.
-// Delegates business logic to ops.AwaitVerdict.
-func AwaitVerdictCommand(projectRoot, taskID, agentID string, timeout time.Duration) error {
-	result, err := ops.AwaitVerdict(context.Background(), projectRoot, taskID, agentID, timeout)
-	if err != nil {
-		return fmt.Errorf("await verdict: %w", err)
-	}
+// AwaitVerdictResult adds the remaining total wait budget to a POLL outcome.
+type AwaitVerdictResult struct {
+	*ops.AwaitVerdictResult
+	TimeoutSeconds int `json:"timeout_seconds,omitempty"`
+}
 
-	fmt.Printf("Verdict: %s\nStatus: %s\n", result.Verdict, result.TaskStatus)
-	if result.Reason != "" {
-		fmt.Printf("Reason: %s\n", result.Reason)
+// AwaitVerdict applies the bounded foreground interval to one verdict wait.
+func AwaitVerdict(projectRoot, taskID, agentID string, remaining time.Duration) (*AwaitVerdictResult, error) {
+	return awaitVerdictWithInterval(projectRoot, taskID, agentID, remaining, maxAwaitInterval)
+}
+
+func awaitVerdictWithInterval(
+	projectRoot, taskID, agentID string,
+	remaining, maxInterval time.Duration,
+) (*AwaitVerdictResult, error) {
+	return awaitVerdictWithBudget(remaining, maxInterval, func(interval time.Duration) (*ops.AwaitVerdictResult, error) {
+		return ops.AwaitVerdict(context.Background(), projectRoot, taskID, agentID, interval)
+	})
+}
+
+func awaitVerdictWithBudget(
+	remaining time.Duration,
+	maxInterval time.Duration,
+	await func(time.Duration) (*ops.AwaitVerdictResult, error),
+) (*AwaitVerdictResult, error) {
+	result, timeoutSeconds, err := awaitWithBudget(
+		remaining,
+		maxInterval,
+		await,
+		func(result *ops.AwaitVerdictResult) bool { return result.Verdict == ops.VerdictTimeout },
+		func(result *ops.AwaitVerdictResult) { result.Verdict = ops.VerdictPoll },
+	)
+	if err != nil {
+		return nil, err
 	}
-	if result.ReviewerAgent != "" {
-		fmt.Printf("Reviewer: %s\n", result.ReviewerAgent)
+	if result.Verdict != ops.VerdictPoll {
+		timeoutSeconds = 0
 	}
-	if result.ReviewCommit != "" {
-		fmt.Printf("Review commit: %s\n", result.ReviewCommit)
-	}
-	if result.CurrentAssignee != "" {
-		fmt.Printf("Current assignee: %s\n", result.CurrentAssignee)
-	}
-	if result.SafeAction != "" {
-		fmt.Printf("Safe action: %s\n", result.SafeAction)
-	}
-	if result.Guidance != "" {
-		fmt.Printf("\n%s\n", result.Guidance)
-	}
-	return nil
+	return &AwaitVerdictResult{AwaitVerdictResult: result, TimeoutSeconds: timeoutSeconds}, nil
 }

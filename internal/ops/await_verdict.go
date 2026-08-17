@@ -171,14 +171,14 @@ func AwaitVerdict(ctx context.Context, projectRoot, taskID, agentID string, time
 
 	// --- Event loop: block until verdict arrives ---
 	rolePair := task.RolePair
+	deadline := time.Now().Add(timeout)
 
 	watcher, watchErr := newAwaitVerdictWatcher(bb)
 	if watchErr != nil {
-		return awaitVerdictPolling(ctx, bb, taskID, agentID, timeout, resolver, rolePair, projectRoot)
+		return awaitVerdictPolling(ctx, bb, taskID, agentID, deadline, task.Status, resolver, rolePair, projectRoot)
 	}
 	defer watcher.Close()
 
-	deadline := time.Now().Add(timeout)
 	deadlineTimer := time.NewTimer(time.Until(deadline))
 	defer deadlineTimer.Stop()
 
@@ -230,7 +230,7 @@ func AwaitVerdict(ctx context.Context, projectRoot, taskID, agentID string, time
 		case watcherErr := <-watcher.Errors():
 			log.Printf("Watcher error, falling back to polling: %v", watcherErr)
 			watcher.Close()
-			return awaitVerdictPolling(ctx, bb, taskID, agentID, timeout, resolver, rolePair, projectRoot)
+			return awaitVerdictPolling(ctx, bb, taskID, agentID, deadline, task.Status, resolver, rolePair, projectRoot)
 
 		case <-deadlineTimer.C:
 			releaseOwnership(bb, agentID)
@@ -441,10 +441,11 @@ func handleVerdictResult(bb *db.Blackboard, task *models.Task, agentID, projectR
 
 // awaitVerdictPolling is the polling fallback for when fsnotify is unavailable.
 // It checks state every 5 seconds until a verdict arrives or the deadline expires.
-func awaitVerdictPolling(ctx context.Context, bb *db.Blackboard, taskID, agentID string, timeout time.Duration, resolver *pipeline.Resolver, rolePair, projectRoot string) (*AwaitVerdictResult, error) {
-	deadline := time.Now().Add(timeout)
+func awaitVerdictPolling(ctx context.Context, bb *db.Blackboard, taskID, agentID string, deadline time.Time, taskStatus models.TaskStatus, resolver *pipeline.Resolver, rolePair, projectRoot string) (*AwaitVerdictResult, error) {
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
+	deadlineTimer := time.NewTimer(time.Until(deadline))
+	defer deadlineTimer.Stop()
 
 	for {
 		select {
@@ -466,13 +467,14 @@ func awaitVerdictPolling(ctx context.Context, bb *db.Blackboard, taskID, agentID
 				releaseOwnership(bb, agentID)
 				return disappearedVerdictResult(), nil
 			}
+			taskStatus = currentTask.Status
 			if vc := checkVerdictStatus(currentTask, resolver, rolePair); vc != nil {
 				return handleVerdictResult(bb, currentTask, agentID, projectRoot, resolver, rolePair)
 			}
-			if time.Now().After(deadline) {
-				releaseOwnership(bb, agentID)
-				return &AwaitVerdictResult{Verdict: VerdictTimeout, TaskStatus: currentTask.Status}, nil
-			}
+
+		case <-deadlineTimer.C:
+			releaseOwnership(bb, agentID)
+			return &AwaitVerdictResult{Verdict: VerdictTimeout, TaskStatus: taskStatus}, nil
 		}
 	}
 }
