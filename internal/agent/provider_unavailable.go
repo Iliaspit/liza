@@ -12,18 +12,23 @@ import (
 )
 
 type providerUnavailablePattern struct {
-	Provider string
-	Needles  []string
+	Provider   string
+	Needles    []string
+	Diagnostic string
 }
+
+const codexSessionAccessDiagnostic = "thread/start failed: error creating thread: Codex cannot access session files under .codex/sessions (permission denied)"
 
 var providerUnavailablePatterns = []providerUnavailablePattern{
 	{
-		Provider: "codex",
-		Needles:  []string{"Codex cannot access session files", ".codex/sessions", "permission denied"},
+		Provider:   "codex",
+		Needles:    []string{"Codex cannot access session files", ".codex/sessions", "permission denied"},
+		Diagnostic: codexSessionAccessDiagnostic,
 	},
 	{
-		Provider: "codex",
-		Needles:  []string{"thread/start failed", "error creating thread", ".codex/sessions"},
+		Provider:   "codex",
+		Needles:    []string{"thread/start failed", "error creating thread", ".codex/sessions"},
+		Diagnostic: "thread/start failed: error creating thread using .codex/sessions",
 	},
 }
 
@@ -36,43 +41,40 @@ type ProviderUnavailable struct {
 // DetectProviderUnavailable scans agent output for provider startup failures
 // that make the provider unable to create a usable agent session.
 func DetectProviderUnavailable(output, cliName string) *ProviderUnavailable {
-	for _, p := range providerUnavailablePatterns {
-		if p.Provider != cliName {
-			continue
-		}
-		matched := true
-		for _, needle := range p.Needles {
-			if !strings.Contains(output, needle) {
-				matched = false
-				break
-			}
-		}
-		if matched {
-			return &ProviderUnavailable{
-				Provider: p.Provider,
-				Message:  representativeProviderFailureLine(output, p.Needles),
-			}
-		}
-	}
-	return nil
+	providerUnavailable, _ := classifyProviderUnavailable(output, cliName)
+	return providerUnavailable
 }
 
-func representativeProviderFailureLine(output string, needles []string) string {
-	for _, line := range strings.Split(output, "\n") {
-		for _, needle := range needles {
-			if strings.Contains(line, needle) {
-				return line
+func classifyProviderUnavailable(output, cliName string) (*ProviderUnavailable, string) {
+	provider := acpxAgentNameFromTool(cliName)
+	for _, p := range providerUnavailablePatterns {
+		if p.Provider != provider {
+			continue
+		}
+		for _, line := range strings.Split(output, "\n") {
+			matched := true
+			for _, needle := range p.Needles {
+				if !strings.Contains(line, needle) {
+					matched = false
+					break
+				}
+			}
+			if matched {
+				return &ProviderUnavailable{
+					Provider: p.Provider,
+					Message:  p.Diagnostic,
+				}, p.Diagnostic
 			}
 		}
 	}
-	return strings.TrimSpace(output)
+	return nil, ""
 }
 
 const providerUnavailableSignalPrefix = "provider-unavailable-"
 
 // ProviderUnavailableSignalPath returns the path to the provider-unavailable signal file.
 func ProviderUnavailableSignalPath(projectRoot, provider string) string {
-	return filepath.Join(paths.New(projectRoot).LizaDir(), providerUnavailableSignalPrefix+provider)
+	return filepath.Join(paths.New(projectRoot).LizaDir(), providerUnavailableSignalPrefix+acpxAgentNameFromTool(provider))
 }
 
 // ProviderUnavailableSignalGlob returns a glob matching provider-unavailable signal files.
@@ -105,11 +107,11 @@ func CheckProviderUnavailableSignal(projectRoot, provider string) bool {
 
 // ClearProviderUnavailableSignal removes a provider-unavailable signal file.
 func ClearProviderUnavailableSignal(projectRoot, provider string) error {
-	err := os.Remove(ProviderUnavailableSignalPath(projectRoot, provider))
-	if os.IsNotExist(err) {
-		return nil
+	signalPath := ProviderUnavailableSignalPath(projectRoot, provider)
+	if err := os.Remove(signalPath); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("remove provider-unavailable signal %q: %w", signalPath, err)
 	}
-	return err
+	return nil
 }
 
 // LogProviderUnavailableAlert appends a provider-unavailable alert to alerts.log.

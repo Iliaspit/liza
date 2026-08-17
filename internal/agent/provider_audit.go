@@ -32,8 +32,9 @@ type ProviderAuditDegraded struct {
 // DetectProviderAuditDegraded scans provider output for non-fatal audit trail
 // degradation such as Codex rollout persistence failures.
 func DetectProviderAuditDegraded(output, cliName string) *ProviderAuditDegraded {
+	provider := acpxAgentNameFromTool(cliName)
 	for _, p := range providerAuditPatterns {
-		if p.Provider != cliName {
+		if p.Provider != provider {
 			continue
 		}
 		for _, line := range strings.Split(output, "\n") {
@@ -84,7 +85,7 @@ func handleProviderAuditDegraded(bb *db.Blackboard, config SupervisorConfig, tas
 				Reporter:  config.AgentID,
 				Type:      ProviderAuditDegradedAnomalyType,
 				Details: map[string]any{
-					"provider": config.CLIName,
+					"provider": pad.Provider,
 					"agent_id": config.AgentID,
 					"message":  pad.Message,
 					"impact":   "provider transcript or rollout persistence may be incomplete",

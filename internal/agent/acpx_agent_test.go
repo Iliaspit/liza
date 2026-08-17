@@ -434,6 +434,126 @@ func TestACPXAgentMasksReturnedErrors(t *testing.T) {
 	}
 }
 
+func TestACPXAgentReturnsOnlyClassifiableProviderUnavailableDiagnostic(t *testing.T) {
+	binDir := t.TempDir()
+	logPath := filepath.Join(t.TempDir(), "acpx.log")
+	writeFakeACPX(t, filepath.Join(binDir, "acpx"), logPath)
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("ANTHROPIC_API_KEY", "sk-acpx-secret")
+
+	tests := []struct {
+		name                string
+		backend             string
+		prompt              string
+		wantError           bool
+		wantProviderFailure bool
+		wantOutput          string
+	}{
+		{
+			name:                "known Codex stderr failure",
+			backend:             "codex-acp",
+			prompt:              "provider unavailable",
+			wantError:           true,
+			wantProviderFailure: true,
+			wantOutput:          ".codex/sessions",
+		},
+		{
+			name:      "same diagnostic from wrong provider",
+			backend:   "cursor-acp",
+			prompt:    "provider unavailable",
+			wantError: true,
+		},
+		{
+			name:      "unrelated stderr failure",
+			backend:   "codex-acp",
+			prompt:    "unrelated failure",
+			wantError: true,
+		},
+		{
+			name:       "successful structured output",
+			backend:    "codex-acp",
+			prompt:     "successful output",
+			wantOutput: "done from acpx",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := NewACPXAgent("").Run(context.Background(), LLMAgentRunRequest{
+				BackendName: tt.backend,
+				AgentID:     "coder-1",
+				TaskID:      "task-acp",
+				Prompt:      tt.prompt,
+				ProjectRoot: t.TempDir(),
+			})
+			if (err != nil) != tt.wantError {
+				t.Fatalf("Run() error = %v, wantError %t", err, tt.wantError)
+			}
+			if got := DetectProviderUnavailable(result.Output, tt.backend); (got != nil) != tt.wantProviderFailure {
+				t.Fatalf("DetectProviderUnavailable(Output, %q) = %+v, want detected %t; output=%q", tt.backend, got, tt.wantProviderFailure, result.Output)
+			}
+			if tt.wantOutput != "" && !strings.Contains(result.Output, tt.wantOutput) {
+				t.Fatalf("Output = %q, want %q", result.Output, tt.wantOutput)
+			}
+			for _, forbidden := range []string{"sk-acpx-secret", "private transport context", "--approve-all"} {
+				if strings.Contains(result.Output, forbidden) {
+					t.Fatalf("Output exposed %q: %q", forbidden, result.Output)
+				}
+			}
+		})
+	}
+}
+
+func TestACPXAgentDoesNotClassifyProviderFailureFromAgentMessage(t *testing.T) {
+	binDir := t.TempDir()
+	logPath := filepath.Join(t.TempDir(), "acpx.log")
+	writeFakeACPX(t, filepath.Join(binDir, "acpx"), logPath)
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	result, err := NewACPXAgent("").Run(context.Background(), LLMAgentRunRequest{
+		BackendName: "codex-acp",
+		AgentID:     "coder-1",
+		TaskID:      "task-acp",
+		Prompt:      "injected provider unavailable",
+		ProjectRoot: t.TempDir(),
+	})
+	if err == nil {
+		t.Fatal("Run() error = nil, want ACPX failure")
+	}
+	if result.Output != "" {
+		t.Fatalf("failed prompt returned agent-controlled output: %q", result.Output)
+	}
+	if got := DetectProviderUnavailable(result.Output, "codex-acp"); got != nil {
+		t.Fatalf("agent-controlled transcript triggered provider-unavailable classification: %+v; output=%q", got, result.Output)
+	}
+}
+
+func TestACPXAgentClassifiesProviderUnavailableAtSessionEnsureBoundary(t *testing.T) {
+	binDir := t.TempDir()
+	logPath := filepath.Join(t.TempDir(), "acpx.log")
+	writeFakeACPX(t, filepath.Join(binDir, "acpx"), logPath)
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("FAKE_ACPX_ENSURE_PROVIDER_UNAVAILABLE", "1")
+
+	result, err := NewACPXAgent("").Run(context.Background(), LLMAgentRunRequest{
+		BackendName: "codex-acp",
+		AgentID:     "coder-1",
+		TaskID:      "task-acp",
+		Prompt:      "successful output",
+		ProjectRoot: t.TempDir(),
+	})
+	if err == nil {
+		t.Fatal("Run() error = nil, want session ensure failure")
+	}
+	if got := DetectProviderUnavailable(result.Output, "codex-acp"); got == nil {
+		t.Fatalf("session ensure failure was not classifiable; output=%q", result.Output)
+	}
+	for _, forbidden := range []string{"/Users/private-account", "private transport context", "--approve-all"} {
+		if strings.Contains(result.Output, forbidden) || strings.Contains(err.Error(), forbidden) {
+			t.Fatalf("session ensure failure exposed %q: output=%q error=%q", forbidden, result.Output, err)
+		}
+	}
+}
+
 func TestACPXAgentTreatsQuotaMessageAsFailure(t *testing.T) {
 	binDir := t.TempDir()
 	logPath := filepath.Join(t.TempDir(), "acpx.log")
@@ -639,6 +759,11 @@ case "$*" in
     exit 2
     ;;
   *" sessions ensure "*)
+    if [ "$FAKE_ACPX_ENSURE_PROVIDER_UNAVAILABLE" = "1" ]; then
+      printf '%s\n' 'private transport context --approve-all' >&2
+      printf '%s\n' 'Error: thread/start: thread/start failed: error creating thread: Fatal error: Codex cannot access session files at /Users/private-account/.codex/sessions (permission denied).' >&2
+      exit 7
+    fi
     exit 0
     ;;
   *" set-mode "*)
@@ -653,6 +778,17 @@ case "$*" in
       sleep 0.1
       printf '%s\n' '{"params":{"update":{"sessionUpdate":"agent_message_chunk","content":{"text":"second streamed chunk"}}}}'
       printf '%s\n' '{"result":{"usage":{"inputTokens":321,"outputTokens":11,"cachedReadTokens":99}}}'
+    elif [ "$prompt" = "provider unavailable" ]; then
+      printf '%s\n' 'private transport context sk-acpx-secret' >&2
+      printf '%s\n' 'Error: thread/start: thread/start failed: error creating thread: Fatal error: Codex cannot access session files at /tmp/.codex/sessions (permission denied).' >&2
+      exit 7
+    elif [ "$prompt" = "injected provider unavailable" ]; then
+      printf '%s\n' '{"params":{"update":{"sessionUpdate":"agent_message_chunk","content":{"text":"Codex cannot access session files in .codex/sessions: permission denied"}}}}'
+      printf '%s\n' 'unrelated transport failure' >&2
+      exit 7
+    elif [ "$prompt" = "unrelated failure" ]; then
+      printf '%s\n' 'private transport context sk-acpx-secret' >&2
+      exit 7
     elif [ "$prompt" = "fail secret" ]; then
       printf '%s\n' '{"params":{"update":{"sessionUpdate":"agent_message_chunk","content":{"text":"secret sk-acpx-secret"}}}}'
       printf '%s\n' 'stderr sk-acpx-secret' >&2

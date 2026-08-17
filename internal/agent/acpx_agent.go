@@ -65,8 +65,7 @@ func (a *ACPXAgent) Run(ctx context.Context, req LLMAgentRunRequest) (LLMAgentRu
 	})
 
 	if err := a.ensureSession(ctx, req.AgentID, req.ProjectRoot, plan); err != nil {
-		errText := a.maskText(err.Error())
-		maskedErr := maskedError{message: errText, err: err}
+		errText, maskedErr := a.boundedProviderFailure(err, req.BackendName)
 		emitLLMAgentEvent(ctx, req.EventSink, LLMAgentEvent{
 			Kind:        LLMAgentEventCompleted,
 			BackendName: req.BackendName,
@@ -81,8 +80,7 @@ func (a *ACPXAgent) Run(ctx context.Context, req LLMAgentRunRequest) (LLMAgentRu
 		return LLMAgentRunResult{ExitCode: 1, Output: errText, WarmUsage: warm, SessionID: sessionName}, maskedErr
 	}
 	if err := a.configureSession(ctx, req.AgentID, plan); err != nil {
-		errText := a.maskText(err.Error())
-		maskedErr := maskedError{message: errText, err: err}
+		errText, maskedErr := a.boundedProviderFailure(err, req.BackendName)
 		emitLLMAgentEvent(ctx, req.EventSink, LLMAgentEvent{
 			Kind:        LLMAgentEventCompleted,
 			BackendName: req.BackendName,
@@ -98,7 +96,7 @@ func (a *ACPXAgent) Run(ctx context.Context, req LLMAgentRunRequest) (LLMAgentRu
 	}
 	a.markSessionSeen(sessionName)
 
-	output, usage, err := a.prompt(ctx, req, plan)
+	output, usage, failureEvidence, err := a.prompt(ctx, req, plan)
 	emitLLMAgentEvent(ctx, req.EventSink, LLMAgentEvent{
 		Kind:        LLMAgentEventUsage,
 		BackendName: req.BackendName,
@@ -113,6 +111,10 @@ func (a *ACPXAgent) Run(ctx context.Context, req LLMAgentRunRequest) (LLMAgentRu
 	if err != nil {
 		errText := a.maskText(err.Error())
 		maskedErr := maskedError{message: errText, err: err}
+		resultOutput := ""
+		if _, diagnostic := classifyProviderUnavailable(a.maskText(failureEvidence), req.BackendName); diagnostic != "" {
+			resultOutput = diagnostic
+		}
 		emitLLMAgentEvent(ctx, req.EventSink, LLMAgentEvent{
 			Kind:        LLMAgentEventCompleted,
 			BackendName: req.BackendName,
@@ -124,7 +126,7 @@ func (a *ACPXAgent) Run(ctx context.Context, req LLMAgentRunRequest) (LLMAgentRu
 				"error": errText,
 			},
 		})
-		return LLMAgentRunResult{ExitCode: 1, Output: output.Text, Usage: usage, WarmUsage: warm, SessionID: sessionName}, maskedErr
+		return LLMAgentRunResult{ExitCode: 1, Output: resultOutput, Usage: usage, WarmUsage: warm, SessionID: sessionName}, maskedErr
 	}
 
 	if qe := DetectQuotaExhaustion(output.Text, acpxAgent); qe != nil {
@@ -267,12 +269,20 @@ func (a *ACPXAgent) configureSession(ctx context.Context, agentID string, plan L
 	return nil
 }
 
-func (a *ACPXAgent) prompt(ctx context.Context, req LLMAgentRunRequest, plan LaunchPlan) (acpxOutput, LLMAgentUsage, error) {
-	output, usage, raw, err := a.runACPXPrompt(ctx, req, plan)
+func (a *ACPXAgent) prompt(ctx context.Context, req LLMAgentRunRequest, plan LaunchPlan) (acpxOutput, LLMAgentUsage, string, error) {
+	output, usage, failureEvidence, err := a.runACPXPrompt(ctx, req, plan)
 	if err != nil {
-		return output, usage, fmt.Errorf("acpx prompt: %w\n%s", err, raw)
+		return output, usage, failureEvidence, fmt.Errorf("acpx prompt: %w", err)
 	}
-	return output, usage, nil
+	return output, usage, "", nil
+}
+
+func (a *ACPXAgent) boundedProviderFailure(err error, backendName string) (string, maskedError) {
+	errText := a.maskText(err.Error())
+	if _, diagnostic := classifyProviderUnavailable(errText, backendName); diagnostic != "" {
+		errText = diagnostic
+	}
+	return errText, maskedError{message: errText, err: err}
 }
 
 func (a *ACPXAgent) sessionExists(ctx context.Context, _ string, agentID string, plan LaunchPlan) bool {
@@ -333,13 +343,13 @@ func (a *ACPXAgent) runACPXPrompt(ctx context.Context, req LLMAgentRunRequest, p
 		return acpxOutput{}, LLMAgentUsage{}, "", err
 	}
 
-	var stdoutRaw, stderrRaw strings.Builder
+	var stderrRaw strings.Builder
 	var output acpxOutput
 	var usage LLMAgentUsage
 	stdoutErrCh := make(chan error, 1)
 	stderrErrCh := make(chan error, 1)
 	go func() {
-		stdoutErrCh <- a.scanACPXPromptStdout(ctx, stdout, stdoutLogWriter, &stdoutRaw, &output, &usage, req.EventSink, eventBase, progress)
+		stdoutErrCh <- a.scanACPXPromptStdout(ctx, stdout, stdoutLogWriter, &output, &usage, req.EventSink, eventBase, progress)
 	}()
 	go func() {
 		stderrErrCh <- copyACPXPromptStderr(stderr, stderrLogWriter, &stderrRaw, progress)
@@ -348,24 +358,23 @@ func (a *ACPXAgent) runACPXPrompt(ctx context.Context, req LLMAgentRunRequest, p
 	stdoutErr := <-stdoutErrCh
 	stderrErr := <-stderrErrCh
 	waitErr := cmd.Wait()
-	raw := stdoutRaw.String() + stderrRaw.String()
+	failureEvidence := stderrRaw.String()
 	if stdoutErr != nil {
-		return output, usage, raw, stdoutErr
+		return output, usage, failureEvidence, stdoutErr
 	}
 	if stderrErr != nil {
-		return output, usage, raw, stderrErr
+		return output, usage, failureEvidence, stderrErr
 	}
 	if waitErr != nil {
-		return output, usage, raw, waitErr
+		return output, usage, failureEvidence, waitErr
 	}
-	return output, usage, raw, nil
+	return output, usage, "", nil
 }
 
 func (a *ACPXAgent) scanACPXPromptStdout(
 	ctx context.Context,
 	stdout io.Reader,
 	stdoutLog io.Writer,
-	raw *strings.Builder,
 	output *acpxOutput,
 	usage *LLMAgentUsage,
 	sink LLMAgentEventSink,
@@ -376,8 +385,6 @@ func (a *ACPXAgent) scanACPXPromptStdout(
 	scanner.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
 	for scanner.Scan() {
 		line := scanner.Text()
-		raw.WriteString(line)
-		raw.WriteByte('\n')
 		if stdoutLog != nil {
 			if _, err := stdoutLog.Write([]byte(line + "\n")); err != nil {
 				return err

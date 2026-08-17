@@ -25,6 +25,18 @@ func TestDetectProviderAuditDegraded_CodexRolloutThreadNotFound(t *testing.T) {
 	}
 }
 
+func TestDetectProviderAuditDegraded_CodexACPAlias(t *testing.T) {
+	output := `2026-05-05T18:03:44.961611Z ERROR codex_core::session: failed to record rollout items: thread 019e983f-f3a2-7071-8a66-aa1774db9101 not found`
+
+	result := DetectProviderAuditDegraded(output, "codex-acp")
+	if result == nil {
+		t.Fatal("expected provider audit degradation detected for codex-acp, got nil")
+	}
+	if result.Provider != "codex" {
+		t.Errorf("Provider = %q, want canonical provider %q", result.Provider, "codex")
+	}
+}
+
 func TestDetectProviderAuditDegraded_IgnoresUnrelatedThreadNotFound(t *testing.T) {
 	output := `thread 019e983f-f3a2-7071-8a66-aa1774db9101 not found`
 
@@ -52,7 +64,7 @@ func TestDetectProviderAuditDegraded_WrongProvider(t *testing.T) {
 	}
 }
 
-func TestHandleProviderAuditDegraded_RecordsAlertAndAnomaly(t *testing.T) {
+func TestHandleProviderAuditDegraded_CanonicalizesProviderAliasInAnomaly(t *testing.T) {
 	projectRoot := t.TempDir()
 	statePath, _ := testhelpers.SetupLizaDir(t, projectRoot)
 	state := testhelpers.CreateValidState()
@@ -62,7 +74,7 @@ func TestHandleProviderAuditDegraded_RecordsAlertAndAnomaly(t *testing.T) {
 	handled := handleProviderAuditDegraded(bb, SupervisorConfig{
 		AgentID:     "coder-1",
 		ProjectRoot: projectRoot,
-		CLIName:     "codex",
+		CLIName:     "codex-acp",
 	}, "task-1", output)
 	if !handled {
 		t.Fatal("handleProviderAuditDegraded returned false, want true")
