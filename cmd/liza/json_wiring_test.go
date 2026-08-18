@@ -1910,7 +1910,7 @@ func assertMasterPlanningTopology(t *testing.T, projectRoot string) {
 			target:     "epic-planning-pair",
 			from:       "epic-planning-main-pair.approved",
 			to:         "epic-planning-pair.initial",
-			taskSlug:   "epic-planning",
+			taskSlug:   "ep",
 			transition: "epic-decompose",
 		},
 		{
@@ -1918,7 +1918,7 @@ func assertMasterPlanningTopology(t *testing.T, projectRoot string) {
 			target:     "architecture-pair",
 			from:       "architecture-main-pair.approved",
 			to:         "architecture-pair.initial",
-			taskSlug:   "architecture",
+			taskSlug:   "ar",
 			transition: "arch-decompose",
 		},
 		{
@@ -1926,7 +1926,7 @@ func assertMasterPlanningTopology(t *testing.T, projectRoot string) {
 			target:     "code-planning-pair",
 			from:       "code-planning-main-pair.approved",
 			to:         "code-planning-pair.initial",
-			taskSlug:   "code-planning",
+			taskSlug:   "cp",
 			transition: "code-plan-decompose",
 		},
 	}

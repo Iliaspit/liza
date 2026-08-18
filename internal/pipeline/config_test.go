@@ -727,6 +727,17 @@ func TestLoadFrozen_BackfillsLegacyMasterDecompositionOutputRefs(t *testing.T) {
 			t.Fatalf("%s DecompositionOutputRef = %q, want %q", rolePair, got, want)
 		}
 	}
+
+	for name, rolePair := range cfg.Pipeline.RolePairs {
+		if rolePair.TaskSlug != "" {
+			t.Errorf("legacy role-pair %s TaskSlug = %q, want empty", name, rolePair.TaskSlug)
+		}
+	}
+	assertMasterPlanningTopology(t, cfg, map[string]string{
+		"epic-decompose":      "epic-planning",
+		"arch-decompose":      "architecture",
+		"code-plan-decompose": "code-planning",
+	})
 }
 
 // --- Resolver tests ---
@@ -1212,7 +1223,11 @@ func TestLoad_Phase2ValidConfig(t *testing.T) {
 			t.Errorf("missing role-pair %s", name)
 		}
 	}
-	assertMasterPlanningTopology(t, cfg)
+	assertMasterPlanningTopology(t, cfg, map[string]string{
+		"epic-decompose":      "epic-planning",
+		"arch-decompose":      "architecture",
+		"code-plan-decompose": "code-planning",
+	})
 
 	// Verify 11 roles (10 agent roles + orchestrator).
 	if len(cfg.Pipeline.Roles) != 11 {
@@ -1279,7 +1294,7 @@ func requirePipelineTransition(t *testing.T, cfg *PipelineConfig, name string) T
 	return TransitionDef{}
 }
 
-func assertMasterPlanningTopology(t *testing.T, cfg *PipelineConfig) {
+func assertMasterPlanningTopology(t *testing.T, cfg *PipelineConfig, decompositionSlugs map[string]string) {
 	t.Helper()
 	type masterPair struct {
 		name       string
@@ -1306,7 +1321,7 @@ func assertMasterPlanningTopology(t *testing.T, cfg *PipelineConfig) {
 			sub:   "epic-spec-subpipeline",
 			steps: []string{"epic-planning-main-pair", "epic-planning-pair", "us-writing-pair"},
 			transition: TransitionDef{
-				Name: "epic-decompose", TaskSlug: "epic-planning",
+				Name: "epic-decompose", TaskSlug: decompositionSlugs["epic-decompose"],
 				From: "epic-planning-main-pair.approved", To: "epic-planning-pair.initial",
 				Trigger: "auto", Cardinality: "per-subtask",
 			},
@@ -1325,7 +1340,7 @@ func assertMasterPlanningTopology(t *testing.T, cfg *PipelineConfig) {
 			sub:   "architecture-subpipeline",
 			steps: []string{"architecture-main-pair", "architecture-pair"},
 			transition: TransitionDef{
-				Name: "arch-decompose", TaskSlug: "architecture",
+				Name: "arch-decompose", TaskSlug: decompositionSlugs["arch-decompose"],
 				From: "architecture-main-pair.approved", To: "architecture-pair.initial",
 				Trigger: "auto", Cardinality: "per-subtask",
 			},
@@ -1344,7 +1359,7 @@ func assertMasterPlanningTopology(t *testing.T, cfg *PipelineConfig) {
 			sub:   "coding-subpipeline",
 			steps: []string{"code-planning-main-pair", "code-planning-pair", "coding-pair"},
 			transition: TransitionDef{
-				Name: "code-plan-decompose", TaskSlug: "code-planning",
+				Name: "code-plan-decompose", TaskSlug: decompositionSlugs["code-plan-decompose"],
 				From: "code-planning-main-pair.approved", To: "code-planning-pair.initial",
 				Trigger: "auto", Cardinality: "per-subtask",
 			},
@@ -1403,6 +1418,52 @@ func assertMasterPlanningTopology(t *testing.T, cfg *PipelineConfig) {
 		}
 		if got[0] != want.transition {
 			t.Errorf("%s decompose transition = %+v, want %+v", want.sub, got[0], want.transition)
+		}
+	}
+}
+
+func assertEmbeddedTaskSlugs(t *testing.T, cfg *PipelineConfig) {
+	t.Helper()
+
+	wantRolePairSlugs := map[string]string{
+		"epic-planning-main-pair": "epm",
+		"epic-planning-pair":      "ep",
+		"us-writing-pair":         "uw",
+		"architecture-main-pair":  "arm",
+		"architecture-pair":       "ar",
+		"code-planning-main-pair": "cpm",
+		"code-planning-pair":      "cp",
+		"coding-pair":             "code",
+		"integration-pair":        "ia",
+	}
+	for name, want := range wantRolePairSlugs {
+		if got := cfg.Pipeline.RolePairs[name].TaskSlug; got != want {
+			t.Errorf("role-pair %s task-slug = %q, want %q", name, got, want)
+		}
+	}
+
+	wantTransitionSlugs := map[string]string{
+		"epic-decompose":            "ep",
+		"epic-to-us":                "uw",
+		"arch-decompose":            "ar",
+		"code-plan-decompose":       "cp",
+		"code-plan-to-coding":       "code",
+		"integration-to-fix":        "fix",
+		"us-to-coding":              "arm",
+		"architecture-to-code-plan": "cp",
+	}
+	gotTransitionSlugs := make(map[string]string, len(wantTransitionSlugs))
+	for _, subPipeline := range cfg.Pipeline.SubPipelines {
+		for _, transition := range subPipeline.Transitions {
+			gotTransitionSlugs[transition.Name] = transition.TaskSlug
+		}
+	}
+	for _, transition := range cfg.Pipeline.PipelineTransitions {
+		gotTransitionSlugs[transition.Name] = transition.TaskSlug
+	}
+	for name, want := range wantTransitionSlugs {
+		if got := gotTransitionSlugs[name]; got != want {
+			t.Errorf("transition %s task-slug = %q, want %q", name, got, want)
 		}
 	}
 }
@@ -2046,7 +2107,12 @@ func TestLoad_EmbeddedPipelineRoles(t *testing.T) {
 	if len(cfg.Pipeline.Roles) != 13 {
 		t.Fatalf("expected 13 roles, got %d", len(cfg.Pipeline.Roles))
 	}
-	assertMasterPlanningTopology(t, cfg)
+	assertMasterPlanningTopology(t, cfg, map[string]string{
+		"epic-decompose":      "ep",
+		"arch-decompose":      "ar",
+		"code-plan-decompose": "cp",
+	})
+	assertEmbeddedTaskSlugs(t, cfg)
 
 	expectedRoles := map[string]string{
 		"coder":                 "doer",
@@ -2749,6 +2815,36 @@ func TestTaskSlugOrName(t *testing.T) {
 			t.Errorf("TaskSlugOrName() = %q, want %q", got, "us-to-coding")
 		}
 	})
+}
+
+func TestRolePairTaskSlugOrName(t *testing.T) {
+	t.Run("returns slug when set", func(t *testing.T) {
+		rp := RolePairDef{TaskSlug: "cp"}
+		if got := rp.TaskSlugOrName("code-planning-pair"); got != "cp" {
+			t.Errorf("TaskSlugOrName() = %q, want %q", got, "cp")
+		}
+	})
+	t.Run("falls back to role-pair name without suffix", func(t *testing.T) {
+		rp := RolePairDef{}
+		if got := rp.TaskSlugOrName("code-planning-pair"); got != "code-planning" {
+			t.Errorf("TaskSlugOrName() = %q, want %q", got, "code-planning")
+		}
+	})
+}
+
+func TestValidate_InvalidRolePairTaskSlug(t *testing.T) {
+	cfg := loadTestConfig(t)
+	rp := cfg.Pipeline.RolePairs["coding-pair"]
+	rp.TaskSlug = "BAD SLUG"
+	cfg.Pipeline.RolePairs["coding-pair"] = rp
+
+	err := validate(cfg)
+	if err == nil {
+		t.Fatal("expected error for invalid role-pair task-slug")
+	}
+	assertContains(t, err.Error(), `role-pair "coding-pair"`)
+	assertContains(t, err.Error(), "task-slug")
+	assertContains(t, err.Error(), "kebab-case")
 }
 
 func TestLoad_InvalidTaskSlug(t *testing.T) {

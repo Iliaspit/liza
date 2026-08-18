@@ -405,6 +405,7 @@ pipeline:
     epic-planning-main-pair:
       doer: epic-planner
       reviewer: epic-plan-reviewer
+      task-slug: epm
       decomposition-root: true
       decomposition-output-ref: plan_ref
       review-policy:
@@ -423,6 +424,7 @@ pipeline:
     epic-planning-pair:
       doer: epic-planner
       reviewer: epic-plan-reviewer
+      task-slug: ep
       states:
         initial: DRAFT_EPIC_PLAN
         executing: EPIC_PLANNING
@@ -434,6 +436,7 @@ pipeline:
     us-writing-pair:
       doer: us-writer
       reviewer: us-reviewer
+      task-slug: uw
       states:
         initial: DRAFT_US
         executing: WRITING_US
@@ -445,6 +448,7 @@ pipeline:
     code-planning-main-pair:
       doer: code-planner
       reviewer: code-plan-reviewer
+      task-slug: cpm
       decomposition-root: true
       decomposition-output-ref: plan_ref
       review-policy:
@@ -463,6 +467,7 @@ pipeline:
     code-planning-pair:
       doer: code-planner
       reviewer: code-plan-reviewer
+      task-slug: cp
       states:
         initial: DRAFT_CODING_PLAN
         executing: CODE_PLANNING
@@ -474,6 +479,7 @@ pipeline:
     coding-pair:
       doer: coder
       reviewer: code-reviewer
+      task-slug: code
       review-policy:
         quorum: 1
       states:
@@ -489,6 +495,7 @@ pipeline:
     architecture-main-pair:
       doer: architect
       reviewer: architecture-reviewer
+      task-slug: arm
       decomposition-root: true
       decomposition-output-ref: arch_ref
       review-policy:
@@ -507,6 +514,7 @@ pipeline:
     architecture-pair:
       doer: architect
       reviewer: architecture-reviewer
+      task-slug: ar
       states:
         initial: DRAFT_ARCHITECTURE
         executing: ARCHITECTING
@@ -518,6 +526,7 @@ pipeline:
     integration-pair:
       doer: integration-analyst
       reviewer: integration-reviewer
+      task-slug: ia
       states:
         initial: DRAFT_INTEGRATION_ANALYSIS
         executing: ANALYZING_INTEGRATION
@@ -535,13 +544,13 @@ pipeline:
         - us-writing-pair
       transitions:
         - name: epic-decompose
-          task-slug: epic-planning
+          task-slug: ep
           from: epic-planning-main-pair.approved
           to: epic-planning-pair.initial
           trigger: auto
           cardinality: per-subtask
         - name: epic-to-us
-          task-slug: us-writing
+          task-slug: uw
           from: epic-planning-pair.approved
           to: us-writing-pair.initial
           trigger: manual  # human validates epic decomposition
@@ -553,7 +562,7 @@ pipeline:
         - architecture-pair
       transitions:
         - name: arch-decompose
-          task-slug: architecture
+          task-slug: ar
           from: architecture-main-pair.approved
           to: architecture-pair.initial
           trigger: auto
@@ -566,13 +575,13 @@ pipeline:
         - coding-pair
       transitions:
         - name: code-plan-decompose
-          task-slug: code-planning
+          task-slug: cp
           from: code-planning-main-pair.approved
           to: code-planning-pair.initial
           trigger: auto
           cardinality: per-subtask
         - name: code-plan-to-coding
-          task-slug: coding
+          task-slug: code
           from: code-planning-pair.approved
           to: coding-pair.initial
           trigger: manual  # human validates implementation plan before coding begins
@@ -584,7 +593,7 @@ pipeline:
         - coding-pair
       transitions:
         - name: integration-to-fix
-          task-slug: integration-fixing
+          task-slug: fix
           from: integration-pair.approved
           to: coding-pair.initial
           trigger: auto
@@ -592,13 +601,13 @@ pipeline:
 
   pipeline-transitions:
     - name: us-to-coding
-      task-slug: architecture
+      task-slug: arm
       from: epic-spec-subpipeline.us-writing-pair.approved
       to: architecture-subpipeline.architecture-main-pair.initial
       trigger: manual
       cardinality: many-to-one  # N approved US → 1 architecture task
     - name: architecture-to-code-plan
-      task-slug: code-planning
+      task-slug: cp
       from: architecture-subpipeline.architecture-pair.approved
       to: coding-subpipeline.code-planning-pair.initial
       trigger: manual  # human validates architectural decomposition

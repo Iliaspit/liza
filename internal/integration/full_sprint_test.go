@@ -551,8 +551,8 @@ func TestFullSprintSequence(t *testing.T) {
 	}
 	approveArchitectureMaster := func(agentID string, reviewingStatus models.TaskStatus) {
 		t.Helper()
-		claimReviewManually(t, bb, "epic-1-architecture", agentID, reviewingStatus)
-		if err := commands.SubmitVerdictCommand(projectDir, "epic-1-architecture", "APPROVED", "", agentID, ""); err != nil {
+		claimReviewManually(t, bb, "epic-1-arm", agentID, reviewingStatus)
+		if err := commands.SubmitVerdictCommand(projectDir, "epic-1-arm", "APPROVED", "", agentID, ""); err != nil {
 			t.Fatalf("SubmitVerdict architecture master by %s failed: %v", agentID, err)
 		}
 	}
@@ -563,14 +563,14 @@ func TestFullSprintSequence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read after first architecture master approval failed: %v", err)
 	}
-	if task := stateAfterFirstArchitectureReview.FindTask("epic-1-architecture"); task == nil || task.Status != models.TaskStatus("ARCHITECTURE_MAIN_PARTIALLY_APPROVED") {
+	if task := stateAfterFirstArchitectureReview.FindTask("epic-1-arm"); task == nil || task.Status != models.TaskStatus("ARCHITECTURE_MAIN_PARTIALLY_APPROVED") {
 		t.Fatalf("first architecture master approval status = %v, want ARCHITECTURE_MAIN_PARTIALLY_APPROVED", task)
 	}
 
 	registerReviewer("architecture-reviewer-2", "test")
 	approveArchitectureMaster("architecture-reviewer-2", models.TaskStatus("REVIEWING_ARCHITECTURE_MAIN_2"))
 	os.Setenv("LIZA_AGENT_ID", "architecture-reviewer-2")
-	if err := commands.WtMergeCommand(projectDir, "epic-1-architecture", "architecture-reviewer-2"); err != nil {
+	if err := commands.WtMergeCommand(projectDir, "epic-1-arm", "architecture-reviewer-2"); err != nil {
 		t.Fatalf("WtMerge architecture master failed: %v", err)
 	}
 	os.Unsetenv("LIZA_AGENT_ID")
@@ -608,15 +608,15 @@ func TestFullSprintSequence(t *testing.T) {
 
 	// Expected tasks (1 original + 9 created by transitions):
 	//   epic-1                                                                  (epic-planning-pair)
-	//   epic-1-us-writing-0                                                     (us-writing-pair, CAP-001)
-	//   epic-1-us-writing-1                                                     (us-writing-pair, CAP-002)
-	//   epic-1-architecture                                                     (architecture-main-pair)
-	//   epic-1-architecture-architecture-0                                      (architecture-pair)
-	//   epic-1-architecture-architecture-1                                      (architecture-pair)
-	//   epic-1-architecture-architecture-0-code-planning-0                      (code-planning-pair)
-	//   epic-1-architecture-architecture-1-code-planning-0                      (code-planning-pair)
-	//   epic-1-architecture-architecture-0-code-planning-0-coding-0             (coding-pair)
-	//   epic-1-architecture-architecture-1-code-planning-0-coding-0             (coding-pair)
+	//   epic-1-uw-0                                                             (us-writing-pair, CAP-001)
+	//   epic-1-uw-1                                                             (us-writing-pair, CAP-002)
+	//   epic-1-arm                                                              (architecture-main-pair)
+	//   epic-1-arm-ar-0                                                         (architecture-pair)
+	//   epic-1-arm-ar-1                                                         (architecture-pair)
+	//   epic-1-arm-ar-0-cp-0                                                    (code-planning-pair)
+	//   epic-1-arm-ar-1-cp-0                                                    (code-planning-pair)
+	//   epic-1-arm-ar-0-cp-0-code-0                                             (coding-pair)
+	//   epic-1-arm-ar-1-cp-0-code-0                                             (coding-pair)
 	if len(state.Tasks) != 10 {
 		t.Errorf("Expected 10 tasks, got %d", len(state.Tasks))
 	}
@@ -637,12 +637,12 @@ func TestFullSprintSequence(t *testing.T) {
 
 	// Both US tasks should have us-to-coding executed (many-to-one).
 	for _, suffix := range []string{"0", "1"} {
-		usTaskID := "epic-1-us-writing-" + suffix
+		usTaskID := "epic-1-uw-" + suffix
 		assertTransitionExecuted(t, state, usTaskID, "us-to-coding")
 	}
 
 	// Architecture master requires quorum 2 and auto-decomposes to specialized architecture tasks.
-	archMasterTaskID := "epic-1-architecture"
+	archMasterTaskID := "epic-1-arm"
 	archMasterTask := state.FindTask(archMasterTaskID)
 	if archMasterTask == nil {
 		t.Fatalf("architecture master task %s not found", archMasterTaskID)
@@ -657,7 +657,7 @@ func TestFullSprintSequence(t *testing.T) {
 
 	// Specialized architecture tasks bypass code-planning-main-pair and create code-planning-pair tasks.
 	for _, suffix := range []string{"0", "1"} {
-		archTaskID := archMasterTaskID + "-architecture-" + suffix
+		archTaskID := archMasterTaskID + "-ar-" + suffix
 		archTask := state.FindTask(archTaskID)
 		if archTask == nil {
 			t.Fatalf("specialized architecture task %s not found", archTaskID)
@@ -670,14 +670,14 @@ func TestFullSprintSequence(t *testing.T) {
 
 	// Each code-planning task fans out to a coding task.
 	for _, suffix := range []string{"0", "1"} {
-		codePlanTaskID := archMasterTaskID + "-architecture-" + suffix + "-code-planning-0"
+		codePlanTaskID := archMasterTaskID + "-ar-" + suffix + "-cp-0"
 		assertTransitionExecuted(t, state, codePlanTaskID, "code-plan-to-coding")
 	}
 
 	// Verify capability scoping: each US task has the right scope, spec_ref (goal spec),
 	// and epic_ref (epic document with section anchor) from output[].
-	usTask0 := state.FindTask("epic-1-us-writing-0")
-	usTask1 := state.FindTask("epic-1-us-writing-1")
+	usTask0 := state.FindTask("epic-1-uw-0")
+	usTask1 := state.FindTask("epic-1-uw-1")
 	if usTask0 != nil {
 		if usTask0.Scope != "CAP-001 Authentication" {
 			t.Errorf("US task 0 scope = %q, want %q", usTask0.Scope, "CAP-001 Authentication")
@@ -712,7 +712,7 @@ func TestFullSprintSequence(t *testing.T) {
 	// Verify EpicRef and ArchRef propagate to specialized architecture, code-planning, and coding tasks.
 	wantArchRef := "specs/arch-plan/full-sprint-architecture.md"
 	for _, suffix := range []string{"0", "1"} {
-		archTaskID := archMasterTaskID + "-architecture-" + suffix
+		archTaskID := archMasterTaskID + "-ar-" + suffix
 		archTask := state.FindTask(archTaskID)
 		if archTask != nil {
 			wantEpicRef := "specs/epics/ep-001-auth.md"
@@ -727,7 +727,7 @@ func TestFullSprintSequence(t *testing.T) {
 			}
 		}
 
-		cpTask := state.FindTask(archTaskID + "-code-planning-0")
+		cpTask := state.FindTask(archTaskID + "-cp-0")
 		if cpTask != nil {
 			wantEpicRef := "specs/epics/ep-001-auth.md"
 			if cpTask.EpicRef != wantEpicRef {
@@ -741,7 +741,7 @@ func TestFullSprintSequence(t *testing.T) {
 			}
 		}
 
-		codingTask := state.FindTask(archTaskID + "-code-planning-0-coding-0")
+		codingTask := state.FindTask(archTaskID + "-cp-0-code-0")
 		if codingTask != nil && codingTask.ArchRef != wantArchRef {
 			t.Errorf("Coding task %s arch_ref = %q, want %q", codingTask.ID, codingTask.ArchRef, wantArchRef)
 		}

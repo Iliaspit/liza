@@ -887,7 +887,7 @@ func TestOrchestratorPreWork_ManyToOneCohort(t *testing.T) {
 	if readState.Sprint.CheckpointTrigger != "" {
 		t.Errorf("CheckpointTrigger = %q after PreWork, want empty (gate should have fired and cleared it)", readState.Sprint.CheckpointTrigger)
 	}
-	childID := "epic-1-architecture"
+	childID := "epic-1-arm"
 	child := readState.FindTask(childID)
 	if child == nil {
 		t.Fatalf("child task %q not found", childID)

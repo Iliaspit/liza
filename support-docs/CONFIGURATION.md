@@ -102,6 +102,34 @@ Depending on selected providers and options, `§BRAND_BINARY_NAME§ init` writes
 - standalone `.bash-policy.yaml` defaults and selected provider hooks when
   `§BRAND_ENV_PREFIX§_ENABLE_BASH_POLICY` is enabled
 
+### Task ID slugs
+
+Task IDs use compact, configurable segments so complete IDs remain readable in
+the TUI. `role-pairs.<name>.task-slug` controls the prefix for initial tasks;
+each transition's `task-slug` controls the segment appended to its child task
+IDs. Both fields are optional: role pairs fall back to their name without the
+conventional `-pair` suffix, while transitions fall back to their name.
+
+The embedded pipeline supplies compact defaults. Because
+`§BRAND_PROJECT_DIRNAME§/pipeline.yaml` is frozen during initialization,
+existing workspaces retain their original task IDs and naming behavior.
+
+| Role pair | Default slug |
+|-----------|--------------|
+| `epic-planning-main-pair` | `epm` |
+| `epic-planning-pair` | `ep` |
+| `us-writing-pair` | `uw` |
+| `architecture-main-pair` | `arm` |
+| `architecture-pair` | `ar` |
+| `code-planning-main-pair` | `cpm` |
+| `code-planning-pair` | `cp` |
+| `coding-pair` | `code` |
+| `integration-pair` | `ia` |
+
+The `integration-to-fix` transition uses `fix`, distinguishing rework from
+normal coding tasks. For example, `epic-1-arm-ar-0-cp-0-code-0` identifies a
+coding task reached through architecture and code planning.
+
 Provider catalog metadata defines the active contract location:
 
 | Provider | Active contract path |
@@ -1125,3 +1153,7 @@ project configuration belongs in `§BRAND_PROJECT_DIRNAME§/state.yaml`.
 4. `§BRAND_BINARY_NAME§ resume`
 
 **Never change state while agents are running** without pausing first.
+
+Do not change a role-pair or transition `task-slug` after related tasks have
+been created. Recovery derives deterministic child IDs from the frozen slug;
+changing it mid-run can make existing children appear missing.

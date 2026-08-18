@@ -138,9 +138,12 @@ Phase 1 prepares Phase 2 (the adding of a new US Writing Sub-pipeline) by:
    upstream children as dependencies. This enforces phase-gate ordering: phase-2 children
    cannot be claimed until all phase-1 children are MERGED.
 
-   **Recovery:** Child task IDs are deterministic and namespaced by transition:
-   `<parent-id>-<transition-name>-<subtask-index>` for `per-subtask` (index from `output[]`
-   order), `<parent-id>-<transition-name>` for `one-to-one`. The operation sequence is:
+   **Recovery:** Child task IDs are deterministic and namespaced by the transition's
+   `task-slug` (falling back to its name): `<parent-id>-<task-slug>-<subtask-index>`
+   for `per-subtask` (index from `output[]` order), `<parent-id>-<task-slug>` for
+   `one-to-one`. Initial planning task IDs similarly use the target role-pair's
+   `task-slug`, falling back to its name without the conventional `-pair` suffix.
+   The operation sequence is:
    (1) write transition key to `transitions_executed`, (2) create child tasks one by one.
    On crash recovery, the supervisor compares expected child IDs (derived from `output[]`
    length or cardinality) against existing children — only missing children are created.
@@ -543,7 +546,7 @@ sub-pipelines:
       - architecture-pair
     transitions:
       - name: arch-decompose
-        task-slug: architecture
+        task-slug: ar
         from: architecture-main-pair.approved
         to: architecture-pair.initial
         trigger: auto

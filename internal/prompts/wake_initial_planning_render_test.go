@@ -27,11 +27,11 @@ func TestWakeInitialPlanningExplicitRoutesRenderResolvedTargets(t *testing.T) {
 			entryPoint:     "general-objective",
 			simpleRolePair: "epic-planning-pair",
 			simpleTaskType: "epic-planning",
-			simpleIDPrefix: "epic-planning",
+			simpleIDPrefix: "ep",
 			simpleDisplay:  "Epic Planner",
 			fanOutRolePair: "epic-planning-main-pair",
 			fanOutTaskType: "epic-planning",
-			fanOutIDPrefix: "epic-planning-main",
+			fanOutIDPrefix: "epm",
 			fanOutDisplay:  "Epic Planner",
 		},
 		{
@@ -39,11 +39,11 @@ func TestWakeInitialPlanningExplicitRoutesRenderResolvedTargets(t *testing.T) {
 			entryPoint:     "functional-spec",
 			simpleRolePair: "architecture-pair",
 			simpleTaskType: "architecture",
-			simpleIDPrefix: "architecture",
+			simpleIDPrefix: "ar",
 			simpleDisplay:  "Architect",
 			fanOutRolePair: "architecture-main-pair",
 			fanOutTaskType: "architecture",
-			fanOutIDPrefix: "architecture-main",
+			fanOutIDPrefix: "arm",
 			fanOutDisplay:  "Architect",
 		},
 		{
@@ -51,11 +51,11 @@ func TestWakeInitialPlanningExplicitRoutesRenderResolvedTargets(t *testing.T) {
 			entryPoint:     "detailed-spec",
 			simpleRolePair: "architecture-pair",
 			simpleTaskType: "architecture",
-			simpleIDPrefix: "architecture",
+			simpleIDPrefix: "ar",
 			simpleDisplay:  "Architect",
 			fanOutRolePair: "architecture-main-pair",
 			fanOutTaskType: "architecture",
-			fanOutIDPrefix: "architecture-main",
+			fanOutIDPrefix: "arm",
 			fanOutDisplay:  "Architect",
 		},
 		{
@@ -63,11 +63,11 @@ func TestWakeInitialPlanningExplicitRoutesRenderResolvedTargets(t *testing.T) {
 			entryPoint:     "technical-spec",
 			simpleRolePair: "code-planning-pair",
 			simpleTaskType: "planning",
-			simpleIDPrefix: "code-planning",
+			simpleIDPrefix: "cp",
 			simpleDisplay:  "Code Planner",
 			fanOutRolePair: "code-planning-main-pair",
 			fanOutTaskType: "planning",
-			fanOutIDPrefix: "code-planning-main",
+			fanOutIDPrefix: "cpm",
 			fanOutDisplay:  "Code Planner",
 		},
 	}
@@ -121,10 +121,10 @@ func TestWakeInitialPlanningClassificationRendersResolvedRouteData(t *testing.T)
 	}
 
 	assertContainsAll(t, rendered, []string{
-		"- \"general-objective\": simple role_pair \"epic-planning-pair\", type \"epic-planning\", display \"Epic Planner\", id prefix \"epic-planning\"; fan-out role_pair \"epic-planning-main-pair\", type \"epic-planning\", display \"Epic Planner\", id prefix \"epic-planning-main\"",
-		"- \"functional-spec\": simple role_pair \"architecture-pair\", type \"architecture\", display \"Architect\", id prefix \"architecture\"; fan-out role_pair \"architecture-main-pair\", type \"architecture\", display \"Architect\", id prefix \"architecture-main\"",
-		"- \"detailed-spec\": simple role_pair \"architecture-pair\", type \"architecture\", display \"Architect\", id prefix \"architecture\"; fan-out role_pair \"architecture-main-pair\", type \"architecture\", display \"Architect\", id prefix \"architecture-main\"",
-		"- \"technical-spec\": simple role_pair \"code-planning-pair\", type \"planning\", display \"Code Planner\", id prefix \"code-planning\"; fan-out role_pair \"code-planning-main-pair\", type \"planning\", display \"Code Planner\", id prefix \"code-planning-main\"",
+		"- \"general-objective\": simple role_pair \"epic-planning-pair\", type \"epic-planning\", display \"Epic Planner\", id prefix \"ep\"; fan-out role_pair \"epic-planning-main-pair\", type \"epic-planning\", display \"Epic Planner\", id prefix \"epm\"",
+		"- \"functional-spec\": simple role_pair \"architecture-pair\", type \"architecture\", display \"Architect\", id prefix \"ar\"; fan-out role_pair \"architecture-main-pair\", type \"architecture\", display \"Architect\", id prefix \"arm\"",
+		"- \"detailed-spec\": simple role_pair \"architecture-pair\", type \"architecture\", display \"Architect\", id prefix \"ar\"; fan-out role_pair \"architecture-main-pair\", type \"architecture\", display \"Architect\", id prefix \"arm\"",
+		"- \"technical-spec\": simple role_pair \"code-planning-pair\", type \"planning\", display \"Code Planner\", id prefix \"cp\"; fan-out role_pair \"code-planning-main-pair\", type \"planning\", display \"Code Planner\", id prefix \"cpm\"",
 		"Choose the chosen entry-point's simple target for a simple goal.",
 		"Choose the chosen entry-point's fan-out target for a fan-out or uncertain goal when it is listed.",
 		"\"role_pair\": \"<chosen-simple-role-pair>\"",
@@ -148,7 +148,7 @@ func TestWakeInitialPlanningMissingMasterRendersSpecializedFallback(t *testing.T
 	assertContainsAll(t, rendered, []string{
 		"Entry-point \"functional-spec\" was specified. Dispatch simple goals to Architect.",
 		"SIMPLE GOAL TASK EXAMPLE",
-		"\"id\": \"architecture-1\"",
+		"\"id\": \"ar-1\"",
 		"\"type\": \"architecture\"",
 		"\"role_pair\": \"architecture-pair\"",
 		"No mapped master planning role-pair is configured for this entry-point.",
@@ -160,7 +160,7 @@ func TestWakeInitialPlanningMissingMasterRendersSpecializedFallback(t *testing.T
 	assertNotContainsAny(t, rendered, []string{
 		"architecture-main-pair",
 		"FAN-OUT GOAL TASK EXAMPLE",
-		"\"id\": \"architecture-2\"",
+		"\"id\": \"ar-2\"",
 	})
 }
 

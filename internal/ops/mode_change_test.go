@@ -378,7 +378,7 @@ func TestResume_PlanningCheckpointExecutesTransitionsMidSprint(t *testing.T) {
 		t.Fatalf("source transition not recorded: %+v", source)
 	}
 
-	childID := "plan-ready-coding-0"
+	childID := "plan-ready-code-0"
 	child := readState.FindTask(childID)
 	if child == nil {
 		t.Fatalf("child task %q not found", childID)
@@ -456,7 +456,7 @@ func TestResume_ManyToOneCheckpointExecutesTransitionsMidSprint(t *testing.T) {
 		t.Errorf("CheckpointTrigger = %q, want cleared", readState.Sprint.CheckpointTrigger)
 	}
 
-	childID := "epic-plan-1-architecture"
+	childID := "epic-plan-1-arm"
 	child := readState.FindTask(childID)
 	if child == nil {
 		t.Fatalf("child task %q not found", childID)
@@ -518,7 +518,7 @@ func TestResume_ManyToOneCheckpointExecutesTransitionsWhenAllPlannedTerminal(t *
 		t.Errorf("CheckpointTrigger = %q, want cleared", readState.Sprint.CheckpointTrigger)
 	}
 
-	childID := "epic-plan-1-architecture"
+	childID := "epic-plan-1-arm"
 	child := readState.FindTask(childID)
 	if child == nil {
 		t.Fatalf("child task %q not found", childID)

@@ -94,10 +94,20 @@ var validDecompositionOutputRefs = map[string]bool{
 type RolePairDef struct {
 	Doer                   string           `yaml:"doer"`
 	Reviewer               string           `yaml:"reviewer"`
+	TaskSlug               string           `yaml:"task-slug,omitempty"` // prefix used for initial task IDs (falls back to role-pair name)
 	DecompositionRoot      bool             `yaml:"decomposition-root,omitempty"`
 	DecompositionOutputRef string           `yaml:"decomposition-output-ref,omitempty"`
 	ReviewPolicy           *ReviewPolicyDef `yaml:"review-policy,omitempty"`
 	States                 RolePairStates   `yaml:"states"`
+}
+
+// TaskSlugOrName returns TaskSlug if set, otherwise the role-pair name without
+// its conventional "-pair" suffix.
+func (r RolePairDef) TaskSlugOrName(name string) string {
+	if r.TaskSlug != "" {
+		return r.TaskSlug
+	}
+	return strings.TrimSuffix(name, "-pair")
 }
 
 // RolePairStates holds the state names for a role-pair's lifecycle.
@@ -160,9 +170,9 @@ func LoadFrozen(projectRoot string) (*PipelineConfig, error) {
 	refCfg, refErr := LoadEmbeddedReference()
 	if refErr == nil {
 		MigrateOperations(cfg, refCfg)
-		// Task-slugs are NOT migrated: old workspaces keep transition names as
-		// task ID segments (TaskSlugOrName falls back to Name). New workspaces
-		// get task-slugs frozen at init time from the embedded config.
+		// Task-slugs are NOT migrated: old workspaces keep their existing role-pair
+		// prefixes and transition segments. New workspaces get task-slugs frozen at
+		// init time from the embedded config.
 	}
 
 	return cfg, nil
@@ -221,6 +231,9 @@ func validate(cfg *PipelineConfig) error {
 	}
 
 	for name, rp := range p.RolePairs {
+		if rp.TaskSlug != "" && !kebabCaseRe.MatchString(rp.TaskSlug) {
+			return fmt.Errorf("role-pair %q: task-slug %q must be lowercase kebab-case (e.g. %q)", name, rp.TaskSlug, "code-planning")
+		}
 		doer, ok := p.Roles[rp.Doer]
 		if !ok {
 			return fmt.Errorf("role-pair %q: doer %q not found in roles", name, rp.Doer)

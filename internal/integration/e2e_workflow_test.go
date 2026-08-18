@@ -1536,7 +1536,7 @@ func TestManyToOneTransitionLifecycle(t *testing.T) {
 
 	// Step 10: Assert deterministic child ID = <parent>-<task-slug>
 	t.Log("Step 10: Verify deterministic child ID")
-	expectedID := parentID + "-architecture"
+	expectedID := parentID + "-arm"
 	if grandchildID != expectedID {
 		t.Errorf("Expected grandchild ID %q, got %q", expectedID, grandchildID)
 	}
