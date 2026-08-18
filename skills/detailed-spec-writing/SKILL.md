@@ -1,6 +1,6 @@
 ---
 name: detailed-spec-writing
-description: Transform requirements into precise specifications for coding tasks
+description: Produce legacy PRD-format SMARC specifications. Use only when the user or assigned task explicitly names detailed-spec-writing; never infer activation from requests to write an objective, goal, requirements, specification, plan, or PRD.
 ---
 
 # Objective
@@ -11,8 +11,9 @@ Output: a git-tracked markdown document. One spec per task; one cohesive capabil
 
 # Trigger
 
-- Orchestrator creates a spec-writing task (§BRAND_NAME_TITLE§ mode)
-- User asks to spec a feature or requirement (Pairing mode)
+- The user explicitly invokes `/detailed-spec-writing` or names `detailed-spec-writing`.
+- An assigned task explicitly lists `detailed-spec-writing` among its required skills.
+- Never infer activation from the requested artifact type or generic specification-writing language.
 
 # Inputs
 
