@@ -149,6 +149,28 @@ func (ts TaskStatus) IsTerminal() bool {
 	return ts == TaskStatusMerged || ts == TaskStatusAbandoned || ts == TaskStatusSuperseded
 }
 
+type pipelineCleanStatusResolver interface {
+	CleanStatus(rolePair string) (TaskStatus, error)
+}
+
+// IsOperationallyTerminal reports whether a task has no remaining operational
+// work. Pipeline-declared clean states are terminal, while approved states that
+// merely feed another pipeline stage remain active.
+func IsOperationallyTerminal(task *Task, pr PipelineResolver) bool {
+	if task == nil {
+		return false
+	}
+	if task.Status.IsTerminal() {
+		return true
+	}
+	cleanResolver, ok := pr.(pipelineCleanStatusResolver)
+	if !ok || task.RolePair == "" {
+		return false
+	}
+	cleanStatus, err := cleanResolver.CleanStatus(task.RolePair)
+	return err == nil && task.Status == cleanStatus
+}
+
 // IsSprintTerminal checks if the task status is terminal for sprint completion purposes.
 // MERGED is the universal sprint-terminal state for all role-pairs.
 func (ts TaskStatus) IsSprintTerminal() bool {
@@ -265,15 +287,18 @@ type Task struct {
 	RescopeReason       *string                `yaml:"rescope_reason,omitempty"`
 	FailedBy            []string               `yaml:"failed_by,omitempty"`
 	IntegrationFailure  map[string]any         `yaml:"integration_failure,omitempty" json:"integration_failure,omitempty"`
-	Attempt             int                    `yaml:"attempt,omitempty"`
-	DependsOn           []string               `yaml:"depends_on,omitempty"`
-	IntegrationFix      bool                   `yaml:"integration_fix,omitempty"`
-	HandoffPending      bool                   `yaml:"handoff_pending,omitempty"`
-	HandoffEvents       []HandoffEvent         `yaml:"handoff_events,omitempty"`
-	MaxIterations       int                    `yaml:"max_iterations,omitempty"`
-	Created             time.Time              `yaml:"created"`
-	History             []TaskHistoryEntry     `yaml:"history"`
-	Extra               map[string]any         `yaml:",inline"`
+
+	IntegrationAnalysis *IntegrationAnalysisMetadata `yaml:"integration_analysis,omitempty" json:"integration_analysis,omitempty"`
+
+	Attempt        int                `yaml:"attempt,omitempty"`
+	DependsOn      []string           `yaml:"depends_on,omitempty"`
+	IntegrationFix bool               `yaml:"integration_fix,omitempty"`
+	HandoffPending bool               `yaml:"handoff_pending,omitempty"`
+	HandoffEvents  []HandoffEvent     `yaml:"handoff_events,omitempty"`
+	MaxIterations  int                `yaml:"max_iterations,omitempty"`
+	Created        time.Time          `yaml:"created"`
+	History        []TaskHistoryEntry `yaml:"history"`
+	Extra          map[string]any     `yaml:",inline"`
 }
 
 // EffectiveParentTasks returns the list of parent task IDs.

@@ -1,31 +1,54 @@
 package agent
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/ops"
+	"github.com/liza-mas/liza/internal/prompts"
 )
 
 // OrchestratorWakeTrigger represents what triggered the orchestrator to wake
 type OrchestratorWakeTrigger string
 
 const (
-	WakeTriggerInitialPlanning     OrchestratorWakeTrigger = "INITIAL_PLANNING"
-	WakeTriggerBlocked             OrchestratorWakeTrigger = "BLOCKED_TASKS"
-	WakeTriggerHypothesisExhausted OrchestratorWakeTrigger = "HYPOTHESIS_EXHAUSTED"
-	WakeTriggerImmediateDiscovery  OrchestratorWakeTrigger = "IMMEDIATE_DISCOVERY"
-	WakeTriggerPlanningComplete    OrchestratorWakeTrigger = "PLANNING_COMPLETE"
-	WakeTriggerManyToOneReady      OrchestratorWakeTrigger = "MANY_TO_ONE_READY"
-	WakeTriggerCodingComplete      OrchestratorWakeTrigger = "CODING_COMPLETE"
-	WakeTriggerSprintComplete      OrchestratorWakeTrigger = "SPRINT_COMPLETE"
-	WakeTriggerNone                OrchestratorWakeTrigger = "NONE"
+	WakeTriggerInitialPlanning        OrchestratorWakeTrigger = "INITIAL_PLANNING"
+	WakeTriggerBlocked                OrchestratorWakeTrigger = "BLOCKED_TASKS"
+	WakeTriggerHypothesisExhausted    OrchestratorWakeTrigger = "HYPOTHESIS_EXHAUSTED"
+	WakeTriggerImmediateDiscovery     OrchestratorWakeTrigger = "IMMEDIATE_DISCOVERY"
+	WakeTriggerPlanningComplete       OrchestratorWakeTrigger = "PLANNING_COMPLETE"
+	WakeTriggerManyToOneReady         OrchestratorWakeTrigger = "MANY_TO_ONE_READY"
+	WakeTriggerCodingComplete         OrchestratorWakeTrigger = "CODING_COMPLETE"
+	WakeTriggerSprintComplete         OrchestratorWakeTrigger = "SPRINT_COMPLETE"
+	WakeTriggerIntegrationWaiting     OrchestratorWakeTrigger = "INTEGRATION_WAITING"
+	WakeTriggerIntegrationBlocked     OrchestratorWakeTrigger = "INTEGRATION_BLOCKED"
+	WakeTriggerIntegrationExhausted   OrchestratorWakeTrigger = "INTEGRATION_EXHAUSTED"
+	WakeTriggerIntegrationUnavailable OrchestratorWakeTrigger = "INTEGRATION_UNAVAILABLE"
+	WakeTriggerNone                   OrchestratorWakeTrigger = "NONE"
 )
 
 // OrchestratorWakeResult contains the wake trigger and count
 type OrchestratorWakeResult struct {
-	Trigger OrchestratorWakeTrigger
-	Count   int
+	Trigger     OrchestratorWakeTrigger
+	Count       int
+	Integration prompts.EffectiveIntegrationCompletion
+}
+
+// ShouldWake reports whether the projected result needs orchestrator work.
+// Stable integration outcomes remain visible to diagnostics without causing a
+// restart loop.
+func (result OrchestratorWakeResult) ShouldWake() bool {
+	switch result.Trigger {
+	case WakeTriggerNone,
+		WakeTriggerIntegrationWaiting,
+		WakeTriggerIntegrationBlocked,
+		WakeTriggerIntegrationExhausted,
+		WakeTriggerIntegrationUnavailable:
+		return false
+	default:
+		return true
+	}
 }
 
 type orchestratorWakeTriggerSpec struct {
@@ -81,6 +104,28 @@ var orchestratorWakeTriggerSpecs = []orchestratorWakeTriggerSpec{
 // 6. Many-to-one transition ready
 // 7. Sprint complete (all planned tasks terminal)
 func DetectOrchestratorWakeTriggers(state *models.State, pipelineTerminals []models.TaskStatus, planningPairs map[string]bool, m2oTransitions []ops.ManyToOneTransitionInfo) OrchestratorWakeResult {
+	return detectOrchestratorWakeTriggers(state, pipelineTerminals, planningPairs, m2oTransitions, nil)
+}
+
+// DetectOrchestratorWakeTriggersForProject evaluates terminal integration
+// state through the authoritative progress decision and prompt projection.
+func DetectOrchestratorWakeTriggersForProject(projectRoot string, state *models.State, pipelineTerminals []models.TaskStatus, planningPairs map[string]bool, m2oTransitions []ops.ManyToOneTransitionInfo) OrchestratorWakeResult {
+	return detectOrchestratorWakeTriggers(state, pipelineTerminals, planningPairs, m2oTransitions, func() prompts.EffectiveIntegrationCompletion {
+		decision, evaluationErr := ops.EvaluateLiveIntegrationProgress(state, projectRoot)
+		return prompts.ProjectEffectiveIntegrationCompletion(decision, nil, evaluationErr)
+	})
+}
+
+// DetectOrchestratorWakeTriggersWithIntegrationProjection exposes the pure
+// adapter used by tests and read-only consumers that already hold an
+// authoritative projection.
+func DetectOrchestratorWakeTriggersWithIntegrationProjection(state *models.State, pipelineTerminals []models.TaskStatus, planningPairs map[string]bool, m2oTransitions []ops.ManyToOneTransitionInfo, projection prompts.EffectiveIntegrationCompletion) OrchestratorWakeResult {
+	return detectOrchestratorWakeTriggers(state, pipelineTerminals, planningPairs, m2oTransitions, func() prompts.EffectiveIntegrationCompletion {
+		return projection
+	})
+}
+
+func detectOrchestratorWakeTriggers(state *models.State, pipelineTerminals []models.TaskStatus, planningPairs map[string]bool, m2oTransitions []ops.ManyToOneTransitionInfo, integrationProjection func() prompts.EffectiveIntegrationCompletion) OrchestratorWakeResult {
 	for _, triggerSpec := range orchestratorWakeTriggerSpecs {
 		if count := triggerSpec.Count(state); count > 0 {
 			return OrchestratorWakeResult{
@@ -120,6 +165,9 @@ func DetectOrchestratorWakeTriggers(state *models.State, pipelineTerminals []mod
 			state.Sprint.Status == models.SprintStatusCompleted {
 			return OrchestratorWakeResult{Trigger: WakeTriggerNone}
 		}
+		if integrationProjection != nil && (state.Goal.BaseCommit != nil || state.Goal.Integration != nil) {
+			return projectIntegrationWakeResult(integrationProjection(), len(state.Sprint.Scope.Planned))
+		}
 		// Detect coding completion: all tasks terminal, coding happened (base_commit set),
 		// but no integration task exists yet.
 		if state.Goal.BaseCommit != nil && !hasIntegrationTask(state) {
@@ -135,6 +183,37 @@ func DetectOrchestratorWakeTriggers(state *models.State, pipelineTerminals []mod
 	}
 
 	return OrchestratorWakeResult{Trigger: WakeTriggerNone}
+}
+
+func projectIntegrationWakeResult(projection prompts.EffectiveIntegrationCompletion, plannedCount int) OrchestratorWakeResult {
+	switch OrchestratorWakeTrigger(projection.WakeTrigger) {
+	case WakeTriggerCodingComplete,
+		WakeTriggerSprintComplete,
+		WakeTriggerIntegrationWaiting,
+		WakeTriggerIntegrationBlocked,
+		WakeTriggerIntegrationExhausted,
+		WakeTriggerIntegrationUnavailable:
+	default:
+		projection = prompts.ProjectEffectiveIntegrationCompletion(
+			ops.IntegrationProgressDecision{},
+			nil,
+			fmt.Errorf("unknown integration wake projection %q", projection.WakeTrigger),
+		)
+	}
+	count := len(projection.RequestKeys)
+	if count == 0 {
+		count = len(projection.TaskIDs)
+	}
+	if projection.Status == "complete" {
+		count = plannedCount
+	} else if count == 0 {
+		count = 1
+	}
+	return OrchestratorWakeResult{
+		Trigger:     OrchestratorWakeTrigger(projection.WakeTrigger),
+		Count:       count,
+		Integration: projection,
+	}
 }
 
 // countActionableBlockedTasks counts BLOCKED tasks that the orchestrator should

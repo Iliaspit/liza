@@ -55,6 +55,11 @@ var mergeCASRetryTestHook func(attempt int, integrationRef, preMergeHEAD string)
 // Production code leaves this nil.
 var artifactGuardPostUpdateTestHook func() error
 
+// Test seams restore their previous values with t.Cleanup. Production keeps
+// the hook nil and uses the shared transition validator directly.
+var integrationMutationReceiptPersistTestHook func(models.IntegrationMutationReceipt)
+var validateIntegrationLifecycleTransition = statevalidate.ValidateIntegrationLifecycleTransition
+
 // Integration failure reason constants.
 const (
 	IntegrationReasonHEADMismatch           = "worktree HEAD mismatch"
@@ -268,8 +273,50 @@ func integrationFailureRecoveryHint(reason string) string {
 	}
 }
 
-func rollbackMergedCommit(projectRoot string, gitWrapper *git.Git, integrationRef, preMergeHEAD, mergeCommit, restoreRef, taskID string) error {
-	return withIntegrationMutationLock(projectRoot, "rollback "+taskID, func() error {
+type integrationRefMutation struct {
+	taskID       string
+	beforeCommit string
+	afterCommit  string
+}
+
+func (mutation *integrationRefMutation) receipt() models.IntegrationMutationReceipt {
+	return models.IntegrationMutationReceipt{
+		TaskID:       mutation.taskID,
+		BeforeCommit: mutation.beforeCommit,
+		AfterCommit:  mutation.afterCommit,
+	}
+}
+
+func persistIntegrationMutationReceipt(bb *db.Blackboard, mutation *integrationRefMutation) error {
+	if mutation == nil || mutation.beforeCommit == mutation.afterCommit {
+		return nil
+	}
+	receipt := mutation.receipt()
+	if integrationMutationReceiptPersistTestHook != nil {
+		integrationMutationReceiptPersistTestHook(receipt)
+	}
+	return bb.Modify(func(state *models.State) error {
+		previous := *state
+		previous.Goal = state.Goal
+		if lifecycle := state.Goal.Integration; lifecycle != nil {
+			previousLifecycle := *lifecycle
+			previousLifecycle.MutationReceipts = slices.Clone(lifecycle.MutationReceipts)
+			previous.Goal.Integration = &previousLifecycle
+		} else {
+			state.Goal.Integration = &models.IntegrationLifecycle{}
+		}
+
+		state.Goal.Integration.MutationReceipts = append(state.Goal.Integration.MutationReceipts, receipt)
+		if err := invalidateGoalCompleteStopForMutation(state, receipt); err != nil {
+			return err
+		}
+		return validateIntegrationLifecycleTransition(&previous, state)
+	})
+}
+
+func rollbackMergedCommit(projectRoot string, gitWrapper *git.Git, integrationRef, preMergeHEAD, mergeCommit, restoreRef, taskID string) (*integrationRefMutation, error) {
+	var mutation *integrationRefMutation
+	err := withIntegrationMutationLock(projectRoot, "rollback "+taskID, func() error {
 		if err := gitWrapper.UpdateRef(integrationRef, preMergeHEAD, mergeCommit); err != nil {
 			var casErr *git.RefConflictError
 			if errors.As(err, &casErr) {
@@ -278,6 +325,7 @@ func rollbackMergedCommit(projectRoot string, gitWrapper *git.Git, integrationRe
 			}
 			return err
 		}
+		mutation = &integrationRefMutation{taskID: taskID, beforeCommit: mergeCommit, afterCommit: preMergeHEAD}
 
 		// Ref rolled back — sync working tree to match pre-merge state. This
 		// reverse sync undoes the forward SyncMergedFiles step.
@@ -290,6 +338,21 @@ func rollbackMergedCommit(projectRoot string, gitWrapper *git.Git, integrationRe
 			}
 		}
 		return nil
+	})
+	return mutation, err
+}
+
+func rollbackMergedCommitAndPersist(bb *db.Blackboard, projectRoot string, gitWrapper *git.Git, integrationRef, preMergeHEAD, mergeCommit, restoreRef, taskID string) error {
+	return withEffectiveIntegrationCompletionLinearization(projectRoot, "rollback "+taskID, func() error {
+		mutation, rollbackErr := rollbackMergedCommit(projectRoot, gitWrapper, integrationRef, preMergeHEAD, mergeCommit, restoreRef, taskID)
+		if receiptErr := persistIntegrationMutationReceipt(bb, mutation); receiptErr != nil {
+			receiptErr = fmt.Errorf("failed to persist rollback integration mutation receipt: %w", receiptErr)
+			if rollbackErr != nil {
+				return errors.Join(rollbackErr, receiptErr)
+			}
+			return receiptErr
+		}
+		return rollbackErr
 	})
 }
 
@@ -566,16 +629,43 @@ func MergeWorktree(projectRoot, taskID, agentID string, mergeExtra ...map[string
 
 	artifactGuardHook := buildArtifactGuardHook(bb, projectRoot, gitWrapper, taskID)
 	var outcome *casMergeOutcome
-	err = withIntegrationMutationLock(projectRoot, "forward "+taskID, func() error {
-		var mergeErr error
-		outcome, mergeErr = performCASMerge(gitWrapper, integrationRef, expectedCommit, taskID, artifactGuardHook)
-		if mergeErr != nil || outcome.conflict {
-			return mergeErr
+	var forwardMutation *integrationRefMutation
+	err = withEffectiveIntegrationCompletionLinearization(projectRoot, "forward "+taskID, func() error {
+		mutationErr := withIntegrationMutationLock(projectRoot, "forward "+taskID, func() error {
+			var mergeErr error
+			outcome, mergeErr = performCASMerge(gitWrapper, integrationRef, expectedCommit, taskID, artifactGuardHook)
+			if mergeErr != nil || outcome.conflict {
+				return mergeErr
+			}
+			if outcome.preMergeHEAD != outcome.mergeCommit {
+				forwardMutation = &integrationRefMutation{
+					taskID:       taskID,
+					beforeCommit: outcome.preMergeHEAD,
+					afterCommit:  outcome.mergeCommit,
+				}
+			}
+			if syncErr := gitWrapper.SyncMergedFiles(outcome.preMergeHEAD, outcome.mergeCommit); syncErr != nil {
+				return fmt.Errorf("failed to sync working tree after merge: %w", syncErr)
+			}
+			return nil
+		})
+		if receiptErr := persistIntegrationMutationReceipt(bb, forwardMutation); receiptErr != nil {
+			receiptErr = fmt.Errorf("failed to persist integration mutation receipt: %w", receiptErr)
+			rollbackMutation, rollbackErr := rollbackMergedCommit(
+				projectRoot,
+				gitWrapper,
+				integrationRef,
+				outcome.preMergeHEAD,
+				outcome.mergeCommit,
+				"HEAD",
+				taskID,
+			)
+			if rollbackErr == nil && rollbackMutation == nil {
+				rollbackErr = fmt.Errorf("failed to roll back integration ref after receipt persistence failure: ref changed from %s", shortSHA(outcome.mergeCommit))
+			}
+			return errors.Join(mutationErr, receiptErr, rollbackErr)
 		}
-		if syncErr := gitWrapper.SyncMergedFiles(outcome.preMergeHEAD, outcome.mergeCommit); syncErr != nil {
-			return fmt.Errorf("failed to sync working tree after merge: %w", syncErr)
-		}
-		return nil
+		return mutationErr
 	})
 	if err != nil {
 		var artifactErr *candidateArtifactGuardError
@@ -622,7 +712,7 @@ func MergeWorktree(projectRoot, taskID, agentID string, mergeExtra ...map[string
 		return nil, fmt.Errorf("failed to read state for post-merge artifact validation: %w", err)
 	}
 	if err := statevalidate.ValidateMergeArtifactRefs(currentState, projectRoot, taskID); err != nil {
-		rollbackErr := rollbackMergedCommit(projectRoot, gitWrapper, integrationRef, preMergeHEAD, mergeCommit, rollbackRestoreRef, taskID)
+		rollbackErr := rollbackMergedCommitAndPersist(bb, projectRoot, gitWrapper, integrationRef, preMergeHEAD, mergeCommit, rollbackRestoreRef, taskID)
 		diagnostic := integrationFailureDiagnosticWithDetail(IntegrationReasonStateInvalid, err.Error(), mergeCommit, "", rollbackErr)
 		if updateErr := markIntegrationFailedWithDiagnostic(bb, taskID, agentID, IntegrationReasonStateInvalid, mergeCommit, pb, diagnostic); updateErr != nil {
 			return nil, fmt.Errorf("failed to update state to INTEGRATION_FAILED: %w", updateErr)
@@ -661,7 +751,7 @@ func MergeWorktree(projectRoot, taskID, agentID string, mergeExtra ...map[string
 
 			// CAS rollback: only rewind if ref still points to our merge commit.
 			// If someone else merged on top, rewinding would drop their work.
-			rollbackErr := rollbackMergedCommit(projectRoot, gitWrapper, integrationRef, preMergeHEAD, mergeCommit, rollbackRestoreRef, taskID)
+			rollbackErr := rollbackMergedCommitAndPersist(bb, projectRoot, gitWrapper, integrationRef, preMergeHEAD, mergeCommit, rollbackRestoreRef, taskID)
 
 			diagnostic := integrationFailureDiagnostic(IntegrationReasonTestsFailed, mergeCommit, testOutput, rollbackErr)
 			if updateErr := markIntegrationFailedWithDiagnostic(bb, taskID, agentID, IntegrationReasonTestsFailed, mergeCommit, pb, diagnostic); updateErr != nil {

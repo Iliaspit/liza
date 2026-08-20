@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -16,6 +17,7 @@ import (
 	lizaerrors "github.com/liza-mas/liza/internal/errors"
 	"github.com/liza-mas/liza/internal/git"
 	"github.com/liza-mas/liza/internal/models"
+	"github.com/liza-mas/liza/internal/pipeline"
 	"github.com/liza-mas/liza/internal/statevalidate"
 	"github.com/liza-mas/liza/internal/testhelpers"
 )
@@ -253,6 +255,413 @@ func setupMergeTestRepo(t *testing.T, taskID, agentID string) (string, string) {
 	testhelpers.WriteInitialState(t, stateFile, initialState)
 
 	return tmpDir, stateFile
+}
+
+type integrationMutationScenario struct {
+	projectRoot string
+	stateFile   string
+	taskID      string
+	agentID     string
+	before      string
+	after       string
+}
+
+func setupIntegrationMutationScenario(t *testing.T) integrationMutationScenario {
+	t.Helper()
+	const taskID = "integration-mutation"
+	const agentID = "integration-analyst-1"
+	projectRoot, stateFile := setupMergeTestRepo(t, taskID, agentID)
+	state := readStateForTest(t, stateFile)
+	task := state.FindTask(taskID)
+	if task == nil || task.ReviewCommit == nil {
+		t.Fatal("merge task or review commit missing")
+	}
+
+	before := testhelpers.MustGit(t, projectRoot, "rev-parse", "refs/heads/integration")
+	after := *task.ReviewCommit
+	task.RolePair = "integration-pair"
+	task.Status = models.TaskStatus("INTEGRATION_ANALYSIS_APPROVED")
+	task.IntegrationAnalysis = &models.IntegrationAnalysisMetadata{
+		Key:          "global:1",
+		Phase:        models.IntegrationAnalysisPhaseGlobal,
+		Generation:   1,
+		SourceCommit: before,
+	}
+
+	progressState := readyGlobalProgressState(before)
+	for i := range progressState.Tasks {
+		for j := range progressState.Tasks[i].Output {
+			progressState.Tasks[i].Output[j].SpecRef = "README.md"
+		}
+	}
+	state.Goal.Integration = progressState.Goal.Integration
+	state.Tasks = append(progressState.Tasks, *task)
+	state.Goal.Integration.GlobalGenerations = []models.IntegrationGlobalGeneration{{
+		Generation:     1,
+		AnalysisTaskID: taskID,
+		AnalysisKey:    "global:1",
+		Verdict:        models.IntegrationAnalysisVerdictClean,
+		SourceCommit:   before,
+		ReportCommit:   after,
+	}}
+	state.Goal.Integration.MutationReceipts = []models.IntegrationMutationReceipt{{
+		TaskID:       "earlier-mutation",
+		BeforeCommit: "earlier-before",
+		AfterCommit:  "earlier-after",
+	}}
+	state.Goal.Integration.Closure = &models.IntegrationClosure{
+		Status:       models.IntegrationClosureStatusClean,
+		Generation:   1,
+		AnalysisKey:  "global:1",
+		SourceCommit: before,
+	}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	return integrationMutationScenario{
+		projectRoot: projectRoot,
+		stateFile:   stateFile,
+		taskID:      taskID,
+		agentID:     agentID,
+		before:      before,
+		after:       after,
+	}
+}
+
+func prepareUnfinalizedIntegrationScenario(t *testing.T, scenario integrationMutationScenario) {
+	t.Helper()
+	bb := db.For(scenario.stateFile)
+	if err := bb.Modify(func(state *models.State) error {
+		state.Goal.Integration.GlobalGenerations = nil
+		state.Goal.Integration.Closure = nil
+		return nil
+	}); err != nil {
+		t.Fatalf("prepare unfinalized integration scenario: %v", err)
+	}
+}
+
+func persistVerifiedCleanProjection(t *testing.T, scenario integrationMutationScenario, verification cleanIntegrationSourceVerification) {
+	t.Helper()
+	if !verification.Effective {
+		return
+	}
+	bb := db.For(scenario.stateFile)
+	if err := bb.Modify(func(state *models.State) error {
+		state.Goal.Integration.GlobalGenerations = append(state.Goal.Integration.GlobalGenerations, models.IntegrationGlobalGeneration{
+			Generation:     1,
+			AnalysisTaskID: scenario.taskID,
+			AnalysisKey:    "global:1",
+			Verdict:        models.IntegrationAnalysisVerdictClean,
+			SourceCommit:   verification.SourceCommit,
+			ReportCommit:   scenario.after,
+		})
+		state.Goal.Integration.Closure = &models.IntegrationClosure{
+			Status:       models.IntegrationClosureStatusClean,
+			Generation:   1,
+			AnalysisKey:  "global:1",
+			SourceCommit: verification.SourceCommit,
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("persist verified clean projection: %v", err)
+	}
+}
+
+func testIntegrationMutationReceiptPersistence(t *testing.T) {
+	scenario := setupIntegrationMutationScenario(t)
+	beforeState := readStateForTest(t, scenario.stateFile)
+
+	if _, err := MergeWorktree(scenario.projectRoot, scenario.taskID, scenario.agentID); err != nil {
+		t.Fatalf("MergeWorktree() error = %v", err)
+	}
+	afterState := readStateForTest(t, scenario.stateFile)
+	beforeLifecycle := beforeState.Goal.Integration
+	afterLifecycle := afterState.Goal.Integration
+	if beforeLifecycle == nil || afterLifecycle == nil {
+		t.Fatal("integration lifecycle missing")
+	}
+	if !reflect.DeepEqual(afterLifecycle.Coverage, beforeLifecycle.Coverage) {
+		t.Fatal("coverage evidence changed while appending mutation receipt")
+	}
+	if !reflect.DeepEqual(afterLifecycle.GlobalGenerations, beforeLifecycle.GlobalGenerations) {
+		t.Fatal("global generation evidence changed while appending mutation receipt")
+	}
+	if !reflect.DeepEqual(afterLifecycle.Closure, beforeLifecycle.Closure) {
+		t.Fatal("clean closure changed while appending mutation receipt")
+	}
+	if len(afterLifecycle.MutationReceipts) != len(beforeLifecycle.MutationReceipts)+1 ||
+		!reflect.DeepEqual(afterLifecycle.MutationReceipts[:len(beforeLifecycle.MutationReceipts)], beforeLifecycle.MutationReceipts) {
+		t.Fatalf("mutation receipts = %#v, want prior receipts as unchanged prefix plus one", afterLifecycle.MutationReceipts)
+	}
+	assertMutationReceipt(t, afterLifecycle.MutationReceipts[len(afterLifecycle.MutationReceipts)-1], scenario.taskID, scenario.before, scenario.after)
+}
+
+func testIntegrationMutationValidatorRejection(t *testing.T) {
+	scenario := setupIntegrationMutationScenario(t)
+	state := readStateForTest(t, scenario.stateFile)
+	closure := state.Goal.Integration.Closure
+	if closure == nil {
+		t.Fatal("clean integration closure missing")
+	}
+	stopToken, err := encodeGoalCompleteStopToken(goalCompleteStopToken{
+		AnalysisKey:  closure.AnalysisKey,
+		Generation:   closure.Generation,
+		SourceCommit: closure.SourceCommit,
+		OperationID:  "AAAAAAAAAAAAAAAAAAAAAA",
+	})
+	if err != nil {
+		t.Fatalf("encode goal-complete stop token: %v", err)
+	}
+	stoppedAt := time.Unix(1_700_000_000, 0).UTC()
+	if err := db.For(scenario.stateFile).Modify(func(state *models.State) error {
+		state.Config.Mode = models.SystemModeStopped
+		state.Config.ModeChangedAt = &stoppedAt
+		state.Config.ModeChangedBy = &stopToken
+		return nil
+	}); err != nil {
+		t.Fatalf("install goal-complete stop: %v", err)
+	}
+	before := readStateForTest(t, scenario.stateFile)
+	previousValidator := validateIntegrationLifecycleTransition
+	validatorCalled := false
+	validateIntegrationLifecycleTransition = func(previous, candidate *models.State) error {
+		validatorCalled = true
+		return errors.New("forced lifecycle transition rejection")
+	}
+	t.Cleanup(func() { validateIntegrationLifecycleTransition = previousValidator })
+
+	_, err = MergeWorktree(scenario.projectRoot, scenario.taskID, scenario.agentID)
+	if err == nil || !strings.Contains(err.Error(), "forced lifecycle transition rejection") {
+		t.Fatalf("MergeWorktree() error = %v, want validator rejection", err)
+	}
+	if !validatorCalled {
+		t.Fatal("public MergeWorktree did not call the lifecycle transition validator")
+	}
+	assertIntegrationHead(t, scenario.projectRoot, scenario.before)
+	state = readStateForTest(t, scenario.stateFile)
+	if !reflect.DeepEqual(state.Goal.Integration, before.Goal.Integration) {
+		t.Fatalf("integration lifecycle changed after validator rejection:\n got: %#v\nwant: %#v", state.Goal.Integration, before.Goal.Integration)
+	}
+	if got := len(state.Goal.Integration.MutationReceipts); got != 1 {
+		t.Fatalf("mutation receipt count = %d, want prior receipt only", got)
+	}
+	if state.Config.Mode != models.SystemModeStopped || state.Config.ModeChangedAt == nil || !state.Config.ModeChangedAt.Equal(stoppedAt) ||
+		state.Config.ModeChangedBy == nil || *state.Config.ModeChangedBy != stopToken {
+		t.Fatalf("goal-complete stop changed after validator rejection: mode=%s changed_at=%v changed_by=%v", state.Config.Mode, state.Config.ModeChangedAt, state.Config.ModeChangedBy)
+	}
+	if task := state.FindTask(scenario.taskID); task == nil || task.Status != models.TaskStatus("INTEGRATION_ANALYSIS_APPROVED") {
+		t.Fatalf("task persisted after validator rejection: %#v", task)
+	}
+}
+
+func testIntegrationMutationReceiptAfterLockRelease(t *testing.T) {
+	scenario := setupIntegrationMutationScenario(t)
+	previousHook := integrationMutationReceiptPersistTestHook
+	lockAcquired := false
+	integrationMutationReceiptPersistTestHook = func(receipt models.IntegrationMutationReceipt) {
+		err := withIntegrationMutationLockTimeout(scenario.projectRoot, "receipt-test", 250*time.Millisecond, func() error {
+			lockAcquired = true
+			return nil
+		})
+		if err != nil {
+			t.Errorf("receipt persistence still held integration mutation lock: %v", err)
+		}
+	}
+	t.Cleanup(func() { integrationMutationReceiptPersistTestHook = previousHook })
+
+	if _, err := MergeWorktree(scenario.projectRoot, scenario.taskID, scenario.agentID); err != nil {
+		t.Fatalf("MergeWorktree() error = %v", err)
+	}
+	if !lockAcquired {
+		t.Fatal("receipt persistence hook did not acquire the released integration mutation lock")
+	}
+}
+
+func testIntegrationMutationRollbackReceipt(t *testing.T) {
+	scenario := setupIntegrationMutationScenario(t)
+	scriptsDir := filepath.Join(scenario.projectRoot, "scripts")
+	if err := os.MkdirAll(scriptsDir, 0755); err != nil {
+		t.Fatalf("create scripts directory: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(scriptsDir, "integration-test.sh"), []byte("#!/bin/sh\nexit 1\n"), 0755); err != nil {
+		t.Fatalf("write integration test: %v", err)
+	}
+
+	_, err := MergeWorktree(scenario.projectRoot, scenario.taskID, scenario.agentID)
+	var integrationErr *IntegrationFailedError
+	if !errors.As(err, &integrationErr) || integrationErr.RollbackError != nil {
+		t.Fatalf("MergeWorktree() error = %T %v, want integration failure with successful rollback", err, err)
+	}
+	state := readStateForTest(t, scenario.stateFile)
+	receipts := state.Goal.Integration.MutationReceipts
+	if len(receipts) != 3 {
+		t.Fatalf("mutation receipts = %#v, want prior, forward, rollback", receipts)
+	}
+	assertMutationReceipt(t, receipts[1], scenario.taskID, scenario.before, scenario.after)
+	assertMutationReceipt(t, receipts[2], scenario.taskID, scenario.after, scenario.before)
+	assertIntegrationHead(t, scenario.projectRoot, scenario.before)
+}
+
+func testIntegrationMutationNoOpReceipt(t *testing.T) {
+	scenario := setupIntegrationMutationScenario(t)
+	testhelpers.MustGit(t, scenario.projectRoot, "update-ref", "refs/heads/integration", scenario.after, scenario.before)
+
+	if _, err := MergeWorktree(scenario.projectRoot, scenario.taskID, scenario.agentID); err != nil {
+		t.Fatalf("MergeWorktree() error = %v", err)
+	}
+	state := readStateForTest(t, scenario.stateFile)
+	if got := len(state.Goal.Integration.MutationReceipts); got != 1 {
+		t.Fatalf("no-op mutation receipt count = %d, want prior receipt only", got)
+	}
+}
+
+func testIntegrationMutationBeforeVerification(t *testing.T) {
+	scenario := setupIntegrationMutationScenario(t)
+	prepareUnfinalizedIntegrationScenario(t, scenario)
+	linearized := make(chan struct{})
+	releasePersistence := make(chan struct{})
+	released := false
+	release := func() {
+		if !released {
+			close(releasePersistence)
+			released = true
+		}
+	}
+	t.Cleanup(release)
+	previousHook := integrationMutationReceiptPersistTestHook
+	integrationMutationReceiptPersistTestHook = func(receipt models.IntegrationMutationReceipt) {
+		close(linearized)
+		<-releasePersistence
+	}
+	t.Cleanup(func() { integrationMutationReceiptPersistTestHook = previousHook })
+
+	mergeDone := make(chan error, 1)
+	go func() {
+		_, err := MergeWorktree(scenario.projectRoot, scenario.taskID, scenario.agentID)
+		mergeDone <- err
+	}()
+	select {
+	case <-linearized:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for integration ref mutation")
+	}
+
+	verification, err := verifyCleanIntegrationSource(scenario.projectRoot, scenario.before)
+	if err != nil {
+		t.Fatalf("verifyCleanIntegrationSource() error = %v", err)
+	}
+	if verification.Effective || verification.SourceCommit != scenario.before || verification.IntegrationHEAD != scenario.after {
+		t.Fatalf("verification after mutation = %#v, want stale source ineffective against new HEAD", verification)
+	}
+	persistVerifiedCleanProjection(t, scenario, verification)
+	state := readStateForTest(t, scenario.stateFile)
+	if len(state.Goal.Integration.GlobalGenerations) != 0 || state.Goal.Integration.Closure != nil {
+		t.Fatalf("mutation-before-finalization persisted stale clean projection: %#v", state.Goal.Integration)
+	}
+	release()
+	select {
+	case err := <-mergeDone:
+		if err != nil {
+			t.Fatalf("MergeWorktree() error = %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for merge after releasing receipt persistence")
+	}
+}
+
+func testIntegrationMutationAfterVerification(t *testing.T) {
+	t.Run("projection before mutation", func(t *testing.T) {
+		scenario := setupIntegrationMutationScenario(t)
+		prepareUnfinalizedIntegrationScenario(t, scenario)
+		verification, err := verifyCleanIntegrationSource(scenario.projectRoot, scenario.before)
+		if err != nil {
+			t.Fatalf("verifyCleanIntegrationSource() error = %v", err)
+		}
+		if !verification.Effective || verification.SourceCommit != scenario.before || verification.IntegrationHEAD != scenario.before {
+			t.Fatalf("verification before mutation = %#v, want prospective clean source effective", verification)
+		}
+		persistVerifiedCleanProjection(t, scenario, verification)
+
+		if _, err := MergeWorktree(scenario.projectRoot, scenario.taskID, scenario.agentID); err != nil {
+			t.Fatalf("MergeWorktree() error = %v", err)
+		}
+		assertStaleProjectionIneffective(t, scenario)
+	})
+
+	t.Run("mutation between verification and projection", func(t *testing.T) {
+		scenario := setupIntegrationMutationScenario(t)
+		prepareUnfinalizedIntegrationScenario(t, scenario)
+		verification, err := verifyCleanIntegrationSource(scenario.projectRoot, scenario.before)
+		if err != nil {
+			t.Fatalf("verifyCleanIntegrationSource() error = %v", err)
+		}
+		if !verification.Effective || verification.SourceCommit != scenario.before || verification.IntegrationHEAD != scenario.before {
+			t.Fatalf("verification before mutation = %#v, want prospective clean source effective", verification)
+		}
+
+		linearized := make(chan struct{})
+		releasePersistence := make(chan struct{})
+		released := false
+		release := func() {
+			if !released {
+				close(releasePersistence)
+				released = true
+			}
+		}
+		t.Cleanup(release)
+		previousHook := integrationMutationReceiptPersistTestHook
+		integrationMutationReceiptPersistTestHook = func(receipt models.IntegrationMutationReceipt) {
+			close(linearized)
+			<-releasePersistence
+		}
+		t.Cleanup(func() { integrationMutationReceiptPersistTestHook = previousHook })
+		mergeDone := make(chan error, 1)
+		go func() {
+			_, err := MergeWorktree(scenario.projectRoot, scenario.taskID, scenario.agentID)
+			mergeDone <- err
+		}()
+		select {
+		case <-linearized:
+		case <-time.After(2 * time.Second):
+			release()
+			t.Fatal("timed out waiting for integration ref mutation")
+		}
+
+		persistVerifiedCleanProjection(t, scenario, verification)
+		release()
+		select {
+		case err := <-mergeDone:
+			if err != nil {
+				t.Fatalf("MergeWorktree() error = %v", err)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("timed out waiting for merge after clean projection")
+		}
+		assertStaleProjectionIneffective(t, scenario)
+	})
+}
+
+func assertStaleProjectionIneffective(t *testing.T, scenario integrationMutationScenario) {
+	t.Helper()
+	state := readStateForTest(t, scenario.stateFile)
+	generations := state.Goal.Integration.GlobalGenerations
+	if len(generations) != 1 || generations[0].Verdict != models.IntegrationAnalysisVerdictClean || generations[0].SourceCommit != scenario.before {
+		t.Fatalf("clean global projection = %#v, want one clean generation for source %s", generations, scenario.before)
+	}
+	if state.Goal.Integration.Closure == nil || state.Goal.Integration.Closure.SourceCommit != scenario.before {
+		t.Fatalf("mutation rewrote clean closure: %#v", state.Goal.Integration.Closure)
+	}
+	decision := evaluateProgress(t, state, pipeline.SlicedIntegrationCapability{Available: true}, scenario.after)
+	if decision.IntegrationComplete {
+		t.Fatalf("stale clean evidence remained effective after mutation: %#v", decision)
+	}
+}
+
+func assertMutationReceipt(t *testing.T, receipt models.IntegrationMutationReceipt, taskID, before, after string) {
+	t.Helper()
+	want := models.IntegrationMutationReceipt{TaskID: taskID, BeforeCommit: before, AfterCommit: after}
+	if !reflect.DeepEqual(receipt, want) {
+		t.Fatalf("mutation receipt = %#v, want %#v", receipt, want)
+	}
 }
 
 func TestPerformCASMergePreUpdateHookSkipsAlreadyMerged(t *testing.T) {

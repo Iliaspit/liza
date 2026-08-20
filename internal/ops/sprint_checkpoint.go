@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/liza-mas/liza/internal/brand"
@@ -67,18 +68,56 @@ func SprintCheckpoint(projectRoot string, trigger string) (*SprintCheckpointResu
 	}
 
 	timestamp := time.Now()
-	report := generateSprintSummary(state, timestamp)
+	checkpoint := func(completionAuthorization *effectiveIntegrationCompletionAuthorization) error {
+		if completionAuthorization != nil {
+			state, err = blackboard.Read()
+			if err != nil {
+				return fmt.Errorf("failed to re-read state after integration completion check: %w", err)
+			}
+			if err := completionAuthorization.validateState(state, true); err != nil {
+				return err
+			}
+		}
 
-	if err := os.WriteFile(reportPath, []byte(report), 0644); err != nil {
-		return nil, fmt.Errorf("failed to write sprint summary: %w", err)
+		report := generateSprintSummary(state, timestamp)
+		stagedReport, err := os.CreateTemp(filepath.Dir(reportPath), ".sprint-summary-*.tmp")
+		if err != nil {
+			return fmt.Errorf("failed to stage sprint summary: %w", err)
+		}
+		stagedReportPath := stagedReport.Name()
+		defer os.Remove(stagedReportPath)
+		if _, err := stagedReport.WriteString(report); err != nil {
+			_ = stagedReport.Close()
+			return fmt.Errorf("failed to stage sprint summary: %w", err)
+		}
+		if err := stagedReport.Chmod(0644); err != nil {
+			_ = stagedReport.Close()
+			return fmt.Errorf("failed to stage sprint summary: %w", err)
+		}
+		if err := stagedReport.Close(); err != nil {
+			return fmt.Errorf("failed to stage sprint summary: %w", err)
+		}
+
+		return blackboard.Modify(func(s *models.State) error {
+			if completionAuthorization != nil {
+				if err := completionAuthorization.validateState(s, true); err != nil {
+					return err
+				}
+			}
+			if err := os.Rename(stagedReportPath, reportPath); err != nil {
+				return fmt.Errorf("failed to write sprint summary: %w", err)
+			}
+			s.Sprint.Status = models.SprintStatusCheckpoint
+			s.Sprint.Timeline.CheckpointAt = &timestamp
+			s.Sprint.CheckpointTrigger = trigger
+			return nil
+		})
 	}
-
-	err = blackboard.Modify(func(s *models.State) error {
-		s.Sprint.Status = models.SprintStatusCheckpoint
-		s.Sprint.Timeline.CheckpointAt = &timestamp
-		s.Sprint.CheckpointTrigger = trigger
-		return nil
-	})
+	if trigger == models.CheckpointTriggerSprintComplete {
+		err = withEffectiveIntegrationCompletionAuthorization(projectRoot, "sprint checkpoint", true, checkpoint)
+	} else {
+		err = checkpoint(nil)
+	}
 
 	if err != nil {
 		return nil, fmt.Errorf("failed to update sprint status: %w", err)

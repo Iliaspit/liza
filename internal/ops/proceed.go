@@ -171,14 +171,11 @@ func Proceed(projectRoot, taskID, transitionName string) (*ProceedResult, error)
 
 	statePath := paths.New(projectRoot).StatePath()
 	blackboard := db.For(statePath)
-
 	now := time.Now().UTC()
-	result := &ProceedResult{
-		SourceTaskID:   taskID,
-		TransitionName: transitionName,
+	newResult := func() *ProceedResult {
+		return &ProceedResult{SourceTaskID: taskID, TransitionName: transitionName}
 	}
-
-	err = blackboard.Modify(func(s *models.State) error {
+	execute := func(s *models.State, result *ProceedResult) error {
 		// Validate sprint is COMPLETED
 		if s.Sprint.Status != models.SprintStatusCompleted {
 			return fmt.Errorf("sprint must be COMPLETED before proceeding (current: %s)", s.Sprint.Status)
@@ -204,6 +201,28 @@ func Proceed(projectRoot, taskID, transitionName string) (*ProceedResult, error)
 		s.Sprint.Scope.Planned = append(s.Sprint.Scope.Planned, result.ChildTaskIDs...)
 
 		return nil
+	}
+
+	preflightState, err := blackboard.Read()
+	if err != nil {
+		return nil, fmt.Errorf("proceed failed: read state preflight: %w", err)
+	}
+	// Exercise the exact transition path against the read snapshot so invalid
+	// requests retain their native errors before integration reconciliation. The
+	// in-memory mutations are discarded; the transaction below rechecks them.
+	if err := execute(preflightState, newResult()); err != nil {
+		return nil, fmt.Errorf("proceed failed: %w", err)
+	}
+
+	result := newResult()
+
+	err = withEffectiveIntegrationCompletionAuthorization(projectRoot, "proceed", false, func(completionAuthorization *effectiveIntegrationCompletionAuthorization) error {
+		return blackboard.Modify(func(s *models.State) error {
+			if err := completionAuthorization.validateState(s, false); err != nil {
+				return err
+			}
+			return execute(s, result)
+		})
 	})
 
 	if err != nil {
