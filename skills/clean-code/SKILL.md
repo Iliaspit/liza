@@ -12,7 +12,7 @@ Clean Code is a reader's gift — refactor for the next developer, not the compi
 | Argument | Scope Source | Pre-flight |
 |----------|-------------|------------|
 | (none) | `git diff --cached` | Full (staged changes required) |
-| `<commit-sha>` | `git diff <sha>^..<sha>` | Tests + coverage + concurrent work only |
+| `<commit-sha>` | `git diff <sha>^..<sha>` | Validation + concurrent work only |
 
 When a commit SHA is provided, changes are made directly to files — the user reviews and amends. Skip staging-dependent pre-flight steps (staged check, stash backup).
 
@@ -45,13 +45,13 @@ If exclusion is uncertain, ask. The default is to skip, not to clean.
    git diff --cached --quiet && echo "Nothing staged" && exit 1
 ```
 
-2. **Tests pass**
+2. **Tests pass** *(Pairing only; multi-agent mode uses task-focused tests)*
 ```bash
    $TEST_CMD || exit 1
 ```
 
-3. **Coverage gate** (tiered by transformation risk)
-  - Run: `$COVERAGE_CMD && diff-cover $COVERAGE_REPORT --compare-branch=HEAD`
+3. **Coverage gate** (tiered by transformation risk; Pairing runs it, multi-agent mode reuses existing task-scoped evidence)
+  - **Pairing:** Run `$COVERAGE_CMD && diff-cover $COVERAGE_REPORT --compare-branch=HEAD`
   - `diff-cover` maps coverage to staged hunks (language-agnostic — any Cobertura XML)
 
   | Transformation Risk | Examples | Threshold |
@@ -61,9 +61,9 @@ If exclusion is uncertain, ask. The default is to skip, not to clean.
   | Behavioral-adjacent | CQS split, error handling isolation | ≥90% |
 
   - **Pairing:** Threshold = highest-risk transformation planned (applies to whole session)
-  - **§BRAND_NAME_TITLE§:** Threshold caps allowed transformation set (see Mode-Specific Behavior)
+  - **§BRAND_NAME_TITLE§:** Existing task-scoped evidence caps the allowed transformation set; without it, allow mechanical transformations only (see Mode-Specific Behavior)
   - **STOP if below threshold** — report uncovered lines (Pairing: all transformations blocked; §BRAND_NAME_TITLE§: only above-coverage transformations blocked)
-  - Tools unavailable: warn, require explicit waiver (§BRAND_NAME_TITLE§: abort — no waiver mechanism)
+  - Tools unavailable: Pairing warns and requires explicit waiver; §BRAND_NAME_TITLE§ uses the no-evidence mechanical-only fallback
 
 4. **Diff size guard** — **STOP if >500 lines**: `"Reduce scope or switch to Full-file mode?"`
 
@@ -88,8 +88,8 @@ If exclusion is uncertain, ask. The default is to skip, not to clean.
 ```
 Pre-flight:
   Staged files: N
-  Tests: ✓ pass (X tests)
-  Coverage: Y% of staged lines (threshold: ≥Z% — [risk level])
+  Tests: ✓ [full suite | task-focused] (X tests)
+  Coverage: [Y% of staged lines (threshold: ≥Z% — [risk level]) | unavailable — mechanical only]
   Concurrent edits: none (or ⚠️ [file] — [branch])
   Backup: stash@{0} ✓ verified
 Proceed (P)?
@@ -138,7 +138,7 @@ For each batch:
 2. **Await approval**
 3. **Apply** to files
 4. **Validate:**
-   a. Tests  b. `$TYPE_CHECKER` on touched files  c. Import consistency (extractions often leave stale imports)
+   a. Tests (Pairing: `$TEST_CMD`; multi-agent: task-focused only)  b. `$TYPE_CHECKER` on touched files  c. Import consistency (extractions often leave stale imports)
   - ✓ Pass → **snapshot batch**, continue
   - ✗ Fail → **STOP**:
 ```
@@ -185,7 +185,7 @@ Also run `$TYPE_CHECKER` if project uses type checking.
 | Result | Action |
 |--------|--------|
 | ✓ Pass | Final summary |
-| ✗ Formatter | Apply output, re-run tests; revert if tests fail |
+| ✗ Formatter | Apply output, re-run mode-appropriate tests; revert if tests fail |
 | ✗ Linter | Show violations, ask user |
 | ✗ Type errors | Show errors, ask user |
 | ✗ Unfixable (3 attempts) | Show failure, ask user |
@@ -302,12 +302,12 @@ No clear resolution: **flag conflict, present both options, do not choose.**
 
 **Pairing (default):** All prompts apply as written. User confirms batches, chooses on failure, approves propagation.
 
-**§BRAND_NAME_TITLE§ (multi-agent):** No interactive prompts.
+**§BRAND_NAME_TITLE§ (multi-agent):** No interactive prompts. Do not run repository-wide `$TEST_CMD` or `$COVERAGE_CMD`; the coder's pre-submission gate and reviewer's independent gate own full-suite validation. Use task-focused tests and existing task-scoped coverage evidence only.
 
 | Pairing Prompt | §BRAND_NAME_TITLE§ Behavior |
 |----------------|---------------|
 | Mode announcement | Announce, no prompt |
-| Pre-flight "Proceed?" | Auto-proceed if checks pass; coverage below threshold: downgrade; abort if <30% or non-coverage fail |
+| Pre-flight "Proceed?" | Auto-proceed if task-focused checks pass; coverage below threshold: downgrade; no evidence: mechanical only |
 | Batch/transformation approval | Auto-proceed/apply |
 | Test failure | Auto-revert batch |
 | Between batches | Auto-proceed |
@@ -323,6 +323,7 @@ No clear resolution: **flag conflict, present both options, do not choose.**
 | ≥70% | Mechanical + structural |
 | ≥30% | Mechanical only |
 | <30% | Abort |
+| No evidence | Mechanical only |
 
 When downgraded, Analysis filters violations to allowed set. Log skipped violations.
 
