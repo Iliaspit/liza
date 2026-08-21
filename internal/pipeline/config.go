@@ -30,9 +30,10 @@ type PipelineConfig struct {
 // SlicedIntegrationCapability reports whether a frozen pipeline can run the
 // sliced integration lifecycle.
 type SlicedIntegrationCapability struct {
-	Available bool
-	Code      string
-	Guidance  string
+	Available                       bool
+	PreIntegrationDecompositionRoot string
+	Code                            string
+	Guidance                        string
 }
 
 // SlicedIntegrationUpgradeRequired is returned when a frozen pipeline lacks

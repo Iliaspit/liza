@@ -53,7 +53,16 @@ func NewResolver(config *PipelineConfig, opts ...ResolverOption) *Resolver {
 
 // SlicedIntegrationCapability reports whether the configured pipeline has the
 // complete slice and global integration topology required for sliced coverage.
-func (r *Resolver) SlicedIntegrationCapability() SlicedIntegrationCapability {
+func (r *Resolver) SlicedIntegrationCapability() (SlicedIntegrationCapability, error) {
+	capability := SlicedIntegrationCapability{}
+	if _, ok := r.config.Pipeline.RolePairs["code-planning-pair"]; ok {
+		rootRolePair, _, err := r.DecompositionRootForTarget("code-planning-pair")
+		if err != nil {
+			return SlicedIntegrationCapability{}, fmt.Errorf("resolve pre-integration decomposition root: %w", err)
+		}
+		capability.PreIntegrationDecompositionRoot = rootRolePair
+	}
+
 	slicePair, sliceOK := r.config.Pipeline.RolePairs["slice-integration-pair"]
 	globalPair, globalOK := r.config.Pipeline.RolePairs["integration-pair"]
 	integration, integrationOK := r.config.Pipeline.SubPipelines["integration-subpipeline"]
@@ -66,13 +75,13 @@ func (r *Resolver) SlicedIntegrationCapability() SlicedIntegrationCapability {
 		slices.Contains(integration.Steps, "coding-pair") &&
 		hasIntegrationFindingTransition(integration.Transitions, "slice-integration-to-fix", "slice-integration-pair.approved") &&
 		hasIntegrationFindingTransition(integration.Transitions, "integration-to-fix", "integration-pair.approved") {
-		return SlicedIntegrationCapability{Available: true}
+		capability.Available = true
+		return capability, nil
 	}
 
-	return SlicedIntegrationCapability{
-		Code:     SlicedIntegrationUpgradeRequired,
-		Guidance: "Sliced integration requires a fresh workspace or a manual frozen pipeline topology update.",
-	}
+	capability.Code = SlicedIntegrationUpgradeRequired
+	capability.Guidance = "Sliced integration requires a fresh workspace or a manual frozen pipeline topology update."
+	return capability, nil
 }
 
 func hasIntegrationFindingTransition(transitions []TransitionDef, name, from string) bool {

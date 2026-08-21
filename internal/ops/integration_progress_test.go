@@ -13,6 +13,40 @@ import (
 func TestEvaluateIntegrationProgress(t *testing.T) {
 	available := pipeline.SlicedIntegrationCapability{Available: true}
 
+	t.Run("decomposition root with pending output keeps planning unsettled", func(t *testing.T) {
+		fixture := newReconcileFixture(t, false)
+		state := fixture.readState(t)
+		state.Tasks = []models.Task{{
+			ID:       "master-plan",
+			RolePair: "code-planning-main-pair",
+			Status:   models.TaskStatus("CODING_PLAN_MAIN_APPROVED"),
+			Output:   []models.OutputEntry{{Desc: "scoped planning work"}},
+		}}
+
+		assertPending := func(status models.TaskStatus) {
+			t.Helper()
+			state.Tasks[0].Status = status
+			decision, err := EvaluateLiveIntegrationProgress(state, fixture.projectRoot)
+			if err != nil {
+				t.Fatalf("EvaluateLiveIntegrationProgress() error = %v", err)
+			}
+			if decision.PlanningSettled || decision.FreezeContributingSet || decision.ContributingSet != nil || decision.GlobalRequest != nil {
+				t.Fatalf("pending decomposition decision = %#v, want unsettled with no cohort or global request", decision)
+			}
+			if decision.Waiting == nil || decision.Waiting.Code != integrationProgressWaitingPlanning {
+				t.Fatalf("pending decomposition waiting = %#v, want %q", decision.Waiting, integrationProgressWaitingPlanning)
+			}
+		}
+
+		assertPending(models.TaskStatus("CODING_PLAN_MAIN_APPROVED"))
+		assertPending(models.TaskStatusMerged)
+
+		state.Goal.Integration = &models.IntegrationLifecycle{
+			ContributingSet: &models.IntegrationContributingSet{Scopes: []models.IntegrationScopeSnapshot{}},
+		}
+		assertPending(models.TaskStatusMerged)
+	})
+
 	t.Run("partial handoff cannot settle coverage and the cohort freezes once", func(t *testing.T) {
 		state := integrationProgressState(
 			progressPlan("plan-a", models.TaskStatusCodePlanning, false),
@@ -405,7 +439,11 @@ func TestEvaluateLiveIntegrationProgress(t *testing.T) {
 	if err != nil {
 		t.Fatalf("pipeline.LoadFrozen() error = %v", err)
 	}
-	want, err := EvaluateIntegrationProgress(state, pipeline.NewResolver(cfg).SlicedIntegrationCapability(), fixture.head)
+	capability, err := pipeline.NewResolver(cfg).SlicedIntegrationCapability()
+	if err != nil {
+		t.Fatalf("SlicedIntegrationCapability() error = %v", err)
+	}
+	want, err := EvaluateIntegrationProgress(state, capability, fixture.head)
 	if err != nil {
 		t.Fatalf("EvaluateIntegrationProgress() error = %v", err)
 	}

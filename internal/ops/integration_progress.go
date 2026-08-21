@@ -90,11 +90,15 @@ func EvaluateLiveIntegrationProgress(state *models.State, projectRoot string) (I
 	if err != nil {
 		return IntegrationProgressDecision{}, fmt.Errorf("load frozen pipeline: %w", err)
 	}
+	capability, err := pipeline.NewResolver(cfg).SlicedIntegrationCapability()
+	if err != nil {
+		return IntegrationProgressDecision{}, fmt.Errorf("resolve sliced integration capability: %w", err)
+	}
 	integrationHEAD, err := ResolveIntegrationHEAD(projectRoot, state.Config.IntegrationBranch)
 	if err != nil {
 		return IntegrationProgressDecision{}, fmt.Errorf("read integration HEAD: %w", err)
 	}
-	return EvaluateIntegrationProgress(state, pipeline.NewResolver(cfg).SlicedIntegrationCapability(), integrationHEAD)
+	return EvaluateIntegrationProgress(state, capability, integrationHEAD)
 }
 
 type integrationProgressEvaluator struct {
@@ -223,7 +227,10 @@ func (e *integrationProgressEvaluator) evaluate(
 		lifecycle = &models.IntegrationLifecycle{}
 	}
 
-	cohort, freeze, settled, err := e.contributingSet(lifecycle.ContributingSet)
+	cohort, freeze, settled, err := e.contributingSet(
+		lifecycle.ContributingSet,
+		capability.PreIntegrationDecompositionRoot,
+	)
 	if err != nil {
 		return decision, err
 	}
@@ -256,7 +263,16 @@ func (e *integrationProgressEvaluator) evaluate(
 
 func (e *integrationProgressEvaluator) contributingSet(
 	persisted *models.IntegrationContributingSet,
+	decompositionRootRolePair string,
 ) (*models.IntegrationContributingSet, bool, bool, error) {
+	settled, err := e.decompositionRootTasksSettled(decompositionRootRolePair)
+	if err != nil {
+		return nil, false, false, err
+	}
+	if !settled {
+		return nil, false, false, nil
+	}
+
 	if persisted != nil {
 		cohort := cloneIntegrationContributingSet(persisted)
 		if err := e.validateCohort(cohort); err != nil {
@@ -304,6 +320,29 @@ func (e *integrationProgressEvaluator) contributingSet(
 	}
 	sort.Slice(cohort.Scopes, func(i, j int) bool { return cohort.Scopes[i].PlanTaskID < cohort.Scopes[j].PlanTaskID })
 	return cohort, true, true, nil
+}
+
+func (e *integrationProgressEvaluator) decompositionRootTasksSettled(rolePair string) (bool, error) {
+	if rolePair == "" {
+		return true, nil
+	}
+	for i := range e.state.Tasks {
+		task := &e.state.Tasks[i]
+		if task.RolePair != rolePair {
+			continue
+		}
+		resolution, err := e.resolveLineage(task.ID, false)
+		if err != nil {
+			return false, err
+		}
+		if !resolution.settled {
+			return false, nil
+		}
+		if task.Status == models.TaskStatusMerged && len(task.Output) > 0 && !hasExecutedOutputTransition(task.TransitionsExecuted) {
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
 func (e *integrationProgressEvaluator) preIntegrationPlans() ([]*models.Task, error) {

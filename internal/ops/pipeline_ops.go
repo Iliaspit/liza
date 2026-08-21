@@ -134,7 +134,10 @@ func readEffectiveIntegrationCompletionSnapshot(projectRoot string) (effectiveIn
 	if err != nil {
 		return effectiveIntegrationCompletionSnapshot{}, err
 	}
-	capability := resolver.SlicedIntegrationCapability()
+	capability, err := resolver.SlicedIntegrationCapability()
+	if err != nil {
+		return effectiveIntegrationCompletionSnapshot{}, fmt.Errorf("resolve sliced integration capability: %w", err)
+	}
 	blackboard := db.For(paths.New(projectRoot).StatePath())
 	var snapshot effectiveIntegrationCompletionSnapshot
 	err = withIntegrationMutationLock(projectRoot, "verify effective integration completion", func() error {

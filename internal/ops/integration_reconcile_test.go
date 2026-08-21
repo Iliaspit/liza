@@ -353,6 +353,42 @@ func TestReconcileIntegrationAnalyses(t *testing.T) {
 		}
 	})
 
+	t.Run("pending decomposition root creates no global analysis", func(t *testing.T) {
+		fixture := newReconcileFixture(t, false)
+		masterPlan := testhelpers.BuildTaskByStatus("master-plan", models.TaskStatusApproved, time.Now().UTC())
+		masterPlan.Type = models.TaskTypePlanning
+		masterPlan.RolePair = "code-planning-main-pair"
+		masterPlan.Status = models.TaskStatus("CODING_PLAN_MAIN_APPROVED")
+		masterPlan.PlanRef = "README.md"
+		masterPlan.ArchRef = "README.md"
+		masterPlan.Output = []models.OutputEntry{{
+			Desc: "scoped planning work", DoneWhen: "scoped plan reviewed", Scope: "internal/ops", SpecRef: "README.md",
+		}}
+		fixture.mutateState(t, func(state *models.State) {
+			state.Tasks = []models.Task{masterPlan}
+			state.Sprint.Scope.Planned = []string{"master-plan"}
+		})
+
+		result, err := ReconcileIntegrationAnalyses(fixture.projectRoot)
+		if err != nil {
+			t.Fatalf("pending decomposition reconciliation error = %v", err)
+		}
+		if result.Changed || len(result.CreatedTaskIDs) != 0 || result.Reason != nil {
+			t.Fatalf("pending decomposition result = %#v, want unchanged planning wait", result)
+		}
+		state := fixture.readState(t)
+		if state.FindTask("integration-global-1") != nil || slices.Contains(state.Sprint.Scope.Planned, "integration-global-1") {
+			t.Fatal("pending decomposition created or planned integration-global-1")
+		}
+		decision, err := EvaluateLiveIntegrationProgress(state, fixture.projectRoot)
+		if err != nil {
+			t.Fatalf("pending decomposition progress error = %v", err)
+		}
+		if decision.Waiting == nil || decision.Waiting.Code != integrationProgressWaitingPlanning {
+			t.Fatalf("pending decomposition decision = %#v, want planning wait", decision)
+		}
+	})
+
 	t.Run("global waits for repair replacement lineage then creates bounded next generation", func(t *testing.T) {
 		fixture := newReconcileFixture(t, false)
 		if _, err := ReconcileIntegrationAnalyses(fixture.projectRoot); err != nil {

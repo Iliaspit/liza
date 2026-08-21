@@ -786,7 +786,10 @@ func TestSlicedIntegrationPipelineLegacyFrozenUpgrade(t *testing.T) {
 		t.Error("LoadFrozen did not retain allowed-operation migration")
 	}
 
-	capability := NewResolver(frozen).SlicedIntegrationCapability()
+	capability, err := NewResolver(frozen).SlicedIntegrationCapability()
+	if err != nil {
+		t.Fatalf("SlicedIntegrationCapability(): %v", err)
+	}
 	if capability.Available {
 		t.Error("SlicedIntegrationCapability.Available = true for legacy topology")
 	}
@@ -2306,9 +2309,15 @@ func TestSlicedIntegrationPipelineTopology(t *testing.T) {
 		}
 	}
 
-	capability := resolver.SlicedIntegrationCapability()
+	capability, err := resolver.SlicedIntegrationCapability()
+	if err != nil {
+		t.Fatalf("SlicedIntegrationCapability(): %v", err)
+	}
 	if !capability.Available || capability.Code != "" || capability.Guidance != "" {
 		t.Errorf("SlicedIntegrationCapability() = %+v, want available capability", capability)
+	}
+	if capability.PreIntegrationDecompositionRoot != "code-planning-main-pair" {
+		t.Errorf("pre-integration decomposition root = %q, want code-planning-main-pair", capability.PreIntegrationDecompositionRoot)
 	}
 
 	partial, err := LoadFromBytes(data)
@@ -2320,9 +2329,57 @@ func TestSlicedIntegrationPipelineTopology(t *testing.T) {
 		return transition.Name == "slice-integration-to-fix"
 	})
 	partial.Pipeline.SubPipelines["integration-subpipeline"] = integration
-	partialCapability := NewResolver(partial).SlicedIntegrationCapability()
+	partialCapability, err := NewResolver(partial).SlicedIntegrationCapability()
+	if err != nil {
+		t.Fatalf("partial SlicedIntegrationCapability(): %v", err)
+	}
 	if partialCapability.Available || partialCapability.Code != "pipeline_upgrade_required" {
 		t.Errorf("partial SlicedIntegrationCapability() = %+v, want pipeline upgrade required", partialCapability)
+	}
+	if partialCapability.PreIntegrationDecompositionRoot != "code-planning-main-pair" {
+		t.Errorf("partial pre-integration decomposition root = %q, want code-planning-main-pair", partialCapability.PreIntegrationDecompositionRoot)
+	}
+
+	noRoot, err := LoadFromBytes(data)
+	if err != nil {
+		t.Fatalf("LoadFromBytes(no root): %v", err)
+	}
+	rootPair := noRoot.Pipeline.RolePairs["code-planning-main-pair"]
+	rootPair.DecompositionRoot = false
+	rootPair.DecompositionOutputRef = ""
+	noRoot.Pipeline.RolePairs["code-planning-main-pair"] = rootPair
+	noRootCapability, err := NewResolver(noRoot).SlicedIntegrationCapability()
+	if err != nil {
+		t.Fatalf("no-root SlicedIntegrationCapability(): %v", err)
+	}
+	if !noRootCapability.Available || noRootCapability.PreIntegrationDecompositionRoot != "" {
+		t.Errorf("no-root SlicedIntegrationCapability() = %+v, want available without root", noRootCapability)
+	}
+
+	ambiguous, err := LoadFromBytes(data)
+	if err != nil {
+		t.Fatalf("LoadFromBytes(ambiguous root): %v", err)
+	}
+	alternateRoot := ambiguous.Pipeline.RolePairs["code-planning-main-pair"]
+	alternateRoot.States = RolePairStates{
+		Initial: "DRAFT_ALTERNATE_PLANNING_ROOT", Executing: "ALTERNATE_PLANNING_ROOT",
+		Submitted: "ALTERNATE_PLANNING_ROOT_TO_REVIEW", Reviewing: "REVIEWING_ALTERNATE_PLANNING_ROOT",
+		Approved: "ALTERNATE_PLANNING_ROOT_APPROVED", Rejected: "ALTERNATE_PLANNING_ROOT_REJECTED",
+		PartiallyApproved: "ALTERNATE_PLANNING_ROOT_PARTIALLY_APPROVED", Reviewing2: "REVIEWING_ALTERNATE_PLANNING_ROOT_2",
+	}
+	ambiguous.Pipeline.RolePairs["alternate-planning-root-pair"] = alternateRoot
+	coding := ambiguous.Pipeline.SubPipelines["coding-subpipeline"]
+	coding.Steps = append(coding.Steps, "alternate-planning-root-pair")
+	coding.Transitions = append(coding.Transitions, TransitionDef{
+		Name: "alternate-root-to-code-planning", From: "alternate-planning-root-pair.approved", To: "code-planning-pair.initial",
+		Trigger: "auto", Cardinality: "per-subtask",
+	})
+	ambiguous.Pipeline.SubPipelines["coding-subpipeline"] = coding
+	if err := validate(ambiguous); err != nil {
+		t.Fatalf("ambiguous topology should pass config validation before capability resolution: %v", err)
+	}
+	if _, err := NewResolver(ambiguous).SlicedIntegrationCapability(); err == nil || !strings.Contains(err.Error(), "multiple decomposition roots") {
+		t.Fatalf("ambiguous SlicedIntegrationCapability() error = %v, want multiple decomposition roots", err)
 	}
 }
 

@@ -1266,7 +1266,11 @@ func assertIntegrationIncomplete(t *testing.T, fixture *slicedLifecycleFixture, 
 	if err != nil {
 		t.Fatalf("LoadFrozen(): %v", err)
 	}
-	decision, err := ops.EvaluateIntegrationProgress(fixture.read(t), pipeline.NewResolver(frozen).SlicedIntegrationCapability(), head)
+	capability, err := pipeline.NewResolver(frozen).SlicedIntegrationCapability()
+	if err != nil {
+		t.Fatalf("SlicedIntegrationCapability(): %v", err)
+	}
+	decision, err := ops.EvaluateIntegrationProgress(fixture.read(t), capability, head)
 	if err != nil {
 		t.Fatalf("EvaluateIntegrationProgress(): %v", err)
 	}

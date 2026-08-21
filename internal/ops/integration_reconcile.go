@@ -58,7 +58,10 @@ func reconcileIntegrationAnalyses(projectRoot string, completionLockHeld bool) (
 	if err != nil {
 		return nil, fmt.Errorf("load integration reconciliation pipeline: %w", err)
 	}
-	capability := resolver.SlicedIntegrationCapability()
+	capability, err := resolver.SlicedIntegrationCapability()
+	if err != nil {
+		return nil, fmt.Errorf("resolve sliced integration capability: %w", err)
+	}
 	if hooks := testReconcileIntegrationAnalysesHooks; hooks != nil && hooks.capability != nil {
 		capability = *hooks.capability
 	}

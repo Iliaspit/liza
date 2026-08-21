@@ -473,7 +473,10 @@ func populateIntegrationContext(task *models.Task, state *models.State, resolver
 
 func populateSliceIntegrationContext(task *models.Task, state *models.State, resolver *pipeline.Resolver, data *prompts.RoleContextData) error {
 	metadata := task.IntegrationAnalysis
-	capability := resolver.SlicedIntegrationCapability()
+	capability, err := resolver.SlicedIntegrationCapability()
+	if err != nil {
+		return fmt.Errorf("resolve sliced integration capability: %w", err)
+	}
 	if !capability.Available {
 		return fmt.Errorf("slice integration context unavailable (%s): %s", capability.Code, capability.Guidance)
 	}
