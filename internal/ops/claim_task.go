@@ -39,7 +39,8 @@ type claimWorktreePhaseResult struct {
 }
 
 type claimTaskTestHooks struct {
-	beforePhase3Modify func()
+	beforePhase3Modify                     func()
+	afterPreservedIntegrationEqualityCheck func()
 }
 
 var testClaimTaskHooks *claimTaskTestHooks
@@ -169,13 +170,14 @@ func claimTask(projectRoot, taskID, agentID string) (*ClaimResult, error) {
 	}
 	maxCoderIterations = effectiveCoderIterationLimit(task, state.Config)
 	claimCtx = claimContext{
-		taskID:            taskID,
-		agentID:           agentID,
-		taskStatus:        taskStatus,
-		targetStatus:      pipelineExecuting,
-		worktreeDir:       worktreeDir,
-		worktreeRel:       worktreeRel,
-		integrationBranch: integrationBranch,
+		taskID:              taskID,
+		agentID:             agentID,
+		taskStatus:          taskStatus,
+		targetStatus:        pipelineExecuting,
+		worktreeDir:         worktreeDir,
+		worktreeRel:         worktreeRel,
+		integrationBranch:   integrationBranch,
+		pipelineTransitions: pipelineTransitions,
 	}
 	if err := strategy.validate(task, state, runtimeRole, doerRole, &claimCtx); err != nil {
 		return nil, err
@@ -287,7 +289,11 @@ func completeClaimTaskAfterValidation(
 
 	var baseCommit string
 	if _, preserveInitial := strategy.(preservedInitialClaimStrategy); preserveInitial {
-		baseCommit = *lockedTask.BaseCommit
+		claimCtx.preservedBaseCommit = *lockedTask.BaseCommit
+		baseCommit, err = gitWrapper.GetCommitSHA(integrationBranch)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get preserved claim integration commit: %w", err)
+		}
 	} else {
 		baseCommit, err = gitWrapper.GetCommitSHA(integrationBranch)
 		if err != nil {
@@ -354,7 +360,7 @@ func completeClaimTaskAfterValidation(
 		testClaimTaskHooks.beforePhase3Modify()
 	}
 
-	err = bb.Modify(func(state *models.State) error {
+	modifyClaimState := func(state *models.State) error {
 		// Re-check task exists and status hasn't changed
 		task := state.FindTask(taskID)
 		if task == nil {
@@ -412,7 +418,47 @@ func completeClaimTaskAfterValidation(
 		state.Agents[agentID] = agent
 
 		return nil
-	})
+	}
+
+	if _, preserveInitial := strategy.(preservedInitialClaimStrategy); preserveInitial {
+		err = withEffectiveIntegrationCompletionLinearization(projectRoot, "claim preserved task "+taskID, func() error {
+			var currentIntegrationCommit string
+			if lockErr := withIntegrationMutationLock(projectRoot, "verify preserved claim integration "+taskID, func() error {
+				var resolveErr error
+				currentIntegrationCommit, resolveErr = gitWrapper.GetCommitSHA(integrationBranch)
+				return resolveErr
+			}); lockErr != nil {
+				return fmt.Errorf("verify preserved claim integration ref: %w", lockErr)
+			}
+			if currentIntegrationCommit != claimCtx.baseCommit {
+				return fmt.Errorf(
+					"integration ref changed before preserved claim assignment: got %s, want %s",
+					currentIntegrationCommit,
+					claimCtx.baseCommit,
+				)
+			}
+			currentHead, headErr := gitWrapper.GetWorktreeHEAD(taskID)
+			if headErr != nil {
+				return fmt.Errorf("read preserved worktree HEAD before assignment: %w", headErr)
+			}
+			if currentHead != claimCtx.worktreeHead {
+				return fmt.Errorf("preserved worktree HEAD changed before assignment: got %s, want %s", currentHead, claimCtx.worktreeHead)
+			}
+			ancestor, ancestorErr := gitWrapper.IsAncestor(claimCtx.baseCommit, currentHead)
+			if ancestorErr != nil {
+				return fmt.Errorf("verify preserved worktree ancestry before assignment: %w", ancestorErr)
+			}
+			if !ancestor {
+				return fmt.Errorf("preserved worktree HEAD %s does not descend from captured integration commit %s", currentHead, claimCtx.baseCommit)
+			}
+			if testClaimTaskHooks != nil && testClaimTaskHooks.afterPreservedIntegrationEqualityCheck != nil {
+				testClaimTaskHooks.afterPreservedIntegrationEqualityCheck()
+			}
+			return bb.Modify(modifyClaimState)
+		})
+	} else {
+		err = bb.Modify(modifyClaimState)
+	}
 
 	if err != nil {
 		// Cleanup on failure — only delete resources we created in this invocation.

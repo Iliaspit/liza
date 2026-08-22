@@ -2007,6 +2007,329 @@ func TestClaimTask_SentinelAssignedTo_Rejected(t *testing.T) {
 	}
 }
 
+func TestClaimTask_PreservedInitialRebasesOntoCapturedIntegrationCommit(t *testing.T) {
+	fixture := newPreservedInitialClaimFixture(t)
+	targetSHA := advancePreservedClaimIntegration(t, fixture.projectRoot, "dependency.txt", "merged dependency\n", "Merge dependency")
+
+	result, err := ClaimTask(fixture.projectRoot, fixture.taskID, fixture.agentID)
+	if err != nil {
+		t.Fatalf("ClaimTask() error: %v", err)
+	}
+	if result.BaseCommit != targetSHA {
+		t.Fatalf("BaseCommit = %s, want captured integration SHA %s", result.BaseCommit, targetSHA)
+	}
+
+	claimedHead := testhelpers.MustGit(t, fixture.worktreeDir, "rev-parse", "HEAD")
+	if claimedHead == fixture.preservedHead {
+		t.Fatal("preserved commit SHA was not rewritten by rebase")
+	}
+	if got := testhelpers.MustGit(t, fixture.worktreeDir, "log", "-1", "--format=%s"); got != fixture.commitMessage {
+		t.Fatalf("commit message = %q, want %q", got, fixture.commitMessage)
+	}
+	if got, err := os.ReadFile(filepath.Join(fixture.worktreeDir, "task.txt")); err != nil || string(got) != fixture.taskContent {
+		t.Fatalf("task content = %q, %v; want %q", got, err, fixture.taskContent)
+	}
+	if got, err := os.ReadFile(filepath.Join(fixture.worktreeDir, "dependency.txt")); err != nil || string(got) != "merged dependency\n" {
+		t.Fatalf("dependency content = %q, %v", got, err)
+	}
+	ancestor, err := git.New(fixture.projectRoot).IsAncestor(targetSHA, claimedHead)
+	if err != nil {
+		t.Fatalf("IsAncestor() error: %v", err)
+	}
+	if !ancestor {
+		t.Fatalf("rebased HEAD %s does not descend from %s", claimedHead, targetSHA)
+	}
+
+	state := readClaimStateForTest(t, fixture.stateFile)
+	task := state.FindTask(fixture.taskID)
+	if task == nil {
+		t.Fatal("task not found")
+	}
+	if task.BaseCommit == nil || *task.BaseCommit != targetSHA {
+		t.Fatalf("task base_commit = %v, want %s", task.BaseCommit, targetSHA)
+	}
+	if task.AssignedTo == nil || *task.AssignedTo != fixture.agentID {
+		t.Fatalf("task assigned_to = %v, want %s", task.AssignedTo, fixture.agentID)
+	}
+}
+
+func TestClaimTask_PreservedInitialDependencyGatePrecedesFilesystemWork(t *testing.T) {
+	fixture := newPreservedInitialClaimFixture(t)
+	state := readClaimStateForTest(t, fixture.stateFile)
+	pending := testhelpers.BuildTaskByStatus("dependency-1", models.TaskStatusReady, time.Now().UTC())
+	task := state.FindTask(fixture.taskID)
+	task.DependsOn = []string{pending.ID}
+	state.Tasks = append(state.Tasks, pending)
+	testhelpers.WriteInitialState(t, fixture.stateFile, state)
+	advancePreservedClaimIntegration(t, fixture.projectRoot, "dependency.txt", "not yet available\n", "Prepare dependency")
+
+	_, err := ClaimTask(fixture.projectRoot, fixture.taskID, fixture.agentID)
+	if err == nil || !strings.Contains(err.Error(), "unmet dependencies") {
+		t.Fatalf("ClaimTask() error = %v, want unmet dependencies", err)
+	}
+	if head := testhelpers.MustGit(t, fixture.worktreeDir, "rev-parse", "HEAD"); head != fixture.preservedHead {
+		t.Fatalf("worktree HEAD moved before dependency gate: got %s, want %s", head, fixture.preservedHead)
+	}
+}
+
+func TestClaimTask_PreservedInitialIntegrationMoveBeforeCriticalSectionFailsClosed(t *testing.T) {
+	fixture := newPreservedInitialClaimFixture(t)
+	targetSHA := advancePreservedClaimIntegration(t, fixture.projectRoot, "dependency.txt", "dependency v1\n", "Merge dependency")
+	laterSHA := advancePreservedClaimIntegration(t, fixture.projectRoot, "later.txt", "later integration\n", "Advance integration later")
+	testhelpers.MustGit(t, fixture.projectRoot, "branch", "-f", "integration", targetSHA)
+
+	testClaimTaskHooks = &claimTaskTestHooks{
+		beforePhase3Modify: func() {
+			if err := git.New(fixture.projectRoot).UpdateRef("refs/heads/integration", laterSHA, targetSHA); err != nil {
+				t.Fatalf("advance integration before critical section: %v", err)
+			}
+		},
+	}
+	t.Cleanup(func() { testClaimTaskHooks = nil })
+
+	_, err := ClaimTask(fixture.projectRoot, fixture.taskID, fixture.agentID)
+	if err == nil || !strings.Contains(err.Error(), "integration ref changed") {
+		t.Fatalf("ClaimTask() error = %v, want integration ref changed", err)
+	}
+
+	state := readClaimStateForTest(t, fixture.stateFile)
+	task := state.FindTask(fixture.taskID)
+	if task.AssignedTo != nil {
+		t.Fatalf("assigned_to = %v, want nil", task.AssignedTo)
+	}
+	if task.BaseCommit == nil || *task.BaseCommit != fixture.originalBase {
+		t.Fatalf("base_commit = %v, want unchanged %s", task.BaseCommit, fixture.originalBase)
+	}
+	if got, readErr := os.ReadFile(filepath.Join(fixture.worktreeDir, "task.txt")); readErr != nil || string(got) != fixture.taskContent {
+		t.Fatalf("preserved patch content = %q, %v", got, readErr)
+	}
+}
+
+func TestClaimTask_PreservedInitialIntegrationMoveAfterEqualityWaitsForAssignment(t *testing.T) {
+	fixture := newPreservedInitialClaimFixture(t)
+	targetSHA := advancePreservedClaimIntegration(t, fixture.projectRoot, "dependency.txt", "dependency v1\n", "Merge dependency")
+	laterSHA := advancePreservedClaimIntegration(t, fixture.projectRoot, "later.txt", "later integration\n", "Advance integration later")
+	testhelpers.MustGit(t, fixture.projectRoot, "branch", "-f", "integration", targetSHA)
+
+	const moverOperation = "test preserved claim cooperating integration move"
+	moverReachedLock := make(chan struct{})
+	moverDone := make(chan error, 1)
+	beforeEffectiveIntegrationCompletionLinearizationTestHook = func(operation string) {
+		if operation == moverOperation {
+			close(moverReachedLock)
+		}
+	}
+	t.Cleanup(func() {
+		beforeEffectiveIntegrationCompletionLinearizationTestHook = nil
+		testClaimTaskHooks = nil
+	})
+	testClaimTaskHooks = &claimTaskTestHooks{
+		afterPreservedIntegrationEqualityCheck: func() {
+			go func() {
+				moverDone <- withEffectiveIntegrationCompletionLinearization(fixture.projectRoot, moverOperation, func() error {
+					state, readErr := db.New(fixture.stateFile).Read()
+					if readErr != nil {
+						return fmt.Errorf("read state after assignment: %w", readErr)
+					}
+					task := state.FindTask(fixture.taskID)
+					if task == nil || task.AssignedTo == nil || *task.AssignedTo != fixture.agentID {
+						return fmt.Errorf("integration mover ran before assignment committed: %+v", task)
+					}
+					return withIntegrationMutationLock(fixture.projectRoot, "test preserved claim ref move", func() error {
+						return git.New(fixture.projectRoot).UpdateRef("refs/heads/integration", laterSHA, targetSHA)
+					})
+				})
+			}()
+			<-moverReachedLock
+			if got := testhelpers.MustGit(t, fixture.projectRoot, "rev-parse", "integration"); got != targetSHA {
+				t.Fatalf("integration moved inside equality/assignment boundary: got %s, want %s", got, targetSHA)
+			}
+			select {
+			case moveErr := <-moverDone:
+				t.Fatalf("cooperating integration move completed before assignment: %v", moveErr)
+			default:
+			}
+		},
+	}
+
+	result, err := ClaimTask(fixture.projectRoot, fixture.taskID, fixture.agentID)
+	if err != nil {
+		t.Fatalf("ClaimTask() error: %v", err)
+	}
+	if result.BaseCommit != targetSHA {
+		t.Fatalf("BaseCommit = %s, want assignment-linearized %s", result.BaseCommit, targetSHA)
+	}
+	if moveErr := <-moverDone; moveErr != nil {
+		t.Fatalf("cooperating integration move: %v", moveErr)
+	}
+	if got := testhelpers.MustGit(t, fixture.projectRoot, "rev-parse", "integration"); got != laterSHA {
+		t.Fatalf("integration = %s, want post-assignment move %s", got, laterSHA)
+	}
+}
+
+func TestClaimTask_PreservedInitialDirtyWorktreeBecomesRecoveryState(t *testing.T) {
+	fixture := newPreservedInitialClaimFixture(t)
+	advancePreservedClaimIntegration(t, fixture.projectRoot, "dependency.txt", "merged dependency\n", "Merge dependency")
+	if err := os.WriteFile(filepath.Join(fixture.worktreeDir, "task.txt"), []byte("dirty task work\n"), 0o644); err != nil {
+		t.Fatalf("dirty task worktree: %v", err)
+	}
+
+	_, err := ClaimTask(fixture.projectRoot, fixture.taskID, fixture.agentID)
+	if err == nil || !strings.Contains(err.Error(), "preserved worktree is dirty") {
+		t.Fatalf("ClaimTask() error = %v, want dirty recovery error", err)
+	}
+	assertPreservedInitialRecoveryState(t, fixture, "dirty")
+}
+
+func TestClaimTask_PreservedInitialNonConflictRebaseFailureBecomesRecoveryState(t *testing.T) {
+	fixture := newPreservedInitialClaimFixture(t)
+	advancePreservedClaimIntegration(t, fixture.projectRoot, "dependency.txt", "merged dependency\n", "Merge dependency")
+	hookPath := filepath.Join(fixture.projectRoot, ".git", "hooks", "pre-rebase")
+	if err := os.WriteFile(hookPath, []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
+		t.Fatalf("write pre-rebase hook: %v", err)
+	}
+
+	_, err := ClaimTask(fixture.projectRoot, fixture.taskID, fixture.agentID)
+	if err == nil || !strings.Contains(err.Error(), "preserved worktree rebase failed") {
+		t.Fatalf("ClaimTask() error = %v, want non-conflict rebase recovery error", err)
+	}
+	assertPreservedInitialRecoveryState(t, fixture, "rebase failed")
+	assertGitStatusClean(t, fixture.worktreeDir)
+}
+
+func TestClaimTask_PreservedInitialGenericRebaseFailureWithInProgressStateAborts(t *testing.T) {
+	fixture := newPreservedInitialClaimFixtureWithBaseFile(t, "conflict.txt", "base\n")
+	writeAndCommit(t, fixture.worktreeDir, "conflict.txt", "task\n", fixture.commitMessage)
+	fixture.preservedHead = testhelpers.MustGit(t, fixture.worktreeDir, "rev-parse", "HEAD")
+	writeAndCommit(t, fixture.projectRoot, "conflict.txt", "integration\n", "Merge conflicting dependency")
+	targetSHA := testhelpers.MustGit(t, fixture.projectRoot, "rev-parse", "HEAD")
+	testhelpers.MustGit(t, fixture.projectRoot, "branch", "-f", "integration", targetSHA)
+
+	hookPath := filepath.Join(fixture.projectRoot, ".git", "hooks", "pre-rebase")
+	hook := "#!/bin/sh\ngit rebase --no-verify \"$1\" >/dev/null 2>&1\nexit 1\n"
+	if err := os.WriteFile(hookPath, []byte(hook), 0o755); err != nil {
+		t.Fatalf("write pre-rebase hook: %v", err)
+	}
+
+	_, err := ClaimTask(fixture.projectRoot, fixture.taskID, fixture.agentID)
+	if err == nil || !strings.Contains(err.Error(), "preserved worktree rebase failed") {
+		t.Fatalf("ClaimTask() error = %v, want generic rebase recovery error", err)
+	}
+	if strings.Contains(err.Error(), "preserved worktree rebase conflict") {
+		t.Fatalf("ClaimTask() error = %v, want generic failure classification", err)
+	}
+	assertPreservedInitialRecoveryState(t, fixture, "rebase failed")
+	assertGitStatusClean(t, fixture.worktreeDir)
+	if head := testhelpers.MustGit(t, fixture.worktreeDir, "rev-parse", "HEAD"); head != fixture.preservedHead {
+		t.Fatalf("HEAD after aborted generic rebase failure = %s, want %s", head, fixture.preservedHead)
+	}
+}
+
+func TestClaimTask_PreservedInitialRebaseConflictBecomesRecoveryState(t *testing.T) {
+	fixture := newPreservedInitialClaimFixtureWithBaseFile(t, "conflict.txt", "base\n")
+	writeAndCommit(t, fixture.worktreeDir, "conflict.txt", "task\n", fixture.commitMessage)
+	fixture.preservedHead = testhelpers.MustGit(t, fixture.worktreeDir, "rev-parse", "HEAD")
+	writeAndCommit(t, fixture.projectRoot, "conflict.txt", "integration\n", "Merge conflicting dependency")
+	targetSHA := testhelpers.MustGit(t, fixture.projectRoot, "rev-parse", "HEAD")
+	testhelpers.MustGit(t, fixture.projectRoot, "branch", "-f", "integration", targetSHA)
+
+	_, err := ClaimTask(fixture.projectRoot, fixture.taskID, fixture.agentID)
+	if err == nil || !strings.Contains(err.Error(), "preserved worktree rebase conflict") {
+		t.Fatalf("ClaimTask() error = %v, want rebase conflict recovery error", err)
+	}
+	assertPreservedInitialRecoveryState(t, fixture, "rebase conflict")
+	assertGitStatusClean(t, fixture.worktreeDir)
+	if head := testhelpers.MustGit(t, fixture.worktreeDir, "rev-parse", "HEAD"); head != fixture.preservedHead {
+		t.Fatalf("HEAD after aborted rebase = %s, want %s", head, fixture.preservedHead)
+	}
+}
+
+type preservedInitialClaimFixture struct {
+	projectRoot   string
+	stateFile     string
+	worktreeDir   string
+	taskID        string
+	agentID       string
+	originalBase  string
+	preservedHead string
+	commitMessage string
+	taskContent   string
+}
+
+func newPreservedInitialClaimFixture(t *testing.T) *preservedInitialClaimFixture {
+	t.Helper()
+	return newPreservedInitialClaimFixtureWithBaseFile(t, "", "")
+}
+
+func newPreservedInitialClaimFixtureWithBaseFile(t *testing.T, baseFile, baseContent string) *preservedInitialClaimFixture {
+	t.Helper()
+	projectRoot := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, projectRoot)
+	if baseFile != "" {
+		writeAndCommit(t, projectRoot, baseFile, baseContent, "Add preserved claim base file")
+		testhelpers.MustGit(t, projectRoot, "branch", "-f", "integration", "HEAD")
+	}
+	stateFile, _ := testhelpers.SetupLizaDir(t, projectRoot)
+	testhelpers.CreateTestWorktree(t, projectRoot, "task-1")
+
+	worktreeDir := filepath.Join(projectRoot, paths.WorktreesDirName, "task-1")
+	originalBase := testhelpers.MustGit(t, projectRoot, "rev-parse", "integration")
+	commitMessage := "Preserve task change"
+	taskContent := "preserved task content\n"
+	writeAndCommit(t, worktreeDir, "task.txt", taskContent, commitMessage)
+	preservedHead := testhelpers.MustGit(t, worktreeDir, "rev-parse", "HEAD")
+
+	state := testhelpers.CreateValidState()
+	registerClaimTaskTestAgents(state)
+	task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusReady, time.Now().UTC())
+	task.Worktree = testhelpers.StringPtr(filepath.Join(paths.WorktreesDirName, "task-1"))
+	task.BaseCommit = &originalBase
+	state.Tasks = []models.Task{task}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	return &preservedInitialClaimFixture{
+		projectRoot: projectRoot, stateFile: stateFile, worktreeDir: worktreeDir,
+		taskID: "task-1", agentID: "coder-1", originalBase: originalBase,
+		preservedHead: preservedHead, commitMessage: commitMessage, taskContent: taskContent,
+	}
+}
+
+func advancePreservedClaimIntegration(t *testing.T, projectRoot, name, content, message string) string {
+	t.Helper()
+	writeAndCommit(t, projectRoot, name, content, message)
+	sha := testhelpers.MustGit(t, projectRoot, "rev-parse", "HEAD")
+	testhelpers.MustGit(t, projectRoot, "branch", "-f", "integration", sha)
+	return sha
+}
+
+func assertPreservedInitialRecoveryState(t *testing.T, fixture *preservedInitialClaimFixture, reasonContains string) {
+	t.Helper()
+	state := readClaimStateForTest(t, fixture.stateFile)
+	task := state.FindTask(fixture.taskID)
+	if task == nil {
+		t.Fatal("task not found")
+	}
+	if task.Status != models.TaskStatusBlocked {
+		t.Fatalf("status = %s, want BLOCKED", task.Status)
+	}
+	if task.AssignedTo != nil || task.LeaseExpires != nil {
+		t.Fatalf("recovery task ownership = assigned_to %v lease %v, want unassigned", task.AssignedTo, task.LeaseExpires)
+	}
+	if task.BaseCommit == nil || *task.BaseCommit != fixture.originalBase {
+		t.Fatalf("base_commit = %v, want unchanged %s", task.BaseCommit, fixture.originalBase)
+	}
+	if task.BlockedReason == nil || !strings.Contains(*task.BlockedReason, reasonContains) {
+		t.Fatalf("blocked_reason = %v, want %q", task.BlockedReason, reasonContains)
+	}
+	if len(task.BlockedQuestions) == 0 || task.RepairRequest == nil || len(task.RepairRequest.Evidence) == 0 || len(task.RepairRequest.Validation) == 0 {
+		t.Fatalf("recovery metadata is not actionable: %+v", task)
+	}
+	agent := state.Agents[fixture.agentID]
+	if agent.CurrentTask != nil || agent.Status == models.AgentStatusWorking {
+		t.Fatalf("agent = %+v, want unassigned", agent)
+	}
+}
+
 // readClaimStateForTest reads state for claim test verification.
 func readClaimStateForTest(t *testing.T, stateFile string) *models.State {
 	t.Helper()

@@ -122,22 +122,7 @@ func TestExpectedEmbeddedFilesRendersMacros(t *testing.T) {
 }
 
 func TestExpectedEmbeddedFilesUseNonDefaultBrand(t *testing.T) {
-	files, err := ExpectedEmbeddedFiles(findRepoRoot(t), brand.ValuesFromEnv(func(key string) string {
-		switch key {
-		case "BRAND_NAME_LOWER", "BRAND_ARCHIVE_PREFIX", "BRAND_MISTRAL_PROMPT_ID":
-			return "acme-agent"
-		case "BRAND_BINARY_NAME":
-			return "acme-cli"
-		case "BRAND_NAME_UPPER", "BRAND_ENV_PREFIX":
-			return "ACME_AGENT"
-		case "BRAND_NAME_TITLE":
-			return "Acme Agent"
-		case "BRAND_REPO", "BRAND_RELEASE_REPO", "BRAND_INSTALL_REPO":
-			return "acme/agent"
-		default:
-			return ""
-		}
-	}))
+	files, err := ExpectedEmbeddedFiles(findRepoRoot(t), nonDefaultBrandValues())
 	if err != nil {
 		t.Fatalf("ExpectedEmbeddedFiles: %v", err)
 	}
@@ -169,6 +154,77 @@ func TestExpectedEmbeddedFilesUseNonDefaultBrand(t *testing.T) {
 	if !sawNameLowerOperatorSkill {
 		t.Fatalf("expected generated operator skill path to use name-lower")
 	}
+}
+
+func TestExpectedEmbeddedFilesDocumentDependencyHeldUnblock(t *testing.T) {
+	root := findRepoRoot(t)
+	surfacePaths := []string{
+		"INVARIANTS.md",
+		"support-docs/SUPPORT.md",
+		"support-docs/USAGE_MULTI_AGENTS.md",
+		"internal/embedded/support-docs/SUPPORT.md",
+		"internal/embedded/support-docs/USAGE_MULTI_AGENTS.md",
+		"specs/architecture/state-machines.md",
+		"specs/architecture/ADR/0077-dependency-edge-canonicalization.md",
+		"specs/architecture/ADR/0080-claimable-rebase-unblock.md",
+		"specs/protocols/worktree-management.md",
+	}
+	requiredStatements := []string{
+		"valid pending dependencies",
+		"role-pair initial status",
+		"dependency-held",
+		"--assign-to",
+		"remains rejected while any dependency is unmet",
+		"captured integration SHA",
+		"completion lock",
+		"equality check and assignment",
+		"cooperating integration movement",
+		"without holding the integration mutation lock across",
+	}
+	for _, relPath := range surfacePaths {
+		content, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(relPath)))
+		if err != nil {
+			t.Fatalf("read %s: %v", relPath, err)
+		}
+		for _, required := range requiredStatements {
+			if !strings.Contains(string(content), required) {
+				t.Errorf("%s missing dependency-held unblock statement %q", relPath, required)
+			}
+		}
+	}
+
+	files, err := ExpectedEmbeddedFiles(root, nonDefaultBrandValues())
+	if err != nil {
+		t.Fatalf("ExpectedEmbeddedFiles: %v", err)
+	}
+	rawDefaultRE := regexp.MustCompile(`(?i)(^|[^A-Za-z])liza($|[^A-Za-z0-9])|liza-mas/liza`)
+	for _, file := range files {
+		if !strings.HasPrefix(file.RelPath, "support-docs/") {
+			continue
+		}
+		if match := rawDefaultRE.Find(file.Content); match != nil {
+			t.Errorf("%s contains raw default brand token %q", file.RelPath, match)
+		}
+	}
+}
+
+func nonDefaultBrandValues() brand.Values {
+	return brand.ValuesFromEnv(func(key string) string {
+		switch key {
+		case "BRAND_NAME_LOWER", "BRAND_ARCHIVE_PREFIX", "BRAND_MISTRAL_PROMPT_ID":
+			return "acme-agent"
+		case "BRAND_BINARY_NAME":
+			return "acme-cli"
+		case "BRAND_NAME_UPPER", "BRAND_ENV_PREFIX":
+			return "ACME_AGENT"
+		case "BRAND_NAME_TITLE":
+			return "Acme Agent"
+		case "BRAND_REPO", "BRAND_RELEASE_REPO", "BRAND_INSTALL_REPO":
+			return "acme/agent"
+		default:
+			return ""
+		}
+	})
 }
 
 func mkdirAll(t *testing.T, path string) {

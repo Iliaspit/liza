@@ -2,6 +2,7 @@ package ops
 
 import (
 	stderrors "errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -498,7 +499,245 @@ func TestUnblockTask_RebaseConflictLeavesBlockedWithRepairRequest(t *testing.T) 
 	}
 }
 
-func TestUnblockTask_RejectsUnmetDependencies(t *testing.T) {
+func TestUnblockTask_WithoutAssignToAllowsPendingDependency(t *testing.T) {
+	tmpDir := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, tmpDir)
+	testhelpers.SetupPipelineConfig(t, tmpDir)
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+
+	now := time.Now().UTC()
+	state := testhelpers.CreateValidState()
+	task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusBlocked, now)
+	task.RolePair = "code-planning-pair"
+	task.Worktree = nil
+	task.BaseCommit = nil
+	task.DependsOn = []string{"dep-1"}
+	task.RepairRequest = &models.RepairRequest{
+		Operation:  "repair_dependency_graph",
+		Target:     "task-1",
+		Command:    "repair dependency edge",
+		Evidence:   []string{"dependency edge repaired"},
+		Validation: []string{"validate dependency graph"},
+	}
+	dep := testhelpers.BuildTaskByStatus("dep-1", models.TaskStatusImplementing, now)
+	dep.RolePair = "code-planning-pair"
+	state.Tasks = []models.Task{task, dep}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	result, err := UnblockTaskWithOptions(tmpDir, "task-1", "repair verified", "orchestrator-1", UnblockTaskOptions{})
+	if err != nil {
+		t.Fatalf("UnblockTaskWithOptions() error: %v", err)
+	}
+	if result.ToStatus != models.TaskStatusDraftCodingPlan {
+		t.Fatalf("ToStatus = %s, want %s", result.ToStatus, models.TaskStatusDraftCodingPlan)
+	}
+	if result.Claimable {
+		t.Fatal("Claimable = true, want false while dependency is pending")
+	}
+
+	readState, err := db.New(stateFile).Read()
+	if err != nil {
+		t.Fatalf("Read state: %v", err)
+	}
+	updated := readState.FindTask("task-1")
+	if updated == nil {
+		t.Fatal("task not found")
+	}
+	if updated.Status != models.TaskStatusDraftCodingPlan {
+		t.Fatalf("Status = %s, want %s", updated.Status, models.TaskStatusDraftCodingPlan)
+	}
+	if updated.AssignedTo != nil || updated.LeaseExpires != nil {
+		t.Fatalf("assignment metadata not cleared: assigned_to=%v lease_expires=%v", updated.AssignedTo, updated.LeaseExpires)
+	}
+	if updated.BlockedReason != nil || len(updated.BlockedQuestions) != 0 || updated.RepairRequest != nil {
+		t.Fatalf("blocked metadata not cleared: %+v", updated)
+	}
+	last := updated.History[len(updated.History)-1]
+	if last.Event != models.TaskEventUnblocked {
+		t.Fatalf("History event = %q, want %q", last.Event, models.TaskEventUnblocked)
+	}
+	if last.Extra["repair_operation"] != "repair_dependency_graph" {
+		t.Fatalf("repair_operation = %v, want repair_dependency_graph", last.Extra["repair_operation"])
+	}
+	validation, ok := last.Extra["repair_validation"].([]any)
+	if !ok || len(validation) != 1 || validation[0] != "validate dependency graph" {
+		t.Fatalf("repair_validation = %#v, want archived validation", last.Extra["repair_validation"])
+	}
+}
+
+func TestUnblockTask_WithoutAssignToRejectsInvalidOrSupersededDependencies(t *testing.T) {
+	tests := []struct {
+		name      string
+		configure func(task *models.Task, state *models.State, now time.Time)
+		wantError string
+	}{
+		{
+			name: "missing dependency",
+			configure: func(task *models.Task, _ *models.State, _ time.Time) {
+				task.DependsOn = []string{"missing-dep"}
+			},
+			wantError: "invalid dependency: missing-dep (invalid_missing",
+		},
+		{
+			name: "superseded dependency with pending replacement",
+			configure: func(task *models.Task, state *models.State, now time.Time) {
+				task.DependsOn = []string{"superseded-dep"}
+				superseded := testhelpers.BuildTaskByStatus("superseded-dep", models.TaskStatusSuperseded, now)
+				superseded.SupersededBy = []string{"replacement-dep"}
+				superseded.RescopeReason = testhelpers.StringPtr("replaced")
+				replacement := testhelpers.BuildTaskByStatus("replacement-dep", models.TaskStatusImplementing, now)
+				state.Tasks = append(state.Tasks, superseded, replacement)
+			},
+			wantError: "unsatisfied_superseded",
+		},
+		{
+			name: "self dependency",
+			configure: func(task *models.Task, _ *models.State, _ time.Time) {
+				task.DependsOn = []string{"task-1"}
+			},
+			wantError: "cannot depend on itself",
+		},
+		{
+			name: "dependency cycle",
+			configure: func(task *models.Task, state *models.State, now time.Time) {
+				task.DependsOn = []string{"dep-1"}
+				dep := testhelpers.BuildTaskByStatus("dep-1", models.TaskStatusImplementing, now)
+				dep.DependsOn = []string{"task-1"}
+				state.Tasks = append(state.Tasks, dep)
+			},
+			wantError: "dependency cycle",
+		},
+		{
+			name: "terminal non-merged dependency",
+			configure: func(task *models.Task, state *models.State, now time.Time) {
+				task.DependsOn = []string{"dep-1"}
+				dep := testhelpers.BuildTaskByStatus("dep-1", models.TaskStatusAbandoned, now)
+				state.Tasks = append(state.Tasks, dep)
+			},
+			wantError: "terminal non-MERGED dependency",
+		},
+		{
+			name: "untrimmed dependency",
+			configure: func(task *models.Task, state *models.State, now time.Time) {
+				task.DependsOn = []string{" dep-1 "}
+				dep := testhelpers.BuildTaskByStatus(" dep-1 ", models.TaskStatusImplementing, now)
+				state.Tasks = append(state.Tasks, dep)
+			},
+			wantError: `invalid depends_on entry " dep-1 "`,
+		},
+		{
+			name: "duplicate dependency",
+			configure: func(task *models.Task, state *models.State, now time.Time) {
+				task.DependsOn = []string{"dep-1", "dep-1"}
+				dep := testhelpers.BuildTaskByStatus("dep-1", models.TaskStatusImplementing, now)
+				state.Tasks = append(state.Tasks, dep)
+			},
+			wantError: `duplicate depends_on entry "dep-1"`,
+		},
+		{
+			name: "downstream dependency",
+			configure: func(task *models.Task, state *models.State, now time.Time) {
+				task.DependsOn = []string{"dep-1"}
+				dep := testhelpers.BuildTaskByStatus("dep-1", models.TaskStatusImplementing, now)
+				dep.RolePair = "coding-pair"
+				state.Tasks = append(state.Tasks, dep)
+			},
+			wantError: "downstream dependency",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			testhelpers.SetupTestGitRepo(t, tmpDir)
+			testhelpers.SetupPipelineConfig(t, tmpDir)
+			stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+
+			now := time.Now().UTC()
+			state := testhelpers.CreateValidState()
+			task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusBlocked, now)
+			task.RolePair = "code-planning-pair"
+			task.Worktree = nil
+			task.BaseCommit = nil
+			state.Tasks = []models.Task{task}
+			tt.configure(&state.Tasks[0], state, now)
+			testhelpers.WriteInitialState(t, stateFile, state)
+
+			_, err := UnblockTaskWithOptions(tmpDir, "task-1", "repair verified", "orchestrator-1", UnblockTaskOptions{})
+			if err == nil {
+				t.Fatal("Expected error, got nil")
+			}
+			if !strings.Contains(err.Error(), tt.wantError) {
+				t.Fatalf("Error = %q, want substring %q", err.Error(), tt.wantError)
+			}
+
+			readState, readErr := db.New(stateFile).Read()
+			if readErr != nil {
+				t.Fatalf("Read state: %v", readErr)
+			}
+			updated := readState.FindTask("task-1")
+			if updated == nil || updated.Status != models.TaskStatusBlocked {
+				t.Fatalf("task status after rejected unblock = %v, want %s", updated, models.TaskStatusBlocked)
+			}
+		})
+	}
+}
+
+func TestUnblockTask_WithoutAssignToRejectsPipelineTerminalDependencies(t *testing.T) {
+	pipelineConfig, err := os.ReadFile(filepath.Join(testhelpers.FindRepoRoot(t), "internal", "pipeline", "testdata", "valid-with-clean.yaml"))
+	if err != nil {
+		t.Fatalf("Read pipeline config: %v", err)
+	}
+
+	tests := []struct {
+		name   string
+		status models.TaskStatus
+	}{
+		{name: "configured clean", status: "INTEGRATION_ANALYSIS_CLEAN"},
+		{name: "transition-source approved", status: "INTEGRATION_ANALYSIS_APPROVED"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			testhelpers.SetupTestGitRepo(t, tmpDir)
+			testhelpers.SetupPipelineConfigBytes(t, tmpDir, pipelineConfig)
+			stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+
+			now := time.Now().UTC()
+			state := testhelpers.CreateValidState()
+			task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusBlocked, now)
+			task.RolePair = "coding-pair"
+			task.Worktree = nil
+			task.BaseCommit = nil
+			task.DependsOn = []string{"dep-1"}
+			dep := testhelpers.BuildTaskByStatus("dep-1", tt.status, now)
+			dep.RolePair = "integration-pair"
+			state.Tasks = []models.Task{task, dep}
+			testhelpers.WriteInitialState(t, stateFile, state)
+
+			_, err := UnblockTaskWithOptions(tmpDir, "task-1", "repair verified", "orchestrator-1", UnblockTaskOptions{})
+			if err == nil {
+				t.Fatalf("UnblockTaskWithOptions accepted pipeline-terminal dependency %s", tt.status)
+			}
+			wantError := fmt.Sprintf("terminal non-MERGED dependency dep-1 (%s)", tt.status)
+			if !strings.Contains(err.Error(), wantError) {
+				t.Fatalf("Error = %q, want substring %q", err.Error(), wantError)
+			}
+
+			readState, readErr := db.New(stateFile).Read()
+			if readErr != nil {
+				t.Fatalf("Read state: %v", readErr)
+			}
+			updated := readState.FindTask("task-1")
+			if updated == nil || updated.Status != models.TaskStatusBlocked {
+				t.Fatalf("task status after rejected unblock = %v, want %s", updated, models.TaskStatusBlocked)
+			}
+		})
+	}
+}
+
+func TestUnblockTask_WithAssignToRejectsPendingDependency(t *testing.T) {
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
 	testhelpers.SetupPipelineConfig(t, tmpDir)
@@ -511,6 +750,7 @@ func TestUnblockTask_RejectsUnmetDependencies(t *testing.T) {
 	task.Worktree = testhelpers.StringPtr(".worktrees/task-1")
 	task.DependsOn = []string{"dep-1"}
 	dep := testhelpers.BuildTaskByStatus("dep-1", models.TaskStatusImplementing, now)
+	dep.RolePair = "code-planning-pair"
 	state.Tasks = []models.Task{task, dep}
 	testhelpers.WriteInitialState(t, stateFile, state)
 
@@ -540,6 +780,7 @@ func TestUnblockTask_AllowsMergedDependency(t *testing.T) {
 	task.Worktree = testhelpers.StringPtr(".worktrees/task-1")
 	task.DependsOn = []string{"dep-1"}
 	dep := testhelpers.BuildTaskByStatus("dep-1", models.TaskStatusMerged, now)
+	dep.RolePair = "code-planning-pair"
 	state.Tasks = []models.Task{task, dep}
 	testhelpers.WriteInitialState(t, stateFile, state)
 

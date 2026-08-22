@@ -25,6 +25,10 @@ When unblocking a repaired `BLOCKED` task, Liza may:
 
 If the unblock-time rebase conflicts, Liza leaves the task `BLOCKED` with repair metadata instead of moving it to integration failure or pretending the task is claimable.
 
+## Current Policy Note (2026-08-21)
+
+Issue #118 separates restoration to a role-pair initial status from immediate claimability. Unassigned `unblock-task` may restore a repaired task with valid pending dependencies, but the restored task remains dependency-held and unclaimable until every direct dependency is `MERGED`; direct `--assign-to` remains rejected while any dependency is unmet. Once the dependencies merge, preserved-worktree claim uses one captured integration SHA for rebase and ancestry validation. It then holds the completion lock across the final integration-ref equality check and assignment, ordering cooperating integration movement on either side without holding the integration mutation lock across the blackboard write.
+
 ## Consequences
 
 Positive:

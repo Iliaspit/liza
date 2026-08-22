@@ -121,10 +121,19 @@ HEAD, new HEAD, target ref, and target SHA. Rebase conflicts are aborted and the
 task remains `BLOCKED` with fresh blocked metadata and a repair request; this is
 distinct from submit/merge conflicts that move tasks to `INTEGRATION_FAILED`.
 
-When `unblock-task` is run without `--assign-to`, it restores the task to the
-role-pair initial status. If `worktree` remains set, that initial task is a
-claimable continuation from the preserved branch. Claim validates the preserved
-path/branch/HEAD/base and fails closed rather than deleting invalid work.
+When `unblock-task` is run without `--assign-to`, it may restore a repaired task
+with valid pending dependencies to the role-pair initial status. The task remains
+dependency-held and unclaimable until every direct dependency is `MERGED`;
+direct `--assign-to` remains rejected while any dependency is unmet. If
+`worktree` remains set, the initial task is a preserved-branch continuation.
+
+Once dependencies merge, claim rechecks them before filesystem work, captures
+one integration commit, and rebases or validates the preserved HEAD on that
+captured integration SHA. The completion lock then encloses the final ref
+equality check and assignment, ordering cooperating integration movement before
+or after the assignment without holding the integration mutation lock across the
+blackboard write. A stale ref, changed HEAD, dirty worktree, or failed rebase
+leaves the task unassigned and preserves actionable recovery state.
 
 ---
 

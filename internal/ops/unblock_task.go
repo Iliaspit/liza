@@ -12,6 +12,7 @@ import (
 	"github.com/liza-mas/liza/internal/identity"
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/paths"
+	"github.com/liza-mas/liza/internal/pipeline"
 	"github.com/liza-mas/liza/internal/roles"
 )
 
@@ -94,8 +95,8 @@ func UnblockTask(projectRoot, taskID, assignTo, reason, agentID string) (*Unbloc
 	return UnblockTaskWithOptions(projectRoot, taskID, reason, agentID, UnblockTaskOptions{AssignTo: assignTo})
 }
 
-// UnblockTaskWithOptions restores a repaired BLOCKED task to either a claimable
-// initial state or directly to its executing state when AssignTo is provided.
+// UnblockTaskWithOptions restores a repaired BLOCKED task to either its initial
+// state or directly to its executing state when AssignTo is provided.
 func UnblockTaskWithOptions(projectRoot, taskID, reason, agentID string, opts UnblockTaskOptions) (*UnblockTaskResult, error) {
 	if taskID == "" {
 		return nil, &PreconditionError{Reason: "task ID is required"}
@@ -157,10 +158,19 @@ func UnblockTaskWithOptions(projectRoot, taskID, reason, agentID string, opts Un
 		if err != nil {
 			return &PreconditionError{Reason: fmt.Sprintf("unrecognized role-pair %q: %v", task.RolePair, err)}
 		}
+		if err := validateUnblockDirectDependencies(state, resolver, task); err != nil {
+			return err
+		}
+		if err := validateDependencyDirection(state, resolver, task.ID, task.RolePair, task.DependsOn); err != nil {
+			return err
+		}
 		var unmet []string
 		for _, dep := range unmetDependencies(task, state) {
 			if dep.Invalid() {
 				return &PreconditionError{Reason: fmt.Sprintf("task %s has invalid dependency: %s", taskID, dep.Summary())}
+			}
+			if opts.AssignTo == "" && dep.Kind == models.DependencyUnsatisfiedPending {
+				continue
 			}
 			unmet = append(unmet, dep.Summary())
 		}
@@ -258,7 +268,7 @@ func UnblockTaskWithOptions(projectRoot, taskID, reason, agentID string, opts Un
 			FromStatus: fromStatus,
 			ToStatus:   targetStatus,
 			AssignedTo: opts.AssignTo,
-			Claimable:  opts.AssignTo == "",
+			Claimable:  task.IsClaimable(expectedDoer, state.Tasks, resolver),
 			Rebase:     rebaseResult,
 		}
 		if opts.AssignTo != "" {
@@ -271,6 +281,36 @@ func UnblockTaskWithOptions(projectRoot, taskID, reason, agentID string, opts Un
 	}
 
 	return &result, nil
+}
+
+func validateUnblockDirectDependencies(state *models.State, resolver *pipeline.Resolver, task *models.Task) error {
+	seen := make(map[string]bool, len(task.DependsOn))
+	for _, depID := range task.DependsOn {
+		if depID == "" || strings.TrimSpace(depID) != depID {
+			return &PreconditionError{Reason: fmt.Sprintf("task %s has invalid depends_on entry %q", task.ID, depID)}
+		}
+		if depID == task.ID {
+			return &PreconditionError{Reason: fmt.Sprintf("task %s cannot depend on itself", task.ID)}
+		}
+		if seen[depID] {
+			return &PreconditionError{Reason: fmt.Sprintf("task %s has duplicate depends_on entry %q", task.ID, depID)}
+		}
+		seen[depID] = true
+
+		depTask := state.FindTask(depID)
+		if depTask == nil {
+			continue
+		}
+		if depTask.Status != models.TaskStatusMerged &&
+			depTask.Status != models.TaskStatusSuperseded &&
+			depTask.Status.IsPipelineSprintTerminal(resolver.SprintTerminalStates()) {
+			return &PreconditionError{Reason: fmt.Sprintf("task %s has terminal non-MERGED dependency %s (%s)", task.ID, depID, depTask.Status)}
+		}
+		if dependencyReachesTask(state, depID, task.ID, map[string]bool{}) {
+			return &PreconditionError{Reason: fmt.Sprintf("task %s dependency %s creates a dependency cycle", task.ID, depID)}
+		}
+	}
+	return nil
 }
 
 func maybeRebaseTaskBeforeUnblock(bb *db.Blackboard, projectRoot, taskID, agentID string, opts UnblockTaskOptions) (*UnblockTaskRebaseResult, error) {

@@ -888,6 +888,80 @@ func TestJSON_RetargetDependency_RejectsTransitiveCycle(t *testing.T) {
 	}
 }
 
+func TestJSON_UnblockTask_PendingDependencyReportsNotClaimable(t *testing.T) {
+	projectRoot, _ := setupMutationTestProject(t, func(state *models.State) {
+		now := time.Now().UTC()
+		task := testhelpers.BuildTaskByStatus("task-json-unblock", models.TaskStatusBlocked, now)
+		task.RolePair = "code-planning-pair"
+		task.Worktree = nil
+		task.BaseCommit = nil
+		task.AssignedTo = nil
+		task.LeaseExpires = nil
+		task.DependsOn = []string{"task-json-pending-dependency"}
+		dependency := testhelpers.BuildTaskByStatus("task-json-pending-dependency", models.TaskStatusImplementing, now)
+		dependency.RolePair = "code-planning-pair"
+		state.Tasks = []models.Task{task, dependency}
+	})
+
+	stdout, err := executeRootCommandCapture(t, projectRoot,
+		"unblock-task", "task-json-unblock",
+		"--reason", "repair verified",
+		"--agent-id", "orchestrator-1",
+		"--json",
+	)
+	if err != nil {
+		t.Fatalf("unblock-task --json failed: %v\n%s", err, stdout)
+	}
+
+	env := parseEnvelope(t, stdout)
+	if env["ok"] != true {
+		t.Fatalf("expected ok=true, got %v", env["ok"])
+	}
+	result, ok := env["result"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected result object, got %T", env["result"])
+	}
+	if result["claimable"] != false {
+		t.Fatalf("claimable = %v, want false", result["claimable"])
+	}
+	if result["to_status"] != string(models.TaskStatusDraftCodingPlan) {
+		t.Fatalf("to_status = %v, want %s", result["to_status"], models.TaskStatusDraftCodingPlan)
+	}
+}
+
+func TestJSON_UnblockTask_AssignToRejectsPendingDependency(t *testing.T) {
+	projectRoot, statePath := setupMutationTestProject(t, func(state *models.State) {
+		now := time.Now().UTC()
+		task := testhelpers.BuildTaskByStatus("task-json-unblock-direct", models.TaskStatusBlocked, now)
+		task.RolePair = "code-planning-pair"
+		task.Worktree = nil
+		task.BaseCommit = nil
+		task.AssignedTo = nil
+		task.LeaseExpires = nil
+		task.DependsOn = []string{"task-json-pending-dependency"}
+		dependency := testhelpers.BuildTaskByStatus("task-json-pending-dependency", models.TaskStatusImplementing, now)
+		dependency.RolePair = "code-planning-pair"
+		state.Tasks = []models.Task{task, dependency}
+	})
+
+	stdout, err := executeRootCommandCapture(t, projectRoot,
+		"unblock-task", "task-json-unblock-direct",
+		"--assign-to", "code-planner-1",
+		"--reason", "repair verified",
+		"--agent-id", "orchestrator-1",
+		"--json",
+	)
+	if err == nil {
+		t.Fatal("expected --assign-to rejection while dependency is pending")
+	}
+	assertJSONError(t, stdout, "validation", "has unmet dependencies")
+
+	task := mustFindTask(t, readState(t, statePath), "task-json-unblock-direct")
+	if task.Status != models.TaskStatusBlocked || task.AssignedTo != nil {
+		t.Fatalf("rejected task changed: status=%s assigned_to=%v", task.Status, task.AssignedTo)
+	}
+}
+
 func TestJSON_RetargetDependency_RejectsNonOrchestrator(t *testing.T) {
 	projectRoot, _ := setupMutationTestProject(t, func(state *models.State) {
 		now := time.Now().UTC()

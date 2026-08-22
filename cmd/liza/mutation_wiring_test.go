@@ -610,6 +610,15 @@ func TestMutationCommandWiring(t *testing.T) {
 		}
 	})
 
+	t.Run("unblock-task help distinguishes initial status from claimability", func(t *testing.T) {
+		if !strings.Contains(unblockTaskCmd.Long, "initial status") {
+			t.Fatalf("unblock-task help = %q, want initial status", unblockTaskCmd.Long)
+		}
+		if !strings.Contains(unblockTaskCmd.Long, "dependency-held") || !strings.Contains(unblockTaskCmd.Long, "not immediately claimable") {
+			t.Fatalf("unblock-task help = %q, want dependency-held claimability distinction", unblockTaskCmd.Long)
+		}
+	})
+
 	t.Run("unblock-task without assign-to restores claimable state", func(t *testing.T) {
 		projectRoot, statePath := setupMutationTestProject(t, func(state *models.State) {
 			now := time.Now().UTC()
@@ -641,6 +650,84 @@ func TestMutationCommandWiring(t *testing.T) {
 		}
 		if task.AssignedTo != nil {
 			t.Fatalf("task assigned_to = %v, want nil", *task.AssignedTo)
+		}
+	})
+
+	t.Run("unblock-task without assign-to restores dependency-held initial state", func(t *testing.T) {
+		projectRoot, statePath := setupMutationTestProject(t, func(state *models.State) {
+			now := time.Now().UTC()
+			task := testhelpers.BuildTaskByStatus("task-unblock-dependency-held", models.TaskStatusBlocked, now)
+			task.RolePair = "code-planning-pair"
+			task.Worktree = nil
+			task.BaseCommit = nil
+			task.AssignedTo = nil
+			task.LeaseExpires = nil
+			task.DependsOn = []string{"task-pending-dependency"}
+			dependency := testhelpers.BuildTaskByStatus("task-pending-dependency", models.TaskStatusImplementing, now)
+			dependency.RolePair = "code-planning-pair"
+			state.Tasks = []models.Task{task, dependency}
+		})
+
+		err := executeRootCommand(
+			t,
+			projectRoot,
+			"unblock-task",
+			"task-unblock-dependency-held",
+			"--reason",
+			"repair verified",
+			"--agent-id",
+			"orchestrator-1",
+		)
+		if err != nil {
+			t.Fatalf("unblock-task execute failed: %v", err)
+		}
+
+		task := mustFindTask(t, readState(t, statePath), "task-unblock-dependency-held")
+		if task.Status != models.TaskStatusDraftCodingPlan {
+			t.Fatalf("task status = %s, want %s", task.Status, models.TaskStatusDraftCodingPlan)
+		}
+		if task.AssignedTo != nil {
+			t.Fatalf("task assigned_to = %v, want nil", *task.AssignedTo)
+		}
+	})
+
+	t.Run("unblock-task with assign-to rejects pending dependency", func(t *testing.T) {
+		projectRoot, statePath := setupMutationTestProject(t, func(state *models.State) {
+			now := time.Now().UTC()
+			task := testhelpers.BuildTaskByStatus("task-unblock-direct-rejected", models.TaskStatusBlocked, now)
+			task.RolePair = "code-planning-pair"
+			task.Worktree = nil
+			task.BaseCommit = nil
+			task.AssignedTo = nil
+			task.LeaseExpires = nil
+			task.DependsOn = []string{"task-pending-dependency"}
+			dependency := testhelpers.BuildTaskByStatus("task-pending-dependency", models.TaskStatusImplementing, now)
+			dependency.RolePair = "code-planning-pair"
+			state.Tasks = []models.Task{task, dependency}
+		})
+
+		err := executeRootCommand(
+			t,
+			projectRoot,
+			"unblock-task",
+			"task-unblock-direct-rejected",
+			"--assign-to",
+			"code-planner-1",
+			"--reason",
+			"repair verified",
+			"--agent-id",
+			"orchestrator-1",
+		)
+		if err == nil {
+			t.Fatal("expected --assign-to rejection while dependency is pending")
+		}
+		if !strings.Contains(err.Error(), "has unmet dependencies") {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		task := mustFindTask(t, readState(t, statePath), "task-unblock-direct-rejected")
+		if task.Status != models.TaskStatusBlocked || task.AssignedTo != nil {
+			t.Fatalf("rejected task changed: status=%s assigned_to=%v", task.Status, task.AssignedTo)
 		}
 	})
 

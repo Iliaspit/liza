@@ -86,6 +86,8 @@ claimable(task, role) =
 
 Agent cannot claim if already assigned to another executing task.
 
+Unassigned `unblock-task` may restore a repaired task with valid pending dependencies to its role-pair initial status. The restored task remains dependency-held and unclaimable until every direct dependency is `MERGED`; `unblock-task --assign-to` remains rejected while any dependency is unmet.
+
 **Enforced:** spec, code (`claim_task.go`)
 
 ### 3.4 Dependency Direction
@@ -155,6 +157,7 @@ Agent registration/unregistration, heartbeat, post-exit IDLE reset, orchestrator
 | Integration ref advancement and every main-index sync/restore run under one project-scoped file lock; blackboard state writes happen after releasing it | Cross-process `index.lock` collisions, lock-order inversion | spec (`worktree-management.md`), code (`wt_merge.go`, `integration_mutation_lock.go`) |
 | Sliced-integration analysis materialization is idempotent: a deterministic slice/global analysis key has exactly one matching task and one planned membership across concurrent reconciliation, wake, and restart | Duplicate analysis tasks or generations | code (`integration_reconcile.go`, `workdetection.go`) |
 | Completion and integration-ref mutation are linearizable under the completion → mutation → blackboard-read lock order; ADR-0112's mutation → blackboard-read order remains intact, and there is no blackboard state write while the mutation lock is held | Durable completion tied to a stale integration HEAD, deadlock | code (`pipeline_ops.go`, `integration_mutation_lock.go`, `wt_merge.go`, `mode_change.go`) |
+| Preserved initial-status claim rebases and validates the task worktree against one captured integration SHA, then holds the completion lock across the final ref equality check and assignment to order both against cooperating integration movement, without holding the integration mutation lock across the blackboard write | Assignment against a stale dependency artifact, lock-order inversion | code (`claim_task.go`, `claim_task_strategy.go`, `pipeline_ops.go`) |
 | Singleton Blackboard instances per state path | Cache coherence, fragmented locks | code (`blackboard.go` via `sync.Map`) |
 | Concurrent transition detection: re-validate status under lock before committing | Status changed between read and write | code (`wt_merge.go`, `submit_review.go`) |
 
@@ -196,7 +199,7 @@ Integration-fix claims clear active `output[]`, `review_commit`, approvals, `mer
 | Worktree path is deterministic: `.worktrees/{taskID}` | Directory traversal, path confusion | code (`claim_task.go`, `wt_create.go`) |
 | ABANDONED/SUPERSEDED/MERGED tasks: worktree must be deleted; BLOCKED worktrees may be preserved only for explicit repair/unblock workflows | Stale worktrees, resource leaks, lost repair work | spec (`worktree-management.md`) |
 | Rejected-task reclaim preserves the task worktree/branch for same-owner reclaim and post-expiry reassignment; missing or corrupt worktree state is recreated from integration | Lost rejected work, inconsistent reassignment semantics | spec, code (`claim_task.go`) |
-| Initial-status task with `worktree` set means claimable continuation from preserved branch; claim validates path, task branch, HEAD, and `base_commit`, and fails rather than deleting invalid preserved work | Lost blocked-task work, stale worktree misclassification | spec, code (`claim_task.go`) |
+| Initial-status task with `worktree` set means preserved-branch continuation; it may remain dependency-held, and claim validates dependencies, path, task branch, HEAD, and `base_commit` before resuming rather than deleting invalid preserved work | Lost blocked-task work, stale worktree misclassification | spec, code (`claim_task.go`) |
 | Rebase onto integration branch before submission; conflict → abort and restore clean state | Merge conflicts discovered late | code (`submit_review.go`) |
 | Integration progression fails closed until planning is settled, required coverage is complete, every slice is resolved, and coding plus repair work is terminal; blocked/abandoned repairs, slice exhaustion, unavailable topology, and global generation exhaustion cannot satisfy completion | Premature global analysis or successful completion with missing evidence | code (`integration_progress.go`, `pipeline_ops.go`) |
 | Clean integration completion names an immutable reviewed source commit and is effective only while it equals live integration HEAD; a later ref mutation appends a receipt and mutation-side invalidation makes any goal-complete stop tied to the superseded commit non-successful | Stale clean evidence surviving a branch mutation | code (`submit_verdict.go`, `wt_merge.go`, `mode_change.go`) |

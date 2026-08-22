@@ -556,15 +556,15 @@ Effects:
 
 var unblockTaskCmd = &cobra.Command{
 	Use:   "unblock-task <task-id>",
-	Short: "Restore a repaired BLOCKED task to claimable or executing state",
+	Short: "Restore a repaired BLOCKED task to its initial or executing state",
 	Long: `Restore a BLOCKED task after the orchestrator has verified that the blocker is gone.
 
 	This is for repair completion, not normal task claiming. Without --assign-to,
-it moves the task back to the initial claimable status for its role_pair. With
---assign-to, it directly restores the executing status and assigns the requested
-doer agent. With --rebase-on, it rebases a preserved task worktree before
-unblocking, updates base_commit, and leaves rebase conflicts BLOCKED with fresh
-repair metadata.`,
+	it moves the task back to the initial status for its role_pair. Pending dependencies
+	keep that task dependency-held and not immediately claimable. With --assign-to,
+	it directly restores the executing status and assigns the requested doer agent.
+	With --rebase-on, it rebases a preserved task worktree before unblocking, updates
+	base_commit, and leaves rebase conflicts BLOCKED with fresh repair metadata.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) (retErr error) {
 		if isJSON(cmd) {
@@ -1364,7 +1364,7 @@ func init() {
 
 	// Unblock-task command flags
 	unblockTaskCmd.Flags().String("agent-id", "", "orchestrator agent ID (auto-resolved if not provided)")
-	unblockTaskCmd.Flags().String("assign-to", "", "doer agent ID to resume the task directly; omitted makes the task claimable")
+	unblockTaskCmd.Flags().String("assign-to", "", "doer agent ID to resume the task directly; omitted restores initial status and may remain dependency-held")
 	unblockTaskCmd.Flags().String("reason", "", "reason the blocked task can resume (required)")
 	unblockTaskCmd.Flags().String("rebase-on", "", "branch or commit to rebase the task worktree onto before unblocking")
 	unblockTaskCmd.Flags().Bool("allow-dirty", false, "allow tracked worktree changes during --rebase-on by using git rebase --autostash")

@@ -1,7 +1,9 @@
 package ops
 
 import (
+	stderrors "errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/liza-mas/liza/internal/db"
@@ -11,16 +13,19 @@ import (
 )
 
 type claimContext struct {
-	taskID            string
-	agentID           string
-	taskStatus        models.TaskStatus
-	targetStatus      models.TaskStatus
-	worktreeDir       string
-	worktreeRel       string
-	integrationBranch string
-	previousAssignee  string
-	baseCommit        string
-	leaseExpires      time.Time
+	taskID              string
+	agentID             string
+	taskStatus          models.TaskStatus
+	targetStatus        models.TaskStatus
+	worktreeDir         string
+	worktreeRel         string
+	integrationBranch   string
+	previousAssignee    string
+	baseCommit          string
+	preservedBaseCommit string
+	worktreeHead        string
+	leaseExpires        time.Time
+	pipelineTransitions map[models.TaskStatus][]models.TaskStatus
 }
 
 type claimStrategy interface {
@@ -130,7 +135,7 @@ func (preservedInitialClaimStrategy) requiresDependencyRecheck() bool {
 }
 
 func (preservedInitialClaimStrategy) handleWorktree(
-	_ *db.Blackboard,
+	bb *db.Blackboard,
 	gitWrapper *git.Git,
 	ctx *claimContext,
 ) (claimWorktreePhaseResult, error) {
@@ -150,17 +155,117 @@ func (preservedInitialClaimStrategy) handleWorktree(
 	if err != nil {
 		return result, err
 	}
-	if _, err := gitWrapper.GetCommitSHA(ctx.baseCommit); err != nil {
-		return result, &PreconditionError{Reason: fmt.Sprintf("preserved base_commit %s does not resolve: %v", ctx.baseCommit, err)}
+	if _, err := gitWrapper.GetCommitSHA(ctx.preservedBaseCommit); err != nil {
+		return result, &PreconditionError{Reason: fmt.Sprintf("preserved base_commit %s does not resolve: %v", ctx.preservedBaseCommit, err)}
 	}
-	ancestor, err := gitWrapper.IsAncestor(ctx.baseCommit, head)
+	ancestor, err := gitWrapper.IsAncestor(ctx.preservedBaseCommit, head)
 	if err != nil {
 		return result, err
 	}
 	if !ancestor {
-		return result, &PreconditionError{Reason: fmt.Sprintf("preserved base_commit %s is not an ancestor of worktree HEAD %s", ctx.baseCommit, head)}
+		return result, &PreconditionError{Reason: fmt.Sprintf("preserved base_commit %s is not an ancestor of worktree HEAD %s", ctx.preservedBaseCommit, head)}
 	}
+
+	status, err := gitWrapper.WorktreeStatusShort(ctx.worktreeDir)
+	if err != nil {
+		return result, err
+	}
+	if strings.TrimSpace(status) != "" {
+		reason := fmt.Sprintf("preserved worktree is dirty: %s", strings.Join(strings.Fields(status), " "))
+		if markErr := markPreservedInitialClaimRecovery(bb, ctx, "clean_preserved_claim_worktree", reason, reason); markErr != nil {
+			return result, fmt.Errorf("%s; failed to record recovery state: %w", reason, markErr)
+		}
+		return result, &PreconditionError{Reason: reason}
+	}
+
+	targetAncestor, err := gitWrapper.IsAncestor(ctx.baseCommit, head)
+	if err != nil {
+		return result, err
+	}
+	if !targetAncestor {
+		if err := gitWrapper.RebaseOnto(ctx.worktreeDir, ctx.baseCommit); err != nil {
+			kind := "retry_preserved_claim_rebase"
+			reason := fmt.Sprintf("preserved worktree rebase failed onto %s: %v", ctx.baseCommit, err)
+			var conflict *git.RebaseConflictError
+			if stderrors.As(err, &conflict) {
+				kind = "resolve_preserved_claim_rebase_conflict"
+				reason = fmt.Sprintf("preserved worktree rebase conflict onto %s: %v", ctx.baseCommit, err)
+			}
+			if abortErr := gitWrapper.AbortRebase(ctx.worktreeDir); abortErr != nil {
+				reason = fmt.Sprintf("%s; abort failed: %v", reason, abortErr)
+			}
+			if markErr := markPreservedInitialClaimRecovery(bb, ctx, kind, reason, err.Error()); markErr != nil {
+				return result, fmt.Errorf("%s; failed to record recovery state: %w", reason, markErr)
+			}
+			return result, &PreconditionError{Reason: reason}
+		}
+		head, err = gitWrapper.GetWorktreeHEAD(ctx.taskID)
+		if err != nil {
+			return result, err
+		}
+	}
+
+	ancestor, err = gitWrapper.IsAncestor(ctx.baseCommit, head)
+	if err != nil {
+		return result, err
+	}
+	if !ancestor {
+		return result, &PreconditionError{Reason: fmt.Sprintf("preserved worktree HEAD %s does not descend from captured integration commit %s", head, ctx.baseCommit)}
+	}
+	ctx.worktreeHead = head
 	return result, nil
+}
+
+func markPreservedInitialClaimRecovery(
+	bb *db.Blackboard,
+	ctx *claimContext,
+	operation,
+	reason,
+	evidence string,
+) error {
+	now := time.Now().UTC()
+	question := "Repair the preserved worktree, then use unblock-task to restore it for a new claim."
+	statusCommand := fmt.Sprintf("git -C %s status --short", ctx.worktreeRel)
+	repairCommand := statusCommand
+	validation := []string{statusCommand}
+	if operation != "clean_preserved_claim_worktree" {
+		repairCommand = fmt.Sprintf("git -C %s rebase %s", ctx.worktreeRel, ctx.baseCommit)
+		validation = append(validation, repairCommand)
+	}
+	return bb.Modify(func(state *models.State) error {
+		task := state.FindTask(ctx.taskID)
+		if task == nil {
+			return fmt.Errorf("task %s not found while recording preserved claim recovery", ctx.taskID)
+		}
+		if task.Status != ctx.taskStatus {
+			return fmt.Errorf("race condition: task status changed from %s to %s", ctx.taskStatus, task.Status)
+		}
+		if err := task.TransitionWith(models.TaskStatusBlocked, ctx.pipelineTransitions); err != nil {
+			return err
+		}
+		task.AssignedTo = nil
+		task.LeaseExpires = nil
+		task.BlockedReason = &reason
+		task.BlockedQuestions = []string{question}
+		task.RepairRequest = &models.RepairRequest{
+			Operation:  operation,
+			Target:     ctx.taskID,
+			Command:    repairCommand,
+			Evidence:   []string{truncateForDiagnostics(evidence, 2000)},
+			Validation: validation,
+		}
+		task.History = append(task.History, models.TaskHistoryEntry{
+			Time:   now,
+			Event:  models.TaskEventBlocked,
+			Agent:  &ctx.agentID,
+			Reason: &reason,
+			Extra: map[string]any{
+				"preserved_worktree": true,
+				"rebase_target_sha":  ctx.baseCommit,
+			},
+		})
+		return nil
+	})
 }
 
 func (preservedInitialClaimStrategy) shouldRunPostWorktreeCmd(claimWorktreePhaseResult) bool {

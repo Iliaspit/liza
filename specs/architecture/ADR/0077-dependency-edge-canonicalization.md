@@ -26,6 +26,10 @@ Liza now rewrites or rejects dependency edges when state changes:
 
 Recursive resolution remains a useful concept for understanding supersession, but the persisted graph is made canonical before consumers rely on it.
 
+## Current Policy Note (2026-08-21)
+
+Issue #118 narrows the original unblock-readiness rule without weakening canonical edges. Unassigned `unblock-task` may restore a repaired task with valid pending dependencies to its role-pair initial status; that task remains dependency-held and unclaimable until every direct dependency is `MERGED`, and direct `--assign-to` remains rejected while any dependency is unmet. For a preserved worktree, eventual claim rebases and validates the task branch on one captured integration SHA, then holds the completion lock across the final ref equality check and assignment to order both against cooperating integration movement, without holding the integration mutation lock across the blackboard write.
+
 ## Consequences
 
 Positive:

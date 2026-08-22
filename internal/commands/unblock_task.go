@@ -6,7 +6,7 @@ import (
 	"github.com/liza-mas/liza/internal/ops"
 )
 
-// UnblockTaskCommand restores a repaired BLOCKED task to its executing status.
+// UnblockTaskCommand restores a repaired BLOCKED task to its initial or executing status.
 func UnblockTaskCommand(projectRoot, taskID, assignTo, reason, agentID string) error {
 	return UnblockTaskWithOptionsCommand(projectRoot, taskID, reason, agentID, ops.UnblockTaskOptions{AssignTo: assignTo})
 }
@@ -21,8 +21,11 @@ func UnblockTaskWithOptionsCommand(projectRoot, taskID, reason, agentID string, 
 	if result.AssignedTo != "" {
 		fmt.Printf("Task %s unblocked: %s -> %s, assigned to %s\n",
 			result.TaskID, result.FromStatus, result.ToStatus, result.AssignedTo)
-	} else {
+	} else if result.Claimable {
 		fmt.Printf("Task %s unblocked: %s -> %s, claimable\n",
+			result.TaskID, result.FromStatus, result.ToStatus)
+	} else {
+		fmt.Printf("Task %s unblocked: %s -> %s, dependency-held\n",
 			result.TaskID, result.FromStatus, result.ToStatus)
 	}
 	if result.Rebase != nil {
