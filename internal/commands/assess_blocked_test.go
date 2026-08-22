@@ -1,12 +1,121 @@
 package commands
 
 import (
+	"bytes"
+	"io"
+	"os"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/liza-mas/liza/internal/models"
+	"github.com/liza-mas/liza/internal/ops"
 	"github.com/liza-mas/liza/internal/testhelpers"
 )
+
+func TestAssessBlockedCommand_ReconcilesCanonicalMetadata(t *testing.T) {
+	tests := []struct {
+		name          string
+		taskID        string
+		repairRequest *models.RepairRequest
+		wantRepair    string
+	}{
+		{
+			name:   "command-style repair request",
+			taskID: "task-command-repair",
+			repairRequest: &models.RepairRequest{
+				Operation:  "retarget-dependency",
+				Target:     "task-command-repair",
+				Command:    "liza retarget-dependency task-command-repair stale replacement --json",
+				Evidence:   []string{"command=retarget exit_code=1 stderr=orchestrator authority required"},
+				Validation: []string{"liza validate --json"},
+			},
+			wantRepair: `{"operation":"retarget-dependency","target":"task-command-repair","command":"liza retarget-dependency task-command-repair stale replacement --json","evidence":["command=retarget exit_code=1 stderr=orchestrator authority required"],"validation":["liza validate --json"]}`,
+		},
+		{
+			name:   "declarative repair request",
+			taskID: "task-declarative-repair",
+			repairRequest: &models.RepairRequest{
+				Operation: "apply-dependency-repair",
+				Target:    "task-declarative-repair",
+				DependencyUpdates: []models.DependencyUpdate{{
+					TaskID:            "consumer",
+					ExpectedDependsOn: []string{},
+					DesiredDependsOn:  []string{"producer"},
+				}},
+				Evidence:   []string{"error=dependency repair requires orchestrator authority"},
+				Validation: []string{"liza validate --json"},
+			},
+			wantRepair: `{"operation":"apply-dependency-repair","target":"task-declarative-repair","dependency_updates":[{"task_id":"consumer","expected_depends_on":[],"desired_depends_on":["producer"]}],"evidence":["error=dependency repair requires orchestrator authority"],"validation":["liza validate --json"]}`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			statePath, _ := testhelpers.SetupLizaDir(t, tmpDir)
+			testhelpers.CreateSpecFile(t, tmpDir, "vision.md", "# Vision\n")
+			now := time.Now().UTC()
+			oldReason := "obsolete blocker"
+			state := testhelpers.CreateValidState()
+			task := testhelpers.BuildTaskByStatus(tt.taskID, models.TaskStatusBlocked, now)
+			task.AssignedTo = nil
+			task.Worktree = nil
+			task.SpecRef = state.Goal.SpecRef
+			task.BlockedReason = &oldReason
+			task.BlockedQuestions = []string{"obsolete question"}
+			state.Tasks = []models.Task{task}
+			testhelpers.WriteInitialState(t, statePath, state)
+
+			stdout := captureAssessBlockedStdout(t, func() error {
+				return AssessBlockedWithOptionsCommand(tmpDir, tt.taskID, "current assessment", "orchestrator-1", ops.AssessBlockedOptions{
+					Reason:        "current blocker",
+					Questions:     []string{"Can the orchestrator repair it?"},
+					RepairRequest: tt.repairRequest,
+				})
+			})
+
+			for _, want := range []string{
+				"Reason: current blocker\n",
+				`Questions: ["Can the orchestrator repair it?"]` + "\n",
+				"Repair request: " + tt.wantRepair + "\n",
+			} {
+				if !strings.Contains(stdout, want) {
+					t.Fatalf("output = %q, want exact fragment %q", stdout, want)
+				}
+			}
+		})
+	}
+}
+
+func captureAssessBlockedStdout(t *testing.T, run func() error) string {
+	t.Helper()
+	oldStdout := os.Stdout
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("create stdout pipe: %v", err)
+	}
+	os.Stdout = writer
+	t.Cleanup(func() { os.Stdout = oldStdout })
+
+	runErr := run()
+	if closeErr := writer.Close(); closeErr != nil {
+		t.Fatalf("close stdout writer: %v", closeErr)
+	}
+	os.Stdout = oldStdout
+	if runErr != nil {
+		t.Fatalf("AssessBlockedWithOptionsCommand() error = %v", runErr)
+	}
+
+	var output bytes.Buffer
+	if _, err := io.Copy(&output, reader); err != nil {
+		t.Fatalf("read stdout: %v", err)
+	}
+	if err := reader.Close(); err != nil {
+		t.Fatalf("close stdout reader: %v", err)
+	}
+	return output.String()
+}
 
 func TestAssessBlockedCommand(t *testing.T) {
 	tests := []struct {

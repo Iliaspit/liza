@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 
@@ -10,12 +11,34 @@ import (
 // AssessBlockedCommand records an orchestrator assessment of a BLOCKED task.
 // Delegates business logic to ops.AssessBlocked.
 func AssessBlockedCommand(projectRoot, taskID, note, agentID string) error {
-	result, err := ops.AssessBlocked(projectRoot, taskID, note, agentID)
+	return AssessBlockedWithOptionsCommand(projectRoot, taskID, note, agentID, ops.AssessBlockedOptions{})
+}
+
+// AssessBlockedWithOptionsCommand records an orchestrator assessment, optionally
+// reconciles canonical blocker metadata, and prints the resulting state.
+func AssessBlockedWithOptionsCommand(projectRoot, taskID, note, agentID string, opts ops.AssessBlockedOptions) error {
+	result, err := ops.AssessBlockedWithOptions(projectRoot, taskID, note, agentID, opts)
 	if err != nil {
 		return fmt.Errorf("assess blocked: %w", err)
 	}
 
 	fmt.Printf("Task %s assessed by orchestrator\n", result.TaskID)
+	if result.Reason != "" {
+		questions, err := json.Marshal(result.Questions)
+		if err != nil {
+			return fmt.Errorf("encode resulting blocked questions: %w", err)
+		}
+		fmt.Printf("Reason: %s\nQuestions: %s\n", result.Reason, questions)
+		if result.RepairRequest == nil {
+			fmt.Println("Repair request: none")
+		} else {
+			repairRequest, err := json.Marshal(result.RepairRequest)
+			if err != nil {
+				return fmt.Errorf("encode resulting repair request: %w", err)
+			}
+			fmt.Printf("Repair request: %s\n", repairRequest)
+		}
+	}
 	for _, warning := range result.Warnings {
 		fmt.Fprintf(os.Stderr, "warning: %s\n", warning)
 	}

@@ -83,6 +83,90 @@ func TestRetargetDependency_ReplacesEdgeAndClearsMatchingRepairRequest(t *testin
 	}
 }
 
+func TestRetargetDependency_ClearsRepairRequestAfterEquivalentCanonicalRepair(t *testing.T) {
+	tmpDir := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, tmpDir)
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+
+	now := time.Now().UTC()
+	state := testhelpers.CreateValidState()
+	state.Goal.SpecRef = "README.md"
+	task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusBlocked, now)
+	task.DependsOn = []string{"old-dep"}
+	task.RepairRequest = &models.RepairRequest{
+		Operation:  retargetDependencyOperation,
+		Target:     "task-1",
+		Command:    "liza retarget-dependency task-1 old-dep replacement-new --reason repair --agent-id orchestrator-1 --json",
+		Evidence:   []string{"command=liza claim-task task-1 coder-1 exit_code=1 stderr=task has invalid dependency old-dep"},
+		Validation: []string{"liza validate --json"},
+	}
+	originalRepairRequest := *task.RepairRequest
+	originalBlockedReason := *task.BlockedReason
+	originalBlockedQuestions := slices.Clone(task.BlockedQuestions)
+	superseded := testhelpers.BuildTaskByStatus("replacement-old", models.TaskStatusSuperseded, now)
+	superseded.RolePair = "coding-pair"
+	superseded.SupersededBy = []string{"replacement-new"}
+	superseded.RescopeReason = testhelpers.StringPtr("replaced")
+	state.Tasks = []models.Task{
+		task,
+		testhelpers.BuildTaskByStatus("old-dep", models.TaskStatusMerged, now),
+		superseded,
+		testhelpers.BuildTaskByStatus("replacement-new", models.TaskStatusMerged, now),
+	}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	result, err := RetargetDependency(tmpDir, "task-1", "old-dep", []string{"replacement-old"}, "Follow canonical replacement", "orchestrator-1")
+	if err != nil {
+		t.Fatalf("RetargetDependency() error: %v", err)
+	}
+	if !result.RepairRequestCleared {
+		t.Fatal("RepairRequestCleared = false, want true")
+	}
+	if !slices.Equal(result.CanonicalDependencies, []string{"replacement-new"}) {
+		t.Fatalf("CanonicalDependencies = %v, want [replacement-new]", result.CanonicalDependencies)
+	}
+
+	readState, err := db.New(stateFile).Read()
+	if err != nil {
+		t.Fatalf("read state: %v", err)
+	}
+	updated := readState.FindTask("task-1")
+	if updated == nil {
+		t.Fatal("task-1 not found")
+	}
+	if updated.RepairRequest != nil {
+		t.Fatal("RepairRequest should be cleared after the requested stale edge is removed")
+	}
+	if updated.BlockedReason == nil || *updated.BlockedReason != originalBlockedReason {
+		t.Fatalf("BlockedReason = %v, want %q", updated.BlockedReason, originalBlockedReason)
+	}
+	if !slices.Equal(updated.BlockedQuestions, originalBlockedQuestions) {
+		t.Fatalf("BlockedQuestions = %v, want %v", updated.BlockedQuestions, originalBlockedQuestions)
+	}
+	last := updated.History[len(updated.History)-1]
+	if last.Event != models.TaskEventDependenciesRewritten {
+		t.Fatalf("History event = %q, want %q", last.Event, models.TaskEventDependenciesRewritten)
+	}
+	if last.Extra["repair_request_cleared"] != true {
+		t.Fatalf("repair_request_cleared = %v, want true", last.Extra["repair_request_cleared"])
+	}
+	for key, want := range map[string]string{
+		"repair_operation": originalRepairRequest.Operation,
+		"repair_target":    originalRepairRequest.Target,
+		"repair_command":   originalRepairRequest.Command,
+	} {
+		if last.Extra[key] != want {
+			t.Errorf("history %s = %#v, want %#v", key, last.Extra[key], want)
+		}
+	}
+	if !reflect.DeepEqual(last.Extra["repair_evidence"], []any{originalRepairRequest.Evidence[0]}) {
+		t.Errorf("history repair_evidence = %#v, want retired request evidence", last.Extra["repair_evidence"])
+	}
+	if !reflect.DeepEqual(last.Extra["repair_validation"], []any{originalRepairRequest.Validation[0]}) {
+		t.Errorf("history repair_validation = %#v, want retired request validation", last.Extra["repair_validation"])
+	}
+}
+
 func TestRetargetDependency_CanonicalizesSupersededReplacement(t *testing.T) {
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
@@ -154,7 +238,78 @@ func TestRetargetDependency_RejectsCanonicalizationToEmptyDependencies(t *testin
 	}
 }
 
-func TestRetargetDependency_DoesNotClearRepairRequestForDifferentTuple(t *testing.T) {
+func TestRetargetDependency_DoesNotClearRepairRequestForDifferentTargetOrEdge(t *testing.T) {
+	tests := []struct {
+		name    string
+		target  string
+		command string
+	}{
+		{
+			name:    "different target",
+			target:  "other-task",
+			command: "liza retarget-dependency task-1 old-dep new-dep --reason repair --agent-id orchestrator-1 --json",
+		},
+		{
+			name:    "different old edge",
+			target:  "task-1",
+			command: "liza retarget-dependency task-1 other-old new-dep --reason repair --agent-id orchestrator-1 --json",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			testhelpers.SetupTestGitRepo(t, tmpDir)
+			stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+
+			now := time.Now().UTC()
+			state := testhelpers.CreateValidState()
+			state.Goal.SpecRef = "README.md"
+			task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusBlocked, now)
+			task.DependsOn = []string{"old-dep"}
+			task.RepairRequest = &models.RepairRequest{
+				Operation:  retargetDependencyOperation,
+				Target:     tt.target,
+				Command:    tt.command,
+				Evidence:   []string{"command=liza claim-task task-1 coder-1 exit_code=1 stderr=task has an unrelated stale dependency"},
+				Validation: []string{"liza validate --json"},
+			}
+			originalRepairRequest := *task.RepairRequest
+			state.Tasks = []models.Task{
+				task,
+				testhelpers.BuildTaskByStatus("old-dep", models.TaskStatusMerged, now),
+				testhelpers.BuildTaskByStatus("new-dep", models.TaskStatusMerged, now),
+			}
+			testhelpers.WriteInitialState(t, stateFile, state)
+
+			result, err := RetargetDependency(tmpDir, "task-1", "old-dep", []string{"new-dep"}, "Correct dependency", "orchestrator-1")
+			if err != nil {
+				t.Fatalf("RetargetDependency() error: %v", err)
+			}
+			if result.RepairRequestCleared {
+				t.Fatal("RepairRequestCleared = true, want false")
+			}
+
+			readState, err := db.New(stateFile).Read()
+			if err != nil {
+				t.Fatalf("read state: %v", err)
+			}
+			updated := readState.FindTask("task-1")
+			if updated == nil {
+				t.Fatal("task-1 not found")
+			}
+			if !reflect.DeepEqual(updated.RepairRequest, &originalRepairRequest) {
+				t.Fatalf("RepairRequest = %#v, want unrelated request %#v", updated.RepairRequest, originalRepairRequest)
+			}
+			last := updated.History[len(updated.History)-1]
+			if last.Extra["repair_request_cleared"] != false {
+				t.Fatalf("repair_request_cleared = %v, want false", last.Extra["repair_request_cleared"])
+			}
+		})
+	}
+}
+
+func TestRetargetDependency_DoesNotClearRepairRequestWhenStaleEdgeRemains(t *testing.T) {
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
@@ -165,25 +320,28 @@ func TestRetargetDependency_DoesNotClearRepairRequestForDifferentTuple(t *testin
 	task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusBlocked, now)
 	task.DependsOn = []string{"old-dep"}
 	task.RepairRequest = &models.RepairRequest{
-		Operation:  "retarget-dependency",
+		Operation:  retargetDependencyOperation,
 		Target:     "task-1",
-		Command:    "liza retarget-dependency task-1 other-old new-dep --reason repair --agent-id orchestrator-1 --json",
-		Evidence:   []string{"command=liza claim-task task-1 coder-1 exit_code=1 stderr=task has invalid dependency other-old"},
+		Command:    "liza retarget-dependency task-1 old-dep new-dep --reason repair --agent-id orchestrator-1 --json",
+		Evidence:   []string{"command=liza claim-task task-1 coder-1 exit_code=1 stderr=task has invalid dependency old-dep"},
 		Validation: []string{"liza validate --json"},
 	}
+	originalRepairRequest := *task.RepairRequest
 	state.Tasks = []models.Task{
 		task,
 		testhelpers.BuildTaskByStatus("old-dep", models.TaskStatusMerged, now),
-		testhelpers.BuildTaskByStatus("new-dep", models.TaskStatusMerged, now),
 	}
 	testhelpers.WriteInitialState(t, stateFile, state)
 
-	result, err := RetargetDependency(tmpDir, "task-1", "old-dep", []string{"new-dep"}, "Correct dependency", "orchestrator-1")
+	result, err := RetargetDependency(tmpDir, "task-1", "old-dep", []string{"old-dep"}, "No-op replacement", "orchestrator-1")
 	if err != nil {
 		t.Fatalf("RetargetDependency() error: %v", err)
 	}
 	if result.RepairRequestCleared {
-		t.Fatal("RepairRequestCleared = true, want false")
+		t.Fatal("RepairRequestCleared = true, want false while the stale edge remains")
+	}
+	if !slices.Equal(result.CanonicalDependencies, []string{"old-dep"}) {
+		t.Fatalf("CanonicalDependencies = %v, want [old-dep]", result.CanonicalDependencies)
 	}
 
 	readState, err := db.New(stateFile).Read()
@@ -191,8 +349,18 @@ func TestRetargetDependency_DoesNotClearRepairRequestForDifferentTuple(t *testin
 		t.Fatalf("read state: %v", err)
 	}
 	updated := readState.FindTask("task-1")
-	if updated.RepairRequest == nil {
-		t.Fatal("RepairRequest should remain for different tuple")
+	if updated == nil {
+		t.Fatal("task-1 not found")
+	}
+	if !slices.Equal(updated.DependsOn, []string{"old-dep"}) {
+		t.Fatalf("DependsOn = %v, want [old-dep]", updated.DependsOn)
+	}
+	if !reflect.DeepEqual(updated.RepairRequest, &originalRepairRequest) {
+		t.Fatalf("RepairRequest = %#v, want actionable request %#v", updated.RepairRequest, originalRepairRequest)
+	}
+	last := updated.History[len(updated.History)-1]
+	if last.Extra["repair_request_cleared"] != false {
+		t.Fatalf("repair_request_cleared = %v, want false", last.Extra["repair_request_cleared"])
 	}
 }
 

@@ -536,7 +536,7 @@ Use `§BRAND_BINARY_NAME§ -C <project-root> ...` to select a §BRAND_NAME_TITLE
 | `§BRAND_BINARY_NAME§ submit-for-review <task-id> [commit-ref]` | Submit a task for review (doer agents; defaults to worktree `HEAD`)                                                  |
 | `§BRAND_BINARY_NAME§ submit-verdict <task-id> <APPROVED\|REJECTED> [--reason "<reason>"]` | Submit a review verdict (reviewer agents; `--reason` required for REJECTED)                                          |
 | `§BRAND_BINARY_NAME§ mark-blocked <task-id>` | Mark a task as BLOCKED with reason/questions; optional `--depends-on` records blocking task IDs for scheduling and orchestrator re-wake. Use `--repair-request-file <path>` for a complete declarative dependency repair; individual `--repair-*` flags remain for command-based non-dependency repairs. |
-| `§BRAND_BINARY_NAME§ assess-blocked <task-id>` | Record orchestrator assessment of a BLOCKED task and raise an `UNRESOLVED BLOCKED` alert when it cannot be resolved now |
+| `§BRAND_BINARY_NAME§ assess-blocked <task-id>` | Reconcile a BLOCKED task's canonical reason, questions, and optional repair request after partial repair, or use `--note` alone for a history-only assessment that raises an `UNRESOLVED BLOCKED` alert |
 | `§BRAND_BINARY_NAME§ retarget-dependency <task-id> <old-dep-id> <new-dep-ids> --reason "..."` | Orchestrator-only repair for one direct edge on a non-terminal task. Replaces the old edge with one or more existing task IDs, canonicalizes dependencies, validates the full candidate state, and leaves task status unchanged. |
 | `§BRAND_BINARY_NAME§ apply-dependency-repair <blocked-task-id> --reason "..."` | Orchestrator-only consumer for one stored declarative dependency repair. Atomically compares every expected list, commits every canonical desired list and audit entry, and clears the request only on complete success; the source remains BLOCKED. |
 | `§BRAND_BINARY_NAME§ repair-superseded-dependencies <task-id> --reason <reason>` | Orchestrator-only repair for one SUPERSEDED task. Atomically removes all illegal downstream direct dependencies, retains legal edges and terminal/replacement metadata, audits removed and retained IDs, and validates the full candidate state. |
@@ -583,6 +583,39 @@ The operation rejects stale expected lists or an invalid complete candidate
 without changing dependencies, history, or the request. Success reports every
 committed canonical list and clears the request in the same transaction. Run
 the request's validation and unblock separately.
+
+After any graph repair, run
+`§BRAND_BINARY_NAME§ get <task-id> --json`; it is the canonical current view of
+`depends_on`, `blocked_reason`, `blocked_questions`, and `repair_request`.
+History remains audit evidence, not an alternate current view.
+
+After a partial repair, replace stale canonical blocker metadata atomically:
+
+```bash
+§BRAND_BINARY_NAME§ assess-blocked <task-id> --reason "<current blocker>" \
+  --question "<current question>" [--question "<another current question>"] \
+  --agent-id <orchestrator-id> --json
+```
+
+`--reason` and one to three repeatable `--question` values are required
+together. With no replacement request, the command clears the previous
+`repair_request`. A command-style replacement is all-or-nothing: provide
+`--repair-operation`, `--repair-target`, `--repair-command`, one or more
+`--repair-evidence` values, and one or more `--repair-validation` values
+together. For a command-free declarative `apply-dependency-repair` replacement
+that preserves `dependency_updates`, put the complete JSON request in a file
+and pass `--repair-request-file <path>`; it cannot be combined with individual
+`--repair-*` fields. These two replacement paths are mutually exclusive.
+
+The note-only form,
+`§BRAND_BINARY_NAME§ assess-blocked <task-id> --note "<assessment>"`, remains
+history-only compatibility for a blocker whose canonical metadata is already
+current. It does not replace reason, questions, or the repair request.
+After a full repair, use `§BRAND_BINARY_NAME§ unblock-task <task-id> --reason "..."`
+instead; that guarded transition clears canonical blocker metadata. It returns
+the task to its role-pair initial status, but claimability still depends on direct dependencies:
+valid pending dependencies keep it dependency-held and unclaimable until every direct
+dependency is `MERGED`.
 
 If `§BRAND_BINARY_NAME§ retarget-dependency A old-dependency B --reason "..."
 --json` would create a cycle, full candidate-state validation returns this safe

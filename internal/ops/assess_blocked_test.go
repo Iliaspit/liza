@@ -2,6 +2,7 @@ package ops
 
 import (
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -217,5 +218,309 @@ func TestAssessBlocked_Idempotent(t *testing.T) {
 	}
 	if assessmentCount != 2 {
 		t.Errorf("Expected 2 assessment entries, got %d", assessmentCount)
+	}
+}
+
+func TestAssessBlocked_ReconcilesCanonicalMetadata(t *testing.T) {
+	tests := []struct {
+		name              string
+		repairRequest     *models.RepairRequest
+		wantRepairRequest *models.RepairRequest
+	}{
+		{
+			name: "clears prior repair request",
+		},
+		{
+			name: "normalizes declarative replacement",
+			repairRequest: &models.RepairRequest{
+				Operation: "  " + models.RepairOperationApplyDependencyRepair + "  ",
+				Target:    " task-1 ",
+				DependencyUpdates: []models.DependencyUpdate{
+					{
+						TaskID:            " task-1 ",
+						ExpectedDependsOn: []string{" old-dependency "},
+						DesiredDependsOn:  []string{" replacement-dependency "},
+					},
+				},
+				Evidence:   []string{"", " error=provider unavailable "},
+				Validation: []string{" verify repaired dependency graph "},
+			},
+			wantRepairRequest: &models.RepairRequest{
+				Operation: models.RepairOperationApplyDependencyRepair,
+				Target:    "task-1",
+				DependencyUpdates: []models.DependencyUpdate{
+					{
+						TaskID:            "task-1",
+						ExpectedDependsOn: []string{"old-dependency"},
+						DesiredDependsOn:  []string{"replacement-dependency"},
+					},
+				},
+				Evidence:   []string{"error=provider unavailable"},
+				Validation: []string{"verify repaired dependency graph"},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+			testhelpers.CreateSpecFile(t, tmpDir, "vision.md", "# Vision\n")
+			now := time.Now().UTC()
+			state := testhelpers.CreateValidState()
+			task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusBlocked, now)
+			task.AssignedTo = nil
+			oldReason := "obsolete blocker"
+			task.BlockedReason = &oldReason
+			task.BlockedQuestions = []string{"obsolete question"}
+			task.RepairRequest = testAssessBlockedRepairRequest()
+			state.Tasks = []models.Task{task}
+			setTaskSpecRefs(state)
+			testhelpers.WriteInitialState(t, stateFile, state)
+
+			result, err := AssessBlockedWithOptions(
+				tmpDir,
+				"task-1",
+				"remaining blocker reassessed",
+				"orchestrator-1",
+				AssessBlockedOptions{
+					Reason:        "current blocker",
+					Questions:     []string{"first current question", "second current question"},
+					RepairRequest: tt.repairRequest,
+				},
+			)
+			if err != nil {
+				t.Fatalf("AssessBlockedWithOptions() error: %v", err)
+			}
+
+			if result.TaskID != "task-1" || result.Reason != "current blocker" {
+				t.Fatalf("result identity/reason = %#v, want task-1/current blocker", result)
+			}
+			if !reflect.DeepEqual(result.Questions, []string{"first current question", "second current question"}) {
+				t.Errorf("result questions = %#v", result.Questions)
+			}
+			if !reflect.DeepEqual(result.RepairRequest, tt.wantRepairRequest) {
+				t.Errorf("result repair request = %#v, want %#v", result.RepairRequest, tt.wantRepairRequest)
+			}
+
+			readState, err := db.New(stateFile).Read()
+			if err != nil {
+				t.Fatalf("Read() error: %v", err)
+			}
+			got := readState.FindTask("task-1")
+			if got.Status != models.TaskStatusBlocked {
+				t.Errorf("status = %s, want BLOCKED", got.Status)
+			}
+			if got.BlockedReason == nil || *got.BlockedReason != "current blocker" {
+				t.Errorf("blocked reason = %v, want current blocker", got.BlockedReason)
+			}
+			if !reflect.DeepEqual(got.BlockedQuestions, []string{"first current question", "second current question"}) {
+				t.Errorf("blocked questions = %#v", got.BlockedQuestions)
+			}
+			if !reflect.DeepEqual(got.RepairRequest, tt.wantRepairRequest) {
+				t.Errorf("canonical repair request = %#v, want %#v", got.RepairRequest, tt.wantRepairRequest)
+			}
+
+			last := got.History[len(got.History)-1]
+			if last.Event != models.TaskEventOrchestratorAssessment || last.Reason == nil || *last.Reason != "current blocker" {
+				t.Errorf("assessment history = %#v", last)
+			}
+			if !reflect.DeepEqual(last.Extra["blocked_questions"], []any{"first current question", "second current question"}) {
+				t.Errorf("history blocked_questions = %#v", last.Extra["blocked_questions"])
+			}
+			_, hasRepairRequest := last.Extra["repair_request"]
+			if !hasRepairRequest {
+				t.Error("assessment history must record resulting repair_request state")
+			}
+		})
+	}
+}
+
+func TestAssessBlocked_CandidateValidationRollback(t *testing.T) {
+	tmpDir := t.TempDir()
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	now := time.Now().UTC()
+	state := testhelpers.CreateValidState()
+	task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusBlocked, now)
+	task.AssignedTo = nil
+	task.RepairRequest = testAssessBlockedRepairRequest()
+	state.Tasks = []models.Task{task}
+	state.Goal.SpecRef = "specs/missing-goal-spec.md"
+	setTaskSpecRefs(state)
+	testhelpers.WriteInitialState(t, stateFile, state)
+	before := readAssessBlockedTask(t, stateFile, "task-1")
+
+	_, err := AssessBlockedWithOptions(
+		tmpDir,
+		"task-1",
+		"must roll back",
+		"orchestrator-1",
+		AssessBlockedOptions{
+			Reason:    "new reason",
+			Questions: []string{"new question"},
+		},
+	)
+	if err == nil {
+		t.Fatal("AssessBlockedWithOptions() error = nil, want full-state validation failure")
+	}
+
+	after := readAssessBlockedTask(t, stateFile, "task-1")
+	assertAssessBlockedStateUnchanged(t, before, after)
+}
+
+func TestAssessBlockedWithOptions_FailuresPreserveState(t *testing.T) {
+	tests := []struct {
+		name        string
+		taskID      string
+		agentID     string
+		status      models.TaskStatus
+		opts        AssessBlockedOptions
+		errContains string
+	}{
+		{
+			name:        "empty task ID",
+			agentID:     "orchestrator-1",
+			status:      models.TaskStatusBlocked,
+			opts:        AssessBlockedOptions{Reason: "new reason", Questions: []string{"new question"}},
+			errContains: "task ID is required",
+		},
+		{
+			name:        "empty agent ID",
+			taskID:      "task-1",
+			status:      models.TaskStatusBlocked,
+			opts:        AssessBlockedOptions{Reason: "new reason", Questions: []string{"new question"}},
+			errContains: "agent ID is required",
+		},
+		{
+			name:        "unauthorized role",
+			taskID:      "task-1",
+			agentID:     "coder-1",
+			status:      models.TaskStatusBlocked,
+			opts:        AssessBlockedOptions{Reason: "new reason", Questions: []string{"new question"}},
+			errContains: "only orchestrator agents",
+		},
+		{
+			name:        "reason without questions",
+			taskID:      "task-1",
+			agentID:     "orchestrator-1",
+			status:      models.TaskStatusBlocked,
+			opts:        AssessBlockedOptions{Reason: "new reason"},
+			errContains: "at least 1 question",
+		},
+		{
+			name:        "questions without reason",
+			taskID:      "task-1",
+			agentID:     "orchestrator-1",
+			status:      models.TaskStatusBlocked,
+			opts:        AssessBlockedOptions{Questions: []string{"new question"}},
+			errContains: "reason is required",
+		},
+		{
+			name:        "too many questions",
+			taskID:      "task-1",
+			agentID:     "orchestrator-1",
+			status:      models.TaskStatusBlocked,
+			opts:        AssessBlockedOptions{Reason: "new reason", Questions: []string{"one", "two", "three", "four"}},
+			errContains: "maximum 3 questions",
+		},
+		{
+			name:    "invalid replacement repair request",
+			taskID:  "task-1",
+			agentID: "orchestrator-1",
+			status:  models.TaskStatusBlocked,
+			opts: AssessBlockedOptions{
+				Reason:        "new reason",
+				Questions:     []string{"new question"},
+				RepairRequest: &models.RepairRequest{Operation: "retarget-dependency", Target: "task-1"},
+			},
+			errContains: "repair request command is required",
+		},
+		{
+			name:        "wrong status",
+			taskID:      "task-1",
+			agentID:     "orchestrator-1",
+			status:      models.TaskStatusReady,
+			opts:        AssessBlockedOptions{Reason: "new reason", Questions: []string{"new question"}},
+			errContains: "BLOCKED status",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+			task := testhelpers.BuildTaskByStatus("task-1", tt.status, time.Now().UTC())
+			task.RepairRequest = testAssessBlockedRepairRequest()
+			state := testhelpers.CreateValidState()
+			state.Tasks = []models.Task{task}
+			testhelpers.WriteInitialState(t, stateFile, state)
+			before := readAssessBlockedTask(t, stateFile, "task-1")
+
+			_, err := AssessBlockedWithOptions(tmpDir, tt.taskID, "reassessment", tt.agentID, tt.opts)
+			if err == nil || !strings.Contains(err.Error(), tt.errContains) {
+				t.Fatalf("AssessBlockedWithOptions() error = %v, want containing %q", err, tt.errContains)
+			}
+
+			after := readAssessBlockedTask(t, stateFile, "task-1")
+			assertAssessBlockedStateUnchanged(t, before, after)
+		})
+	}
+}
+
+func TestAssessBlocked_NoteOnlyPreservesCanonicalMetadata(t *testing.T) {
+	tmpDir := t.TempDir()
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusBlocked, time.Now().UTC())
+	task.RepairRequest = testAssessBlockedRepairRequest()
+	state := testhelpers.CreateValidState()
+	state.Tasks = []models.Task{task}
+	testhelpers.WriteInitialState(t, stateFile, state)
+	before := readAssessBlockedTask(t, stateFile, "task-1")
+
+	if _, err := AssessBlocked(tmpDir, "task-1", "history only", "orchestrator-1"); err != nil {
+		t.Fatalf("AssessBlocked() error: %v", err)
+	}
+
+	after := readAssessBlockedTask(t, stateFile, "task-1")
+	if !reflect.DeepEqual(before.BlockedReason, after.BlockedReason) ||
+		!reflect.DeepEqual(before.BlockedQuestions, after.BlockedQuestions) ||
+		!reflect.DeepEqual(before.RepairRequest, after.RepairRequest) {
+		t.Fatalf("note-only assessment changed canonical metadata: before=%#v after=%#v", before, after)
+	}
+	if len(after.History) != len(before.History)+1 {
+		t.Fatalf("history length = %d, want %d", len(after.History), len(before.History)+1)
+	}
+}
+
+func testAssessBlockedRepairRequest() *models.RepairRequest {
+	return &models.RepairRequest{
+		Operation:  "retarget-dependency",
+		Target:     "task-1",
+		Command:    "liza retarget-dependency task-1 old-dependency replacement-dependency",
+		Evidence:   []string{"command=retarget exit_code=1 stderr=repair required"},
+		Validation: []string{"liza get task-1 --json"},
+	}
+}
+
+func readAssessBlockedTask(t *testing.T, stateFile, taskID string) *models.Task {
+	t.Helper()
+	state, err := db.New(stateFile).Read()
+	if err != nil {
+		t.Fatalf("Read() error: %v", err)
+	}
+	task := state.FindTask(taskID)
+	if task == nil {
+		t.Fatalf("task %s not found", taskID)
+	}
+	return task
+}
+
+func assertAssessBlockedStateUnchanged(t *testing.T, before, after *models.Task) {
+	t.Helper()
+	if !reflect.DeepEqual(before.BlockedReason, after.BlockedReason) ||
+		!reflect.DeepEqual(before.BlockedQuestions, after.BlockedQuestions) ||
+		!reflect.DeepEqual(before.RepairRequest, after.RepairRequest) ||
+		!reflect.DeepEqual(before.History, after.History) {
+		t.Fatalf("blocked metadata/history changed after rejected assessment:\nbefore=%#v\nafter=%#v", before, after)
 	}
 }

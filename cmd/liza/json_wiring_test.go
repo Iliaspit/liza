@@ -625,6 +625,251 @@ func declarativeRepairRequestFor(taskID string) models.RepairRequest {
 	}
 }
 
+func TestJSON_AssessBlocked_ReconcilesCanonicalMetadata(t *testing.T) {
+	resetFlagIfPresent(assessBlockedCmd, "question")
+	t.Cleanup(func() { resetFlagIfPresent(assessBlockedCmd, "question") })
+	projectRoot, statePath := setupMutationTestProject(t, func(state *models.State) {
+		now := time.Now().UTC()
+		reason := "obsolete blocker"
+		task := testhelpers.BuildTaskByStatus("task-assess-repair", models.TaskStatusBlocked, now)
+		task.AssignedTo = nil
+		task.Worktree = nil
+		task.BlockedReason = &reason
+		task.BlockedQuestions = []string{"obsolete question"}
+		state.Tasks = []models.Task{task}
+		state.Agents["orchestrator-1"] = testhelpers.RegisteredTestAgent("orchestrator")
+	})
+	testhelpers.CreateSpecFile(t, projectRoot, "vision.md", "# Vision\n")
+
+	commandRepairWant := models.RepairRequest{
+		Operation:  "retarget-dependency",
+		Target:     "task-assess-repair",
+		Command:    "liza retarget-dependency task-assess-repair stale replacement --json",
+		Evidence:   []string{"command=retarget exit_code=1 stderr=orchestrator authority required"},
+		Validation: []string{"liza validate --json"},
+	}
+	stdout, err := executeRootCommandCapture(t, projectRoot,
+		"assess-blocked", "task-assess-repair",
+		"--agent-id", "orchestrator-1",
+		"--reason", "current command blocker",
+		"--question", "Can the orchestrator retarget the dependency?",
+		"--repair-operation", commandRepairWant.Operation,
+		"--repair-target", commandRepairWant.Target,
+		"--repair-command", commandRepairWant.Command,
+		"--repair-evidence", commandRepairWant.Evidence[0],
+		"--repair-validation", commandRepairWant.Validation[0],
+		"--json",
+	)
+	if err != nil {
+		t.Fatalf("command-style assess-blocked failed: %v\n%s", err, stdout)
+	}
+	commandResult := parseEnvelope(t, stdout)["result"].(map[string]any)
+	if commandResult["reason"] != "current command blocker" {
+		t.Fatalf("reason = %v, want current command blocker", commandResult["reason"])
+	}
+	if !reflect.DeepEqual(commandResult["questions"], []any{"Can the orchestrator retarget the dependency?"}) {
+		t.Fatalf("questions = %#v, want exact current question", commandResult["questions"])
+	}
+	commandRepair := commandResult["repair_request"].(map[string]any)
+	wantCommandRepairJSON := map[string]any{
+		"operation":  commandRepairWant.Operation,
+		"target":     commandRepairWant.Target,
+		"command":    commandRepairWant.Command,
+		"evidence":   []any{commandRepairWant.Evidence[0]},
+		"validation": []any{commandRepairWant.Validation[0]},
+	}
+	if !reflect.DeepEqual(commandRepair, wantCommandRepairJSON) {
+		t.Fatalf("repair_request = %#v, want %#v", commandRepair, wantCommandRepairJSON)
+	}
+	stored := readState(t, statePath).FindTask("task-assess-repair")
+	if !reflect.DeepEqual(stored.RepairRequest, &commandRepairWant) {
+		t.Fatalf("stored repair_request = %#v, want %#v", stored.RepairRequest, &commandRepairWant)
+	}
+
+	declarativeRepairWant := declarativeRepairRequestFor("task-assess-repair")
+	requestPath := writeRepairRequestFile(t, projectRoot, declarativeRepairWant)
+	resetFlagIfPresent(assessBlockedCmd, "question")
+	stdout, err = executeRootCommandCapture(t, projectRoot,
+		"assess-blocked", "task-assess-repair",
+		"--agent-id", "orchestrator-1",
+		"--reason", "current declarative blocker",
+		"--question", "Can the orchestrator apply the dependency update?",
+		"--question", "Can it validate the repaired graph?",
+		"--repair-request-file", requestPath,
+		"--json",
+	)
+	if err != nil {
+		t.Fatalf("declarative assess-blocked failed: %v\n%s", err, stdout)
+	}
+	declarativeResult := parseEnvelope(t, stdout)["result"].(map[string]any)
+	declarativeRepair := declarativeResult["repair_request"].(map[string]any)
+	wantDeclarativeRepairJSON := map[string]any{
+		"operation": declarativeRepairWant.Operation,
+		"target":    declarativeRepairWant.Target,
+		"dependency_updates": []any{map[string]any{
+			"task_id":             "consumer-1",
+			"expected_depends_on": []any{},
+			"desired_depends_on":  []any{"producer-1"},
+		}},
+		"evidence":   []any{declarativeRepairWant.Evidence[0]},
+		"validation": []any{declarativeRepairWant.Validation[0]},
+	}
+	if !reflect.DeepEqual(declarativeRepair, wantDeclarativeRepairJSON) {
+		t.Fatalf("declarative repair_request = %#v, want %#v", declarativeRepair, wantDeclarativeRepairJSON)
+	}
+	stored = readState(t, statePath).FindTask("task-assess-repair")
+	if stored.BlockedReason == nil || *stored.BlockedReason != "current declarative blocker" {
+		t.Fatalf("stored blocked_reason = %v, want current declarative blocker", stored.BlockedReason)
+	}
+	if !reflect.DeepEqual(stored.BlockedQuestions, []string{"Can the orchestrator apply the dependency update?", "Can it validate the repaired graph?"}) {
+		t.Fatalf("stored blocked_questions = %#v, want exact current questions", stored.BlockedQuestions)
+	}
+	if !reflect.DeepEqual(stored.RepairRequest, &declarativeRepairWant) {
+		t.Fatalf("stored repair_request = %#v, want %#v", stored.RepairRequest, &declarativeRepairWant)
+	}
+
+	resetFlagIfPresent(assessBlockedCmd, "question")
+	stdout, err = executeRootCommandCapture(t, projectRoot,
+		"assess-blocked", "task-assess-repair",
+		"--agent-id", "orchestrator-1",
+		"--reason", "current blocker needs no repair request",
+		"--question", "Can the task remain blocked pending an answer?",
+		"--json",
+	)
+	if err != nil {
+		t.Fatalf("repair-clearing assess-blocked failed: %v\n%s", err, stdout)
+	}
+	clearResult := parseEnvelope(t, stdout)["result"].(map[string]any)
+	if _, present := clearResult["repair_request"]; present {
+		t.Fatalf("repair-clearing result unexpectedly contains repair_request: %#v", clearResult)
+	}
+	if stored := readState(t, statePath).FindTask("task-assess-repair"); stored.RepairRequest != nil {
+		t.Fatalf("stored repair_request = %#v, want cleared request", stored.RepairRequest)
+	}
+
+	t.Run("validation rejects malformed input before mutation", func(t *testing.T) {
+		tests := []struct {
+			name      string
+			prepare   func(*testing.T, string) []string
+			wantParts []string
+		}{
+			{
+				name: "reason without question",
+				prepare: func(_ *testing.T, _ string) []string {
+					return []string{"--reason", "current blocker"}
+				},
+				wantParts: []string{"--question is required"},
+			},
+			{
+				name: "question without reason",
+				prepare: func(_ *testing.T, _ string) []string {
+					return []string{"--question", "What remains blocked?"}
+				},
+				wantParts: []string{"--reason is required"},
+			},
+			{
+				name: "too many questions",
+				prepare: func(_ *testing.T, _ string) []string {
+					return []string{"--reason", "current blocker", "--question", "one", "--question", "two", "--question", "three", "--question", "four"}
+				},
+				wantParts: []string{"at most 3 times"},
+			},
+			{
+				name: "partial command-style repair",
+				prepare: func(_ *testing.T, _ string) []string {
+					return []string{"--reason", "current blocker", "--question", "What remains blocked?", "--repair-operation", "retarget-dependency"}
+				},
+				wantParts: []string{"--repair-target is required"},
+			},
+			{
+				name: "empty request file",
+				prepare: func(t *testing.T, root string) []string {
+					path := filepath.Join(root, "empty-repair.json")
+					if err := os.WriteFile(path, nil, 0o600); err != nil {
+						t.Fatalf("write empty repair request: %v", err)
+					}
+					return []string{"--reason", "current blocker", "--question", "What remains blocked?", "--repair-request-file", path}
+				},
+				wantParts: []string{"repair request file is empty"},
+			},
+			{
+				name: "unreadable request file",
+				prepare: func(_ *testing.T, root string) []string {
+					return []string{"--reason", "current blocker", "--question", "What remains blocked?", "--repair-request-file", filepath.Join(root, "missing-repair.json")}
+				},
+				wantParts: []string{"reading repair request file", "missing-repair.json"},
+			},
+			{
+				name: "invalid request file",
+				prepare: func(t *testing.T, root string) []string {
+					path := filepath.Join(root, "invalid-repair.json")
+					if err := os.WriteFile(path, []byte("not-json"), 0o600); err != nil {
+						t.Fatalf("write invalid repair request: %v", err)
+					}
+					return []string{"--reason", "current blocker", "--question", "What remains blocked?", "--repair-request-file", path}
+				},
+				wantParts: []string{"parsing repair request file"},
+			},
+			{
+				name: "incomplete request file",
+				prepare: func(t *testing.T, root string) []string {
+					path := filepath.Join(root, "incomplete-repair.json")
+					if err := os.WriteFile(path, []byte("{}"), 0o600); err != nil {
+						t.Fatalf("write incomplete repair request: %v", err)
+					}
+					return []string{"--reason", "current blocker", "--question", "What remains blocked?", "--repair-request-file", path}
+				},
+				wantParts: []string{"repair request operation is required"},
+			},
+			{
+				name: "mixed file and fields",
+				prepare: func(t *testing.T, root string) []string {
+					path := writeRepairRequestFile(t, root, declarativeRepairRequestFor("task-invalid-assess"))
+					return []string{"--reason", "current blocker", "--question", "What remains blocked?", "--repair-request-file", path, "--repair-operation", "apply-dependency-repair"}
+				},
+				wantParts: []string{"--repair-request-file cannot be combined with --repair-"},
+			},
+		}
+
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				root, invalidStatePath := setupMutationTestProject(t, func(state *models.State) {
+					now := time.Now().UTC()
+					reason := "unchanged blocker"
+					task := testhelpers.BuildTaskByStatus("task-invalid-assess", models.TaskStatusBlocked, now)
+					task.AssignedTo = nil
+					task.Worktree = nil
+					task.BlockedReason = &reason
+					task.BlockedQuestions = []string{"unchanged question"}
+					state.Tasks = []models.Task{task}
+					state.Agents["orchestrator-1"] = testhelpers.RegisteredTestAgent("orchestrator")
+				})
+				testhelpers.CreateSpecFile(t, root, "vision.md", "# Vision\n")
+				extraArgs := tt.prepare(t, root)
+				before, readErr := os.ReadFile(invalidStatePath)
+				if readErr != nil {
+					t.Fatalf("read state before invalid assess: %v", readErr)
+				}
+				args := append([]string{"assess-blocked", "task-invalid-assess", "--agent-id", "orchestrator-1"}, extraArgs...)
+				args = append(args, "--json")
+				resetFlagIfPresent(assessBlockedCmd, "question")
+				stdout, err := executeRootCommandCapture(t, root, args...)
+				if err == nil {
+					t.Fatal("expected validation error")
+				}
+				assertJSONError(t, stdout, "validation", tt.wantParts...)
+				after, readErr := os.ReadFile(invalidStatePath)
+				if readErr != nil {
+					t.Fatalf("read state after invalid assess: %v", readErr)
+				}
+				if !bytes.Equal(after, before) {
+					t.Fatal("invalid assess-blocked input changed state")
+				}
+			})
+		}
+	})
+}
+
 func TestJSON_MarkBlocked_RepairRequestFile(t *testing.T) {
 	legacyCommand := "liza add-task --id architecture-2 --agent-id orchestrator-1 --json"
 	projectRoot, statePath := setupMutationTestProject(t, func(state *models.State) {

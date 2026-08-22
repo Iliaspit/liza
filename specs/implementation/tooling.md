@@ -50,7 +50,7 @@ All system mechanics are provided by the `liza` Go binary (assumed in PATH). See
 | `liza status` | Show system status |
 | `liza get` | Get blackboard data |
 | `liza mark-blocked` | Mark task as blocked |
-| `liza assess-blocked` | Record orchestrator assessment of a blocked task (prevents re-wake) |
+| `liza assess-blocked` | Reconcile canonical blocker metadata after partial repair, or record a note-only assessment |
 | `liza supersede-task` | Supersede a task; no-replacement cleanup requires an operator-provided `--recoverability-command` audit string |
 | `liza retarget-dependency` | Replace one direct dependency edge on a non-terminal task through an orchestrator-only validated repair |
 | `liza repair-superseded-dependencies` | Remove all illegal downstream direct dependencies from one SUPERSEDED task through an orchestrator-only audited repair |
@@ -178,7 +178,7 @@ CLI commands are divided into agent-callable and supervisor-only:
 | `liza submit-for-review` | Coder | Request review (atomic state transition) |
 | `liza submit-verdict` | Code Reviewer | Approve/reject (atomic state transition) |
 | `liza mark-blocked` | All doer roles | Mark task as blocked |
-| `liza assess-blocked` | Orchestrator | Record assessment of blocked task (prevents re-wake loops) |
+| `liza assess-blocked` | Orchestrator | Reconcile canonical blocker metadata after partial repair, or record a note-only assessment |
 | `liza retarget-dependency` | Orchestrator | Replace one direct edge on a non-terminal task and validate the candidate state |
 | `liza repair-superseded-dependencies` | Orchestrator | Atomically remove illegal downstream edges from a SUPERSEDED task with full validation and audit history |
 | `liza wt-merge` | Supervisor | Merge after Code Reviewer approves |
@@ -546,7 +546,8 @@ worktree creation still fails after successful artifact cleanup, it must commit
 a truthful repair state instead of leaving stale pointers: status becomes
 `BLOCKED`, claims are cleared, worktree/base/review metadata is cleared, and
 `blocked_reason` records the failed fresh creation. `unblock-task` remains the
-only path back to claimability.
+only guarded path out of `BLOCKED`; pending direct dependencies may still hold
+the restored task.
 
 `--fresh` postconditions by status:
 
@@ -557,7 +558,7 @@ only path back to claimability.
 | Submitted/reviewing/approved/partial-review statuses | Yes | Status resets to initial; `review_commit`, approvals, merge and output metadata cleared; fresh worktree recorded. |
 | `CODE_REJECTED` / role-pair equivalent | Yes | Status resets to initial; rejection and attempt metadata cleared; fresh worktree recorded. |
 | `INTEGRATION_FAILED` | Yes | Status resets to initial; repair and integration-failure metadata cleared; fresh worktree recorded. |
-| `BLOCKED` | Yes | Status remains `BLOCKED`; claim/review substrate is repaired, but `blocked_reason` and `blocked_questions` are preserved. Use `liza unblock-task` to restore claimability. |
+| `BLOCKED` | Yes | Status remains `BLOCKED`; claim/review substrate is repaired, but `blocked_reason` and `blocked_questions` are preserved. Use `liza unblock-task` to leave `BLOCKED`; valid pending dependencies may still keep the restored task dependency-held. |
 | Terminal statuses (`MERGED`, `ABANDONED`, `SUPERSEDED`) | No | Rejected. |
 
 For tasks absent from state, only `--force` performs git-only cleanup of orphaned
@@ -592,6 +593,38 @@ liza status   # Summary of goal, sprint, agents, tasks
 ```bash
 liza get      # Print current state
 ```
+
+For a BLOCKED task, `liza get <task-id> --json` is the canonical current view
+of `depends_on`, `blocked_reason`, `blocked_questions`, and `repair_request`.
+Task history is append-only audit evidence, not a second current view.
+
+**liza assess-blocked** — Reconcile canonical blocker metadata (Orchestrator)
+
+After a partial repair, replace the current reason and one to three questions
+atomically:
+
+```bash
+liza assess-blocked <task-id> --reason "<current blocker>" \
+  --question "<current question>" [--question "<another current question>"] \
+  --agent-id <orchestrator-id> --json
+```
+
+Without replacement input, structured assessment clears the previous repair
+request. A command-style replacement is all-or-nothing: provide
+`--repair-operation`, `--repair-target`, `--repair-command`, one or more
+`--repair-evidence` values, and one or more `--repair-validation` values. A
+command-free declarative `apply-dependency-repair` replacement, including
+`dependency_updates`, instead uses a complete JSON file through
+`--repair-request-file <path>`; it cannot be combined with individual
+`--repair-*` fields. The file and field paths are mutually exclusive.
+
+`liza assess-blocked <task-id> --note "<assessment>"` remains note-only,
+history-only compatibility when the canonical metadata is already current.
+After a full repair, use
+`liza unblock-task <task-id> --reason "<verified resolution>"`; this guarded
+transition clears canonical blocker metadata. It returns the task to its
+role-pair initial status, but claimability still depends on direct dependencies:
+valid pending dependencies keep it dependency-held and unclaimable until every direct dependency is `MERGED`.
 
 **liza handoff** — Record a context-exhaustion handoff through the CLI
 ```bash

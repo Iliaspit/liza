@@ -625,68 +625,75 @@ var unblockTaskCmd = &cobra.Command{
 }
 
 func markBlockedOptionsFromFlags(cmd *cobra.Command) (ops.MarkBlockedOptions, error) {
+	dependsOn, _ := cmd.Flags().GetStringSlice("depends-on")
+	repairRequest, err := repairRequestFromFlags(cmd)
+	if err != nil {
+		return ops.MarkBlockedOptions{}, err
+	}
+	return ops.MarkBlockedOptions{DependsOn: dependsOn, RepairRequest: repairRequest}, nil
+}
+
+func repairRequestFromFlags(cmd *cobra.Command) (*models.RepairRequest, error) {
 	repairRequestFile, _ := cmd.Flags().GetString("repair-request-file")
 	operation, _ := cmd.Flags().GetString("repair-operation")
 	target, _ := cmd.Flags().GetString("repair-target")
 	command, _ := cmd.Flags().GetString("repair-command")
 	evidence, _ := cmd.Flags().GetStringArray("repair-evidence")
 	validation, _ := cmd.Flags().GetStringArray("repair-validation")
-	dependsOn, _ := cmd.Flags().GetStringSlice("depends-on")
-	opts := ops.MarkBlockedOptions{DependsOn: dependsOn}
 
 	if cmd.Flags().Changed("repair-request-file") {
 		if strings.TrimSpace(repairRequestFile) == "" {
-			return ops.MarkBlockedOptions{}, cliValidationError("--repair-request-file requires a path")
+			return nil, cliValidationError("--repair-request-file requires a path")
 		}
 		for _, name := range []string{"repair-operation", "repair-target", "repair-command", "repair-evidence", "repair-validation"} {
 			if cmd.Flags().Changed(name) {
-				return ops.MarkBlockedOptions{}, cliValidationError("--repair-request-file cannot be combined with --repair-* fields")
+				return nil, cliValidationError("--repair-request-file cannot be combined with --repair-* fields")
 			}
 		}
 
 		data, err := os.ReadFile(repairRequestFile)
 		if err != nil {
-			return ops.MarkBlockedOptions{}, cliValidationWrap("reading repair request file", err)
+			return nil, cliValidationWrap("reading repair request file", err)
+		}
+		if strings.TrimSpace(string(data)) == "" {
+			return nil, cliValidationError("repair request file is empty")
 		}
 		var request models.RepairRequest
 		if err := json.Unmarshal(data, &request); err != nil {
-			return ops.MarkBlockedOptions{}, cliValidationWrap("parsing repair request file", err)
+			return nil, cliValidationWrap("parsing repair request file", err)
 		}
-		opts.RepairRequest = &request
-		return opts, nil
+		return &request, nil
 	}
 
-	hasRepairRequest := strings.TrimSpace(operation) != "" ||
-		strings.TrimSpace(target) != "" ||
-		strings.TrimSpace(command) != "" ||
-		hasNonEmptyValue(evidence) ||
-		hasNonEmptyValue(validation)
+	hasRepairRequest := false
+	for _, name := range []string{"repair-operation", "repair-target", "repair-command", "repair-evidence", "repair-validation"} {
+		hasRepairRequest = hasRepairRequest || cmd.Flags().Changed(name)
+	}
 	if !hasRepairRequest {
-		return opts, nil
+		return nil, nil
 	}
 	if strings.TrimSpace(operation) == "" {
-		return ops.MarkBlockedOptions{}, cliValidationError("--repair-operation is required when repair request fields are provided")
+		return nil, cliValidationError("--repair-operation is required when repair request fields are provided")
 	}
 	if strings.TrimSpace(target) == "" {
-		return ops.MarkBlockedOptions{}, cliValidationError("--repair-target is required when repair request fields are provided")
+		return nil, cliValidationError("--repair-target is required when repair request fields are provided")
 	}
 	if strings.TrimSpace(command) == "" {
-		return ops.MarkBlockedOptions{}, cliValidationError("--repair-command is required when repair request fields are provided")
+		return nil, cliValidationError("--repair-command is required when repair request fields are provided")
 	}
 	if !hasNonEmptyValue(evidence) {
-		return ops.MarkBlockedOptions{}, cliValidationError("--repair-evidence is required when repair request fields are provided")
+		return nil, cliValidationError("--repair-evidence is required when repair request fields are provided")
 	}
 	if !hasNonEmptyValue(validation) {
-		return ops.MarkBlockedOptions{}, cliValidationError("--repair-validation is required when repair request fields are provided")
+		return nil, cliValidationError("--repair-validation is required when repair request fields are provided")
 	}
-	opts.RepairRequest = &models.RepairRequest{
+	return &models.RepairRequest{
 		Operation:  operation,
 		Target:     target,
 		Command:    command,
 		Evidence:   evidence,
 		Validation: validation,
-	}
-	return opts, nil
+	}, nil
 }
 
 func hasNonEmptyValue(values []string) bool {
@@ -735,6 +742,10 @@ Requirements:
 		taskID := args[0]
 
 		note, _ := cmd.Flags().GetString("note")
+		opts, err := assessBlockedOptionsFromFlags(cmd)
+		if err != nil {
+			return err
+		}
 
 		agentID, err := resolveOrchestratorID(cmd)
 		if err != nil {
@@ -755,11 +766,39 @@ Requirements:
 		}
 
 		if isJSON(cmd) {
-			result, err := ops.AssessBlocked(projectRoot, taskID, note, agentID)
+			result, err := ops.AssessBlockedWithOptions(projectRoot, taskID, note, agentID, opts)
 			return jsonout.WriteResult(os.Stdout, result, resultWarnings(result), err)
 		}
-		return commands.AssessBlockedCommand(projectRoot, taskID, note, agentID)
+		return commands.AssessBlockedWithOptionsCommand(projectRoot, taskID, note, agentID, opts)
 	},
+}
+
+func assessBlockedOptionsFromFlags(cmd *cobra.Command) (ops.AssessBlockedOptions, error) {
+	reason, _ := cmd.Flags().GetString("reason")
+	questions, _ := cmd.Flags().GetStringArray("question")
+	repairRequest, err := repairRequestFromFlags(cmd)
+	if err != nil {
+		return ops.AssessBlockedOptions{}, err
+	}
+	reconcile := cmd.Flags().Changed("reason") || cmd.Flags().Changed("question") || repairRequest != nil
+	if !reconcile {
+		return ops.AssessBlockedOptions{}, nil
+	}
+	if strings.TrimSpace(reason) == "" {
+		return ops.AssessBlockedOptions{}, cliValidationError("--reason is required for canonical metadata reconciliation")
+	}
+	if len(questions) == 0 {
+		return ops.AssessBlockedOptions{}, cliValidationError("--question is required for canonical metadata reconciliation")
+	}
+	if len(questions) > 3 {
+		return ops.AssessBlockedOptions{}, cliValidationError("--question may be repeated at most 3 times")
+	}
+	for _, question := range questions {
+		if strings.TrimSpace(question) == "" {
+			return ops.AssessBlockedOptions{}, cliValidationError("--question values must not be empty")
+		}
+	}
+	return ops.AssessBlockedOptions{Reason: reason, Questions: questions, RepairRequest: repairRequest}, nil
 }
 
 var assessHypothesisExhaustedCmd = &cobra.Command{
@@ -1375,6 +1414,14 @@ func init() {
 	// Assess-blocked command flags
 	assessBlockedCmd.Flags().String("agent-id", "", "orchestrator agent ID (auto-resolved if not provided)")
 	assessBlockedCmd.Flags().String("note", "", "optional note about the assessment outcome")
+	assessBlockedCmd.Flags().String("reason", "", "current canonical blocked reason; requires --question")
+	assessBlockedCmd.Flags().StringArray("question", nil, "current canonical blocked question (repeat 1-3 times with --reason)")
+	assessBlockedCmd.Flags().String("repair-operation", "", "orchestrator-only repair operation requested for the current blocker")
+	assessBlockedCmd.Flags().String("repair-target", "", "task or state object the requested repair should modify")
+	assessBlockedCmd.Flags().String("repair-command", "", "exact command the orchestrator should run or adapt")
+	assessBlockedCmd.Flags().StringArray("repair-evidence", nil, "evidence gathered before requesting orchestrator repair")
+	assessBlockedCmd.Flags().StringArray("repair-validation", nil, "validation already run or required after orchestrator repair")
+	assessBlockedCmd.Flags().String("repair-request-file", "", "path to a complete JSON repair request; mutually exclusive with --repair-* fields")
 	registerCompletion(assessBlockedCmd, "agent-id", completeAgentIDs)
 
 	// Assess-hypothesis-exhausted command flags

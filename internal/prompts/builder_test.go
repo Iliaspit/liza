@@ -744,6 +744,9 @@ func TestRenderOrchestratorDashboard(t *testing.T) {
 				"For any inverse edge, confirm the stored repair request or direct repair reason identifies the explicit relationship",
 				"Do not run either repair operation until this shared semantic gate passes",
 				"The repair reason must identify the verified direction or name the explicit relationship that justifies an inverse edge",
+				"If graph repair leaves a current blocker, reconcile its canonical metadata",
+				`liza assess-blocked <task-id> --reason "<current blocker>" --question "<current question>"`,
+				"If graph repair resolves every blocker, use liza unblock-task",
 			}, replacementLineagePolicy...),
 		},
 		{

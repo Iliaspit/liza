@@ -102,7 +102,7 @@ func RetargetDependency(projectRoot, taskID, oldDependency string, newDependenci
 			return &PreconditionError{Reason: "retarget-dependency cannot remove all dependencies; use an explicit dependency-removal operation instead"}
 		}
 
-		repairExtra := matchingRetargetRepairExtra(task.RepairRequest, taskID, oldDependency, normalizedNewDeps)
+		repairExtra := matchingRetargetRepairExtra(task.RepairRequest, taskID, oldDependency, canonical)
 		repairRequestCleared := repairExtra != nil
 		if repairRequestCleared {
 			task.RepairRequest = nil
@@ -245,11 +245,14 @@ func replaceDependency(deps []string, oldDependency string, newDependencies []st
 	return dedupeStrings(replaced)
 }
 
-func matchingRetargetRepairExtra(request *models.RepairRequest, taskID, oldDependency string, newDependencies []string) map[string]any {
-	if request == nil || request.Operation != retargetDependencyOperation {
+func matchingRetargetRepairExtra(request *models.RepairRequest, taskID, oldDependency string, canonicalDependencies []string) map[string]any {
+	if request == nil || request.Operation != retargetDependencyOperation || request.Target != taskID {
 		return nil
 	}
-	if !repairCommandMatchesRetarget(request.Command, taskID, oldDependency, newDependencies) {
+	if slices.Contains(canonicalDependencies, oldDependency) {
+		return nil
+	}
+	if !repairCommandMatchesRetargetEdge(request.Command, taskID, oldDependency) {
 		return nil
 	}
 
@@ -262,20 +265,16 @@ func matchingRetargetRepairExtra(request *models.RepairRequest, taskID, oldDepen
 	}
 }
 
-func repairCommandMatchesRetarget(command, taskID, oldDependency string, newDependencies []string) bool {
+func repairCommandMatchesRetargetEdge(command, taskID, oldDependency string) bool {
 	fields := strings.Fields(command)
-	for i := 0; i+3 < len(fields); i++ {
+	for i := 0; i+2 < len(fields); i++ {
 		if fields[i] != retargetDependencyOperation {
 			continue
 		}
 		if fields[i+1] != taskID || fields[i+2] != oldDependency {
 			continue
 		}
-		commandDeps, err := normalizeRetargetNewDependencies([]string{fields[i+3]})
-		if err != nil {
-			return false
-		}
-		return slices.Equal(commandDeps, newDependencies)
+		return true
 	}
 	return false
 }
