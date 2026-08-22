@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"strings"
 	"testing"
 )
@@ -19,6 +20,30 @@ func TestAgentHelpListsAllRuntimeRoles(t *testing.T) {
 	for _, role := range required {
 		if !strings.Contains(helpText, role) {
 			t.Fatalf("agent help missing role %q", role)
+		}
+	}
+}
+
+func TestRepairAgentPoolHelpDescribesClaimEligibleReviewerCapacity(t *testing.T) {
+	resetRootCmdForTest(t)
+
+	var out bytes.Buffer
+	rootCmd.SetOut(&out)
+	rootCmd.SetErr(&out)
+	rootCmd.SetArgs([]string{"repair-agent-pool", "--help"})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("repair-agent-pool --help failed: %v\n%s", err, out.String())
+	}
+
+	help := out.String()
+	for _, required := range []string{
+		"reviewer work",
+		"existing claim filters",
+		"prior-approval",
+		"provider-diversity",
+	} {
+		if !strings.Contains(help, required) {
+			t.Errorf("repair-agent-pool --help missing %q:\n%s", required, help)
 		}
 	}
 }

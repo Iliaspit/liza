@@ -78,6 +78,7 @@ The orchestrator creates and manages task flow across roles such as writers, rev
 code-planners, coders, and integration agents. TUI/headless watch normally auto-repairs missing
 claimable-role capacity for doer/reviewer work. Do **not** routinely `§BRAND_BINARY_NAME§ agent <role>` or
 `repair-agent-pool` — no-ops when healthy.
+For reviewer work, capacity requires a live usable agent that can pass the existing claim filters for the task, including prior-approval and configured provider-diversity eligibility.
 Manually staff only as a genuine exception: claimable/reviewable work stranded with **no** live agent
 for that role and auto-repair is disabled, failing, or too slow for the run. *(If you must launch one headless, detach
 it — `setsid nohup … & disown`; harness-backgrounded `§BRAND_BINARY_NAME§ agent` gets reaped, `context canceled`.)*

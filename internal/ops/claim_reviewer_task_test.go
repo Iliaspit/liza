@@ -1,6 +1,7 @@
 package ops
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -1767,12 +1768,16 @@ func TestClaimReviewerTask_ReviewClaimCooldown(t *testing.T) {
 // doerDiversityResolver is a mock for testing doer-provider diversity filtering.
 // It implements the interface required by filterDoerProviderDiversity.
 type doerDiversityResolver struct {
-	diversity      string            // default value returned by ProviderDiversity
+	diversity      string // default value returned by ProviderDiversity
+	diversityErr   error
 	impactOverride map[string]string // impact → diversity override (optional)
 	reviewerRole   string
 }
 
 func (r *doerDiversityResolver) ProviderDiversity(_ string, impact string) (string, error) {
+	if r.diversityErr != nil {
+		return "", r.diversityErr
+	}
 	if r.impactOverride != nil {
 		if v, ok := r.impactOverride[impact]; ok {
 			return v, nil
@@ -1783,6 +1788,131 @@ func (r *doerDiversityResolver) ProviderDiversity(_ string, impact string) (stri
 
 func (r *doerDiversityResolver) ReviewerRole(string) (string, error) {
 	return r.reviewerRole, nil
+}
+
+func TestReviewerClaimEligibility(t *testing.T) {
+	now := time.Now().UTC()
+	doerID := "coder-1"
+	task := &models.Task{
+		ID:         "task-1",
+		RolePair:   "coding-pair",
+		AssignedTo: &doerID,
+	}
+
+	newState := func() *models.State {
+		return &models.State{Agents: map[string]models.Agent{
+			"coder-1":         {Role: "coder", Provider: "anthropic"},
+			"code-reviewer-1": reviewerCapacityTestAgent("code-reviewer", "anthropic"),
+			"code-reviewer-2": reviewerCapacityTestAgent("code-reviewer", "google"),
+		}}
+	}
+
+	t.Run("rejects a prior approver", func(t *testing.T) {
+		state := newState()
+		candidate := *task
+		candidate.Approvals = []models.Approval{{Agent: "code-reviewer-2", Provider: "google"}}
+		resolver := &doerDiversityResolver{diversity: "preferred", reviewerRole: "code-reviewer"}
+
+		if ReviewerClaimEligible(ReviewerClaimEligibilityInput{
+			State: state, Task: &candidate, AgentID: "code-reviewer-2",
+			ReviewerRole: "code-reviewer", Now: now, Resolver: resolver,
+		}) {
+			t.Fatal("prior approver must not remain claim-eligible")
+		}
+	})
+
+	t.Run("rejects same-provider reviewer when prior approver remains a blocking alternative", func(t *testing.T) {
+		state := newState()
+		candidate := *task
+		candidate.Approvals = []models.Approval{{Agent: "code-reviewer-2", Provider: "google"}}
+		resolver := &doerDiversityResolver{diversity: "preferred", reviewerRole: "code-reviewer"}
+
+		if ReviewerClaimEligible(ReviewerClaimEligibilityInput{
+			State: state, Task: &candidate, AgentID: "code-reviewer-1",
+			ReviewerRole: "code-reviewer", Now: now, Resolver: resolver,
+		}) {
+			t.Fatal("same-provider reviewer must be blocked while the different-provider prior approver is registered")
+		}
+	})
+
+	t.Run("permits same-provider reviewer when diversity is disabled", func(t *testing.T) {
+		state := newState()
+		candidate := *task
+		candidate.Approvals = []models.Approval{{Agent: "code-reviewer-2", Provider: "google"}}
+		resolver := &doerDiversityResolver{reviewerRole: "code-reviewer"}
+
+		if !ReviewerClaimEligible(ReviewerClaimEligibilityInput{
+			State: state, Task: &candidate, AgentID: "code-reviewer-1",
+			ReviewerRole: "code-reviewer", Now: now, Resolver: resolver,
+		}) {
+			t.Fatal("same-provider reviewer should remain eligible when diversity is disabled")
+		}
+	})
+
+	t.Run("permits same-provider reviewer when no blocking alternative is registered", func(t *testing.T) {
+		state := newState()
+		delete(state.Agents, "code-reviewer-2")
+		candidate := *task
+		candidate.Approvals = []models.Approval{{Agent: "code-reviewer-2", Provider: "google"}}
+		resolver := &doerDiversityResolver{diversity: "preferred", reviewerRole: "code-reviewer"}
+
+		if !ReviewerClaimEligible(ReviewerClaimEligibilityInput{
+			State: state, Task: &candidate, AgentID: "code-reviewer-1",
+			ReviewerRole: "code-reviewer", Now: now, Resolver: resolver,
+		}) {
+			t.Fatal("same-provider reviewer should remain eligible without a registered blocking alternative")
+		}
+	})
+
+	t.Run("provider diversity resolver errors fail open", func(t *testing.T) {
+		state := newState()
+		candidate := *task
+		candidate.Approvals = []models.Approval{{Agent: "code-reviewer-2", Provider: "google"}}
+		resolver := &doerDiversityResolver{
+			diversityErr: errors.New("resolver unavailable"),
+			reviewerRole: "code-reviewer",
+		}
+
+		if !ReviewerClaimEligible(ReviewerClaimEligibilityInput{
+			State: state, Task: &candidate, AgentID: "code-reviewer-1",
+			ReviewerRole: "code-reviewer", Now: now, Resolver: resolver,
+		}) {
+			t.Fatal("resolver errors must preserve fail-open claim eligibility")
+		}
+	})
+
+	t.Run("rejects a reviewer in claim cooldown", func(t *testing.T) {
+		state := newState()
+		candidate := *task
+		candidate.History = []models.TaskHistoryEntry{{
+			Time:  now.Add(-time.Second),
+			Event: models.TaskEventReviewClaimReleased,
+			Agent: testhelpers.StringPtr("code-reviewer-1"),
+		}}
+		resolver := &doerDiversityResolver{reviewerRole: "code-reviewer"}
+
+		if ReviewerClaimEligible(ReviewerClaimEligibilityInput{
+			State: state, Task: &candidate, AgentID: "code-reviewer-1",
+			ReviewerRole: "code-reviewer", Now: now, Resolver: resolver,
+		}) {
+			t.Fatal("reviewer in claim cooldown must not remain claim-eligible")
+		}
+	})
+
+	t.Run("rejects an invalid registered claimant", func(t *testing.T) {
+		state := newState()
+		invalid := state.Agents["code-reviewer-1"]
+		invalid.Provider = ""
+		state.Agents["code-reviewer-1"] = invalid
+		resolver := &doerDiversityResolver{reviewerRole: "code-reviewer"}
+
+		if ReviewerClaimEligible(ReviewerClaimEligibilityInput{
+			State: state, Task: task, AgentID: "code-reviewer-1",
+			ReviewerRole: "code-reviewer", Now: now, Resolver: resolver,
+		}) {
+			t.Fatal("invalid registered claimant must not remain claim-eligible")
+		}
+	})
 }
 
 func TestIsBlockedByDoerDiversity(t *testing.T) {

@@ -243,6 +243,7 @@ func FindMissingRolesWithClaimableWork(state *models.State, pr models.PipelineRe
 	}
 
 	registeredRoles := make(map[string]bool)
+	registeredAgentsByRole := make(map[string][]string)
 	now := time.Now().UTC()
 	nilLeaseHeartbeatWindow := models.NormalizeHeartbeatInterval(state.Config.HeartbeatInterval) + models.LeaseExpiryGracePeriod
 	for agentID, agentState := range state.Agents {
@@ -251,8 +252,10 @@ func FindMissingRolesWithClaimableWork(state *models.State, pr models.PipelineRe
 				continue
 			}
 			registeredRoles[agentState.Role] = true
+			registeredAgentsByRole[agentState.Role] = append(registeredAgentsByRole[agentState.Role], agentID)
 		}
 	}
+	reviewerPolicy, _ := pr.(ops.ReviewerClaimPolicyResolver)
 
 	missingRoleTasks := make(map[string][]string)
 	for i := range state.Tasks {
@@ -273,8 +276,20 @@ func FindMissingRolesWithClaimableWork(state *models.State, pr models.PipelineRe
 		if !registeredRoles[doerRuntime] && models.IsRoleTaskReady(state, task, doerRuntime, pr, now) {
 			missingRoleTasks[doerRuntime] = append(missingRoleTasks[doerRuntime], task.ID)
 		}
-		if !registeredRoles[reviewerRuntime] && models.IsRoleTaskReady(state, task, reviewerRuntime, pr, now) {
-			missingRoleTasks[reviewerRuntime] = append(missingRoleTasks[reviewerRuntime], task.ID)
+		if models.IsRoleTaskReady(state, task, reviewerRuntime, pr, now) {
+			hasClaimEligibleReviewer := false
+			for _, agentID := range registeredAgentsByRole[reviewerRuntime] {
+				if reviewerPolicy != nil && ops.ReviewerClaimEligible(ops.ReviewerClaimEligibilityInput{
+					State: state, Task: task, AgentID: agentID,
+					ReviewerRole: reviewerRuntime, Now: now, Resolver: reviewerPolicy,
+				}) {
+					hasClaimEligibleReviewer = true
+					break
+				}
+			}
+			if !hasClaimEligibleReviewer {
+				missingRoleTasks[reviewerRuntime] = append(missingRoleTasks[reviewerRuntime], task.ID)
+			}
 		}
 	}
 

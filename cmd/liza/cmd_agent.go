@@ -376,9 +376,11 @@ var repairAgentPoolCmd = &cobra.Command{
 	Short: "Repair missing agent roles for claimable work",
 	Long: fmt.Sprintf(`Repair the runtime agent pool for claimable work.
 
-By default, detects roles with immediately claimable tasks but no live registered
-agent, then spawns one agent process per missing role. The --missing flag is kept
-as an explicit spelling of the default behavior.
+By default, detects roles with immediately claimable tasks but no live usable
+agent capacity, then spawns one agent process per missing role. For reviewer work,
+capacity requires a live usable agent that can pass the existing claim filters for
+the task, including prior-approval and configured provider-diversity eligibility.
+The --missing flag is kept as an explicit spelling of the default behavior.
 
 Use --cli to choose the backend for newly spawned agents. When omitted, the CLI
 defaults to role-specific config, role-specific env, config.default_cli,

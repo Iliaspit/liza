@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/liza-mas/liza/internal/models"
+	"github.com/liza-mas/liza/internal/ops"
 	"github.com/liza-mas/liza/internal/testhelpers"
 )
 
@@ -54,6 +55,115 @@ func writeRepairAgentPoolState(t *testing.T, state *models.State) string {
 	testhelpers.SetupPipelineConfig(t, tmpDir)
 	testhelpers.WriteInitialState(t, statePath, state)
 	return tmpDir
+}
+
+type repairReviewerPolicyResolver struct {
+	models.PipelineResolver
+	diversity    string
+	diversityErr error
+	reviewerRole string
+}
+
+func (r repairReviewerPolicyResolver) ProviderDiversity(string, string) (string, error) {
+	return r.diversity, r.diversityErr
+}
+
+func (r repairReviewerPolicyResolver) ReviewerRole(rolePair string) (string, error) {
+	if r.reviewerRole != "" {
+		return r.reviewerRole, nil
+	}
+	return r.PipelineResolver.ReviewerRole(rolePair)
+}
+
+func TestFindMissingRolesWithClaimableWork_ReviewerClaimEligibility(t *testing.T) {
+	now := time.Now().UTC()
+	baseState := func() *models.State {
+		state := testhelpers.CreateValidState()
+		doerID := "coder-1"
+		task := testhelpers.BuildTaskByStatus("review-deadlock", models.TaskStatusPartiallyApproved, now)
+		task.AssignedTo = &doerID
+		task.ReviewCommit = testhelpers.StringPtr("review123")
+		task.Approvals = []models.Approval{{Agent: "quorum-reviewer-2", Provider: "google", Timestamp: now}}
+		state.Tasks = []models.Task{task}
+		state.Agents = map[string]models.Agent{
+			"coder-1":           {Role: "coder", Provider: "anthropic"},
+			"quorum-reviewer-1": repairReviewerAgent("quorum-reviewer", "anthropic"),
+			"quorum-reviewer-2": repairReviewerAgent("quorum-reviewer", "google"),
+		}
+		return state
+	}
+
+	state := baseState()
+	projectRoot := writeRepairAgentPoolState(t, state)
+	baseResolver, err := ops.LoadResolverForModels(projectRoot)
+	if err != nil {
+		t.Fatalf("LoadResolverForModels() error = %v", err)
+	}
+
+	t.Run("reports reviewer role and task for deadlocked roster", func(t *testing.T) {
+		resolver := repairReviewerPolicyResolver{
+			PipelineResolver: baseResolver,
+			diversity:        "preferred",
+			reviewerRole:     "quorum-reviewer",
+		}
+
+		missing := FindMissingRolesWithClaimableWork(baseState(), resolver)
+		if len(missing) != 1 {
+			t.Fatalf("missing = %+v, want one reviewer role", missing)
+		}
+		if missing[0].Role != "quorum-reviewer" || !slices.Equal(missing[0].TaskIDs, []string{"review-deadlock"}) {
+			t.Fatalf("missing = %+v, want resolver-provided quorum-reviewer for review-deadlock", missing)
+		}
+	})
+
+	t.Run("live claim-eligible reviewer suppresses repair", func(t *testing.T) {
+		state := baseState()
+		state.Agents["quorum-reviewer-3"] = repairReviewerAgent("quorum-reviewer", "google")
+		resolver := repairReviewerPolicyResolver{
+			PipelineResolver: baseResolver,
+			diversity:        "preferred",
+			reviewerRole:     "quorum-reviewer",
+		}
+
+		if missing := FindMissingRolesWithClaimableWork(state, resolver); len(missing) != 0 {
+			t.Fatalf("missing = %+v, want none with a claim-eligible reviewer", missing)
+		}
+	})
+
+	t.Run("resolver error preserves fail-open capacity", func(t *testing.T) {
+		resolver := repairReviewerPolicyResolver{
+			PipelineResolver: baseResolver,
+			diversityErr:     errors.New("resolver unavailable"),
+			reviewerRole:     "quorum-reviewer",
+		}
+
+		if missing := FindMissingRolesWithClaimableWork(baseState(), resolver); len(missing) != 0 {
+			t.Fatalf("missing = %+v, want none when resolver error leaves reviewer claim-eligible", missing)
+		}
+	})
+
+	t.Run("doer capacity remains role-presence based", func(t *testing.T) {
+		state := testhelpers.CreateValidState()
+		state.Tasks = []models.Task{testhelpers.BuildTaskByStatus("doer-work", models.TaskStatusReady, now)}
+		leaseExpires := now.Add(30 * time.Minute)
+		state.Agents["coder-1"] = models.Agent{
+			Role:         "coder",
+			Status:       models.AgentStatusIdle,
+			Heartbeat:    now,
+			LeaseExpires: &leaseExpires,
+		}
+		resolver := repairReviewerPolicyResolver{PipelineResolver: baseResolver, diversity: "preferred"}
+
+		if missing := FindMissingRolesWithClaimableWork(state, resolver); len(missing) != 0 {
+			t.Fatalf("missing = %+v, want doer capacity semantics unchanged", missing)
+		}
+	})
+}
+
+func repairReviewerAgent(role, provider string) models.Agent {
+	agent := testhelpers.RegisteredTestAgent(role)
+	agent.Provider = provider
+	return agent
 }
 
 func TestParseAutoRepairAgentPoolEnv(t *testing.T) {

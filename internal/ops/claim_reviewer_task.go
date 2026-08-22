@@ -39,6 +39,70 @@ type ClaimReviewerTaskResult struct {
 	LeaseExpires time.Time
 }
 
+// ReviewerClaimPolicyResolver exposes the review-policy lookups needed to
+// project whether a registered reviewer can claim a specific task.
+type ReviewerClaimPolicyResolver interface {
+	ProviderDiversity(string, string) (string, error)
+	ReviewerRole(string) (string, error)
+}
+
+// ReviewerClaimEligibilityInput contains the state and policy inputs for one
+// reviewer/task eligibility projection.
+type ReviewerClaimEligibilityInput struct {
+	State        *models.State
+	Task         *models.Task
+	AgentID      string
+	ReviewerRole string
+	Now          time.Time
+	Resolver     ReviewerClaimPolicyResolver
+}
+
+type reviewerClaimEligibility struct {
+	registrationErr        error
+	alreadyApproved        bool
+	inCooldown             bool
+	blockedByDoerDiversity bool
+}
+
+func (e reviewerClaimEligibility) eligible() bool {
+	return e.registrationErr == nil && !e.alreadyApproved && !e.inCooldown && !e.blockedByDoerDiversity
+}
+
+// ReviewerClaimEligible projects the agent-specific reviewer claim gates for
+// task. Task claimability and review-boundary validation remain separate.
+func ReviewerClaimEligible(input ReviewerClaimEligibilityInput) bool {
+	return projectReviewerClaimEligibility(input).eligible()
+}
+
+func projectReviewerClaimEligibility(input ReviewerClaimEligibilityInput) reviewerClaimEligibility {
+	if input.State == nil || input.Task == nil || input.Resolver == nil {
+		return reviewerClaimEligibility{registrationErr: &PreconditionError{Reason: "reviewer claim eligibility inputs are incomplete"}}
+	}
+	agent, err := requireRegisteredClaimAgent(input.State, input.AgentID, input.ReviewerRole)
+	if err != nil {
+		return reviewerClaimEligibility{registrationErr: err}
+	}
+	return reviewerClaimEligibility{
+		alreadyApproved:        input.Task.HasApprovalFromAgent(input.AgentID),
+		inCooldown:             isInReviewClaimCooldown(input.Task, input.AgentID, input.Now.Add(-defaultReviewClaimCooldown)),
+		blockedByDoerDiversity: isBlockedByDoerDiversityAt(input.Task, agent.Provider, input.AgentID, input.State, input.Resolver, input.Now),
+	}
+}
+
+func filterByReviewerClaimEligibility(
+	candidates []*models.Task,
+	projected map[*models.Task]reviewerClaimEligibility,
+	keep func(reviewerClaimEligibility) bool,
+) []*models.Task {
+	filtered := make([]*models.Task, 0, len(candidates))
+	for _, task := range candidates {
+		if keep(projected[task]) {
+			filtered = append(filtered, task)
+		}
+	}
+	return filtered
+}
+
 // ClaimReviewerTask finds and claims a reviewable task for a code-reviewer agent.
 // It atomically transitions the task to REVIEWING (or REVIEWING_2 for partially-
 // approved tasks), assigns the reviewer, and updates the agent status.
@@ -114,16 +178,28 @@ func ClaimReviewerTask(input ClaimReviewerTaskInput) (*ClaimReviewerTaskResult, 
 			return &PreconditionError{Reason: "no reviewable tasks found"}
 		}
 
+		projected := make(map[*models.Task]reviewerClaimEligibility, len(candidates))
+		for _, task := range candidates {
+			projected[task] = projectReviewerClaimEligibility(ReviewerClaimEligibilityInput{
+				State: state, Task: task, AgentID: input.AgentID,
+				ReviewerRole: role, Now: now, Resolver: pb.resolver,
+			})
+		}
+
 		// Independent-review filter: skip tasks the claiming agent already
 		// approved. Without this, a reviewer-1 polling loop would re-claim
 		// its own partially_approved task and self-rubber-stamp the quorum.
-		candidates = filterAlreadyApprovedByAgent(candidates, input.AgentID)
+		candidates = filterByReviewerClaimEligibility(candidates, projected, func(e reviewerClaimEligibility) bool {
+			return e.registrationErr == nil && !e.alreadyApproved
+		})
 		if len(candidates) == 0 {
 			return &PreconditionError{Reason: "no reviewable tasks found (all candidates already approved by claimer)"}
 		}
 
 		// Filter out candidates in claim cooldown to prevent claim-release spin.
-		candidates = filterReviewClaimCooldown(candidates, input.AgentID, defaultReviewClaimCooldown, now)
+		candidates = filterByReviewerClaimEligibility(candidates, projected, func(e reviewerClaimEligibility) bool {
+			return !e.inCooldown
+		})
 		if len(candidates) == 0 {
 			return &PreconditionError{Reason: "all reviewable tasks in claim cooldown"}
 		}
@@ -134,7 +210,9 @@ func ClaimReviewerTask(input ClaimReviewerTaskInput) (*ClaimReviewerTaskResult, 
 		// Filter by doer-provider diversity: when provider-diversity is configured,
 		// block reviewers that share the doer's provider if a different-provider
 		// reviewer is registered (even if busy).
-		candidates = filterDoerProviderDiversity(candidates, claimerProvider, input.AgentID, state, pb.resolver)
+		candidates = filterByReviewerClaimEligibility(candidates, projected, func(e reviewerClaimEligibility) bool {
+			return !e.blockedByDoerDiversity
+		})
 		if len(candidates) == 0 {
 			return &PreconditionError{Reason: "no reviewable tasks found"}
 		}
@@ -382,41 +460,6 @@ func isDiversitySatisfiable(
 	return false
 }
 
-// filterAlreadyApprovedByAgent removes candidates where the given agent has
-// already recorded an approval. A reviewer must not be allowed to re-claim a
-// task they already approved — the round-2 verdict has to come from an
-// independent reviewer (quorum > 1 contract). Without this filter, the
-// agent loop happily picks up its own partially_approved task during round
-// 2 polling and double-counts the same approval.
-func filterAlreadyApprovedByAgent(candidates []*models.Task, agentID string) []*models.Task {
-	if agentID == "" {
-		return candidates
-	}
-	var filtered []*models.Task
-	for _, t := range candidates {
-		if t.HasApprovalFromAgent(agentID) {
-			continue
-		}
-		filtered = append(filtered, t)
-	}
-	return filtered
-}
-
-// filterReviewClaimCooldown removes candidates where the claiming agent has a
-// recent claim_released or review_claim_released history event within the
-// cooldown window. This prevents claim-release spin loops.
-func filterReviewClaimCooldown(candidates []*models.Task, agentID string, cooldown time.Duration, now time.Time) []*models.Task {
-	cutoff := now.Add(-cooldown)
-	var filtered []*models.Task
-	for _, t := range candidates {
-		if isInReviewClaimCooldown(t, agentID, cutoff) {
-			continue
-		}
-		filtered = append(filtered, t)
-	}
-	return filtered
-}
-
 // isInReviewClaimCooldown checks if the task has a recent claim release event
 // from the specified agent within the cutoff time.
 func isInReviewClaimCooldown(task *models.Task, agentID string, cutoff time.Time) bool {
@@ -476,6 +519,17 @@ func isBlockedByDoerDiversity(
 		ReviewerRole(string) (string, error)
 	},
 ) bool {
+	return isBlockedByDoerDiversityAt(task, claimerProvider, claimerAgentID, state, resolver, time.Now().UTC())
+}
+
+func isBlockedByDoerDiversityAt(
+	task *models.Task,
+	claimerProvider string,
+	claimerAgentID string,
+	state *models.State,
+	resolver ReviewerClaimPolicyResolver,
+	now time.Time,
+) bool {
 	// Resolve effective impact from task history, then check if provider-diversity
 	// is configured at that impact level (with base-level fallthrough).
 	effectiveImpact := ResolveEffectiveImpact(task.History)
@@ -504,7 +558,6 @@ func isBlockedByDoerDiversity(
 	if err != nil {
 		return false
 	}
-	now := time.Now().UTC()
 	for agentID, agent := range state.Agents {
 		if agentID == claimerAgentID {
 			continue

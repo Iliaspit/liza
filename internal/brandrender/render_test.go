@@ -10,6 +10,8 @@ import (
 	"github.com/liza-mas/liza/internal/brand"
 )
 
+var rawDefaultBrandRE = regexp.MustCompile(`(?i)(^|[^A-Za-z])liza($|[^A-Za-z0-9])|liza-mas/liza`)
+
 func TestRenderBytesRejectsUnknownAndStrayMacros(t *testing.T) {
 	values := brand.RuntimeValues()
 	if _, err := RenderBytes([]byte("hello §BRAND_UNKNOWN§"), values); err == nil {
@@ -127,7 +129,6 @@ func TestExpectedEmbeddedFilesUseNonDefaultBrand(t *testing.T) {
 		t.Fatalf("ExpectedEmbeddedFiles: %v", err)
 	}
 
-	rawDefaultRE := regexp.MustCompile(`(?i)(^|[^A-Za-z])liza($|[^A-Za-z0-9])|liza-mas/liza`)
 	var sawBinaryLogsSkill bool
 	var sawNameLowerOperatorSkill bool
 	for _, file := range files {
@@ -144,7 +145,7 @@ func TestExpectedEmbeddedFilesUseNonDefaultBrand(t *testing.T) {
 		if strings.Contains(file.RelPath, "acme-agent-logs") || strings.Contains(rendered, "acme-agent-logs") {
 			t.Fatalf("%s contains name-lower logs skill artifact", file.RelPath)
 		}
-		if match := rawDefaultRE.FindString(rendered); match != "" {
+		if match := rawDefaultBrandRE.FindString(rendered); match != "" {
 			t.Fatalf("%s contains raw default brand token %q", file.RelPath, match)
 		}
 	}
@@ -153,6 +154,38 @@ func TestExpectedEmbeddedFilesUseNonDefaultBrand(t *testing.T) {
 	}
 	if !sawNameLowerOperatorSkill {
 		t.Fatalf("expected generated operator skill path to use name-lower")
+	}
+}
+
+func TestRenderedRepairAgentPoolDocsDescribeClaimEligibleReviewerCapacity(t *testing.T) {
+	files, err := ExpectedEmbeddedFiles(findRepoRoot(t), nonDefaultBrandValues())
+	if err != nil {
+		t.Fatalf("ExpectedEmbeddedFiles: %v", err)
+	}
+
+	renderedByPath := make(map[string][]byte, len(files))
+	for _, file := range files {
+		renderedByPath[file.RelPath] = file.Content
+	}
+
+	statement := "For reviewer work, capacity requires a live usable agent that can pass the existing claim filters for the task, including prior-approval and configured provider-diversity eligibility."
+	for _, relPath := range []string{
+		"support-docs/USAGE_MULTI_AGENTS.md",
+		"support-docs/CONFIGURATION.md",
+		"support-docs/TROUBLESHOOTING.md",
+		"skills/acme-agent-operator/SKILL.md",
+	} {
+		content, ok := renderedByPath[relPath]
+		if !ok {
+			t.Errorf("rendered artifacts missing %s", relPath)
+			continue
+		}
+		if !strings.Contains(string(content), statement) {
+			t.Errorf("%s missing reviewer-capacity statement %q", relPath, statement)
+		}
+		if match := rawDefaultBrandRE.Find(content); match != nil {
+			t.Errorf("%s contains raw default brand token %q", relPath, match)
+		}
 	}
 }
 
@@ -197,12 +230,11 @@ func TestExpectedEmbeddedFilesDocumentDependencyHeldUnblock(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ExpectedEmbeddedFiles: %v", err)
 	}
-	rawDefaultRE := regexp.MustCompile(`(?i)(^|[^A-Za-z])liza($|[^A-Za-z0-9])|liza-mas/liza`)
 	for _, file := range files {
 		if !strings.HasPrefix(file.RelPath, "support-docs/") {
 			continue
 		}
-		if match := rawDefaultRE.Find(file.Content); match != nil {
+		if match := rawDefaultBrandRE.Find(file.Content); match != nil {
 			t.Errorf("%s contains raw default brand token %q", file.RelPath, match)
 		}
 	}
