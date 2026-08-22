@@ -342,10 +342,36 @@ Examples:
 
 		if isJSON(cmd) {
 			result, err := ops.RetargetDependency(projectRoot, taskID, oldDependency, newDependencies, reason, agentID)
+			verbose, _ := cmd.Flags().GetBool("verbose")
+			if verbose {
+				writeRetargetDependencyVerboseDiagnostic(os.Stderr, err)
+			}
 			return jsonout.WriteResult(os.Stdout, result, resultWarnings(result), err)
 		}
 		return commands.RetargetDependencyCommand(projectRoot, taskID, oldDependency, newDependencies, reason, agentID)
 	},
+}
+
+func writeRetargetDependencyVerboseDiagnostic(stderr io.Writer, err error) {
+	if err == nil {
+		return
+	}
+
+	details := jsonout.ErrorDetails(err)
+	if details["diagnostic_action"] != "retarget_dependency_rejected" {
+		return
+	}
+	_, message := jsonout.ClassifyError(err)
+	diagnostic := struct {
+		Message string         `json:"message"`
+		Details map[string]any `json:"details"`
+	}{
+		Message: message,
+		Details: details,
+	}
+	// The diagnostic is secondary to the stdout envelope; a stderr write failure
+	// must not replace the classified operation result.
+	_ = json.NewEncoder(stderr).Encode(diagnostic)
 }
 
 var applyDependencyRepairCmd = &cobra.Command{

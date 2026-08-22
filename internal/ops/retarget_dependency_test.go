@@ -1,12 +1,18 @@
 package ops
 
 import (
+	"errors"
+	"reflect"
 	"slices"
+	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/liza-mas/liza/internal/db"
+	activitylog "github.com/liza-mas/liza/internal/log"
 	"github.com/liza-mas/liza/internal/models"
+	"github.com/liza-mas/liza/internal/paths"
 	"github.com/liza-mas/liza/internal/testhelpers"
 )
 
@@ -237,34 +243,141 @@ func TestRetargetDependency_RequiresAtLeastOneNewDependency(t *testing.T) {
 	testhelpers.RequireErrorContains(t, err, "at least one new dependency is required")
 }
 
-func TestRetargetDependency_RejectsCandidateStateCycle(t *testing.T) {
+func TestRetargetDependency_CycleDiagnostics(t *testing.T) {
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
+	const sentinel = "retarget-cycle-secret-sentinel"
+	t.Setenv("RETARGET_TOKEN", sentinel)
+
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()
 	state.Goal.SpecRef = "README.md"
-	task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusBlocked, now)
+	task := testhelpers.BuildTaskByStatus("A", models.TaskStatusBlocked, now)
 	task.DependsOn = []string{"old-dep"}
-	newDep := testhelpers.BuildTaskByStatus("new-dep", models.TaskStatusReady, now)
-	newDep.DependsOn = []string{"task-1"}
+	task.RepairRequest = &models.RepairRequest{
+		Operation:  retargetDependencyOperation,
+		Target:     "A",
+		Command:    "liza retarget-dependency A old-dep B --reason repair --agent-id orchestrator-1 --json",
+		Evidence:   []string{"error=dependency graph needs repair"},
+		Validation: []string{"liza validate --json"},
+	}
+	taskB := testhelpers.BuildTaskByStatus("B", models.TaskStatusReady, now)
+	taskB.DependsOn = []string{"C"}
+	taskC := testhelpers.BuildTaskByStatus("C", models.TaskStatusReady, now)
+	taskC.DependsOn = []string{"A"}
 	state.Tasks = []models.Task{
 		task,
 		testhelpers.BuildTaskByStatus("old-dep", models.TaskStatusMerged, now),
-		newDep,
+		taskB,
+		taskC,
 	}
 	testhelpers.WriteInitialState(t, stateFile, state)
 
-	_, err := RetargetDependency(tmpDir, "task-1", "old-dep", []string{"new-dep"}, "Should fail", "orchestrator-1")
-	testhelpers.RequireErrorContains(t, err, "circular dependency detected")
+	beforeState, err := db.New(stateFile).Read()
+	if err != nil {
+		t.Fatalf("read state before retarget: %v", err)
+	}
+	before := beforeState.FindTask("A")
+	if before == nil {
+		t.Fatal("task A not found before retarget")
+	}
+
+	reason := "token=" + sentinel + " " + strings.Repeat("é", 1400)
+	_, err = RetargetDependency(tmpDir, "A", "old-dep", []string{"B"}, reason, "orchestrator-1")
+	if err == nil {
+		t.Fatal("RetargetDependency() error = nil, want dependency-cycle rejection")
+	}
+	var operational *OperationalError
+	if !errors.As(err, &operational) {
+		t.Fatalf("RetargetDependency() error = %T: %v, want *OperationalError", err, err)
+	}
+	if operational.Code != "validation" {
+		t.Fatalf("OperationalError.Code = %q, want validation", operational.Code)
+	}
+	if operational.Phase != "candidate-state-validation" {
+		t.Fatalf("OperationalError.Phase = %q, want candidate-state-validation", operational.Phase)
+	}
+	details := operational.SafeDetails()
+	for key, want := range map[string]string{
+		"operation":         retargetDependencyOperation,
+		"task_id":           "A",
+		"old_dependency":    "old-dep",
+		"phase":             "candidate-state-validation",
+		"diagnostic_action": "retarget_dependency_rejected",
+	} {
+		if details[key] != want {
+			t.Errorf("OperationalError detail %s = %v, want %q", key, details[key], want)
+		}
+	}
+	newDependencies, ok := details["new_dependencies"].([]string)
+	if !ok || !slices.Equal(newDependencies, []string{"B"}) {
+		t.Fatalf("new_dependencies = %#v, want []string{\"B\"}", details["new_dependencies"])
+	}
+	cyclePath, ok := details["cycle_path"].([]string)
+	if !ok || !slices.Equal(cyclePath, []string{"A", "B", "C", "A"}) {
+		t.Fatalf("cycle_path = %#v, want []string{\"A\", \"B\", \"C\", \"A\"}", details["cycle_path"])
+	}
 
 	readState, readErr := db.New(stateFile).Read()
 	if readErr != nil {
 		t.Fatalf("read state: %v", readErr)
 	}
-	unchanged := readState.FindTask("task-1")
-	if !slices.Equal(unchanged.DependsOn, []string{"old-dep"}) {
-		t.Fatalf("DependsOn persisted after failed validation: %v", unchanged.DependsOn)
+	unchanged := readState.FindTask("A")
+	if unchanged == nil {
+		t.Fatal("task A not found after rejected retarget")
+	}
+	if !slices.Equal(unchanged.DependsOn, before.DependsOn) {
+		t.Fatalf("DependsOn persisted after failed validation: got %v, want %v", unchanged.DependsOn, before.DependsOn)
+	}
+	if !reflect.DeepEqual(unchanged.RepairRequest, before.RepairRequest) {
+		t.Fatalf("RepairRequest changed after failed validation: got %#v, want %#v", unchanged.RepairRequest, before.RepairRequest)
+	}
+	if !reflect.DeepEqual(unchanged.History, before.History) {
+		t.Fatalf("History changed after failed validation: got %#v, want %#v", unchanged.History, before.History)
+	}
+
+	entries, logErr := activitylog.New(paths.New(tmpDir).LogPath()).Read()
+	if logErr != nil {
+		t.Fatalf("read activity log: %v", logErr)
+	}
+	var rejected []activitylog.Entry
+	for _, entry := range entries {
+		switch entry.Action {
+		case "retarget_dependency_rejected":
+			rejected = append(rejected, entry)
+		case retargetDependencyOperation:
+			t.Fatalf("rejected retarget recorded success activity: %#v", entry)
+		}
+	}
+	if len(rejected) != 1 {
+		t.Fatalf("retarget_dependency_rejected activity count = %d, want 1; entries=%#v", len(rejected), entries)
+	}
+	detail := rejected[0].Detail
+	if !utf8.ValidString(detail) {
+		t.Fatalf("rejection Detail is not valid UTF-8: %q", detail)
+	}
+	if len([]byte(detail)) > 2048 {
+		t.Fatalf("rejection Detail byte length = %d, want <= 2048", len([]byte(detail)))
+	}
+	if strings.Contains(detail, sentinel) {
+		t.Fatalf("rejection Detail leaked sentinel secret: %q", detail)
+	}
+	if !strings.HasSuffix(detail, "... [truncated]") {
+		t.Fatalf("rejection Detail was not truncated: %q", detail)
+	}
+	for _, want := range []string{
+		"operation=retarget-dependency",
+		"phase=candidate-state-validation",
+		"task_id=A",
+		"old_dependency=old-dep",
+		"new_dependencies=B",
+		"cycle_path=A -> B -> C -> A",
+		"token=***",
+	} {
+		if !strings.Contains(detail, want) {
+			t.Errorf("rejection Detail = %q, want substring %q", detail, want)
+		}
 	}
 }

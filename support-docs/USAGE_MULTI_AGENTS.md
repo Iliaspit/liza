@@ -571,6 +571,34 @@ without changing dependencies, history, or the request. Success reports every
 committed canonical list and clears the request in the same transaction. Run
 the request's validation and unblock separately.
 
+If `§BRAND_BINARY_NAME§ retarget-dependency A old-dependency B --reason "..."
+--json` would create a cycle, full candidate-state validation returns this safe
+validation envelope:
+
+```json
+{
+  "ok": false,
+  "result": null,
+  "error": {
+    "code": "validation",
+    "message": "retarget dependency rejected because the candidate state contains a dependency cycle",
+    "details": {
+      "operation": "retarget-dependency",
+      "task_id": "A",
+      "old_dependency": "old-dependency",
+      "new_dependencies": ["B"],
+      "phase": "candidate-state-validation",
+      "cycle_path": ["A", "B", "C", "A"],
+      "diagnostic_action": "retarget_dependency_rejected"
+    }
+  }
+}
+```
+
+With `--json -v`, stdout contains exactly one JSON envelope and stderr contains only the classified safe message and details; the raw underlying error is not emitted. The ordered string-array `cycle_path` closes the cycle and identifies the edges to repair.
+
+The candidate dependency, repair request, and task history remain unchanged, and no `retarget-dependency` success activity is recorded. The activity log instead records `retarget_dependency_rejected` with masked, bounded rejection evidence. In retry tracking, the supervisor attributes the failure to `retarget-dependency` and uses the envelope's `validation` code.
+
 For legacy terminal dependency corruption, run exactly
 `§BRAND_BINARY_NAME§ repair-superseded-dependencies <task-id> --reason <reason>`
 as the orchestrator. The task must already be `SUPERSEDED` and contain at least

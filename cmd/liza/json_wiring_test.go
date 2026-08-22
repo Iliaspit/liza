@@ -6,11 +6,13 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/liza-mas/liza/internal/commands"
+	activitylog "github.com/liza-mas/liza/internal/log"
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/pipeline"
 	"github.com/liza-mas/liza/internal/prompts"
@@ -743,6 +745,146 @@ func TestJSON_RetargetDependency_Success(t *testing.T) {
 	}
 	if result["old_dependency"] != "old-dep" {
 		t.Fatalf("old_dependency = %v, want old-dep", result["old_dependency"])
+	}
+}
+
+func TestJSON_RetargetDependency_RejectsTransitiveCycle(t *testing.T) {
+	const sentinel = "retarget-cycle-cli-secret"
+	t.Setenv("RETARGET_TOKEN", sentinel)
+
+	projectRoot, statePath := setupMutationTestProject(t, func(state *models.State) {
+		now := time.Now().UTC()
+		state.Goal.SpecRef = "README.md"
+		taskA := testhelpers.BuildTaskByStatus("A", models.TaskStatusBlocked, now)
+		taskA.DependsOn = []string{"old-dep"}
+		taskA.RepairRequest = &models.RepairRequest{
+			Operation:  "retarget-dependency",
+			Target:     "A",
+			Command:    "liza retarget-dependency A old-dep B --json",
+			Evidence:   []string{"error=dependency graph needs repair"},
+			Validation: []string{"liza validate --json"},
+		}
+		taskB := testhelpers.BuildTaskByStatus("B", models.TaskStatusReady, now)
+		taskB.DependsOn = []string{"C"}
+		taskC := testhelpers.BuildTaskByStatus("C", models.TaskStatusReady, now)
+		taskC.DependsOn = []string{"A"}
+		state.Tasks = []models.Task{
+			taskA,
+			testhelpers.BuildTaskByStatus("old-dep", models.TaskStatusMerged, now),
+			taskB,
+			taskC,
+		}
+	})
+	before := mustFindTask(t, readState(t, statePath), "A")
+
+	oldStderr := os.Stderr
+	stderrR, stderrW, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("failed to create stderr pipe: %v", err)
+	}
+	os.Stderr = stderrW
+
+	stdout, cmdErr := executeRootCommandCapture(t, projectRoot,
+		"retarget-dependency", "A", "old-dep", "B",
+		"--reason", "token="+sentinel+" prove transitive cycle rejection",
+		"--agent-id", "orchestrator-1",
+		"--json", "-v",
+	)
+
+	stderrW.Close()
+	os.Stderr = oldStderr
+	var stderrBuf bytes.Buffer
+	if _, copyErr := io.Copy(&stderrBuf, stderrR); copyErr != nil {
+		t.Fatalf("failed to read stderr: %v", copyErr)
+	}
+	stderrR.Close()
+	stderr := stderrBuf.String()
+
+	if cmdErr == nil {
+		t.Fatal("expected dependency-cycle rejection, got nil")
+	}
+	envDecoder := json.NewDecoder(strings.NewReader(stdout))
+	var env map[string]any
+	if err := envDecoder.Decode(&env); err != nil {
+		t.Fatalf("decode stdout envelope: %v\nraw output: %s", err, stdout)
+	}
+	if err := assertJSONStreamEOF(envDecoder); err != nil {
+		t.Fatalf("stdout contains output beyond one JSON envelope: %v", err)
+	}
+	if env["ok"] != false {
+		t.Fatalf("expected ok=false, got %v", env["ok"])
+	}
+	errObj, ok := env["error"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected error object, got %T", env["error"])
+	}
+	if errObj["code"] != "validation" {
+		t.Fatalf("error.code = %v, want validation", errObj["code"])
+	}
+	const wantMessage = "retarget dependency rejected because the candidate state contains a dependency cycle"
+	if errObj["message"] != wantMessage {
+		t.Fatalf("error.message = %q, want %q", errObj["message"], wantMessage)
+	}
+	wantDetails := map[string]any{
+		"operation":         "retarget-dependency",
+		"task_id":           "A",
+		"old_dependency":    "old-dep",
+		"new_dependencies":  []any{"B"},
+		"phase":             "candidate-state-validation",
+		"cycle_path":        []any{"A", "B", "C", "A"},
+		"diagnostic_action": "retarget_dependency_rejected",
+	}
+	if !reflect.DeepEqual(errObj["details"], wantDetails) {
+		t.Fatalf("error.details = %#v, want %#v", errObj["details"], wantDetails)
+	}
+
+	stderrDecoder := json.NewDecoder(strings.NewReader(stderr))
+	var diagnostic map[string]any
+	if err := stderrDecoder.Decode(&diagnostic); err != nil {
+		t.Fatalf("decode verbose stderr diagnostic: %v\nraw output: %s", err, stderr)
+	}
+	if err := assertJSONStreamEOF(stderrDecoder); err != nil {
+		t.Fatalf("stderr contains output beyond one safe diagnostic: %v", err)
+	}
+	if len(diagnostic) != 2 || diagnostic["message"] != wantMessage || !reflect.DeepEqual(diagnostic["details"], wantDetails) {
+		t.Fatalf("verbose stderr diagnostic = %#v, want safe message and details", diagnostic)
+	}
+	if strings.Contains(stdout, sentinel) || strings.Contains(stderr, sentinel) {
+		t.Fatalf("CLI output leaked sentinel: stdout=%q stderr=%q", stdout, stderr)
+	}
+
+	after := mustFindTask(t, readState(t, statePath), "A")
+	if !reflect.DeepEqual(after.DependsOn, before.DependsOn) {
+		t.Fatalf("DependsOn changed after rejected retarget: got %v, want %v", after.DependsOn, before.DependsOn)
+	}
+	if !reflect.DeepEqual(after.History, before.History) {
+		t.Fatalf("History changed after rejected retarget: got %#v, want %#v", after.History, before.History)
+	}
+	if !reflect.DeepEqual(after.RepairRequest, before.RepairRequest) {
+		t.Fatalf("RepairRequest changed after rejected retarget: got %#v, want %#v", after.RepairRequest, before.RepairRequest)
+	}
+
+	entries, err := activitylog.New(filepath.Join(projectRoot, ".liza", "log.yaml")).Read()
+	if err != nil {
+		t.Fatalf("read activity log: %v", err)
+	}
+	var rejected []activitylog.Entry
+	for _, entry := range entries {
+		switch entry.Action {
+		case "retarget_dependency_rejected":
+			rejected = append(rejected, entry)
+		case "retarget-dependency":
+			t.Fatalf("rejected retarget recorded success activity: %#v", entry)
+		}
+	}
+	if len(rejected) != 1 {
+		t.Fatalf("retarget_dependency_rejected activity count = %d, want 1; entries=%#v", len(rejected), entries)
+	}
+	if rejected[0].Task == nil || *rejected[0].Task != "A" || !strings.Contains(rejected[0].Detail, "cycle_path=A -> B -> C -> A") {
+		t.Fatalf("rejection activity = %#v, want task A and complete cycle path", rejected[0])
+	}
+	if strings.Contains(rejected[0].Detail, sentinel) {
+		t.Fatalf("rejection activity leaked sentinel: %q", rejected[0].Detail)
 	}
 }
 

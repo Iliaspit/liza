@@ -53,6 +53,44 @@ func TestArtifactConsistency(t *testing.T) {
 			}
 		}
 	})
+
+	t.Run("retarget-dependency cycle diagnostics documentation", func(t *testing.T) {
+		docs := []string{
+			"support-docs/SUPPORT.md",
+			"support-docs/USAGE_MULTI_AGENTS.md",
+		}
+		required := []string{
+			`"ok": false`,
+			`"result": null`,
+			`"code": "validation"`,
+			`"operation": "retarget-dependency"`,
+			`"task_id": "A"`,
+			`"old_dependency": "old-dependency"`,
+			`"new_dependencies": ["B"]`,
+			`"phase": "candidate-state-validation"`,
+			`"cycle_path": ["A", "B", "C", "A"]`,
+			`"diagnostic_action": "retarget_dependency_rejected"`,
+			`--json -v`,
+			`stdout contains exactly one JSON envelope`,
+			`stderr contains only the classified safe message and details`,
+			`retarget_dependency_rejected`,
+			`candidate dependency, repair request, and task history remain unchanged`,
+			"no `retarget-dependency` success activity is recorded",
+			"supervisor attributes the failure to `retarget-dependency`",
+		}
+
+		for _, doc := range docs {
+			content, err := os.ReadFile(filepath.Join(repoRoot, filepath.FromSlash(doc)))
+			if err != nil {
+				t.Fatalf("reading %s: %v", doc, err)
+			}
+			for _, fragment := range required {
+				if !strings.Contains(string(content), fragment) {
+					t.Errorf("%s missing retarget-dependency diagnostic contract fragment %q", doc, fragment)
+				}
+			}
+		}
+	})
 }
 
 func TestArtifactConsistencyRendersNonDefaultBrand(t *testing.T) {

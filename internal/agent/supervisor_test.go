@@ -1292,6 +1292,64 @@ func TestDetectObservedRuntimeFailure_CodexCommandEventAggregatedOutput(t *testi
 	}
 }
 
+func TestDetectObservedRuntimeFailure_RetargetDependency(t *testing.T) {
+	const errorEnvelope = `{"ok":false,"result":null,"error":{"code":"validation","message":"validation failed"}}`
+
+	tests := []struct {
+		name        string
+		output      string
+		wantCommand string
+	}{
+		{
+			name: "raw transcript",
+			output: `liza retarget-dependency task-1 old-dependency new-dependency --json
+` + errorEnvelope,
+			wantCommand: "retarget-dependency",
+		},
+		{
+			name:        "Codex command event",
+			output:      `{"type":"item.completed","item":{"type":"command_execution","command":"liza retarget-dependency task-1 old-dependency new-dependency --json","aggregated_output":"{\"ok\":false,\"result\":null,\"error\":{\"code\":\"validation\",\"message\":\"validation failed\"}}\n","exit_code":1}}`,
+			wantCommand: "retarget-dependency",
+		},
+		{
+			name:        "no command context",
+			output:      errorEnvelope,
+			wantCommand: unknownLizaJSONCommand,
+		},
+	}
+
+	failures := make([]observedRuntimeFailure, 0, len(tests))
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			failure := detectObservedRuntimeFailure(tt.output)
+			if failure == nil {
+				t.Fatal("detectObservedRuntimeFailure() = nil, want failure")
+			}
+			if failure.Command != tt.wantCommand {
+				t.Fatalf("Command = %q, want %q", failure.Command, tt.wantCommand)
+			}
+			if failure.Code != "validation" {
+				t.Fatalf("Code = %q, want validation", failure.Code)
+			}
+			failures = append(failures, *failure)
+		})
+	}
+	if t.Failed() {
+		return
+	}
+
+	tracker := newRuntimeFailureTracker()
+	if count := tracker.Track("task-1", failures[0]); count != 1 {
+		t.Fatalf("raw transcript Track() = %d, want 1", count)
+	}
+	if count := tracker.Track("task-1", failures[1]); count != 2 {
+		t.Fatalf("equivalent command event Track() = %d, want 2", count)
+	}
+	if count := tracker.Track("task-1", failures[2]); count != 1 {
+		t.Fatalf("unknown command Track() = %d, want reset to 1", count)
+	}
+}
+
 func TestRuntimeFailureTracker_ResetsOnDifferentFailure(t *testing.T) {
 	tracker := newRuntimeFailureTracker()
 

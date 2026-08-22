@@ -307,6 +307,34 @@ Supersede/cancel operations rewrite active downstream dependencies first; stale 
 
 If validation reports downstream dependencies on an already-`SUPERSEDED` task, the orchestrator runs `§BRAND_BINARY_NAME§ repair-superseded-dependencies <task-id> --reason <reason>`. The command removes every illegal downstream direct edge in one transaction, retains legal edges and terminal/replacement metadata, records the caller, reason, and removed/retained IDs in task history and the activity log, and validates the full candidate state. Non-`SUPERSEDED`, already-valid, or still-invalid candidates are rejected without mutation. Activity-log failure is returned as a warning after a successful state commit. Never repair the blackboard directly.
 
+### `retarget-dependency` rejects a dependency cycle
+
+When full candidate-state validation finds a cycle, `§BRAND_BINARY_NAME§ retarget-dependency A old-dependency B --reason "..." --json` returns a validation envelope with safe recovery details:
+
+```json
+{
+  "ok": false,
+  "result": null,
+  "error": {
+    "code": "validation",
+    "message": "retarget dependency rejected because the candidate state contains a dependency cycle",
+    "details": {
+      "operation": "retarget-dependency",
+      "task_id": "A",
+      "old_dependency": "old-dependency",
+      "new_dependencies": ["B"],
+      "phase": "candidate-state-validation",
+      "cycle_path": ["A", "B", "C", "A"],
+      "diagnostic_action": "retarget_dependency_rejected"
+    }
+  }
+}
+```
+
+With `--json -v`, stdout contains exactly one JSON envelope and stderr contains only the classified safe message and details; the raw underlying error is not emitted. The ordered string-array `cycle_path` closes the cycle and identifies the edges to repair.
+
+The candidate dependency, repair request, and task history remain unchanged, and no `retarget-dependency` success activity is recorded. The activity log instead records `retarget_dependency_rejected` with masked, bounded rejection evidence. In retry tracking, the supervisor attributes the failure to `retarget-dependency` and uses the envelope's `validation` code.
+
 ### Integration failure
 **Symptom**: Task in INTEGRATION_FAILED state.
 **Diagnosis**: Merge conflict between task worktree and integration branch.

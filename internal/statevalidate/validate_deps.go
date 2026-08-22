@@ -10,6 +10,18 @@ import (
 	"github.com/liza-mas/liza/internal/pipeline"
 )
 
+// DependencyCycleError reports an ordered, closed path through a dependency cycle.
+type DependencyCycleError struct {
+	CyclePath []string
+}
+
+func (e *DependencyCycleError) Error() string {
+	if len(e.CyclePath) == 0 {
+		return "circular dependency detected"
+	}
+	return fmt.Sprintf("circular dependency detected: %s eventually depends on itself", e.CyclePath[0])
+}
+
 // validateDependencies checks referential integrity and ordering constraints
 // for task dependencies: every depends_on entry must reference an existing task,
 // executing tasks must have all dependencies satisfied, and the dependency graph
@@ -181,6 +193,10 @@ func isTaskIDChar(ch byte) bool {
 // starting from 'start', detecting if any path leads back to it. Returns an
 // error describing the cycle when one is found.
 func checkCircular(start, current string, visited map[string]bool, state *models.State) error {
+	return checkCircularPath(start, current, visited, state, []string{current})
+}
+
+func checkCircularPath(start, current string, visited map[string]bool, state *models.State, path []string) error {
 	task := state.FindTask(current)
 	if task == nil || len(task.DependsOn) == 0 {
 		return nil
@@ -188,11 +204,13 @@ func checkCircular(start, current string, visited map[string]bool, state *models
 
 	for _, depID := range task.DependsOn {
 		if depID == start {
-			return fmt.Errorf("circular dependency detected: %s eventually depends on itself", start)
+			cyclePath := append(slices.Clone(path), start)
+			return &DependencyCycleError{CyclePath: cyclePath}
 		}
 		if !visited[depID] {
 			visited[depID] = true
-			if err := checkCircular(start, depID, visited, state); err != nil {
+			nextPath := append(slices.Clone(path), depID)
+			if err := checkCircularPath(start, depID, visited, state, nextPath); err != nil {
 				return err
 			}
 		}

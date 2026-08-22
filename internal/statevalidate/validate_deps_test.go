@@ -2,6 +2,8 @@ package statevalidate
 
 import (
 	"bytes"
+	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -10,6 +12,31 @@ import (
 	"github.com/liza-mas/liza/internal/pipeline"
 	"github.com/liza-mas/liza/internal/testhelpers"
 )
+
+func TestValidateDependencies_DependencyCyclePath(t *testing.T) {
+	now := time.Now().UTC()
+	state := testhelpers.CreateValidState()
+	taskA := testhelpers.BuildTaskByStatus("A", models.TaskStatusReady, now)
+	taskA.DependsOn = []string{"B"}
+	taskB := testhelpers.BuildTaskByStatus("B", models.TaskStatusReady, now)
+	taskB.DependsOn = []string{"C"}
+	taskC := testhelpers.BuildTaskByStatus("C", models.TaskStatusReady, now)
+	taskC.DependsOn = []string{"A"}
+	state.Tasks = []models.Task{taskA, taskB, taskC}
+
+	err := validateDependencies(state, "", true, nil, nil, nil)
+	var cycleErr *DependencyCycleError
+	if !errors.As(err, &cycleErr) {
+		t.Fatalf("validateDependencies() error = %T %v, want *DependencyCycleError", err, err)
+	}
+	if got, want := err.Error(), "circular dependency detected: A eventually depends on itself"; got != want {
+		t.Fatalf("validateDependencies() error = %q, want %q", got, want)
+	}
+	wantPath := []string{"A", "B", "C", "A"}
+	if !slices.Equal(cycleErr.CyclePath, wantPath) {
+		t.Fatalf("DependencyCycleError.CyclePath = %v, want %v", cycleErr.CyclePath, wantPath)
+	}
+}
 
 func TestValidateDependencies_RejectsMalformedDependsOn(t *testing.T) {
 	now := time.Now().UTC()

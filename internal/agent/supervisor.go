@@ -554,6 +554,7 @@ func detectLizaCommandContext(output string) string {
 		"await-verdict",
 		"await-resubmission",
 		"mark-blocked",
+		"retarget-dependency",
 		"set-task-output",
 		"handoff",
 	} {

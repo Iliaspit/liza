@@ -1,6 +1,7 @@
 package ops
 
 import (
+	stderrors "errors"
 	"fmt"
 	"io"
 	"slices"
@@ -15,7 +16,12 @@ import (
 	"github.com/liza-mas/liza/internal/statevalidate"
 )
 
-const retargetDependencyOperation = "retarget-dependency"
+const (
+	retargetDependencyOperation              = "retarget-dependency"
+	retargetDependencyRejectedAction         = "retarget_dependency_rejected"
+	retargetDependencyCandidateValidation    = "candidate-state-validation"
+	retargetDependencyRejectedDetailMaxBytes = 2048
+)
 
 // RetargetDependencyResult contains the outcome of retargeting one task
 // dependency edge.
@@ -138,6 +144,25 @@ func RetargetDependency(projectRoot, taskID, oldDependency string, newDependenci
 		return nil
 	})
 	if err != nil {
+		var cycleErr *statevalidate.DependencyCycleError
+		if stderrors.As(err, &cycleErr) {
+			cyclePath := slices.Clone(cycleErr.CyclePath)
+			recordRetargetDependencyRejection(lp.LogPath(), now, agentID, taskID, oldDependency, normalizedNewDeps, cyclePath, reason, err)
+			return nil, &OperationalError{
+				Code:    "validation",
+				Phase:   retargetDependencyCandidateValidation,
+				Message: "retarget dependency rejected because the candidate state contains a dependency cycle",
+				Details: map[string]any{
+					"operation":         retargetDependencyOperation,
+					"task_id":           taskID,
+					"old_dependency":    oldDependency,
+					"new_dependencies":  append([]string(nil), normalizedNewDeps...),
+					"cycle_path":        cyclePath,
+					"diagnostic_action": retargetDependencyRejectedAction,
+				},
+				Err: err,
+			}
+		}
 		return nil, fmt.Errorf("failed to retarget dependency: %w", err)
 	}
 
@@ -154,6 +179,36 @@ func RetargetDependency(projectRoot, taskID, oldDependency string, newDependenci
 	}
 
 	return &result, nil
+}
+
+func recordRetargetDependencyRejection(logPath string, timestamp time.Time, agentID, taskID, oldDependency string, newDependencies, cyclePath []string, reason string, err error) {
+	detail := fmt.Sprintf(
+		"operation=%s phase=%s task_id=%s old_dependency=%s new_dependencies=%s cycle_path=%s reason=%s error=%v",
+		retargetDependencyOperation,
+		retargetDependencyCandidateValidation,
+		taskID,
+		oldDependency,
+		strings.Join(newDependencies, ","),
+		strings.Join(cyclePath, " -> "),
+		reason,
+		err,
+	)
+	// boundedString appends this marker after applying its byte limit, so reserve
+	// the marker bytes and discard any partial UTF-8 rune at the cut point.
+	const truncationMarker = "... [truncated]"
+	detail = strings.ToValidUTF8(
+		boundedMaskedString(detail, retargetDependencyRejectedDetailMaxBytes-len(truncationMarker)),
+		"",
+	)
+	// The candidate mutation is already rejected; a secondary audit-log failure
+	// must not replace the validation result.
+	_ = log.New(logPath).Append(log.Entry{
+		Timestamp: timestamp,
+		Agent:     agentID,
+		Action:    retargetDependencyRejectedAction,
+		Task:      &taskID,
+		Detail:    detail,
+	})
 }
 
 func normalizeRetargetNewDependencies(values []string) ([]string, error) {
