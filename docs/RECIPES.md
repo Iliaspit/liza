@@ -130,6 +130,8 @@ liza resume
 
 When `liza tui` is running, circuit-breaker checks are automatic:
 
+Detection reads anomalies and planning task review evidence. The `planning_review_churn` pattern triggers at four or more durable planning rejection cycles with severity `PLANNING_CONVERGENCE_DEGRADED`; `MERGED` tasks remain eligible.
+
 ```bash
 # If pattern detected by watch:
 # - circuit_breaker.status = TRIGGERED
@@ -163,6 +165,9 @@ liza resume
 | spec_gap_cluster | SPEC_FLAW | Ambiguous spec causing repeated questions |
 | workaround_pattern | ARCHITECTURE_FLAW | Root cause patched repeatedly |
 | external_service_outage | EXTERNAL_DEPENDENCY | External service unavailable |
+| planning_review_churn | PLANNING_CONVERGENCE_DEGRADED | Code-planning convergence requires rejection-evidence review |
+
+For `planning_review_churn`, pause downstream fan-out and inspect rejection evidence before choosing remediation.
 
 ## Integration Failure Recovery
 

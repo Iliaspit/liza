@@ -14,7 +14,7 @@ The circuit breaker is an **observer, not a participant**. It reads signals, det
 circuit_breaker:
   identity: observer
   permissions:
-    read: [.liza/state.yaml (anomalies), .liza/log.yaml, sprint.metrics]
+    read: [.liza/state.yaml (anomalies, planning task review evidence), .liza/log.yaml, sprint.metrics]
     write: [.liza/circuit_breaker_report.md, circuit_breaker fields, config.mode → CIRCUIT_BREAKER_TRIPPED]
     execute: NOTHING
   prohibitions:
@@ -25,9 +25,9 @@ circuit_breaker:
 
 ---
 
-## Input: Anomalies Section
+## Input: Anomalies and Planning Task Review Evidence
 
-The circuit breaker reads the **anomalies section** of the blackboard, populated by Code Reviewers and Coders:
+The circuit breaker reads both **anomalies** and **planning task review evidence** from the blackboard. Code Reviewers and Coders populate anomalies:
 
 ```yaml
 anomalies:
@@ -58,6 +58,8 @@ anomalies:
       reality: "API returns max 100, no cursor"
       spec_ref: "specs/requirements.md#FR-012"
 ```
+
+Planning task review evidence is read from planning-task type, status, `review_cycles_total`, and timestamped `rejected` or `review_verdict_rejected` history. This evidence remains durable when a task eventually reaches `MERGED`.
 
 ---
 
@@ -126,7 +128,15 @@ circuit_breaker_rules:
       condition: count(type=provider_audit_degraded, same(provider), distinct(agent_id) >= 2) OR count(type=provider_audit_degraded, same(provider)) >= 3
       severity: OBSERVABILITY_DEGRADED
       action: TRIP_MODE
+
+    - name: planning_review_churn
+      description: "Four or more durable rejection cycles on a planning task; `MERGED` tasks remain eligible"
+      condition: task.type=planning AND durable_rejection_count >= 4
+      severity: PLANNING_CONVERGENCE_DEGRADED
+      action: TRIP_MODE
 ```
+
+For `planning_review_churn`, a positive `review_cycles_total` is the authoritative durable count; when `review_cycles_total` is zero, count timestamped `rejected` and `review_verdict_rejected` task-history events instead. A count of four or more cycles triggers regardless of current task status; `MERGED` tasks remain eligible.
 
 ### Pattern Matching Functions
 
@@ -146,7 +156,7 @@ The pattern conditions use pseudo-functions for matching:
 
 **v1 Workflow:**
 1. Run ``liza analyze`` — outputs exact-match counts per pattern
-2. Human reviews output and anomalies section
+2. Human reviews output, anomalies, and qualifying planning-task rejection evidence
 3. Human applies judgment: "these 2 exact + 1 similar = pattern"
 4. Human triggers circuit breaker if pattern warrants
 
@@ -154,9 +164,9 @@ The pattern conditions use pseudo-functions for matching:
 
 ### Acknowledgement Watermark
 
-Circuit-breaker detection normally evaluates durable `state.anomalies`.
-When a prior trigger has been cleared, old anomalies must not re-alert by
-themselves. A trigger is considered cleared only when:
+Circuit-breaker detection evaluates durable anomalies and planning task review evidence.
+When a prior trigger has been cleared, old evidence must not re-alert by itself.
+A trigger is considered cleared only when:
 
 - `circuit_breaker.status == OK`
 - `circuit_breaker.current_trigger == null`
@@ -167,8 +177,13 @@ detection considers only anomalies with `anomaly.timestamp` strictly after that
 history timestamp. Anomalies at or before the watermark are suppressed for
 detection and report evidence, and the report records their suppressed count.
 
+For `planning_review_churn`, the task's durable rejection count remains the
+threshold evidence, but retrigger eligibility requires a timestamped rejection
+strictly after the watermark. A counter at or above four with no later rejection
+remains suppressed; `MERGED` tasks remain eligible when later evidence arrives.
+
 If `status == TRIGGERED` or `current_trigger` is non-null, no watermark applies:
-the trigger is still active or stale and all anomalies remain eligible.
+the trigger is still active or stale, so all anomalies and planning task review evidence remain eligible.
 
 ---
 
@@ -182,6 +197,7 @@ the trigger is still active or stale and all anomalies remain eligible.
 | `ARCHITECTURE_FLAW` | How we're building | Pause, new ADR, possible refactor |
 | `TECH_STACK_FLAW` | Tools/frameworks | Spike needed, possible tech pivot |
 | `EXTERNAL_DEPENDENCY` | External services | Halt sprint — external issue, not agent problem; wait or escalate |
+| `PLANNING_CONVERGENCE_DEGRADED` | code-planning convergence | pause downstream fan-out and inspect rejection evidence before choosing remediation |
 
 **Note:** `TECH_STACK_FLAW` is reserved for future patterns (e.g., library version conflicts). No current pattern triggers it.
 

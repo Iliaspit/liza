@@ -25,7 +25,7 @@ import (
 var analyzeCmd = &cobra.Command{
 	Use:   "analyze",
 	Short: "Run circuit breaker pattern detection analysis",
-	Long: fmt.Sprintf(`Analyze anomalies in the blackboard and detect systemic failure patterns.
+	Long: fmt.Sprintf(`Analyze anomalies and planning task review evidence in the blackboard to detect systemic failure patterns.
 
 Detects the following patterns:
   - retry_cluster: 3+ retry_loops with similar error patterns (ARCHITECTURE_FLAW)
@@ -35,6 +35,7 @@ Detects the following patterns:
   - workaround_pattern: 2+ workarounds/trade-offs with similar root causes (ARCHITECTURE_FLAW)
   - external_service_outage: 2+ external blockers from same service (EXTERNAL_DEPENDENCY)
   - provider_audit_degradation: 2+ agents or 3+ hits for same provider (OBSERVABILITY_DEGRADED)
+  - planning_review_churn: four or more durable planning rejection cycles; %[3]s tasks remain eligible (PLANNING_CONVERGENCE_DEGRADED)
 
 If a pattern is detected:
   - Updates circuit_breaker.status to TRIGGERED
@@ -44,7 +45,7 @@ If a pattern is detected:
 
 If no patterns are detected:
   - Updates circuit_breaker.status to OK
-  - Continues normal operation`, paths.ProjectDirName(), brand.Command("checkpoint")),
+  - Continues normal operation`, paths.ProjectDirName(), brand.Command("checkpoint"), "`MERGED`"),
 	RunE: func(cmd *cobra.Command, args []string) (retErr error) {
 		if isJSON(cmd) {
 			log.SetOutput(io.Discard)

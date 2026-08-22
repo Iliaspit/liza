@@ -556,6 +556,166 @@ func TestDetectUnacknowledgedPatterns(t *testing.T) {
 	}
 }
 
+func TestDetectPlanningReviewChurn(t *testing.T) {
+	watermark := time.Date(2026, 8, 21, 10, 0, 0, 0, time.UTC)
+	triggerPattern := "planning_review_churn"
+	clearedCircuitBreaker := func() models.CircuitBreaker {
+		return models.CircuitBreaker{
+			Status: "OK",
+			History: []models.CircuitBreakerHistory{
+				{
+					Timestamp: watermark,
+					Pattern:   &triggerPattern,
+					Severity:  stringPtr("PLANNING_CONVERGENCE_DEGRADED"),
+					Result:    "TRIGGERED",
+				},
+			},
+		}
+	}
+	assertPlanningChurn := func(t *testing.T, state *models.State, wantEvidence string) {
+		t.Helper()
+
+		result, _, _ := DetectUnacknowledgedPatterns(state)
+		if !result.Triggered {
+			t.Fatal("Triggered = false, want true")
+		}
+		if result.Pattern != "planning_review_churn" {
+			t.Errorf("Pattern = %q, want planning_review_churn", result.Pattern)
+		}
+		if result.Severity != "PLANNING_CONVERGENCE_DEGRADED" {
+			t.Errorf("Severity = %q, want PLANNING_CONVERGENCE_DEGRADED", result.Severity)
+		}
+		if result.Evidence != wantEvidence {
+			t.Errorf("Evidence = %q, want %q", result.Evidence, wantEvidence)
+		}
+	}
+
+	t.Run("durable review cycle total triggers after merge", func(t *testing.T) {
+		state := &models.State{Tasks: []models.Task{{
+			ID:                "plan-counter",
+			Type:              models.TaskTypePlanning,
+			Status:            models.TaskStatusMerged,
+			ReviewCyclesTotal: 4,
+		}}}
+
+		assertPlanningChurn(t, state, "planning task plan-counter with status MERGED has 4 durable rejection cycles")
+	})
+
+	t.Run("timestamped rejection history triggers after merge when total is zero", func(t *testing.T) {
+		state := &models.State{Tasks: []models.Task{{
+			ID:     "plan-history",
+			Type:   models.TaskTypePlanning,
+			Status: models.TaskStatusMerged,
+			History: []models.TaskHistoryEntry{
+				{Time: watermark.Add(-4 * time.Minute), Event: models.TaskEventRejected},
+				{Time: watermark.Add(-3 * time.Minute), Event: models.TaskEventReviewVerdictRejected},
+				{Time: watermark.Add(-2 * time.Minute), Event: models.TaskEventRejected},
+				{Time: watermark.Add(-time.Minute), Event: models.TaskEventReviewVerdictRejected},
+			},
+		}}}
+
+		assertPlanningChurn(t, state, "planning task plan-history with status MERGED has 4 durable rejection cycles")
+	})
+
+	t.Run("count three does not trigger", func(t *testing.T) {
+		state := &models.State{Tasks: []models.Task{{
+			ID:                "plan-low-churn",
+			Type:              models.TaskTypePlanning,
+			Status:            models.TaskStatusMerged,
+			ReviewCyclesTotal: 3,
+		}}}
+
+		result, _, _ := DetectUnacknowledgedPatterns(state)
+		if result.Triggered {
+			t.Errorf("Triggered = true, want false; result = %+v", result)
+		}
+	})
+
+	t.Run("non-planning task does not trigger", func(t *testing.T) {
+		state := &models.State{Tasks: []models.Task{{
+			ID:                "coding-churn",
+			Type:              models.TaskTypeCoding,
+			Status:            models.TaskStatusMerged,
+			ReviewCyclesTotal: 4,
+		}}}
+
+		result, _, _ := DetectUnacknowledgedPatterns(state)
+		if result.Triggered {
+			t.Errorf("Triggered = true, want false; result = %+v", result)
+		}
+	})
+
+	t.Run("cleared trigger suppresses unchanged rejection history", func(t *testing.T) {
+		state := &models.State{
+			Tasks: []models.Task{{
+				ID:                "plan-cleared",
+				Type:              models.TaskTypePlanning,
+				Status:            models.TaskStatusMerged,
+				ReviewCyclesTotal: 4,
+				History: []models.TaskHistoryEntry{
+					{Time: watermark.Add(-3 * time.Minute), Event: models.TaskEventRejected},
+					{Time: watermark.Add(-2 * time.Minute), Event: models.TaskEventRejected},
+					{Time: watermark.Add(-time.Minute), Event: models.TaskEventReviewVerdictRejected},
+					{Time: watermark, Event: models.TaskEventReviewVerdictRejected},
+				},
+			}},
+			CircuitBreaker: clearedCircuitBreaker(),
+		}
+
+		result, _, _ := DetectUnacknowledgedPatterns(state)
+		if result.Triggered {
+			t.Errorf("Triggered = true, want false; result = %+v", result)
+		}
+	})
+
+	t.Run("later rejection retriggers after cleared watermark", func(t *testing.T) {
+		state := &models.State{
+			Tasks: []models.Task{{
+				ID:     "plan-retriggered",
+				Type:   models.TaskTypePlanning,
+				Status: models.TaskStatusMerged,
+				History: []models.TaskHistoryEntry{
+					{Time: watermark.Add(-3 * time.Minute), Event: models.TaskEventRejected},
+					{Time: watermark.Add(-2 * time.Minute), Event: models.TaskEventRejected},
+					{Time: watermark.Add(-time.Minute), Event: models.TaskEventReviewVerdictRejected},
+					{Time: watermark, Event: models.TaskEventReviewVerdictRejected},
+					{Time: watermark.Add(time.Minute), Event: models.TaskEventRejected},
+				},
+			}},
+			CircuitBreaker: clearedCircuitBreaker(),
+		}
+
+		assertPlanningChurn(t, state, "planning task plan-retriggered with status MERGED has 5 durable rejection cycles")
+	})
+
+	t.Run("existing anomaly pattern keeps priority", func(t *testing.T) {
+		state := &models.State{
+			Anomalies: []models.Anomaly{
+				{Type: "retry_loop", Details: map[string]any{"error_pattern": "timeout"}},
+				{Type: "retry_loop", Details: map[string]any{"error_pattern": "timeout"}},
+				{Type: "retry_loop", Details: map[string]any{"error_pattern": "timeout"}},
+			},
+			Tasks: []models.Task{{
+				ID:                "plan-with-anomaly",
+				Type:              models.TaskTypePlanning,
+				Status:            models.TaskStatusMerged,
+				ReviewCyclesTotal: 4,
+			}},
+		}
+
+		result, _, _ := DetectUnacknowledgedPatterns(state)
+		if !result.Triggered {
+			t.Fatal("Triggered = false, want true")
+		}
+		if result.Pattern != "retry_cluster" {
+			t.Errorf("Pattern = %q, want retry_cluster", result.Pattern)
+		}
+		if result.Severity != "ARCHITECTURE_FLAW" {
+			t.Errorf("Severity = %q, want ARCHITECTURE_FLAW", result.Severity)
+		}
+	})
+}
+
 func TestGenerateReport(t *testing.T) {
 	now := time.Date(2025, 1, 18, 17, 30, 0, 0, time.UTC)
 

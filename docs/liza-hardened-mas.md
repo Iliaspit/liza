@@ -421,7 +421,7 @@ loads the architecture review skill.
 
 ### Circuit Breaker
 
-Pattern detection on anomalies escalates systemic failures before they cascade:
+Circuit-breaker detection uses anomalies and planning task review evidence to escalate systemic failures before they cascade:
 
 | Pattern | Threshold | Severity |
 |---------|-----------|----------|
@@ -431,6 +431,7 @@ Pattern detection on anomalies escalates systemic failures before they cascade:
 | Spec gap cluster | Multiple tasks hitting same ambiguity | SPEC_FLAW |
 | Workaround pattern | 2+ workarounds with same root cause | ARCHITECTURE_FLAW |
 | External service outage | 2+ tasks blocked by same service | EXTERNAL_DEPENDENCY |
+| planning_review_churn | four or more planning rejection cycles; `MERGED` tasks remain eligible | PLANNING_CONVERGENCE_DEGRADED |
 
 When triggered: sprint pauses, markdown report generated with evidence, human decision required.
 The circuit breaker is observation-only — it never proposes solutions, modifies code,

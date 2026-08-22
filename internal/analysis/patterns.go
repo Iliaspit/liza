@@ -38,8 +38,9 @@ func DetectPatterns(anomalies []models.Anomaly) PatternResult {
 	return PatternResult{Triggered: false}
 }
 
-// DetectUnacknowledgedPatterns runs circuit-breaker detection on anomalies that
-// have not already been acknowledged by a cleared circuit-breaker trigger.
+// DetectUnacknowledgedPatterns runs circuit-breaker detection on anomalies and
+// planning-task review evidence that have not already been acknowledged by a
+// cleared circuit-breaker trigger.
 //
 // "Cleared" means circuit_breaker.status == OK and current_trigger == nil.
 // In any active or partially stale triggered state, all anomalies are considered.
@@ -51,7 +52,10 @@ func DetectUnacknowledgedPatterns(state *models.State) (PatternResult, []models.
 	}
 
 	considered, suppressedCount := UnacknowledgedAnomalies(state)
-	return DetectPatterns(considered), considered, suppressedCount
+	if result := DetectPatterns(considered); result.Triggered {
+		return result, considered, suppressedCount
+	}
+	return checkPlanningReviewChurn(state), considered, suppressedCount
 }
 
 // UnacknowledgedAnomalies returns the anomaly slice eligible for current
@@ -94,6 +98,47 @@ func latestClearedTriggerWatermark(state *models.State) (time.Time, bool) {
 		return time.Time{}, false
 	}
 	return latest, true
+}
+
+func checkPlanningReviewChurn(state *models.State) PatternResult {
+	watermark, cleared := latestClearedTriggerWatermark(state)
+	for _, task := range state.Tasks {
+		if task.Type != models.TaskTypePlanning {
+			continue
+		}
+
+		historyCount, latestRejection := planningRejectionHistory(task.History)
+		rejectionCount := task.ReviewCyclesTotal
+		if rejectionCount == 0 {
+			rejectionCount = historyCount
+		}
+		if rejectionCount < 4 || cleared && !latestRejection.After(watermark) {
+			continue
+		}
+
+		return PatternResult{
+			Triggered: true,
+			Pattern:   "planning_review_churn",
+			Severity:  "PLANNING_CONVERGENCE_DEGRADED",
+			Evidence:  fmt.Sprintf("planning task %s with status %s has %d durable rejection cycles", task.ID, task.Status, rejectionCount),
+		}
+	}
+	return PatternResult{Triggered: false}
+}
+
+func planningRejectionHistory(history []models.TaskHistoryEntry) (int, time.Time) {
+	count := 0
+	var latest time.Time
+	for _, entry := range history {
+		if entry.Time.IsZero() || entry.Event != models.TaskEventRejected && entry.Event != models.TaskEventReviewVerdictRejected {
+			continue
+		}
+		count++
+		if entry.Time.After(latest) {
+			latest = entry.Time
+		}
+	}
+	return count, latest
 }
 
 func checkRetryCluster(anomalies []models.Anomaly) PatternResult {

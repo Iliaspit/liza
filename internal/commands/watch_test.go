@@ -1804,6 +1804,54 @@ func TestRunChecks_CircuitBreakerAlertOnPattern(t *testing.T) {
 	}
 }
 
+func TestRunChecks_CircuitBreakerAlertOnPlanningReviewChurn(t *testing.T) {
+	projectRoot := t.TempDir()
+	stateFile, _ := testhelpers.SetupLizaDir(t, projectRoot)
+	testhelpers.SetupPipelineConfig(t, projectRoot)
+
+	planningTask := testhelpers.BuildTaskByStatus("plan-review-churn", models.TaskStatusMerged, time.Now().UTC())
+	planningTask.Type = models.TaskTypePlanning
+	planningTask.RolePair = "code-planning-pair"
+	planningTask.ReviewCyclesTotal = 4
+	state := testhelpers.CreateValidState()
+	state.Tasks = []models.Task{planningTask}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	cache := make(map[string]time.Time)
+	config := WatchConfig{ProjectRoot: projectRoot, StateCache: cache}
+	alerts := RunChecksWithState(state, config)
+	if len(alerts) != 1 {
+		t.Fatalf("len(alerts) = %d, want 1: %+v", len(alerts), alerts)
+	}
+	alert := alerts[0]
+	if alert.Level != AlertLevelCritical {
+		t.Errorf("alert.Level = %q, want %q", alert.Level, AlertLevelCritical)
+	}
+	if alert.Category != "CIRCUIT BREAKER" {
+		t.Errorf("alert.Category = %q, want CIRCUIT BREAKER", alert.Category)
+	}
+	for _, content := range []string{"planning_review_churn", "PLANNING_CONVERGENCE_DEGRADED"} {
+		if !strings.Contains(alert.Message, content) {
+			t.Errorf("alert.Message = %q, want it to contain %q", alert.Message, content)
+		}
+	}
+
+	if throttled := RunChecksWithState(state, config); len(throttled) != 0 {
+		t.Errorf("throttled alerts = %+v, want none", throttled)
+	}
+
+	belowThreshold := testhelpers.CreateValidState()
+	planningTask.ReviewCyclesTotal = 3
+	belowThreshold.Tasks = []models.Task{planningTask}
+	belowThresholdAlerts := RunChecksWithState(belowThreshold, WatchConfig{
+		ProjectRoot: projectRoot,
+		StateCache:  make(map[string]time.Time),
+	})
+	if len(belowThresholdAlerts) != 0 {
+		t.Errorf("below-threshold alerts = %+v, want none", belowThresholdAlerts)
+	}
+}
+
 func TestRunChecks_NoCircuitBreakerAlertBelowThreshold(t *testing.T) {
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)

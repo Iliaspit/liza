@@ -686,14 +686,14 @@ Unacknowledged forces or gaps the system doesn't model.
 **Skill:** systemic-thinking
 **Category:** BLIND SPOT
 
-**Issue:** The architecture describes the circuit breaker as a systemic observer with access to anomalies, logs, and sprint metrics, but current pattern detection consumes blackboard anomalies only. Its task-semantic inputs are behavioral logging duties assigned to Coders and Code Reviewers; supervisor-reported provider degradation is the main independent exception. Detection therefore assumes affected agents continue reporting failures and classify equivalent failures consistently.
+**Issue:** The architecture describes the circuit breaker as a systemic observer with access to anomalies, logs, sprint metrics, and selected durable task state. Most task-semantic inputs remain behavioral logging duties assigned to Coders and Code Reviewers; independently derived provider degradation and planning-review churn cover only two known cases. Detection therefore still assumes affected agents report and consistently classify other equivalent failures.
 
 **Implication:** Correlated failures that suppress, misclassify, or normalize anomaly reporting are invisible to the mechanism intended to detect systemic failure.
 
-**Current mitigation:** Multiple role classes can report anomalies, anomaly payloads are validated, and operational monitoring observes several direct health signals. Those direct signals are not combined with the circuit-breaker pattern model.
+**Current mitigation:** Multiple role classes can report anomalies, anomaly payloads are validated, and operational monitoring observes several direct health signals. `planning_review_churn` is a partial independent mitigation: analysis also reads planning task review evidence, triggers at four or more durable planning rejection cycles, and classifies the signal as `PLANNING_CONVERGENCE_DEGRADED`; `MERGED` tasks remain eligible. The broader participant-reporting blind spot remains open because other direct signals are not combined with the circuit-breaker pattern model.
 
 **Future options:**
-- Derive corroborating signals from task history, retries, verdict cycles, and sprint metrics
+- Derive additional corroborating signals from task history, retries, verdict cycles, and sprint metrics
 - Detect expected-but-missing anomaly reports after observable failure events
 - Treat degraded or absent reporting as a circuit-breaker input
 
