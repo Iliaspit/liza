@@ -263,7 +263,7 @@ Use `§BRAND_BINARY_NAME§ launch wezterm mas --preset general-objective`. This 
 
 **Integration phase** agents (integration-analyst, integration-reviewer) are spawned by the orchestrator after all coding tasks for a goal complete. They are not needed at startup — spawn them when the orchestrator triggers the integration sub-pipeline.
 
-Each agent command accepts a `--cli` flag to select the coding agent CLI: `claude`, `codex`, `codex-acp`, `cursor-acp`, `opencode`, `opencode-acp`, `gemini`, `mistral`, `kimi`, catalog providers such as `qwen` or `devin`, or any custom tools configured in `§BRAND_PROJECT_DIRNAME§/state.yaml` under `config.agent_tools`. When `--cli` is omitted, §BRAND_NAME_TITLE§ first applies the selected structured profile, then resolves role-specific config (`config.default_doer_cli` for doers and orchestrators, `config.default_reviewer_cli` for reviewers), role-specific env (`§BRAND_ENV_PREFIX§_DEFAULT_DOER_CLI` for doers and orchestrators, `§BRAND_ENV_PREFIX§_DEFAULT_REVIEWER_CLI` for reviewers), `config.default_cli`, `§BRAND_ENV_PREFIX§_DEFAULT_CLI`, then `claude`. Set built-in defaults at init time with `§BRAND_BINARY_NAME§ init --default-cli codex --default-reviewer-cli gemini "..."`, or edit `state.yaml` directly. Use `§BRAND_BINARY_NAME§ agent coder --explain-launch` to inspect the resolved executable and argv before spawning a provider.
+Each agent command accepts a `--cli` flag to select the coding agent CLI: `claude`, `codex`, `codex-acp`, `cursor-acp`, `opencode`, `opencode-acp`, `gemini`, `mistral`, `kimi`, catalog providers such as `qwen` or `devin`, or any custom tools configured in `§BRAND_PROJECT_DIRNAME§/state.yaml` under `config.agent_tools`. When `--cli` is omitted, §BRAND_NAME_TITLE§ first applies the selected structured profile, then resolves role-specific config (`config.default_doer_cli` for doers and orchestrators, `config.default_reviewer_cli` for reviewers), role-specific env (`§BRAND_ENV_PREFIX§_DEFAULT_DOER_CLI` for doers and orchestrators, `§BRAND_ENV_PREFIX§_DEFAULT_REVIEWER_CLI` for reviewers), `config.default_cli`, `§BRAND_ENV_PREFIX§_DEFAULT_CLI`, then `claude`. Set built-in defaults at init time with `§BRAND_BINARY_NAME§ init --default-cli codex --default-reviewer-cli gemini "..."`. Use `§BRAND_BINARY_NAME§ agent coder --explain-launch` to inspect the resolved executable and argv before spawning a provider.
 `codex-acp`, `cursor-acp`, and catalog-backed ACP providers such as `qwen-acp` and `devin-acp` use §BRAND_NAME_TITLE§'s ACPX runtime. They require the `acpx` executable on the spawned agent's `PATH`; install it with `npm install -g acpx`. Provider-specific commands may also be required: `cursor-acp` needs an authenticated Cursor CLI (`cursor-agent`), and `devin-acp` needs the `devin` executable because ACPX runs it as `--agent "devin acp"`. Use `§BRAND_BINARY_NAME§ init --cursor` for Cursor's project-local contract setup; it includes the Claude and Codex project setup Cursor relies on. Set `§BRAND_ENV_PREFIX§_ENABLE_BASH_POLICY=1` before init when selected providers should receive standalone bash-policy hooks. The runtime CLI name remains `cursor-acp`. §BRAND_NAME_TITLE§ preflights these prerequisites before direct `§BRAND_BINARY_NAME§ agent` execution and before TUI/API agent spawning, so a missing binary fails before the ACP session is started. ACPX providers run with catalog-defined target names, session templates, and prompt argv while preserving §BRAND_NAME_TITLE§'s event parsing, usage capture, session reuse, output logging, and approval behavior. During `acpx prompt`, stdout JSON-RPC and stderr diagnostics are streamed to `§BRAND_PROJECT_DIRNAME§/agent-outputs/`; parsed message chunks are returned to the supervisor and lifecycle/usage metadata is logged. Short ACPX session control calls are not transcript-logged.
 In the TUI, `s` spawns with the configured default CLI; `S` prompts for CLI selection.
 
@@ -531,11 +531,12 @@ Use `§BRAND_BINARY_NAME§ -C <project-root> ...` to select a §BRAND_NAME_TITLE
 | `§BRAND_BINARY_NAME§ mark-blocked <task-id>` | Mark a task as BLOCKED with reason/questions; optional `--depends-on` records blocking task IDs for scheduling and orchestrator re-wake; optional `--repair-*` flags request orchestrator-only state repair |
 | `§BRAND_BINARY_NAME§ assess-blocked <task-id>` | Record orchestrator assessment of a BLOCKED task and raise an `UNRESOLVED BLOCKED` alert when it cannot be resolved now |
 | `§BRAND_BINARY_NAME§ retarget-dependency <task-id> <old-dep-id> <new-dep-ids> --reason "..."` | Orchestrator-only repair for one non-terminal task's direct `depends_on` edge. Replaces the old edge with one or more existing task IDs, canonicalizes dependencies, validates the full candidate state, and leaves task status unchanged. |
+| `§BRAND_BINARY_NAME§ repair-superseded-dependencies <task-id> --reason <reason>` | Orchestrator-only repair for one SUPERSEDED task. Atomically removes all illegal downstream direct dependencies, retains legal edges and terminal/replacement metadata, audits removed and retained IDs, and validates the full candidate state. |
 | `§BRAND_BINARY_NAME§ unblock-task <task-id> --reason "..." [--assign-to <agent-id>] [--rebase-on <branch>] [--allow-dirty]` | Restore a repaired BLOCKED task. Without `--assign-to`, the task becomes claimable again; with `--assign-to`, it directly resumes for that doer. `--rebase-on` rebases a preserved task worktree before unblocking, updates `base_commit`, and leaves conflicts BLOCKED with repair metadata. Fails while any `depends_on` target is not directly MERGED. |
 | `§BRAND_BINARY_NAME§ assess-hypothesis-exhausted <task-id>` | Record orchestrator assessment of a hypothesis-exhausted task (2+ coders failed)                                     |
 | `§BRAND_BINARY_NAME§ cancel-task <task-id> "reason"` | Cancel a non-approved, non-terminal task, including active/submitted/reviewing work, by transitioning it to ABANDONED with audit trail. Releases §BRAND_NAME_TITLE§ state claims and removes the task worktree/branch best-effort; it does not kill a live provider process. |
 | `§BRAND_BINARY_NAME§ handoff <task-id> <summary> <next-action>` | Context-exhaustion handoff for a doer agent's claimed task                                                           |
-| `§BRAND_BINARY_NAME§ supersede-task <task-id> [replacements] --reason "..."` | Mark a task as SUPERSEDED. When no replacements are provided, also requires `--recoverability-command "<single-line command>"`; §BRAND_NAME_TITLE§ records this audit command and a pre-cleanup branch/worktree snapshot, but does not execute it. Do not include secrets. |
+| `§BRAND_BINARY_NAME§ supersede-task <task-id> [replacements] --reason "..."` | Mark a task as SUPERSEDED. The same transaction prunes the retiring task's illegal downstream edges, retains legal historical edges, audits removed IDs, rewrites active consumers, and validates the candidate. With no replacements, `--recoverability-command "<single-line command>"` is also required; do not include secrets. |
 | `§BRAND_BINARY_NAME§ proceed <task-id> <transition>` | Execute inter-pair pipeline transition (e.g., code-plan-to-coding)                                                   |
 | **Worktree Management** |                                                                                                                      |
 | `§BRAND_BINARY_NAME§ wt-create <task-id>` | Create a worktree for an executing task                                                                              |
@@ -552,6 +553,16 @@ Use `§BRAND_BINARY_NAME§ -C <project-root> ...` to select a §BRAND_NAME_TITLE
 | `§BRAND_BINARY_NAME§ update-sprint-metrics` | Recompute sprint metrics from current state                                                                          |
 | `§BRAND_BINARY_NAME§ clear-stale-review-claims` | Clear expired review leases                                                                                          |
 | `§BRAND_BINARY_NAME§ get <query>` | Query state data (tasks, agents, etc.)                                                                               |
+
+For legacy terminal dependency corruption, run exactly
+`§BRAND_BINARY_NAME§ repair-superseded-dependencies <task-id> --reason <reason>`
+as the orchestrator. The task must already be `SUPERSEDED` and contain at least
+one downstream direct dependency. The operation removes every illegal edge in
+one transaction, preserves legal dependencies and all other terminal metadata,
+records task-history and activity-log audit evidence, and commits only after
+full candidate-state validation. Failed candidates leave state unchanged;
+post-commit activity-log failures are warnings. Never edit
+`§BRAND_PROJECT_DIRNAME§/state.yaml` directly.
 
 When passing a shell variable to `--reason`, always quote it:
 `--reason "$reason"`. If an unquoted empty variable causes `--reason` to
@@ -615,7 +626,7 @@ Rationale:
 > permission denials. Run `/context-engineering` when logs point to prompt bloat,
 > missing context, or poor handoffs.
 
-CLI commands (e.g., `§BRAND_BINARY_NAME§ add-task`) operate on `§BRAND_PROJECT_DIRNAME§/state.yaml` with proper locking. Agents use CLI commands via Bash with `--json` for structured output.
+CLI commands (e.g., `§BRAND_BINARY_NAME§ add-task`) operate on `§BRAND_PROJECT_DIRNAME§/state.yaml` with proper locking. Agents use CLI commands via Bash with `--json` for structured output and never edit the blackboard directly.
 
 The settings template is embedded into the binary. `§BRAND_BINARY_NAME§ init` writes the active copy to `.claude/settings.json` in the project directory.
 

@@ -550,11 +550,20 @@ The `depends_on` field declares explicit dependencies between tasks:
 **Semantics:**
 - `depends_on` is an array of task IDs that must reach MERGED status before this task can be claimed
 - `depends_on` must not point to a downstream pipeline role-pair. Same-role-pair and upstream dependencies are valid.
-- Active tasks must not depend on terminal non-MERGED tasks. When a task is superseded, active downstream `depends_on` entries are rewritten to its replacements; when a task is cancelled, active downstream `depends_on` entries pointing at it are removed. Terminal tasks keep historical dependency edges for audit.
+- Active tasks must not depend on terminal non-MERGED tasks. When a task is superseded, active downstream `depends_on` entries are rewritten to its replacements and the retiring task's own illegal downstream dependencies are pruned in the same transaction; legal historical edges remain. When a task is cancelled, active downstream `depends_on` entries pointing at it are removed.
 - Explicit `output[].task_depends_on` writes reject terminal non-MERGED task IDs. Operational output and generated child `depends_on` follow the canonical dependency rule before they can mint or patch child tasks: superseded entries are rewritten to legal replacements, cancelled or unreplaced retired entries are removed, downstream replacements that are already MERGED are treated as satisfied and omitted from child dependencies, and illegal pending replacements fail the affected mutation or transition instead of being silently dropped. `SUPERSEDED` and `ABANDONED` task output remains audit history unless crash recovery can still consume it.
 - Empty array or missing field means no dependencies — task is immediately claimable
 - Coders can only claim tasks where ALL dependencies are satisfied
 - Orchestrator sets dependencies during task creation based on logical ordering
+
+Dependency direction remains valid for terminal tasks. To recover legacy
+corruption on one `SUPERSEDED` task, the orchestrator runs
+`liza repair-superseded-dependencies <task-id> --reason <reason>`. The operation
+removes every illegal downstream direct edge in one locked transaction, retains
+legal edges and terminal/replacement metadata, records removed and retained IDs
+with the reason and caller in `dependencies_rewritten` history, and validates
+the full candidate state before commit. Failed repairs do not mutate state;
+direct edits to `.liza/state.yaml` are prohibited.
 
 **Claimability Rule:**
 ```
@@ -970,7 +979,8 @@ Reads do not require lock (eventual consistency acceptable for reads).
 | Submit verdict | Code Reviewer | Lock → verify REVIEWING + commit SHA matches + reviewing_by matches self → set APPROVED/REJECTED + reason + set approved_by on approval + clear review lease → unlock |
 | Execute merge | Supervisor | After Code Reviewer sets APPROVED → supervisor runs `liza wt-merge` → update state to MERGED |
 | Mark blocked | Any | Lock → set state BLOCKED + diagnosis → unlock |
-| Rescope task | Orchestrator | Lock → set original SUPERSEDED → create new task(s) with reference → unlock |
+| Rescope task | Orchestrator | Lock → prune the retiring task's illegal downstream edges + set original SUPERSEDED + rewrite active consumers/create replacements + validate candidate → unlock |
+| Repair superseded dependencies | Orchestrator | Lock → require SUPERSEDED + remove all illegal downstream direct edges + append audit history + validate full candidate → unlock; append activity log after commit |
 | Finalize draft | Orchestrator | Lock → change DRAFT to READY → unlock |
 | Log activity | Any | Append to log.yaml (no lock needed, append-only) |
 
@@ -1092,7 +1102,7 @@ invariants:
   - "MERGED task must not have worktree"
   - "Task type must be a known type (currently: 'coding', 'planning'); empty defaults to 'coding'"
   - "depends_on must reference existing task IDs"
-  - "depends_on must not reference a task whose role_pair is downstream of the dependent task's role_pair"
+  - "depends_on must not reference a task whose role_pair is downstream of the dependent task's role_pair, including for terminal tasks"
   - "depends_on must not create circular dependencies"
   - "Non-terminal tasks must not depend on terminal non-MERGED tasks"
   - "IMPLEMENTING task must have all depends_on tasks directly MERGED"

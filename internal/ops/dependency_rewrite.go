@@ -57,6 +57,46 @@ func rewriteActiveDependents(state *models.State, resolver *pipeline.Resolver, t
 	return nil
 }
 
+func pruneDownstreamDependencies(state *models.State, resolver *pipeline.Resolver, task *models.Task) ([]string, []string, error) {
+	if task == nil {
+		return nil, nil, nil
+	}
+	if state == nil || resolver == nil || task.RolePair == "" {
+		return append([]string(nil), task.DependsOn...), nil, nil
+	}
+
+	retained := make([]string, 0, len(task.DependsOn))
+	removed := make([]string, 0, len(task.DependsOn))
+	depResolver := models.NewDependencyResolver(state)
+	for _, depID := range task.DependsOn {
+		path := depResolver.Resolve(depID).Path
+		if len(path) == 0 {
+			path = []string{depID}
+		}
+		resolvesDownstream := false
+		for _, pathID := range path {
+			depTask := state.FindTask(pathID)
+			if depTask == nil || depTask.RolePair == "" {
+				continue
+			}
+			downstream, err := resolver.IsRolePairDownstream(task.RolePair, depTask.RolePair)
+			if err != nil {
+				return nil, nil, err
+			}
+			if downstream {
+				resolvesDownstream = true
+				break
+			}
+		}
+		if resolvesDownstream {
+			removed = append(removed, depID)
+			continue
+		}
+		retained = append(retained, depID)
+	}
+	return retained, removed, nil
+}
+
 func canonicalizeTaskDependsOnForTransition(state *models.State, resolver *pipeline.Resolver, task *models.Task) error {
 	if task == nil || len(task.DependsOn) == 0 {
 		return nil

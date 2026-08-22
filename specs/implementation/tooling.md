@@ -52,6 +52,8 @@ All system mechanics are provided by the `liza` Go binary (assumed in PATH). See
 | `liza mark-blocked` | Mark task as blocked |
 | `liza assess-blocked` | Record orchestrator assessment of a blocked task (prevents re-wake) |
 | `liza supersede-task` | Supersede a task; no-replacement cleanup requires an operator-provided `--recoverability-command` audit string |
+| `liza retarget-dependency` | Replace one direct dependency edge on a non-terminal task through an orchestrator-only validated repair |
+| `liza repair-superseded-dependencies` | Remove all illegal downstream direct dependencies from one SUPERSEDED task through an orchestrator-only audited repair |
 | `liza delete agent\|task` | Delete agent or task entry |
 
 Locking is internal to the binary — no external `flock` wrapper needed.
@@ -137,7 +139,7 @@ Cleanup: If commit fails, worktree is deleted to maintain consistency
 
 This pattern ensures no task is ever in IMPLEMENTING state without a valid worktree.
 
-**State Updates:** Agents use dedicated CLI commands for state transitions. The CLI handles locking and validation internally:
+**State Updates:** Agents use dedicated CLI commands for state transitions. The CLI handles locking and validation internally. Agents must never edit `.liza/state.yaml` directly; unsupported mutations are escalated as orchestrator repair requests or blockers.
 
 ```bash
 # Request review (atomic)
@@ -177,6 +179,8 @@ CLI commands are divided into agent-callable and supervisor-only:
 | `liza submit-verdict` | Code Reviewer | Approve/reject (atomic state transition) |
 | `liza mark-blocked` | All doer roles | Mark task as blocked |
 | `liza assess-blocked` | Orchestrator | Record assessment of blocked task (prevents re-wake loops) |
+| `liza retarget-dependency` | Orchestrator | Replace one direct edge on a non-terminal task and validate the candidate state |
+| `liza repair-superseded-dependencies` | Orchestrator | Atomically remove illegal downstream edges from a SUPERSEDED task with full validation and audit history |
 | `liza wt-merge` | Supervisor | Merge after Code Reviewer approves |
 | `liza wt-delete` | Planner | Clean up abandoned tasks |
 
@@ -467,6 +471,12 @@ liza supersede-task task-3 task-4,task-5 --reason "Split into replacements"
 liza supersede-task task-3 --reason "Work already merged" --recoverability-command "liza recover-task task-3"
 ```
 
+Before committing the transition, supersession removes the retiring task's own
+illegal downstream direct dependencies, records their IDs in the `superseded`
+history event, rewrites active consumers to the declared replacements, and
+validates the candidate state. Legal historical dependencies are retained. A
+validation failure rolls back the transition and every dependency rewrite.
+
 When no replacements are provided, supersession is the destructive cleanup path:
 no successor will preserve the old task branch. The command therefore requires a
 single-line `--recoverability-command` audit string. Liza records the string and
@@ -493,6 +503,21 @@ history:
 
 In Go, these audit fields live in `TaskHistoryEntry.Extra`; the state YAML
 serializes that map inline.
+
+**liza repair-superseded-dependencies** — Repair terminal dependency metadata
+```bash
+liza repair-superseded-dependencies <task-id> --reason <reason>
+```
+
+This orchestrator-only command accepts one `SUPERSEDED` task with illegal
+downstream direct dependencies. In one locked transaction it removes all
+illegal edges, retains legal dependencies and all other terminal/replacement
+metadata, appends `dependencies_rewritten` history with the reason, caller, and
+removed/retained IDs, then validates the full candidate state before commit.
+Non-`SUPERSEDED` or already-valid targets and candidates that remain invalid are
+rejected without mutation. The activity log is appended after commit; a log
+failure is returned as a warning. Never repair this metadata by editing
+`.liza/state.yaml` directly.
 
 **liza recover-task** — Recover by task ID
 ```bash
@@ -568,7 +593,13 @@ liza status   # Summary of goal, sprint, agents, tasks
 liza get      # Print current state
 ```
 
-> **Note:** `liza handoff` command is pending Go implementation. The data model exists (`HandoffNote` struct, `handoff_pending` field) but no CLI command wraps it yet. Agents write handoff notes directly to state.yaml for now.
+**liza handoff** — Record a context-exhaustion handoff through the CLI
+```bash
+liza handoff <task-id> <summary> <next-action>
+```
+
+The command records the handoff without requiring or permitting a direct
+`state.yaml` edit.
 
 ---
 

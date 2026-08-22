@@ -348,6 +348,59 @@ Examples:
 	},
 }
 
+var repairSupersededDependenciesCmd = &cobra.Command{
+	Use:   "repair-superseded-dependencies <task-id> --reason <reason>",
+	Short: "Repair illegal dependencies on one superseded task",
+	Long: fmt.Sprintf(`Remove every illegal downstream dependency from one superseded task.
+
+This orchestrator-only repair preserves legal dependencies and all terminal task
+metadata, validates the full candidate state, and records the reason and caller in
+task history and the activity log.
+
+Example:
+  %s task-3 --reason "Repair terminal dependency metadata"`, brand.Command("repair-superseded-dependencies")),
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) (retErr error) {
+		if isJSON(cmd) {
+			log.SetOutput(io.Discard)
+			defer log.SetOutput(os.Stderr)
+			defer func() {
+				if retErr != nil && !errors.Is(retErr, jsonout.ErrAlreadyWritten) {
+					_ = jsonout.WriteResult(os.Stdout, nil, nil, retErr)
+					retErr = jsonout.ErrAlreadyWritten
+				}
+			}()
+		}
+
+		taskID := args[0]
+		reason, _ := cmd.Flags().GetString("reason")
+
+		agentID, err := resolveOrchestratorID(cmd)
+		if err != nil {
+			return err
+		}
+
+		projectRoot, err := requireProjectRoot()
+		if err != nil {
+			return err
+		}
+
+		resolver, err := loadResolverForRBAC(projectRoot)
+		if err != nil {
+			return err
+		}
+		if err := validateAllowedOperation(resolver, agentID, "repair-superseded-dependencies"); err != nil {
+			return err
+		}
+
+		if isJSON(cmd) {
+			result, err := ops.RepairSupersededDependencies(projectRoot, taskID, reason, agentID)
+			return jsonout.WriteResult(os.Stdout, result, resultWarnings(result), err)
+		}
+		return commands.RepairSupersededDependenciesCommand(projectRoot, taskID, reason, agentID)
+	},
+}
+
 var markBlockedCmd = &cobra.Command{
 	Use:   "mark-blocked <task-id>",
 	Short: "Mark a task as BLOCKED due to unresolvable blocker",
@@ -1115,6 +1168,7 @@ func init() {
 	rootCmd.AddCommand(addTasksCmd)
 	rootCmd.AddCommand(supersedeTaskCmd)
 	rootCmd.AddCommand(retargetDependencyCmd)
+	rootCmd.AddCommand(repairSupersededDependenciesCmd)
 	rootCmd.AddCommand(cancelTaskCmd)
 	rootCmd.AddCommand(reconcileMergedCmd)
 	rootCmd.AddCommand(markBlockedCmd)
@@ -1137,6 +1191,7 @@ func init() {
 	}
 	supersedeTaskCmd.ValidArgsFunction = completeTaskIDArgs(2)
 	retargetDependencyCmd.ValidArgsFunction = completeTaskIDArgs(3)
+	repairSupersededDependenciesCmd.ValidArgsFunction = completeTaskIDArgs(1)
 	cancelTaskCmd.ValidArgsFunction = completeTaskIDArgs(1)
 	reconcileMergedCmd.ValidArgsFunction = completeTaskIDArgs(1)
 	markBlockedCmd.ValidArgsFunction = completeTaskIDArgs(1)
@@ -1152,6 +1207,7 @@ func init() {
 	addJSONFlag(addTasksCmd)
 	addJSONFlag(supersedeTaskCmd)
 	addJSONFlag(retargetDependencyCmd)
+	addJSONFlag(repairSupersededDependenciesCmd)
 	addJSONFlag(cancelTaskCmd)
 	addJSONFlag(reconcileMergedCmd)
 	addJSONFlag(markBlockedCmd)
@@ -1170,6 +1226,9 @@ func init() {
 	addAgentIDFlag(retargetDependencyCmd)
 	retargetDependencyCmd.Flags().String("reason", "", "reason for retargeting this dependency (required)")
 	retargetDependencyCmd.MarkFlagRequired("reason")
+	addAgentIDFlag(repairSupersededDependenciesCmd)
+	repairSupersededDependenciesCmd.Flags().String("reason", "", "reason for repairing superseded dependencies (required)")
+	repairSupersededDependenciesCmd.MarkFlagRequired("reason")
 	addAgentIDFlag(cancelTaskCmd)
 	addAgentIDFlag(reconcileMergedCmd)
 	reconcileMergedCmd.Flags().String("merge-commit", "", "merge commit that completed the task externally (required)")

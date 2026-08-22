@@ -13,6 +13,7 @@ pipeline:
         - add-tasks
         - supersede-task
         - retarget-dependency
+        - repair-superseded-dependencies
         - cancel-task
         - reconcile-merged
         - unblock-task

@@ -30,6 +30,7 @@ Verified zombie-agent detection requires procfs and uses process cwd as project-
 §BRAND_BINARY_NAME§ recover-agent <agent-id>      # Release claim + remove worktree + delete agent
 §BRAND_BINARY_NAME§ release-claim <task-id>       # Granular: release claim only
 §BRAND_BINARY_NAME§ clear-stale-review-claims     # Clear all expired review leases
+§BRAND_BINARY_NAME§ repair-superseded-dependencies <task-id> --reason <reason> # Repair illegal terminal dependency edges
 §BRAND_BINARY_NAME§ delete agent <id>             # Remove agent from state
 §BRAND_BINARY_NAME§ delete task <id>              # Remove task from state
 ```
@@ -223,7 +224,7 @@ Key task fields:
 - `blocked_reason` / `blocked_questions` — why the task is stuck
 - `repair_request` — optional complete orchestrator-only repair request captured when the blocker is a state transition the assigned agent cannot perform (`operation`, `target`, `command`, `evidence`, `validation`)
 - `rejection_reason` — reviewer feedback on rejection
-- `depends_on` — task IDs that must be terminal before this task is claimable
+- `depends_on` — task IDs that must be directly MERGED before this task is claimable and must not point downstream in the pipeline
 - `output[]` — structured output entries (used by `§BRAND_BINARY_NAME§ proceed` to create child tasks)
   - `output[].depends_on` — sibling output indexes resolved during `proceed`
   - `output[].task_depends_on` — existing concrete task IDs copied to generated child tasks
@@ -239,49 +240,28 @@ Key agent fields:
 
 ### Modifying state.yaml
 
-**Golden rule:** Never round-trip state.yaml through `yaml.dump` or any YAML serializer. The file is owned by Go's `yaml.v3` library. Python/Ruby serializers change indentation, timestamp formatting, and block scalar representation in incompatible ways.
+**Golden rule:** Never edit `state.yaml` directly. Direct edits bypass locking,
+role authorization, audit history, and all-or-nothing candidate validation.
 
-**Safe mutation methods (preference order):**
+Use the dedicated CLI operation for every state mutation. In particular:
 
-1. **CLI commands** — `§BRAND_BINARY_NAME§ unblock-task`, `§BRAND_BINARY_NAME§ retarget-dependency`, `§BRAND_BINARY_NAME§ cancel-task`, `§BRAND_BINARY_NAME§ supersede-task`, `§BRAND_BINARY_NAME§ release-claim`, `§BRAND_BINARY_NAME§ recover-task`, etc. Always prefer these.
-2. **Line-level text edits** — For changes the CLI doesn't support (e.g., output-entry dependency repair, setting a status the CLI rejects). Use `§BRAND_BINARY_NAME§ pause` first to stop heartbeat updates, then back up before touching anything:
+- use `§BRAND_BINARY_NAME§ retarget-dependency <task-id> <old-dep-id> <new-dep-ids> --reason <reason>` for one direct edge on a non-terminal task;
+- use `§BRAND_BINARY_NAME§ repair-superseded-dependencies <task-id> --reason <reason>` for all illegal downstream direct edges on one `SUPERSEDED` task;
+- use `§BRAND_BINARY_NAME§ unblock-task`, `§BRAND_BINARY_NAME§ cancel-task`, `§BRAND_BINARY_NAME§ supersede-task`, `§BRAND_BINARY_NAME§ release-claim`, or `§BRAND_BINARY_NAME§ recover-task` for their declared transitions.
 
-```bash
-cp §BRAND_PROJECT_DIRNAME§/state.yaml §BRAND_PROJECT_DIRNAME§/state.yaml.bak
-```
-
-Edit with line-level operations:
-
-```python
-with open('§BRAND_PROJECT_DIRNAME§/state.yaml', 'r') as f:
-    lines = f.readlines()
-# Modify specific lines by index
-lines[N] = lines[N].replace('OLD_VALUE', 'NEW_VALUE')
-# Or insert lines
-lines.insert(N, '      depends_on:\n')
-# Write atomically
-import tempfile, os
-with tempfile.NamedTemporaryFile('w', dir='§BRAND_PROJECT_DIRNAME§', suffix='.yaml', delete=False) as tmp:
-    tmp.writelines(lines)
-    tmp_path = tmp.name
-os.rename(tmp_path, '§BRAND_PROJECT_DIRNAME§/state.yaml')
-```
-
-3. **After any manual edit:**
-   - `diff §BRAND_PROJECT_DIRNAME§/state.yaml.bak §BRAND_PROJECT_DIRNAME§/state.yaml` — review exactly what changed
-   - `§BRAND_BINARY_NAME§ validate` — check invariants
-   - `§BRAND_BINARY_NAME§ update-sprint-metrics --json` — triggers Go to normalize formatting (only works if the file still parses)
-   - Timestamps must be ISO 8601 UTC (`YYYY-MM-DDTHH:MM:SSZ`). Generate: `date -u +%Y-%m-%dT%H:%M:%SZ`
-   - Once satisfied, remove the backup: `rm §BRAND_PROJECT_DIRNAME§/state.yaml.bak`
+If no command supports the required mutation, stop and record an
+orchestrator-only repair request with `§BRAND_BINARY_NAME§ mark-blocked`; do not
+work around the state machine. Run `§BRAND_BINARY_NAME§ validate` after recovery
+to verify the whole blackboard.
 
 ### Known Gotchas
 
-- **`|N` block scalars**: Go writes `|4` for multi-line fields (e.g. `rejection_reason`). If the file was round-tripped through Python YAML, these become unparseable. Fix: repair the broken scalars with line-level text edits (e.g. convert `|4` back to `|4` with correct indentation), then `§BRAND_BINARY_NAME§ validate`. Once parseable, `§BRAND_BINARY_NAME§ update-sprint-metrics` will normalize formatting.
-- **Timestamps**: Python's `yaml.dump` converts `2026-04-14T14:29:31Z` to `2026-04-14 14:29:31+00:00`. Go rejects this. Never round-trip timestamps through a YAML library.
-- **Concurrent writes**: Agents and CLI write concurrently. Use `§BRAND_BINARY_NAME§ pause` before manual edits, or write atomically (temp file + `os.rename`).
+- **`|N` block scalars**: Go writes indentation indicators for multi-line fields (for example `rejection_reason`). YAML serializers can make live state unparseable. Restore a trusted backup or use a supported migration/recovery command; do not hand-edit a live blackboard.
+- **Timestamps**: Python's `yaml.dump` can convert `2026-04-14T14:29:31Z` to `2026-04-14 14:29:31+00:00`. Go rejects this. Never round-trip the blackboard through a YAML library.
+- **Concurrent writes**: Agents and CLI write concurrently. Only CLI mutations participate in the required lock and validation protocol.
 - **Field names**: SUPERSEDED tasks require `rescope_reason` (not `superseded_reason`). Check `§BRAND_BINARY_NAME§ validate` for correct field names.
-- **Status constraints**: `§BRAND_BINARY_NAME§ supersede-task` works from BLOCKED, REJECTED, or any pipeline-declared initial state. Without replacements, pass `--recoverability-command "<single-line command>"` to record the operator audit command before branch/worktree cleanup; do not include secrets. For other states, edit state.yaml directly.
-- **Dependency edits**: Use `§BRAND_BINARY_NAME§ retarget-dependency <task-id> <old-dep-id> <new-dep-ids> --reason "..."` for one non-terminal task's direct `depends_on` edge. It does not repair `output[].task_depends_on`; use line-level ops only for dependency metadata the CLI still does not support.
+- **Status constraints**: `§BRAND_BINARY_NAME§ supersede-task` works from BLOCKED, REJECTED, or any pipeline-declared initial state. Without replacements, pass `--recoverability-command "<single-line command>"` to record the operator audit command before branch/worktree cleanup; do not include secrets. Unsupported status changes require escalation, not a direct edit.
+- **Dependency edits**: Use `§BRAND_BINARY_NAME§ retarget-dependency <task-id> <old-dep-id> <new-dep-ids> --reason "..."` for one non-terminal direct edge. Use `§BRAND_BINARY_NAME§ repair-superseded-dependencies <task-id> --reason "..."` for all illegal downstream direct edges on a `SUPERSEDED` task. Unsupported dependency metadata requires an orchestrator repair request.
 - **Holding a task from review**: Add a `depends_on` on the task that should be reviewed first — the system enforces ordering. Alternatively, set status to the pre-review state.
 
 ## Agent Exit Codes
@@ -317,7 +297,9 @@ Exit 42 with `handoff_pending: true` on the task means context exhaustion — th
 **Diagnosis**: Read `blocked_reason`, `blocked_questions`, `depends_on`, and optional `repair_request` in state.yaml. A `BLOCKED` alert is raised when a task blocks; if the orchestrator assesses but cannot resolve it, an `UNRESOLVED BLOCKED` alert is raised.
 **Fix**: If the blocker was another task, the blocked task should list it in `depends_on` so the orchestrator wakes when that task changes. If the wrong direct dependency edge is the blocker, use `§BRAND_BINARY_NAME§ retarget-dependency <id> <old-dep-id> <new-dep-id[,new-dep-id]> --reason "..."`; the task remains BLOCKED until explicitly unblocked or assessed. If the blocker was repaired and every `depends_on` target is directly MERGED, use `§BRAND_BINARY_NAME§ unblock-task <id> --reason "..."` to make the task claimable again, or add `--assign-to <doer-agent-id>` for a direct-resume fast path.
 If the task has a preserved worktree and integration moved while it was blocked, use `§BRAND_BINARY_NAME§ unblock-task <id> --rebase-on <integration-branch> --reason "..."`. Tracked worktree changes require `--allow-dirty`, which rebases with Git autostash; untracked files that would be overwritten are refused. Submit/merge conflicts move tasks to `INTEGRATION_FAILED`; unblock-time rebase conflicts remain `BLOCKED` with fresh repair metadata so the preserved worktree can be repaired and unblocked again.
-Supersede/cancel operations rewrite active downstream dependencies first; stale edges to SUPERSEDED or ABANDONED tasks must not remain on active tasks. Otherwise use `§BRAND_BINARY_NAME§ supersede-task <id> [replacements] --reason "..."` to replace with new tasks, `§BRAND_BINARY_NAME§ supersede-task <id> --reason "..." --recoverability-command "§BRAND_BINARY_NAME§ recover-task <id>"` to mark completed externally with no replacements, or `§BRAND_BINARY_NAME§ recover-task <id>` to reset.
+Supersede/cancel operations rewrite active downstream dependencies first; stale edges to SUPERSEDED or ABANDONED tasks must not remain on active tasks. Supersession also prunes the retiring task's own illegal downstream edges, retains legal historical dependencies, audits removed IDs, and validates the candidate before commit. Otherwise use `§BRAND_BINARY_NAME§ supersede-task <id> [replacements] --reason "..."` to replace with new tasks, `§BRAND_BINARY_NAME§ supersede-task <id> --reason "..." --recoverability-command "§BRAND_BINARY_NAME§ recover-task <id>"` to mark completed externally with no replacements, or `§BRAND_BINARY_NAME§ recover-task <id>` to reset.
+
+If validation reports downstream dependencies on an already-`SUPERSEDED` task, the orchestrator runs `§BRAND_BINARY_NAME§ repair-superseded-dependencies <task-id> --reason <reason>`. The command removes every illegal downstream direct edge in one transaction, retains legal edges and terminal/replacement metadata, records the caller, reason, and removed/retained IDs in task history and the activity log, and validates the full candidate state. Non-`SUPERSEDED`, already-valid, or still-invalid candidates are rejected without mutation. Activity-log failure is returned as a warning after a successful state commit. Never repair the blackboard directly.
 
 ### Integration failure
 **Symptom**: Task in INTEGRATION_FAILED state.
@@ -381,6 +363,7 @@ After a circuit-breaker trigger is reviewed and `§BRAND_BINARY_NAME§ resume` c
 - Tasks in submitted states must have `review_commit`
 - Tasks in rejected states must have `rejection_reason`
 - BLOCKED tasks must have `blocked_reason` and `blocked_questions`
+- Dependency direction applies to every task, including terminal tasks; dependencies cannot point to downstream role-pairs
 - MERGED tasks must not have `worktree`
 - No two agents assigned to the same task
 - Tasks in initial/draft states cannot have `assigned_to`

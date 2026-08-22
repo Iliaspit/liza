@@ -1,8 +1,10 @@
 package ops
 
 import (
+	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"testing"
 	"time"
@@ -11,6 +13,7 @@ import (
 	"github.com/liza-mas/liza/internal/errors"
 	"github.com/liza-mas/liza/internal/git"
 	"github.com/liza-mas/liza/internal/models"
+	"github.com/liza-mas/liza/internal/statevalidate"
 	"github.com/liza-mas/liza/internal/testhelpers"
 )
 
@@ -182,6 +185,208 @@ func TestSupersedeTask_RewritesActiveDependentDependencies(t *testing.T) {
 	terminal = *readState.FindTask("terminal-dependent")
 	if !slices.Equal(terminal.DependsOn, []string{"task-1"}) {
 		t.Fatalf("terminal depends_on = %v, want historical dependency preserved", terminal.DependsOn)
+	}
+}
+
+func TestSupersedeTask_PrunesOwnDownstreamDependencies(t *testing.T) {
+	tmpDir := t.TempDir()
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	testhelpers.CreateSpecFile(t, tmpDir, "vision.md", "# Vision\n")
+
+	now := time.Now().UTC()
+	target := testhelpers.BuildTaskByStatus("plan-old", models.TaskStatusBlocked, now)
+	target.RolePair = "code-planning-pair"
+	target.DependsOn = []string{"coding-a", "legal-plan", "coding-b"}
+	codingA := testhelpers.BuildTaskByStatus("coding-a", models.TaskStatusReady, now)
+	codingB := testhelpers.BuildTaskByStatus("coding-b", models.TaskStatusReady, now)
+	legalPlan := testhelpers.BuildTaskByStatus("legal-plan", models.TaskStatusDraftCodingPlan, now)
+	replacement := testhelpers.BuildTaskByStatus("replacement-plan", models.TaskStatusDraftCodingPlan, now)
+	consumer := testhelpers.BuildTaskByStatus("active-consumer", models.TaskStatusReady, now)
+	consumer.DependsOn = []string{"plan-old"}
+	state := testhelpers.CreateValidState()
+	state.Tasks = []models.Task{target, codingA, legalPlan, codingB, replacement, consumer}
+	for i := range state.Tasks {
+		state.Tasks[i].SpecRef = state.Goal.SpecRef
+	}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	_, err := SupersedeTask(tmpDir, "plan-old", []string{"replacement-plan"}, "Replace invalid plan", "orchestrator-1")
+	if err != nil {
+		t.Fatalf("SupersedeTask() error: %v", err)
+	}
+
+	readState, err := db.New(stateFile).Read()
+	if err != nil {
+		t.Fatalf("Failed to read state: %v", err)
+	}
+	updated := readState.FindTask("plan-old")
+	if updated.Status != models.TaskStatusSuperseded {
+		t.Fatalf("status = %s, want SUPERSEDED", updated.Status)
+	}
+	if !slices.Equal(updated.DependsOn, []string{"legal-plan"}) {
+		t.Fatalf("depends_on = %v, want legal dependency preserved", updated.DependsOn)
+	}
+	if !slices.Equal(updated.SupersededBy, []string{"replacement-plan"}) {
+		t.Fatalf("superseded_by = %v, want [replacement-plan]", updated.SupersededBy)
+	}
+	consumer = *readState.FindTask("active-consumer")
+	if !slices.Equal(consumer.DependsOn, []string{"replacement-plan"}) {
+		t.Fatalf("active consumer depends_on = %v, want [replacement-plan]", consumer.DependsOn)
+	}
+
+	lastHistory := updated.History[len(updated.History)-1]
+	removed, ok := lastHistory.Extra["removed_dependencies"].([]any)
+	if !ok || !reflect.DeepEqual(removed, []any{"coding-a", "coding-b"}) {
+		t.Fatalf("removed_dependencies = %#v, want [coding-a coding-b]", lastHistory.Extra["removed_dependencies"])
+	}
+	if err := statevalidate.ValidateState(readState, tmpDir, false, io.Discard); err != nil {
+		t.Fatalf("persisted state validation failed: %v", err)
+	}
+}
+
+func TestSupersedeTask_PrunesSupersessionPathDownstreamDependency(t *testing.T) {
+	tmpDir := t.TempDir()
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	testhelpers.CreateSpecFile(t, tmpDir, "vision.md", "# Vision\n")
+
+	now := time.Now().UTC()
+	target := testhelpers.BuildTaskByStatus("plan-old", models.TaskStatusBlocked, now)
+	target.RolePair = "code-planning-pair"
+	target.DependsOn = []string{"retired-downstream-plan", "retired-legal-plan"}
+	downstreamPath := testhelpers.BuildTaskByStatus("retired-downstream-plan", models.TaskStatusSuperseded, now)
+	downstreamPath.RolePair = "code-planning-pair"
+	downstreamPath.SupersededBy = []string{"coding-a", "coding-b"}
+	downstreamPath.RescopeReason = testhelpers.StringPtr("Split into coding replacements")
+	legalPath := testhelpers.BuildTaskByStatus("retired-legal-plan", models.TaskStatusSuperseded, now)
+	legalPath.RolePair = "code-planning-pair"
+	legalPath.SupersededBy = []string{"same-role-plan", "upstream-architecture"}
+	legalPath.RescopeReason = testhelpers.StringPtr("Replaced by legal prerequisites")
+	upstream := testhelpers.BuildTaskByStatus("upstream-architecture", models.TaskStatus("DRAFT_ARCHITECTURE"), now)
+	upstream.RolePair = "architecture-pair"
+	state := testhelpers.CreateValidState()
+	state.Tasks = []models.Task{
+		target,
+		downstreamPath,
+		legalPath,
+		testhelpers.BuildTaskByStatus("coding-a", models.TaskStatusReady, now),
+		testhelpers.BuildTaskByStatus("coding-b", models.TaskStatusReady, now),
+		testhelpers.BuildTaskByStatus("same-role-plan", models.TaskStatusDraftCodingPlan, now),
+		upstream,
+		testhelpers.BuildTaskByStatus("replacement-plan", models.TaskStatusDraftCodingPlan, now),
+	}
+	setTaskSpecRefs(state)
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	_, err := SupersedeTask(tmpDir, "plan-old", []string{"replacement-plan"}, "Replace invalid plan", "orchestrator-1")
+	if err != nil {
+		t.Fatalf("SupersedeTask() error: %v", err)
+	}
+
+	readState, err := db.New(stateFile).Read()
+	if err != nil {
+		t.Fatalf("read state: %v", err)
+	}
+	updated := readState.FindTask("plan-old")
+	if updated == nil {
+		t.Fatal("plan-old not found")
+	}
+	if updated.Status != models.TaskStatusSuperseded {
+		t.Fatalf("status = %s, want SUPERSEDED", updated.Status)
+	}
+	if !slices.Equal(updated.DependsOn, []string{"retired-legal-plan"}) {
+		t.Fatalf("depends_on = %v, want original legal path retained", updated.DependsOn)
+	}
+	if !slices.Equal(updated.SupersededBy, []string{"replacement-plan"}) {
+		t.Fatalf("superseded_by = %v, want [replacement-plan]", updated.SupersededBy)
+	}
+	lastHistory := updated.History[len(updated.History)-1]
+	if !reflect.DeepEqual(lastHistory.Extra["removed_dependencies"], []any{"retired-downstream-plan"}) {
+		t.Fatalf("removed_dependencies = %#v, want original direct dependency", lastHistory.Extra["removed_dependencies"])
+	}
+	if err := statevalidate.ValidateState(readState, tmpDir, false, io.Discard); err != nil {
+		t.Fatalf("persisted state validation failed: %v", err)
+	}
+}
+
+func TestSupersedeTask_SupersessionPathInvalidCandidateLeavesStateUnchanged(t *testing.T) {
+	tmpDir := t.TempDir()
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	testhelpers.CreateSpecFile(t, tmpDir, "vision.md", "# Vision\n")
+
+	now := time.Now().UTC()
+	target := testhelpers.BuildTaskByStatus("plan-old", models.TaskStatusBlocked, now)
+	target.RolePair = "code-planning-pair"
+	target.DependsOn = []string{"retired-downstream-plan"}
+	downstreamPath := testhelpers.BuildTaskByStatus("retired-downstream-plan", models.TaskStatusSuperseded, now)
+	downstreamPath.RolePair = "code-planning-pair"
+	downstreamPath.SupersededBy = []string{"coding-a"}
+	downstreamPath.RescopeReason = testhelpers.StringPtr("Split into coding replacement")
+	invalid := testhelpers.BuildTaskByStatus("invalid-task", models.TaskStatusReady, now)
+	invalid.DependsOn = []string{"missing-task"}
+	state := testhelpers.CreateValidState()
+	state.Tasks = []models.Task{
+		target,
+		downstreamPath,
+		testhelpers.BuildTaskByStatus("coding-a", models.TaskStatusReady, now),
+		testhelpers.BuildTaskByStatus("replacement-plan", models.TaskStatusDraftCodingPlan, now),
+		invalid,
+	}
+	setTaskSpecRefs(state)
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	bb := db.New(stateFile)
+	before, err := bb.Read()
+	if err != nil {
+		t.Fatalf("read initial state: %v", err)
+	}
+	_, err = SupersedeTask(tmpDir, "plan-old", []string{"replacement-plan"}, "Replace invalid plan", "orchestrator-1")
+	testhelpers.RequireErrorContains(t, err, "missing-task")
+	after, err := bb.Read()
+	if err != nil {
+		t.Fatalf("read state after rejected candidate: %v", err)
+	}
+	if !reflect.DeepEqual(after, before) {
+		t.Fatalf("state changed after candidate validation failure\nbefore: %#v\nafter:  %#v", before, after)
+	}
+}
+
+func TestSupersedeTask_InvalidCandidateLeavesStateUnchanged(t *testing.T) {
+	tmpDir := t.TempDir()
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	testhelpers.CreateSpecFile(t, tmpDir, "vision.md", "# Vision\n")
+
+	now := time.Now().UTC()
+	target := testhelpers.BuildTaskByStatus("plan-old", models.TaskStatusBlocked, now)
+	target.RolePair = "code-planning-pair"
+	target.DependsOn = []string{"coding-a", "legal-plan", "coding-b"}
+	codingA := testhelpers.BuildTaskByStatus("coding-a", models.TaskStatusReady, now)
+	codingB := testhelpers.BuildTaskByStatus("coding-b", models.TaskStatusReady, now)
+	legalPlan := testhelpers.BuildTaskByStatus("legal-plan", models.TaskStatusDraftCodingPlan, now)
+	replacement := testhelpers.BuildTaskByStatus("replacement-plan", models.TaskStatusDraftCodingPlan, now)
+	consumer := testhelpers.BuildTaskByStatus("active-consumer", models.TaskStatusReady, now)
+	consumer.DependsOn = []string{"plan-old"}
+	invalid := testhelpers.BuildTaskByStatus("invalid-task", models.TaskStatusReady, now)
+	invalid.DependsOn = []string{"missing-task"}
+	state := testhelpers.CreateValidState()
+	state.Tasks = []models.Task{target, codingA, legalPlan, codingB, replacement, consumer, invalid}
+	for i := range state.Tasks {
+		state.Tasks[i].SpecRef = state.Goal.SpecRef
+	}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	bb := db.New(stateFile)
+	before, err := bb.Read()
+	if err != nil {
+		t.Fatalf("Failed to read initial state: %v", err)
+	}
+	_, err = SupersedeTask(tmpDir, "plan-old", []string{"replacement-plan"}, "Replace invalid plan", "orchestrator-1")
+	testhelpers.RequireErrorContains(t, err, "missing-task")
+	after, err := bb.Read()
+	if err != nil {
+		t.Fatalf("Failed to read state after rejected candidate: %v", err)
+	}
+	if !reflect.DeepEqual(after.Tasks, before.Tasks) {
+		t.Fatalf("tasks changed after candidate validation failure\nbefore: %#v\nafter:  %#v", before.Tasks, after.Tasks)
 	}
 }
 

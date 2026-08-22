@@ -660,6 +660,99 @@ func TestJSON_RetargetDependency_RejectsNonOrchestrator(t *testing.T) {
 	assertJSONError(t, stdout, "permission_denied", `operation "retarget-dependency" not allowed for role "coder"`)
 }
 
+func TestJSON_RepairSupersededDependencies_Success(t *testing.T) {
+	projectRoot, statePath := setupMutationTestProject(t, func(state *models.State) {
+		now := time.Now().UTC()
+		state.Goal.SpecRef = "README.md"
+		target := testhelpers.BuildTaskByStatus("plan-old", models.TaskStatusSuperseded, now)
+		target.RolePair = "code-planning-pair"
+		target.DependsOn = []string{"coding-a", "legal-plan", "coding-b"}
+		target.SupersededBy = []string{"replacement-plan"}
+		target.RescopeReason = testhelpers.StringPtr("Replaced invalid plan")
+		state.Tasks = []models.Task{
+			target,
+			testhelpers.BuildTaskByStatus("coding-a", models.TaskStatusReady, now),
+			testhelpers.BuildTaskByStatus("legal-plan", models.TaskStatusDraftCodingPlan, now),
+			testhelpers.BuildTaskByStatus("coding-b", models.TaskStatusReady, now),
+			testhelpers.BuildTaskByStatus("replacement-plan", models.TaskStatusDraftCodingPlan, now),
+		}
+	})
+	logPath := filepath.Join(projectRoot, ".liza", "log.yaml")
+	if err := os.RemoveAll(logPath); err != nil {
+		t.Fatalf("remove log path: %v", err)
+	}
+	if err := os.Mkdir(logPath, 0o755); err != nil {
+		t.Fatalf("mkdir log path: %v", err)
+	}
+
+	stdout, err := executeRootCommandCapture(t, projectRoot,
+		"repair-superseded-dependencies", "plan-old",
+		"--reason", "Repair terminal dependency metadata",
+		"--agent-id", "orchestrator-1",
+		"--json",
+	)
+	if err != nil {
+		t.Fatalf("repair-superseded-dependencies --json failed: %v\n%s", err, stdout)
+	}
+
+	env := parseEnvelope(t, stdout)
+	if env["ok"] != true {
+		t.Fatalf("expected ok=true, got %v", env["ok"])
+	}
+	result, ok := env["result"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected result object, got %T", env["result"])
+	}
+	if result["task_id"] != "plan-old" {
+		t.Fatalf("task_id = %v, want plan-old", result["task_id"])
+	}
+	removed, ok := result["removed_dependencies"].([]any)
+	if !ok || len(removed) != 2 || removed[0] != "coding-a" || removed[1] != "coding-b" {
+		t.Fatalf("removed_dependencies = %#v, want [coding-a coding-b]", result["removed_dependencies"])
+	}
+	retained, ok := result["retained_dependencies"].([]any)
+	if !ok || len(retained) != 1 || retained[0] != "legal-plan" {
+		t.Fatalf("retained_dependencies = %#v, want [legal-plan]", result["retained_dependencies"])
+	}
+	warnings, ok := env["warnings"].([]any)
+	if !ok || len(warnings) != 1 || !strings.Contains(warnings[0].(string), "activity log write failed") {
+		t.Fatalf("warnings = %#v, want activity log write failure", env["warnings"])
+	}
+
+	task := mustFindTask(t, readState(t, statePath), "plan-old")
+	last := task.History[len(task.History)-1]
+	if last.Agent == nil || *last.Agent != "orchestrator-1" {
+		t.Fatalf("history agent = %v, want orchestrator-1", last.Agent)
+	}
+}
+
+func TestJSON_RepairSupersededDependencies_RejectsNonOrchestrator(t *testing.T) {
+	projectRoot, statePath := setupMutationTestProject(t, func(state *models.State) {
+		now := time.Now().UTC()
+		target := testhelpers.BuildTaskByStatus("plan-old", models.TaskStatusSuperseded, now)
+		target.RolePair = "code-planning-pair"
+		target.DependsOn = []string{"coding-a"}
+		state.Tasks = []models.Task{
+			target,
+			testhelpers.BuildTaskByStatus("coding-a", models.TaskStatusReady, now),
+		}
+	})
+
+	stdout, err := executeRootCommandCapture(t, projectRoot,
+		"repair-superseded-dependencies", "plan-old",
+		"--reason", "Repair terminal dependency metadata",
+		"--agent-id", "coder-1",
+		"--json",
+	)
+	if err == nil {
+		t.Fatal("expected RBAC error, got nil")
+	}
+	assertJSONError(t, stdout, "permission_denied", `operation "repair-superseded-dependencies" not allowed for role "coder"`)
+	if got := mustFindTask(t, readState(t, statePath), "plan-old").DependsOn; len(got) != 1 || got[0] != "coding-a" {
+		t.Fatalf("task DependsOn changed after rejected command: %v", got)
+	}
+}
+
 func TestJSON_MarkBlocked_AlertWriteFailureReturnsWarning(t *testing.T) {
 	projectRoot, _ := setupMutationTestProject(t, func(state *models.State) {
 		now := time.Now().UTC()

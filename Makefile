@@ -59,7 +59,7 @@ test: sync-embedded check-testhelpers
 
 # Run e2e tests (full sprint sequence with mock CLI — ~40s)
 test-e2e: sync-embedded check-testhelpers
-	go test -race -tags e2e -run TestFullSprintSequence ./internal/integration/ -count=1
+	go test -race -tags e2e -run '^(TestFullSprintSequence|TestTerminalDependencyRecovery)$$' ./internal/integration/ -count=1
 
 # Run tests with coverage report
 coverage: test

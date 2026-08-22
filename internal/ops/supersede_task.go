@@ -2,6 +2,7 @@ package ops
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/paths"
 	"github.com/liza-mas/liza/internal/secretmask"
+	"github.com/liza-mas/liza/internal/statevalidate"
 )
 
 // SupersedeResult contains the outcome of superseding a task.
@@ -127,6 +129,11 @@ func SupersedeTaskWithOptions(projectRoot, taskID string, replacementIDs []strin
 		if err := validateDependencyDirection(state, pb.resolver, currentTask.ID, currentTask.RolePair, replacementIDs); err != nil {
 			return err
 		}
+		retainedDependencies, removedDependencies, err := pruneDownstreamDependencies(state, pb.resolver, currentTask)
+		if err != nil {
+			return err
+		}
+		currentTask.DependsOn = retainedDependencies
 
 		if err := currentTask.TransitionWith(models.TaskStatusSuperseded, pb.transitions); err != nil {
 			return err
@@ -159,10 +166,23 @@ func SupersedeTaskWithOptions(projectRoot, taskID string, replacementIDs []strin
 		if salvage != nil {
 			historyEntry.Extra = salvage
 		}
+		if len(removedDependencies) > 0 {
+			if historyEntry.Extra == nil {
+				historyEntry.Extra = make(map[string]any)
+			}
+			historyEntry.Extra["removed_dependencies"] = append([]string(nil), removedDependencies...)
+		}
 		currentTask.History = append(currentTask.History, historyEntry)
 
 		if err := rewriteActiveDependents(state, pb.resolver, taskID, replacementIDs, agentID, now); err != nil {
 			return err
+		}
+		// Legacy tasks predate pipeline-wide validation. For pipeline tasks, validate
+		// every structural invariant while skipping unchanged external artifact refs.
+		if currentTask.RolePair != "" {
+			if err := statevalidate.ValidateState(state, projectRoot, true, io.Discard); err != nil {
+				return err
+			}
 		}
 
 		return nil

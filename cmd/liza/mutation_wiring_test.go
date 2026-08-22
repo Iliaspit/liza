@@ -311,6 +311,120 @@ func TestMutationCommandWiring(t *testing.T) {
 		}
 	})
 
+	t.Run("repair-superseded-dependencies", func(t *testing.T) {
+		t.Run("wires task reason and caller identity", func(t *testing.T) {
+			projectRoot, statePath := setupMutationTestProject(t, func(state *models.State) {
+				now := time.Now().UTC()
+				state.Goal.SpecRef = "README.md"
+				target := testhelpers.BuildTaskByStatus("plan-old", models.TaskStatusSuperseded, now)
+				target.RolePair = "code-planning-pair"
+				target.DependsOn = []string{"coding-a", "legal-plan", "coding-b"}
+				target.SupersededBy = []string{"replacement-plan"}
+				target.RescopeReason = testhelpers.StringPtr("Replaced invalid plan")
+				state.Tasks = []models.Task{
+					target,
+					testhelpers.BuildTaskByStatus("coding-a", models.TaskStatusReady, now),
+					testhelpers.BuildTaskByStatus("legal-plan", models.TaskStatusDraftCodingPlan, now),
+					testhelpers.BuildTaskByStatus("coding-b", models.TaskStatusReady, now),
+					testhelpers.BuildTaskByStatus("replacement-plan", models.TaskStatusDraftCodingPlan, now),
+				}
+			})
+
+			err := executeRootCommand(
+				t,
+				projectRoot,
+				"repair-superseded-dependencies",
+				"plan-old",
+				"--reason",
+				"Repair terminal dependency metadata",
+				"--agent-id",
+				"orchestrator-1",
+			)
+			if err != nil {
+				t.Fatalf("repair-superseded-dependencies execute failed: %v", err)
+			}
+
+			state := readState(t, statePath)
+			task := mustFindTask(t, state, "plan-old")
+			if len(task.DependsOn) != 1 || task.DependsOn[0] != "legal-plan" {
+				t.Fatalf("task DependsOn = %v, want [legal-plan]", task.DependsOn)
+			}
+			last := task.History[len(task.History)-1]
+			if last.Event != models.TaskEventDependenciesRewritten {
+				t.Fatalf("history event = %s, want dependencies_rewritten", last.Event)
+			}
+			if last.Agent == nil || *last.Agent != "orchestrator-1" {
+				t.Fatalf("history agent = %v, want orchestrator-1", last.Agent)
+			}
+			if last.Reason == nil || *last.Reason != "Repair terminal dependency metadata" {
+				t.Fatalf("history reason = %v, want repair reason", last.Reason)
+			}
+		})
+
+		t.Run("rejects missing arguments without mutation", func(t *testing.T) {
+			projectRoot, statePath := setupMutationTestProject(t, func(state *models.State) {
+				now := time.Now().UTC()
+				target := testhelpers.BuildTaskByStatus("plan-old", models.TaskStatusSuperseded, now)
+				target.RolePair = "code-planning-pair"
+				target.DependsOn = []string{"coding-a"}
+				state.Tasks = []models.Task{
+					target,
+					testhelpers.BuildTaskByStatus("coding-a", models.TaskStatusReady, now),
+				}
+			})
+
+			err := executeRootCommand(
+				t,
+				projectRoot,
+				"repair-superseded-dependencies",
+				"--reason",
+				"Repair terminal dependency metadata",
+				"--agent-id",
+				"orchestrator-1",
+			)
+			if err == nil {
+				t.Fatal("expected missing task ID to be rejected")
+			}
+			if !strings.Contains(err.Error(), "accepts 1 arg(s), received 0") {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got := mustFindTask(t, readState(t, statePath), "plan-old").DependsOn; len(got) != 1 || got[0] != "coding-a" {
+				t.Fatalf("task DependsOn changed after rejected command: %v", got)
+			}
+		})
+
+		t.Run("rejects missing reason without mutation", func(t *testing.T) {
+			projectRoot, statePath := setupMutationTestProject(t, func(state *models.State) {
+				now := time.Now().UTC()
+				target := testhelpers.BuildTaskByStatus("plan-old", models.TaskStatusSuperseded, now)
+				target.RolePair = "code-planning-pair"
+				target.DependsOn = []string{"coding-a"}
+				state.Tasks = []models.Task{
+					target,
+					testhelpers.BuildTaskByStatus("coding-a", models.TaskStatusReady, now),
+				}
+			})
+
+			err := executeRootCommand(
+				t,
+				projectRoot,
+				"repair-superseded-dependencies",
+				"plan-old",
+				"--agent-id",
+				"orchestrator-1",
+			)
+			if err == nil {
+				t.Fatal("expected missing reason to be rejected")
+			}
+			if !strings.Contains(err.Error(), `required flag(s) "reason" not set`) {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got := mustFindTask(t, readState(t, statePath), "plan-old").DependsOn; len(got) != 1 || got[0] != "coding-a" {
+				t.Fatalf("task DependsOn changed after rejected command: %v", got)
+			}
+		})
+	})
+
 	t.Run("handoff rejects code-reviewer agent via RBAC", func(t *testing.T) {
 		projectRoot, _ := setupMutationTestProject(t, func(state *models.State) {
 			now := time.Now().UTC()
