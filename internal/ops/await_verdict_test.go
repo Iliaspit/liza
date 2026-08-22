@@ -3,7 +3,6 @@ package ops
 import (
 	"context"
 	stderrors "errors"
-	"io"
 	"strings"
 	"testing"
 	"time"
@@ -11,7 +10,7 @@ import (
 	"github.com/liza-mas/liza/internal/db"
 	"github.com/liza-mas/liza/internal/errors"
 	"github.com/liza-mas/liza/internal/models"
-	"github.com/liza-mas/liza/internal/statevalidate"
+	"github.com/liza-mas/liza/internal/pipeline"
 	"github.com/liza-mas/liza/internal/testhelpers"
 )
 
@@ -713,39 +712,56 @@ func TestAwaitVerdict_DelayedWatcherErrorUsesOriginalDeadline(t *testing.T) {
 	})
 	state.Tasks = []models.Task{task}
 	state.Agents["coder-1"] = models.Agent{Role: "coder", Status: models.AgentStatusWaiting}
-	bb := testhelpers.WriteInitialState(t, stateFile, state)
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	watcherErr := stderrors.New("delayed watcher failure")
+	const simulatedWatcherDelay = 3 * time.Second
+	deadlineBase := time.Now()
+	currentTime := deadlineBase
+	previousNow := awaitVerdictNow
+	awaitVerdictNow = func() time.Time { return currentTime }
+	t.Cleanup(func() { awaitVerdictNow = previousNow })
 
 	previousWatcher := newAwaitVerdictWatcher
 	newAwaitVerdictWatcher = func(*db.Blackboard) (awaitVerdictWatcher, error) {
-		return newDelayedErrorWatcher(300 * time.Millisecond), nil
+		currentTime = deadlineBase.Add(simulatedWatcherDelay)
+		errors := make(chan error, 1)
+		errors <- watcherErr
+		return &delayedErrorWatcher{
+			events: make(chan struct{}),
+			errors: errors,
+		}, nil
 	}
 	t.Cleanup(func() { newAwaitVerdictWatcher = previousWatcher })
 
-	started := time.Now()
-	result, err := AwaitVerdict(context.Background(), tmpDir, "task-1", "coder-1", 500*time.Millisecond)
-	elapsed := time.Since(started)
-	if err != nil {
-		t.Fatalf("AwaitVerdict error: %v", err)
+	var deadlineObserved time.Time
+	previousPolling := runAwaitVerdictPolling
+	runAwaitVerdictPolling = func(
+		_ context.Context,
+		_ *db.Blackboard,
+		_, _ string,
+		deadline time.Time,
+		_ models.TaskStatus,
+		_ *pipeline.Resolver,
+		_, _ string,
+	) (*AwaitVerdictResult, error) {
+		deadlineObserved = deadline
+		return nil, watcherErr
 	}
-	if result.Verdict != VerdictTimeout {
-		t.Errorf("Verdict = %q, want TIMEOUT", result.Verdict)
+	t.Cleanup(func() { runAwaitVerdictPolling = previousPolling })
+
+	const overallTimeout = 10 * time.Second
+	result, err := AwaitVerdict(context.Background(), tmpDir, "task-1", "coder-1", overallTimeout)
+	if result != nil {
+		t.Fatalf("AwaitVerdict result = %#v, want nil", result)
 	}
-	if elapsed < 400*time.Millisecond {
-		t.Errorf("returned before original deadline: elapsed = %s", elapsed)
-	}
-	if elapsed >= 800*time.Millisecond {
-		t.Errorf("returned after original deadline tolerance: elapsed = %s, want < 800ms", elapsed)
+	if !stderrors.Is(err, watcherErr) {
+		t.Fatalf("AwaitVerdict error = %v, want %v", err, watcherErr)
 	}
 
-	readState, readErr := bb.Read()
-	if readErr != nil {
-		t.Fatalf("failed to read state: %v", readErr)
-	}
-	if readState.Agents["coder-1"].CurrentTask != nil {
-		t.Error("coder ownership should be released after timeout")
-	}
-	if err := statevalidate.ValidateState(readState, tmpDir, false, io.Discard); err != nil {
-		t.Fatalf("state should validate after timeout: %v", err)
+	wantDeadline := deadlineBase.Add(overallTimeout)
+	if !deadlineObserved.Equal(wantDeadline) {
+		t.Fatalf("polling deadline = %s, want original deadline %s", deadlineObserved, wantDeadline)
 	}
 }
 

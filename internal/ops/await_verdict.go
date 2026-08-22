@@ -62,6 +62,10 @@ var newAwaitVerdictWatcher = func(bb *db.Blackboard) (awaitVerdictWatcher, error
 
 var awaitVerdictTickInterval = time.Second
 
+var awaitVerdictNow = time.Now
+
+var runAwaitVerdictPolling = awaitVerdictPolling
+
 // AwaitVerdict blocks until a review verdict arrives for a submitted task.
 // It validates preconditions, acquires ownership (agent status=WAITING,
 // CurrentTask=taskID), checks budget, then blocks on an event loop until
@@ -171,11 +175,11 @@ func AwaitVerdict(ctx context.Context, projectRoot, taskID, agentID string, time
 
 	// --- Event loop: block until verdict arrives ---
 	rolePair := task.RolePair
-	deadline := time.Now().Add(timeout)
+	deadline := awaitVerdictNow().Add(timeout)
 
 	watcher, watchErr := newAwaitVerdictWatcher(bb)
 	if watchErr != nil {
-		return awaitVerdictPolling(ctx, bb, taskID, agentID, deadline, task.Status, resolver, rolePair, projectRoot)
+		return runAwaitVerdictPolling(ctx, bb, taskID, agentID, deadline, task.Status, resolver, rolePair, projectRoot)
 	}
 	defer watcher.Close()
 
@@ -230,7 +234,7 @@ func AwaitVerdict(ctx context.Context, projectRoot, taskID, agentID string, time
 		case watcherErr := <-watcher.Errors():
 			log.Printf("Watcher error, falling back to polling: %v", watcherErr)
 			watcher.Close()
-			return awaitVerdictPolling(ctx, bb, taskID, agentID, deadline, task.Status, resolver, rolePair, projectRoot)
+			return runAwaitVerdictPolling(ctx, bb, taskID, agentID, deadline, task.Status, resolver, rolePair, projectRoot)
 
 		case <-deadlineTimer.C:
 			releaseOwnership(bb, agentID)

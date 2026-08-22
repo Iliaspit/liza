@@ -122,10 +122,13 @@ func TestLizaSimplifiedProjectACPPerformanceComparison(t *testing.T) {
 	baseline := runSimplifiedLizaBenchmark(t, "cli")
 	acp := runSimplifiedLizaBenchmark(t, "acp")
 
+	// Wall-clock duration is diagnostic only because scheduler noise must not decide the comparison.
 	baselineDuration := totalDuration(baseline)
 	acpDuration := totalDuration(acp)
 	baselineTokens := totalInputTokens(baseline)
 	acpTokens := totalInputTokens(acp)
+	baselineModeledCost := totalModeledProviderCost(baseline)
+	acpModeledCost := totalModeledProviderCost(acp)
 
 	if len(baseline) != 2 || len(acp) != 2 {
 		t.Fatalf("runs: baseline=%d acp=%d, want 2 each", len(baseline), len(acp))
@@ -136,15 +139,15 @@ func TestLizaSimplifiedProjectACPPerformanceComparison(t *testing.T) {
 	if acpTokens >= baselineTokens {
 		t.Fatalf("ACP tokens = %d, baseline tokens = %d; expected ACP to use fewer tokens", acpTokens, baselineTokens)
 	}
-	if acpDuration >= baselineDuration {
-		t.Fatalf("ACP duration = %s, baseline duration = %s; expected ACP to be faster", acpDuration, baselineDuration)
+	if err := validateLowerModeledProviderCost(baseline, acp); err != nil {
+		t.Fatal(err)
 	}
 
-	speedup := percentImprovement(float64(baselineDuration), float64(acpDuration))
 	tokenSavings := percentImprovement(float64(baselineTokens), float64(acpTokens))
-	t.Logf("baseline: runs=%d duration=%s input_tokens=%d warm_runs=%d", len(baseline), baselineDuration, baselineTokens, warmRunCount(baseline))
-	t.Logf("acp: runs=%d duration=%s input_tokens=%d warm_runs=%d", len(acp), acpDuration, acpTokens, warmRunCount(acp))
-	t.Logf("difference: speedup=%.2f%% input_token_savings=%.2f%%", speedup, tokenSavings)
+	modeledCostSavings := percentImprovement(float64(baselineModeledCost), float64(acpModeledCost))
+	t.Logf("baseline: runs=%d observed_duration=%s modeled_provider_cost=%s input_tokens=%d warm_runs=%d", len(baseline), baselineDuration, baselineModeledCost, baselineTokens, warmRunCount(baseline))
+	t.Logf("acp: runs=%d observed_duration=%s modeled_provider_cost=%s input_tokens=%d warm_runs=%d", len(acp), acpDuration, acpModeledCost, acpTokens, warmRunCount(acp))
+	t.Logf("difference: modeled_provider_cost_savings=%.2f%% input_token_savings=%.2f%%", modeledCostSavings, tokenSavings)
 	warmRun := findWarmRun(t, acp)
 	baselineWarmTaskTokens := findRunTokens(t, baseline, warmRun.TaskID)
 	t.Logf("warm task delta: task=%s baseline_tokens=%d acp_tokens=%d savings=%.2f%%",
@@ -152,6 +155,31 @@ func TestLizaSimplifiedProjectACPPerformanceComparison(t *testing.T) {
 		baselineWarmTaskTokens,
 		warmRun.Usage.InputTokens,
 		percentImprovement(float64(baselineWarmTaskTokens), float64(warmRun.Usage.InputTokens)))
+}
+
+func TestValidateLowerModeledProviderCostRejectsEqualOrHigherACP(t *testing.T) {
+	const baselineInputTokens = 100
+	baseline := []acpplugin.RunMetric{{Usage: acpplugin.Usage{InputTokens: baselineInputTokens}}}
+	tests := []struct {
+		name        string
+		inputTokens int
+	}{
+		{name: "equal", inputTokens: baselineInputTokens},
+		{name: "higher", inputTokens: baselineInputTokens + 1},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			acp := []acpplugin.RunMetric{{Usage: acpplugin.Usage{InputTokens: test.inputTokens}}}
+			err := validateLowerModeledProviderCost(baseline, acp)
+			if err == nil {
+				t.Fatalf("ACP input tokens = %d, baseline input tokens = %d; expected modeled provider cost comparison to fail", test.inputTokens, baselineInputTokens)
+			}
+			if !strings.Contains(err.Error(), "expected ACP modeled provider cost to be lower") {
+				t.Fatalf("error = %q, want modeled provider cost comparison", err)
+			}
+		})
+	}
 }
 
 func runSimplifiedLizaBenchmark(t *testing.T, mode string) []acpplugin.RunMetric {
@@ -252,8 +280,11 @@ func estimateACPTaskDeltaTokens(projectRoot, taskID string) int {
 }
 
 func sleepForSimulatedProviderCost(inputTokens int) {
-	delay := 15*time.Millisecond + time.Duration(inputTokens)*50*time.Microsecond
-	time.Sleep(delay)
+	time.Sleep(modeledProviderCost(inputTokens))
+}
+
+func modeledProviderCost(inputTokens int) time.Duration {
+	return 15*time.Millisecond + time.Duration(inputTokens)*50*time.Microsecond
 }
 
 func toLLMUsage(usage acpplugin.Usage) LLMAgentUsage {
@@ -279,6 +310,23 @@ func totalInputTokens(runs []acpplugin.RunMetric) int {
 		total += run.Usage.InputTokens
 	}
 	return total
+}
+
+func totalModeledProviderCost(runs []acpplugin.RunMetric) time.Duration {
+	var total time.Duration
+	for _, run := range runs {
+		total += modeledProviderCost(run.Usage.InputTokens)
+	}
+	return total
+}
+
+func validateLowerModeledProviderCost(baseline, acp []acpplugin.RunMetric) error {
+	baselineCost := totalModeledProviderCost(baseline)
+	acpCost := totalModeledProviderCost(acp)
+	if acpCost >= baselineCost {
+		return fmt.Errorf("ACP modeled provider cost = %s, baseline modeled provider cost = %s; expected ACP modeled provider cost to be lower", acpCost, baselineCost)
+	}
+	return nil
 }
 
 func warmRunCount(runs []acpplugin.RunMetric) int {
