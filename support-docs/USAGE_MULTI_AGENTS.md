@@ -364,6 +364,13 @@ integration sub-pipeline (post-coding, orchestrator-triggered):
 
 The configured entry points still name the specialized planning pairs. During `INITIAL_PLANNING`, §BRAND_NAME_TITLE§ resolves the mapped `decomposition-root` role-pair and creates exactly one first task: the specialized task for simple work, or the master task when the work would otherwise fan out. The master task's quorum-approved `output[]` entries create the specialized children.
 
+During master decomposition, compare interface ownership and consumption with
+the plan's stated data flow before declaring dependencies. Enforce
+provider-before-consumer ordering: a consumer may depend on its provider, but a
+provider must not depend on its consumer merely because both tasks share a
+role-pair. An inverse edge is valid only when the plan names another explicit
+relationship that requires it.
+
 Each transition between pairs is a **human gate** (unless auto-resume is enabled): the sprint completes, the human reviews, then runs `§BRAND_BINARY_NAME§ proceed <task-id> <transition>` followed by `§BRAND_BINARY_NAME§ resume`. With auto-resume, these transitions happen automatically.
 
 The intra-subpipeline master-to-specialized transitions (`epic-decompose`, `arch-decompose`, `code-plan-decompose`) are `trigger: auto` and run after the master task reaches its quorum-approved state. `architecture-to-code-plan` is still Case A: specialized `architecture-pair` output goes directly to `code-planning-pair` children and does not create a `code-planning-main-pair` task. Specialized epic outputs still use `epic_ref` for `us-writing-pair`; the epic master framework uses `plan_ref`.
@@ -564,7 +571,13 @@ Each update supplies a `task_id` plus explicit `expected_depends_on` and
 --reason "..." --questions "..."`. Do not encode dependency repairs as command
 sequences or mix file input with individual `--repair-*` flags.
 
-The orchestrator re-reads the blocked task and runs
+Before `retarget-dependency`, the orchestrator re-reads the affected tasks and
+their planning/decomposition context and applies the same
+provider-before-consumer ordering. The repair reason identifies the verified
+direction or the explicit relationship that justifies an inverse edge.
+
+For a stored declarative repair, the orchestrator re-reads the blocked task and
+runs
 `§BRAND_BINARY_NAME§ apply-dependency-repair <blocked-task-id> --reason "..."`.
 The operation rejects stale expected lists or an invalid complete candidate
 without changing dependencies, history, or the request. Success reports every

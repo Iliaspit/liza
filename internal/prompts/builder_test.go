@@ -738,6 +738,12 @@ func TestRenderOrchestratorDashboard(t *testing.T) {
 				`"role_pair": "coding-pair"`,
 				"liza supersede-task <task-id> <new-id-1>,<new-id-2>",
 				"liza assess-blocked",
+				"Before either stored apply-dependency-repair or direct retarget-dependency operation",
+				"Re-read every affected task and its planning/decomposition context",
+				"Verify provider-before-consumer direction for every proposed edge",
+				"For any inverse edge, confirm the stored repair request or direct repair reason identifies the explicit relationship",
+				"Do not run either repair operation until this shared semantic gate passes",
+				"The repair reason must identify the verified direction or name the explicit relationship that justifies an inverse edge",
 			}, replacementLineagePolicy...),
 		},
 		{
@@ -930,6 +936,62 @@ func TestRenderOrchestratorDashboard(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestRenderOrchestratorDashboard_BlockedDependencyRepairsRequireSemanticDirection(t *testing.T) {
+	now := time.Now().UTC()
+	state := testhelpers.CreateValidState()
+	state.Tasks = []models.Task{
+		testhelpers.BuildTaskByStatus("task-1", models.TaskStatusBlocked, now),
+	}
+
+	_, wakeInstr, err := RenderOrchestratorDashboard(state, setupPipelineConfig(t), "orchestrator-1")
+	if err != nil {
+		t.Fatalf("RenderOrchestratorDashboard() error: %v", err)
+	}
+
+	semanticGate := "Before either stored apply-dependency-repair or direct retarget-dependency operation:"
+	gateRequirements := []string{
+		semanticGate,
+		"Re-read every affected task and its planning/decomposition context.",
+		"Verify provider-before-consumer direction for every proposed edge",
+		"For any inverse edge, confirm the stored repair request or direct repair reason identifies the explicit relationship that independently requires the provider to depend on the consumer.",
+		"Do not run either repair operation until this shared semantic gate passes.",
+	}
+	if count := strings.Count(wakeInstr, semanticGate); count != 1 {
+		t.Fatalf("blocked-task wake prompt contains %d shared semantic gates, want 1:\n%s", count, wakeInstr)
+	}
+
+	operations := []string{
+		"liza apply-dependency-repair <blocked-task-id>",
+		"liza retarget-dependency <task-id> <old-dep-id> <new-dep-id[,new-dep-id]>",
+	}
+	for _, operation := range operations {
+		operationIndex := strings.Index(wakeInstr, operation)
+		if operationIndex == -1 {
+			t.Fatalf("blocked-task wake prompt missing repair operation %q:\n%s", operation, wakeInstr)
+		}
+		for _, requirement := range gateRequirements {
+			requirementIndex := strings.Index(wakeInstr, requirement)
+			if requirementIndex == -1 {
+				t.Fatalf("blocked-task wake prompt missing shared semantic gate requirement %q:\n%s", requirement, wakeInstr)
+			}
+			if requirementIndex > operationIndex {
+				t.Fatalf("repair operation %q appears before shared semantic gate requirement %q:\n%s", operation, requirement, wakeInstr)
+			}
+		}
+	}
+
+	reconciliation := "If graph repair leaves a current blocker, reconcile its canonical metadata with:"
+	reconciliationIndex := strings.Index(wakeInstr, reconciliation)
+	if reconciliationIndex == -1 {
+		t.Fatalf("blocked-task wake prompt missing blocker-metadata reconciliation:\n%s", wakeInstr)
+	}
+	for _, operation := range operations {
+		if reconciliationIndex < strings.Index(wakeInstr, operation) {
+			t.Fatalf("blocker-metadata reconciliation appears before repair operation %q:\n%s", operation, wakeInstr)
+		}
 	}
 }
 
@@ -1654,6 +1716,10 @@ func TestBuildRoleContext_MasterDecompositionMandate(t *testing.T) {
 		"2. Interface ownership.",
 		"3. Shared-file ownership.",
 		"4. Dependency ordering.",
+		"Compare interface ownership and consumption with the plan's stated data flow",
+		"A consumer may depend on its provider",
+		"do not make a provider depend on its consumer solely because both tasks share a role-pair",
+		"An inverse edge requires another explicit relationship named in the plan",
 		"5. Inherited constraints.",
 		"6. Completeness.",
 		"`arch_ref`",
@@ -1698,6 +1764,9 @@ func TestBuildRoleContext_MasterDecompositionReview(t *testing.T) {
 		"2. Interface ownership.",
 		"3. Shared-file ownership.",
 		"4. Dependency ordering.",
+		"Reject a provider/consumer inversion",
+		"another explicit relationship named in the plan",
+		"justifies the inverse edge",
 		"5. Inherited constraints.",
 		"6. Completeness.",
 	} {

@@ -5,12 +5,17 @@ Tasks are BLOCKED. Analyze and resolve immediately:
 
 1. Read blocked tasks from blackboard — understand blocked_reason, blocked_questions, and repair_request if present
 2. Determine if blocker is:
-   - Structured repair_request present → verify the target state still needs repair, then apply the requested orchestrator-only operation if valid
+   - Structured repair_request present → verify the target state still needs repair, then complete the shared semantic gate below before applying a valid orchestrator-only operation
    - Missing dependency → create prerequisite task (run {{binaryName}} add-tasks --tasks-file <path.json> --agent-id {{.AgentID}} --json NOW)
    - Spec ambiguity → clarify spec, then supersede with corrected task
    - External dependency → document, possibly supersede task
    - Wrong approach → supersede task, create alternative (run commands NOW)
-3. For each blocked task, decide action:
+3. Before either stored apply-dependency-repair or direct retarget-dependency operation:
+   a. Re-read every affected task and its planning/decomposition context.
+   b. Verify provider-before-consumer direction for every proposed edge: a consumer may depend on its provider; a provider must not depend on its consumer.
+   c. For any inverse edge, confirm the stored repair request or direct repair reason identifies the explicit relationship that independently requires the provider to depend on the consumer.
+   d. Do not run either repair operation until this shared semantic gate passes.
+4. For each blocked task, decide action:
    - To apply a stored multi-task or complete-list dependency repair:
      a. Re-read the blocked source task and confirm its request operation is `apply-dependency-repair` and its expected dependency lists still match current state.
      b. Run: {{binaryName}} apply-dependency-repair <blocked-task-id> --reason "Apply the stored dependency graph repair" --agent-id {{.AgentID}} --json
@@ -19,8 +24,9 @@ Tasks are BLOCKED. Analyze and resolve immediately:
    - To repair one direct edge on a non-terminal task without replacing either task:
      a. Re-read the task via {{binaryName}} get <task-id> --json to confirm it is still BLOCKED and still has the old depends_on edge.
      b. Verify the new dependency task(s) already exist and represent the intended blocker.
-     c. Run: {{binaryName}} retarget-dependency <task-id> <old-dep-id> <new-dep-id[,new-dep-id]> --reason "Correct dependency edge because <why>" --agent-id {{.AgentID}} --json
-     d. The task remains BLOCKED. After validation/repair is complete, use {{binaryName}} unblock-task or {{binaryName}} assess-blocked.
+     c. The repair reason must identify the verified direction or name the explicit relationship that justifies an inverse edge.
+     d. Run: {{binaryName}} retarget-dependency <task-id> <old-dep-id> <new-dep-id[,new-dep-id]> --reason "Correct dependency edge because <why>" --agent-id {{.AgentID}} --json
+     e. The task remains BLOCKED. After validation/repair is complete, use {{binaryName}} unblock-task or {{binaryName}} assess-blocked.
    - To resume after verified repair:
      a. Re-read the task via {{binaryName}} get <task-id> --json to confirm it is still BLOCKED.
      b. Verify the blocker is no longer true using current repair_request validation, consumed `dependency_repair_receipt.validation`, current worktree state, or another concrete check.
@@ -47,12 +53,12 @@ Tasks are BLOCKED. Analyze and resolve immediately:
    c. Run: {{binaryName}} add-tasks --tasks-file <path.json> --agent-id {{.AgentID}} --json (create replacement tasks)
    d. Run: {{binaryName}} supersede-task <task-id> <new-id-1>,<new-id-2> --reason "Split due to complexity" --agent-id {{.AgentID}} --json
    e. Run: {{binaryName}} wt-delete <task-id> --json (if worktree exists)
-4. After analyzing each blocked task:
+5. After analyzing each blocked task:
    - If you resolved it (unblocked or superseded): no further action needed for that task
    - If you CANNOT resolve it (genuine spec ambiguity, external dependency): run {{binaryName}} assess-blocked to record your assessment
      Run: {{binaryName}} assess-blocked <task-id> --note "<why it cannot be resolved now>" --agent-id {{.AgentID}} --json
      This prevents re-waking for the same unresolvable block. The task will trigger again only when new information arrives (dependency changes, human notes).
-5. Execute all state-modifying commands in this session. Do NOT defer.
+6. Execute all state-modifying commands in this session. Do NOT defer.
 
 Do NOT call {{binaryName}} sprint-checkpoint. If you cannot resolve a blocker, assess it and exit. Other tasks must continue uninterrupted.
 {{- end -}}

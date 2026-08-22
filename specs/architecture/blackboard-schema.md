@@ -318,6 +318,13 @@ Optional:
 
 Generated child tasks also persist task-level `decomposition` metadata copied from the source `output[]` entry. Task-level metadata is read-only context for the child and does not change dependency scheduling.
 
+`interfaces_owned` and `interfaces_consumed` are free-form planning annotations,
+not authoritative machine relationships. Structural dependency validation checks
+task IDs, pipeline direction, terminal-state legality, and cycles, but it does
+not infer provider/consumer direction from interface names. Agents must verify
+that direction from the decomposition and plan: a consumer may depend on its
+provider, while an inverse edge requires another explicit relationship.
+
 Generated child tasks for per-subtask transitions also persist task-level `validation` and `destructive_db` copied from the source `output[]` entry. Synthesized one-to-one and many-to-one transition children do not inherit parent task validation or `destructive_db` because those commands belong to the parent phase.
 
 For decomposition-root outputs, `liza set-task-output` requires the configured `decomposition-output-ref` framework ref on every entry:

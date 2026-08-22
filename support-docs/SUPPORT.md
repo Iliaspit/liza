@@ -250,6 +250,13 @@ Use the dedicated CLI operation for every state mutation. In particular:
 - use `§BRAND_BINARY_NAME§ repair-superseded-dependencies <task-id> --reason <reason>` for all illegal downstream direct edges on one `SUPERSEDED` task;
 - use `§BRAND_BINARY_NAME§ unblock-task`, `§BRAND_BINARY_NAME§ cancel-task`, `§BRAND_BINARY_NAME§ supersede-task`, `§BRAND_BINARY_NAME§ release-claim`, or `§BRAND_BINARY_NAME§ recover-task` for their declared transitions.
 
+Before any dependency repair, perform semantic verification by re-reading the
+affected tasks and their planning/decomposition context. Confirm that a
+consumer depends on its provider. If another relationship requires the inverse
+edge, name that relationship as an explicit exception rationale in the repair
+reason. Structural candidate-state validation cannot supply this semantic
+proof.
+
 The dependency request file contains operation `apply-dependency-repair`, the
 blocked source task as `target`, unique `dependency_updates` with explicit
 `expected_depends_on` and `desired_depends_on` lists, structured evidence, and
