@@ -228,7 +228,7 @@ func evaluateMergeGate(input mergeGateInput) *mergeGateResult {
 		}
 		result.extra = map[string]any{
 			"diversity_not_achievable": true,
-			"reason":                   reason,
+			"diversity_reason":         reason,
 		}
 	} else {
 		// Different providers exist but diversity wasn't achieved in approvals

@@ -15,6 +15,39 @@ import (
 )
 
 func TestRunSupervisor_FinalPlanningQuorumApprovalAutoMerges(t *testing.T) {
+	runSupervisorFinalPlanningQuorumApprovalAutoMerges(t, "claude")
+}
+
+func TestRunSupervisor_FinalPlanningQuorumApprovalAutoMergesSingleProvider(t *testing.T) {
+	task := runSupervisorFinalPlanningQuorumApprovalAutoMerges(t, "codex")
+
+	for _, approval := range task.Approvals {
+		if approval.Provider != "codex" {
+			t.Fatalf("approval provider = %q, want codex: %+v", approval.Provider, task.Approvals)
+		}
+	}
+	for _, entry := range task.History {
+		if entry.Event != models.TaskEventMerged {
+			continue
+		}
+		if got, ok := entry.Extra["diversity_not_achievable"]; !ok || got != true {
+			t.Fatalf("merged history diversity_not_achievable = %v, want true: %+v", got, entry.Extra)
+		}
+		reason, ok := entry.Extra["diversity_reason"].(string)
+		if !ok || reason == "" {
+			t.Fatalf("merged history diversity_reason = %v, want non-empty string: %+v", entry.Extra["diversity_reason"], entry.Extra)
+		}
+		if _, ok := entry.Extra["reason"]; ok {
+			t.Fatalf("merged history contains inline reason key: %+v", entry.Extra)
+		}
+		return
+	}
+
+	t.Fatalf("merged history entry not found: %+v", task.History)
+}
+
+func runSupervisorFinalPlanningQuorumApprovalAutoMerges(t *testing.T, firstReviewerProvider string) *models.Task {
+	t.Helper()
 	projectRoot, statePath, taskID := setupAgentMergeRepo(t)
 	supervisorLogPath := filepath.Join(t.TempDir(), "supervisor.log")
 	supervisorLog, err := os.Create(supervisorLogPath)
@@ -52,7 +85,7 @@ func TestRunSupervisor_FinalPlanningQuorumApprovalAutoMerges(t *testing.T) {
 		task.ApprovedBy = &reviewer1
 		task.Approvals = []models.Approval{{
 			Agent:     reviewer1,
-			Provider:  "claude",
+			Provider:  firstReviewerProvider,
 			Timestamp: now,
 		}}
 		task.History = []models.TaskHistoryEntry{{
@@ -67,7 +100,7 @@ func TestRunSupervisor_FinalPlanningQuorumApprovalAutoMerges(t *testing.T) {
 		task.IntegrationFailure = nil
 
 		firstReviewer := testhelpers.RegisteredTestAgent("code-plan-reviewer")
-		firstReviewer.Provider = "claude"
+		firstReviewer.Provider = firstReviewerProvider
 		state.Agents = map[string]models.Agent{reviewer1: firstReviewer}
 		return nil
 	}); err != nil {
@@ -112,11 +145,12 @@ func TestRunSupervisor_FinalPlanningQuorumApprovalAutoMerges(t *testing.T) {
 	if task.ApprovalCount() != 2 || task.LastApprover() != reviewer2 {
 		t.Fatalf("approvals = %+v, want final approval owned by %s", task.Approvals, reviewer2)
 	}
-	if task.MergeCommit == nil || *task.MergeCommit != reviewCommit {
-		t.Fatalf("merge_commit = %v, want review commit %s", task.MergeCommit, reviewCommit)
+	integrationHead := mustGitInDir(t, projectRoot, "rev-parse", "integration")
+	if task.MergeCommit == nil || *task.MergeCommit != integrationHead {
+		t.Fatalf("merge_commit = %v, want integration HEAD %s", task.MergeCommit, integrationHead)
 	}
-	if got := mustGitInDir(t, projectRoot, "rev-parse", "integration"); got != reviewCommit {
-		t.Fatalf("integration HEAD = %s, want %s", got, reviewCommit)
+	if integrationHead != reviewCommit {
+		t.Fatalf("integration HEAD = %s, want %s", integrationHead, reviewCommit)
 	}
 
 	finalApprovalIndex := -1
@@ -148,4 +182,6 @@ func TestRunSupervisor_FinalPlanningQuorumApprovalAutoMerges(t *testing.T) {
 			t.Fatalf("supervisor log missing %q:\n%s", message, logOutput)
 		}
 	}
+
+	return task
 }

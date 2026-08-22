@@ -45,7 +45,7 @@ func TestMergeGateDiversityAchieved(t *testing.T) {
 
 // TestMergeGateDiversityNotAchievable verifies that when provider-diversity is
 // "preferred" but all registered reviewers share the same provider, merge proceeds
-// with diversity_not_achievable: true and a reason.
+// with diversity_not_achievable: true and a collision-free diversity_reason.
 func TestMergeGateDiversityNotAchievable(t *testing.T) {
 	task := &models.Task{
 		ID:       "task-1",
@@ -78,13 +78,16 @@ func TestMergeGateDiversityNotAchievable(t *testing.T) {
 	if v, ok := result.extra["diversity_not_achievable"]; !ok || v != true {
 		t.Errorf("expected diversity_not_achievable=true, got %v", result.extra)
 	}
-	reason, ok := result.extra["reason"]
+	reason, ok := result.extra["diversity_reason"]
 	if !ok {
-		t.Fatal("expected reason in extra")
+		t.Fatal("expected diversity_reason in extra")
 	}
 	reasonStr, ok := reason.(string)
 	if !ok || reasonStr == "" {
-		t.Errorf("expected non-empty reason string, got %v", reason)
+		t.Errorf("expected non-empty diversity_reason string, got %v", reason)
+	}
+	if _, ok := result.extra["reason"]; ok {
+		t.Errorf("expected inline reason key to be absent, got %v", result.extra)
 	}
 }
 
