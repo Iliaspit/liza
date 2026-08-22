@@ -348,6 +348,60 @@ Examples:
 	},
 }
 
+var applyDependencyRepairCmd = &cobra.Command{
+	Use:   "apply-dependency-repair <blocked-task-id> --reason <reason>",
+	Short: "Apply one stored dependency repair atomically",
+	Long: fmt.Sprintf(`Apply the declarative dependency repair stored on one blocked task.
+
+This orchestrator-only operation verifies every expected dependency list, computes
+every canonical desired list, validates the complete candidate graph, and commits
+the batch with audit history in one state transaction. The source task remains
+blocked so repair validation and unblocking stay explicit.
+
+Example:
+  %s task-3 --reason "Apply the stored dependency graph repair"`, brand.Command("apply-dependency-repair")),
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) (retErr error) {
+		if isJSON(cmd) {
+			log.SetOutput(io.Discard)
+			defer log.SetOutput(os.Stderr)
+			defer func() {
+				if retErr != nil && !errors.Is(retErr, jsonout.ErrAlreadyWritten) {
+					_ = jsonout.WriteResult(os.Stdout, nil, nil, retErr)
+					retErr = jsonout.ErrAlreadyWritten
+				}
+			}()
+		}
+
+		sourceTaskID := args[0]
+		reason, _ := cmd.Flags().GetString("reason")
+
+		agentID, err := resolveOrchestratorID(cmd)
+		if err != nil {
+			return err
+		}
+
+		projectRoot, err := requireProjectRoot()
+		if err != nil {
+			return err
+		}
+
+		resolver, err := loadResolverForRBAC(projectRoot)
+		if err != nil {
+			return err
+		}
+		if err := validateAllowedOperation(resolver, agentID, "apply-dependency-repair"); err != nil {
+			return err
+		}
+
+		if isJSON(cmd) {
+			result, err := ops.ApplyDependencyRepair(projectRoot, sourceTaskID, reason, agentID)
+			return jsonout.WriteResult(os.Stdout, result, resultWarnings(result), err)
+		}
+		return commands.ApplyDependencyRepairCommand(projectRoot, sourceTaskID, reason, agentID)
+	},
+}
+
 var repairSupersededDependenciesCmd = &cobra.Command{
 	Use:   "repair-superseded-dependencies <task-id> --reason <reason>",
 	Short: "Repair illegal dependencies on one superseded task",
@@ -421,7 +475,7 @@ Effects:
   - status = BLOCKED
   - blocked_reason = <reason>
   - blocked_questions = [<questions>]
-  - repair_request = <structured orchestrator repair request> when --repair-* flags are provided
+  - repair_request = <structured orchestrator repair request> when --repair-* flags or --repair-request-file are provided
   - Clear assigned_to
   - Clear lease_expires
   - Add history entry with event "blocked"
@@ -545,6 +599,7 @@ repair metadata.`,
 }
 
 func markBlockedOptionsFromFlags(cmd *cobra.Command) (ops.MarkBlockedOptions, error) {
+	repairRequestFile, _ := cmd.Flags().GetString("repair-request-file")
 	operation, _ := cmd.Flags().GetString("repair-operation")
 	target, _ := cmd.Flags().GetString("repair-target")
 	command, _ := cmd.Flags().GetString("repair-command")
@@ -552,6 +607,28 @@ func markBlockedOptionsFromFlags(cmd *cobra.Command) (ops.MarkBlockedOptions, er
 	validation, _ := cmd.Flags().GetStringArray("repair-validation")
 	dependsOn, _ := cmd.Flags().GetStringSlice("depends-on")
 	opts := ops.MarkBlockedOptions{DependsOn: dependsOn}
+
+	if cmd.Flags().Changed("repair-request-file") {
+		if strings.TrimSpace(repairRequestFile) == "" {
+			return ops.MarkBlockedOptions{}, cliValidationError("--repair-request-file requires a path")
+		}
+		for _, name := range []string{"repair-operation", "repair-target", "repair-command", "repair-evidence", "repair-validation"} {
+			if cmd.Flags().Changed(name) {
+				return ops.MarkBlockedOptions{}, cliValidationError("--repair-request-file cannot be combined with --repair-* fields")
+			}
+		}
+
+		data, err := os.ReadFile(repairRequestFile)
+		if err != nil {
+			return ops.MarkBlockedOptions{}, cliValidationWrap("reading repair request file", err)
+		}
+		var request models.RepairRequest
+		if err := json.Unmarshal(data, &request); err != nil {
+			return ops.MarkBlockedOptions{}, cliValidationWrap("parsing repair request file", err)
+		}
+		opts.RepairRequest = &request
+		return opts, nil
+	}
 
 	hasRepairRequest := strings.TrimSpace(operation) != "" ||
 		strings.TrimSpace(target) != "" ||
@@ -1168,6 +1245,7 @@ func init() {
 	rootCmd.AddCommand(addTasksCmd)
 	rootCmd.AddCommand(supersedeTaskCmd)
 	rootCmd.AddCommand(retargetDependencyCmd)
+	rootCmd.AddCommand(applyDependencyRepairCmd)
 	rootCmd.AddCommand(repairSupersededDependenciesCmd)
 	rootCmd.AddCommand(cancelTaskCmd)
 	rootCmd.AddCommand(reconcileMergedCmd)
@@ -1191,6 +1269,7 @@ func init() {
 	}
 	supersedeTaskCmd.ValidArgsFunction = completeTaskIDArgs(2)
 	retargetDependencyCmd.ValidArgsFunction = completeTaskIDArgs(3)
+	applyDependencyRepairCmd.ValidArgsFunction = completeTaskIDArgs(1)
 	repairSupersededDependenciesCmd.ValidArgsFunction = completeTaskIDArgs(1)
 	cancelTaskCmd.ValidArgsFunction = completeTaskIDArgs(1)
 	reconcileMergedCmd.ValidArgsFunction = completeTaskIDArgs(1)
@@ -1207,6 +1286,7 @@ func init() {
 	addJSONFlag(addTasksCmd)
 	addJSONFlag(supersedeTaskCmd)
 	addJSONFlag(retargetDependencyCmd)
+	addJSONFlag(applyDependencyRepairCmd)
 	addJSONFlag(repairSupersededDependenciesCmd)
 	addJSONFlag(cancelTaskCmd)
 	addJSONFlag(reconcileMergedCmd)
@@ -1226,6 +1306,9 @@ func init() {
 	addAgentIDFlag(retargetDependencyCmd)
 	retargetDependencyCmd.Flags().String("reason", "", "reason for retargeting this dependency (required)")
 	retargetDependencyCmd.MarkFlagRequired("reason")
+	addAgentIDFlag(applyDependencyRepairCmd)
+	applyDependencyRepairCmd.Flags().String("reason", "", "reason for applying the stored dependency repair (required)")
+	applyDependencyRepairCmd.MarkFlagRequired("reason")
 	addAgentIDFlag(repairSupersededDependenciesCmd)
 	repairSupersededDependenciesCmd.Flags().String("reason", "", "reason for repairing superseded dependencies (required)")
 	repairSupersededDependenciesCmd.MarkFlagRequired("reason")
@@ -1245,6 +1328,7 @@ func init() {
 	markBlockedCmd.Flags().String("repair-command", "", "exact command the orchestrator should run or adapt")
 	markBlockedCmd.Flags().StringArray("repair-evidence", nil, "evidence gathered before requesting orchestrator repair")
 	markBlockedCmd.Flags().StringArray("repair-validation", nil, "validation already run or required after orchestrator repair")
+	markBlockedCmd.Flags().String("repair-request-file", "", "path to a complete JSON repair request; mutually exclusive with --repair-* fields")
 	markBlockedCmd.Flags().StringSlice("depends-on", nil, "task IDs blocking this task; also used as the orchestrator re-wake signal")
 	markBlockedCmd.Flags().String("agent-id", "", "agent ID marking the task as blocked")
 	markBlockedCmd.MarkFlagRequired("reason")

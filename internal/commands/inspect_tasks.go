@@ -39,6 +39,7 @@ type taskInfo struct {
 	BlockedReason      *string                       `json:"blocked_reason,omitempty" yaml:"blocked_reason,omitempty"`
 	BlockedQuestions   []string                      `json:"blocked_questions,omitempty" yaml:"blocked_questions,omitempty"`
 	RepairRequest      *models.RepairRequest         `json:"repair_request,omitempty" yaml:"repair_request,omitempty"`
+	DependencyReceipt  *dependencyRepairReceipt      `json:"dependency_repair_receipt,omitempty" yaml:"dependency_repair_receipt,omitempty"`
 	Iteration          int                           `json:"iteration,omitempty" yaml:"iteration,omitempty"`
 	ReviewCycles       int                           `json:"review_cycles,omitempty" yaml:"review_cycles,omitempty"`
 	LeaseExpires       *string                       `json:"lease_expires,omitempty" yaml:"lease_expires,omitempty"`
@@ -55,6 +56,12 @@ type taskInfo struct {
 	Output             []models.OutputEntry          `json:"output,omitempty" yaml:"output,omitempty"`
 	Decomposition      *models.DecompositionManifest `json:"decomposition,omitempty" yaml:"decomposition,omitempty"`
 	AttemptNum         int                           `json:"attempt_num,omitempty" yaml:"attempt_num,omitempty"`
+}
+
+type dependencyRepairReceipt struct {
+	Operation       string   `json:"operation" yaml:"operation"`
+	AffectedTaskIDs []string `json:"affected_task_ids" yaml:"affected_task_ids"`
+	Validation      []string `json:"validation" yaml:"validation"`
 }
 
 // taskSummaryInfo is a compact task projection for agent orchestration.
@@ -188,6 +195,7 @@ func buildTaskInfo(task *models.Task, projectRoot string) taskInfo {
 		BlockedReason:      task.BlockedReason,
 		BlockedQuestions:   task.BlockedQuestions,
 		RepairRequest:      task.RepairRequest,
+		DependencyReceipt:  latestDependencyRepairReceipt(task),
 		Iteration:          task.Iteration,
 		ReviewCycles:       task.ReviewCyclesCurrent,
 		Worktree:           task.Worktree,
@@ -215,6 +223,53 @@ func buildTaskInfo(task *models.Task, projectRoot string) taskInfo {
 	}
 
 	return info
+}
+
+func latestDependencyRepairReceipt(task *models.Task) *dependencyRepairReceipt {
+	for i := len(task.History) - 1; i >= 0; i-- {
+		entry := task.History[i]
+		if entry.Event != models.TaskEventDependencyRepairApplied &&
+			(entry.Event != models.TaskEventDependenciesRewritten || entry.Extra["repair_source_task"] != task.ID) {
+			continue
+		}
+		if entry.Extra["operation"] != models.RepairOperationApplyDependencyRepair ||
+			entry.Extra["repair_request_cleared"] != true {
+			continue
+		}
+		affectedTaskIDs, ok := historyExtraStringSlice(entry.Extra["affected_task_ids"])
+		if !ok || len(affectedTaskIDs) == 0 {
+			continue
+		}
+		validation, ok := historyExtraStringSlice(entry.Extra["repair_validation"])
+		if !ok || len(validation) == 0 {
+			continue
+		}
+		return &dependencyRepairReceipt{
+			Operation:       models.RepairOperationApplyDependencyRepair,
+			AffectedTaskIDs: affectedTaskIDs,
+			Validation:      validation,
+		}
+	}
+	return nil
+}
+
+func historyExtraStringSlice(value any) ([]string, bool) {
+	switch values := value.(type) {
+	case []string:
+		return append([]string{}, values...), true
+	case []any:
+		result := make([]string, len(values))
+		for i, value := range values {
+			stringValue, ok := value.(string)
+			if !ok {
+				return nil, false
+			}
+			result[i] = stringValue
+		}
+		return result, true
+	default:
+		return nil, false
+	}
 }
 
 func buildTaskSummaryInfo(task *models.Task) taskSummaryInfo {

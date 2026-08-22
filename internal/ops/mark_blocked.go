@@ -60,7 +60,7 @@ func MarkBlockedWithOptions(projectRoot, taskID, reason string, questions []stri
 	if len(questions) > 3 {
 		return nil, &PreconditionError{Reason: "maximum 3 questions allowed per blocking protocol"}
 	}
-	repairRequest, err := normalizeRepairRequest(opts.RepairRequest)
+	repairRequest, err := normalizeRepairRequest(opts.RepairRequest, taskID)
 	if err != nil {
 		return nil, err
 	}
@@ -222,7 +222,7 @@ func dependencyReachesTask(state *models.State, currentID, targetID string, visi
 	return false
 }
 
-func normalizeRepairRequest(request *models.RepairRequest) (*models.RepairRequest, error) {
+func normalizeRepairRequest(request *models.RepairRequest, blockedTaskID string) (*models.RepairRequest, error) {
 	if request == nil {
 		return nil, nil
 	}
@@ -240,8 +240,25 @@ func normalizeRepairRequest(request *models.RepairRequest) (*models.RepairReques
 	if normalized.Target == "" {
 		return nil, &PreconditionError{Reason: "repair request target is required"}
 	}
-	if normalized.Command == "" {
-		return nil, &PreconditionError{Reason: "repair request command is required"}
+	if normalized.Operation == models.RepairOperationApplyDependencyRepair {
+		if normalized.Target != blockedTaskID {
+			return nil, &PreconditionError{Reason: fmt.Sprintf("declarative dependency repair target must match blocked task %q", blockedTaskID)}
+		}
+		if normalized.Command != "" {
+			return nil, &PreconditionError{Reason: "declarative dependency repair must not include a command"}
+		}
+		dependencyUpdates, err := normalizeDependencyUpdates(request.DependencyUpdates)
+		if err != nil {
+			return nil, err
+		}
+		normalized.DependencyUpdates = dependencyUpdates
+	} else {
+		if normalized.Command == "" {
+			return nil, &PreconditionError{Reason: "repair request command is required"}
+		}
+		if request.DependencyUpdates != nil {
+			return nil, &PreconditionError{Reason: "command-based repair requests must not include dependency_updates"}
+		}
 	}
 	if len(normalized.Evidence) == 0 {
 		return nil, &PreconditionError{Reason: "repair request evidence is required"}
@@ -251,6 +268,61 @@ func normalizeRepairRequest(request *models.RepairRequest) (*models.RepairReques
 	}
 	if !normalized.HasStructuredFailureEvidence() {
 		return nil, &PreconditionError{Reason: fmt.Sprintf(`repair requests require structured failure evidence; valid examples: "command=%s exit_code=1 stderr=command requires role type [orchestrator]", "command=provider-call exit_code=1 error=provider unavailable", or "error=provider session thread not found"`, brand.Command("add-task", "--json"))}
+	}
+	return normalized, nil
+}
+
+func normalizeDependencyUpdates(updates []models.DependencyUpdate) ([]models.DependencyUpdate, error) {
+	if len(updates) == 0 {
+		return nil, &PreconditionError{Reason: "declarative dependency repair dependency_updates is required"}
+	}
+
+	normalized := make([]models.DependencyUpdate, 0, len(updates))
+	seenTasks := make(map[string]bool, len(updates))
+	for i, update := range updates {
+		taskID := strings.TrimSpace(update.TaskID)
+		if taskID == "" {
+			return nil, &PreconditionError{Reason: fmt.Sprintf("dependency_updates[%d].task_id is required", i)}
+		}
+		if seenTasks[taskID] {
+			return nil, &PreconditionError{Reason: fmt.Sprintf("duplicate dependency update task_id %q", taskID)}
+		}
+		seenTasks[taskID] = true
+
+		expected, err := normalizeExplicitDependencyList(update.ExpectedDependsOn, "expected_depends_on", i)
+		if err != nil {
+			return nil, err
+		}
+		desired, err := normalizeExplicitDependencyList(update.DesiredDependsOn, "desired_depends_on", i)
+		if err != nil {
+			return nil, err
+		}
+		normalized = append(normalized, models.DependencyUpdate{
+			TaskID:            taskID,
+			ExpectedDependsOn: expected,
+			DesiredDependsOn:  desired,
+		})
+	}
+	return normalized, nil
+}
+
+func normalizeExplicitDependencyList(values []string, field string, updateIndex int) ([]string, error) {
+	if values == nil {
+		return nil, &PreconditionError{Reason: fmt.Sprintf("dependency_updates[%d].%s must be an explicit list", updateIndex, field)}
+	}
+
+	normalized := make([]string, 0, len(values))
+	seen := make(map[string]bool, len(values))
+	for _, value := range values {
+		dependencyID := strings.TrimSpace(value)
+		if dependencyID == "" {
+			return nil, &PreconditionError{Reason: fmt.Sprintf("dependency_updates[%d].%s entries cannot be empty", updateIndex, field)}
+		}
+		if seen[dependencyID] {
+			return nil, &PreconditionError{Reason: fmt.Sprintf("duplicate %s entry %q in dependency_updates[%d]", field, dependencyID, updateIndex)}
+		}
+		seen[dependencyID] = true
+		normalized = append(normalized, dependencyID)
 	}
 	return normalized, nil
 }

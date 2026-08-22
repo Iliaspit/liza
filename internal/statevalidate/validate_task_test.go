@@ -334,6 +334,77 @@ func TestValidateTaskInvariants_LegacyRepairEvidenceRemainsValid(t *testing.T) {
 	}
 }
 
+func validDeclarativeRepairTask() models.Task {
+	task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusBlocked, time.Now().UTC())
+	task.RepairRequest = &models.RepairRequest{
+		Operation: "apply-dependency-repair",
+		Target:    "task-1",
+		DependencyUpdates: []models.DependencyUpdate{
+			{TaskID: "consumer-1", ExpectedDependsOn: []string{}, DesiredDependsOn: []string{"producer-1"}},
+			{TaskID: "consumer-2", ExpectedDependsOn: []string{"producer-2"}, DesiredDependsOn: []string{}},
+		},
+		Evidence:   []string{"error=dependency repair requires orchestrator authority"},
+		Validation: []string{"liza validate --json"},
+	}
+	return task
+}
+
+func TestValidateTask_DeclarativeDependencyRepairRequest(t *testing.T) {
+	cfg := loadTestConfig(t)
+	resolver := pipeline.NewResolver(cfg)
+	if err := validateTaskInvariants(stateWithTasks(validDeclarativeRepairTask()), "", true, resolver, cfg); err != nil {
+		t.Fatalf("valid declarative repair request rejected: %v", err)
+	}
+
+	tests := []struct {
+		name    string
+		mutate  func(*models.RepairRequest)
+		wantErr string
+	}{
+		{
+			name:    "rejects command",
+			mutate:  func(request *models.RepairRequest) { request.Command = "liza retarget-dependency consumer-1 old new" },
+			wantErr: "must not include command",
+		},
+		{
+			name:    "requires dependency updates",
+			mutate:  func(request *models.RepairRequest) { request.DependencyUpdates = nil },
+			wantErr: "without dependency_updates",
+		},
+		{
+			name: "requires explicit desired list",
+			mutate: func(request *models.RepairRequest) {
+				request.DependencyUpdates[0].DesiredDependsOn = nil
+			},
+			wantErr: "desired_depends_on must be an explicit list",
+		},
+		{
+			name: "rejects duplicate update task",
+			mutate: func(request *models.RepairRequest) {
+				request.DependencyUpdates[1].TaskID = "consumer-1"
+			},
+			wantErr: "duplicate dependency update task_id",
+		},
+	}
+
+	for _, tt := range tests {
+		task := validDeclarativeRepairTask()
+		tt.mutate(task.RepairRequest)
+		err := validateTaskInvariants(stateWithTasks(task), "", true, resolver, cfg)
+		if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+			t.Fatalf("%s: Error = %v, want substring %q", tt.name, err, tt.wantErr)
+		}
+	}
+
+	legacyWithUpdates := validDeclarativeRepairTask()
+	legacyWithUpdates.RepairRequest.Operation = "add-task"
+	legacyWithUpdates.RepairRequest.Command = "liza add-task --json"
+	err := validateTaskInvariants(stateWithTasks(legacyWithUpdates), "", true, resolver, cfg)
+	if err == nil || !strings.Contains(err.Error(), "must not include dependency_updates") {
+		t.Fatalf("legacy request with declarative updates error = %v", err)
+	}
+}
+
 func TestValidateTaskInvariants_CompletionFieldRequirements(t *testing.T) {
 	cfg := loadTestConfig(t)
 	resolver := pipeline.NewResolver(cfg)

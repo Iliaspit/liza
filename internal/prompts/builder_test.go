@@ -2370,6 +2370,11 @@ func TestBuildRoleContext_AwaitVerdictLoopRendersForAllDoers(t *testing.T) {
 		"Do NOT poll liza get",
 		"Do NOT run more worktree commands after APPROVED, TERMINAL, or ALREADY_TRANSITIONED",
 	}
+	dependencyRepairKeys := []string{
+		"--repair-request-file",
+		"apply-dependency-repair",
+		"command-free",
+	}
 	for _, tc := range doerRoles {
 		t.Run(tc.role, func(t *testing.T) {
 			data := &RoleContextData{
@@ -2393,6 +2398,11 @@ func TestBuildRoleContext_AwaitVerdictLoopRendersForAllDoers(t *testing.T) {
 			for _, key := range awaitVerdictKeys {
 				if !strings.Contains(output, key) {
 					t.Errorf("output missing await-verdict loop key %q", key)
+				}
+			}
+			for _, key := range dependencyRepairKeys {
+				if !strings.Contains(output, key) {
+					t.Errorf("output missing dependency-repair guidance key %q", key)
 				}
 			}
 			assertBoundedAwaitLifecycleGuidance(t, output)

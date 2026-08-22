@@ -311,6 +311,58 @@ func TestMutationCommandWiring(t *testing.T) {
 		}
 	})
 
+	t.Run("apply-dependency-repair applies the stored batch", func(t *testing.T) {
+		projectRoot, statePath := setupMutationTestProject(t, func(state *models.State) {
+			now := time.Now().UTC()
+			state.Goal.SpecRef = "README.md"
+			source := testhelpers.BuildTaskByStatus("repair-source", models.TaskStatusBlocked, now)
+			source.DependsOn = []string{"old-source"}
+			source.RepairRequest = &models.RepairRequest{
+				Operation: models.RepairOperationApplyDependencyRepair,
+				Target:    "repair-source",
+				DependencyUpdates: []models.DependencyUpdate{
+					{TaskID: "repair-source", ExpectedDependsOn: []string{"old-source"}, DesiredDependsOn: []string{"new-source"}},
+				},
+				Evidence:   []string{"command=blocked-operation exit_code=1 stderr=orchestrator repair required"},
+				Validation: []string{"validate repaired dependency graph"},
+			}
+			state.Tasks = []models.Task{
+				source,
+				testhelpers.BuildTaskByStatus("old-source", models.TaskStatusMerged, now),
+				testhelpers.BuildTaskByStatus("new-source", models.TaskStatusMerged, now),
+			}
+		})
+
+		err := executeRootCommand(
+			t,
+			projectRoot,
+			"apply-dependency-repair",
+			"repair-source",
+			"--reason",
+			"Apply stored graph repair",
+			"--agent-id",
+			"orchestrator-1",
+		)
+		if err != nil {
+			t.Fatalf("apply-dependency-repair execute failed: %v", err)
+		}
+
+		task := mustFindTask(t, readState(t, statePath), "repair-source")
+		if len(task.DependsOn) != 1 || task.DependsOn[0] != "new-source" {
+			t.Fatalf("task DependsOn = %v, want [new-source]", task.DependsOn)
+		}
+		if task.Status != models.TaskStatusBlocked || task.RepairRequest != nil {
+			t.Fatalf("task status/request = %s/%#v, want BLOCKED/nil", task.Status, task.RepairRequest)
+		}
+		last := task.History[len(task.History)-1]
+		if last.Agent == nil || *last.Agent != "orchestrator-1" {
+			t.Fatalf("history agent = %v, want orchestrator-1", last.Agent)
+		}
+		if last.Reason == nil || *last.Reason != "Apply stored graph repair" {
+			t.Fatalf("history reason = %v, want repair reason", last.Reason)
+		}
+	})
+
 	t.Run("repair-superseded-dependencies", func(t *testing.T) {
 		t.Run("wires task reason and caller identity", func(t *testing.T) {
 			projectRoot, statePath := setupMutationTestProject(t, func(state *models.State) {

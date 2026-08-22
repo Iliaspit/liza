@@ -2,6 +2,7 @@ package commands
 
 import (
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -773,6 +774,89 @@ func TestBuildTaskInfo_IncludesBlockedRepairRequest(t *testing.T) {
 	}
 	if info.RepairRequest.Target != "architecture-2" {
 		t.Fatalf("RepairRequest.Target = %q, want architecture-2", info.RepairRequest.Target)
+	}
+	if info.RepairRequest.Command != "liza add-task --id architecture-2 --agent-id orchestrator-1 --json" {
+		t.Fatalf("RepairRequest.Command = %q, want legacy command", info.RepairRequest.Command)
+	}
+}
+
+func TestBuildTaskInfo_IncludesConsumedDependencyRepairReceipt(t *testing.T) {
+	tests := []struct {
+		name        string
+		taskID      string
+		event       models.TaskEventName
+		sourceID    string
+		wantReceipt bool
+	}{
+		{
+			name:        "source absent from updates",
+			taskID:      "repair-source",
+			event:       models.TaskEventDependencyRepairApplied,
+			wantReceipt: true,
+		},
+		{
+			name:        "source included in updates",
+			taskID:      "repair-source",
+			event:       models.TaskEventDependenciesRewritten,
+			sourceID:    "repair-source",
+			wantReceipt: true,
+		},
+		{
+			name:     "first non-source affected task",
+			taskID:   "consumer-a",
+			event:    models.TaskEventDependenciesRewritten,
+			sourceID: "repair-source",
+		},
+		{
+			name:     "second non-source affected task",
+			taskID:   "consumer-b",
+			event:    models.TaskEventDependenciesRewritten,
+			sourceID: "repair-source",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			extra := map[string]any{
+				"operation":              models.RepairOperationApplyDependencyRepair,
+				"affected_task_ids":      []any{"consumer-a", "consumer-b"},
+				"repair_validation":      []any{"run focused validation"},
+				"repair_request_cleared": true,
+			}
+			if tt.sourceID != "" {
+				extra["repair_source_task"] = tt.sourceID
+			}
+			task := models.Task{
+				ID:          tt.taskID,
+				Description: "Repair dependency graph",
+				Status:      models.TaskStatusBlocked,
+				Priority:    1,
+				Created:     time.Now().UTC(),
+				History: []models.TaskHistoryEntry{{
+					Time:  time.Now().UTC(),
+					Event: tt.event,
+					Extra: extra,
+				}},
+			}
+
+			info := buildTaskInfo(&task, "")
+
+			if !tt.wantReceipt {
+				if info.DependencyReceipt != nil {
+					t.Fatalf("DependencyReceipt = %#v, want nil", info.DependencyReceipt)
+				}
+				return
+			}
+			if info.DependencyReceipt == nil {
+				t.Fatal("DependencyReceipt is nil")
+			}
+			if !reflect.DeepEqual(info.DependencyReceipt.AffectedTaskIDs, []string{"consumer-a", "consumer-b"}) {
+				t.Fatalf("AffectedTaskIDs = %v, want [consumer-a consumer-b]", info.DependencyReceipt.AffectedTaskIDs)
+			}
+			if !reflect.DeepEqual(info.DependencyReceipt.Validation, []string{"run focused validation"}) {
+				t.Fatalf("Validation = %v, want declared validation", info.DependencyReceipt.Validation)
+			}
+		})
 	}
 }
 

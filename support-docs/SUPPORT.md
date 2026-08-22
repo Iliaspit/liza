@@ -222,7 +222,7 @@ Key task fields:
 - `iteration` — doer iteration count
 - `review_cycles_current` / `review_cycles_total` — rejection count
 - `blocked_reason` / `blocked_questions` — why the task is stuck
-- `repair_request` — optional complete orchestrator-only repair request captured when the blocker is a state transition the assigned agent cannot perform (`operation`, `target`, `command`, `evidence`, `validation`)
+- `repair_request` — optional complete orchestrator-only repair request captured when the blocker is a state transition the assigned agent cannot perform (`operation`, `target`, `evidence`, `validation`, and either `command` for command-based non-dependency requests or `dependency_updates` for `apply-dependency-repair`)
 - `rejection_reason` — reviewer feedback on rejection
 - `depends_on` — task IDs that must be directly MERGED before this task is claimable and must not point downstream in the pipeline
 - `output[]` — structured output entries (used by `§BRAND_BINARY_NAME§ proceed` to create child tasks)
@@ -246,13 +246,19 @@ role authorization, audit history, and all-or-nothing candidate validation.
 Use the dedicated CLI operation for every state mutation. In particular:
 
 - use `§BRAND_BINARY_NAME§ retarget-dependency <task-id> <old-dep-id> <new-dep-ids> --reason <reason>` for one direct edge on a non-terminal task;
+- for multiple active tasks or complete dependency lists, store a command-free `apply-dependency-repair` JSON request with `§BRAND_BINARY_NAME§ mark-blocked --repair-request-file <path>`, then have the orchestrator run `§BRAND_BINARY_NAME§ apply-dependency-repair <blocked-task-id> --reason <reason>`;
 - use `§BRAND_BINARY_NAME§ repair-superseded-dependencies <task-id> --reason <reason>` for all illegal downstream direct edges on one `SUPERSEDED` task;
 - use `§BRAND_BINARY_NAME§ unblock-task`, `§BRAND_BINARY_NAME§ cancel-task`, `§BRAND_BINARY_NAME§ supersede-task`, `§BRAND_BINARY_NAME§ release-claim`, or `§BRAND_BINARY_NAME§ recover-task` for their declared transitions.
 
-If no command supports the required mutation, stop and record an
-orchestrator-only repair request with `§BRAND_BINARY_NAME§ mark-blocked`; do not
-work around the state machine. Run `§BRAND_BINARY_NAME§ validate` after recovery
-to verify the whole blackboard.
+The dependency request file contains operation `apply-dependency-repair`, the
+blocked source task as `target`, unique `dependency_updates` with explicit
+`expected_depends_on` and `desired_depends_on` lists, structured evidence, and
+validation; it omits `command`. File input is mutually exclusive with the
+individual `--repair-*` flags used for command-based non-dependency repairs. Do
+not encode dependency repairs as command sequences. If no supported operation
+covers another mutation, stop and record an orchestrator-only repair request;
+do not work around the state machine. Run `§BRAND_BINARY_NAME§ validate` after
+recovery to verify the whole blackboard.
 
 ### Known Gotchas
 
@@ -261,7 +267,7 @@ to verify the whole blackboard.
 - **Concurrent writes**: Agents and CLI write concurrently. Only CLI mutations participate in the required lock and validation protocol.
 - **Field names**: SUPERSEDED tasks require `rescope_reason` (not `superseded_reason`). Check `§BRAND_BINARY_NAME§ validate` for correct field names.
 - **Status constraints**: `§BRAND_BINARY_NAME§ supersede-task` works from BLOCKED, REJECTED, or any pipeline-declared initial state. Without replacements, pass `--recoverability-command "<single-line command>"` to record the operator audit command before branch/worktree cleanup; do not include secrets. Unsupported status changes require escalation, not a direct edit.
-- **Dependency edits**: Use `§BRAND_BINARY_NAME§ retarget-dependency <task-id> <old-dep-id> <new-dep-ids> --reason "..."` for one non-terminal direct edge. Use `§BRAND_BINARY_NAME§ repair-superseded-dependencies <task-id> --reason "..."` for all illegal downstream direct edges on a `SUPERSEDED` task. Unsupported dependency metadata requires an orchestrator repair request.
+- **Dependency edits**: Use `§BRAND_BINARY_NAME§ retarget-dependency <task-id> <old-dep-id> <new-dep-ids> --reason "..."` for one direct edge on a non-terminal task. For multiple active tasks or complete lists, persist a command-free request through `§BRAND_BINARY_NAME§ mark-blocked --repair-request-file <path>` and apply it atomically with `§BRAND_BINARY_NAME§ apply-dependency-repair <blocked-task-id> --reason "..."`. Use `§BRAND_BINARY_NAME§ repair-superseded-dependencies <task-id> --reason "..."` for all illegal downstream direct edges on a `SUPERSEDED` task.
 - **Holding a task from review**: Add a `depends_on` on the task that should be reviewed first — the system enforces ordering. Alternatively, set status to the pre-review state.
 
 ## Agent Exit Codes
@@ -295,7 +301,7 @@ Exit 42 with `handoff_pending: true` on the task means context exhaustion — th
 ### BLOCKED task
 **Symptom**: Task in BLOCKED state, agents skip it.
 **Diagnosis**: Read `blocked_reason`, `blocked_questions`, `depends_on`, and optional `repair_request` in state.yaml. A `BLOCKED` alert is raised when a task blocks; if the orchestrator assesses but cannot resolve it, an `UNRESOLVED BLOCKED` alert is raised.
-**Fix**: If the blocker was another task, the blocked task should list it in `depends_on` so the orchestrator wakes when that task changes. If the wrong direct dependency edge is the blocker, use `§BRAND_BINARY_NAME§ retarget-dependency <id> <old-dep-id> <new-dep-id[,new-dep-id]> --reason "..."`; the task remains BLOCKED until explicitly unblocked or assessed. If the blocker was repaired and every `depends_on` target is directly MERGED, use `§BRAND_BINARY_NAME§ unblock-task <id> --reason "..."` to make the task claimable again, or add `--assign-to <doer-agent-id>` for a direct-resume fast path.
+**Fix**: If the blocker was another task, the blocked task should list it in `depends_on` so the orchestrator wakes when that task changes. If one direct edge is wrong, use `§BRAND_BINARY_NAME§ retarget-dependency <id> <old-dep-id> <new-dep-id[,new-dep-id]> --reason "..."`. For multiple tasks or complete lists, the blocked agent stores the command-free request through `§BRAND_BINARY_NAME§ mark-blocked --repair-request-file <path>` and the orchestrator runs `§BRAND_BINARY_NAME§ apply-dependency-repair <blocked-task-id> --reason "..."`; stale or invalid batches leave every dependency, audit entry, and request unchanged. The task remains BLOCKED until its repair validation passes and it is explicitly unblocked or assessed. If every `depends_on` target is directly MERGED, use `§BRAND_BINARY_NAME§ unblock-task <id> --reason "..."` to make the task claimable again, or add `--assign-to <doer-agent-id>` for a direct-resume fast path.
 If the task has a preserved worktree and integration moved while it was blocked, use `§BRAND_BINARY_NAME§ unblock-task <id> --rebase-on <integration-branch> --reason "..."`. Tracked worktree changes require `--allow-dirty`, which rebases with Git autostash; untracked files that would be overwritten are refused. Submit/merge conflicts move tasks to `INTEGRATION_FAILED`; unblock-time rebase conflicts remain `BLOCKED` with fresh repair metadata so the preserved worktree can be repaired and unblocked again.
 Supersede/cancel operations rewrite active downstream dependencies first; stale edges to SUPERSEDED or ABANDONED tasks must not remain on active tasks. Supersession also prunes the retiring task's own illegal downstream edges, retains legal historical dependencies, audits removed IDs, and validates the candidate before commit. Otherwise use `§BRAND_BINARY_NAME§ supersede-task <id> [replacements] --reason "..."` to replace with new tasks, `§BRAND_BINARY_NAME§ supersede-task <id> --reason "..." --recoverability-command "§BRAND_BINARY_NAME§ recover-task <id>"` to mark completed externally with no replacements, or `§BRAND_BINARY_NAME§ recover-task <id>` to reset.
 

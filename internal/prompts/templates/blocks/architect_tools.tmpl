@@ -23,5 +23,5 @@ ARCHITECT TOOLS:
 - {{binaryName}} mark-blocked — Cannot proceed
   {{binaryName}} mark-blocked {{.TaskID}} --agent-id {{.AgentID}} --reason "<what is blocking>" --questions "<q1>" --questions "<q2>" --json
   If a command failure is the blocker, `--reason` MUST include the exact failing command and stderr/error text. Do NOT infer root cause without a captured failure.
-  If the blocker requires an orchestrator-only repair, add --repair-operation, --repair-target, --repair-command, --repair-evidence, and --repair-validation.
+  For dependency-graph repair, pass a command-free `apply-dependency-repair` JSON request through --repair-request-file; do not encode dependency repairs as command sequences. Use individual --repair-* fields only for other repairs.
 {{- end -}}

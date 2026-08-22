@@ -373,8 +373,10 @@ func validateStatusFields(task *models.Task, sc *statusClassifier) error {
 		if task.RepairRequest != nil && strings.TrimSpace(task.RepairRequest.Target) == "" {
 			return fmt.Errorf("BLOCKED task repair_request without target: %s", task.ID)
 		}
-		if task.RepairRequest != nil && strings.TrimSpace(task.RepairRequest.Command) == "" {
-			return fmt.Errorf("BLOCKED task repair_request without command: %s", task.ID)
+		if task.RepairRequest != nil {
+			if err := validateRepairRequestShape(task); err != nil {
+				return err
+			}
 		}
 		if task.RepairRequest != nil && len(nonEmptyStrings(task.RepairRequest.Evidence)) == 0 {
 			return fmt.Errorf("BLOCKED task repair_request without evidence: %s", task.ID)
@@ -394,6 +396,68 @@ func validateStatusFields(task *models.Task, sc *statusClassifier) error {
 		}
 	}
 
+	return nil
+}
+
+func validateRepairRequestShape(task *models.Task) error {
+	request := task.RepairRequest
+	if request.Operation != models.RepairOperationApplyDependencyRepair {
+		if strings.TrimSpace(request.Command) == "" {
+			return fmt.Errorf("BLOCKED task repair_request without command: %s", task.ID)
+		}
+		if request.DependencyUpdates != nil {
+			return fmt.Errorf("BLOCKED task command-based repair_request must not include dependency_updates: %s", task.ID)
+		}
+		return nil
+	}
+
+	if strings.TrimSpace(request.Target) != task.ID {
+		return fmt.Errorf("BLOCKED task declarative repair_request target must match blocked task: %s", task.ID)
+	}
+	if strings.TrimSpace(request.Command) != "" {
+		return fmt.Errorf("BLOCKED task declarative repair_request must not include command: %s", task.ID)
+	}
+	if len(request.DependencyUpdates) == 0 {
+		return fmt.Errorf("BLOCKED task declarative repair_request without dependency_updates: %s", task.ID)
+	}
+
+	seenTasks := make(map[string]bool, len(request.DependencyUpdates))
+	for i, update := range request.DependencyUpdates {
+		updateTaskID := strings.TrimSpace(update.TaskID)
+		if updateTaskID == "" {
+			return fmt.Errorf("BLOCKED task repair_request dependency_updates[%d].task_id is required: %s", i, task.ID)
+		}
+		if seenTasks[updateTaskID] {
+			return fmt.Errorf("BLOCKED task repair_request has duplicate dependency update task_id %q: %s", updateTaskID, task.ID)
+		}
+		seenTasks[updateTaskID] = true
+
+		if err := validateExplicitDependencyList(update.ExpectedDependsOn, "expected_depends_on", i, task.ID); err != nil {
+			return err
+		}
+		if err := validateExplicitDependencyList(update.DesiredDependsOn, "desired_depends_on", i, task.ID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateExplicitDependencyList(values []string, field string, updateIndex int, blockedTaskID string) error {
+	if values == nil {
+		return fmt.Errorf("BLOCKED task repair_request dependency_updates[%d].%s must be an explicit list: %s", updateIndex, field, blockedTaskID)
+	}
+
+	seen := make(map[string]bool, len(values))
+	for _, value := range values {
+		dependencyID := strings.TrimSpace(value)
+		if dependencyID == "" {
+			return fmt.Errorf("BLOCKED task repair_request dependency_updates[%d].%s contains an empty task ID: %s", updateIndex, field, blockedTaskID)
+		}
+		if seen[dependencyID] {
+			return fmt.Errorf("BLOCKED task repair_request dependency_updates[%d] has duplicate %s entry %q: %s", updateIndex, field, dependencyID, blockedTaskID)
+		}
+		seen[dependencyID] = true
+	}
 	return nil
 }
 

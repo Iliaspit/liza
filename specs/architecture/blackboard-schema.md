@@ -565,6 +565,45 @@ with the reason and caller in `dependencies_rewritten` history, and validates
 the full candidate state before commit. Failed repairs do not mutate state;
 direct edits to `.liza/state.yaml` are prohibited.
 
+Active dependency repair has two separate paths. `retarget-dependency` changes
+one direct edge on a non-terminal task. A repair that changes multiple tasks or
+complete dependency lists is stored on its blocked source task as a declarative
+request:
+
+```yaml
+repair_request:
+  operation: apply-dependency-repair
+  target: blocked-task
+  dependency_updates:
+    - task_id: consumer-a
+      expected_depends_on: [old-a]
+      desired_depends_on: [replacement-a, replacement-b]
+    - task_id: consumer-b
+      expected_depends_on: []
+      desired_depends_on: [replacement-a]
+  evidence:
+    - "command=retarget-dependency exit_code=1 stderr=repair requires multiple atomic updates"
+  validation:
+    - "project-specific validation command"
+```
+
+The request is command-free: `command` must be absent, update `task_id` values
+must be unique, and both dependency lists must be explicit, unique, non-empty
+task IDs even when the list itself is `[]`. The owning task is the request
+`target`. Agents provide the complete JSON object to
+`mark-blocked --repair-request-file <path>`; file input is mutually exclusive
+with the individual `--repair-*` flags used by command-based non-dependency
+repairs.
+
+The orchestrator runs
+`apply-dependency-repair <blocked-task-id> --reason <reason>`. One locked
+mutation checks the source request and every expected list, canonicalizes all
+desired lists, validates the complete candidate state, appends per-task audit
+history, and clears the request only on success. Any stale or invalid update
+leaves all dependencies, history, and request data unchanged. The source task
+remains `BLOCKED` until its declared validation succeeds and it is explicitly
+unblocked.
+
 **Claimability Rule:**
 ```
 claimable = (status in [READY, REJECTED, INTEGRATION_FAILED]) AND (depends_on is empty OR all depends_on tasks are MERGED)
@@ -1097,7 +1136,7 @@ invariants:
   - "REVIEWING task must have review_commit"
   - "REJECTED task must have rejection_reason"
   - "BLOCKED task must have blocked_reason and blocked_questions"
-  - "BLOCKED task repair_request, when present, must have operation, target, command, evidence, and validation"
+  - "BLOCKED task repair_request, when present, must have operation, target, evidence, validation, and either `command` for command-based non-dependency requests or `dependency_updates` for `apply-dependency-repair`"
   - "SUPERSEDED task must have rescope_reason (superseded_by is optional)"
   - "MERGED task must not have worktree"
   - "Task type must be a known type (currently: 'coding', 'planning'); empty defaults to 'coding'"

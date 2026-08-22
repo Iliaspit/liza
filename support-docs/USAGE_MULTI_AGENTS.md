@@ -528,9 +528,10 @@ Use `§BRAND_BINARY_NAME§ -C <project-root> ...` to select a §BRAND_NAME_TITLE
 | `§BRAND_BINARY_NAME§ claim-task <task-id> <agent-id>` | Atomically claim a task for a doer agent (creates worktree, updates state)                                           |
 | `§BRAND_BINARY_NAME§ submit-for-review <task-id> [commit-ref]` | Submit a task for review (doer agents; defaults to worktree `HEAD`)                                                  |
 | `§BRAND_BINARY_NAME§ submit-verdict <task-id> <APPROVED\|REJECTED> [--reason "<reason>"]` | Submit a review verdict (reviewer agents; `--reason` required for REJECTED)                                          |
-| `§BRAND_BINARY_NAME§ mark-blocked <task-id>` | Mark a task as BLOCKED with reason/questions; optional `--depends-on` records blocking task IDs for scheduling and orchestrator re-wake; optional `--repair-*` flags request orchestrator-only state repair |
+| `§BRAND_BINARY_NAME§ mark-blocked <task-id>` | Mark a task as BLOCKED with reason/questions; optional `--depends-on` records blocking task IDs for scheduling and orchestrator re-wake. Use `--repair-request-file <path>` for a complete declarative dependency repair; individual `--repair-*` flags remain for command-based non-dependency repairs. |
 | `§BRAND_BINARY_NAME§ assess-blocked <task-id>` | Record orchestrator assessment of a BLOCKED task and raise an `UNRESOLVED BLOCKED` alert when it cannot be resolved now |
-| `§BRAND_BINARY_NAME§ retarget-dependency <task-id> <old-dep-id> <new-dep-ids> --reason "..."` | Orchestrator-only repair for one non-terminal task's direct `depends_on` edge. Replaces the old edge with one or more existing task IDs, canonicalizes dependencies, validates the full candidate state, and leaves task status unchanged. |
+| `§BRAND_BINARY_NAME§ retarget-dependency <task-id> <old-dep-id> <new-dep-ids> --reason "..."` | Orchestrator-only repair for one direct edge on a non-terminal task. Replaces the old edge with one or more existing task IDs, canonicalizes dependencies, validates the full candidate state, and leaves task status unchanged. |
+| `§BRAND_BINARY_NAME§ apply-dependency-repair <blocked-task-id> --reason "..."` | Orchestrator-only consumer for one stored declarative dependency repair. Atomically compares every expected list, commits every canonical desired list and audit entry, and clears the request only on complete success; the source remains BLOCKED. |
 | `§BRAND_BINARY_NAME§ repair-superseded-dependencies <task-id> --reason <reason>` | Orchestrator-only repair for one SUPERSEDED task. Atomically removes all illegal downstream direct dependencies, retains legal edges and terminal/replacement metadata, audits removed and retained IDs, and validates the full candidate state. |
 | `§BRAND_BINARY_NAME§ unblock-task <task-id> --reason "..." [--assign-to <agent-id>] [--rebase-on <branch>] [--allow-dirty]` | Restore a repaired BLOCKED task. Without `--assign-to`, the task becomes claimable again; with `--assign-to`, it directly resumes for that doer. `--rebase-on` rebases a preserved task worktree before unblocking, updates `base_commit`, and leaves conflicts BLOCKED with repair metadata. Fails while any `depends_on` target is not directly MERGED. |
 | `§BRAND_BINARY_NAME§ assess-hypothesis-exhausted <task-id>` | Record orchestrator assessment of a hypothesis-exhausted task (2+ coders failed)                                     |
@@ -553,6 +554,22 @@ Use `§BRAND_BINARY_NAME§ -C <project-root> ...` to select a §BRAND_NAME_TITLE
 | `§BRAND_BINARY_NAME§ update-sprint-metrics` | Recompute sprint metrics from current state                                                                          |
 | `§BRAND_BINARY_NAME§ clear-stale-review-claims` | Clear expired review leases                                                                                          |
 | `§BRAND_BINARY_NAME§ get <query>` | Query state data (tasks, agents, etc.)                                                                               |
+
+For a repair spanning multiple active tasks or complete dependency lists, write
+a JSON request with operation `apply-dependency-repair`, the blocked source task
+as `target`, unique `dependency_updates`, structured evidence, and validation.
+Each update supplies a `task_id` plus explicit `expected_depends_on` and
+`desired_depends_on` arrays; `[]` is meaningful. Omit `command`, then run
+`§BRAND_BINARY_NAME§ mark-blocked <blocked-task-id> --repair-request-file <path>
+--reason "..." --questions "..."`. Do not encode dependency repairs as command
+sequences or mix file input with individual `--repair-*` flags.
+
+The orchestrator re-reads the blocked task and runs
+`§BRAND_BINARY_NAME§ apply-dependency-repair <blocked-task-id> --reason "..."`.
+The operation rejects stale expected lists or an invalid complete candidate
+without changing dependencies, history, or the request. Success reports every
+committed canonical list and clears the request in the same transaction. Run
+the request's validation and unblock separately.
 
 For legacy terminal dependency corruption, run exactly
 `§BRAND_BINARY_NAME§ repair-superseded-dependencies <task-id> --reason <reason>`

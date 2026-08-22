@@ -214,14 +214,26 @@ type Approval struct {
 	Timestamp time.Time `yaml:"timestamp"`
 }
 
+// RepairOperationApplyDependencyRepair identifies a declarative dependency repair request.
+const RepairOperationApplyDependencyRepair = "apply-dependency-repair"
+
+// DependencyUpdate describes the complete expected and desired direct
+// dependency state for one task in a declarative graph repair.
+type DependencyUpdate struct {
+	TaskID            string   `yaml:"task_id" json:"task_id"`
+	ExpectedDependsOn []string `yaml:"expected_depends_on" json:"expected_depends_on"`
+	DesiredDependsOn  []string `yaml:"desired_depends_on" json:"desired_depends_on"`
+}
+
 // RepairRequest carries a structured request from a blocked doer to the
 // orchestrator for state repairs that the doer is not authorized to perform.
 type RepairRequest struct {
-	Operation  string   `yaml:"operation" json:"operation"`
-	Target     string   `yaml:"target,omitempty" json:"target,omitempty"`
-	Command    string   `yaml:"command,omitempty" json:"command,omitempty"`
-	Evidence   []string `yaml:"evidence,omitempty" json:"evidence,omitempty"`
-	Validation []string `yaml:"validation,omitempty" json:"validation,omitempty"`
+	Operation         string             `yaml:"operation" json:"operation"`
+	Target            string             `yaml:"target,omitempty" json:"target,omitempty"`
+	Command           string             `yaml:"command,omitempty" json:"command,omitempty"`
+	DependencyUpdates []DependencyUpdate `yaml:"dependency_updates,omitempty" json:"dependency_updates,omitempty"`
+	Evidence          []string           `yaml:"evidence,omitempty" json:"evidence,omitempty"`
+	Validation        []string           `yaml:"validation,omitempty" json:"validation,omitempty"`
 }
 
 // HasStructuredFailureEvidence reports whether evidence contains either a

@@ -102,3 +102,4 @@
 | [0112 — Serialize Integration Working-Tree Mutations](0112-serialize-integration-working-tree-mutations.md) | Use a project-scoped file lock for integration ref advancement and shared-index sync/restore. |
 | [0113 — Sliced Integration Analysis and Final Closure](0113-sliced-integration-analysis-and-final-closure.md) | Add bounded per-scope coverage, independent global rescans, and linearizable current-HEAD closure. |
 | [0114 — Terminal Dependency Repair](0114-terminal-dependency-repair.md) | Prune illegal downstream edges during supersession and repair existing SUPERSEDED task metadata through one audited transaction. |
+| [0115 — Declarative Atomic Dependency Repairs](0115-declarative-atomic-dependency-repairs.md) | Persist command-free dependency repair requests through `--repair-request-file` and consume them atomically with `apply-dependency-repair`. |

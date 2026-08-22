@@ -11,18 +11,23 @@ Tasks are BLOCKED. Analyze and resolve immediately:
    - External dependency → document, possibly supersede task
    - Wrong approach → supersede task, create alternative (run commands NOW)
 3. For each blocked task, decide action:
-   - To repair a wrong direct task dependency without replacing either task:
+   - To apply a stored multi-task or complete-list dependency repair:
+     a. Re-read the blocked source task and confirm its request operation is `apply-dependency-repair` and its expected dependency lists still match current state.
+     b. Run: {{binaryName}} apply-dependency-repair <blocked-task-id> --reason "Apply the stored dependency graph repair" --agent-id {{.AgentID}} --json
+     c. The batch commits atomically or not at all and clears the consumed request. The source task remains BLOCKED.
+     d. Re-read the source via {{binaryName}} get <blocked-task-id> --json. Use `dependency_repair_receipt.affected_task_ids` to inspect the committed tasks and run the receipt's declared validation before unblocking or assessing the source.
+   - To repair one direct edge on a non-terminal task without replacing either task:
      a. Re-read the task via {{binaryName}} get <task-id> --json to confirm it is still BLOCKED and still has the old depends_on edge.
      b. Verify the new dependency task(s) already exist and represent the intended blocker.
      c. Run: {{binaryName}} retarget-dependency <task-id> <old-dep-id> <new-dep-id[,new-dep-id]> --reason "Correct dependency edge because <why>" --agent-id {{.AgentID}} --json
      d. The task remains BLOCKED. After validation/repair is complete, use {{binaryName}} unblock-task or {{binaryName}} assess-blocked.
-	   - To resume after verified repair:
-	     a. Re-read the task via {{binaryName}} get <task-id> --json to confirm it is still BLOCKED.
-	     b. Verify the blocker is no longer true using the repair_request validation, current worktree state, or another concrete check.
-	     c. If the task has a preserved worktree and integration moved while blocked, prefer: {{binaryName}} unblock-task <task-id> --rebase-on <integration-branch> --reason "Verified blocker is resolved" --agent-id {{.AgentID}} --json
-	     d. Otherwise run: {{binaryName}} unblock-task <task-id> --reason "Verified blocker is resolved" --agent-id {{.AgentID}} --json
-	     e. Add --assign-to <doer-agent-id> only when direct resume is required; no live process check is required for unblock assignment.
-	     f. A --rebase-on conflict remains BLOCKED with a fresh repair_request; do not treat it as submit/merge INTEGRATION_FAILED.
+   - To resume after verified repair:
+     a. Re-read the task via {{binaryName}} get <task-id> --json to confirm it is still BLOCKED.
+     b. Verify the blocker is no longer true using current repair_request validation, consumed `dependency_repair_receipt.validation`, current worktree state, or another concrete check.
+     c. If the task has a preserved worktree and integration moved while blocked, prefer: {{binaryName}} unblock-task <task-id> --rebase-on <integration-branch> --reason "Verified blocker is resolved" --agent-id {{.AgentID}} --json
+     d. Otherwise run: {{binaryName}} unblock-task <task-id> --reason "Verified blocker is resolved" --agent-id {{.AgentID}} --json
+     e. Add --assign-to <doer-agent-id> only when direct resume is required; no live process check is required for unblock assignment.
+     f. A --rebase-on conflict remains BLOCKED with a fresh repair_request; do not treat it as submit/merge INTEGRATION_FAILED.
    - To supersede (create clean replacement):
    Example supersede workflow:
    a. Re-read the task via {{binaryName}} get <task-id> --json to confirm it is still BLOCKED.

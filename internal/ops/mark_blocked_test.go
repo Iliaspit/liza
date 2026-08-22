@@ -287,6 +287,135 @@ func TestMarkBlockedWithOptions_RepairRequest(t *testing.T) {
 	}
 }
 
+func TestMarkBlockedWithOptions_DeclarativeDependencyRepair(t *testing.T) {
+	tmpDir := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, tmpDir)
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+
+	now := time.Now().UTC()
+	state := testhelpers.CreateValidState()
+	state.Tasks = []models.Task{
+		testhelpers.BuildTaskByStatus("task-1", models.TaskStatusImplementing, now),
+	}
+	testhelpers.WriteInitialState(t, stateFile, state)
+	result, err := MarkBlockedWithOptions(
+		tmpDir,
+		"task-1",
+		"Dependency graph repair is orchestrator-only",
+		[]string{"Can the orchestrator apply the stored dependency repair?"},
+		"coder-1",
+		MarkBlockedOptions{RepairRequest: &models.RepairRequest{
+			Operation: " apply-dependency-repair ",
+			Target:    " task-1 ",
+			DependencyUpdates: []models.DependencyUpdate{
+				{
+					TaskID:            " consumer-1 ",
+					ExpectedDependsOn: []string{},
+					DesiredDependsOn:  []string{" producer-1 ", "producer-2"},
+				},
+				{
+					TaskID:            "consumer-2",
+					ExpectedDependsOn: []string{" producer-1 "},
+					DesiredDependsOn:  []string{},
+				},
+			},
+			Evidence:   []string{" error=dependency repair requires orchestrator authority "},
+			Validation: []string{" liza validate --json "},
+		}},
+	)
+	if err != nil {
+		t.Fatalf("MarkBlockedWithOptions() error: %v", err)
+	}
+	if result.RepairRequest == nil {
+		t.Fatal("RepairRequest result is nil")
+	}
+	readState, err := db.New(stateFile).Read()
+	if err != nil {
+		t.Fatalf("Failed to read state: %v", err)
+	}
+	request := readState.FindTask("task-1").RepairRequest
+	if request == nil {
+		t.Fatal("persisted RepairRequest is nil")
+	}
+	if request.Operation != "apply-dependency-repair" || request.Target != "task-1" {
+		t.Fatalf("persisted request identity = %q/%q", request.Operation, request.Target)
+	}
+	if len(request.DependencyUpdates) != 2 {
+		t.Fatalf("DependencyUpdates len = %d, want 2", len(request.DependencyUpdates))
+	}
+	first := request.DependencyUpdates[0]
+	if first.TaskID != "consumer-1" {
+		t.Fatalf("first TaskID = %q, want consumer-1", first.TaskID)
+	}
+	if first.ExpectedDependsOn == nil || len(first.ExpectedDependsOn) != 0 {
+		t.Fatalf("first ExpectedDependsOn = %#v, want explicit empty list", first.ExpectedDependsOn)
+	}
+	if got := strings.Join(first.DesiredDependsOn, ","); got != "producer-1,producer-2" {
+		t.Fatalf("first DesiredDependsOn = %q, want producer-1,producer-2", got)
+	}
+	second := request.DependencyUpdates[1]
+	if second.DesiredDependsOn == nil || len(second.DesiredDependsOn) != 0 {
+		t.Fatalf("second DesiredDependsOn = %#v, want explicit empty list", second.DesiredDependsOn)
+	}
+
+	valid := models.RepairRequest{
+		Operation: "apply-dependency-repair",
+		Target:    "task-1",
+		DependencyUpdates: []models.DependencyUpdate{{
+			TaskID:            "consumer-1",
+			ExpectedDependsOn: []string{},
+			DesiredDependsOn:  []string{},
+		}},
+		Evidence:   []string{"error=dependency repair requires orchestrator authority"},
+		Validation: []string{"liza validate --json"},
+	}
+	tests := []struct {
+		name    string
+		request models.RepairRequest
+		wantErr string
+	}{
+		{
+			name: "requires explicit expected list",
+			request: func() models.RepairRequest {
+				request := valid
+				request.DependencyUpdates = []models.DependencyUpdate{{
+					TaskID:           "consumer-1",
+					DesiredDependsOn: []string{},
+				}}
+				return request
+			}(),
+			wantErr: "expected_depends_on must be an explicit list",
+		},
+		{
+			name: "rejects duplicate update task",
+			request: func() models.RepairRequest {
+				request := valid
+				request.DependencyUpdates = append(request.DependencyUpdates, models.DependencyUpdate{
+					TaskID:            " consumer-1 ",
+					ExpectedDependsOn: []string{},
+					DesiredDependsOn:  []string{},
+				})
+				return request
+			}(),
+			wantErr: `duplicate dependency update task_id "consumer-1"`,
+		},
+	}
+
+	for _, tt := range tests {
+		_, err := MarkBlockedWithOptions(
+			"/nonexistent",
+			"task-1",
+			"blocked",
+			[]string{"q1"},
+			"coder-1",
+			MarkBlockedOptions{RepairRequest: &tt.request},
+		)
+		if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+			t.Fatalf("%s: Error = %v, want substring %q", tt.name, err, tt.wantErr)
+		}
+	}
+}
+
 func TestMarkBlockedWithOptions_RepairRequestRequiresCompleteRequest(t *testing.T) {
 	valid := models.RepairRequest{
 		Operation:  "add-task",

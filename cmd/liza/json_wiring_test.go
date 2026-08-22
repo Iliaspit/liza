@@ -596,6 +596,117 @@ func TestJSON_MarkBlocked_InvalidRepairEvidenceReportsValidExample(t *testing.T)
 	assertJSONError(t, stdout, "validation", "valid examples", "exit_code=1 stderr=", "error=provider session thread not found")
 }
 
+func writeRepairRequestFile(t *testing.T, projectRoot string, request models.RepairRequest) string {
+	t.Helper()
+	data, err := json.Marshal(request)
+	if err != nil {
+		t.Fatalf("marshal repair request: %v", err)
+	}
+	path := filepath.Join(projectRoot, "repair-request.json")
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("write repair request: %v", err)
+	}
+	return path
+}
+
+func declarativeRepairRequestFor(taskID string) models.RepairRequest {
+	return models.RepairRequest{
+		Operation: "apply-dependency-repair",
+		Target:    taskID,
+		DependencyUpdates: []models.DependencyUpdate{{
+			TaskID:            "consumer-1",
+			ExpectedDependsOn: []string{},
+			DesiredDependsOn:  []string{"producer-1"},
+		}},
+		Evidence:   []string{"error=dependency repair requires orchestrator authority"},
+		Validation: []string{"liza validate --json"},
+	}
+}
+
+func TestJSON_MarkBlocked_RepairRequestFile(t *testing.T) {
+	legacyCommand := "liza add-task --id architecture-2 --agent-id orchestrator-1 --json"
+	projectRoot, statePath := setupMutationTestProject(t, func(state *models.State) {
+		now := time.Now().UTC()
+		legacyTask := testhelpers.BuildTaskByStatus("task-legacy-repair", models.TaskStatusBlocked, now)
+		legacyTask.AssignedTo = nil
+		legacyTask.Worktree = nil
+		legacyTask.RepairRequest = &models.RepairRequest{
+			Operation:  "add-task",
+			Target:     "architecture-2",
+			Command:    legacyCommand,
+			Evidence:   []string{"command requires role type [orchestrator]"},
+			Validation: []string{"go test ./cmd/liza"},
+		}
+		state.Tasks = []models.Task{
+			testhelpers.BuildTaskByStatus("task-file-repair", models.TaskStatusImplementing, now),
+			legacyTask,
+		}
+	})
+	requestPath := writeRepairRequestFile(t, projectRoot, declarativeRepairRequestFor("task-file-repair"))
+	stdout, err := executeRootCommandCapture(t, projectRoot,
+		"mark-blocked", "task-file-repair",
+		"--agent-id", "coder-1",
+		"--reason", "Dependency graph repair is orchestrator-only",
+		"--questions", "Can the orchestrator apply the stored repair?",
+		"--repair-request-file", requestPath,
+		"--json",
+	)
+	if err != nil {
+		t.Fatalf("mark-blocked --repair-request-file failed: %v\n%s", err, stdout)
+	}
+	env := parseEnvelope(t, stdout)
+	result, ok := env["result"].(map[string]any)
+	if !ok {
+		t.Fatalf("result = %T, want object", env["result"])
+	}
+	repairRequest, ok := result["repair_request"].(map[string]any)
+	if !ok {
+		t.Fatalf("repair_request = %T, want object", result["repair_request"])
+	}
+	if _, present := repairRequest["command"]; present {
+		t.Fatalf("repair_request unexpectedly contains command: %#v", repairRequest)
+	}
+	state := readState(t, statePath)
+	stored := state.FindTask("task-file-repair").RepairRequest
+	if stored == nil || len(stored.DependencyUpdates) != 1 {
+		t.Fatalf("stored RepairRequest = %#v, want one dependency update", stored)
+	}
+	if stored.DependencyUpdates[0].ExpectedDependsOn == nil {
+		t.Fatal("expected_depends_on must remain an explicit empty list")
+	}
+
+	stdout, err = executeRootCommandCapture(t, projectRoot,
+		"mark-blocked", "task-file-repair",
+		"--agent-id", "coder-1",
+		"--reason", "Dependency graph repair is orchestrator-only",
+		"--questions", "Can the orchestrator apply the stored repair?",
+		"--repair-request-file", requestPath,
+		"--repair-operation", "apply-dependency-repair",
+		"--json",
+	)
+	if err == nil {
+		t.Fatal("expected mixed repair flag validation error")
+	}
+	assertJSONError(t, stdout, "validation", "--repair-request-file cannot be combined with --repair-")
+
+	stdout, err = executeRootCommandCapture(t, projectRoot, "get", "task-legacy-repair", "--json")
+	if err != nil {
+		t.Fatalf("inspect legacy repair request failed: %v\n%s", err, stdout)
+	}
+	legacyEnv := parseEnvelope(t, stdout)
+	legacyResult, ok := legacyEnv["result"].(map[string]any)
+	if !ok {
+		t.Fatalf("legacy result = %T, want object", legacyEnv["result"])
+	}
+	legacyRepairRequest, ok := legacyResult["repair_request"].(map[string]any)
+	if !ok {
+		t.Fatalf("legacy repair_request = %T, want object", legacyResult["repair_request"])
+	}
+	if legacyRepairRequest["command"] != legacyCommand {
+		t.Fatalf("legacy repair_request.command = %v, want %q", legacyRepairRequest["command"], legacyCommand)
+	}
+}
+
 func TestJSON_RetargetDependency_Success(t *testing.T) {
 	projectRoot, _ := setupMutationTestProject(t, func(state *models.State) {
 		now := time.Now().UTC()
@@ -658,6 +769,127 @@ func TestJSON_RetargetDependency_RejectsNonOrchestrator(t *testing.T) {
 		t.Fatalf("expected RBAC error, got nil")
 	}
 	assertJSONError(t, stdout, "permission_denied", `operation "retarget-dependency" not allowed for role "coder"`)
+}
+
+func TestJSON_ApplyDependencyRepair_ReportsEveryCanonicalUpdate(t *testing.T) {
+	projectRoot, statePath := setupMutationTestProject(t, func(state *models.State) {
+		now := time.Now().UTC()
+		state.Goal.SpecRef = "README.md"
+		source := testhelpers.BuildTaskByStatus("repair-source", models.TaskStatusBlocked, now)
+		source.DependsOn = []string{"old-source"}
+		source.RepairRequest = &models.RepairRequest{
+			Operation: models.RepairOperationApplyDependencyRepair,
+			Target:    "repair-source",
+			DependencyUpdates: []models.DependencyUpdate{
+				{TaskID: "repair-source", ExpectedDependsOn: []string{"old-source"}, DesiredDependsOn: []string{"replacement-old"}},
+				{TaskID: "consumer", ExpectedDependsOn: []string{"old-consumer"}, DesiredDependsOn: []string{}},
+			},
+			Evidence:   []string{"command=blocked-operation exit_code=1 stderr=orchestrator repair required"},
+			Validation: []string{"validate repaired dependency graph"},
+		}
+		consumer := testhelpers.BuildTaskByStatus("consumer", models.TaskStatusReady, now)
+		consumer.DependsOn = []string{"old-consumer"}
+		replacementOld := testhelpers.BuildTaskByStatus("replacement-old", models.TaskStatusSuperseded, now)
+		replacementOld.RolePair = "coding-pair"
+		replacementOld.SupersededBy = []string{"replacement-new"}
+		replacementOld.RescopeReason = testhelpers.StringPtr("Canonical replacement")
+		state.Tasks = []models.Task{
+			source,
+			consumer,
+			testhelpers.BuildTaskByStatus("old-source", models.TaskStatusMerged, now),
+			testhelpers.BuildTaskByStatus("old-consumer", models.TaskStatusMerged, now),
+			replacementOld,
+			testhelpers.BuildTaskByStatus("replacement-new", models.TaskStatusMerged, now),
+		}
+	})
+
+	stdout, err := executeRootCommandCapture(t, projectRoot,
+		"apply-dependency-repair", "repair-source",
+		"--reason", "Apply stored graph repair",
+		"--agent-id", "orchestrator-1",
+		"--json",
+	)
+	if err != nil {
+		t.Fatalf("apply-dependency-repair --json failed: %v\n%s", err, stdout)
+	}
+
+	env := parseEnvelope(t, stdout)
+	if env["ok"] != true {
+		t.Fatalf("expected ok=true, got %v", env["ok"])
+	}
+	result, ok := env["result"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected result object, got %T", env["result"])
+	}
+	if result["source_task_id"] != "repair-source" {
+		t.Fatalf("source_task_id = %v, want repair-source", result["source_task_id"])
+	}
+	updates, ok := result["updates"].([]any)
+	if !ok || len(updates) != 2 {
+		t.Fatalf("updates = %#v, want two entries", result["updates"])
+	}
+	first, ok := updates[0].(map[string]any)
+	if !ok || first["task_id"] != "repair-source" {
+		t.Fatalf("updates[0] = %#v, want repair-source", updates[0])
+	}
+	firstDeps, ok := first["canonical_dependencies"].([]any)
+	if !ok || len(firstDeps) != 1 || firstDeps[0] != "replacement-new" {
+		t.Fatalf("updates[0].canonical_dependencies = %#v, want [replacement-new]", first["canonical_dependencies"])
+	}
+	second, ok := updates[1].(map[string]any)
+	if !ok || second["task_id"] != "consumer" {
+		t.Fatalf("updates[1] = %#v, want consumer", updates[1])
+	}
+	secondDeps, ok := second["canonical_dependencies"].([]any)
+	if !ok || len(secondDeps) != 0 {
+		t.Fatalf("updates[1].canonical_dependencies = %#v, want []", second["canonical_dependencies"])
+	}
+
+	updatedState := readState(t, statePath)
+	updatedSource := mustFindTask(t, updatedState, "repair-source")
+	if updatedSource.Status != models.TaskStatusBlocked || updatedSource.RepairRequest != nil {
+		t.Fatalf("source status/request = %s/%#v, want BLOCKED/nil", updatedSource.Status, updatedSource.RepairRequest)
+	}
+	if got := mustFindTask(t, updatedState, "consumer").DependsOn; len(got) != 0 {
+		t.Fatalf("consumer DependsOn = %v, want empty", got)
+	}
+}
+
+func TestJSON_ApplyDependencyRepair_RBAC(t *testing.T) {
+	projectRoot, statePath := setupMutationTestProject(t, func(state *models.State) {
+		now := time.Now().UTC()
+		source := testhelpers.BuildTaskByStatus("repair-source", models.TaskStatusBlocked, now)
+		source.DependsOn = []string{"old-source"}
+		source.RepairRequest = &models.RepairRequest{
+			Operation: models.RepairOperationApplyDependencyRepair,
+			Target:    "repair-source",
+			DependencyUpdates: []models.DependencyUpdate{
+				{TaskID: "repair-source", ExpectedDependsOn: []string{"old-source"}, DesiredDependsOn: []string{"new-source"}},
+			},
+			Evidence:   []string{"command=blocked-operation exit_code=1 stderr=orchestrator repair required"},
+			Validation: []string{"validate repaired dependency graph"},
+		}
+		state.Tasks = []models.Task{
+			source,
+			testhelpers.BuildTaskByStatus("old-source", models.TaskStatusMerged, now),
+			testhelpers.BuildTaskByStatus("new-source", models.TaskStatusMerged, now),
+		}
+	})
+
+	stdout, err := executeRootCommandCapture(t, projectRoot,
+		"apply-dependency-repair", "repair-source",
+		"--reason", "Apply stored graph repair",
+		"--agent-id", "coder-1",
+		"--json",
+	)
+	if err == nil {
+		t.Fatal("expected RBAC error, got nil")
+	}
+	assertJSONError(t, stdout, "permission_denied", `operation "apply-dependency-repair" not allowed for role "coder"`)
+	unchangedSource := mustFindTask(t, readState(t, statePath), "repair-source")
+	if len(unchangedSource.DependsOn) != 1 || unchangedSource.DependsOn[0] != "old-source" || unchangedSource.RepairRequest == nil {
+		t.Fatalf("source changed after rejected command: %#v", unchangedSource)
+	}
 }
 
 func TestJSON_RepairSupersededDependencies_Success(t *testing.T) {
