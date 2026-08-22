@@ -348,7 +348,7 @@ func calculateTimeInStatus(task *models.Task) time.Duration {
 		entry := task.History[i]
 		switch entry.Event {
 		case models.TaskEventClaimed, models.TaskEventSubmittedForReview, models.TaskEventRejected, models.TaskEventApproved,
-			models.TaskEventMerged, models.TaskEventBlocked, models.TaskEventAbandoned, models.TaskEventSuperseded, models.TaskEventIntegrationFailed:
+			models.TaskEventMerged, models.TaskEventBlocked, models.TaskEventUnblocked, models.TaskEventAbandoned, models.TaskEventSuperseded, models.TaskEventIntegrationFailed:
 			return time.Since(entry.Time)
 		}
 	}
