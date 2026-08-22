@@ -1,6 +1,8 @@
 {{- define "wake_hypothesis_exhausted" -}}
 Multiple coders failed on same task. Re-evaluate and act NOW:
 
+{{template "replacement_lineage_policy" .}}
+
 1. Read task history — understand what was tried and why it failed
 2. Determine if:
    - Task is impossible as specified → supersede with revised tasks:

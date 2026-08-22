@@ -659,6 +659,15 @@ func TestBuildBasePromptSembleOnlyRoutingOmitsUnavailableOptionalTools(t *testin
 func TestRenderOrchestratorDashboard(t *testing.T) {
 	now := time.Now().UTC()
 	projectRoot := setupPipelineConfig(t)
+	replacementLineagePolicy := []string{
+		"Preserve an independently reviewable replacement lineage for each independently scoped original",
+		"one original may split into several cohesive replacements",
+		"Do not map several independent originals to one shared replacement or replan",
+		"A shared replan is allowed only when corrections are semantically inseparable",
+		"Record an explicit reason explaining why; convenience or a shared incident is insufficient",
+		"Reason replacement dependencies within each preserved lineage, not from the shared incident",
+		"Later specialized outputs do not restore collapsed supersession provenance",
+	}
 
 	tests := []struct {
 		name           string
@@ -717,7 +726,7 @@ func TestRenderOrchestratorDashboard(t *testing.T) {
 				}
 				return state
 			}(),
-			wantContains: []string{
+			wantContains: append([]string{
 				"WAKE TRIGGER: BLOCKED_TASKS",
 				"- Total tasks: 2",
 				"- Blocked: 1",
@@ -729,7 +738,7 @@ func TestRenderOrchestratorDashboard(t *testing.T) {
 				`"role_pair": "coding-pair"`,
 				"liza supersede-task <task-id> <new-id-1>,<new-id-2>",
 				"liza assess-blocked",
-			},
+			}, replacementLineagePolicy...),
 		},
 		{
 			name: "hypothesis exhaustion trigger",
@@ -740,7 +749,7 @@ func TestRenderOrchestratorDashboard(t *testing.T) {
 				state.Tasks = []models.Task{task}
 				return state
 			}(),
-			wantContains: []string{
+			wantContains: append([]string{
 				"WAKE TRIGGER: HYPOTHESIS_EXHAUSTED",
 				"- Hypothesis exhausted: 1",
 				"Multiple coders failed on same task. Re-evaluate and act NOW:",
@@ -749,7 +758,7 @@ func TestRenderOrchestratorDashboard(t *testing.T) {
 				`"done": "<falsifiable completion condition>"`,
 				`"role_pair": "coding-pair"`,
 				"liza supersede-task <old-id> <new-id-1>,<new-id-2>",
-			},
+			}, replacementLineagePolicy...),
 		},
 		{
 			name: "immediate discovery trigger",
@@ -773,11 +782,11 @@ func TestRenderOrchestratorDashboard(t *testing.T) {
 				}
 				return state
 			}(),
-			wantContains: []string{
+			wantContains: append([]string{
 				"WAKE TRIGGER: IMMEDIATE_DISCOVERY",
 				"- Immediate discoveries: 1",
 				"Urgent discoveries need immediate action:",
-			},
+			}, replacementLineagePolicy...),
 		},
 		{
 			name: "mixed task statuses (in progress calculation)",

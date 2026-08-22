@@ -1,6 +1,8 @@
 {{- define "wake_blocked_tasks" -}}
 Tasks are BLOCKED. Analyze and resolve immediately:
 
+{{template "replacement_lineage_policy" .}}
+
 1. Read blocked tasks from blackboard — understand blocked_reason, blocked_questions, and repair_request if present
 2. Determine if blocker is:
    - Structured repair_request present → verify the target state still needs repair, then apply the requested orchestrator-only operation if valid

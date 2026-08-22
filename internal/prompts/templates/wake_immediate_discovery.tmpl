@@ -1,6 +1,8 @@
 {{- define "wake_immediate_discovery" -}}
 Urgent discoveries need immediate action:
 
+{{template "replacement_lineage_policy" .}}
+
 1. Read discovered[] entries with urgency=immediate
 2. For each, execute decision NOW:
    - Convert to task → run {{binaryName}} add-tasks --tasks-file <path.json> --agent-id {{.AgentID}} --json NOW, then run {{binaryName}} set-discovery-disposition <id> <new-task-id> --json
