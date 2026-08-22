@@ -222,7 +222,6 @@ func executeAgent(ctx context.Context, config SupervisorConfig, prompt string, a
 		AgentID:        config.AgentID,
 		TaskID:         taskID,
 		SessionID:      taskID,
-		ResumeSession:  "",
 		WarmSession:    false,
 		ProfileName:    config.ProfileName,
 		ProfileVars:    config.ProfileVars,

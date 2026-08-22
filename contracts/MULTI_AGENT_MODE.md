@@ -202,6 +202,8 @@ WITHOUT meaningful progress → **STOP IMMEDIATELY**
 
 "Meaningful progress" = new information that changes next action. Piping same output through different tools is NOT progress.
 
+Exempt: `§BRAND_BINARY_NAME§ await-verdict` and `§BRAND_BINARY_NAME§ await-resubmission` POLL retries. Each returns a smaller remaining budget and the loop ends at TIMEOUT — bounded waiting, not repetition.
+
 | Role | Log As | Then |
 |------|--------|------|
 | Coder | `retry_loop` | Mark task BLOCKED with diagnosis |

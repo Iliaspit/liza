@@ -16,6 +16,14 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// awaitBudgetSecondsDefault and awaitBudgetFlagUsage derive from the single
+// ops-side ceiling so the flag default and the enforced maximum cannot drift.
+var awaitBudgetSecondsDefault = int(ops.DefaultAwaitBudget.Seconds())
+
+var awaitBudgetFlagUsage = fmt.Sprintf(
+	"total wait budget in seconds, measured from submission/rejection; "+
+		"each invocation waits at most 100 seconds; maximum %d", awaitBudgetSecondsDefault)
+
 var awaitVerdict = commands.AwaitVerdict
 var awaitResubmission = commands.AwaitResubmission
 
@@ -292,6 +300,21 @@ Agent ID for audit trail:
 	},
 }
 
+// awaitBudgetFromFlag reads --timeout-seconds as a total wait allowance and
+// refuses a value above the hard ceiling rather than silently shortening it. The
+// ops layer clamps as well, as defence for non-CLI callers; at this boundary an
+// operator who asks for longer is told instead of quietly given less.
+func awaitBudgetFromFlag(cmd *cobra.Command) (time.Duration, error) {
+	seconds, _ := cmd.Flags().GetInt("timeout-seconds")
+	budget := time.Duration(seconds) * time.Second
+	if budget > ops.DefaultAwaitBudget {
+		return 0, fmt.Errorf(
+			"--timeout-seconds %d exceeds the %d-second maximum wait budget",
+			seconds, int(ops.DefaultAwaitBudget.Seconds()))
+	}
+	return budget, nil
+}
+
 var awaitVerdictCmd = &cobra.Command{
 	Use:   "await-verdict <task-id>",
 	Short: "Block until a review verdict arrives for a submitted task",
@@ -307,8 +330,8 @@ Possible outcomes:
   - APPROVED: work accepted, agent can exit
   - REJECTED: work needs revision, reason provided
   - ALREADY_TRANSITIONED: verdict was recovered after task moved onward; follow safe_action
-  - POLL: the 100-second call cap expired; retry with returned timeout_seconds
-  - TIMEOUT: the remaining total budget expired without a verdict
+  - POLL: the 100-second call cap expired; run the same command again (no argument to carry over)
+  - TIMEOUT: the total wait budget expired without a verdict
   - NEW_ATTEMPT: task reassigned for fresh attempt
   - ABORTED: task was superseded or cancelled`,
 	Args: cobra.ExactArgs(1),
@@ -344,8 +367,10 @@ Possible outcomes:
 			return err
 		}
 
-		timeoutSec, _ := cmd.Flags().GetInt("timeout-seconds")
-		timeout := time.Duration(timeoutSec) * time.Second
+		timeout, err := awaitBudgetFromFlag(cmd)
+		if err != nil {
+			return err
+		}
 
 		result, err := awaitVerdict(projectRoot, taskID, agentID, timeout)
 		if isJSON(cmd) {
@@ -372,8 +397,8 @@ Requirements:
 
 Possible outcomes:
   - RESUBMITTED: doer submitted new changes; use returned base_commit..review_commit for re-review
-  - POLL: the 100-second call cap expired; retry with returned timeout_seconds
-  - TIMEOUT: the remaining total budget expired without a resubmission
+  - POLL: the 100-second call cap expired; run the same command again (no argument to carry over)
+  - TIMEOUT: the total wait budget expired without a resubmission
   - TERMINAL: task reached a terminal state (superseded, abandoned)
   - ABORTED: task was cancelled or reassigned`,
 	Args: cobra.ExactArgs(1),
@@ -409,8 +434,10 @@ Possible outcomes:
 			return err
 		}
 
-		timeoutSec, _ := cmd.Flags().GetInt("timeout-seconds")
-		timeout := time.Duration(timeoutSec) * time.Second
+		timeout, err := awaitBudgetFromFlag(cmd)
+		if err != nil {
+			return err
+		}
 
 		result, err := awaitResubmission(projectRoot, taskID, agentID, timeout)
 		if isJSON(cmd) {
@@ -544,11 +571,11 @@ func init() {
 
 	// Await-verdict flags
 	addAgentIDFlag(awaitVerdictCmd)
-	awaitVerdictCmd.Flags().Int("timeout-seconds", 1500, "remaining total budget in seconds; each invocation waits at most 100 seconds")
+	awaitVerdictCmd.Flags().Int("timeout-seconds", awaitBudgetSecondsDefault, awaitBudgetFlagUsage)
 
 	// Await-resubmission flags
 	addAgentIDFlag(awaitResubmissionCmd)
-	awaitResubmissionCmd.Flags().Int("timeout-seconds", 1500, "remaining total budget in seconds; each invocation waits at most 100 seconds")
+	awaitResubmissionCmd.Flags().Int("timeout-seconds", awaitBudgetSecondsDefault, awaitBudgetFlagUsage)
 
 	// Submit-verdict flags
 	submitVerdictCmd.Flags().String("impact", "", "impact classification (standard, significant, architecture)")

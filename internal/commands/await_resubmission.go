@@ -13,8 +13,11 @@ type AwaitResubmissionResult struct {
 	TimeoutSeconds int `json:"timeout_seconds,omitempty"`
 }
 
-// AwaitResubmission applies the bounded foreground interval to one resubmission wait.
-func AwaitResubmission(projectRoot, taskID, agentID string, remaining time.Duration) (*AwaitResubmissionResult, error) {
+// AwaitResubmission applies the bounded foreground interval to one resubmission
+// wait. budget is the total wait allowance; the remaining share is derived from
+// the rejection recorded in task history. See AwaitVerdict.
+func AwaitResubmission(projectRoot, taskID, agentID string, budget time.Duration) (*AwaitResubmissionResult, error) {
+	remaining := ops.AwaitResubmissionRemainingBudget(projectRoot, taskID, agentID, budget)
 	return awaitResubmissionWithInterval(projectRoot, taskID, agentID, remaining, maxAwaitInterval)
 }
 

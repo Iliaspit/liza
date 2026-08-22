@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -32,10 +33,10 @@ func TestAwaitCommands_TimeoutHelp(t *testing.T) {
 			if flag == nil {
 				t.Fatal("--timeout-seconds flag is missing")
 			}
-			if flag.DefValue != "1500" {
-				t.Fatalf("--timeout-seconds default = %q, want 1500", flag.DefValue)
+			if flag.DefValue != "1800" {
+				t.Fatalf("--timeout-seconds default = %q, want 1800", flag.DefValue)
 			}
-			for _, phrase := range []string{"remaining total budget", "at most 100 seconds"} {
+			for _, phrase := range []string{"total wait budget", "at most 100 seconds"} {
 				if !strings.Contains(flag.Usage, phrase) {
 					t.Errorf("--timeout-seconds help = %q, want phrase %q", flag.Usage, phrase)
 				}
@@ -62,11 +63,11 @@ func TestAwaitVerdictCLI_BudgetAndOutput(t *testing.T) {
 			args: []string{"await-verdict", "task-await", "--agent-id", "coder-1", "--json"},
 			result: &commands.AwaitVerdictResult{
 				AwaitVerdictResult: &ops.AwaitVerdictResult{Verdict: ops.VerdictPoll, TaskStatus: models.TaskStatusReadyForReview},
-				TimeoutSeconds:     1400,
+				TimeoutSeconds:     1700,
 			},
-			wantBudget:      1500 * time.Second,
+			wantBudget:      1800 * time.Second,
 			wantJSONVerdict: ops.VerdictPoll,
-			wantJSONTimeout: 1400,
+			wantJSONTimeout: 1700,
 		},
 		{
 			name: "json timeout uses caller remaining budget",
@@ -84,10 +85,10 @@ func TestAwaitVerdictCLI_BudgetAndOutput(t *testing.T) {
 			args: []string{"await-verdict", "task-await", "--agent-id", "coder-1"},
 			result: &commands.AwaitVerdictResult{
 				AwaitVerdictResult: &ops.AwaitVerdictResult{Verdict: ops.VerdictPoll, TaskStatus: models.TaskStatusReadyForReview},
-				TimeoutSeconds:     1400,
+				TimeoutSeconds:     1700,
 			},
-			wantBudget:      1500 * time.Second,
-			wantHumanOutput: "Verdict: POLL\nStatus: CODE_TO_REVIEW\nTimeout seconds: 1400\n",
+			wantBudget:      1800 * time.Second,
+			wantHumanOutput: "Verdict: POLL\nStatus: CODE_TO_REVIEW\nTimeout seconds: 1700\n",
 		},
 		{
 			name: "human timeout uses caller remaining budget",
@@ -105,7 +106,7 @@ func TestAwaitVerdictCLI_BudgetAndOutput(t *testing.T) {
 			result: &commands.AwaitVerdictResult{
 				AwaitVerdictResult: &ops.AwaitVerdictResult{Verdict: ops.VerdictApproved, TaskStatus: models.TaskStatusApproved},
 			},
-			wantBudget:      1500 * time.Second,
+			wantBudget:      1800 * time.Second,
 			wantJSONVerdict: ops.VerdictApproved,
 		},
 		{
@@ -123,7 +124,7 @@ func TestAwaitVerdictCLI_BudgetAndOutput(t *testing.T) {
 					Guidance:        "Revise and resubmit.",
 				},
 			},
-			wantBudget:      1500 * time.Second,
+			wantBudget:      1800 * time.Second,
 			wantHumanOutput: "Verdict: REJECTED\nStatus: CODE_REJECTED\nReason: changes requested\nReviewer: reviewer-1\nReview commit: review-commit\nCurrent assignee: coder-1\nSafe action: revise\n\nRevise and resubmit.\n",
 		},
 	}
@@ -175,11 +176,11 @@ func TestAwaitResubmissionCLI_BudgetAndOutput(t *testing.T) {
 			args: []string{"await-resubmission", "task-await", "--agent-id", "code-reviewer-1", "--json"},
 			result: &commands.AwaitResubmissionResult{
 				AwaitResubmissionResult: &ops.AwaitResubmissionResult{Verdict: ops.ResubmissionPoll, TaskStatus: models.TaskStatusRejected},
-				TimeoutSeconds:          1400,
+				TimeoutSeconds:          1700,
 			},
-			wantBudget:      1500 * time.Second,
+			wantBudget:      1800 * time.Second,
 			wantJSONVerdict: ops.ResubmissionPoll,
-			wantJSONTimeout: 1400,
+			wantJSONTimeout: 1700,
 		},
 		{
 			name: "json timeout uses caller remaining budget",
@@ -197,10 +198,10 @@ func TestAwaitResubmissionCLI_BudgetAndOutput(t *testing.T) {
 			args: []string{"await-resubmission", "task-await", "--agent-id", "code-reviewer-1"},
 			result: &commands.AwaitResubmissionResult{
 				AwaitResubmissionResult: &ops.AwaitResubmissionResult{Verdict: ops.ResubmissionPoll, TaskStatus: models.TaskStatusRejected},
-				TimeoutSeconds:          1400,
+				TimeoutSeconds:          1700,
 			},
-			wantBudget:      1500 * time.Second,
-			wantHumanOutput: "Verdict: POLL\nStatus: CODE_REJECTED\nTimeout seconds: 1400\n",
+			wantBudget:      1800 * time.Second,
+			wantHumanOutput: "Verdict: POLL\nStatus: CODE_REJECTED\nTimeout seconds: 1700\n",
 		},
 		{
 			name: "human timeout uses caller remaining budget",
@@ -218,7 +219,7 @@ func TestAwaitResubmissionCLI_BudgetAndOutput(t *testing.T) {
 			result: &commands.AwaitResubmissionResult{
 				AwaitResubmissionResult: &ops.AwaitResubmissionResult{Verdict: ops.ResubmissionResubmitted, TaskStatus: models.TaskStatusReadyForReview},
 			},
-			wantBudget:      1500 * time.Second,
+			wantBudget:      1800 * time.Second,
 			wantJSONVerdict: ops.ResubmissionResubmitted,
 		},
 		{
@@ -233,7 +234,7 @@ func TestAwaitResubmissionCLI_BudgetAndOutput(t *testing.T) {
 					ReviewCycle:  2,
 				},
 			},
-			wantBudget:      1500 * time.Second,
+			wantBudget:      1800 * time.Second,
 			wantHumanOutput: "Verdict: RESUBMITTED\nStatus: CODE_TO_REVIEW\nBase commit: base-commit\nReview commit: review-commit\nReview cycle: 2\n",
 		},
 	}
@@ -475,4 +476,61 @@ func installFailingSubmitReviewCLIIndexer(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+// TestAwaitTimeoutSecondsRejectsOverCeiling covers the CLI boundary: an operator
+// asking for more than the maximum is told, not silently given less.
+func TestAwaitTimeoutSecondsRejectsOverCeiling(t *testing.T) {
+	overCeiling := strconv.Itoa(int(ops.DefaultAwaitBudget.Seconds()) + 1)
+
+	t.Run("await-verdict", func(t *testing.T) {
+		projectRoot := setupAwaitCLIProject(t)
+		resetFlagIfPresent(awaitVerdictCmd, "timeout-seconds")
+		t.Cleanup(func() { resetFlagIfPresent(awaitVerdictCmd, "timeout-seconds") })
+
+		original := awaitVerdict
+		t.Cleanup(func() { awaitVerdict = original })
+		called := false
+		awaitVerdict = func(string, string, string, time.Duration) (*commands.AwaitVerdictResult, error) {
+			called = true
+			return nil, nil
+		}
+
+		_, err := executeRootCommandCapture(t, projectRoot,
+			"await-verdict", "task-await", "--agent-id", "coder-1",
+			"--timeout-seconds", overCeiling)
+		assertOverCeilingRejected(t, err, called)
+	})
+
+	t.Run("await-resubmission", func(t *testing.T) {
+		projectRoot := setupAwaitCLIProject(t)
+		resetFlagIfPresent(awaitResubmissionCmd, "timeout-seconds")
+		t.Cleanup(func() { resetFlagIfPresent(awaitResubmissionCmd, "timeout-seconds") })
+
+		original := awaitResubmission
+		t.Cleanup(func() { awaitResubmission = original })
+		called := false
+		awaitResubmission = func(string, string, string, time.Duration) (*commands.AwaitResubmissionResult, error) {
+			called = true
+			return nil, nil
+		}
+
+		_, err := executeRootCommandCapture(t, projectRoot,
+			"await-resubmission", "task-await", "--agent-id", "code-reviewer-1",
+			"--timeout-seconds", overCeiling)
+		assertOverCeilingRejected(t, err, called)
+	})
+}
+
+func assertOverCeilingRejected(t *testing.T, err error, awaitCalled bool) {
+	t.Helper()
+	if err == nil {
+		t.Fatal("expected an error for a budget above the ceiling")
+	}
+	if !strings.Contains(err.Error(), "exceeds") {
+		t.Errorf("error = %q, want it to name the maximum", err)
+	}
+	if awaitCalled {
+		t.Error("await ran despite an out-of-range budget")
+	}
 }

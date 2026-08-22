@@ -97,5 +97,20 @@ The attempt lifecycle (ADR-0051) established that agents should own their attemp
 
 **Restores:** Original vision of attempt-scoped agent sessions. **Extends:** ADR-0051 (First-Class Attempt Model) — completes the attempt lifecycle with session persistence.
 
+## Amendment (2026-08-23)
+
+The `MCP_TIMEOUT` constraint above no longer applies — ADR-0057 removed the MCP
+server, and both awaits are now plain foreground CLI calls. Each invocation is
+capped at 100s (provider tool-call limits) and carries no argument between calls:
+the remaining budget is derived from the submission or rejection recorded in task
+history, bounded by a fixed `DefaultAwaitBudget` horizon.
+
+Consequent changes: default budget 1500s → 1800s; reviewer session ceiling
+30m → 2h so a reviewer can span a full attempt as a doer already could; the
+doer-side three-call prompt cap removed, which had bounded doer waiting at ~5
+minutes and abandoned the task on expiry.
+
+See `specs/protocols/await-primitives.md` for the current mechanism.
+
 ---
 *Reconstructed from commits 3f49344..ce6469a (2026-03-30 to 2026-03-31)*

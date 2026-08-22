@@ -286,3 +286,253 @@ func assertBoundedAwaitOwnershipReleased(
 		t.Error("doer current_task should be nil after await")
 	}
 }
+
+// TestAwaitVerdict_BudgetExhaustionReleasesDoerClaim verifies that a doer whose
+// wait budget runs out leaves no claim behind. The session ends at that point and
+// never resumes, so a retained assigned_to would pin the task to a departed agent
+// until its lease lapsed.
+func TestAwaitVerdict_BudgetExhaustionReleasesDoerClaim(t *testing.T) {
+	fixture := setupBoundedAwaitFixture(
+		t,
+		models.TaskStatusReadyForReview,
+		boundedAwaitCoderID,
+		"coder",
+		models.AgentStatusWaiting,
+		models.TaskEventSubmittedForReview,
+	)
+
+	// Give the task a live doer claim plus the submitted-attempt state a review
+	// in flight depends on, as it would have after ClaimTask + submit-for-review.
+	liveLease := time.Now().Add(30 * time.Minute)
+	reviewLease := time.Now().Add(30 * time.Minute)
+	if err := fixture.bb.Modify(func(s *models.State) error {
+		task := s.FindTask(boundedAwaitTaskID)
+		task.AssignedTo = testhelpers.StringPtr(boundedAwaitCoderID)
+		task.LeaseExpires = &liveLease
+		task.Worktree = testhelpers.StringPtr(".worktrees/" + boundedAwaitTaskID)
+		task.BaseCommit = testhelpers.StringPtr("abc1234")
+		task.ReviewCommit = testhelpers.StringPtr("def5678")
+		task.Output = []models.OutputEntry{{Desc: "implementation notes"}}
+		task.Iteration = 3
+		task.ReviewingBy = testhelpers.StringPtr(boundedAwaitReviewerID)
+		task.ReviewLeaseExpires = &reviewLease
+		return nil
+	}); err != nil {
+		t.Fatalf("seed doer claim: %v", err)
+	}
+
+	// remaining == interval, so the single call exhausts the budget outright.
+	result, err := awaitVerdictWithInterval(
+		fixture.projectRoot, boundedAwaitTaskID, boundedAwaitCoderID, time.Second, time.Second)
+	if err != nil {
+		t.Fatalf("awaitVerdictWithInterval: %v", err)
+	}
+	if result.Verdict != ops.VerdictTimeout {
+		t.Fatalf("verdict = %q, want %q", result.Verdict, ops.VerdictTimeout)
+	}
+
+	state, err := fixture.bb.Read()
+	if err != nil {
+		t.Fatalf("read state: %v", err)
+	}
+	task := state.FindTask(boundedAwaitTaskID)
+	if task == nil {
+		t.Fatal("task not found after await")
+	}
+	if task.AssignedTo != nil {
+		t.Errorf("assigned_to = %q, want nil after budget exhaustion", *task.AssignedTo)
+	}
+	if task.LeaseExpires != nil {
+		t.Error("lease_expires should be nil after budget exhaustion")
+	}
+	if task.Status != models.TaskStatusReadyForReview {
+		t.Errorf("status = %q, want it left submitted for the reviewer", task.Status)
+	}
+
+	// The submitted attempt belongs to the review in flight, not to the departed
+	// doer. Clearing any of these strands the reviewer: submit-verdict rejects a
+	// missing review_commit, and a missing worktree bypasses boundary validation.
+	if task.Worktree == nil {
+		t.Error("worktree cleared; the reviewer would be handed an empty worktree")
+	}
+	if task.BaseCommit == nil {
+		t.Error("base_commit cleared; the review boundary is destroyed")
+	}
+	if task.ReviewCommit == nil {
+		t.Error("review_commit cleared; a later verdict would fail validation")
+	}
+	if len(task.Output) != 1 {
+		t.Errorf("output entries = %d, want 1 preserved; the submitted attempt lost its result", len(task.Output))
+	}
+	if task.Iteration != 3 {
+		t.Errorf("iteration = %d, want 3 preserved", task.Iteration)
+	}
+	if task.ReviewingBy == nil || *task.ReviewingBy != boundedAwaitReviewerID {
+		t.Errorf("reviewing_by = %v, want the active reviewer untouched", task.ReviewingBy)
+	}
+	if task.ReviewLeaseExpires == nil {
+		t.Error("review_lease_expires cleared; the active review lost its lease")
+	}
+}
+
+// TestAwaitVerdict_NonThreadingCallerStillConverges is the closure condition for
+// the loop-detection exemption: a caller that never passes the reported remainder
+// back must still reach TIMEOUT rather than looping until the session ceiling.
+// Each call here supplies the full default budget, exactly as an agent that omits
+// --timeout-seconds would.
+func TestAwaitVerdict_NonThreadingCallerStillConverges(t *testing.T) {
+	fixture := setupBoundedAwaitFixture(
+		t,
+		models.TaskStatusReadyForReview,
+		boundedAwaitCoderID,
+		"coder",
+		models.AgentStatusWaiting,
+		models.TaskEventSubmittedForReview,
+	)
+
+	// Age the submission anchor past the budget the caller keeps re-sending.
+	const budget = 30 * time.Minute
+	if err := fixture.bb.Modify(func(s *models.State) error {
+		task := s.FindTask(boundedAwaitTaskID)
+		for i := range task.History {
+			if task.History[i].Event == models.TaskEventSubmittedForReview {
+				task.History[i].Time = time.Now().UTC().Add(-budget - time.Minute)
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("age submission anchor: %v", err)
+	}
+
+	remaining := ops.AwaitVerdictRemainingBudget(
+		fixture.projectRoot, boundedAwaitTaskID, boundedAwaitCoderID, budget)
+	if remaining != 0 {
+		t.Fatalf("derived remaining = %s, want 0 once the anchor predates the budget", remaining)
+	}
+
+	// The full budget is re-sent, as a non-threading caller would; the derived
+	// remainder must still be exhausted.
+	result, err := AwaitVerdict(fixture.projectRoot, boundedAwaitTaskID, boundedAwaitCoderID, budget)
+	if err != nil {
+		t.Fatalf("AwaitVerdict: %v", err)
+	}
+	if result.Verdict != ops.VerdictTimeout {
+		t.Fatalf("verdict = %q, want %q — a non-threading caller must still converge",
+			result.Verdict, ops.VerdictTimeout)
+	}
+	if result.TimeoutSeconds != 0 {
+		t.Errorf("timeout_seconds = %d, want 0 on final exhaustion", result.TimeoutSeconds)
+	}
+}
+
+// TestAwaitRemainingBudget_AnchorArithmetic covers the clamps around the derived
+// remainder: a fresh anchor yields the full budget, a future anchor (clock skew)
+// never yields more than it, and a missing anchor falls back rather than failing.
+func TestAwaitRemainingBudget_AnchorArithmetic(t *testing.T) {
+	fixture := setupBoundedAwaitFixture(
+		t,
+		models.TaskStatusRejected,
+		boundedAwaitReviewerID,
+		"code-reviewer",
+		models.AgentStatusIdle,
+		models.TaskEventRejected,
+	)
+	const budget = 30 * time.Minute
+
+	setRejectionTime := func(t *testing.T, at time.Time) {
+		t.Helper()
+		if err := fixture.bb.Modify(func(s *models.State) error {
+			task := s.FindTask(boundedAwaitTaskID)
+			for i := range task.History {
+				if task.History[i].Event == models.TaskEventRejected {
+					task.History[i].Time = at
+				}
+			}
+			return nil
+		}); err != nil {
+			t.Fatalf("set rejection time: %v", err)
+		}
+	}
+
+	setRejectionTime(t, time.Now().UTC().Add(-10*time.Minute))
+	got := ops.AwaitResubmissionRemainingBudget(
+		fixture.projectRoot, boundedAwaitTaskID, boundedAwaitReviewerID, budget)
+	if got > 20*time.Minute || got < 19*time.Minute {
+		t.Errorf("remaining after 10m elapsed = %s, want ~20m", got)
+	}
+
+	setRejectionTime(t, time.Now().UTC().Add(time.Hour))
+	got = ops.AwaitResubmissionRemainingBudget(
+		fixture.projectRoot, boundedAwaitTaskID, boundedAwaitReviewerID, budget)
+	if got != budget {
+		t.Errorf("remaining with a future anchor = %s, want the full budget %s", got, budget)
+	}
+
+	got = ops.AwaitResubmissionRemainingBudget(
+		fixture.projectRoot, boundedAwaitTaskID, "code-reviewer-absent", budget)
+	if got != budget {
+		t.Errorf("remaining with no anchor for the agent = %s, want fallback to %s", got, budget)
+	}
+}
+
+// TestAwaitRemainingBudget_CallerCannotExtendDeadline covers the second half of
+// the loop bound: deriving from an anchor is only monotonic if the total is also
+// fixed. A caller that raises --timeout-seconds by however much time has passed
+// would otherwise hold the remainder constant forever.
+func TestAwaitRemainingBudget_CallerCannotExtendDeadline(t *testing.T) {
+	fixture := setupBoundedAwaitFixture(
+		t,
+		models.TaskStatusReadyForReview,
+		boundedAwaitCoderID,
+		"coder",
+		models.AgentStatusWaiting,
+		models.TaskEventSubmittedForReview,
+	)
+
+	setSubmissionAge := func(t *testing.T, age time.Duration) {
+		t.Helper()
+		if err := fixture.bb.Modify(func(s *models.State) error {
+			task := s.FindTask(boundedAwaitTaskID)
+			for i := range task.History {
+				if task.History[i].Event == models.TaskEventSubmittedForReview {
+					task.History[i].Time = time.Now().UTC().Add(-age)
+				}
+			}
+			return nil
+		}); err != nil {
+			t.Fatalf("set submission age: %v", err)
+		}
+	}
+
+	// An escalating caller: each call asks for more than the last, by more than
+	// the elapsed time. The derived remainder must still fall.
+	var previous time.Duration
+	for i, step := range []struct {
+		age   time.Duration
+		total time.Duration
+	}{
+		{5 * time.Minute, 30 * time.Minute},
+		{15 * time.Minute, 2 * time.Hour},
+		{29 * time.Minute, 24 * time.Hour},
+	} {
+		setSubmissionAge(t, step.age)
+		got := ops.AwaitVerdictRemainingBudget(
+			fixture.projectRoot, boundedAwaitTaskID, boundedAwaitCoderID, step.total)
+		if got > ops.DefaultAwaitBudget {
+			t.Fatalf("step %d: remaining = %s, exceeds the %s ceiling",
+				i, got, ops.DefaultAwaitBudget)
+		}
+		if i > 0 && got >= previous {
+			t.Fatalf("step %d: remaining = %s did not fall below previous %s; "+
+				"a caller raising the total extended its own deadline", i, got, previous)
+		}
+		previous = got
+	}
+
+	// Past the ceiling, no total revives the wait.
+	setSubmissionAge(t, 90*time.Minute)
+	if got := ops.AwaitVerdictRemainingBudget(
+		fixture.projectRoot, boundedAwaitTaskID, boundedAwaitCoderID, 24*time.Hour); got != 0 {
+		t.Errorf("remaining = %s past the ceiling, want 0", got)
+	}
+}

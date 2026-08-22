@@ -1,11 +1,13 @@
 # `liza_await_verdict` MCP Tool
 
 > **Historical implementation plan (superseded).** The MCP surface described below
-> was removed. The current `await-verdict` CLI treats `--timeout-seconds` as the
-> remaining overall budget, caps one foreground call at 100 seconds, returns `POLL`
-> with a smaller `timeout_seconds` while budget remains, and returns final `TIMEOUT`
-> when the budget is exhausted. Historical MCP names, `MCP_TIMEOUT`, and direct
-> 1,500-second blocking behavior below are retained only as implementation provenance.
+> was removed. The current `await-verdict` CLI treats `--timeout-seconds` as the total
+> wait allowance (default 1,800 seconds, also a hard ceiling), caps one foreground call
+> at 100 seconds, and derives the remaining share from task history rather than from a
+> value the caller carries between calls: retries re-run the identical command, get
+> `POLL` while budget remains, and `TIMEOUT` once it is exhausted. Historical MCP names,
+> `MCP_TIMEOUT`, and direct 1,500-second blocking behavior below are retained only as
+> implementation provenance.
 
 ## Context
 

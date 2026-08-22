@@ -2,13 +2,14 @@
 - {{binaryName}} await-verdict — Block until review verdict arrives (call after submit-for-review; budget-aware)
   {{binaryName}} await-verdict {{.TaskID}} --agent-id {{.AgentID}} --json
   One call lasts at most 100 seconds. Handle the response status:
-  - `POLL`: call await-verdict again in the foreground with the returned smaller `timeout_seconds`.
+  - `POLL`: run the same await-verdict command again in the foreground. Repeat until a non-POLL outcome.
+    There is no call limit and no argument to carry over: {{brandTitle}} tracks the remaining budget from your
+    submission time, and `timeout_seconds` is reported for visibility only.
   - `TIMEOUT`: stop waiting and exit normally; the overall budget is exhausted.
   - REJECTED: read rejection reason, fix, resubmit
   - APPROVED, TERMINAL, or ALREADY_TRANSITIONED with safe_action=stop: exit normally
   - NEW_ATTEMPT or ABORTED: exit normally
   - Budget error: exit normally
-  BUDGET: Call await-verdict at most 3 times. If no verdict after 3 calls, exit normally — the supervisor will restart you with the verdict.
   Harness backgrounding, a terminal/stop outcome, or exhausted retry policy means stop safely without custom polling or background execution.
   If the harness backgrounds await-verdict and says it will notify on completion, end the turn; do NOT call Monitor, search for Monitor, ScheduleWakeup, or read/tail/sleep/poll the output file.
   Do NOT poll {{binaryName}} get, cat /tmp, or any other command to check for verdict arrival between calls.

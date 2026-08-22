@@ -71,7 +71,7 @@ if iterations >= max_iterations and task.state != APPROVED:
     exit(42)
 ```
 
-**Wait Model:** Agents do not block waiting for verdicts. After requesting review, the coder exits with code 42. The supervisor restarts the agent, which re-reads the blackboard to discover the verdict. This stateless restart model is fundamental to Liza's design.
+**Wait Model:** Agents hold their session across the review boundary. After requesting review the doer calls `liza await-verdict`; after a REJECTED verdict the reviewer calls `liza await-resubmission`. Both loop in 100-second foreground calls until an outcome arrives or the wait budget is exhausted. A session never survives exit, so this is the only mechanism preserving agent context across a review cycle. On budget exhaustion the agent exits and a fresh session picks the task up — affinity is best-effort, not guaranteed. See [Await Primitives](await-primitives.md).
 
 **Logging:** Coder MUST log anomalies as they occur (not at end of task). See [Roles](../architecture/roles.md#coder-logging-duties) for required anomaly types.
 

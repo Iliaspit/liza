@@ -453,15 +453,17 @@ func TestDefaultTimeout(t *testing.T) {
 		role string
 		want time.Duration
 	}{
-		// Type defaults (no YAML applied): doer=2h, reviewer=30m, orchestrator=4h
+		// Type defaults (no YAML applied): doer=2h, reviewer=2h, orchestrator=4h.
+		// Reviewer matches doer so both sessions can span a whole attempt while
+		// holding await-verdict / await-resubmission.
 		{"coder", 2 * time.Hour},
 		{"code-planner", 2 * time.Hour},
 		{"epic-planner", 2 * time.Hour},
 		{"us-writer", 2 * time.Hour},
-		{"code-reviewer", 30 * time.Minute},
-		{"code-plan-reviewer", 30 * time.Minute},
-		{"epic-plan-reviewer", 30 * time.Minute},
-		{"us-reviewer", 30 * time.Minute},
+		{"code-reviewer", 2 * time.Hour},
+		{"code-plan-reviewer", 2 * time.Hour},
+		{"epic-plan-reviewer", 2 * time.Hour},
+		{"us-reviewer", 2 * time.Hour},
 		{"orchestrator", 4 * time.Hour},
 	}
 

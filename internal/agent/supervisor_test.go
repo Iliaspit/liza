@@ -41,7 +41,6 @@ type MockLLMAgentCall struct {
 	AdditionalDirs []string
 	TaskID         string
 	SessionID      string
-	ResumeSession  string
 	WarmSession    bool
 	EventSinkSet   bool
 }
@@ -56,7 +55,6 @@ func (m *MockLLMAgent) Run(ctx context.Context, req LLMAgentRunRequest) (LLMAgen
 		AdditionalDirs: slices.Clone(req.AdditionalDirs),
 		TaskID:         req.TaskID,
 		SessionID:      req.SessionID,
-		ResumeSession:  req.ResumeSession,
 		WarmSession:    req.WarmSession,
 		EventSinkSet:   req.EventSink != nil,
 	})
@@ -267,12 +265,11 @@ func TestMockLLMAgentResultCarriesUsageAndSessionMetadata(t *testing.T) {
 	}
 	ctx := context.Background()
 	result, err := mock.Run(ctx, LLMAgentRunRequest{
-		BackendName:   "claude",
-		AgentID:       "claude-2",
-		TaskID:        "task-42",
-		SessionID:     "sess-42",
-		ResumeSession: "resume-7",
-		WarmSession:   true,
+		BackendName: "claude",
+		AgentID:     "claude-2",
+		TaskID:      "task-42",
+		SessionID:   "sess-42",
+		WarmSession: true,
 	})
 	if err != nil {
 		t.Fatalf("Run error: %v", err)

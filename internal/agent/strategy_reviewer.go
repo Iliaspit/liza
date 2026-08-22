@@ -33,7 +33,7 @@ func (s *reviewerStrategy) effectiveMaxRetries() int {
 	return defaultMaxMergeRetries
 }
 
-const defaultReviewerTimeout = 30 * time.Minute
+const defaultReviewerTimeout = 2 * time.Hour
 
 func (s *reviewerStrategy) DefaultTimeout() time.Duration {
 	if s.executionTimeout > 0 {

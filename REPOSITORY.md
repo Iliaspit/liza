@@ -74,6 +74,7 @@ specs/
 │   └── ADR/                            # Architecture Decision Records
 ├── protocols/
 │   ├── task-lifecycle.md               # Claim → iterate → review → merge
+│   ├── await-primitives.md             # Session-holding waits, budget mechanics, coupled clocks
 │   ├── sprint-governance.md            # Checkpoints, retrospectives, spec evolution
 │   ├── circuit-breaker.md              # Systemic failure detection, severity levels
 │   ├── worktree-management.md          # Isolated workspaces, merge protocol

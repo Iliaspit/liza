@@ -815,9 +815,10 @@ func TestResetAgentAfterExit_WaitingWithoutCurrentTask(t *testing.T) {
 	}
 }
 
-// TestResetAgentAfterExit_DoerWaitingWithCurrentTask tests that a WAITING doer
-// with CurrentTask set is preserved for await-verdict continuity.
-func TestResetAgentAfterExit_DoerWaitingWithCurrentTask(t *testing.T) {
+// TestResetAgentAfterExit_DoerWaitingReleasesClaim tests that a WAITING doer
+// with CurrentTask set is reset and its claim released. A session never resumes
+// after exit, so preserving the claim would only pin the task to a departed agent.
+func TestResetAgentAfterExit_DoerWaitingReleasesClaim(t *testing.T) {
 	tmpDir := t.TempDir()
 	statePath, _ := testhelpers.SetupLizaDir(t, tmpDir)
 	testhelpers.SetupPipelineConfig(t, tmpDir)
@@ -844,11 +845,11 @@ func TestResetAgentAfterExit_DoerWaitingWithCurrentTask(t *testing.T) {
 	}
 
 	agent := state.Agents[agentID]
-	if agent.Status != models.AgentStatusWaiting {
-		t.Errorf("Expected status WAITING, got %s", agent.Status)
+	if agent.Status != models.AgentStatusIdle {
+		t.Errorf("Expected status IDLE, got %s", agent.Status)
 	}
-	if agent.CurrentTask == nil || *agent.CurrentTask != taskID {
-		t.Errorf("Expected CurrentTask %q, got %v", taskID, agent.CurrentTask)
+	if agent.CurrentTask != nil {
+		t.Errorf("Expected CurrentTask nil, got %v", *agent.CurrentTask)
 	}
 }
 

@@ -71,7 +71,7 @@ pipeline:
       display-name: "Epic Plan Reviewer"
       description: "Reviews epic plans, issues binding verdicts"
       timeouts:
-        execution: 30m
+        execution: 2h
         poll-interval: 30s
         max-wait: 5h
       allowed-operations:
@@ -131,7 +131,7 @@ pipeline:
       display-name: "US Reviewer"
       description: "Reviews user stories, issues binding verdicts"
       timeouts:
-        execution: 30m
+        execution: 2h
         poll-interval: 30s
         max-wait: 5h
       allowed-operations:
@@ -191,7 +191,7 @@ pipeline:
       display-name: "Code Plan Reviewer"
       description: "Reviews implementation plans, issues binding verdicts"
       timeouts:
-        execution: 30m
+        execution: 2h
         poll-interval: 30s
         max-wait: 5h
       allowed-operations:
@@ -257,7 +257,7 @@ pipeline:
       display-name: "Code Reviewer"
       description: "Reviews code changes, issues binding verdicts"
       timeouts:
-        execution: 30m
+        execution: 2h
         poll-interval: 30s
         max-wait: 5h
       allowed-operations:
@@ -319,7 +319,7 @@ pipeline:
       display-name: "Architecture Reviewer"
       description: "Reviews architectural coherence, interface contracts, structural soundness"
       timeouts:
-        execution: 30m
+        execution: 2h
         poll-interval: 30s
         max-wait: 5h
       allowed-operations:
@@ -379,7 +379,7 @@ pipeline:
       display-name: "Integration Reviewer"
       description: "Validates and enriches findings with systemic analysis"
       timeouts:
-        execution: 30m
+        execution: 2h
         poll-interval: 30s
         max-wait: 5h
       allowed-operations:

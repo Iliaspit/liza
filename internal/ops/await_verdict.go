@@ -160,7 +160,7 @@ func AwaitVerdict(ctx context.Context, projectRoot, taskID, agentID string, time
 
 	// Budget gate: simulate what would happen on rejection. If limits are
 	// already at capacity, release ownership and return immediately rather
-	// than blocking for up to 25 minutes only to discover we can't iterate.
+	// than blocking for the full budget only to discover we can't iterate.
 	iterLimit := effectiveCoderIterationLimit(task, state.Config)
 	reviewLimit := effectiveReviewCycleLimit(state.Config)
 	_, shouldEscalate := classifyLimitEscalation(
@@ -517,6 +517,7 @@ func extractReviewerFromHistory(task *models.Task) string {
 type submittedReview struct {
 	index  int
 	commit string
+	at     time.Time
 }
 
 type recoveredVerdict struct {
@@ -539,7 +540,7 @@ func latestSubmissionByAgent(task *models.Task, agentID string) (submittedReview
 		if entry.Commit != nil {
 			commit = *entry.Commit
 		}
-		return submittedReview{index: i, commit: commit}, true
+		return submittedReview{index: i, commit: commit, at: entry.Time}, true
 	}
 	return submittedReview{}, false
 }
@@ -686,4 +687,92 @@ func recoveredVerdictGuidance(result *AwaitVerdictResult) string {
 		"Review verdict was recovered after the task already moved to %s. Stop this session; do not retry await-verdict or run more worktree commands for this submission.",
 		result.TaskStatus,
 	)
+}
+
+// DefaultAwaitBudget is the total wait allowance for one await, and also the
+// hard ceiling: a caller cannot raise it. Without the ceiling, an invocation
+// passing an ever-larger total would offset its own elapsed time and hold the
+// remainder constant, so the derived bound would stop being monotonic.
+const DefaultAwaitBudget = 30 * time.Minute
+
+func cappedAwaitBudget(total time.Duration) time.Duration {
+	if total <= 0 {
+		return 0
+	}
+	return min(total, DefaultAwaitBudget)
+}
+
+// AwaitVerdictRemainingBudget reports how much of total is left for this wait,
+// measured from the agent's most recent submission rather than from a value the
+// agent carries between calls. A caller that never passes back the reported
+// remainder therefore still converges on TIMEOUT instead of looping until the
+// session ceiling. Falls back to total when no anchor exists — the await's own
+// precondition checks own that error.
+func AwaitVerdictRemainingBudget(projectRoot, taskID, agentID string, total time.Duration) time.Duration {
+	lp := paths.New(projectRoot)
+	bb := db.For(lp.StatePath())
+	_, task, err := readTaskState(bb, taskID)
+	if err != nil || task == nil {
+		return cappedAwaitBudget(total)
+	}
+	submission, ok := latestSubmissionByAgent(task, agentID)
+	if !ok {
+		return cappedAwaitBudget(total)
+	}
+	return remainingFromAnchor(submission.at, total)
+}
+
+// remainingFromAnchor clamps elapsed-time subtraction into [0, total]. A future
+// anchor (clock skew) yields total, never more.
+func remainingFromAnchor(anchor time.Time, total time.Duration) time.Duration {
+	total = cappedAwaitBudget(total)
+	if anchor.IsZero() {
+		return total
+	}
+	elapsed := awaitVerdictNow().Sub(anchor)
+	if elapsed <= 0 {
+		return total
+	}
+	if elapsed >= total {
+		return 0
+	}
+	return total - elapsed
+}
+
+// ReleaseDepartedDoerAssignment drops only the doer's assignment and lease when a
+// wait ends at budget exhaustion. Deliberately narrower than ReleaseClaim, whose
+// doer profile also clears Worktree, BaseCommit, Iteration, Output and the whole
+// submitted-attempt block (ReviewCommit, approvals, MergeCommit). Applying that
+// here would strip the review boundary from a task still sitting in review, so a
+// later verdict would fail validation and the reviewer would face an empty
+// worktree. The submitted attempt must outlive the doer that produced it.
+//
+// No-op unless agentID still holds the assignment, so a task already reclaimed by
+// someone else is left alone.
+func ReleaseDepartedDoerAssignment(projectRoot, taskID, agentID string) error {
+	lp := paths.New(projectRoot)
+	bb := db.For(lp.StatePath())
+	now := awaitVerdictNow().UTC()
+
+	return bb.Modify(func(state *models.State) error {
+		task := state.FindTask(taskID)
+		if task == nil {
+			return &errors.NotFoundError{Entity: "task", ID: taskID}
+		}
+		if task.AssignedTo == nil || *task.AssignedTo != agentID {
+			return nil
+		}
+
+		task.AssignedTo = nil
+		task.LeaseExpires = nil
+
+		reason := "await budget exhausted; doer session ended"
+		task.History = append(task.History, models.TaskHistoryEntry{
+			Time:   now,
+			Event:  "doer_claim_released",
+			Agent:  &agentID,
+			Reason: &reason,
+		})
+		return nil
+	})
 }

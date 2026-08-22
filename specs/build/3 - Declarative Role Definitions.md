@@ -130,7 +130,7 @@ pipeline:
       display-name: "Code Reviewer"
       description: "Reviews code changes, issues binding verdicts"
       timeouts:
-        execution: 30m         # default for reviewer if omitted: 30m
+        execution: 2h          # default for reviewer if omitted: 2h
         poll-interval: 30s
         max-wait: 5h
       context-sections:
@@ -238,7 +238,16 @@ Role `type` determines the generic strategy applied by the supervisor:
 | Type | Strategy | Claim Slot | Default Timeout | Key Behaviors |
 |------|----------|------------|-----------------|---------------|
 | `doer` | `doerStrategy` | `AssignedTo` | 2h | Wait for claimable tasks, build doer prompt, log submission on exit |
-| `reviewer` | `reviewerStrategy` | `ReviewingBy` | 30m | Handle merges in PreWork, clear stale claims, build reviewer prompt |
+| `reviewer` | `reviewerStrategy` | `ReviewingBy` | 2h | Handle merges in PreWork, clear stale claims, build reviewer prompt |
+
+The reviewer default matches the doer's so both sessions can span a whole attempt while holding
+`await-resubmission` / `await-verdict`. See [Await Primitives](../protocols/await-primitives.md).
+
+**Frozen configs are not upgraded.** `MigrateOperations` patches missing allowed-operations only —
+it never rewrites timeouts, so a workspace initialized before this change keeps `execution: 30m`
+in its own `.liza/pipeline.yaml` and its reviewers stay bounded at 30 minutes. This is deliberate:
+a project may have tuned that value. To adopt the new default, edit the role's `timeouts.execution`
+in the workspace config, or omit the field to fall through to the built-in default.
 | `orchestrator` | `orchestratorStrategy` | None | 4h | Detect wake triggers, no task claiming, verify state changes on exit |
 
 The `type` field replaces `DoerRoles()`, `ReviewerRoles()`, `IsDoerRole()`, `IsReviewerRole()`

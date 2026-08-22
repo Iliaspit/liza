@@ -31,8 +31,9 @@ var boundedAwaitLifecycleGuidance = []string{
 }
 
 var reviewerAwaitOutcomeGuidance = []string{
-	"`POLL` returns a smaller remaining budget in `timeout_seconds` for the next foreground invocation.",
-	"`TIMEOUT` is final budget exhaustion.",
+	"On `POLL`, run the same command again in the foreground.",
+	"There is no call limit and no argument to carry over",
+	"`TIMEOUT` is final budget exhaustion — exit normally.",
 }
 
 func withPromptBrandValues(t *testing.T, mutate func()) {
@@ -2441,10 +2442,10 @@ func TestBuildRoleContext_AwaitVerdictLoopRendersForAllDoers(t *testing.T) {
 		"liza await-verdict",
 		"POLL",
 		"timeout_seconds",
-		"call await-verdict again in the foreground with the returned",
+		"run the same await-verdict command again in the foreground",
+		"There is no call limit and no argument to carry over",
 		"stop waiting and exit normally",
 		"sole polling primitive",
-		"Call await-verdict at most 3 times",
 		"If the harness backgrounds await-verdict and says it will notify on completion, end the turn; do NOT call Monitor, search for Monitor, ScheduleWakeup, or read/tail/sleep/poll the output file.",
 		"Do NOT poll liza get",
 		"Do NOT run more worktree commands after APPROVED, TERMINAL, or ALREADY_TRANSITIONED",

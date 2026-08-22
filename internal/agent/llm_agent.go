@@ -53,7 +53,6 @@ type LLMAgentRunRequest struct {
 	AgentID        string
 	TaskID         string
 	SessionID      string
-	ResumeSession  string
 	WarmSession    bool
 	ProfileName    string
 	ProfileVars    map[string]string

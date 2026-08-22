@@ -58,6 +58,7 @@
 | Document | Purpose |
 |----------|---------|
 | [Task Lifecycle](protocols/task-lifecycle.md) | Claim, iterate, review, merge flow |
+| [Await Primitives](protocols/await-primitives.md) | Session-holding waits across the review boundary; the six coupled clocks |
 | [Sprint Governance](protocols/sprint-governance.md) | Checkpoints, retrospectives, spec evolution |
 | [Circuit Breaker](protocols/circuit-breaker.md) | Systemic failure detection, severity classification |
 | [Worktree Management](protocols/worktree-management.md) | Isolated workspaces, merge protocol |

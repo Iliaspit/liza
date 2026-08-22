@@ -448,3 +448,36 @@ func awaitResubmissionPolling(ctx context.Context, projectRoot string, bb *db.Bl
 		}
 	}
 }
+
+// latestRejectionByAgent returns when this agent last rejected the task.
+func latestRejectionByAgent(task *models.Task, agentID string) (time.Time, bool) {
+	for i := len(task.History) - 1; i >= 0; i-- {
+		entry := task.History[i]
+		if entry.Event != models.TaskEventRejected {
+			continue
+		}
+		if entry.Agent == nil || *entry.Agent != agentID {
+			continue
+		}
+		return entry.Time, true
+	}
+	return time.Time{}, false
+}
+
+// AwaitResubmissionRemainingBudget reports how much of total is left for this
+// wait, measured from the reviewer's most recent rejection. Mirrors
+// AwaitVerdictRemainingBudget: the bound holds without the caller carrying a
+// value between invocations.
+func AwaitResubmissionRemainingBudget(projectRoot, taskID, agentID string, total time.Duration) time.Duration {
+	lp := paths.New(projectRoot)
+	bb := db.For(lp.StatePath())
+	_, task, err := readTaskState(bb, taskID)
+	if err != nil || task == nil {
+		return cappedAwaitBudget(total)
+	}
+	rejectedAt, ok := latestRejectionByAgent(task, agentID)
+	if !ok {
+		return cappedAwaitBudget(total)
+	}
+	return remainingFromAnchor(rejectedAt, total)
+}

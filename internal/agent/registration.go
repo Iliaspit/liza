@@ -369,26 +369,17 @@ func resetAgentAfterExit(bb *db.Blackboard, agentID, projectRoot string) error {
 			return &errors.NotFoundError{Entity: "agent", ID: agentID}
 		}
 
-		roleType := ""
-		if resolver != nil {
-			roleType, _ = resolver.RoleType(agent.Role)
-		}
-
 		switch agent.Status {
 		case models.AgentStatusWaiting:
+			// A session never resumes after exit, so a WAITING agent holding a
+			// task has nothing to come back to: fall through and release the
+			// claim rather than pinning the task to a departed agent.
 			if agent.CurrentTask != nil {
 				task := state.FindTask(*agent.CurrentTask)
 				if task != nil && task.ReviewingBy != nil && *task.ReviewingBy == agentID {
 					return releaseTaskClaim(state, task, agent.Role, agentID, pipelineTransitions, resolver, now)
 				}
-				if roleType == "reviewer" {
-					break
-				}
-				agent.Heartbeat = now
-				state.Agents[agentID] = agent
-				return nil
 			}
-			// CurrentTask already cleared — fall through to reset to IDLE
 		case models.AgentStatusHandoff:
 			if agent.CurrentTask != nil {
 				agent.Heartbeat = now
