@@ -93,6 +93,7 @@ REVIEW CHECKLIST:
 | Falsifiable done_when | done_when is vague or untestable |
 | Scope smell | done_when spans >2 packages or >4 conditions — verify the task has a single intent; reject with split suggestion if composite |
 | Dependency order | Tasks have circular or missing dependencies |
+| Executable dependency proof | Plan claims sibling child-task ordering without output[].depends_on sibling indexes, claims child ordering inherited across planning-task dependencies when the dependency did not execute the same transition name and output[].task_depends_on does not name existing concrete task IDs, or requires a concrete dependency target that does not exist without marking the planning task BLOCKED |
 | Shared-file dependency | Two tasks modify the same file but lack depends_on between them — parallel coders will hit merge conflicts |
 | Spec compliance matrix | Plan has no "## Spec Compliance Matrix" section, or matrix has GAP rows, or matrix omits spec requirements, or matrix task mappings are inaccurate |
 | output[] populated | Task has no output[] entries (planner must call {{binaryName}} set-task-output --json) |

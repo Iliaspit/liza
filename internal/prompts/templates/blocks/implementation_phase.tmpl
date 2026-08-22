@@ -65,6 +65,9 @@ file and output[] entries only.
    validation (optional canonical commands; hook/check intent must appear in the plan text, desc, or done_when). Commands must be single-purpose and agent-executable. Forbidden validation command shapes: `cd ... &&`, command substitution/backticks, polling or tail pipelines, and task artifact paths outside the worktree.
    depends_on (optional array of sibling index strings, e.g. ["0", "2"] — resolved to child task IDs at transition),
    task_depends_on (optional array of existing concrete task IDs outside this output[]).
+   Automatic child dependency inheritance applies only when an upstream dependency executed the same transition name.
+   For ordering across different transition names, set output[].task_depends_on to existing concrete task IDs.
+   If the required concrete dependency task does not exist, mark the planning task BLOCKED for authoritative graph reconciliation; do not claim future ordering.
    Extract each field verbatim from the plan file — do not compose from memory or paraphrase.
 4. Update only planning artifacts required by DONE WHEN (plan file and task-output JSON).
 5. Validate done_when criteria with concrete checks.
