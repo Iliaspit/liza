@@ -282,6 +282,17 @@ func buildManyToOneChild(childID string, cohort []*models.Task, sharedParentID s
 	specRef := cohort[0].SpecRef
 	epicRef := paths.SplitRefFile(cohort[0].EpicRef) // doc-only: strip section anchor at many-to-one boundary
 
+	// Fan-in keeps the defect classification if any member carries it: a cohort
+	// mixing defect and feature parents still consolidates work whose root cause
+	// must be established downstream.
+	rcaRequired := false
+	for _, member := range cohort {
+		if member.RCARequired {
+			rcaRequired = true
+			break
+		}
+	}
+
 	return models.Task{
 		ID:          childID,
 		Type:        tDef.taskType,
@@ -292,6 +303,7 @@ func buildManyToOneChild(childID string, cohort []*models.Task, sharedParentID s
 		ParentTasks: parentIDs,
 		SpecRef:     paths.NormalizeSpecRef(specRef),
 		EpicRef:     paths.NormalizeSpecRef(epicRef),
+		RCARequired: rcaRequired,
 		DoneWhen:    fmt.Sprintf("Complete %s work based on %d parent tasks from %s", doerName, len(cohort), sharedParentID),
 		Scope:       fmt.Sprintf("Consolidation of %d tasks from %s", len(cohort), sharedParentID),
 		DependsOn:   inheritedDeps,
@@ -489,7 +501,7 @@ func proceedInner(s *models.State, taskID, transitionName string, tDef transitio
 				// child for i.
 				continue
 			}
-			child := buildChildTask(siblingIDs[i], taskID, entry, tDef.targetStatus, tDef.targetRolePair, tDef.taskType, siblingIDs, inheritedDeps, task.EpicRef, task.ArchRef, now)
+			child := buildChildTask(siblingIDs[i], taskID, entry, tDef.targetStatus, tDef.targetRolePair, tDef.taskType, siblingIDs, inheritedDeps, task.EpicRef, task.ArchRef, task.RCARequired, now)
 			canonicalDeps, _, err := canonicalizeChildDependsOn(s, resolver, child.ID, child.RolePair, child.DependsOn, allowedMissingDeps)
 			if err != nil {
 				return err
@@ -616,7 +628,7 @@ func recoverCrashedTransition(s *models.State, task *models.Task, taskID, transi
 		}
 		var children []models.Task
 		for _, idx := range missingChildren {
-			child := buildChildTask(siblingIDs[idx], taskID, canonicalOutput[idx], tDef.targetStatus, tDef.targetRolePair, tDef.taskType, siblingIDs, inheritedDeps, task.EpicRef, task.ArchRef, now)
+			child := buildChildTask(siblingIDs[idx], taskID, canonicalOutput[idx], tDef.targetStatus, tDef.targetRolePair, tDef.taskType, siblingIDs, inheritedDeps, task.EpicRef, task.ArchRef, task.RCARequired, now)
 			canonicalDeps, _, err := canonicalizeChildDependsOn(s, resolver, child.ID, child.RolePair, child.DependsOn, allowedMissingDeps)
 			if err != nil {
 				return err
@@ -1275,7 +1287,7 @@ func buildTransitionDefFromPipeline(resolver *pipeline.Resolver, transitionName 
 // siblingIDs maps output entry indices to their generated task IDs,
 // used to resolve DependsOn index references to actual task IDs.
 // inheritedDeps are phase-gate dependencies from upstream tasks' children.
-func buildChildTask(childID, parentID string, entry models.OutputEntry, targetStatus models.TaskStatus, targetRolePair string, taskType models.TaskType, siblingIDs, inheritedDeps []string, parentEpicRef, parentArchRef string, now time.Time) models.Task {
+func buildChildTask(childID, parentID string, entry models.OutputEntry, targetStatus models.TaskStatus, targetRolePair string, taskType models.TaskType, siblingIDs, inheritedDeps []string, parentEpicRef, parentArchRef string, parentRCARequired bool, now time.Time) models.Task {
 	var deps []string
 	for _, ref := range entry.DependsOn {
 		idx, _ := strconv.Atoi(ref) // validated upstream in validateOutputEntry
@@ -1309,6 +1321,7 @@ func buildChildTask(childID, parentID string, entry models.OutputEntry, targetSt
 		ArchRef:       paths.NormalizeSpecRef(archRef),
 		Decomposition: entry.Decomposition,
 		Kind:          entry.Kind,
+		RCARequired:   parentRCARequired,
 		DoneWhen:      entry.DoneWhen,
 		Validation:    slices.Clone(entry.Validation),
 		DestructiveDB: entry.DestructiveDB,
@@ -1340,6 +1353,7 @@ func buildOneToOneChild(childID, parentID string, parent *models.Task, tDef tran
 		EpicRef:     parent.EpicRef,
 		PlanRef:     parent.PlanRef,
 		ArchRef:     parent.ArchRef,
+		RCARequired: parent.RCARequired,
 		DoneWhen:    fmt.Sprintf("Complete %s work based on parent task %s", doerName, parentID),
 		Scope:       fmt.Sprintf("Based on parent task %s", parentID),
 		DependsOn:   inheritedDeps,

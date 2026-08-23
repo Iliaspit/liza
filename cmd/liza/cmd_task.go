@@ -1191,7 +1191,10 @@ var addTasksCmd = &cobra.Command{
 
 Reads task definitions from a JSON file. Each task must have id, desc, spec,
 done, and scope. Optional fields: priority, depends, type, role_pair, plan_ref,
-validation, destructive_db.
+validation, destructive_db, rca_required.
+
+Set rca_required when the objective is a defect fix: the flag inherits to child
+tasks and requires the code plan to carry a reviewed root cause analysis.
 
 Tasks are added independently; failed tasks don't block subsequent ones.
 Each added task is scoped-validated before persistence. If unrelated existing

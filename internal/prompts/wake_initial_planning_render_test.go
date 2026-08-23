@@ -164,6 +164,61 @@ func TestWakeInitialPlanningMissingMasterRendersSpecializedFallback(t *testing.T
 	})
 }
 
+// The defect classification instruction is the only mechanism that ever sets
+// rca_required, and its default (false) is silent: weakening or deleting the
+// instruction would leave every other test in the suite green while making the
+// feature inert. These assertions are that instruction's only guard.
+func TestWakeInitialPlanningRendersDefectClassification(t *testing.T) {
+	fallbackContent := strings.ReplaceAll(string(embedded.PipelineConfigContent()), "      decomposition-root: true\n      decomposition-output-ref: plan_ref\n", "")
+	fallbackContent = strings.ReplaceAll(fallbackContent, "      decomposition-root: true\n      decomposition-output-ref: arch_ref\n", "")
+
+	tests := []struct {
+		name       string
+		entryPoint string
+		root       func(t *testing.T) string
+	}{
+		{
+			name:       "explicit entry point",
+			entryPoint: "technical-spec",
+			root:       setupPipelineConfig,
+		},
+		{
+			name:       "inferred entry point",
+			entryPoint: "",
+			root:       setupPipelineConfig,
+		},
+		{
+			name:       "missing master fallback",
+			entryPoint: "functional-spec",
+			root: func(t *testing.T) string {
+				return setupPipelineConfigContent(t, []byte(fallbackContent))
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			projectRoot := tt.root(t)
+			data, err := buildWakeTemplateData("specs/goal.md", tt.entryPoint, projectRoot)
+			if err != nil {
+				t.Fatalf("buildWakeTemplateData: %v", err)
+			}
+			rendered, err := buildInstructionsForWakeTrigger("INITIAL_PLANNING", "orchestrator-1", data, nil)
+			if err != nil {
+				t.Fatalf("buildInstructionsForWakeTrigger: %v", err)
+			}
+
+			assertContainsAll(t, rendered, []string{
+				"DEFECT CLASSIFICATION:",
+				"a bug, regression, or incident",
+				`set "rca_required": true on the task`,
+				`"rca_required": false,`,
+				`The defect classification is stated, and "rca_required" is set only for defect fixes.`,
+			})
+		})
+	}
+}
+
 func TestWakeInitialPlanningRejectsOldMultiTaskGuidance(t *testing.T) {
 	projectRoot := setupPipelineConfig(t)
 	for _, entryPoint := range []string{"", "general-objective", "functional-spec", "detailed-spec", "technical-spec"} {

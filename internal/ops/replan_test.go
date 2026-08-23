@@ -503,6 +503,38 @@ func TestReplan_PreservesParentTasksAndArchRef(t *testing.T) {
 	}
 }
 
+func TestReplan_PreservesRCARequired(t *testing.T) {
+	tmpDir, stateFile := setupReplanTest(t)
+	now := time.Now().UTC()
+
+	state := testhelpers.CreateValidState()
+	state.Sprint.Status = models.SprintStatusCheckpoint
+
+	task := buildMergedPlanningTask("plan-1", now)
+	task.RCARequired = true
+
+	state.Tasks = append(state.Tasks, task)
+	state.Sprint.Scope.Planned = []string{"plan-1"}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	result, err := Replan(tmpDir, &ReplanInput{TaskID: "plan-1", ChangedBy: "human"})
+	if err != nil {
+		t.Fatalf("Replan: %v", err)
+	}
+
+	readState, err := db.New(stateFile).Read()
+	if err != nil {
+		t.Fatalf("read state: %v", err)
+	}
+	newTask := readState.FindTask(result.NewTaskID)
+	if newTask == nil {
+		t.Fatal("new task not found")
+	}
+	if !newTask.RCARequired {
+		t.Errorf("RCARequired = false, want true (replacement must keep the defect classification)")
+	}
+}
+
 func TestReplan_RetargetsDownstream(t *testing.T) {
 	tmpDir, stateFile := setupReplanTest(t)
 	now := time.Now().UTC()

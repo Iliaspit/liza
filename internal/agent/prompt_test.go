@@ -3081,6 +3081,69 @@ func TestBuildPrompt_TaskDecompositionRenders(t *testing.T) {
 	}
 }
 
+// Guards the Task -> RoleContextData wiring for rca_required. The rendering tests in
+// internal/prompts construct RoleContextData directly, so they stay green if this
+// single assignment disappears; because false is the silent default, that regression
+// would make the feature inert with no other failing test.
+func TestBuildTaskRoleContextData_RCARequired(t *testing.T) {
+	now := time.Now().UTC()
+	resolver := testResolver(t)
+
+	makeState := func(rca bool) *models.State {
+		return &models.State{
+			Version: 1,
+			Goal: models.Goal{
+				ID:          "goal-1",
+				Description: "Test goal",
+				SpecRef:     "spec.md",
+				Status:      models.GoalStatusInProgress,
+				Created:     now,
+			},
+			Tasks: []models.Task{
+				{
+					ID:          "task-1",
+					Description: "Plan the regression fix",
+					Status:      models.TaskStatusImplementing,
+					Priority:    1,
+					Iteration:   1,
+					DoneWhen:    "Done",
+					RCARequired: rca,
+					Created:     now,
+				},
+			},
+			Agents: make(map[string]models.Agent),
+			Config: models.Config{IntegrationBranch: "main"},
+		}
+	}
+
+	for _, role := range []struct{ name, agentID string }{
+		{name: "code-planner", agentID: "code-planner-1"},
+		{name: "code-plan-reviewer", agentID: "code-plan-reviewer-1"},
+	} {
+		t.Run(role.name, func(t *testing.T) {
+			config := SupervisorConfig{Role: role.name, AgentID: role.agentID}
+
+			state := makeState(true)
+			data, err := buildTaskRoleContextData(&state.Tasks[0], state, config, resolver)
+			if err != nil {
+				t.Fatalf("buildTaskRoleContextData: %v", err)
+			}
+			if !data.RCARequired {
+				t.Errorf("RCARequired = false, want true (task flag must reach the prompt context)")
+			}
+
+			state = makeState(false)
+			data, err = buildTaskRoleContextData(&state.Tasks[0], state, config, resolver)
+			if err != nil {
+				t.Fatalf("buildTaskRoleContextData (unflagged): %v", err)
+			}
+			if data.RCARequired {
+				t.Errorf("RCARequired = true, want false")
+			}
+		})
+	}
+}
+
 // TestBuildTaskRoleContextData_AttemptNum_UsesEffectiveAttempt verifies that
 // AttemptNum is populated via task.EffectiveAttempt(), not len(task.Attempted)+1.
 func TestBuildTaskRoleContextData_AttemptNum_UsesEffectiveAttempt(t *testing.T) {

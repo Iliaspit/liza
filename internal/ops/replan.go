@@ -138,6 +138,7 @@ func Replan(projectRoot string, input *ReplanInput) (*ReplanResult, error) {
 			PlanRef:     task.PlanRef,
 			ArchRef:     task.ArchRef,
 			Kind:        task.Kind,
+			RCARequired: task.RCARequired,
 			DoneWhen:    task.DoneWhen,
 			Scope:       task.Scope,
 			DependsOn:   slices.Clone(task.DependsOn),

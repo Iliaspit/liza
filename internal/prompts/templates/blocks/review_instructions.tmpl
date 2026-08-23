@@ -106,6 +106,17 @@ REVIEW CHECKLIST:
 | validation command shape | A validation[] command is not single-purpose and agent-executable. Forbidden validation command shapes: `cd ... &&`, command substitution/backticks, polling or tail pipelines, and task artifact paths outside the worktree. |
 | Cross-reference consistency | For every cross-reference in the plan ("owned by CPx", "depends on CPx", "out of scope for CPx"), the referenced task must explicitly state that responsibility, dependency, or exclusion. Reject if any dangling reference. |
 | e2e/doc coverage | Spec compliance matrix missing mandatory E2E or DOC impact rows, or rows marked N/A without justification, or feature adds user-visible behavior but no e2e test or doc update task planned |
+{{- if .RCARequired}}
+| Root cause evidence | Plan has no "## Root Cause Analysis" section; a source or code-path claim lacks a file:line you can check; or a runtime claim lacks a checkable artifact — exact command and output, log excerpt, or explicit reporter attribution |
+| Mechanism, not category | RCA names a failure category ("race condition", "state corruption") without the code path that produces it |
+| Reproduction bound to a test | RCA states no concrete triggering state, or no output[] done_when references it |
+| Honest verification scope | RCA states as verified anything its cited sources do not support, or presents inferred/reporter-attributed claims unmarked |
+| Cause sufficiency | RCA does not state whether fixing the named cause makes the failure impossible, or leaves a residual path unnamed |
+
+Evaluate the Root Cause Analysis FIRST. If it fails any gate above, reject on the
+RCA alone and do not review the task breakdown — a plan built on a wrong cause is
+not repairable by fixing the plan.
+{{- end}}
 {{- if ne .ArchRef ""}}
 
 {{template "artifact-ref-fallback" .}}

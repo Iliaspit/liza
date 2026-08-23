@@ -286,6 +286,7 @@ type Task struct {
 	PlanRef             string                 `yaml:"plan_ref,omitempty"`
 	ArchRef             string                 `yaml:"arch_ref,omitempty"`
 	Kind                string                 `yaml:"kind,omitempty"`
+	RCARequired         bool                   `yaml:"rca_required,omitempty" json:"rca_required,omitempty"`
 	DoneWhen            string                 `yaml:"done_when"`
 	Validation          []string               `yaml:"validation,omitempty" json:"validation,omitempty"`
 	DestructiveDB       bool                   `yaml:"destructive_db,omitempty" json:"destructive_db,omitempty"`

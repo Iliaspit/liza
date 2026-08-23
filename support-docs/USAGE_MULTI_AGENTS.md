@@ -367,6 +367,47 @@ integration sub-pipeline (post-coding, orchestrator-triggered):
 
 The configured entry points still name the specialized planning pairs. During `INITIAL_PLANNING`, §BRAND_NAME_TITLE§ resolves the mapped `decomposition-root` role-pair and creates exactly one first task: the specialized task for simple work, or the master task when the work would otherwise fan out. The master task's quorum-approved `output[]` entries create the specialized children.
 
+#### Defect Objectives (`rca_required`)
+
+During `INITIAL_PLANNING` the orchestrator also classifies the objective itself. When
+the goal spec describes a failure of existing behavior — a bug, regression, or
+incident — rather than a new capability, it sets `rca_required: true` on the task it
+creates. The flag defaults to false, inherits down the planning-to-coding chain
+(including the many-to-one fan-in, where any flagged parent carries it forward), and
+survives `§BRAND_BINARY_NAME§ replan`. Integration-analysis tasks are excluded — they
+render no root cause analysis, so the flag would be inert there.
+
+When it is true, two things change downstream. The code-planner must produce a
+`## Root Cause Analysis` section in the plan file — source and code-path claims cited
+as `file:line` and runtime claims backed by a checkable artifact (exact command and
+output, log excerpt, or explicit reporter attribution), the code path that produces the
+failure rather than its category, the concrete state that
+reproduces it, an honest split between what was verified and what was inferred,
+whether fixing the named cause makes the failure impossible, and adjacent defects
+recorded but not planned. At least one `output[]` `done_when` must reference the
+reproduction, so the coder's failing test exercises the real path. And the
+code-plan-reviewer gates on that section first: an unsound root cause is rejected on
+its own, without reviewing the task breakdown.
+
+Nothing detects a mis-classification. A defect goal the orchestrator reads as feature
+work simply gets no root cause analysis. If you know the objective is a fix, check the
+flag on the first task (`§BRAND_BINARY_NAME§ get <task-id> --json`, which shows
+`rca_required` only when it is set) before letting the sprint run.
+
+No command changes the classification on an existing task, and `replan` deliberately
+preserves it. Correcting it in either direction means abandoning the task and creating
+a replacement, which is supported while the task is still in its initial state:
+
+```bash
+§BRAND_BINARY_NAME§ cancel-task <task-id> "misclassified objective: rca_required"
+# edit the task JSON: set or remove "rca_required": true, and give it a fresh id
+§BRAND_BINARY_NAME§ add-tasks --tasks-file <path.json> --agent-id orchestrator-1 --json
+```
+
+The replacement needs a new task ID — `add-tasks` rejects an ID that already exists,
+and `cancel-task` keeps the original for audit rather than removing it. Do not edit
+`state.yaml` directly to change the flag.
+
 During master decomposition, compare interface ownership and consumption with
 the plan's stated data flow before declaring dependencies. Enforce
 provider-before-consumer ordering: a consumer may depend on its provider, but a

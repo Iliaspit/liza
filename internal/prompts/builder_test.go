@@ -3729,6 +3729,88 @@ func TestDetermineWakeTrigger_CodingComplete(t *testing.T) {
 	}
 }
 
+func TestBuildRoleContext_RCARequired(t *testing.T) {
+	projectRoot := setupPipelineConfig(t)
+	resolver := testPipelineResolver(t)
+
+	planner := func(rca bool) *RoleContextData {
+		return &RoleContextData{
+			Role: "code-planner", AgentID: "code-planner-1", RoleType: "doer",
+			TaskID: "task-1", Description: "Plan the regression fix",
+			DoneWhen: "Plan submitted", Scope: "internal/ops",
+			Worktree:     projectRoot + "/.worktrees/task-1",
+			IterationNum: 1,
+			RCARequired:  rca,
+			ProjectRoot:  projectRoot,
+		}
+	}
+	reviewer := func(rca bool) *RoleContextData {
+		return &RoleContextData{
+			Role: "code-plan-reviewer", AgentID: "code-plan-reviewer-1", RoleType: "reviewer",
+			TaskID: "task-1", Description: "Plan the regression fix",
+			DoneWhen: "Plan submitted", Scope: "internal/ops",
+			Worktree:     projectRoot + "/.worktrees/task-1",
+			IterationNum: 1,
+			BaseCommit:   "abc", ReviewCommit: "def", AssignedTo: "code-planner-1",
+			RCARequired: rca,
+			ProjectRoot: projectRoot,
+		}
+	}
+
+	render := func(t *testing.T, role string, data *RoleContextData) string {
+		t.Helper()
+		sections, _ := resolver.ContextSections(role)
+		output, err := BuildRoleContext(role, sections, data)
+		if err != nil {
+			t.Fatalf("BuildRoleContext: %v", err)
+		}
+		return output
+	}
+
+	t.Run("code-planner with RCARequired renders the RCA requirement", func(t *testing.T) {
+		output := render(t, "code-planner", planner(true))
+		if !strings.Contains(output, "## Root Cause Analysis") {
+			t.Error("code-planner output missing the Root Cause Analysis section requirement")
+		}
+		if !strings.Contains(output, "Mechanism") {
+			t.Error("code-planner output missing the mechanism requirement")
+		}
+		// Both sides must carry the same evidence taxonomy: a planner permitted to
+		// attribute a runtime claim must not face a reviewer gate demanding file:line
+		// for it.
+		if !strings.Contains(output, "checkable artifact") {
+			t.Error("code-planner output missing the runtime-evidence taxonomy")
+		}
+	})
+
+	t.Run("code-planner without RCARequired renders no RCA text", func(t *testing.T) {
+		output := render(t, "code-planner", planner(false))
+		if strings.Contains(output, "Root Cause Analysis") {
+			t.Error("code-planner output should carry no RCA text when RCARequired is false")
+		}
+	})
+
+	t.Run("code-plan-reviewer with RCARequired renders gates and ordering", func(t *testing.T) {
+		output := render(t, "code-plan-reviewer", reviewer(true))
+		if !strings.Contains(output, "Root cause evidence") {
+			t.Error("code-plan-reviewer output missing the root cause evidence gate")
+		}
+		if !strings.Contains(output, "Evaluate the Root Cause Analysis FIRST") {
+			t.Error("code-plan-reviewer output missing the RCA-first ordering instruction")
+		}
+		if !strings.Contains(output, "checkable artifact") {
+			t.Error("code-plan-reviewer gate missing the runtime-evidence taxonomy the planner is held to")
+		}
+	})
+
+	t.Run("code-plan-reviewer without RCARequired renders no RCA gates", func(t *testing.T) {
+		output := render(t, "code-plan-reviewer", reviewer(false))
+		if strings.Contains(output, "Root Cause Analysis") {
+			t.Error("code-plan-reviewer output should carry no RCA gates when RCARequired is false")
+		}
+	})
+}
+
 func TestBuildRoleContext_ArchRef(t *testing.T) {
 	projectRoot := setupPipelineConfig(t)
 	resolver := testPipelineResolver(t)

@@ -30,6 +30,7 @@ type AddTaskInput struct {
 	DestructiveDB bool     `json:"destructive_db,omitempty"`
 	Scope         string   `json:"scope"`
 	Priority      int      `json:"priority"`
+	RCARequired   bool     `json:"rca_required,omitempty"`
 	DependsOn     []string `json:"depends,omitempty"`
 }
 
@@ -143,6 +144,7 @@ func AddTask(statePath, logPath string, input *AddTaskInput, orchestratorID stri
 		DoneWhen:      input.DoneWhen,
 		Validation:    slices.Clone(input.Validation),
 		DestructiveDB: input.DestructiveDB,
+		RCARequired:   input.RCARequired,
 		Scope:         input.Scope,
 		DependsOn:     normalizedDeps,
 		Created:       now,

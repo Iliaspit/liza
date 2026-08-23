@@ -134,6 +134,44 @@ func TestAddTask_PersistsDestructiveDB(t *testing.T) {
 	}
 }
 
+func TestAddTask_PersistsRCARequired(t *testing.T) {
+	tmpDir := t.TempDir()
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	logFile := filepath.Join(tmpDir, ".liza", "log.jsonl")
+	testhelpers.CreateSpecFile(t, tmpDir, "vision.md", "# Vision\n")
+	testhelpers.CreateSpecFile(t, tmpDir, "regression.md", "# Regression\n")
+
+	state := testhelpers.CreateValidState()
+	state.Sprint.Scope.Planned = nil
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	input := AddTaskInput{
+		ID:          "task-defect-fix",
+		Description: "Plan the fix for the reported regression",
+		SpecRef:     "specs/regression.md",
+		DoneWhen:    "Implementation plan for the regression is submitted for review",
+		Scope:       "Planning only: regression fix. No implementation.",
+		Priority:    1,
+		RolePair:    "code-planning-pair",
+		RCARequired: true,
+	}
+	if _, err := AddTask(stateFile, logFile, &input, "orchestrator-1"); err != nil {
+		t.Fatalf("AddTask() error = %v, want nil", err)
+	}
+
+	readState, err := db.New(stateFile).Read()
+	if err != nil {
+		t.Fatalf("Read state: %v", err)
+	}
+	task := readState.FindTask("task-defect-fix")
+	if task == nil {
+		t.Fatal("task not persisted")
+	}
+	if !task.RCARequired {
+		t.Fatalf("RCARequired = false, want true")
+	}
+}
+
 func TestAddTask_Success(t *testing.T) {
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)

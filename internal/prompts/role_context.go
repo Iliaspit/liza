@@ -156,6 +156,7 @@ type RoleContextData struct {
 	PlanRef               string // coding plan path only (no fragment)
 	PlanSection           string // coding plan anchor fragment, empty if none
 	ArchRef               string // path to architecture document, empty if none
+	RCARequired           bool   // objective is a defect fix: plan must carry a reviewed RCA
 	ValidationCommands    []string
 	DestructiveDB         bool
 	TaskDecomposition     *models.DecompositionManifest

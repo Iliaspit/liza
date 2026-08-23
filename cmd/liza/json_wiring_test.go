@@ -2402,6 +2402,47 @@ func TestJSON_GetTasksSummaryActive(t *testing.T) {
 	}
 }
 
+func TestJSON_GetTaskExposesRCARequired(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		rcaRequired bool
+		wantPresent bool
+	}{
+		{name: "defect task exposes the flag", rcaRequired: true, wantPresent: true},
+		{name: "feature task omits the flag", rcaRequired: false, wantPresent: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			projectRoot, _ := setupMutationTestProject(t, func(state *models.State) {
+				now := time.Now().UTC()
+				task := testhelpers.BuildTaskByStatus("task-rca", models.TaskStatusImplementing, now)
+				task.RCARequired = tc.rcaRequired
+				state.Tasks = []models.Task{task}
+			})
+
+			stdout, err := executeRootCommandCapture(t, projectRoot, "get", "task-rca", "--json")
+			if err != nil {
+				t.Fatalf("get task-rca --json failed: %v", err)
+			}
+
+			env := parseEnvelope(t, stdout)
+			if env["ok"] != true {
+				t.Fatalf("expected ok=true, got %v", env["ok"])
+			}
+			task, ok := env["result"].(map[string]any)
+			if !ok {
+				t.Fatalf("expected task object, got %T", env["result"])
+			}
+			value, present := task["rca_required"]
+			if present != tc.wantPresent {
+				t.Fatalf("rca_required present = %v, want %v (task: %v)", present, tc.wantPresent, task)
+			}
+			if tc.wantPresent && value != true {
+				t.Errorf("rca_required = %v, want true", value)
+			}
+		})
+	}
+}
+
 func TestJSON_GetTaskOutputSummary(t *testing.T) {
 	projectRoot, _ := setupMutationTestProject(t, func(state *models.State) {
 		now := time.Now().UTC()

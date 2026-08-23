@@ -17,6 +17,14 @@ Use the specialized planning target when the goal has one coherent planning scop
 FAN-OUT OR UNCERTAIN GOAL:
 Use the mapped master planning target when available if multiple functional areas need separate ownership, shared files or interfaces require explicit boundary assignment, independent downstream workstreams could run in parallel after planning, the goal would likely produce more than 8 downstream output entries, or boundary placement is uncertain.
 
+DEFECT CLASSIFICATION:
+Classify the objective as well as its shape. If the goal spec describes a failure of
+existing behavior -- a bug, regression, or incident -- rather than a new capability,
+set "rca_required": true on the task. The flag inherits down the planning-to-coding
+chain and makes the code plan carry a reviewed root cause analysis. The examples below show the
+new-capability default; change it to true for a defect fix. Where the spec mixes both,
+set true only if the failure is the reason the goal exists.
+
 --- EXECUTION PHASE (MANDATORY - DO NOT SKIP) ---
 {{- if .GoalEntryPoint }}
 
@@ -35,6 +43,7 @@ SIMPLE GOAL TASK EXAMPLE:
     "scope": "Planning only: <single planning scope>. No implementation.",
     "priority": 1,
     "depends": [],
+    "rca_required": false,
     "type": "{{.ResolvedTaskType}}",
     "role_pair": "{{.ResolvedRolePair}}"
   }
@@ -53,6 +62,7 @@ FAN-OUT GOAL TASK EXAMPLE:
     "scope": "Planning only: define boundaries, interface contracts, ownership, and specialized follow-up scopes. No implementation.",
     "priority": 1,
     "depends": [],
+    "rca_required": false,
     "type": "{{.ResolvedFanOutTaskType}}",
     "role_pair": "{{.ResolvedFanOutRolePair}}"
   }
@@ -68,6 +78,7 @@ Then run: {{binaryName}} add-tasks --tasks-file <path.json> --agent-id {{.AgentI
 
 SUCCESS CRITERIA:
 - Exactly one task is created.
+- The defect classification is stated, and "rca_required" is set only for defect fixes.
 - Simple goals use role_pair {{.ResolvedRolePair}}.
 {{- if .ResolvedHasFanOutTarget }}
 - Fan-out or uncertain goals use role_pair {{.ResolvedFanOutRolePair}}.
@@ -111,6 +122,7 @@ SIMPLE GOAL TASK EXAMPLE:
     "scope": "Planning only: <single planning scope>. No implementation.",
     "priority": 1,
     "depends": [],
+    "rca_required": false,
     "type": "<chosen-simple-type>",
     "role_pair": "<chosen-simple-role-pair>"
   }
@@ -126,6 +138,7 @@ FAN-OUT GOAL TASK EXAMPLE:
     "scope": "Planning only: define boundaries, interface contracts, ownership, and specialized follow-up scopes. No implementation.",
     "priority": 1,
     "depends": [],
+    "rca_required": false,
     "type": "<chosen-fan-out-type>",
     "role_pair": "<chosen-fan-out-role-pair>"
   }
@@ -135,6 +148,7 @@ Then run: {{binaryName}} add-tasks --tasks-file <path.json> --agent-id {{.AgentI
 
 SUCCESS CRITERIA:
 - Exactly one task is created.
+- The defect classification is stated, and "rca_required" is set only for defect fixes.
 - Classification reasoning is stated before creating the task.
 - Simple goals use the chosen simple role_pair.
 - Fan-out or uncertain goals use the chosen fan-out role_pair when available.
@@ -152,6 +166,7 @@ The file must contain a bare JSON array -- NOT a wrapper object.
     "scope": "Planning only: <single planning scope>. No implementation.",
     "priority": 1,
     "depends": [],
+    "rca_required": false,
     "type": "planning",
     "role_pair": "code-planning-pair"
   }
@@ -160,6 +175,7 @@ Then run: {{binaryName}} add-tasks --tasks-file <path.json> --agent-id {{.AgentI
 
 SUCCESS CRITERIA:
 - Exactly one task is created.
+- The defect classification is stated, and "rca_required" is set only for defect fixes.
 - The task uses role_pair code-planning-pair.
 - The task enters DRAFT_CODING_PLAN and is claimable by code-planner.
 {{- end }}

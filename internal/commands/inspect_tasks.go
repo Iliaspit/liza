@@ -47,6 +47,7 @@ type taskInfo struct {
 	DoneWhen           string                        `json:"done_when,omitempty" yaml:"done_when,omitempty"`
 	Validation         []string                      `json:"validation,omitempty" yaml:"validation,omitempty"`
 	DestructiveDB      bool                          `json:"destructive_db,omitempty" yaml:"destructive_db,omitempty"`
+	RCARequired        bool                          `json:"rca_required,omitempty" yaml:"rca_required,omitempty"`
 	Scope              string                        `json:"scope,omitempty" yaml:"scope,omitempty"`
 	SpecRef            string                        `json:"spec_ref,omitempty" yaml:"spec_ref,omitempty"`
 	MergeCommit        *string                       `json:"merge_commit,omitempty" yaml:"merge_commit,omitempty"`
@@ -202,6 +203,7 @@ func buildTaskInfo(task *models.Task, projectRoot string) taskInfo {
 		DoneWhen:           task.DoneWhen,
 		Validation:         task.Validation,
 		DestructiveDB:      task.DestructiveDB,
+		RCARequired:        task.RCARequired,
 		Scope:              task.Scope,
 		SpecRef:            task.SpecRef,
 		MergeCommit:        task.MergeCommit,

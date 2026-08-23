@@ -279,6 +279,7 @@ Pipeline topology itself is frozen in `.liza/pipeline.yaml` at `liza init`. Role
 |-------|------|--------|---------|
 | `output` | `[]OutputEntry` | Doer agent | Structured subtask definitions for next role pair |
 | `arch_ref` | `string` | `liza proceed` | Path to architecture document (repo-relative). Set on child tasks during transition: first hop copies from parent's `output[]` entry, second hop inherits from parent task field. Validated via `checkSpecFileExists` (same pattern as `plan_ref`). |
+| `rca_required` | `bool` | Orchestrator (`add-tasks`) | Objective is a defect fix. Defaults to false and is inert when omitted. Inherited by every child task during transitions and preserved across `liza replan`. When true, the code-planner must produce a `## Root Cause Analysis` section in the plan file and the code-plan-reviewer gates on it before reviewing the task breakdown. Not the same strength as the `adversarial-pairing` field of the same name, which gates a separately reviewed analysis phase. |
 | `parent_task` | `*string` | `liza proceed` / orchestrator | Back-reference from child to parent task (deprecated: use `parent_tasks`) |
 | `parent_tasks` | `[]string` | `liza proceed` / orchestrator | Multi-parent back-references (used by many-to-one transitions; supersedes `parent_task`) |
 | `transitions_executed` | `map[string]bool` | `liza proceed` / orchestrator | Idempotency — prevents duplicate transitions. For `many-to-one` transitions, set on **all** cohort members (not just the trigger task) to prevent re-firing from any member |
@@ -389,6 +390,29 @@ Precedence: entry-level `arch_ref` takes priority over parent task `arch_ref`. T
 | Architecture | goal spec | — (produces it via `output[]`) | — |
 | Code-planning | from `output[]` entry | from architecture task's `output[]` entry (first hop) | — |
 | Coding | from `output[]` entry | inherited from parent code-planning task (second hop) | from code-planner's `output[]` entry |
+
+**`rca_required` Propagation:**
+
+`rca_required` has no entry-level counterpart — it is set once by the orchestrator on
+the goal's initial planning task and inherited by descendants through all three child
+constructors in `proceed.go`, on both the normal and crash-recovery call sites of each:
+
+| Constructor | Cardinality | Semantics |
+|---|---|---|
+| `buildChildTask` | per-subtask | inherits the parent task's flag |
+| `buildOneToOneChild` | one-to-one | inherits the parent task's flag |
+| `buildManyToOneChild` | many-to-one | true if **any** cohort member carries it — a fan-in mixing defect and feature parents still consolidates work whose root cause must be established downstream |
+
+`replan.go` copies it onto replacement tasks. The many-to-one path is load-bearing:
+`us-to-coding` is many-to-one, so every `general-objective` goal traverses it before
+reaching code planning.
+
+Two deliberate exclusions. The integration-analysis task built in
+`integration_reconcile.go` does not carry the flag: those tasks route to
+`integration-pair` and `coding-pair`, neither of which renders any RCA text, so the
+flag would be inert. And there is no per-`output[]` override — a defect goal that fans
+out marks all of its scopes. The trigger to add one is the first fan-out defect goal
+whose unrelated scopes produce padded root cause sections.
 
 **`parent-tasks-context` prompt section:**
 

@@ -103,3 +103,4 @@
 | [0113 — Sliced Integration Analysis and Final Closure](0113-sliced-integration-analysis-and-final-closure.md) | Add bounded per-scope coverage, independent global rescans, and linearizable current-HEAD closure. |
 | [0114 — Terminal Dependency Repair](0114-terminal-dependency-repair.md) | Prune illegal downstream edges during supersession and repair existing SUPERSEDED task metadata through one audited transaction. |
 | [0115 — Declarative Atomic Dependency Repairs](0115-declarative-atomic-dependency-repairs.md) | Persist command-free dependency repair requests through `--repair-request-file` and consume them atomically with `apply-dependency-repair`. |
+| [0116 — Orchestrator Classifies Defect Objectives](0116-orchestrator-classifies-defect-objectives.md) | Orchestrator sets `rca_required` at initial planning; flag inherits to children and makes code plans carry a reviewed root cause analysis. |

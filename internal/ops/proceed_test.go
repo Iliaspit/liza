@@ -3545,6 +3545,123 @@ func TestProceed_PerSubtask_InheritsParentArchRef(t *testing.T) {
 	}
 }
 
+// --- rca_required propagation tests ---
+
+func TestProceed_PerSubtask_InheritsParentRCARequired(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		want bool
+	}{
+		{name: "defect parent", want: true},
+		{name: "feature parent", want: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tmpDir, stateFile := setupPipelineProceedTest(t)
+
+			state := testhelpers.CreateValidState()
+			state.PipelineVersion = 2
+			state.Sprint.Status = models.SprintStatusCompleted
+
+			now := time.Now().UTC()
+			parentID := "plan-rca-inherit-1"
+			reviewCommit := "abc123"
+			task := models.Task{
+				ID:           parentID,
+				Type:         models.TaskTypeCoding,
+				RolePair:     "code-planning-pair",
+				Description:  "Plan with rca_required parent",
+				Status:       models.TaskStatus("CODING_PLAN_APPROVED"),
+				Priority:     1,
+				Created:      now,
+				SpecRef:      "README.md",
+				RCARequired:  tc.want,
+				DoneWhen:     "Plan approved",
+				Scope:        "auth module",
+				ReviewCommit: &reviewCommit,
+				Output: []models.OutputEntry{
+					{Desc: "Task A", DoneWhen: "A works", Scope: "a", SpecRef: "specs/a.md"},
+					{Desc: "Task B", DoneWhen: "B works", Scope: "b", SpecRef: "specs/b.md"},
+				},
+				History: []models.TaskHistoryEntry{},
+			}
+			state.Tasks = append(state.Tasks, task)
+			state.Sprint.Scope.Planned = []string{parentID}
+			testhelpers.WriteInitialState(t, stateFile, state)
+
+			result, err := Proceed(tmpDir, parentID, "code-plan-to-coding")
+			if err != nil {
+				t.Fatalf("Proceed() error: %v", err)
+			}
+
+			readState, err := db.New(stateFile).Read()
+			if err != nil {
+				t.Fatalf("Failed to read state: %v", err)
+			}
+
+			for i, childID := range result.ChildTaskIDs {
+				child := readState.FindTask(childID)
+				if child == nil {
+					t.Fatalf("Child task %d not found", i)
+				}
+				if child.RCARequired != tc.want {
+					t.Errorf("Child %d rca_required = %v, want %v", i, child.RCARequired, tc.want)
+				}
+			}
+		})
+	}
+}
+
+func TestProceed_OneToOne_InheritsRCARequired(t *testing.T) {
+	tmpDir, stateFile := setupPipelineProceedTest(t)
+
+	state := testhelpers.CreateValidState()
+	state.PipelineVersion = 2
+	state.Sprint.Status = models.SprintStatusInProgress
+
+	now := time.Now().UTC()
+	parentID := "plan-rca-oto-1"
+	reviewCommit := "abc123"
+	task := models.Task{
+		ID:           parentID,
+		Type:         models.TaskTypeCoding,
+		RolePair:     "code-planning-pair",
+		Description:  "Plan with rca_required for one-to-one",
+		Status:       models.TaskStatusMerged,
+		Priority:     1,
+		Created:      now,
+		SpecRef:      "README.md",
+		PlanRef:      "specs/plans/plan.md",
+		RCARequired:  true,
+		DoneWhen:     "Plan approved",
+		Scope:        "auth module",
+		ReviewCommit: &reviewCommit,
+		History:      []models.TaskHistoryEntry{},
+	}
+	state.Tasks = append(state.Tasks, task)
+	state.Sprint.Scope.Planned = []string{parentID}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	results, err := ExecuteAvailableTransitions(tmpDir, "auto")
+	if err != nil {
+		t.Fatalf("ExecuteAvailableTransitions(auto) error: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("results count = %d, want 1", len(results))
+	}
+
+	readState, err := db.New(stateFile).Read()
+	if err != nil {
+		t.Fatalf("Failed to read state: %v", err)
+	}
+	child := readState.FindTask(results[0].ChildTaskIDs[0])
+	if child == nil {
+		t.Fatal("Child task not found")
+	}
+	if !child.RCARequired {
+		t.Errorf("Child rca_required = false, want true")
+	}
+}
+
 // --- epic_ref propagation tests ---
 
 func TestProceed_PerSubtask_InheritsParentEpicRef(t *testing.T) {
@@ -5681,6 +5798,133 @@ func TestProceedManyToOne_CrashRecovery_MissingChild(t *testing.T) {
 		if !srcTask.TransitionsExecuted["us-to-coding"] {
 			t.Errorf("Task %s: transitions_executed should contain us-to-coding (crash recovery repair)", c.ID)
 		}
+	}
+}
+
+func TestProceedManyToOne_InheritsRCARequiredFromAnyCohortMember(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		flagged []int
+		want    bool
+	}{
+		{name: "no member flagged", flagged: nil, want: false},
+		{name: "one member flagged", flagged: []int{1}, want: true},
+		{name: "all members flagged", flagged: []int{0, 1, 2}, want: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tmpDir, stateFile := setupPhase2PipelineProceedTest(t)
+
+			state := testhelpers.CreateValidState()
+			state.PipelineVersion = 2
+			state.Sprint.Status = models.SprintStatusCompleted
+
+			parentID := "epic-plan-1"
+			cohort := makeManyToOneCohort(parentID, "us-writing-pair", models.TaskStatusMerged, "specs/goal.md", 3)
+			for _, idx := range tc.flagged {
+				cohort[idx].RCARequired = true
+			}
+			for _, task := range cohort {
+				state.Tasks = append(state.Tasks, task)
+				state.Sprint.Scope.Planned = append(state.Sprint.Scope.Planned, task.ID)
+			}
+			testhelpers.WriteInitialState(t, stateFile, state)
+
+			result, err := Proceed(tmpDir, cohort[0].ID, "us-to-coding")
+			if err != nil {
+				t.Fatalf("Proceed() error: %v", err)
+			}
+
+			readState, err := db.New(stateFile).Read()
+			if err != nil {
+				t.Fatalf("Failed to read state: %v", err)
+			}
+			child := readState.FindTask(result.ChildTaskIDs[0])
+			if child == nil {
+				t.Fatal("Child task not found")
+			}
+			if child.RCARequired != tc.want {
+				t.Errorf("Child rca_required = %v, want %v", child.RCARequired, tc.want)
+			}
+		})
+	}
+}
+
+// us-to-coding is trigger: manual, so the production entry point is
+// ExecuteAvailableTransitions with the "" filter (mode_change.go, claiming.go), not
+// "auto". This covers the flag surviving that route.
+func TestExecuteAvailableTransitions_ManyToOnePreservesRCARequired(t *testing.T) {
+	tmpDir, stateFile := setupPhase2PipelineProceedTest(t)
+
+	state := testhelpers.CreateValidState()
+	state.PipelineVersion = 2
+	state.Sprint.Status = models.SprintStatusCompleted
+
+	parentID := "epic-plan-1"
+	cohort := makeManyToOneCohort(parentID, "us-writing-pair", models.TaskStatusMerged, "specs/goal.md", 3)
+	cohort[1].RCARequired = true
+	for _, task := range cohort {
+		state.Tasks = append(state.Tasks, task)
+		state.Sprint.Scope.Planned = append(state.Sprint.Scope.Planned, task.ID)
+	}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	results, err := ExecuteAvailableTransitions(tmpDir, "")
+	if err != nil {
+		t.Fatalf("ExecuteAvailableTransitions(\"\") error: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("results count = %d, want 1", len(results))
+	}
+
+	readState, err := db.New(stateFile).Read()
+	if err != nil {
+		t.Fatalf("Failed to read state: %v", err)
+	}
+	child := readState.FindTask(results[0].ChildTaskIDs[0])
+	if child == nil {
+		t.Fatal("Child task not found")
+	}
+	if !child.RCARequired {
+		t.Errorf("Child rca_required = false, want true (flag lost through ExecuteAvailableTransitions)")
+	}
+}
+
+func TestProceedManyToOne_CrashRecovery_PreservesRCARequired(t *testing.T) {
+	tmpDir, stateFile := setupPhase2PipelineProceedTest(t)
+
+	state := testhelpers.CreateValidState()
+	state.PipelineVersion = 2
+	state.Sprint.Status = models.SprintStatusCompleted
+
+	parentID := "epic-plan-1"
+	cohort := makeManyToOneCohort(parentID, "us-writing-pair", models.TaskStatusMerged, "specs/goal.md", 3)
+	cohort[2].RCARequired = true
+
+	// Simulate crash: transition marked on some members, child never created.
+	cohort[0].TransitionsExecuted = map[string]bool{"us-to-coding": true}
+	cohort[1].TransitionsExecuted = map[string]bool{"us-to-coding": true}
+
+	for _, task := range cohort {
+		state.Tasks = append(state.Tasks, task)
+		state.Sprint.Scope.Planned = append(state.Sprint.Scope.Planned, task.ID)
+	}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	result, err := Proceed(tmpDir, cohort[0].ID, "us-to-coding")
+	if err != nil {
+		t.Fatalf("Proceed() error: %v", err)
+	}
+
+	readState, err := db.New(stateFile).Read()
+	if err != nil {
+		t.Fatalf("Failed to read state: %v", err)
+	}
+	child := readState.FindTask(result.ChildTaskIDs[0])
+	if child == nil {
+		t.Fatal("Child task not found after crash recovery")
+	}
+	if !child.RCARequired {
+		t.Errorf("Recreated child rca_required = false, want true")
 	}
 }
 
