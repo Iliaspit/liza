@@ -91,6 +91,16 @@ Agents run in **isolated git worktrees** and inherit env only from the spawning 
   each task worktree **before** `post_worktree_cmd`, on create/claim/reviewer paths, keeping them
   gitignored in the worktree (never committed). *(as of §BRAND_BINARY_NAME§ b1d3ed7; verify.)*
 
+If `post_worktree_cmd` is configured and fails, the run fails closed (ADR-0117): the affected agent
+goes `degraded` with reason `claim_worktree_setup_failed` and its supervisor exits. Fresh doer claims
+abort before the claim is recorded, leaving the task at its prior status. Resumes differ — the lease
+is already renewed, `handoff_pending` cleared, and a resume history entry appended before setup runs,
+so the task stays assigned to that agent and is picked up again on restart. Reviewer claims are
+released back to the reviewable status, so review-ready work survives. Read `recover_hint` for the
+command and worktree, re-run it there, fix it, then
+`§BRAND_BINARY_NAME§ clear-agent-degraded <agent-id>` and restart the agent — do not work around it
+by unsetting the command.
+
 Put the target in a root `.env` and enable the gate. Do **not** restart the host just to inject env,
 do **not** commit a defaulting `conftest`/`.env`, do **not** edit the user's global shell profile.
 

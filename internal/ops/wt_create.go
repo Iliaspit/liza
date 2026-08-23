@@ -95,9 +95,10 @@ func createWorktree(projectRoot, taskID string, fresh bool) (*CreateWorktreeResu
 				result.Warnings = append(result.Warnings, ProvisionWorktreeEnvFiles(lp.ProjectRoot(), worktreeDir)...)
 			}
 			// Run post-worktree command even on existing worktrees — idempotent, catches prior failures.
+			// Fail closed: an unprepared worktree must not be reported as ready.
 			if postCmd != nil {
 				if err := RunPostWorktreeCmd(*postCmd, worktreeDir); err != nil {
-					result.Warnings = append(result.Warnings, fmt.Sprintf("post-worktree-cmd: %v", err))
+					return nil, err
 				}
 			}
 			result.Warnings = append(result.Warnings, PrepareSembleWorktreeIgnore(worktreeDir)...)
@@ -152,10 +153,11 @@ func createWorktree(projectRoot, taskID string, fresh bool) (*CreateWorktreeResu
 	}
 
 	// Run post-worktree command so the worktree is build/test-ready.
-	// Non-fatal: agents can run the command manually.
+	// Fail closed: the worktree stays on disk for inspection, but creation
+	// reports failure rather than handing over an unprepared checkout.
 	if postCmd != nil {
 		if err := RunPostWorktreeCmd(*postCmd, worktreeDir); err != nil {
-			result.Warnings = append(result.Warnings, fmt.Sprintf("post-worktree-cmd: %v", err))
+			return nil, err
 		}
 	}
 	result.Warnings = append(result.Warnings, PrepareSembleWorktreeIgnore(worktreeDir)...)
@@ -387,6 +389,14 @@ func copyFilePreserveMode(src, dst string) error {
 // RunPostWorktreeCmd runs the configured post-worktree shell command in the given directory.
 // It is idempotent and safe to call on both new and existing worktrees.
 //
+// Failure returns *PostWorktreeSetupError. Callers fail closed on it: a worktree
+// whose setup did not succeed is not build-ready, and handing it to a provider
+// session burns agent iterations on environment errors.
+//
+// The command's output is discarded rather than captured. It cannot be logged or
+// persisted safely (see PostWorktreeSetupError), so buffering it would only risk
+// exposure; the operator reruns the command in the worktree to see it.
+//
 // Trust model: the command comes from state.yaml which lives inside .liza/ in
 // the project root. Write access to state.yaml implies write access to the
 // repo (same trust boundary as Makefile, .github/workflows/, package.json
@@ -394,9 +404,8 @@ func copyFilePreserveMode(src, dst string) error {
 func RunPostWorktreeCmd(cmdStr, dir string) error {
 	cmd := exec.Command("sh", "-c", cmdStr)
 	cmd.Dir = dir
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("%w: %s", err, out)
+	if err := cmd.Run(); err != nil {
+		return newPostWorktreeSetupError(cmdStr, dir, err)
 	}
 	return nil
 }

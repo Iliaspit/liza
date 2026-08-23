@@ -64,6 +64,19 @@ Merge to main is human-triggered, not part of Liza flow.
 3. No cross-worktree file access
 4. No direct commits to integration branch
 
+**Worktree readiness:** When `config.post_worktree_cmd` is set, it runs in the
+task worktree before any provider session starts — on initial claim, doer resume
+(handoff and restart), review, worktree recovery, and worktree recreation. It
+must succeed. A failure fails closed: the doer claim aborts before it is
+recorded, a reviewer claim is released back to the task's reviewable status, and
+the affected agent is marked degraded so it stops claiming instead of retrying.
+Reviewer setup failures do not block the task — blocking would return it to the
+doer's executing status and discard review-ready work. The command's output is never captured: a
+setup command can print secrets that cannot be masked from this process, so only
+the masked command, the worktree path, and the exit status are recorded.
+Reproduce a failure by rerunning the command in the named worktree. See
+ADR-0117.
+
 **Ignored env-file provisioning:** Worktree env-file copying is disabled by
 default. When `config.copy_worktree_env_files` is true, worktree setup may copy
 only root-level regular files matching `.env`, `.env.*`, `*.env`, or `.envrc`.

@@ -148,19 +148,30 @@ func (s *reviewerStrategy) ClaimTask(config SupervisorConfig, bb *db.Blackboard)
 		"task_id", taskID,
 		"review_commit", reviewCommit)
 
-	// Verify worktree exists before launching agent.
+	// Verify the worktree exists and is prepared before launching agent.
 	_, wtErr := ensureReviewerWorktree(config.ProjectRoot, bb, taskID, config.AgentID)
 	if wtErr != nil {
 		logger.Warn("Reviewer worktree check failed",
 			"task_id", taskID, "error", wtErr)
 		if !errors.Is(wtErr, errTaskBlocked) {
-			// Transient error (bb.Read, BranchExists, AttachWorktree).
-			// blockReviewerTask was NOT called, so the reviewer claim
-			// and agent state are still dangling — release them.
+			// Transient error (bb.Read, BranchExists, AttachWorktree) or a
+			// post_worktree_cmd failure. blockReviewerTask was NOT called, so the
+			// reviewer claim and agent state are still dangling — release them.
+			// Release restores the task to its reviewable status, preserving the
+			// doer's completed work for the next reviewer.
 			releaseReviewerClaimQuietly(config.ProjectRoot, taskID, config.AgentID)
 		}
 		// For errTaskBlocked, blockReviewerTask already cleared
 		// claim fields and released agent state.
+		//
+		// A failed setup command is project-level, so this reviewer cannot make
+		// progress on any task: degrade it, mirroring the doer claim policy. The
+		// supervisor exits on ErrAgentDegraded before any provider session starts.
+		if degradedErr := markAgentDegradedForInfraClaim(
+			config.ProjectRoot, config.AgentID, s.role, taskID, []string{taskID}, wtErr,
+		); degradedErr != nil {
+			return "", "", degradedErr
+		}
 		return "", "", wtErr
 	}
 

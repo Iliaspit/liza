@@ -70,6 +70,28 @@ tail -f coder-1.log
 - System paused → `§BRAND_BINARY_NAME§ get config.mode` then `§BRAND_BINARY_NAME§ resume`
 - Sprint at checkpoint → `§BRAND_BINARY_NAME§ get sprint.status` then `§BRAND_BINARY_NAME§ resume`
 
+### Agent exits immediately: worktree setup failed
+
+An agent that stops claiming right after start, with `agent_health` recording
+reason `claim_worktree_setup_failed`, hit a failing `post_worktree_cmd`. Worktree
+setup fails closed, so the agent degrades instead of working in an unprepared
+checkout (ADR-0117).
+
+**Diagnosis:**
+```bash
+§BRAND_BINARY_NAME§ get agent_health --json   # reason, last_error, recover_hint
+§BRAND_BINARY_NAME§ get config.post_worktree_cmd --json
+```
+
+**Fix:** the command's output is not recorded (it can carry secrets §BRAND_NAME_TITLE§
+cannot mask), so run the command named in `recover_hint` inside the worktree it names,
+fix whatever fails, then run `§BRAND_BINARY_NAME§ clear-agent-degraded <agent-id>`
+and restart the agent. Fresh doer claims abort before the claim is recorded, so
+the task keeps its prior status; a resumed task stays assigned to its agent and
+is picked up again on restart; reviewer claims are released back to the
+reviewable status, so no review work is lost. Do not work around it by unsetting
+`post_worktree_cmd` — that restores the silent mode this check replaced.
+
 ---
 
 ## Lock and Concurrency Issues

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/liza-mas/liza/internal/models"
+	"github.com/liza-mas/liza/internal/ops"
 	"github.com/liza-mas/liza/internal/paths"
 	"github.com/liza-mas/liza/internal/scipsearch"
 	"github.com/liza-mas/liza/internal/semble"
@@ -804,5 +805,163 @@ func assertReviewerGitStatusClean(t *testing.T, worktreeDir string) {
 	}
 	if strings.TrimSpace(string(output)) != "" {
 		t.Fatalf("git status --porcelain = %q, want clean", output)
+	}
+}
+
+// Recovery that cannot prepare the worktree returns the setup error plain: the
+// task must NOT be blocked, because unblock-task would restore it to the doer's
+// executing status and discard completed review-ready work. The caller releases
+// the claim instead.
+func TestEnsureReviewerWorktree_MissingRecoverable_PostWorktreeCmdFailureDoesNotBlockTask(t *testing.T) {
+	tmpDir := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, tmpDir)
+	statePath, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	testhelpers.SetupPipelineConfig(t, tmpDir)
+
+	state := testhelpers.CreateValidState()
+	now := time.Now().UTC()
+	postCmd := "echo prepare-failed >&2; exit 1"
+	state.Config.PostWorktreeCmd = &postCmd
+	task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusReviewing, now)
+	reviewer := "code-reviewer-1"
+	task.ReviewingBy = &reviewer
+	state.Tasks = []models.Task{task}
+	bb := testhelpers.WriteInitialState(t, statePath, state)
+
+	branchName := paths.TaskBranchPrefix + "task-1"
+	cmd := exec.Command("git", "branch", branchName)
+	cmd.Dir = tmpDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("Failed to create branch: %v\n%s", err, out)
+	}
+
+	_, err := ensureReviewerWorktree(tmpDir, bb, "task-1", reviewer)
+	if err == nil {
+		t.Fatal("ensureReviewerWorktree() error = nil, want setup failure")
+	}
+	var setupErr *ops.PostWorktreeSetupError
+	if !errors.As(err, &setupErr) {
+		t.Fatalf("ensureReviewerWorktree() error = %v, want *ops.PostWorktreeSetupError", err)
+	}
+	if errors.Is(err, errTaskBlocked) {
+		t.Fatal("error wraps errTaskBlocked; setup failure must leave the claim for the caller to release")
+	}
+	if setupErr.Cmd != postCmd {
+		t.Errorf("setupErr.Cmd = %q, want %q", setupErr.Cmd, postCmd)
+	}
+	// The caller (strategy_reviewer.ClaimTask) releases the claim and then routes
+	// this error through markAgentDegradedForInfraClaim. That only degrades the
+	// reviewer if the error still classifies after the caller's wrapping.
+	if got := ops.ClassifyInfraClaimError(err); got.Reason != ops.AgentDegradedWorktreeSetupFailed {
+		t.Errorf("ClassifyInfraClaimError().Reason = %q, want %q", got.Reason, ops.AgentDegradedWorktreeSetupFailed)
+	}
+
+	readState, readErr := bb.Read()
+	if readErr != nil {
+		t.Fatalf("Read() error = %v", readErr)
+	}
+	readTask := readState.FindTask("task-1")
+	if readTask == nil {
+		t.Fatal("FindTask(task-1) = nil")
+	}
+	if readTask.Status == models.TaskStatusBlocked {
+		t.Error("task.Status = BLOCKED, want review state preserved for the next reviewer")
+	}
+}
+
+// D (2026-08-23): reviewers with an intact worktree run setup too — they build
+// and test, so they need the same prepared checkout the doer had.
+func TestEnsureReviewerWorktree_IntactWorktree_RunsPostWorktreeCmd(t *testing.T) {
+	tmpDir := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, tmpDir)
+	statePath, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	testhelpers.SetupPipelineConfig(t, tmpDir)
+
+	state := testhelpers.CreateValidState()
+	now := time.Now().UTC()
+	postCmd := "touch .post-worktree-ran"
+	state.Config.PostWorktreeCmd = &postCmd
+	state.Tasks = []models.Task{testhelpers.BuildTaskByStatus("task-1", models.TaskStatusReviewing, now)}
+	bb := testhelpers.WriteInitialState(t, statePath, state)
+
+	wtPath := filepath.Join(tmpDir, paths.WorktreesDirName, "task-1")
+	if err := os.MkdirAll(wtPath, 0o755); err != nil {
+		t.Fatalf("MkdirAll(%q) error = %v", wtPath, err)
+	}
+
+	recovered, err := ensureReviewerWorktree(tmpDir, bb, "task-1", "code-reviewer-1")
+	if err != nil {
+		t.Fatalf("ensureReviewerWorktree() error = %v", err)
+	}
+	if recovered {
+		t.Error("recovered = true, want false for an intact worktree")
+	}
+	if _, statErr := os.Stat(filepath.Join(wtPath, ".post-worktree-ran")); statErr != nil {
+		t.Errorf("os.Stat(marker) error = %v, want setup to run on the intact worktree", statErr)
+	}
+}
+
+func TestEnsureReviewerWorktree_IntactWorktree_PostWorktreeCmdFailureDoesNotBlockTask(t *testing.T) {
+	tmpDir := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, tmpDir)
+	statePath, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	testhelpers.SetupPipelineConfig(t, tmpDir)
+
+	state := testhelpers.CreateValidState()
+	now := time.Now().UTC()
+	postCmd := "exit 1"
+	state.Config.PostWorktreeCmd = &postCmd
+	task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusReviewing, now)
+	reviewer := "code-reviewer-1"
+	task.ReviewingBy = &reviewer
+	state.Tasks = []models.Task{task}
+	bb := testhelpers.WriteInitialState(t, statePath, state)
+
+	wtPath := filepath.Join(tmpDir, paths.WorktreesDirName, "task-1")
+	if err := os.MkdirAll(wtPath, 0o755); err != nil {
+		t.Fatalf("MkdirAll(%q) error = %v", wtPath, err)
+	}
+
+	_, err := ensureReviewerWorktree(tmpDir, bb, "task-1", reviewer)
+	var setupErr *ops.PostWorktreeSetupError
+	if !errors.As(err, &setupErr) {
+		t.Fatalf("ensureReviewerWorktree() error = %v, want *ops.PostWorktreeSetupError", err)
+	}
+
+	readState, readErr := bb.Read()
+	if readErr != nil {
+		t.Fatalf("Read() error = %v", readErr)
+	}
+	if readTask := readState.FindTask("task-1"); readTask == nil {
+		t.Fatal("FindTask(task-1) = nil")
+	} else if readTask.Status == models.TaskStatusBlocked {
+		t.Error("task.Status = BLOCKED, want review state preserved")
+	}
+}
+
+// No configured command means nothing to enforce — the intact path stays a no-op.
+func TestEnsureReviewerWorktree_IntactWorktree_NoPostWorktreeCmdIsNoOp(t *testing.T) {
+	tmpDir := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, tmpDir)
+	statePath, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	testhelpers.SetupPipelineConfig(t, tmpDir)
+
+	state := testhelpers.CreateValidState()
+	state.Tasks = []models.Task{
+		testhelpers.BuildTaskByStatus("task-1", models.TaskStatusReviewing, time.Now().UTC()),
+	}
+	bb := testhelpers.WriteInitialState(t, statePath, state)
+
+	wtPath := filepath.Join(tmpDir, paths.WorktreesDirName, "task-1")
+	if err := os.MkdirAll(wtPath, 0o755); err != nil {
+		t.Fatalf("MkdirAll(%q) error = %v", wtPath, err)
+	}
+
+	recovered, err := ensureReviewerWorktree(tmpDir, bb, "task-1", "code-reviewer-1")
+	if err != nil {
+		t.Fatalf("ensureReviewerWorktree() error = %v", err)
+	}
+	if recovered {
+		t.Error("recovered = true, want false")
 	}
 }

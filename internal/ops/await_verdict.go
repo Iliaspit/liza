@@ -402,6 +402,14 @@ func handleVerdictResult(bb *db.Blackboard, task *models.Task, agentID, projectR
 					SafeAction:    SafeActionStop,
 				}, nil
 			}
+			// A degraded claim already recorded agent health and bounded retries;
+			// surface it instead of converting it into a verdict, so the failure
+			// stays visible and this agent stops retrying the failing path.
+			if stderrors.Is(claimErr, ErrAgentDegraded) {
+				releaseOwnership(bb, agentID)
+				return nil, fmt.Errorf("auto-reclaim failed: %w", claimErr)
+			}
+
 			// Infrastructure error during reclaim.
 			if result, ok := recoveredVerdictAfterReclaimFailure(bb, task.ID, agentID, rejected); ok {
 				releaseOwnership(bb, agentID)

@@ -29,10 +29,12 @@ var (
 	reviewerWorktreePrepareSembleIgnore            = ops.PrepareSembleWorktreeIgnore
 )
 
-// ensureReviewerWorktree verifies the worktree exists for a reviewer task.
+// ensureReviewerWorktree verifies the worktree exists for a reviewer task and
+// that its configured setup command succeeds, so the reviewer session starts
+// against a build-ready checkout.
 // Returns (true, nil) if the worktree was recovered from an existing branch.
-// Returns (false, nil) if the worktree already exists.
-// Returns (false, error) if the task was blocked or recovery failed.
+// Returns (false, nil) if the worktree already exists and setup succeeded.
+// Returns (false, error) if the task was blocked, recovery failed, or setup failed.
 func ensureReviewerWorktree(projectRoot string, bb *db.Blackboard, taskID, agentID string) (recovered bool, err error) {
 	err = ops.WithProjectLifecycleSharedLock(projectRoot, "reviewer-worktree-recover", func() error {
 		var recoverErr error
@@ -45,7 +47,10 @@ func ensureReviewerWorktree(projectRoot string, bb *db.Blackboard, taskID, agent
 func ensureReviewerWorktreeLocked(projectRoot string, bb *db.Blackboard, taskID, agentID string) (recovered bool, err error) {
 	wtPath := filepath.Join(projectRoot, paths.WorktreesDirName, taskID)
 	if _, statErr := os.Stat(wtPath); statErr == nil {
-		return false, nil // exists, nothing to do
+		// Worktree intact, but still run the configured setup command before the
+		// reviewer session: it is idempotent, and a reviewer that builds and
+		// tests needs the same prepared checkout the doer had.
+		return false, runReviewerWorktreeSetup(bb, taskID, wtPath)
 	}
 
 	logger := GetLogger()
@@ -95,9 +100,13 @@ func ensureReviewerWorktreeLocked(projectRoot string, bb *db.Blackboard, taskID,
 	}
 
 	// Run post-worktree command to ensure recovered worktree is build-ready.
+	// Fail closed: an unprepared worktree must not reach a provider session. The
+	// error is returned plain — the caller releases the reviewer claim back to
+	// reviewable and degrades this reviewer, preserving the doer's work.
 	if state.Config.PostWorktreeCmd != nil {
 		if postErr := ops.RunPostWorktreeCmd(*state.Config.PostWorktreeCmd, wtPath); postErr != nil {
-			logger.Warn("post-worktree-cmd failed after worktree recovery", "task_id", taskID, "error", postErr)
+			logger.Error("post-worktree-cmd failed after worktree recovery", "task_id", taskID, "error", postErr)
+			return false, postErr
 		}
 	}
 
@@ -171,9 +180,31 @@ func ensureReviewerWorktreeLocked(projectRoot string, bb *db.Blackboard, taskID,
 	return true, nil
 }
 
+// runReviewerWorktreeSetup runs the configured post_worktree_cmd against an
+// intact reviewer worktree. Returns the setup error unchanged; the caller owns
+// claim release and agent degradation.
+func runReviewerWorktreeSetup(bb *db.Blackboard, taskID, wtPath string) error {
+	state, err := bb.Read()
+	if err != nil {
+		return fmt.Errorf("read state: %w", err)
+	}
+	if state.Config.PostWorktreeCmd == nil {
+		return nil
+	}
+	postErr := ops.RunPostWorktreeCmd(*state.Config.PostWorktreeCmd, wtPath)
+	if postErr != nil {
+		GetLogger().Error("post-worktree-cmd failed for reviewer worktree", "task_id", taskID, "error", postErr)
+	}
+	return postErr
+}
+
 // blockReviewerTask forces a task into BLOCKED status, bypassing normal
 // transition validation. This handles the exceptional case where a reviewer
 // task's worktree is unrecoverable and no valid transition path to BLOCKED exists.
+//
+// Reserved for lost work. A task blocked here is restored by unblock-task to the
+// doer's executing status (unblock_task.go), which discards review readiness —
+// acceptable when the worktree is gone, not when it merely failed to prepare.
 func blockReviewerTask(bb *db.Blackboard, taskID, agentID, reason string) {
 	if err := bb.Modify(func(state *models.State) error {
 		t := state.FindTask(taskID)

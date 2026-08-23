@@ -1,6 +1,7 @@
 package ops
 
 import (
+	stderrors "errors"
 	"fmt"
 	"strings"
 	"time"
@@ -14,6 +15,7 @@ const (
 	AgentDegradedWorktreeCreateFailed     = "claim_worktree_create_failed"
 	AgentDegradedWorktreeReadonly         = "claim_worktree_readonly"
 	AgentDegradedWorktreePermissionDenied = "claim_worktree_permission_denied"
+	AgentDegradedWorktreeSetupFailed      = "claim_worktree_setup_failed"
 )
 
 // MarkAgentDegradedInput contains the evidence used to mark an agent epoch as
@@ -136,6 +138,22 @@ func ClassifyInfraClaimError(err error) InfraClaimErrorClassification {
 	if err == nil {
 		return InfraClaimErrorClassification{}
 	}
+	// The configured post_worktree_cmd failed. Every worktree this agent
+	// provisions will hit the same project-level failure, so claiming again is
+	// wasted capacity — degrade instead, which also bounds the claim retry loop.
+	var setupErr *PostWorktreeSetupError
+	if stderrors.As(err, &setupErr) {
+		return InfraClaimErrorClassification{
+			Reason: AgentDegradedWorktreeSetupFailed,
+			RecoverHint: fmt.Sprintf(
+				"run the configured post_worktree_cmd (%s) in %s and fix it, then clear agent health",
+				setupErr.Cmd,
+				setupErr.Dir,
+			),
+			IsInfra: true,
+		}
+	}
+
 	msg := err.Error()
 	lower := strings.ToLower(msg)
 

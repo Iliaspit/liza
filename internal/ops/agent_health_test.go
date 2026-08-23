@@ -1,6 +1,7 @@
 package ops
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -36,6 +37,26 @@ func TestClassifyInfraClaimError(t *testing.T) {
 			wantReason: AgentDegradedWorktreePermissionDenied,
 		},
 		{
+			name: "post-worktree setup failure",
+			err: &PostWorktreeSetupError{
+				Cmd: "make sync-embedded",
+				Dir: "/repo/.worktrees/task-a",
+				Err: errString("exit status 2"),
+			},
+			wantInfra:  true,
+			wantReason: AgentDegradedWorktreeSetupFailed,
+		},
+		{
+			name: "wrapped post-worktree setup failure",
+			err: fmt.Errorf("claim task-a: %w", &PostWorktreeSetupError{
+				Cmd: "make sync-embedded",
+				Dir: "/repo/.worktrees/task-a",
+				Err: errString("exit status 2"),
+			}),
+			wantInfra:  true,
+			wantReason: AgentDegradedWorktreeSetupFailed,
+		},
+		{
 			name:      "generic race is not infrastructure",
 			err:       errString("race condition: concurrent claim already provisioned worktree for READY task"),
 			wantInfra: false,
@@ -53,6 +74,10 @@ func TestClassifyInfraClaimError(t *testing.T) {
 			}
 			if tt.wantInfra && got.RecoverHint == "" {
 				t.Fatal("RecoverHint is empty for infra classification")
+			}
+			if tt.wantReason == AgentDegradedWorktreeSetupFailed &&
+				!strings.Contains(got.RecoverHint, "make sync-embedded") {
+				t.Fatalf("RecoverHint = %q, want the configured command named", got.RecoverHint)
 			}
 		})
 	}

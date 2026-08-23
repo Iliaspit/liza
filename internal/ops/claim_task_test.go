@@ -1220,7 +1220,10 @@ func TestClaimTask_CopyWorktreeEnvFilesOnFreshClaim(t *testing.T) {
 	assertGitStatusClean(t, worktreeDir)
 }
 
-func TestClaimTask_PostWorktreeCmdFailureProducesWarning(t *testing.T) {
+// A failed setup command means the worktree is not build-ready. The claim must
+// fail closed rather than hand it to a coder session (ADR-0031 amendment
+// 2026-08-23; superseded the earlier warn-and-continue contract).
+func TestClaimTask_PostWorktreeCmdFailureFailsClaimClosed(t *testing.T) {
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
@@ -1230,7 +1233,7 @@ func TestClaimTask_PostWorktreeCmdFailureProducesWarning(t *testing.T) {
 	registerClaimTaskTestAgents(state)
 
 	// Configure a post-worktree command that will fail.
-	postCmd := "exit 1"
+	postCmd := "echo boom >&2; exit 1"
 	state.Config.PostWorktreeCmd = &postCmd
 	state.Tasks = []models.Task{
 		testhelpers.BuildTaskByStatus("task-1", models.TaskStatusReady, now),
@@ -1238,15 +1241,62 @@ func TestClaimTask_PostWorktreeCmdFailureProducesWarning(t *testing.T) {
 	testhelpers.WriteInitialState(t, stateFile, state)
 
 	result, err := ClaimTask(tmpDir, "task-1", "coder-1")
-	if err != nil {
-		t.Fatalf("ClaimTask() should succeed even when post-worktree-cmd fails, got: %v", err)
+	if err == nil {
+		t.Fatalf("ClaimTask() error = nil, want post-worktree setup failure; result = %+v", result)
+	}
+	var setupErr *PostWorktreeSetupError
+	if !stderrors.As(err, &setupErr) {
+		t.Fatalf("ClaimTask() error = %v, want *PostWorktreeSetupError", err)
+	}
+	if setupErr.Cmd != postCmd {
+		t.Errorf("setupErr.Cmd = %q, want %q", setupErr.Cmd, postCmd)
 	}
 
-	// Warning should be surfaced in result.
-	if len(result.Warnings) == 0 {
-		t.Error("Expected warning from failed post-worktree-cmd")
-	} else if !strings.Contains(result.Warnings[0], "post-worktree-cmd") {
-		t.Errorf("Warning = %q, want to contain 'post-worktree-cmd'", result.Warnings[0])
+	// No partial claim: the task keeps its pre-claim status and stays unassigned.
+	after, readErr := db.For(stateFile).Read()
+	if readErr != nil {
+		t.Fatalf("Read() error = %v", readErr)
+	}
+	task := after.FindTask("task-1")
+	if task == nil {
+		t.Fatal("FindTask(task-1) = nil")
+	}
+	if task.Status != models.TaskStatusReady {
+		t.Errorf("task.Status = %s, want %s", task.Status, models.TaskStatusReady)
+	}
+	if task.AssignedTo != nil {
+		t.Errorf("task.AssignedTo = %q, want nil", *task.AssignedTo)
+	}
+	if agent := after.Agents["coder-1"]; agent.CurrentTask != nil {
+		t.Errorf("agent.CurrentTask = %q, want nil", *agent.CurrentTask)
+	}
+}
+
+// The failing worktree is preserved so the setup command can be reproduced
+// against it; a later fresh claim treats it as a stale resource.
+func TestClaimTask_PostWorktreeCmdFailurePreservesWorktree(t *testing.T) {
+	tmpDir := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, tmpDir)
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+
+	now := time.Now().UTC()
+	state := testhelpers.CreateValidState()
+	registerClaimTaskTestAgents(state)
+
+	postCmd := "exit 1"
+	state.Config.PostWorktreeCmd = &postCmd
+	state.Tasks = []models.Task{
+		testhelpers.BuildTaskByStatus("task-1", models.TaskStatusReady, now),
+	}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	if _, err := ClaimTask(tmpDir, "task-1", "coder-1"); err == nil {
+		t.Fatal("ClaimTask() error = nil, want post-worktree setup failure")
+	}
+
+	worktreeDir := filepath.Join(tmpDir, paths.WorktreesDirName, "task-1")
+	if _, statErr := os.Stat(worktreeDir); statErr != nil {
+		t.Errorf("os.Stat(%q) error = %v, want worktree preserved for inspection", worktreeDir, statErr)
 	}
 }
 
@@ -1288,6 +1338,151 @@ func TestClaimTask_PostWorktreeCmdRunsOnSameCoderReclaim(t *testing.T) {
 	if len(result.Warnings) != 0 {
 		t.Errorf("Expected no warnings, got %v", result.Warnings)
 	}
+}
+
+// Reclaim paths reuse an existing worktree, so a setup failure there means the
+// worktree missed bootstrap or regressed — the reclaim must not proceed.
+func TestClaimTask_PostWorktreeCmdFailureFailsReclaimClosed(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		status      models.TaskStatus
+		preCreateWt bool
+	}{
+		// Both rejected branches run the hook (rejectedClaimStrategy always
+		// returns true), so both must fail closed.
+		{name: "rejected reclaim preserved worktree", status: models.TaskStatusRejected, preCreateWt: true},
+		{name: "rejected reclaim recreated worktree", status: models.TaskStatusRejected, preCreateWt: false},
+		{name: "integration fix", status: models.TaskStatusIntegrationFailed, preCreateWt: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			testhelpers.SetupTestGitRepo(t, tmpDir)
+			stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+			t.Setenv(stacklit.EnvEnableStacklit, "false")
+
+			now := time.Now().UTC()
+			state := testhelpers.CreateValidState()
+			registerClaimTaskTestAgents(state)
+
+			postCmd := "exit 1"
+			state.Config.PostWorktreeCmd = &postCmd
+			state.Tasks = []models.Task{testhelpers.BuildTaskByStatus("task-1", tc.status, now)}
+			testhelpers.WriteInitialState(t, stateFile, state)
+
+			if tc.preCreateWt {
+				if _, err := git.New(tmpDir).CreateWorktree("task-1", "integration"); err != nil {
+					t.Fatalf("Failed to create initial worktree: %v", err)
+				}
+			}
+
+			_, err := ClaimTask(tmpDir, "task-1", "coder-1")
+			if err == nil {
+				t.Fatal("ClaimTask() error = nil, want post-worktree setup failure")
+			}
+			var setupErr *PostWorktreeSetupError
+			if !stderrors.As(err, &setupErr) {
+				t.Fatalf("ClaimTask() error = %v, want *PostWorktreeSetupError", err)
+			}
+
+			after, readErr := db.For(stateFile).Read()
+			if readErr != nil {
+				t.Fatalf("Read() error = %v", readErr)
+			}
+			task := after.FindTask("task-1")
+			if task == nil {
+				t.Fatal("FindTask(task-1) = nil")
+			}
+			if task.Status != tc.status {
+				t.Errorf("task.Status = %s, want unchanged %s", task.Status, tc.status)
+			}
+		})
+	}
+}
+
+// preservedInitialClaimStrategy.shouldRunPostWorktreeCmd returns true, so the
+// preserved-branch continuation path must fail closed like every other claim.
+func TestClaimTask_PostWorktreeCmdFailureFailsPreservedInitialClaimClosed(t *testing.T) {
+	fixture := newPreservedInitialClaimFixture(t)
+
+	bb := db.For(fixture.stateFile)
+	if err := bb.Modify(func(state *models.State) error {
+		postCmd := "exit 1"
+		state.Config.PostWorktreeCmd = &postCmd
+		return nil
+	}); err != nil {
+		t.Fatalf("Modify() error = %v", err)
+	}
+
+	statusBefore := mustFindTaskStatus(t, bb, fixture.taskID)
+
+	_, err := ClaimTask(fixture.projectRoot, fixture.taskID, fixture.agentID)
+	if err == nil {
+		t.Fatal("ClaimTask() error = nil, want post-worktree setup failure")
+	}
+	var setupErr *PostWorktreeSetupError
+	if !stderrors.As(err, &setupErr) {
+		t.Fatalf("ClaimTask() error = %v, want *PostWorktreeSetupError", err)
+	}
+	if got := mustFindTaskStatus(t, bb, fixture.taskID); got != statusBefore {
+		t.Errorf("task.Status = %s, want unchanged %s", got, statusBefore)
+	}
+}
+
+// Fixing the command must make the same claim succeed — fail-closed is a gate,
+// not a permanent rejection of the task.
+func TestClaimTask_SucceedsAfterPostWorktreeCmdFixed(t *testing.T) {
+	tmpDir := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, tmpDir)
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	t.Setenv(stacklit.EnvEnableStacklit, "false")
+
+	now := time.Now().UTC()
+	state := testhelpers.CreateValidState()
+	registerClaimTaskTestAgents(state)
+	broken := "exit 1"
+	state.Config.PostWorktreeCmd = &broken
+	state.Tasks = []models.Task{
+		testhelpers.BuildTaskByStatus("task-1", models.TaskStatusReady, now),
+	}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	if _, err := ClaimTask(tmpDir, "task-1", "coder-1"); err == nil {
+		t.Fatal("ClaimTask() error = nil, want initial setup failure")
+	}
+
+	bb := db.For(stateFile)
+	if err := bb.Modify(func(state *models.State) error {
+		fixed := "touch .post-worktree-ran"
+		state.Config.PostWorktreeCmd = &fixed
+		return nil
+	}); err != nil {
+		t.Fatalf("Modify() error = %v", err)
+	}
+
+	result, err := ClaimTask(tmpDir, "task-1", "coder-1")
+	if err != nil {
+		t.Fatalf("ClaimTask() after fix error = %v, want success", err)
+	}
+	markerPath := filepath.Join(tmpDir, paths.WorktreesDirName, "task-1", ".post-worktree-ran")
+	if _, statErr := os.Stat(markerPath); statErr != nil {
+		t.Errorf("os.Stat(marker) error = %v, want the fixed command to have run", statErr)
+	}
+	if result.TaskID != "task-1" {
+		t.Errorf("result.TaskID = %q, want task-1", result.TaskID)
+	}
+}
+
+func mustFindTaskStatus(t *testing.T, bb *db.Blackboard, taskID string) models.TaskStatus {
+	t.Helper()
+	state, err := bb.Read()
+	if err != nil {
+		t.Fatalf("Read() error = %v", err)
+	}
+	task := state.FindTask(taskID)
+	if task == nil {
+		t.Fatalf("FindTask(%q) = nil", taskID)
+	}
+	return task.Status
 }
 
 func TestClaimTaskPreparesSembleIgnoreForFreshClaim(t *testing.T) {

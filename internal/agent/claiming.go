@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand/v2"
+	"path/filepath"
 	"time"
 
 	"github.com/liza-mas/liza/internal/db"
@@ -14,7 +15,9 @@ import (
 	"github.com/liza-mas/liza/internal/roles"
 )
 
-var ErrAgentDegraded = errors.New("agent degraded: infrastructure claim failure")
+// ErrAgentDegraded aliases the ops sentinel so a claim degraded inside
+// ops.ClaimTask and one degraded here are indistinguishable to the supervisor.
+var ErrAgentDegraded = ops.ErrAgentDegraded
 
 func claimDoerTask(projectRoot, agentID, role string, bb *db.Blackboard) (taskID, worktree string, err error) {
 	logger := GetLogger()
@@ -28,6 +31,11 @@ func claimDoerTask(projectRoot, agentID, role string, bb *db.Blackboard) (taskID
 	}
 	if handoffResult.Found {
 		logger.Info("Resuming claimed task from handoff", "task_id", handoffResult.TaskID, "agent_id", agentID)
+		if setupErr := ensureDoerWorktreeSetup(
+			projectRoot, agentID, role, handoffResult.TaskID, handoffResult.Worktree,
+		); setupErr != nil {
+			return "", "", setupErr
+		}
 		return handoffResult.TaskID, handoffResult.Worktree, nil
 	}
 
@@ -40,6 +48,11 @@ func claimDoerTask(projectRoot, agentID, role string, bb *db.Blackboard) (taskID
 	}
 	if ownedResult.Found {
 		logger.Info("Resuming owned executing task", "task_id", ownedResult.TaskID, "agent_id", agentID)
+		if setupErr := ensureDoerWorktreeSetup(
+			projectRoot, agentID, role, ownedResult.TaskID, ownedResult.Worktree,
+		); setupErr != nil {
+			return "", "", setupErr
+		}
 		return ownedResult.TaskID, ownedResult.Worktree, nil
 	}
 	if ownedResult.Blocked {
@@ -93,6 +106,40 @@ func claimDoerTask(projectRoot, agentID, role string, bb *db.Blackboard) (taskID
 	return "", "", fmt.Errorf("all %d candidates in top priority tier failed to claim: %w", len(tier), lastErr)
 }
 
+// ensureDoerWorktreeSetup runs the configured post_worktree_cmd for a resumed
+// task worktree. Resume paths bypass ClaimTask, so without this a handoff or
+// restart would hand a coder an unprepared worktree — the failure mode the
+// claim path already fails closed on.
+//
+// Enforcement lives here rather than in doerStrategy.PreExecution because the
+// supervisor logs PreExecution failures and continues (supervisor.go), so a
+// PreExecution hook would not fail closed without changing that contract for
+// every strategy.
+func ensureDoerWorktreeSetup(projectRoot, agentID, role, taskID, worktreeRel string) error {
+	if worktreeRel == "" {
+		return nil
+	}
+	state, err := db.For(paths.New(projectRoot).StatePath()).Read()
+	if err != nil {
+		return fmt.Errorf("read state for worktree setup: %w", err)
+	}
+	if state.Config.PostWorktreeCmd == nil {
+		return nil
+	}
+	setupErr := ops.RunPostWorktreeCmd(*state.Config.PostWorktreeCmd, filepath.Join(projectRoot, worktreeRel))
+	if setupErr == nil {
+		return nil
+	}
+	GetLogger().Error("post-worktree-cmd failed on resume",
+		"task_id", taskID, "agent_id", agentID, "error", setupErr)
+	if degradedErr := markAgentDegradedForInfraClaim(
+		projectRoot, agentID, role, taskID, []string{taskID}, setupErr,
+	); degradedErr != nil {
+		return degradedErr
+	}
+	return setupErr
+}
+
 func taskIDsFromCandidates(candidates []*models.Task) []string {
 	taskIDs := make([]string, 0, len(candidates))
 	for _, task := range candidates {
@@ -102,6 +149,11 @@ func taskIDsFromCandidates(candidates []*models.Task) []string {
 }
 
 func markAgentDegradedForInfraClaim(projectRoot, agentID, role, taskID string, candidateTaskIDs []string, err error) error {
+	// ops.ClaimTask already degraded and wrapped this one; re-marking would
+	// duplicate the anomaly.
+	if errors.Is(err, ops.ErrAgentDegraded) {
+		return ErrAgentDegraded
+	}
 	classification := ops.ClassifyInfraClaimError(err)
 	if !classification.IsInfra {
 		return nil

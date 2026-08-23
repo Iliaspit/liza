@@ -1,6 +1,7 @@
 package ops
 
 import (
+	stderrors "errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -1350,5 +1351,52 @@ func assertWorktreeFileMissing(t *testing.T, worktreeDir, rel string) {
 	path := filepath.Join(worktreeDir, rel)
 	if _, err := os.Lstat(path); !os.IsNotExist(err) {
 		t.Fatalf("Lstat(%s) error = %v, want not exist", path, err)
+	}
+}
+
+// CreateWorktree must not report a worktree as ready when its configured setup
+// command failed — on both the fresh and the already-existing path.
+func TestCreateWorktree_PostWorktreeCmdFailureFailsClosed(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		preCreate  bool
+		wantExists bool
+	}{
+		{name: "fresh worktree", preCreate: false},
+		{name: "existing worktree", preCreate: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			testhelpers.SetupTestGitRepo(t, tmpDir)
+			stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+			t.Setenv(stacklit.EnvEnableStacklit, "false")
+
+			now := time.Now().UTC()
+			state := testhelpers.CreateValidState()
+			postCmd := "echo setup-broke >&2; exit 3"
+			state.Config.PostWorktreeCmd = &postCmd
+			state.Tasks = []models.Task{
+				testhelpers.BuildTaskByStatus("task-1", models.TaskStatusImplementing, now),
+			}
+			testhelpers.WriteInitialState(t, stateFile, state)
+
+			if tc.preCreate {
+				if _, err := git.New(tmpDir).CreateWorktree("task-1", "integration"); err != nil {
+					t.Fatalf("Failed to pre-create worktree: %v", err)
+				}
+			}
+
+			result, err := CreateWorktree(tmpDir, "task-1", false)
+			if err == nil {
+				t.Fatalf("CreateWorktree() error = nil, want setup failure; result = %+v", result)
+			}
+			var setupErr *PostWorktreeSetupError
+			if !stderrors.As(err, &setupErr) {
+				t.Fatalf("CreateWorktree() error = %v, want *PostWorktreeSetupError", err)
+			}
+			if setupErr.Cmd != postCmd {
+				t.Errorf("setupErr.Cmd = %q, want %q", setupErr.Cmd, postCmd)
+			}
+		})
 	}
 }

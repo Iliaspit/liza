@@ -3,6 +3,7 @@ package ops
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	stderrors "errors"
 	"fmt"
 	"log"
 	"os"
@@ -58,7 +59,50 @@ func ClaimTask(projectRoot, taskID, agentID string) (*ClaimResult, error) {
 		result, claimErr = claimTask(projectRoot, taskID, agentID)
 		return claimErr
 	})
+	if err != nil {
+		// Degrade at this boundary rather than in one caller: every production
+		// entry point (supervisor claim loop, await-verdict auto-reclaim, CLI)
+		// goes through ClaimTask, and a setup failure must bound retries for all
+		// of them. See ADR-0117.
+		if degradedErr := degradeOnPostWorktreeSetupFailure(projectRoot, taskID, agentID, err); degradedErr != nil {
+			return nil, degradedErr
+		}
+	}
 	return result, err
+}
+
+// ErrAgentDegraded marks a claim failure that already recorded degraded agent
+// health. Callers must stop claiming rather than retry another candidate.
+var ErrAgentDegraded = stderrors.New("agent degraded: infrastructure claim failure")
+
+// degradeOnPostWorktreeSetupFailure records degraded health for a setup failure
+// and returns the error wrapped with ErrAgentDegraded. Returns nil when the
+// error is not a setup failure, leaving the original error untouched.
+func degradeOnPostWorktreeSetupFailure(projectRoot, taskID, agentID string, err error) error {
+	var setupErr *PostWorktreeSetupError
+	if !stderrors.As(err, &setupErr) {
+		return nil
+	}
+	classification := ClassifyInfraClaimError(err)
+	role, roleErr := identity.ExtractRole(agentID)
+	if roleErr != nil {
+		log.Printf("WARNING: claim-task %s: cannot resolve role for degraded health: %v", taskID, roleErr)
+		return fmt.Errorf("%w: %w", ErrAgentDegraded, err)
+	}
+	if markErr := MarkAgentDegraded(MarkAgentDegradedInput{
+		ProjectRoot:    projectRoot,
+		AgentID:        agentID,
+		Role:           role,
+		Reason:         classification.Reason,
+		LastTask:       taskID,
+		CandidateTasks: []string{taskID},
+		LastError:      err.Error(),
+		RecoverHint:    classification.RecoverHint,
+		DegradedBy:     "claim_task",
+	}); markErr != nil {
+		log.Printf("WARNING: claim-task %s: failed to record degraded health: %v", taskID, markErr)
+	}
+	return fmt.Errorf("%w: %w", ErrAgentDegraded, err)
 }
 
 func claimTask(projectRoot, taskID, agentID string) (*ClaimResult, error) {
@@ -325,13 +369,16 @@ func completeClaimTaskAfterValidation(
 	// Run post-worktree command after worktree provisioning.
 	// Runs on: fresh claims, rejection reclaims (including same-coder), integration-fix.
 	// PostWorktreeCmd is idempotent — safe on existing worktrees, catches prior failures.
-	// Non-fatal: warnings are surfaced through ClaimResult for caller visibility.
-	var postCmdWarnings []string
+	//
+	// Fail closed: abort here, before Phase 3 commits any task or agent state, so
+	// no claim exists for a worktree that is not build-ready. The worktree is left
+	// on disk so the failure can be reproduced against it; a later fresh claim
+	// treats it as a stale resource. The caller classifies this error as an
+	// infrastructure failure and degrades the agent, which bounds retries.
 	if postWorktreeCmd != nil && strategy.shouldRunPostWorktreeCmd(worktreePhase) {
 		if postErr := RunPostWorktreeCmd(*postWorktreeCmd, claimCtx.worktreeDir); postErr != nil {
-			warning := fmt.Sprintf("post-worktree-cmd: %v", postErr)
-			postCmdWarnings = append(postCmdWarnings, warning)
-			log.Printf("WARNING: claim-task %s: %s", taskID, warning)
+			log.Printf("ERROR: claim-task %s: %v", taskID, postErr)
+			return nil, postErr
 		}
 	}
 	sembleWarnings := PrepareSembleWorktreeIgnore(claimCtx.worktreeDir)
@@ -489,7 +536,6 @@ func completeClaimTaskAfterValidation(
 	}
 
 	warnings := append([]string{}, envFileWarnings...)
-	warnings = append(warnings, postCmdWarnings...)
 	warnings = append(warnings, sembleWarnings...)
 	warnings = append(warnings, scipWarnings...)
 	warnings = append(warnings, stacklitWarnings...)

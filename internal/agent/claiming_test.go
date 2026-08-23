@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -671,4 +672,154 @@ func findPipelineTestdata(t *testing.T) string {
 func findPhase2PipelineTestdata(t *testing.T) string {
 	t.Helper()
 	return filepath.Join(testhelpers.FindRepoRoot(t), "internal", "pipeline", "testdata", "valid-phase2-full.yaml")
+}
+
+// Resume paths bypass ClaimTask, so without enforcement here a handoff or a
+// restart would hand a coder an unprepared worktree — the gap the claim path
+// already closes.
+func TestClaimDoerTask_ResumePostWorktreeCmdFailureDegradesAgent(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		handoffPending bool
+	}{
+		{name: "owned task resume", handoffPending: false},
+		{name: "handoff resume", handoffPending: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			testhelpers.SetupTestGitRepo(t, tmpDir)
+			statePath, _ := testhelpers.SetupLizaDir(t, tmpDir)
+			testhelpers.CreateTestWorktree(t, tmpDir, "task-owned")
+
+			now := time.Now().UTC()
+			agentID := "coder-1"
+			owned := testhelpers.BuildTaskByStatus("task-owned", models.TaskStatusImplementing, now)
+			owned.AssignedTo = &agentID
+			owned.HandoffPending = tc.handoffPending
+
+			state := testhelpers.CreateValidState()
+			postCmd := "exit 1"
+			state.Config.PostWorktreeCmd = &postCmd
+			state.Tasks = []models.Task{owned}
+			leaseExpires := now.Add(30 * time.Minute)
+			state.Agents[agentID] = models.Agent{
+				Role:         models.RoleCoder,
+				Status:       models.AgentStatusIdle,
+				LeaseExpires: &leaseExpires,
+				Heartbeat:    now,
+				Terminal:     "test",
+				Provider:     "test",
+				PID:          os.Getpid(),
+			}
+			testhelpers.WriteInitialState(t, statePath, state)
+
+			taskID, worktree, err := claimDoerTask(tmpDir, agentID, models.RoleCoder, db.New(statePath))
+			if err == nil {
+				t.Fatal("claimDoerTask() error = nil, want setup failure")
+			}
+			// The supervisor exits on ErrAgentDegraded before building a prompt or
+			// launching a provider, so this is the "no provider invoked" contract.
+			if !errors.Is(err, ErrAgentDegraded) {
+				t.Fatalf("claimDoerTask() error = %v, want ErrAgentDegraded", err)
+			}
+			if taskID != "" || worktree != "" {
+				t.Errorf("claimDoerTask() = (%q, %q), want empty — no task handed to a provider", taskID, worktree)
+			}
+
+			readState, readErr := db.New(statePath).Read()
+			if readErr != nil {
+				t.Fatalf("Read() error = %v", readErr)
+			}
+			health, ok := readState.AgentHealth[agentID]
+			if !ok {
+				t.Fatal("AgentHealth missing entry, want degraded record")
+			}
+			if health.Reason != ops.AgentDegradedWorktreeSetupFailed {
+				t.Errorf("health.Reason = %q, want %q", health.Reason, ops.AgentDegradedWorktreeSetupFailed)
+			}
+		})
+	}
+}
+
+// A resume with no configured command must stay a plain resume.
+func TestClaimDoerTask_ResumeWithoutPostWorktreeCmdUnaffected(t *testing.T) {
+	tmpDir := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, tmpDir)
+	statePath, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	testhelpers.CreateTestWorktree(t, tmpDir, "task-owned")
+
+	now := time.Now().UTC()
+	agentID := "coder-1"
+	owned := testhelpers.BuildTaskByStatus("task-owned", models.TaskStatusImplementing, now)
+	owned.AssignedTo = &agentID
+
+	state := testhelpers.CreateValidState()
+	state.Tasks = []models.Task{owned}
+	leaseExpires := now.Add(30 * time.Minute)
+	state.Agents[agentID] = models.Agent{
+		Role:         models.RoleCoder,
+		Status:       models.AgentStatusIdle,
+		LeaseExpires: &leaseExpires,
+		Heartbeat:    now,
+		Terminal:     "test",
+		Provider:     "test",
+		PID:          os.Getpid(),
+	}
+	testhelpers.WriteInitialState(t, statePath, state)
+
+	taskID, _, err := claimDoerTask(tmpDir, agentID, models.RoleCoder, db.New(statePath))
+	if err != nil {
+		t.Fatalf("claimDoerTask() error = %v", err)
+	}
+	if taskID != "task-owned" {
+		t.Errorf("taskID = %q, want task-owned", taskID)
+	}
+}
+
+// Degraded classification must stop candidate iteration: a fresh-claim setup
+// failure returns immediately instead of trying the next candidate task.
+func TestClaimDoerTask_PostWorktreeCmdFailureStopsCandidateIteration(t *testing.T) {
+	tmpDir := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, tmpDir)
+	statePath, _ := testhelpers.SetupLizaDir(t, tmpDir)
+
+	now := time.Now().UTC()
+	agentID := "coder-1"
+	state := testhelpers.CreateValidState()
+	postCmd := "exit 1"
+	state.Config.PostWorktreeCmd = &postCmd
+	state.Tasks = []models.Task{
+		testhelpers.BuildTaskByStatus("task-a", models.TaskStatusReady, now),
+		testhelpers.BuildTaskByStatus("task-b", models.TaskStatusReady, now),
+		testhelpers.BuildTaskByStatus("task-c", models.TaskStatusReady, now),
+	}
+	leaseExpires := now.Add(30 * time.Minute)
+	state.Agents[agentID] = models.Agent{
+		Role:         models.RoleCoder,
+		Status:       models.AgentStatusIdle,
+		LeaseExpires: &leaseExpires,
+		Heartbeat:    now,
+		Terminal:     "test",
+		Provider:     "test",
+		PID:          os.Getpid(),
+	}
+	testhelpers.WriteInitialState(t, statePath, state)
+
+	taskID, _, err := claimDoerTask(tmpDir, agentID, models.RoleCoder, db.New(statePath))
+	if !errors.Is(err, ErrAgentDegraded) {
+		t.Fatalf("claimDoerTask() error = %v, want ErrAgentDegraded on the first candidate", err)
+	}
+	if taskID != "" {
+		t.Errorf("taskID = %q, want empty", taskID)
+	}
+
+	// Exactly one worktree attempted — iteration stopped rather than churning
+	// a worktree per candidate.
+	entries, readErr := os.ReadDir(filepath.Join(tmpDir, ".worktrees"))
+	if readErr != nil {
+		t.Fatalf("ReadDir(.worktrees) error = %v", readErr)
+	}
+	if len(entries) != 1 {
+		t.Errorf("worktree count = %d, want 1 — candidate iteration should stop at the first failure", len(entries))
+	}
 }

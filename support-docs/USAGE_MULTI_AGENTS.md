@@ -125,6 +125,8 @@ Use this section once the global setup is complete.
 # If no single setup command can be detected and the flag is still unset, init warns
 # that worktrees will have no dependencies or build artifacts and asks for confirmation
 # (--yes skips it).
+# Once configured, the command must succeed: a failure stops the claim, resume, or
+# review rather than warning, and degrades that agent (ADR-0117).
 # See CONFIGURATION.md "Worktree Setup" for details.
 #
 # Integration branch (--branch sets the branch name, default: "integration"):

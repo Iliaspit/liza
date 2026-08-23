@@ -1,5 +1,13 @@
 # 31 - Configurable Post-Worktree Command
 
+## Superseded In Part
+
+ADR-0117 supersedes the failure-handling decision below. A configured
+`post_worktree_cmd` that fails now fails closed rather than warning, and the
+"command failures are silent (by design)" limitation no longer holds. The
+configurable-hook mechanism, the trust model, and the stack-agnostic constraint
+(G1.1) remain in force.
+
 ## Context and Problem Statement
 
 Agent worktrees for Go projects failed builds because embedded assets (e.g., `internal/embedded/claude-settings.json`) were missing. The initial fix hardcoded `make sync-embedded` in `CreateWorktree()`, but this prevented Liza from working on another project than itself.
@@ -31,7 +39,7 @@ liza init --post-worktree-cmd "make sync-embedded"
 **Execution model:**
 - Command runs via `sh -c` in the worktree directory
 - `RunPostWorktreeCmd()` is idempotent — safe on both new and existing worktrees
-- Failures produce warnings, never block task claiming (permissive strategy)
+- Failures produce warnings, never block task claiming (permissive strategy) — **superseded by ADR-0117**
 - Applied at all worktree creation points: direct creation, task claim, recovery, rejection reclaims
 
 **Trust model:** Same boundary as Makefile/CI config — write access to `state.yaml` equals write access to the repository.
@@ -59,7 +67,7 @@ The decision also triggered GUARDRAILS.md rule G1.1 (ADR-0032), which codifies t
 
 **Limitations accepted:**
 - User must know to set the flag at init time
-- Command failures are silent (by design) — requires log analysis to detect
+- Command failures are silent (by design) — requires log analysis to detect — **superseded by ADR-0117**
 
 ## Amendment (2026-08-23)
 
@@ -71,9 +79,6 @@ confirmation before creating the workspace; declining cancels before any state i
 written. Unambiguous Node layouts keep the existing suggestion prompt, `--yes`
 auto-confirms, and scripted callers with no answerable input get the warning and
 continue.
-
-The second accepted limitation — command failures stay silent by design — is
-unchanged.
 
 Implemented in `internal/commands/init.go` (`confirmMissingPostWorktreeCmd`).
 

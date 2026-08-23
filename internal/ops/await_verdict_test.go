@@ -1535,3 +1535,82 @@ func (w *delayedErrorWatcher) Events() <-chan struct{} { return w.events }
 func (w *delayedErrorWatcher) Errors() <-chan error { return w.errors }
 
 func (*delayedErrorWatcher) Close() error { return nil }
+
+// Rejected auto-reclaim goes through ClaimTask, so a failing configured setup
+// command must degrade the agent there too — otherwise this path retries the
+// failing worktree without a bound (ADR-0117).
+func TestAwaitVerdict_RejectedAutoReclaim_PostWorktreeCmdFailureDegradesAgent(t *testing.T) {
+	tmpDir := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, tmpDir)
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+
+	now := time.Now().UTC()
+	state := testhelpers.CreateValidState()
+	state.Config.MaxCoderIterations = 10
+	state.Config.MaxReviewCycles = 5
+	postCmd := "exit 1"
+	state.Config.PostWorktreeCmd = &postCmd
+
+	task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusReadyForReview, now)
+	task.Iteration = 1
+	task.History = append(task.History, models.TaskHistoryEntry{
+		Time:  now,
+		Event: models.TaskEventSubmittedForReview,
+		Agent: strPtr("coder-1"),
+	})
+	state.Tasks = []models.Task{task}
+	state.Agents["coder-1"] = testhelpers.RegisteredTestAgent("coder")
+	bb := testhelpers.WriteInitialState(t, stateFile, state)
+
+	var awaitErr error
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, awaitErr = AwaitVerdict(context.Background(), tmpDir, "task-1", "coder-1", 10*time.Second)
+	}()
+
+	testhelpers.WaitForAsyncSetup()
+	if err := bb.Modify(func(s *models.State) error {
+		tk := s.FindTask("task-1")
+		tk.Status = models.TaskStatusRejected
+		reason := "Missing error handling"
+		tk.RejectionReason = &reason
+		leaseExpires := time.Now().UTC().Add(30 * time.Minute)
+		tk.LeaseExpires = &leaseExpires
+		reviewer := "code-reviewer-1"
+		tk.History = append(tk.History, models.TaskHistoryEntry{
+			Time:  time.Now().UTC(),
+			Event: models.TaskEventRejected,
+			Agent: &reviewer,
+		})
+		return nil
+	}); err != nil {
+		t.Fatalf("Failed to modify state: %v", err)
+	}
+
+	<-done
+
+	if awaitErr == nil {
+		t.Fatal("AwaitVerdict() error = nil, want the setup failure surfaced")
+	}
+	// Bounded: the caller can distinguish "stop, health recorded" from an
+	// ordinary retryable reclaim failure.
+	if !stderrors.Is(awaitErr, ErrAgentDegraded) {
+		t.Fatalf("AwaitVerdict() error = %v, want ErrAgentDegraded", awaitErr)
+	}
+
+	after, readErr := bb.Read()
+	if readErr != nil {
+		t.Fatalf("Read() error = %v", readErr)
+	}
+	health, ok := after.AgentHealth["coder-1"]
+	if !ok {
+		t.Fatal("AgentHealth missing entry, want degraded record for the auto-reclaim failure")
+	}
+	if health.Reason != AgentDegradedWorktreeSetupFailed {
+		t.Errorf("health.Reason = %q, want %q", health.Reason, AgentDegradedWorktreeSetupFailed)
+	}
+	if strings.Contains(health.LastError, "\n") {
+		t.Errorf("health.LastError = %q, want a single-line persisted diagnostic", health.LastError)
+	}
+}

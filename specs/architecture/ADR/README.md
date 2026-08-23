@@ -32,7 +32,7 @@
 | [0028 — Multi-Sprint Support](0028-multi-sprint-support.md) | Automatic sprint advancement with archive-before-mutate and lightweight history. |
 | [0029 — Agent Log Analysis Tools](0029-agent-log-analysis-tools.md) | Default-on agent output logging (`--no-log` to disable) with Python/HTML analysis tools for token waste and struggle detection. |
 | [0030 — Code-Enforced Agent Guardrails](0030-code-enforced-agent-guardrails.md) | Move role boundary, TDD, and checkpoint enforcement from prompts to Go code validation. |
-| [0031 — Configurable Post-Worktree Command](0031-configurable-post-worktree-command.md) | Replace hardcoded build setup with configurable `PostWorktreeCmd` for any stack. |
+| [0031 — Configurable Post-Worktree Command](0031-configurable-post-worktree-command.md) | Replace hardcoded build setup with configurable `PostWorktreeCmd` for any stack. Failure handling superseded by ADR-0117. |
 | [0032 — Project-Specific Guardrails](0032-project-specific-guardrails.md) | GUARDRAILS.md at project root with Tier 0-3 constraints reusing CORE.md enforcement. |
 | [0033 — Orchestrator Role Rename](0033-orchestrator-role-rename.md) | Rename "Planner" to "Orchestrator" to clarify coordination responsibilities. |
 | [0034 — Spec and Story Writing Skills](0034-spec-and-story-writing-skills.md) | Two reusable skills: detailed-spec-writing (SMARC + PRD) and user-story-writing (SMARC + anti-patterns). |
@@ -104,3 +104,4 @@
 | [0114 — Terminal Dependency Repair](0114-terminal-dependency-repair.md) | Prune illegal downstream edges during supersession and repair existing SUPERSEDED task metadata through one audited transaction. |
 | [0115 — Declarative Atomic Dependency Repairs](0115-declarative-atomic-dependency-repairs.md) | Persist command-free dependency repair requests through `--repair-request-file` and consume them atomically with `apply-dependency-repair`. |
 | [0116 — Orchestrator Classifies Defect Objectives](0116-orchestrator-classifies-defect-objectives.md) | Orchestrator sets `rca_required` at initial planning; flag inherits to children and makes code plans carry a reviewed root cause analysis. |
+| [0117 — Fail-Closed Worktree Readiness](0117-fail-closed-worktree-readiness.md) | A configured `post_worktree_cmd` must succeed before a provider session starts; failure degrades the agent instead of warning. Supersedes ADR-0031's failure handling. |

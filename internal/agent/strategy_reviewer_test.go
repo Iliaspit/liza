@@ -9,8 +9,11 @@ import (
 	"testing"
 	"time"
 
+	"errors"
+
 	"github.com/liza-mas/liza/internal/db"
 	"github.com/liza-mas/liza/internal/models"
+	"github.com/liza-mas/liza/internal/ops"
 	"github.com/liza-mas/liza/internal/paths"
 	"github.com/liza-mas/liza/internal/testhelpers"
 )
@@ -268,5 +271,108 @@ func TestEnsureReviewerPromptClaimed_RejectsSubmittedUnclaimedTask(t *testing.T)
 	}
 	if !strings.Contains(err.Error(), "requires reviewing state") {
 		t.Fatalf("ensureReviewerPromptClaimed() error = %v, want reviewing-state rejection", err)
+	}
+}
+
+// Policy-boundary test: exercises reviewerStrategy.ClaimTask itself, so removing
+// or reordering the claim release or the degradation at that call site fails
+// here rather than passing on helper-level coverage.
+func TestReviewerStrategy_ClaimTask_PostWorktreeCmdFailureReleasesClaimAndDegrades(t *testing.T) {
+	tmpDir := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, tmpDir)
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	testhelpers.SetupPipelineConfig(t, tmpDir)
+
+	now := time.Now().UTC()
+	state := testhelpers.CreateValidState()
+	postCmd := "exit 1"
+	state.Config.PostWorktreeCmd = &postCmd
+	reviewCommit := "abc123"
+	state.Tasks = []models.Task{
+		{
+			ID:           "task-1",
+			Status:       models.TaskStatusReadyForReview,
+			RolePair:     "coding-pair",
+			ReviewCommit: &reviewCommit,
+			Created:      now,
+		},
+	}
+	const reviewerID = "code-reviewer-1"
+	state.Agents[reviewerID] = testhelpers.RegisteredTestAgent("code-reviewer")
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	// Intact worktree: the reviewer path runs setup before the provider session.
+	wtPath := filepath.Join(tmpDir, paths.WorktreesDirName, "task-1")
+	if err := os.MkdirAll(wtPath, 0o755); err != nil {
+		t.Fatalf("MkdirAll(%q) error = %v", wtPath, err)
+	}
+
+	strategy, err := NewRoleStrategy("code-reviewer", testResolver(t))
+	if err != nil {
+		t.Fatalf("NewRoleStrategy() error = %v", err)
+	}
+
+	bb := db.New(stateFile)
+	taskID, claimedTaskID, claimErr := strategy.ClaimTask(SupervisorConfig{
+		ProjectRoot: tmpDir,
+		AgentID:     reviewerID,
+		Role:        "code-reviewer",
+	}, bb)
+
+	if claimErr == nil {
+		t.Fatal("ClaimTask() error = nil, want setup failure")
+	}
+	if !errors.Is(claimErr, ErrAgentDegraded) {
+		t.Fatalf("ClaimTask() error = %v, want ErrAgentDegraded", claimErr)
+	}
+	// No task returned means the supervisor never builds a prompt or launches a
+	// provider for this worktree.
+	if taskID != "" || claimedTaskID != "" {
+		t.Errorf("ClaimTask() = (%q, %q), want empty", taskID, claimedTaskID)
+	}
+
+	after, readErr := bb.Read()
+	if readErr != nil {
+		t.Fatalf("Read() error = %v", readErr)
+	}
+
+	task := after.FindTask("task-1")
+	if task == nil {
+		t.Fatal("FindTask(task-1) = nil")
+	}
+	// Exact status, not merely "not BLOCKED": a task stranded in REVIEWING with
+	// no reviewer is unreviewable and unreclaimable, which would also pass a
+	// negative assertion.
+	if task.Status != models.TaskStatusReadyForReview {
+		t.Errorf("task.Status = %s, want %s so another reviewer can claim it",
+			task.Status, models.TaskStatusReadyForReview)
+	}
+	if task.ReviewingBy != nil {
+		t.Errorf("task.ReviewingBy = %q, want the reviewer claim released", *task.ReviewingBy)
+	}
+	if task.ReviewLeaseExpires != nil {
+		t.Errorf("task.ReviewLeaseExpires = %v, want cleared", *task.ReviewLeaseExpires)
+	}
+
+	// The reviewer agent must also be free, not just detached from the task.
+	reviewer, ok := after.Agents[reviewerID]
+	if !ok {
+		t.Fatal("Agents missing reviewer entry")
+	}
+	if reviewer.CurrentTask != nil && *reviewer.CurrentTask != "" {
+		t.Errorf("reviewer.CurrentTask = %q, want released", *reviewer.CurrentTask)
+	}
+	// Exact status: the claim sets REVIEWING, and only ReleaseAgent resets to
+	// IDLE. Asserting "not WORKING" would accept a reviewer left in REVIEWING.
+	if reviewer.Status != models.AgentStatusIdle {
+		t.Errorf("reviewer.Status = %s, want %s", reviewer.Status, models.AgentStatusIdle)
+	}
+
+	health, ok := after.AgentHealth[reviewerID]
+	if !ok {
+		t.Fatal("AgentHealth missing entry, want the reviewer degraded")
+	}
+	if health.Reason != ops.AgentDegradedWorktreeSetupFailed {
+		t.Errorf("health.Reason = %q, want %q", health.Reason, ops.AgentDegradedWorktreeSetupFailed)
 	}
 }
