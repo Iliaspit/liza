@@ -61,5 +61,21 @@ The decision also triggered GUARDRAILS.md rule G1.1 (ADR-0032), which codifies t
 - User must know to set the flag at init time
 - Command failures are silent (by design) — requires log analysis to detect
 
+## Amendment (2026-08-23)
+
+The limitation "user must know to set the flag at init time" is now mitigated at
+the source. When `--post-worktree-cmd` is absent and auto-detection cannot select
+one command—because no Node layout exists or multiple Node projects are
+present—`liza init` explains that task worktrees are fresh checkouts and asks for
+confirmation before creating the workspace; declining cancels before any state is
+written. Unambiguous Node layouts keep the existing suggestion prompt, `--yes`
+auto-confirms, and scripted callers with no answerable input get the warning and
+continue.
+
+The second accepted limitation — command failures stay silent by design — is
+unchanged.
+
+Implemented in `internal/commands/init.go` (`confirmMissingPostWorktreeCmd`).
+
 ---
 *Reconstructed from commits c2aba97, 0a53d76, cc20f98, 7f682dd (2026-02-27 to 2026-03-07)*

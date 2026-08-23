@@ -62,10 +62,10 @@ Run `§BRAND_BINARY_NAME§ init` in each project where §BRAND_NAME_TITLE§ shou
 interactive wizard walks through mode selection, provider selection, and
 project-local setup. Add `--yes` when using explicit init arguments to
 auto-confirm approval prompts such as provider config merges, template
-overwrites, detected `post_worktree_cmd` suggestions, and removal of existing
-workspace data before full initialization. Workspace cleanup lists
-`§BRAND_PROJECT_DIRNAME§/`, `.worktrees/`, and associated task branches before
-deleting them. `--yes` bypasses that confirmation, but never ownership or
+overwrites, detected `post_worktree_cmd` suggestions, the missing
+`post_worktree_cmd` warning, and removal of existing workspace data before full
+initialization. Workspace cleanup lists `§BRAND_PROJECT_DIRNAME§/`,
+`.worktrees/`, and associated task branches before deleting them. `--yes` bypasses that confirmation, but never ownership or
 live-agent safety checks. Run `§BRAND_BINARY_NAME§ cleanup` to perform the same
 cleanup without immediately initializing another goal.
 
@@ -906,6 +906,7 @@ Worktrees are bare checkouts — they lack build artifacts like `node_modules/`,
 
 - **After merge:** If `post_worktree_cmd` is still unset and a successful merge introduces an unambiguous Node project layout on the integration branch, `§BRAND_BINARY_NAME§ wt-merge` auto-populates the same detected command. Ambiguous layouts still require manual configuration.
 - **After init:** Add `post_worktree_cmd: "your command"` to the `config` section of `§BRAND_PROJECT_DIRNAME§/state.yaml`.
+- **Missing-command warning:** When `--post-worktree-cmd` is not provided and auto-detection cannot select one command—because no Node layout exists or multiple Node projects are present—`§BRAND_BINARY_NAME§ init` explains the risk (task worktrees are fresh checkouts with no dependencies or build artifacts) and asks for confirmation before creating the workspace. Answering anything but `y` cancels initialization before any workspace data is written. `--yes` auto-confirms; scripted callers with no answerable input get the warning and continue.
 
 **Behavior:** The command runs via `sh -c` in the worktree directory. It is non-fatal — warnings are emitted but worktree creation succeeds even if the command fails.
 

@@ -972,6 +972,10 @@ func InitCommandWithConfig(params InitParams) error {
 		fmt.Fprintf(os.Stderr, "Warning: %s\n", warning)
 	}
 
+	if err := confirmMissingPostWorktreeCmd(params, lizaPaths.ProjectRoot(), stdin, rawStdin); err != nil {
+		return err
+	}
+
 	if _, err := CleanupProjectCommand(CleanupParams{
 		ProjectRoot: lizaPaths.ProjectRoot(),
 		Stdin:       stdin,
@@ -1353,6 +1357,46 @@ func detectNodeSubdirs(projectRoot string) []string {
 // a manual-configuration message instead of guessing at a compound command.
 func detectPostWorktreeCmd(projectRoot string) string {
 	return projectdetect.DetectPostWorktreeCmd(projectRoot)
+}
+
+// confirmMissingPostWorktreeCmd guards against forgetting --post-worktree-cmd.
+// Auto-detection only covers Node layouts; every other stack would otherwise
+// initialize silently and hand agents worktrees with no dependencies or build
+// artifacts. Interactive callers must confirm; non-interactive callers get the
+// warning only, since there is no one to answer.
+func confirmMissingPostWorktreeCmd(params InitParams, projectRoot string, stdin *bufio.Reader, rawStdin io.Reader) error {
+	if params.PostWorktreeCmd != "" || detectPostWorktreeCmd(projectRoot) != "" {
+		return nil
+	}
+	nodeSubdirs := detectNodeSubdirs(projectRoot)
+	if len(nodeSubdirs) > 1 {
+		fmt.Fprintf(os.Stderr, "⚠️  No --post-worktree-cmd set, and auto-detection found multiple Node.js projects (%s), so no single setup command could be selected.\n", strings.Join(nodeSubdirs, ", "))
+	} else {
+		fmt.Fprintln(os.Stderr, "⚠️  No --post-worktree-cmd set, and auto-detection found no Node.js project layout.")
+	}
+	fmt.Fprintln(os.Stderr, "Task worktrees are fresh checkouts: no installed dependencies, no build artifacts. Agent builds and tests can fail for environment reasons and burn iterations.")
+	fmt.Fprintf(os.Stderr, "Set one with: %s init \"<goal>\" --post-worktree-cmd \"make setup\", or add post_worktree_cmd to %s/state.yaml later.\n", brand.BinaryName, paths.ProjectDirName())
+	if !params.ForceInteractive && !params.AutoConfirm && !isInteractive(rawStdin) {
+		return nil
+	}
+	fmt.Fprint(os.Stderr, "Continue without a post-worktree setup command? (y/n): ")
+	if params.AutoConfirm {
+		fmt.Fprintln(os.Stderr, "yes")
+		return nil
+	}
+	response, err := termutil.ReadSingleKey(stdin)
+	fmt.Fprintln(os.Stderr)
+	if err != nil {
+		// No answerable input (isInteractive also accepts /dev/null, so
+		// scripted callers reach this prompt). Nobody is there to answer:
+		// the warning stands and initialization continues, as it does on
+		// the non-interactive path above.
+		return nil
+	}
+	if response != "y" {
+		return fmt.Errorf("initialization cancelled by user")
+	}
+	return nil
 }
 
 // detectPkgManagerContext returns a human-readable description of what was

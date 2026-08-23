@@ -4503,6 +4503,225 @@ func TestDetectPostWorktreeCmd(t *testing.T) {
 	}
 }
 
+func TestConfirmMissingPostWorktreeCmd_MultipleNodeSubdirsExplainsAmbiguity(t *testing.T) {
+	tmpDir := t.TempDir()
+	for _, subdir := range []string{"api", "web"} {
+		dir := filepath.Join(tmpDir, subdir)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("os.MkdirAll(%q) error = %v", dir, err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "package.json"), []byte("{}\n"), 0o644); err != nil {
+			t.Fatalf("os.WriteFile(%q) error = %v", filepath.Join(dir, "package.json"), err)
+		}
+	}
+
+	rawStdin := strings.NewReader("y\n")
+	stderr, err := captureStderrForTest(func() error {
+		return confirmMissingPostWorktreeCmd(
+			InitParams{ForceInteractive: true},
+			tmpDir,
+			bufio.NewReader(rawStdin),
+			rawStdin,
+		)
+	})
+	if err != nil {
+		t.Fatalf("confirmMissingPostWorktreeCmd() error = %v", err)
+	}
+	if !strings.Contains(stderr, "multiple Node.js projects (api, web)") {
+		t.Errorf("stderr = %q, want multiple-project explanation", stderr)
+	}
+	if strings.Contains(stderr, "found no Node.js project layout") {
+		t.Errorf("stderr = %q, contains false no-layout explanation", stderr)
+	}
+}
+
+func TestInitCommandWithConfig_MissingPostWorktreeCmdDeclined(t *testing.T) {
+	tmpDir := setupGitRepo(t)
+	defer os.RemoveAll(tmpDir)
+	setupGlobalLiza(t)
+
+	originalDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(originalDir)
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatal(err)
+	}
+
+	testhelpers.CreateCommittedSpecFile(t, tmpDir, "vision.md", "# Vision\n")
+
+	// No package.json: nothing to auto-detect, so the missing-command warning
+	// must block. Declining aborts before any workspace state is written.
+	err = InitCommandWithConfig(InitParams{
+		Description:      "Goal without post-worktree-cmd",
+		SpecRef:          "specs/vision.md",
+		Stdin:            strings.NewReader("n\n"),
+		ForceInteractive: true,
+	})
+	if err == nil {
+		t.Fatal("InitCommandWithConfig() error = nil, want cancellation error")
+	}
+	if !strings.Contains(err.Error(), "cancelled by user") {
+		t.Errorf("InitCommandWithConfig() error = %v, want cancellation error", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(tmpDir, ".liza")); !os.IsNotExist(statErr) {
+		t.Errorf(".liza/ exists after declined init, want no workspace created")
+	}
+}
+
+func TestInitCommandWithConfig_MissingPostWorktreeCmdConfirmed(t *testing.T) {
+	tmpDir := setupGitRepo(t)
+	defer os.RemoveAll(tmpDir)
+	setupGlobalLiza(t)
+
+	originalDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(originalDir)
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatal(err)
+	}
+
+	testhelpers.CreateCommittedSpecFile(t, tmpDir, "vision.md", "# Vision\n")
+
+	err = InitCommandWithConfig(InitParams{
+		Description:      "Goal without post-worktree-cmd",
+		SpecRef:          "specs/vision.md",
+		Stdin:            strings.NewReader("y\n"),
+		ForceInteractive: true,
+	})
+	if err != nil {
+		t.Fatalf("InitCommandWithConfig() error = %v", err)
+	}
+
+	bb := db.New(filepath.Join(tmpDir, ".liza", "state.yaml"))
+	state, err := bb.Read()
+	if err != nil {
+		t.Fatalf("Failed to read state: %v", err)
+	}
+	if state.Config.PostWorktreeCmd != nil {
+		t.Errorf("state.Config.PostWorktreeCmd = %q, want nil", *state.Config.PostWorktreeCmd)
+	}
+}
+
+func TestInitCommandWithConfig_MissingPostWorktreeCmdUnansweredContinues(t *testing.T) {
+	tmpDir := setupGitRepo(t)
+	defer os.RemoveAll(tmpDir)
+	setupGlobalLiza(t)
+
+	originalDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(originalDir)
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatal(err)
+	}
+
+	testhelpers.CreateCommittedSpecFile(t, tmpDir, "vision.md", "# Vision\n")
+
+	// Scripted callers reach the prompt because isInteractive also accepts
+	// /dev/null. An unanswerable prompt must not cancel initialization.
+	err = InitCommandWithConfig(InitParams{
+		Description:      "Goal without post-worktree-cmd",
+		SpecRef:          "specs/vision.md",
+		Stdin:            strings.NewReader(""),
+		ForceInteractive: true,
+	})
+	if err != nil {
+		t.Fatalf("InitCommandWithConfig() error = %v", err)
+	}
+
+	bb := db.New(filepath.Join(tmpDir, ".liza", "state.yaml"))
+	state, err := bb.Read()
+	if err != nil {
+		t.Fatalf("Failed to read state: %v", err)
+	}
+	if state.Config.PostWorktreeCmd != nil {
+		t.Errorf("state.Config.PostWorktreeCmd = %q, want nil", *state.Config.PostWorktreeCmd)
+	}
+}
+
+func TestInitCommandWithConfig_ExplicitPostWorktreeCmdSkipsWarning(t *testing.T) {
+	tmpDir := setupGitRepo(t)
+	defer os.RemoveAll(tmpDir)
+	setupGlobalLiza(t)
+
+	originalDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(originalDir)
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatal(err)
+	}
+
+	testhelpers.CreateCommittedSpecFile(t, tmpDir, "vision.md", "# Vision\n")
+
+	// Empty stdin: succeeding proves no confirmation was requested.
+	err = InitCommandWithConfig(InitParams{
+		Description:      "Goal with explicit post-worktree-cmd",
+		SpecRef:          "specs/vision.md",
+		PostWorktreeCmd:  "make setup",
+		Stdin:            strings.NewReader(""),
+		ForceInteractive: true,
+	})
+	if err != nil {
+		t.Fatalf("InitCommandWithConfig() error = %v", err)
+	}
+
+	bb := db.New(filepath.Join(tmpDir, ".liza", "state.yaml"))
+	state, err := bb.Read()
+	if err != nil {
+		t.Fatalf("Failed to read state: %v", err)
+	}
+	if state.Config.PostWorktreeCmd == nil {
+		t.Fatal("state.Config.PostWorktreeCmd is nil, want non-nil")
+	}
+	if *state.Config.PostWorktreeCmd != "make setup" {
+		t.Errorf("state.Config.PostWorktreeCmd = %q, want %q", *state.Config.PostWorktreeCmd, "make setup")
+	}
+}
+
+func TestInitCommandWithConfig_AutoConfirmSkipsMissingPostWorktreePrompt(t *testing.T) {
+	tmpDir := setupGitRepo(t)
+	defer os.RemoveAll(tmpDir)
+	setupGlobalLiza(t)
+
+	originalDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(originalDir)
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatal(err)
+	}
+
+	testhelpers.CreateCommittedSpecFile(t, tmpDir, "vision.md", "# Vision\n")
+
+	// --yes auto-answers the warning without consuming stdin.
+	err = InitCommandWithConfig(InitParams{
+		Description: "Goal without post-worktree-cmd",
+		SpecRef:     "specs/vision.md",
+		Stdin:       strings.NewReader(""),
+		AutoConfirm: true,
+	})
+	if err != nil {
+		t.Fatalf("InitCommandWithConfig() error = %v", err)
+	}
+
+	bb := db.New(filepath.Join(tmpDir, ".liza", "state.yaml"))
+	state, err := bb.Read()
+	if err != nil {
+		t.Fatalf("Failed to read state: %v", err)
+	}
+	if state.Config.PostWorktreeCmd != nil {
+		t.Errorf("state.Config.PostWorktreeCmd = %q, want nil", *state.Config.PostWorktreeCmd)
+	}
+}
+
 func TestInitCommandWithConfig_AutoSuggestsPostWorktreeCmd(t *testing.T) {
 	tmpDir := setupGitRepo(t)
 	defer os.RemoveAll(tmpDir)

@@ -122,6 +122,9 @@ Use this section once the global setup is complete.
 #
 # Worktree setup: If package.json is detected and --post-worktree-cmd is not set,
 # §BRAND_BINARY_NAME§ init auto-suggests the right install command (npm/yarn/pnpm/bun).
+# If no single setup command can be detected and the flag is still unset, init warns
+# that worktrees will have no dependencies or build artifacts and asks for confirmation
+# (--yes skips it).
 # See CONFIGURATION.md "Worktree Setup" for details.
 #
 # Integration branch (--branch sets the branch name, default: "integration"):
