@@ -3883,6 +3883,141 @@ func TestComputeInheritedDeps_MissingUpstreamChild_ReturnsError(t *testing.T) {
 	}
 }
 
+// --- Replanned-upstream regression tests (GH #137) ---
+//
+// Replan marks every outbound transition executed on the original task without
+// creating any children (replan.go:102-115), and the "replanned" marker excludes
+// that task from Phase 1b recovery (proceed.go:1100). Phase 1a skips it as a
+// transition source (:1053). Only computeInheritedDeps lacked the equivalent
+// guard, so a replanned upstream permanently failed every downstream transition.
+
+func TestComputeInheritedDeps_ReplannedUpstream_SkippedNotError(t *testing.T) {
+	tmpDir, _ := setupPipelineProceedTest(t)
+	resolver, _, err := loadResolver(tmpDir)
+	if err != nil {
+		t.Fatalf("loadResolver: %v", err)
+	}
+
+	// plan-1 was replanned: the transition is marked executed but the canonical
+	// child never existed and, by design, never will.
+	s := &models.State{
+		Tasks: []models.Task{
+			{
+				ID:       "plan-1",
+				Status:   models.TaskStatusMerged,
+				RolePair: "code-planning-pair",
+				Output: []models.OutputEntry{
+					{Desc: "a", DoneWhen: "a", Scope: "a", SpecRef: "s.md"},
+				},
+				TransitionsExecuted: map[string]bool{
+					"replanned":           true,
+					"code-plan-to-coding": true,
+				},
+			},
+			{
+				ID:        "plan-2",
+				Status:    models.TaskStatusMerged,
+				RolePair:  "code-planning-pair",
+				DependsOn: []string{"plan-1"},
+			},
+		},
+	}
+
+	downstream := s.FindTask("plan-2")
+	inherited, err := computeInheritedDeps(s, downstream, "code-plan-to-coding", resolver)
+	if err != nil {
+		t.Fatalf("computeInheritedDeps returned an error for a replanned upstream: %v", err)
+	}
+	if len(inherited) != 0 {
+		t.Errorf("inherited = %v, want none — a replanned upstream contributes no phase-gate dependencies", inherited)
+	}
+}
+
+func TestEAT_ReplannedUpstream_DoesNotBlockDownstreamTransitions(t *testing.T) {
+	tmpDir, stateFile := setupPipelineProceedTest(t)
+
+	now := time.Now().UTC()
+	state := testhelpers.CreateValidState()
+	state.PipelineVersion = 2
+	state.Sprint.Status = models.SprintStatusInProgress
+
+	const (
+		replannedID = "plan-orig"
+		dependentID = "plan-dep"
+		transition  = "code-plan-to-coding"
+	)
+
+	// Upstream: replanned, so it carries childless markers and is excluded from
+	// both transition collection and crash recovery.
+	replanned := testhelpers.BuildTaskByStatus(replannedID, models.TaskStatusMerged, now)
+	replanned.RolePair = "code-planning-pair"
+	replanned.Output = []models.OutputEntry{
+		{Desc: "a", DoneWhen: "a", Scope: "a", SpecRef: "s.md"},
+	}
+	replanned.TransitionsExecuted = map[string]bool{
+		"replanned": true,
+		transition:  true,
+	}
+
+	// Dependent: MERGED, so replan's retarget loop (replan.go:151-153) skipped it
+	// and it still points at the original. MERGED is also the only status from
+	// which transitions are collected (proceed.go:1046), which is what makes this
+	// stale edge reachable rather than incidental.
+	dependent := testhelpers.BuildTaskByStatus(dependentID, models.TaskStatusMerged, now)
+	dependent.RolePair = "code-planning-pair"
+	dependent.Output = []models.OutputEntry{
+		{Desc: "d", DoneWhen: "d", Scope: "d", SpecRef: "s.md"},
+	}
+	dependent.DependsOn = []string{replannedID}
+
+	state.Tasks = append(state.Tasks, replanned, dependent)
+	state.Sprint.Scope.Planned = []string{replannedID, dependentID}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	results, err := ExecuteAvailableTransitions(tmpDir, "manual")
+	if err != nil {
+		t.Fatalf("ExecuteAvailableTransitions: %v", err)
+	}
+
+	// (1) The dependent's transition must actually have executed. A bare count
+	// check would false-pass on any unrelated result.
+	var got *ProceedResult
+	for i := range results {
+		if results[i].SourceTaskID == dependentID && results[i].TransitionName == transition {
+			got = &results[i]
+			break
+		}
+	}
+	if got == nil {
+		t.Fatalf("no ProceedResult for %s/%s — transition blocked by replanned upstream; got %+v",
+			dependentID, transition, results)
+	}
+
+	// (2) The expected canonical children were reported.
+	wantChild := perSubtaskChildID(dependentID, transition, 0)
+	if len(got.ChildTaskIDs) != 1 || got.ChildTaskIDs[0] != wantChild {
+		t.Fatalf("ChildTaskIDs = %v, want [%s]", got.ChildTaskIDs, wantChild)
+	}
+
+	// (3) The children are present in persisted state, not merely returned.
+	finalState, err := db.For(stateFile).Read()
+	if err != nil {
+		t.Fatalf("read state: %v", err)
+	}
+	child := finalState.FindTask(wantChild)
+	if child == nil {
+		t.Fatalf("child %s absent from persisted state", wantChild)
+	}
+
+	// (4) The guard skipped the replanned upstream rather than inheriting from
+	// it: no child of the dependent may depend on a child of the replanned task.
+	orphanChild := perSubtaskChildID(replannedID, transition, 0)
+	if slices.Contains(child.DependsOn, orphanChild) {
+		t.Errorf("child %s depends on %s, which never existed; replanned upstream must be skipped, not inherited",
+			wantChild, orphanChild)
+	}
+}
+
 // --- Topological ordering tests ---
 
 func TestEAT_TopoOrdering_UpstreamBeforeDownstream(t *testing.T) {

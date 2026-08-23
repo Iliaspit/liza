@@ -1377,8 +1377,11 @@ func validateOutputEntry(entry models.OutputEntry, index, totalEntries int) erro
 // the child task IDs that were created by that transition. These become additional
 // DependsOn entries on downstream children, enforcing phase-gate ordering.
 //
-// Returns error if an upstream transition is marked executed but expected children
-// are missing (crash inconsistency that must be recovered first).
+// Replanned dependencies are skipped: their executed-transition markers are
+// suppressive metadata rather than evidence of materialized children.
+//
+// Returns error if a non-replanned upstream transition is marked executed but
+// expected children are missing (crash inconsistency that must be recovered first).
 func computeInheritedDeps(s *models.State, task *models.Task, transitionName string, resolver *pipeline.Resolver) ([]string, error) {
 	td, err := resolver.Transition(transitionName)
 	if err != nil {
@@ -1390,6 +1393,19 @@ func computeInheritedDeps(s *models.State, task *models.Task, transitionName str
 	for _, depID := range task.DependsOn {
 		depTask := s.FindTask(depID)
 		if depTask == nil || !depTask.TransitionsExecuted[transitionName] {
+			continue
+		}
+		// Replanned tasks carry executed-transition markers with no children by
+		// design: Replan marks every outbound transition to block it (replan.go
+		// "Invalidate old task output and block all outbound transitions"), and
+		// the replacement owns the downstream pipeline. Both transition-collection
+		// phases already skip them — as a transition source and as a crash-recovery
+		// target — so the marker must not be read here as evidence that children
+		// were materialized. Without this guard a replanned upstream fails every
+		// downstream transition permanently, and the same "replanned" marker
+		// excludes it from the recovery pass that would otherwise repair it.
+		// See GH #137.
+		if depTask.TransitionsExecuted["replanned"] {
 			continue
 		}
 		switch td.Cardinality {
