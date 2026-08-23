@@ -20,7 +20,7 @@ When Stacklit and `scip-search` are available, use them as the pre-edit impact b
 
 ### Execution and Validation
 
-1. Use `apply_patch` for edits; use `morph-mcp` only for broad, context-heavy, or fast-apply edits. A shell `workdir` does not relocate a patch capability that exposes no `workdir`; resolve each target from the exact recorded absolute worktree, express it from the patch tool's actual root, and stop if the capability cannot reach it.
+1. Use `apply_patch` only for edits that touch one file, with a separate call per file; use `morph-mcp` only for broad, context-heavy, or fast-apply edits. A shell `workdir` does not relocate a patch capability that exposes no `workdir`; resolve each target from the exact recorded absolute worktree, express it from the patch tool's actual root, and stop if the capability cannot reach it.
 2. Use native manifests, lockfiles, and language-native commands for dependency, build, and validation evidence.
 3. Validate edits with native build/test/lint/typecheck commands plus pre-commit on touched files.
 4. Use `context7` → `Ref` → `deepwiki` → `WebFetch` for docs, repo architecture, and web lookup.
