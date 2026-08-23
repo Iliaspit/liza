@@ -164,10 +164,9 @@ func TestWakeInitialPlanningMissingMasterRendersSpecializedFallback(t *testing.T
 	})
 }
 
-// The defect classification instruction is the only mechanism that ever sets
-// rca_required, and its default (false) is silent: weakening or deleting the
-// instruction would leave every other test in the suite green while making the
-// feature inert. These assertions are that instruction's only guard.
+// Initial planning owns objective-level classification only for direct or
+// fallback specialized work. Mapped decomposition roots delegate independent
+// classification to each output entry.
 func TestWakeInitialPlanningRendersDefectClassification(t *testing.T) {
 	fallbackContent := strings.ReplaceAll(string(embedded.PipelineConfigContent()), "      decomposition-root: true\n      decomposition-output-ref: plan_ref\n", "")
 	fallbackContent = strings.ReplaceAll(fallbackContent, "      decomposition-root: true\n      decomposition-output-ref: arch_ref\n", "")
@@ -210,10 +209,14 @@ func TestWakeInitialPlanningRendersDefectClassification(t *testing.T) {
 
 			assertContainsAll(t, rendered, []string{
 				"DEFECT CLASSIFICATION:",
+				"Classify the objective before dispatch.",
 				"a bug, regression, or incident",
-				`set "rca_required": true on the task`,
+				"Direct or fallback specialized tasks",
+				"Mapped decomposition-root tasks always use",
+				"each output[] entry",
+				`set "rca_required": true on that task`,
 				`"rca_required": false,`,
-				`The defect classification is stated, and "rca_required" is set only for defect fixes.`,
+				`The objective classification and RCA ownership boundary are stated`,
 			})
 		})
 	}

@@ -739,6 +739,7 @@ func TestOutputEntry_KindJSONRoundTrip(t *testing.T) {
 }
 
 func TestOutputEntry_ValidationRoundTripAndOmitEmpty(t *testing.T) {
+	rcaRequired := true
 	original := OutputEntry{
 		Desc:          "x",
 		DoneWhen:      "y",
@@ -746,6 +747,7 @@ func TestOutputEntry_ValidationRoundTripAndOmitEmpty(t *testing.T) {
 		SpecRef:       "s",
 		Validation:    []string{"make test", "pre-commit run --files docs/USAGE.md"},
 		DestructiveDB: true,
+		RCARequired:   &rcaRequired,
 	}
 
 	yamlData, err := yaml.Marshal(&original)
@@ -758,6 +760,9 @@ func TestOutputEntry_ValidationRoundTripAndOmitEmpty(t *testing.T) {
 	if !strings.Contains(string(yamlData), "destructive_db: true") {
 		t.Fatalf("YAML missing destructive_db key:\n%s", string(yamlData))
 	}
+	if !strings.Contains(string(yamlData), "rca_required: true") {
+		t.Fatalf("YAML missing rca_required key:\n%s", string(yamlData))
+	}
 	var yamlDecoded OutputEntry
 	if err := yaml.Unmarshal(yamlData, &yamlDecoded); err != nil {
 		t.Fatalf("YAML Unmarshal: %v", err)
@@ -767,6 +772,9 @@ func TestOutputEntry_ValidationRoundTripAndOmitEmpty(t *testing.T) {
 	}
 	if !yamlDecoded.DestructiveDB {
 		t.Errorf("YAML DestructiveDB = false, want true")
+	}
+	if yamlDecoded.RCARequired == nil || !*yamlDecoded.RCARequired {
+		t.Errorf("YAML RCARequired = %v, want pointer to true", yamlDecoded.RCARequired)
 	}
 
 	jsonData, err := json.Marshal(&original)
@@ -779,6 +787,9 @@ func TestOutputEntry_ValidationRoundTripAndOmitEmpty(t *testing.T) {
 	if !strings.Contains(string(jsonData), `"destructive_db":true`) || strings.Contains(string(jsonData), `"DestructiveDB"`) {
 		t.Fatalf("JSON destructive_db key mismatch: %s", string(jsonData))
 	}
+	if !strings.Contains(string(jsonData), `"rca_required":true`) || strings.Contains(string(jsonData), `"RCARequired"`) {
+		t.Fatalf("JSON rca_required key mismatch: %s", string(jsonData))
+	}
 	var jsonDecoded OutputEntry
 	if err := json.Unmarshal(jsonData, &jsonDecoded); err != nil {
 		t.Fatalf("JSON Unmarshal: %v", err)
@@ -788,6 +799,9 @@ func TestOutputEntry_ValidationRoundTripAndOmitEmpty(t *testing.T) {
 	}
 	if !jsonDecoded.DestructiveDB {
 		t.Errorf("JSON DestructiveDB = false, want true")
+	}
+	if jsonDecoded.RCARequired == nil || !*jsonDecoded.RCARequired {
+		t.Errorf("JSON RCARequired = %v, want pointer to true", jsonDecoded.RCARequired)
 	}
 
 	empty := OutputEntry{Desc: "x", DoneWhen: "y", Scope: "z", SpecRef: "s"}
@@ -801,6 +815,9 @@ func TestOutputEntry_ValidationRoundTripAndOmitEmpty(t *testing.T) {
 	if strings.Contains(string(emptyYAML), "destructive_db:") {
 		t.Errorf("false DestructiveDB should be omitted from YAML, got:\n%s", string(emptyYAML))
 	}
+	if strings.Contains(string(emptyYAML), "rca_required:") {
+		t.Errorf("nil RCARequired should be omitted from YAML, got:\n%s", string(emptyYAML))
+	}
 	emptyJSON, err := json.Marshal(&empty)
 	if err != nil {
 		t.Fatalf("empty JSON Marshal: %v", err)
@@ -810,6 +827,26 @@ func TestOutputEntry_ValidationRoundTripAndOmitEmpty(t *testing.T) {
 	}
 	if strings.Contains(string(emptyJSON), `"destructive_db"`) || strings.Contains(string(emptyJSON), `"DestructiveDB"`) {
 		t.Errorf("false DestructiveDB should be omitted from JSON, got: %s", string(emptyJSON))
+	}
+	if strings.Contains(string(emptyJSON), `"rca_required"`) || strings.Contains(string(emptyJSON), `"RCARequired"`) {
+		t.Errorf("nil RCARequired should be omitted from JSON, got: %s", string(emptyJSON))
+	}
+
+	rcaNotRequired := false
+	explicitFalse := OutputEntry{Desc: "x", DoneWhen: "y", Scope: "z", SpecRef: "s", RCARequired: &rcaNotRequired}
+	falseYAML, err := yaml.Marshal(&explicitFalse)
+	if err != nil {
+		t.Fatalf("false YAML Marshal: %v", err)
+	}
+	if !strings.Contains(string(falseYAML), "rca_required: false") {
+		t.Errorf("explicit false RCARequired should be retained in YAML, got:\n%s", string(falseYAML))
+	}
+	falseJSON, err := json.Marshal(&explicitFalse)
+	if err != nil {
+		t.Fatalf("false JSON Marshal: %v", err)
+	}
+	if !strings.Contains(string(falseJSON), `"rca_required":false`) {
+		t.Errorf("explicit false RCARequired should be retained in JSON, got: %s", string(falseJSON))
 	}
 }
 

@@ -619,6 +619,19 @@ func TestMutationCommandWiring(t *testing.T) {
 		}
 	})
 
+	t.Run("set-task-output help documents decomposition root RCA classification", func(t *testing.T) {
+		for _, want := range []string{
+			"rca_required",
+			"decomposition",
+			"explicit output value overrides",
+			"must provide rca_required",
+		} {
+			if !strings.Contains(setTaskOutputCmd.Long, want) {
+				t.Fatalf("set-task-output help = %q, want %q", setTaskOutputCmd.Long, want)
+			}
+		}
+	})
+
 	t.Run("unblock-task without assign-to restores claimable state", func(t *testing.T) {
 		projectRoot, statePath := setupMutationTestProject(t, func(state *models.State) {
 			now := time.Now().UTC()

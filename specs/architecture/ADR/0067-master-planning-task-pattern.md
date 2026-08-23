@@ -26,6 +26,20 @@ Add a master planning task pattern for planning fan-out:
 
 The master task owns the general approach, boundaries, interfaces, shared ownership, dependency ordering, required framework artifact refs, and typed decomposition metadata. Specialized children inherit that framework and do not redefine it.
 
+For code-planning fan-out, that ownership includes an explicit `rca_required`
+decision on every output entry. The master code planner may inspect source far
+enough to identify safe structural seams and coverage, but it does not establish
+root cause or write detailed implementation plans. If unresolved diagnosis makes
+a proposed split unsafe, it groups the affected scope or blocks the master task.
+The master reviewer checks that every classification matches its bounded outcome
+and that uncertain causal work was grouped safely; it does not perform or verify
+the downstream root-cause analysis.
+
+This requirement is topology-driven. A decomposition root must supply the
+classification when any configured output consumer's doer role is `code-planner`,
+regardless of the role-pair names. The same validation runs when output is set,
+during the normal per-subtask transition, and during crash recovery.
+
 Case A remains unchanged: `architecture-to-code-plan` consumes specialized `architecture-pair` output and targets `code-planning-pair` directly, bypassing `code-planning-main-pair`. Specialized epic outputs continue to use `epic_ref` for `us-writing-pair`; epic master outputs use `plan_ref` as the framework ref.
 
 ## Consequences
@@ -41,6 +55,9 @@ Trade-offs:
 - Fan-out work pays an additional planning review cycle before specialized planners start.
 - Poor master decomposition becomes a high-impact single point of failure, mitigated by quorum 2 and master-specific reviewer criteria.
 - Output-entry schema is heavier for decomposition-root tasks.
+- Code-planning decomposition roots cannot transition until every output carries
+  an explicit RCA classification; this prevents task-wide defaults from silently
+  crossing mixed feature and defect boundaries.
 - Existing frozen `.liza/pipeline.yaml` workspaces are not rewritten when embedded topology changes. Known legacy master role-pairs missing `decomposition-output-ref` are backfilled in memory at load time; adopting new role-pairs or transitions requires manually updating `.liza/pipeline.yaml` or starting a fresh workspace.
 
 ## Alternatives Considered

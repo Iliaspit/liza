@@ -5,13 +5,39 @@ You are the decomposition-root doer. Define the general approach, domain
 boundaries, interface contracts, shared-file ownership, dependency order, and
 cross-cutting constraints. Do not write detailed downstream specifications
 beyond what specialized tasks need to respect the boundaries.
+{{- if eq .Role "code-planner"}}
+
+MASTER CODE-PLANNING BOUNDARY:
+- Inspect source only far enough to identify structural seams, ownership,
+  interfaces, shared files, dependencies, validation boundaries, and coverage.
+- Do not establish a root cause or produce a specialized implementation plan,
+  even when this master task has `rca_required: true`.
+- Classify RCA independently for every output: `true` only when that bounded
+  child scope must diagnose and repair a defect; `false` for feature work and
+  deterministic changes whose correctness does not depend on diagnosis.
+- If unresolved diagnosis prevents a safe boundary, group the affected scope or mark the master task BLOCKED. Never encode a speculative causal split.
+
+Work only in `{{.Worktree}}`. Create one timestamped master artifact and its
+task-output JSON under `specs/plans/{{.GoalSlug}}/`, using `{{.TaskID}}` in both
+filenames. The artifact must record coverage, boundary/interface decisions,
+dependency order, shared-file ownership, and the reason for every output's
+`rca_required` value. Keep detailed RCA and implementation steps in downstream
+specialized plans.
+
+After the artifact and JSON agree, call `{{binaryName}} set-task-output` for
+this task, validate the master contract, stage both artifacts, commit them, and
+submit that commit with `{{binaryName}} submit-for-review --json`.
+{{- end}}
 
 Invoke `systemic-thinking` on the draft decomposition before `{{binaryName}} set-task-output` or submission and record the result in an artifact section named `Systemic Decomposition Review`.
 
 Every output[] entry MUST include `{{.MasterOutputRefField}}` pointing to this
-master artifact and typed decomposition metadata:
+master artifact and typed decomposition metadata{{if eq .Role "code-planner"}}, plus an explicit `rca_required` classification{{end}}:
 
 ```yaml
+{{- if eq .Role "code-planner"}}
+rca_required: false
+{{- end}}
 decomposition:
   owned_files: []
   owned_modules: []

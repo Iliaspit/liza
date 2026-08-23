@@ -167,6 +167,9 @@ func validateDecompositionRootOutput(state *models.State, resolver decomposition
 	if err != nil {
 		return err
 	}
+	if err := validateDecompositionRootRCAClassificationForRoot(resolver, rolePair, output); err != nil {
+		return err
+	}
 
 	ownedFiles := map[string]int{}
 	interfacesOwned := map[string]int{}
@@ -197,9 +200,55 @@ func validateDecompositionRootOutput(state *models.State, resolver decomposition
 	return validateDependsOnAcyclic(output)
 }
 
+func validateDecompositionRootRCAClassification(resolver decompositionRootResolver, rolePair string, output []models.OutputEntry) error {
+	isRoot, err := resolver.IsDecompositionRoot(rolePair)
+	if err != nil {
+		return err
+	}
+	if !isRoot {
+		return nil
+	}
+	return validateDecompositionRootRCAClassificationForRoot(resolver, rolePair, output)
+}
+
+func validateDecompositionRootRCAClassificationForRoot(resolver decompositionRootResolver, rolePair string, output []models.OutputEntry) error {
+	requiresRCAClassification, err := decompositionOutputsRequireRCAClassification(resolver, rolePair)
+	if err != nil {
+		return err
+	}
+	if !requiresRCAClassification {
+		return nil
+	}
+	for i, entry := range output {
+		if entry.RCARequired == nil {
+			return &PreconditionError{Reason: fmt.Sprintf("output[%d].rca_required is required because decomposition-root role-pair %q routes to code planning", i, rolePair)}
+		}
+	}
+	return nil
+}
+
+func decompositionOutputsRequireRCAClassification(resolver decompositionRootResolver, rolePair string) (bool, error) {
+	consumerRolePairs, err := resolver.OutputConsumerRolePairs(rolePair)
+	if err != nil {
+		return false, err
+	}
+	for _, consumerRolePair := range consumerRolePairs {
+		doerRole, err := resolver.DoerRole(consumerRolePair)
+		if err != nil {
+			return false, err
+		}
+		if doerRole == models.RoleCodePlanner {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 type decompositionRootResolver interface {
 	IsDecompositionRoot(rolePair string) (bool, error)
 	DecompositionOutputRef(rolePair string) (string, error)
+	OutputConsumerRolePairs(sourceRolePair string) ([]string, error)
+	DoerRole(rolePair string) (string, error)
 }
 
 type decompositionRootOutputRef struct {

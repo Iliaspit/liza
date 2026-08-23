@@ -11,6 +11,7 @@ import (
 
 	"github.com/liza-mas/liza/internal/db"
 	"github.com/liza-mas/liza/internal/models"
+	"github.com/liza-mas/liza/internal/pipeline"
 	"github.com/liza-mas/liza/internal/taskkind"
 	"github.com/liza-mas/liza/internal/testhelpers"
 )
@@ -2222,6 +2223,12 @@ func TestExecuteAvailableTransitions_MasterPlanningAutoDecompose(t *testing.T) {
 			reviewCommit := "abc123"
 			mergeCommit := "def456"
 			output := masterPlanningOutputEntries(tt.refField, tt.expectedPlanRef, tt.expectedArchRef)
+			parentRCARequired := false
+			if tt.targetRolePair == "code-planning-pair" {
+				parentRCARequired = true
+				output[0].RCARequired = outputRCARequired(false)
+				output[1].RCARequired = outputRCARequired(true)
+			}
 			task := models.Task{
 				ID:           tt.parentID,
 				Type:         tt.taskType,
@@ -2231,6 +2238,7 @@ func TestExecuteAvailableTransitions_MasterPlanningAutoDecompose(t *testing.T) {
 				Priority:     1,
 				Created:      now,
 				SpecRef:      "specs/goals/master-planning.md",
+				RCARequired:  parentRCARequired,
 				DoneWhen:     "Master decomposition approved",
 				Scope:        "master planning scope",
 				ReviewCommit: &reviewCommit,
@@ -2307,6 +2315,128 @@ func TestExecuteAvailableTransitions_MasterPlanningAutoDecompose(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestProceed_CodePlanningRootRequiresRCAClassificationAtTransition(t *testing.T) {
+	for _, tc := range []struct {
+		name               string
+		transitionExecuted bool
+	}{
+		{name: "normal transition", transitionExecuted: false},
+		{name: "crash recovery", transitionExecuted: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tmpDir, stateFile, parentID := setupCodePlanningRootProceedState(t, tc.transitionExecuted)
+			state, err := db.New(stateFile).Read()
+			if err != nil {
+				t.Fatalf("read state: %v", err)
+			}
+			state.FindTask(parentID).Output[0].RCARequired = nil
+			if tc.transitionExecuted {
+				err = recoverCodePlanningRootTransition(t, tmpDir, state, parentID, &ProceedResult{})
+			} else {
+				err = proceedCodePlanningRootTransition(t, tmpDir, state, parentID, &ProceedResult{})
+			}
+			testhelpers.RequireErrorContains(t, err, "output[0].rca_required is required")
+		})
+	}
+}
+
+func TestProceed_CodePlanningRootCrashRecoveryPersistsRCAClassification(t *testing.T) {
+	tmpDir, stateFile, parentID := setupCodePlanningRootProceedState(t, true)
+	state, err := db.New(stateFile).Read()
+	if err != nil {
+		t.Fatalf("read state: %v", err)
+	}
+	result := &ProceedResult{}
+	err = recoverCodePlanningRootTransition(t, tmpDir, state, parentID, result)
+	if err != nil {
+		t.Fatalf("recoverCrashedTransition() error: %v", err)
+	}
+	if len(result.ChildTaskIDs) != 2 {
+		t.Fatalf("ChildTaskIDs count = %d, want 2", len(result.ChildTaskIDs))
+	}
+	want := []bool{false, true}
+	for i, childID := range result.ChildTaskIDs {
+		child := state.FindTask(childID)
+		if child == nil {
+			t.Fatalf("child %q not found", childID)
+		}
+		if child.RCARequired != want[i] {
+			t.Errorf("child %q rca_required = %v, want %v", childID, child.RCARequired, want[i])
+		}
+	}
+}
+
+func proceedCodePlanningRootTransition(t *testing.T, projectRoot string, state *models.State, parentID string, result *ProceedResult) error {
+	t.Helper()
+	resolver, tDef := codePlanningRootTransitionDef(t, projectRoot)
+	return proceedInner(state, parentID, "code-plan-decompose", tDef, nil, resolver, time.Now().UTC(), result)
+}
+
+func recoverCodePlanningRootTransition(t *testing.T, projectRoot string, state *models.State, parentID string, result *ProceedResult) error {
+	t.Helper()
+	resolver, tDef := codePlanningRootTransitionDef(t, projectRoot)
+	return recoverCrashedTransition(state, state.FindTask(parentID), parentID, "code-plan-decompose", tDef, nil, resolver, time.Now().UTC(), result)
+}
+
+func codePlanningRootTransitionDef(t *testing.T, projectRoot string) (*pipeline.Resolver, transitionDef) {
+	t.Helper()
+	resolver, _, err := loadResolver(projectRoot)
+	if err != nil {
+		t.Fatalf("loadResolver: %v", err)
+	}
+	tDef, err := buildTransitionDefFromPipeline(resolver, "code-plan-decompose")
+	if err != nil {
+		t.Fatalf("buildTransitionDefFromPipeline: %v", err)
+	}
+	tDef.requiredStatus = models.TaskStatusMerged
+	return resolver, tDef
+}
+
+func setupCodePlanningRootProceedState(t *testing.T, transitionExecuted bool) (string, string, string) {
+	t.Helper()
+
+	tmpDir, stateFile := setupPhase2PipelineProceedTest(t)
+	state := testhelpers.CreateValidState()
+	state.PipelineVersion = 2
+	state.Sprint.Status = models.SprintStatusInProgress
+	now := time.Now().UTC()
+	parentID := "code-planning-root-rca"
+	reviewCommit := "abc123"
+	mergeCommit := "def456"
+	output := masterPlanningOutputEntries("plan", "specs/plans/master-code-plan.md", "")
+	output[0].RCARequired = outputRCARequired(false)
+	output[1].RCARequired = outputRCARequired(true)
+	parent := models.Task{
+		ID:                  parentID,
+		Type:                models.TaskTypeCoding,
+		RolePair:            "code-planning-main-pair",
+		Description:         "Master code planning task",
+		Status:              models.TaskStatusMerged,
+		Priority:            1,
+		Created:             now,
+		SpecRef:             "specs/goals/master-planning.md",
+		RCARequired:         true,
+		DoneWhen:            "Master decomposition approved",
+		Scope:               "master planning scope",
+		ReviewCommit:        &reviewCommit,
+		MergeCommit:         &mergeCommit,
+		Output:              output,
+		TransitionsExecuted: map[string]bool{},
+		History:             []models.TaskHistoryEntry{},
+	}
+	if transitionExecuted {
+		parent.TransitionsExecuted["code-plan-decompose"] = true
+	}
+	state.Tasks = append(state.Tasks,
+		buildExternalDependencyTask("external-foundation-task", "code-planning-pair", now),
+		buildExternalDependencyTask("external-review-task", "code-planning-pair", now),
+		parent,
+	)
+	state.Sprint.Scope.Planned = []string{"external-foundation-task", "external-review-task", parentID}
+	testhelpers.WriteInitialState(t, stateFile, state)
+	return tmpDir, stateFile, parentID
 }
 
 func TestProceed_ArchitectureToCodePlanBypassesMasterPlanning(t *testing.T) {
@@ -2626,7 +2756,14 @@ func assertMasterPlanningChild(t *testing.T, child *models.Task, parentID string
 	if child.ArchRef != expectedArchRef {
 		t.Errorf("child %q arch_ref = %q, want %q", child.ID, child.ArchRef, expectedArchRef)
 	}
+	if entry.RCARequired != nil && child.RCARequired != *entry.RCARequired {
+		t.Errorf("child %q rca_required = %v, want explicit output value %v", child.ID, child.RCARequired, *entry.RCARequired)
+	}
 	assertDecompositionEqual(t, child.ID, child.Decomposition, entry.Decomposition)
+}
+
+func outputRCARequired(value bool) *bool {
+	return &value
 }
 
 func assertDecompositionEqual(t *testing.T, childID string, got, want *models.DecompositionManifest) {
@@ -3547,13 +3684,17 @@ func TestProceed_PerSubtask_InheritsParentArchRef(t *testing.T) {
 
 // --- rca_required propagation tests ---
 
-func TestProceed_PerSubtask_InheritsParentRCARequired(t *testing.T) {
+func TestProceed_PerSubtask_ResolvesRCARequired(t *testing.T) {
 	for _, tc := range []struct {
-		name string
-		want bool
+		name         string
+		parent       bool
+		outputValues []*bool
+		want         []bool
 	}{
-		{name: "defect parent", want: true},
-		{name: "feature parent", want: false},
+		{name: "defect parent fallback", parent: true, want: []bool{true, true}},
+		{name: "feature parent fallback", parent: false, want: []bool{false, false}},
+		{name: "explicit false overrides defect parent", parent: true, outputValues: []*bool{outputRCARequired(false), outputRCARequired(true)}, want: []bool{false, true}},
+		{name: "explicit true overrides feature parent", parent: false, outputValues: []*bool{outputRCARequired(true), outputRCARequired(false)}, want: []bool{true, false}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			tmpDir, stateFile := setupPipelineProceedTest(t)
@@ -3574,13 +3715,13 @@ func TestProceed_PerSubtask_InheritsParentRCARequired(t *testing.T) {
 				Priority:     1,
 				Created:      now,
 				SpecRef:      "README.md",
-				RCARequired:  tc.want,
+				RCARequired:  tc.parent,
 				DoneWhen:     "Plan approved",
 				Scope:        "auth module",
 				ReviewCommit: &reviewCommit,
 				Output: []models.OutputEntry{
-					{Desc: "Task A", DoneWhen: "A works", Scope: "a", SpecRef: "specs/a.md"},
-					{Desc: "Task B", DoneWhen: "B works", Scope: "b", SpecRef: "specs/b.md"},
+					{Desc: "Task A", DoneWhen: "A works", Scope: "a", SpecRef: "specs/a.md", RCARequired: outputValueAt(tc.outputValues, 0)},
+					{Desc: "Task B", DoneWhen: "B works", Scope: "b", SpecRef: "specs/b.md", RCARequired: outputValueAt(tc.outputValues, 1)},
 				},
 				History: []models.TaskHistoryEntry{},
 			}
@@ -3603,12 +3744,19 @@ func TestProceed_PerSubtask_InheritsParentRCARequired(t *testing.T) {
 				if child == nil {
 					t.Fatalf("Child task %d not found", i)
 				}
-				if child.RCARequired != tc.want {
-					t.Errorf("Child %d rca_required = %v, want %v", i, child.RCARequired, tc.want)
+				if child.RCARequired != tc.want[i] {
+					t.Errorf("Child %d rca_required = %v, want %v", i, child.RCARequired, tc.want[i])
 				}
 			}
 		})
 	}
+}
+
+func outputValueAt(values []*bool, index int) *bool {
+	if index >= len(values) {
+		return nil
+	}
+	return values[index]
 }
 
 func TestProceed_OneToOne_InheritsRCARequired(t *testing.T) {

@@ -1094,12 +1094,16 @@ var setTaskOutputCmd = &cobra.Command{
 	Long: `Define output entries that will become downstream tasks after merge.
 
 Reads output entries from a JSON file. Each entry must have desc, done_when,
-and scope. Optional fields: spec_ref, plan_ref, arch_ref, validation,
-destructive_db, depends_on, task_depends_on.
+and scope. Optional fields: spec_ref, epic_ref, plan_ref, arch_ref, validation,
+destructive_db, rca_required, depends_on, task_depends_on, decomposition.
 
 depends_on contains sibling output indexes, e.g. "0" for output[0].
 task_depends_on contains existing concrete task IDs to copy onto generated
 child tasks.
+An explicit output value overrides the parent task's rca_required value; an
+omitted value inherits the parent default. A decomposition root whose configured
+consumer is code planning must provide rca_required on every output entry, along
+with its required artifact reference and typed decomposition metadata.
 
 Requirements:
   - Agent ID must be provided (via --agent-id flag or ` + brand.EnvName("AGENT_ID") + ` env var)
@@ -1193,8 +1197,10 @@ Reads task definitions from a JSON file. Each task must have id, desc, spec,
 done, and scope. Optional fields: priority, depends, type, role_pair, plan_ref,
 validation, destructive_db, rca_required.
 
-Set rca_required when the objective is a defect fix: the flag inherits to child
-tasks and requires the code plan to carry a reviewed root cause analysis.
+Set task-level rca_required when a direct planning objective is a defect fix.
+It is the default inherited by generated children only when an output entry does
+not provide an explicit override. Mapped code-planning decomposition roots use
+false at task level and classify rca_required independently on every output.
 
 Tasks are added independently; failed tasks don't block subsequent ones.
 Each added task is scoped-validated before persistence. If unrelated existing

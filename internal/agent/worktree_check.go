@@ -36,6 +36,20 @@ var (
 // Returns (false, nil) if the worktree already exists and setup succeeded.
 // Returns (false, error) if the task was blocked, recovery failed, or setup failed.
 func ensureReviewerWorktree(projectRoot string, bb *db.Blackboard, taskID, agentID string) (recovered bool, err error) {
+	// Intact-worktree fast path, deliberately outside the lifecycle lock: it
+	// creates and recovers nothing, which is what that lock guards. Setup can run
+	// for minutes, and holding the lock across it would stall project cleanup on
+	// every review round. Trade-off: cleanup may now delete the worktree while
+	// setup runs, degrading the reviewer — acceptable, since cleanup is tearing
+	// the run down regardless.
+	wtPath := filepath.Join(projectRoot, paths.WorktreesDirName, taskID)
+	if _, statErr := os.Stat(wtPath); statErr == nil {
+		// Still run the configured setup command before the reviewer session: it
+		// is idempotent, and a reviewer that builds and tests needs the same
+		// prepared checkout the doer had.
+		return false, runReviewerWorktreeSetup(bb, taskID, wtPath)
+	}
+
 	err = ops.WithProjectLifecycleSharedLock(projectRoot, "reviewer-worktree-recover", func() error {
 		var recoverErr error
 		recovered, recoverErr = ensureReviewerWorktreeLocked(projectRoot, bb, taskID, agentID)
@@ -47,9 +61,8 @@ func ensureReviewerWorktree(projectRoot string, bb *db.Blackboard, taskID, agent
 func ensureReviewerWorktreeLocked(projectRoot string, bb *db.Blackboard, taskID, agentID string) (recovered bool, err error) {
 	wtPath := filepath.Join(projectRoot, paths.WorktreesDirName, taskID)
 	if _, statErr := os.Stat(wtPath); statErr == nil {
-		// Worktree intact, but still run the configured setup command before the
-		// reviewer session: it is idempotent, and a reviewer that builds and
-		// tests needs the same prepared checkout the doer had.
+		// Raced: a concurrent claim created the worktree between the fast-path
+		// stat above and this lock. Same handling, re-checked under the lock.
 		return false, runReviewerWorktreeSetup(bb, taskID, wtPath)
 	}
 

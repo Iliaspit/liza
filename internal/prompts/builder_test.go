@@ -1042,7 +1042,7 @@ func TestRenderOrchestratorDashboard_EntryPoints(t *testing.T) {
 				"Epic Planner",
 			},
 			wantNotContain: []string{
-				"classify",
+				"Classify the input document",
 				"code-planning-pair",
 			},
 		},
@@ -1056,7 +1056,7 @@ func TestRenderOrchestratorDashboard_EntryPoints(t *testing.T) {
 				"\"type\": \"architecture\"",
 			},
 			wantNotContain: []string{
-				"classify",
+				"Classify the input document",
 				"epic-planning-pair",
 				"\"type\": \"coding\"",
 			},
@@ -1071,7 +1071,7 @@ func TestRenderOrchestratorDashboard_EntryPoints(t *testing.T) {
 				"\"type\": \"planning\"",
 			},
 			wantNotContain: []string{
-				"classify",
+				"Classify the input document",
 				"architecture-pair",
 				"\"type\": \"architecture\"",
 			},
@@ -1086,7 +1086,7 @@ func TestRenderOrchestratorDashboard_EntryPoints(t *testing.T) {
 				"\"type\": \"architecture\"",
 			},
 			wantNotContain: []string{
-				"classify",
+				"Classify the input document",
 				"epic-planning-pair",
 				"\"type\": \"coding\"",
 			},

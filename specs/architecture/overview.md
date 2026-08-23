@@ -128,6 +128,13 @@ Planning fan-out is gated by a reviewed master task when no upstream step has al
 
 Master role-pairs reuse the same doer/reviewer roles as their specialized counterparts and are selected by `decomposition-root: true`. Their configured `decomposition-output-ref` declares the artifact ref required on each master output entry. Their job is to define the general approach, ownership boundaries, interface contracts, required artifact refs, and typed `output[]` decomposition. After quorum approval, auto per-subtask transitions create specialized planning children:
 
+For code-planning fan-out, the master also assigns an explicit `rca_required`
+classification to each output. It may inspect source far enough to find safe
+structural seams, but detailed implementation planning and root-cause establishment
+belong to the specialized child. Unresolved diagnosis that prevents a safe split is
+grouped into one scope or blocks the master task. The master reviewer checks the
+classification and boundary decision without verifying the root cause itself.
+
 ```text
 epic-planning-main-pair -> epic-planning-pair -> us-writing-pair
 architecture-main-pair  -> architecture-pair

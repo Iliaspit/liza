@@ -965,3 +965,72 @@ func TestEnsureReviewerWorktree_IntactWorktree_NoPostWorktreeCmdIsNoOp(t *testin
 		t.Error("recovered = true, want false")
 	}
 }
+
+// The intact-worktree path deliberately runs setup outside the project lifecycle
+// lock (ensureReviewerWorktree). Nothing else pins that: the other intact-path
+// tests pass whether or not the call sits under the lock, and the duplicated call
+// site invites a future "cleanup" that moves it back.
+func TestEnsureReviewerWorktree_IntactWorktree_SetupDoesNotHoldLifecycleLock(t *testing.T) {
+	tmpDir := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, tmpDir)
+	statePath, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	testhelpers.SetupPipelineConfig(t, tmpDir)
+
+	wtPath := filepath.Join(tmpDir, paths.WorktreesDirName, "task-1")
+	if err := os.MkdirAll(wtPath, 0o755); err != nil {
+		t.Fatalf("MkdirAll(%q) error = %v", wtPath, err)
+	}
+	started := filepath.Join(tmpDir, "setup-started")
+	release := filepath.Join(tmpDir, "setup-release")
+
+	state := testhelpers.CreateValidState()
+	now := time.Now().UTC()
+	// Blocks inside setup so the lock question can be asked mid-flight.
+	postCmd := "touch " + started + "; while [ ! -f " + release + " ]; do sleep 0.01; done"
+	state.Config.PostWorktreeCmd = &postCmd
+	state.Tasks = []models.Task{testhelpers.BuildTaskByStatus("task-1", models.TaskStatusReviewing, now)}
+	bb := testhelpers.WriteInitialState(t, statePath, state)
+
+	// Always release: a failed assertion must not wedge the child or TempDir cleanup.
+	defer func() { _ = os.WriteFile(release, nil, 0o600) }()
+
+	ensureDone := make(chan error, 1)
+	go func() {
+		_, ensureErr := ensureReviewerWorktree(tmpDir, bb, "task-1", "code-reviewer-1")
+		ensureDone <- ensureErr
+	}()
+
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		if _, statErr := os.Stat(started); statErr == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("setup command never started")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	lockDone := make(chan error, 1)
+	go func() {
+		lockDone <- ops.WithProjectLifecycleExclusiveLock(tmpDir, "test-cleanup", func() error { return nil })
+	}()
+
+	select {
+	case lockErr := <-lockDone:
+		// nil also proves the lock is real: the exclusive variant errors when the
+		// lock file is absent, so this cannot pass by never locking at all.
+		if lockErr != nil {
+			t.Errorf("WithProjectLifecycleExclusiveLock() error = %v, want it acquirable during setup", lockErr)
+		}
+	case <-time.After(10 * time.Second):
+		t.Error("exclusive lifecycle lock blocked while intact-path setup ran; setup must not hold it")
+	}
+
+	if err := os.WriteFile(release, nil, 0o600); err != nil {
+		t.Fatalf("WriteFile(release) error = %v", err)
+	}
+	if err := <-ensureDone; err != nil {
+		t.Errorf("ensureReviewerWorktree() error = %v", err)
+	}
+}

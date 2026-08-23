@@ -5,6 +5,29 @@ You are reviewing a decomposition-root planning task. Limit the verdict to
 coherence of boundaries, ownership, dependencies, interface contracts, artifact
 refs, and coverage. Do not require specialized detail beyond what downstream
 tasks need to respect the master framework.
+{{- if eq .Role "code-plan-reviewer"}}
+
+MASTER CODE-PLANNING REVIEW BOUNDARY:
+- Review each output's RCA classification against its bounded objective.
+  `true` means downstream correctness requires defect diagnosis; `false` means
+  feature work or another deterministic change that does not require diagnosis.
+- Reject an omitted classification, a single task-wide classification copied
+  across materially different outputs, or a causal split unsupported by safe
+  structural boundaries.
+- If diagnosis is unresolved, accept only a safely grouped scope or a BLOCKED
+  master task. Do not establish or verify the root cause; that belongs to each
+  specialized code-planning task classified `true`.
+
+Verify HEAD equals `{{.ReviewCommit}}`, inspect changed paths and targeted diffs
+for `{{.BaseCommit}}..{{.ReviewCommit}}`, read the master artifact and adjacent
+task-output JSON, then run `{{binaryName}} get {{.TaskID}} --json`. Confirm every
+persisted output matches the artifact, includes `{{.MasterOutputRefField}}`,
+typed decomposition metadata, and explicit `rca_required`. Submit the result
+with `{{binaryName}} submit-verdict`.
+{{- if ne .PriorRejection ""}}
+{{- template "prior-feedback-review" .}}
+{{- end}}
+{{- end}}
 
 Invoke `systemic-thinking` before submitting a verdict and cite its evidence in
 the review. Reject the output if missing systemic-thinking evidence.

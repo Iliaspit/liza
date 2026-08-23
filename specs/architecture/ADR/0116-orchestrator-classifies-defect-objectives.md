@@ -26,33 +26,47 @@ criterion, and a way for both agents to agree that the objective is a defect at 
 
 ## Decision
 
-The orchestrator classifies the objective during `INITIAL_PLANNING`, alongside its
-existing entry-point and fan-out classification, and records the result as
-`rca_required` on the single task it creates.
+During `INITIAL_PLANNING`, the orchestrator records objective-level classification
+on direct or fallback specialized tasks. A mapped decomposition-root task always
+starts with task-level `rca_required: false`; its master planner owns the finer
+classification because the independently bounded outputs do not exist until that
+decomposition is written.
 
-The flag defaults to false, inherits unconditionally to child tasks through every
-construction path in `proceed.go`, and is copied onto replacement tasks by
-`replan.go`. When true, the code-planner prompt requires a `## Root Cause Analysis`
-section in the plan file, and the code-plan-reviewer prompt gains reject gates for it
-plus an instruction to evaluate that section before the task breakdown.
+`OutputEntry.RCARequired` is a nullable boolean. An explicit output value overrides
+the parent task default for the generated per-subtask child; omission falls back to
+the parent for compatibility with non-master flows. A decomposition root whose
+configured output topology targets a `code-planner` doer must provide a non-null
+value on every output. Validation runs at `set-task-output`, at normal per-subtask
+transition, and during crash recovery. One-to-one inheritance, many-to-one OR
+aggregation, and `replan.go` preservation remain unchanged.
 
-Classification sits with the orchestrator rather than the code-planner because the
-alternative makes planner and reviewer each classify independently: when they
-disagree, the rejection cycle burns on whether this is a defect instead of on the
-analysis. One recorded decision removes that class of churn.
+When a specialized code-planning task receives true, its prompt requires a
+`## Root Cause Analysis` section and its reviewer evaluates that section before the
+task breakdown. Master code-planning prompts instead own bounded structural
+investigation, coverage, grouping or blocking when diagnosis prevents a safe split,
+and per-output classification. They exclude the specialized RCA and detailed
+implementation-plan responsibilities. Master reviewers check classifications and
+boundaries without establishing or verifying root cause.
+
+Objective classification sits with the orchestrator when the task is already a
+single specialized scope. Per-output classification sits with the master planner
+because only that planner defines those scopes; the master reviewer checks the
+recorded decisions against the bounded outcomes rather than independently diagnosing
+them.
 
 ## Consequences
 
-Positive: a defect objective now produces a root cause that a peer reviewer can
+Positive: each defect-bearing specialized scope now produces a root cause that a peer reviewer can
 refute against cited evidence, and the reproduction it names binds to an `output[]`
 `done_when`, so the coder's failing test exercises the real path. The flag is visible
-in `state.yaml` and through `get <task-id> --json`. Feature work is untouched — both
-prompt additions are conditional, so they cost no tokens when the flag is false.
+in `state.yaml` and through `get <task-id> --json`. Specialized feature work keeps the
+conditional no-RCA prompt path; master code planning always pays the smaller
+classification/boundary prompt cost because mixed outputs are possible.
 
-Negative: a mis-classified defect goal silently gets no analysis. This was chosen
-deliberately over a reviewer backstop that would have made the reviewer re-derive the
-classification, reintroducing the disagreement the flag exists to remove. The
-mitigation is documentation, not code.
+Negative: a mis-classified direct defect goal can still get no analysis. For a
+decomposition root, omission fails closed and the master reviewer checks each
+classification, but classification correctness remains a planning judgment rather
+than runtime diagnosis.
 
 The classification is observable but not mutable: no command changes `rca_required` on
 an existing task. `add-tasks` only creates, `replan` preserves, and direct `state.yaml`
@@ -73,12 +87,10 @@ recorded here rather than asserted away. §14 Anomaly Logging is touched themati
 and not violated: the accepted silent default is a hidden-failure surface with no
 anomaly carrier, and no §14 invariant is extended or weakened.
 
-The flag is goal-level with no per-`output[]` override, so a defect goal that fans out
-marks all of its scopes, including any that do not touch the defective path. Deferred:
-an override needs `*bool` on `OutputEntry` to express "exempt this one", and the
-dominant path for defects is the `technical-spec` entry point, which creates exactly
-one code-planning task. The trigger to add it is the first fan-out defect goal whose
-unrelated scopes produce padded root cause sections.
+The original goal-level-only decision is superseded for per-subtask construction:
+`*bool` on `OutputEntry` now distinguishes omission from explicit false, so mixed
+fan-out can require RCA only on the scopes that need diagnosis. The task-level flag
+remains the fallback and remains load-bearing for one-to-one and many-to-one paths.
 
 Naming: `rca_required` matches the `adversarial-pairing` frontmatter field
 deliberately, but means something weaker here — a required section within a reviewed

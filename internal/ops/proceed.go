@@ -469,6 +469,11 @@ func proceedInner(s *models.State, taskID, transitionName string, tDef transitio
 				return err
 			}
 		}
+		if resolver != nil {
+			if err := validateDecompositionRootRCAClassification(resolver, task.RolePair, canonicalOutput); err != nil {
+				return err
+			}
+		}
 	case "one-to-one":
 		if task.SpecRef == "" {
 			return fmt.Errorf("task %q has empty spec_ref for one-to-one transition %q", taskID, transitionName)
@@ -581,6 +586,11 @@ func recoverCrashedTransition(s *models.State, task *models.Task, taskID, transi
 		canonicalOutput, outputChanged, err := canonicalizedOutputTaskDependsOnForTarget(s, resolver, task, tDef.targetRolePair)
 		if err != nil {
 			return err
+		}
+		if resolver != nil {
+			if err := validateDecompositionRootRCAClassification(resolver, task.RolePair, canonicalOutput); err != nil {
+				return err
+			}
 		}
 		// Re-compute dedup decision against current repo-wide state. For skipped
 		// entries, siblingIDs[i] must point at the foreign incumbent so downstream
@@ -1306,6 +1316,10 @@ func buildChildTask(childID, parentID string, entry models.OutputEntry, targetSt
 	if archRef == "" {
 		archRef = parentArchRef
 	}
+	rcaRequired := parentRCARequired
+	if entry.RCARequired != nil {
+		rcaRequired = *entry.RCARequired
+	}
 
 	return models.Task{
 		ID:            childID,
@@ -1321,7 +1335,7 @@ func buildChildTask(childID, parentID string, entry models.OutputEntry, targetSt
 		ArchRef:       paths.NormalizeSpecRef(archRef),
 		Decomposition: entry.Decomposition,
 		Kind:          entry.Kind,
-		RCARequired:   parentRCARequired,
+		RCARequired:   rcaRequired,
 		DoneWhen:      entry.DoneWhen,
 		Validation:    slices.Clone(entry.Validation),
 		DestructiveDB: entry.DestructiveDB,

@@ -371,13 +371,21 @@ The configured entry points still name the specialized planning pairs. During `I
 
 #### Defect Objectives (`rca_required`)
 
-During `INITIAL_PLANNING` the orchestrator also classifies the objective itself. When
-the goal spec describes a failure of existing behavior — a bug, regression, or
-incident — rather than a new capability, it sets `rca_required: true` on the task it
-creates. The flag defaults to false, inherits down the planning-to-coding chain
-(including the many-to-one fan-in, where any flagged parent carries it forward), and
-survives `§BRAND_BINARY_NAME§ replan`. Integration-analysis tasks are excluded — they
-render no root cause analysis, so the flag would be inert there.
+During `INITIAL_PLANNING` the orchestrator classifies direct or fallback specialized
+objectives. When the goal spec describes a failure of existing behavior — a bug,
+regression, or incident — rather than a new capability, it sets
+`rca_required: true` on that specialized task. A mapped decomposition-root task
+always starts with `rca_required: false`; its master code planner classifies every
+output independently after defining the structural scopes.
+
+On per-subtask transitions, an explicit `output[].rca_required` true or false
+overrides the parent task default. An omitted value inherits the default for
+non-master compatibility. Every decomposition-root output that routes by configured
+topology to a `code-planner` doer must provide the field; omission is rejected when
+output is set and again during normal or crash-recovery transition execution.
+One-to-one inheritance, many-to-one fan-in (true when any parent is true), and
+`§BRAND_BINARY_NAME§ replan` preservation are unchanged. Integration-analysis tasks
+remain excluded because their prompts do not use the flag.
 
 When it is true, two things change downstream. The code-planner must produce a
 `## Root Cause Analysis` section in the plan file — source and code-path claims cited
@@ -391,14 +399,23 @@ reproduction, so the coder's failing test exercises the real path. And the
 code-plan-reviewer gates on that section first: an unsound root cause is rejected on
 its own, without reviewing the task breakdown.
 
-Nothing detects a mis-classification. A defect goal the orchestrator reads as feature
-work simply gets no root cause analysis. If you know the objective is a fix, check the
-flag on the first task (`§BRAND_BINARY_NAME§ get <task-id> --json`, which shows
-`rca_required` only when it is set) before letting the sprint run.
+For a master code-planning task, the planner may inspect source far enough to identify
+safe boundaries, ownership, interfaces, shared files, dependencies, and coverage. It
+must not establish root cause or write detailed implementation plans. If unresolved
+diagnosis prevents a safe split, it groups the affected scope or blocks the master
+task. The master reviewer checks every output classification and that grouping/block
+decision, but does not verify the root cause; specialized tasks classified true own
+that work.
 
-No command changes the classification on an existing task, and `replan` deliberately
-preserves it. Correcting it in either direction means abandoning the task and creating
-a replacement, which is supported while the task is still in its initial state:
+Nothing detects a mis-classified direct objective. If you know a direct specialized
+task is a fix, check its task-level flag with
+`§BRAND_BINARY_NAME§ get <task-id> --json` before letting the sprint run. For a master
+task, inspect every persisted output entry instead; explicit false values are visible
+because output classification is tri-state rather than an omitted false default.
+
+No command changes task-level classification on an existing task, and `replan`
+deliberately preserves it. Correcting a direct task in either direction means
+abandoning it and creating a replacement while it is still in its initial state:
 
 ```bash
 §BRAND_BINARY_NAME§ cancel-task <task-id> "misclassified objective: rca_required"
@@ -407,8 +424,9 @@ a replacement, which is supported while the task is still in its initial state:
 ```
 
 The replacement needs a new task ID — `add-tasks` rejects an ID that already exists,
-and `cancel-task` keeps the original for audit rather than removing it. Do not edit
-`state.yaml` directly to change the flag.
+and `cancel-task` keeps the original for audit rather than removing it. A master
+planner corrects an output classification by updating and resubmitting its master
+artifact and task-output JSON before approval. Do not edit `state.yaml` directly.
 
 During master decomposition, compare interface ownership and consumption with
 the plan's stated data flow before declaring dependencies. Enforce
@@ -506,13 +524,13 @@ artifact yourself and surfaces unflagged decisions agents baked in without marki
 | Pause for manual work | (no command) | Want to make manual changes before continuing                                                        |
 | Abort | `§BRAND_BINARY_NAME§ stop` | Want to stop entirely                                                                                |
 
-**`§BRAND_BINARY_NAME§ proceed`** creates child tasks from a completed task's `output[]` entries based on the pipeline transition's cardinality (`per-subtask`: one child per output entry, `one-to-one`: single child from parent, `many-to-one`: all sibling tasks in a cohort must reach approved status, then one child is created linked to all parents — used by the `us-to-coding` transition to fan N approved user stories into one architecture task). Per-subtask children copy `output[].validation` and `output[].destructive_db`; one-to-one and many-to-one children do not inherit parent task validation metadata. Use `§BRAND_BINARY_NAME§ status` to see available transitions for tasks at terminal states. Transition checkpoints run this in batch during `§BRAND_BINARY_NAME§ resume`; manual use is for explicit one-off transition execution.
+**`§BRAND_BINARY_NAME§ proceed`** creates child tasks from a completed task's `output[]` entries based on the pipeline transition's cardinality (`per-subtask`: one child per output entry, `one-to-one`: single child from parent, `many-to-one`: all sibling tasks in a cohort must reach approved status, then one child is created linked to all parents — used by the `us-to-coding` transition to fan N approved user stories into one architecture task). Per-subtask children copy `output[].validation` and `output[].destructive_db`; explicit `output[].rca_required` overrides the parent default, while omission inherits it. One-to-one and many-to-one children do not inherit parent task validation metadata. Use `§BRAND_BINARY_NAME§ status` to see available transitions for tasks at terminal states. Transition checkpoints run this in batch during `§BRAND_BINARY_NAME§ resume`; manual use is for explicit one-off transition execution.
 
 For `per-subtask` output, `depends_on` names sibling output indexes (`"0"` means `output[0]`). Use `task_depends_on` when the generated child must depend on existing concrete task IDs outside the current `output[]`. Generated children inherit dependency children only when both tasks execute the same transition name. Different transition names do not propagate child ordering. For cross-transition child ordering, use explicit `output[].task_depends_on` entries containing existing concrete task IDs. Concrete dependencies must follow pipeline direction: a generated child cannot depend on a task whose role-pair is downstream from the child's role-pair, including through `superseded_by` resolution paths.
 
 If task or `output[]` validation may reset/drop DB state, set `destructive_db: true`. Validation must be non-empty, and every command must start with `§BRAND_ENV_PREFIX§_ALLOW_DESTRUCTIVE_DB=1 ` or `env §BRAND_ENV_PREFIX§_ALLOW_DESTRUCTIVE_DB=1 `. The marker is part of the canonical command and should only target disposable DB state.
 
-Master planning output entries also carry `decomposition` metadata. `read_only_depends_on` and `read_only_task_depends_on` describe read-only use only; scheduling still comes from mirrored `depends_on` and `task_depends_on` entries. Master outputs must include the inherited framework ref configured by the role-pair's `decomposition-output-ref`: `plan_ref` for `epic-planning-main-pair`, `arch_ref` for `architecture-main-pair`, and `plan_ref` for `code-planning-main-pair`.
+Master planning output entries also carry `decomposition` metadata. `read_only_depends_on` and `read_only_task_depends_on` describe read-only use only; scheduling still comes from mirrored `depends_on` and `task_depends_on` entries. Master outputs must include the inherited framework ref configured by the role-pair's `decomposition-output-ref`: `plan_ref` for `epic-planning-main-pair`, `arch_ref` for `architecture-main-pair`, and `plan_ref` for `code-planning-main-pair`. Code-planning master outputs additionally require an explicit boolean `rca_required` on every entry.
 
 #### Replanning at Checkpoint
 

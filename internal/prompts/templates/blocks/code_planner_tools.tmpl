@@ -9,11 +9,23 @@ CODE PLANNER TOOLS:
   {{binaryName}} write-checkpoint {{.TaskID}} --agent-id {{.AgentID}} --intent "<what>" --validation-plan "<how to verify>" --files-to-modify "<file1>" --json
 - {{binaryName}} set-task-output — Persist structured task definitions for downstream task creation
   {{binaryName}} set-task-output {{.TaskID}} --output {{.Worktree}}/specs/plans/{{.GoalSlug}}/TIMESTAMP-{{.TaskID}}-output.json --agent-id {{.AgentID}} --json
+{{- if .DecompositionRoot}}
+  Use the same TIMESTAMP as the master artifact described in the Master Decomposition Mandate.
+  Create that JSON file next to the master artifact with a file-writing tool, not a Bash heredoc (heredoc with JSON triggers a shell safety block).
+{{- else}}
   Use the same TIMESTAMP as the plan file from Implementation Phase step 2.
   Create that JSON file next to the plan file with a file-writing tool, not a Bash heredoc (heredoc with JSON triggers a shell safety block).
+{{- end}}
+{{- if .DecompositionRoot}}
+  JSON file contains: [
+    {"desc": "...", "done_when": "...", "scope": "...", "spec_ref": "...", "{{.MasterOutputRefField}}": "...", "rca_required": false, "decomposition": {"owned_files": ["..."], "owned_modules": [], "read_only_depends_on": [], "read_only_task_depends_on": [], "interfaces_owned": ["..."], "interfaces_consumed": [], "coverage_notes": "..."}, "validation": ["<canonical command>"], "depends_on": [], "task_depends_on": []}
+  ]
+  Every entry requires its own boolean rca_required and typed decomposition metadata. The explicit output value becomes the specialized child's task-level RCA requirement.
+{{- else}}
   JSON file contains: [
     {"desc": "...", "done_when": "...", "scope": "...", "spec_ref": "...", "plan_ref": "...", "validation": ["<canonical command>"], "depends_on": ["0", "2"], "task_depends_on": ["existing-task-id"]}
   ]
+{{- end}}
   validation: optional ordered array of canonical commands the child task should run; each must be satisfiable for the child scope. Commands must be single-purpose and agent-executable. Forbidden validation command shapes: `cd ... &&`, command substitution/backticks, polling or tail pipelines, and task artifact paths outside the worktree.
   depends_on: optional array of sibling index strings. "0" means "depends on output[0]".
   Indices are resolved to child task IDs at transition time.

@@ -252,6 +252,7 @@ Tasks support inter-pair transitions via `liza proceed` (manual) or orchestrator
       validation:
         - make test
       destructive_db: false
+      rca_required: false
       decomposition:
         owned_files: ["src/middleware/auth.go"]
         owned_modules: ["auth middleware"]
@@ -279,7 +280,7 @@ Pipeline topology itself is frozen in `.liza/pipeline.yaml` at `liza init`. Role
 |-------|------|--------|---------|
 | `output` | `[]OutputEntry` | Doer agent | Structured subtask definitions for next role pair |
 | `arch_ref` | `string` | `liza proceed` | Path to architecture document (repo-relative). Set on child tasks during transition: first hop copies from parent's `output[]` entry, second hop inherits from parent task field. Validated via `checkSpecFileExists` (same pattern as `plan_ref`). |
-| `rca_required` | `bool` | Orchestrator (`add-tasks`) | Objective is a defect fix. Defaults to false and is inert when omitted. Inherited by every child task during transitions and preserved across `liza replan`. When true, the code-planner must produce a `## Root Cause Analysis` section in the plan file and the code-plan-reviewer gates on it before reviewing the task breakdown. Not the same strength as the `adversarial-pairing` field of the same name, which gates a separately reviewed analysis phase. |
+| `rca_required` | `bool` | Orchestrator (`add-tasks`) / `liza proceed` | Specialized objective requires defect diagnosis. Defaults to false. For per-subtask children, an explicit `output[].rca_required` overrides this parent default; omission inherits it. One-to-one children inherit it, many-to-one children OR parent values, and `liza replan` preserves it. When true, the specialized code-planner produces a `## Root Cause Analysis` section and the code-plan-reviewer gates on it. Not the same strength as the `adversarial-pairing` field, which gates a separate analysis phase. |
 | `parent_task` | `*string` | `liza proceed` / orchestrator | Back-reference from child to parent task (deprecated: use `parent_tasks`) |
 | `parent_tasks` | `[]string` | `liza proceed` / orchestrator | Multi-parent back-references (used by many-to-one transitions; supersedes `parent_task`) |
 | `transitions_executed` | `map[string]bool` | `liza proceed` / orchestrator | Idempotency — prevents duplicate transitions. For `many-to-one` transitions, set on **all** cohort members (not just the trigger task) to prevent re-firing from any member |
@@ -298,6 +299,7 @@ Optional:
 - `epic_ref` (`string`): Path to a concrete epic artifact (repo-relative). Specialized `epic-planning-pair` outputs use this for `us-writing-pair` children; epic master framework refs use `plan_ref`, not `epic_ref`.
 - `validation` (`[]string`): Ordered canonical validation commands for the generated child task. Commands are stored exactly as declared, must be single-line, non-empty, and must not have leading or trailing whitespace. Newly declared validation commands must be single-purpose and agent-executable. Forbidden validation command shapes: `cd ... &&`, command substitution/backticks, polling or tail pipelines, and task artifact paths outside the worktree. Existing stored commands that violate this shape remain visible as task-declared executable guidance and are translated by consumers rather than edited in place. This field is distinct from `repair_request.validation`, which records validation for an orchestrator repair request.
 - `destructive_db` (`bool`): Optional safety marker for validation commands that may reset, drop, or otherwise destroy DB state. Defaults to false and is inert when omitted. When true, `validation` must be non-empty and every command must start with `LIZA_ALLOW_DESTRUCTIVE_DB=1 ` or `env LIZA_ALLOW_DESTRUCTIVE_DB=1 `. The marker is part of the canonical command and must not be translated away.
+- `rca_required` (`*bool`): Per-child RCA classification. Explicit true or false overrides the parent task default during per-subtask construction; omission inherits the parent value. It is mandatory on every output from a decomposition root when any configured output consumer's doer role is `code-planner`.
 - `task_depends_on` (`[]string`): Existing concrete task IDs outside this `output[]`. Set by doer via `set-task-output`; copied to generated child tasks as scheduler-facing `depends_on`.
 - `decomposition` (`DecompositionManifest`): Typed decomposition metadata. Required on `output[]` entries produced by `decomposition-root` role-pairs and optional elsewhere.
 
@@ -393,13 +395,12 @@ Precedence: entry-level `arch_ref` takes priority over parent task `arch_ref`. T
 
 **`rca_required` Propagation:**
 
-`rca_required` has no entry-level counterpart — it is set once by the orchestrator on
-the goal's initial planning task and inherited by descendants through all three child
-constructors in `proceed.go`, on both the normal and crash-recovery call sites of each:
+`rca_required` resolves at child construction. Per-subtask entries can override the
+parent default explicitly; omission retains backward-compatible inheritance:
 
 | Constructor | Cardinality | Semantics |
 |---|---|---|
-| `buildChildTask` | per-subtask | inherits the parent task's flag |
+| `buildChildTask` | per-subtask | explicit `output[].rca_required` wins; omitted value inherits the parent task's flag |
 | `buildOneToOneChild` | one-to-one | inherits the parent task's flag |
 | `buildManyToOneChild` | many-to-one | true if **any** cohort member carries it — a fan-in mixing defect and feature parents still consolidates work whose root cause must be established downstream |
 
@@ -407,12 +408,17 @@ constructors in `proceed.go`, on both the normal and crash-recovery call sites o
 `us-to-coding` is many-to-one, so every `general-objective` goal traverses it before
 reaching code planning.
 
-Two deliberate exclusions. The integration-analysis task built in
+For decomposition roots, the mandatory classification rule is derived from pipeline
+topology rather than role-pair names: if any output consumer resolves to doer role
+`code-planner`, every output must carry non-null `rca_required`. The same validation
+runs when output is persisted, during the normal per-subtask transition, and during
+crash recovery. This lets mixed feature/defect siblings receive different values while
+preventing a task-wide default from leaking across structural boundaries.
+
+One deliberate exclusion remains. The integration-analysis task built in
 `integration_reconcile.go` does not carry the flag: those tasks route to
 `integration-pair` and `coding-pair`, neither of which renders any RCA text, so the
-flag would be inert. And there is no per-`output[]` override — a defect goal that fans
-out marks all of its scopes. The trigger to add one is the first fan-out defect goal
-whose unrelated scopes produce padded root cause sections.
+flag would be inert.
 
 **`parent-tasks-context` prompt section:**
 

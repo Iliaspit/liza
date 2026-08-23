@@ -749,6 +749,7 @@ func TestBuildPromptWithContext_DecompositionRootDoerMandate(t *testing.T) {
 						DoneWhen:    "Master decomposition is complete",
 						Scope:       "Master decomposition scope",
 						RolePair:    tt.rolePair,
+						RCARequired: tt.role == models.RoleCodePlanner,
 						Worktree:    &worktree,
 					},
 				},
@@ -796,6 +797,17 @@ func TestBuildPromptWithContext_DecompositionRootDoerMandate(t *testing.T) {
 			)
 			assertNotContains(t, prompt, "MASTER DECOMPOSITION REVIEW")
 			assertNotContains(t, prompt, "master-decomposition-review")
+			if tt.role == models.RoleCodePlanner {
+				assertContainsAll(t, prompt,
+					"Classify RCA independently for every output",
+					"group the affected scope or mark the master task BLOCKED",
+					"Every entry requires its own boolean rca_required",
+				)
+				assertNotContains(t, prompt, "TASK DECOMPOSITION PRINCIPLE:")
+				assertNotContains(t, prompt, "ROOT CAUSE ANALYSIS (REQUIRED — this objective is a defect fix)")
+				assertNotContains(t, prompt, "Save your plan to:")
+				assertNotContains(t, prompt, "Implementation Phase step 2")
+			}
 		})
 	}
 }
@@ -830,6 +842,7 @@ func TestBuildPromptWithContext_DecompositionRootReviewerReview(t *testing.T) {
 						DoneWhen:     "Master decomposition is reviewed",
 						Scope:        "Master decomposition scope",
 						RolePair:     tt.rolePair,
+						RCARequired:  tt.role == models.RoleCodePlanReviewer,
 						BaseCommit:   ptrString("base-sha"),
 						ReviewCommit: ptrString("review-sha"),
 						AssignedTo:   ptrString("planner-1"),
@@ -869,6 +882,14 @@ func TestBuildPromptWithContext_DecompositionRootReviewerReview(t *testing.T) {
 			)
 			assertNotContains(t, prompt, "MASTER DECOMPOSITION MANDATE")
 			assertNotContains(t, prompt, "master-decomposition-mandate")
+			if tt.role == models.RoleCodePlanReviewer {
+				assertContainsAll(t, prompt,
+					"Review each output's RCA classification",
+					"Do not establish or verify the root cause",
+				)
+				assertNotContains(t, prompt, "Evaluate the Root Cause Analysis FIRST")
+				assertNotContains(t, prompt, "Plan file location")
+			}
 		})
 	}
 }
@@ -923,6 +944,13 @@ func TestBuildPromptWithContext_NonRootDoersRenderNoMasterMandate(t *testing.T) 
 			assertNotContains(t, prompt, "Systemic Decomposition Review")
 			assertNotContains(t, prompt, "Master Output Contract properties 1-6")
 			assertNotContains(t, prompt, "MASTER DECOMPOSITION REVIEW")
+			if tt.role == models.RoleCodePlanner {
+				assertContainsAll(t, prompt,
+					"TASK DECOMPOSITION PRINCIPLE:",
+					"IMPLEMENTATION PHASE:",
+					"Implementation Phase step 2",
+				)
+			}
 		})
 	}
 }
@@ -1015,7 +1043,12 @@ func TestBuildPromptWithContext_CustomDecompositionRootDoerUsesConfiguredArtifac
 	if err != nil {
 		t.Fatalf("buildPromptWithContext() error = %v", err)
 	}
-	assertContainsAll(t, prompt, "=== MASTER DECOMPOSITION MANDATE ===", "plan_ref")
+	assertContainsAll(t, prompt,
+		"=== MASTER DECOMPOSITION MANDATE ===",
+		"arch_ref",
+		`"arch_ref": "..."`,
+	)
+	assertNotContains(t, prompt, `"plan_ref": "..."`)
 }
 
 func TestBuildPromptWithContext_CustomDecompositionRootReviewerUsesConfiguredArtifactRef(t *testing.T) {
@@ -1053,7 +1086,7 @@ func TestBuildPromptWithContext_CustomDecompositionRootReviewerUsesConfiguredArt
 	if err != nil {
 		t.Fatalf("buildPromptWithContext() error = %v", err)
 	}
-	assertContainsAll(t, prompt, "=== MASTER DECOMPOSITION REVIEW ===", "missing `plan_ref`")
+	assertContainsAll(t, prompt, "=== MASTER DECOMPOSITION REVIEW ===", "missing `arch_ref`")
 }
 
 func assertContainsAll(t *testing.T, got string, wants ...string) {
@@ -1090,7 +1123,7 @@ var customMasterRefPromptPipelineYAML = `pipeline:
     code-planner:
       type: doer
       display-name: "Code Planner"
-      context-sections: [assigned-task]
+      context-sections: [assigned-task, code-planner-tools]
     code-plan-reviewer:
       type: reviewer
       display-name: "Code Plan Reviewer"
@@ -1099,7 +1132,7 @@ var customMasterRefPromptPipelineYAML = `pipeline:
       doer: code-planner
       reviewer: code-plan-reviewer
       decomposition-root: true
-      decomposition-output-ref: plan_ref
+      decomposition-output-ref: arch_ref
       states: {initial: DRAFT_CUSTOM_MAIN, executing: CUSTOM_PLANNING_MAIN, submitted: CUSTOM_MAIN_TO_REVIEW, reviewing: REVIEWING_CUSTOM_MAIN, approved: CUSTOM_MAIN_APPROVED, rejected: CUSTOM_MAIN_REJECTED}
     code-planning-pair:
       doer: code-planner

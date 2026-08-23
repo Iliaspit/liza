@@ -363,6 +363,7 @@ type OutputEntry struct {
 	Kind          string                 `yaml:"kind,omitempty" json:"kind,omitempty"`
 	Validation    []string               `yaml:"validation,omitempty" json:"validation,omitempty"`
 	DestructiveDB bool                   `yaml:"destructive_db,omitempty" json:"destructive_db,omitempty"`
+	RCARequired   *bool                  `yaml:"rca_required,omitempty" json:"rca_required,omitempty"`
 	DependsOn     []string               `yaml:"depends_on,omitempty" json:"depends_on,omitempty"`
 	Decomposition *DecompositionManifest `yaml:"decomposition,omitempty" json:"decomposition,omitempty"`
 	// TaskDependsOn names existing concrete task IDs to copy onto generated child tasks.

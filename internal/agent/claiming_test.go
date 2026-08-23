@@ -722,6 +722,12 @@ func TestClaimDoerTask_ResumePostWorktreeCmdFailureDegradesAgent(t *testing.T) {
 			if !errors.Is(err, ErrAgentDegraded) {
 				t.Fatalf("claimDoerTask() error = %v, want ErrAgentDegraded", err)
 			}
+			// The sentinel says "stop claiming"; the cause says what to fix. Both
+			// must survive to the supervisor, which logs this error on exit.
+			var setupErr *ops.PostWorktreeSetupError
+			if !errors.As(err, &setupErr) {
+				t.Fatalf("claimDoerTask() error = %v, want the setup failure preserved as the cause", err)
+			}
 			if taskID != "" || worktree != "" {
 				t.Errorf("claimDoerTask() = (%q, %q), want empty — no task handed to a provider", taskID, worktree)
 			}

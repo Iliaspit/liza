@@ -152,7 +152,7 @@ func markAgentDegradedForInfraClaim(projectRoot, agentID, role, taskID string, c
 	// ops.ClaimTask already degraded and wrapped this one; re-marking would
 	// duplicate the anomaly.
 	if errors.Is(err, ops.ErrAgentDegraded) {
-		return ErrAgentDegraded
+		return err
 	}
 	classification := ops.ClassifyInfraClaimError(err)
 	if !classification.IsInfra {
@@ -171,7 +171,10 @@ func markAgentDegradedForInfraClaim(projectRoot, agentID, role, taskID string, c
 	}); markErr != nil {
 		return fmt.Errorf("failed to mark agent degraded after claim infrastructure failure: %w", markErr)
 	}
-	return ErrAgentDegraded
+	// Wrap rather than return the bare sentinel: callers log this error, and the
+	// cause names the command and worktree. Mirrors ops.ClaimTask's shape so both
+	// sides of the ErrAgentDegraded alias render identically.
+	return fmt.Errorf("%w: %w", ErrAgentDegraded, err)
 }
 
 // claimCoderTask wraps claimDoerTask for backward compatibility.

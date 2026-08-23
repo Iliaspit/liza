@@ -727,8 +727,18 @@ func taskContextSections(base []string, task *models.Task, data *prompts.RoleCon
 	data.DecompositionRoot = true
 	data.MasterOutputRefField = refField
 	if data.RoleType == "doer" {
+		if data.Role == models.RoleCodePlanner {
+			sections = slices.DeleteFunc(sections, func(section string) bool {
+				return section == "task-decomposition" || section == "implementation-phase"
+			})
+		}
 		sections = append(sections, "master-decomposition-mandate")
 	} else {
+		if data.Role == models.RoleCodePlanReviewer {
+			sections = slices.DeleteFunc(sections, func(section string) bool {
+				return section == "review-instructions"
+			})
+		}
 		sections = append(sections, "master-decomposition-review")
 	}
 	return sections, nil

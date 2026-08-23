@@ -824,6 +824,14 @@ func TestSetTaskOutput_DecompositionRootValidation(t *testing.T) {
 		errContains string
 	}{
 		{
+			name: "missing per-output RCA classification",
+			mutate: func(output []models.OutputEntry) []models.OutputEntry {
+				output[0].RCARequired = nil
+				return output
+			},
+			errContains: "output[0].rca_required is required",
+		},
+		{
 			name: "missing decomposition",
 			mutate: func(output []models.OutputEntry) []models.OutputEntry {
 				output[0].Decomposition = nil
@@ -968,11 +976,39 @@ func TestValidateDecompositionRootOutput_UsesConfiguredOutputRef(t *testing.T) {
 	output := validDecompositionRootOutput("specs/plans/master.md")
 
 	err := validateDecompositionRootOutput(state, stubDecompositionRootResolver{
-		root:      true,
-		outputRef: "plan_ref",
+		root:          true,
+		outputRef:     "plan_ref",
+		consumerPairs: []string{"custom-specialized-pair"},
+		doerRoles:     map[string]string{"custom-specialized-pair": models.RoleCodePlanner},
 	}, "custom-main-pair", output)
 	if err != nil {
 		t.Fatalf("validateDecompositionRootOutput() unexpected error: %v", err)
+	}
+}
+
+func TestValidateDecompositionRootOutput_RCARequirementUsesConfiguredTopology(t *testing.T) {
+	state := testhelpers.CreateValidState()
+	state.Tasks = []models.Task{
+		testhelpers.BuildTaskByStatus("existing-plan", models.TaskStatusMerged, time.Now().UTC()),
+	}
+	output := validDecompositionRootOutput("specs/plans/master.md")
+	for i := range output {
+		output[i].RCARequired = nil
+	}
+
+	codePlannerTopology := stubDecompositionRootResolver{
+		root:          true,
+		outputRef:     "plan_ref",
+		consumerPairs: []string{"bespoke-child-pair"},
+		doerRoles:     map[string]string{"bespoke-child-pair": models.RoleCodePlanner},
+	}
+	err := validateDecompositionRootOutput(state, codePlannerTopology, "renamed-master-pair", output)
+	testhelpers.RequireErrorContains(t, err, "output[0].rca_required is required")
+
+	nonCodePlannerTopology := codePlannerTopology
+	nonCodePlannerTopology.doerRoles = map[string]string{"bespoke-child-pair": "architect"}
+	if err := validateDecompositionRootOutput(state, nonCodePlannerTopology, "renamed-master-pair", output); err != nil {
+		t.Fatalf("non-code-planner topology unexpectedly required rca_required: %v", err)
 	}
 }
 
@@ -1019,8 +1055,10 @@ func TestSetTaskOutput_NonRootAllowsOutputWithoutDecomposition(t *testing.T) {
 }
 
 type stubDecompositionRootResolver struct {
-	root      bool
-	outputRef string
+	root          bool
+	outputRef     string
+	consumerPairs []string
+	doerRoles     map[string]string
 }
 
 func (r stubDecompositionRootResolver) IsDecompositionRoot(string) (bool, error) {
@@ -1029,6 +1067,14 @@ func (r stubDecompositionRootResolver) IsDecompositionRoot(string) (bool, error)
 
 func (r stubDecompositionRootResolver) DecompositionOutputRef(string) (string, error) {
 	return r.outputRef, nil
+}
+
+func (r stubDecompositionRootResolver) OutputConsumerRolePairs(string) ([]string, error) {
+	return r.consumerPairs, nil
+}
+
+func (r stubDecompositionRootResolver) DoerRole(rolePair string) (string, error) {
+	return r.doerRoles[rolePair], nil
 }
 
 func setupSetTaskOutputRootTask(t *testing.T, rolePair string, status models.TaskStatus) string {
@@ -1051,6 +1097,8 @@ func setupSetTaskOutputRootTask(t *testing.T, rolePair string, status models.Tas
 }
 
 func validDecompositionRootOutput(planRef string) []models.OutputEntry {
+	rcaNotRequired := false
+	rcaRequired := true
 	return []models.OutputEntry{
 		{
 			Desc:     "Plan storage boundaries",
@@ -1061,6 +1109,7 @@ func validDecompositionRootOutput(planRef string) []models.OutputEntry {
 			TaskDependsOn: []string{
 				"existing-plan",
 			},
+			RCARequired: &rcaNotRequired,
 			Decomposition: &models.DecompositionManifest{
 				OwnedFiles:            []string{"internal/a.go"},
 				ReadOnlyTaskDependsOn: []string{"existing-plan"},
@@ -1069,12 +1118,13 @@ func validDecompositionRootOutput(planRef string) []models.OutputEntry {
 			},
 		},
 		{
-			Desc:      "Plan ops boundaries",
-			DoneWhen:  "ops plan is complete",
-			Scope:     "internal/ops",
-			SpecRef:   "specs/master.md",
-			PlanRef:   planRef,
-			DependsOn: []string{"0"},
+			Desc:        "Plan ops boundaries",
+			DoneWhen:    "ops plan is complete",
+			Scope:       "internal/ops",
+			SpecRef:     "specs/master.md",
+			PlanRef:     planRef,
+			DependsOn:   []string{"0"},
+			RCARequired: &rcaRequired,
 			Decomposition: &models.DecompositionManifest{
 				OwnedFiles:        []string{"internal/b.go"},
 				ReadOnlyDependsOn: []int{0},

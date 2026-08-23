@@ -18,12 +18,12 @@ FAN-OUT OR UNCERTAIN GOAL:
 Use the mapped master planning target when available if multiple functional areas need separate ownership, shared files or interfaces require explicit boundary assignment, independent downstream workstreams could run in parallel after planning, the goal would likely produce more than 8 downstream output entries, or boundary placement is uncertain.
 
 DEFECT CLASSIFICATION:
-Classify the objective as well as its shape. If the goal spec describes a failure of
-existing behavior -- a bug, regression, or incident -- rather than a new capability,
-set "rca_required": true on the task. The flag inherits down the planning-to-coding
-chain and makes the code plan carry a reviewed root cause analysis. The examples below show the
-new-capability default; change it to true for a defect fix. Where the spec mixes both,
-set true only if the failure is the reason the goal exists.
+Classify the objective before dispatch. A defect is a failure of existing behavior --
+a bug, regression, or incident -- rather than a new capability.
+- Direct or fallback specialized tasks own objective-level classification: set "rca_required": true on that task only for a defect fix; otherwise use false.
+- Mapped decomposition-root tasks always use "rca_required": false. Their master
+  planner must classify each output[] entry independently, so mixed feature and
+  defect scopes do not inherit one task-wide answer.
 
 --- EXECUTION PHASE (MANDATORY - DO NOT SKIP) ---
 {{- if .GoalEntryPoint }}
@@ -78,7 +78,7 @@ Then run: {{binaryName}} add-tasks --tasks-file <path.json> --agent-id {{.AgentI
 
 SUCCESS CRITERIA:
 - Exactly one task is created.
-- The defect classification is stated, and "rca_required" is set only for defect fixes.
+- The objective classification and RCA ownership boundary are stated; direct or fallback specialized tasks classify the objective, while mapped master tasks delegate classification to each output.
 - Simple goals use role_pair {{.ResolvedRolePair}}.
 {{- if .ResolvedHasFanOutTarget }}
 - Fan-out or uncertain goals use role_pair {{.ResolvedFanOutRolePair}}.
@@ -148,7 +148,7 @@ Then run: {{binaryName}} add-tasks --tasks-file <path.json> --agent-id {{.AgentI
 
 SUCCESS CRITERIA:
 - Exactly one task is created.
-- The defect classification is stated, and "rca_required" is set only for defect fixes.
+- The objective classification and RCA ownership boundary are stated; direct or fallback specialized tasks classify the objective, while mapped master tasks delegate classification to each output.
 - Classification reasoning is stated before creating the task.
 - Simple goals use the chosen simple role_pair.
 - Fan-out or uncertain goals use the chosen fan-out role_pair when available.
@@ -175,7 +175,7 @@ Then run: {{binaryName}} add-tasks --tasks-file <path.json> --agent-id {{.AgentI
 
 SUCCESS CRITERIA:
 - Exactly one task is created.
-- The defect classification is stated, and "rca_required" is set only for defect fixes.
+- The objective classification and RCA ownership boundary are stated; direct or fallback specialized tasks classify the objective, while mapped master tasks delegate classification to each output.
 - The task uses role_pair code-planning-pair.
 - The task enters DRAFT_CODING_PLAN and is claimable by code-planner.
 {{- end }}
