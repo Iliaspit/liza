@@ -17,6 +17,8 @@ import (
 )
 
 func TestRepairSupersededDependencies_RemovesAllIllegalEdgesAtomically(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 	testhelpers.CreateSpecFile(t, tmpDir, "vision.md", "# Vision\n")
@@ -125,6 +127,8 @@ func TestRepairSupersededDependencies_RemovesAllIllegalEdgesAtomically(t *testin
 }
 
 func TestRepairSupersededDependencies_PrunesSupersessionPathDownstreamDependency(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 	testhelpers.CreateSpecFile(t, tmpDir, "vision.md", "# Vision\n")
@@ -213,6 +217,8 @@ func TestRepairSupersededDependencies_PrunesSupersessionPathDownstreamDependency
 }
 
 func TestRepairSupersededDependencies_SupersessionPathInvalidCandidateLeavesAuditUnchanged(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 	testhelpers.CreateSpecFile(t, tmpDir, "vision.md", "# Vision\n")
@@ -273,6 +279,8 @@ func TestRepairSupersededDependencies_SupersessionPathInvalidCandidateLeavesAudi
 }
 
 func TestRepairSupersededDependencies_RejectsNonSupersededTaskWithoutMutation(t *testing.T) {
+	t.Parallel()
+
 	now := time.Now().UTC()
 	target := testhelpers.BuildTaskByStatus("plan-old", models.TaskStatusBlocked, now)
 	target.RolePair = "code-planning-pair"
@@ -287,6 +295,8 @@ func TestRepairSupersededDependencies_RejectsNonSupersededTaskWithoutMutation(t 
 }
 
 func TestRepairSupersededDependencies_RejectsAlreadyValidTaskWithoutMutation(t *testing.T) {
+	t.Parallel()
+
 	now := time.Now().UTC()
 	target := testhelpers.BuildTaskByStatus("plan-old", models.TaskStatusSuperseded, now)
 	target.RolePair = "code-planning-pair"
@@ -302,6 +312,8 @@ func TestRepairSupersededDependencies_RejectsAlreadyValidTaskWithoutMutation(t *
 }
 
 func TestRepairSupersededDependencies_RejectsStillInvalidCandidateWithoutMutation(t *testing.T) {
+	t.Parallel()
+
 	now := time.Now().UTC()
 	target := testhelpers.BuildTaskByStatus("plan-old", models.TaskStatusSuperseded, now)
 	target.RolePair = "code-planning-pair"

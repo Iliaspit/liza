@@ -13,6 +13,8 @@ import (
 )
 
 func TestRecoverAgent_Validation(t *testing.T) {
+	t.Parallel()
+
 	_, err := RecoverAgent("/nonexistent", "", false, "reason")
 	if err == nil {
 		t.Fatal("Expected error for empty agent ID")
@@ -23,6 +25,8 @@ func TestRecoverAgent_Validation(t *testing.T) {
 }
 
 func TestRecoverAgent_NotFound_Idempotent(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
@@ -42,6 +46,8 @@ func TestRecoverAgent_NotFound_Idempotent(t *testing.T) {
 }
 
 func TestRecoverAgent_MissingAgentReleasesTaskSideClaims(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
@@ -122,6 +128,8 @@ func TestRecoverAgent_MissingAgentReleasesTaskSideClaims(t *testing.T) {
 }
 
 func TestRecoverAgent_ReleasesTaskSideDoerClaimWhenAgentCurrentTaskMissing(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
@@ -181,6 +189,8 @@ func TestRecoverAgent_ReleasesTaskSideDoerClaimWhenAgentCurrentTaskMissing(t *te
 }
 
 func TestRecoverAgent_CoderWithImplementingTask(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
@@ -273,6 +283,8 @@ func TestRecoverAgent_CoderWithImplementingTask(t *testing.T) {
 }
 
 func TestRecoverAgent_ReviewerWithReviewingTask(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
@@ -347,6 +359,8 @@ func TestRecoverAgent_ReviewerWithReviewingTask(t *testing.T) {
 }
 
 func TestRecoverAgent_NoCurrentTask(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
@@ -387,6 +401,8 @@ func TestRecoverAgent_NoCurrentTask(t *testing.T) {
 }
 
 func TestRecoverAgent_PIDAlive_NoForce(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
@@ -408,6 +424,8 @@ func TestRecoverAgent_PIDAlive_NoForce(t *testing.T) {
 }
 
 func TestRecoverAgent_PIDAlive_WithForce(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
@@ -429,6 +447,8 @@ func TestRecoverAgent_PIDAlive_WithForce(t *testing.T) {
 }
 
 func TestRecoverAgent_DoubleRecover(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
@@ -468,6 +488,8 @@ func TestRecoverAgent_DoubleRecover(t *testing.T) {
 // (data-engineer) triggers worktree removal during recovery, proving the condition
 // is resolver-based rather than hardcoded to "coder".
 func TestRecoverAgent_CustomDoerRole_WorktreeRemoval(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
@@ -577,6 +599,8 @@ func TestRecoverAgent_CustomDoerRole_WorktreeRemoval(t *testing.T) {
 // during agent recovery, a warning log line is emitted indicating claim release was
 // skipped due to missing resolver and the claim-owning agent is preserved.
 func TestRecoverAgent_NilResolver_WarningLogLine(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 
 	// Manually create .liza dir WITHOUT pipeline config so resolver is nil.

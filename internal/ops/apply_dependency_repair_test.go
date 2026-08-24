@@ -14,6 +14,8 @@ import (
 )
 
 func TestApplyDependencyRepair_MultiTaskAtomicSuccess(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
@@ -115,6 +117,8 @@ func TestApplyDependencyRepair_MultiTaskAtomicSuccess(t *testing.T) {
 }
 
 func TestApplyDependencyRepair_PreservesSourceValidationReceipt(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
@@ -183,6 +187,8 @@ func TestApplyDependencyRepair_PreservesSourceValidationReceipt(t *testing.T) {
 }
 
 func TestApplyDependencyRepair_StaleOrInvalidBatchRollsBack(t *testing.T) {
+	t.Parallel()
+
 	assertDependencyRepairBatchRollsBack(t, "stale expectation", models.TaskStatusReady, []models.DependencyUpdate{
 		{TaskID: "repair-source", ExpectedDependsOn: []string{"old-source"}, DesiredDependsOn: []string{"new-source"}},
 		{TaskID: "consumer", ExpectedDependsOn: []string{"stale-consumer"}, DesiredDependsOn: []string{"new-consumer"}},

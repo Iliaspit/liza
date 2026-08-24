@@ -107,13 +107,13 @@ Corrections to the previous assessment:
 
 ## Executive Summary
 
-Liza remains a well-engineered, specification-driven multi-agent orchestrator with strong correctness infrastructure. Its Go runtime has extensive tests, race-enabled CI, meaningful integration coverage, explicit state validation, and disciplined error handling. Documentation depth—219 specifications and 96 active ADRs—is exceptional.
+Liza remains a well-engineered, specification-driven multi-agent orchestrator with strong correctness infrastructure. Its Go runtime has extensive tests, a dedicated final race target, meaningful integration coverage, explicit state validation, and disciplined error handling. Documentation depth—219 specifications and 96 active ADRs—is exceptional.
 
 The codebase has nevertheless crossed from isolated large-file concerns into sustained structural-debt growth. Production Go LOC doubled across 424 commits, while files over 500 LOC grew from 12 to 35. The three P1 decomposition targets from the previous assessment all grew substantially without remediation. Python is now a material production surface, but CI does not install Python or run its tests, linter, or type checker.
 
 ### Key Strengths
 
-- **High testing investment:** 150,683 Go test LOC, 2,998 test functions, race-enabled unit runs, and 14 E2E files covering real supervisor and operations flows.
+- **High testing investment:** 150,683 Go test LOC, 2,998 test functions, a dedicated race-enabled final-validation target, and 14 E2E files covering real supervisor and operations flows.
 - **Explicit correctness boundaries:** state mutation, pipeline resolution, persistence, and validation remain separated and heavily exercised.
 - **Traceable engineering decisions:** 219 specifications and 96 active ADRs preserve design intent at unusual depth.
 - **Dependency restraint:** 13 direct Go dependencies is reasonable for the feature surface; dynamic integrations remain isolated in dedicated packages.
@@ -272,7 +272,7 @@ The previous characterization of Python tooling as vestigial is stale. It is now
 **Strengths:**
 
 - Go has a 2.30:1 test-to-production ratio and 2,998 test functions.
-- `make test` enables the race detector and coverage collection.
+- `make test` is the routine uninstrumented full-suite target; `make test-race` is the mandatory final local concurrency gate, and `make coverage` owns package-local coverage reporting.
 - Fourteen E2E files total 6,208 LOC.
 - Sampled integration tests execute the real supervisor and operations flows with the LLM boundary mocked, rather than only asserting internal helper behavior.
 - Test guards ratchet parallel usage and cap real sleeps.
@@ -281,20 +281,21 @@ The previous characterization of Python tooling as vestigial is stale. It is now
 
 - Codecov upload is non-blocking and no coverage threshold or trend gate exists.
 - There are no Go fuzz tests despite concurrency, YAML parsing, graph operations, and state-transition inputs.
-- Fifteen `t.Parallel()` calls across 246 test files is limited adoption; the guard enforces a floor, not broad parallel-test discipline.
-- Ten real `time.Sleep` uses remain in tests, within the configured ceiling of eleven.
+- 514 `t.Parallel()` calls now span 48 of 282 test files and the guard ratchets that exact count; adoption remains intentionally concentrated in audited packages.
+- Eight real `time.Sleep` uses remain in tests, within the configured ceiling of eleven.
 - Python tests are absent from CI.
 
 ### Pre-Commit and CI Pipeline ★★★☆☆
 
 **Strengths:**
 
-- CI runs on Linux and macOS and executes lint, race-enabled unit tests, E2E tests, and builds.
+- CI runs on Linux and macOS and executes lint, routine unit tests, E2E tests, and builds.
 - The local pre-commit configuration includes 22 hooks covering Go, Python, file hygiene, duplicate detection, and commit conventions.
 
 **Concerns:**
 
 - CI's `make lint` runs embedded/test-helper checks, `go fmt`, and `go vet`; it does not execute the complete pre-commit suite.
+- CI does not yet invoke `make test-race` or `make coverage`; its Codecov step still expects the retired fixed `coverage.out` path. Wiring those split targets is tracked as deliberate debt.
 - Staticcheck, goimports verification, jscpd, ruff, mypy, and pytest are therefore not merge gates.
 - `goimports@latest` and `staticcheck@latest` make local tool resolution non-reproducible.
 - Codecov uses `fail_ci_if_error: false` and has no threshold.

@@ -284,7 +284,12 @@ func rejectAwaitFixture(t *testing.T, fixture awaitIntegrationFixture) {
 func startAwaitVerdict(projectRoot, taskID, agentID string, remaining time.Duration) <-chan awaitVerdictCall {
 	result := make(chan awaitVerdictCall, 1)
 	go func() {
-		awaitResult, err := commands.AwaitVerdict(projectRoot, taskID, agentID, remaining)
+		awaitResult, err := commands.AwaitVerdictWithOptions(
+			projectRoot, taskID, agentID, remaining,
+			commands.AwaitVerdictOptions{
+				FallbackPollInterval: 10 * time.Millisecond,
+			},
+		)
 		result <- awaitVerdictCall{result: awaitResult, err: err}
 	}()
 	return result

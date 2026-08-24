@@ -2,6 +2,7 @@ package integration
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -16,6 +18,25 @@ import (
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/testhelpers"
 )
+
+var dependencyRepairCLIBuild struct {
+	sync.Once
+	binary  string
+	tempDir string
+	output  []byte
+	err     error
+}
+
+func TestMain(m *testing.M) {
+	code := m.Run()
+	if dependencyRepairCLIBuild.tempDir != "" {
+		if err := os.RemoveAll(dependencyRepairCLIBuild.tempDir); err != nil {
+			fmt.Fprintf(os.Stderr, "remove dependency-repair test binary: %v\n", err)
+			code = 1
+		}
+	}
+	os.Exit(code)
+}
 
 func TestDependencyRepairWorkflow(t *testing.T) {
 	cliPath := buildDependencyRepairCLI(t)
@@ -165,18 +186,26 @@ func TestDependencyRepairWorkflow_ResumesFromConsumedRequest(t *testing.T) {
 
 func buildDependencyRepairCLI(t *testing.T) string {
 	t.Helper()
-	_, sourceFile, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("locate dependency repair integration test")
+	dependencyRepairCLIBuild.Do(func() {
+		_, sourceFile, _, ok := runtime.Caller(0)
+		if !ok {
+			dependencyRepairCLIBuild.err = fmt.Errorf("locate dependency repair integration test")
+			return
+		}
+		repoRoot := filepath.Clean(filepath.Join(filepath.Dir(sourceFile), "..", ".."))
+		dependencyRepairCLIBuild.tempDir, dependencyRepairCLIBuild.err = os.MkdirTemp("", "liza-dependency-repair-")
+		if dependencyRepairCLIBuild.err != nil {
+			return
+		}
+		dependencyRepairCLIBuild.binary = filepath.Join(dependencyRepairCLIBuild.tempDir, "liza")
+		cmd := exec.Command("go", "build", "-o", dependencyRepairCLIBuild.binary, "./cmd/liza")
+		cmd.Dir = repoRoot
+		dependencyRepairCLIBuild.output, dependencyRepairCLIBuild.err = cmd.CombinedOutput()
+	})
+	if dependencyRepairCLIBuild.err != nil {
+		t.Fatalf("build CLI: %v\n%s", dependencyRepairCLIBuild.err, dependencyRepairCLIBuild.output)
 	}
-	repoRoot := filepath.Clean(filepath.Join(filepath.Dir(sourceFile), "..", ".."))
-	cliPath := filepath.Join(t.TempDir(), "liza")
-	cmd := exec.Command("go", "build", "-o", cliPath, "./cmd/liza")
-	cmd.Dir = repoRoot
-	if output, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("build CLI: %v\n%s", err, output)
-	}
-	return cliPath
+	return dependencyRepairCLIBuild.binary
 }
 
 func setupDependencyRepairWorkflow(t *testing.T, request models.RepairRequest) (string, *db.Blackboard, string) {

@@ -12,6 +12,8 @@ import (
 )
 
 func TestCleanupPredecessorBranches_AllSuccessorsTerminal(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
@@ -45,6 +47,8 @@ func TestCleanupPredecessorBranches_AllSuccessorsTerminal(t *testing.T) {
 }
 
 func TestCleanupPredecessorBranches_OneSuccessorActive(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
@@ -78,6 +82,8 @@ func TestCleanupPredecessorBranches_OneSuccessorActive(t *testing.T) {
 }
 
 func TestCleanupPredecessorBranches_SupersededSuccessorIsTerminal(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
@@ -112,6 +118,8 @@ func TestCleanupPredecessorBranches_SupersededSuccessorIsTerminal(t *testing.T) 
 }
 
 func TestCleanupPredecessorBranches_AbandonedSuccessorIsTerminal(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
@@ -144,6 +152,8 @@ func TestCleanupPredecessorBranches_AbandonedSuccessorIsTerminal(t *testing.T) {
 }
 
 func TestCleanupPredecessorBranches_UnresolvedSuccessor(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
@@ -187,6 +197,8 @@ func TestCleanupPredecessorBranches_UnresolvedSuccessor(t *testing.T) {
 }
 
 func TestCleanupPredecessorBranches_NoPredecessors(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
@@ -207,6 +219,8 @@ func TestCleanupPredecessorBranches_NoPredecessors(t *testing.T) {
 }
 
 func TestCleanupPredecessorBranches_IgnoresNonSupersededWithStaleField(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)

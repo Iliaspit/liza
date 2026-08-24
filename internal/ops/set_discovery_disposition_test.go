@@ -11,6 +11,8 @@ import (
 )
 
 func TestSetDiscoveryDisposition(t *testing.T) {
+	t.Parallel()
+
 	t.Run("sets disposition on existing discovery", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)

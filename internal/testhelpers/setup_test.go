@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -62,6 +63,13 @@ func TestSetupTestGitRepo(t *testing.T) {
 	}
 	if string(output) != expectedHooksPath+"\n" {
 		t.Errorf("Expected core.hooksPath=%q, got %q", expectedHooksPath, string(output))
+	}
+	configContent, err := os.ReadFile(filepath.Join(gitDir, "config"))
+	if err != nil {
+		t.Fatalf("Failed to read copied git config: %v", err)
+	}
+	if count := strings.Count(string(configContent), "hooksPath"); count != 1 {
+		t.Fatalf("copied git config hooksPath count = %d, want 1:\n%s", count, configContent)
 	}
 	cmd = exec.Command("git", "-C", tmpDir, "commit", "--allow-empty", "-m", "Verify local hooks path")
 	if output, err = cmd.CombinedOutput(); err != nil {
@@ -124,6 +132,27 @@ func TestSetupTestGitRepoCopiesIsolatedFixture(t *testing.T) {
 	SetupTestGitRepo(t, second)
 	if _, err := os.Stat(filepath.Join(second, "extra.txt")); !os.IsNotExist(err) {
 		t.Fatalf("second fixture extra.txt stat err = %v, want missing isolated repo", err)
+	}
+}
+
+func TestCreateTestGitRepoTemplateRemovesPreparationDirectory(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("TMPDIR", tmpDir)
+
+	entries, err := createTestGitRepoTemplate(true)
+	if err != nil {
+		t.Fatalf("createTestGitRepoTemplate: %v", err)
+	}
+	if len(entries) == 0 {
+		t.Fatal("createTestGitRepoTemplate returned no cached entries")
+	}
+
+	remaining, err := os.ReadDir(tmpDir)
+	if err != nil {
+		t.Fatalf("read TMPDIR: %v", err)
+	}
+	if len(remaining) != 0 {
+		t.Fatalf("prepared fixture left %d entries in TMPDIR: %v", len(remaining), remaining)
 	}
 }
 

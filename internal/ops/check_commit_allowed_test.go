@@ -11,6 +11,8 @@ import (
 )
 
 func TestCheckCommitAllowed_EmptyTaskID(t *testing.T) {
+	t.Parallel()
+
 	result := CheckCommitAllowed(t.TempDir(), "")
 	if !result.Allowed {
 		t.Fatalf("empty task ID should fail-safe allow, got reject: %s", result.Reason)
@@ -18,6 +20,8 @@ func TestCheckCommitAllowed_EmptyTaskID(t *testing.T) {
 }
 
 func TestCheckCommitAllowed_StateMissing(t *testing.T) {
+	t.Parallel()
+
 	// Directly exercises the spec risk "hook must handle missing state gracefully":
 	// no .liza/state.yaml on disk must result in fail-safe allow.
 	tmpDir := t.TempDir()
@@ -28,6 +32,8 @@ func TestCheckCommitAllowed_StateMissing(t *testing.T) {
 }
 
 func TestCheckCommitAllowed_TaskNotFound(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 	state := testhelpers.CreateValidState()
@@ -40,6 +46,8 @@ func TestCheckCommitAllowed_TaskNotFound(t *testing.T) {
 }
 
 func TestCheckCommitAllowed_Blocked(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
@@ -55,6 +63,8 @@ func TestCheckCommitAllowed_Blocked(t *testing.T) {
 }
 
 func TestCheckCommitAllowed_Implementing(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
@@ -70,6 +80,8 @@ func TestCheckCommitAllowed_Implementing(t *testing.T) {
 }
 
 func TestCheckCommitAllowed_Rejected(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
@@ -85,6 +97,8 @@ func TestCheckCommitAllowed_Rejected(t *testing.T) {
 }
 
 func TestCheckCommitAllowed_ReadyForReview(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
@@ -103,6 +117,8 @@ func TestCheckCommitAllowed_ReadyForReview(t *testing.T) {
 }
 
 func TestCheckCommitAllowed_Reviewing(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
@@ -118,6 +134,8 @@ func TestCheckCommitAllowed_Reviewing(t *testing.T) {
 }
 
 func TestCheckCommitAllowed_Approved(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
@@ -133,6 +151,8 @@ func TestCheckCommitAllowed_Approved(t *testing.T) {
 }
 
 func TestCheckCommitAllowed_MissingRolePair(t *testing.T) {
+	t.Parallel()
+
 	// Regression guard: a task with no role_pair must fail-safe allow, not
 	// reject. Rejecting would turn state-schema gaps into commit deadlocks.
 	tmpDir := t.TempDir()
@@ -152,6 +172,8 @@ func TestCheckCommitAllowed_MissingRolePair(t *testing.T) {
 }
 
 func TestCheckCommitAllowed_UnknownRolePair(t *testing.T) {
+	t.Parallel()
+
 	// Regression guard: a task whose role_pair isn't in the pipeline config
 	// (e.g. config drift) must fail-safe allow. Pipeline resolver errors
 	// during RejectedStatus lookup must not become commit deadlocks.
@@ -172,6 +194,8 @@ func TestCheckCommitAllowed_UnknownRolePair(t *testing.T) {
 }
 
 func TestCheckCommitAllowed_PipelineMissing(t *testing.T) {
+	t.Parallel()
+
 	// Fail-safe when pipeline config is unavailable.
 	tmpDir := t.TempDir()
 	_, _ = testhelpers.SetupLizaDir(t, tmpDir)

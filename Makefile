@@ -1,4 +1,4 @@
-.PHONY: build test test-e2e clean install lint check-testhelpers check-embedded release package build-all tidy run coverage help
+.PHONY: build test test-fast test-race test-e2e clean install lint check-testhelpers check-embedded release package build-all tidy run coverage help
 
 # Brand variables
 BRAND_NAME_LOWER?=liza
@@ -55,15 +55,27 @@ build: sync-embedded
 # The sync-embedded step copies contracts/ and skills/ into internal/embedded/ for go:embed.
 # claude-settings.json and hooks/ are mastered directly in internal/embedded/.
 test: sync-embedded check-testhelpers
-	go test -race -coverprofile=coverage.out ./...
+	go test ./...
+
+# Run the short test subset for fast local feedback
+test-fast: sync-embedded check-testhelpers
+	go test -short ./...
+
+# Run the full suite with race instrumentation
+test-race: sync-embedded check-testhelpers
+	go test -race ./...
 
 # Run e2e tests (full sprint sequence with mock CLI — ~40s)
 test-e2e: sync-embedded check-testhelpers
 	go test -race -tags e2e -run '^(TestFullSprintSequence|TestTerminalDependencyRecovery)$$' ./internal/integration/ -count=1
 
-# Run tests with coverage report
-coverage: test
-	go tool cover -html=coverage.out
+# Run tests with a per-invocation, self-cleaning coverage profile
+coverage: sync-embedded check-testhelpers
+	@set -eu; \
+		coverage_file="$$(mktemp "$${TMPDIR:-/tmp}/$(BINARY_NAME)-coverage.XXXXXX")"; \
+		trap 'rm -f "$$coverage_file"' EXIT HUP INT TERM; \
+		go test -coverprofile="$$coverage_file" ./...; \
+		go tool cover -html="$$coverage_file"
 
 # Clean build artifacts
 clean:
@@ -91,9 +103,10 @@ install: build
 # should only be used in *_test.go files.
 check-testhelpers:
 	@echo "Checking for testhelpers in production code..."
-	@if find . -name "*.go" ! -name "*_test.go" -type f -exec grep -l "internal/testhelpers" {} \; | grep -q .; then \
+	@matches="$$(grep -rl --include='*.go' --exclude='*_test.go' 'internal/testhelpers' cmd internal plugin || true)"; \
+	if [ -n "$$matches" ]; then \
 		echo "ERROR: testhelpers package imported in production code:"; \
-		find . -name "*.go" ! -name "*_test.go" -type f -exec grep -l "internal/testhelpers" {} \;; \
+		printf '%s\n' "$$matches"; \
 		echo ""; \
 		echo "The testhelpers package should only be imported in test files (*_test.go)."; \
 		echo "This ensures test utilities don't leak into production binaries."; \
@@ -127,7 +140,7 @@ build-all: sync-embedded
 	GOOS=darwin GOARCH=arm64 go build $(LDFLAGS) -o $(BINARY_NAME)-darwin-arm64 ./cmd/liza
 
 # Create release artifacts
-release: clean lint test
+release: clean lint test-race
 	@echo "Building release artifacts..."
 	@mkdir -p dist
 	@# Build $(BINARY_NAME) for all platforms
@@ -160,7 +173,9 @@ package: release
 help:
 	@echo "Available targets:"
 	@echo "  build              - Build $(BINARY_NAME) binary"
-	@echo "  test               - Run tests (includes testhelpers check)"
+	@echo "  test               - Run the full suite without race or coverage instrumentation"
+	@echo "  test-fast          - Run the short test subset"
+	@echo "  test-race          - Run the full suite with race instrumentation"
 	@echo "  test-e2e           - Run e2e full sprint test (~40s, requires -tags e2e)"
 	@echo "  coverage           - Run tests with coverage report"
 	@echo "  clean              - Clean build artifacts"

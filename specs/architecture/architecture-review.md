@@ -442,14 +442,14 @@ The repository enforces test-suite properties in the suite itself. `internal/tes
 
 **Signals:**
 
-- `make test` runs `go test -race -coverprofile=coverage.out ./...` with no `-coverpkg`, so each package is credited only with coverage produced by its own test binary.
+- `make coverage` runs `go test -coverprofile=<unique-temporary-profile> ./...` with no `-coverpkg`, so each package is credited only with coverage produced by its own test binary. Routine `make test` intentionally collects no coverage.
 - Under that default, `internal/alerts` and `internal/projectdetect` read 0.0% and `internal/errors` 12.7%. Measured with `-coverpkg=./...` they are 89.7%, 92.9%, and 91.1%. Neither package has a test file of its own; both are exercised thoroughly by their callers.
 - `models.ValidateDependsOn` reads 22.2% by default and 100% cross-package. Three prior passes recorded "untested entry point" findings that dissolve under correct measurement.
-- `.github/workflows/ci.yml` uploads this profile to Codecov with `fail_ci_if_error: false`, and the repository has no `codecov.yml` or threshold.
+- `.github/workflows/ci.yml` still attempts to upload `coverage.out` with `fail_ci_if_error: false`, but its preceding `make test` step no longer produces that file. The repository has no `codecov.yml` or threshold, and CI wiring for `make coverage` is explicitly deferred.
 
 **Impact:** The published number is systematically wrong for exactly the packages this review keeps flagging — thin leaf packages consumed from elsewhere. It under-reports them, which is the harmless direction for the package but the harmful direction for the reviewer: three passes have now spent attention on false gaps, and the same artifact hides the real ones behind noise. Codecov is decorative, not a gate.
 
-**Direction:** Add `-coverpkg=./...` to the `test` target. That single flag changes what every future coverage claim in this document means, so it should land before any coverage-driven work.
+**Direction:** Add `-coverpkg=./...` to the `coverage` target and give CI an explicit retained-profile path. That change affects what every future coverage claim in this document means, so it should land before any coverage-driven work.
 
 #### The human-readable CLI path is structurally unmeasured *(pass 20, Coverage lens)*
 
@@ -678,7 +678,7 @@ The repository enforces test-suite properties in the suite itself. `internal/tes
 | Untested role Phase 2 query functions | Stale: those functions no longer exist. |
 | MCP runtime architecture findings | Obsolete: MCP was removed under ADR-0057. Current C4/overview references are a separate documentation-drift finding. *(adjusted, pass 21)* |
 | `format.go` file references | Stale path: current helpers live in `format_helpers.go`. |
-| "`coverage.out` is a narrow or partial run" | Adjusted at pass 21: the ignored local artifact is not a durable evidence source. Pass 20's figures came from a separate complete `-coverpkg` run; the current local profile reports 1.9% and is not used here. |
+| "`coverage.out` is a narrow or partial run" | Adjusted again on 2026-08-24: `make coverage` now uses and removes a unique temporary profile, so there is no canonical local `coverage.out`. Pass 20's figures came from a separate complete `-coverpkg` run and remain historical evidence. |
 | "Three packages have zero test files" (`alerts`, `projectdetect`, `taskkind`) | Adjusted at pass 20: accurate as stated, but not a coverage gap. `alerts` is 89.7% and `projectdetect` 92.9% from their callers; `taskkind` has no executable statements. |
 | Untested `statevalidate` and embedded entry points | Stale at pass 20: `statevalidate` 89.6%, `PlanGlobalFiles` 90.9%, `WritePipelineConfig` 100%. The finding was an artifact of same-package measurement. |
 
@@ -703,7 +703,7 @@ The repository enforces test-suite properties in the suite itself. `internal/tes
 
 The [2026-07-24 code quality assessment](code_quality_assessment.md#repository-metrics-dashboard) counted all tracked Go files at 150,683 test lines and 65,509 production lines, a 2.30:1 ratio. The previously quoted 150,414/65,061 total used the narrower `cmd/` + `internal/` scope: the exact difference is `plugin/acp` (269 test and 448 production lines). This dated ratio indicates substantial test investment but is not a statement-coverage percentage.
 
-**Historical measurement basis *(pass 20, Coverage lens)*.** A separate complete `go test -coverpkg=./... ./...` run produced whole-module profiles for approximately 48 test binaries, then deduplicated blocks by block key. The raw profiles and deduplication implementation were not retained. The committed [2026-07-25 coverage summary](coverage-summary-2026-07-25.md) preserves the reviewed aggregate, per-package bands, and zero-function counts, but the figures remain historical until repository tooling regenerates the same basis. `coverage.out` is ignored, and `make test` still omits `-coverpkg` — see §2.3.
+**Historical measurement basis *(pass 20, Coverage lens)*.** A separate complete `go test -coverpkg=./... ./...` run produced whole-module profiles for approximately 48 test binaries, then deduplicated blocks by block key. The raw profiles and deduplication implementation were not retained. The committed [2026-07-25 coverage summary](coverage-summary-2026-07-25.md) preserves the reviewed aggregate, per-package bands, and zero-function counts, but the figures remain historical until repository tooling regenerates the same basis. `make coverage` still omits `-coverpkg` and cleans its temporary profile — see §2.3.
 
 The retained summary records **80.7%** over 26,178 statements by profile-block arithmetic and **82.6%** by `go tool cover -func`. The latter omits function literals outside a `FuncDecl`, including all 69 Cobra `RunE` bodies, so block arithmetic is the more complete historical total.
 
@@ -724,8 +724,8 @@ The retained summary records **80.7%** over 26,178 statements by profile-block a
 - 118 of 2,314 measured functions are at 0.0%, 59 of them exported. They cluster in `commands` (19), `ops` (17), `cmd/liza` (15), `updater` (10), and `agent` (10). This count excludes the 69 `RunE` bodies, which the measuring tool cannot see at all.
 - `internal/interactive` at 35.8% is small (67 statements) but sits on the first-run initialization path, where failure is user-visible and recovery is manual.
 - `git.ResetHard` is the only destructive Git helper at 0.0%; `MergeTree`, `CreateCommitFromTree`, and `AttachWorktree` are all covered.
-- The test tree currently contains seven `time.Sleep(` and twelve `t.Parallel()` occurrences outside the budget-guard source files. `internal/testguard` enforces an 11-sleep ceiling and a 9-parallel-call floor; it does not ratchet the current parallel count exactly. *(adjusted, pass 21)*
-- Twelve `t.Parallel()` calls across 246 test files means the suite is essentially serial; the large packages take 40–60 seconds each. The floor prevents a full regression but currently permits the count to fall from twelve to nine. *(adjusted, pass 21)*
+- The test tree currently contains eight `time.Sleep(` and 514 `t.Parallel()` occurrences outside the budget-guard source files. `internal/testguard` retains the 11-sleep ceiling and now ratchets the exact 514-call parallel baseline. *(adjusted 2026-08-24)*
+- The 514 parallel calls span 48 of 282 test files and are concentrated in the audited `internal/ops` set plus sliced-integration lifecycle branches. The remaining large packages still need package-local shared-state audits before broader adoption. *(adjusted 2026-08-24)*
 - `internal/embedded/opencode-tools/exec.ts` is shipped to users' `.opencode/tools/` directories, and no `package.json`, `tsconfig.json`, type-check, or lint step exists anywhere in the repository or CI. Its only assertions are content-identity checks in `embedded_test.go`, which verify that the bytes were copied, not that they run.
 - Integration coverage exists for multi-component task, Git, persistence, and execution flows; no new behavior is being added by this review.
 
@@ -733,7 +733,7 @@ The retained summary records **80.7%** over 26,178 statements by profile-block a
 
 | Priority | Status | Issue | Rationale | Direction |
 |----------|--------|-------|-----------|-----------|
-| **High** | ✓ verified | [`make test` has no `-coverpkg`](architectural-issues.md#coverage-basis-is-not-reproducible-by-repository-tooling) | Packages are credited only with their own tests, so the default profile understates caller-driven coverage and cannot regenerate the pass-20 basis. | Add `-coverpkg=./...` and retain a deterministic summary before any coverage-driven work. *(pass 20 Coverage finding verified in passes 21–22)* |
+| **High** | ✓ verified | [`make coverage` has no `-coverpkg`](architectural-issues.md#coverage-basis-is-not-reproducible-by-repository-tooling) | Packages are credited only with their own tests, so the standard profile understates caller-driven coverage and cannot regenerate the pass-20 basis. | Add `-coverpkg=./...` and retain a deterministic summary before any coverage-driven work. *(pass 20 Coverage finding verified in passes 21–22; command updated 2026-08-24)* |
 | **Medium** | ~ adjusted | Human-readable CLI path is untested | Pass 20 found 12 exported `*Command` entry points and 7 formatters at 0.0%; no fresh complete coverage run was made in pass 21, while the structural gap remains. | Add table-driven tests over the `*Command` functions, or collapse the adapter layer — the Boundaries lens reaches the same place. *(pass 20, Coverage lens)* |
 | **Medium** | ✓ verified | `exec.ts` ships without a toolchain | A TypeScript file installed into users' `.opencode/tools/` has no type-check, lint, or test anywhere in the repo or CI; only byte-identity assertions. | Add a type-check step, or state explicitly that the file is vendored and unverified. *(pass 20, Coverage lens)* |
 | **Medium** | + new | Provider support crosses the catalog boundary | Provider launch is catalog-driven, but setup dependencies, activation assets, bash-policy integration, and runtime failure detection still require provider-specific edits across four packages. | Move declarative dependencies/assets into the catalog and document the remaining behavioral extension points. *(pass 22, Coupling lens)* |
@@ -783,7 +783,7 @@ The retained summary records **80.7%** over 26,178 statements by profile-block a
 | **Low** | ~ adjusted | [118 zero-coverage functions, 59 exported](coverage-summary-2026-07-25.md#zero-coverage-functions) | This is a retained pass-20 full-profile measurement, not a claim derived from the current ignored `coverage.out`; the structural concentration in CLI and orchestration adapters remains relevant. | Triage the exported half after the default coverage command is corrected. *(pass 20, Coverage lens)* |
 | **Low** | ✓ verified | Two exported functions with no caller | `commands.UnblockTaskCommand` and `models.(*DependencyResolver).UnmetDependencies` still have no production caller. | Delete both. *(pass 20, Coverage lens)* |
 | **Low** | ~ adjusted | `internal/interactive` at 35.8% | The pass-20 full-profile measurement remains the latest complete figure; the small package is on first-run initialization, where failure is user-visible and recovery is manual. | Cover the prompt/response paths when initialization next changes. *(pass 20, Coverage lens)* |
-| **Low** | ~ adjusted | Serial test suite | There are now 12 `t.Parallel()` calls across 246 test files; the `testguard` floor is nine and the sleep ceiling is eleven, so the suite is ratcheted rather than broadly parallel. | Raise the ratchet opportunistically; no immediate action needed. *(adjusted, pass 20 finding remeasured pass 21)* |
+| **Low** | ~ adjusted | Remaining serial test packages | There are now 514 `t.Parallel()` calls across 48 of 282 test files with an exact ratchet, but adoption is concentrated in `internal/ops` and sliced integration. | Audit shared state package by package before extending parallelism to `internal/commands`, `internal/agent`, or `cmd/liza`. *(adjusted 2026-08-24)* |
 | **Low** | ✓ verified | Stale `specs/plans` reference in tooling | `.pre-commit-config.yaml` still ignores `**/specs/plans/**` after the directory was deleted. | Prune the obsolete ignore independently. *(pass 20, Coverage lens)* |
 | **Low** | ✓ verified | `.gitignore` embedded allowlist drift | `console.sh` and `support.md` are allowlisted but absent; `claudeignore` is tracked but not allowlisted. | Prune and add. *(pass 19, Boundaries lens)* |
 | **Low** | ✓ verified | Pure domain predicates trapped in `ops` | Domain predicates inside `ops` still force `prompts → ops`, while infrastructure probes also live in the same package. | Relocate pure predicates to `models`/`pipeline` and infrastructure probes to `process`. *(pass 19, Boundaries lens)* |

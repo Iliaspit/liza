@@ -7,8 +7,9 @@ date: 2026-08-21
 
 ## Context
 
-Repository-wide validation such as `rtk make test` can run for several minutes.
-RTK may buffer successful package output while the execution tool exposes the
+Repository-wide validation such as `rtk make test-race`, `rtk make coverage`,
+or a repeated race/shuffle package run can run for several minutes. RTK may
+buffer successful package output while the execution tool exposes the
 still-running process through a session ID.
 
 ## Failure Mode
@@ -25,6 +26,12 @@ command, not as validation retries. Continue waiting within the tool's documente
 foreground mechanism, provide periodic status updates when required, and interrupt
 only when there is independent evidence of a stall or a configured timeout expires.
 Do not launch a duplicate validation command to obtain visible output.
+
+Account for repetition when choosing the timeout. For example, `go test
+-race -count=10` runs ten copies inside one package process; the default
+ten-minute package timeout may expire even when each individual iteration is
+healthy. Measure one iteration, then set an explicit bounded timeout above the
+expected aggregate duration.
 
 ## References
 

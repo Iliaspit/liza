@@ -27,6 +27,8 @@ func setupAdvanceTest(t *testing.T) (tmpDir, stateFile string) {
 }
 
 func TestAdvanceSprint(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupAdvanceTest(t)
 
 	now := time.Now().UTC()
@@ -102,6 +104,8 @@ func TestAdvanceSprint(t *testing.T) {
 }
 
 func TestAdvanceSprint_ArchiveFileCreated(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupAdvanceTest(t)
 
 	now := time.Now().UTC()
@@ -152,6 +156,8 @@ func TestAdvanceSprint_ArchiveFileCreated(t *testing.T) {
 }
 
 func TestAdvanceSprint_NotCheckpoint(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
@@ -166,6 +172,8 @@ func TestAdvanceSprint_NotCheckpoint(t *testing.T) {
 }
 
 func TestAdvanceSprint_NotAllTerminal(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
@@ -187,6 +195,8 @@ func TestAdvanceSprint_NotAllTerminal(t *testing.T) {
 }
 
 func TestAdvanceSprint_LegacyZeroNumber(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupAdvanceTest(t)
 
 	now := time.Now().UTC()
@@ -227,6 +237,8 @@ func TestAdvanceSprint_LegacyZeroNumber(t *testing.T) {
 // TestAdvanceSprint_LegacyPassesValidation is a regression test: advancing a
 // legacy sprint (Number=0) must produce state that passes full validation.
 func TestAdvanceSprint_LegacyPassesValidation(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupAdvanceTest(t)
 
 	// Create spec files referenced by state and tasks
@@ -264,6 +276,8 @@ func TestAdvanceSprint_LegacyPassesValidation(t *testing.T) {
 }
 
 func TestResumeWithSprintAdvance(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupAdvanceTest(t)
 
 	now := time.Now().UTC()
@@ -337,6 +351,8 @@ func TestResumeWithSprintAdvance(t *testing.T) {
 // a merged planning task with Output[] but no TransitionsExecuted must be carried
 // into the new sprint so the orchestrator can fire PLANNING_COMPLETE.
 func TestAdvanceSprint_CarriesMergedPlanningWithUnconsumedOutput(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupAdvanceTest(t)
 
 	now := time.Now().UTC()
@@ -396,6 +412,8 @@ func TestAdvanceSprint_CarriesMergedPlanningWithUnconsumedOutput(t *testing.T) {
 // COMPLETED/resume path: a merged planning task with unconsumed output must survive
 // sprint advance via Resume.
 func TestResumeWithSprintAdvance_CarriesMergedPlanning(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupAdvanceTest(t)
 
 	now := time.Now().UTC()
@@ -468,6 +486,8 @@ func TestResumeWithSprintAdvance_CarriesMergedPlanning(t *testing.T) {
 }
 
 func TestResumeWithSprintAdvance_BlocksApprovedUnmergedPlanning(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name                   string
 		taskID                 string
@@ -586,6 +606,8 @@ func TestResumeWithSprintAdvance_BlocksApprovedUnmergedPlanning(t *testing.T) {
 }
 
 func TestApprovedPlanningTasksWithUnmergedOutput(t *testing.T) {
+	t.Parallel()
+
 	planningPairs := map[string]bool{
 		"code-planning-pair": true,
 		"epic-planning-pair": true,
@@ -657,6 +679,8 @@ func TestApprovedPlanningTasksWithUnmergedOutput(t *testing.T) {
 // child tasks are created in the new sprint. Without this, merged planning tasks
 // with unconsumed output[] are carried forward indefinitely without creating children.
 func TestResumeWithSprintAdvance_AfterMergeExecutesPlanningHandoff(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupAdvanceTest(t)
 
 	now := time.Now().UTC()
@@ -733,6 +757,8 @@ func TestResumeWithSprintAdvance_AfterMergeExecutesPlanningHandoff(t *testing.T)
 }
 
 func TestCollectMergedPlanningWithUnconsumedOutput_ConfiguredPairs(t *testing.T) {
+	t.Parallel()
+
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()
 
@@ -761,6 +787,8 @@ func TestCollectMergedPlanningWithUnconsumedOutput_ConfiguredPairs(t *testing.T)
 }
 
 func TestCollectMergedPlanningWithUnconsumedOutput_ConsumedOutputNotCarried(t *testing.T) {
+	t.Parallel()
+
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()
 
@@ -782,6 +810,8 @@ func TestCollectMergedPlanningWithUnconsumedOutput_ConsumedOutputNotCarried(t *t
 }
 
 func TestResumeWithoutSprintAdvance(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
@@ -824,6 +854,8 @@ func TestResumeWithoutSprintAdvance(t *testing.T) {
 func ptrS(s string) *string { return &s }
 
 func TestIsManyToOneReady(t *testing.T) {
+	t.Parallel()
+
 	now := time.Now().UTC()
 
 	m2oTransitions := []ManyToOneTransitionInfo{
@@ -905,6 +937,8 @@ func TestIsManyToOneReady(t *testing.T) {
 }
 
 func TestCollectMergedManyToOneWithUnfiredTransition(t *testing.T) {
+	t.Parallel()
+
 	now := time.Now().UTC()
 
 	m2oTransitions := []ManyToOneTransitionInfo{
@@ -946,6 +980,8 @@ func TestCollectMergedManyToOneWithUnfiredTransition(t *testing.T) {
 }
 
 func TestBuildSprintAdvancePlan_CarriesManyToOne(t *testing.T) {
+	t.Parallel()
+
 	now := time.Now().UTC()
 
 	state := testhelpers.CreateValidState()
@@ -986,6 +1022,8 @@ func TestBuildSprintAdvancePlan_CarriesManyToOne(t *testing.T) {
 }
 
 func TestAdvanceSprint_CycleBlockedPlanningTaskCarriedForward(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupAdvanceTest(t)
 
 	now := time.Now().UTC()
@@ -1035,6 +1073,8 @@ func TestAdvanceSprint_CycleBlockedPlanningTaskCarriedForward(t *testing.T) {
 // were recognized as terminal, causing pipeline-terminal tasks to be carried
 // indefinitely and triggering an auto-resume sprint-advance loop.
 func TestAdvanceSprint_PipelineTerminalNotCarried(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupAdvanceTest(t)
 	testhelpers.SetupPipelineConfig(t, tmpDir)
 

@@ -25,9 +25,9 @@ package testhelpers
 
 import (
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -35,9 +35,16 @@ import (
 )
 
 type preparedGitRepoTemplate struct {
-	once sync.Once
-	dir  string
-	err  error
+	once    sync.Once
+	entries []gitRepoTemplateEntry
+	err     error
+}
+
+type gitRepoTemplateEntry struct {
+	relPath    string
+	mode       os.FileMode
+	content    []byte
+	linkTarget string
 }
 
 var (
@@ -48,8 +55,8 @@ var (
 // SetupTestGitRepo initializes a git repository with basic configuration.
 // It performs the following:
 //   - Copies a prepared git repo fixture into tmpDir
-//   - Sets user.email to "test@example.com"
-//   - Sets user.name to "Test User"
+//   - Retains user.email "test@example.com" from the prepared template
+//   - Retains user.name "Test User" from the prepared template
 //   - Sets local core.hooksPath to tmpDir's .git/hooks
 //   - Provides README.md, an initial commit, and an "integration" branch
 //
@@ -61,8 +68,8 @@ func SetupTestGitRepo(t *testing.T, tmpDir string) {
 	if err := prepareGitFixtureDir(tmpDir); err != nil {
 		t.Fatalf("Failed to prepare test git repo directory: %v", err)
 	}
-	templateDir := gitRepoTemplateDir(t, &testGitRepoTemplate, true)
-	if err := copyDirContents(templateDir, tmpDir); err != nil {
+	template := gitRepoTemplate(t, &testGitRepoTemplate, true)
+	if err := materializeGitRepoTemplate(template, tmpDir); err != nil {
 		t.Fatalf("Failed to copy test git repo template: %v", err)
 	}
 	configureTestGitRepo(t, tmpDir)
@@ -77,35 +84,39 @@ func SetupBasicTestGitRepo(t *testing.T, tmpDir string) {
 	if err := prepareGitFixtureDir(tmpDir); err != nil {
 		t.Fatalf("Failed to prepare basic test git repo directory: %v", err)
 	}
-	templateDir := gitRepoTemplateDir(t, &basicGitRepoTemplate, false)
-	if err := copyDirContents(templateDir, tmpDir); err != nil {
+	template := gitRepoTemplate(t, &basicGitRepoTemplate, false)
+	if err := materializeGitRepoTemplate(template, tmpDir); err != nil {
 		t.Fatalf("Failed to copy basic test git repo template: %v", err)
 	}
 	configureTestGitRepo(t, tmpDir)
 }
 
-func gitRepoTemplateDir(t *testing.T, template *preparedGitRepoTemplate, includeIntegrationBranch bool) string {
+func gitRepoTemplate(t *testing.T, template *preparedGitRepoTemplate, includeIntegrationBranch bool) []gitRepoTemplateEntry {
 	t.Helper()
 
 	template.once.Do(func() {
-		template.dir, template.err = createTestGitRepoTemplate(includeIntegrationBranch)
+		template.entries, template.err = createTestGitRepoTemplate(includeIntegrationBranch)
 	})
 	if template.err != nil {
 		t.Fatalf("Failed to create test git repo template: %v", template.err)
 	}
-	return template.dir
+	return template.entries
 }
 
-func createTestGitRepoTemplate(includeIntegrationBranch bool) (string, error) {
+func createTestGitRepoTemplate(includeIntegrationBranch bool) (entries []gitRepoTemplateEntry, err error) {
 	dir, err := os.MkdirTemp("", "liza-test-git-template-*")
 	if err != nil {
-		return "", err
+		return nil, err
 	}
+	defer func() {
+		if removeErr := os.RemoveAll(dir); err == nil && removeErr != nil {
+			err = fmt.Errorf("remove prepared test git repo: %w", removeErr)
+		}
+	}()
 	if err := initializeTestGitRepo(dir, includeIntegrationBranch); err != nil {
-		_ = os.RemoveAll(dir)
-		return "", err
+		return nil, err
 	}
-	return dir, nil
+	return snapshotGitRepoTemplate(dir)
 }
 
 func initializeTestGitRepo(dir string, includeIntegrationBranch bool) error {
@@ -142,11 +153,50 @@ func initializeTestGitRepo(dir string, includeIntegrationBranch bool) error {
 func configureTestGitRepo(t *testing.T, repoDir string) {
 	t.Helper()
 
-	MustGit(t, repoDir, "config", "user.email", "test@example.com")
-	MustGit(t, repoDir, "config", "user.name", "Test User")
-	if err := configureTestGitRepoHooks(repoDir); err != nil {
+	if err := rewriteCopiedTestGitRepoHooks(repoDir); err != nil {
 		t.Fatalf("Failed to configure test repo hooks path: %v", err)
 	}
+}
+
+func rewriteCopiedTestGitRepoHooks(repoDir string) error {
+	hooksDir, err := filepath.Abs(filepath.Join(repoDir, ".git", "hooks"))
+	if err != nil {
+		return fmt.Errorf("resolve test hooks path: %w", err)
+	}
+	configPath := filepath.Join(repoDir, ".git", "config")
+	content, err := os.ReadFile(configPath)
+	if err != nil {
+		return fmt.Errorf("read copied test git config: %w", err)
+	}
+
+	lines := strings.Split(string(content), "\n")
+	section := ""
+	replaced := false
+	kept := lines[:0]
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") {
+			section = strings.ToLower(strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(trimmed, "["), "]")))
+		}
+		if section == "core" {
+			key, _, found := strings.Cut(trimmed, "=")
+			if found && strings.EqualFold(strings.TrimSpace(key), "hooksPath") {
+				if !replaced {
+					kept = append(kept, "\thooksPath = "+hooksDir)
+					replaced = true
+				}
+				continue
+			}
+		}
+		kept = append(kept, line)
+	}
+	if !replaced {
+		return fmt.Errorf("copied test git config has no core.hooksPath entry")
+	}
+	if err := os.WriteFile(configPath, []byte(strings.Join(kept, "\n")), 0o644); err != nil {
+		return fmt.Errorf("write copied test git config: %w", err)
+	}
+	return nil
 }
 
 func configureTestGitRepoHooks(repoDir string) error {
@@ -177,8 +227,9 @@ func prepareGitFixtureDir(dir string) error {
 	return nil
 }
 
-func copyDirContents(src, dst string) error {
-	return filepath.WalkDir(src, func(path string, entry os.DirEntry, err error) error {
+func snapshotGitRepoTemplate(src string) ([]gitRepoTemplateEntry, error) {
+	var entries []gitRepoTemplateEntry
+	err := filepath.WalkDir(src, func(path string, entry os.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -190,49 +241,63 @@ func copyDirContents(src, dst string) error {
 		if err != nil {
 			return err
 		}
-		target := filepath.Join(dst, rel)
 		info, err := entry.Info()
 		if err != nil {
 			return err
 		}
 		mode := info.Mode()
+		templateEntry := gitRepoTemplateEntry{relPath: rel, mode: mode}
 		switch {
 		case mode.IsDir():
-			return os.MkdirAll(target, mode.Perm())
+			entries = append(entries, templateEntry)
+			return nil
 		case mode.Type()&os.ModeSymlink != 0:
 			linkTarget, err := os.Readlink(path)
 			if err != nil {
 				return err
 			}
-			return os.Symlink(linkTarget, target)
-		case mode.IsRegular():
-			return copyRegularFile(path, target, mode)
-		default:
+			templateEntry.linkTarget = linkTarget
+			entries = append(entries, templateEntry)
 			return nil
+		case mode.IsRegular():
+			content, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			templateEntry.content = content
+			entries = append(entries, templateEntry)
+			return nil
+		default:
+			return fmt.Errorf("unsupported prepared git fixture entry %s (%s)", rel, mode)
 		}
 	})
+	return entries, err
 }
 
-func copyRegularFile(src, dst string, mode os.FileMode) error {
-	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
-		return err
+func materializeGitRepoTemplate(entries []gitRepoTemplateEntry, dst string) error {
+	for _, entry := range entries {
+		target := filepath.Join(dst, entry.relPath)
+		switch {
+		case entry.mode.IsDir():
+			if err := os.MkdirAll(target, entry.mode.Perm()); err != nil {
+				return err
+			}
+		case entry.mode.Type()&os.ModeSymlink != 0:
+			if err := os.Symlink(entry.linkTarget, target); err != nil {
+				return err
+			}
+		case entry.mode.IsRegular():
+			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+				return err
+			}
+			if err := os.WriteFile(target, entry.content, entry.mode.Perm()); err != nil {
+				return err
+			}
+		default:
+			return fmt.Errorf("unsupported cached git fixture entry %s (%s)", entry.relPath, entry.mode)
+		}
 	}
-	in, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer in.Close()
-
-	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, mode.Perm())
-	if err != nil {
-		return err
-	}
-
-	if _, err := io.Copy(out, in); err != nil {
-		_ = out.Close()
-		return err
-	}
-	return out.Close()
+	return nil
 }
 
 // SetupLizaDir creates the .liza directory structure and returns paths to the state file and lock file.

@@ -60,7 +60,23 @@ var newAwaitVerdictWatcher = func(bb *db.Blackboard) (awaitVerdictWatcher, error
 	return bb.WatchForChanges()
 }
 
-var awaitVerdictTickInterval = time.Second
+const (
+	defaultAwaitVerdictAbortPollInterval    = time.Second
+	defaultAwaitVerdictFallbackPollInterval = 5 * time.Second
+)
+
+// AwaitVerdictOptions controls the periodic checks used while waiting. The
+// zero value preserves the production defaults.
+type AwaitVerdictOptions struct {
+	AbortPollInterval    time.Duration
+	FallbackPollInterval time.Duration
+}
+
+func (opts AwaitVerdictOptions) normalized() AwaitVerdictOptions {
+	opts.AbortPollInterval = normalizedAwaitInterval(opts.AbortPollInterval, defaultAwaitVerdictAbortPollInterval)
+	opts.FallbackPollInterval = normalizedAwaitInterval(opts.FallbackPollInterval, defaultAwaitVerdictFallbackPollInterval)
+	return opts
+}
 
 var awaitVerdictNow = time.Now
 
@@ -71,6 +87,12 @@ var runAwaitVerdictPolling = awaitVerdictPolling
 // CurrentTask=taskID), checks budget, then blocks on an event loop until
 // the task status leaves the submitted/reviewing/partially-approved set.
 func AwaitVerdict(ctx context.Context, projectRoot, taskID, agentID string, timeout time.Duration) (*AwaitVerdictResult, error) {
+	return AwaitVerdictWithOptions(ctx, projectRoot, taskID, agentID, timeout, AwaitVerdictOptions{})
+}
+
+// AwaitVerdictWithOptions is AwaitVerdict with configurable polling intervals.
+func AwaitVerdictWithOptions(ctx context.Context, projectRoot, taskID, agentID string, timeout time.Duration, opts AwaitVerdictOptions) (*AwaitVerdictResult, error) {
+	opts = opts.normalized()
 	if taskID == "" {
 		return nil, &PreconditionError{Reason: "task ID is required"}
 	}
@@ -179,14 +201,14 @@ func AwaitVerdict(ctx context.Context, projectRoot, taskID, agentID string, time
 
 	watcher, watchErr := newAwaitVerdictWatcher(bb)
 	if watchErr != nil {
-		return runAwaitVerdictPolling(ctx, bb, taskID, agentID, deadline, task.Status, resolver, rolePair, projectRoot)
+		return runAwaitVerdictPolling(ctx, bb, taskID, agentID, deadline, task.Status, resolver, rolePair, projectRoot, opts.FallbackPollInterval)
 	}
 	defer watcher.Close()
 
 	deadlineTimer := time.NewTimer(time.Until(deadline))
 	defer deadlineTimer.Stop()
 
-	abortTicker := time.NewTicker(awaitVerdictTickInterval)
+	abortTicker := time.NewTicker(opts.AbortPollInterval)
 	defer abortTicker.Stop()
 
 	for {
@@ -234,7 +256,7 @@ func AwaitVerdict(ctx context.Context, projectRoot, taskID, agentID string, time
 		case watcherErr := <-watcher.Errors():
 			log.Printf("Watcher error, falling back to polling: %v", watcherErr)
 			watcher.Close()
-			return runAwaitVerdictPolling(ctx, bb, taskID, agentID, deadline, task.Status, resolver, rolePair, projectRoot)
+			return runAwaitVerdictPolling(ctx, bb, taskID, agentID, deadline, task.Status, resolver, rolePair, projectRoot, opts.FallbackPollInterval)
 
 		case <-deadlineTimer.C:
 			releaseOwnership(bb, agentID)
@@ -453,8 +475,8 @@ func handleVerdictResult(bb *db.Blackboard, task *models.Task, agentID, projectR
 
 // awaitVerdictPolling is the polling fallback for when fsnotify is unavailable.
 // It checks state every 5 seconds until a verdict arrives or the deadline expires.
-func awaitVerdictPolling(ctx context.Context, bb *db.Blackboard, taskID, agentID string, deadline time.Time, taskStatus models.TaskStatus, resolver *pipeline.Resolver, rolePair, projectRoot string) (*AwaitVerdictResult, error) {
-	ticker := time.NewTicker(5 * time.Second)
+func awaitVerdictPolling(ctx context.Context, bb *db.Blackboard, taskID, agentID string, deadline time.Time, taskStatus models.TaskStatus, resolver *pipeline.Resolver, rolePair, projectRoot string, pollInterval time.Duration) (*AwaitVerdictResult, error) {
+	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
 	deadlineTimer := time.NewTimer(time.Until(deadline))
 	defer deadlineTimer.Stop()
@@ -708,6 +730,13 @@ func cappedAwaitBudget(total time.Duration) time.Duration {
 		return 0
 	}
 	return min(total, DefaultAwaitBudget)
+}
+
+func normalizedAwaitInterval(interval, fallback time.Duration) time.Duration {
+	if interval <= 0 {
+		return fallback
+	}
+	return interval
 }
 
 // AwaitVerdictRemainingBudget reports how much of total is left for this wait,

@@ -222,7 +222,12 @@ func startAwaitResubmission(
 ) <-chan awaitResubmissionCall {
 	result := make(chan awaitResubmissionCall, 1)
 	go func() {
-		awaitResult, err := commands.AwaitResubmission(projectRoot, taskID, agentID, remaining)
+		awaitResult, err := commands.AwaitResubmissionWithOptions(
+			projectRoot, taskID, agentID, remaining,
+			commands.AwaitResubmissionOptions{
+				FallbackPollInterval: 10 * time.Millisecond,
+			},
+		)
 		result <- awaitResubmissionCall{result: awaitResult, err: err}
 	}()
 	return result

@@ -90,6 +90,25 @@ func TestFor(t *testing.T) {
 	}
 }
 
+func TestResetInstance(t *testing.T) {
+	t.Cleanup(ResetInstances)
+
+	dir := t.TempDir()
+	statePath := filepath.Join(dir, "state.yaml")
+	otherPath := filepath.Join(dir, "other.yaml")
+	stateInstance := For(statePath)
+	otherInstance := For(otherPath)
+
+	ResetInstance(statePath + "/")
+
+	if refreshed := For(statePath); refreshed == stateInstance {
+		t.Error("For() after ResetInstance returned the stale singleton")
+	}
+	if preserved := For(otherPath); preserved != otherInstance {
+		t.Error("ResetInstance removed an independent path singleton")
+	}
+}
+
 // TestBlackboardBasicReadWrite tests basic read and write operations
 func TestBlackboardBasicReadWrite(t *testing.T) {
 	dir := t.TempDir()

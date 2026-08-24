@@ -1011,6 +1011,8 @@ func TestAwaitResubmission_ReviewLeaseExpires(t *testing.T) {
 	// Verify initial lease: should be approximately now + timeout + 5min.
 	var tk *models.Task
 	deadline := time.Now().Add(2 * time.Second)
+	pollTicker := time.NewTicker(10 * time.Millisecond)
+	defer pollTicker.Stop()
 	for {
 		s, readErr := bb.Read()
 		if readErr != nil {
@@ -1023,7 +1025,7 @@ func TestAwaitResubmission_ReviewLeaseExpires(t *testing.T) {
 		if time.Now().After(deadline) {
 			t.Fatal("ReviewLeaseExpires should be set on entry")
 		}
-		time.Sleep(10 * time.Millisecond)
+		<-pollTicker.C
 	}
 	expectedEntryLease := now.Add(timeout + 5*time.Minute)
 	entryLeaseDiff := tk.ReviewLeaseExpires.Sub(expectedEntryLease)
@@ -1071,6 +1073,8 @@ func waitForReviewOwnership(t *testing.T, bb *db.Blackboard, taskID, reviewerID 
 	t.Helper()
 
 	deadline := time.Now().Add(5 * time.Second)
+	pollTicker := time.NewTicker(10 * time.Millisecond)
+	defer pollTicker.Stop()
 	for time.Now().Before(deadline) {
 		state, err := bb.Read()
 		if err != nil {
@@ -1080,7 +1084,7 @@ func waitForReviewOwnership(t *testing.T, bb *db.Blackboard, taskID, reviewerID 
 		if task != nil && task.ReviewingBy != nil && *task.ReviewingBy == reviewerID {
 			return
 		}
-		time.Sleep(10 * time.Millisecond)
+		<-pollTicker.C
 	}
 
 	t.Fatalf("timed out waiting for %s to acquire review ownership of %s", reviewerID, taskID)

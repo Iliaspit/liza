@@ -14,6 +14,8 @@ import (
 )
 
 func TestUpdateReviewCommit_HappyPath_Submitted(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
@@ -127,6 +129,8 @@ func TestUpdateReviewCommit_HappyPath_Submitted(t *testing.T) {
 }
 
 func TestUpdateReviewCommit_ReleasesReviewer(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
@@ -203,6 +207,8 @@ func TestUpdateReviewCommit_ReleasesReviewer(t *testing.T) {
 }
 
 func TestUpdateReviewCommit_SetsMissingReviewCommitAndReleasesReviewer(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
@@ -277,6 +283,8 @@ func TestUpdateReviewCommit_SetsMissingReviewCommitAndReleasesReviewer(t *testin
 }
 
 func TestUpdateReviewCommit_RejectsWrongStatus(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
@@ -298,6 +306,8 @@ func TestUpdateReviewCommit_RejectsWrongStatus(t *testing.T) {
 }
 
 func TestUpdateReviewCommit_RejectsNoMismatch(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
@@ -332,6 +342,8 @@ func TestUpdateReviewCommit_RejectsNoMismatch(t *testing.T) {
 }
 
 func TestUpdateReviewCommit_UpdatesStaleBaseWhenReviewCommitMatchesHead(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
@@ -380,6 +392,8 @@ func TestUpdateReviewCommit_UpdatesStaleBaseWhenReviewCommitMatchesHead(t *testi
 }
 
 func TestUpdateReviewCommit_SetsMissingBaseCommit(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
@@ -424,6 +438,8 @@ func TestUpdateReviewCommit_SetsMissingBaseCommit(t *testing.T) {
 }
 
 func TestUpdateReviewCommit_SetsMissingReviewCommit(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)

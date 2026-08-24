@@ -15,6 +15,8 @@ import (
 )
 
 func TestAssessBlocked_Validation(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name        string
 		taskID      string
@@ -59,6 +61,8 @@ func TestAssessBlocked_Validation(t *testing.T) {
 }
 
 func TestAssessBlocked_TaskNotFound(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
@@ -75,6 +79,8 @@ func TestAssessBlocked_TaskNotFound(t *testing.T) {
 }
 
 func TestAssessBlocked_WrongStatus(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
@@ -95,6 +101,8 @@ func TestAssessBlocked_WrongStatus(t *testing.T) {
 }
 
 func TestAssessBlocked_Success(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
@@ -151,6 +159,8 @@ func TestAssessBlocked_Success(t *testing.T) {
 }
 
 func TestAssessBlocked_SuccessWithoutNote(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
@@ -180,6 +190,8 @@ func TestAssessBlocked_SuccessWithoutNote(t *testing.T) {
 }
 
 func TestAssessBlocked_Idempotent(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
@@ -222,6 +234,8 @@ func TestAssessBlocked_Idempotent(t *testing.T) {
 }
 
 func TestAssessBlocked_ReconcilesCanonicalMetadata(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name              string
 		repairRequest     *models.RepairRequest
@@ -337,6 +351,8 @@ func TestAssessBlocked_ReconcilesCanonicalMetadata(t *testing.T) {
 }
 
 func TestAssessBlocked_CandidateValidationRollback(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 	now := time.Now().UTC()
@@ -369,6 +385,8 @@ func TestAssessBlocked_CandidateValidationRollback(t *testing.T) {
 }
 
 func TestAssessBlockedWithOptions_FailuresPreserveState(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name        string
 		taskID      string
@@ -468,6 +486,8 @@ func TestAssessBlockedWithOptions_FailuresPreserveState(t *testing.T) {
 }
 
 func TestAssessBlocked_NoteOnlyPreservesCanonicalMetadata(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 	task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusBlocked, time.Now().UTC())

@@ -12,6 +12,8 @@ import (
 )
 
 func TestClassifyInfraClaimError(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name       string
 		err        error
@@ -84,6 +86,8 @@ func TestClassifyInfraClaimError(t *testing.T) {
 }
 
 func TestMarkAndClearAgentDegraded(t *testing.T) {
+	t.Parallel()
+
 	projectRoot, statePath := writeAgentHealthState(t)
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()
@@ -157,6 +161,8 @@ func writeAgentHealthState(t *testing.T) (projectRoot, statePath string) {
 }
 
 func TestClassifyInfraClaimErrorNoSecretEcho(t *testing.T) {
+	t.Parallel()
+
 	got := ClassifyInfraClaimError(errString("failed to create .worktrees/task-a: permission denied"))
 	if !got.IsInfra {
 		t.Fatal("expected infrastructure classification")

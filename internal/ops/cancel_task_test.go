@@ -15,6 +15,8 @@ import (
 )
 
 func TestCancelTask_Validation(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name    string
 		taskID  string
@@ -45,6 +47,8 @@ func TestCancelTask_Validation(t *testing.T) {
 }
 
 func TestCancelTask_FromBlocked(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
@@ -145,6 +149,8 @@ func TestCancelTask_FromBlocked(t *testing.T) {
 }
 
 func TestCancelTask_RemovesActiveDependentDependencies(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
@@ -189,6 +195,8 @@ func TestCancelTask_RemovesActiveDependentDependencies(t *testing.T) {
 }
 
 func TestCancelTask_RemovesOperationalOutputTaskDependsOn(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
@@ -228,6 +236,8 @@ func TestCancelTask_RemovesOperationalOutputTaskDependsOn(t *testing.T) {
 }
 
 func TestCancelTask_FromInitialCodingPair(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
@@ -257,6 +267,8 @@ func TestCancelTask_FromInitialCodingPair(t *testing.T) {
 }
 
 func TestCancelTask_FromInitialEpicPlanningPair(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
@@ -274,6 +286,8 @@ func TestCancelTask_FromInitialEpicPlanningPair(t *testing.T) {
 }
 
 func TestCancelTask_FromRejected(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
@@ -294,6 +308,8 @@ func TestCancelTask_FromRejected(t *testing.T) {
 }
 
 func TestCancelTask_FromIntegrationFailed(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
@@ -314,6 +330,8 @@ func TestCancelTask_FromIntegrationFailed(t *testing.T) {
 }
 
 func TestCancelTask_FromActiveStates(t *testing.T) {
+	t.Parallel()
+
 	for _, tt := range []struct {
 		name       string
 		status     models.TaskStatus
@@ -402,6 +420,8 @@ func TestCancelTask_FromActiveStates(t *testing.T) {
 }
 
 func TestCancelTask_StaleOperationsFailAfterActiveCancel(t *testing.T) {
+	t.Parallel()
+
 	t.Run("doer submit-for-review", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
@@ -464,6 +484,8 @@ func TestCancelTask_StaleOperationsFailAfterActiveCancel(t *testing.T) {
 }
 
 func TestCancelTask_RejectFromApproved(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
@@ -482,6 +504,8 @@ func TestCancelTask_RejectFromApproved(t *testing.T) {
 }
 
 func TestCancelTask_RejectFromMerged(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
@@ -500,6 +524,8 @@ func TestCancelTask_RejectFromMerged(t *testing.T) {
 }
 
 func TestCancelTask_TaskNotFound(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
@@ -516,6 +542,8 @@ func TestCancelTask_TaskNotFound(t *testing.T) {
 }
 
 func TestCancelTask_CleansUpWorktree(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
@@ -579,6 +607,8 @@ func TestCancelTask_CleansUpWorktree(t *testing.T) {
 }
 
 func TestCancelTask_DeletesBranchEvenWithoutWorktree(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)

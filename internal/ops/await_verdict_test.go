@@ -441,10 +441,6 @@ func TestAwaitVerdict_Rejected_ObservedByTickWhenWatcherSilent(t *testing.T) {
 	}
 	defer func() { newAwaitVerdictWatcher = originalWatcher }()
 
-	originalTickInterval := awaitVerdictTickInterval
-	awaitVerdictTickInterval = 10 * time.Millisecond
-	defer func() { awaitVerdictTickInterval = originalTickInterval }()
-
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()
 	state.Config.MaxCoderIterations = 10
@@ -471,7 +467,10 @@ func TestAwaitVerdict_Rejected_ObservedByTickWhenWatcherSilent(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		result, awaitErr = AwaitVerdict(context.Background(), tmpDir, "task-1", "coder-1", 30*time.Second)
+		result, awaitErr = AwaitVerdictWithOptions(
+			context.Background(), tmpDir, "task-1", "coder-1", 30*time.Second,
+			AwaitVerdictOptions{AbortPollInterval: 10 * time.Millisecond},
+		)
 	}()
 
 	select {
@@ -735,6 +734,7 @@ func TestAwaitVerdict_DelayedWatcherErrorUsesOriginalDeadline(t *testing.T) {
 	t.Cleanup(func() { newAwaitVerdictWatcher = previousWatcher })
 
 	var deadlineObserved time.Time
+	var pollIntervalObserved time.Duration
 	previousPolling := runAwaitVerdictPolling
 	runAwaitVerdictPolling = func(
 		_ context.Context,
@@ -744,14 +744,20 @@ func TestAwaitVerdict_DelayedWatcherErrorUsesOriginalDeadline(t *testing.T) {
 		_ models.TaskStatus,
 		_ *pipeline.Resolver,
 		_, _ string,
+		pollInterval time.Duration,
 	) (*AwaitVerdictResult, error) {
 		deadlineObserved = deadline
+		pollIntervalObserved = pollInterval
 		return nil, watcherErr
 	}
 	t.Cleanup(func() { runAwaitVerdictPolling = previousPolling })
 
 	const overallTimeout = 10 * time.Second
-	result, err := AwaitVerdict(context.Background(), tmpDir, "task-1", "coder-1", overallTimeout)
+	const fallbackPollInterval = 17 * time.Millisecond
+	result, err := AwaitVerdictWithOptions(
+		context.Background(), tmpDir, "task-1", "coder-1", overallTimeout,
+		AwaitVerdictOptions{FallbackPollInterval: fallbackPollInterval},
+	)
 	if result != nil {
 		t.Fatalf("AwaitVerdict result = %#v, want nil", result)
 	}
@@ -762,6 +768,9 @@ func TestAwaitVerdict_DelayedWatcherErrorUsesOriginalDeadline(t *testing.T) {
 	wantDeadline := deadlineBase.Add(overallTimeout)
 	if !deadlineObserved.Equal(wantDeadline) {
 		t.Fatalf("polling deadline = %s, want original deadline %s", deadlineObserved, wantDeadline)
+	}
+	if pollIntervalObserved != fallbackPollInterval {
+		t.Fatalf("polling interval = %s, want %s", pollIntervalObserved, fallbackPollInterval)
 	}
 }
 

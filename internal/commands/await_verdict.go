@@ -14,22 +14,38 @@ type AwaitVerdictResult struct {
 	TimeoutSeconds int `json:"timeout_seconds,omitempty"`
 }
 
+// AwaitVerdictOptions configures the operation's periodic checks.
+type AwaitVerdictOptions = ops.AwaitVerdictOptions
+
 // AwaitVerdict applies the bounded foreground interval to one verdict wait.
 // budget is the total wait allowance, not a remainder the caller tracks: the
 // remaining share is derived from the submission recorded in task history, so
 // repeated invocations converge on TIMEOUT whether or not the caller passes the
 // reported remainder back.
 func AwaitVerdict(projectRoot, taskID, agentID string, budget time.Duration) (*AwaitVerdictResult, error) {
+	return AwaitVerdictWithOptions(projectRoot, taskID, agentID, budget, AwaitVerdictOptions{})
+}
+
+// AwaitVerdictWithOptions is AwaitVerdict with configurable polling intervals.
+func AwaitVerdictWithOptions(projectRoot, taskID, agentID string, budget time.Duration, opts AwaitVerdictOptions) (*AwaitVerdictResult, error) {
 	remaining := ops.AwaitVerdictRemainingBudget(projectRoot, taskID, agentID, budget)
-	return awaitVerdictWithInterval(projectRoot, taskID, agentID, remaining, maxAwaitInterval)
+	return awaitVerdictWithIntervalAndOptions(projectRoot, taskID, agentID, remaining, maxAwaitInterval, opts)
 }
 
 func awaitVerdictWithInterval(
 	projectRoot, taskID, agentID string,
 	remaining, maxInterval time.Duration,
 ) (*AwaitVerdictResult, error) {
+	return awaitVerdictWithIntervalAndOptions(projectRoot, taskID, agentID, remaining, maxInterval, AwaitVerdictOptions{})
+}
+
+func awaitVerdictWithIntervalAndOptions(
+	projectRoot, taskID, agentID string,
+	remaining, maxInterval time.Duration,
+	opts AwaitVerdictOptions,
+) (*AwaitVerdictResult, error) {
 	result, err := awaitVerdictWithBudget(remaining, maxInterval, func(interval time.Duration) (*ops.AwaitVerdictResult, error) {
-		return ops.AwaitVerdict(context.Background(), projectRoot, taskID, agentID, interval)
+		return ops.AwaitVerdictWithOptions(context.Background(), projectRoot, taskID, agentID, interval, opts)
 	})
 	if err == nil && result.Verdict == ops.VerdictTimeout {
 		releaseExhaustedDoerClaim(projectRoot, taskID, agentID)

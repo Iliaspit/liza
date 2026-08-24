@@ -10,6 +10,8 @@ import (
 )
 
 func TestReconcileMerged_FromIntegrationFailedMissingWorktree(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)

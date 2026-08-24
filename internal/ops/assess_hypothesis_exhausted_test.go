@@ -12,6 +12,8 @@ import (
 )
 
 func TestAssessHypothesisExhausted_Validation(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name        string
 		taskID      string
@@ -56,6 +58,8 @@ func TestAssessHypothesisExhausted_Validation(t *testing.T) {
 }
 
 func TestAssessHypothesisExhausted_TaskNotFound(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
@@ -72,6 +76,8 @@ func TestAssessHypothesisExhausted_TaskNotFound(t *testing.T) {
 }
 
 func TestAssessHypothesisExhausted_InsufficientFailures(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
@@ -92,6 +98,8 @@ func TestAssessHypothesisExhausted_InsufficientFailures(t *testing.T) {
 }
 
 func TestAssessHypothesisExhausted_TerminalStatus(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
@@ -112,6 +120,8 @@ func TestAssessHypothesisExhausted_TerminalStatus(t *testing.T) {
 }
 
 func TestAssessHypothesisExhausted_Success(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
@@ -165,6 +175,8 @@ func TestAssessHypothesisExhausted_Success(t *testing.T) {
 }
 
 func TestAssessHypothesisExhausted_SuccessWithoutNote(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
@@ -194,6 +206,8 @@ func TestAssessHypothesisExhausted_SuccessWithoutNote(t *testing.T) {
 }
 
 func TestAssessHypothesisExhausted_Idempotent(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 

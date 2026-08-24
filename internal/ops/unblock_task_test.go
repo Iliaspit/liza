@@ -15,6 +15,8 @@ import (
 )
 
 func TestUnblockTask_RestoresExecutingStateAndAssignment(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
 	testhelpers.SetupPipelineConfig(t, tmpDir)
@@ -99,6 +101,8 @@ func TestUnblockTask_RestoresExecutingStateAndAssignment(t *testing.T) {
 }
 
 func TestUnblockTask_AllowsAssignToWithoutLiveProcess(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
 	testhelpers.SetupPipelineConfig(t, tmpDir)
@@ -133,6 +137,8 @@ func TestUnblockTask_AllowsAssignToWithoutLiveProcess(t *testing.T) {
 }
 
 func TestUnblockTask_WithoutAssignToMakesTaskClaimable(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
 	testhelpers.SetupPipelineConfig(t, tmpDir)
@@ -184,6 +190,8 @@ func TestUnblockTask_WithoutAssignToMakesTaskClaimable(t *testing.T) {
 }
 
 func TestClaimTask_PreservesUnblockedWorktree(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
 	testhelpers.SetupPipelineConfig(t, tmpDir)
@@ -232,6 +240,8 @@ func TestClaimTask_PreservesUnblockedWorktree(t *testing.T) {
 }
 
 func TestUnblockTask_RebaseOnMakesClaimableAndUpdatesBaseCommit(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
 	testhelpers.SetupPipelineConfig(t, tmpDir)
@@ -288,6 +298,8 @@ func TestUnblockTask_RebaseOnMakesClaimableAndUpdatesBaseCommit(t *testing.T) {
 }
 
 func TestUnblockTask_RebaseOnAssignToResumesAndUpdatesBaseCommit(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
 	testhelpers.SetupPipelineConfig(t, tmpDir)
@@ -371,6 +383,8 @@ func TestUnblockTask_RebaseOnAssignToResumesAndUpdatesBaseCommit(t *testing.T) {
 }
 
 func TestUnblockTask_RebaseOnRejectsTrackedDirtyWithoutAllowDirty(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
 	testhelpers.SetupPipelineConfig(t, tmpDir)
@@ -404,6 +418,8 @@ func TestUnblockTask_RebaseOnRejectsTrackedDirtyWithoutAllowDirty(t *testing.T) 
 }
 
 func TestUnblockTask_RebaseOnRejectsUntrackedOverwrite(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
 	testhelpers.SetupPipelineConfig(t, tmpDir)
@@ -436,6 +452,8 @@ func TestUnblockTask_RebaseOnRejectsUntrackedOverwrite(t *testing.T) {
 }
 
 func TestUnblockTask_RebaseConflictLeavesBlockedWithRepairRequest(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
 	testhelpers.SetupPipelineConfig(t, tmpDir)
@@ -500,6 +518,8 @@ func TestUnblockTask_RebaseConflictLeavesBlockedWithRepairRequest(t *testing.T) 
 }
 
 func TestUnblockTask_WithoutAssignToAllowsPendingDependency(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
 	testhelpers.SetupPipelineConfig(t, tmpDir)
@@ -566,6 +586,8 @@ func TestUnblockTask_WithoutAssignToAllowsPendingDependency(t *testing.T) {
 }
 
 func TestUnblockTask_WithoutAssignToRejectsInvalidOrSupersededDependencies(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name      string
 		configure func(task *models.Task, state *models.State, now time.Time)
@@ -684,6 +706,8 @@ func TestUnblockTask_WithoutAssignToRejectsInvalidOrSupersededDependencies(t *te
 }
 
 func TestUnblockTask_WithoutAssignToRejectsPipelineTerminalDependencies(t *testing.T) {
+	t.Parallel()
+
 	pipelineConfig, err := os.ReadFile(filepath.Join(testhelpers.FindRepoRoot(t), "internal", "pipeline", "testdata", "valid-with-clean.yaml"))
 	if err != nil {
 		t.Fatalf("Read pipeline config: %v", err)
@@ -738,6 +762,8 @@ func TestUnblockTask_WithoutAssignToRejectsPipelineTerminalDependencies(t *testi
 }
 
 func TestUnblockTask_WithAssignToRejectsPendingDependency(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
 	testhelpers.SetupPipelineConfig(t, tmpDir)
@@ -768,6 +794,8 @@ func TestUnblockTask_WithAssignToRejectsPendingDependency(t *testing.T) {
 }
 
 func TestUnblockTask_AllowsMergedDependency(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
 	testhelpers.SetupPipelineConfig(t, tmpDir)
@@ -795,6 +823,8 @@ func TestUnblockTask_AllowsMergedDependency(t *testing.T) {
 }
 
 func TestUnblockTask_RejectsUnknownAssignTo(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
 	testhelpers.SetupPipelineConfig(t, tmpDir)
@@ -818,6 +848,8 @@ func TestUnblockTask_RejectsUnknownAssignTo(t *testing.T) {
 }
 
 func TestUnblockTask_RejectsWrongDoerRole(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
 	testhelpers.SetupPipelineConfig(t, tmpDir)

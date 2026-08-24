@@ -17,6 +17,8 @@ import (
 )
 
 func TestReleaseClaim_Validation(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name        string
 		taskID      string
@@ -42,6 +44,8 @@ func TestReleaseClaim_Validation(t *testing.T) {
 }
 
 func TestReleaseClaim_CoderClaim(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
@@ -103,6 +107,8 @@ func TestReleaseClaim_CoderClaim(t *testing.T) {
 }
 
 func TestReleaseClaim_CoderClaim_ClearsWorktreeFields(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
@@ -213,6 +219,8 @@ func TestReleaseClaim_CoderClaim_ClearsWorktreeFields(t *testing.T) {
 }
 
 func TestReleaseClaim_ReviewerClaim(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
@@ -263,6 +271,8 @@ func TestReleaseClaim_ReviewerClaim(t *testing.T) {
 }
 
 func TestReleaseClaim_BothClaims(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
@@ -296,6 +306,8 @@ func TestReleaseClaim_BothClaims(t *testing.T) {
 }
 
 func TestReleaseClaim_NoClaims(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
@@ -310,6 +322,8 @@ func TestReleaseClaim_NoClaims(t *testing.T) {
 }
 
 func TestReleaseClaim_TaskNotFound(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
@@ -326,6 +340,8 @@ func TestReleaseClaim_TaskNotFound(t *testing.T) {
 }
 
 func TestReleaseClaim_ActiveLease_NoForce(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
@@ -343,6 +359,8 @@ func TestReleaseClaim_ActiveLease_NoForce(t *testing.T) {
 }
 
 func TestReleaseClaim_DefaultAgentAndReason(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
@@ -365,6 +383,8 @@ func TestReleaseClaim_DefaultAgentAndReason(t *testing.T) {
 }
 
 func TestReleaseClaim_PipelineCoderClaim(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupPipelineTest(t)
 
 	now := time.Now().UTC()
@@ -411,6 +431,8 @@ func TestReleaseClaim_PipelineCoderClaim(t *testing.T) {
 }
 
 func TestReleaseClaim_PipelineReviewerClaim(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupPipelineTest(t)
 
 	now := time.Now().UTC()
@@ -457,6 +479,8 @@ func TestReleaseClaim_PipelineReviewerClaim(t *testing.T) {
 }
 
 func TestReleaseClaim_PipelineReviewerClaimReviewing2(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupPipelineTest(t)
 	writeValidationSpecRefs(t, tmpDir)
 
@@ -522,6 +546,8 @@ func TestReleaseClaim_PipelineReviewerClaimReviewing2(t *testing.T) {
 }
 
 func TestReleaseClaim_PipelineReviewerClaim_LegacySubmittedStatus(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupPipelineTest(t)
 	pipelinePath := filepath.Join(tmpDir, ".liza", "pipeline.yaml")
 	data, err := os.ReadFile(pipelinePath)
@@ -625,6 +651,8 @@ type assertAnError struct{}
 func (assertAnError) Error() string { return "partial status unavailable" }
 
 func TestResolveReviewerClaimReleaseStatus_Reviewing2MissingPartialFailsClosed(t *testing.T) {
+	t.Parallel()
+
 	now := time.Now().UTC()
 	reviewer := "code-reviewer-2"
 	reviewLease := now.Add(30 * time.Minute)

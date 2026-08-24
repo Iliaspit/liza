@@ -13,6 +13,8 @@ import (
 )
 
 func TestProjectLifecycleLockLivesOutsideCleanupTargets(t *testing.T) {
+	t.Parallel()
+
 	projectRoot := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, projectRoot)
 
@@ -36,6 +38,8 @@ func TestProjectLifecycleLockLivesOutsideCleanupTargets(t *testing.T) {
 }
 
 func TestProjectLifecycleSharedLockPreservesNonRepositoryValidation(t *testing.T) {
+	t.Parallel()
+
 	called := false
 	wantErr := os.ErrInvalid
 	err := WithProjectLifecycleSharedLock(filepath.Join(t.TempDir(), "missing"), "test", func() error {
@@ -51,6 +55,8 @@ func TestProjectLifecycleSharedLockPreservesNonRepositoryValidation(t *testing.T
 }
 
 func TestProjectLifecycleLockTimeoutIsActionable(t *testing.T) {
+	t.Parallel()
+
 	projectRoot := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, projectRoot)
 

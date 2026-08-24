@@ -12,6 +12,8 @@ import (
 )
 
 func TestHandoff_Validation(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name        string
 		input       *HandoffInput
@@ -54,6 +56,8 @@ func TestHandoff_Validation(t *testing.T) {
 }
 
 func TestHandoff_Success(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
@@ -139,6 +143,8 @@ func TestHandoff_Success(t *testing.T) {
 }
 
 func TestHandoff_StructuredFields(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
@@ -207,6 +213,8 @@ func TestHandoff_StructuredFields(t *testing.T) {
 }
 
 func TestHandoff_TaskNotFound(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
@@ -229,6 +237,8 @@ func TestHandoff_TaskNotFound(t *testing.T) {
 }
 
 func TestHandoff_WrongStatus(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
@@ -255,6 +265,8 @@ func TestHandoff_WrongStatus(t *testing.T) {
 }
 
 func TestHandoff_PipelineExecutingStatus(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupPipelineTest(t)
 
 	now := time.Now().UTC()
@@ -293,6 +305,8 @@ func TestHandoff_PipelineExecutingStatus(t *testing.T) {
 }
 
 func TestHandoff_PipelineNonExecutingStatus(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupPipelineTest(t)
 
 	now := time.Now().UTC()
@@ -331,6 +345,8 @@ func TestHandoff_PipelineNonExecutingStatus(t *testing.T) {
 }
 
 func TestHandoff_WrongAgent(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 

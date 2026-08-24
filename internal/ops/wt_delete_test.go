@@ -14,11 +14,15 @@ import (
 )
 
 func TestDeleteWorktree_Validation(t *testing.T) {
+	t.Parallel()
+
 	_, err := DeleteWorktree("/nonexistent", "")
 	testhelpers.RequireErrorContains(t, err, "task ID is required")
 }
 
 func TestDeleteWorktree_TaskNotFound(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
@@ -35,6 +39,8 @@ func TestDeleteWorktree_TaskNotFound(t *testing.T) {
 }
 
 func TestDeleteWorktree_WrongStatus(t *testing.T) {
+	t.Parallel()
+
 	statuses := []struct {
 		name   string
 		status models.TaskStatus
@@ -65,6 +71,8 @@ func TestDeleteWorktree_WrongStatus(t *testing.T) {
 }
 
 func TestDeleteWorktree_AllowedStatuses(t *testing.T) {
+	t.Parallel()
+
 	statuses := []struct {
 		name   string
 		status models.TaskStatus
@@ -101,6 +109,8 @@ func TestDeleteWorktree_AllowedStatuses(t *testing.T) {
 }
 
 func TestDeleteWorktree_MergedWithWarning(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
@@ -121,6 +131,8 @@ func TestDeleteWorktree_MergedWithWarning(t *testing.T) {
 }
 
 func TestDeleteWorktree_CleanState(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
@@ -178,6 +190,8 @@ func TestDeleteWorktree_CleanState(t *testing.T) {
 }
 
 func TestDeleteWorktree_SupersededPreservesBranch(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)

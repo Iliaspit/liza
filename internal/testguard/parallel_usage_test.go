@@ -13,11 +13,11 @@ import (
 // minParallelCallsInTests is a floor ratchet: it should only increase as more
 // stateless tests opt into t.Parallel(). Lower it only when tests genuinely
 // need sequential execution (e.g. shared process-global state).
-const minParallelCallsInTests = 9
+const minParallelCallsInTests = 514
 
 // sourceDirs lists directories containing Go source. Walking only these
 // prevents transient directories (worktrees, backups) from affecting the count.
-var sourceDirs = []string{"cmd", "internal"}
+var sourceDirs = []string{"cmd", "internal", "plugin"}
 
 func TestParallelUsageBudget(t *testing.T) {
 	_, thisFile, _, ok := runtime.Caller(0)

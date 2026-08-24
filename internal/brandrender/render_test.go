@@ -1,11 +1,13 @@
 package brandrender
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/liza-mas/liza/internal/brand"
 )
@@ -120,6 +122,249 @@ func TestExpectedEmbeddedFilesRendersMacros(t *testing.T) {
 	}
 	if !sawBrandedBashPolicy {
 		t.Fatalf("expected generated bash-policy.yaml, got %+v", files)
+	}
+}
+
+func TestSyncEmbeddedPreservesUnchangedFileMetadata(t *testing.T) {
+	root := newSyncFixture(t)
+	if err := SyncEmbedded(SyncOptions{RepoRoot: root, Values: brand.RuntimeValues()}); err != nil {
+		t.Fatalf("first SyncEmbedded: %v", err)
+	}
+	target := filepath.Join(root, "internal", "embedded", "contracts", "CORE.md")
+	wantModTime := time.Unix(1_700_000_000, 0)
+	if err := os.Chtimes(target, wantModTime, wantModTime); err != nil {
+		t.Fatalf("set target times: %v", err)
+	}
+	wantContent, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("read target: %v", err)
+	}
+	wantInfo, err := os.Stat(target)
+	if err != nil {
+		t.Fatalf("stat target: %v", err)
+	}
+
+	if err := SyncEmbedded(SyncOptions{RepoRoot: root, Values: brand.RuntimeValues()}); err != nil {
+		t.Fatalf("second SyncEmbedded: %v", err)
+	}
+	gotContent, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("read target after second sync: %v", err)
+	}
+	gotInfo, err := os.Stat(target)
+	if err != nil {
+		t.Fatalf("stat target after second sync: %v", err)
+	}
+	if !bytes.Equal(gotContent, wantContent) {
+		t.Fatalf("unchanged content rewritten: got %q, want %q", gotContent, wantContent)
+	}
+	if !gotInfo.ModTime().Equal(wantModTime) {
+		t.Fatalf("unchanged mtime = %v, want %v", gotInfo.ModTime(), wantModTime)
+	}
+	if gotInfo.Mode().Perm() != wantInfo.Mode().Perm() {
+		t.Fatalf("unchanged mode = %v, want %v", gotInfo.Mode().Perm(), wantInfo.Mode().Perm())
+	}
+}
+
+func TestSyncEmbeddedRewritesChangedContent(t *testing.T) {
+	root := newSyncFixture(t)
+	if err := SyncEmbedded(SyncOptions{RepoRoot: root, Values: brand.RuntimeValues()}); err != nil {
+		t.Fatalf("first SyncEmbedded: %v", err)
+	}
+	target := filepath.Join(root, "internal", "embedded", "contracts", "CORE.md")
+	writeFile(t, filepath.Join(root, "contracts", "CORE.md"), "changed §BRAND_NAME_TITLE§\n")
+	if err := SyncEmbedded(SyncOptions{RepoRoot: root, Values: brand.RuntimeValues()}); err != nil {
+		t.Fatalf("second SyncEmbedded: %v", err)
+	}
+	got, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("read target: %v", err)
+	}
+	if string(got) != "changed Liza\n" {
+		t.Fatalf("target content = %q", got)
+	}
+	info, err := os.Stat(target)
+	if err != nil {
+		t.Fatalf("stat target: %v", err)
+	}
+	if info.Mode().Perm() != 0o644 {
+		t.Fatalf("target mode = %v, want 0644", info.Mode().Perm())
+	}
+}
+
+func TestSyncEmbeddedRepairsModeWithoutRewritingContent(t *testing.T) {
+	root := newSyncFixture(t)
+	if err := SyncEmbedded(SyncOptions{RepoRoot: root, Values: brand.RuntimeValues()}); err != nil {
+		t.Fatalf("first SyncEmbedded: %v", err)
+	}
+	target := filepath.Join(root, "internal", "embedded", "contracts", "CORE.md")
+	wantModTime := time.Unix(1_700_000_000, 0)
+	if err := os.Chtimes(target, wantModTime, wantModTime); err != nil {
+		t.Fatalf("set target times: %v", err)
+	}
+	if err := os.Chmod(target, 0o600); err != nil {
+		t.Fatalf("chmod target: %v", err)
+	}
+
+	if err := SyncEmbedded(SyncOptions{RepoRoot: root, Values: brand.RuntimeValues()}); err != nil {
+		t.Fatalf("second SyncEmbedded: %v", err)
+	}
+	info, err := os.Stat(target)
+	if err != nil {
+		t.Fatalf("stat target: %v", err)
+	}
+	if info.Mode().Perm() != 0o644 {
+		t.Fatalf("target mode = %v, want 0644", info.Mode().Perm())
+	}
+	if !info.ModTime().Equal(wantModTime) {
+		t.Fatalf("mode-only repair changed mtime to %v, want %v", info.ModTime(), wantModTime)
+	}
+}
+
+func TestSyncEmbeddedPrunesOnlyStaleManagedEntries(t *testing.T) {
+	root := newSyncFixture(t)
+	embedded := filepath.Join(root, "internal", "embedded")
+	mkdirAll(t, filepath.Join(embedded, "skills", "stale"))
+	mkdirAll(t, filepath.Join(embedded, "docs"))
+	writeFile(t, filepath.Join(embedded, "skills", "stale", "OLD.md"), "stale\n")
+	writeFile(t, filepath.Join(embedded, "docs", "OLD.md"), "legacy\n")
+	writeFile(t, filepath.Join(embedded, "keep.txt"), "unmanaged\n")
+
+	if err := SyncEmbedded(SyncOptions{RepoRoot: root, Values: brand.RuntimeValues()}); err != nil {
+		t.Fatalf("SyncEmbedded: %v", err)
+	}
+	requireNotExist(t, filepath.Join(embedded, "skills", "stale"))
+	requireNotExist(t, filepath.Join(embedded, "docs"))
+	if got, err := os.ReadFile(filepath.Join(embedded, "keep.txt")); err != nil || string(got) != "unmanaged\n" {
+		t.Fatalf("unmanaged file = %q, %v", got, err)
+	}
+}
+
+func TestSyncEmbeddedReplacesDesiredFileSymlinkWithoutFollowingIt(t *testing.T) {
+	root := newSyncFixture(t)
+	if err := SyncEmbedded(SyncOptions{RepoRoot: root, Values: brand.RuntimeValues()}); err != nil {
+		t.Fatalf("first SyncEmbedded: %v", err)
+	}
+	target := filepath.Join(root, "internal", "embedded", "contracts", "CORE.md")
+	escape := filepath.Join(t.TempDir(), "escape.txt")
+	writeFile(t, escape, "outside\n")
+	if err := os.Remove(target); err != nil {
+		t.Fatalf("remove target: %v", err)
+	}
+	if err := os.Symlink(escape, target); err != nil {
+		t.Fatalf("symlink target: %v", err)
+	}
+
+	if err := SyncEmbedded(SyncOptions{RepoRoot: root, Values: brand.RuntimeValues()}); err != nil {
+		t.Fatalf("second SyncEmbedded: %v", err)
+	}
+	info, err := os.Lstat(target)
+	if err != nil {
+		t.Fatalf("lstat target: %v", err)
+	}
+	if !info.Mode().IsRegular() {
+		t.Fatalf("target mode = %v, want regular", info.Mode())
+	}
+	if got, err := os.ReadFile(escape); err != nil || string(got) != "outside\n" {
+		t.Fatalf("escape target changed: %q, %v", got, err)
+	}
+}
+
+func TestSyncEmbeddedReplacesSymlinkedManagedDirectoryWithoutEscaping(t *testing.T) {
+	root := newSyncFixture(t)
+	embeddedContracts := filepath.Join(root, "internal", "embedded", "contracts")
+	escapeDir := t.TempDir()
+	writeFile(t, filepath.Join(escapeDir, "sentinel.txt"), "outside\n")
+	if err := os.Symlink(escapeDir, embeddedContracts); err != nil {
+		t.Fatalf("symlink managed directory: %v", err)
+	}
+
+	if err := SyncEmbedded(SyncOptions{RepoRoot: root, Values: brand.RuntimeValues()}); err != nil {
+		t.Fatalf("SyncEmbedded: %v", err)
+	}
+	info, err := os.Lstat(embeddedContracts)
+	if err != nil {
+		t.Fatalf("lstat embedded contracts: %v", err)
+	}
+	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		t.Fatalf("embedded contracts mode = %v, want real directory", info.Mode())
+	}
+	if got, err := os.ReadFile(filepath.Join(escapeDir, "sentinel.txt")); err != nil || string(got) != "outside\n" {
+		t.Fatalf("escape directory changed: %q, %v", got, err)
+	}
+}
+
+func TestSyncEmbeddedReplacesNonRegularDesiredTarget(t *testing.T) {
+	root := newSyncFixture(t)
+	target := filepath.Join(root, "internal", "embedded", "contracts", "CORE.md")
+	mkdirAll(t, filepath.Dir(target))
+	if err := os.Mkdir(target, 0o755); err != nil {
+		t.Fatalf("create directory at desired target: %v", err)
+	}
+	if err := SyncEmbedded(SyncOptions{RepoRoot: root, Values: brand.RuntimeValues()}); err != nil {
+		t.Fatalf("SyncEmbedded: %v", err)
+	}
+	info, err := os.Lstat(target)
+	if err != nil {
+		t.Fatalf("lstat target: %v", err)
+	}
+	if !info.Mode().IsRegular() {
+		t.Fatalf("target mode = %v, want regular", info.Mode())
+	}
+}
+
+func TestSyncEmbeddedRejectsBrandedPathCollisionBeforeMutation(t *testing.T) {
+	root := newSyncFixture(t)
+	mkdirAll(t, filepath.Join(root, "skills", "acme-cli-logs"))
+	writeFile(t, filepath.Join(root, "skills", "acme-cli-logs", "SKILL.md"), "name: duplicate\n")
+	marker := filepath.Join(root, "internal", "embedded", "contracts", "marker.md")
+	mkdirAll(t, filepath.Dir(marker))
+	writeFile(t, marker, "preserve\n")
+
+	err := SyncEmbedded(SyncOptions{RepoRoot: root, Values: nonDefaultBrandValues()})
+	if err == nil || !strings.Contains(err.Error(), "duplicate rendered path") {
+		t.Fatalf("SyncEmbedded error = %v, want duplicate rendered path", err)
+	}
+	if got, readErr := os.ReadFile(marker); readErr != nil || string(got) != "preserve\n" {
+		t.Fatalf("preflight mutated marker: %q, %v", got, readErr)
+	}
+}
+
+func TestPreflightRenderedFilesRejectsFileDirectoryCollision(t *testing.T) {
+	tests := map[string][]RenderedFile{
+		"file before child": {
+			{RelPath: "skills/tool"},
+			{RelPath: "skills/tool/SKILL.md"},
+		},
+		"child before file": {
+			{RelPath: "skills/tool/SKILL.md"},
+			{RelPath: "skills/tool"},
+		},
+	}
+	for name, files := range tests {
+		t.Run(name, func(t *testing.T) {
+			_, _, err := preflightRenderedFiles(files)
+			if err == nil || !strings.Contains(err.Error(), "rendered path collision") {
+				t.Fatalf("preflightRenderedFiles error = %v, want file/directory collision", err)
+			}
+		})
+	}
+}
+
+func TestSyncEmbeddedRejectsSymlinkedEmbeddedRoot(t *testing.T) {
+	root := newSyncFixture(t)
+	embedded := filepath.Join(root, "internal", "embedded")
+	if err := os.Remove(embedded); err != nil {
+		t.Fatalf("remove embedded root: %v", err)
+	}
+	escapeDir := t.TempDir()
+	if err := os.Symlink(escapeDir, embedded); err != nil {
+		t.Fatalf("symlink embedded root: %v", err)
+	}
+
+	err := SyncEmbedded(SyncOptions{RepoRoot: root, Values: brand.RuntimeValues()})
+	if err == nil || !strings.Contains(err.Error(), "non-symlink directory") {
+		t.Fatalf("SyncEmbedded error = %v, want embedded-root rejection", err)
 	}
 }
 
@@ -270,6 +515,27 @@ func writeFile(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatalf("write %s: %v", path, err)
+	}
+}
+
+func newSyncFixture(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	mkdirAll(t, filepath.Join(root, "contracts"))
+	mkdirAll(t, filepath.Join(root, "skills", "liza-logs"))
+	mkdirAll(t, filepath.Join(root, "support-docs"))
+	mkdirAll(t, filepath.Join(root, "internal", "embedded"))
+	writeFile(t, filepath.Join(root, "contracts", "CORE.md"), "# §BRAND_NAME_TITLE§\n")
+	writeFile(t, filepath.Join(root, "skills", "liza-logs", "SKILL.md"), "name: §BRAND_BINARY_NAME§-logs\n")
+	writeFile(t, filepath.Join(root, "support-docs", "USAGE.md"), "run §BRAND_BINARY_NAME§\n")
+	writeFile(t, filepath.Join(root, ".bash-policy.yaml"), "rules: []\n")
+	return root
+}
+
+func requireNotExist(t *testing.T, path string) {
+	t.Helper()
+	if _, err := os.Lstat(path); !os.IsNotExist(err) {
+		t.Fatalf("%s still exists: %v", path, err)
 	}
 }
 

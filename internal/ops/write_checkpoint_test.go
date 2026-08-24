@@ -10,6 +10,8 @@ import (
 )
 
 func TestWriteCheckpoint_Validation(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name        string
 		input       WriteCheckpointInput
@@ -47,6 +49,8 @@ func TestWriteCheckpoint_Validation(t *testing.T) {
 }
 
 func TestWriteCheckpoint_TaskNotFound(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
@@ -64,6 +68,8 @@ func TestWriteCheckpoint_TaskNotFound(t *testing.T) {
 }
 
 func TestWriteCheckpoint_WrongStatus(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
@@ -85,6 +91,8 @@ func TestWriteCheckpoint_WrongStatus(t *testing.T) {
 }
 
 func TestWriteCheckpoint_PipelineExecutingStatus(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupPipelineTest(t)
 
 	now := time.Now().UTC()
@@ -130,6 +138,8 @@ func TestWriteCheckpoint_PipelineExecutingStatus(t *testing.T) {
 }
 
 func TestWriteCheckpoint_PipelineNonExecutingStatus(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupPipelineTest(t)
 
 	now := time.Now().UTC()
@@ -162,6 +172,8 @@ func TestWriteCheckpoint_PipelineNonExecutingStatus(t *testing.T) {
 }
 
 func TestWriteCheckpoint_WrongAgent(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
@@ -183,6 +195,8 @@ func TestWriteCheckpoint_WrongAgent(t *testing.T) {
 }
 
 func TestWriteCheckpoint_Success(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
@@ -236,6 +250,8 @@ func TestWriteCheckpoint_Success(t *testing.T) {
 }
 
 func TestWriteCheckpoint_SuccessWithoutOptionalFields(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
@@ -276,6 +292,8 @@ func TestWriteCheckpoint_SuccessWithoutOptionalFields(t *testing.T) {
 }
 
 func TestWriteCheckpoint_TDDNotRequired(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
@@ -317,6 +335,8 @@ func TestWriteCheckpoint_TDDNotRequired(t *testing.T) {
 }
 
 func TestWriteCheckpoint_TDDNotRequired_OmittedWhenEmpty(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
@@ -354,6 +374,8 @@ func TestWriteCheckpoint_TDDNotRequired_OmittedWhenEmpty(t *testing.T) {
 }
 
 func TestWriteCheckpoint_ScopeExtensions(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
@@ -406,6 +428,8 @@ func TestWriteCheckpoint_ScopeExtensions(t *testing.T) {
 }
 
 func TestWriteCheckpoint_ScopeExtensions_OmittedWhenEmpty(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
@@ -443,6 +467,8 @@ func TestWriteCheckpoint_ScopeExtensions_OmittedWhenEmpty(t *testing.T) {
 }
 
 func TestGetLatestScopeExtensions(t *testing.T) {
+	t.Parallel()
+
 	agent := "coder-1"
 	otherAgent := "coder-2"
 
@@ -519,6 +545,8 @@ func TestGetLatestScopeExtensions(t *testing.T) {
 }
 
 func TestGetTDDWaiver(t *testing.T) {
+	t.Parallel()
+
 	agent := "coder-1"
 	otherAgent := "coder-2"
 
@@ -589,6 +617,8 @@ func TestGetTDDWaiver(t *testing.T) {
 }
 
 func TestWriteCheckpointImpact(t *testing.T) {
+	t.Parallel()
+
 	t.Run("valid values accepted", func(t *testing.T) {
 		validValues := []string{"", "standard", "significant", "architecture"}
 		for _, impact := range validValues {
@@ -661,6 +691,8 @@ func TestWriteCheckpointImpact(t *testing.T) {
 }
 
 func TestGetCheckpointImpact(t *testing.T) {
+	t.Parallel()
+
 	agent := "coder-1"
 	otherAgent := "coder-2"
 
@@ -731,6 +763,8 @@ func TestGetCheckpointImpact(t *testing.T) {
 }
 
 func TestHasCheckpoint(t *testing.T) {
+	t.Parallel()
+
 	agent := "coder-1"
 	otherAgent := "coder-2"
 
@@ -783,6 +817,8 @@ func TestHasCheckpoint(t *testing.T) {
 }
 
 func TestGetValidationPlan(t *testing.T) {
+	t.Parallel()
+
 	agent := "coder-1"
 	otherAgent := "coder-2"
 

@@ -40,6 +40,8 @@ func setupReplanTest(t *testing.T) (string, string) {
 }
 
 func TestReplan_Validation(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name    string
 		input   ReplanInput
@@ -61,6 +63,8 @@ func TestReplan_Validation(t *testing.T) {
 }
 
 func TestReplan_HappyPath(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupReplanTest(t)
 
 	now := time.Now().UTC()
@@ -173,6 +177,8 @@ func TestReplan_HappyPath(t *testing.T) {
 }
 
 func TestReplan_AutoDetection_SingleMatch(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupReplanTest(t)
 
 	now := time.Now().UTC()
@@ -195,6 +201,8 @@ func TestReplan_AutoDetection_SingleMatch(t *testing.T) {
 }
 
 func TestReplan_AutoDetection_MultipleMatches(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupReplanTest(t)
 
 	now := time.Now().UTC()
@@ -213,6 +221,8 @@ func TestReplan_AutoDetection_MultipleMatches(t *testing.T) {
 }
 
 func TestReplan_AutoDetection_ZeroMatches(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupReplanTest(t)
 
 	now := time.Now().UTC()
@@ -231,6 +241,8 @@ func TestReplan_AutoDetection_ZeroMatches(t *testing.T) {
 }
 
 func TestReplan_WrongSprintStatus(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupReplanTest(t)
 
 	now := time.Now().UTC()
@@ -248,6 +260,8 @@ func TestReplan_WrongSprintStatus(t *testing.T) {
 }
 
 func TestReplan_TaskNotMerged(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupReplanTest(t)
 
 	now := time.Now().UTC()
@@ -266,6 +280,8 @@ func TestReplan_TaskNotMerged(t *testing.T) {
 }
 
 func TestReplan_TransitionsAlreadyExecuted(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupReplanTest(t)
 
 	now := time.Now().UTC()
@@ -284,6 +300,8 @@ func TestReplan_TransitionsAlreadyExecuted(t *testing.T) {
 }
 
 func TestReplan_PropagatesKind(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupReplanTest(t)
 
 	now := time.Now().UTC()
@@ -335,6 +353,8 @@ func TestReplan_PropagatesKind(t *testing.T) {
 }
 
 func TestReplan_NoOutput(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupReplanTest(t)
 
 	now := time.Now().UTC()
@@ -354,6 +374,8 @@ func TestReplan_NoOutput(t *testing.T) {
 }
 
 func TestReplan_NotPlanningPair(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupReplanTest(t)
 
 	now := time.Now().UTC()
@@ -375,6 +397,8 @@ func TestReplan_NotPlanningPair(t *testing.T) {
 }
 
 func TestReplan_SecondReplanIncrementsCounter(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupReplanTest(t)
 
 	now := time.Now().UTC()
@@ -403,6 +427,8 @@ func TestReplan_SecondReplanIncrementsCounter(t *testing.T) {
 }
 
 func TestReplan_TaskNotFound(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupReplanTest(t)
 
 	state := testhelpers.CreateValidState()
@@ -414,6 +440,8 @@ func TestReplan_TaskNotFound(t *testing.T) {
 }
 
 func TestReplan_PreservesDependsOn(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupReplanTest(t)
 	now := time.Now().UTC()
 
@@ -455,6 +483,8 @@ func TestReplan_PreservesDependsOn(t *testing.T) {
 }
 
 func TestReplan_PreservesParentTasksAndArchRef(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupReplanTest(t)
 	now := time.Now().UTC()
 
@@ -504,6 +534,8 @@ func TestReplan_PreservesParentTasksAndArchRef(t *testing.T) {
 }
 
 func TestReplan_PreservesRCARequired(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupReplanTest(t)
 	now := time.Now().UTC()
 
@@ -536,6 +568,8 @@ func TestReplan_PreservesRCARequired(t *testing.T) {
 }
 
 func TestReplan_RetargetsDownstream(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupReplanTest(t)
 	now := time.Now().UTC()
 
@@ -575,6 +609,8 @@ func TestReplan_RetargetsDownstream(t *testing.T) {
 }
 
 func TestReplan_WarnsTerminalDownstream(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupReplanTest(t)
 	now := time.Now().UTC()
 
@@ -612,6 +648,8 @@ func TestReplan_WarnsTerminalDownstream(t *testing.T) {
 }
 
 func TestReplan_RetargetDedupes(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupReplanTest(t)
 	now := time.Now().UTC()
 
@@ -650,6 +688,8 @@ func TestReplan_RetargetDedupes(t *testing.T) {
 }
 
 func TestReplan_BlocksOutboundTransitions(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupReplanTest(t)
 
 	now := time.Now().UTC()
@@ -703,6 +743,8 @@ func TestReplan_BlocksOutboundTransitions(t *testing.T) {
 }
 
 func TestReplan_BlocksEpicPlanningTransitions(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupReplanTest(t)
 
 	now := time.Now().UTC()

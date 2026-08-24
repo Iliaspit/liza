@@ -139,6 +139,53 @@ bb.Modify(func(s *models.State) error {
 
 **Contention indicators**: avg lock acquisition > 100ms, agents waiting frequently, high CPU on filesystem ops. **Solution**: reduce agents rather than adding more.
 
+## Test Suite
+
+Measured on the same 8-CPU development host on 2026-08-24. The historical default included
+race instrumentation and coverage; the current default intentionally includes neither, with
+those checks available through `make test-race` and `make coverage`.
+
+| Default `make test` | Wall | User | Sys | CPU | Max RSS |
+|---------------------|------|------|-----|-----|---------|
+| Historical | 314.82s | 878.00s | 159.20s | 329% | 522,588 KiB |
+| Current, test-result cache cleared (isolated worktree) | 122.32s | 310.77s | 123.81s | 355% | 494,676 KiB |
+| Current, unchanged main checkout (repeat 1) | 103.09s | 126.39s | 89.21s | 209% | 265,184 KiB |
+| Current, unchanged main checkout (repeat 2) | 101.61s | 123.86s | 88.07s | 208% | 270,464 KiB |
+
+The uncached isolated-worktree run reduced wall time by 61% and user CPU by 65%. Its original
+19.65s immediate-repeat observation did not reproduce on the active main checkout: an
+independent post-merge review measured 139.6s, 112.8s, and 102.2s before this follow-up.
+After bounding the testguard source walk so live `.liza/` state no longer invalidates its
+cache, the two unchanged repeats above cached every test-bearing package except `cmd/liza`
+and `internal/integration`; those packages still read run-specific temporary paths during
+their tests. The reproducible active-checkout repeat therefore remains above the original
+60s target. An isolated final `internal/integration` run completed in 56.226s;
+representative full-suite runs completed in 77.932s, while a heat-soaked run immediately
+after three uncached race suites took 92.878s.
+
+Exact pre-change/candidate coverage comparison found every package unchanged or higher.
+`internal/commands`, the only package whose statement ratio changed, increased from
+3140/3924 (80.020%) to 3146/3928 (80.092%). Three consecutive uncached `make test-race`
+runs passed in 251.18s, 253.22s, and 251.34s.
+
+`TestSlicedIntegrationLifecycle` fell from 81.30s wall under the historical race-instrumented
+measurement to 15.43s without race instrumentation; the test package reported 9.380s.
+
+The conservative `internal/ops` parallelization deliberately excludes tests that mutate
+process or package globals. A prebuilt non-race binary produced these execution-only results:
+
+| `internal/ops` scope | Wall | User | Sys | CPU | Max RSS |
+|----------------------|------|------|-----|-----|---------|
+| Historical full package | 56.42s | 36.3s | 18.0s | 96% | — |
+| Current full package | 46.59s | 40.05s | 16.55s | 121% | 67,444 KiB |
+| Current 486-test parallel-safe partition | 3.61s | 10.24s | 4.13s | 397% | 32,284 KiB |
+| Current 451-test sequential partition | 42.51s | 29.59s | 12.31s | 98% | 67,456 KiB |
+
+The parallel-safe partition exceeds the 300% utilization target, but the full package does
+not: Go defers parallel tests until sequential top-level tests finish, and the excluded
+partition remains the critical path. Broadening that partition without first removing its
+shared-global coupling would trade speed for flaky or false-positive tests.
+
 ## Benchmarking
 
 ### Commands

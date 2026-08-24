@@ -16,6 +16,8 @@ import (
 )
 
 func TestClaimReviewerTask_Validation(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	testhelpers.SetupLizaDir(t, tmpDir)
 
@@ -45,6 +47,8 @@ func TestClaimReviewerTask_Validation(t *testing.T) {
 }
 
 func TestClaimReviewerTask_DefaultLeaseDuration(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
@@ -84,6 +88,8 @@ func TestClaimReviewerTask_DefaultLeaseDuration(t *testing.T) {
 }
 
 func TestClaimReviewerTask_MissingRegisteredAgentDoesNotCreateGhost(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
@@ -134,6 +140,8 @@ func TestClaimReviewerTask_MissingRegisteredAgentDoesNotCreateGhost(t *testing.T
 }
 
 func TestClaimReviewerTask_CorruptRegisteredAgentRejected(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name        string
 		mutate      func(*models.Agent)
@@ -210,6 +218,8 @@ func TestClaimReviewerTask_CorruptRegisteredAgentRejected(t *testing.T) {
 }
 
 func TestClaimReviewerTask_NoReviewableTasks(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
@@ -238,6 +248,8 @@ func TestClaimReviewerTask_NoReviewableTasks(t *testing.T) {
 }
 
 func TestClaimReviewerTask_Success(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
@@ -319,6 +331,8 @@ func TestClaimReviewerTask_Success(t *testing.T) {
 }
 
 func TestClaimReviewerTask_RejectsReviewCommitMismatch(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
@@ -397,6 +411,8 @@ func TestClaimReviewerTask_RejectsReviewCommitMismatch(t *testing.T) {
 }
 
 func TestClaimReviewerTask_ReleasesSameTaskAssignedAgentOnBoundaryMismatch(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
@@ -466,6 +482,8 @@ func TestClaimReviewerTask_ReleasesSameTaskAssignedAgentOnBoundaryMismatch(t *te
 }
 
 func TestClaimReviewerTask_SkipsStaleReviewBoundaryCandidate(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
@@ -545,6 +563,8 @@ func TestClaimReviewerTask_SkipsStaleReviewBoundaryCandidate(t *testing.T) {
 }
 
 func TestClaimReviewerTask_AllCandidatesNeedBoundaryRepair(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
@@ -602,6 +622,8 @@ func TestClaimReviewerTask_AllCandidatesNeedBoundaryRepair(t *testing.T) {
 }
 
 func TestClaimReviewerTask_PrioritySelection(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
@@ -647,6 +669,8 @@ func TestClaimReviewerTask_PrioritySelection(t *testing.T) {
 }
 
 func TestClaimReviewerTask_TargetTaskIDOverridesPrioritySelection(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
@@ -709,6 +733,8 @@ func TestClaimReviewerTask_TargetTaskIDOverridesPrioritySelection(t *testing.T) 
 }
 
 func TestClaimReviewerTask_TieBreaking(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
@@ -755,6 +781,8 @@ func TestClaimReviewerTask_TieBreaking(t *testing.T) {
 }
 
 func TestClaimReviewerTask_MissingReviewCommit(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
@@ -792,6 +820,8 @@ func TestClaimReviewerTask_MissingReviewCommit(t *testing.T) {
 }
 
 func TestClaimReviewerTask_CodePlanReviewerExplicitRole(t *testing.T) {
+	t.Parallel()
+
 	// Verifies that a code-plan-reviewer agent with an explicit Role field
 	// correctly claims code-planning-pair tasks.
 	tmpDir := t.TempDir()
@@ -849,6 +879,8 @@ func TestClaimReviewerTask_CodePlanReviewerExplicitRole(t *testing.T) {
 }
 
 func TestClaimReviewerTask_SkipsAlreadyReviewing(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
@@ -898,6 +930,8 @@ func TestClaimReviewerTask_SkipsAlreadyReviewing(t *testing.T) {
 }
 
 func TestClaimReviewerTask_PartiallyApproved(t *testing.T) {
+	t.Parallel()
+
 	// Verifies that a partially_approved task can be claimed and transitions to reviewing_2.
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
@@ -957,6 +991,8 @@ func TestClaimReviewerTask_PartiallyApproved(t *testing.T) {
 }
 
 func TestClaimReviewerTask_SkipsTaskAlreadyApprovedByClaimer(t *testing.T) {
+	t.Parallel()
+
 	// Verifies the independent-review filter: a reviewer that already approved
 	// a task in round 1 must not be allowed to claim the same partially_approved
 	// task for round 2. Without this filter, the agent loop polling for
@@ -1018,6 +1054,8 @@ func TestClaimReviewerTask_SkipsTaskAlreadyApprovedByClaimer(t *testing.T) {
 }
 
 func TestClaimReviewerTask_Round2GoesToDifferentReviewer(t *testing.T) {
+	t.Parallel()
+
 	// End-to-end claim-filter check: when reviewer-1 has approved and
 	// reviewer-2 polls, reviewer-2 picks up the partially_approved task
 	// for round 2 even though reviewer-1's loop would have rejected it.
@@ -1074,6 +1112,8 @@ func TestClaimReviewerTask_Round2GoesToDifferentReviewer(t *testing.T) {
 }
 
 func TestClaimReviewerTask_ClaimPriority_PartiallyApprovedOverSubmitted(t *testing.T) {
+	t.Parallel()
+
 	// Verifies that partially_approved tasks are selected before submitted tasks
 	// at the same priority level.
 	tmpDir := t.TempDir()
@@ -1126,6 +1166,8 @@ func TestClaimReviewerTask_ClaimPriority_PartiallyApprovedOverSubmitted(t *testi
 }
 
 func TestClaimReviewerTask_DiversityWithApprovals(t *testing.T) {
+	t.Parallel()
+
 	// Verifies that for partially_approved tasks, the one whose existing
 	// approval provider differs from the claimer's provider is preferred.
 	tmpDir := t.TempDir()
@@ -1198,6 +1240,8 @@ func TestClaimReviewerTask_DiversityWithApprovals(t *testing.T) {
 }
 
 func TestClaimReviewerTask_DiversityFreshSubmissions(t *testing.T) {
+	t.Parallel()
+
 	// Tests fresh-submission diversity preference through selectBestCandidate.
 	//
 	// Architecture note: in production, all candidates for a single claiming agent
@@ -1413,6 +1457,8 @@ func reviewerCapacityTestAgent(role, provider string) models.Agent {
 }
 
 func TestReviewerCapacityLeaseGrace(t *testing.T) {
+	t.Parallel()
+
 	now := time.Now().UTC()
 	agent := reviewerCapacityTestAgent("code-reviewer", "anthropic")
 
@@ -1486,6 +1532,8 @@ func (r *diversityTestResolver) Reviewing2Status(string) (models.TaskStatus, err
 }
 
 func TestClaimReviewerTask_ReviewClaimCooldown(t *testing.T) {
+	t.Parallel()
+
 	t.Run("recent review_claim_released from same agent filters candidate", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		testhelpers.SetupTestGitRepo(t, tmpDir)
@@ -1791,6 +1839,8 @@ func (r *doerDiversityResolver) ReviewerRole(string) (string, error) {
 }
 
 func TestReviewerClaimEligibility(t *testing.T) {
+	t.Parallel()
+
 	now := time.Now().UTC()
 	doerID := "coder-1"
 	task := &models.Task{
@@ -1916,6 +1966,8 @@ func TestReviewerClaimEligibility(t *testing.T) {
 }
 
 func TestIsBlockedByDoerDiversity(t *testing.T) {
+	t.Parallel()
+
 	doerID := "coder-1"
 
 	t.Run("blocked when claimer shares doer provider and diverse reviewer exists", func(t *testing.T) {
@@ -2059,6 +2111,8 @@ func TestIsBlockedByDoerDiversity(t *testing.T) {
 }
 
 func TestFilterDoerProviderDiversity(t *testing.T) {
+	t.Parallel()
+
 	doerID := "coder-1"
 
 	t.Run("filters all candidates when all share doer provider", func(t *testing.T) {

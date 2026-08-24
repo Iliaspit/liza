@@ -1,6 +1,7 @@
 package embedded
 
 import (
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -24,8 +25,18 @@ func TestArtifactConsistency(t *testing.T) {
 	if len(expected) == 0 {
 		t.Fatal("no rendered embedded files found")
 	}
+	expectedByPath := make(map[string]brandrender.RenderedFile, len(expected))
 	for _, file := range expected {
+		if _, exists := expectedByPath[file.RelPath]; exists {
+			t.Fatalf("duplicate expected embedded path %s", file.RelPath)
+		}
+		expectedByPath[file.RelPath] = file
 		compareRenderedToEmbedded(t, file, filepath.Join(embeddedDir, filepath.FromSlash(file.RelPath)))
+	}
+	for relPath := range actualManagedEmbeddedFiles(t, embeddedDir) {
+		if _, expected := expectedByPath[relPath]; !expected {
+			t.Errorf("STALE: unexpected managed embedded file %s — run `make sync-embedded`", relPath)
+		}
 	}
 
 	t.Run("docs support stubs resolve", func(t *testing.T) {
@@ -156,6 +167,24 @@ func TestArtifactConsistencyRendersNonDefaultBrand(t *testing.T) {
 func compareRenderedToEmbedded(t *testing.T, expected brandrender.RenderedFile, embeddedPath string) {
 	t.Helper()
 
+	info, err := os.Lstat(embeddedPath)
+	if err != nil {
+		t.Errorf("inspecting embedded copy %s: %v", embeddedPath, err)
+		return
+	}
+	if !info.Mode().IsRegular() {
+		t.Errorf("DRIFT: embedded copy %s has non-regular mode %v", embeddedPath, info.Mode())
+		return
+	}
+	wantMode := expected.Mode.Perm()
+	if wantMode == 0 {
+		wantMode = 0o644
+	}
+	if info.Mode().Perm() != wantMode {
+		t.Errorf("DRIFT: embedded copy %s mode = %v, want %v — run `make sync-embedded`",
+			embeddedPath, info.Mode().Perm(), wantMode)
+	}
+
 	embedded, err := os.ReadFile(embeddedPath)
 	if err != nil {
 		t.Errorf("reading embedded copy %s: %v", embeddedPath, err)
@@ -166,6 +195,38 @@ func compareRenderedToEmbedded(t *testing.T, expected brandrender.RenderedFile, 
 		t.Errorf("DRIFT: rendered source %s differs from embedded copy %s — run `make sync-embedded`",
 			expected.RelPath, embeddedPath)
 	}
+}
+
+func actualManagedEmbeddedFiles(t *testing.T, embeddedDir string) map[string]bool {
+	t.Helper()
+	actual := make(map[string]bool)
+	for _, managedDir := range brandrender.ManagedEmbeddedDirs() {
+		root := filepath.Join(embeddedDir, filepath.FromSlash(managedDir))
+		err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
+			}
+			if entry.IsDir() {
+				return nil
+			}
+			rel, err := filepath.Rel(embeddedDir, path)
+			if err != nil {
+				return err
+			}
+			actual[filepath.ToSlash(rel)] = true
+			return nil
+		})
+		if err != nil && !os.IsNotExist(err) {
+			t.Fatalf("walk managed embedded directory %s: %v", managedDir, err)
+		}
+	}
+	bashPolicy := filepath.Join(embeddedDir, "bash-policy.yaml")
+	if _, err := os.Lstat(bashPolicy); err == nil {
+		actual["bash-policy.yaml"] = true
+	} else if !os.IsNotExist(err) {
+		t.Fatalf("inspect embedded bash-policy.yaml: %v", err)
+	}
+	return actual
 }
 
 func mkdirAllConsistency(t *testing.T, path string) {

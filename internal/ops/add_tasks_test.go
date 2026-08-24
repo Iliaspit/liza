@@ -15,6 +15,8 @@ import (
 )
 
 func TestAddTask_Validation(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name        string
 		input       AddTaskInput
@@ -96,6 +98,8 @@ func TestAddTask_Validation(t *testing.T) {
 }
 
 func TestAddTask_PersistsDestructiveDB(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 	logFile := filepath.Join(tmpDir, ".liza", "log.jsonl")
@@ -135,6 +139,8 @@ func TestAddTask_PersistsDestructiveDB(t *testing.T) {
 }
 
 func TestAddTask_PersistsRCARequired(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 	logFile := filepath.Join(tmpDir, ".liza", "log.jsonl")
@@ -173,6 +179,8 @@ func TestAddTask_PersistsRCARequired(t *testing.T) {
 }
 
 func TestAddTask_Success(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 	logFile := filepath.Join(tmpDir, ".liza", "log.jsonl")
@@ -287,6 +295,8 @@ func TestAddTask_Success(t *testing.T) {
 }
 
 func TestAddTask_EmptyOrchestratorIDReturnsError(t *testing.T) {
+	t.Parallel()
+
 	input := &AddTaskInput{
 		ID: "task-1", Description: "d", SpecRef: "specs/vision.md",
 		DoneWhen: "w", Scope: "sc", Priority: 1,
@@ -408,6 +418,8 @@ func setupPipelineProject(t *testing.T) (stateFile, logFile string) {
 }
 
 func TestAddTask_RolePairValidation(t *testing.T) {
+	t.Parallel()
+
 	stateFile, logFile := setupPipelineProject(t)
 
 	tests := []struct {
@@ -475,6 +487,8 @@ func TestAddTask_RolePairValidation(t *testing.T) {
 }
 
 func TestAddTask_PipelineSuccess(t *testing.T) {
+	t.Parallel()
+
 	stateFile, logFile := setupPipelineProject(t)
 
 	input := &AddTaskInput{
@@ -515,6 +529,8 @@ func TestAddTask_PipelineSuccess(t *testing.T) {
 }
 
 func TestAddTask_RejectsManualPipelineTransitionChild(t *testing.T) {
+	t.Parallel()
+
 	stateFile, logFile := setupPipelineProject(t)
 	now := time.Now().UTC()
 
@@ -579,6 +595,8 @@ func TestAddTask_RejectsManualPipelineTransitionChild(t *testing.T) {
 }
 
 func TestAddTask_RejectsManualOneToOnePipelineTransitionChild(t *testing.T) {
+	t.Parallel()
+
 	stateFile, logFile := setupPipelineProject(t)
 	now := time.Now().UTC()
 
@@ -640,6 +658,8 @@ func TestAddTask_RejectsManualOneToOnePipelineTransitionChild(t *testing.T) {
 }
 
 func TestAddTask_RejectsManualManyToOnePipelineTransitionChild(t *testing.T) {
+	t.Parallel()
+
 	stateFile, logFile := setupPipelineProject(t)
 	now := time.Now().UTC()
 
@@ -703,6 +723,8 @@ func TestAddTask_RejectsManualManyToOnePipelineTransitionChild(t *testing.T) {
 }
 
 func TestAddTask_DerivesTypeFromRolePair(t *testing.T) {
+	t.Parallel()
+
 	stateFile, logFile := setupPipelineProject(t)
 
 	input := &AddTaskInput{
@@ -739,6 +761,8 @@ func TestAddTask_DerivesTypeFromRolePair(t *testing.T) {
 }
 
 func TestAddTask_DuplicateID(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 	logFile := filepath.Join(tmpDir, ".liza", "log.jsonl")
@@ -765,6 +789,8 @@ func TestAddTask_DuplicateID(t *testing.T) {
 }
 
 func TestAddTask_DegradedCurrentStatePersistsTaskWithWarning(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 	logFile := filepath.Join(tmpDir, ".liza", "log.jsonl")
@@ -827,6 +853,8 @@ func TestAddTask_DegradedCurrentStatePersistsTaskWithWarning(t *testing.T) {
 }
 
 func TestAddTask_RejectsSemicolonJoinedSpecRef(t *testing.T) {
+	t.Parallel()
+
 	input := &AddTaskInput{
 		ID:          "task-multiref",
 		Description: "Task with invalid multi-ref",
@@ -847,6 +875,8 @@ func TestAddTask_RejectsSemicolonJoinedSpecRef(t *testing.T) {
 }
 
 func TestAddTasks_PartialSuccess(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 	logFile := filepath.Join(tmpDir, ".liza", "log.jsonl")
@@ -930,6 +960,8 @@ func TestAddTasks_PartialSuccess(t *testing.T) {
 }
 
 func TestAddTasks_DegradedCurrentStatePersistsValidTasksWithWarning(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 	logFile := filepath.Join(tmpDir, ".liza", "log.jsonl")
@@ -1019,6 +1051,8 @@ func TestAddTasks_DegradedCurrentStatePersistsValidTasksWithWarning(t *testing.T
 }
 
 func TestAddTask_OptionalPlanRefStoredOnTask(t *testing.T) {
+	t.Parallel()
+
 	stateFile, logFile := setupPipelineProject(t)
 	// Create plan file so state validation passes
 	projectRoot := filepath.Dir(filepath.Dir(stateFile))
@@ -1065,6 +1099,8 @@ func TestAddTask_OptionalPlanRefStoredOnTask(t *testing.T) {
 }
 
 func TestAddTask_PlanRefNormalizesWorktreePrefix(t *testing.T) {
+	t.Parallel()
+
 	stateFile, logFile := setupPipelineProject(t)
 	// Create plan file so state validation passes after normalization
 	projectRoot := filepath.Dir(filepath.Dir(stateFile))
@@ -1111,6 +1147,8 @@ func TestAddTask_PlanRefNormalizesWorktreePrefix(t *testing.T) {
 }
 
 func TestAddTasks_EmptyInput(t *testing.T) {
+	t.Parallel()
+
 	input := &AddTasksInput{Tasks: []AddTaskInput{}}
 	_, err := AddTasks("/nonexistent", "/dev/null", input)
 	if err == nil {
@@ -1122,6 +1160,8 @@ func TestAddTasks_EmptyInput(t *testing.T) {
 }
 
 func TestAddTaskInput_JSONUnmarshal(t *testing.T) {
+	t.Parallel()
+
 	// Wire format documented in add-tasks CLI help and wake_initial_planning.tmpl.
 	input := `[
 		{

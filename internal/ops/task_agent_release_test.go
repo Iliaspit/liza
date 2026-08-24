@@ -10,6 +10,8 @@ import (
 )
 
 func TestMarkBlocked_ReleasesAssignedAgent(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
@@ -32,6 +34,8 @@ func TestMarkBlocked_ReleasesAssignedAgent(t *testing.T) {
 }
 
 func TestSupersedeTask_ReleasesAssignedAgent(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
@@ -54,6 +58,8 @@ func TestSupersedeTask_ReleasesAssignedAgent(t *testing.T) {
 }
 
 func TestCancelTask_ReleasesAssignedAgent(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
@@ -76,6 +82,8 @@ func TestCancelTask_ReleasesAssignedAgent(t *testing.T) {
 }
 
 func TestReconcileMerged_ReleasesAssignedAgent(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
@@ -100,6 +108,8 @@ func TestReconcileMerged_ReleasesAssignedAgent(t *testing.T) {
 }
 
 func TestAssessHypothesisExhausted_ReleasesAssignedAgent(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 

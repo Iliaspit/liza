@@ -36,6 +36,8 @@ func TestSlicedIntegrationLifecycle(t *testing.T) {
 	}
 
 	t.Run("settled boundary and zero-slice bypass", func(t *testing.T) {
+		t.Parallel()
+
 		barriers := []struct {
 			name     string
 			unsettle func(*models.State)
@@ -58,6 +60,8 @@ func TestSlicedIntegrationLifecycle(t *testing.T) {
 		}
 		for _, barrier := range barriers {
 			t.Run(barrier.name, func(t *testing.T) {
+				t.Parallel()
+
 				fixture := newSlicedLifecycleFixture(t, true)
 				fixture.modify(t, barrier.unsettle)
 				result := reconcileSlicedLifecycle(t, fixture.root)
@@ -69,6 +73,8 @@ func TestSlicedIntegrationLifecycle(t *testing.T) {
 
 		for _, scopes := range []int{0, 1} {
 			t.Run(string(rune('0'+scopes))+" contributing scopes", func(t *testing.T) {
+				t.Parallel()
+
 				fixture := newSlicedLifecycleFixture(t, false)
 				if scopes == 0 {
 					fixture.modify(t, func(state *models.State) {
@@ -133,6 +139,8 @@ func TestSlicedIntegrationLifecycle(t *testing.T) {
 	})
 
 	t.Run("mixed coverage concurrent creation and restart recovery", func(t *testing.T) {
+		t.Parallel()
+
 		fixture := newSlicedLifecycleFixture(t, true)
 		results := reconcileConcurrently(t, fixture.root, 8)
 		changed := 0
@@ -154,7 +162,7 @@ func TestSlicedIntegrationLifecycle(t *testing.T) {
 		}
 		frozen := cloneLifecycleProjection(beforeRestart)
 
-		db.ResetInstances()
+		db.ResetInstance(fixture.statePath)
 		restarted, err := db.New(fixture.statePath).Read()
 		if err != nil {
 			t.Fatalf("fresh blackboard read: %v", err)
@@ -170,6 +178,8 @@ func TestSlicedIntegrationLifecycle(t *testing.T) {
 	})
 
 	t.Run("blocked slice fan-in and replacement resolution", func(t *testing.T) {
+		t.Parallel()
+
 		fixture := newSlicedLifecycleFixture(t, true)
 		seedRealMutationReceipt(t, fixture)
 		reconcileSlicedLifecycle(t, fixture.root)
@@ -217,6 +227,8 @@ func TestSlicedIntegrationLifecycle(t *testing.T) {
 	})
 
 	t.Run("promoted repair and sibling mutation preserve frozen slices", func(t *testing.T) {
+		t.Parallel()
+
 		fixture := newSlicedLifecycleFixture(t, true)
 		seedRealMutationReceipt(t, fixture)
 		reconcileSlicedLifecycle(t, fixture.root)
@@ -277,6 +289,8 @@ func TestSlicedIntegrationLifecycle(t *testing.T) {
 	})
 
 	t.Run("slice repair review exhaustion blocks global fan-in", func(t *testing.T) {
+		t.Parallel()
+
 		fixture := newSlicedLifecycleFixture(t, true)
 		fixture.modify(t, func(state *models.State) { state.Config.MaxReviewCycles = 1 })
 		reconcileSlicedLifecycle(t, fixture.root)
@@ -312,6 +326,8 @@ func TestSlicedIntegrationLifecycle(t *testing.T) {
 	})
 
 	t.Run("global fix rescan restart and generation exhaustion", func(t *testing.T) {
+		t.Parallel()
+
 		fixture := newSlicedLifecycleFixture(t, true)
 		seedRealMutationReceipt(t, fixture)
 		fixture.modify(t, func(state *models.State) { state.Config.MaxGlobalIntegrationGenerations = 2 })
@@ -350,7 +366,7 @@ func TestSlicedIntegrationLifecycle(t *testing.T) {
 		}
 
 		beforeRestart := cloneLifecycleProjection(state)
-		db.ResetInstances()
+		db.ResetInstance(fixture.statePath)
 		repeat := reconcileSlicedLifecycle(t, fixture.root)
 		if repeat.Changed || !reflect.DeepEqual(cloneLifecycleProjection(fixture.read(t)), beforeRestart) {
 			t.Fatalf("generation-two restart was not idempotent: %#v", repeat)
@@ -379,6 +395,8 @@ func TestSlicedIntegrationLifecycle(t *testing.T) {
 	})
 
 	t.Run("frozen pipeline fails closed", func(t *testing.T) {
+		t.Parallel()
+
 		fixture := newSlicedLifecycleFixture(t, true)
 		freezeLegacyIntegrationPipeline(t, fixture.root)
 		result := reconcileSlicedLifecycle(t, fixture.root)
@@ -395,6 +413,8 @@ func TestSlicedIntegrationLifecycle(t *testing.T) {
 	})
 
 	t.Run("immediate invalidation blocks resume and advance", func(t *testing.T) {
+		t.Parallel()
+
 		for _, operation := range []struct {
 			name   string
 			invoke func(string) error
@@ -403,6 +423,8 @@ func TestSlicedIntegrationLifecycle(t *testing.T) {
 			{name: "advance", invoke: func(root string) error { _, err := ops.AdvanceSprint(root); return err }},
 		} {
 			t.Run(operation.name, func(t *testing.T) {
+				t.Parallel()
+
 				fixture := newCleanCompletionFixture(t)
 				fixture.modify(t, func(state *models.State) {
 					state.Sprint.Status = models.SprintStatusCheckpoint
@@ -612,10 +634,10 @@ type mergeBarrier struct {
 
 func newSlicedLifecycleFixture(t *testing.T, multipleScopes bool) *slicedLifecycleFixture {
 	t.Helper()
-	db.ResetInstances()
 	root := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, root)
 	statePath, _ := testhelpers.SetupLizaDir(t, root)
+	db.ResetInstance(statePath)
 	base := testhelpers.MustGit(t, root, "rev-parse", "HEAD")
 
 	ids := []string{"coding-single-leaf-a", "coding-single-leaf-z"}
@@ -687,7 +709,7 @@ func newSlicedLifecycleFixture(t *testing.T, multipleScopes bool) *slicedLifecyc
 	state.Tasks = tasks
 	state.Sprint.Scope.Planned = taskIDsForSlicedFixture(tasks)
 	testhelpers.WriteInitialState(t, statePath, state)
-	db.ResetInstances()
+	db.ResetInstance(statePath)
 	return &slicedLifecycleFixture{
 		root: root, statePath: statePath, goalBase: base, head: previous, commits: commits,
 		sourceSentinels: sourceSentinels, aggregateSentinelPath: aggregateSentinelPath, aggregateSentinel: aggregateSentinel,

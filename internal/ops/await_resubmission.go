@@ -51,11 +51,35 @@ var newAwaitResubmissionWatcher = func(bb *db.Blackboard) (awaitResubmissionWatc
 	return bb.WatchForChanges()
 }
 
+const (
+	defaultAwaitResubmissionAbortPollInterval    = time.Second
+	defaultAwaitResubmissionFallbackPollInterval = 5 * time.Second
+)
+
+// AwaitResubmissionOptions controls the periodic checks used while waiting.
+// The zero value preserves the production defaults.
+type AwaitResubmissionOptions struct {
+	AbortPollInterval    time.Duration
+	FallbackPollInterval time.Duration
+}
+
+func (opts AwaitResubmissionOptions) normalized() AwaitResubmissionOptions {
+	opts.AbortPollInterval = normalizedAwaitInterval(opts.AbortPollInterval, defaultAwaitResubmissionAbortPollInterval)
+	opts.FallbackPollInterval = normalizedAwaitInterval(opts.FallbackPollInterval, defaultAwaitResubmissionFallbackPollInterval)
+	return opts
+}
+
 // AwaitResubmission blocks until a doer resubmits after a rejection.
 // It validates preconditions, acquires review ownership (ReviewingBy on task,
 // agent status=WAITING), then blocks on an event loop until the task status
 // leaves the waiting set (rejected/implementing/executing).
 func AwaitResubmission(ctx context.Context, projectRoot, taskID, agentID string, timeout time.Duration) (*AwaitResubmissionResult, error) {
+	return AwaitResubmissionWithOptions(ctx, projectRoot, taskID, agentID, timeout, AwaitResubmissionOptions{})
+}
+
+// AwaitResubmissionWithOptions is AwaitResubmission with configurable polling intervals.
+func AwaitResubmissionWithOptions(ctx context.Context, projectRoot, taskID, agentID string, timeout time.Duration, opts AwaitResubmissionOptions) (*AwaitResubmissionResult, error) {
+	opts = opts.normalized()
 	if taskID == "" {
 		return nil, &PreconditionError{Reason: "task ID is required"}
 	}
@@ -125,14 +149,14 @@ func AwaitResubmission(ctx context.Context, projectRoot, taskID, agentID string,
 
 	watcher, watchErr := newAwaitResubmissionWatcher(bb)
 	if watchErr != nil {
-		return awaitResubmissionPolling(ctx, projectRoot, bb, taskID, agentID, deadline, task.Status, resolver, rolePair)
+		return awaitResubmissionPolling(ctx, projectRoot, bb, taskID, agentID, deadline, task.Status, resolver, rolePair, opts.FallbackPollInterval)
 	}
 	defer watcher.Close()
 
 	deadlineTimer := time.NewTimer(time.Until(deadline))
 	defer deadlineTimer.Stop()
 
-	abortTicker := time.NewTicker(1 * time.Second)
+	abortTicker := time.NewTicker(opts.AbortPollInterval)
 	defer abortTicker.Stop()
 
 	for {
@@ -186,7 +210,7 @@ func AwaitResubmission(ctx context.Context, projectRoot, taskID, agentID string,
 		case watcherErr := <-watcher.Errors():
 			log.Printf("Watcher error, falling back to polling: %v", watcherErr)
 			watcher.Close()
-			return awaitResubmissionPolling(ctx, projectRoot, bb, taskID, agentID, deadline, task.Status, resolver, rolePair)
+			return awaitResubmissionPolling(ctx, projectRoot, bb, taskID, agentID, deadline, task.Status, resolver, rolePair, opts.FallbackPollInterval)
 
 		case <-deadlineTimer.C:
 			releaseReviewOwnership(bb, agentID, taskID)
@@ -408,8 +432,8 @@ func reclaimForReview(projectRoot string, bb *db.Blackboard, taskID, agentID str
 
 // awaitResubmissionPolling is the polling fallback for when fsnotify is unavailable.
 // It checks state every 5 seconds until a resubmission arrives or the deadline expires.
-func awaitResubmissionPolling(ctx context.Context, projectRoot string, bb *db.Blackboard, taskID, agentID string, deadline time.Time, taskStatus models.TaskStatus, resolver *pipeline.Resolver, rolePair string) (*AwaitResubmissionResult, error) {
-	ticker := time.NewTicker(5 * time.Second)
+func awaitResubmissionPolling(ctx context.Context, projectRoot string, bb *db.Blackboard, taskID, agentID string, deadline time.Time, taskStatus models.TaskStatus, resolver *pipeline.Resolver, rolePair string, pollInterval time.Duration) (*AwaitResubmissionResult, error) {
+	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
 	deadlineTimer := time.NewTimer(time.Until(deadline))
 	defer deadlineTimer.Stop()

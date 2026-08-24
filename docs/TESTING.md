@@ -8,32 +8,53 @@ Running tests, coverage targets, and test utilities for the Liza Go codebase.
 
 | Command | What |
 |---------|------|
-| `go test ./...` | All tests |
-| `go test -v ./...` | Verbose |
-| `go test -race ./...` | Race detector |
-| `go test -cover ./...` | Coverage summary |
+| `make test-fast` | Short-mode iteration; skips guarded integration tests |
+| `make test` | Required routine full-suite check, without race or coverage instrumentation |
+| `make test-race` | Full suite with the race detector; required once during final pre-commit/merge validation |
+| `make coverage` | Full suite with per-package coverage, then an HTML report |
 | `go test -run TestFoo ./internal/db/` | Specific test |
 | `go test -run "TestBlackboard.*" ./internal/db/` | Pattern match |
-| `go test -short ./...` | Run tests with short-mode enabled (integration tests in `internal/integration/` are skipped via `testing.Short()` guards) |
 | `go test -tags e2e ./internal/integration/` | Run e2e full sprint test (gated by `//go:build e2e`, ~40s) |
 | `make test-e2e` | Same as above via Makefile target |
 
 ### Coverage
 
 ```bash
-go test -coverprofile=coverage.out ./...    # Generate profile
-go tool cover -html=coverage.out            # View in browser
-go tool cover -func=coverage.out            # Coverage by function
+make coverage
 ```
+
+The target creates a unique profile under `${TMPDIR:-/tmp}`, keeps it through
+`go tool cover -html`, and removes it on success, failure, or interruption.
+Coverage remains package-local because the target does not use
+`-coverpkg=./...`; do not treat its aggregate as the cross-package coverage
+basis documented in the architecture review.
 
 ### Race Detection
 
-**Always run with `-race` before merging code that uses goroutines or locks.**
+`make test` intentionally omits `-race` so routine iteration stays responsive.
+Run the race target once for every final change set, not only changes that
+obviously use goroutines or locks:
 
 ```bash
-go test -race ./...                # All packages
-go test -race ./internal/db/       # Specific package (db has locks)
+make test-race
 ```
+
+This is enforced by the project-local worktree validation instructions. CI
+wiring is currently deferred; the existing workflow still invokes `make test`,
+so it is not the race gate.
+
+### Faster temporary storage
+
+State-heavy tests fsync many temporary files. On Linux, a tmpfs can reduce that
+filesystem latency when it has enough free space:
+
+```bash
+mkdir -p /dev/shm/liza-tests
+TMPDIR=/dev/shm/liza-tests make test
+```
+
+Use a private writable directory and monitor its capacity. Keep the default
+`/tmp` on hosts without tmpfs or when the suite could exceed available memory.
 
 ### Benchmarks
 

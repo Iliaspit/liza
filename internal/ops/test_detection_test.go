@@ -10,6 +10,8 @@ import (
 )
 
 func TestIsTestFile(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name string
 		file string
@@ -93,6 +95,8 @@ func TestIsTestFile(t *testing.T) {
 }
 
 func TestHasTestFiles_WithTestFile(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
 
@@ -123,6 +127,8 @@ func TestHasTestFiles_WithTestFile(t *testing.T) {
 }
 
 func TestHasTestFiles_WithShellTestFile(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
 
@@ -153,6 +159,8 @@ func TestHasTestFiles_WithShellTestFile(t *testing.T) {
 }
 
 func TestHasTestFiles_WithNestedPythonTestFile(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
 
@@ -193,6 +201,8 @@ func TestHasTestFiles_WithNestedPythonTestFile(t *testing.T) {
 }
 
 func TestHasTestFiles_WithoutTestFile(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
 
@@ -223,6 +233,8 @@ func TestHasTestFiles_WithoutTestFile(t *testing.T) {
 }
 
 func TestHasTestFiles_NoChanges(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
 

@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"errors"
 	"testing"
 	"time"
 
@@ -34,6 +35,26 @@ func TestMaxAwaitIntervalStaysBelowForegroundTransportLimit(t *testing.T) {
 	if maxAwaitInterval >= maxSafeForegroundAwaitInterval {
 		t.Fatalf("maxAwaitInterval = %s, must stay below foreground transport safety limit %s",
 			maxAwaitInterval, maxSafeForegroundAwaitInterval)
+	}
+}
+
+func TestAwaitResubmissionWithOptions_ForwardsOperationValidation(t *testing.T) {
+	result, err := AwaitResubmissionWithOptions(
+		t.TempDir(),
+		"",
+		boundedAwaitReviewerID,
+		time.Second,
+		AwaitResubmissionOptions{
+			AbortPollInterval:    5 * time.Millisecond,
+			FallbackPollInterval: 5 * time.Millisecond,
+		},
+	)
+	if result != nil {
+		t.Fatalf("result = %#v, want nil on precondition failure", result)
+	}
+	var preconditionErr *ops.PreconditionError
+	if !errors.As(err, &preconditionErr) {
+		t.Fatalf("error = %T %v, want *ops.PreconditionError", err, err)
 	}
 }
 

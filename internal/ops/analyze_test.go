@@ -12,6 +12,8 @@ import (
 )
 
 func TestAnalyze_NoAnomalies(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
@@ -55,6 +57,8 @@ func TestAnalyze_NoAnomalies(t *testing.T) {
 }
 
 func TestAnalyze_TriggeredByRetryCluster(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
@@ -112,6 +116,8 @@ func TestAnalyze_TriggeredByRetryCluster(t *testing.T) {
 }
 
 func TestAnalyze_BelowThreshold(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
@@ -135,6 +141,8 @@ func TestAnalyze_BelowThreshold(t *testing.T) {
 }
 
 func TestAnalyze_ReportsOnlyUnacknowledgedAnomalies(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
@@ -181,6 +189,8 @@ func TestAnalyze_ReportsOnlyUnacknowledgedAnomalies(t *testing.T) {
 }
 
 func TestAnalyze_InvalidStatePath(t *testing.T) {
+	t.Parallel()
+
 	_, err := Analyze("/nonexistent/path")
 	if err == nil {
 		t.Fatal("Expected error for nonexistent path")

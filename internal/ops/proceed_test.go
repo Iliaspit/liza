@@ -19,6 +19,8 @@ import (
 // --- Proceed: happy path ---
 
 func TestProceed_CreatesChildTasks(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupPipelineProceedTest(t)
 
 	state := testhelpers.CreateValidState()
@@ -133,6 +135,8 @@ func TestProceed_CreatesChildTasks(t *testing.T) {
 // --- Proceed: idempotency rejection ---
 
 func TestProceed_RejectsRepeatedTransition(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupPipelineProceedTest(t)
 
 	state := testhelpers.CreateValidState()
@@ -191,6 +195,8 @@ func TestProceed_RejectsRepeatedTransition(t *testing.T) {
 // --- Proceed: sprint not COMPLETED ---
 
 func TestProceed_RejectsIfSprintNotCompleted(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
@@ -231,6 +237,8 @@ func TestProceed_RejectsIfSprintNotCompleted(t *testing.T) {
 // --- Proceed: unknown transition ---
 
 func TestProceed_RejectsUnknownTransition(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
@@ -271,6 +279,8 @@ func TestProceed_RejectsUnknownTransition(t *testing.T) {
 // --- Proceed: task not found ---
 
 func TestProceed_RejectsNonexistentTask(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
@@ -290,6 +300,8 @@ func TestProceed_RejectsNonexistentTask(t *testing.T) {
 // --- Proceed: wrong status ---
 
 func TestProceed_RejectsWrongStatus(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupPipelineProceedTest(t)
 
 	state := testhelpers.CreateValidState()
@@ -330,6 +342,8 @@ func TestProceed_RejectsWrongStatus(t *testing.T) {
 // --- Proceed: empty output ---
 
 func TestProceed_RejectsEmptyOutput(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupPipelineProceedTest(t)
 
 	state := testhelpers.CreateValidState()
@@ -369,6 +383,8 @@ func TestProceed_RejectsEmptyOutput(t *testing.T) {
 // --- Proceed: crash recovery ---
 
 func TestProceed_CrashRecovery_CreatesMissingChildren(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupPipelineProceedTest(t)
 
 	state := testhelpers.CreateValidState()
@@ -462,6 +478,8 @@ func TestProceed_CrashRecovery_CreatesMissingChildren(t *testing.T) {
 // --- Proceed: crash recovery with all children present ---
 
 func TestProceed_CrashRecovery_AllChildrenExist(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupPipelineProceedTest(t)
 
 	state := testhelpers.CreateValidState()
@@ -521,6 +539,8 @@ func TestProceed_CrashRecovery_AllChildrenExist(t *testing.T) {
 // --- Proceed: output entry validation ---
 
 func TestProceed_RejectsOutputMissingFields(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupPipelineProceedTest(t)
 
 	state := testhelpers.CreateValidState()
@@ -560,6 +580,8 @@ func TestProceed_RejectsOutputMissingFields(t *testing.T) {
 }
 
 func TestProceed_RejectsDestructiveDBOutputWithoutMarker(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupPipelineProceedTest(t)
 
 	state := testhelpers.CreateValidState()
@@ -621,6 +643,8 @@ func setupPipelineProceedTest(t *testing.T) (string, string) {
 }
 
 func TestProceed_PipelineCreatesChildTasksWithRolePair(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupPipelineProceedTest(t)
 
 	state := testhelpers.CreateValidState()
@@ -715,6 +739,8 @@ func TestProceed_PipelineCreatesChildTasksWithRolePair(t *testing.T) {
 }
 
 func TestProceed_RejectsChildDownstreamDependency(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupPipelineProceedTest(t)
 
 	state := testhelpers.CreateValidState()
@@ -753,6 +779,8 @@ func TestProceed_RejectsChildDownstreamDependency(t *testing.T) {
 }
 
 func TestExecuteAvailableTransitions_DownstreamDependencyDoesNotMarkExecuted(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupPipelineProceedTest(t)
 
 	state := testhelpers.CreateValidState()
@@ -811,6 +839,8 @@ func TestExecuteAvailableTransitions_DownstreamDependencyDoesNotMarkExecuted(t *
 }
 
 func TestExecuteAvailableTransitions_CanonicalizesOutputTaskDependsOn(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupPipelineProceedTest(t)
 
 	state := testhelpers.CreateValidState()
@@ -876,6 +906,8 @@ func TestExecuteAvailableTransitions_CanonicalizesOutputTaskDependsOn(t *testing
 }
 
 func TestExecuteAvailableTransitions_OutputCanonicalizationFailureLeavesOutputUnchanged(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupPipelineProceedTest(t)
 
 	state := testhelpers.CreateValidState()
@@ -957,6 +989,8 @@ func TestExecuteAvailableTransitions_OutputCanonicalizationFailureLeavesOutputUn
 }
 
 func TestExecuteAvailableTransitions_MissingOutputTaskDependsOnDoesNotCreateChild(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupPipelineProceedTest(t)
 
 	state := testhelpers.CreateValidState()
@@ -1012,6 +1046,8 @@ func TestExecuteAvailableTransitions_MissingOutputTaskDependsOnDoesNotCreateChil
 }
 
 func TestExecuteAvailableTransitions_CrashRecoveryInvalidMissingChildDoesNotPatchExistingChild(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupPipelineProceedTest(t)
 
 	state := testhelpers.CreateValidState()
@@ -1106,6 +1142,8 @@ func TestExecuteAvailableTransitions_CrashRecoveryInvalidMissingChildDoesNotPatc
 }
 
 func TestExecuteAvailableTransitions_CrashRecoveryCanonicalizesOutputTaskDependsOn(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupPipelineProceedTest(t)
 
 	state := testhelpers.CreateValidState()
@@ -1181,6 +1219,8 @@ func TestExecuteAvailableTransitions_CrashRecoveryCanonicalizesOutputTaskDepends
 }
 
 func TestProceed_RecoverCrashedTransitionRejectsPatchedDownstreamDependency(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, _ := setupPipelineProceedTest(t)
 	resolver, _, err := loadResolver(tmpDir)
 	if err != nil {
@@ -1234,6 +1274,8 @@ func TestProceed_RecoverCrashedTransitionRejectsPatchedDownstreamDependency(t *t
 }
 
 func TestAvailableManualTransitions_PipelineTask(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupPipelineProceedTest(t)
 
 	state := testhelpers.CreateValidState()
@@ -1262,6 +1304,8 @@ func TestAvailableManualTransitions_PipelineTask(t *testing.T) {
 }
 
 func TestProceed_PipelineRejectsAutoTransition(t *testing.T) {
+	t.Parallel()
+
 	// Create a pipeline config with an auto transition to verify proceed rejects it.
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
@@ -1387,6 +1431,8 @@ func setupPhase2PipelineProceedTest(t *testing.T) (string, string) {
 // --- Proceed: one-to-one cardinality ---
 
 func TestProceed_OneToOne_CreatesSingleChild(t *testing.T) {
+	t.Parallel()
+
 	// us-to-coding is now many-to-one (CP1). Test single-member cohort creates one child.
 	tmpDir, stateFile := setupPhase2PipelineProceedTest(t)
 
@@ -1481,6 +1527,8 @@ func TestProceed_OneToOne_CreatesSingleChild(t *testing.T) {
 }
 
 func TestProceed_NoFollowUpRejectsPipelineTransition(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupPhase2PipelineProceedTest(t)
 
 	state := testhelpers.CreateValidState()
@@ -1512,6 +1560,8 @@ func TestProceed_NoFollowUpRejectsPipelineTransition(t *testing.T) {
 }
 
 func TestProceed_EpicToUS_ChildRetainsCodingType(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupPhase2PipelineProceedTest(t)
 
 	state := testhelpers.CreateValidState()
@@ -1570,6 +1620,8 @@ func TestProceed_EpicToUS_ChildRetainsCodingType(t *testing.T) {
 }
 
 func TestProceed_OneToOne_AcceptsMergedApprovedParent(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupPhase2PipelineProceedTest(t)
 
 	state := testhelpers.CreateValidState()
@@ -1610,6 +1662,8 @@ func TestProceed_OneToOne_AcceptsMergedApprovedParent(t *testing.T) {
 }
 
 func TestProceed_OneToOne_RejectsMergedTaskFromWrongRolePair(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupPhase2PipelineProceedTest(t)
 
 	state := testhelpers.CreateValidState()
@@ -1647,6 +1701,8 @@ func TestProceed_OneToOne_RejectsMergedTaskFromWrongRolePair(t *testing.T) {
 }
 
 func TestProceed_OneToOne_CrashRecovery_ChildExists(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupPhase2PipelineProceedTest(t)
 
 	state := testhelpers.CreateValidState()
@@ -1705,6 +1761,8 @@ func TestProceed_OneToOne_CrashRecovery_ChildExists(t *testing.T) {
 }
 
 func TestProceed_OneToOne_CrashRecovery_ChildMissing(t *testing.T) {
+	t.Parallel()
+
 	// us-to-coding is now many-to-one. Test crash recovery: transition marked, child missing.
 	tmpDir, stateFile := setupPhase2PipelineProceedTest(t)
 
@@ -1767,6 +1825,8 @@ func TestProceed_OneToOne_CrashRecovery_ChildMissing(t *testing.T) {
 // --- resolvePhaseRef: 3-part refs ---
 
 func TestResolvePhaseRef_3PartRef(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, _ := setupPhase2PipelineProceedTest(t)
 
 	resolver, _, err := loadResolver(tmpDir)
@@ -1785,6 +1845,8 @@ func TestResolvePhaseRef_3PartRef(t *testing.T) {
 }
 
 func TestResolvePhaseRef_3PartRef_Initial(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, _ := setupPhase2PipelineProceedTest(t)
 
 	resolver, _, err := loadResolver(tmpDir)
@@ -1803,6 +1865,8 @@ func TestResolvePhaseRef_3PartRef_Initial(t *testing.T) {
 }
 
 func TestResolvePhaseRef_2PartRef_StillWorks(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, _ := setupPhase2PipelineProceedTest(t)
 
 	resolver, _, err := loadResolver(tmpDir)
@@ -1823,6 +1887,8 @@ func TestResolvePhaseRef_2PartRef_StillWorks(t *testing.T) {
 // --- AvailableTransitions: pipeline-transitions ---
 
 func TestAvailableManualTransitions_PipelineTransition_USApproved(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupPhase2PipelineProceedTest(t)
 
 	state := testhelpers.CreateValidState()
@@ -1851,6 +1917,8 @@ func TestAvailableManualTransitions_PipelineTransition_USApproved(t *testing.T) 
 }
 
 func TestAvailableManualTransitions_NoFollowUpSuppressesPipelineTransition(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupPhase2PipelineProceedTest(t)
 
 	state := testhelpers.CreateValidState()
@@ -1898,6 +1966,8 @@ func TestAvailableManualTransitions_NoFollowUpSuppressesPipelineTransition(t *te
 }
 
 func TestAvailableManualTransitions_PipelineExcludesExecuted(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupPipelineProceedTest(t)
 
 	state := testhelpers.CreateValidState()
@@ -1929,6 +1999,8 @@ func TestAvailableManualTransitions_PipelineExcludesExecuted(t *testing.T) {
 // --- ExecuteAvailableTransitions tests ---
 
 func TestExecuteAvailableTransitions_CreatesChildrenForMergedTasks(t *testing.T) {
+	t.Parallel()
+
 	// us-to-coding is now many-to-one. Test EAT with single-member cohort.
 	tmpDir, stateFile := setupPhase2PipelineProceedTest(t)
 
@@ -2011,6 +2083,8 @@ func TestExecuteAvailableTransitions_CreatesChildrenForMergedTasks(t *testing.T)
 }
 
 func TestExecuteAvailableTransitions_NoFollowUpSuppressesPipelineTransitions(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupPhase2PipelineProceedTest(t)
 
 	state := testhelpers.CreateValidState()
@@ -2079,6 +2153,8 @@ func TestExecuteAvailableTransitions_NoFollowUpSuppressesPipelineTransitions(t *
 }
 
 func TestExecuteAvailableTransitions_PerSubtask(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupPhase2PipelineProceedTest(t)
 
 	state := testhelpers.CreateValidState()
@@ -2156,6 +2232,8 @@ func TestExecuteAvailableTransitions_PerSubtask(t *testing.T) {
 // Master-planning validation matrix: SC3 maps to TestExecuteAvailableTransitions_MasterPlanningAutoDecompose, SC4 to TestProceed_ArchitectureToCodePlanBypassesMasterPlanning, and SC6 to both master decomposition and downstream ref tests.
 
 func TestExecuteAvailableTransitions_MasterPlanningAutoDecompose(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name              string
 		parentID          string
@@ -2318,6 +2396,8 @@ func TestExecuteAvailableTransitions_MasterPlanningAutoDecompose(t *testing.T) {
 }
 
 func TestProceed_CodePlanningRootRequiresRCAClassificationAtTransition(t *testing.T) {
+	t.Parallel()
+
 	for _, tc := range []struct {
 		name               string
 		transitionExecuted bool
@@ -2343,6 +2423,8 @@ func TestProceed_CodePlanningRootRequiresRCAClassificationAtTransition(t *testin
 }
 
 func TestProceed_CodePlanningRootCrashRecoveryPersistsRCAClassification(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile, parentID := setupCodePlanningRootProceedState(t, true)
 	state, err := db.New(stateFile).Read()
 	if err != nil {
@@ -2440,6 +2522,8 @@ func setupCodePlanningRootProceedState(t *testing.T, transitionExecuted bool) (s
 }
 
 func TestProceed_ArchitectureToCodePlanBypassesMasterPlanning(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupPhase2PipelineProceedTest(t)
 
 	state := testhelpers.CreateValidState()
@@ -2536,6 +2620,8 @@ func TestProceed_ArchitectureToCodePlanBypassesMasterPlanning(t *testing.T) {
 }
 
 func TestProceed_MasterPlanningDownstreamRefs(t *testing.T) {
+	t.Parallel()
+
 	t.Run("coding children keep specialized plan ref and inherited arch ref", func(t *testing.T) {
 		tmpDir, stateFile := setupPhase2PipelineProceedTest(t)
 
@@ -2802,6 +2888,8 @@ func assertDecompositionEqual(t *testing.T, childID string, got, want *models.De
 }
 
 func TestExecuteAvailableTransitions_NoopWhenNoTransitions(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupPhase2PipelineProceedTest(t)
 
 	state := testhelpers.CreateValidState()
@@ -2840,6 +2928,8 @@ func TestExecuteAvailableTransitions_NoopWhenNoTransitions(t *testing.T) {
 }
 
 func TestExecuteAvailableTransitions_Idempotent(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupPhase2PipelineProceedTest(t)
 
 	state := testhelpers.CreateValidState()
@@ -2895,6 +2985,8 @@ func TestExecuteAvailableTransitions_Idempotent(t *testing.T) {
 }
 
 func TestExecuteAvailableTransitions_NoSprintGate(t *testing.T) {
+	t.Parallel()
+
 	// Verify ExecuteAvailableTransitions works regardless of sprint status
 	tmpDir, stateFile := setupPhase2PipelineProceedTest(t)
 
@@ -2945,6 +3037,8 @@ func TestExecuteAvailableTransitions_NoSprintGate(t *testing.T) {
 // The recoverCrashedTransition path is only reachable through direct Proceed calls.
 // This test validates the dedup guard against a pre-seeded scope entry.
 func TestExecuteAvailableTransitions_ScopeDedupGuard(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupPhase2PipelineProceedTest(t)
 
 	state := testhelpers.CreateValidState()
@@ -3024,6 +3118,8 @@ func TestExecuteAvailableTransitions_ScopeDedupGuard(t *testing.T) {
 // --- Proceed: sprint scope update ---
 
 func TestProceed_AddsChildrenToSprintScope(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupPipelineProceedTest(t)
 
 	state := testhelpers.CreateValidState()
@@ -3084,6 +3180,8 @@ func TestProceed_AddsChildrenToSprintScope(t *testing.T) {
 // --- DependsOn tests ---
 
 func TestProceed_DependsOnResolvesToChildTaskIDs(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupPipelineProceedTest(t)
 
 	state := testhelpers.CreateValidState()
@@ -3164,6 +3262,8 @@ func TestProceed_DependsOnResolvesToChildTaskIDs(t *testing.T) {
 }
 
 func TestProceed_DependsOnInvalidIndex(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupPipelineProceedTest(t)
 
 	state := testhelpers.CreateValidState()
@@ -3205,6 +3305,8 @@ func TestProceed_DependsOnInvalidIndex(t *testing.T) {
 }
 
 func TestProceed_DependsOnNonNumeric(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupPipelineProceedTest(t)
 
 	state := testhelpers.CreateValidState()
@@ -3245,6 +3347,8 @@ func TestProceed_DependsOnNonNumeric(t *testing.T) {
 }
 
 func TestProceed_DependsOnSelfReference(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupPipelineProceedTest(t)
 
 	state := testhelpers.CreateValidState()
@@ -3285,6 +3389,8 @@ func TestProceed_DependsOnSelfReference(t *testing.T) {
 }
 
 func TestProceed_ChildTasksGetPlanRefFromOutputEntry(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupPipelineProceedTest(t)
 
 	state := testhelpers.CreateValidState()
@@ -3339,6 +3445,8 @@ func TestProceed_ChildTasksGetPlanRefFromOutputEntry(t *testing.T) {
 }
 
 func TestProceed_PerSubtask_PropagatesDecompositionKindAndDirectRefs(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupPipelineProceedTest(t)
 
 	state := testhelpers.CreateValidState()
@@ -3446,6 +3554,8 @@ func TestProceed_PerSubtask_PropagatesDecompositionKindAndDirectRefs(t *testing.
 }
 
 func TestProceed_PerSubtask_DoesNotFallbackToParentPlanRef(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupPipelineProceedTest(t)
 
 	state := testhelpers.CreateValidState()
@@ -3501,6 +3611,8 @@ func TestProceed_PerSubtask_DoesNotFallbackToParentPlanRef(t *testing.T) {
 }
 
 func TestProceed_OneToOne_InheritsPlanRefFromParent(t *testing.T) {
+	t.Parallel()
+
 	// us-to-coding is now many-to-one (CP1). Many-to-one creates architecture
 	// tasks which don't inherit PlanRef — they produce arch_ref instead.
 	// This test verifies the child is created correctly.
@@ -3574,6 +3686,8 @@ func TestProceed_OneToOne_InheritsPlanRefFromParent(t *testing.T) {
 // --- arch_ref propagation tests ---
 
 func TestProceed_PerSubtask_PropagatesArchRef(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupPipelineProceedTest(t)
 
 	state := testhelpers.CreateValidState()
@@ -3628,6 +3742,8 @@ func TestProceed_PerSubtask_PropagatesArchRef(t *testing.T) {
 }
 
 func TestProceed_PerSubtask_InheritsParentArchRef(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupPipelineProceedTest(t)
 
 	state := testhelpers.CreateValidState()
@@ -3685,6 +3801,8 @@ func TestProceed_PerSubtask_InheritsParentArchRef(t *testing.T) {
 // --- rca_required propagation tests ---
 
 func TestProceed_PerSubtask_ResolvesRCARequired(t *testing.T) {
+	t.Parallel()
+
 	for _, tc := range []struct {
 		name         string
 		parent       bool
@@ -3760,6 +3878,8 @@ func outputValueAt(values []*bool, index int) *bool {
 }
 
 func TestProceed_OneToOne_InheritsRCARequired(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupPipelineProceedTest(t)
 
 	state := testhelpers.CreateValidState()
@@ -3813,6 +3933,8 @@ func TestProceed_OneToOne_InheritsRCARequired(t *testing.T) {
 // --- epic_ref propagation tests ---
 
 func TestProceed_PerSubtask_InheritsParentEpicRef(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupPipelineProceedTest(t)
 
 	state := testhelpers.CreateValidState()
@@ -3868,6 +3990,8 @@ func TestProceed_PerSubtask_InheritsParentEpicRef(t *testing.T) {
 }
 
 func TestProceed_OneToOne_InheritsArchRef(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupPipelineProceedTest(t)
 
 	state := testhelpers.CreateValidState()
@@ -3930,6 +4054,8 @@ func TestProceed_OneToOne_InheritsArchRef(t *testing.T) {
 }
 
 func TestProceed_PerSubtask_EntryArchRefOverridesParent(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupPipelineProceedTest(t)
 
 	state := testhelpers.CreateValidState()
@@ -3984,6 +4110,8 @@ func TestProceed_PerSubtask_EntryArchRefOverridesParent(t *testing.T) {
 // --- computeInheritedDeps tests ---
 
 func TestComputeInheritedDeps_UpstreamExecutedSameTransition(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, _ := setupPipelineProceedTest(t)
 	resolver, _, err := loadResolver(tmpDir)
 	if err != nil {
@@ -4038,6 +4166,8 @@ func TestComputeInheritedDeps_UpstreamExecutedSameTransition(t *testing.T) {
 }
 
 func TestComputeInheritedDeps_UpstreamDidNotExecuteTransition(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, _ := setupPipelineProceedTest(t)
 	resolver, _, err := loadResolver(tmpDir)
 	if err != nil {
@@ -4072,6 +4202,8 @@ func TestComputeInheritedDeps_UpstreamDidNotExecuteTransition(t *testing.T) {
 }
 
 func TestComputeInheritedDeps_UpstreamExecutedDifferentTransition(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, _ := setupPipelineProceedTest(t)
 	resolver, _, err := loadResolver(tmpDir)
 	if err != nil {
@@ -4108,6 +4240,8 @@ func TestComputeInheritedDeps_UpstreamExecutedDifferentTransition(t *testing.T) 
 }
 
 func TestComputeInheritedDeps_MissingUpstreamChild_ReturnsError(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, _ := setupPipelineProceedTest(t)
 	resolver, _, err := loadResolver(tmpDir)
 	if err != nil {
@@ -4157,6 +4291,8 @@ func TestComputeInheritedDeps_MissingUpstreamChild_ReturnsError(t *testing.T) {
 // guard, so a replanned upstream permanently failed every downstream transition.
 
 func TestComputeInheritedDeps_ReplannedUpstream_SkippedNotError(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, _ := setupPipelineProceedTest(t)
 	resolver, _, err := loadResolver(tmpDir)
 	if err != nil {
@@ -4199,6 +4335,8 @@ func TestComputeInheritedDeps_ReplannedUpstream_SkippedNotError(t *testing.T) {
 }
 
 func TestEAT_ReplannedUpstream_DoesNotBlockDownstreamTransitions(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupPipelineProceedTest(t)
 
 	now := time.Now().UTC()
@@ -4286,6 +4424,8 @@ func TestEAT_ReplannedUpstream_DoesNotBlockDownstreamTransitions(t *testing.T) {
 // --- Topological ordering tests ---
 
 func TestEAT_TopoOrdering_UpstreamBeforeDownstream(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupPipelineProceedTest(t)
 
 	now := time.Now().UTC()
@@ -4330,6 +4470,8 @@ func TestEAT_TopoOrdering_UpstreamBeforeDownstream(t *testing.T) {
 }
 
 func TestEAT_StableOrdering_UnrelatedTasksPreserveArrayOrder(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupPipelineProceedTest(t)
 
 	now := time.Now().UTC()
@@ -4372,6 +4514,8 @@ func TestEAT_StableOrdering_UnrelatedTasksPreserveArrayOrder(t *testing.T) {
 }
 
 func TestEAT_CycleDetection_CyclicTasksGetHistoryEvent(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupPipelineProceedTest(t)
 
 	now := time.Now().UTC()
@@ -4436,6 +4580,8 @@ func TestEAT_CycleDetection_CyclicTasksGetHistoryEvent(t *testing.T) {
 }
 
 func TestEAT_CycleDetection_Idempotent(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupPipelineProceedTest(t)
 
 	now := time.Now().UTC()
@@ -4486,6 +4632,8 @@ func TestEAT_CycleDetection_Idempotent(t *testing.T) {
 }
 
 func TestEAT_CycleDetection_DownstreamBlockedTransitively(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupPipelineProceedTest(t)
 
 	now := time.Now().UTC()
@@ -4571,6 +4719,8 @@ func TestEAT_CycleDetection_DownstreamBlockedTransitively(t *testing.T) {
 }
 
 func TestEAT_CycleDetection_IndependentCyclesSeparated(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupPipelineProceedTest(t)
 
 	now := time.Now().UTC()
@@ -4644,6 +4794,8 @@ func TestEAT_CycleDetection_IndependentCyclesSeparated(t *testing.T) {
 }
 
 func TestEAT_CrashRecoveryThroughEAT(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupPipelineProceedTest(t)
 
 	now := time.Now().UTC()
@@ -4689,6 +4841,8 @@ func TestEAT_CrashRecoveryThroughEAT(t *testing.T) {
 // --- Phase-gate propagation tests ---
 
 func TestEAT_PhaseGatePropagation(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupPipelineProceedTest(t)
 
 	now := time.Now().UTC()
@@ -4764,6 +4918,8 @@ func TestEAT_PhaseGatePropagation(t *testing.T) {
 }
 
 func TestProceedInner_InheritedDepsAppendedAfterSiblingDeps(t *testing.T) {
+	t.Parallel()
+
 	now := time.Now().UTC()
 
 	s := &models.State{
@@ -4817,6 +4973,8 @@ func TestProceedInner_InheritedDepsAppendedAfterSiblingDeps(t *testing.T) {
 }
 
 func TestProceedInner_PerSubtaskDedupesDependenciesInStableOrder(t *testing.T) {
+	t.Parallel()
+
 	now := time.Now().UTC()
 	siblingID := perSubtaskChildID("plan-1", "code-plan-to-coding", 0)
 
@@ -4870,6 +5028,8 @@ func TestProceedInner_PerSubtaskDedupesDependenciesInStableOrder(t *testing.T) {
 }
 
 func TestProceed_InheritedDepsViaManualPath(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupPipelineProceedTest(t)
 
 	now := time.Now().UTC()
@@ -4931,6 +5091,8 @@ func TestProceed_InheritedDepsViaManualPath(t *testing.T) {
 }
 
 func TestExecuteAvailableTransitions_DropsSatisfiedDownstreamSupersededInheritedDep(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupPipelineProceedTest(t)
 
 	now := time.Now().UTC()
@@ -4988,6 +5150,8 @@ func TestExecuteAvailableTransitions_DropsSatisfiedDownstreamSupersededInherited
 }
 
 func TestExecuteAvailableTransitions_KeepsLegalPendingReplacementAndDropsSatisfiedDownstreamInheritedDep(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupPipelineProceedTest(t)
 
 	now := time.Now().UTC()
@@ -5049,6 +5213,8 @@ func TestExecuteAvailableTransitions_KeepsLegalPendingReplacementAndDropsSatisfi
 }
 
 func TestExecuteAvailableTransitions_RejectsPendingDownstreamSupersededInheritedDep(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupPipelineProceedTest(t)
 
 	now := time.Now().UTC()
@@ -5106,6 +5272,8 @@ func TestExecuteAvailableTransitions_RejectsPendingDownstreamSupersededInherited
 }
 
 func TestEAT_CrashRecovery_PatchesExistingChildrenWithInheritedDeps(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupPipelineProceedTest(t)
 
 	now := time.Now().UTC()
@@ -5202,6 +5370,8 @@ func setupIntegrationPipelineProceedTest(t *testing.T) (string, string) {
 }
 
 func TestExecuteAvailableTransitions_AutoTransition(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupIntegrationPipelineProceedTest(t)
 
 	state := testhelpers.CreateValidState()
@@ -5285,6 +5455,8 @@ func TestExecuteAvailableTransitions_AutoTransition(t *testing.T) {
 }
 
 func TestExecuteAvailableTransitions_ManualFilterIgnoresAuto(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupIntegrationPipelineProceedTest(t)
 
 	state := testhelpers.CreateValidState()
@@ -5370,6 +5542,8 @@ func setupPhase2GitProceedTest(t *testing.T) (string, string) {
 }
 
 func TestExecuteAvailableTransitions_SnapshotsGoalBaseCommit(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupPhase2GitProceedTest(t)
 
 	// Get actual integration branch HEAD SHA for assertion.
@@ -5435,6 +5609,8 @@ func TestExecuteAvailableTransitions_SnapshotsGoalBaseCommit(t *testing.T) {
 }
 
 func TestExecuteAvailableTransitions_NoBaseCommitOverwrite(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupPhase2GitProceedTest(t)
 
 	state := testhelpers.CreateValidState()
@@ -5518,6 +5694,8 @@ func makeManyToOneCohort(parentID, rolePair string, status models.TaskStatus, sp
 }
 
 func TestProceedManyToOne_HappyPath(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupPhase2PipelineProceedTest(t)
 
 	state := testhelpers.CreateValidState()
@@ -5611,6 +5789,8 @@ func TestProceedManyToOne_HappyPath(t *testing.T) {
 }
 
 func TestProceedManyToOne_CohortIncomplete(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupPhase2PipelineProceedTest(t)
 
 	state := testhelpers.CreateValidState()
@@ -5639,6 +5819,8 @@ func TestProceedManyToOne_CohortIncomplete(t *testing.T) {
 }
 
 func TestProceedManyToOne_MixedMergedAndApproved(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupPhase2PipelineProceedTest(t)
 
 	state := testhelpers.CreateValidState()
@@ -5667,6 +5849,8 @@ func TestProceedManyToOne_MixedMergedAndApproved(t *testing.T) {
 }
 
 func TestProceedManyToOne_Idempotent(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupPhase2PipelineProceedTest(t)
 
 	state := testhelpers.CreateValidState()
@@ -5699,6 +5883,8 @@ func TestProceedManyToOne_Idempotent(t *testing.T) {
 }
 
 func TestProceedManyToOne_NoCohortParent(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupPhase2PipelineProceedTest(t)
 
 	state := testhelpers.CreateValidState()
@@ -5736,6 +5922,8 @@ func TestProceedManyToOne_NoCohortParent(t *testing.T) {
 }
 
 func TestProceedManyToOne_SpecRefInheritance(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupPhase2PipelineProceedTest(t)
 
 	state := testhelpers.CreateValidState()
@@ -5773,6 +5961,8 @@ func TestProceedManyToOne_SpecRefInheritance(t *testing.T) {
 }
 
 func TestComputeInheritedDeps_ManyToOne(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, _ := setupPhase2PipelineProceedTest(t)
 
 	resolver, _, err := loadResolver(tmpDir)
@@ -5832,6 +6022,8 @@ func TestComputeInheritedDeps_ManyToOne(t *testing.T) {
 }
 
 func TestComputeInheritedDeps_ManyToOne_IntraCohortSkipsSelfDep(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, _ := setupPhase2PipelineProceedTest(t)
 
 	resolver, _, err := loadResolver(tmpDir)
@@ -5881,6 +6073,8 @@ func TestComputeInheritedDeps_ManyToOne_IntraCohortSkipsSelfDep(t *testing.T) {
 }
 
 func TestProceedManyToOne_CrashRecovery_MissingChild(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupPhase2PipelineProceedTest(t)
 
 	state := testhelpers.CreateValidState()
@@ -5950,6 +6144,8 @@ func TestProceedManyToOne_CrashRecovery_MissingChild(t *testing.T) {
 }
 
 func TestProceedManyToOne_InheritsRCARequiredFromAnyCohortMember(t *testing.T) {
+	t.Parallel()
+
 	for _, tc := range []struct {
 		name    string
 		flagged []int
@@ -6001,6 +6197,8 @@ func TestProceedManyToOne_InheritsRCARequiredFromAnyCohortMember(t *testing.T) {
 // ExecuteAvailableTransitions with the "" filter (mode_change.go, claiming.go), not
 // "auto". This covers the flag surviving that route.
 func TestExecuteAvailableTransitions_ManyToOnePreservesRCARequired(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupPhase2PipelineProceedTest(t)
 
 	state := testhelpers.CreateValidState()
@@ -6038,6 +6236,8 @@ func TestExecuteAvailableTransitions_ManyToOnePreservesRCARequired(t *testing.T)
 }
 
 func TestProceedManyToOne_CrashRecovery_PreservesRCARequired(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupPhase2PipelineProceedTest(t)
 
 	state := testhelpers.CreateValidState()
@@ -6077,6 +6277,8 @@ func TestProceedManyToOne_CrashRecovery_PreservesRCARequired(t *testing.T) {
 }
 
 func TestProceedManyToOne_CrashRecovery_ChildExists(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, _ := setupPhase2PipelineProceedTest(t)
 
 	resolver, _, err := loadResolver(tmpDir)
@@ -6130,6 +6332,8 @@ func TestProceedManyToOne_CrashRecovery_ChildExists(t *testing.T) {
 }
 
 func TestProceedManyToOne_CrashRecoveryRejectsPatchedDownstreamDependency(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, _ := setupPhase2PipelineProceedTest(t)
 
 	resolver, _, err := loadResolver(tmpDir)
@@ -6170,6 +6374,8 @@ func TestProceedManyToOne_CrashRecoveryRejectsPatchedDownstreamDependency(t *tes
 }
 
 func TestIsTransitionIncomplete_ManyToOne(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, _ := setupPhase2PipelineProceedTest(t)
 
 	resolver, _, err := loadResolver(tmpDir)
@@ -6224,6 +6430,8 @@ func TestIsTransitionIncomplete_ManyToOne(t *testing.T) {
 }
 
 func TestExecuteAvailableTransitions_SkipsReplannedTasks(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupPhase2PipelineProceedTest(t)
 
 	state := testhelpers.CreateValidState()
@@ -6313,6 +6521,8 @@ func TestExecuteAvailableTransitions_SkipsReplannedTasks(t *testing.T) {
 }
 
 func TestExecuteAvailableTransitions_DefensiveSkipsReplannedEvenWithoutTransitionBlock(t *testing.T) {
+	t.Parallel()
+
 	// Tests the defensive layer alone: a replanned task where the preventive
 	// layer (blocking real transition names) was somehow missed. The "replanned"
 	// marker in TransitionsExecuted should still prevent EAT from firing.
@@ -6379,6 +6589,8 @@ func setupTaskSlugProceedTest(t *testing.T) (string, string) {
 }
 
 func TestProceed_TaskSlug_ChildIDsUseSlug(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupTaskSlugProceedTest(t)
 
 	state := testhelpers.CreateValidState()
@@ -6426,6 +6638,8 @@ func TestProceed_TaskSlug_ChildIDsUseSlug(t *testing.T) {
 }
 
 func TestProceed_TaskSlug_CrashRecoveryUsesSlug(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupTaskSlugProceedTest(t)
 
 	state := testhelpers.CreateValidState()
@@ -6560,6 +6774,8 @@ func skippedIndex(entry map[string]any) int {
 }
 
 func TestProceed_PerSubtask_KindDedup_Hit(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupPipelineProceedTest(t)
 
 	state := testhelpers.CreateValidState()
@@ -6666,6 +6882,8 @@ func TestProceed_PerSubtask_KindDedup_Hit(t *testing.T) {
 }
 
 func TestProceed_PerSubtask_KindDedup_Miss(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupPipelineProceedTest(t)
 
 	state := testhelpers.CreateValidState()
@@ -6735,6 +6953,8 @@ func TestProceed_PerSubtask_KindDedup_Miss(t *testing.T) {
 }
 
 func TestProceed_PerSubtask_KindDedup_BlockedInFlight(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupPipelineProceedTest(t)
 
 	state := testhelpers.CreateValidState()
@@ -6807,6 +7027,8 @@ func TestProceed_PerSubtask_KindDedup_BlockedInFlight(t *testing.T) {
 }
 
 func TestProceed_PerSubtask_KindDedup_SupersededUnblocks(t *testing.T) {
+	t.Parallel()
+
 	t.Run("only_superseded", func(t *testing.T) {
 		tmpDir, stateFile := setupPipelineProceedTest(t)
 		state := testhelpers.CreateValidState()
@@ -6934,6 +7156,8 @@ func TestProceed_PerSubtask_KindDedup_SupersededUnblocks(t *testing.T) {
 }
 
 func TestProceed_PerSubtask_KindDedup_DuplicateWithinBatch(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupPipelineProceedTest(t)
 
 	state := testhelpers.CreateValidState()
@@ -6993,6 +7217,8 @@ func TestProceed_PerSubtask_KindDedup_DuplicateWithinBatch(t *testing.T) {
 }
 
 func TestProceed_PerSubtask_KindDedup_CrossGoal(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupPipelineProceedTest(t)
 
 	state := testhelpers.CreateValidState()
@@ -7085,6 +7311,8 @@ func TestProceed_PerSubtask_KindDedup_CrossGoal(t *testing.T) {
 }
 
 func TestProceed_PerSubtask_KindDedup_CrashRecovery(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupPipelineProceedTest(t)
 
 	state := testhelpers.CreateValidState()
@@ -7204,6 +7432,8 @@ func TestProceed_PerSubtask_KindDedup_CrashRecovery(t *testing.T) {
 }
 
 func TestProceed_PerSubtask_NoKind_UnaffectedByDedup(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupPipelineProceedTest(t)
 
 	state := testhelpers.CreateValidState()
@@ -7269,6 +7499,8 @@ func TestProceed_PerSubtask_NoKind_UnaffectedByDedup(t *testing.T) {
 }
 
 func TestProceed_PerSubtask_KindDedup_RejectsUnknownKind(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupPipelineProceedTest(t)
 
 	state := testhelpers.CreateValidState()

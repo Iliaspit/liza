@@ -14,6 +14,8 @@ import (
 )
 
 func TestMarkBlocked_Validation(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name        string
 		taskID      string
@@ -63,6 +65,8 @@ func TestMarkBlocked_Validation(t *testing.T) {
 }
 
 func TestMarkBlocked_Success(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
@@ -122,6 +126,8 @@ func TestMarkBlocked_Success(t *testing.T) {
 }
 
 func TestMarkBlockedWithOptions_DependsOnAndImmediateAlert(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
@@ -175,6 +181,8 @@ func TestMarkBlockedWithOptions_DependsOnAndImmediateAlert(t *testing.T) {
 }
 
 func TestMarkBlockedWithOptions_DependsOnValidation(t *testing.T) {
+	t.Parallel()
+
 	now := time.Now().UTC()
 
 	setupState := func(t *testing.T) string {
@@ -224,6 +232,8 @@ func TestMarkBlockedWithOptions_DependsOnValidation(t *testing.T) {
 }
 
 func TestMarkBlockedWithOptions_RepairRequest(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
@@ -288,6 +298,8 @@ func TestMarkBlockedWithOptions_RepairRequest(t *testing.T) {
 }
 
 func TestMarkBlockedWithOptions_DeclarativeDependencyRepair(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
@@ -417,6 +429,8 @@ func TestMarkBlockedWithOptions_DeclarativeDependencyRepair(t *testing.T) {
 }
 
 func TestMarkBlockedWithOptions_RepairRequestRequiresCompleteRequest(t *testing.T) {
+	t.Parallel()
+
 	valid := models.RepairRequest{
 		Operation:  "add-task",
 		Target:     "architecture-2",
@@ -478,6 +492,8 @@ func TestMarkBlockedWithOptions_RepairRequestRequiresCompleteRequest(t *testing.
 }
 
 func TestMarkBlockedWithOptions_RepairRequestRequiresStructuredFailureEvidence(t *testing.T) {
+	t.Parallel()
+
 	_, err := MarkBlockedWithOptions(
 		"/nonexistent",
 		"task-1",
@@ -503,6 +519,8 @@ func TestMarkBlockedWithOptions_RepairRequestRequiresStructuredFailureEvidence(t
 }
 
 func TestMarkBlockedWithOptions_RepairRequestAcceptsStructuredFailureEvidence(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
@@ -536,6 +554,8 @@ func TestMarkBlockedWithOptions_RepairRequestAcceptsStructuredFailureEvidence(t 
 }
 
 func TestMarkBlockedWithOptions_RepairRequestAcceptsStandaloneErrorEvidence(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
@@ -569,6 +589,8 @@ func TestMarkBlockedWithOptions_RepairRequestAcceptsStandaloneErrorEvidence(t *t
 }
 
 func TestMarkBlocked_TaskNotFound(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
@@ -585,6 +607,8 @@ func TestMarkBlocked_TaskNotFound(t *testing.T) {
 }
 
 func TestMarkBlocked_WrongStatus(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
@@ -605,6 +629,8 @@ func TestMarkBlocked_WrongStatus(t *testing.T) {
 }
 
 func TestMarkBlocked_PipelineExecutingStatus(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupPipelineTest(t)
 
 	now := time.Now().UTC()
@@ -657,6 +683,8 @@ func TestMarkBlocked_PipelineExecutingStatus(t *testing.T) {
 }
 
 func TestMarkBlocked_PipelineNonExecutingStatus(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, stateFile := setupPipelineTest(t)
 
 	now := time.Now().UTC()
@@ -688,6 +716,8 @@ func TestMarkBlocked_PipelineNonExecutingStatus(t *testing.T) {
 }
 
 func TestMarkBlocked_WrongAgent(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 

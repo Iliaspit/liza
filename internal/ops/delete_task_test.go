@@ -30,6 +30,8 @@ func setupStateWithDeps(t *testing.T, tmpDir string) string {
 // --- CheckDeleteTask tests ---
 
 func TestCheckDeleteTask_Validation(t *testing.T) {
+	t.Parallel()
+
 	_, err := CheckDeleteTask("/nonexistent", "", false)
 	if err == nil {
 		t.Fatal("Expected error for empty task ID")
@@ -40,6 +42,8 @@ func TestCheckDeleteTask_Validation(t *testing.T) {
 }
 
 func TestCheckDeleteTask_NotFound(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 	testhelpers.WriteInitialState(t, stateFile, testhelpers.CreateValidState())
@@ -54,6 +58,8 @@ func TestCheckDeleteTask_NotFound(t *testing.T) {
 }
 
 func TestCheckDeleteTask_StatusBlocked(t *testing.T) {
+	t.Parallel()
+
 	now := time.Now().UTC()
 	validLease := now.Add(1 * time.Hour)
 
@@ -91,6 +97,8 @@ func TestCheckDeleteTask_StatusBlocked(t *testing.T) {
 }
 
 func TestCheckDeleteTask_MergedForce(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 	state := testhelpers.CreateValidState()
@@ -107,6 +115,8 @@ func TestCheckDeleteTask_MergedForce(t *testing.T) {
 }
 
 func TestCheckDeleteTask_DependentsBlocked(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	setupStateWithDeps(t, tmpDir)
 
@@ -120,6 +130,8 @@ func TestCheckDeleteTask_DependentsBlocked(t *testing.T) {
 }
 
 func TestCheckDeleteTask_DependentsForce(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	setupStateWithDeps(t, tmpDir)
 
@@ -133,6 +145,8 @@ func TestCheckDeleteTask_DependentsForce(t *testing.T) {
 }
 
 func TestCheckDeleteTask_ReturnsInfo(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 	state := testhelpers.CreateValidState()
@@ -160,6 +174,8 @@ func TestCheckDeleteTask_ReturnsInfo(t *testing.T) {
 // --- DeleteTask tests ---
 
 func TestDeleteTask_Validation(t *testing.T) {
+	t.Parallel()
+
 	_, err := DeleteTask("/nonexistent", "", false, false, "reason")
 	if err == nil {
 		t.Fatal("Expected error for empty task ID")
@@ -170,6 +186,8 @@ func TestDeleteTask_Validation(t *testing.T) {
 }
 
 func TestDeleteTask_SuccessfulDeletion(t *testing.T) {
+	t.Parallel()
+
 	for _, status := range []models.TaskStatus{models.TaskStatusDraft, models.TaskStatusReady} {
 		t.Run(string(status), func(t *testing.T) {
 			tmpDir := t.TempDir()
@@ -199,6 +217,8 @@ func TestDeleteTask_SuccessfulDeletion(t *testing.T) {
 }
 
 func TestDeleteTask_ForceMerged(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 	state := testhelpers.CreateValidState()
@@ -215,6 +235,8 @@ func TestDeleteTask_ForceMerged(t *testing.T) {
 }
 
 func TestDeleteTask_ClearsAgentState(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 	state := testhelpers.CreateValidState()
@@ -253,6 +275,8 @@ func TestDeleteTask_ClearsAgentState(t *testing.T) {
 }
 
 func TestDeleteTask_RemovesFromSprintScope(t *testing.T) {
+	t.Parallel()
+
 	for _, scope := range []string{"planned", "stretch"} {
 		t.Run(scope, func(t *testing.T) {
 			tmpDir := t.TempDir()
@@ -294,6 +318,8 @@ func TestDeleteTask_RemovesFromSprintScope(t *testing.T) {
 }
 
 func TestDeleteTask_AddsAuditTrail(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 	state := testhelpers.CreateValidState()
@@ -328,6 +354,8 @@ func TestDeleteTask_AddsAuditTrail(t *testing.T) {
 // --- DeleteTask precondition enforcement (direct calls bypassing CheckDeleteTask) ---
 
 func TestDeleteTask_StatusBlocked(t *testing.T) {
+	t.Parallel()
+
 	now := time.Now().UTC()
 	validLease := now.Add(1 * time.Hour)
 
@@ -365,6 +393,8 @@ func TestDeleteTask_StatusBlocked(t *testing.T) {
 }
 
 func TestDeleteTask_DependentsBlocked(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile := setupStateWithDeps(t, tmpDir)
 
@@ -388,6 +418,8 @@ func TestDeleteTask_DependentsBlocked(t *testing.T) {
 }
 
 func TestDeleteTask_DependentsForce(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	setupStateWithDeps(t, tmpDir)
 
@@ -401,6 +433,8 @@ func TestDeleteTask_DependentsForce(t *testing.T) {
 }
 
 func TestDeleteTask_BlocksDeletionWhenChildParentTaskReferencesTarget(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 	now := time.Now().UTC()
@@ -431,6 +465,8 @@ func TestDeleteTask_BlocksDeletionWhenChildParentTaskReferencesTarget(t *testing
 }
 
 func TestDeleteTask_ParentReferenceForceBypassesBlock(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 	now := time.Now().UTC()
@@ -466,6 +502,8 @@ func TestDeleteTask_ParentReferenceForceBypassesBlock(t *testing.T) {
 // --- Worktree handling ---
 
 func TestDeleteTask_NoWorktree(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 	state := testhelpers.CreateValidState()
@@ -487,6 +525,8 @@ func TestDeleteTask_NoWorktree(t *testing.T) {
 }
 
 func TestDeleteTask_WorktreePreserved(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 	state := testhelpers.CreateValidState()
@@ -509,6 +549,8 @@ func TestDeleteTask_WorktreePreserved(t *testing.T) {
 }
 
 func TestDeleteTask_CommitFailureDoesNotDeleteWorktreeOrBranch(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)

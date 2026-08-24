@@ -7,6 +7,8 @@ import (
 )
 
 func TestOperationalError_Error(t *testing.T) {
+	t.Parallel()
+
 	t.Run("includes both Message and Err", func(t *testing.T) {
 		inner := errors.New("permission denied")
 		e := &OperationalError{Message: "failed to load config", Err: inner}
@@ -28,6 +30,8 @@ func TestOperationalError_Error(t *testing.T) {
 }
 
 func TestOperationalError_Unwrap(t *testing.T) {
+	t.Parallel()
+
 	t.Run("returns inner error", func(t *testing.T) {
 		inner := errors.New("disk full")
 		e := &OperationalError{Message: "write failed", Err: inner}
@@ -45,6 +49,8 @@ func TestOperationalError_Unwrap(t *testing.T) {
 }
 
 func TestOperationalError_ErrorsAs_InnerType(t *testing.T) {
+	t.Parallel()
+
 	// OperationalError wrapping a PreconditionError — errors.As should
 	// match the inner PreconditionError through the Unwrap chain.
 	inner := &PreconditionError{Reason: "bad input"}

@@ -2,6 +2,51 @@
 
 Deliberate debt with payback triggers. See CORE.md Rule 3 (DoD) for policy.
 
+## CI does not yet enforce the split test targets
+
+**What:** Routine `make test` no longer enables the race detector or writes a
+fixed `coverage.out`. The current CI workflow still invokes only `make test` and
+then attempts to upload `coverage.out`, so CI neither runs the new
+`make test-race` concurrency gate nor generates the profile expected by its
+Codecov step. Final local validation is enforced through the worktree build
+prerequisite lesson in the meantime.
+
+**Why deferred:** The test-suite performance goal explicitly excludes CI
+pipeline configuration. Keeping target semantics and CI orchestration as
+separate changes avoids silently expanding a performance implementation into a
+workflow-policy change.
+
+**Payback trigger:** Before the next CI workflow change or release cut, add a
+dedicated `make test-race` step, run `make coverage` where Codecov upload is
+desired, and update the upload step to consume an intentionally retained
+profile rather than the target's self-cleaning temporary file.
+
+## CLI, commands, and integration tests cache nondeterministically
+
+**What:** Unchanged `make test` runs consistently cache `internal/testguard`
+after its source walk was bounded, but `cmd/liza`, `internal/commands`, and
+`internal/tui` re-run on every repeat, and `internal/integration` re-runs
+intermittently — it reported `(cached)` on one repeat and re-ran on the next
+with the tree untouched. Their test logs carry run-specific temporary working
+directories and environment/file observations, so Go computes a fresh
+test-cache input for some or all of these processes each run. Wall time for an
+unchanged repeat therefore varies with which packages happen to hit: measured
+repeats span 45.4s to 103.1s across two checkouts.
+
+**Why deferred:** Removing the remaining cache inputs requires a separate audit
+of process-wide cwd/environment mutation across the CLI, commands, and
+integration suites. That is materially broader than correcting the reviewed
+performance claim and the two local Makefile controls.
+
+**Payback trigger:** Before claiming a reliable unchanged full-suite run under
+60s, or the next time test-suite latency is prioritized, use
+`GODEBUG=gocachetest=1` and test-log traces to remove run-specific inputs from
+`cmd/liza`, `internal/commands`, and `internal/integration`. Close on cache
+status, not wall clock: two consecutive unchanged runs in which every
+test-bearing package reports `(cached)`. A wall-clock threshold can be met by
+variance alone — one measured repeat already came in at 45.4s with none of
+these inputs removed.
+
 ## Legacy built-in readiness surface
 
 **What:** `tasks.legacy_coder_claimable`,

@@ -11,6 +11,8 @@ import (
 )
 
 func TestEvaluateIntegrationProgress(t *testing.T) {
+	t.Parallel()
+
 	available := pipeline.SlicedIntegrationCapability{Available: true}
 
 	t.Run("decomposition root with pending output keeps planning unsettled", func(t *testing.T) {
@@ -428,6 +430,8 @@ func TestEvaluateIntegrationProgress(t *testing.T) {
 }
 
 func TestEvaluateLiveIntegrationProgress(t *testing.T) {
+	t.Parallel()
+
 	fixture := newReconcileFixture(t, false)
 	state := fixture.readState(t)
 

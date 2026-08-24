@@ -8,6 +8,8 @@ import (
 )
 
 func TestFreshClaimStrategy_MutateTask_SetsAttemptOnFirstClaim(t *testing.T) {
+	t.Parallel()
+
 	task := &models.Task{Attempt: 0}
 	ctx := &claimContext{
 		worktreeRel: ".worktrees/test-task",
@@ -22,6 +24,8 @@ func TestFreshClaimStrategy_MutateTask_SetsAttemptOnFirstClaim(t *testing.T) {
 }
 
 func TestFreshClaimStrategy_MutateTask_PreservesNonZeroAttempt(t *testing.T) {
+	t.Parallel()
+
 	task := &models.Task{Attempt: 2}
 	ctx := &claimContext{
 		worktreeRel: ".worktrees/test-task",
@@ -36,6 +40,8 @@ func TestFreshClaimStrategy_MutateTask_PreservesNonZeroAttempt(t *testing.T) {
 }
 
 func TestIntegrationFixClaimStrategy_MutateTask_ClearsStaleAttemptMetadata(t *testing.T) {
+	t.Parallel()
+
 	reviewCommit := "review-sha"
 	approvedBy := "reviewer-1"
 	mergeCommit := "merge-sha"

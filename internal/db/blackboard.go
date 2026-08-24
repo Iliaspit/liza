@@ -75,6 +75,13 @@ func ResetInstances() {
 	})
 }
 
+// ResetInstance clears the cached singleton for one state path.
+// Intended for tests that simulate a process restart without disturbing
+// independent fixtures running concurrently.
+func ResetInstance(statePath string) {
+	instances.Delete(filepath.Clean(statePath))
+}
+
 // WithLockTimeout creates a new independent instance with a custom lock timeout;
 // cached bytes are copied at creation time but diverge afterward. The returned
 // instance is intentionally NOT registered in the singleton map — it is a

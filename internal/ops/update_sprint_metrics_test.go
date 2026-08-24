@@ -11,6 +11,8 @@ import (
 )
 
 func TestComputeSprintMetrics_Empty(t *testing.T) {
+	t.Parallel()
+
 	state := testhelpers.CreateValidState()
 	metrics := state.ComputeSprintMetrics()
 
@@ -26,6 +28,8 @@ func TestComputeSprintMetrics_Empty(t *testing.T) {
 }
 
 func TestComputeSprintMetrics_TaskCounting(t *testing.T) {
+	t.Parallel()
+
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()
 
@@ -55,6 +59,8 @@ func TestComputeSprintMetrics_TaskCounting(t *testing.T) {
 }
 
 func TestComputeSprintMetrics_ReviewVerdicts(t *testing.T) {
+	t.Parallel()
+
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()
 
@@ -112,6 +118,8 @@ func TestComputeSprintMetrics_ReviewVerdicts(t *testing.T) {
 }
 
 func TestComputeSprintMetrics_TaskOutcomeApprovalRate(t *testing.T) {
+	t.Parallel()
+
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()
 
@@ -142,6 +150,8 @@ func TestComputeSprintMetrics_TaskOutcomeApprovalRate(t *testing.T) {
 }
 
 func TestComputeSprintMetrics_AgentIterations(t *testing.T) {
+	t.Parallel()
+
 	state := testhelpers.CreateValidState()
 	state.Agents["agent-1"] = models.Agent{IterationsTotal: 5}
 	state.Agents["agent-2"] = models.Agent{IterationsTotal: 3}
@@ -154,6 +164,8 @@ func TestComputeSprintMetrics_AgentIterations(t *testing.T) {
 }
 
 func TestComputeSprintMetrics_ReviewCyclesAggregated(t *testing.T) {
+	t.Parallel()
+
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()
 
@@ -178,6 +190,8 @@ func TestComputeSprintMetrics_ReviewCyclesAggregated(t *testing.T) {
 }
 
 func TestCheckSuspiciousRates(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name        string
 		metrics     models.SprintMetrics
@@ -276,6 +290,8 @@ func TestCheckSuspiciousRates(t *testing.T) {
 }
 
 func TestUpdateSprintMetrics(t *testing.T) {
+	t.Parallel()
+
 	now := time.Now().UTC()
 	tmpDir := t.TempDir()
 
@@ -309,6 +325,8 @@ func TestUpdateSprintMetrics(t *testing.T) {
 }
 
 func TestUpdateSprintMetrics_CountsPipelineCleanStatusAsDone(t *testing.T) {
+	t.Parallel()
+
 	now := time.Now().UTC()
 	tmpDir := t.TempDir()
 

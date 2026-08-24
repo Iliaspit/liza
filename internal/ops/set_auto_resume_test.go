@@ -8,6 +8,8 @@ import (
 )
 
 func TestSetAutoResume(t *testing.T) {
+	t.Parallel()
+
 	t.Run("sets AutoResume to true", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)

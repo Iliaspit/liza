@@ -62,6 +62,8 @@ func testOrchestratorResolver(t *testing.T) *pipeline.Resolver {
 }
 
 func TestFindOrchestratorID(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name      string
 		agents    map[string]models.Agent
@@ -132,6 +134,8 @@ func TestFindOrchestratorID(t *testing.T) {
 }
 
 func TestResolveOrchestratorFromState(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
@@ -149,6 +153,8 @@ func TestResolveOrchestratorFromState(t *testing.T) {
 }
 
 func TestResolveOrchestratorFromState_NoOrchestrator(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
@@ -163,6 +169,8 @@ func TestResolveOrchestratorFromState_NoOrchestrator(t *testing.T) {
 }
 
 func TestResolveOrchestratorFromState_CustomRoleKeyWithResolver(t *testing.T) {
+	t.Parallel()
+
 	resolver := testOrchestratorResolver(t)
 
 	tmpDir := t.TempDir()
@@ -183,6 +191,8 @@ func TestResolveOrchestratorFromState_CustomRoleKeyWithResolver(t *testing.T) {
 }
 
 func TestResolveOrchestratorFromState_StandardRoleKeyWithResolver(t *testing.T) {
+	t.Parallel()
+
 	resolver := testOrchestratorResolver(t)
 
 	tmpDir := t.TempDir()
@@ -202,6 +212,8 @@ func TestResolveOrchestratorFromState_StandardRoleKeyWithResolver(t *testing.T) 
 }
 
 func TestResolveOrchestratorFromState_MultipleOrchestratorTypesWithResolver(t *testing.T) {
+	t.Parallel()
+
 	resolver := testOrchestratorResolver(t)
 
 	tmpDir := t.TempDir()

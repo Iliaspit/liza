@@ -10,6 +10,8 @@ import (
 )
 
 func TestSetTaskOutput_Validation(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name        string
 		input       SetTaskOutputInput
@@ -155,6 +157,8 @@ func TestSetTaskOutput_Validation(t *testing.T) {
 }
 
 func TestSetTaskOutput_TaskNotFound(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
@@ -170,6 +174,8 @@ func TestSetTaskOutput_TaskNotFound(t *testing.T) {
 }
 
 func TestSetTaskOutput_WrongStatus(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 	now := time.Now().UTC()
@@ -189,6 +195,8 @@ func TestSetTaskOutput_WrongStatus(t *testing.T) {
 }
 
 func TestSetTaskOutput_WrongAgent(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 	now := time.Now().UTC()
@@ -208,6 +216,8 @@ func TestSetTaskOutput_WrongAgent(t *testing.T) {
 }
 
 func TestSetTaskOutput_HappyPath(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 	now := time.Now().UTC()
@@ -258,6 +268,8 @@ func TestSetTaskOutput_HappyPath(t *testing.T) {
 }
 
 func TestSetTaskOutput_EmptyOutput(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 	now := time.Now().UTC()
@@ -293,6 +305,8 @@ func TestSetTaskOutput_EmptyOutput(t *testing.T) {
 }
 
 func TestSetTaskOutput_Idempotent(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 	now := time.Now().UTC()
@@ -337,6 +351,8 @@ func TestSetTaskOutput_Idempotent(t *testing.T) {
 }
 
 func TestSetTaskOutput_NormalizesWorktreeSpecRef(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 	now := time.Now().UTC()
@@ -382,6 +398,8 @@ func TestSetTaskOutput_NormalizesWorktreeSpecRef(t *testing.T) {
 }
 
 func TestSetTaskOutput_NormalizesWorktreePlanRef(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 	now := time.Now().UTC()
@@ -427,6 +445,8 @@ func TestSetTaskOutput_NormalizesWorktreePlanRef(t *testing.T) {
 }
 
 func TestSetTaskOutput_NormalizesWorktreeArchRef(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 	now := time.Now().UTC()
@@ -472,6 +492,8 @@ func TestSetTaskOutput_NormalizesWorktreeArchRef(t *testing.T) {
 }
 
 func TestSetTaskOutput_NormalizesWorktreeEpicRef(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 	now := time.Now().UTC()
@@ -517,6 +539,8 @@ func TestSetTaskOutput_NormalizesWorktreeEpicRef(t *testing.T) {
 }
 
 func TestSetTaskOutput_DependsOnRoundTrip(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 	now := time.Now().UTC()
@@ -571,6 +595,8 @@ func TestSetTaskOutput_DependsOnRoundTrip(t *testing.T) {
 }
 
 func TestSetTaskOutput_DependsOnValidation(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name        string
 		output      []models.OutputEntry
@@ -633,6 +659,8 @@ func TestSetTaskOutput_DependsOnValidation(t *testing.T) {
 }
 
 func TestSetTaskOutput_TaskDependsOnRejectsMissingTask(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 	now := time.Now().UTC()
@@ -658,6 +686,8 @@ func TestSetTaskOutput_TaskDependsOnRejectsMissingTask(t *testing.T) {
 }
 
 func TestSetTaskOutput_TaskDependsOnRejectsTerminalNonMergedTask(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 	now := time.Now().UTC()
@@ -691,6 +721,8 @@ func TestSetTaskOutput_TaskDependsOnRejectsTerminalNonMergedTask(t *testing.T) {
 }
 
 func TestSetTaskOutput_TaskDependsOnRejectsDownstreamRolePair(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 	now := time.Now().UTC()
@@ -721,6 +753,8 @@ func TestSetTaskOutput_TaskDependsOnRejectsDownstreamRolePair(t *testing.T) {
 }
 
 func TestSetTaskOutput_TaskDependsOnAllowsTargetRolePairPeer(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 	now := time.Now().UTC()
@@ -752,6 +786,8 @@ func TestSetTaskOutput_TaskDependsOnAllowsTargetRolePairPeer(t *testing.T) {
 }
 
 func TestSetTaskOutput_CodePlanningStatus(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 	now := time.Now().UTC()
@@ -774,6 +810,8 @@ func TestSetTaskOutput_CodePlanningStatus(t *testing.T) {
 }
 
 func TestSetTaskOutput_DecompositionRootRequiresRoleArtifactRef(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name        string
 		rolePair    string
@@ -818,6 +856,8 @@ func TestSetTaskOutput_DecompositionRootRequiresRoleArtifactRef(t *testing.T) {
 }
 
 func TestSetTaskOutput_DecompositionRootValidation(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name        string
 		mutate      func([]models.OutputEntry) []models.OutputEntry
@@ -956,6 +996,8 @@ func TestSetTaskOutput_DecompositionRootValidation(t *testing.T) {
 }
 
 func TestSetTaskOutput_DecompositionRootAcceptsValidOutput(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := setupSetTaskOutputRootTask(t, "code-planning-main-pair", models.TaskStatus("CODE_PLANNING_MAIN"))
 
 	err := SetTaskOutput(tmpDir, &SetTaskOutputInput{
@@ -969,6 +1011,8 @@ func TestSetTaskOutput_DecompositionRootAcceptsValidOutput(t *testing.T) {
 }
 
 func TestValidateDecompositionRootOutput_UsesConfiguredOutputRef(t *testing.T) {
+	t.Parallel()
+
 	state := testhelpers.CreateValidState()
 	state.Tasks = []models.Task{
 		testhelpers.BuildTaskByStatus("existing-plan", models.TaskStatusMerged, time.Now().UTC()),
@@ -987,6 +1031,8 @@ func TestValidateDecompositionRootOutput_UsesConfiguredOutputRef(t *testing.T) {
 }
 
 func TestValidateDecompositionRootOutput_RCARequirementUsesConfiguredTopology(t *testing.T) {
+	t.Parallel()
+
 	state := testhelpers.CreateValidState()
 	state.Tasks = []models.Task{
 		testhelpers.BuildTaskByStatus("existing-plan", models.TaskStatusMerged, time.Now().UTC()),
@@ -1013,6 +1059,8 @@ func TestValidateDecompositionRootOutput_RCARequirementUsesConfiguredTopology(t 
 }
 
 func TestValidateDependsOnAcyclicRejectsOutOfRangeReference(t *testing.T) {
+	t.Parallel()
+
 	output := []models.OutputEntry{
 		{
 			Desc:      "Plan storage",
@@ -1028,6 +1076,8 @@ func TestValidateDependsOnAcyclicRejectsOutOfRangeReference(t *testing.T) {
 }
 
 func TestSetTaskOutput_NonRootAllowsOutputWithoutDecomposition(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 	now := time.Now().UTC()

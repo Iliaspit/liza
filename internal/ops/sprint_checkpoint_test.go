@@ -13,6 +13,8 @@ import (
 )
 
 func TestSprintCheckpoint_Success(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
@@ -66,6 +68,8 @@ func TestSprintCheckpoint_Success(t *testing.T) {
 }
 
 func TestSprintCheckpoint_StoresTrigger(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
@@ -91,6 +95,8 @@ func TestSprintCheckpoint_StoresTrigger(t *testing.T) {
 }
 
 func TestSprintCheckpoint_EmptyTrigger(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
@@ -116,6 +122,8 @@ func TestSprintCheckpoint_EmptyTrigger(t *testing.T) {
 }
 
 func TestSprintCheckpoint_AutoDetectsPlanningComplete(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
@@ -161,6 +169,8 @@ func TestSprintCheckpoint_AutoDetectsPlanningComplete(t *testing.T) {
 }
 
 func TestSprintCheckpoint_AutoDetectsManyToOneReady(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 	testhelpers.SetupPipelineConfig(t, tmpDir)
@@ -192,6 +202,8 @@ func TestSprintCheckpoint_AutoDetectsManyToOneReady(t *testing.T) {
 }
 
 func TestSprintCheckpoint_AlreadyAtCheckpoint(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
@@ -209,6 +221,8 @@ func TestSprintCheckpoint_AlreadyAtCheckpoint(t *testing.T) {
 }
 
 func TestSprintCheckpoint_CompletedSprint(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
@@ -226,6 +240,8 @@ func TestSprintCheckpoint_CompletedSprint(t *testing.T) {
 }
 
 func TestSprintCheckpoint_AbortedSprint(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
@@ -243,6 +259,8 @@ func TestSprintCheckpoint_AbortedSprint(t *testing.T) {
 }
 
 func TestFormatDuration(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name     string
 		duration time.Duration
@@ -265,6 +283,8 @@ func TestFormatDuration(t *testing.T) {
 }
 
 func TestGenerateSprintSummary_WithAnomalies(t *testing.T) {
+	t.Parallel()
+
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()
 	state.Sprint.Timeline.Started = now.Add(-1 * time.Hour)
@@ -285,6 +305,8 @@ func TestGenerateSprintSummary_WithAnomalies(t *testing.T) {
 }
 
 func TestGenerateSprintSummary_Overdue(t *testing.T) {
+	t.Parallel()
+
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()
 	state.Sprint.Timeline.Started = now.Add(-10 * time.Hour)
@@ -298,6 +320,8 @@ func TestGenerateSprintSummary_Overdue(t *testing.T) {
 }
 
 func TestGenerateSprintSummary_WithAgents(t *testing.T) {
+	t.Parallel()
+
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()
 	state.Sprint.Timeline.Started = now.Add(-1 * time.Hour)
@@ -320,6 +344,8 @@ func TestGenerateSprintSummary_WithAgents(t *testing.T) {
 }
 
 func TestGenerateSprintSummary_CircuitBreakerTriggered(t *testing.T) {
+	t.Parallel()
+
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()
 	state.Sprint.Timeline.Started = now.Add(-1 * time.Hour)

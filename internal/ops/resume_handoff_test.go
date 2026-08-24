@@ -11,6 +11,8 @@ import (
 )
 
 func TestResumeHandoff_Validation(t *testing.T) {
+	t.Parallel()
+
 	t.Run("empty agent ID", func(t *testing.T) {
 		_, err := ResumeHandoff(ResumeHandoffInput{
 			ProjectRoot: "/tmp",
@@ -26,6 +28,8 @@ func TestResumeHandoff_Validation(t *testing.T) {
 }
 
 func TestResumeHandoff_NoHandoffFound(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
@@ -62,6 +66,8 @@ func TestResumeHandoff_NoHandoffFound(t *testing.T) {
 }
 
 func TestResumeHandoff_Success(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
@@ -140,6 +146,8 @@ func TestResumeHandoff_Success(t *testing.T) {
 }
 
 func TestResumeHandoff_MissingWorktree(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
@@ -169,6 +177,8 @@ func TestResumeHandoff_MissingWorktree(t *testing.T) {
 }
 
 func TestResumeHandoff_WrongAgent(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
@@ -201,6 +211,8 @@ func TestResumeHandoff_WrongAgent(t *testing.T) {
 }
 
 func TestResumeHandoff_TaskNotImplementing(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
@@ -233,6 +245,8 @@ func TestResumeHandoff_TaskNotImplementing(t *testing.T) {
 }
 
 func TestResumeHandoff_StaleCandidateSkipped(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
@@ -286,6 +300,8 @@ func TestResumeHandoff_StaleCandidateSkipped(t *testing.T) {
 }
 
 func TestResumeHandoff_AlwaysRefreshesLease(t *testing.T) {
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
