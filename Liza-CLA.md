@@ -2,7 +2,7 @@
 
 This Contributor License Agreement (“**CLA**”) clarifies the intellectual property rights granted with Contributions (as defined below) from any person or entity to the Maintainer.
 
-Please read this CLA carefully before accepting its terms and conditions. This is a legal document. By opening a pull request on GitHub for the Project or by otherwise submitting a Contribution to the Project, You acknowledge that you have read and understood this CLA and You agree to be legally bound by the following terms and conditions for Your present and future Contributions to the Project. Except for the licenses granted herein to the Maintainer, You reserve all right, title, and interest in and to Your Contributions.
+Please read this CLA carefully before accepting its terms and conditions. This is a legal document. By signing this CLA through the Project's CLA workflow, You acknowledge that you have read and understood this CLA and You agree to be legally bound by the following terms and conditions for Your present and future Contributions to the Project. Except for the licenses granted herein to the Maintainer, You reserve all right, title, and interest in and to Your Contributions.
 
 ## 1. Definitions
 
