@@ -30,6 +30,7 @@ type MarkAgentDegradedInput struct {
 	LastError      string
 	RecoverHint    string
 	DegradedBy     string
+	Authority      *models.AgentAuthority
 }
 
 // InfraClaimErrorClassification describes a claim failure that indicates the
@@ -55,10 +56,15 @@ func MarkAgentDegraded(input MarkAgentDegradedInput) error {
 	if input.LastError == "" {
 		return &PreconditionError{Reason: "last error is required"}
 	}
+	if input.Authority != nil {
+		if err := requireAuthorityActor(*input.Authority, input.AgentID); err != nil {
+			return err
+		}
+	}
 
 	bb := db.For(paths.New(input.ProjectRoot).StatePath())
 	now := time.Now().UTC()
-	return bb.Modify(func(state *models.State) error {
+	return lifecycleMutation(bb, input.Authority)(func(state *models.State) error {
 		agent, hasAgent := state.Agents[input.AgentID]
 		if state.AgentHealth == nil {
 			state.AgentHealth = make(map[string]models.AgentHealth)
@@ -115,11 +121,26 @@ func MarkAgentDegraded(input MarkAgentDegradedInput) error {
 // ClearAgentDegraded removes current degraded health for an agent ID. It is
 // idempotent so callers can clear after a successful claim without pre-checks.
 func ClearAgentDegraded(projectRoot, agentID string) error {
+	return clearAgentDegraded(projectRoot, agentID, nil)
+}
+
+// ClearAgentDegradedWithAuthority fences supervisor-driven health cleanup with
+// the caller's current registration generation.
+func ClearAgentDegradedWithAuthority(projectRoot string, authority models.AgentAuthority) error {
+	return clearAgentDegraded(projectRoot, authority.ID, &authority)
+}
+
+func clearAgentDegraded(projectRoot, agentID string, authority *models.AgentAuthority) error {
 	if agentID == "" {
 		return &PreconditionError{Reason: "agent ID is required"}
 	}
+	if authority != nil {
+		if err := requireAuthorityActor(*authority, agentID); err != nil {
+			return err
+		}
+	}
 	bb := db.For(paths.New(projectRoot).StatePath())
-	return bb.Modify(func(state *models.State) error {
+	return lifecycleMutation(bb, authority)(func(state *models.State) error {
 		if state.AgentHealth == nil {
 			return nil
 		}

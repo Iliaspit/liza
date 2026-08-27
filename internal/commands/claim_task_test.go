@@ -237,7 +237,7 @@ func TestClaimTaskCommand(t *testing.T) {
 				if tt.hasWorktree {
 					wt := filepath.Join(".worktrees", tt.taskID)
 					worktreePath = &wt
-					bc := "abc1234"
+					bc := testhelpers.MustGit(t, tmpDir, "rev-parse", "integration")
 					baseCommit = &bc
 				}
 

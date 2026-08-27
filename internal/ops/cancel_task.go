@@ -22,6 +22,16 @@ type CancelResult struct {
 // Cancellable states are determined by the pipeline transition map (TransitionWith).
 // No terminal I/O.
 func CancelTask(projectRoot, taskID, reason, agentID string) (*CancelResult, error) {
+	return cancelTaskWithOptionalAuthority(projectRoot, taskID, reason, agentID, nil)
+}
+
+// CancelTaskWithAuthority fences cancellation with the orchestrator's
+// registration generation.
+func CancelTaskWithAuthority(projectRoot, taskID, reason string, authority models.AgentAuthority) (*CancelResult, error) {
+	return cancelTaskWithOptionalAuthority(projectRoot, taskID, reason, authority.ID, &authority)
+}
+
+func cancelTaskWithOptionalAuthority(projectRoot, taskID, reason, agentID string, authority *models.AgentAuthority) (*CancelResult, error) {
 	if taskID == "" {
 		return nil, &PreconditionError{Reason: "task ID is required"}
 	}
@@ -49,7 +59,7 @@ func CancelTask(projectRoot, taskID, reason, agentID string) (*CancelResult, err
 	originalStatus := task.Status
 
 	// Atomic State Update
-	err = bb.Modify(func(state *models.State) error {
+	err = lifecycleMutation(bb, authority)(func(state *models.State) error {
 		currentTask := state.FindTask(taskID)
 		if currentTask == nil {
 			return &errors.NotFoundError{Entity: "task", ID: taskID}

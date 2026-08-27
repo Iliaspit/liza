@@ -20,6 +20,7 @@ import (
 // SupervisorConfig contains all configuration for the agent supervisor
 type SupervisorConfig struct {
 	AgentID          string
+	Authority        models.AgentAuthority
 	Role             string // runtime role name from pipeline YAML (e.g. "coder", "code-reviewer", "orchestrator")
 	ProjectRoot      string
 	StatePath        string
@@ -68,7 +69,8 @@ func (t *exit42RestartTracker) reset(taskID string) {
 	delete(t.byKey, "task:"+taskID)
 }
 
-func (t *exit42RestartTracker) Handle(bb *db.Blackboard, projectRoot, role, taskID, agentID string) (exit42RestartOutcome, error) {
+func (t *exit42RestartTracker) Handle(bb *db.Blackboard, projectRoot, role, taskID string, authority models.AgentAuthority) (exit42RestartOutcome, error) {
+	agentID := authority.ID
 	state, err := bb.Read()
 	if err != nil {
 		return exit42RestartOutcome{}, fmt.Errorf("read state for exit-42 tracking: %w", err)
@@ -100,7 +102,7 @@ func (t *exit42RestartTracker) Handle(bb *db.Blackboard, projectRoot, role, task
 	}
 
 	blockedTask := false
-	if err := bb.Modify(func(s *models.State) error {
+	if err := ops.ModifyWithAgentAuthority(bb, authority, func(s *models.State) error {
 		if taskID == "" {
 			return nil
 		}
@@ -316,15 +318,14 @@ func isReviewingStatus(task *models.Task, pr models.PipelineResolver) bool {
 }
 
 // blockTaskFromSupervisor marks a task as BLOCKED and releases the assignment.
-// Best-effort: logs warnings on failure but does not return errors.
-func blockTaskFromSupervisor(bb *db.Blackboard, projectRoot, taskID, agentID, reason string) {
+func blockTaskFromSupervisor(bb *db.Blackboard, projectRoot, taskID string, authority models.AgentAuthority, reason string) error {
+	agentID := authority.ID
 	pipelineTransitions, ptErr := ops.LoadPipelineTransitions(projectRoot)
 	if ptErr != nil {
-		GetLogger().Warn("Failed to load pipeline transitions for blocking", "error", ptErr)
-		return
+		return fmt.Errorf("load pipeline transitions for supervisor block: %w", ptErr)
 	}
 
-	if err := bb.Modify(func(s *models.State) error {
+	if err := ops.ModifyWithAgentAuthority(bb, authority, func(s *models.State) error {
 		task := s.FindTask(taskID)
 		if task == nil {
 			return nil
@@ -350,18 +351,17 @@ func blockTaskFromSupervisor(bb *db.Blackboard, projectRoot, taskID, agentID, re
 		})
 		return nil
 	}); err != nil {
-		GetLogger().Warn("Failed to block task from supervisor", "error", err, "task_id", taskID)
-		return
+		return err
 	}
 
 	result, err := ops.DeleteWorktree(projectRoot, taskID)
 	if err != nil {
-		GetLogger().Warn("Failed to clean blocked task worktree", "error", err, "task_id", taskID)
-		return
+		return fmt.Errorf("clean blocked task worktree: %w", err)
 	}
 	for _, warning := range result.Warnings {
 		GetLogger().Warn("Blocked task worktree cleanup warning", "warning", warning, "task_id", taskID)
 	}
+	return nil
 }
 
 // --- Crash restart tracker ---
@@ -608,7 +608,9 @@ func handleObservedRuntimeFailureRetry(
 	if alertErr := LogAlert(config.ProjectRoot, "🚨", "TOOL FAILURE RETRY LOOP", reason); alertErr != nil {
 		GetLogger().Warn("Failed to write tool failure retry alert", "error", alertErr)
 	}
-	blockTaskFromSupervisor(bb, config.ProjectRoot, taskID, config.AgentID, reason)
+	if err := blockTaskFromSupervisor(bb, config.ProjectRoot, taskID, config.Authority, reason); err != nil {
+		GetLogger().Warn("Failed to block task from supervisor", "error", err, "task_id", taskID)
+	}
 	runtimeTracker.reset(taskID)
 	spinTracker.reset(taskID)
 	return true
@@ -694,10 +696,16 @@ func RunSupervisor(ctx context.Context, config SupervisorConfig) error {
 		ApplyYAMLTimeouts(strategy, timeouts.Execution, timeouts.PollInterval, timeouts.MaxWait)
 	}
 
-	if err := registerAgent(bb, config.ProjectRoot, config.AgentID, config.Role, "terminal-1", 1800, config.CLIName, resolver); err != nil {
+	authority, err := registerAgentWithAuthority(bb, config.ProjectRoot, config.AgentID, config.Role, "terminal-1", 1800, config.CLIName, resolver)
+	if err != nil {
 		return err
 	}
-	defer unregisterAgent(bb, config.AgentID, config.ProjectRoot)
+	config.Authority = authority
+	defer func() {
+		if err := unregisterAgent(bb, authority, config.ProjectRoot); err != nil {
+			GetLogger().Warn("Failed to unregister agent", "error", err, "agent_id", authority.ID)
+		}
+	}()
 
 	state, err := bb.Read()
 	if err != nil {
@@ -711,7 +719,7 @@ func RunSupervisor(ctx context.Context, config SupervisorConfig) error {
 	heartbeatErrCh := make(chan error, 1)
 
 	hb := NewHeartbeat(HeartbeatConfig{
-		AgentID:   config.AgentID,
+		Authority: config.Authority,
 		StatePath: config.StatePath,
 		State:     state,
 	})
@@ -887,7 +895,9 @@ func RunSupervisor(ctx context.Context, config SupervisorConfig) error {
 				if alertErr := LogAlert(config.ProjectRoot, "🚨", "SPINNING", reason); alertErr != nil {
 					GetLogger().Warn("Failed to write spinning alert", "error", alertErr)
 				}
-				blockTaskFromSupervisor(bb, config.ProjectRoot, effectiveTask, config.AgentID, reason)
+				if blockErr := blockTaskFromSupervisor(bb, config.ProjectRoot, effectiveTask, config.Authority, reason); blockErr != nil {
+					GetLogger().Warn("Failed to block task from supervisor", "error", blockErr, "task_id", effectiveTask)
+				}
 				spinTracker.reset(effectiveTask)
 				continue
 			}
@@ -928,7 +938,9 @@ func RunSupervisor(ctx context.Context, config SupervisorConfig) error {
 					"agent_id", config.AgentID,
 					"task_id", claimedTaskID,
 					"error", err)
-				blockTaskFromSupervisor(bb, config.ProjectRoot, claimedTaskID, config.AgentID, reason)
+				if blockErr := blockTaskFromSupervisor(bb, config.ProjectRoot, claimedTaskID, config.Authority, reason); blockErr != nil {
+					GetLogger().Warn("Failed to block task from supervisor", "error", blockErr, "task_id", claimedTaskID)
+				}
 				spinTracker.reset(effectiveTask)
 				continue
 			}
@@ -953,7 +965,7 @@ func RunSupervisor(ctx context.Context, config SupervisorConfig) error {
 		if exitCode == 0 && effectiveTask != "" {
 			if failure := detectObservedRuntimeFailure(currentOutput); failure != nil {
 				handleObservedRuntimeFailureRetry(bb, config, effectiveTask, stateBefore.Config, *failure, runtimeFailureTracker, spinTracker)
-				if err := resetAgentAfterExit(bb, config.AgentID, config.ProjectRoot); err != nil {
+				if err := resetAgentAfterExit(bb, config.Authority, config.ProjectRoot); err != nil {
 					GetLogger().Warn("Failed to reset agent status after runtime failure", "error", err, "agent_id", config.AgentID)
 				}
 				exit42Tracker.reset(taskID)
@@ -964,11 +976,13 @@ func RunSupervisor(ctx context.Context, config SupervisorConfig) error {
 
 		// Reset runtime status after CLI exits, but preserve explicit command-driven
 		// states such as WAITING and HANDOFF.
-		if err := resetAgentAfterExit(bb, config.AgentID, config.ProjectRoot); err != nil {
+		if err := resetAgentAfterExit(bb, config.Authority, config.ProjectRoot); err != nil {
 			GetLogger().Warn("Failed to reset agent status after exit", "error", err, "agent_id", config.AgentID)
 		}
 
-		handleProviderAuditDegraded(bb, config, effectiveTask, currentOutput)
+		if _, auditErr := handleProviderAuditDegraded(bb, config, effectiveTask, currentOutput); auditErr != nil {
+			return auditErr
+		}
 
 		// Handle exit code
 		switch exitCode {
@@ -990,7 +1004,7 @@ func RunSupervisor(ctx context.Context, config SupervisorConfig) error {
 			}
 			runtimeFailureTracker.reset(restartTaskID)
 
-			outcome, trackErr := exit42Tracker.Handle(bb, config.ProjectRoot, config.Role, restartTaskID, config.AgentID)
+			outcome, trackErr := exit42Tracker.Handle(bb, config.ProjectRoot, config.Role, restartTaskID, config.Authority)
 			if trackErr != nil {
 				GetLogger().Warn("Exit-42 tracker failed, using default retry delay",
 					"error", trackErr,
@@ -1046,7 +1060,9 @@ func RunSupervisor(ctx context.Context, config SupervisorConfig) error {
 					if alertErr := LogAlert(config.ProjectRoot, "🚨", "CRASH RESTART LOOP", reason); alertErr != nil {
 						GetLogger().Warn("Failed to write crash alert", "error", alertErr)
 					}
-					blockTaskFromSupervisor(bb, config.ProjectRoot, effectiveTask, config.AgentID, reason)
+					if blockErr := blockTaskFromSupervisor(bb, config.ProjectRoot, effectiveTask, config.Authority, reason); blockErr != nil {
+						GetLogger().Warn("Failed to block task from supervisor", "error", blockErr, "task_id", effectiveTask)
+					}
 					crashTracker.reset(effectiveTask)
 					continue
 				}

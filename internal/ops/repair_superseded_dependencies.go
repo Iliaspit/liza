@@ -34,6 +34,16 @@ func (r *RepairSupersededDependenciesResult) GetWarnings() []string {
 // RepairSupersededDependencies removes all downstream-role dependency edges
 // from one SUPERSEDED task in a single validated state transaction.
 func RepairSupersededDependencies(projectRoot, taskID, reason, agentID string) (*RepairSupersededDependenciesResult, error) {
+	return repairSupersededDependenciesWithOptionalAuthority(projectRoot, taskID, reason, agentID, nil)
+}
+
+// RepairSupersededDependenciesWithAuthority fences the terminal dependency
+// repair with the orchestrator's registration generation.
+func RepairSupersededDependenciesWithAuthority(projectRoot, taskID, reason string, authority models.AgentAuthority) (*RepairSupersededDependenciesResult, error) {
+	return repairSupersededDependenciesWithOptionalAuthority(projectRoot, taskID, reason, authority.ID, &authority)
+}
+
+func repairSupersededDependenciesWithOptionalAuthority(projectRoot, taskID, reason, agentID string, authority *models.AgentAuthority) (*RepairSupersededDependenciesResult, error) {
 	if taskID == "" {
 		return nil, &PreconditionError{Reason: "task ID is required"}
 	}
@@ -53,7 +63,7 @@ func RepairSupersededDependencies(projectRoot, taskID, reason, agentID string) (
 
 	var result RepairSupersededDependenciesResult
 	now := time.Now().UTC()
-	err = bb.Modify(func(state *models.State) error {
+	err = lifecycleMutation(bb, authority)(func(state *models.State) error {
 		task := state.FindTask(taskID)
 		if task == nil {
 			return &errors.NotFoundError{Entity: "task", ID: taskID}

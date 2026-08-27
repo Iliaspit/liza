@@ -389,6 +389,28 @@ func validateStatusFields(task *models.Task, sc *statusClassifier) error {
 	if sc.IsRejected(task.Status) && task.RejectionReason == nil {
 		return fmt.Errorf("%s task without rejection_reason: %s", task.Status, task.ID)
 	}
+	if sc.IsRejected(task.Status) {
+		if task.Worktree != nil {
+			canonicalWorktree := filepath.Join(paths.WorktreesDirName, task.ID)
+			if *task.Worktree != canonicalWorktree {
+				return fmt.Errorf("%s task has worktree=%q, want %q", task.Status, *task.Worktree, canonicalWorktree)
+			}
+		}
+		if task.AssignedTo != nil && task.LeaseExpires == nil {
+			return fmt.Errorf("%s task has assigned_to without lease_expires: %s", task.Status, task.ID)
+		}
+		if task.AssignedTo == nil && task.LeaseExpires != nil {
+			return fmt.Errorf("%s task has lease_expires without assigned_to: %s", task.Status, task.ID)
+		}
+		if task.AssignedTo == nil {
+			if task.Worktree != nil && task.BaseCommit == nil {
+				return fmt.Errorf("%s released task has worktree without base_commit: %s", task.Status, task.ID)
+			}
+			if task.Worktree == nil && task.BaseCommit != nil {
+				return fmt.Errorf("%s released task has base_commit without worktree: %s", task.Status, task.ID)
+			}
+		}
+	}
 
 	if task.Status == models.TaskStatusSuperseded {
 		if task.RescopeReason == nil {

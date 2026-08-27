@@ -3,6 +3,7 @@ package ops
 import (
 	stderrors "errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -21,6 +22,7 @@ import (
 	"github.com/liza-mas/liza/internal/scipsearch"
 	"github.com/liza-mas/liza/internal/semble"
 	"github.com/liza-mas/liza/internal/stacklit"
+	"github.com/liza-mas/liza/internal/statevalidate"
 	"github.com/liza-mas/liza/internal/testhelpers"
 )
 
@@ -55,6 +57,52 @@ func TestClaimTask_Validation(t *testing.T) {
 				t.Errorf("Error = %q, want to contain %q", err.Error(), tt.errContains)
 			}
 		})
+	}
+}
+
+func TestClaimGenerationFence(t *testing.T) {
+	const (
+		taskID  = "task-claim-generation-fence"
+		agentID = "coder-1"
+	)
+
+	projectRoot := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, projectRoot)
+	statePath, _ := testhelpers.SetupLizaDir(t, projectRoot)
+	testhelpers.SetupPipelineConfig(t, projectRoot)
+
+	state := testhelpers.CreateValidState()
+	registerClaimTaskTestAgents(state)
+	agent := state.Agents[agentID]
+	agent.Generation = lifecycleGenerationA
+	state.Agents[agentID] = agent
+	state.Tasks = []models.Task{
+		testhelpers.BuildTaskByStatus(taskID, models.TaskStatusReady, time.Now().UTC()),
+	}
+	bb := testhelpers.WriteInitialState(t, statePath, state)
+
+	previousHooks := testClaimTaskHooks
+	testClaimTaskHooks = &claimTaskTestHooks{beforePhase3Modify: func() {
+		setLifecycleAgentGeneration(t, bb, agentID, lifecycleGenerationB)
+	}}
+	t.Cleanup(func() { testClaimTaskHooks = previousHooks })
+
+	_, err := ClaimTaskWithAuthority(projectRoot, taskID, models.AgentAuthority{
+		ID: agentID, Generation: lifecycleGenerationA,
+	})
+	assertLifecycleAuthorityError(t, err, agentID)
+
+	after := readClaimStateForTest(t, statePath)
+	task := after.FindTask(taskID)
+	if task == nil {
+		t.Fatal("task missing after stale claim")
+	}
+	if task.Status != models.TaskStatusReady || task.AssignedTo != nil || task.LeaseExpires != nil ||
+		task.Worktree != nil || task.BaseCommit != nil {
+		t.Fatalf("stale claim published task state: %#v", task)
+	}
+	if got := after.Agents[agentID].Generation; got != lifecycleGenerationB {
+		t.Fatalf("agent generation = %q, want %q", got, lifecycleGenerationB)
 	}
 }
 
@@ -547,6 +595,154 @@ func TestClaimTask_RejectedWorktreePresent_Preserved(t *testing.T) {
 	}
 }
 
+func TestClaimRejectedTask(t *testing.T) {
+	t.Run("reattaches valid branch when directory is absent", func(t *testing.T) {
+		fixture := newRejectedHandoffFixture(t, true)
+		gitWrapper := git.New(fixture.projectRoot)
+		if err := gitWrapper.RemoveWorktreeDir(fixture.taskID); err != nil {
+			t.Fatalf("RemoveWorktreeDir() error: %v", err)
+		}
+
+		if _, err := ClaimTask(fixture.projectRoot, fixture.taskID, "coder-2"); err != nil {
+			t.Fatalf("ClaimTask() error: %v", err)
+		}
+		assertRejectedClaimState(t, fixture, "coder-2", fixture.branchSHA)
+	})
+
+	t.Run("creates from integration only when no reusable artifact exists", func(t *testing.T) {
+		fixture := newRejectedHandoffFixture(t, false)
+		integrationSHA := strings.TrimSpace(testhelpers.MustGit(t, fixture.projectRoot, "rev-parse", "integration"))
+
+		if _, err := ClaimTask(fixture.projectRoot, fixture.taskID, "coder-2"); err != nil {
+			t.Fatalf("ClaimTask() error: %v", err)
+		}
+		fixture.baseCommit = integrationSHA
+		fixture.branchSHA = integrationSHA
+		assertRejectedClaimState(t, fixture, "coder-2", integrationSHA)
+	})
+
+	t.Run("fails closed without deleting unclassifiable corruption", func(t *testing.T) {
+		fixture := newRejectedHandoffFixture(t, false)
+		worktreeDir := filepath.Join(fixture.projectRoot, fixture.worktreeRel)
+		if err := os.MkdirAll(worktreeDir, 0o755); err != nil {
+			t.Fatalf("MkdirAll() error: %v", err)
+		}
+		sentinel := filepath.Join(worktreeDir, "unclassifiable.txt")
+		if err := os.WriteFile(sentinel, []byte("preserve me\n"), 0o644); err != nil {
+			t.Fatalf("WriteFile() error: %v", err)
+		}
+
+		if _, err := ClaimTask(fixture.projectRoot, fixture.taskID, "coder-2"); err == nil {
+			t.Fatal("ClaimTask() error = nil, want fail-closed corruption diagnostic")
+		}
+		if _, err := os.Stat(sentinel); err != nil {
+			t.Fatalf("corrupt artifact was deleted: %v", err)
+		}
+	})
+
+	t.Run("fails closed on noncanonical preserved worktree metadata", func(t *testing.T) {
+		fixture := newRejectedHandoffFixture(t, true)
+		noncanonicalRel := filepath.Join(paths.WorktreesDirName, "recovery-task-1")
+		noncanonicalDir := filepath.Join(fixture.projectRoot, noncanonicalRel)
+		if err := os.MkdirAll(noncanonicalDir, 0o755); err != nil {
+			t.Fatalf("MkdirAll() error: %v", err)
+		}
+		sentinel := filepath.Join(noncanonicalDir, "preserve-me.txt")
+		if err := os.WriteFile(sentinel, []byte("preserve me\n"), 0o644); err != nil {
+			t.Fatalf("WriteFile() error: %v", err)
+		}
+
+		bb := db.For(fixture.stateFile)
+		if err := bb.Modify(func(state *models.State) error {
+			task := state.FindTask(fixture.taskID)
+			if task == nil {
+				return fmt.Errorf("task not found")
+			}
+			task.Worktree = &noncanonicalRel
+			return nil
+		}); err != nil {
+			t.Fatalf("set noncanonical worktree metadata: %v", err)
+		}
+
+		if _, err := ClaimTask(fixture.projectRoot, fixture.taskID, "coder-2"); err == nil ||
+			!strings.Contains(err.Error(), "want \".worktrees/task-1\"") {
+			t.Fatalf("ClaimTask() error = %v, want canonical worktree diagnostic", err)
+		}
+		if _, err := os.Stat(sentinel); err != nil {
+			t.Fatalf("noncanonical recovery artifact was deleted: %v", err)
+		}
+		if got := strings.TrimSpace(testhelpers.MustGit(t, fixture.projectRoot, "rev-parse", fixture.branchName)); got != fixture.branchSHA {
+			t.Fatalf("task branch moved from %s to %s", fixture.branchSHA, got)
+		}
+		after := readClaimStateForTest(t, fixture.stateFile)
+		task := after.FindTask(fixture.taskID)
+		if task == nil || task.Worktree == nil || *task.Worktree != noncanonicalRel || task.Status != models.TaskStatusRejected {
+			t.Fatalf("rejected state changed after noncanonical metadata failure: %#v", task)
+		}
+	})
+
+	t.Run("concurrent retries publish one current doer generation", func(t *testing.T) {
+		fixture := newRejectedHandoffFixture(t, true)
+		if _, err := ReleaseClaim(fixture.projectRoot, fixture.taskID, "doer", true, "handoff", "human"); err != nil {
+			t.Fatalf("ReleaseClaim() error: %v", err)
+		}
+
+		bb := db.For(fixture.stateFile)
+		if err := bb.Modify(func(state *models.State) error {
+			agent := state.Agents["coder-2"]
+			agent.Generation = lifecycleGenerationA
+			state.Agents["coder-2"] = agent
+			return nil
+		}); err != nil {
+			t.Fatalf("set stale coder generation: %v", err)
+		}
+
+		staleAtPhase3 := make(chan error, 1)
+		firstPhase3 := make(chan struct{}, 1)
+		firstPhase3 <- struct{}{}
+		previousHooks := testClaimTaskHooks
+		testClaimTaskHooks = &claimTaskTestHooks{beforePhase3Modify: func() {
+			select {
+			case <-firstPhase3:
+				staleAtPhase3 <- bb.Modify(func(state *models.State) error {
+					agent := state.Agents["coder-2"]
+					agent.Generation = lifecycleGenerationB
+					state.Agents["coder-2"] = agent
+					return nil
+				})
+			default:
+			}
+		}}
+		t.Cleanup(func() { testClaimTaskHooks = previousHooks })
+
+		staleResult := make(chan error, 1)
+		go func() {
+			_, err := ClaimTaskWithAuthority(fixture.projectRoot, fixture.taskID, models.AgentAuthority{
+				ID: "coder-2", Generation: lifecycleGenerationA,
+			})
+			staleResult <- err
+		}()
+		if err := <-staleAtPhase3; err != nil {
+			t.Fatalf("rotate coder generation at stale phase 3: %v", err)
+		}
+
+		_, currentErr := ClaimTaskWithAuthority(fixture.projectRoot, fixture.taskID, models.AgentAuthority{
+			ID: "coder-2", Generation: lifecycleGenerationB,
+		})
+		if currentErr != nil {
+			t.Fatalf("current ClaimTaskWithAuthority() error: %v", currentErr)
+		}
+		assertLifecycleAuthorityError(t, <-staleResult, "coder-2")
+		assertRejectedClaimState(t, fixture, "coder-2", fixture.branchSHA)
+
+		state := readClaimStateForTest(t, fixture.stateFile)
+		winnerAgent := state.Agents["coder-2"]
+		if winnerAgent.Generation != lifecycleGenerationB {
+			t.Fatalf("winner generation = %q, want current %q", winnerAgent.Generation, lifecycleGenerationB)
+		}
+	})
+}
+
 // TestClaimTask_RejectedWorktreeMissing_Recreated verifies that when a REJECTED
 // task's worktree directory is absent, ClaimTask recreates it from integration.
 func TestClaimTask_RejectedWorktreeMissing_Recreated(t *testing.T) {
@@ -592,10 +788,9 @@ func TestClaimTask_RejectedWorktreeMissing_Recreated(t *testing.T) {
 	}
 }
 
-// TestClaimTask_RejectedWorktreeDirExistsBranchMissing_Recreated verifies that
-// when the worktree directory exists but the task branch is missing, the orphaned
-// directory is removed and the worktree is recreated from integration.
-func TestClaimTask_RejectedWorktreeDirExistsBranchMissing_Recreated(t *testing.T) {
+// TestClaimTask_RejectedWorktreeDirExistsBranchMissing_FailsClosed verifies that
+// an unclassifiable rejected-task directory is preserved for manual recovery.
+func TestClaimTask_RejectedWorktreeDirExistsBranchMissing_FailsClosed(t *testing.T) {
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
@@ -639,27 +834,17 @@ func TestClaimTask_RejectedWorktreeDirExistsBranchMissing_Recreated(t *testing.T
 		t.Fatal("Branch should NOT exist before claim (orphaned dir scenario)")
 	}
 
-	integrationSHA, err := gitWrapper.GetCommitSHA("integration")
-	if err != nil {
-		t.Fatalf("Failed to read integration SHA: %v", err)
+	sentinelPath := filepath.Join(wtDir, "preserve-me")
+	if err := os.WriteFile(sentinelPath, []byte("corrupt artifact"), 0644); err != nil {
+		t.Fatalf("Failed to write corruption sentinel: %v", err)
 	}
 
-	result, err := ClaimTask(tmpDir, "task-1", "coder-1")
-	if err != nil {
-		t.Fatalf("ClaimTask() error: %v", err)
+	if _, err := ClaimTask(tmpDir, "task-1", "coder-1"); err == nil {
+		t.Fatal("ClaimTask() error = nil, want unclassifiable artifact failure")
 	}
 
-	// Worktree should be recreated from integration.
-	worktreeHead, err := gitWrapper.GetWorktreeHEAD("task-1")
-	if err != nil {
-		t.Fatalf("Expected valid worktree HEAD after orphan recovery, got error: %v", err)
-	}
-	if worktreeHead != integrationSHA {
-		t.Errorf("Worktree HEAD = %s, want integration SHA %s", worktreeHead, integrationSHA)
-	}
-
-	if result.BaseCommit != integrationSHA {
-		t.Errorf("BaseCommit = %s, want integration SHA %s", result.BaseCommit, integrationSHA)
+	if contents, err := os.ReadFile(sentinelPath); err != nil || string(contents) != "corrupt artifact" {
+		t.Fatalf("Unclassifiable artifact was not preserved: contents=%q err=%v", contents, err)
 	}
 }
 
@@ -2628,4 +2813,120 @@ func registerClaimTaskTestAgents(state *models.State) {
 	state.Agents["coder-1"] = testhelpers.RegisteredTestAgent("coder")
 	state.Agents["coder-2"] = testhelpers.RegisteredTestAgent("coder")
 	state.Agents["code-planner-1"] = testhelpers.RegisteredTestAgent("code-planner")
+}
+
+type rejectedHandoffFixture struct {
+	projectRoot string
+	stateFile   string
+	taskID      string
+	worktreeRel string
+	branchName  string
+	baseCommit  string
+	branchSHA   string
+	reviewerID  string
+	reviewLease time.Time
+}
+
+func newRejectedHandoffFixture(t *testing.T, createArtifact bool) *rejectedHandoffFixture {
+	t.Helper()
+
+	projectRoot := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, projectRoot)
+	stateFile, _ := testhelpers.SetupLizaDir(t, projectRoot)
+	now := time.Now().UTC()
+	fixture := &rejectedHandoffFixture{
+		projectRoot: projectRoot,
+		stateFile:   stateFile,
+		taskID:      "task-1",
+		worktreeRel: filepath.Join(paths.WorktreesDirName, "task-1"),
+		branchName:  paths.TaskBranchPrefix + "task-1",
+		reviewerID:  "code-reviewer-1",
+		reviewLease: now.Add(30 * time.Minute),
+	}
+
+	state := testhelpers.CreateValidState()
+	registerClaimTaskTestAgents(state)
+	reviewer := testhelpers.RegisteredTestAgent("code-reviewer")
+	reviewer.CurrentTask = &fixture.taskID
+	reviewer.LeaseExpires = &fixture.reviewLease
+	state.Agents[fixture.reviewerID] = reviewer
+
+	task := testhelpers.BuildTaskByStatus(fixture.taskID, models.TaskStatusRejected, now)
+	expiredLease := now.Add(-time.Minute)
+	task.LeaseExpires = &expiredLease
+	task.ReviewingBy = &fixture.reviewerID
+	task.ReviewLeaseExpires = &fixture.reviewLease
+
+	if createArtifact {
+		gitWrapper := git.New(projectRoot)
+		baseCommit, err := gitWrapper.CreateWorktree(fixture.taskID, "integration")
+		if err != nil {
+			t.Fatalf("CreateWorktree() error: %v", err)
+		}
+		fixture.baseCommit = baseCommit
+		task.Worktree = &fixture.worktreeRel
+		task.BaseCommit = &fixture.baseCommit
+
+		worktreeDir := filepath.Join(projectRoot, fixture.worktreeRel)
+		marker := filepath.Join(worktreeDir, "rejected-change.txt")
+		if err := os.WriteFile(marker, []byte("preserved rejected work\n"), 0o644); err != nil {
+			t.Fatalf("WriteFile() error: %v", err)
+		}
+		testhelpers.MustGit(t, worktreeDir, "add", "rejected-change.txt")
+		testhelpers.MustGit(t, worktreeDir, "commit", "-m", "Preserve rejected work")
+		fixture.branchSHA = strings.TrimSpace(testhelpers.MustGit(t, projectRoot, "rev-parse", fixture.branchName))
+	} else {
+		task.Worktree = nil
+		task.BaseCommit = nil
+	}
+
+	state.Tasks = []models.Task{task}
+	testhelpers.WriteInitialState(t, stateFile, state)
+	return fixture
+}
+
+func assertRejectedClaimState(t *testing.T, fixture *rejectedHandoffFixture, agentID, wantBranchSHA string) {
+	t.Helper()
+
+	gitWrapper := git.New(fixture.projectRoot)
+	branchSHA, err := gitWrapper.GetCommitSHA(fixture.branchName)
+	if err != nil {
+		t.Fatalf("GetCommitSHA(%s) error: %v", fixture.branchName, err)
+	}
+	if branchSHA != wantBranchSHA {
+		t.Fatalf("branch SHA = %s, want %s", branchSHA, wantBranchSHA)
+	}
+
+	state := readClaimStateForTest(t, fixture.stateFile)
+	task := state.FindTask(fixture.taskID)
+	if task == nil {
+		t.Fatal("claimed task not found")
+	}
+	if task.Status != models.TaskStatusImplementing {
+		t.Fatalf("Status = %s, want %s", task.Status, models.TaskStatusImplementing)
+	}
+	if task.AssignedTo == nil || *task.AssignedTo != agentID || task.LeaseExpires == nil {
+		t.Fatalf("claim ownership = assigned_to %v lease %v, want %s with lease", task.AssignedTo, task.LeaseExpires, agentID)
+	}
+	assertRejectedRecoveryMetadata(t, task, fixture)
+	assertRejectedReviewerAffinity(t, state, task, fixture)
+	if err := statevalidate.ValidateState(state, fixture.projectRoot, true, io.Discard); err != nil {
+		t.Fatalf("claimed rejected state is invalid: %v", err)
+	}
+}
+
+func assertRejectedRecoveryMetadata(t *testing.T, task *models.Task, fixture *rejectedHandoffFixture) {
+	t.Helper()
+	if task.Worktree == nil || *task.Worktree != fixture.worktreeRel ||
+		task.BaseCommit == nil || *task.BaseCommit != fixture.baseCommit {
+		t.Fatalf("recovery tuple = worktree %v base %v, want %q at %q", task.Worktree, task.BaseCommit, fixture.baseCommit, fixture.worktreeRel)
+	}
+}
+
+func assertRejectedReviewerAffinity(t *testing.T, _ *models.State, task *models.Task, fixture *rejectedHandoffFixture) {
+	t.Helper()
+	if task.ReviewingBy == nil || *task.ReviewingBy != fixture.reviewerID ||
+		task.ReviewLeaseExpires == nil || !task.ReviewLeaseExpires.Equal(fixture.reviewLease) {
+		t.Fatalf("reviewer affinity = reviewer %v lease %v, want %q through %s", task.ReviewingBy, task.ReviewLeaseExpires, fixture.reviewerID, fixture.reviewLease)
+	}
 }

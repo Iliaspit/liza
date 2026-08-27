@@ -87,11 +87,26 @@ var runAwaitVerdictPolling = awaitVerdictPolling
 // CurrentTask=taskID), checks budget, then blocks on an event loop until
 // the task status leaves the submitted/reviewing/partially-approved set.
 func AwaitVerdict(ctx context.Context, projectRoot, taskID, agentID string, timeout time.Duration) (*AwaitVerdictResult, error) {
-	return AwaitVerdictWithOptions(ctx, projectRoot, taskID, agentID, timeout, AwaitVerdictOptions{})
+	return awaitVerdictWithOptions(ctx, projectRoot, taskID, agentID, nil, timeout, AwaitVerdictOptions{})
 }
 
 // AwaitVerdictWithOptions is AwaitVerdict with configurable polling intervals.
 func AwaitVerdictWithOptions(ctx context.Context, projectRoot, taskID, agentID string, timeout time.Duration, opts AwaitVerdictOptions) (*AwaitVerdictResult, error) {
+	return awaitVerdictWithOptions(ctx, projectRoot, taskID, agentID, nil, timeout, opts)
+}
+
+// AwaitVerdictWithAuthority is the authenticated command entry point.
+func AwaitVerdictWithAuthority(ctx context.Context, projectRoot, taskID string, authority models.AgentAuthority, timeout time.Duration) (*AwaitVerdictResult, error) {
+	return awaitVerdictWithOptions(ctx, projectRoot, taskID, authority.ID, &authority, timeout, AwaitVerdictOptions{})
+}
+
+// AwaitVerdictWithAuthorityOptions is AwaitVerdictWithAuthority with
+// configurable polling intervals.
+func AwaitVerdictWithAuthorityOptions(ctx context.Context, projectRoot, taskID string, authority models.AgentAuthority, timeout time.Duration, opts AwaitVerdictOptions) (*AwaitVerdictResult, error) {
+	return awaitVerdictWithOptions(ctx, projectRoot, taskID, authority.ID, &authority, timeout, opts)
+}
+
+func awaitVerdictWithOptions(ctx context.Context, projectRoot, taskID, agentID string, authority *models.AgentAuthority, timeout time.Duration, opts AwaitVerdictOptions) (*AwaitVerdictResult, error) {
 	opts = opts.normalized()
 	if taskID == "" {
 		return nil, &PreconditionError{Reason: "task ID is required"}
@@ -154,7 +169,7 @@ func AwaitVerdictWithOptions(ctx context.Context, projectRoot, taskID, agentID s
 			}
 			return nil, err
 		}
-		return handleVerdictResult(bb, task, agentID, projectRoot, resolver, task.RolePair)
+		return handleVerdictResult(bb, task, agentID, authority, projectRoot, resolver, task.RolePair)
 	}
 
 	// Check task status is in the awaitable set.
@@ -176,7 +191,7 @@ func AwaitVerdictWithOptions(ctx context.Context, projectRoot, taskID, agentID s
 	}
 
 	// Acquire ownership atomically.
-	if err := acquireAwaitOwnership(bb, agentID, taskID); err != nil {
+	if err := acquireAwaitOwnership(bb, agentID, taskID, authority); err != nil {
 		return nil, err
 	}
 
@@ -191,8 +206,7 @@ func AwaitVerdictWithOptions(ctx context.Context, projectRoot, taskID, agentID s
 		task.EffectiveAttempt(),
 	)
 	if shouldEscalate {
-		releaseOwnership(bb, agentID)
-		return nil, ErrBudgetExhausted
+		return finishAwaitVerdict(bb, agentID, authority, nil, ErrBudgetExhausted)
 	}
 
 	// --- Event loop: block until verdict arrives ---
@@ -201,7 +215,7 @@ func AwaitVerdictWithOptions(ctx context.Context, projectRoot, taskID, agentID s
 
 	watcher, watchErr := newAwaitVerdictWatcher(bb)
 	if watchErr != nil {
-		return runAwaitVerdictPolling(ctx, bb, taskID, agentID, deadline, task.Status, resolver, rolePair, projectRoot, opts.FallbackPollInterval)
+		return runAwaitVerdictPolling(ctx, bb, taskID, agentID, authority, deadline, task.Status, resolver, rolePair, projectRoot, opts.FallbackPollInterval)
 	}
 	defer watcher.Close()
 
@@ -214,8 +228,7 @@ func AwaitVerdictWithOptions(ctx context.Context, projectRoot, taskID, agentID s
 	for {
 		select {
 		case <-ctx.Done():
-			releaseOwnership(bb, agentID)
-			return nil, ctx.Err()
+			return finishAwaitVerdict(bb, agentID, authority, nil, ctx.Err())
 
 		case <-abortTicker.C:
 			abortState, abortErr := bb.ReadCached()
@@ -223,16 +236,15 @@ func AwaitVerdictWithOptions(ctx context.Context, projectRoot, taskID, agentID s
 				continue
 			}
 			if abortState.Config.Mode == models.SystemModeStopped {
-				releaseOwnership(bb, agentID)
-				return &AwaitVerdictResult{Verdict: VerdictAborted, TaskStatus: task.Status}, nil
+				return finishAwaitVerdict(bb, agentID, authority,
+					&AwaitVerdictResult{Verdict: VerdictAborted, TaskStatus: task.Status}, nil)
 			}
 			currentTask := abortState.FindTask(taskID)
 			if currentTask == nil {
-				releaseOwnership(bb, agentID)
-				return disappearedVerdictResult(), nil
+				return finishAwaitVerdict(bb, agentID, authority, disappearedVerdictResult(), nil)
 			}
 			if vc := checkVerdictStatus(currentTask, resolver, rolePair); vc != nil {
-				return handleVerdictResult(bb, currentTask, agentID, projectRoot, resolver, rolePair)
+				return handleVerdictResult(bb, currentTask, agentID, authority, projectRoot, resolver, rolePair)
 			}
 
 		case <-watcher.Events():
@@ -241,26 +253,25 @@ func AwaitVerdictWithOptions(ctx context.Context, projectRoot, taskID, agentID s
 				continue
 			}
 			if evState.Config.Mode == models.SystemModeStopped {
-				releaseOwnership(bb, agentID)
-				return &AwaitVerdictResult{Verdict: VerdictAborted, TaskStatus: task.Status}, nil
+				return finishAwaitVerdict(bb, agentID, authority,
+					&AwaitVerdictResult{Verdict: VerdictAborted, TaskStatus: task.Status}, nil)
 			}
 			currentTask := evState.FindTask(taskID)
 			if currentTask == nil {
-				releaseOwnership(bb, agentID)
-				return disappearedVerdictResult(), nil
+				return finishAwaitVerdict(bb, agentID, authority, disappearedVerdictResult(), nil)
 			}
 			if vc := checkVerdictStatus(currentTask, resolver, rolePair); vc != nil {
-				return handleVerdictResult(bb, currentTask, agentID, projectRoot, resolver, rolePair)
+				return handleVerdictResult(bb, currentTask, agentID, authority, projectRoot, resolver, rolePair)
 			}
 
 		case watcherErr := <-watcher.Errors():
 			log.Printf("Watcher error, falling back to polling: %v", watcherErr)
 			watcher.Close()
-			return runAwaitVerdictPolling(ctx, bb, taskID, agentID, deadline, task.Status, resolver, rolePair, projectRoot, opts.FallbackPollInterval)
+			return runAwaitVerdictPolling(ctx, bb, taskID, agentID, authority, deadline, task.Status, resolver, rolePair, projectRoot, opts.FallbackPollInterval)
 
 		case <-deadlineTimer.C:
-			releaseOwnership(bb, agentID)
-			return &AwaitVerdictResult{Verdict: VerdictTimeout, TaskStatus: task.Status}, nil
+			return finishAwaitVerdict(bb, agentID, authority,
+				&AwaitVerdictResult{Verdict: VerdictTimeout, TaskStatus: task.Status}, nil)
 		}
 	}
 }
@@ -318,8 +329,8 @@ func checkLastSubmitter(task *models.Task, agentID string) error {
 // acquireAwaitOwnership atomically sets the agent's status to WAITING and
 // CurrentTask to taskID. This prevents other supervisors from claiming the
 // task if it gets rejected while we're waiting.
-func acquireAwaitOwnership(bb *db.Blackboard, agentID, taskID string) error {
-	return bb.Modify(func(s *models.State) error {
+func acquireAwaitOwnership(bb *db.Blackboard, agentID, taskID string, authority *models.AgentAuthority) error {
+	return modifyLifecycleState(bb, authority, func(s *models.State) error {
 		agent, ok := s.Agents[agentID]
 		if !ok {
 			return &errors.NotFoundError{Entity: "agent", ID: agentID}
@@ -334,14 +345,35 @@ func acquireAwaitOwnership(bb *db.Blackboard, agentID, taskID string) error {
 // releaseOwnership clears the agent's CurrentTask, relinquishing ownership
 // of the task. Status is left unchanged — the supervisor's resetAgentAfterExit
 // handles status transitions when the CLI session ends.
-func releaseOwnership(bb *db.Blackboard, agentID string) error {
-	return bb.Modify(func(s *models.State) error {
+func releaseOwnership(bb *db.Blackboard, agentID string, authority *models.AgentAuthority) error {
+	return modifyLifecycleState(bb, authority, func(s *models.State) error {
 		if agent, ok := s.Agents[agentID]; ok {
 			agent.CurrentTask = nil
 			s.Agents[agentID] = agent
 		}
 		return nil
 	})
+}
+
+func finishAwaitVerdict(
+	bb *db.Blackboard,
+	agentID string,
+	authority *models.AgentAuthority,
+	result *AwaitVerdictResult,
+	primaryErr error,
+) (*AwaitVerdictResult, error) {
+	return result, joinAwaitCleanupError(primaryErr, releaseOwnership(bb, agentID, authority))
+}
+
+func joinAwaitCleanupError(primaryErr, cleanupErr error) error {
+	switch {
+	case primaryErr == nil:
+		return cleanupErr
+	case cleanupErr == nil:
+		return primaryErr
+	default:
+		return stderrors.Join(primaryErr, cleanupErr)
+	}
 }
 
 // verdictCheck holds the result of checking whether a verdict has arrived.
@@ -371,20 +403,19 @@ func checkVerdictStatus(task *models.Task, resolver *pipeline.Resolver, rolePair
 
 // handleVerdictResult maps the final task status to an AwaitVerdictResult.
 // For rejections within budget, it attempts auto-reclaim via ClaimTask.
-func handleVerdictResult(bb *db.Blackboard, task *models.Task, agentID, projectRoot string, resolver *pipeline.Resolver, rolePair string) (*AwaitVerdictResult, error) {
+func handleVerdictResult(bb *db.Blackboard, task *models.Task, agentID string, authority *models.AgentAuthority, projectRoot string, resolver *pipeline.Resolver, rolePair string) (*AwaitVerdictResult, error) {
 	approved, _ := resolver.ApprovedStatus(rolePair)
 	rejected, _ := resolver.RejectedStatus(rolePair)
 
 	switch task.Status {
 	case approved:
-		releaseOwnership(bb, agentID)
-		return &AwaitVerdictResult{
+		return finishAwaitVerdict(bb, agentID, authority, &AwaitVerdictResult{
 			Verdict:       VerdictApproved,
 			TaskStatus:    task.Status,
 			ReviewerAgent: extractReviewerFromHistory(task),
 			Guidance:      stopVerdictGuidance(task.Status),
 			SafeAction:    SafeActionStop,
-		}, nil
+		}, nil)
 
 	case rejected:
 		reviewer := extractReviewerFromHistory(task)
@@ -401,44 +432,40 @@ func handleVerdictResult(bb *db.Blackboard, task *models.Task, agentID, projectR
 			var pe *PreconditionError
 			if stderrors.As(claimErr, &pe) {
 				if strings.Contains(pe.Reason, "transitioned to attempt") {
-					releaseOwnership(bb, agentID)
-					return &AwaitVerdictResult{
+					return finishAwaitVerdict(bb, agentID, authority, &AwaitVerdictResult{
 						Verdict:       VerdictNewAttempt,
 						Reason:        reason,
 						ReviewerAgent: reviewer,
 						TaskStatus:    task.Status,
-					}, nil
+					}, nil)
 				}
 				// Blocked or other limit exhaustion.
 				if result, ok := recoveredVerdictAfterReclaimFailure(bb, task.ID, agentID, rejected); ok {
-					releaseOwnership(bb, agentID)
-					return result, nil
+					return finishAwaitVerdict(bb, agentID, authority, result, nil)
 				}
-				releaseOwnership(bb, agentID)
-				return &AwaitVerdictResult{
+				return finishAwaitVerdict(bb, agentID, authority, &AwaitVerdictResult{
 					Verdict:       VerdictTerminal,
 					Reason:        reason,
 					ReviewerAgent: reviewer,
 					TaskStatus:    task.Status,
 					Guidance:      stopVerdictGuidance(task.Status),
 					SafeAction:    SafeActionStop,
-				}, nil
+				}, nil)
 			}
 			// A degraded claim already recorded agent health and bounded retries;
 			// surface it instead of converting it into a verdict, so the failure
 			// stays visible and this agent stops retrying the failing path.
 			if stderrors.Is(claimErr, ErrAgentDegraded) {
-				releaseOwnership(bb, agentID)
-				return nil, fmt.Errorf("auto-reclaim failed: %w", claimErr)
+				return finishAwaitVerdict(bb, agentID, authority, nil,
+					fmt.Errorf("auto-reclaim failed: %w", claimErr))
 			}
 
 			// Infrastructure error during reclaim.
 			if result, ok := recoveredVerdictAfterReclaimFailure(bb, task.ID, agentID, rejected); ok {
-				releaseOwnership(bb, agentID)
-				return result, nil
+				return finishAwaitVerdict(bb, agentID, authority, result, nil)
 			}
-			releaseOwnership(bb, agentID)
-			return nil, fmt.Errorf("auto-reclaim failed: %w", claimErr)
+			return finishAwaitVerdict(bb, agentID, authority, nil,
+				fmt.Errorf("auto-reclaim failed: %w", claimErr))
 		}
 
 		// Reclaim succeeded — re-read task to get updated iteration.
@@ -459,23 +486,21 @@ func handleVerdictResult(bb *db.Blackboard, task *models.Task, agentID, projectR
 
 	default:
 		if result, ok := recoveredVerdictFromHistory(task, agentID); ok {
-			releaseOwnership(bb, agentID)
-			return result, nil
+			return finishAwaitVerdict(bb, agentID, authority, result, nil)
 		}
-		releaseOwnership(bb, agentID)
-		return &AwaitVerdictResult{
+		return finishAwaitVerdict(bb, agentID, authority, &AwaitVerdictResult{
 			Verdict:    VerdictTerminal,
 			TaskStatus: task.Status,
 			Reason:     fmt.Sprintf("task entered non-awaitable status: %s", task.Status),
 			Guidance:   stopVerdictGuidance(task.Status),
 			SafeAction: SafeActionStop,
-		}, nil
+		}, nil)
 	}
 }
 
 // awaitVerdictPolling is the polling fallback for when fsnotify is unavailable.
 // It checks state every 5 seconds until a verdict arrives or the deadline expires.
-func awaitVerdictPolling(ctx context.Context, bb *db.Blackboard, taskID, agentID string, deadline time.Time, taskStatus models.TaskStatus, resolver *pipeline.Resolver, rolePair, projectRoot string, pollInterval time.Duration) (*AwaitVerdictResult, error) {
+func awaitVerdictPolling(ctx context.Context, bb *db.Blackboard, taskID, agentID string, authority *models.AgentAuthority, deadline time.Time, taskStatus models.TaskStatus, resolver *pipeline.Resolver, rolePair, projectRoot string, pollInterval time.Duration) (*AwaitVerdictResult, error) {
 	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
 	deadlineTimer := time.NewTimer(time.Until(deadline))
@@ -484,8 +509,7 @@ func awaitVerdictPolling(ctx context.Context, bb *db.Blackboard, taskID, agentID
 	for {
 		select {
 		case <-ctx.Done():
-			releaseOwnership(bb, agentID)
-			return nil, ctx.Err()
+			return finishAwaitVerdict(bb, agentID, authority, nil, ctx.Err())
 
 		case <-ticker.C:
 			state, err := bb.ReadCached()
@@ -493,22 +517,21 @@ func awaitVerdictPolling(ctx context.Context, bb *db.Blackboard, taskID, agentID
 				continue
 			}
 			if state.Config.Mode == models.SystemModeStopped {
-				releaseOwnership(bb, agentID)
-				return &AwaitVerdictResult{Verdict: VerdictAborted}, nil
+				return finishAwaitVerdict(bb, agentID, authority,
+					&AwaitVerdictResult{Verdict: VerdictAborted}, nil)
 			}
 			currentTask := state.FindTask(taskID)
 			if currentTask == nil {
-				releaseOwnership(bb, agentID)
-				return disappearedVerdictResult(), nil
+				return finishAwaitVerdict(bb, agentID, authority, disappearedVerdictResult(), nil)
 			}
 			taskStatus = currentTask.Status
 			if vc := checkVerdictStatus(currentTask, resolver, rolePair); vc != nil {
-				return handleVerdictResult(bb, currentTask, agentID, projectRoot, resolver, rolePair)
+				return handleVerdictResult(bb, currentTask, agentID, authority, projectRoot, resolver, rolePair)
 			}
 
 		case <-deadlineTimer.C:
-			releaseOwnership(bb, agentID)
-			return &AwaitVerdictResult{Verdict: VerdictTimeout, TaskStatus: taskStatus}, nil
+			return finishAwaitVerdict(bb, agentID, authority,
+				&AwaitVerdictResult{Verdict: VerdictTimeout, TaskStatus: taskStatus}, nil)
 		}
 	}
 }
@@ -787,11 +810,21 @@ func remainingFromAnchor(anchor time.Time, total time.Duration) time.Duration {
 // No-op unless agentID still holds the assignment, so a task already reclaimed by
 // someone else is left alone.
 func ReleaseDepartedDoerAssignment(projectRoot, taskID, agentID string) error {
+	return releaseDepartedDoerAssignment(projectRoot, taskID, agentID, nil)
+}
+
+// ReleaseDepartedDoerAssignmentWithAuthority fences the budget-exhaustion
+// cleanup performed by an authenticated await-verdict command.
+func ReleaseDepartedDoerAssignmentWithAuthority(projectRoot, taskID string, authority models.AgentAuthority) error {
+	return releaseDepartedDoerAssignment(projectRoot, taskID, authority.ID, &authority)
+}
+
+func releaseDepartedDoerAssignment(projectRoot, taskID, agentID string, authority *models.AgentAuthority) error {
 	lp := paths.New(projectRoot)
 	bb := db.For(lp.StatePath())
 	now := awaitVerdictNow().UTC()
 
-	return bb.Modify(func(state *models.State) error {
+	return modifyLifecycleState(bb, authority, func(state *models.State) error {
 		task := state.FindTask(taskID)
 		if task == nil {
 			return &errors.NotFoundError{Entity: "task", ID: taskID}

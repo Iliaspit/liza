@@ -44,6 +44,16 @@ type AddTaskResult struct {
 // for duplicates. Also updates sprint.scope.planned, goal.alignment_history,
 // and appends to the activity log. No terminal I/O.
 func AddTask(statePath, logPath string, input *AddTaskInput, orchestratorID string) (*AddTaskResult, error) {
+	return addTaskWithOptionalAuthority(statePath, logPath, input, orchestratorID, nil)
+}
+
+// AddTaskWithAuthority fences task creation with the orchestrator's current
+// registration generation.
+func AddTaskWithAuthority(statePath, logPath string, input *AddTaskInput, authority models.AgentAuthority) (*AddTaskResult, error) {
+	return addTaskWithOptionalAuthority(statePath, logPath, input, authority.ID, &authority)
+}
+
+func addTaskWithOptionalAuthority(statePath, logPath string, input *AddTaskInput, orchestratorID string, authority *models.AgentAuthority) (*AddTaskResult, error) {
 	if orchestratorID == "" {
 		return nil, &PreconditionError{Reason: "orchestrator agent ID is required"}
 	}
@@ -152,7 +162,7 @@ func AddTask(statePath, logPath string, input *AddTaskInput, orchestratorID stri
 	}
 
 	var postValidationErr error
-	err = bb.Modify(func(state *models.State) error {
+	err = lifecycleMutation(bb, authority)(func(state *models.State) error {
 		if state.FindTask(input.ID) != nil {
 			return &PreconditionError{Reason: fmt.Sprintf("task '%s' already exists", input.ID)}
 		}
@@ -292,16 +302,38 @@ type AddTaskItemResult struct {
 // AddTasks adds multiple tasks in a single call. Each task is added
 // independently; failed tasks don't block subsequent ones.
 func AddTasks(statePath, logPath string, input *AddTasksInput) (*AddTasksResult, error) {
+	return addTasksWithOptionalAuthority(statePath, logPath, input, nil)
+}
+
+// AddTasksWithAuthority fences every independent item write with the same
+// current orchestrator generation and stops the batch on authority loss.
+func AddTasksWithAuthority(statePath, logPath string, input *AddTasksInput, authority models.AgentAuthority) (*AddTasksResult, error) {
+	return addTasksWithOptionalAuthority(statePath, logPath, input, &authority)
+}
+
+func addTasksWithOptionalAuthority(statePath, logPath string, input *AddTasksInput, authority *models.AgentAuthority) (*AddTasksResult, error) {
 	if len(input.Tasks) == 0 {
 		return nil, &PreconditionError{Reason: "at least one task is required"}
 	}
 	orchestratorID := input.OrchestratorID
+	if authority != nil {
+		orchestratorID = authority.ID
+	}
 	if orchestratorID == "" {
 		return nil, &PreconditionError{Reason: "orchestrator agent ID is required"}
 	}
 	result := &AddTasksResult{Results: make([]AddTaskItemResult, 0, len(input.Tasks))}
 	for i := range input.Tasks {
-		r, err := AddTask(statePath, logPath, &input.Tasks[i], orchestratorID)
+		var r *AddTaskResult
+		var err error
+		if authority == nil {
+			r, err = AddTask(statePath, logPath, &input.Tasks[i], orchestratorID)
+		} else {
+			r, err = AddTaskWithAuthority(statePath, logPath, &input.Tasks[i], *authority)
+			if IsAgentAuthorityError(err) {
+				return nil, err
+			}
+		}
 		item := AddTaskItemResult{TaskID: input.Tasks[i].ID}
 		if err != nil {
 			item.Error = err.Error()

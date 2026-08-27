@@ -29,6 +29,7 @@ type ClaimReviewerTaskInput struct {
 	Role          string
 	TaskID        string
 	LeaseDuration int
+	Authority     *models.AgentAuthority
 }
 
 // ClaimReviewerTaskResult contains the outcome of a successful reviewer task claim.
@@ -114,6 +115,11 @@ func ClaimReviewerTask(input ClaimReviewerTaskInput) (*ClaimReviewerTaskResult, 
 	if input.AgentID == "" {
 		return nil, &PreconditionError{Reason: "agent ID is required"}
 	}
+	if input.Authority != nil {
+		if err := requireAuthorityActor(*input.Authority, input.AgentID); err != nil {
+			return nil, err
+		}
+	}
 	if input.LeaseDuration <= 0 {
 		input.LeaseDuration = models.DefaultLeaseDurationSeconds
 	}
@@ -147,7 +153,7 @@ func ClaimReviewerTask(input ClaimReviewerTaskInput) (*ClaimReviewerTaskResult, 
 	}
 	pr := pb.pr
 
-	err = bb.Modify(func(state *models.State) error {
+	err = lifecycleMutation(bb, input.Authority)(func(state *models.State) error {
 		claimingAgent, err := requireRegisteredClaimAgent(state, input.AgentID, role)
 		if err != nil {
 			return err

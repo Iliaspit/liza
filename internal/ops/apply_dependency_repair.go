@@ -45,6 +45,16 @@ type preparedDependencyUpdate struct {
 // ApplyDependencyRepair consumes one blocked task's declarative repair request
 // and commits every requested dependency list in one validated transaction.
 func ApplyDependencyRepair(projectRoot, sourceTaskID, reason, agentID string) (*ApplyDependencyRepairResult, error) {
+	return applyDependencyRepairWithOptionalAuthority(projectRoot, sourceTaskID, reason, agentID, nil)
+}
+
+// ApplyDependencyRepairWithAuthority fences the complete repair batch with the
+// orchestrator's registration generation.
+func ApplyDependencyRepairWithAuthority(projectRoot, sourceTaskID, reason string, authority models.AgentAuthority) (*ApplyDependencyRepairResult, error) {
+	return applyDependencyRepairWithOptionalAuthority(projectRoot, sourceTaskID, reason, authority.ID, &authority)
+}
+
+func applyDependencyRepairWithOptionalAuthority(projectRoot, sourceTaskID, reason, agentID string, authority *models.AgentAuthority) (*ApplyDependencyRepairResult, error) {
 	if sourceTaskID == "" {
 		return nil, &PreconditionError{Reason: "blocked task ID is required"}
 	}
@@ -64,7 +74,7 @@ func ApplyDependencyRepair(projectRoot, sourceTaskID, reason, agentID string) (*
 
 	var result ApplyDependencyRepairResult
 	now := time.Now().UTC()
-	err = bb.Modify(func(state *models.State) error {
+	err = lifecycleMutation(bb, authority)(func(state *models.State) error {
 		source := state.FindTask(sourceTaskID)
 		if source == nil {
 			return &errors.NotFoundError{Entity: "task", ID: sourceTaskID}

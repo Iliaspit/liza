@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/liza-mas/liza/internal/db"
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/ops"
 	"github.com/liza-mas/liza/internal/paths"
@@ -19,6 +20,21 @@ import (
 	"github.com/liza-mas/liza/internal/semble"
 	"github.com/liza-mas/liza/internal/testhelpers"
 )
+
+func testWorktreeAuthority(t *testing.T, bb *db.Blackboard, agentID string) models.AgentAuthority {
+	t.Helper()
+	const generation = "test-generation"
+	if err := bb.Modify(func(current *models.State) error {
+		agent := current.Agents[agentID]
+		agent.Role = models.RoleCodeReviewer
+		agent.Generation = generation
+		current.Agents[agentID] = agent
+		return nil
+	}); err != nil {
+		t.Fatalf("install worktree test authority: %v", err)
+	}
+	return models.AgentAuthority{ID: agentID, Generation: generation}
+}
 
 func isolateGitGlobalConfig(t *testing.T) {
 	t.Helper()
@@ -40,7 +56,7 @@ func TestEnsureReviewerWorktree_Exists(t *testing.T) {
 	// Create the worktree directory so it "exists"
 	testhelpers.CreateTestWorktree(t, tmpDir, "task-1")
 
-	recovered, err := ensureReviewerWorktree(tmpDir, bb, "task-1", "code-reviewer-1")
+	recovered, err := ensureReviewerWorktree(tmpDir, bb, "task-1", testWorktreeAuthority(t, bb, "code-reviewer-1"))
 	if err != nil {
 		t.Fatalf("Expected no error, got: %v", err)
 	}
@@ -70,7 +86,7 @@ func TestEnsureReviewerWorktree_MissingRecoverable(t *testing.T) {
 	}
 
 	// No worktree directory — recovery should recreate it.
-	recovered, err := ensureReviewerWorktree(tmpDir, bb, "task-1", "code-reviewer-1")
+	recovered, err := ensureReviewerWorktree(tmpDir, bb, "task-1", testWorktreeAuthority(t, bb, "code-reviewer-1"))
 	if err != nil {
 		t.Fatalf("Expected successful recovery, got error: %v", err)
 	}
@@ -127,7 +143,7 @@ func TestEnsureReviewerWorktree_MissingRecoverable_RunsPostWorktreeCmd(t *testin
 	}
 
 	// No worktree directory — recovery should recreate it.
-	recovered, err := ensureReviewerWorktree(tmpDir, bb, "task-1", "code-reviewer-1")
+	recovered, err := ensureReviewerWorktree(tmpDir, bb, "task-1", testWorktreeAuthority(t, bb, "code-reviewer-1"))
 	if err != nil {
 		t.Fatalf("Expected successful recovery, got error: %v", err)
 	}
@@ -164,7 +180,7 @@ func TestEnsureReviewerWorktree_MissingRecoverable_CopyWorktreeEnvFilesBeforePos
 	branchName := paths.TaskBranchPrefix + "task-1"
 	testhelpers.MustGit(t, tmpDir, "branch", branchName)
 
-	recovered, err := ensureReviewerWorktree(tmpDir, bb, "task-1", "code-reviewer-1")
+	recovered, err := ensureReviewerWorktree(tmpDir, bb, "task-1", testWorktreeAuthority(t, bb, "code-reviewer-1"))
 	if err != nil {
 		t.Fatalf("Expected successful recovery, got error: %v", err)
 	}
@@ -217,7 +233,7 @@ func TestEnsureReviewerWorktree_MissingRecoverable_RefreshesScipAfterPostWorktre
 	})
 	defer restoreRefresh()
 
-	recovered, err := ensureReviewerWorktree(tmpDir, bb, "task-1", "code-reviewer-1")
+	recovered, err := ensureReviewerWorktree(tmpDir, bb, "task-1", testWorktreeAuthority(t, bb, "code-reviewer-1"))
 	if err != nil {
 		t.Fatalf("Expected successful recovery, got error: %v", err)
 	}
@@ -270,7 +286,7 @@ func TestEnsureReviewerWorktree_Exists_DoesNotRefreshScip(t *testing.T) {
 	})
 	defer restoreRefresh()
 
-	recovered, err := ensureReviewerWorktree(tmpDir, bb, "task-1", "code-reviewer-1")
+	recovered, err := ensureReviewerWorktree(tmpDir, bb, "task-1", testWorktreeAuthority(t, bb, "code-reviewer-1"))
 	if err != nil {
 		t.Fatalf("Expected no error, got: %v", err)
 	}
@@ -311,7 +327,7 @@ func TestEnsureReviewerWorktree_MissingRecoverable_ScipFailureWarningOnlyAndOmit
 	})
 	defer restoreRefresh()
 
-	recovered, err := ensureReviewerWorktree(tmpDir, bb, "task-1", "code-reviewer-1")
+	recovered, err := ensureReviewerWorktree(tmpDir, bb, "task-1", testWorktreeAuthority(t, bb, "code-reviewer-1"))
 	if err != nil {
 		t.Fatalf("Expected warning-only scip failure, got error: %v", err)
 	}
@@ -352,7 +368,7 @@ func TestEnsureReviewerWorktreeRecoveryPreparesSembleIgnore(t *testing.T) {
 	branchName := paths.TaskBranchPrefix + "task-1"
 	testhelpers.MustGit(t, tmpDir, "branch", branchName)
 
-	recovered, err := ensureReviewerWorktree(tmpDir, bb, "task-1", "code-reviewer-1")
+	recovered, err := ensureReviewerWorktree(tmpDir, bb, "task-1", testWorktreeAuthority(t, bb, "code-reviewer-1"))
 	if err != nil {
 		t.Fatalf("ensureReviewerWorktree() error = %v", err)
 	}
@@ -415,7 +431,7 @@ func TestEnsureReviewerWorktreeRecoveryRunsSemblePreparationBeforeIndexRefresh(t
 	})
 	defer restoreRefresh()
 
-	recovered, err := ensureReviewerWorktree(tmpDir, bb, "task-1", "code-reviewer-1")
+	recovered, err := ensureReviewerWorktree(tmpDir, bb, "task-1", testWorktreeAuthority(t, bb, "code-reviewer-1"))
 	if err != nil {
 		t.Fatalf("ensureReviewerWorktree() error = %v", err)
 	}
@@ -455,7 +471,7 @@ func TestEnsureReviewerWorktreeRecoveryLogsBoundedSembleWarning(t *testing.T) {
 	testhelpers.MustGit(t, tmpDir, "branch", branchName)
 
 	logs := captureAgentLogs(t)
-	recovered, err := ensureReviewerWorktree(tmpDir, bb, "task-1", "code-reviewer-1")
+	recovered, err := ensureReviewerWorktree(tmpDir, bb, "task-1", testWorktreeAuthority(t, bb, "code-reviewer-1"))
 	if err != nil {
 		t.Fatalf("ensureReviewerWorktree() error = %v", err)
 	}
@@ -497,7 +513,7 @@ func TestEnsureReviewerWorktreeRecoveryLeavesTrackedSembleIgnoreUnmodified(t *te
 	testhelpers.MustGit(t, tmpDir, "branch", branchName)
 
 	logs := captureAgentLogs(t)
-	recovered, err := ensureReviewerWorktree(tmpDir, bb, "task-1", "code-reviewer-1")
+	recovered, err := ensureReviewerWorktree(tmpDir, bb, "task-1", testWorktreeAuthority(t, bb, "code-reviewer-1"))
 	if err != nil {
 		t.Fatalf("ensureReviewerWorktree() error = %v", err)
 	}
@@ -549,7 +565,7 @@ func TestEnsureReviewerWorktreeRecoveryExistingWorktreeFastPathUnchanged(t *test
 	})
 	defer restoreRefresh()
 
-	recovered, err := ensureReviewerWorktree(tmpDir, bb, "task-1", "code-reviewer-1")
+	recovered, err := ensureReviewerWorktree(tmpDir, bb, "task-1", testWorktreeAuthority(t, bb, "code-reviewer-1"))
 	if err != nil {
 		t.Fatalf("ensureReviewerWorktree() error = %v", err)
 	}
@@ -593,7 +609,7 @@ func TestEnsureReviewerWorktree_MissingAlreadyRecovered(t *testing.T) {
 	bb := testhelpers.WriteInitialState(t, statePath, state)
 
 	// No worktree and already recovered once — should block.
-	recovered, err := ensureReviewerWorktree(tmpDir, bb, "task-1", reviewerID)
+	recovered, err := ensureReviewerWorktree(tmpDir, bb, "task-1", testWorktreeAuthority(t, bb, reviewerID))
 	if err == nil {
 		t.Fatal("Expected error for already-recovered task")
 	}
@@ -731,7 +747,7 @@ func TestEnsureReviewerWorktree_MissingBranchGone(t *testing.T) {
 	bb := testhelpers.WriteInitialState(t, statePath, state)
 
 	// No worktree AND no branch — unrecoverable.
-	recovered, err := ensureReviewerWorktree(tmpDir, bb, "task-1", reviewerID)
+	recovered, err := ensureReviewerWorktree(tmpDir, bb, "task-1", testWorktreeAuthority(t, bb, reviewerID))
 	if err == nil {
 		t.Fatal("Expected error when branch is missing")
 	}
@@ -835,7 +851,7 @@ func TestEnsureReviewerWorktree_MissingRecoverable_PostWorktreeCmdFailureDoesNot
 		t.Fatalf("Failed to create branch: %v\n%s", err, out)
 	}
 
-	_, err := ensureReviewerWorktree(tmpDir, bb, "task-1", reviewer)
+	_, err := ensureReviewerWorktree(tmpDir, bb, "task-1", testWorktreeAuthority(t, bb, reviewer))
 	if err == nil {
 		t.Fatal("ensureReviewerWorktree() error = nil, want setup failure")
 	}
@@ -889,7 +905,7 @@ func TestEnsureReviewerWorktree_IntactWorktree_RunsPostWorktreeCmd(t *testing.T)
 		t.Fatalf("MkdirAll(%q) error = %v", wtPath, err)
 	}
 
-	recovered, err := ensureReviewerWorktree(tmpDir, bb, "task-1", "code-reviewer-1")
+	recovered, err := ensureReviewerWorktree(tmpDir, bb, "task-1", testWorktreeAuthority(t, bb, "code-reviewer-1"))
 	if err != nil {
 		t.Fatalf("ensureReviewerWorktree() error = %v", err)
 	}
@@ -922,7 +938,7 @@ func TestEnsureReviewerWorktree_IntactWorktree_PostWorktreeCmdFailureDoesNotBloc
 		t.Fatalf("MkdirAll(%q) error = %v", wtPath, err)
 	}
 
-	_, err := ensureReviewerWorktree(tmpDir, bb, "task-1", reviewer)
+	_, err := ensureReviewerWorktree(tmpDir, bb, "task-1", testWorktreeAuthority(t, bb, reviewer))
 	var setupErr *ops.PostWorktreeSetupError
 	if !errors.As(err, &setupErr) {
 		t.Fatalf("ensureReviewerWorktree() error = %v, want *ops.PostWorktreeSetupError", err)
@@ -957,7 +973,7 @@ func TestEnsureReviewerWorktree_IntactWorktree_NoPostWorktreeCmdIsNoOp(t *testin
 		t.Fatalf("MkdirAll(%q) error = %v", wtPath, err)
 	}
 
-	recovered, err := ensureReviewerWorktree(tmpDir, bb, "task-1", "code-reviewer-1")
+	recovered, err := ensureReviewerWorktree(tmpDir, bb, "task-1", testWorktreeAuthority(t, bb, "code-reviewer-1"))
 	if err != nil {
 		t.Fatalf("ensureReviewerWorktree() error = %v", err)
 	}
@@ -996,7 +1012,7 @@ func TestEnsureReviewerWorktree_IntactWorktree_SetupDoesNotHoldLifecycleLock(t *
 
 	ensureDone := make(chan error, 1)
 	go func() {
-		_, ensureErr := ensureReviewerWorktree(tmpDir, bb, "task-1", "code-reviewer-1")
+		_, ensureErr := ensureReviewerWorktree(tmpDir, bb, "task-1", testWorktreeAuthority(t, bb, "code-reviewer-1"))
 		ensureDone <- ensureErr
 	}()
 

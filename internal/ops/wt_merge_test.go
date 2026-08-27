@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -1077,6 +1078,126 @@ func TestMergeWorktree_Success(t *testing.T) {
 	}
 	if testsRanVal != false {
 		t.Errorf("tests_ran = %v, want false", testsRanVal)
+	}
+}
+
+func TestApprovedMergeTakeoverInterruptionConvergence(t *testing.T) {
+	for _, tc := range []struct {
+		name              string
+		interruptAfterGit bool
+	}{
+		{name: "git not advanced"},
+		{name: "git already advanced and state still approved", interruptAfterGit: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			taskID := "takeover-" + strings.ReplaceAll(tc.name, " ", "-")
+			const agentID = "code-reviewer-1"
+			projectRoot, stateFile := setupMergeTestRepo(t, taskID, agentID)
+			initial := readStateForTest(t, stateFile)
+			task := initial.FindTask(taskID)
+			if task == nil || task.ReviewCommit == nil {
+				t.Fatal("approved task or review_commit missing")
+			}
+			reviewCommit := *task.ReviewCommit
+
+			previousHook := mergeFinalStateTestHook
+			t.Cleanup(func() { mergeFinalStateTestHook = previousHook })
+			if tc.interruptAfterGit {
+				const interrupted = "interrupt after git advancement"
+				mergeFinalStateTestHook = func() { panic(interrupted) }
+				func() {
+					defer func() {
+						if recovered := recover(); recovered != interrupted {
+							t.Fatalf("interrupted merge panic = %v, want %q", recovered, interrupted)
+						}
+					}()
+					_, _ = MergeWorktree(projectRoot, taskID, agentID)
+				}()
+
+				interruptedState := readStateForTest(t, stateFile)
+				if got := interruptedState.FindTask(taskID).Status; got != models.TaskStatusApproved {
+					t.Fatalf("status after interrupted state write = %s, want APPROVED", got)
+				}
+				if got := testhelpers.MustGit(t, projectRoot, "rev-parse", "refs/heads/integration"); got != reviewCommit {
+					t.Fatalf("integration HEAD after interruption = %s, want %s", got, reviewCommit)
+				}
+			}
+
+			arrived := make(chan struct{}, 2)
+			release := make(chan struct{})
+			var releaseOnce sync.Once
+			releaseHandlers := func() { releaseOnce.Do(func() { close(release) }) }
+			defer releaseHandlers()
+			mergeFinalStateTestHook = func() {
+				arrived <- struct{}{}
+				<-release
+			}
+
+			type mergeOutcome struct {
+				result *MergeResult
+				err    error
+			}
+			outcomes := make(chan mergeOutcome, 2)
+			for range 2 {
+				go func() {
+					result, err := MergeWorktree(projectRoot, taskID, agentID)
+					outcomes <- mergeOutcome{result: result, err: err}
+				}()
+			}
+			for range 2 {
+				select {
+				case <-arrived:
+				case <-time.After(10 * time.Second):
+					releaseHandlers()
+					t.Fatal("timed out waiting for concurrent merge handlers")
+				}
+			}
+			releaseHandlers()
+
+			successes := 0
+			for range 2 {
+				outcome := <-outcomes
+				if outcome.err == nil {
+					successes++
+					if outcome.result == nil || outcome.result.MergeCommit != reviewCommit {
+						t.Fatalf("successful merge result = %+v, want stable commit %s", outcome.result, reviewCommit)
+					}
+					continue
+				}
+				if outcome.result != nil {
+					t.Fatalf("failed concurrent merge returned result %+v", outcome.result)
+				}
+			}
+			if successes != 1 {
+				t.Fatalf("successful integration results = %d, want 1", successes)
+			}
+
+			mergeFinalStateTestHook = nil
+			if repeated, err := MergeWorktree(projectRoot, taskID, agentID); err == nil || repeated != nil {
+				t.Fatalf("repeated merge = (%+v, %v), want stable no-result rejection", repeated, err)
+			}
+
+			finalState := readStateForTest(t, stateFile)
+			merged := finalState.FindTask(taskID)
+			if merged == nil || merged.Status != models.TaskStatusMerged {
+				t.Fatalf("final task = %+v, want MERGED", merged)
+			}
+			if merged.MergeCommit == nil || *merged.MergeCommit != reviewCommit {
+				t.Fatalf("merge_commit = %v, want stable %s", merged.MergeCommit, reviewCommit)
+			}
+			mergedEvents := 0
+			for _, entry := range merged.History {
+				if entry.Event == models.TaskEventMerged {
+					mergedEvents++
+				}
+			}
+			if mergedEvents != 1 {
+				t.Fatalf("merged history transitions = %d, want 1", mergedEvents)
+			}
+			if got := testhelpers.MustGit(t, projectRoot, "rev-parse", "refs/heads/integration"); got != reviewCommit {
+				t.Fatalf("integration HEAD = %s, want stable %s", got, reviewCommit)
+			}
+		})
 	}
 }
 

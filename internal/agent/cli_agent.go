@@ -55,20 +55,10 @@ func (d *CLIAgent) Run(ctx context.Context, req LLMAgentRunRequest) (LLMAgentRun
 		TaskID:      req.TaskID,
 		SessionID:   req.SessionID,
 	}
-	emitLLMAgentEvent(ctx, req.EventSink, LLMAgentEvent{
-		Kind:        LLMAgentEventStarted,
-		BackendName: cliName,
-		AgentID:     agentID,
-		TaskID:      req.TaskID,
-		SessionID:   req.SessionID,
-		Payload: map[string]any{
-			"mode": "run",
-		},
-	})
-
 	cmd, cleanup, err := d.buildRunCommand(ctx, LLMAgentRunRequest{
 		BackendName:    cliName,
 		AgentID:        agentID,
+		Generation:     req.Generation,
 		TaskID:         req.TaskID,
 		SessionID:      req.SessionID,
 		ProfileName:    req.ProfileName,
@@ -79,6 +69,7 @@ func (d *CLIAgent) Run(ctx context.Context, req LLMAgentRunRequest) (LLMAgentRun
 		AdditionalDirs: req.AdditionalDirs,
 		RuntimeConfig:  runtimeConfig,
 		EventSink:      req.EventSink,
+		LaunchGate:     req.LaunchGate,
 	})
 	if err != nil {
 		emitLLMAgentEvent(ctx, req.EventSink, LLMAgentEvent{
@@ -127,7 +118,32 @@ func (d *CLIAgent) Run(ctx context.Context, req LLMAgentRunRequest) (LLMAgentRun
 
 	defer closeAgentOutputLogs(stdoutLog, stderrLog, agentID)
 
-	err = cmd.Run()
+	err = req.LaunchGate.launch(ctx, cmd.Start)
+	if err != nil {
+		emitLLMAgentEvent(ctx, req.EventSink, LLMAgentEvent{
+			Kind:        LLMAgentEventCompleted,
+			BackendName: cliName,
+			AgentID:     agentID,
+			TaskID:      req.TaskID,
+			SessionID:   req.SessionID,
+			Message:     err.Error(),
+			Payload: map[string]any{
+				"error": err.Error(),
+			},
+		})
+		return LLMAgentRunResult{Usage: LLMAgentUsage{}, WarmUsage: req.WarmSession, SessionID: req.SessionID}, err
+	}
+	emitLLMAgentEvent(ctx, req.EventSink, LLMAgentEvent{
+		Kind:        LLMAgentEventStarted,
+		BackendName: cliName,
+		AgentID:     agentID,
+		TaskID:      req.TaskID,
+		SessionID:   req.SessionID,
+		Payload: map[string]any{
+			"mode": "run",
+		},
+	})
+	err = cmd.Wait()
 	stdout := stdoutBuf.String()
 	stderr := stderrBuf.String()
 	output := stdout + "\n" + stderr
@@ -182,18 +198,7 @@ func (d *CLIAgent) RunInteractive(ctx context.Context, req LLMAgentInteractiveRe
 	agentID := req.AgentID
 	projectRoot := req.ProjectRoot
 	_ = req.AdditionalDirs // CLI execution does not use this; ACP implementations may.
-	emitLLMAgentEvent(ctx, req.EventSink, LLMAgentEvent{
-		Kind:        LLMAgentEventStarted,
-		BackendName: cliName,
-		AgentID:     agentID,
-		TaskID:      "",
-		SessionID:   req.SessionID,
-		Payload: map[string]any{
-			"mode": "interactive",
-		},
-	})
-
-	cmdEnv := agentProcessEnv(os.Environ(), agentID)
+	cmdEnv := agentProcessEnv(os.Environ(), agentID, req.Generation)
 	plan, err := ResolveLaunchPlan(LaunchPlanRequest{
 		ToolName:      cliName,
 		ProfileName:   req.ProfileName,
@@ -218,7 +223,20 @@ func (d *CLIAgent) RunInteractive(ctx context.Context, req LLMAgentInteractiveRe
 	cmd.Stdin = os.Stdin
 	cmd.Env = cmdEnv
 
-	err = cmd.Run()
+	err = req.LaunchGate.launch(ctx, cmd.Start)
+	if err == nil {
+		emitLLMAgentEvent(ctx, req.EventSink, LLMAgentEvent{
+			Kind:        LLMAgentEventStarted,
+			BackendName: cliName,
+			AgentID:     agentID,
+			TaskID:      "",
+			SessionID:   req.SessionID,
+			Payload: map[string]any{
+				"mode": "interactive",
+			},
+		})
+		err = cmd.Wait()
+	}
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			exitCode := exitErr.ExitCode()
@@ -294,6 +312,7 @@ func (d *CLIAgent) Execute(ctx context.Context, cliName string, agentID string, 
 		ProjectRoot:    projectRoot,
 		AdditionalDirs: additionalDirs,
 		RuntimeConfig:  runtimeConfig,
+		LaunchGate:     immediateLaunchGate,
 	})
 }
 
@@ -306,6 +325,7 @@ func (d *CLIAgent) ExecuteInteractive(ctx context.Context, cliName string, agent
 		AgentID:        agentID,
 		ProjectRoot:    projectRoot,
 		AdditionalDirs: additionalDirs,
+		LaunchGate:     immediateLaunchGate,
 	})
 }
 
@@ -388,7 +408,7 @@ func (d *CLIAgent) buildRunCommand(ctx context.Context, req LLMAgentRunRequest) 
 			}
 		}
 	}
-	cmdEnv = agentProcessEnv(cmdEnv, req.AgentID)
+	cmdEnv = agentProcessEnv(cmdEnv, req.AgentID, req.Generation)
 
 	var cmd *exec.Cmd
 	if plan.RequiresCodexWrapper {
@@ -488,19 +508,27 @@ func envValue(env []string, key string) string {
 	return ""
 }
 
-func agentProcessEnv(base []string, agentID string) []string {
-	brandedName := brand.EnvName("AGENT_ID")
-	legacyName := "LIZA_AGENT_ID"
-	out := make([]string, 0, len(base)+2)
+func agentProcessEnv(base []string, agentID, generation string) []string {
+	brandedIDName := brand.EnvName("AGENT_ID")
+	legacyIDName := brand.LegacyEnvName("AGENT_ID")
+	brandedGenerationName := brand.EnvName("AGENT_GENERATION")
+	legacyGenerationName := brand.LegacyEnvName("AGENT_GENERATION")
+	out := make([]string, 0, len(base)+4)
 	for _, entry := range base {
-		if strings.HasPrefix(entry, brandedName+"=") || strings.HasPrefix(entry, legacyName+"=") {
+		if strings.HasPrefix(entry, brandedIDName+"=") ||
+			strings.HasPrefix(entry, legacyIDName+"=") ||
+			strings.HasPrefix(entry, brandedGenerationName+"=") ||
+			strings.HasPrefix(entry, legacyGenerationName+"=") {
 			continue
 		}
 		out = append(out, entry)
 	}
-	out = append(out, brandedName+"="+agentID)
-	if brandedName != legacyName {
-		out = append(out, legacyName+"="+agentID)
+	out = append(out, brandedIDName+"="+agentID, brandedGenerationName+"="+generation)
+	if brandedIDName != legacyIDName {
+		out = append(out, legacyIDName+"="+agentID)
+	}
+	if brandedGenerationName != legacyGenerationName {
+		out = append(out, legacyGenerationName+"="+generation)
 	}
 	return out
 }

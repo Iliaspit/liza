@@ -2,6 +2,7 @@ package ops
 
 import (
 	"fmt"
+	"io"
 	"log"
 	"time"
 
@@ -11,6 +12,7 @@ import (
 	"github.com/liza-mas/liza/internal/paths"
 	"github.com/liza-mas/liza/internal/pipeline"
 	"github.com/liza-mas/liza/internal/roles"
+	"github.com/liza-mas/liza/internal/statevalidate"
 )
 
 // ReleaseClaimResult contains the outcome of releasing a claim.
@@ -23,15 +25,16 @@ type ReleaseClaimResult struct {
 
 // claimRelease describes the field access pattern for one role's claim on a task.
 type claimRelease struct {
-	hasClaimFn      func(*models.Task) bool
-	agentFieldFn    func(*models.Task) *string
-	leaseFieldFn    func(*models.Task) *time.Time
-	activeStatus    models.TaskStatus
-	releasedStatus  models.TaskStatus
-	eventName       string
-	clearFn         func(*models.Task)
-	missingLeaseMsg string
-	activeLeaseMsg  string
+	hasClaimFn              func(*models.Task) bool
+	agentFieldFn            func(*models.Task) *string
+	leaseFieldFn            func(*models.Task) *time.Time
+	activeStatus            models.TaskStatus
+	releasedStatus          models.TaskStatus
+	eventName               string
+	clearFn                 func(*models.Task)
+	missingLeaseMsg         string
+	activeLeaseMsg          string
+	preserveRejectedHandoff bool
 }
 
 var reviewerRelease = claimRelease{
@@ -134,7 +137,25 @@ func resolveDoerClaimReleaseStatus(task *models.Task, resolver models.PipelineRe
 		doer.activeStatus = doerActive
 		doer.releasedStatus = doerReleased
 	}
+	if isRejectedDoerRelease(task, resolver) {
+		doer.preserveRejectedHandoff = true
+		doer.clearFn = func(t *models.Task) {
+			t.AssignedTo = nil
+			t.LeaseExpires = nil
+		}
+	}
 	return doer
+}
+
+func isRejectedDoerRelease(task *models.Task, resolver models.PipelineResolver) bool {
+	if task.Status == models.TaskStatusRejected || task.Status == models.TaskStatusCodingPlanRejected {
+		return true
+	}
+	if task.RolePair == "" || resolver == nil {
+		return false
+	}
+	rejected, err := resolver.RejectedStatus(task.RolePair)
+	return err == nil && task.Status == rejected
 }
 
 // resolveReviewerClaimReleaseStatus returns the reviewer claimRelease config
@@ -206,8 +227,24 @@ func releaseOneClaim(state *models.State, task *models.Task, cfg claimRelease, p
 // ReleaseClaim releases reviewer, doer, or both claims on a task. Without
 // force, refuses if lease is still valid. No terminal I/O.
 func ReleaseClaim(projectRoot, taskID, role string, force bool, reason, agentID string) (*ReleaseClaimResult, error) {
+	return releaseClaim(projectRoot, taskID, role, force, reason, agentID, nil)
+}
+
+// ReleaseClaimWithAuthority fences a supervisor-driven claim release with the
+// caller's current registration generation. The legacy entry point remains
+// available for explicit audit-only human/admin recovery.
+func ReleaseClaimWithAuthority(projectRoot, taskID, role string, force bool, reason string, authority models.AgentAuthority) (*ReleaseClaimResult, error) {
+	return releaseClaim(projectRoot, taskID, role, force, reason, authority.ID, &authority)
+}
+
+func releaseClaim(projectRoot, taskID, role string, force bool, reason, agentID string, authority *models.AgentAuthority) (*ReleaseClaimResult, error) {
 	if taskID == "" {
 		return nil, &PreconditionError{Reason: "task ID is required"}
+	}
+	if authority != nil {
+		if err := requireAuthorityActor(*authority, agentID); err != nil {
+			return nil, err
+		}
 	}
 
 	if role != roles.ClaimReviewer && role != roles.ClaimDoer && role != roles.ClaimBoth {
@@ -237,7 +274,7 @@ func ReleaseClaim(projectRoot, taskID, role string, force bool, reason, agentID 
 	}
 	pipelineTransitions := BuildPipelineTransitions(resolver)
 
-	err := bb.Modify(func(state *models.State) error {
+	err := lifecycleMutation(bb, authority)(func(state *models.State) error {
 		task := state.FindTask(taskID)
 		if task == nil {
 			return &errors.NotFoundError{Entity: "task", ID: taskID}
@@ -255,6 +292,7 @@ func ReleaseClaim(projectRoot, taskID, role string, force bool, reason, agentID 
 			releasedReviewer = released
 		}
 
+		preservedRejectedHandoff := false
 		if role == roles.ClaimDoer || role == roles.ClaimBoth {
 			effectiveCoderRelease := resolveDoerClaimReleaseStatus(task, resolver)
 			released, err := releaseOneClaim(state, task, effectiveCoderRelease, pipelineTransitions, force, agentID, reason, now)
@@ -262,10 +300,16 @@ func ReleaseClaim(projectRoot, taskID, role string, force bool, reason, agentID 
 				return err
 			}
 			releasedDoer = released
+			preservedRejectedHandoff = released && effectiveCoderRelease.preserveRejectedHandoff
 		}
 
 		if !releasedReviewer && !releasedDoer {
 			return &PreconditionError{Reason: fmt.Sprintf("no claims to release for task %s", taskID)}
+		}
+		if preservedRejectedHandoff {
+			if err := statevalidate.ValidateState(state, projectRoot, true, io.Discard); err != nil {
+				return fmt.Errorf("released rejected claim produced invalid state: %w", err)
+			}
 		}
 
 		return nil

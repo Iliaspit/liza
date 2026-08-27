@@ -45,6 +45,16 @@ var testTransitionHooks *transitionTestHooks
 // Phase 3 (bb.Modify): Re-check sentinel, clear AssignedTo/RejectionReason/
 // Worktree/BaseCommit, transition to initial pipeline status.
 func TransitionToNewAttempt(projectRoot, taskID, reason string) (*TransitionAttemptResult, error) {
+	return transitionToNewAttemptWithOptionalAuthority(projectRoot, taskID, reason, nil)
+}
+
+// TransitionToNewAttemptWithAuthority fences both state phases for an
+// authenticated lifecycle caller.
+func TransitionToNewAttemptWithAuthority(projectRoot, taskID, reason string, authority models.AgentAuthority) (*TransitionAttemptResult, error) {
+	return transitionToNewAttemptWithOptionalAuthority(projectRoot, taskID, reason, &authority)
+}
+
+func transitionToNewAttemptWithOptionalAuthority(projectRoot, taskID, reason string, authority *models.AgentAuthority) (*TransitionAttemptResult, error) {
 	lp := paths.New(projectRoot)
 	bb := db.For(lp.StatePath())
 
@@ -61,7 +71,7 @@ func TransitionToNewAttempt(projectRoot, taskID, reason string) (*TransitionAtte
 	)
 
 	// Phase 1: mark attempt boundary, block claims via sentinel.
-	err = bb.Modify(func(state *models.State) error {
+	err = lifecycleMutation(bb, authority)(func(state *models.State) error {
 		task := state.FindTask(taskID)
 		if task == nil {
 			return &errors.NotFoundError{Entity: "task", ID: taskID}
@@ -146,7 +156,7 @@ func TransitionToNewAttempt(projectRoot, taskID, reason string) (*TransitionAtte
 	pb.transitions[originalStatus] = append(pb.transitions[originalStatus], initialStatus)
 
 	// Phase 3: release sentinel, make task claimable.
-	err = bb.Modify(func(state *models.State) error {
+	err = lifecycleMutation(bb, authority)(func(state *models.State) error {
 		task := state.FindTask(taskID)
 		if task == nil {
 			return &errors.NotFoundError{Entity: "task", ID: taskID}

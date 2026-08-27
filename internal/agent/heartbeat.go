@@ -7,6 +7,7 @@ import (
 	"github.com/liza-mas/liza/internal/db"
 	"github.com/liza-mas/liza/internal/errors"
 	"github.com/liza-mas/liza/internal/models"
+	"github.com/liza-mas/liza/internal/ops"
 )
 
 const (
@@ -17,6 +18,7 @@ const (
 
 type HeartbeatConfig struct {
 	AgentID       string
+	Authority     models.AgentAuthority
 	StatePath     string
 	Interval      time.Duration
 	LeaseDuration time.Duration
@@ -24,7 +26,7 @@ type HeartbeatConfig struct {
 }
 
 type Heartbeat struct {
-	agentID       string
+	authority     models.AgentAuthority
 	bb            *db.Blackboard
 	interval      time.Duration
 	leaseDuration time.Duration
@@ -46,8 +48,13 @@ func NewHeartbeat(config HeartbeatConfig) *Heartbeat {
 		leaseDuration = DefaultLeaseDuration
 	}
 
+	authority := config.Authority
+	if authority.ID == "" {
+		authority.ID = config.AgentID
+	}
+
 	return &Heartbeat{
-		agentID:       config.AgentID,
+		authority:     authority,
 		bb:            db.For(config.StatePath),
 		interval:      interval,
 		leaseDuration: leaseDuration,
@@ -65,11 +72,11 @@ func (h *Heartbeat) Start(ctx context.Context) error {
 			return nil
 		case <-ticker.C:
 			if err := h.beat(); err != nil {
-				if errors.IsNotFound(err) {
+				if errors.IsNotFound(err) || ops.IsAgentAuthorityError(err) {
 					return err
 				}
 				// Non-fatal: supervisors detect stale agents via watch command
-				logger.Error("Heartbeat update failed", "error", err, "agent_id", h.agentID)
+				logger.Error("Heartbeat update failed", "error", err, "agent_id", h.authority.ID)
 			}
 		}
 	}
@@ -79,23 +86,24 @@ func (h *Heartbeat) beat() error {
 	now := time.Now().UTC()
 	newLease := now.Add(h.leaseDuration)
 
-	return h.bb.Modify(func(state *models.State) error {
-		agent, exists := state.Agents[h.agentID]
+	return ops.ModifyWithAgentAuthority(h.bb, h.authority, func(state *models.State) error {
+		agentID := h.authority.ID
+		agent, exists := state.Agents[agentID]
 		if !exists {
-			return &errors.NotFoundError{Entity: "agent", ID: h.agentID}
+			return &errors.NotFoundError{Entity: "agent", ID: agentID}
 		}
 
 		agent.Heartbeat = now
 		agent.LeaseExpires = &newLease
-		state.Agents[h.agentID] = agent
+		state.Agents[agentID] = agent
 
 		// Renew task lease if agent is actively assigned
 		if agent.CurrentTask != nil {
 			if task := state.FindTask(*agent.CurrentTask); task != nil {
-				if task.AssignedTo != nil && *task.AssignedTo == h.agentID && task.LeaseExpires != nil {
+				if task.AssignedTo != nil && *task.AssignedTo == agentID && task.LeaseExpires != nil {
 					task.LeaseExpires = &newLease
 				}
-				if task.ReviewingBy != nil && *task.ReviewingBy == h.agentID && task.ReviewLeaseExpires != nil {
+				if task.ReviewingBy != nil && *task.ReviewingBy == agentID && task.ReviewLeaseExpires != nil {
 					task.ReviewLeaseExpires = &newLease
 				}
 			}

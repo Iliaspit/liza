@@ -599,7 +599,8 @@ func TestRecoverAgent_CustomDoerRole_WorktreeRemoval(t *testing.T) {
 // during agent recovery, a warning log line is emitted indicating claim release was
 // skipped due to missing resolver and the claim-owning agent is preserved.
 func TestRecoverAgent_NilResolver_WarningLogLine(t *testing.T) {
-	t.Parallel()
+	// captureLogOutput temporarily redirects the process-global logger, so this
+	// test must not overlap parallel tests that may log concurrently.
 
 	tmpDir := t.TempDir()
 

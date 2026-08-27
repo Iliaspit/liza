@@ -811,11 +811,13 @@ func TestOrchestratorPreWork_ManualCheckpoint(t *testing.T) {
 func TestOrchestratorPreWork_PlanningComplete_Resumed(t *testing.T) {
 	tmpDir := t.TempDir()
 	statePath, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	authority := models.AgentAuthority{ID: "orchestrator-1", Generation: "test-generation"}
 
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()
 	state.Sprint.Status = models.SprintStatusInProgress
 	state.Sprint.CheckpointTrigger = "PLANNING_COMPLETE"
+	state.Agents[authority.ID] = models.Agent{Role: "orchestrator", Generation: authority.Generation}
 
 	task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusMerged, now)
 	task.RolePair = "code-planning-pair"
@@ -832,7 +834,9 @@ func TestOrchestratorPreWork_PlanningComplete_Resumed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRoleStrategy() error = %v", err)
 	}
-	shouldContinue, err := s.PreWork(context.Background(), bb, SupervisorConfig{ProjectRoot: tmpDir})
+	shouldContinue, err := s.PreWork(context.Background(), bb, SupervisorConfig{
+		AgentID: authority.ID, Authority: authority, ProjectRoot: tmpDir,
+	})
 	if err != nil {
 		t.Errorf("PreWork() error = %v", err)
 	}
@@ -857,11 +861,13 @@ func TestOrchestratorPreWork_ManyToOneCohort(t *testing.T) {
 	tmpDir := t.TempDir()
 	statePath, _ := testhelpers.SetupLizaDir(t, tmpDir)
 	testhelpers.SetupPipelineConfig(t, tmpDir)
+	authority := models.AgentAuthority{ID: "orchestrator-1", Generation: "test-generation"}
 
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()
 	state.Sprint.Status = models.SprintStatusInProgress
 	state.Sprint.CheckpointTrigger = models.CheckpointTriggerManyToOneReady
+	state.Agents[authority.ID] = models.Agent{Role: "orchestrator", Generation: authority.Generation}
 
 	// Build m2o-ready tasks: MERGED us-writing-pair tasks sharing a parent, no output
 	parentID := "epic-1"
@@ -881,7 +887,9 @@ func TestOrchestratorPreWork_ManyToOneCohort(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRoleStrategy() error = %v", err)
 	}
-	shouldContinue, err := s.PreWork(context.Background(), bb, SupervisorConfig{ProjectRoot: tmpDir})
+	shouldContinue, err := s.PreWork(context.Background(), bb, SupervisorConfig{
+		AgentID: authority.ID, Authority: authority, ProjectRoot: tmpDir,
+	})
 	if err != nil {
 		t.Errorf("PreWork() error = %v", err)
 	}

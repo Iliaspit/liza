@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	stderrors "errors"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -18,6 +19,7 @@ import (
 	"github.com/liza-mas/liza/internal/identity"
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/paths"
+	"github.com/liza-mas/liza/internal/statevalidate"
 )
 
 // ClaimResult contains the outcome of a successful task claim.
@@ -53,10 +55,20 @@ var testClaimTaskHooks *claimTaskTestHooks
 //
 // Returns a structured ClaimResult on success. No terminal I/O.
 func ClaimTask(projectRoot, taskID, agentID string) (*ClaimResult, error) {
+	return claimTaskWithOptionalAuthority(projectRoot, taskID, agentID, nil)
+}
+
+// ClaimTaskWithAuthority fences the phase-three claim write and every
+// claim-triggered follow-up write with the caller's registration generation.
+func ClaimTaskWithAuthority(projectRoot, taskID string, authority models.AgentAuthority) (*ClaimResult, error) {
+	return claimTaskWithOptionalAuthority(projectRoot, taskID, authority.ID, &authority)
+}
+
+func claimTaskWithOptionalAuthority(projectRoot, taskID, agentID string, authority *models.AgentAuthority) (*ClaimResult, error) {
 	var result *ClaimResult
 	err := WithProjectLifecycleSharedLock(projectRoot, "task-claim-worktree", func() error {
 		var claimErr error
-		result, claimErr = claimTask(projectRoot, taskID, agentID)
+		result, claimErr = claimTask(projectRoot, taskID, agentID, authority)
 		return claimErr
 	})
 	if err != nil {
@@ -64,7 +76,7 @@ func ClaimTask(projectRoot, taskID, agentID string) (*ClaimResult, error) {
 		// entry point (supervisor claim loop, await-verdict auto-reclaim, CLI)
 		// goes through ClaimTask, and a setup failure must bound retries for all
 		// of them. See ADR-0117.
-		if degradedErr := degradeOnPostWorktreeSetupFailure(projectRoot, taskID, agentID, err); degradedErr != nil {
+		if degradedErr := degradeOnPostWorktreeSetupFailure(projectRoot, taskID, agentID, authority, err); degradedErr != nil {
 			return nil, degradedErr
 		}
 	}
@@ -78,7 +90,7 @@ var ErrAgentDegraded = stderrors.New("agent degraded: infrastructure claim failu
 // degradeOnPostWorktreeSetupFailure records degraded health for a setup failure
 // and returns the error wrapped with ErrAgentDegraded. Returns nil when the
 // error is not a setup failure, leaving the original error untouched.
-func degradeOnPostWorktreeSetupFailure(projectRoot, taskID, agentID string, err error) error {
+func degradeOnPostWorktreeSetupFailure(projectRoot, taskID, agentID string, authority *models.AgentAuthority, err error) error {
 	var setupErr *PostWorktreeSetupError
 	if !stderrors.As(err, &setupErr) {
 		return nil
@@ -99,13 +111,14 @@ func degradeOnPostWorktreeSetupFailure(projectRoot, taskID, agentID string, err 
 		LastError:      err.Error(),
 		RecoverHint:    classification.RecoverHint,
 		DegradedBy:     "claim_task",
+		Authority:      authority,
 	}); markErr != nil {
 		log.Printf("WARNING: claim-task %s: failed to record degraded health: %v", taskID, markErr)
 	}
 	return fmt.Errorf("%w: %w", ErrAgentDegraded, err)
 }
 
-func claimTask(projectRoot, taskID, agentID string) (*ClaimResult, error) {
+func claimTask(projectRoot, taskID, agentID string, authority *models.AgentAuthority) (*ClaimResult, error) {
 	if taskID == "" {
 		return nil, &PreconditionError{Reason: "task ID is required"}
 	}
@@ -244,7 +257,7 @@ func claimTask(projectRoot, taskID, agentID string) (*ClaimResult, error) {
 		if shouldEscalate {
 			switch escalation.action {
 			case LimitActionNewAttempt:
-				result, taErr := TransitionToNewAttempt(projectRoot, taskID, escalation.reason)
+				result, taErr := transitionToNewAttemptWithOptionalAuthority(projectRoot, taskID, escalation.reason, authority)
 				if taErr != nil {
 					return nil, fmt.Errorf("failed to transition to new attempt: %w", taErr)
 				}
@@ -253,7 +266,7 @@ func claimTask(projectRoot, taskID, agentID string) (*ClaimResult, error) {
 					taskID, result.NewAttempt,
 				)}
 			case LimitActionBlocked:
-				if err := enforceBlockedEscalation(bb, taskID, agentID, taskStatus, pipelineTransitions, escalation); err != nil {
+				if err := enforceBlockedEscalation(bb, taskID, agentID, taskStatus, pipelineTransitions, escalation, authority); err != nil {
 					return nil, fmt.Errorf("failed to enforce escalation limit: %w", err)
 				}
 				return nil, &PreconditionError{Reason: fmt.Sprintf(
@@ -285,6 +298,7 @@ func claimTask(projectRoot, taskID, agentID string) (*ClaimResult, error) {
 			claimCtx,
 			pipelineTransitions,
 			resolver,
+			authority,
 		)
 		return lockedErr
 	})
@@ -316,6 +330,7 @@ func completeClaimTaskAfterValidation(
 	claimCtx claimContext,
 	pipelineTransitions map[models.TaskStatus][]models.TaskStatus,
 	resolver models.PipelineResolver,
+	authority *models.AgentAuthority,
 ) (*ClaimResult, error) {
 	// --- Phase 2: Handle Worktree ---
 	lockedTask, err := recheckClaimTaskBeforeWorktree(
@@ -332,6 +347,10 @@ func completeClaimTaskAfterValidation(
 	}
 
 	var baseCommit string
+	_, rejectedClaim := strategy.(rejectedClaimStrategy)
+	if rejectedClaim && lockedTask.BaseCommit != nil {
+		claimCtx.preservedBaseCommit = strings.TrimSpace(*lockedTask.BaseCommit)
+	}
 	if _, preserveInitial := strategy.(preservedInitialClaimStrategy); preserveInitial {
 		claimCtx.preservedBaseCommit = *lockedTask.BaseCommit
 		baseCommit, err = gitWrapper.GetCommitSHA(integrationBranch)
@@ -463,6 +482,11 @@ func completeClaimTaskAfterValidation(
 		agent.LeaseExpires = &leaseExpires
 		agent.Heartbeat = now
 		state.Agents[agentID] = agent
+		if rejectedClaim {
+			if err := statevalidate.ValidateState(state, projectRoot, true, io.Discard); err != nil {
+				return fmt.Errorf("rejected claim produced invalid state: %w", err)
+			}
+		}
 
 		return nil
 	}
@@ -501,10 +525,10 @@ func completeClaimTaskAfterValidation(
 			if testClaimTaskHooks != nil && testClaimTaskHooks.afterPreservedIntegrationEqualityCheck != nil {
 				testClaimTaskHooks.afterPreservedIntegrationEqualityCheck()
 			}
-			return bb.Modify(modifyClaimState)
+			return lifecycleMutation(bb, authority)(modifyClaimState)
 		})
 	} else {
-		err = bb.Modify(modifyClaimState)
+		err = lifecycleMutation(bb, authority)(modifyClaimState)
 	}
 
 	if err != nil {
@@ -546,7 +570,7 @@ func completeClaimTaskAfterValidation(
 		AgentID:           agentID,
 		SourceStatus:      taskStatus,
 		WorktreeRel:       claimCtx.worktreeRel,
-		BaseCommit:        baseCommit,
+		BaseCommit:        claimCtx.baseCommit,
 		LeaseExpires:      leaseExpires,
 		IntegrationFix:    taskStatus == models.TaskStatusIntegrationFailed,
 		PreviousAssignee:  claimCtx.previousAssignee,
@@ -729,37 +753,44 @@ func ensureRejectedWorktreeExists(
 		return result, fmt.Errorf("failed to stat worktree %s: %w", ctx.worktreeDir, err)
 	}
 
-	branchExists := false
-	if worktreeDirExists {
-		var err error
-		branchExists, err = gitWrapper.BranchExists(branchName)
-		if err != nil {
-			return result, fmt.Errorf("failed to check branch %s: %w", branchName, err)
-		}
+	branchExists, err := gitWrapper.BranchExists(branchName)
+	if err != nil {
+		return result, fmt.Errorf("failed to check branch %s: %w", branchName, err)
 	}
 
 	if worktreeDirExists && branchExists {
-		// Both worktree and branch exist — validate and preserve.
-		if err := validateRejectedWorktree(gitWrapper, ctx.taskID, ctx.worktreeDir, ctx.worktreeRel); err != nil {
+		if err := validateRejectedWorktree(gitWrapper, ctx); err != nil {
 			return result, err
 		}
 		return result, nil
 	}
 
-	// Either worktree or branch (or both) missing — clean partial state and recreate.
 	if worktreeDirExists {
-		// Worktree dir exists but branch is missing — remove orphaned worktree dir.
-		if err := gitWrapper.RemoveWorktreeDir(ctx.taskID); err != nil {
-			return result, fmt.Errorf("failed to remove orphaned worktree %s (branch missing): %w", ctx.worktreeRel, err)
-		}
+		return result, &PreconditionError{Reason: fmt.Sprintf(
+			"rejected task artifacts are unclassifiable: worktree %s exists but branch %s is missing; preserved without cleanup",
+			ctx.worktreeRel,
+			branchName,
+		)}
 	}
 
-	// Cleanup stale branch if any (branch without worktree, or leftover after RemoveWorktreeDir).
-	_ = gitWrapper.DeleteBranch(branchName)
+	if branchExists {
+		if err := gitWrapper.RemoveWorktreeDir(ctx.taskID); err != nil {
+			return result, fmt.Errorf("failed to clear stale worktree registration for %s: %w", ctx.worktreeRel, err)
+		}
+		if err := gitWrapper.AttachWorktree(ctx.taskID, branchName); err != nil {
+			return result, fmt.Errorf("failed to reattach rejected task branch %s: %w", branchName, err)
+		}
+		if err := validateRejectedWorktree(gitWrapper, ctx); err != nil {
+			return result, err
+		}
+		return result, nil
+	}
 
-	if _, err := gitWrapper.CreateWorktree(ctx.taskID, ctx.integrationBranch); err != nil {
+	createdBase, err := gitWrapper.CreateWorktree(ctx.taskID, ctx.integrationBranch)
+	if err != nil {
 		return result, fmt.Errorf("failed to recreate worktree for REJECTED task from integration branch: %w", err)
 	}
+	ctx.baseCommit = createdBase
 	result.created = true
 	return result, nil
 }
@@ -777,10 +808,11 @@ func enforceBlockedEscalation(
 	expectedStatus models.TaskStatus,
 	pipelineTransitions map[models.TaskStatus][]models.TaskStatus,
 	escalation limitEscalation,
+	authority *models.AgentAuthority,
 ) error {
 	now := time.Now().UTC()
 
-	return bb.Modify(func(state *models.State) error {
+	return lifecycleMutation(bb, authority)(func(state *models.State) error {
 		task := state.FindTask(taskID)
 		if task == nil {
 			return &errors.NotFoundError{Entity: "task", ID: taskID}
@@ -836,13 +868,13 @@ func enforceBlockedEscalation(
 
 func validateRejectedWorktree(
 	gitWrapper *git.Git,
-	taskID, worktreeDir, worktreeRel string,
+	ctx *claimContext,
 ) error {
-	if _, err := os.Stat(worktreeDir); os.IsNotExist(err) {
-		return fmt.Errorf("worktree %s missing for REJECTED task", worktreeRel)
+	if _, err := os.Stat(ctx.worktreeDir); os.IsNotExist(err) {
+		return fmt.Errorf("worktree %s missing for REJECTED task", ctx.worktreeRel)
 	}
 
-	branchName := paths.TaskBranchPrefix + taskID
+	branchName := paths.TaskBranchPrefix + ctx.taskID
 	branchExists, err := gitWrapper.BranchExists(branchName)
 	if err != nil {
 		return fmt.Errorf("failed to check branch %s for REJECTED task: %w", branchName, err)
@@ -851,9 +883,39 @@ func validateRejectedWorktree(
 		return fmt.Errorf("branch %s missing for REJECTED task", branchName)
 	}
 
-	if _, err := gitWrapper.GetWorktreeHEAD(taskID); err != nil {
-		return fmt.Errorf("worktree %s invalid for REJECTED task: %w", worktreeRel, err)
+	branch, err := gitWrapper.GetWorktreeBranch(ctx.worktreeDir)
+	if err != nil {
+		return fmt.Errorf("worktree %s invalid for REJECTED task: %w", ctx.worktreeRel, err)
 	}
+	if branch != branchName {
+		return &PreconditionError{Reason: fmt.Sprintf("rejected worktree branch = %q, want %q", branch, branchName)}
+	}
+
+	head, err := gitWrapper.GetWorktreeHEAD(ctx.taskID)
+	if err != nil {
+		return fmt.Errorf("worktree %s invalid for REJECTED task: %w", ctx.worktreeRel, err)
+	}
+	baseCommit := ctx.preservedBaseCommit
+	if baseCommit == "" {
+		baseCommit, err = gitWrapper.GetMergeBase(head, ctx.integrationBranch)
+		if err != nil {
+			return fmt.Errorf("failed to derive rejected worktree base commit: %w", err)
+		}
+	} else {
+		resolvedBase, resolveErr := gitWrapper.GetCommitSHA(baseCommit)
+		if resolveErr != nil {
+			return &PreconditionError{Reason: fmt.Sprintf("rejected base_commit %s does not resolve: %v", baseCommit, resolveErr)}
+		}
+		baseCommit = resolvedBase
+	}
+	ancestor, err := gitWrapper.IsAncestor(baseCommit, head)
+	if err != nil {
+		return fmt.Errorf("failed to validate rejected worktree lineage: %w", err)
+	}
+	if !ancestor {
+		return &PreconditionError{Reason: fmt.Sprintf("rejected base_commit %s is not an ancestor of worktree HEAD %s", baseCommit, head)}
+	}
+	ctx.baseCommit = baseCommit
 
 	return nil
 }

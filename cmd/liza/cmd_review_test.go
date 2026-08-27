@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/liza-mas/liza/internal/brand"
 	"github.com/liza-mas/liza/internal/commands"
 	"github.com/liza-mas/liza/internal/db"
 	"github.com/liza-mas/liza/internal/git"
@@ -138,7 +139,7 @@ func TestAwaitVerdictCLI_BudgetAndOutput(t *testing.T) {
 			originalAwait := awaitVerdict
 			t.Cleanup(func() { awaitVerdict = originalAwait })
 			var gotBudget time.Duration
-			awaitVerdict = func(projectRoot, taskID, agentID string, remaining time.Duration) (*commands.AwaitVerdictResult, error) {
+			awaitVerdict = func(projectRoot, taskID string, authority models.AgentAuthority, remaining time.Duration) (*commands.AwaitVerdictResult, error) {
 				gotBudget = remaining
 				return tt.result, nil
 			}
@@ -248,7 +249,7 @@ func TestAwaitResubmissionCLI_BudgetAndOutput(t *testing.T) {
 			originalAwait := awaitResubmission
 			t.Cleanup(func() { awaitResubmission = originalAwait })
 			var gotBudget time.Duration
-			awaitResubmission = func(projectRoot, taskID, agentID string, remaining time.Duration) (*commands.AwaitResubmissionResult, error) {
+			awaitResubmission = func(projectRoot, taskID string, authority models.AgentAuthority, remaining time.Duration) (*commands.AwaitResubmissionResult, error) {
 				gotBudget = remaining
 				return tt.result, nil
 			}
@@ -293,6 +294,7 @@ func assertAwaitJSONResult(t *testing.T, stdout, wantVerdict string, wantTimeout
 
 func setupAwaitCLIProject(t *testing.T) string {
 	t.Helper()
+	t.Setenv(brand.EnvName("AGENT_GENERATION"), testhelpers.TestAgentGeneration)
 	projectRoot, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatalf("resolve temp project root: %v", err)
@@ -390,6 +392,7 @@ func TestSubmitForReviewCLI_JSONIncludesScipWarnings(t *testing.T) {
 
 func setupSubmitForReviewCLIProject(t *testing.T) (projectRoot, statePath, taskID, agentID string) {
 	t.Helper()
+	t.Setenv(brand.EnvName("AGENT_GENERATION"), testhelpers.TestAgentGeneration)
 
 	projectRoot = t.TempDir()
 	projectRoot, err := filepath.EvalSymlinks(projectRoot)
@@ -457,6 +460,7 @@ func setupSubmitForReviewCLIProject(t *testing.T) (projectRoot, statePath, taskI
 				Role:        "coder",
 				Status:      models.AgentStatusWorking,
 				CurrentTask: &currentTask,
+				Generation:  testhelpers.TestAgentGeneration,
 			},
 		},
 	}
@@ -491,7 +495,7 @@ func TestAwaitTimeoutSecondsRejectsOverCeiling(t *testing.T) {
 		original := awaitVerdict
 		t.Cleanup(func() { awaitVerdict = original })
 		called := false
-		awaitVerdict = func(string, string, string, time.Duration) (*commands.AwaitVerdictResult, error) {
+		awaitVerdict = func(string, string, models.AgentAuthority, time.Duration) (*commands.AwaitVerdictResult, error) {
 			called = true
 			return nil, nil
 		}
@@ -510,7 +514,7 @@ func TestAwaitTimeoutSecondsRejectsOverCeiling(t *testing.T) {
 		original := awaitResubmission
 		t.Cleanup(func() { awaitResubmission = original })
 		called := false
-		awaitResubmission = func(string, string, string, time.Duration) (*commands.AwaitResubmissionResult, error) {
+		awaitResubmission = func(string, string, models.AgentAuthority, time.Duration) (*commands.AwaitResubmissionResult, error) {
 			called = true
 			return nil, nil
 		}

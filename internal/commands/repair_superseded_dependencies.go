@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/ops"
 )
 
@@ -12,6 +13,16 @@ import (
 // from one superseded task and prints the audited result.
 func RepairSupersededDependenciesCommand(projectRoot, taskID, reason, agentID string) error {
 	result, err := ops.RepairSupersededDependencies(projectRoot, taskID, reason, agentID)
+	return printRepairSupersededDependenciesResult(result, err)
+}
+
+// RepairSupersededDependenciesWithAuthorityCommand repairs dependencies using generation-fenced authority.
+func RepairSupersededDependenciesWithAuthorityCommand(projectRoot, taskID, reason string, authority models.AgentAuthority) error {
+	result, err := ops.RepairSupersededDependenciesWithAuthority(projectRoot, taskID, reason, authority)
+	return printRepairSupersededDependenciesResult(result, err)
+}
+
+func printRepairSupersededDependenciesResult(result *ops.RepairSupersededDependenciesResult, err error) error {
 	if err != nil {
 		return fmt.Errorf("repair superseded dependencies: %w", err)
 	}

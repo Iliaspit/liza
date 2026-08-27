@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/liza-mas/liza/internal/db"
+	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/testhelpers"
 )
 
@@ -68,14 +69,19 @@ func TestHandleProviderAuditDegraded_CanonicalizesProviderAliasInAnomaly(t *test
 	projectRoot := t.TempDir()
 	statePath, _ := testhelpers.SetupLizaDir(t, projectRoot)
 	state := testhelpers.CreateValidState()
+	state.Agents["coder-1"] = models.Agent{Role: "coder", Status: models.AgentStatusIdle, Generation: "generation-current"}
 	bb := testhelpers.WriteInitialState(t, statePath, state)
 
 	output := `ERROR codex_core::session: failed to record rollout items: thread 019e983f-f3a2-7071-8a66-aa1774db9101 not found`
-	handled := handleProviderAuditDegraded(bb, SupervisorConfig{
+	handled, handleErr := handleProviderAuditDegraded(bb, SupervisorConfig{
 		AgentID:     "coder-1",
+		Authority:   models.AgentAuthority{ID: "coder-1", Generation: "generation-current"},
 		ProjectRoot: projectRoot,
 		CLIName:     "codex-acp",
 	}, "task-1", output)
+	if handleErr != nil {
+		t.Fatalf("handleProviderAuditDegraded error = %v", handleErr)
+	}
 	if !handled {
 		t.Fatal("handleProviderAuditDegraded returned false, want true")
 	}

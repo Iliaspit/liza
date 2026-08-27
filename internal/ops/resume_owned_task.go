@@ -16,6 +16,7 @@ import (
 type ResumeOwnedTaskInput struct {
 	ProjectRoot string
 	AgentID     string
+	Authority   *models.AgentAuthority
 }
 
 // ResumeOwnedTaskResult contains the outcome of owned-task recovery.
@@ -52,6 +53,11 @@ func ResumeOwnedTask(input ResumeOwnedTaskInput) (*ResumeOwnedTaskResult, error)
 	if input.AgentID == "" {
 		return nil, &PreconditionError{Reason: "agent ID is required"}
 	}
+	if input.Authority != nil {
+		if err := requireAuthorityActor(*input.Authority, input.AgentID); err != nil {
+			return nil, err
+		}
+	}
 
 	lp := paths.New(input.ProjectRoot)
 	bb := db.For(lp.StatePath())
@@ -76,7 +82,7 @@ func ResumeOwnedTask(input ResumeOwnedTaskInput) (*ResumeOwnedTaskResult, error)
 
 		if task.Worktree == nil || *task.Worktree == "" {
 			reason := fmt.Sprintf("owned task resume failed: task %s has no worktree in state", task.ID)
-			blocked, err := blockOwnedResumeCandidate(bb, task.ID, input.AgentID, resolver, pipelineTransitions, reason)
+			blocked, err := blockOwnedResumeCandidate(bb, task.ID, input.AgentID, input.Authority, resolver, pipelineTransitions, reason)
 			if err != nil {
 				return nil, err
 			}
@@ -88,7 +94,7 @@ func ResumeOwnedTask(input ResumeOwnedTaskInput) (*ResumeOwnedTaskResult, error)
 
 		if err := validateOwnedResumeWorktreeHealth(gitWrapper, task.ID); err != nil {
 			reason := fmt.Sprintf("owned task resume failed: worktree not healthy: %v", err)
-			blocked, blockErr := blockOwnedResumeCandidate(bb, task.ID, input.AgentID, resolver, pipelineTransitions, reason)
+			blocked, blockErr := blockOwnedResumeCandidate(bb, task.ID, input.AgentID, input.Authority, resolver, pipelineTransitions, reason)
 			if blockErr != nil {
 				return nil, blockErr
 			}
@@ -98,7 +104,7 @@ func ResumeOwnedTask(input ResumeOwnedTaskInput) (*ResumeOwnedTaskResult, error)
 			continue
 		}
 
-		resumed, result, err := resumeOwnedCandidate(bb, task.ID, input.AgentID, resolver)
+		resumed, result, err := resumeOwnedCandidate(bb, task.ID, input.AgentID, input.Authority, resolver)
 		if err != nil {
 			return nil, err
 		}
@@ -110,11 +116,11 @@ func ResumeOwnedTask(input ResumeOwnedTaskInput) (*ResumeOwnedTaskResult, error)
 	return &ResumeOwnedTaskResult{Found: false}, nil
 }
 
-func resumeOwnedCandidate(bb *db.Blackboard, taskID, agentID string, pr models.PipelineResolver) (bool, *ResumeOwnedTaskResult, error) {
+func resumeOwnedCandidate(bb *db.Blackboard, taskID, agentID string, authority *models.AgentAuthority, pr models.PipelineResolver) (bool, *ResumeOwnedTaskResult, error) {
 	now := time.Now().UTC()
 	var worktree string
 
-	err := bb.Modify(func(state *models.State) error {
+	err := lifecycleMutation(bb, authority)(func(state *models.State) error {
 		task := state.FindTask(taskID)
 		if task == nil {
 			return &lizaerrors.NotFoundError{Entity: "task", ID: taskID}
@@ -159,6 +165,7 @@ func resumeOwnedCandidate(bb *db.Blackboard, taskID, agentID string, pr models.P
 func blockOwnedResumeCandidate(
 	bb *db.Blackboard,
 	taskID, agentID string,
+	authority *models.AgentAuthority,
 	pr models.PipelineResolver,
 	pipelineTransitions map[models.TaskStatus][]models.TaskStatus,
 	reason string,
@@ -167,7 +174,7 @@ func blockOwnedResumeCandidate(
 	blocked := false
 	questions := []string{"Repair or recreate the task worktree, then unblock the task."}
 
-	err := bb.Modify(func(state *models.State) error {
+	err := lifecycleMutation(bb, authority)(func(state *models.State) error {
 		task := state.FindTask(taskID)
 		if task == nil {
 			return &lizaerrors.NotFoundError{Entity: "task", ID: taskID}

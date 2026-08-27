@@ -33,6 +33,19 @@ type WriteCheckpointInput struct {
 // WriteCheckpoint writes a pre-execution checkpoint to a task's history.
 // The checkpoint must be written before submitting for review.
 func WriteCheckpoint(projectRoot string, input *WriteCheckpointInput) error {
+	return writeCheckpointWithOptionalAuthority(projectRoot, input, nil)
+}
+
+// WriteCheckpointWithAuthority fences the history write with the caller's
+// registration generation.
+func WriteCheckpointWithAuthority(projectRoot string, input *WriteCheckpointInput, authority models.AgentAuthority) error {
+	if err := requireAuthorityActor(authority, input.AgentID); err != nil {
+		return err
+	}
+	return writeCheckpointWithOptionalAuthority(projectRoot, input, &authority)
+}
+
+func writeCheckpointWithOptionalAuthority(projectRoot string, input *WriteCheckpointInput, authority *models.AgentAuthority) error {
 	if input.TaskID == "" {
 		return &PreconditionError{Reason: "task_id is required"}
 	}
@@ -67,7 +80,7 @@ func WriteCheckpoint(projectRoot string, input *WriteCheckpointInput) error {
 
 	now := time.Now().UTC()
 
-	return bb.Modify(func(state *models.State) error {
+	return lifecycleMutation(bb, authority)(func(state *models.State) error {
 		task := state.FindTask(input.TaskID)
 		if task == nil {
 			return fmt.Errorf("task %s not found", input.TaskID)

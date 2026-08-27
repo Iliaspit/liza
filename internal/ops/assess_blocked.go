@@ -206,6 +206,16 @@ func AssessBlocked(projectRoot, taskID, note, agentID string) (*AssessBlockedRes
 // transaction. The zero-value options preserve AssessBlocked's history-only
 // behavior.
 func AssessBlockedWithOptions(projectRoot, taskID, note, agentID string, opts AssessBlockedOptions) (*AssessBlockedResult, error) {
+	return assessBlockedWithOptionalAuthority(projectRoot, taskID, note, agentID, opts, nil)
+}
+
+// AssessBlockedWithAuthority fences the assessment write with the
+// orchestrator's registration generation.
+func AssessBlockedWithAuthority(projectRoot, taskID, note string, authority models.AgentAuthority, opts AssessBlockedOptions) (*AssessBlockedResult, error) {
+	return assessBlockedWithOptionalAuthority(projectRoot, taskID, note, authority.ID, opts, &authority)
+}
+
+func assessBlockedWithOptionalAuthority(projectRoot, taskID, note, agentID string, opts AssessBlockedOptions, authority *models.AgentAuthority) (*AssessBlockedResult, error) {
 	if taskID == "" {
 		return nil, &PreconditionError{Reason: "task ID is required"}
 	}
@@ -243,7 +253,7 @@ func AssessBlockedWithOptions(projectRoot, taskID, note, agentID string, opts As
 	now := time.Now().UTC()
 	result := AssessBlockedResult{TaskID: taskID}
 
-	err := bb.Modify(func(state *models.State) error {
+	err := lifecycleMutation(bb, authority)(func(state *models.State) error {
 		task := state.FindTask(taskID)
 		if task == nil {
 			return &errors.NotFoundError{Entity: "task", ID: taskID}

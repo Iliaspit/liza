@@ -146,7 +146,7 @@ func TestOrchestratorPreExecutionScipRefreshRunsBeforePromptStateReadForWakeTrig
 			defer restore()
 
 			strategy := &orchestratorStrategy{}
-			if err := strategy.PreExecution(bb, SupervisorConfig{AgentID: "orchestrator-1", ProjectRoot: projectRoot}); err != nil {
+			if err := strategy.PreExecution(bb, orchestratorScipConfig(projectRoot)); err != nil {
 				t.Fatalf("PreExecution() error = %v", err)
 			}
 
@@ -173,7 +173,7 @@ func TestOrchestratorPreExecutionScipRefreshDisabledActivationNoOp(t *testing.T)
 	defer restore()
 
 	strategy := &orchestratorStrategy{}
-	if err := strategy.PreExecution(bb, SupervisorConfig{AgentID: "orchestrator-1", ProjectRoot: projectRoot}); err != nil {
+	if err := strategy.PreExecution(bb, orchestratorScipConfig(projectRoot)); err != nil {
 		t.Fatalf("PreExecution() error = %v", err)
 	}
 	assertNoScipIndexDir(t, projectRoot)
@@ -193,7 +193,7 @@ func TestOrchestratorPreExecutionScipRefreshEmptyAllowlistNoOp(t *testing.T) {
 	defer restore()
 
 	strategy := &orchestratorStrategy{}
-	if err := strategy.PreExecution(bb, SupervisorConfig{AgentID: "orchestrator-1", ProjectRoot: projectRoot}); err != nil {
+	if err := strategy.PreExecution(bb, orchestratorScipConfig(projectRoot)); err != nil {
 		t.Fatalf("PreExecution() error = %v", err)
 	}
 	assertNoScipIndexDir(t, projectRoot)
@@ -214,7 +214,7 @@ func TestOrchestratorPreExecutionScipRefreshFailureIsWarningOnly(t *testing.T) {
 	defer restore()
 
 	strategy := &orchestratorStrategy{}
-	if err := strategy.PreExecution(bb, SupervisorConfig{AgentID: "orchestrator-1", ProjectRoot: projectRoot}); err != nil {
+	if err := strategy.PreExecution(bb, orchestratorScipConfig(projectRoot)); err != nil {
 		t.Fatalf("PreExecution() error = %v", err)
 	}
 	if got := mustReadState(t, bb).Agents["orchestrator-1"].Status; got != models.AgentStatusPlanning {
@@ -236,7 +236,7 @@ func TestOrchestratorPreExecutionScipRefreshErrorDoesNotPreventExecution(t *test
 	defer restore()
 
 	strategy := &orchestratorStrategy{}
-	if err := strategy.PreExecution(bb, SupervisorConfig{AgentID: "orchestrator-1", ProjectRoot: projectRoot}); err != nil {
+	if err := strategy.PreExecution(bb, orchestratorScipConfig(projectRoot)); err != nil {
 		t.Fatalf("PreExecution() error = %v", err)
 	}
 	if got := mustReadState(t, bb).Agents["orchestrator-1"].Status; got != models.AgentStatusPlanning {
@@ -270,7 +270,7 @@ func TestOrchestratorPreExecutionScipRefreshUsesProjectRootNotTaskWorktree(t *te
 	defer restore()
 
 	strategy := &orchestratorStrategy{}
-	if err := strategy.PreExecution(bb, SupervisorConfig{AgentID: "orchestrator-1", ProjectRoot: projectRoot}); err != nil {
+	if err := strategy.PreExecution(bb, orchestratorScipConfig(projectRoot)); err != nil {
 		t.Fatalf("PreExecution() error = %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(projectRoot, ".liza", "scip", "go.scip")); err != nil {
@@ -308,7 +308,7 @@ func TestOrchestratorPreExecutionStacklitRefreshUsesProjectRoot(t *testing.T) {
 	defer restore()
 
 	strategy := &orchestratorStrategy{}
-	if err := strategy.PreExecution(bb, SupervisorConfig{AgentID: "orchestrator-1", ProjectRoot: projectRoot}); err != nil {
+	if err := strategy.PreExecution(bb, orchestratorScipConfig(projectRoot)); err != nil {
 		t.Fatalf("PreExecution() error = %v", err)
 	}
 	if !called {
@@ -329,15 +329,21 @@ func newOrchestratorScipTestBlackboard(t *testing.T, projectRoot string, mutate 
 	state := testhelpers.CreateValidState()
 	state.Config.ScipSearch = []string{"go"}
 	state.Agents["orchestrator-1"] = models.Agent{
-		Role:      "orchestrator",
-		Status:    models.AgentStatusIdle,
-		Terminal:  "terminal-1",
-		Heartbeat: time.Now().UTC(),
+		Role:       "orchestrator",
+		Status:     models.AgentStatusIdle,
+		Terminal:   "terminal-1",
+		Heartbeat:  time.Now().UTC(),
+		Generation: "test-generation",
 	}
 	if mutate != nil {
 		mutate(state)
 	}
 	return testhelpers.WriteInitialState(t, statePath, state)
+}
+
+func orchestratorScipConfig(projectRoot string) SupervisorConfig {
+	authority := models.AgentAuthority{ID: "orchestrator-1", Generation: "test-generation"}
+	return SupervisorConfig{AgentID: authority.ID, Authority: authority, ProjectRoot: projectRoot}
 }
 
 func writeProjectRootScipIndex(t *testing.T, projectRoot string) string {

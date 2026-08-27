@@ -24,6 +24,7 @@ import (
 func TestReviewerPreWork_ExecutesAutoTransitions(t *testing.T) {
 	tmpDir := t.TempDir()
 	statePath, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	const reviewerID = "code-reviewer-1"
 
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()
@@ -55,16 +56,23 @@ func TestReviewerPreWork_ExecutesAutoTransitions(t *testing.T) {
 
 	state.Tasks = []models.Task{task}
 	state.Sprint.Scope.Planned = []string{parentID}
+	state.Agents[reviewerID] = testhelpers.RegisteredTestAgent(models.RoleCodeReviewer)
 	testhelpers.WriteInitialState(t, statePath, state)
 
 	bb := db.New(statePath)
+	authority := testSupervisorAuthority(t, bb, reviewerID)
 	resolver := testResolver(t)
 	s, err := NewRoleStrategy("code-reviewer", resolver)
 	if err != nil {
 		t.Fatalf("NewRoleStrategy() error = %v", err)
 	}
 
-	shouldContinue, err := s.PreWork(context.Background(), bb, SupervisorConfig{ProjectRoot: tmpDir})
+	shouldContinue, err := s.PreWork(context.Background(), bb, SupervisorConfig{
+		AgentID:     reviewerID,
+		Role:        models.RoleCodeReviewer,
+		ProjectRoot: tmpDir,
+		Authority:   authority,
+	})
 	if err != nil {
 		t.Fatalf("PreWork() error = %v", err)
 	}
@@ -122,6 +130,7 @@ func TestReviewerPreWork_ExecutesAutoTransitions(t *testing.T) {
 func TestReviewerPreWork_DoesNotExecuteManualTransitions(t *testing.T) {
 	tmpDir := t.TempDir()
 	statePath, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	const reviewerID = "code-reviewer-1"
 
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()
@@ -152,16 +161,23 @@ func TestReviewerPreWork_DoesNotExecuteManualTransitions(t *testing.T) {
 
 	state.Tasks = []models.Task{task}
 	state.Sprint.Scope.Planned = []string{parentID}
+	state.Agents[reviewerID] = testhelpers.RegisteredTestAgent(models.RoleCodeReviewer)
 	testhelpers.WriteInitialState(t, statePath, state)
 
 	bb := db.New(statePath)
+	authority := testSupervisorAuthority(t, bb, reviewerID)
 	resolver := testResolver(t)
 	s, err := NewRoleStrategy("code-reviewer", resolver)
 	if err != nil {
 		t.Fatalf("NewRoleStrategy() error = %v", err)
 	}
 
-	shouldContinue, err := s.PreWork(context.Background(), bb, SupervisorConfig{ProjectRoot: tmpDir})
+	shouldContinue, err := s.PreWork(context.Background(), bb, SupervisorConfig{
+		AgentID:     reviewerID,
+		Role:        models.RoleCodeReviewer,
+		ProjectRoot: tmpDir,
+		Authority:   authority,
+	})
 	if err != nil {
 		t.Fatalf("PreWork() error = %v", err)
 	}
@@ -229,6 +245,7 @@ func TestReviewerClaimTask_InitialTaskClaimsSpecifiedReviewTask(t *testing.T) {
 		ProjectRoot: tmpDir,
 		StatePath:   statePath,
 		InitialTask: "task-low",
+		Authority:   testSupervisorAuthority(t, db.New(statePath), "code-reviewer-1"),
 	}, db.New(statePath))
 	if err != nil {
 		t.Fatalf("ClaimTask() error = %v", err)
@@ -317,6 +334,7 @@ func TestReviewerStrategy_ClaimTask_PostWorktreeCmdFailureReleasesClaimAndDegrad
 		ProjectRoot: tmpDir,
 		AgentID:     reviewerID,
 		Role:        "code-reviewer",
+		Authority:   testSupervisorAuthority(t, bb, reviewerID),
 	}, bb)
 
 	if claimErr == nil {

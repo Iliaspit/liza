@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -13,6 +14,109 @@ import (
 	"github.com/liza-mas/liza/internal/ops"
 	"github.com/liza-mas/liza/internal/testhelpers"
 )
+
+func TestApprovedMergeTakeoverAfterFinalApproverExit(t *testing.T) {
+	projectRoot, statePath, taskID := setupAgentMergeRepo(t)
+	bb := db.New(statePath)
+
+	const (
+		expiredReviewer = "code-reviewer-1"
+		finalApprover   = "code-reviewer-2"
+		takeoverOwner   = "code-reviewer-3"
+		otherReviewer   = "code-reviewer-4"
+	)
+	off := false
+	if err := bb.Modify(func(state *models.State) error {
+		state.Config.AutoCheckpointSummary = &off
+		expiredLease := time.Now().UTC().Add(-time.Minute)
+		for _, reviewer := range []string{expiredReviewer, finalApprover} {
+			expired := state.Agents[reviewer]
+			expired.LeaseExpires = &expiredLease
+			state.Agents[reviewer] = expired
+		}
+		state.Agents[takeoverOwner] = testhelpers.RegisteredTestAgent("code-reviewer")
+		state.Agents[otherReviewer] = testhelpers.RegisteredTestAgent("code-reviewer")
+		return nil
+	}); err != nil {
+		t.Fatalf("prepare reviewer registrations: %v", err)
+	}
+
+	before, err := bb.Read()
+	if err != nil {
+		t.Fatalf("read approved state: %v", err)
+	}
+	approved := before.FindTask(taskID)
+	if approved == nil || approved.ReviewCommit == nil || approved.ApprovedBy == nil {
+		t.Fatal("approved task evidence is incomplete")
+	}
+	if approved.LastApprover() != finalApprover {
+		t.Fatalf("last approver = %q, want departed %q", approved.LastApprover(), finalApprover)
+	}
+	approvalsBefore := append([]models.Approval(nil), approved.Approvals...)
+	approvedByBefore := *approved.ApprovedBy
+	reviewCommitBefore := *approved.ReviewCommit
+	rolePairBefore := approved.RolePair
+
+	pr, err := ops.LoadResolverForModels(projectRoot)
+	if err != nil {
+		t.Fatalf("load pipeline resolver: %v", err)
+	}
+	if !hasPendingMerges(bb, takeoverOwner, pr) {
+		t.Fatalf("expected deterministic takeover owner %s to observe the pending merge", takeoverOwner)
+	}
+	if hasPendingMerges(bb, expiredReviewer, pr) {
+		t.Fatalf("expired reviewer %s observed the pending merge", expiredReviewer)
+	}
+	if hasPendingMerges(bb, finalApprover, pr) {
+		t.Fatalf("expired final approver %s retained merge affinity", finalApprover)
+	}
+	if hasPendingMerges(bb, otherReviewer, pr) {
+		t.Fatalf("non-elected reviewer %s observed the pending merge", otherReviewer)
+	}
+
+	authority := before.Agents[takeoverOwner].Authority(takeoverOwner)
+	if err := handleApprovedMergesWithAuthority(projectRoot, authority, bb, pr); err != nil {
+		t.Fatalf("take over approved merge: %v", err)
+	}
+
+	after, err := bb.Read()
+	if err != nil {
+		t.Fatalf("read merged state: %v", err)
+	}
+	merged := after.FindTask(taskID)
+	if merged == nil || merged.Status != models.TaskStatusMerged {
+		t.Fatalf("task status = %v, want MERGED", merged)
+	}
+	if !reflect.DeepEqual(merged.Approvals, approvalsBefore) {
+		t.Fatalf("approvals changed during takeover\nbefore: %+v\nafter:  %+v", approvalsBefore, merged.Approvals)
+	}
+	if merged.ApprovedBy == nil || *merged.ApprovedBy != approvedByBefore {
+		t.Fatalf("approved_by = %v, want unchanged %q", merged.ApprovedBy, approvedByBefore)
+	}
+	if merged.ReviewCommit == nil || *merged.ReviewCommit != reviewCommitBefore {
+		t.Fatalf("review_commit = %v, want unchanged %q", merged.ReviewCommit, reviewCommitBefore)
+	}
+	if merged.RolePair != rolePairBefore {
+		t.Fatalf("role_pair = %q, want unchanged %q", merged.RolePair, rolePairBefore)
+	}
+	if merged.LastApprover() != finalApprover {
+		t.Fatalf("last approver = %q, want immutable %q", merged.LastApprover(), finalApprover)
+	}
+
+	mergedEvents := 0
+	for _, entry := range merged.History {
+		if entry.Event != models.TaskEventMerged {
+			continue
+		}
+		mergedEvents++
+		if entry.Agent == nil || *entry.Agent != takeoverOwner {
+			t.Fatalf("merged history agent = %v, want elected owner %q", entry.Agent, takeoverOwner)
+		}
+	}
+	if mergedEvents != 1 {
+		t.Fatalf("merged history transitions = %d, want 1", mergedEvents)
+	}
+}
 
 func TestRunSupervisor_FinalPlanningQuorumApprovalAutoMerges(t *testing.T) {
 	runSupervisorFinalPlanningQuorumApprovalAutoMerges(t, "claude")

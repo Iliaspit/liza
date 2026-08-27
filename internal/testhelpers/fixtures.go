@@ -361,6 +361,9 @@ func RegisterTestAgent(t *testing.T, bb *db.Blackboard, agentID, role string) {
 	}
 }
 
+// TestAgentGeneration is the persisted generation used by live test registrations.
+const TestAgentGeneration = "test-generation"
+
 // RegisteredTestAgent returns an agent record equivalent to a live supervisor
 // registration for unit tests that construct state before writing it.
 func RegisteredTestAgent(role string) models.Agent {
@@ -374,6 +377,7 @@ func RegisteredTestAgent(role string) models.Agent {
 		CurrentTask:     nil,
 		Terminal:        "test",
 		Provider:        "test",
+		Generation:      TestAgentGeneration,
 		IterationsTotal: 0,
 		ContextPercent:  0,
 		PID:             os.Getpid(),

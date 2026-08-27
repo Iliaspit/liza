@@ -22,6 +22,23 @@ import (
 	"github.com/liza-mas/liza/internal/testhelpers"
 )
 
+func testSupervisorAuthority(t *testing.T, bb *db.Blackboard, agentID string) models.AgentAuthority {
+	t.Helper()
+	const generation = "test-generation"
+	if err := bb.Modify(func(state *models.State) error {
+		agent, exists := state.Agents[agentID]
+		if !exists {
+			return fmt.Errorf("agent %s not found", agentID)
+		}
+		agent.Generation = generation
+		state.Agents[agentID] = agent
+		return nil
+	}); err != nil {
+		t.Fatalf("install supervisor test authority: %v", err)
+	}
+	return models.AgentAuthority{ID: agentID, Generation: generation}
+}
+
 // MockLLMAgent for testing LLMAgent execution
 type MockLLMAgent struct {
 	mu               sync.Mutex
@@ -321,7 +338,7 @@ func TestExecuteAgentBlocksTaskAfterProgressTimeout(t *testing.T) {
 			Heartbeat:   now,
 		},
 	}
-	testhelpers.WriteInitialState(t, statePath, state)
+	bb := testhelpers.WriteInitialState(t, statePath, state)
 
 	mock := &MockLLMAgent{
 		OnExecute: func(ctx context.Context, cliName string, agentID string, prompt string, projectRoot string, additionalDirs []string) error {
@@ -334,6 +351,7 @@ func TestExecuteAgentBlocksTaskAfterProgressTimeout(t *testing.T) {
 	}
 	config := SupervisorConfig{
 		AgentID:                  agentID,
+		Authority:                testSupervisorAuthority(t, bb, agentID),
 		Role:                     models.RoleCoder,
 		ProjectRoot:              tmpDir,
 		StatePath:                statePath,
@@ -354,7 +372,7 @@ func TestExecuteAgentBlocksTaskAfterProgressTimeout(t *testing.T) {
 		t.Fatalf("exitCode = %d, want 0 after watchdog block", exitCode)
 	}
 
-	bb := db.For(statePath)
+	bb = db.For(statePath)
 	after, err := bb.Read()
 	if err != nil {
 		t.Fatalf("bb.Read: %v", err)
@@ -478,7 +496,7 @@ printf 'stderr-before sk-test-secret-value stderr-after\n' >&2
 	t.Setenv("ANTHROPIC_API_KEY", "sk-test-secret-value")
 
 	executor := NewCLIAgent(outputsDir)
-	result, err := executor.Run(context.Background(), LLMAgentRunRequest{BackendName: "claude", AgentID: "coder-1", Prompt: "prompt body", ProjectRoot: projectRoot})
+	result, err := executor.Run(context.Background(), LLMAgentRunRequest{BackendName: "claude", AgentID: "coder-1", Prompt: "prompt body", ProjectRoot: projectRoot, LaunchGate: immediateLaunchGate})
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
 	}
@@ -561,6 +579,7 @@ exit 7
 		Prompt:      "prompt body",
 		ProjectRoot: projectRoot,
 		EventSink:   sink,
+		LaunchGate:  immediateLaunchGate,
 	})
 	if err != nil {
 		t.Fatalf("Run error: %v", err)
@@ -644,6 +663,7 @@ printf 'stderr with no log\n' >&2
 		TaskID:      "task-no-log",
 		Prompt:      "prompt body",
 		ProjectRoot: projectRoot,
+		LaunchGate:  immediateLaunchGate,
 	})
 	if err != nil {
 		t.Fatalf("Run error: %v", err)
@@ -685,6 +705,7 @@ fi
 		TaskID:      "task-opencode",
 		Prompt:      "prompt body",
 		ProjectRoot: projectRoot,
+		LaunchGate:  immediateLaunchGate,
 	})
 	if err != nil {
 		t.Fatalf("Run error: %v", err)
@@ -731,7 +752,7 @@ done
 	t.Setenv("LIZA_DISABLE_CLAUDE_SUBAGENTS", "1")
 
 	executor := NewCLIAgent(outputsDir)
-	result, err := executor.Run(context.Background(), LLMAgentRunRequest{BackendName: "claude", AgentID: "coder-1", Prompt: "prompt body", ProjectRoot: projectRoot})
+	result, err := executor.Run(context.Background(), LLMAgentRunRequest{BackendName: "claude", AgentID: "coder-1", Prompt: "prompt body", ProjectRoot: projectRoot, LaunchGate: immediateLaunchGate})
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
 	}
@@ -770,7 +791,7 @@ printf 'agent-id:%s\n' "$LIZA_AGENT_ID"
 	t.Setenv("LIZA_AGENT_ID", "from-parent-env")
 
 	executor := NewCLIAgent(outputsDir)
-	result, err := executor.Run(context.Background(), LLMAgentRunRequest{BackendName: "claude", AgentID: "coder-7", Prompt: "prompt body", ProjectRoot: projectRoot})
+	result, err := executor.Run(context.Background(), LLMAgentRunRequest{BackendName: "claude", AgentID: "coder-7", Prompt: "prompt body", ProjectRoot: projectRoot, LaunchGate: immediateLaunchGate})
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
 	}
@@ -805,7 +826,7 @@ printf '%%s\n' "$LIZA_AGENT_ID" > %q
 	t.Setenv("LIZA_AGENT_ID", "from-parent-env")
 
 	executor := NewCLIAgent("")
-	exitCode, err := executor.RunInteractive(context.Background(), LLMAgentInteractiveRequest{BackendName: "gemini", AgentID: "code-reviewer-4", ProjectRoot: projectRoot})
+	exitCode, err := executor.RunInteractive(context.Background(), LLMAgentInteractiveRequest{BackendName: "gemini", AgentID: "code-reviewer-4", ProjectRoot: projectRoot, LaunchGate: immediateLaunchGate})
 	if err != nil {
 		t.Fatalf("ExecuteInteractive error: %v", err)
 	}
@@ -845,6 +866,7 @@ fi
 		AgentID:     "coder-1",
 		Prompt:      "implement the task",
 		ProjectRoot: t.TempDir(),
+		LaunchGate:  immediateLaunchGate,
 		RuntimeConfig: models.Config{
 			AgentTools: map[string]models.AgentToolConfig{
 				"cursor": {
@@ -1025,7 +1047,7 @@ func TestExit42RestartTracker_ExponentialBackoffAndCap(t *testing.T) {
 
 	var delays []time.Duration
 	for i := 0; i < 4; i++ {
-		outcome, err := tracker.Handle(bb, tmpDir, "coder", task.ID, agentID)
+		outcome, err := tracker.Handle(bb, tmpDir, "coder", task.ID, testSupervisorAuthority(t, bb, agentID))
 		if err != nil {
 			t.Fatalf("Handle() error on attempt %d: %v", i+1, err)
 		}
@@ -1080,7 +1102,7 @@ func TestExit42RestartTracker_Blocking(t *testing.T) {
 	tracker := newExit42RestartTracker()
 
 	// First attempt
-	outcome, err := tracker.Handle(bb, tmpDir, "coder", task.ID, agentID)
+	outcome, err := tracker.Handle(bb, tmpDir, "coder", task.ID, testSupervisorAuthority(t, bb, agentID))
 	if err != nil {
 		t.Fatalf("Handle() error on attempt 1: %v", err)
 	}
@@ -1089,7 +1111,7 @@ func TestExit42RestartTracker_Blocking(t *testing.T) {
 	}
 
 	// Second attempt (at threshold)
-	outcome, err = tracker.Handle(bb, tmpDir, "coder", task.ID, agentID)
+	outcome, err = tracker.Handle(bb, tmpDir, "coder", task.ID, testSupervisorAuthority(t, bb, agentID))
 	if err != nil {
 		t.Fatalf("Handle() error on attempt 2: %v", err)
 	}
@@ -1098,7 +1120,7 @@ func TestExit42RestartTracker_Blocking(t *testing.T) {
 	}
 
 	// Third attempt (over threshold)
-	outcome, err = tracker.Handle(bb, tmpDir, "coder", task.ID, agentID)
+	outcome, err = tracker.Handle(bb, tmpDir, "coder", task.ID, testSupervisorAuthority(t, bb, agentID))
 	if err != nil {
 		t.Fatalf("Handle() error on attempt 3: %v", err)
 	}
@@ -1146,7 +1168,7 @@ func TestExit42RestartTracker_BlocksNonCoderRoles(t *testing.T) {
 
 	// Exhaust the threshold.
 	for i := 0; i < 3; i++ {
-		tracker.Handle(bb, tmpDir, "code-reviewer", task.ID, agentID)
+		tracker.Handle(bb, tmpDir, "code-reviewer", task.ID, testSupervisorAuthority(t, bb, agentID))
 	}
 
 	// Read updated state — task should be BLOCKED.
@@ -1384,6 +1406,7 @@ func TestObservedRuntimeFailureRetry_BlocksWithoutGenericSpin(t *testing.T) {
 
 	config := SupervisorConfig{
 		AgentID:     agentID,
+		Authority:   testSupervisorAuthority(t, bb, agentID),
 		Role:        models.RoleCoder,
 		ProjectRoot: projectRoot,
 		StatePath:   statePath,
@@ -2250,6 +2273,9 @@ func buildPromptFailureFixture(t *testing.T, integrationBranch string) (bb *db.B
 
 	state := testhelpers.CreateValidState()
 	state.Config.IntegrationBranch = integrationBranch
+	state.Agents[agentID] = models.Agent{
+		Role: "architect", Status: models.AgentStatusWorking, CurrentTask: &taskID,
+	}
 	state.Tasks = []models.Task{
 		{
 			ID:           taskID,
@@ -2320,7 +2346,7 @@ func TestSupervisor_BuildPromptFailure_BlocksTask(t *testing.T) {
 		t.Fatalf("precommit-domain guard should have matched; aborting test")
 	}
 	reason := fmt.Sprintf("prompt context build failed: %v", err)
-	blockTaskFromSupervisor(bb, projectRoot, claimedTaskID, agentID, reason)
+	blockTaskFromSupervisor(bb, projectRoot, claimedTaskID, testSupervisorAuthority(t, bb, agentID), reason)
 
 	// Invariant: agent was never invoked.
 	if calls := mockExecutor.GetCalls(); len(calls) != 0 {
@@ -2438,14 +2464,11 @@ func TestExecuteAgentRequiresLLMAgent(t *testing.T) {
 
 func TestExecuteAgentUsesLegacyCLIExecutor(t *testing.T) {
 	legacy := &legacyOnlyCLIExecutor{}
-	config := SupervisorConfig{
-		AgentID:          "coder-1",
-		Role:             models.RoleCoder,
-		ProjectRoot:      t.TempDir(),
-		CLIName:          "codex",
-		Executor:         legacy,
-		ExecutionTimeout: 5 * time.Second,
-	}
+	fixture := newProviderGenerationFixture(t)
+	config := fixture.config(fixture.authorityA)
+	config.Role = models.RoleCoder
+	config.CLIName = "codex"
+	config.Executor = legacy
 
 	exitCode, output, err := executeAgent(context.Background(), config, "legacy prompt", []string{"extra-dir"}, "", models.Config{})
 	if err != nil {

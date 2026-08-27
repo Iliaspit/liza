@@ -54,6 +54,10 @@ This pattern prevents TOCTOU races in multi-agent scenarios.`,
 		if err != nil {
 			return err
 		}
+		authority, err := requireAgentAuthorityForID(cmd, agentID)
+		if err != nil {
+			return err
+		}
 
 		resolver, err := loadResolverForRBAC(projectRoot)
 		if err != nil {
@@ -64,10 +68,10 @@ This pattern prevents TOCTOU races in multi-agent scenarios.`,
 		}
 
 		if isJSON(cmd) {
-			result, err := ops.ClaimTask(projectRoot, taskID, agentID)
+			result, err := ops.ClaimTaskWithAuthority(projectRoot, taskID, authority)
 			return jsonout.WriteResult(os.Stdout, result, nil, err)
 		}
-		return commands.ClaimTaskCommand(projectRoot, taskID, agentID)
+		return commands.ClaimTaskWithAuthorityCommand(projectRoot, taskID, authority)
 	},
 }
 
@@ -181,7 +185,7 @@ Example YAML file format:
 			input.Priority = 1
 		}
 
-		orchestratorID, err := resolveOrchestratorID(cmd)
+		authority, err := resolveOrchestratorAuthority(cmd)
 		if err != nil {
 			return err
 		}
@@ -190,7 +194,7 @@ Example YAML file format:
 		if err != nil {
 			return err
 		}
-		if err := validateRoleType(resolver, orchestratorID, "orchestrator"); err != nil {
+		if err := validateRoleType(resolver, authority.ID, "orchestrator"); err != nil {
 			return err
 		}
 
@@ -208,10 +212,10 @@ Example YAML file format:
 				Priority:      input.Priority,
 				DependsOn:     input.DependsOn,
 			}
-			result, err := ops.AddTask(statePath, logPath, opsInput, orchestratorID)
+			result, err := ops.AddTaskWithAuthority(statePath, logPath, opsInput, authority)
 			return jsonout.WriteResult(os.Stdout, result, nil, err)
 		}
-		return commands.AddTaskCommand(statePath, logPath, input, orchestratorID)
+		return commands.AddTaskWithAuthorityCommand(statePath, logPath, input, authority)
 	},
 }
 
@@ -261,7 +265,7 @@ Examples:
 			}
 		}
 
-		agentID, err := resolveOrchestratorID(cmd)
+		authority, err := resolveOrchestratorAuthority(cmd)
 		if err != nil {
 			return err
 		}
@@ -275,17 +279,17 @@ Examples:
 		if err != nil {
 			return err
 		}
-		if err := validateAllowedOperation(resolver, agentID, "supersede-task"); err != nil {
+		if err := validateAllowedOperation(resolver, authority.ID, "supersede-task"); err != nil {
 			return err
 		}
 
 		if isJSON(cmd) {
-			result, err := ops.SupersedeTaskWithOptions(projectRoot, taskID, replacementIDs, reason, agentID, ops.SupersedeTaskOptions{
+			result, err := ops.SupersedeTaskWithAuthority(projectRoot, taskID, replacementIDs, reason, authority, ops.SupersedeTaskOptions{
 				RecoverabilityCommand: recoverabilityCommand,
 			})
 			return jsonout.WriteResult(os.Stdout, result, nil, err)
 		}
-		return commands.SupersedeTaskCommand(projectRoot, taskID, replacementIDs, reason, agentID, recoverabilityCommand)
+		return commands.SupersedeTaskWithAuthorityCommand(projectRoot, taskID, replacementIDs, reason, recoverabilityCommand, authority)
 	},
 }
 
@@ -322,7 +326,7 @@ Examples:
 		newDependencies := strings.Split(args[2], ",")
 		reason, _ := cmd.Flags().GetString("reason")
 
-		agentID, err := resolveOrchestratorID(cmd)
+		authority, err := resolveOrchestratorAuthority(cmd)
 		if err != nil {
 			return err
 		}
@@ -336,19 +340,19 @@ Examples:
 		if err != nil {
 			return err
 		}
-		if err := validateAllowedOperation(resolver, agentID, "retarget-dependency"); err != nil {
+		if err := validateAllowedOperation(resolver, authority.ID, "retarget-dependency"); err != nil {
 			return err
 		}
 
 		if isJSON(cmd) {
-			result, err := ops.RetargetDependency(projectRoot, taskID, oldDependency, newDependencies, reason, agentID)
+			result, err := ops.RetargetDependencyWithAuthority(projectRoot, taskID, oldDependency, newDependencies, reason, authority)
 			verbose, _ := cmd.Flags().GetBool("verbose")
 			if verbose {
 				writeRetargetDependencyVerboseDiagnostic(os.Stderr, err)
 			}
 			return jsonout.WriteResult(os.Stdout, result, resultWarnings(result), err)
 		}
-		return commands.RetargetDependencyCommand(projectRoot, taskID, oldDependency, newDependencies, reason, agentID)
+		return commands.RetargetDependencyWithAuthorityCommand(projectRoot, taskID, oldDependency, newDependencies, reason, authority)
 	},
 }
 
@@ -402,7 +406,7 @@ Example:
 		sourceTaskID := args[0]
 		reason, _ := cmd.Flags().GetString("reason")
 
-		agentID, err := resolveOrchestratorID(cmd)
+		authority, err := resolveOrchestratorAuthority(cmd)
 		if err != nil {
 			return err
 		}
@@ -416,15 +420,15 @@ Example:
 		if err != nil {
 			return err
 		}
-		if err := validateAllowedOperation(resolver, agentID, "apply-dependency-repair"); err != nil {
+		if err := validateAllowedOperation(resolver, authority.ID, "apply-dependency-repair"); err != nil {
 			return err
 		}
 
 		if isJSON(cmd) {
-			result, err := ops.ApplyDependencyRepair(projectRoot, sourceTaskID, reason, agentID)
+			result, err := ops.ApplyDependencyRepairWithAuthority(projectRoot, sourceTaskID, reason, authority)
 			return jsonout.WriteResult(os.Stdout, result, resultWarnings(result), err)
 		}
-		return commands.ApplyDependencyRepairCommand(projectRoot, sourceTaskID, reason, agentID)
+		return commands.ApplyDependencyRepairWithAuthorityCommand(projectRoot, sourceTaskID, reason, authority)
 	},
 }
 
@@ -455,7 +459,7 @@ Example:
 		taskID := args[0]
 		reason, _ := cmd.Flags().GetString("reason")
 
-		agentID, err := resolveOrchestratorID(cmd)
+		authority, err := resolveOrchestratorAuthority(cmd)
 		if err != nil {
 			return err
 		}
@@ -469,15 +473,15 @@ Example:
 		if err != nil {
 			return err
 		}
-		if err := validateAllowedOperation(resolver, agentID, "repair-superseded-dependencies"); err != nil {
+		if err := validateAllowedOperation(resolver, authority.ID, "repair-superseded-dependencies"); err != nil {
 			return err
 		}
 
 		if isJSON(cmd) {
-			result, err := ops.RepairSupersededDependencies(projectRoot, taskID, reason, agentID)
+			result, err := ops.RepairSupersededDependenciesWithAuthority(projectRoot, taskID, reason, authority)
 			return jsonout.WriteResult(os.Stdout, result, resultWarnings(result), err)
 		}
-		return commands.RepairSupersededDependenciesCommand(projectRoot, taskID, reason, agentID)
+		return commands.RepairSupersededDependenciesWithAuthorityCommand(projectRoot, taskID, reason, authority)
 	},
 }
 
@@ -528,7 +532,7 @@ Effects:
 			return err
 		}
 
-		agentID, err := requireAgentID(cmd)
+		authority, err := requireAgentAuthority(cmd)
 		if err != nil {
 			return err
 		}
@@ -542,15 +546,15 @@ Effects:
 		if err != nil {
 			return err
 		}
-		if err := validateAllowedOperation(resolver, agentID, "mark-blocked"); err != nil {
+		if err := validateAllowedOperation(resolver, authority.ID, "mark-blocked"); err != nil {
 			return err
 		}
 
 		if isJSON(cmd) {
-			result, err := ops.MarkBlockedWithOptions(projectRoot, taskID, reason, questions, agentID, opts)
+			result, err := ops.MarkBlockedWithAuthority(projectRoot, taskID, reason, questions, authority, opts)
 			return jsonout.WriteResult(os.Stdout, result, resultWarnings(result), err)
 		}
-		return commands.MarkBlockedWithOptionsCommand(projectRoot, taskID, reason, questions, agentID, opts)
+		return commands.MarkBlockedWithAuthorityCommand(projectRoot, taskID, reason, questions, authority, opts)
 	},
 }
 
@@ -598,7 +602,7 @@ var unblockTaskCmd = &cobra.Command{
 			AllowDirty: allowDirty,
 		}
 
-		agentID, err := resolveOrchestratorID(cmd)
+		authority, err := resolveOrchestratorAuthority(cmd)
 		if err != nil {
 			return err
 		}
@@ -612,15 +616,15 @@ var unblockTaskCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		if err := validateAllowedOperation(resolver, agentID, "unblock-task"); err != nil {
+		if err := validateAllowedOperation(resolver, authority.ID, "unblock-task"); err != nil {
 			return err
 		}
 
 		if isJSON(cmd) {
-			result, err := ops.UnblockTaskWithOptions(projectRoot, taskID, reason, agentID, opts)
+			result, err := ops.UnblockTaskWithAuthority(projectRoot, taskID, reason, authority, opts)
 			return jsonout.WriteResult(os.Stdout, result, nil, err)
 		}
-		return commands.UnblockTaskWithOptionsCommand(projectRoot, taskID, reason, agentID, opts)
+		return commands.UnblockTaskWithAuthorityCommand(projectRoot, taskID, reason, authority, opts)
 	},
 }
 
@@ -712,6 +716,14 @@ func resultWarnings(result interface{ GetWarnings() []string }) []string {
 	return result.GetWarnings()
 }
 
+func resolveOrchestratorAuthority(cmd *cobra.Command) (models.AgentAuthority, error) {
+	agentID, err := resolveOrchestratorID(cmd)
+	if err != nil {
+		return models.AgentAuthority{}, err
+	}
+	return requireAgentAuthorityForID(cmd, agentID)
+}
+
 var assessBlockedCmd = &cobra.Command{
 	Use:   "assess-blocked <task-id>",
 	Short: "Record orchestrator assessment of a BLOCKED task",
@@ -747,7 +759,7 @@ Requirements:
 			return err
 		}
 
-		agentID, err := resolveOrchestratorID(cmd)
+		authority, err := resolveOrchestratorAuthority(cmd)
 		if err != nil {
 			return err
 		}
@@ -761,15 +773,15 @@ Requirements:
 		if err != nil {
 			return err
 		}
-		if err := validateRoleType(resolver, agentID, "orchestrator"); err != nil {
+		if err := validateRoleType(resolver, authority.ID, "orchestrator"); err != nil {
 			return err
 		}
 
 		if isJSON(cmd) {
-			result, err := ops.AssessBlockedWithOptions(projectRoot, taskID, note, agentID, opts)
+			result, err := ops.AssessBlockedWithAuthority(projectRoot, taskID, note, authority, opts)
 			return jsonout.WriteResult(os.Stdout, result, resultWarnings(result), err)
 		}
-		return commands.AssessBlockedWithOptionsCommand(projectRoot, taskID, note, agentID, opts)
+		return commands.AssessBlockedWithAuthorityCommand(projectRoot, taskID, note, authority, opts)
 	},
 }
 
@@ -833,7 +845,7 @@ Requirements:
 
 		note, _ := cmd.Flags().GetString("note")
 
-		agentID, err := resolveOrchestratorID(cmd)
+		authority, err := resolveOrchestratorAuthority(cmd)
 		if err != nil {
 			return err
 		}
@@ -847,15 +859,15 @@ Requirements:
 		if err != nil {
 			return err
 		}
-		if err := validateRoleType(resolver, agentID, "orchestrator"); err != nil {
+		if err := validateRoleType(resolver, authority.ID, "orchestrator"); err != nil {
 			return err
 		}
 
 		if isJSON(cmd) {
-			result, err := ops.AssessHypothesisExhausted(projectRoot, taskID, note, agentID)
+			result, err := ops.AssessHypothesisExhaustedWithAuthority(projectRoot, taskID, note, authority)
 			return jsonout.WriteResult(os.Stdout, result, nil, err)
 		}
-		return commands.AssessHypothesisExhaustedCommand(projectRoot, taskID, note, agentID)
+		return commands.AssessHypothesisExhaustedWithAuthorityCommand(projectRoot, taskID, note, authority)
 	},
 }
 
@@ -896,7 +908,7 @@ Example:
 		taskID := args[0]
 		reason := args[1]
 
-		agentID, err := resolveOrchestratorID(cmd)
+		authority, err := resolveOrchestratorAuthority(cmd)
 		if err != nil {
 			return err
 		}
@@ -910,15 +922,15 @@ Example:
 		if err != nil {
 			return err
 		}
-		if err := validateAllowedOperation(resolver, agentID, "cancel-task"); err != nil {
+		if err := validateAllowedOperation(resolver, authority.ID, "cancel-task"); err != nil {
 			return err
 		}
 
 		if isJSON(cmd) {
-			result, err := ops.CancelTask(projectRoot, taskID, reason, agentID)
+			result, err := ops.CancelTaskWithAuthority(projectRoot, taskID, reason, authority)
 			return jsonout.WriteResult(os.Stdout, result, nil, err)
 		}
-		return commands.CancelTaskCommand(projectRoot, taskID, reason, agentID)
+		return commands.CancelTaskWithAuthorityCommand(projectRoot, taskID, reason, authority)
 	},
 }
 
@@ -950,7 +962,7 @@ Example:
 		prURL, _ := cmd.Flags().GetString("pr-url")
 		reason, _ := cmd.Flags().GetString("reason")
 
-		agentID, err := resolveOrchestratorID(cmd)
+		authority, err := resolveOrchestratorAuthority(cmd)
 		if err != nil {
 			return err
 		}
@@ -964,11 +976,11 @@ Example:
 		if err != nil {
 			return err
 		}
-		if err := validateAllowedOperation(resolver, agentID, "reconcile-merged"); err != nil {
+		if err := validateAllowedOperation(resolver, authority.ID, "reconcile-merged"); err != nil {
 			return err
 		}
 
-		result, err := ops.ReconcileMerged(projectRoot, taskID, mergeCommit, prURL, reason, agentID)
+		result, err := ops.ReconcileMergedWithAuthority(projectRoot, taskID, mergeCommit, prURL, reason, authority)
 		if isJSON(cmd) {
 			return jsonout.WriteResult(os.Stdout, result, nil, err)
 		}
@@ -1032,7 +1044,7 @@ Updates:
 
 		taskID := args[0]
 
-		agentID, err := requireAgentID(cmd)
+		authority, err := requireAgentAuthority(cmd)
 		if err != nil {
 			return err
 		}
@@ -1046,7 +1058,7 @@ Updates:
 		if err != nil {
 			return err
 		}
-		if err := validateAllowedOperation(resolver, agentID, "write-checkpoint"); err != nil {
+		if err := validateAllowedOperation(resolver, authority.ID, "write-checkpoint"); err != nil {
 			return err
 		}
 
@@ -1060,7 +1072,7 @@ Updates:
 
 		input := &ops.WriteCheckpointInput{
 			TaskID:         taskID,
-			AgentID:        agentID,
+			AgentID:        authority.ID,
 			Intent:         intent,
 			ValidationPlan: validationPlan,
 			FilesToModify:  filesToModify,
@@ -1081,10 +1093,10 @@ Updates:
 		}
 
 		if isJSON(cmd) {
-			err := ops.WriteCheckpoint(projectRoot, input)
+			err := ops.WriteCheckpointWithAuthority(projectRoot, input, authority)
 			return jsonout.WriteResult(os.Stdout, nil, nil, err)
 		}
-		return commands.WriteCheckpointCommand(projectRoot, input)
+		return commands.WriteCheckpointWithAuthorityCommand(projectRoot, input, authority)
 	},
 }
 
@@ -1137,7 +1149,7 @@ Example:
 
 		taskID := args[0]
 
-		agentID, err := requireAgentID(cmd)
+		authority, err := requireAgentAuthority(cmd)
 		if err != nil {
 			return err
 		}
@@ -1151,7 +1163,7 @@ Example:
 		if err != nil {
 			return err
 		}
-		if err := validateAllowedOperation(resolver, agentID, "set-task-output"); err != nil {
+		if err := validateAllowedOperation(resolver, authority.ID, "set-task-output"); err != nil {
 			return err
 		}
 
@@ -1176,15 +1188,15 @@ Example:
 
 		input := &ops.SetTaskOutputInput{
 			TaskID:  taskID,
-			AgentID: agentID,
+			AgentID: authority.ID,
 			Output:  entries,
 		}
 
 		if isJSON(cmd) {
-			err := ops.SetTaskOutput(projectRoot, input)
+			err := ops.SetTaskOutputWithAuthority(projectRoot, input, authority)
 			return jsonout.WriteResult(os.Stdout, nil, nil, err)
 		}
-		return commands.SetTaskOutputCommand(projectRoot, input)
+		return commands.SetTaskOutputWithAuthorityCommand(projectRoot, input, authority)
 	},
 }
 
@@ -1246,7 +1258,7 @@ Example:
 			return &ops.PreconditionError{Reason: fmt.Sprintf("%s: %v", hint, err)}
 		}
 
-		orchestratorID, err := resolveOrchestratorID(cmd)
+		authority, err := resolveOrchestratorAuthority(cmd)
 		if err != nil {
 			return err
 		}
@@ -1258,20 +1270,20 @@ Example:
 		if err != nil {
 			return err
 		}
-		if err := validateAllowedOperation(resolver, orchestratorID, "add-tasks"); err != nil {
+		if err := validateAllowedOperation(resolver, authority.ID, "add-tasks"); err != nil {
 			return err
 		}
 
 		input := &ops.AddTasksInput{
 			Tasks:          tasks,
-			OrchestratorID: orchestratorID,
+			OrchestratorID: authority.ID,
 		}
 
 		if isJSON(cmd) {
-			result, err := ops.AddTasks(statePath, logPath, input)
+			result, err := ops.AddTasksWithAuthority(statePath, logPath, input, authority)
 			return jsonout.WriteResult(os.Stdout, result, nil, err)
 		}
-		return commands.AddTasksCommand(statePath, logPath, input)
+		return commands.AddTasksWithAuthorityCommand(statePath, logPath, input, authority)
 	},
 }
 

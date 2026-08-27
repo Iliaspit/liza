@@ -24,8 +24,8 @@ var awaitBudgetFlagUsage = fmt.Sprintf(
 	"total wait budget in seconds, measured from submission/rejection; "+
 		"each invocation waits at most 100 seconds; maximum %d", awaitBudgetSecondsDefault)
 
-var awaitVerdict = commands.AwaitVerdict
-var awaitResubmission = commands.AwaitResubmission
+var awaitVerdict = commands.AwaitVerdictWithAuthority
+var awaitResubmission = commands.AwaitResubmissionWithAuthority
 
 var submitForReviewCmd = &cobra.Command{
 	Use:   "submit-for-review <task-id> [commit-ref]",
@@ -64,10 +64,11 @@ Updates:
 			commitRef = args[1]
 		}
 
-		agentID, err := requireAgentID(cmd)
+		authority, err := requireAgentAuthority(cmd)
 		if err != nil {
 			return err
 		}
+		agentID := authority.ID
 
 		projectRoot, err := requireProjectRoot()
 		if err != nil {
@@ -83,14 +84,14 @@ Updates:
 		}
 
 		if isJSON(cmd) {
-			result, err := ops.SubmitForReview(projectRoot, taskID, commitRef, agentID)
+			result, err := ops.SubmitForReviewWithAuthority(projectRoot, taskID, commitRef, authority)
 			var warnings []string
 			if result != nil {
 				warnings = result.Warnings
 			}
 			return jsonout.WriteResult(os.Stdout, result, warnings, err)
 		}
-		return commands.SubmitForReviewCommand(projectRoot, taskID, commitRef, agentID)
+		return commands.SubmitForReviewCommandWithAuthority(projectRoot, taskID, commitRef, authority)
 	},
 }
 
@@ -126,10 +127,11 @@ Updates:
 		summary := args[1]
 		nextAction := args[2]
 
-		agentID, err := requireAgentID(cmd)
+		authority, err := requireAgentAuthority(cmd)
 		if err != nil {
 			return err
 		}
+		agentID := authority.ID
 
 		projectRoot, err := requireProjectRoot()
 		if err != nil {
@@ -151,6 +153,7 @@ Updates:
 				Summary:     summary,
 				NextAction:  nextAction,
 				AgentID:     agentID,
+				Authority:   &authority,
 			})
 			return jsonout.WriteResult(os.Stdout, result, nil, err)
 		}
@@ -159,6 +162,7 @@ Updates:
 			Summary:    summary,
 			NextAction: nextAction,
 			AgentID:    agentID,
+			Authority:  &authority,
 		})
 	},
 }
@@ -213,10 +217,11 @@ For REJECTED verdict:
 			reason = flagReason
 		}
 
-		agentID, err := requireAgentID(cmd)
+		authority, err := requireAgentAuthority(cmd)
 		if err != nil {
 			return err
 		}
+		agentID := authority.ID
 
 		projectRoot, err := requireProjectRoot()
 		if err != nil {
@@ -234,10 +239,10 @@ For REJECTED verdict:
 		impact, _ := cmd.Flags().GetString("impact")
 
 		if isJSON(cmd) {
-			result, err := ops.SubmitVerdict(projectRoot, taskID, verdict, reason, agentID, impact)
+			result, err := ops.SubmitVerdictWithAuthority(projectRoot, taskID, verdict, reason, authority, impact)
 			return jsonout.WriteResult(os.Stdout, result, nil, err)
 		}
-		return commands.SubmitVerdictCommand(projectRoot, taskID, verdict, reason, agentID, impact)
+		return commands.SubmitVerdictCommandWithAuthority(projectRoot, taskID, verdict, reason, authority, impact)
 	},
 }
 
@@ -349,10 +354,11 @@ Possible outcomes:
 
 		taskID := args[0]
 
-		agentID, err := requireAgentID(cmd)
+		authority, err := requireAgentAuthority(cmd)
 		if err != nil {
 			return err
 		}
+		agentID := authority.ID
 
 		projectRoot, err := requireProjectRoot()
 		if err != nil {
@@ -372,7 +378,7 @@ Possible outcomes:
 			return err
 		}
 
-		result, err := awaitVerdict(projectRoot, taskID, agentID, timeout)
+		result, err := awaitVerdict(projectRoot, taskID, authority, timeout)
 		if isJSON(cmd) {
 			return jsonout.WriteResult(os.Stdout, result, nil, err)
 		}
@@ -416,10 +422,11 @@ Possible outcomes:
 
 		taskID := args[0]
 
-		agentID, err := requireAgentID(cmd)
+		authority, err := requireAgentAuthority(cmd)
 		if err != nil {
 			return err
 		}
+		agentID := authority.ID
 
 		projectRoot, err := requireProjectRoot()
 		if err != nil {
@@ -439,7 +446,7 @@ Possible outcomes:
 			return err
 		}
 
-		result, err := awaitResubmission(projectRoot, taskID, agentID, timeout)
+		result, err := awaitResubmission(projectRoot, taskID, authority, timeout)
 		if isJSON(cmd) {
 			return jsonout.WriteResult(os.Stdout, result, nil, err)
 		}

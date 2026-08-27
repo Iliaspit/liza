@@ -1132,6 +1132,7 @@ func TestValidateCommand_DuplicateAssignments(t *testing.T) {
 						Status:          models.TaskStatusRejected,
 						RolePair:        "coding-pair",
 						AssignedTo:      &agent,
+						LeaseExpires:    &leaseExpires,
 						RejectionReason: &rejectionReason,
 						Created:         now,
 						SpecRef:         "specs/test.md",

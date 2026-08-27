@@ -6,6 +6,7 @@ import (
 
 	"github.com/liza-mas/liza/internal/db"
 	"github.com/liza-mas/liza/internal/models"
+	"github.com/liza-mas/liza/internal/ops"
 )
 
 const ProviderAuditDegradedAnomalyType = "provider_audit_degraded"
@@ -61,10 +62,10 @@ func LogProviderAuditDegradedAlert(projectRoot string, pad *ProviderAuditDegrade
 	return LogAlert(projectRoot, "⚠️", "PROVIDER AUDIT DEGRADED", pad.Provider+": "+pad.Message)
 }
 
-func handleProviderAuditDegraded(bb *db.Blackboard, config SupervisorConfig, taskID, output string) bool {
+func handleProviderAuditDegraded(bb *db.Blackboard, config SupervisorConfig, taskID, output string) (bool, error) {
 	pad := DetectProviderAuditDegraded(output, config.CLIName)
 	if pad == nil {
-		return false
+		return false, nil
 	}
 
 	GetLogger().Warn("Provider audit degraded",
@@ -78,7 +79,7 @@ func handleProviderAuditDegraded(bb *db.Blackboard, config SupervisorConfig, tas
 	}
 
 	if bb != nil {
-		if err := bb.Modify(func(state *models.State) error {
+		if err := ops.ModifyWithAgentAuthority(bb, config.Authority, func(state *models.State) error {
 			state.Anomalies = append(state.Anomalies, models.Anomaly{
 				Timestamp: time.Now().UTC(),
 				Task:      taskID,
@@ -94,8 +95,9 @@ func handleProviderAuditDegraded(bb *db.Blackboard, config SupervisorConfig, tas
 			return nil
 		}); err != nil {
 			GetLogger().Warn("Failed to record provider audit degradation anomaly", "error", err)
+			return true, err
 		}
 	}
 
-	return true
+	return true, nil
 }

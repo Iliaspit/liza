@@ -39,6 +39,25 @@ func TestFreshClaimStrategy_MutateTask_PreservesNonZeroAttempt(t *testing.T) {
 	}
 }
 
+func TestRejectedClaimStrategy_MutateTask_PublishesRecoveryTuple(t *testing.T) {
+	t.Parallel()
+
+	task := &models.Task{}
+	ctx := &claimContext{
+		worktreeRel: ".worktrees/test-task",
+		baseCommit:  "abc123",
+	}
+
+	rejectedClaimStrategy{}.mutateTask(task, ctx)
+
+	if task.Worktree == nil || *task.Worktree != ctx.worktreeRel {
+		t.Fatalf("Worktree = %v, want %q", task.Worktree, ctx.worktreeRel)
+	}
+	if task.BaseCommit == nil || *task.BaseCommit != ctx.baseCommit {
+		t.Fatalf("BaseCommit = %v, want %q", task.BaseCommit, ctx.baseCommit)
+	}
+}
+
 func TestIntegrationFixClaimStrategy_MutateTask_ClearsStaleAttemptMetadata(t *testing.T) {
 	t.Parallel()
 

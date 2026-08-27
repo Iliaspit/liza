@@ -50,36 +50,21 @@ func (a *ACPXAgent) Run(ctx context.Context, req LLMAgentRunRequest) (LLMAgentRu
 	if sessionName == "" {
 		sessionName = acpxSessionName(req.AgentID)
 	}
-	warm := a.hasSeenSession(sessionName) || a.sessionExists(ctx, req.ProjectRoot, req.AgentID, plan)
-
-	emitLLMAgentEvent(ctx, req.EventSink, LLMAgentEvent{
-		Kind:        LLMAgentEventStarted,
-		BackendName: req.BackendName,
-		AgentID:     req.AgentID,
-		TaskID:      req.TaskID,
-		SessionID:   sessionName,
-		Payload: map[string]any{
-			"mode":       "acpx",
-			"acpx_agent": acpxAgent,
-		},
+	var warm bool
+	var promptProcess *acpxPromptProcess
+	err = req.LaunchGate.launch(ctx, func() error {
+		warm = a.hasSeenSession(sessionName) || a.sessionExists(ctx, req.ProjectRoot, req.AgentID, req.Generation, plan)
+		if err := a.ensureSession(ctx, req.AgentID, req.Generation, req.ProjectRoot, plan); err != nil {
+			return err
+		}
+		if err := a.configureSession(ctx, req.AgentID, req.Generation, plan); err != nil {
+			return err
+		}
+		var err error
+		promptProcess, err = a.startACPXPrompt(ctx, req, plan)
+		return err
 	})
-
-	if err := a.ensureSession(ctx, req.AgentID, req.ProjectRoot, plan); err != nil {
-		errText, maskedErr := a.boundedProviderFailure(err, req.BackendName)
-		emitLLMAgentEvent(ctx, req.EventSink, LLMAgentEvent{
-			Kind:        LLMAgentEventCompleted,
-			BackendName: req.BackendName,
-			AgentID:     req.AgentID,
-			TaskID:      req.TaskID,
-			SessionID:   sessionName,
-			Message:     errText,
-			Payload: map[string]any{
-				"error": errText,
-			},
-		})
-		return LLMAgentRunResult{ExitCode: 1, Output: errText, WarmUsage: warm, SessionID: sessionName}, maskedErr
-	}
-	if err := a.configureSession(ctx, req.AgentID, plan); err != nil {
+	if err != nil {
 		errText, maskedErr := a.boundedProviderFailure(err, req.BackendName)
 		emitLLMAgentEvent(ctx, req.EventSink, LLMAgentEvent{
 			Kind:        LLMAgentEventCompleted,
@@ -95,8 +80,19 @@ func (a *ACPXAgent) Run(ctx context.Context, req LLMAgentRunRequest) (LLMAgentRu
 		return LLMAgentRunResult{ExitCode: 1, Output: errText, WarmUsage: warm, SessionID: sessionName}, maskedErr
 	}
 	a.markSessionSeen(sessionName)
+	emitLLMAgentEvent(ctx, req.EventSink, LLMAgentEvent{
+		Kind:        LLMAgentEventStarted,
+		BackendName: req.BackendName,
+		AgentID:     req.AgentID,
+		TaskID:      req.TaskID,
+		SessionID:   sessionName,
+		Payload: map[string]any{
+			"mode":       "acpx",
+			"acpx_agent": acpxAgent,
+		},
+	})
 
-	output, usage, failureEvidence, err := a.prompt(ctx, req, plan)
+	output, usage, failureEvidence, err := a.waitACPXPrompt(ctx, req, promptProcess)
 	emitLLMAgentEvent(ctx, req.EventSink, LLMAgentEvent{
 		Kind:        LLMAgentEventUsage,
 		BackendName: req.BackendName,
@@ -180,24 +176,26 @@ func (a *ACPXAgent) RunInteractive(ctx context.Context, req LLMAgentInteractiveR
 		return 1, fmt.Errorf("interactive mode is not supported by %s", req.BackendName)
 	}
 
-	emitLLMAgentEvent(ctx, req.EventSink, LLMAgentEvent{
-		Kind:        LLMAgentEventStarted,
-		BackendName: req.BackendName,
-		AgentID:     req.AgentID,
-		SessionID:   req.SessionID,
-		Payload: map[string]any{
-			"mode": "interactive",
-		},
-	})
-
 	cmd := exec.CommandContext(ctx, executable)
 	cmd.Dir = req.ProjectRoot
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
-	cmd.Env = agentProcessEnv(os.Environ(), req.AgentID)
+	cmd.Env = agentProcessEnv(os.Environ(), req.AgentID, req.Generation)
 
-	err = cmd.Run()
+	err = req.LaunchGate.launch(ctx, cmd.Start)
+	if err == nil {
+		emitLLMAgentEvent(ctx, req.EventSink, LLMAgentEvent{
+			Kind:        LLMAgentEventStarted,
+			BackendName: req.BackendName,
+			AgentID:     req.AgentID,
+			SessionID:   req.SessionID,
+			Payload: map[string]any{
+				"mode": "interactive",
+			},
+		})
+		err = cmd.Wait()
+	}
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			exitCode := exitErr.ExitCode()
@@ -243,7 +241,7 @@ func interactiveExecutableForACPX(plan LaunchPlan) string {
 	}
 }
 
-func (a *ACPXAgent) ensureSession(ctx context.Context, agentID string, projectRoot string, plan LaunchPlan) error {
+func (a *ACPXAgent) ensureSession(ctx context.Context, agentID, generation, projectRoot string, plan LaunchPlan) error {
 	args := plan.ACPXEnsureArgs
 	if len(args) == 0 {
 		if strings.TrimSpace(projectRoot) == "" {
@@ -251,30 +249,22 @@ func (a *ACPXAgent) ensureSession(ctx context.Context, agentID string, projectRo
 		}
 		args = []string{"--cwd", projectRoot, plan.ACPXAgent, "sessions", "ensure", "--name", plan.ACPXSessionName}
 	}
-	out, err := a.runACPX(ctx, plan.Executable, agentID, args, "")
+	out, err := a.runACPX(ctx, plan.Executable, agentID, generation, args, "")
 	if err != nil {
 		return fmt.Errorf("acpx sessions ensure: %w\n%s", err, out)
 	}
 	return nil
 }
 
-func (a *ACPXAgent) configureSession(ctx context.Context, agentID string, plan LaunchPlan) error {
+func (a *ACPXAgent) configureSession(ctx context.Context, agentID, generation string, plan LaunchPlan) error {
 	if len(plan.ACPXSetModeArgs) == 0 {
 		return nil
 	}
-	out, err := a.runACPX(ctx, plan.Executable, agentID, plan.ACPXSetModeArgs, "")
+	out, err := a.runACPX(ctx, plan.Executable, agentID, generation, plan.ACPXSetModeArgs, "")
 	if err != nil {
 		return fmt.Errorf("acpx set-mode: %w\n%s", err, out)
 	}
 	return nil
-}
-
-func (a *ACPXAgent) prompt(ctx context.Context, req LLMAgentRunRequest, plan LaunchPlan) (acpxOutput, LLMAgentUsage, string, error) {
-	output, usage, failureEvidence, err := a.runACPXPrompt(ctx, req, plan)
-	if err != nil {
-		return output, usage, failureEvidence, fmt.Errorf("acpx prompt: %w", err)
-	}
-	return output, usage, "", nil
 }
 
 func (a *ACPXAgent) boundedProviderFailure(err error, backendName string) (string, maskedError) {
@@ -285,17 +275,17 @@ func (a *ACPXAgent) boundedProviderFailure(err error, backendName string) (strin
 	return errText, maskedError{message: errText, err: err}
 }
 
-func (a *ACPXAgent) sessionExists(ctx context.Context, _ string, agentID string, plan LaunchPlan) bool {
+func (a *ACPXAgent) sessionExists(ctx context.Context, _ string, agentID, generation string, plan LaunchPlan) bool {
 	if len(plan.ACPXShowArgs) == 0 {
 		return false
 	}
-	_, err := a.runACPX(ctx, plan.Executable, agentID, plan.ACPXShowArgs, "")
+	_, err := a.runACPX(ctx, plan.Executable, agentID, generation, plan.ACPXShowArgs, "")
 	return err == nil
 }
 
-func (a *ACPXAgent) runACPX(ctx context.Context, executable, agentID string, args []string, stdin string) (string, error) {
+func (a *ACPXAgent) runACPX(ctx context.Context, executable, agentID, generation string, args []string, stdin string) (string, error) {
 	cmd := exec.CommandContext(ctx, executable, args...)
-	cmd.Env = agentProcessEnv(os.Environ(), agentID)
+	cmd.Env = agentProcessEnv(os.Environ(), agentID, generation)
 	if stdin != "" {
 		cmd.Stdin = strings.NewReader(stdin)
 	}
@@ -306,42 +296,60 @@ func (a *ACPXAgent) runACPX(ctx context.Context, executable, agentID string, arg
 	return stdout.String() + stderr.String(), err
 }
 
-func (a *ACPXAgent) runACPXPrompt(ctx context.Context, req LLMAgentRunRequest, plan LaunchPlan) (acpxOutput, LLMAgentUsage, string, error) {
+type acpxPromptProcess struct {
+	cmd             *exec.Cmd
+	stdout          io.ReadCloser
+	stderr          io.ReadCloser
+	stdoutLog       *streamingOutputFile
+	stderrLog       *streamingOutputFile
+	stdoutLogWriter io.Writer
+	stderrLogWriter io.Writer
+	eventBase       LLMAgentEvent
+}
+
+func (a *ACPXAgent) startACPXPrompt(ctx context.Context, req LLMAgentRunRequest, plan LaunchPlan) (*acpxPromptProcess, error) {
 	cmd := exec.CommandContext(ctx, plan.Executable, plan.ACPXPromptArgs...)
-	cmd.Env = agentProcessEnv(os.Environ(), req.AgentID)
+	cmd.Env = agentProcessEnv(os.Environ(), req.AgentID, req.Generation)
 	cmd.Stdin = strings.NewReader(req.Prompt)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		return acpxOutput{}, LLMAgentUsage{}, "", fmt.Errorf("open acpx stdout: %w", err)
+		return nil, fmt.Errorf("open acpx stdout: %w", err)
 	}
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
-		return acpxOutput{}, LLMAgentUsage{}, "", fmt.Errorf("open acpx stderr: %w", err)
+		return nil, fmt.Errorf("open acpx stderr: %w", err)
 	}
 
-	var stdoutLog, stderrLog *streamingOutputFile
-	var stdoutLogWriter, stderrLogWriter io.Writer
+	process := &acpxPromptProcess{
+		cmd:    cmd,
+		stdout: stdout,
+		stderr: stderr,
+		eventBase: LLMAgentEvent{
+			BackendName: req.BackendName,
+			AgentID:     req.AgentID,
+			TaskID:      req.TaskID,
+			SessionID:   plan.ACPXSessionName,
+		},
+	}
 	if a.outputsDir != "" {
 		timestamp := time.Now().UTC().Format("20060102-150405")
-		stdoutLog = newStreamingOutputFile(a.outputsDir, req.AgentID, "txt", timestamp, a.masker)
-		stderrLog = newStreamingOutputFile(a.outputsDir, req.AgentID, "err", timestamp, a.masker)
-		stdoutLogWriter = stdoutLog
-		stderrLogWriter = stderrLog
+		process.stdoutLog = newStreamingOutputFile(a.outputsDir, req.AgentID, "txt", timestamp, a.masker)
+		process.stderrLog = newStreamingOutputFile(a.outputsDir, req.AgentID, "err", timestamp, a.masker)
+		process.stdoutLogWriter = process.stdoutLog
+		process.stderrLogWriter = process.stderrLog
 	}
-	defer closeAgentOutputLogs(stdoutLog, stderrLog, req.AgentID)
-
-	eventBase := LLMAgentEvent{
-		BackendName: req.BackendName,
-		AgentID:     req.AgentID,
-		TaskID:      req.TaskID,
-		SessionID:   plan.ACPXSessionName,
-	}
-	progress := executionProgressCallback(ctx)
 
 	if err := cmd.Start(); err != nil {
-		return acpxOutput{}, LLMAgentUsage{}, "", err
+		closeAgentOutputLogs(process.stdoutLog, process.stderrLog, req.AgentID)
+		return nil, err
 	}
+	return process, nil
+}
+
+func (a *ACPXAgent) waitACPXPrompt(ctx context.Context, req LLMAgentRunRequest, process *acpxPromptProcess) (acpxOutput, LLMAgentUsage, string, error) {
+	defer closeAgentOutputLogs(process.stdoutLog, process.stderrLog, req.AgentID)
+	progress := executionProgressCallback(ctx)
 
 	var stderrRaw strings.Builder
 	var output acpxOutput
@@ -349,15 +357,15 @@ func (a *ACPXAgent) runACPXPrompt(ctx context.Context, req LLMAgentRunRequest, p
 	stdoutErrCh := make(chan error, 1)
 	stderrErrCh := make(chan error, 1)
 	go func() {
-		stdoutErrCh <- a.scanACPXPromptStdout(ctx, stdout, stdoutLogWriter, &output, &usage, req.EventSink, eventBase, progress)
+		stdoutErrCh <- a.scanACPXPromptStdout(ctx, process.stdout, process.stdoutLogWriter, &output, &usage, req.EventSink, process.eventBase, progress)
 	}()
 	go func() {
-		stderrErrCh <- copyACPXPromptStderr(stderr, stderrLogWriter, &stderrRaw, progress)
+		stderrErrCh <- copyACPXPromptStderr(process.stderr, process.stderrLogWriter, &stderrRaw, progress)
 	}()
 
 	stdoutErr := <-stdoutErrCh
 	stderrErr := <-stderrErrCh
-	waitErr := cmd.Wait()
+	waitErr := process.cmd.Wait()
 	failureEvidence := stderrRaw.String()
 	if stdoutErr != nil {
 		return output, usage, failureEvidence, stdoutErr
@@ -366,7 +374,7 @@ func (a *ACPXAgent) runACPXPrompt(ctx context.Context, req LLMAgentRunRequest, p
 		return output, usage, failureEvidence, stderrErr
 	}
 	if waitErr != nil {
-		return output, usage, failureEvidence, waitErr
+		return output, usage, failureEvidence, fmt.Errorf("acpx prompt: %w", waitErr)
 	}
 	return output, usage, "", nil
 }

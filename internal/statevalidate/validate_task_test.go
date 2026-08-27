@@ -24,6 +24,13 @@ func withStateValidateProjectDir(t *testing.T, projectDir string) {
 func TestValidateTaskInvariants_EnforcesStatusSpecificRequiredFields(t *testing.T) {
 	cfg := loadTestConfig(t)
 	resolver := pipeline.NewResolver(cfg)
+	rejectedTask := func(update func(*models.Task)) func() models.Task {
+		return func() models.Task {
+			task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusRejected, time.Now().UTC())
+			update(&task)
+			return task
+		}
+	}
 
 	cases := []struct {
 		name    string
@@ -225,6 +232,50 @@ func TestValidateTaskInvariants_EnforcesStatusSpecificRequiredFields(t *testing.
 				return task
 			},
 			wantErr: "CODE_REJECTED task without rejection_reason: task-1",
+		},
+		{
+			name: "rejected assignment requires lease",
+			task: rejectedTask(func(task *models.Task) {
+				task.LeaseExpires = nil
+				task.Worktree = nil
+			}),
+			wantErr: "CODE_REJECTED task has assigned_to without lease_expires: task-1",
+		},
+		{
+			name: "rejected lease requires assignment",
+			task: rejectedTask(func(task *models.Task) {
+				task.AssignedTo = nil
+				task.Worktree = nil
+			}),
+			wantErr: "CODE_REJECTED task has lease_expires without assigned_to: task-1",
+		},
+		{
+			name: "rejected worktree requires base commit",
+			task: rejectedTask(func(task *models.Task) {
+				task.AssignedTo = nil
+				task.LeaseExpires = nil
+			}),
+			wantErr: "CODE_REJECTED released task has worktree without base_commit: task-1",
+		},
+		{
+			name: "rejected base commit requires worktree",
+			task: rejectedTask(func(task *models.Task) {
+				task.AssignedTo = nil
+				task.LeaseExpires = nil
+				task.Worktree = nil
+				task.BaseCommit = testhelpers.StringPtr("abc123")
+			}),
+			wantErr: "CODE_REJECTED released task has base_commit without worktree: task-1",
+		},
+		{
+			name: "rejected recovery metadata requires canonical worktree",
+			task: rejectedTask(func(task *models.Task) {
+				task.AssignedTo = nil
+				task.LeaseExpires = nil
+				task.Worktree = testhelpers.StringPtr(".worktrees/recovery-task-1")
+				task.BaseCommit = testhelpers.StringPtr("abc123")
+			}),
+			wantErr: `CODE_REJECTED task has worktree=".worktrees/recovery-task-1", want ".worktrees/task-1"`,
 		},
 		{
 			name: "superseded status requires rescope_reason",

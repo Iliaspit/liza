@@ -736,20 +736,20 @@ func checkRegisteredAgentsWithoutLiveProcess(state *models.State) []Alert {
 				continue
 			}
 		}
-		processStatus := ops.AgentProcessStatus(agentID, agent)
-		if processStatus.IsLiveOrUnknown() {
+		observation := ops.AgentProcessOwnership(agentID, agent, now)
+		if observation.Raw.IsLiveOrUnknown() {
 			continue
 		}
 		processDescription := "no live process"
-		if processStatus.State == "mismatched" {
+		if observation.Raw.State == "mismatched" {
 			processDescription = "mismatched process"
 		}
 		alerts = append(alerts, Alert{
 			Timestamp: now,
 			Level:     AlertLevelCritical,
 			Category:  "REGISTERED AGENT PROCESS",
-			Message: fmt.Sprintf("agent %s has active lease but %s (pid %d: %s)",
-				agentID, processDescription, agent.PID, processStatus.Detail),
+			Message: fmt.Sprintf("agent %s has active lease but %s; %s",
+				agentID, processDescription, observation.Diagnostic(agent.PID)),
 		})
 	}
 	return alerts

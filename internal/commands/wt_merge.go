@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/ops"
 )
 
@@ -14,6 +15,20 @@ func WtMergeCommand(projectRoot, taskID, agentID string) error {
 	result, err := ops.MergeWorktree(projectRoot, taskID, agentID)
 	if err != nil {
 		// Print context for integration failures
+		if intErr, ok := err.(*ops.IntegrationFailedError); ok {
+			printIntegrationFailure(taskID, intErr)
+		}
+		return err
+	}
+
+	printMergeResult(result)
+	return nil
+}
+
+// WtMergeCommandWithAuthority is the authenticated command adapter.
+func WtMergeCommandWithAuthority(projectRoot, taskID string, authority models.AgentAuthority) error {
+	result, err := ops.MergeWorktreeWithAuthority(projectRoot, taskID, authority)
+	if err != nil {
 		if intErr, ok := err.(*ops.IntegrationFailedError); ok {
 			printIntegrationFailure(taskID, intErr)
 		}

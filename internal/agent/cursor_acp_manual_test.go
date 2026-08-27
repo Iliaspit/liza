@@ -19,6 +19,7 @@ func TestCursorACPRealSmoke(t *testing.T) {
 		TaskID:      "cursor-acp-real-smoke",
 		ProjectRoot: ".",
 		Prompt:      `This is a smoke test through Liza's ACPX Cursor backend. Do not modify files or run tools. Reply exactly: CURSOR_ACP_REAL_OK`,
+		LaunchGate:  immediateLaunchGate,
 	})
 	if err != nil {
 		t.Fatalf("Cursor ACP smoke failed: %v\nOutput:\n%s", err, result.Output)

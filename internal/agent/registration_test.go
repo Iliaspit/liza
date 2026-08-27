@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -17,7 +18,82 @@ import (
 	"github.com/liza-mas/liza/internal/pipeline"
 	"github.com/liza-mas/liza/internal/statevalidate"
 	"github.com/liza-mas/liza/internal/testhelpers"
+	"gopkg.in/yaml.v3"
 )
+
+func TestAgentGeneration(t *testing.T) {
+	var legacy models.Agent
+	if err := yaml.Unmarshal([]byte("role: coder\nstatus: IDLE\nheartbeat: 2026-08-25T00:00:00Z\nterminal: terminal-1\n"), &legacy); err != nil {
+		t.Fatalf("decode legacy agent: %v", err)
+	}
+	if legacy.Generation != "" {
+		t.Fatalf("legacy generation = %q, want empty", legacy.Generation)
+	}
+
+	t.Cleanup(ops.SetAgentProcessProcRootForTest(filepath.Join(t.TempDir(), "missing-proc")))
+	projectRoot := t.TempDir()
+	statePath, _ := testhelpers.SetupLizaDir(t, projectRoot)
+	testhelpers.SetupPipelineConfig(t, projectRoot)
+	bb := testhelpers.WriteInitialState(t, statePath, testhelpers.CreateValidState())
+	resolver := testResolver(t)
+
+	authorityA, err := registerAgentWithAuthority(bb, projectRoot, "coder-1", "coder", "terminal-a", 1800, "codex", resolver)
+	if err != nil {
+		t.Fatalf("register generation A: %v", err)
+	}
+	if authorityA.ID != "coder-1" || authorityA.Generation == "" {
+		t.Fatalf("authority A = %#v, want matching ID and non-empty generation", authorityA)
+	}
+	registeredA, err := bb.Read()
+	if err != nil {
+		t.Fatalf("read generation A: %v", err)
+	}
+	if registeredA.Agents[authorityA.ID].Generation != authorityA.Generation {
+		t.Fatalf("persisted generation A = %q, want %q", registeredA.Agents[authorityA.ID].Generation, authorityA.Generation)
+	}
+
+	if err := bb.Modify(func(state *models.State) error {
+		agent := state.Agents[authorityA.ID]
+		expired := time.Now().UTC().Add(-time.Minute)
+		agent.LeaseExpires = &expired
+		state.Agents[authorityA.ID] = agent
+		return nil
+	}); err != nil {
+		t.Fatalf("expire generation A: %v", err)
+	}
+
+	authorityB, err := registerAgentWithAuthority(bb, projectRoot, "coder-1", "coder", "terminal-b", 1800, "claude", resolver)
+	if err != nil {
+		t.Fatalf("register takeover generation B: %v", err)
+	}
+	if authorityB.Generation == "" || authorityB.Generation == authorityA.Generation {
+		t.Fatalf("authority B generation = %q, want non-empty and distinct from %q", authorityB.Generation, authorityA.Generation)
+	}
+	registeredB, err := bb.Read()
+	if err != nil {
+		t.Fatalf("read generation B: %v", err)
+	}
+	if registeredB.Agents[authorityB.ID].Generation != authorityB.Generation {
+		t.Fatalf("persisted generation B = %q, want %q", registeredB.Agents[authorityB.ID].Generation, authorityB.Generation)
+	}
+}
+
+func testAgentAuthority(t *testing.T, bb *db.Blackboard, agentID string) models.AgentAuthority {
+	t.Helper()
+	const generation = "test-generation"
+	if err := bb.Modify(func(state *models.State) error {
+		agent, exists := state.Agents[agentID]
+		if !exists {
+			return fmt.Errorf("agent %s not found", agentID)
+		}
+		agent.Generation = generation
+		state.Agents[agentID] = agent
+		return nil
+	}); err != nil {
+		t.Fatalf("install test authority for %s: %v", agentID, err)
+	}
+	return models.AgentAuthority{ID: agentID, Generation: generation}
+}
 
 // TestValidateIdentity tests agent ID format validation
 func TestValidateIdentity(t *testing.T) {
@@ -280,14 +356,29 @@ func TestRegisterAgentWaitsForProjectCleanupExclusion(t *testing.T) {
 	}
 }
 
-func TestRegisterAgentTakesOverDeadOrMismatchedActiveLease(t *testing.T) {
+func TestRegisterAgentNamespaceSafeSingularity(t *testing.T) {
 	tests := []struct {
-		name string
-		pid  int
-		argv []string
+		name              string
+		pid               int
+		argv              []string
+		candidatePID      int
+		wantCorrelation   string
+		allowTakeoverWith string
 	}{
-		{name: "dead pid", pid: 987654321},
-		{name: "mismatched pid", pid: 1234, argv: []string{"go", "test"}},
+		{
+			name:              "procfs mismatch",
+			pid:               1234,
+			argv:              []string{"go", "test"},
+			candidatePID:      4321,
+			wantCorrelation:   "observer-visible matching pid 4321",
+			allowTakeoverWith: "expiry",
+		},
+		{
+			name:              "pid not found",
+			pid:               987654321,
+			wantCorrelation:   "correlation unavailable",
+			allowTakeoverWith: "removal",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -297,22 +388,55 @@ func TestRegisterAgentTakesOverDeadOrMismatchedActiveLease(t *testing.T) {
 			if len(tt.argv) > 0 {
 				writeRegistrationProcCmdline(t, procRoot, tt.pid, tt.argv)
 			}
+			if tt.candidatePID != 0 {
+				writeRegistrationProcCmdline(t, procRoot, tt.candidatePID, []string{
+					"liza", "agent", "orchestrator", "--agent-id", "orchestrator-1",
+				})
+			}
 
 			statePath, _ := testhelpers.SetupLizaDir(t, tmpDir)
 			testhelpers.SetupPipelineConfig(t, tmpDir)
 			state := testhelpers.CreateValidState()
-			state.Agents["coder-1"] = models.Agent{
-				Role:         "coder",
-				Status:       models.AgentStatusWorking,
+			state.Agents["orchestrator-1"] = models.Agent{
+				Role:         "orchestrator",
+				Status:       models.AgentStatusPlanning,
 				LeaseExpires: testhelpers.TimePtr(time.Now().UTC().Add(10 * time.Minute)),
 				Heartbeat:    time.Now().UTC(),
 				PID:          tt.pid,
 			}
 			bb := testhelpers.WriteInitialState(t, statePath, state)
 
-			err := registerAgent(bb, tmpDir, "coder-1", "coder", "terminal-1", 1800, "codex", testResolver(t))
-			if err != nil {
-				t.Fatalf("registerAgent() error = %v, want takeover", err)
+			err := registerAgent(bb, tmpDir, "orchestrator-2", "orchestrator", "terminal-2", 1800, "codex", testResolver(t))
+			if err == nil {
+				t.Fatal("registerAgent() error = nil, want fresh unexpired orchestrator to preserve singularity")
+			}
+			for _, want := range []string{
+				"unknown/degraded",
+				fmt.Sprintf("recorded namespace-local pid %d", tt.pid),
+				tt.wantCorrelation,
+			} {
+				if !strings.Contains(err.Error(), want) {
+					t.Fatalf("registerAgent() error = %q, want %q", err, want)
+				}
+			}
+
+			if err := bb.Modify(func(state *models.State) error {
+				switch tt.allowTakeoverWith {
+				case "expiry":
+					expired := time.Now().UTC().Add(-time.Minute)
+					existing := state.Agents["orchestrator-1"]
+					existing.LeaseExpires = &expired
+					state.Agents["orchestrator-1"] = existing
+				case "removal":
+					delete(state.Agents, "orchestrator-1")
+				}
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+
+			if err := registerAgent(bb, tmpDir, "orchestrator-2", "orchestrator", "terminal-2", 1800, "codex", testResolver(t)); err != nil {
+				t.Fatalf("registerAgent() after explicit %s = %v, want takeover", tt.allowTakeoverWith, err)
 			}
 		})
 	}
@@ -560,7 +684,7 @@ func TestUnregisterAgent(t *testing.T) {
 
 	bb := testhelpers.WriteInitialState(t, statePath, state)
 
-	unregisterAgent(bb, agentID, tmpDir)
+	unregisterAgent(bb, testAgentAuthority(t, bb, agentID), tmpDir)
 
 	// Verify agent was removed
 	state, err := bb.Read()
@@ -603,7 +727,7 @@ func TestUnregisterAgent_ReleasesTaskSideClaimWhenCurrentTaskMissing(t *testing.
 	}
 	bb := testhelpers.WriteInitialState(t, statePath, state)
 
-	unregisterAgent(bb, agentID, tmpDir)
+	unregisterAgent(bb, testAgentAuthority(t, bb, agentID), tmpDir)
 
 	readState, err := bb.Read()
 	if err != nil {
@@ -698,7 +822,7 @@ func TestOrchestratorStatusTransitions(t *testing.T) {
 	}
 
 	// Simulate orchestrator starting work - set PLANNING status
-	err = setAgentToOrchestratingStatus(bb, agentID)
+	err = setAgentToOrchestratingStatus(bb, testAgentAuthority(t, bb, agentID))
 	if err != nil {
 		t.Fatalf("setAgentToOrchestratingStatus() error = %v", err)
 	}
@@ -720,7 +844,7 @@ func TestOrchestratorStatusTransitions(t *testing.T) {
 	}
 
 	// Simulate orchestrator completing work - reset to IDLE
-	err = resetAgentToIdle(bb, agentID)
+	err = resetAgentToIdle(bb, testAgentAuthority(t, bb, agentID))
 	if err != nil {
 		t.Fatalf("resetAgentToIdle() error = %v", err)
 	}
@@ -749,13 +873,13 @@ func TestSetAgentToPlanningStatusNonExistent(t *testing.T) {
 	bb := db.New(statePath)
 
 	// Try to set status for non-existent agent
-	err := setAgentToOrchestratingStatus(bb, "orchestrator-999")
+	err := setAgentToOrchestratingStatus(bb, models.AgentAuthority{ID: "orchestrator-999", Generation: "test-generation"})
 	if err == nil {
 		t.Error("setAgentToOrchestratingStatus() should return error for non-existent agent")
 	}
 
-	if !errors.IsNotFound(err) {
-		t.Errorf("expected NotFoundError, got %T: %v", err, err)
+	if !strings.Contains(err.Error(), "current generation <missing>") {
+		t.Errorf("expected missing current-generation diagnostic, got %T: %v", err, err)
 	}
 }
 
@@ -770,12 +894,12 @@ func TestResetAgentToIdle_NotFound(t *testing.T) {
 
 	bb := db.New(statePath)
 
-	err := resetAgentToIdle(bb, "nonexistent")
+	err := resetAgentToIdle(bb, models.AgentAuthority{ID: "nonexistent", Generation: "test-generation"})
 	if err == nil {
 		t.Fatal("Expected error for nonexistent agent")
 	}
-	if !errors.IsNotFound(err) {
-		t.Errorf("expected NotFoundError, got %T: %v", err, err)
+	if !strings.Contains(err.Error(), "current generation <missing>") {
+		t.Errorf("expected missing current-generation diagnostic, got %T: %v", err, err)
 	}
 }
 
@@ -796,7 +920,7 @@ func TestResetAgentAfterExit_WaitingWithoutCurrentTask(t *testing.T) {
 	}
 	bb := testhelpers.WriteInitialState(t, statePath, state)
 
-	err := resetAgentAfterExit(bb, agentID, tmpDir)
+	err := resetAgentAfterExit(bb, testAgentAuthority(t, bb, agentID), tmpDir)
 	if err != nil {
 		t.Fatalf("resetAgentAfterExit() error = %v", err)
 	}
@@ -834,7 +958,7 @@ func TestResetAgentAfterExit_DoerWaitingReleasesClaim(t *testing.T) {
 	}
 	bb := testhelpers.WriteInitialState(t, statePath, state)
 
-	err := resetAgentAfterExit(bb, agentID, tmpDir)
+	err := resetAgentAfterExit(bb, testAgentAuthority(t, bb, agentID), tmpDir)
 	if err != nil {
 		t.Fatalf("resetAgentAfterExit() error = %v", err)
 	}
@@ -885,7 +1009,7 @@ func TestResetAgentAfterExit_ReviewerWaitingReleasesPassiveOwnership(t *testing.
 	}
 	bb := testhelpers.WriteInitialState(t, statePath, state)
 
-	if err := resetAgentAfterExit(bb, agentID, tmpDir); err != nil {
+	if err := resetAgentAfterExit(bb, testAgentAuthority(t, bb, agentID), tmpDir); err != nil {
 		t.Fatalf("resetAgentAfterExit() error = %v", err)
 	}
 
@@ -948,7 +1072,7 @@ func TestResetAgentAfterExit_ReviewerWaitingDoesNotClearOtherReviewerClaim(t *te
 	}
 	bb := testhelpers.WriteInitialState(t, statePath, state)
 
-	if err := resetAgentAfterExit(bb, agentID, tmpDir); err != nil {
+	if err := resetAgentAfterExit(bb, testAgentAuthority(t, bb, agentID), tmpDir); err != nil {
 		t.Fatalf("resetAgentAfterExit() error = %v", err)
 	}
 
@@ -983,12 +1107,12 @@ func TestResetAgentAfterExit_NotFound(t *testing.T) {
 
 	bb := db.New(statePath)
 
-	err := resetAgentAfterExit(bb, "nonexistent", tmpDir)
+	err := resetAgentAfterExit(bb, models.AgentAuthority{ID: "nonexistent", Generation: "test-generation"}, tmpDir)
 	if err == nil {
 		t.Fatal("Expected error for nonexistent agent")
 	}
-	if !errors.IsNotFound(err) {
-		t.Errorf("expected NotFoundError, got %T: %v", err, err)
+	if !strings.Contains(err.Error(), "current generation <missing>") {
+		t.Errorf("expected missing current-generation diagnostic, got %T: %v", err, err)
 	}
 }
 
@@ -1023,7 +1147,7 @@ func TestResetAgentAfterExit_ReviewerReleasesTask(t *testing.T) {
 	}
 	bb := testhelpers.WriteInitialState(t, statePath, state)
 
-	err := resetAgentAfterExit(bb, agentID, tmpDir)
+	err := resetAgentAfterExit(bb, testAgentAuthority(t, bb, agentID), tmpDir)
 	if err != nil {
 		t.Fatalf("resetAgentAfterExit() error = %v", err)
 	}
@@ -1106,7 +1230,7 @@ func TestResetAgentAfterExit_ReviewerReleasesReviewing2Task(t *testing.T) {
 	}
 	bb := testhelpers.WriteInitialState(t, statePath, state)
 
-	err := resetAgentAfterExit(bb, agentID, tmpDir)
+	err := resetAgentAfterExit(bb, testAgentAuthority(t, bb, agentID), tmpDir)
 	if err != nil {
 		t.Fatalf("resetAgentAfterExit() error = %v", err)
 	}
@@ -1185,7 +1309,7 @@ func TestResetAgentAfterExit_CoderReleasesTask(t *testing.T) {
 	}
 	bb := testhelpers.WriteInitialState(t, statePath, state)
 
-	err := resetAgentAfterExit(bb, agentID, tmpDir)
+	err := resetAgentAfterExit(bb, testAgentAuthority(t, bb, agentID), tmpDir)
 	if err != nil {
 		t.Fatalf("resetAgentAfterExit() error = %v", err)
 	}
@@ -1246,7 +1370,7 @@ func TestResetAgentAfterExit_HandoffPreservesTask(t *testing.T) {
 	}
 	bb := testhelpers.WriteInitialState(t, statePath, state)
 
-	err := resetAgentAfterExit(bb, agentID, tmpDir)
+	err := resetAgentAfterExit(bb, testAgentAuthority(t, bb, agentID), tmpDir)
 	if err != nil {
 		t.Fatalf("resetAgentAfterExit() error = %v", err)
 	}
@@ -1295,7 +1419,7 @@ func TestResetAgentAfterExit_NoCurrentTask(t *testing.T) {
 	}
 	bb := testhelpers.WriteInitialState(t, statePath, state)
 
-	err := resetAgentAfterExit(bb, agentID, tmpDir)
+	err := resetAgentAfterExit(bb, testAgentAuthority(t, bb, agentID), tmpDir)
 	if err != nil {
 		t.Fatalf("resetAgentAfterExit() error = %v", err)
 	}
@@ -1518,22 +1642,30 @@ pipeline:
 	}
 }
 
-func TestRegisterMaxInstancesIgnoresDeadOrMismatchedActiveLease(t *testing.T) {
+func TestRegisterMaxInstancesUsesLeaseFirstCapacity(t *testing.T) {
+	const maxInstances = 2
+
 	tests := []struct {
-		name string
-		pid  int
-		argv []string
+		name         string
+		firstPID     int
+		argv         []string
+		wantRawState string
+		release      string
 	}{
-		{name: "dead pid", pid: 987654321},
-		{name: "mismatched pid", pid: 1234, argv: []string{"go", "test"}},
+		{name: "pid not found then lease expiry", firstPID: 987654320, wantRawState: "dead", release: "expiry"},
+		{name: "pid not found then removal", firstPID: 987654320, wantRawState: "dead", release: "removal"},
+		{name: "mismatched pid then lease expiry", firstPID: 1234, argv: []string{"go", "test"}, wantRawState: "mismatched", release: "expiry"},
+		{name: "mismatched pid then removal", firstPID: 1234, argv: []string{"go", "test"}, wantRawState: "mismatched", release: "removal"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			tmpDir := t.TempDir()
 			procRoot := t.TempDir()
 			t.Cleanup(ops.SetAgentProcessProcRootForTest(procRoot))
-			if len(tt.argv) > 0 {
-				writeRegistrationProcCmdline(t, procRoot, tt.pid, tt.argv)
+			if tt.argv != nil {
+				for i := range maxInstances {
+					writeRegistrationProcCmdline(t, procRoot, tt.firstPID+i, tt.argv)
+				}
 			}
 			statePath, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
@@ -1542,7 +1674,7 @@ pipeline:
   roles:
     coder:
       type: doer
-      max-instances: 1
+      max-instances: 2
       display-name: "Coder"
     code-reviewer:
       type: reviewer
@@ -1570,19 +1702,54 @@ pipeline:
 			}
 			resolver := pipeline.NewResolver(cfg)
 
+			now := time.Now().UTC()
 			state := testhelpers.CreateValidState()
-			state.Agents["coder-1"] = models.Agent{
-				Role:         "coder",
-				Status:       models.AgentStatusWorking,
-				LeaseExpires: testhelpers.TimePtr(time.Now().UTC().Add(10 * time.Minute)),
-				Heartbeat:    time.Now().UTC(),
-				PID:          tt.pid,
+			for i := range maxInstances {
+				id := fmt.Sprintf("coder-%d", i+1)
+				state.Agents[id] = models.Agent{
+					Role:         "coder",
+					Status:       models.AgentStatusWorking,
+					LeaseExpires: testhelpers.TimePtr(now.Add(10 * time.Minute)),
+					Heartbeat:    now,
+					PID:          tt.firstPID + i,
+				}
 			}
 			bb := testhelpers.WriteInitialState(t, statePath, state)
 
-			err = registerAgent(bb, tmpDir, "coder-2", "coder", "terminal-2", 1800, "claude", resolver)
-			if err != nil {
-				t.Fatalf("registerAgent() error = %v, want capacity to ignore non-live registered agent", err)
+			err = registerAgent(bb, tmpDir, "coder-3", "coder", "terminal-3", 1800, "claude", resolver)
+			if err == nil {
+				t.Fatal("registerAgent() error = nil, want lease-first role capacity rejection")
+			}
+			for _, want := range []string{
+				"role coder already has 2 live agent(s) (max 2)",
+				"effective ownership unknown/degraded",
+				"raw state " + tt.wantRawState,
+			} {
+				if !strings.Contains(err.Error(), want) {
+					t.Fatalf("registerAgent() error = %q, want %q", err, want)
+				}
+			}
+			if strings.Contains(err.Error(), "effective ownership dead") {
+				t.Fatalf("registerAgent() error = %q, effective ownership must remain lease-first", err)
+			}
+
+			if err := bb.Modify(func(state *models.State) error {
+				switch tt.release {
+				case "expiry":
+					expired := now.Add(-time.Minute)
+					agent := state.Agents["coder-1"]
+					agent.LeaseExpires = &expired
+					state.Agents["coder-1"] = agent
+				case "removal":
+					delete(state.Agents, "coder-1")
+				}
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+
+			if err := registerAgent(bb, tmpDir, "coder-3", "coder", "terminal-3", 1800, "claude", resolver); err != nil {
+				t.Fatalf("registerAgent() after %s = %v, want available capacity", tt.release, err)
 			}
 		})
 	}

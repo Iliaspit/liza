@@ -42,6 +42,16 @@ func SupersedeTask(projectRoot, taskID string, replacementIDs []string, reason, 
 // SupersedeTaskWithOptions transitions an initial, rejected, or BLOCKED task to
 // SUPERSEDED with explicit options for destructive no-replacement cleanup.
 func SupersedeTaskWithOptions(projectRoot, taskID string, replacementIDs []string, reason, agentID string, opts SupersedeTaskOptions) (*SupersedeResult, error) {
+	return supersedeTaskWithOptionalAuthority(projectRoot, taskID, replacementIDs, reason, agentID, opts, nil)
+}
+
+// SupersedeTaskWithAuthority fences the supersession transaction with the
+// orchestrator's registration generation.
+func SupersedeTaskWithAuthority(projectRoot, taskID string, replacementIDs []string, reason string, authority models.AgentAuthority, opts SupersedeTaskOptions) (*SupersedeResult, error) {
+	return supersedeTaskWithOptionalAuthority(projectRoot, taskID, replacementIDs, reason, authority.ID, opts, &authority)
+}
+
+func supersedeTaskWithOptionalAuthority(projectRoot, taskID string, replacementIDs []string, reason, agentID string, opts SupersedeTaskOptions, authority *models.AgentAuthority) (*SupersedeResult, error) {
 	if taskID == "" {
 		return nil, &PreconditionError{Reason: "task ID is required"}
 	}
@@ -116,7 +126,7 @@ func SupersedeTaskWithOptions(projectRoot, taskID string, replacementIDs []strin
 
 	// Phase 2: Atomic State Update
 	hadWorktree := task.Worktree != nil
-	err = bb.Modify(func(state *models.State) error {
+	err = lifecycleMutation(bb, authority)(func(state *models.State) error {
 		currentTask := state.FindTask(taskID)
 		if currentTask == nil {
 			return &errors.NotFoundError{Entity: "task", ID: taskID}

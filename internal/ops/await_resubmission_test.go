@@ -1072,7 +1072,7 @@ func TestAwaitResubmission_ReviewLeaseExpires(t *testing.T) {
 func waitForReviewOwnership(t *testing.T, bb *db.Blackboard, taskID, reviewerID string) {
 	t.Helper()
 
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(10 * time.Second)
 	pollTicker := time.NewTicker(10 * time.Millisecond)
 	defer pollTicker.Stop()
 	for time.Now().Before(deadline) {

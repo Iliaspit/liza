@@ -3,6 +3,7 @@ package commands
 import (
 	"fmt"
 
+	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/ops"
 )
 
@@ -10,6 +11,17 @@ import (
 // Delegates business logic to ops.SubmitVerdict.
 func SubmitVerdictCommand(projectRoot, taskID, verdict, reason, agentID, impact string) error {
 	result, err := ops.SubmitVerdict(projectRoot, taskID, verdict, reason, agentID, impact)
+	if err != nil {
+		return fmt.Errorf("submit verdict: %w", err)
+	}
+
+	printVerdictResult(result)
+	return nil
+}
+
+// SubmitVerdictCommandWithAuthority is the authenticated command adapter.
+func SubmitVerdictCommandWithAuthority(projectRoot, taskID, verdict, reason string, authority models.AgentAuthority, impact string) error {
+	result, err := ops.SubmitVerdictWithAuthority(projectRoot, taskID, verdict, reason, authority, impact)
 	if err != nil {
 		return fmt.Errorf("submit verdict: %w", err)
 	}

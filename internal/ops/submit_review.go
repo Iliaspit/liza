@@ -34,6 +34,7 @@ var (
 	submitReviewRefreshIndexes                 = scipsearch.RefreshIndexes
 	submitReviewRefreshStacklitIndex           = stacklit.RefreshIndex
 	submitReviewRefreshFunctionalClustersIndex = functionalclusters.RefreshIndex
+	submitReviewBeforeModifyTestHook           func()
 )
 
 // SubmitForReview validates that commitRef resolves to the worktree HEAD before rebase,
@@ -41,6 +42,16 @@ var (
 // then atomically transitions the task to READY_FOR_REVIEW.
 // No terminal I/O.
 func SubmitForReview(projectRoot, taskID, commitRef, agentID string) (*SubmitForReviewResult, error) {
+	return submitForReview(projectRoot, taskID, commitRef, agentID, nil)
+}
+
+// SubmitForReviewWithAuthority is the authenticated command entry point. The
+// caller-held generation is revalidated inside every state transaction.
+func SubmitForReviewWithAuthority(projectRoot, taskID, commitRef string, authority models.AgentAuthority) (*SubmitForReviewResult, error) {
+	return submitForReview(projectRoot, taskID, commitRef, authority.ID, &authority)
+}
+
+func submitForReview(projectRoot, taskID, commitRef, agentID string, authority *models.AgentAuthority) (*SubmitForReviewResult, error) {
 	if taskID == "" {
 		return nil, &PreconditionError{Reason: "task ID is required"}
 	}
@@ -235,7 +246,7 @@ func SubmitForReview(projectRoot, taskID, commitRef, agentID string) (*SubmitFor
 		// Transition to INTEGRATION_FAILED so the orchestrator re-queues the task.
 		// This catches conflicts early (before review), avoiding a wasted review cycle.
 		// See also: markIntegrationFailed in wt_merge.go (sibling for post-review merge path).
-		markErr := markSubmitRebaseConflict(bb, taskID, agentID, pipelineTransitions)
+		markErr := markSubmitRebaseConflict(bb, taskID, agentID, authority, pipelineTransitions)
 		if markErr != nil {
 			return nil, &OperationalError{
 				Code:    "state_write",
@@ -280,8 +291,11 @@ func SubmitForReview(projectRoot, taskID, commitRef, agentID string) (*SubmitFor
 
 	// Phase 3: Atomic update with new commit SHA
 	now := time.Now().UTC()
+	if submitReviewBeforeModifyTestHook != nil {
+		submitReviewBeforeModifyTestHook()
+	}
 
-	err = bb.Modify(func(state *models.State) error {
+	err = modifyLifecycleState(bb, authority, func(state *models.State) error {
 		task := state.FindTask(taskID)
 		if task == nil {
 			return &errors.NotFoundError{Entity: "task", ID: taskID}
@@ -450,9 +464,9 @@ func truncateForDiagnostics(s string, limit int) string {
 // Sibling: markIntegrationFailed in wt_merge.go handles the post-review merge path.
 // Both share the pattern: transition → append FailedBy → write history entry.
 // They differ in pre-conditions (approved vs implementing) and post-actions (agent release).
-func markSubmitRebaseConflict(bb *db.Blackboard, taskID, agentID string, pipelineTransitions map[models.TaskStatus][]models.TaskStatus) error {
+func markSubmitRebaseConflict(bb *db.Blackboard, taskID, agentID string, authority *models.AgentAuthority, pipelineTransitions map[models.TaskStatus][]models.TaskStatus) error {
 	reason := IntegrationReasonMergeConflict
-	return bb.Modify(func(s *models.State) error {
+	return modifyLifecycleState(bb, authority, func(s *models.State) error {
 		t := s.FindTask(taskID)
 		if t == nil {
 			return &errors.NotFoundError{Entity: "task", ID: taskID}

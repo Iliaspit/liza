@@ -740,6 +740,7 @@ func TestAwaitVerdict_DelayedWatcherErrorUsesOriginalDeadline(t *testing.T) {
 		_ context.Context,
 		_ *db.Blackboard,
 		_, _ string,
+		_ *models.AgentAuthority,
 		deadline time.Time,
 		_ models.TaskStatus,
 		_ *pipeline.Resolver,
@@ -1487,7 +1488,7 @@ func TestHandleVerdictResult_NonAwaitableStatusRecoversVerdict(t *testing.T) {
 		t.Fatalf("loadResolver error: %v", err)
 	}
 	bb := db.For(stateFile)
-	result, err := handleVerdictResult(bb, &task, "coder-1", tmpDir, resolver, task.RolePair)
+	result, err := handleVerdictResult(bb, &task, "coder-1", nil, tmpDir, resolver, task.RolePair)
 	if err != nil {
 		t.Fatalf("handleVerdictResult error: %v", err)
 	}

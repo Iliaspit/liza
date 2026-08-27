@@ -298,6 +298,9 @@ func (rejectedClaimStrategy) validate(task *models.Task, _ *models.State, runtim
 	if runtimeRole != doerRole {
 		return fmt.Errorf("task %s is %s (not claimable by %s)", task.ID, task.Status, runtimeRole)
 	}
+	if task.Worktree != nil && *task.Worktree != ctx.worktreeRel {
+		return &PreconditionError{Reason: fmt.Sprintf("task %s worktree = %q, want %q", task.ID, *task.Worktree, ctx.worktreeRel)}
+	}
 	if task.AssignedTo != nil {
 		ctx.previousAssignee = *task.AssignedTo
 	}
@@ -324,7 +327,10 @@ func (rejectedClaimStrategy) shouldRunPostWorktreeCmd(claimWorktreePhaseResult) 
 	return true
 }
 
-func (rejectedClaimStrategy) mutateTask(_ *models.Task, _ *claimContext) {}
+func (rejectedClaimStrategy) mutateTask(task *models.Task, ctx *claimContext) {
+	task.Worktree = &ctx.worktreeRel
+	task.BaseCommit = &ctx.baseCommit
+}
 
 func (rejectedClaimStrategy) historyEntry(now time.Time, ctx *claimContext) models.TaskHistoryEntry {
 	agentPtr := &ctx.agentID

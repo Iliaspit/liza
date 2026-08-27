@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/liza-mas/liza/internal/brand"
 	"github.com/liza-mas/liza/internal/db"
 	"github.com/liza-mas/liza/internal/git"
 	"github.com/liza-mas/liza/internal/models"
@@ -20,7 +21,7 @@ func TestMutationCommandWiring(t *testing.T) {
 			state.Tasks = []models.Task{
 				testhelpers.BuildTaskByStatus("task-claim-alpha", models.TaskStatusReady, now),
 			}
-			state.Agents["coder-42"] = testhelpers.RegisteredTestAgent("coder")
+			state.Agents["coder-42"] = mutationTestAgent("coder")
 		})
 
 		err := executeRootCommand(t, projectRoot, "claim-task", "task-claim-alpha", "coder-42")
@@ -52,6 +53,7 @@ func TestMutationCommandWiring(t *testing.T) {
 			state.Tasks = []models.Task{
 				testhelpers.BuildTaskByStatus("task-review-flag", models.TaskStatusReviewing, now),
 			}
+			state.Agents["code-reviewer-9"] = mutationTestAgent("code-reviewer")
 		})
 
 		err := executeRootCommand(t, projectRoot, "submit-verdict", "task-review-flag", "APPROVED", "--agent-id", "code-reviewer-9")
@@ -75,6 +77,7 @@ func TestMutationCommandWiring(t *testing.T) {
 			state.Tasks = []models.Task{
 				testhelpers.BuildTaskByStatus("task-review-env", models.TaskStatusReviewing, now),
 			}
+			state.Agents["code-reviewer-8"] = mutationTestAgent("code-reviewer")
 		})
 
 		t.Setenv("LIZA_AGENT_ID", "code-reviewer-8")
@@ -112,6 +115,7 @@ func TestMutationCommandWiring(t *testing.T) {
 			state.Tasks = []models.Task{
 				testhelpers.BuildTaskByStatus("task-reason-flag", models.TaskStatusReviewing, now),
 			}
+			state.Agents["code-reviewer-8"] = mutationTestAgent("code-reviewer")
 		})
 
 		// Pass both positional reason and --reason flag; flag should win
@@ -750,6 +754,7 @@ func TestMutationCommandWiring(t *testing.T) {
 			state.Tasks = []models.Task{
 				testhelpers.BuildTaskByStatus("task-repair-request", models.TaskStatusImplementing, now),
 			}
+			state.Agents["coder-1"] = mutationTestAgent("coder")
 		})
 
 		err := executeRootCommand(
@@ -804,6 +809,7 @@ func TestMutationCommandWiring(t *testing.T) {
 				testhelpers.BuildTaskByStatus("task-blocked-on-dep", models.TaskStatusImplementing, now),
 				testhelpers.BuildTaskByStatus("dep-task", models.TaskStatusImplementing, now),
 			}
+			state.Agents["coder-1"] = mutationTestAgent("coder")
 		})
 
 		err := executeRootCommand(
@@ -1049,6 +1055,7 @@ func TestMutationCommandWiring(t *testing.T) {
 
 func setupMutationTestProject(t *testing.T, mutateState func(*models.State)) (string, string) {
 	t.Helper()
+	t.Setenv(brand.EnvName("AGENT_GENERATION"), testhelpers.TestAgentGeneration)
 
 	projectRoot := t.TempDir()
 	projectRoot, err := filepath.EvalSymlinks(projectRoot)
@@ -1060,6 +1067,11 @@ func setupMutationTestProject(t *testing.T, mutateState func(*models.State)) (st
 	testhelpers.SetupPipelineConfig(t, projectRoot)
 
 	state := testhelpers.CreateValidState()
+	orchestrator := mutationTestAgent("orchestrator")
+	expired := time.Unix(0, 0).UTC()
+	orchestrator.Heartbeat = expired
+	orchestrator.LeaseExpires = &expired
+	state.Agents["orchestrator-1"] = orchestrator
 	if mutateState != nil {
 		mutateState(state)
 	}
@@ -1068,11 +1080,18 @@ func setupMutationTestProject(t *testing.T, mutateState func(*models.State)) (st
 	return projectRoot, statePath
 }
 
+func mutationTestAgent(role string) models.Agent {
+	agent := testhelpers.RegisteredTestAgent(role)
+	agent.Generation = testhelpers.TestAgentGeneration
+	return agent
+}
+
 // executeRootCommand runs a CLI command against the given project root.
 // NOTE: os.Chdir is process-global state, which prevents t.Parallel() in this
 // package. Most tests still use Chdir to exercise default root resolution.
 func executeRootCommand(t *testing.T, projectRoot string, args ...string) error {
 	t.Helper()
+	t.Setenv(brand.EnvName("AGENT_GENERATION"), testhelpers.TestAgentGeneration)
 
 	oldDir, err := os.Getwd()
 	if err != nil {

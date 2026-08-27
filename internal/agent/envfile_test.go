@@ -116,13 +116,17 @@ func TestAgentProcessEnvExportsBrandedAndLegacyAgentID(t *testing.T) {
 	got := agentProcessEnv([]string{
 		"ACME_AGENT_AGENT_ID=old-branded",
 		"LIZA_AGENT_ID=old-legacy",
+		"ACME_AGENT_AGENT_GENERATION=old-branded-generation",
+		"LIZA_AGENT_GENERATION=old-legacy-generation",
 		"PATH=/bin",
-	}, "coder-7")
+	}, "coder-7", "generation-7")
 
 	want := []string{
 		"PATH=/bin",
 		"ACME_AGENT_AGENT_ID=coder-7",
+		"ACME_AGENT_AGENT_GENERATION=generation-7",
 		"LIZA_AGENT_ID=coder-7",
+		"LIZA_AGENT_GENERATION=generation-7",
 	}
 	if len(got) != len(want) {
 		t.Fatalf("agentProcessEnv() = %v, want %v", got, want)

@@ -98,10 +98,16 @@ func ResolveEffectiveImpact(history []models.TaskHistoryEntry) string {
 // the reviewer's impact classification; it cannot downgrade the effective impact.
 // No terminal I/O.
 func SubmitVerdict(projectRoot, taskID, verdict, reason, agentID, impact string) (result *VerdictResult, retErr error) {
-	return submitVerdict(projectRoot, taskID, verdict, reason, agentID, impact, false)
+	return submitVerdict(projectRoot, taskID, verdict, reason, agentID, nil, impact, false)
 }
 
-func submitVerdict(projectRoot, taskID, verdict, reason, agentID, impact string, completionLinearized bool) (result *VerdictResult, retErr error) {
+// SubmitVerdictWithAuthority is the authenticated command entry point. The
+// caller-held generation is revalidated inside every state transaction.
+func SubmitVerdictWithAuthority(projectRoot, taskID, verdict, reason string, authority models.AgentAuthority, impact string) (result *VerdictResult, retErr error) {
+	return submitVerdict(projectRoot, taskID, verdict, reason, authority.ID, &authority, impact, false)
+}
+
+func submitVerdict(projectRoot, taskID, verdict, reason, agentID string, authority *models.AgentAuthority, impact string, completionLinearized bool) (result *VerdictResult, retErr error) {
 	if taskID == "" {
 		return nil, &PreconditionError{Reason: "task ID is required"}
 	}
@@ -142,7 +148,7 @@ func submitVerdict(projectRoot, taskID, verdict, reason, agentID, impact string,
 	recordFailure := true
 	defer func() {
 		if retErr != nil && recordFailure {
-			recordSubmitVerdictFailure(bb, lp.LogPath(), taskID, agentID, verdict, retErr)
+			recordSubmitVerdictFailure(bb, lp.LogPath(), taskID, agentID, authority, verdict, retErr)
 		}
 	}()
 
@@ -189,7 +195,7 @@ func submitVerdict(projectRoot, taskID, verdict, reason, agentID, impact string,
 
 	// Fast-fail before git operations; re-checked authoritatively inside Modify.
 	if !isReviewingStatus(task.Status, expectedReviewingStatus, expectedReviewing2Status) {
-		if recordErr := recordStaleVerdictAnomaly(bb, taskID, agentID, verdict, reason, impact, expectedReviewingStatus, expectedReviewing2Status); recordErr != nil {
+		if recordErr := recordStaleVerdictAnomaly(bb, taskID, agentID, authority, verdict, reason, impact, expectedReviewingStatus, expectedReviewing2Status); recordErr != nil {
 			return nil, fmt.Errorf("failed to record stale verdict anomaly: %w", recordErr)
 		}
 		return nil, &PreconditionError{Reason: fmt.Sprintf("task %s is not in a reviewing state (current status: %s)", taskID, task.Status)}
@@ -231,7 +237,7 @@ func submitVerdict(projectRoot, taskID, verdict, reason, agentID, impact string,
 		callbackEntered := false
 		linearizationErr := withEffectiveIntegrationCompletionLinearization(projectRoot, "clean integration verdict "+taskID, func() error {
 			callbackEntered = true
-			result, retErr = submitVerdict(projectRoot, taskID, verdict, reason, agentID, impact, true)
+			result, retErr = submitVerdict(projectRoot, taskID, verdict, reason, agentID, authority, impact, true)
 			return retErr
 		})
 		if callbackEntered {
@@ -267,7 +273,7 @@ func submitVerdict(projectRoot, taskID, verdict, reason, agentID, impact string,
 		testSubmitVerdictHooks.beforeModify()
 	}
 
-	err = bb.Modify(func(state *models.State) error {
+	err = modifyLifecycleState(bb, authority, func(state *models.State) error {
 		task := state.FindTask(taskID)
 		if task == nil {
 			return &errors.NotFoundError{Entity: "task", ID: taskID}
@@ -462,7 +468,12 @@ func submitVerdict(projectRoot, taskID, verdict, reason, agentID, impact string,
 	}
 
 	if newAttemptNeeded {
-		_, taErr := TransitionToNewAttempt(projectRoot, taskID, newAttemptReason)
+		var taErr error
+		if authority == nil {
+			_, taErr = TransitionToNewAttempt(projectRoot, taskID, newAttemptReason)
+		} else {
+			_, taErr = TransitionToNewAttemptWithAuthority(projectRoot, taskID, newAttemptReason, *authority)
+		}
 		if taErr != nil {
 			return nil, fmt.Errorf("submit_verdict %s: rejection committed but attempt transition failed: %w", taskID, taErr)
 		}
@@ -625,10 +636,10 @@ func snapshotIntegrationLifecycleState(state *models.State) *models.State {
 	return &previous
 }
 
-func recordSubmitVerdictFailure(bb *db.Blackboard, logPath, taskID, agentID, verdict string, err error) {
+func recordSubmitVerdictFailure(bb *db.Blackboard, logPath, taskID, agentID string, authority *models.AgentAuthority, verdict string, err error) {
 	errorText := boundedMaskedErrorString(err, 2048)
 	stack := boundedMaskedString(string(debug.Stack()), 4096)
-	anomalyErr := recordSubmitVerdictFailureAnomaly(bb, taskID, agentID, verdict, err, errorText)
+	anomalyErr := recordSubmitVerdictFailureAnomaly(bb, taskID, agentID, authority, verdict, err, errorText)
 	logSubmitVerdictError(logPath, taskID, agentID, verdict, errorText, stack, boundedMaskedErrorString(anomalyErr, 1024))
 }
 
@@ -651,12 +662,12 @@ func logSubmitVerdictError(logPath, taskID, agentID, verdict string, errorText s
 	})
 }
 
-func recordSubmitVerdictFailureAnomaly(bb *db.Blackboard, taskID, agentID, verdict string, err error, errorText string) error {
+func recordSubmitVerdictFailureAnomaly(bb *db.Blackboard, taskID, agentID string, authority *models.AgentAuthority, verdict string, err error, errorText string) error {
 	if bb == nil || err == nil || isSubmitVerdictPreconditionError(err) {
 		return nil
 	}
 
-	return bb.Modify(func(state *models.State) error {
+	return modifyLifecycleState(bb, authority, func(state *models.State) error {
 		state.Anomalies = append(state.Anomalies, models.Anomaly{
 			Timestamp: time.Now().UTC(),
 			Task:      taskID,
@@ -714,9 +725,9 @@ func isReviewingStatus(status, expectedReviewingStatus, expectedReviewing2Status
 		(expectedReviewing2Status != "" && status == expectedReviewing2Status)
 }
 
-func recordStaleVerdictAnomaly(bb *db.Blackboard, taskID, agentID, verdict, reason, impact string, expectedReviewingStatus, expectedReviewing2Status models.TaskStatus) error {
+func recordStaleVerdictAnomaly(bb *db.Blackboard, taskID, agentID string, authority *models.AgentAuthority, verdict, reason, impact string, expectedReviewingStatus, expectedReviewing2Status models.TaskStatus) error {
 	now := time.Now().UTC()
-	return bb.Modify(func(state *models.State) error {
+	return modifyLifecycleState(bb, authority, func(state *models.State) error {
 		task := state.FindTask(taskID)
 		if task == nil {
 			return &errors.NotFoundError{Entity: "task", ID: taskID}

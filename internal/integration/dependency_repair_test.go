@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/liza-mas/liza/internal/brand"
 	"github.com/liza-mas/liza/internal/db"
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/testhelpers"
@@ -222,6 +223,8 @@ func setupDependencyRepairWorkflow(t *testing.T, request models.RepairRequest) (
 	consumer.DependsOn = []string{"old-consumer"}
 	state := testhelpers.CreateValidState()
 	state.Goal.SpecRef = "README.md"
+	state.Agents["coder-1"] = testhelpers.RegisteredTestAgent("coder")
+	state.Agents["orchestrator-1"] = testhelpers.RegisteredTestAgent("orchestrator")
 	state.Tasks = []models.Task{
 		source,
 		consumer,
@@ -264,7 +267,9 @@ func runDependencyRepairCLI(t *testing.T, cliPath, projectRoot string, args ...s
 
 func executeDependencyRepairCLI(cliPath, projectRoot string, args ...string) (string, error) {
 	commandArgs := append([]string{"-C", projectRoot}, args...)
-	output, err := exec.Command(cliPath, commandArgs...).CombinedOutput()
+	cmd := exec.Command(cliPath, commandArgs...)
+	cmd.Env = append(os.Environ(), brand.EnvName("AGENT_GENERATION")+"="+testhelpers.TestAgentGeneration)
+	output, err := cmd.CombinedOutput()
 	return string(output), err
 }
 

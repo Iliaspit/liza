@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"testing"
 )
@@ -315,6 +316,21 @@ func TestAgentProcessStatusForPID_ProcfsUnavailableKeepsAliveUnknown(t *testing.
 	got := AgentProcessStatusForPID(os.Getpid(), "coder", "coder-1", filepath.Join(t.TempDir(), "missing-proc"))
 	if got.State != AgentProcessUnknown || !got.Alive {
 		t.Fatalf("AgentProcessStatusForPID() = %+v, want unknown alive", got)
+	}
+}
+
+func TestFindExplicitAgentIdentityPIDs(t *testing.T) {
+	procRoot := t.TempDir()
+	writeProcWithoutCWD(t, procRoot, 42, []string{"liza", "agent", "coder", "--agent-id", "coder-1"})
+	writeProcWithoutCWD(t, procRoot, 7, []string{"liza", "agent", "coder", "--agent-id=coder-1"})
+	writeProcWithoutCWD(t, procRoot, 8, []string{"liza", "agent", "coder", "--agent-id", "coder-2"})
+	writeProcWithoutCWD(t, procRoot, 9, []string{"liza", "agent", "coder"})
+	writeProcWithoutCWD(t, procRoot, 10, []string{"liza", "agent", "orchestrator", "--agent-id", "coder-1"})
+
+	got := FindExplicitAgentIdentityPIDs("coder", "coder-1", procRoot)
+	want := []int{7, 42}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("FindExplicitAgentIdentityPIDs() = %v, want %v", got, want)
 	}
 }
 

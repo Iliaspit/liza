@@ -136,10 +136,11 @@ The worktree and branch are automatically cleaned up after a successful merge.`,
 			}()
 		}
 
-		agentID, err := requireAgentID(cmd)
+		authority, err := requireAgentAuthority(cmd)
 		if err != nil {
 			return err
 		}
+		agentID := authority.ID
 
 		projectRoot, err := requireProjectRoot()
 		if err != nil {
@@ -155,10 +156,10 @@ The worktree and branch are automatically cleaned up after a successful merge.`,
 		}
 
 		if isJSON(cmd) {
-			result, err := ops.MergeWorktree(projectRoot, taskID, agentID)
+			result, err := ops.MergeWorktreeWithAuthority(projectRoot, taskID, authority)
 			return jsonout.WriteResult(os.Stdout, result, nil, err)
 		}
-		return commands.WtMergeCommand(projectRoot, taskID, agentID)
+		return commands.WtMergeCommandWithAuthority(projectRoot, taskID, authority)
 	},
 }
 

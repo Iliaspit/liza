@@ -35,7 +35,7 @@ var (
 // Returns (true, nil) if the worktree was recovered from an existing branch.
 // Returns (false, nil) if the worktree already exists and setup succeeded.
 // Returns (false, error) if the task was blocked, recovery failed, or setup failed.
-func ensureReviewerWorktree(projectRoot string, bb *db.Blackboard, taskID, agentID string) (recovered bool, err error) {
+func ensureReviewerWorktree(projectRoot string, bb *db.Blackboard, taskID string, authority models.AgentAuthority) (recovered bool, err error) {
 	// Intact-worktree fast path, deliberately outside the lifecycle lock: it
 	// creates and recovers nothing, which is what that lock guards. Setup can run
 	// for minutes, and holding the lock across it would stall project cleanup on
@@ -52,13 +52,14 @@ func ensureReviewerWorktree(projectRoot string, bb *db.Blackboard, taskID, agent
 
 	err = ops.WithProjectLifecycleSharedLock(projectRoot, "reviewer-worktree-recover", func() error {
 		var recoverErr error
-		recovered, recoverErr = ensureReviewerWorktreeLocked(projectRoot, bb, taskID, agentID)
+		recovered, recoverErr = ensureReviewerWorktreeLocked(projectRoot, bb, taskID, authority)
 		return recoverErr
 	})
 	return recovered, err
 }
 
-func ensureReviewerWorktreeLocked(projectRoot string, bb *db.Blackboard, taskID, agentID string) (recovered bool, err error) {
+func ensureReviewerWorktreeLocked(projectRoot string, bb *db.Blackboard, taskID string, authority models.AgentAuthority) (recovered bool, err error) {
+	agentID := authority.ID
 	wtPath := filepath.Join(projectRoot, paths.WorktreesDirName, taskID)
 	if _, statErr := os.Stat(wtPath); statErr == nil {
 		// Raced: a concurrent claim created the worktree between the fast-path
@@ -82,7 +83,9 @@ func ensureReviewerWorktreeLocked(projectRoot string, bb *db.Blackboard, taskID,
 	for _, h := range task.History {
 		if h.Event == models.TaskEventWorktreeRecovered {
 			logger.Error("Blocking task: worktree still missing after prior recovery", "task_id", taskID)
-			blockReviewerTask(bb, taskID, agentID, "worktree missing after prior recovery attempt")
+			if blockErr := blockReviewerTask(bb, taskID, authority, "worktree missing after prior recovery attempt"); blockErr != nil {
+				return false, blockErr
+			}
 			return false, fmt.Errorf("task %s: unrecoverable worktree: %w", taskID, errTaskBlocked)
 		}
 	}
@@ -96,7 +99,9 @@ func ensureReviewerWorktreeLocked(projectRoot string, bb *db.Blackboard, taskID,
 	}
 	if !branchExists {
 		logger.Error("Cannot recover: branch also missing", "task_id", taskID, "branch", branchName)
-		blockReviewerTask(bb, taskID, agentID, "worktree and branch both missing — unrecoverable")
+		if blockErr := blockReviewerTask(bb, taskID, authority, "worktree and branch both missing — unrecoverable"); blockErr != nil {
+			return false, blockErr
+		}
 		return false, fmt.Errorf("task %s: branch missing: %w", taskID, errTaskBlocked)
 	}
 
@@ -174,7 +179,7 @@ func ensureReviewerWorktreeLocked(projectRoot string, bb *db.Blackboard, taskID,
 	}
 
 	// Record recovery in history.
-	if modErr := bb.Modify(func(s *models.State) error {
+	if modErr := ops.ModifyWithAgentAuthority(bb, authority, func(s *models.State) error {
 		t := s.FindTask(taskID)
 		if t != nil {
 			agentPtr := agentID
@@ -218,8 +223,9 @@ func runReviewerWorktreeSetup(bb *db.Blackboard, taskID, wtPath string) error {
 // Reserved for lost work. A task blocked here is restored by unblock-task to the
 // doer's executing status (unblock_task.go), which discards review readiness —
 // acceptable when the worktree is gone, not when it merely failed to prepare.
-func blockReviewerTask(bb *db.Blackboard, taskID, agentID, reason string) {
-	if err := bb.Modify(func(state *models.State) error {
+func blockReviewerTask(bb *db.Blackboard, taskID string, authority models.AgentAuthority, reason string) error {
+	agentID := authority.ID
+	if err := ops.ModifyWithAgentAuthority(bb, authority, func(state *models.State) error {
 		t := state.FindTask(taskID)
 		if t == nil {
 			return nil
@@ -252,6 +258,7 @@ func blockReviewerTask(bb *db.Blackboard, taskID, agentID, reason string) {
 
 		return nil
 	}); err != nil {
-		GetLogger().Error("Failed to block reviewer task", "task_id", taskID, "error", err)
+		return err
 	}
+	return nil
 }

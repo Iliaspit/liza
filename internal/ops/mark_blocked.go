@@ -45,6 +45,16 @@ func MarkBlocked(projectRoot, taskID, reason string, questions []string, agentID
 // MarkBlockedWithOptions transitions a task from an executing status to BLOCKED
 // and optionally records a structured repair request for orchestrator follow-up.
 func MarkBlockedWithOptions(projectRoot, taskID, reason string, questions []string, agentID string, opts MarkBlockedOptions) (*MarkBlockedResult, error) {
+	return markBlockedWithOptionalAuthority(projectRoot, taskID, reason, questions, agentID, opts, nil)
+}
+
+// MarkBlockedWithAuthority fences the block transition with the caller's
+// registration generation.
+func MarkBlockedWithAuthority(projectRoot, taskID, reason string, questions []string, authority models.AgentAuthority, opts MarkBlockedOptions) (*MarkBlockedResult, error) {
+	return markBlockedWithOptionalAuthority(projectRoot, taskID, reason, questions, authority.ID, opts, &authority)
+}
+
+func markBlockedWithOptionalAuthority(projectRoot, taskID, reason string, questions []string, agentID string, opts MarkBlockedOptions, authority *models.AgentAuthority) (*MarkBlockedResult, error) {
 	if taskID == "" {
 		return nil, &PreconditionError{Reason: "task ID is required"}
 	}
@@ -87,7 +97,7 @@ func MarkBlockedWithOptions(projectRoot, taskID, reason string, questions []stri
 	}
 	pipelineTransitions := BuildPipelineTransitions(resolver)
 
-	err = bb.Modify(func(state *models.State) error {
+	err = lifecycleMutation(bb, authority)(func(state *models.State) error {
 		task := state.FindTask(taskID)
 		if task == nil {
 			return &errors.NotFoundError{Entity: "task", ID: taskID}

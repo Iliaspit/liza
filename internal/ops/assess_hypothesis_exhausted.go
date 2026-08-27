@@ -21,6 +21,16 @@ type AssessHypothesisExhaustedResult struct {
 // If the exhausted task is not already BLOCKED, it transitions the task to BLOCKED
 // so the task cannot be reassigned unchanged.
 func AssessHypothesisExhausted(projectRoot, taskID, note, agentID string) (*AssessHypothesisExhaustedResult, error) {
+	return assessHypothesisExhaustedWithOptionalAuthority(projectRoot, taskID, note, agentID, nil)
+}
+
+// AssessHypothesisExhaustedWithAuthority fences the assessment write with the
+// orchestrator's registration generation.
+func AssessHypothesisExhaustedWithAuthority(projectRoot, taskID, note string, authority models.AgentAuthority) (*AssessHypothesisExhaustedResult, error) {
+	return assessHypothesisExhaustedWithOptionalAuthority(projectRoot, taskID, note, authority.ID, &authority)
+}
+
+func assessHypothesisExhaustedWithOptionalAuthority(projectRoot, taskID, note, agentID string, authority *models.AgentAuthority) (*AssessHypothesisExhaustedResult, error) {
 	if taskID == "" {
 		return nil, &PreconditionError{Reason: "task ID is required"}
 	}
@@ -42,7 +52,7 @@ func AssessHypothesisExhausted(projectRoot, taskID, note, agentID string) (*Asse
 	}
 	pipelineTransitions := BuildPipelineTransitions(resolver)
 
-	err = bb.Modify(func(state *models.State) error {
+	err = lifecycleMutation(bb, authority)(func(state *models.State) error {
 		task := state.FindTask(taskID)
 		if task == nil {
 			return &errors.NotFoundError{Entity: "task", ID: taskID}

@@ -13,6 +13,16 @@ import (
 // UpdateSprintMetrics recomputes sprint metrics from current task and agent state.
 // Returns the computed metrics. No terminal I/O.
 func UpdateSprintMetrics(projectRoot string) (models.SprintMetrics, error) {
+	return updateSprintMetricsWithOptionalAuthority(projectRoot, nil)
+}
+
+// UpdateSprintMetricsWithAuthority fences the metrics follow-up write with the
+// same registration generation as its parent lifecycle operation.
+func UpdateSprintMetricsWithAuthority(projectRoot string, authority models.AgentAuthority) (models.SprintMetrics, error) {
+	return updateSprintMetricsWithOptionalAuthority(projectRoot, &authority)
+}
+
+func updateSprintMetricsWithOptionalAuthority(projectRoot string, authority *models.AgentAuthority) (models.SprintMetrics, error) {
 	statePath := paths.New(projectRoot).StatePath()
 	blackboard := db.For(statePath)
 
@@ -27,7 +37,7 @@ func UpdateSprintMetrics(projectRoot string) (models.SprintMetrics, error) {
 	}
 	metrics := state.ComputeSprintMetricsWithTerminalStates(terminalStates)
 
-	err = blackboard.Modify(func(s *models.State) error {
+	err = lifecycleMutation(blackboard, authority)(func(s *models.State) error {
 		s.Sprint.Metrics = metrics
 		return nil
 	})

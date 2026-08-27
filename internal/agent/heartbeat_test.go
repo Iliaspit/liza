@@ -7,10 +7,31 @@ import (
 	"time"
 
 	"github.com/liza-mas/liza/internal/db"
-	lizaerrors "github.com/liza-mas/liza/internal/errors"
 	"github.com/liza-mas/liza/internal/models"
+	"github.com/liza-mas/liza/internal/ops"
 	"github.com/liza-mas/liza/internal/testhelpers"
 )
+
+func newAuthenticatedTestHeartbeat(t *testing.T, config HeartbeatConfig) *Heartbeat {
+	t.Helper()
+	const generation = "test-generation"
+	config.Authority = models.AgentAuthority{ID: config.AgentID, Generation: generation}
+	bb := db.New(config.StatePath)
+	state, err := bb.Read()
+	if err == nil {
+		if _, exists := state.Agents[config.AgentID]; exists {
+			if err := bb.Modify(func(current *models.State) error {
+				agent := current.Agents[config.AgentID]
+				agent.Generation = generation
+				current.Agents[config.AgentID] = agent
+				return nil
+			}); err != nil {
+				t.Fatalf("install heartbeat test authority: %v", err)
+			}
+		}
+	}
+	return NewHeartbeat(config)
+}
 
 func TestHeartbeat(t *testing.T) {
 	tests := []struct {
@@ -85,12 +106,13 @@ func TestHeartbeat(t *testing.T) {
 				LeaseDuration: tt.leaseDuration,
 			}
 
+			hb := newAuthenticatedTestHeartbeat(t, config)
+
 			// Create context with timeout
 			ctx, cancel := context.WithTimeout(context.Background(), tt.runDuration)
 			defer cancel()
 
 			// Start heartbeat
-			hb := NewHeartbeat(config)
 			doneCh := make(chan error, 1)
 			go func() {
 				doneCh <- hb.Start(ctx)
@@ -174,11 +196,11 @@ func TestHeartbeatWithInvalidAgent(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
 
-	hb := NewHeartbeat(config)
+	hb := newAuthenticatedTestHeartbeat(t, config)
 
 	err := hb.Start(ctx)
-	if !lizaerrors.IsNotFound(err) {
-		t.Fatalf("Start() error = %v, want NotFound", err)
+	if !ops.IsAgentAuthorityError(err) {
+		t.Fatalf("Start() error = %v, want generation authority error", err)
 	}
 }
 
@@ -193,7 +215,7 @@ func TestHeartbeatWithInvalidStatePath(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
 
-	hb := NewHeartbeat(config)
+	hb := newAuthenticatedTestHeartbeat(t, config)
 
 	// Should handle invalid path gracefully
 	err := hb.Start(ctx)
@@ -228,37 +250,26 @@ func TestHeartbeatStop(t *testing.T) {
 		LeaseDuration: 30 * time.Minute,
 	}
 
+	hb := newAuthenticatedTestHeartbeat(t, config)
+	if err := hb.beat(); err != nil {
+		t.Fatalf("establish heartbeat before cancellation test: %v", err)
+	}
+
+	state, err := db.New(stateFile).Read()
+	if err != nil {
+		t.Fatalf("read established heartbeat: %v", err)
+	}
+	if !state.Agents["coder-1"].Heartbeat.After(now) {
+		t.Fatal("heartbeat was not established before cancellation test")
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	hb := NewHeartbeat(config)
 	doneCh := make(chan error, 1)
 	go func() {
 		doneCh <- hb.Start(ctx)
 	}()
-
-	// Wait until at least one heartbeat update is observed.
-	bb := db.New(stateFile)
-	waitDeadline := time.After(5 * time.Second)
-	waitTicker := time.NewTicker(10 * time.Millisecond)
-	defer waitTicker.Stop()
-
-	updated := false
-	for !updated {
-		select {
-		case <-waitDeadline:
-			t.Fatal("Heartbeat was not observed before cancellation")
-		case <-waitTicker.C:
-			state, err := bb.Read()
-			if err != nil {
-				continue
-			}
-			agent, exists := state.Agents["coder-1"]
-			if exists && agent.Heartbeat.After(now) {
-				updated = true
-			}
-		}
-	}
 
 	// Cancel context to stop heartbeat
 	cancel()
@@ -362,8 +373,8 @@ func TestHeartbeatConcurrency(t *testing.T) {
 		LeaseDuration: 30 * time.Minute,
 	}
 
-	hb1 := NewHeartbeat(config1)
-	hb2 := NewHeartbeat(config2)
+	hb1 := newAuthenticatedTestHeartbeat(t, config1)
+	hb2 := newAuthenticatedTestHeartbeat(t, config2)
 
 	done1 := make(chan error, 1)
 	done2 := make(chan error, 1)
@@ -473,7 +484,7 @@ func TestHeartbeatIntervalFromConfig(t *testing.T) {
 				State:     initialState,
 			}
 
-			hb := NewHeartbeat(config)
+			hb := newAuthenticatedTestHeartbeat(t, config)
 			if hb == nil {
 				t.Fatal("NewHeartbeat() returned nil")
 			}
@@ -590,7 +601,7 @@ func TestHeartbeatRenewsTaskLease(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
 
-	hb := NewHeartbeat(config)
+	hb := newAuthenticatedTestHeartbeat(t, config)
 	doneCh := make(chan error, 1)
 	go func() { doneCh <- hb.Start(ctx) }()
 	<-doneCh
@@ -660,7 +671,7 @@ func TestHeartbeatRenewsReviewLease(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
 
-	hb := NewHeartbeat(config)
+	hb := newAuthenticatedTestHeartbeat(t, config)
 	doneCh := make(chan error, 1)
 	go func() { doneCh <- hb.Start(ctx) }()
 	<-doneCh
@@ -729,7 +740,7 @@ func TestHeartbeatSkipsClearedLease(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
 
-	hb := NewHeartbeat(config)
+	hb := newAuthenticatedTestHeartbeat(t, config)
 	doneCh := make(chan error, 1)
 	go func() { doneCh <- hb.Start(ctx) }()
 	<-doneCh

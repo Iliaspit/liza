@@ -218,6 +218,121 @@ func TestReleaseClaim_CoderClaim_ClearsWorktreeFields(t *testing.T) {
 	}
 }
 
+func TestReleaseRejectedClaim(t *testing.T) {
+	fixture := newRejectedHandoffFixture(t, true)
+
+	result, err := ReleaseClaim(fixture.projectRoot, fixture.taskID, "doer", true, "handoff", "human")
+	if err != nil {
+		t.Fatalf("ReleaseClaim() error: %v", err)
+	}
+	if !result.ReleasedDoer || result.ReleasedReviewer {
+		t.Fatalf("ReleaseClaim() result = %+v, want doer-only release", result)
+	}
+
+	state := readClaimStateForTest(t, fixture.stateFile)
+	task := state.FindTask(fixture.taskID)
+	if task == nil {
+		t.Fatal("released task not found")
+	}
+	if task.Status != models.TaskStatusRejected {
+		t.Fatalf("Status = %s, want %s", task.Status, models.TaskStatusRejected)
+	}
+	if task.AssignedTo != nil || task.LeaseExpires != nil {
+		t.Fatalf("doer ownership = assigned_to %v lease %v, want released", task.AssignedTo, task.LeaseExpires)
+	}
+	assertRejectedRecoveryMetadata(t, task, fixture)
+	assertRejectedReviewerAffinity(t, state, task, fixture)
+	if err := statevalidate.ValidateState(state, fixture.projectRoot, true, io.Discard); err != nil {
+		t.Fatalf("released rejected state is invalid: %v", err)
+	}
+}
+
+func TestRejectedTaskHandoff(t *testing.T) {
+	fixture := newRejectedHandoffFixture(t, true)
+	bb := db.For(fixture.stateFile)
+	if err := bb.Modify(func(state *models.State) error {
+		task := state.FindTask(fixture.taskID)
+		if task == nil {
+			return &errors.NotFoundError{Entity: "task", ID: fixture.taskID}
+		}
+		doerID := "coder-1"
+		task.Status = models.TaskStatusReviewing
+		task.AssignedTo = &doerID
+		task.RejectionReason = nil
+		task.ReviewCommit = &fixture.branchSHA
+
+		doer := state.Agents[doerID]
+		doer.Status = models.AgentStatusWorking
+		doer.CurrentTask = &fixture.taskID
+		state.Agents[doerID] = doer
+
+		reviewer := state.Agents[fixture.reviewerID]
+		reviewer.Status = models.AgentStatusWorking
+		reviewer.CurrentTask = &fixture.taskID
+		state.Agents[fixture.reviewerID] = reviewer
+		return nil
+	}); err != nil {
+		t.Fatalf("prepare reviewing handoff: %v", err)
+	}
+
+	reviewerAuthority := models.AgentAuthority{ID: fixture.reviewerID, Generation: testhelpers.TestAgentGeneration}
+	if _, err := SubmitVerdictWithAuthority(
+		fixture.projectRoot,
+		fixture.taskID,
+		"REJECTED",
+		"preserve the rejected handoff",
+		reviewerAuthority,
+		"",
+	); err != nil {
+		t.Fatalf("SubmitVerdictWithAuthority(REJECTED) error: %v", err)
+	}
+	afterReject := readClaimStateForTest(t, fixture.stateFile)
+	rejectedTask := afterReject.FindTask(fixture.taskID)
+	if rejectedTask == nil || rejectedTask.Status != models.TaskStatusRejected {
+		t.Fatalf("rejected task state = %#v, want CODE_REJECTED", rejectedTask)
+	}
+	assertRejectedRecoveryMetadata(t, rejectedTask, fixture)
+
+	if err := acquireReviewOwnership(bb, fixture.reviewerID, fixture.taskID, &reviewerAuthority, time.Minute); err != nil {
+		t.Fatalf("acquireReviewOwnership() error: %v", err)
+	}
+	afterReviewerWait := readClaimStateForTest(t, fixture.stateFile)
+	rejectedTask = afterReviewerWait.FindTask(fixture.taskID)
+	if rejectedTask == nil || rejectedTask.ReviewLeaseExpires == nil {
+		t.Fatalf("rejected reviewer ownership missing: %#v", rejectedTask)
+	}
+	fixture.reviewLease = *rejectedTask.ReviewLeaseExpires
+	assertRejectedRecoveryMetadata(t, rejectedTask, fixture)
+	assertRejectedReviewerAffinity(t, afterReviewerWait, rejectedTask, fixture)
+
+	if _, err := ReleaseClaimWithAuthority(
+		fixture.projectRoot,
+		fixture.taskID,
+		"doer",
+		true,
+		"handoff",
+		models.AgentAuthority{ID: "coder-1", Generation: testhelpers.TestAgentGeneration},
+	); err != nil {
+		t.Fatalf("ReleaseClaimWithAuthority() error: %v", err)
+	}
+	afterRelease := readClaimStateForTest(t, fixture.stateFile)
+	releasedTask := afterRelease.FindTask(fixture.taskID)
+	assertRejectedRecoveryMetadata(t, releasedTask, fixture)
+	assertRejectedReviewerAffinity(t, afterRelease, releasedTask, fixture)
+	if err := statevalidate.ValidateState(afterRelease, fixture.projectRoot, true, io.Discard); err != nil {
+		t.Fatalf("released rejected state is invalid: %v", err)
+	}
+
+	if _, err := ClaimTaskWithAuthority(
+		fixture.projectRoot,
+		fixture.taskID,
+		models.AgentAuthority{ID: "coder-2", Generation: testhelpers.TestAgentGeneration},
+	); err != nil {
+		t.Fatalf("ClaimTaskWithAuthority() error: %v", err)
+	}
+	assertRejectedClaimState(t, fixture, "coder-2", fixture.branchSHA)
+}
+
 func TestReleaseClaim_ReviewerClaim(t *testing.T) {
 	t.Parallel()
 

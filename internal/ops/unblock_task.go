@@ -98,6 +98,16 @@ func UnblockTask(projectRoot, taskID, assignTo, reason, agentID string) (*Unbloc
 // UnblockTaskWithOptions restores a repaired BLOCKED task to either its initial
 // state or directly to its executing state when AssignTo is provided.
 func UnblockTaskWithOptions(projectRoot, taskID, reason, agentID string, opts UnblockTaskOptions) (*UnblockTaskResult, error) {
+	return unblockTaskWithOptionalAuthority(projectRoot, taskID, reason, agentID, opts, nil)
+}
+
+// UnblockTaskWithAuthority fences the unblock transaction and conflict
+// follow-up write with the orchestrator's registration generation.
+func UnblockTaskWithAuthority(projectRoot, taskID, reason string, authority models.AgentAuthority, opts UnblockTaskOptions) (*UnblockTaskResult, error) {
+	return unblockTaskWithOptionalAuthority(projectRoot, taskID, reason, authority.ID, opts, &authority)
+}
+
+func unblockTaskWithOptionalAuthority(projectRoot, taskID, reason, agentID string, opts UnblockTaskOptions, authority *models.AgentAuthority) (*UnblockTaskResult, error) {
 	if taskID == "" {
 		return nil, &PreconditionError{Reason: "task ID is required"}
 	}
@@ -130,13 +140,13 @@ func UnblockTaskWithOptions(projectRoot, taskID, reason, agentID string, opts Un
 	bb := db.For(lp.StatePath())
 	now := time.Now().UTC()
 
-	rebaseResult, err := maybeRebaseTaskBeforeUnblock(bb, lp.ProjectRoot(), taskID, agentID, opts)
+	rebaseResult, err := maybeRebaseTaskBeforeUnblock(bb, lp.ProjectRoot(), taskID, agentID, opts, authority)
 	if err != nil {
 		return nil, err
 	}
 
 	var result UnblockTaskResult
-	err = bb.Modify(func(state *models.State) error {
+	err = lifecycleMutation(bb, authority)(func(state *models.State) error {
 		task := state.FindTask(taskID)
 		if task == nil {
 			return &errors.NotFoundError{Entity: "task", ID: taskID}
@@ -313,7 +323,7 @@ func validateUnblockDirectDependencies(state *models.State, resolver *pipeline.R
 	return nil
 }
 
-func maybeRebaseTaskBeforeUnblock(bb *db.Blackboard, projectRoot, taskID, agentID string, opts UnblockTaskOptions) (*UnblockTaskRebaseResult, error) {
+func maybeRebaseTaskBeforeUnblock(bb *db.Blackboard, projectRoot, taskID, agentID string, opts UnblockTaskOptions, authority *models.AgentAuthority) (*UnblockTaskRebaseResult, error) {
 	if strings.TrimSpace(opts.RebaseOn) == "" {
 		return nil, nil
 	}
@@ -355,7 +365,7 @@ func maybeRebaseTaskBeforeUnblock(bb *db.Blackboard, projectRoot, taskID, agentI
 				Err:     err,
 			}
 		}
-		if markErr := markUnblockRebaseConflict(bb, taskID, agentID, snapshot, err); markErr != nil {
+		if markErr := markUnblockRebaseConflict(bb, taskID, agentID, snapshot, err, authority); markErr != nil {
 			return nil, markErr
 		}
 		return nil, &UnblockRebaseConflictError{
@@ -466,7 +476,7 @@ func revalidateUnblockRebase(projectRoot string, task *models.Task, rebase *Unbl
 	return nil
 }
 
-func markUnblockRebaseConflict(bb *db.Blackboard, taskID, agentID string, snapshot unblockRebaseSnapshot, cause error) error {
+func markUnblockRebaseConflict(bb *db.Blackboard, taskID, agentID string, snapshot unblockRebaseSnapshot, cause error, authority *models.AgentAuthority) error {
 	now := time.Now().UTC()
 	reason := fmt.Sprintf("unblock-task rebase conflict onto %s (%s)", snapshot.TargetRef, shortSHA(snapshot.TargetSHA))
 	questions := []string{
@@ -484,7 +494,7 @@ func markUnblockRebaseConflict(bb *db.Blackboard, taskID, agentID string, snapsh
 		"stdout_stderr_excerpt": excerpt,
 		"recovery_hint":         "resolve the unblock-time rebase conflict in the task worktree, then retry unblock-task",
 	}
-	return bb.Modify(func(state *models.State) error {
+	return lifecycleMutation(bb, authority)(func(state *models.State) error {
 		task := state.FindTask(taskID)
 		if task == nil {
 			return &errors.NotFoundError{Entity: "task", ID: taskID}

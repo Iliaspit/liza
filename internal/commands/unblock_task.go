@@ -3,6 +3,7 @@ package commands
 import (
 	"fmt"
 
+	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/ops"
 )
 
@@ -14,6 +15,16 @@ func UnblockTaskCommand(projectRoot, taskID, assignTo, reason, agentID string) e
 // UnblockTaskWithOptionsCommand restores a repaired BLOCKED task.
 func UnblockTaskWithOptionsCommand(projectRoot, taskID, reason, agentID string, opts ops.UnblockTaskOptions) error {
 	result, err := ops.UnblockTaskWithOptions(projectRoot, taskID, reason, agentID, opts)
+	return printUnblockTaskResult(result, err)
+}
+
+// UnblockTaskWithAuthorityCommand unblocks a task using generation-fenced authority.
+func UnblockTaskWithAuthorityCommand(projectRoot, taskID, reason string, authority models.AgentAuthority, opts ops.UnblockTaskOptions) error {
+	result, err := ops.UnblockTaskWithAuthority(projectRoot, taskID, reason, authority, opts)
+	return printUnblockTaskResult(result, err)
+}
+
+func printUnblockTaskResult(result *ops.UnblockTaskResult, err error) error {
 	if err != nil {
 		return fmt.Errorf("unblock task: %w", err)
 	}

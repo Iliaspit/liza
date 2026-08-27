@@ -14,6 +14,7 @@ import (
 type ResumeHandoffInput struct {
 	ProjectRoot string
 	AgentID     string
+	Authority   *models.AgentAuthority
 }
 
 // ResumeHandoffResult contains the outcome of a successful handoff resumption.
@@ -28,6 +29,11 @@ type ResumeHandoffResult struct {
 func ResumeHandoff(input ResumeHandoffInput) (*ResumeHandoffResult, error) {
 	if input.AgentID == "" {
 		return nil, &PreconditionError{Reason: "agent ID is required"}
+	}
+	if input.Authority != nil {
+		if err := requireAuthorityActor(*input.Authority, input.AgentID); err != nil {
+			return nil, err
+		}
 	}
 
 	lp := paths.New(input.ProjectRoot)
@@ -50,12 +56,12 @@ func ResumeHandoff(input ResumeHandoffInput) (*ResumeHandoffResult, error) {
 		return nil, fmt.Errorf("failed to read state: %w", err)
 	}
 
-	return resumeHandoffWithState(bb, state, input.AgentID, executingStatuses)
+	return resumeHandoffWithState(bb, state, input.AgentID, input.Authority, executingStatuses)
 }
 
 // resumeHandoffWithState performs the handoff resumption with an already-read state.
 // This allows for efficient checking without re-reading state.
-func resumeHandoffWithState(bb *db.Blackboard, state *models.State, agentID string, executingStatuses []models.TaskStatus) (*ResumeHandoffResult, error) {
+func resumeHandoffWithState(bb *db.Blackboard, state *models.State, agentID string, authority *models.AgentAuthority, executingStatuses []models.TaskStatus) (*ResumeHandoffResult, error) {
 	now := time.Now().UTC()
 
 	for i := range state.Tasks {
@@ -70,7 +76,7 @@ func resumeHandoffWithState(bb *db.Blackboard, state *models.State, agentID stri
 		id := task.ID
 		wt := *task.Worktree
 
-		err := bb.Modify(func(s *models.State) error {
+		err := lifecycleMutation(bb, authority)(func(s *models.State) error {
 			t := s.FindTask(id)
 			if t == nil {
 				return &lizaerrors.NotFoundError{Entity: "task", ID: id}
@@ -103,6 +109,9 @@ func resumeHandoffWithState(bb *db.Blackboard, state *models.State, agentID stri
 			return nil
 		})
 		if err != nil {
+			if IsAgentAuthorityError(err) {
+				return nil, err
+			}
 			// Conflict on this candidate, try next
 			continue
 		}

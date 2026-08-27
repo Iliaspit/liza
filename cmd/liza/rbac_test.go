@@ -132,6 +132,7 @@ func TestIntegrationReviewerRenderedCLIFailureRecovery(t *testing.T) {
 		task.Status = reviewingStatus
 		task.ReviewingBy = testhelpers.StringPtr(reviewerID)
 		state.Tasks = []models.Task{task}
+		state.Agents[reviewerID] = mutationTestAgent(roleName)
 		testhelpers.WriteInitialState(t, statePath, state)
 
 		return projectRoot, statePath, resolver, rejectedStatus

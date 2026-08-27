@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/ops"
 )
 
@@ -18,6 +19,16 @@ func AssessBlockedCommand(projectRoot, taskID, note, agentID string) error {
 // reconciles canonical blocker metadata, and prints the resulting state.
 func AssessBlockedWithOptionsCommand(projectRoot, taskID, note, agentID string, opts ops.AssessBlockedOptions) error {
 	result, err := ops.AssessBlockedWithOptions(projectRoot, taskID, note, agentID, opts)
+	return printAssessBlockedResult(result, err)
+}
+
+// AssessBlockedWithAuthorityCommand records an assessment using generation-fenced authority.
+func AssessBlockedWithAuthorityCommand(projectRoot, taskID, note string, authority models.AgentAuthority, opts ops.AssessBlockedOptions) error {
+	result, err := ops.AssessBlockedWithAuthority(projectRoot, taskID, note, authority, opts)
+	return printAssessBlockedResult(result, err)
+}
+
+func printAssessBlockedResult(result *ops.AssessBlockedResult, err error) error {
 	if err != nil {
 		return fmt.Errorf("assess blocked: %w", err)
 	}

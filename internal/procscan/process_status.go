@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"syscall"
 )
@@ -98,6 +99,49 @@ func AgentProcessStatusForPID(pid int, role, agentID, procRoot string) AgentProc
 	}
 
 	return signalProcessStatus(pid, err, procfsUnavailable)
+}
+
+// FindExplicitAgentIdentityPIDs returns observer-visible processes whose
+// command line explicitly names the expected agent ID. Auto-assigned processes
+// without --agent-id are intentionally excluded because they cannot be
+// correlated to a recorded registration from process evidence alone.
+func FindExplicitAgentIdentityPIDs(role, agentID, procRoot string) []int {
+	if agentID == "" {
+		return nil
+	}
+	if procRoot == "" {
+		procRoot = "/proc"
+	}
+
+	entries, err := os.ReadDir(procRoot)
+	if err != nil {
+		return nil
+	}
+
+	var pids []int
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		pid, err := strconv.Atoi(entry.Name())
+		if err != nil {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(procRoot, entry.Name(), "cmdline"))
+		if err != nil {
+			continue
+		}
+		argv := ParseCmdlineBytes(data)
+		if !IsLizaAgentArgv(argv) || (role != "" && roleFromArgv(argv) != role) {
+			continue
+		}
+		if flagValue(argv, "--agent-id") == agentID {
+			pids = append(pids, pid)
+		}
+	}
+
+	sort.Ints(pids)
+	return pids
 }
 
 func signalProcessStatus(pid int, identityErr error, procfsUnavailable bool) AgentProcessStatus {

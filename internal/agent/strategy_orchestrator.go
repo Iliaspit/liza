@@ -78,11 +78,11 @@ func (s *orchestratorStrategy) PreWork(_ context.Context, bb *db.Blackboard, con
 
 	// Clear trigger even if transitions failed — the human approved, so don't
 	// re-checkpoint. Transition errors are logged; retry is manual.
-	if err := bb.Modify(func(s *models.State) error {
+	if err := ops.ModifyWithAgentAuthority(bb, config.Authority, func(s *models.State) error {
 		s.Sprint.CheckpointTrigger = ""
 		return nil
 	}); err != nil {
-		logger.Warn("Failed to clear checkpoint trigger", "error", err)
+		return false, fmt.Errorf("clear checkpoint trigger: %w", err)
 	}
 
 	return false, nil
@@ -117,7 +117,7 @@ func (s *orchestratorStrategy) ClaimTask(_ SupervisorConfig, _ *db.Blackboard) (
 }
 
 func (s *orchestratorStrategy) PreExecution(bb *db.Blackboard, config SupervisorConfig) error {
-	if err := setAgentToOrchestratingStatus(bb, config.AgentID); err != nil {
+	if err := setAgentToOrchestratingStatus(bb, config.Authority); err != nil {
 		return err
 	}
 	refreshOrchestratorProjectRootScipIndexes(bb, config)

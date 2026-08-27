@@ -29,6 +29,7 @@ type HandoffInput struct {
 	Summary     string // required — legacy field
 	NextAction  string // required — maps to NextStep
 	AgentID     string
+	Authority   *models.AgentAuthority
 	Succeeded   []string // optional — overrides Summary→Succeeded mapping
 	Failed      []string // optional
 	Hypothesis  string   // optional
@@ -49,7 +50,11 @@ func Handoff(input *HandoffInput) (*HandoffResult, error) {
 	if input.NextAction == "" {
 		return nil, &PreconditionError{Reason: "next action is required"}
 	}
-	if input.AgentID == "" {
+	agentID, err := lifecycleAgentID(input.AgentID, input.Authority)
+	if err != nil {
+		return nil, err
+	}
+	if agentID == "" {
 		return nil, &PreconditionError{Reason: fmt.Sprintf("%s is required", brand.EnvName("AGENT_ID"))}
 	}
 
@@ -57,9 +62,9 @@ func Handoff(input *HandoffInput) (*HandoffResult, error) {
 	bb := db.For(lp.StatePath())
 	now := time.Now().UTC()
 
-	runtimeRole, err := identity.ExtractRole(input.AgentID)
+	runtimeRole, err := identity.ExtractRole(agentID)
 	if err != nil {
-		return nil, fmt.Errorf("invalid agent ID %s: %w", input.AgentID, err)
+		return nil, fmt.Errorf("invalid agent ID %s: %w", agentID, err)
 	}
 
 	resolver, _, resolverErr := loadResolver(input.ProjectRoot)
@@ -79,7 +84,10 @@ func Handoff(input *HandoffInput) (*HandoffResult, error) {
 		succeeded = []string{input.Summary}
 	}
 
-	err = bb.Modify(func(state *models.State) error {
+	if handoffBeforeModifyTestHook != nil {
+		handoffBeforeModifyTestHook()
+	}
+	err = modifyLifecycleState(bb, input.Authority, func(state *models.State) error {
 		task := state.FindTask(input.TaskID)
 		if task == nil {
 			return &errors.NotFoundError{Entity: "task", ID: input.TaskID}
@@ -89,8 +97,8 @@ func Handoff(input *HandoffInput) (*HandoffResult, error) {
 			return &PreconditionError{Reason: fmt.Sprintf("task %s is not in an executing status (current status: %s)", input.TaskID, task.Status)}
 		}
 
-		if task.AssignedTo == nil || *task.AssignedTo != input.AgentID {
-			return &PreconditionError{Reason: fmt.Sprintf("task %s is not assigned to agent %s", input.TaskID, input.AgentID)}
+		if task.AssignedTo == nil || *task.AssignedTo != agentID {
+			return &PreconditionError{Reason: fmt.Sprintf("task %s is not assigned to agent %s", input.TaskID, agentID)}
 		}
 
 		task.HandoffPending = true
@@ -98,13 +106,13 @@ func Handoff(input *HandoffInput) (*HandoffResult, error) {
 		task.History = append(task.History, models.TaskHistoryEntry{
 			Time:  now,
 			Event: models.TaskEventHandoffInitiated,
-			Agent: &input.AgentID,
+			Agent: &agentID,
 			Note:  &note,
 		})
 
 		task.HandoffEvents = append(task.HandoffEvents, models.HandoffEvent{
 			Timestamp:  now,
-			Agent:      input.AgentID,
+			Agent:      agentID,
 			Trigger:    models.HandoffTriggerContextExhaustion,
 			Succeeded:  succeeded,
 			Failed:     input.Failed,
@@ -114,14 +122,14 @@ func Handoff(input *HandoffInput) (*HandoffResult, error) {
 			DeadEnds:   input.DeadEnds,
 		})
 
-		agent, exists := state.Agents[input.AgentID]
+		agent, exists := state.Agents[agentID]
 		if !exists {
 			agent = models.Agent{Role: runtimeRole}
 		}
 		agent.Status = models.AgentStatusHandoff
 		agent.CurrentTask = &input.TaskID
 		agent.Heartbeat = now
-		state.Agents[input.AgentID] = agent
+		state.Agents[agentID] = agent
 
 		return nil
 	})
@@ -131,6 +139,8 @@ func Handoff(input *HandoffInput) (*HandoffResult, error) {
 
 	return &HandoffResult{
 		TaskID:  input.TaskID,
-		AgentID: input.AgentID,
+		AgentID: agentID,
 	}, nil
 }
+
+var handoffBeforeModifyTestHook func()

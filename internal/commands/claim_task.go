@@ -20,6 +20,17 @@ func ClaimTaskCommand(projectRoot, taskID, agentID string) error {
 	return nil
 }
 
+// ClaimTaskWithAuthorityCommand claims a task using generation-fenced authority.
+func ClaimTaskWithAuthorityCommand(projectRoot, taskID string, authority models.AgentAuthority) error {
+	result, err := ops.ClaimTaskWithAuthority(projectRoot, taskID, authority)
+	if err != nil {
+		return err
+	}
+
+	printClaimResult(result)
+	return nil
+}
+
 func printClaimResult(r *ops.ClaimResult) {
 	switch r.SourceStatus {
 	case models.TaskStatusRejected:

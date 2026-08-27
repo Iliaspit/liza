@@ -47,10 +47,27 @@ func (f LLMAgentEventFunc) RecordLLMAgentEvent(ctx context.Context, event LLMAge
 	f(ctx, event)
 }
 
+// LLMAgentLaunchGate linearizes one provider start against same-ID agent
+// registration. Built-in agents call it around setup/start only; compatibility
+// adapters without a start boundary hold it for their complete blocking call.
+type LLMAgentLaunchGate func(ctx context.Context, start func() error) error
+
+func (g LLMAgentLaunchGate) launch(ctx context.Context, start func() error) error {
+	if g == nil {
+		return fmt.Errorf("provider launch gate is required")
+	}
+	return g(ctx, start)
+}
+
+var immediateLaunchGate LLMAgentLaunchGate = func(_ context.Context, start func() error) error {
+	return start()
+}
+
 // LLMAgentRunRequest contains parameters for running one LLM agent turn.
 type LLMAgentRunRequest struct {
 	BackendName    string
 	AgentID        string
+	Generation     string
 	TaskID         string
 	SessionID      string
 	WarmSession    bool
@@ -62,6 +79,7 @@ type LLMAgentRunRequest struct {
 	AdditionalDirs []string
 	RuntimeConfig  models.Config
 	EventSink      LLMAgentEventSink
+	LaunchGate     LLMAgentLaunchGate
 }
 
 // LLMAgentRunResult contains the result of an LLM agent execution.
@@ -87,6 +105,7 @@ type LLMAgentUsage struct {
 type LLMAgentInteractiveRequest struct {
 	BackendName    string
 	AgentID        string
+	Generation     string
 	SessionID      string
 	ProfileName    string
 	ProfileVars    map[string]string
@@ -94,6 +113,7 @@ type LLMAgentInteractiveRequest struct {
 	AdditionalDirs []string
 	RuntimeConfig  models.Config
 	EventSink      LLMAgentEventSink
+	LaunchGate     LLMAgentLaunchGate
 }
 
 // LLMAgent is the semantic boundary for something that can run an LLM agent turn.
@@ -123,11 +143,23 @@ type legacyCLIExecutorAdapter struct {
 }
 
 func (a legacyCLIExecutorAdapter) Run(ctx context.Context, req LLMAgentRunRequest) (LLMAgentRunResult, error) {
-	return a.executor.Execute(ctx, req.BackendName, req.AgentID, req.Prompt, req.ProjectRoot, req.AdditionalDirs, req.RuntimeConfig)
+	var result LLMAgentRunResult
+	err := req.LaunchGate.launch(ctx, func() error {
+		var err error
+		result, err = a.executor.Execute(ctx, req.BackendName, req.AgentID, req.Prompt, req.ProjectRoot, req.AdditionalDirs, req.RuntimeConfig)
+		return err
+	})
+	return result, err
 }
 
 func (a legacyCLIExecutorAdapter) RunInteractive(ctx context.Context, req LLMAgentInteractiveRequest) (int, error) {
-	return a.executor.ExecuteInteractive(ctx, req.BackendName, req.AgentID, req.ProjectRoot, req.AdditionalDirs)
+	var exitCode int
+	err := req.LaunchGate.launch(ctx, func() error {
+		var err error
+		exitCode, err = a.executor.ExecuteInteractive(ctx, req.BackendName, req.AgentID, req.ProjectRoot, req.AdditionalDirs)
+		return err
+	})
+	return exitCode, err
 }
 
 func resolveLLMAgent(config SupervisorConfig) (LLMAgent, error) {

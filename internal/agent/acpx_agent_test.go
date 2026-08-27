@@ -34,6 +34,7 @@ func TestACPXAgentRunUsesPersistentCodexSession(t *testing.T) {
 		Prompt:      "implement the requested change",
 		ProjectRoot: t.TempDir(),
 		EventSink:   sink,
+		LaunchGate:  immediateLaunchGate,
 	}
 
 	first, err := agent.Run(context.Background(), req)
@@ -105,6 +106,7 @@ func TestACPXAgentRunUsesOpenCodeTarget(t *testing.T) {
 		AgentID:     "coder-1",
 		Prompt:      "implement the requested change",
 		ProjectRoot: t.TempDir(),
+		LaunchGate:  immediateLaunchGate,
 	}
 
 	result, err := NewACPXAgent("").Run(context.Background(), req)
@@ -151,6 +153,7 @@ func TestACPXAgentRunUsesCursorTarget(t *testing.T) {
 		AgentID:     "coder-1",
 		Prompt:      "implement the requested change",
 		ProjectRoot: t.TempDir(),
+		LaunchGate:  immediateLaunchGate,
 	}
 
 	result, err := NewACPXAgent("").Run(context.Background(), req)
@@ -190,6 +193,7 @@ func TestACPXAgentRunUsesConfiguredQwenTarget(t *testing.T) {
 		AgentID:     "coder-1",
 		Prompt:      "implement the requested change",
 		ProjectRoot: t.TempDir(),
+		LaunchGate:  immediateLaunchGate,
 		RuntimeConfig: models.Config{AgentTools: map[string]models.AgentToolConfig{
 			"qwen-acp": {
 				Backend:             ToolBackendACPX,
@@ -241,6 +245,7 @@ func TestACPXAgentEnsureSessionFallbackUsesProjectRoot(t *testing.T) {
 		AgentID:     "coder-1",
 		Prompt:      "implement the requested change",
 		ProjectRoot: t.TempDir(),
+		LaunchGate:  immediateLaunchGate,
 		RuntimeConfig: models.Config{AgentTools: map[string]models.AgentToolConfig{
 			"custom-acp": {
 				Backend:         ToolBackendACPX,
@@ -283,6 +288,7 @@ func TestACPXAgentEnsureSessionFailsFastWithoutProjectRootOrEnsureArgs(t *testin
 		AgentID:     "coder-1",
 		Prompt:      "implement the requested change",
 		ProjectRoot: "",
+		LaunchGate:  immediateLaunchGate,
 		RuntimeConfig: models.Config{AgentTools: map[string]models.AgentToolConfig{
 			"custom-acp": {
 				Backend:         ToolBackendACPX,
@@ -326,6 +332,7 @@ func TestACPXAgentRunUsesConfiguredDevinACPServerCommand(t *testing.T) {
 		AgentID:     "coder-1",
 		Prompt:      "implement the requested change",
 		ProjectRoot: t.TempDir(),
+		LaunchGate:  immediateLaunchGate,
 		RuntimeConfig: models.Config{AgentTools: map[string]models.AgentToolConfig{
 			"devin-acp": {
 				Backend:             ToolBackendACPX,
@@ -388,6 +395,7 @@ func TestACPXAgentMasksReturnedOutputAndEvents(t *testing.T) {
 		Prompt:      "emit secret",
 		ProjectRoot: t.TempDir(),
 		EventSink:   sink,
+		LaunchGate:  immediateLaunchGate,
 	})
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
@@ -418,6 +426,7 @@ func TestACPXAgentMasksReturnedErrors(t *testing.T) {
 		TaskID:      "task-acp",
 		Prompt:      "fail secret",
 		ProjectRoot: t.TempDir(),
+		LaunchGate:  immediateLaunchGate,
 	})
 	if err == nil {
 		t.Fatal("Run() error = nil, want ACPX failure")
@@ -484,6 +493,7 @@ func TestACPXAgentReturnsOnlyClassifiableProviderUnavailableDiagnostic(t *testin
 				TaskID:      "task-acp",
 				Prompt:      tt.prompt,
 				ProjectRoot: t.TempDir(),
+				LaunchGate:  immediateLaunchGate,
 			})
 			if (err != nil) != tt.wantError {
 				t.Fatalf("Run() error = %v, wantError %t", err, tt.wantError)
@@ -515,6 +525,7 @@ func TestACPXAgentDoesNotClassifyProviderFailureFromAgentMessage(t *testing.T) {
 		TaskID:      "task-acp",
 		Prompt:      "injected provider unavailable",
 		ProjectRoot: t.TempDir(),
+		LaunchGate:  immediateLaunchGate,
 	})
 	if err == nil {
 		t.Fatal("Run() error = nil, want ACPX failure")
@@ -540,6 +551,7 @@ func TestACPXAgentClassifiesProviderUnavailableAtSessionEnsureBoundary(t *testin
 		TaskID:      "task-acp",
 		Prompt:      "successful output",
 		ProjectRoot: t.TempDir(),
+		LaunchGate:  immediateLaunchGate,
 	})
 	if err == nil {
 		t.Fatal("Run() error = nil, want session ensure failure")
@@ -566,6 +578,7 @@ func TestACPXAgentTreatsQuotaMessageAsFailure(t *testing.T) {
 		TaskID:      "task-acp",
 		Prompt:      "cursor quota",
 		ProjectRoot: t.TempDir(),
+		LaunchGate:  immediateLaunchGate,
 	})
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
@@ -590,6 +603,7 @@ func TestACPXAgentDetectsQuotaWithUnderlyingAgentName(t *testing.T) {
 		TaskID:      "task-acp",
 		Prompt:      "codex quota",
 		ProjectRoot: t.TempDir(),
+		LaunchGate:  immediateLaunchGate,
 	})
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
@@ -612,6 +626,7 @@ func TestACPXAgentRunInteractiveDelegatesToUnderlyingCLI(t *testing.T) {
 		BackendName: "cursor-acp",
 		AgentID:     "coder-1",
 		ProjectRoot: t.TempDir(),
+		LaunchGate:  immediateLaunchGate,
 	})
 	if err != nil {
 		t.Fatalf("RunInteractive() error = %v", err)
@@ -653,6 +668,7 @@ func TestACPXAgentDetectsPersistedWarmSession(t *testing.T) {
 		TaskID:      "task-acp",
 		Prompt:      "implement the requested change",
 		ProjectRoot: t.TempDir(),
+		LaunchGate:  immediateLaunchGate,
 	})
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
@@ -698,6 +714,7 @@ func TestACPXAgentRunStreamsOutputToLogsEventsAndProgress(t *testing.T) {
 			Prompt:      "stream output",
 			ProjectRoot: t.TempDir(),
 			EventSink:   sink,
+			LaunchGate:  immediateLaunchGate,
 		})
 		done <- runResult{result: result, err: err}
 	}()

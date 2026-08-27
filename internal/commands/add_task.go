@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/ops"
 	"gopkg.in/yaml.v3"
 )
@@ -42,6 +43,19 @@ func LoadTaskInputFromFile(path string) (*TaskInput, error) {
 // AddTaskCommand adds a new task.
 // Delegates business logic (including post-write validation) to ops.AddTask.
 func AddTaskCommand(statePath, logPath string, input *TaskInput, orchestratorID string) error {
+	return addTaskCommand(statePath, logPath, input, func(opsInput *ops.AddTaskInput) (*ops.AddTaskResult, error) {
+		return ops.AddTask(statePath, logPath, opsInput, orchestratorID)
+	})
+}
+
+// AddTaskWithAuthorityCommand adds a task using generation-fenced authority.
+func AddTaskWithAuthorityCommand(statePath, logPath string, input *TaskInput, authority models.AgentAuthority) error {
+	return addTaskCommand(statePath, logPath, input, func(opsInput *ops.AddTaskInput) (*ops.AddTaskResult, error) {
+		return ops.AddTaskWithAuthority(statePath, logPath, opsInput, authority)
+	})
+}
+
+func addTaskCommand(statePath, logPath string, input *TaskInput, add func(*ops.AddTaskInput) (*ops.AddTaskResult, error)) error {
 	opsInput := &ops.AddTaskInput{
 		ID:            input.ID,
 		Type:          input.Type,
@@ -56,7 +70,7 @@ func AddTaskCommand(statePath, logPath string, input *TaskInput, orchestratorID 
 		DependsOn:     input.DependsOn,
 	}
 
-	result, err := ops.AddTask(statePath, logPath, opsInput, orchestratorID)
+	result, err := add(opsInput)
 	if err != nil {
 		return fmt.Errorf("add task: %w", err)
 	}

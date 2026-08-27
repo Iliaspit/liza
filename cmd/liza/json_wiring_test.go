@@ -464,7 +464,9 @@ func TestJSON_AddTasks_MissingTasksFileReportsActionableValidation(t *testing.T)
 }
 
 func TestJSON_AddTasks_MissingOrchestratorReportsActionablePrecondition(t *testing.T) {
-	projectRoot, _ := setupMutationTestProject(t, nil)
+	projectRoot, _ := setupMutationTestProject(t, func(state *models.State) {
+		delete(state.Agents, "orchestrator-1")
+	})
 	t.Setenv("LIZA_AGENT_ID", "")
 
 	tasks := []map[string]any{
@@ -888,6 +890,7 @@ func TestJSON_MarkBlocked_RepairRequestFile(t *testing.T) {
 			testhelpers.BuildTaskByStatus("task-file-repair", models.TaskStatusImplementing, now),
 			legacyTask,
 		}
+		state.Agents["coder-1"] = testhelpers.RegisteredTestAgent("coder")
 	})
 	requestPath := writeRepairRequestFile(t, projectRoot, declarativeRepairRequestFor("task-file-repair"))
 	stdout, err := executeRootCommandCapture(t, projectRoot,
@@ -1452,6 +1455,7 @@ func TestJSON_MarkBlocked_AlertWriteFailureReturnsWarning(t *testing.T) {
 		state.Tasks = []models.Task{
 			testhelpers.BuildTaskByStatus("task-alert-warning", models.TaskStatusImplementing, now),
 		}
+		state.Agents["coder-1"] = testhelpers.RegisteredTestAgent("coder")
 	})
 	alertsPath := filepath.Join(projectRoot, ".liza", "alerts.log")
 	if err := os.RemoveAll(alertsPath); err != nil {
@@ -2543,6 +2547,7 @@ func TestJSON_VoidSuccess(t *testing.T) {
 			"coder-1": {
 				Role:         "coder",
 				Status:       models.AgentStatusWorking,
+				Generation:   testhelpers.TestAgentGeneration,
 				CurrentTask:  &task.ID,
 				LeaseExpires: timePtr(now.Add(30 * time.Minute)),
 				Heartbeat:    now,

@@ -3142,6 +3142,77 @@ func TestCheckRegisteredAgentsWithoutLiveProcess_UnknownProcfsDoesNotAlert(t *te
 	}
 }
 
+func TestRegistrationWatcherProcessIdentityCorrelation(t *testing.T) {
+	now := time.Now().UTC()
+	tests := []struct {
+		name            string
+		recordedPID     int
+		recordedArgv    []string
+		candidatePID    int
+		wantRawState    string
+		wantCorrelation string
+	}{
+		{
+			name:            "observer-visible explicit agent id",
+			recordedPID:     3,
+			recordedArgv:    []string{"go", "test"},
+			candidatePID:    3828790,
+			wantRawState:    "mismatched",
+			wantCorrelation: "observer-visible matching pid 3828790",
+		},
+		{
+			name:            "pid not found and no explicit match",
+			recordedPID:     987654321,
+			wantRawState:    "dead",
+			wantCorrelation: "correlation unavailable",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			procRoot := t.TempDir()
+			t.Cleanup(ops.SetAgentProcessProcRootForTest(procRoot))
+			if len(tt.recordedArgv) > 0 {
+				writeWatchProcCmdline(t, procRoot, tt.recordedPID, tt.recordedArgv)
+			}
+			if tt.candidatePID != 0 {
+				writeWatchProcCmdline(t, procRoot, tt.candidatePID, []string{
+					"liza", "agent", "orchestrator", "--agent-id", "orchestrator-1",
+				})
+			}
+			writeWatchProcCmdline(t, procRoot, 5, []string{
+				"liza", "agent", "orchestrator", "--agent-id", "orchestrator-2",
+			})
+
+			state := testhelpers.CreateValidState()
+			state.Agents = map[string]models.Agent{
+				"orchestrator-1": {
+					Role:         "orchestrator",
+					Status:       models.AgentStatusIdle,
+					LeaseExpires: testhelpers.TimePtr(now.Add(30 * time.Minute)),
+					Heartbeat:    now,
+					PID:          tt.recordedPID,
+				},
+			}
+
+			alerts := checkRegisteredAgentsWithoutLiveProcess(state)
+			if len(alerts) != 1 {
+				t.Fatalf("alerts = %v, want one degraded process observation", alerts)
+			}
+			for _, want := range []string{
+				"unknown/degraded",
+				fmt.Sprintf("raw state %s", tt.wantRawState),
+				fmt.Sprintf("recorded namespace-local pid %d", tt.recordedPID),
+				tt.wantCorrelation,
+			} {
+				if !strings.Contains(alerts[0].Message, want) {
+					t.Fatalf("watcher diagnostic = %q, want %q", alerts[0].Message, want)
+				}
+			}
+		})
+	}
+}
+
 func TestRunChecksWithState_StuckAlertsDedupedAndRealertAfterClear(t *testing.T) {
 	now := time.Now().UTC()
 

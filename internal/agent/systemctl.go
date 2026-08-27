@@ -173,6 +173,21 @@ func checkpointBlocksRole(state *models.State, roleType string) (bool, string) {
 	return true, "[CHECKPOINT] Sprint is at checkpoint"
 }
 
+func newProviderLaunchGate(config SupervisorConfig) LLMAgentLaunchGate {
+	return func(ctx context.Context, start func() error) error {
+		return ops.WithAgentLifecycleLock(ctx, config.ProjectRoot, config.Authority.ID, "provider-start", func() error {
+			state, err := db.For(config.StatePath).ReadContext(ctx)
+			if err != nil {
+				return fmt.Errorf("read current agent authority before provider start: %w", err)
+			}
+			if err := ops.RequireAgentAuthority(state, config.Authority); err != nil {
+				return err
+			}
+			return start()
+		})
+	}
+}
+
 // executeAgent executes the CLI with timeout.
 func executeAgent(ctx context.Context, config SupervisorConfig, prompt string, additionalDirs []string, taskID string, runtimeConfig models.Config) (int, string, error) {
 	logger := GetLogger()
@@ -181,6 +196,7 @@ func executeAgent(ctx context.Context, config SupervisorConfig, prompt string, a
 	if err != nil {
 		return 0, "", err
 	}
+	launchGate := newProviderLaunchGate(config)
 
 	// Interactive mode: launch CLI without -p so user can paste the prompt
 	if config.Interactive {
@@ -190,12 +206,14 @@ func executeAgent(ctx context.Context, config SupervisorConfig, prompt string, a
 		exitCode, err := agent.RunInteractive(ctx, LLMAgentInteractiveRequest{
 			BackendName:    config.CLIName,
 			AgentID:        config.AgentID,
+			Generation:     config.Authority.Generation,
 			SessionID:      taskID,
 			ProfileName:    config.ProfileName,
 			ProfileVars:    config.ProfileVars,
 			ProjectRoot:    config.ProjectRoot,
 			AdditionalDirs: additionalDirs,
 			RuntimeConfig:  runtimeConfig,
+			LaunchGate:     launchGate,
 		})
 		return exitCode, "", err
 	}
@@ -221,6 +239,7 @@ func executeAgent(ctx context.Context, config SupervisorConfig, prompt string, a
 	result, err := agent.Run(execCtx, LLMAgentRunRequest{
 		BackendName:    config.CLIName,
 		AgentID:        config.AgentID,
+		Generation:     config.Authority.Generation,
 		TaskID:         taskID,
 		SessionID:      taskID,
 		WarmSession:    false,
@@ -231,10 +250,13 @@ func executeAgent(ctx context.Context, config SupervisorConfig, prompt string, a
 		AdditionalDirs: additionalDirs,
 		RuntimeConfig:  runtimeConfig,
 		EventSink:      supervisorLLMAgentEventSink{},
+		LaunchGate:     launchGate,
 	})
 	watchdogResult := stopWatchdog()
 	if watchdogResult.Blocked {
-		blockTaskFromSupervisor(db.For(config.StatePath), config.ProjectRoot, taskID, config.AgentID, watchdogResult.Reason)
+		if blockErr := blockTaskFromSupervisor(db.For(config.StatePath), config.ProjectRoot, taskID, config.Authority, watchdogResult.Reason); blockErr != nil {
+			logger.Warn("Failed to block task from execution watchdog", "error", blockErr, "task_id", taskID)
+		}
 		logger.Error("Agent execution stopped after stale progress",
 			"agent_id", config.AgentID,
 			"task_id", taskID,

@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/ops"
 )
 
@@ -12,6 +13,16 @@ import (
 // repair and prints every committed canonical dependency list.
 func ApplyDependencyRepairCommand(projectRoot, sourceTaskID, reason, agentID string) error {
 	result, err := ops.ApplyDependencyRepair(projectRoot, sourceTaskID, reason, agentID)
+	return printApplyDependencyRepairResult(result, err)
+}
+
+// ApplyDependencyRepairWithAuthorityCommand applies a repair using generation-fenced authority.
+func ApplyDependencyRepairWithAuthorityCommand(projectRoot, sourceTaskID, reason string, authority models.AgentAuthority) error {
+	result, err := ops.ApplyDependencyRepairWithAuthority(projectRoot, sourceTaskID, reason, authority)
+	return printApplyDependencyRepairResult(result, err)
+}
+
+func printApplyDependencyRepairResult(result *ops.ApplyDependencyRepairResult, err error) error {
 	if err != nil {
 		return fmt.Errorf("apply dependency repair: %w", err)
 	}

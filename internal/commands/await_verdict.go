@@ -5,6 +5,7 @@ import (
 	"log"
 	"time"
 
+	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/ops"
 )
 
@@ -12,6 +13,29 @@ import (
 type AwaitVerdictResult struct {
 	*ops.AwaitVerdictResult
 	TimeoutSeconds int `json:"timeout_seconds,omitempty"`
+}
+
+var runAwaitVerdictWithAuthorityOptions = ops.AwaitVerdictWithAuthorityOptions
+
+// AwaitVerdictWithAuthority applies the bounded foreground interval while
+// preserving caller-held generation authority through ownership and cleanup.
+func AwaitVerdictWithAuthority(projectRoot, taskID string, authority models.AgentAuthority, budget time.Duration) (*AwaitVerdictResult, error) {
+	return AwaitVerdictWithAuthorityOptions(projectRoot, taskID, authority, budget, AwaitVerdictOptions{})
+}
+
+// AwaitVerdictWithAuthorityOptions is AwaitVerdictWithAuthority with
+// configurable polling intervals.
+func AwaitVerdictWithAuthorityOptions(projectRoot, taskID string, authority models.AgentAuthority, budget time.Duration, opts AwaitVerdictOptions) (*AwaitVerdictResult, error) {
+	remaining := ops.AwaitVerdictRemainingBudget(projectRoot, taskID, authority.ID, budget)
+	result, err := awaitVerdictWithBudget(remaining, maxAwaitInterval, func(interval time.Duration) (*ops.AwaitVerdictResult, error) {
+		return runAwaitVerdictWithAuthorityOptions(context.Background(), projectRoot, taskID, authority, interval, opts)
+	})
+	if err == nil && result.Verdict == ops.VerdictTimeout {
+		if releaseErr := ops.ReleaseDepartedDoerAssignmentWithAuthority(projectRoot, taskID, authority); releaseErr != nil {
+			return result, releaseErr
+		}
+	}
+	return result, err
 }
 
 // AwaitVerdictOptions configures the operation's periodic checks.

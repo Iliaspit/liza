@@ -1,9 +1,12 @@
 package agent
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/liza-mas/liza/internal/db"
@@ -51,29 +54,37 @@ func validateIdentity(agentID, role string) error {
 // for review quorum provider-diversity checks.
 // resolver is used for role classification (singularity, reviewer detection).
 func registerAgent(bb *db.Blackboard, projectRoot, agentID, role, terminal string, leaseDuration int, provider string, resolver *pipeline.Resolver) error {
-	return ops.WithProjectLifecycleSharedLock(projectRoot, "agent-register", func() error {
-		return registerAgentLocked(bb, projectRoot, agentID, role, terminal, leaseDuration, provider, resolver)
-	})
+	_, err := registerAgentWithAuthority(bb, projectRoot, agentID, role, terminal, leaseDuration, provider, resolver)
+	return err
 }
 
-func registerAgentLocked(bb *db.Blackboard, projectRoot, agentID, role, terminal string, leaseDuration int, provider string, resolver *pipeline.Resolver) error {
+func registerAgentWithAuthority(bb *db.Blackboard, projectRoot, agentID, role, terminal string, leaseDuration int, provider string, resolver *pipeline.Resolver) (models.AgentAuthority, error) {
+	var authority models.AgentAuthority
+	err := ops.WithProjectLifecycleSharedLock(projectRoot, "agent-register", func() error {
+		return ops.WithAgentLifecycleLock(context.Background(), projectRoot, agentID, "agent-register", func() error {
+			var err error
+			authority, err = registerAgentLocked(bb, projectRoot, agentID, role, terminal, leaseDuration, provider, resolver)
+			return err
+		})
+	})
+	return authority, err
+}
+
+func registerAgentLocked(bb *db.Blackboard, projectRoot, agentID, role, terminal string, leaseDuration int, provider string, resolver *pipeline.Resolver) (models.AgentAuthority, error) {
 	logger := GetLogger()
 	now := time.Now().UTC()
 	leaseExpires := now.Add(time.Duration(leaseDuration) * time.Second)
+	var authority models.AgentAuthority
 
 	// Single atomic registration - skip STARTING state, go directly to IDLE
 	err := bb.Modify(func(state *models.State) error {
 		// Check for collision
 		if existing, exists := state.Agents[agentID]; exists {
-			// Check if lease is still valid
-			if existing.LeaseExpires != nil && existing.LeaseExpires.After(now) {
-				processStatus := ops.AgentProcessStatus(agentID, existing)
-				if processStatus.IsLiveOrUnknown() {
-					return &errors.AgentCollisionError{AgentID: agentID}
-				}
-				logger.Info("Taking over non-live agent lease", "agent_id", agentID, "pid", existing.PID, "process_state", processStatus.State, "process_detail", processStatus.Detail)
+			observation := ops.AgentProcessOwnership(agentID, existing, now)
+			if observation.Occupied() {
+				return fmt.Errorf("%w; %s", &errors.AgentCollisionError{AgentID: agentID}, observation.Diagnostic(existing.PID))
 			} else {
-				logger.Info("Taking over expired agent lease", "agent_id", agentID)
+				logger.Info("Taking over expired or stale agent lease", "agent_id", agentID, "ownership_state", observation.Effective)
 			}
 		}
 
@@ -85,38 +96,57 @@ func registerAgentLocked(bb *db.Blackboard, projectRoot, agentID, role, terminal
 			maxInst, err := resolver.MaxInstances(role)
 			if err == nil && maxInst > 0 {
 				roleType, _ := resolver.RoleType(role)
-				liveCount := 0
-				for id, agent := range state.Agents {
+				agentIDs := make([]string, 0, len(state.Agents))
+				for id := range state.Agents {
+					agentIDs = append(agentIDs, id)
+				}
+				sort.Strings(agentIDs)
+
+				occupiedCount := 0
+				var occupiedDetails []string
+				for _, id := range agentIDs {
 					if id == agentID {
 						continue
 					}
-					if agent.LeaseExpires == nil || !agent.LeaseExpires.After(now) {
-						continue
+					agent := state.Agents[id]
+					matchesRole := agent.Role == role
+					if roleType == "orchestrator" {
+						resolvedType, resolveErr := resolver.RoleType(agent.Role)
+						matchesRole = resolveErr == nil && resolvedType == "orchestrator"
 					}
-					if !ops.AgentProcessStatus(id, agent).IsLiveOrUnknown() {
+					if !matchesRole {
 						continue
 					}
 					if roleType == "orchestrator" {
-						// Count all live agents whose resolved type is orchestrator.
-						if rt, rtErr := resolver.RoleType(agent.Role); rtErr == nil && rt == "orchestrator" {
-							liveCount++
+						observation := ops.AgentProcessOwnership(id, agent, now)
+						if !observation.Occupied() {
+							continue
 						}
-					} else {
-						// Non-orchestrator: count by exact role key.
-						if agent.Role == role {
-							liveCount++
-						}
+						occupiedCount++
+						occupiedDetails = append(occupiedDetails, fmt.Sprintf("%s: %s", id, observation.Diagnostic(agent.PID)))
+						continue
 					}
+					observation := ops.AgentProcessOwnership(id, agent, now)
+					if !observation.Occupied() {
+						continue
+					}
+					occupiedCount++
+					occupiedDetails = append(occupiedDetails, fmt.Sprintf("%s: %s", id, observation.Diagnostic(agent.PID)))
 				}
-				if liveCount >= maxInst {
+				if occupiedCount >= maxInst {
 					if roleType == "orchestrator" {
-						return fmt.Errorf("type orchestrator already has %d live agent(s); only %d instance(s) allowed",
-							liveCount, maxInst)
+						return fmt.Errorf("type orchestrator already has %d live agent(s); only %d instance(s) allowed; %s",
+							occupiedCount, maxInst, strings.Join(occupiedDetails, "; "))
 					}
-					return fmt.Errorf("role %s already has %d live agent(s) (max %d); only %d instance(s) allowed",
-						role, liveCount, maxInst, maxInst)
+					return fmt.Errorf("role %s already has %d live agent(s) (max %d); only %d instance(s) allowed; %s",
+						role, occupiedCount, maxInst, maxInst, strings.Join(occupiedDetails, "; "))
 				}
 			}
+		}
+
+		generation, err := models.NewAgentGeneration()
+		if err != nil {
+			return err
 		}
 
 		// Register agent directly as IDLE (atomic operation)
@@ -124,6 +154,7 @@ func registerAgentLocked(bb *db.Blackboard, projectRoot, agentID, role, terminal
 		state.Agents[agentID] = models.Agent{
 			Role:         role,
 			Status:       models.AgentStatusIdle,
+			Generation:   generation,
 			Heartbeat:    now,
 			RegisteredAt: now,
 			Terminal:     terminal,
@@ -131,12 +162,13 @@ func registerAgentLocked(bb *db.Blackboard, projectRoot, agentID, role, terminal
 			LeaseExpires: &leaseExpires,
 			PID:          pid,
 		}
+		authority = models.AgentAuthority{ID: agentID, Generation: generation}
 
 		return nil
 	})
 
 	if err != nil {
-		return err
+		return models.AgentAuthority{}, err
 	}
 
 	// If reviewer role: clear stale review claims
@@ -149,7 +181,7 @@ func registerAgentLocked(bb *db.Blackboard, projectRoot, agentID, role, terminal
 		}
 	}
 
-	return nil
+	return authority, nil
 }
 
 // AutoAssignAgentID reads state, picks the first available <role>-N, and calls
@@ -181,14 +213,14 @@ func AutoAssignAgentID(bb *db.Blackboard, role string, maxRetries int, tryFn fun
 // unregisterAgent releases any task claim held by the agent, then removes
 // the agent from state. Both operations happen in a single atomic modify
 // so that an interrupt between them cannot leave a stuck task.
-func unregisterAgent(bb *db.Blackboard, agentID, projectRoot string) {
-	logger := GetLogger()
+func unregisterAgent(bb *db.Blackboard, authority models.AgentAuthority, projectRoot string) error {
 	now := time.Now().UTC()
+	agentID := authority.ID
 
 	// Load pipeline config outside the lock to avoid disk I/O under bb.Modify
 	pipelineTransitions, resolver := loadPipelineForRelease(projectRoot)
 
-	err := bb.Modify(func(state *models.State) error {
+	err := ops.ModifyWithAgentAuthority(bb, authority, func(state *models.State) error {
 		agent, exists := state.Agents[agentID]
 		if !exists {
 			return nil
@@ -218,9 +250,7 @@ func unregisterAgent(bb *db.Blackboard, agentID, projectRoot string) {
 		return nil
 	})
 
-	if err != nil {
-		logger.Warn("Failed to unregister agent", "error", err, "agent_id", agentID)
-	}
+	return err
 }
 
 // releaseTaskClaim transitions a task back to its unclaimed status and clears
@@ -337,10 +367,11 @@ func loadPipelineForRelease(projectRoot string) (map[models.TaskStatus][]models.
 }
 
 // resetAgentToIdle resets an agent's status to IDLE and clears CurrentTask
-func resetAgentToIdle(bb *db.Blackboard, agentID string) error {
+func resetAgentToIdle(bb *db.Blackboard, authority models.AgentAuthority) error {
 	now := time.Now().UTC()
+	agentID := authority.ID
 
-	return bb.Modify(func(state *models.State) error {
+	return ops.ModifyWithAgentAuthority(bb, authority, func(state *models.State) error {
 		agent, exists := state.Agents[agentID]
 		if !exists {
 			return &errors.NotFoundError{Entity: "agent", ID: agentID}
@@ -357,13 +388,14 @@ func resetAgentToIdle(bb *db.Blackboard, agentID string) error {
 
 // resetAgentAfterExit clears transient runtime states after CLI exit while preserving
 // explicit command-driven states that are meaningful between loops.
-func resetAgentAfterExit(bb *db.Blackboard, agentID, projectRoot string) error {
+func resetAgentAfterExit(bb *db.Blackboard, authority models.AgentAuthority, projectRoot string) error {
 	now := time.Now().UTC()
+	agentID := authority.ID
 
 	// Load pipeline config outside the lock to avoid disk I/O under bb.Modify
 	pipelineTransitions, resolver := loadPipelineForRelease(projectRoot)
 
-	return bb.Modify(func(state *models.State) error {
+	return ops.ModifyWithAgentAuthority(bb, authority, func(state *models.State) error {
 		agent, exists := state.Agents[agentID]
 		if !exists {
 			return &errors.NotFoundError{Entity: "agent", ID: agentID}
@@ -407,10 +439,11 @@ func resetAgentAfterExit(bb *db.Blackboard, agentID, projectRoot string) error {
 }
 
 // setAgentToOrchestratingStatus sets an orchestrator agent's status to PLANNING
-func setAgentToOrchestratingStatus(bb *db.Blackboard, agentID string) error {
+func setAgentToOrchestratingStatus(bb *db.Blackboard, authority models.AgentAuthority) error {
 	now := time.Now().UTC()
+	agentID := authority.ID
 
-	return bb.Modify(func(state *models.State) error {
+	return ops.ModifyWithAgentAuthority(bb, authority, func(state *models.State) error {
 		agent, exists := state.Agents[agentID]
 		if !exists {
 			return &errors.NotFoundError{Entity: "agent", ID: agentID}

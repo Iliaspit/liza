@@ -59,6 +59,7 @@ var artifactGuardPostUpdateTestHook func() error
 // the hook nil and uses the shared transition validator directly.
 var integrationMutationReceiptPersistTestHook func(models.IntegrationMutationReceipt)
 var validateIntegrationLifecycleTransition = statevalidate.ValidateIntegrationLifecycleTransition
+var mergeFinalStateTestHook func()
 
 // Integration failure reason constants.
 const (
@@ -136,9 +137,33 @@ func markIntegrationFailed(bb *db.Blackboard, taskID, agentID, reason, mergeComm
 	)
 }
 
+func markIntegrationFailedWithAuthority(bb *db.Blackboard, taskID string, authority models.AgentAuthority, reason, mergeCommit string, pb *pipelineBundle) error {
+	return markIntegrationFailedWithDiagnosticAuthority(
+		bb,
+		taskID,
+		authority.ID,
+		&authority,
+		reason,
+		mergeCommit,
+		pb,
+		integrationFailureDiagnostic(reason, mergeCommit, "", nil),
+	)
+}
+
 func markIntegrationFailedWithDiagnostic(
 	bb *db.Blackboard,
 	taskID, agentID, reason, mergeCommit string,
+	pb *pipelineBundle,
+	diagnostic map[string]any,
+) error {
+	return markIntegrationFailedWithDiagnosticAuthority(bb, taskID, agentID, nil, reason, mergeCommit, pb, diagnostic)
+}
+
+func markIntegrationFailedWithDiagnosticAuthority(
+	bb *db.Blackboard,
+	taskID, agentID string,
+	authority *models.AgentAuthority,
+	reason, mergeCommit string,
 	pb *pipelineBundle,
 	diagnostic map[string]any,
 ) error {
@@ -146,7 +171,7 @@ func markIntegrationFailedWithDiagnostic(
 	if pb != nil {
 		pr = pb.pr
 	}
-	return bb.Modify(func(s *models.State) error {
+	return modifyLifecycleState(bb, authority, func(s *models.State) error {
 		t := s.FindTask(taskID)
 		if t == nil {
 			return &lizaerrors.NotFoundError{Entity: "task", ID: taskID}
@@ -287,7 +312,7 @@ func (mutation *integrationRefMutation) receipt() models.IntegrationMutationRece
 	}
 }
 
-func persistIntegrationMutationReceipt(bb *db.Blackboard, mutation *integrationRefMutation) error {
+func persistIntegrationMutationReceipt(bb *db.Blackboard, mutation *integrationRefMutation, authority *models.AgentAuthority) error {
 	if mutation == nil || mutation.beforeCommit == mutation.afterCommit {
 		return nil
 	}
@@ -295,7 +320,7 @@ func persistIntegrationMutationReceipt(bb *db.Blackboard, mutation *integrationR
 	if integrationMutationReceiptPersistTestHook != nil {
 		integrationMutationReceiptPersistTestHook(receipt)
 	}
-	return bb.Modify(func(state *models.State) error {
+	return modifyLifecycleState(bb, authority, func(state *models.State) error {
 		previous := *state
 		previous.Goal = state.Goal
 		if lifecycle := state.Goal.Integration; lifecycle != nil {
@@ -342,10 +367,10 @@ func rollbackMergedCommit(projectRoot string, gitWrapper *git.Git, integrationRe
 	return mutation, err
 }
 
-func rollbackMergedCommitAndPersist(bb *db.Blackboard, projectRoot string, gitWrapper *git.Git, integrationRef, preMergeHEAD, mergeCommit, restoreRef, taskID string) error {
+func rollbackMergedCommitAndPersist(bb *db.Blackboard, projectRoot string, gitWrapper *git.Git, integrationRef, preMergeHEAD, mergeCommit, restoreRef, taskID string, authority *models.AgentAuthority) error {
 	return withEffectiveIntegrationCompletionLinearization(projectRoot, "rollback "+taskID, func() error {
 		mutation, rollbackErr := rollbackMergedCommit(projectRoot, gitWrapper, integrationRef, preMergeHEAD, mergeCommit, restoreRef, taskID)
-		if receiptErr := persistIntegrationMutationReceipt(bb, mutation); receiptErr != nil {
+		if receiptErr := persistIntegrationMutationReceipt(bb, mutation, authority); receiptErr != nil {
 			receiptErr = fmt.Errorf("failed to persist rollback integration mutation receipt: %w", receiptErr)
 			if rollbackErr != nil {
 				return errors.Join(rollbackErr, receiptErr)
@@ -554,6 +579,17 @@ func handlePreUpdateHookFailure(gw *git.Git, integrationRef, preMergeHEAD string
 //
 // No terminal I/O — integration test output is captured and returned in the result or error.
 func MergeWorktree(projectRoot, taskID, agentID string, mergeExtra ...map[string]any) (*MergeResult, error) {
+	return mergeWorktree(projectRoot, taskID, agentID, nil, mergeExtra...)
+}
+
+// MergeWorktreeWithAuthority is the authenticated command entry point. Every
+// state write in the merge, rollback, failure, and finalization paths checks
+// the caller-held generation in its own transaction.
+func MergeWorktreeWithAuthority(projectRoot, taskID string, authority models.AgentAuthority, mergeExtra ...map[string]any) (*MergeResult, error) {
+	return mergeWorktree(projectRoot, taskID, authority.ID, &authority, mergeExtra...)
+}
+
+func mergeWorktree(projectRoot, taskID, agentID string, authority *models.AgentAuthority, mergeExtra ...map[string]any) (*MergeResult, error) {
 	if taskID == "" {
 		return nil, &PreconditionError{Reason: "task ID is required"}
 	}
@@ -609,7 +645,7 @@ func MergeWorktree(projectRoot, taskID, agentID string, mergeExtra ...map[string
 			// HEAD mismatch indicates state corruption — stops retry loops, preserves worktree
 			detail := fmt.Sprintf("worktree HEAD (%s) does not match approved commit (%s)", shortSHA(wtHEAD), shortSHA(expectedCommit))
 			diagnostic := integrationFailureDiagnosticWithDetail(IntegrationReasonHEADMismatch, detail, "", "", nil)
-			if err := markIntegrationFailedWithDiagnostic(bb, taskID, agentID, IntegrationReasonHEADMismatch, "", pb, diagnostic); err != nil {
+			if err := markIntegrationFailedWithDiagnosticAuthority(bb, taskID, agentID, authority, IntegrationReasonHEADMismatch, "", pb, diagnostic); err != nil {
 				return nil, fmt.Errorf("failed to update state to INTEGRATION_FAILED: %w", err)
 			}
 
@@ -649,7 +685,7 @@ func MergeWorktree(projectRoot, taskID, agentID string, mergeExtra ...map[string
 			}
 			return nil
 		})
-		if receiptErr := persistIntegrationMutationReceipt(bb, forwardMutation); receiptErr != nil {
+		if receiptErr := persistIntegrationMutationReceipt(bb, forwardMutation, authority); receiptErr != nil {
 			receiptErr = fmt.Errorf("failed to persist integration mutation receipt: %w", receiptErr)
 			rollbackMutation, rollbackErr := rollbackMergedCommit(
 				projectRoot,
@@ -671,7 +707,7 @@ func MergeWorktree(projectRoot, taskID, agentID string, mergeExtra ...map[string
 		var artifactErr *candidateArtifactGuardError
 		if errors.As(err, &artifactErr) {
 			diagnostic := integrationFailureDiagnosticWithDetail(IntegrationReasonStateInvalid, err.Error(), "", "", nil)
-			if updateErr := markIntegrationFailedWithDiagnostic(bb, taskID, agentID, IntegrationReasonStateInvalid, "", pb, diagnostic); updateErr != nil {
+			if updateErr := markIntegrationFailedWithDiagnosticAuthority(bb, taskID, agentID, authority, IntegrationReasonStateInvalid, "", pb, diagnostic); updateErr != nil {
 				return nil, fmt.Errorf("failed to update state to INTEGRATION_FAILED: %w", updateErr)
 			}
 			return nil, &IntegrationFailedError{Reason: IntegrationReasonStateInvalid, Cause: err}
@@ -679,7 +715,7 @@ func MergeWorktree(projectRoot, taskID, agentID string, mergeExtra ...map[string
 		return nil, err
 	}
 	if outcome.conflict {
-		if updateErr := markIntegrationFailed(bb, taskID, agentID, "merge conflict", "", pb); updateErr != nil {
+		if updateErr := markIntegrationFailedWithDiagnosticAuthority(bb, taskID, agentID, authority, IntegrationReasonMergeConflict, "", pb, integrationFailureDiagnostic(IntegrationReasonMergeConflict, "", "", nil)); updateErr != nil {
 			return nil, fmt.Errorf("failed to update state to INTEGRATION_FAILED: %w", updateErr)
 		}
 		return nil, &IntegrationFailedError{Reason: IntegrationReasonMergeConflict}
@@ -712,9 +748,9 @@ func MergeWorktree(projectRoot, taskID, agentID string, mergeExtra ...map[string
 		return nil, fmt.Errorf("failed to read state for post-merge artifact validation: %w", err)
 	}
 	if err := statevalidate.ValidateMergeArtifactRefs(currentState, projectRoot, taskID); err != nil {
-		rollbackErr := rollbackMergedCommitAndPersist(bb, projectRoot, gitWrapper, integrationRef, preMergeHEAD, mergeCommit, rollbackRestoreRef, taskID)
+		rollbackErr := rollbackMergedCommitAndPersist(bb, projectRoot, gitWrapper, integrationRef, preMergeHEAD, mergeCommit, rollbackRestoreRef, taskID, authority)
 		diagnostic := integrationFailureDiagnosticWithDetail(IntegrationReasonStateInvalid, err.Error(), mergeCommit, "", rollbackErr)
-		if updateErr := markIntegrationFailedWithDiagnostic(bb, taskID, agentID, IntegrationReasonStateInvalid, mergeCommit, pb, diagnostic); updateErr != nil {
+		if updateErr := markIntegrationFailedWithDiagnosticAuthority(bb, taskID, agentID, authority, IntegrationReasonStateInvalid, mergeCommit, pb, diagnostic); updateErr != nil {
 			return nil, fmt.Errorf("failed to update state to INTEGRATION_FAILED: %w", updateErr)
 		}
 		return nil, &IntegrationFailedError{
@@ -751,10 +787,10 @@ func MergeWorktree(projectRoot, taskID, agentID string, mergeExtra ...map[string
 
 			// CAS rollback: only rewind if ref still points to our merge commit.
 			// If someone else merged on top, rewinding would drop their work.
-			rollbackErr := rollbackMergedCommitAndPersist(bb, projectRoot, gitWrapper, integrationRef, preMergeHEAD, mergeCommit, rollbackRestoreRef, taskID)
+			rollbackErr := rollbackMergedCommitAndPersist(bb, projectRoot, gitWrapper, integrationRef, preMergeHEAD, mergeCommit, rollbackRestoreRef, taskID, authority)
 
 			diagnostic := integrationFailureDiagnostic(IntegrationReasonTestsFailed, mergeCommit, testOutput, rollbackErr)
-			if updateErr := markIntegrationFailedWithDiagnostic(bb, taskID, agentID, IntegrationReasonTestsFailed, mergeCommit, pb, diagnostic); updateErr != nil {
+			if updateErr := markIntegrationFailedWithDiagnosticAuthority(bb, taskID, agentID, authority, IntegrationReasonTestsFailed, mergeCommit, pb, diagnostic); updateErr != nil {
 				return nil, fmt.Errorf("failed to update state to INTEGRATION_FAILED: %w", updateErr)
 			}
 
@@ -800,7 +836,10 @@ func MergeWorktree(projectRoot, taskID, agentID string, mergeExtra ...map[string
 	// worktree still exists for investigation; reverse order would lose the worktree
 	// while state still says APPROVED)
 	var autoConfiguredPostWorktreeCmd bool
-	err = bb.Modify(func(s *models.State) error {
+	if mergeFinalStateTestHook != nil {
+		mergeFinalStateTestHook()
+	}
+	err = modifyLifecycleState(bb, authority, func(s *models.State) error {
 		t := s.FindTask(taskID)
 		if t == nil {
 			return &lizaerrors.NotFoundError{Entity: "task", ID: taskID}

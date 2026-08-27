@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/ops"
 )
 
@@ -13,6 +14,16 @@ import (
 // result to stdout.
 func RetargetDependencyCommand(projectRoot, taskID, oldDependency string, newDependencies []string, reason, agentID string) error {
 	result, err := ops.RetargetDependency(projectRoot, taskID, oldDependency, newDependencies, reason, agentID)
+	return printRetargetDependencyResult(result, err)
+}
+
+// RetargetDependencyWithAuthorityCommand retargets an edge using generation-fenced authority.
+func RetargetDependencyWithAuthorityCommand(projectRoot, taskID, oldDependency string, newDependencies []string, reason string, authority models.AgentAuthority) error {
+	result, err := ops.RetargetDependencyWithAuthority(projectRoot, taskID, oldDependency, newDependencies, reason, authority)
+	return printRetargetDependencyResult(result, err)
+}
+
+func printRetargetDependencyResult(result *ops.RetargetDependencyResult, err error) error {
 	if err != nil {
 		return fmt.Errorf("retarget dependency: %w", err)
 	}

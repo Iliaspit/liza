@@ -45,6 +45,16 @@ func (r *RetargetDependencyResult) GetWarnings() []string {
 // with one or more direct dependencies. It is a metadata repair operation: it
 // does not unblock the task or execute repair validation commands.
 func RetargetDependency(projectRoot, taskID, oldDependency string, newDependencies []string, reason, agentID string) (*RetargetDependencyResult, error) {
+	return retargetDependencyWithOptionalAuthority(projectRoot, taskID, oldDependency, newDependencies, reason, agentID, nil)
+}
+
+// RetargetDependencyWithAuthority fences the dependency rewrite with the
+// orchestrator's registration generation.
+func RetargetDependencyWithAuthority(projectRoot, taskID, oldDependency string, newDependencies []string, reason string, authority models.AgentAuthority) (*RetargetDependencyResult, error) {
+	return retargetDependencyWithOptionalAuthority(projectRoot, taskID, oldDependency, newDependencies, reason, authority.ID, &authority)
+}
+
+func retargetDependencyWithOptionalAuthority(projectRoot, taskID, oldDependency string, newDependencies []string, reason, agentID string, authority *models.AgentAuthority) (*RetargetDependencyResult, error) {
 	if taskID == "" {
 		return nil, &PreconditionError{Reason: "task ID is required"}
 	}
@@ -73,7 +83,7 @@ func RetargetDependency(projectRoot, taskID, oldDependency string, newDependenci
 	var result RetargetDependencyResult
 	now := time.Now().UTC()
 
-	err = bb.Modify(func(state *models.State) error {
+	err = lifecycleMutation(bb, authority)(func(state *models.State) error {
 		task := state.FindTask(taskID)
 		if task == nil {
 			return &errors.NotFoundError{Entity: "task", ID: taskID}

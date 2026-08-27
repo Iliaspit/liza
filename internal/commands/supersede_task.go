@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/ops"
 )
 
@@ -13,6 +14,18 @@ func SupersedeTaskCommand(projectRoot, taskID string, replacementIDs []string, r
 	result, err := ops.SupersedeTaskWithOptions(projectRoot, taskID, replacementIDs, reason, agentID, ops.SupersedeTaskOptions{
 		RecoverabilityCommand: recoverabilityCommand,
 	})
+	return printSupersedeTaskResult(result, err)
+}
+
+// SupersedeTaskWithAuthorityCommand supersedes a task using generation-fenced authority.
+func SupersedeTaskWithAuthorityCommand(projectRoot, taskID string, replacementIDs []string, reason, recoverabilityCommand string, authority models.AgentAuthority) error {
+	result, err := ops.SupersedeTaskWithAuthority(projectRoot, taskID, replacementIDs, reason, authority, ops.SupersedeTaskOptions{
+		RecoverabilityCommand: recoverabilityCommand,
+	})
+	return printSupersedeTaskResult(result, err)
+}
+
+func printSupersedeTaskResult(result *ops.SupersedeResult, err error) error {
 	if err != nil {
 		return fmt.Errorf("supersede task: %w", err)
 	}

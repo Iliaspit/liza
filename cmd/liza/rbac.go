@@ -10,6 +10,16 @@ import (
 	"github.com/liza-mas/liza/internal/pipeline"
 )
 
+// afterRBACAdmissionTestHook is a deterministic test seam for replacing an
+// agent generation after CLI authorization but before command dispatch.
+var afterRBACAdmissionTestHook func(agentID string)
+
+func runAfterRBACAdmissionTestHook(agentID string) {
+	if afterRBACAdmissionTestHook != nil {
+		afterRBACAdmissionTestHook(agentID)
+	}
+}
+
 // loadResolverForRBAC loads a pipeline resolver from the project root using the
 // frozen config (.liza/pipeline.yaml). Returns a fail-closed error on load failure.
 func loadResolverForRBAC(projectRoot string) (*pipeline.Resolver, error) {
@@ -54,6 +64,7 @@ func validateAllowedOperation(resolver *pipeline.Resolver, agentID, operationNam
 		}
 	}
 	if capabilities.Allows(operationName) {
+		runAfterRBACAdmissionTestHook(agentID)
 		return nil
 	}
 	return &lizaerrors.PermissionError{
@@ -88,6 +99,7 @@ func validateRoleType(resolver *pipeline.Resolver, agentID string, allowedTypes 
 	}
 	for _, allowed := range allowedTypes {
 		if actualType == allowed {
+			runAfterRBACAdmissionTestHook(agentID)
 			return nil
 		}
 	}

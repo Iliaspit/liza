@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math/rand/v2"
 	"path/filepath"
+	"sort"
 	"time"
 
 	"github.com/liza-mas/liza/internal/db"
@@ -20,11 +21,20 @@ import (
 var ErrAgentDegraded = ops.ErrAgentDegraded
 
 func claimDoerTask(projectRoot, agentID, role string, bb *db.Blackboard) (taskID, worktree string, err error) {
+	return claimDoerTaskWithOptionalAuthority(projectRoot, agentID, role, nil, bb)
+}
+
+func claimDoerTaskWithAuthority(projectRoot string, authority models.AgentAuthority, role string, bb *db.Blackboard) (taskID, worktree string, err error) {
+	return claimDoerTaskWithOptionalAuthority(projectRoot, authority.ID, role, &authority, bb)
+}
+
+func claimDoerTaskWithOptionalAuthority(projectRoot, agentID, role string, authority *models.AgentAuthority, bb *db.Blackboard) (taskID, worktree string, err error) {
 	logger := GetLogger()
 
 	handoffResult, err := ops.ResumeHandoff(ops.ResumeHandoffInput{
 		ProjectRoot: projectRoot,
 		AgentID:     agentID,
+		Authority:   authority,
 	})
 	if err != nil {
 		return "", "", err
@@ -32,7 +42,7 @@ func claimDoerTask(projectRoot, agentID, role string, bb *db.Blackboard) (taskID
 	if handoffResult.Found {
 		logger.Info("Resuming claimed task from handoff", "task_id", handoffResult.TaskID, "agent_id", agentID)
 		if setupErr := ensureDoerWorktreeSetup(
-			projectRoot, agentID, role, handoffResult.TaskID, handoffResult.Worktree,
+			projectRoot, agentID, role, handoffResult.TaskID, handoffResult.Worktree, authority,
 		); setupErr != nil {
 			return "", "", setupErr
 		}
@@ -42,6 +52,7 @@ func claimDoerTask(projectRoot, agentID, role string, bb *db.Blackboard) (taskID
 	ownedResult, err := ops.ResumeOwnedTask(ops.ResumeOwnedTaskInput{
 		ProjectRoot: projectRoot,
 		AgentID:     agentID,
+		Authority:   authority,
 	})
 	if err != nil {
 		return "", "", err
@@ -49,7 +60,7 @@ func claimDoerTask(projectRoot, agentID, role string, bb *db.Blackboard) (taskID
 	if ownedResult.Found {
 		logger.Info("Resuming owned executing task", "task_id", ownedResult.TaskID, "agent_id", agentID)
 		if setupErr := ensureDoerWorktreeSetup(
-			projectRoot, agentID, role, ownedResult.TaskID, ownedResult.Worktree,
+			projectRoot, agentID, role, ownedResult.TaskID, ownedResult.Worktree, authority,
 		); setupErr != nil {
 			return "", "", setupErr
 		}
@@ -62,6 +73,11 @@ func claimDoerTask(projectRoot, agentID, role string, bb *db.Blackboard) (taskID
 	state, err := bb.Read()
 	if err != nil {
 		return "", "", fmt.Errorf("failed to read state: %w", err)
+	}
+	if authority != nil {
+		if err := ops.RequireAgentAuthority(state, *authority); err != nil {
+			return "", "", err
+		}
 	}
 
 	pr := loadResolver(projectRoot)
@@ -83,17 +99,32 @@ func claimDoerTask(projectRoot, agentID, role string, bb *db.Blackboard) (taskID
 	var lastErr error
 	candidateIDs := taskIDsFromCandidates(tier)
 	for _, task := range tier {
-		result, claimErr := ops.ClaimTask(projectRoot, task.ID, agentID)
+		var result *ops.ClaimResult
+		var claimErr error
+		if authority == nil {
+			result, claimErr = ops.ClaimTask(projectRoot, task.ID, agentID)
+		} else {
+			result, claimErr = ops.ClaimTaskWithAuthority(projectRoot, task.ID, *authority)
+		}
 		if claimErr != nil {
 			logger.Warn("Claim attempt failed, trying next candidate",
 				"task_id", task.ID, "error", claimErr)
-			if classifyErr := markAgentDegradedForInfraClaim(projectRoot, agentID, role, task.ID, candidateIDs, claimErr); classifyErr != nil {
+			if classifyErr := markAgentDegradedForInfraClaim(projectRoot, agentID, role, task.ID, candidateIDs, claimErr, authority); classifyErr != nil {
 				return "", "", classifyErr
 			}
 			lastErr = claimErr
 			continue
 		}
-		if clearErr := ops.ClearAgentDegraded(projectRoot, agentID); clearErr != nil {
+		var clearErr error
+		if authority == nil {
+			clearErr = ops.ClearAgentDegraded(projectRoot, agentID)
+		} else {
+			clearErr = ops.ClearAgentDegradedWithAuthority(projectRoot, *authority)
+		}
+		if clearErr != nil {
+			if ops.IsAgentAuthorityError(clearErr) {
+				return "", "", clearErr
+			}
 			logger.Warn("Failed to clear degraded agent health after successful claim",
 				"agent_id", agentID, "error", clearErr)
 		}
@@ -115,7 +146,7 @@ func claimDoerTask(projectRoot, agentID, role string, bb *db.Blackboard) (taskID
 // supervisor logs PreExecution failures and continues (supervisor.go), so a
 // PreExecution hook would not fail closed without changing that contract for
 // every strategy.
-func ensureDoerWorktreeSetup(projectRoot, agentID, role, taskID, worktreeRel string) error {
+func ensureDoerWorktreeSetup(projectRoot, agentID, role, taskID, worktreeRel string, authority *models.AgentAuthority) error {
 	if worktreeRel == "" {
 		return nil
 	}
@@ -133,7 +164,7 @@ func ensureDoerWorktreeSetup(projectRoot, agentID, role, taskID, worktreeRel str
 	GetLogger().Error("post-worktree-cmd failed on resume",
 		"task_id", taskID, "agent_id", agentID, "error", setupErr)
 	if degradedErr := markAgentDegradedForInfraClaim(
-		projectRoot, agentID, role, taskID, []string{taskID}, setupErr,
+		projectRoot, agentID, role, taskID, []string{taskID}, setupErr, authority,
 	); degradedErr != nil {
 		return degradedErr
 	}
@@ -148,7 +179,7 @@ func taskIDsFromCandidates(candidates []*models.Task) []string {
 	return taskIDs
 }
 
-func markAgentDegradedForInfraClaim(projectRoot, agentID, role, taskID string, candidateTaskIDs []string, err error) error {
+func markAgentDegradedForInfraClaim(projectRoot, agentID, role, taskID string, candidateTaskIDs []string, err error, authority *models.AgentAuthority) error {
 	// ops.ClaimTask already degraded and wrapped this one; re-marking would
 	// duplicate the anomaly.
 	if errors.Is(err, ops.ErrAgentDegraded) {
@@ -168,6 +199,7 @@ func markAgentDegradedForInfraClaim(projectRoot, agentID, role, taskID string, c
 		LastError:      err.Error(),
 		RecoverHint:    classification.RecoverHint,
 		DegradedBy:     "claim_loop",
+		Authority:      authority,
 	}); markErr != nil {
 		return fmt.Errorf("failed to mark agent degraded after claim infrastructure failure: %w", markErr)
 	}
@@ -194,6 +226,14 @@ func shuffledByPriorityTier(candidates []*models.Task) []*models.Task {
 }
 
 func claimReviewerTaskForRole(projectRoot, agentID, role, targetTaskID string, leaseDuration int, bb *db.Blackboard) (taskID, worktree, reviewCommit string, err error) {
+	return claimReviewerTaskForRoleWithOptionalAuthority(projectRoot, agentID, role, targetTaskID, leaseDuration, nil, bb)
+}
+
+func claimReviewerTaskForRoleWithAuthority(projectRoot string, authority models.AgentAuthority, role, targetTaskID string, leaseDuration int, bb *db.Blackboard) (taskID, worktree, reviewCommit string, err error) {
+	return claimReviewerTaskForRoleWithOptionalAuthority(projectRoot, authority.ID, role, targetTaskID, leaseDuration, &authority, bb)
+}
+
+func claimReviewerTaskForRoleWithOptionalAuthority(projectRoot, agentID, role, targetTaskID string, leaseDuration int, authority *models.AgentAuthority, bb *db.Blackboard) (taskID, worktree, reviewCommit string, err error) {
 	logger := GetLogger()
 
 	result, err := ops.ClaimReviewerTask(ops.ClaimReviewerTaskInput{
@@ -202,6 +242,7 @@ func claimReviewerTaskForRole(projectRoot, agentID, role, targetTaskID string, l
 		Role:          role,
 		TaskID:        targetTaskID,
 		LeaseDuration: leaseDuration,
+		Authority:     authority,
 	})
 	if err != nil {
 		logger.Error("Review claim error", "error", err)
@@ -219,12 +260,16 @@ func claimReviewerTask(projectRoot, agentID string, leaseDuration int, bb *db.Bl
 // releaseReviewerClaimQuietly releases a reviewer claim, logging but not
 // propagating errors. Used in supervisor recovery paths for transient failures
 // where blockReviewerTask was NOT called.
-func releaseReviewerClaimQuietly(projectRoot, taskID, agentID string) {
-	_, err := ops.ReleaseClaim(projectRoot, taskID, roles.ClaimReviewer, true, "supervisor: worktree check transient failure", agentID)
+func releaseReviewerClaimQuietly(projectRoot, taskID string, authority models.AgentAuthority) error {
+	_, err := ops.ReleaseClaimWithAuthority(projectRoot, taskID, roles.ClaimReviewer, true, "supervisor: worktree check transient failure", authority)
 	if err != nil {
 		GetLogger().Warn("Failed to release reviewer claim during recovery",
 			"task_id", taskID, "error", err)
+		if ops.IsAgentAuthorityError(err) {
+			return err
+		}
 	}
+	return nil
 }
 
 // mergeGateInput holds the inputs for the merge gate evaluation.
@@ -294,10 +339,23 @@ func evaluateMergeGate(input mergeGateInput) *mergeGateResult {
 }
 
 func handleApprovedMerges(projectRoot, agentID string, bb *db.Blackboard, pr models.PipelineResolver) error {
+	return handleApprovedMergesWithOptionalAuthority(projectRoot, agentID, nil, bb, pr)
+}
+
+func handleApprovedMergesWithAuthority(projectRoot string, authority models.AgentAuthority, bb *db.Blackboard, pr models.PipelineResolver) error {
+	return handleApprovedMergesWithOptionalAuthority(projectRoot, authority.ID, &authority, bb, pr)
+}
+
+func handleApprovedMergesWithOptionalAuthority(projectRoot, agentID string, authority *models.AgentAuthority, bb *db.Blackboard, pr models.PipelineResolver) error {
 	logger := GetLogger()
 	state, err := bb.Read()
 	if err != nil {
 		return err
+	}
+	if authority != nil {
+		if err := ops.RequireAgentAuthority(state, *authority); err != nil {
+			return err
+		}
 	}
 
 	// Load the concrete resolver once for quorum and diversity lookups.
@@ -309,7 +367,7 @@ func handleApprovedMerges(projectRoot, agentID string, bb *db.Blackboard, pr mod
 
 	for i := range state.Tasks {
 		task := &state.Tasks[i]
-		if approvedMergePending(task, agentID, pr) {
+		if approvedMergePending(task, state, agentID, pr) {
 
 			// Resolve effective impact and quorum for merge gate
 			effectiveImpact := ops.ResolveEffectiveImpact(task.History)
@@ -353,8 +411,16 @@ func handleApprovedMerges(projectRoot, agentID string, bb *db.Blackboard, pr mod
 
 			logger.Info("Merging approved task", "task_id", task.ID)
 
-			result, err := ops.MergeWorktree(projectRoot, task.ID, agentID, gate.extra)
+			var result *ops.MergeResult
+			if authority == nil {
+				result, err = ops.MergeWorktree(projectRoot, task.ID, agentID, gate.extra)
+			} else {
+				result, err = ops.MergeWorktreeWithAuthority(projectRoot, task.ID, *authority, gate.extra)
+			}
 			if err != nil {
+				if ops.IsAgentAuthorityError(err) {
+					return err
+				}
 				var integrationErr *ops.IntegrationFailedError
 				if errors.As(err, &integrationErr) {
 					logArgs := []any{
@@ -408,18 +474,60 @@ func hasPendingMerges(bb *db.Blackboard, agentID string, pr models.PipelineResol
 
 	for i := range state.Tasks {
 		task := &state.Tasks[i]
-		if approvedMergePending(task, agentID, pr) {
+		if approvedMergePending(task, state, agentID, pr) {
 			return true
 		}
 	}
 	return false
 }
 
-func approvedMergePending(task *models.Task, agentID string, pr models.PipelineResolver) bool {
-	if !models.IsApprovedForMerge(task, pr) || task.LastApprover() != agentID {
+func approvedMergePending(task *models.Task, state *models.State, agentID string, pr models.PipelineResolver) bool {
+	if !models.IsApprovedForMerge(task, pr) || task.LastApprover() == "" {
 		return false
 	}
-	return task.MergeCommit == nil || len(task.IntegrationFailure) > 0
+	if task.MergeCommit != nil && len(task.IntegrationFailure) == 0 {
+		return false
+	}
+	return approvedMergeOwner(task, state, pr) == agentID
+}
+
+func approvedMergeOwner(task *models.Task, state *models.State, pr models.PipelineResolver) string {
+	reviewerRole, err := pr.ReviewerRole(task.RolePair)
+	if err != nil {
+		return ""
+	}
+
+	eligible := make([]string, 0, len(state.Agents))
+	now := time.Now().UTC()
+	nilLeaseHeartbeatWindow := models.NormalizeHeartbeatInterval(state.Config.HeartbeatInterval) + models.LeaseExpiryGracePeriod
+	for id, agent := range state.Agents {
+		if agent.Role != reviewerRole || agent.Generation == "" {
+			continue
+		}
+		liveRegistration := agent.LeaseExpires != nil && agent.LeaseExpires.After(now)
+		if agent.LeaseExpires == nil {
+			liveRegistration = !agent.Heartbeat.IsZero() && agent.Heartbeat.After(now.Add(-nilLeaseHeartbeatWindow))
+		}
+		if !liveRegistration {
+			continue
+		}
+		if health, ok := state.AgentHealth[id]; ok && health.IsCurrentDegradedFor(agent) {
+			continue
+		}
+		eligible = append(eligible, id)
+	}
+	sort.Strings(eligible)
+
+	lastApprover := task.LastApprover()
+	for _, id := range eligible {
+		if id == lastApprover {
+			return id
+		}
+	}
+	if len(eligible) == 0 {
+		return ""
+	}
+	return eligible[0]
 }
 
 // handleAvailableTransitions creates child tasks from pipeline transitions
@@ -466,7 +574,7 @@ func handleAutoTransitions(projectRoot string) error {
 // handleCleanTaskCleanup removes worktrees for tasks at pipeline-defined clean
 // terminal states (e.g., INTEGRATION_ANALYSIS_CLEAN). These tasks bypass the
 // merge path that normally handles worktree cleanup.
-func handleCleanTaskCleanup(projectRoot string) error {
+func handleCleanTaskCleanup(projectRoot string, authority models.AgentAuthority) error {
 	lp := paths.New(projectRoot)
 	bb := db.For(lp.StatePath())
 	state, err := bb.Read()
@@ -489,6 +597,9 @@ func handleCleanTaskCleanup(projectRoot string) error {
 		if err != nil || task.Status != cleanStatus {
 			continue
 		}
+		if err := ops.RequireAgentAuthority(state, authority); err != nil {
+			return err
+		}
 		result, err := ops.DeleteWorktree(projectRoot, task.ID)
 		if err != nil {
 			logger.Warn("Failed to cleanup clean task worktree", "task_id", task.ID, "error", err)
@@ -504,7 +615,7 @@ func handleCleanTaskCleanup(projectRoot string) error {
 		// Finalize: mirror non-git cleanup from the merge path.
 		// Records completion handoff event and releases the assigned agent.
 		taskID := task.ID
-		if err := bb.Modify(func(s *models.State) error {
+		if err := ops.ModifyWithAgentAuthority(bb, authority, func(s *models.State) error {
 			t := s.FindTask(taskID)
 			if t == nil {
 				return nil

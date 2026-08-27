@@ -1,6 +1,11 @@
 package models
 
-import "time"
+import (
+	"crypto/rand"
+	"encoding/hex"
+	"fmt"
+	"time"
+)
 
 // AgentStatus represents the state of an agent
 type AgentStatus string
@@ -44,10 +49,27 @@ func (ahs AgentHealthState) IsValid() bool {
 	return false
 }
 
+// AgentAuthority identifies one persisted registration incarnation.
+type AgentAuthority struct {
+	ID         string `json:"id"`
+	Generation string `json:"generation"`
+}
+
+// NewAgentGeneration returns an opaque generation suitable for fencing one
+// successful agent registration from every earlier registration of the same ID.
+func NewAgentGeneration() (string, error) {
+	var token [16]byte
+	if _, err := rand.Read(token[:]); err != nil {
+		return "", fmt.Errorf("mint agent generation: %w", err)
+	}
+	return hex.EncodeToString(token[:]), nil
+}
+
 // Agent represents an agent (coder, reviewer, orchestrator) in the system
 type Agent struct {
 	Role            string         `yaml:"role"`
 	Status          AgentStatus    `yaml:"status"`
+	Generation      string         `yaml:"generation,omitempty"`
 	CurrentTask     *string        `yaml:"current_task,omitempty"`
 	LeaseExpires    *time.Time     `yaml:"lease_expires,omitempty"`
 	Heartbeat       time.Time      `yaml:"heartbeat"`
@@ -58,6 +80,11 @@ type Agent struct {
 	ContextPercent  int            `yaml:"context_percent"`
 	PID             int            `yaml:"pid,omitempty"`
 	Extra           map[string]any `yaml:",inline"`
+}
+
+// Authority returns the caller-held authority for this registered agent.
+func (a Agent) Authority(agentID string) AgentAuthority {
+	return AgentAuthority{ID: agentID, Generation: a.Generation}
 }
 
 // AgentHealth records current capacity health for a specific agent epoch.

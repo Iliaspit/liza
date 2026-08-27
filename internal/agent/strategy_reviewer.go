@@ -55,7 +55,10 @@ func (s *reviewerStrategy) PreWork(_ context.Context, bb *db.Blackboard, config 
 	if prErr != nil {
 		logger.Warn("Failed to load pipeline resolver — skipping merge handling", "error", prErr)
 	} else {
-		if err := handleApprovedMerges(config.ProjectRoot, config.AgentID, bb, pr); err != nil {
+		if err := handleApprovedMergesWithAuthority(config.ProjectRoot, config.Authority, bb, pr); err != nil {
+			if ops.IsAgentAuthorityError(err) {
+				return false, err
+			}
 			logger.Warn("Merge handler error", "error", err)
 		}
 	}
@@ -67,7 +70,7 @@ func (s *reviewerStrategy) PreWork(_ context.Context, bb *db.Blackboard, config 
 	}
 
 	// Clean up worktrees for tasks at pipeline-defined clean terminal states.
-	if err := handleCleanTaskCleanup(config.ProjectRoot); err != nil {
+	if err := handleCleanTaskCleanup(config.ProjectRoot, config.Authority); err != nil {
 		logger.Warn("Clean task cleanup error", "error", err)
 	}
 
@@ -138,7 +141,7 @@ func (s *reviewerStrategy) WaitForWork(ctx context.Context, bb *db.Blackboard, c
 func (s *reviewerStrategy) ClaimTask(config SupervisorConfig, bb *db.Blackboard) (string, string, error) {
 	logger := GetLogger()
 
-	taskID, _, reviewCommit, err := claimReviewerTaskForRole(config.ProjectRoot, config.AgentID, s.role, config.InitialTask, 1800, bb)
+	taskID, _, reviewCommit, err := claimReviewerTaskForRoleWithAuthority(config.ProjectRoot, config.Authority, s.role, config.InitialTask, 1800, bb)
 	if err != nil {
 		return "", "", err
 	}
@@ -149,7 +152,7 @@ func (s *reviewerStrategy) ClaimTask(config SupervisorConfig, bb *db.Blackboard)
 		"review_commit", reviewCommit)
 
 	// Verify the worktree exists and is prepared before launching agent.
-	_, wtErr := ensureReviewerWorktree(config.ProjectRoot, bb, taskID, config.AgentID)
+	_, wtErr := ensureReviewerWorktree(config.ProjectRoot, bb, taskID, config.Authority)
 	if wtErr != nil {
 		logger.Warn("Reviewer worktree check failed",
 			"task_id", taskID, "error", wtErr)
@@ -159,7 +162,9 @@ func (s *reviewerStrategy) ClaimTask(config SupervisorConfig, bb *db.Blackboard)
 			// reviewer claim and agent state are still dangling — release them.
 			// Release restores the task to its reviewable status, preserving the
 			// doer's completed work for the next reviewer.
-			releaseReviewerClaimQuietly(config.ProjectRoot, taskID, config.AgentID)
+			if releaseErr := releaseReviewerClaimQuietly(config.ProjectRoot, taskID, config.Authority); releaseErr != nil {
+				return "", "", releaseErr
+			}
 		}
 		// For errTaskBlocked, blockReviewerTask already cleared
 		// claim fields and released agent state.
@@ -168,7 +173,7 @@ func (s *reviewerStrategy) ClaimTask(config SupervisorConfig, bb *db.Blackboard)
 		// progress on any task: degrade it, mirroring the doer claim policy. The
 		// supervisor exits on ErrAgentDegraded before any provider session starts.
 		if degradedErr := markAgentDegradedForInfraClaim(
-			config.ProjectRoot, config.AgentID, s.role, taskID, []string{taskID}, wtErr,
+			config.ProjectRoot, config.AgentID, s.role, taskID, []string{taskID}, wtErr, &config.Authority,
 		); degradedErr != nil {
 			return "", "", degradedErr
 		}

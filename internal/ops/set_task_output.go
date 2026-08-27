@@ -22,6 +22,19 @@ type SetTaskOutputInput struct {
 // to the given agent, and be in an executing state (IMPLEMENTING, CODE_PLANNING, or
 // a pipeline-defined executing status). Overwrites any existing output (idempotent).
 func SetTaskOutput(projectRoot string, input *SetTaskOutputInput) error {
+	return setTaskOutputWithOptionalAuthority(projectRoot, input, nil)
+}
+
+// SetTaskOutputWithAuthority fences the output write with the caller's
+// registration generation.
+func SetTaskOutputWithAuthority(projectRoot string, input *SetTaskOutputInput, authority models.AgentAuthority) error {
+	if err := requireAuthorityActor(authority, input.AgentID); err != nil {
+		return err
+	}
+	return setTaskOutputWithOptionalAuthority(projectRoot, input, &authority)
+}
+
+func setTaskOutputWithOptionalAuthority(projectRoot string, input *SetTaskOutputInput, authority *models.AgentAuthority) error {
 	if input.TaskID == "" {
 		return &PreconditionError{Reason: "task_id is required"}
 	}
@@ -80,7 +93,7 @@ func SetTaskOutput(projectRoot string, input *SetTaskOutputInput) error {
 		}
 	}
 
-	return bb.Modify(func(state *models.State) error {
+	return lifecycleMutation(bb, authority)(func(state *models.State) error {
 		task := state.FindTask(input.TaskID)
 		if task == nil {
 			return fmt.Errorf("task %s not found", input.TaskID)

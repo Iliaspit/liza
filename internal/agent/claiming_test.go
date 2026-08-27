@@ -280,14 +280,15 @@ func TestHasPendingMerges(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			tmpDir := t.TempDir()
 			statePath, _ := testhelpers.SetupLizaDir(t, tmpDir)
+			pr, _ := ops.LoadResolverForModels(tmpDir)
 
 			state := testhelpers.CreateValidState()
 			state.Tasks = tt.tasks
+			registerEligibleMergeTestAgents(state, tt.tasks, tt.agentID, pr)
 
 			testhelpers.WriteInitialState(t, statePath, state)
 
 			bb := db.New(statePath)
-			pr, _ := ops.LoadResolverForModels(tmpDir)
 
 			result := hasPendingMerges(bb, tt.agentID, pr)
 			if result != tt.expected {
@@ -363,6 +364,7 @@ func TestHasPendingMerges_Pipeline(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			state := testhelpers.CreateValidState()
 			state.Tasks = tt.tasks
+			registerEligibleMergeTestAgents(state, tt.tasks, tt.agentID, pr)
 			testhelpers.WriteInitialState(t, statePath, state)
 
 			bb := db.New(statePath)
@@ -468,6 +470,7 @@ func TestHasPendingMerges_Phase2Pipeline(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			state := testhelpers.CreateValidState()
 			state.Tasks = tt.tasks
+			registerEligibleMergeTestAgents(state, tt.tasks, tt.agentID, pr)
 			testhelpers.WriteInitialState(t, statePath, state)
 
 			bb := db.New(statePath)
@@ -556,9 +559,9 @@ func TestLogTaskSubmissionIfCompleted_Phase2Pipeline(t *testing.T) {
 	}
 }
 
-// TestMergeIdentityCheck verifies that hasPendingMerges (and by extension
-// handleApprovedMerges, which uses the same condition) identifies the merge
-// owner via task.LastApprover() from the approvals list, not task.ApprovedBy.
+// TestMergeIdentityCheck verifies that an eligible final approver keeps merge
+// affinity. Supervisor takeover after that approver exits is covered by
+// TestApprovedMergeTakeoverAfterFinalApproverExit.
 func TestMergeIdentityCheck(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -646,19 +649,38 @@ func TestMergeIdentityCheck(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			tmpDir := t.TempDir()
 			statePath, _ := testhelpers.SetupLizaDir(t, tmpDir)
+			pr, _ := ops.LoadResolverForModels(tmpDir)
 
 			state := testhelpers.CreateValidState()
 			state.Tasks = tt.tasks
+			registerEligibleMergeTestAgents(state, tt.tasks, tt.agentID, pr)
 			testhelpers.WriteInitialState(t, statePath, state)
 
 			bb := db.New(statePath)
-			pr, _ := ops.LoadResolverForModels(tmpDir)
 
 			result := hasPendingMerges(bb, tt.agentID, pr)
 			if result != tt.expected {
 				t.Errorf("hasPendingMerges() = %v, expected %v", result, tt.expected)
 			}
 		})
+	}
+}
+
+func registerEligibleMergeTestAgents(state *models.State, tasks []models.Task, caller string, pr models.PipelineResolver) {
+	for i := range tasks {
+		reviewerRole, err := pr.ReviewerRole(tasks[i].RolePair)
+		if err != nil {
+			continue
+		}
+		agentIDs := map[string]struct{}{caller: {}}
+		for _, approval := range tasks[i].Approvals {
+			agentIDs[approval.Agent] = struct{}{}
+		}
+		for agentID := range agentIDs {
+			if agentID != "" {
+				state.Agents[agentID] = testhelpers.RegisteredTestAgent(reviewerRole)
+			}
+		}
 	}
 }
 

@@ -28,6 +28,8 @@ var (
 	BuildDate = "unknown"
 )
 
+const agentGenerationEnvSuffix = "AGENT_GENERATION"
+
 var rootCmd = &cobra.Command{
 	Use:   brand.BinaryName,
 	Short: fmt.Sprintf("%s - Multi-agent task execution system", brand.NameTitle),

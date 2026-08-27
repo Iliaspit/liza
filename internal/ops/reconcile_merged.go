@@ -24,6 +24,16 @@ type ReconcileMergedResult struct {
 // verifies the task was completed externally, such as by a GitHub PR merge.
 // The merge commit must resolve locally so state records a concrete commit.
 func ReconcileMerged(projectRoot, taskID, mergeCommit, prURL, reason, agentID string) (*ReconcileMergedResult, error) {
+	return reconcileMergedWithOptionalAuthority(projectRoot, taskID, mergeCommit, prURL, reason, agentID, nil)
+}
+
+// ReconcileMergedWithAuthority fences reconciliation and its metrics follow-up
+// with the orchestrator's registration generation.
+func ReconcileMergedWithAuthority(projectRoot, taskID, mergeCommit, prURL, reason string, authority models.AgentAuthority) (*ReconcileMergedResult, error) {
+	return reconcileMergedWithOptionalAuthority(projectRoot, taskID, mergeCommit, prURL, reason, authority.ID, &authority)
+}
+
+func reconcileMergedWithOptionalAuthority(projectRoot, taskID, mergeCommit, prURL, reason, agentID string, authority *models.AgentAuthority) (*ReconcileMergedResult, error) {
 	if taskID == "" {
 		return nil, &PreconditionError{Reason: "task ID is required"}
 	}
@@ -61,7 +71,7 @@ func ReconcileMerged(projectRoot, taskID, mergeCommit, prURL, reason, agentID st
 	}
 
 	now := time.Now().UTC()
-	err = bb.Modify(func(state *models.State) error {
+	err = lifecycleMutation(bb, authority)(func(state *models.State) error {
 		currentTask := state.FindTask(taskID)
 		if currentTask == nil {
 			return &errors.NotFoundError{Entity: "task", ID: taskID}
@@ -123,8 +133,14 @@ func ReconcileMerged(projectRoot, taskID, mergeCommit, prURL, reason, agentID st
 		}
 	}
 	warnings = append(warnings, cleanupPredecessorBranches(bb, gw, taskID)...)
-	if _, err := UpdateSprintMetrics(projectRoot); err != nil {
-		warnings = append(warnings, fmt.Sprintf("failed to update sprint metrics: %v", err))
+	var metricsErr error
+	if authority == nil {
+		_, metricsErr = UpdateSprintMetrics(projectRoot)
+	} else {
+		_, metricsErr = UpdateSprintMetricsWithAuthority(projectRoot, *authority)
+	}
+	if metricsErr != nil {
+		warnings = append(warnings, fmt.Sprintf("failed to update sprint metrics: %v", metricsErr))
 	}
 
 	return &ReconcileMergedResult{

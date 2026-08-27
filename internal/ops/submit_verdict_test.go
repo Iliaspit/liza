@@ -581,6 +581,7 @@ func TestRecordStaleVerdictAnomaly_SkipsReviewingTask(t *testing.T) {
 		bb,
 		"task-1",
 		"code-reviewer-1",
+		nil,
 		"REJECTED",
 		"late finding",
 		"",
@@ -2067,6 +2068,7 @@ func TestRecordSubmitVerdictFailure_LogsAnomalyRecordingFailure(t *testing.T) {
 		paths.New(tmpDir).LogPath(),
 		"task-1",
 		"code-reviewer-1",
+		nil,
 		"REJECTED",
 		fmt.Errorf("primary cause contains %s", secret),
 	)

@@ -1,6 +1,7 @@
 package ops
 
 import (
+	"bytes"
 	"fmt"
 	"strings"
 	"testing"
@@ -143,6 +144,51 @@ func TestMarkAndClearAgentDegraded(t *testing.T) {
 	}
 	if _, ok := readState.AgentHealth["coder-1"]; ok {
 		t.Fatal("agent health still present after clear")
+	}
+}
+
+func TestMarkAgentDegradedRejectsAuthorityActorMismatch(t *testing.T) {
+	t.Parallel()
+
+	projectRoot, statePath := writeAgentHealthState(t)
+	now := time.Now().UTC()
+	state := testhelpers.CreateValidState()
+	state.Agents["coder-1"] = models.Agent{
+		Role:         "coder",
+		Status:       models.AgentStatusIdle,
+		Generation:   "generation-b",
+		Heartbeat:    now,
+		RegisteredAt: now,
+	}
+	state.Agents["coder-2"] = models.Agent{
+		Role:         "coder",
+		Status:       models.AgentStatusIdle,
+		Generation:   "other-generation",
+		Heartbeat:    now,
+		RegisteredAt: now,
+	}
+	testhelpers.WriteInitialState(t, statePath, state)
+
+	before := readStateBytes(t, statePath)
+	authority := models.AgentAuthority{ID: "coder-1", Generation: "generation-b"}
+	err := MarkAgentDegraded(MarkAgentDegradedInput{
+		ProjectRoot: projectRoot,
+		AgentID:     "coder-2",
+		Role:        "coder",
+		Reason:      AgentDegradedWorktreeCreateFailed,
+		LastError:   "cannot create worktree",
+		Authority:   &authority,
+	})
+	if err == nil {
+		t.Fatal("MarkAgentDegraded() error = nil, want authority actor mismatch")
+	}
+	if !strings.Contains(err.Error(), "coder-1") || !strings.Contains(err.Error(), "coder-2") {
+		t.Fatalf("MarkAgentDegraded() error = %q, want both authority and actor IDs", err)
+	}
+
+	after := readStateBytes(t, statePath)
+	if !bytes.Equal(after, before) {
+		t.Fatal("serialized state changed after authority actor mismatch")
 	}
 }
 

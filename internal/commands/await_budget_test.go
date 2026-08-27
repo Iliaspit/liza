@@ -1,7 +1,12 @@
 package commands
 
 import (
+	"bytes"
+	"context"
 	"errors"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -393,6 +398,72 @@ func TestAwaitVerdict_BudgetExhaustionReleasesDoerClaim(t *testing.T) {
 	}
 	if task.ReviewLeaseExpires == nil {
 		t.Error("review_lease_expires cleared; the active review lost its lease")
+	}
+}
+
+func TestAwaitVerdictWithAuthority_BudgetCleanupPropagatesGenerationFence(t *testing.T) {
+	fixture := setupBoundedAwaitFixture(
+		t,
+		models.TaskStatusReadyForReview,
+		boundedAwaitCoderID,
+		"coder",
+		models.AgentStatusWaiting,
+		models.TaskEventSubmittedForReview,
+	)
+
+	liveLease := time.Now().Add(30 * time.Minute)
+	if err := fixture.bb.Modify(func(state *models.State) error {
+		task := state.FindTask(boundedAwaitTaskID)
+		task.AssignedTo = testhelpers.StringPtr(boundedAwaitCoderID)
+		task.LeaseExpires = &liveLease
+		agent := state.Agents[boundedAwaitCoderID]
+		agent.Generation = "generation-b"
+		state.Agents[boundedAwaitCoderID] = agent
+		return nil
+	}); err != nil {
+		t.Fatalf("seed generation-B claim: %v", err)
+	}
+
+	previousAwait := runAwaitVerdictWithAuthorityOptions
+	runAwaitVerdictWithAuthorityOptions = func(
+		context.Context,
+		string,
+		string,
+		models.AgentAuthority,
+		time.Duration,
+		AwaitVerdictOptions,
+	) (*ops.AwaitVerdictResult, error) {
+		return &ops.AwaitVerdictResult{Verdict: ops.VerdictTimeout}, nil
+	}
+	t.Cleanup(func() { runAwaitVerdictWithAuthorityOptions = previousAwait })
+
+	statePath := filepath.Join(fixture.projectRoot, ".liza", "state.yaml")
+	before, err := os.ReadFile(statePath)
+	if err != nil {
+		t.Fatalf("read state before stale cleanup: %v", err)
+	}
+	stale := models.AgentAuthority{ID: boundedAwaitCoderID, Generation: "generation-a"}
+	result, err := AwaitVerdictWithAuthorityOptions(
+		fixture.projectRoot, boundedAwaitTaskID, stale, time.Second, AwaitVerdictOptions{},
+	)
+	var authorityErr *ops.AgentAuthorityError
+	if !errors.As(err, &authorityErr) {
+		t.Fatalf("error = %T %v, want *ops.AgentAuthorityError", err, err)
+	}
+	for _, want := range []string{boundedAwaitCoderID, "generation-a", "generation-b"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error = %q, want %q", err, want)
+		}
+	}
+	if result == nil || result.Verdict != ops.VerdictTimeout {
+		t.Fatalf("result = %#v, want TIMEOUT with authority error", result)
+	}
+	after, err := os.ReadFile(statePath)
+	if err != nil {
+		t.Fatalf("read state after stale cleanup: %v", err)
+	}
+	if !bytes.Equal(after, before) {
+		t.Fatal("stale command budget cleanup changed generation-B state")
 	}
 }
 
