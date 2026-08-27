@@ -62,6 +62,19 @@ type RoleDef struct {
 	MandatoryDocs     []string    `yaml:"mandatory-docs,omitempty"`
 }
 
+// EffectiveRoleCapabilities is a resolver-owned projection of a role's
+// declarative authorization configuration. AllowedOperations is cloned when
+// the projection is created so callers cannot mutate the resolver config.
+type EffectiveRoleCapabilities struct {
+	RoleType          string
+	AllowedOperations []string
+}
+
+// Allows reports whether operation is present in the projected configuration.
+func (c EffectiveRoleCapabilities) Allows(operation string) bool {
+	return slices.Contains(c.AllowedOperations, operation)
+}
+
 // TimeoutDef holds duration strings for role-specific timeouts.
 type TimeoutDef struct {
 	Execution    string `yaml:"execution,omitempty"`

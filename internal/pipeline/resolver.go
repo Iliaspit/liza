@@ -231,13 +231,26 @@ func (r *Resolver) AllRoleNames() []string {
 	return names
 }
 
-// AllowedOperations returns the allowed-operations list for the named role.
-func (r *Resolver) AllowedOperations(name string) ([]string, error) {
+// EffectiveRoleCapabilities returns the named role's declarative type and a
+// cloned operation set. The projection never infers authority from role type.
+func (r *Resolver) EffectiveRoleCapabilities(name string) (EffectiveRoleCapabilities, error) {
 	role, ok := r.config.Pipeline.Roles[name]
 	if !ok {
-		return nil, fmt.Errorf("unknown role %q", name)
+		return EffectiveRoleCapabilities{}, fmt.Errorf("unknown role %q", name)
 	}
-	return role.AllowedOperations, nil
+	return EffectiveRoleCapabilities{
+		RoleType:          role.Type,
+		AllowedOperations: slices.Clone(role.AllowedOperations),
+	}, nil
+}
+
+// AllowedOperations returns a cloned allowed-operations list for the named role.
+func (r *Resolver) AllowedOperations(name string) ([]string, error) {
+	capabilities, err := r.EffectiveRoleCapabilities(name)
+	if err != nil {
+		return nil, err
+	}
+	return capabilities.AllowedOperations, nil
 }
 
 // RoleTimeouts returns the parsed timeout durations for the named role.
@@ -304,13 +317,38 @@ func (r *Resolver) roleNamesByType(roleType string) []string {
 	return names
 }
 
-// ContextSections returns the context-sections list for the named role.
+// ContextSections returns the effective context-sections list for the named
+// role, including capability-checked compatibility sections.
 func (r *Resolver) ContextSections(name string) ([]string, error) {
 	role, ok := r.config.Pipeline.Roles[name]
 	if !ok {
 		return nil, fmt.Errorf("unknown role %q", name)
 	}
-	return role.ContextSections, nil
+	capabilities, err := r.EffectiveRoleCapabilities(name)
+	if err != nil {
+		return nil, err
+	}
+
+	sections := slices.Clone(role.ContextSections)
+	var recoveryOperation string
+	switch capabilities.RoleType {
+	case "doer":
+		recoveryOperation = "mark-blocked"
+	case "reviewer":
+		recoveryOperation = "submit-verdict"
+	default:
+		return sections, nil
+	}
+	if !capabilities.Allows(recoveryOperation) {
+		return nil, fmt.Errorf(
+			"role %q requires allowed operation %q for context section %q",
+			name, recoveryOperation, "cli-failure-recovery",
+		)
+	}
+	if !slices.Contains(sections, "cli-failure-recovery") {
+		sections = append(sections, "cli-failure-recovery")
+	}
+	return sections, nil
 }
 
 // Skills returns the skills list for the named role.

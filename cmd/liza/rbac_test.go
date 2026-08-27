@@ -1,13 +1,19 @@
 package main
 
 import (
+	"bytes"
 	stderrors "errors"
+	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	lizaerrors "github.com/liza-mas/liza/internal/errors"
+	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/pipeline"
+	"github.com/liza-mas/liza/internal/prompts"
 	"github.com/liza-mas/liza/internal/testhelpers"
 )
 
@@ -45,6 +51,214 @@ func TestValidateAllowedOperation_Rejection(t *testing.T) {
 			t.Errorf("error %q missing expected substring %q", msg, want)
 		}
 	}
+}
+
+func TestValidateAllowedOperationEffectiveRoleCapabilities(t *testing.T) {
+	resolver := setupResolver(t)
+
+	allowed := []struct {
+		agentID   string
+		operation string
+	}{
+		{agentID: "integration-reviewer-1", operation: "submit-verdict"},
+		{agentID: "coder-1", operation: "submit-for-review"},
+		{agentID: "coder-1", operation: "mark-blocked"},
+	}
+	for _, test := range allowed {
+		if err := validateAllowedOperation(resolver, test.agentID, test.operation); err != nil {
+			t.Errorf("validateAllowedOperation(%q, %q): %v", test.agentID, test.operation, err)
+		}
+	}
+
+	denied := []struct {
+		agentID   string
+		role      string
+		operation string
+	}{
+		{agentID: "integration-reviewer-1", role: "integration-reviewer", operation: "mark-blocked"},
+		{agentID: "coder-1", role: "coder", operation: "submit-verdict"},
+	}
+	for _, test := range denied {
+		err := validateAllowedOperation(resolver, test.agentID, test.operation)
+		if err == nil {
+			t.Errorf("validateAllowedOperation(%q, %q): expected permission error", test.agentID, test.operation)
+			continue
+		}
+		var permissionErr *lizaerrors.PermissionError
+		if !stderrors.As(err, &permissionErr) {
+			t.Errorf("validateAllowedOperation(%q, %q) error type = %T, want *errors.PermissionError", test.agentID, test.operation, err)
+			continue
+		}
+		if permissionErr.AgentID != test.agentID || permissionErr.Role != test.role || permissionErr.Operation != test.operation {
+			t.Errorf("PermissionError = %#v, want agent=%q role=%q operation=%q", permissionErr, test.agentID, test.role, test.operation)
+		}
+		wantReason := fmt.Sprintf("operation %q not allowed for role %q", test.operation, test.role)
+		if !strings.Contains(permissionErr.Error(), wantReason) {
+			t.Errorf("PermissionError %q missing %q", permissionErr.Error(), wantReason)
+		}
+	}
+}
+
+func TestIntegrationReviewerRenderedCLIFailureRecovery(t *testing.T) {
+	const (
+		roleName   = "integration-reviewer"
+		reviewerID = roleName + "-1"
+		taskID     = "task-integration-review-recovery"
+		rolePair   = "integration-pair"
+	)
+
+	setupProject := func(t *testing.T) (string, string, *pipeline.Resolver, models.TaskStatus) {
+		t.Helper()
+
+		projectRoot, statePath := setupMutationTestProject(t, nil)
+		cfg, err := pipeline.LoadFrozen(projectRoot)
+		if err != nil {
+			t.Fatalf("LoadFrozen: %v", err)
+		}
+		resolver := pipeline.NewResolver(cfg)
+		reviewingStatus, err := resolver.ReviewingStatus(rolePair)
+		if err != nil {
+			t.Fatalf("ReviewingStatus(%q): %v", rolePair, err)
+		}
+		rejectedStatus, err := resolver.RejectedStatus(rolePair)
+		if err != nil {
+			t.Fatalf("RejectedStatus(%q): %v", rolePair, err)
+		}
+
+		state := readState(t, statePath)
+		task := testhelpers.BuildTaskByStatus(taskID, models.TaskStatusReviewing, time.Now().UTC())
+		task.Type = models.TaskTypeIntegration
+		task.RolePair = rolePair
+		task.Status = reviewingStatus
+		task.ReviewingBy = testhelpers.StringPtr(reviewerID)
+		state.Tasks = []models.Task{task}
+		testhelpers.WriteInitialState(t, statePath, state)
+
+		return projectRoot, statePath, resolver, rejectedStatus
+	}
+
+	renderedRecoveryOperation := func(t *testing.T, resolver *pipeline.Resolver) string {
+		t.Helper()
+
+		capabilities, err := resolver.EffectiveRoleCapabilities(roleName)
+		if err != nil {
+			t.Fatalf("EffectiveRoleCapabilities(%q): %v", roleName, err)
+		}
+		sections, err := resolver.ContextSections(roleName)
+		if err != nil {
+			t.Fatalf("ContextSections(%q): %v", roleName, err)
+		}
+		rendered, err := prompts.BuildRoleContext(roleName, sections, &prompts.RoleContextData{
+			Role:     roleName,
+			RoleType: capabilities.RoleType,
+			AgentID:  reviewerID,
+			TaskID:   taskID,
+		})
+		if err != nil {
+			t.Fatalf("BuildRoleContext(%q): %v", roleName, err)
+		}
+
+		const executableLabel = "EXECUTABLE RECOVERY COMMAND:"
+		if count := strings.Count(rendered, executableLabel); count != 1 {
+			t.Fatalf("rendered recovery contains %d executable command labels, want 1:\n%s", count, rendered)
+		}
+		recovery := rendered[strings.Index(rendered, executableLabel)+len(executableLabel):]
+		commandStart := strings.Index(recovery, "`")
+		if commandStart < 0 {
+			t.Fatalf("rendered recovery has no executable command:\n%s", recovery)
+		}
+		commandTail := recovery[commandStart+1:]
+		commandEnd := strings.Index(commandTail, "`")
+		if commandEnd < 0 {
+			t.Fatalf("rendered recovery has an unterminated executable command:\n%s", recovery)
+		}
+		commandFields := strings.Fields(commandTail[:commandEnd])
+		if len(commandFields) < 2 {
+			t.Fatalf("rendered executable command has fewer than two fields: %q", commandTail[:commandEnd])
+		}
+		return commandFields[1]
+	}
+
+	const failingCommand = "liza await-resubmission task-integration-review-recovery --agent-id integration-reviewer-1 --json"
+	const observedError = "rpc transport closed after 3 attempts"
+	rejectionReason := fmt.Sprintf(
+		"Repeated CLI failure. Exact command: %s. Observed error: %s.",
+		failingCommand,
+		observedError,
+	)
+
+	t.Run("executes authorized recovery and records exact evidence", func(t *testing.T) {
+		projectRoot, statePath, resolver, rejectedStatus := setupProject(t)
+		operation := renderedRecoveryOperation(t, resolver)
+		if operation != "submit-verdict" {
+			t.Fatalf("rendered recovery operation = %q, want submit-verdict", operation)
+		}
+
+		stdout, err := executeRootCommandCapture(t, projectRoot,
+			operation, taskID, "REJECTED",
+			"--reason", rejectionReason,
+			"--agent-id", reviewerID,
+			"--json",
+		)
+		if strings.Contains(strings.ToLower(stdout), "permission_denied") {
+			t.Fatalf("rendered recovery returned permission_denied: %s", stdout)
+		}
+		if err != nil {
+			t.Fatalf("rendered recovery command failed: %v\nstdout: %s", err, stdout)
+		}
+
+		state := readState(t, statePath)
+		task := mustFindTask(t, state, taskID)
+		if task.Status != rejectedStatus {
+			t.Fatalf("task status = %s, want configured rejected status %s", task.Status, rejectedStatus)
+		}
+		if task.RejectionReason == nil || *task.RejectionReason != rejectionReason {
+			t.Fatalf("rejection_reason = %v, want exact CLI failure evidence %q", task.RejectionReason, rejectionReason)
+		}
+		if len(task.History) == 0 {
+			t.Fatal("expected rejected history entry")
+		}
+		last := task.History[len(task.History)-1]
+		if last.Event != models.TaskEventRejected {
+			t.Fatalf("history event = %q, want %q", last.Event, models.TaskEventRejected)
+		}
+		if last.Agent == nil || *last.Agent != reviewerID {
+			t.Fatalf("history agent = %v, want %q", last.Agent, reviewerID)
+		}
+		if last.Reason == nil || *last.Reason != rejectionReason {
+			t.Fatalf("history reason = %v, want exact CLI failure evidence %q", last.Reason, rejectionReason)
+		}
+	})
+
+	t.Run("keeps mark-blocked denied without changing state", func(t *testing.T) {
+		projectRoot, statePath, _, _ := setupProject(t)
+		before, err := os.ReadFile(statePath)
+		if err != nil {
+			t.Fatalf("ReadFile() before mark-blocked: %v", err)
+		}
+
+		stdout, err := executeRootCommandCapture(t, projectRoot,
+			"mark-blocked", taskID,
+			"--reason", rejectionReason,
+			"--questions", "Which prerequisite or external state must change?",
+			"--agent-id", reviewerID,
+			"--json",
+		)
+		if err == nil {
+			t.Fatal("integration reviewer mark-blocked unexpectedly succeeded")
+		}
+		if !strings.Contains(strings.ToLower(stdout), "permission_denied") {
+			t.Fatalf("mark-blocked output missing permission_denied:\n%s\nerror: %v", stdout, err)
+		}
+
+		after, readErr := os.ReadFile(statePath)
+		if readErr != nil {
+			t.Fatalf("ReadFile() after mark-blocked: %v", readErr)
+		}
+		if !bytes.Equal(after, before) {
+			t.Fatal("denied integration reviewer mark-blocked changed task state")
+		}
+	})
 }
 
 func TestValidateAllowedOperation_InvalidAgentID(t *testing.T) {

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/liza-mas/liza/internal/brand"
+	"github.com/liza-mas/liza/internal/brandrender"
 	"github.com/liza-mas/liza/internal/embedded"
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/ops"
@@ -286,6 +287,130 @@ func TestBuildBasePromptUsesDistinctBrandDirectories(t *testing.T) {
 		if strings.Contains(prompt, notWant) {
 			t.Fatalf("BuildBasePrompt() rendered misleading directory guidance %q:\n%s", notWant, prompt)
 		}
+	}
+}
+
+func TestBuildBasePromptOmitsUniversalCLIFailureMutation(t *testing.T) {
+	prompt, err := BuildBasePrompt(BasePromptConfig{
+		Role:        "code-reviewer",
+		AgentID:     "code-reviewer-1",
+		TaskID:      "task-1",
+		SpecsDir:    "/project/specs",
+		ProjectRoot: "/project",
+		StatePath:   "/project/.liza/state.yaml",
+		GoalDesc:    "Review a change",
+	})
+	if err != nil {
+		t.Fatalf("BuildBasePrompt: %v", err)
+	}
+	if strings.Contains(prompt, "mark-blocked") {
+		t.Fatalf("base prompt contains a mark-blocked operation reference:\n%s", prompt)
+	}
+}
+
+func TestNonDefaultBrandPromptCLIFailureRecovery(t *testing.T) {
+	withPromptBrandValues(t, func() {
+		brand.NameTitle = "Acme"
+		brand.BinaryName = "acme"
+		brand.GlobalDirName = ".acme-home"
+		brand.ProjectDirName = ".acme-state"
+	})
+
+	base, err := BuildBasePrompt(BasePromptConfig{
+		Role:        "custom-doer",
+		AgentID:     "custom-doer-1",
+		TaskID:      "task-1",
+		SpecsDir:    "/project/specs",
+		ProjectRoot: "/project",
+		StatePath:   "/project/.acme-state/state.yaml",
+		GoalDesc:    "Implement a change",
+	})
+	if err != nil {
+		t.Fatalf("BuildBasePrompt: %v", err)
+	}
+	roleContext, err := BuildRoleContext("custom-doer", []string{"cli-failure-recovery"}, &RoleContextData{
+		Role:     "custom-doer",
+		AgentID:  "custom-doer-1",
+		RoleType: "doer",
+		TaskID:   "task-1",
+	})
+	if err != nil {
+		t.Fatalf("BuildRoleContext: %v", err)
+	}
+	prompt := base + roleContext
+
+	for _, want := range []string{"You are a Acme custom-doer agent", "acme mark-blocked"} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("non-default-brand prompt missing %q:\n%s", want, prompt)
+		}
+	}
+	for _, rawDefaultBrand := range []string{"Liza", "LIZA", "liza"} {
+		if strings.Contains(prompt, rawDefaultBrand) {
+			t.Errorf("non-default-brand prompt contains raw default-brand literal %q:\n%s", rawDefaultBrand, prompt)
+		}
+	}
+}
+
+func TestMultiAgentContractRecoveryMatchesRoleCapabilities(t *testing.T) {
+	source, err := os.ReadFile(filepath.Join("..", "..", "contracts", "MULTI_AGENT_MODE.md"))
+	if err != nil {
+		t.Fatalf("read Multi-Agent contract: %v", err)
+	}
+	values := brand.RuntimeValues()
+	values.NameLower = "acme-agent"
+	values.NameUpper = "ACME_AGENT"
+	values.NameTitle = "Acme Agent"
+	values.BinaryName = "acme-cli"
+	values.GlobalDirName = ".acme-agent"
+	values.ProjectDirName = ".acme-agent"
+	values.EnvPrefix = "ACME_AGENT"
+
+	renderedBytes, err := brandrender.RenderBytes(source, values)
+	if err != nil {
+		t.Fatalf("render Multi-Agent contract: %v", err)
+	}
+	rendered := string(renderedBytes)
+
+	blackboardStart := strings.Index(rendered, "## Blackboard Protocol")
+	blackboardEnd := strings.Index(rendered, "## Output Discipline")
+	if blackboardStart < 0 || blackboardEnd <= blackboardStart {
+		t.Fatalf("rendered contract is missing the Blackboard Protocol section:\n%s", rendered)
+	}
+	blackboard := rendered[blackboardStart:blackboardEnd]
+	if !strings.Contains(blackboard, "role-specific repeated-failure recovery") {
+		t.Errorf("generic blackboard guidance does not delegate repeated CLI failure to the role-specific recovery block:\n%s", blackboard)
+	}
+	if strings.Contains(blackboard, "mark-blocked") {
+		t.Errorf("generic blackboard guidance universally prescribes mark-blocked:\n%s", blackboard)
+	}
+
+	circuitStart := strings.Index(rendered, "## Circuit Breaker")
+	if circuitStart < 0 {
+		t.Fatalf("rendered contract is missing the Circuit Breaker section:\n%s", rendered)
+	}
+	circuitBreaker := rendered[circuitStart:]
+	for _, want := range []string{
+		"all doer and reviewer roles",
+		"Doer (all doer roles)",
+		"`acme-cli mark-blocked`",
+		"Reviewer (all reviewer roles)",
+		"`acme-cli submit-verdict ... REJECTED`",
+		"NON-EXECUTABLE REFERENCE",
+		"`acme-cli mark-blocked` is doer-only and MUST NOT be executed by reviewers",
+		"exact failing command",
+		"observed error",
+	} {
+		if !strings.Contains(circuitBreaker, want) {
+			t.Errorf("rendered Circuit Breaker section missing recovery requirement %q", want)
+		}
+	}
+	if !strings.Contains(rendered, "# Multi-Agent Mode Contract (Acme Agent)") {
+		t.Error("rendered contract does not contain the configured brand title")
+	}
+
+	rawDefaultBrand := regexp.MustCompile(`(?i)(^|[^A-Za-z])liza($|[^A-Za-z0-9])|liza-mas/liza`)
+	if match := rawDefaultBrand.FindString(rendered); match != "" {
+		t.Errorf("rendered contract contains raw default-brand presentation literal %q", match)
 	}
 }
 
@@ -1777,6 +1902,160 @@ func TestBuildRoleContext_MasterDecompositionReview(t *testing.T) {
 		if !strings.Contains(output, want) {
 			t.Fatalf("output missing %q", want)
 		}
+	}
+}
+
+func TestRenderedCLIFailureRecoveryMatchesEffectiveCapabilities(t *testing.T) {
+	cfg, err := pipeline.LoadEmbeddedReference()
+	if err != nil {
+		t.Fatalf("LoadEmbeddedReference: %v", err)
+	}
+	resolver := pipeline.NewResolver(cfg)
+	roleNames := append(resolver.DoerRoleNames(), resolver.ReviewerRoleNames()...)
+
+	for _, roleName := range roleNames {
+		roleName := roleName
+		t.Run(roleName, func(t *testing.T) {
+			capabilities, err := resolver.EffectiveRoleCapabilities(roleName)
+			if err != nil {
+				t.Fatalf("EffectiveRoleCapabilities(%q): %v", roleName, err)
+			}
+			sections, err := resolver.ContextSections(roleName)
+			if err != nil {
+				t.Fatalf("ContextSections(%q): %v", roleName, err)
+			}
+			sectionCount := 0
+			for _, section := range sections {
+				if section == "cli-failure-recovery" {
+					sectionCount++
+				}
+			}
+			if sectionCount != 1 {
+				t.Fatalf("ContextSections(%q) contains %d cli-failure-recovery blocks, want 1: %v", roleName, sectionCount, sections)
+			}
+
+			output, err := BuildRoleContext(roleName, sections, &RoleContextData{
+				Role:     roleName,
+				AgentID:  roleName + "-1",
+				RoleType: capabilities.RoleType,
+				TaskID:   "task-1",
+			})
+			if err != nil {
+				t.Fatalf("BuildRoleContext(%q): %v", roleName, err)
+			}
+			const blockHeader = "=== CLI FAILURE RECOVERY ==="
+			if got := strings.Count(output, blockHeader); got != 1 {
+				t.Fatalf("BuildRoleContext(%q) rendered %d CLI failure recovery blocks, want 1", roleName, got)
+			}
+			recovery := output[strings.Index(output, blockHeader):]
+			for _, evidence := range []string{"exact failing command", "observed error"} {
+				if !strings.Contains(strings.ToLower(recovery), evidence) {
+					t.Errorf("recovery block for %q missing %q evidence guidance:\n%s", roleName, evidence, recovery)
+				}
+			}
+
+			expectedOperation := "mark-blocked"
+			if capabilities.RoleType == "reviewer" {
+				expectedOperation = "submit-verdict"
+			}
+			if !capabilities.Allows(expectedOperation) {
+				t.Fatalf("recovery operation %q is not allowed for %q: %v", expectedOperation, roleName, capabilities.AllowedOperations)
+			}
+			nonExecutableIndex := strings.Index(recovery, "NON-EXECUTABLE REFERENCE")
+			executable := recovery
+			if nonExecutableIndex >= 0 {
+				executable = recovery[:nonExecutableIndex]
+			}
+			if !strings.Contains(executable, "EXECUTABLE RECOVERY COMMAND") ||
+				!strings.Contains(executable, brand.BinaryName+" "+expectedOperation) {
+				t.Errorf("recovery block for %q does not name executable allowed operation %q:\n%s", roleName, expectedOperation, recovery)
+			}
+
+			if capabilities.RoleType == "reviewer" {
+				if !strings.Contains(executable, "submit-verdict task-1 REJECTED") {
+					t.Errorf("reviewer recovery for %q does not reject the task:\n%s", roleName, recovery)
+				}
+				markBlockedIndex := strings.Index(recovery, brand.BinaryName+" mark-blocked")
+				if nonExecutableIndex < 0 || markBlockedIndex < nonExecutableIndex {
+					t.Errorf("reviewer mark-blocked reference for %q is not confined to NON-EXECUTABLE REFERENCE:\n%s", roleName, recovery)
+				}
+			}
+		})
+	}
+}
+
+func TestRenderedCollectivePlanScopingMatchesEffectiveCapabilities(t *testing.T) {
+	withPromptBrandValues(t, func() {
+		brand.BinaryName = "acme-cli"
+	})
+
+	cfg, err := pipeline.LoadEmbeddedReference()
+	if err != nil {
+		t.Fatalf("LoadEmbeddedReference: %v", err)
+	}
+	resolver := pipeline.NewResolver(cfg)
+	roleNames := append(resolver.DoerRoleNames(), resolver.ReviewerRoleNames()...)
+
+	for _, roleName := range roleNames {
+		roleName := roleName
+		t.Run(roleName, func(t *testing.T) {
+			capabilities, err := resolver.EffectiveRoleCapabilities(roleName)
+			if err != nil {
+				t.Fatalf("EffectiveRoleCapabilities(%q): %v", roleName, err)
+			}
+			sections, err := resolver.ContextSections(roleName)
+			if err != nil {
+				t.Fatalf("ContextSections(%q): %v", roleName, err)
+			}
+
+			output, err := BuildRoleContext(roleName, sections, &RoleContextData{
+				Role:           roleName,
+				AgentID:        roleName + "-1",
+				RoleType:       capabilities.RoleType,
+				TaskID:         "task-2",
+				TotalPlanTasks: 2,
+				TaskOrdinal:    2,
+				GoalSpecRef:    "specs/goal.md",
+				PhaseDependencyTasks: []SiblingTaskSummary{{
+					ID:       "plan-1",
+					Status:   "MERGED",
+					PlanRef:  "specs/plan-phase1.md",
+					RolePair: "code-planning-pair",
+				}},
+			})
+			if err != nil {
+				t.Fatalf("BuildRoleContext(%q): %v", roleName, err)
+			}
+
+			if capabilities.RoleType == "reviewer" {
+				allowedReference := "NON-EXECUTABLE REFERENCE:\n`" + brand.BinaryName + " mark-blocked` is doer-only and MUST NOT be executed by reviewers."
+				if got := strings.Count(output, allowedReference); got != 1 {
+					t.Fatalf("BuildRoleContext(%q) rendered %d reviewer non-executable references, want 1:\n%s", roleName, got, output)
+				}
+				withoutAllowedReference := strings.Replace(output, allowedReference, "", 1)
+				if strings.Contains(withoutAllowedReference, "mark-blocked") {
+					t.Errorf("reviewer context for %q contains mark-blocked outside the CLI failure recovery non-executable reference:\n%s", roleName, output)
+				}
+				return
+			}
+
+			hasCollectivePlanScoping := false
+			for _, section := range sections {
+				if section == "collective-plan-scoping" {
+					hasCollectivePlanScoping = true
+					break
+				}
+			}
+			if !hasCollectivePlanScoping {
+				return
+			}
+
+			const escalation = "- Do NOT iterate with the reviewer — mark BLOCKED immediately via "
+			want := escalation + brand.BinaryName + " mark-blocked --json."
+			if !strings.Contains(output, want) {
+				t.Errorf("doer context for %q changed sibling-consistency escalation %q:\n%s", roleName, want, output)
+			}
+		})
 	}
 }
 

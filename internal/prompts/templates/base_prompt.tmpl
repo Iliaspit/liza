@@ -20,7 +20,7 @@ OPERATIONAL RULES:
   NEVER read state.yaml directly to save context budget. {{binaryName}} get --json returns only the requested slice.
 - For MODIFYING state: use role-specific CLI commands ONLY
   NEVER edit state.yaml directly — direct edits bypass invariant checks and can corrupt state irreversibly.
-  If a CLI command fails repeatedly, use {{binaryName}} mark-blocked to flag the task — never work around the failure.
+  If a CLI command fails repeatedly, follow the role-specific CLI FAILURE RECOVERY block — never substitute an undeclared mutation.
 - AUTONOMY: Your authority is pre-approved. Execute commands immediately.
   If the environment surfaces permission checks, DO proceed with tool execution unless explicitly denied.
 - When your work unit is complete, simply stop — the session ends and the supervisor handles lifecycle.

@@ -3,6 +3,7 @@ package pipeline
 import (
 	"os"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -785,6 +786,63 @@ func TestAllowedOperations(t *testing.T) {
 	}
 }
 
+func TestEffectiveRoleCapabilities(t *testing.T) {
+	cfg, err := LoadEmbeddedReference()
+	if err != nil {
+		t.Fatalf("LoadEmbeddedReference: %v", err)
+	}
+	resolver := NewResolver(cfg)
+
+	roleNames := append(resolver.DoerRoleNames(), resolver.ReviewerRoleNames()...)
+	operations := []string{"unknown-operation"}
+	for _, roleName := range roleNames {
+		operations = append(operations, cfg.Pipeline.Roles[roleName].AllowedOperations...)
+	}
+
+	for _, roleName := range roleNames {
+		roleName := roleName
+		t.Run(roleName, func(t *testing.T) {
+			role := cfg.Pipeline.Roles[roleName]
+			capabilities, err := resolver.EffectiveRoleCapabilities(roleName)
+			if err != nil {
+				t.Fatalf("EffectiveRoleCapabilities(%q): %v", roleName, err)
+			}
+			if capabilities.RoleType != role.Type {
+				t.Errorf("RoleType = %q, want %q", capabilities.RoleType, role.Type)
+			}
+			if !slices.Equal(capabilities.AllowedOperations, role.AllowedOperations) {
+				t.Errorf("AllowedOperations = %v, want %v", capabilities.AllowedOperations, role.AllowedOperations)
+			}
+			for _, operation := range operations {
+				want := slices.Contains(role.AllowedOperations, operation)
+				if got := capabilities.Allows(operation); got != want {
+					t.Errorf("Allows(%q) = %v, want %v", operation, got, want)
+				}
+			}
+		})
+	}
+
+	coderCapabilities, err := resolver.EffectiveRoleCapabilities("coder")
+	if err != nil {
+		t.Fatalf("EffectiveRoleCapabilities(coder): %v", err)
+	}
+	coderCapabilities.AllowedOperations[0] = "mutated-operation"
+	freshCoderCapabilities, err := resolver.EffectiveRoleCapabilities("coder")
+	if err != nil {
+		t.Fatalf("EffectiveRoleCapabilities(coder) after caller mutation: %v", err)
+	}
+	if freshCoderCapabilities.Allows("mutated-operation") {
+		t.Fatal("caller mutation changed resolver configuration")
+	}
+	if freshCoderCapabilities.AllowedOperations[0] == "mutated-operation" {
+		t.Fatal("EffectiveRoleCapabilities returned resolver-owned operation storage")
+	}
+
+	if _, err := resolver.EffectiveRoleCapabilities("unknown-role"); err == nil {
+		t.Fatal("EffectiveRoleCapabilities(unknown-role): expected error, got nil")
+	}
+}
+
 func TestRoleTimeouts(t *testing.T) {
 	r := NewResolver(loadPhase2Config(t))
 	got, err := r.RoleTimeouts("coder")
@@ -853,7 +911,7 @@ func TestResolver_RoleDisplayName(t *testing.T) {
 func TestResolver_ContextSections(t *testing.T) {
 	r := NewResolver(loadPhase2Config(t))
 
-	// Coder should have 16 context-sections.
+	// Coder should have 17 effective context-sections.
 	got, err := r.ContextSections("coder")
 	if err != nil {
 		t.Fatalf("ContextSections(coder): %v", err)
@@ -862,7 +920,7 @@ func TestResolver_ContextSections(t *testing.T) {
 		"assigned-task", "worktree-rules", "collective-plan-scoping", "handoff-resume",
 		"integration-fix", "prior-rejection", "prior-attempt", "doer-state-transitions", "coder-tools",
 		"anomaly-logging", "blocking-protocol", "commit-workflow", "implementation-phase",
-		"submission-phase", "mandatory-docs", "skills-affinity",
+		"submission-phase", "mandatory-docs", "skills-affinity", "cli-failure-recovery",
 	}
 	if len(got) != len(want) {
 		t.Fatalf("ContextSections(coder) len = %d, want %d\ngot:  %v\nwant: %v", len(got), len(want), got, want)
@@ -873,22 +931,25 @@ func TestResolver_ContextSections(t *testing.T) {
 		}
 	}
 
-	// Code-reviewer should have 13 context-sections.
+	// Code-reviewer should have 14 effective context-sections.
 	got, err = r.ContextSections("code-reviewer")
 	if err != nil {
 		t.Fatalf("ContextSections(code-reviewer): %v", err)
 	}
-	if len(got) != 13 {
-		t.Fatalf("ContextSections(code-reviewer) len = %d, want 13\ngot: %v", len(got), got)
+	if len(got) != 14 {
+		t.Fatalf("ContextSections(code-reviewer) len = %d, want 14\ngot: %v", len(got), got)
 	}
 	if got[0] != "review-task" {
 		t.Errorf("ContextSections(code-reviewer)[0] = %q, want %q", got[0], "review-task")
 	}
-	if got[len(got)-2] != "mandatory-docs" {
-		t.Errorf("ContextSections(code-reviewer)[-2] = %q, want %q", got[len(got)-2], "mandatory-docs")
+	if got[len(got)-3] != "mandatory-docs" {
+		t.Errorf("ContextSections(code-reviewer)[-3] = %q, want %q", got[len(got)-3], "mandatory-docs")
 	}
-	if got[len(got)-1] != "skills-affinity" {
-		t.Errorf("ContextSections(code-reviewer)[-1] = %q, want %q", got[len(got)-1], "skills-affinity")
+	if got[len(got)-2] != "skills-affinity" {
+		t.Errorf("ContextSections(code-reviewer)[-2] = %q, want %q", got[len(got)-2], "skills-affinity")
+	}
+	if got[len(got)-1] != "cli-failure-recovery" {
+		t.Errorf("ContextSections(code-reviewer)[-1] = %q, want %q", got[len(got)-1], "cli-failure-recovery")
 	}
 
 	// Orchestrator should have 4 context-sections.
@@ -911,6 +972,85 @@ func TestResolver_ContextSections(t *testing.T) {
 	if err == nil {
 		t.Error("ContextSections(unknown-role): expected error, got nil")
 	}
+}
+
+func TestResolver_ContextSectionsProjectsCLIFailureRecoveryForCustomRoles(t *testing.T) {
+	cfg := &PipelineConfig{Pipeline: Pipeline{Roles: map[string]RoleDef{
+		"custom-doer": {
+			Type:              "doer",
+			ContextSections:   []string{"assigned-task"},
+			AllowedOperations: []string{"mark-blocked"},
+		},
+		"custom-reviewer": {
+			Type:              "reviewer",
+			ContextSections:   []string{"review-task"},
+			AllowedOperations: []string{"submit-verdict"},
+		},
+		"already-projected": {
+			Type:              "doer",
+			ContextSections:   []string{"assigned-task", "cli-failure-recovery"},
+			AllowedOperations: []string{"mark-blocked"},
+		},
+		"unauthorized-doer": {
+			Type:            "doer",
+			ContextSections: []string{"assigned-task"},
+		},
+		"unauthorized-reviewer": {
+			Type:            "reviewer",
+			ContextSections: []string{"review-task"},
+		},
+	}}}
+	resolver := NewResolver(cfg)
+
+	for _, roleName := range []string{"custom-doer", "custom-reviewer", "already-projected"} {
+		roleName := roleName
+		t.Run(roleName, func(t *testing.T) {
+			sections, err := resolver.ContextSections(roleName)
+			if err != nil {
+				t.Fatalf("ContextSections(%q): %v", roleName, err)
+			}
+			if got := countString(sections, "cli-failure-recovery"); got != 1 {
+				t.Fatalf("ContextSections(%q) contains %d cli-failure-recovery blocks, want 1: %v", roleName, got, sections)
+			}
+			if sections[len(sections)-1] != "cli-failure-recovery" {
+				t.Fatalf("ContextSections(%q) last section = %q, want cli-failure-recovery", roleName, sections[len(sections)-1])
+			}
+		})
+	}
+
+	if slices.Contains(cfg.Pipeline.Roles["custom-doer"].ContextSections, "cli-failure-recovery") {
+		t.Fatal("ContextSections mutated the custom role's frozen context list")
+	}
+
+	for _, tc := range []struct {
+		roleName  string
+		operation string
+	}{
+		{roleName: "unauthorized-doer", operation: "mark-blocked"},
+		{roleName: "unauthorized-reviewer", operation: "submit-verdict"},
+	} {
+		t.Run(tc.roleName+"-fails-closed", func(t *testing.T) {
+			_, err := resolver.ContextSections(tc.roleName)
+			if err == nil {
+				t.Fatalf("ContextSections(%q): expected capability error, got nil", tc.roleName)
+			}
+			for _, want := range []string{tc.roleName, tc.operation, "cli-failure-recovery"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("ContextSections(%q) error %q missing %q", tc.roleName, err, want)
+				}
+			}
+		})
+	}
+}
+
+func countString(values []string, want string) int {
+	count := 0
+	for _, value := range values {
+		if value == want {
+			count++
+		}
+	}
+	return count
 }
 
 func TestResolver_Skills(t *testing.T) {
@@ -1263,7 +1403,11 @@ pipeline:
 // before any block that can trigger file reads, preventing agents from reading files
 // with the wrong path prefix before seeing worktree grounding instructions.
 func TestResolver_WorktreeRulesBeforeReadBearingBlocks(t *testing.T) {
-	r := NewResolver(loadPhase2Config(t))
+	cfg, err := LoadEmbeddedReference()
+	if err != nil {
+		t.Fatalf("LoadEmbeddedReference: %v", err)
+	}
+	r := NewResolver(cfg)
 
 	readBearingBlocks := []string{
 		"collective-plan-scoping",
@@ -1308,8 +1452,6 @@ func TestResolver_WorktreeRulesBeforeReadBearingBlocks(t *testing.T) {
 // TestResolver_FixtureMatchesEmbeddedPipeline ensures the Phase 2 test fixture
 // stays in sync with the production embedded pipeline for context-sections ordering.
 func TestResolver_FixtureMatchesEmbeddedPipeline(t *testing.T) {
-	fixture := NewResolver(loadPhase2Config(t))
-
 	embeddedData, err := os.ReadFile("../embedded/pipeline.yaml")
 	if err != nil {
 		t.Fatalf("failed to read embedded pipeline.yaml: %v", err)
@@ -1318,6 +1460,9 @@ func TestResolver_FixtureMatchesEmbeddedPipeline(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadFromBytes(embedded): %v", err)
 	}
+	fixtureCfg := loadPhase2Config(t)
+	MigrateOperations(fixtureCfg, embeddedCfg)
+	fixture := NewResolver(fixtureCfg)
 	embedded := NewResolver(embeddedCfg)
 
 	for _, role := range []string{

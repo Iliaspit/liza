@@ -10,6 +10,7 @@ import (
 
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/testhelpers"
+	"gopkg.in/yaml.v3"
 )
 
 func TestLoad_ValidConfig(t *testing.T) {
@@ -695,6 +696,65 @@ func TestLoadFrozen_ValidFile(t *testing.T) {
 	}
 	if len(cfg.Pipeline.RolePairs) != 3 {
 		t.Errorf("expected 3 role-pairs, got %d", len(cfg.Pipeline.RolePairs))
+	}
+}
+
+func TestLoadFrozenEffectiveRoleCapabilities(t *testing.T) {
+	legacy, err := LoadEmbeddedReference()
+	if err != nil {
+		t.Fatalf("LoadEmbeddedReference: %v", err)
+	}
+
+	coder := legacy.Pipeline.Roles["coder"]
+	coder.AllowedOperations = slices.DeleteFunc(
+		slices.Clone(coder.AllowedOperations),
+		func(operation string) bool { return operation == "await-verdict" },
+	)
+	legacy.Pipeline.Roles["coder"] = coder
+	legacy.Pipeline.Roles["custom-doer"] = RoleDef{
+		Type:              "doer",
+		DisplayName:       "Custom Doer",
+		AllowedOperations: []string{"custom-operation"},
+	}
+
+	legacyCapabilities, err := NewResolver(legacy).EffectiveRoleCapabilities("coder")
+	if err != nil {
+		t.Fatalf("EffectiveRoleCapabilities(coder) before LoadFrozen: %v", err)
+	}
+	if legacyCapabilities.Allows("await-verdict") {
+		t.Fatal("legacy coder unexpectedly allows await-verdict before LoadFrozen migration")
+	}
+
+	data, err := yaml.Marshal(legacy)
+	if err != nil {
+		t.Fatalf("marshal legacy pipeline: %v", err)
+	}
+	projectRoot := t.TempDir()
+	testhelpers.SetupPipelineConfigBytes(t, projectRoot, data)
+
+	frozen, err := LoadFrozen(projectRoot)
+	if err != nil {
+		t.Fatalf("LoadFrozen: %v", err)
+	}
+	resolver := NewResolver(frozen)
+
+	standardCapabilities, err := resolver.EffectiveRoleCapabilities("coder")
+	if err != nil {
+		t.Fatalf("EffectiveRoleCapabilities(coder) after LoadFrozen: %v", err)
+	}
+	if !standardCapabilities.Allows("await-verdict") {
+		t.Fatal("frozen coder does not expose await-verdict after additive migration")
+	}
+
+	customCapabilities, err := resolver.EffectiveRoleCapabilities("custom-doer")
+	if err != nil {
+		t.Fatalf("EffectiveRoleCapabilities(custom-doer): %v", err)
+	}
+	if !slices.Equal(customCapabilities.AllowedOperations, []string{"custom-operation"}) {
+		t.Fatalf("custom allowed operations = %v, want [custom-operation]", customCapabilities.AllowedOperations)
+	}
+	if customCapabilities.Allows("mark-blocked") {
+		t.Fatal("custom doer gained mark-blocked from its role type")
 	}
 }
 

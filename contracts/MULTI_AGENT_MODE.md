@@ -87,7 +87,7 @@ The blackboard (`state.yaml`) is the coordination mechanism.
 
 **History is Immutable:** Never delete history entries. Append only.
 
-**Do NOT edit state.yaml directly.** All state transitions MUST go through §BRAND_NAME_TITLE§ CLI commands (`§BRAND_BINARY_NAME§ submit-for-review`, `§BRAND_BINARY_NAME§ claim-task`, etc.). Direct edits bypass invariant checks and can corrupt state irreversibly. If a CLI command fails repeatedly, set the task BLOCKED via `§BRAND_BINARY_NAME§ mark-blocked` — never work around the failure by editing state.yaml.
+**Do NOT edit state.yaml directly.** All state transitions MUST go through §BRAND_NAME_TITLE§ CLI commands (`§BRAND_BINARY_NAME§ submit-for-review`, `§BRAND_BINARY_NAME§ claim-task`, etc.). Direct edits bypass invariant checks and can corrupt state irreversibly. If a CLI command fails repeatedly, stop retrying and use the role-specific repeated-failure recovery in Circuit Breaker; never substitute an undeclared mutation or edit state.yaml.
 
 **Do NOT use TodoWrite.** The blackboard already tracks task state and checkpoints.
 
@@ -204,11 +204,15 @@ WITHOUT meaningful progress → **STOP IMMEDIATELY**
 
 Exempt: `§BRAND_BINARY_NAME§ await-verdict` and `§BRAND_BINARY_NAME§ await-resubmission` POLL retries. Each returns a smaller remaining budget and the loop ends at TIMEOUT — bounded waiting, not repetition.
 
+These recovery paths apply to all doer and reviewer roles. Every repeated-failure record MUST include the exact failing command and observed error.
+
 | Role | Log As | Then |
 |------|--------|------|
-| Coder | `retry_loop` | Mark task BLOCKED with diagnosis |
-| Code Reviewer | `reviewer_loop` | Issue REJECTED with `"insufficient information to complete review"` |
+| Doer (all doer roles) | `retry_loop` | Execute `§BRAND_BINARY_NAME§ mark-blocked` with the failure evidence |
+| Reviewer (all reviewer roles) | `reviewer_loop` | Execute `§BRAND_BINARY_NAME§ submit-verdict ... REJECTED` with the failure evidence |
 | Orchestrator | `spec_gap` | Pause for human input |
+
+**NON-EXECUTABLE REFERENCE:** `§BRAND_BINARY_NAME§ mark-blocked` is doer-only and MUST NOT be executed by reviewers.
 
 Exit with code 42 after logging.
 

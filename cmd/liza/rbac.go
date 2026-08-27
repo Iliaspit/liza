@@ -43,7 +43,7 @@ func validateAllowedOperation(resolver *pipeline.Resolver, agentID, operationNam
 			Err:       err,
 		}
 	}
-	ops, err := resolver.AllowedOperations(role)
+	capabilities, err := resolver.EffectiveRoleCapabilities(role)
 	if err != nil {
 		return &lizaerrors.PermissionError{
 			Operation: operationName,
@@ -53,10 +53,8 @@ func validateAllowedOperation(resolver *pipeline.Resolver, agentID, operationNam
 			Err:       err,
 		}
 	}
-	for _, op := range ops {
-		if op == operationName {
-			return nil
-		}
+	if capabilities.Allows(operationName) {
+		return nil
 	}
 	return &lizaerrors.PermissionError{
 		Operation: operationName,

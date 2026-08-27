@@ -39,6 +39,7 @@ pipeline:
     epic-planner:
       type: doer
       display-name: "Epic Planner"
+      allowed-operations: [mark-blocked]
       context-sections:
         - assigned-task
         - worktree-rules
@@ -53,6 +54,7 @@ pipeline:
     epic-plan-reviewer:
       type: reviewer
       display-name: "Epic Plan Reviewer"
+      allowed-operations: [submit-verdict]
       context-sections:
         - review-task
         - worktree-rules
@@ -68,6 +70,7 @@ pipeline:
     us-writer:
       type: doer
       display-name: "US Writer"
+      allowed-operations: [mark-blocked]
       context-sections:
         - assigned-task
         - worktree-rules
@@ -83,6 +86,7 @@ pipeline:
     us-reviewer:
       type: reviewer
       display-name: "US Reviewer"
+      allowed-operations: [submit-verdict]
       context-sections:
         - review-task
         - worktree-rules
@@ -99,6 +103,7 @@ pipeline:
     code-planner:
       type: doer
       display-name: "Code Planner"
+      allowed-operations: [mark-blocked]
       context-sections:
         - assigned-task
         - worktree-rules
@@ -114,6 +119,7 @@ pipeline:
     code-plan-reviewer:
       type: reviewer
       display-name: "Code Plan Reviewer"
+      allowed-operations: [submit-verdict]
       context-sections:
         - review-task
         - worktree-rules
@@ -130,6 +136,7 @@ pipeline:
     coder:
       type: doer
       display-name: "Coder"
+      allowed-operations: [mark-blocked]
       context-sections:
         - assigned-task
         - worktree-rules
@@ -150,6 +157,7 @@ pipeline:
     code-reviewer:
       type: reviewer
       display-name: "Code Reviewer"
+      allowed-operations: [submit-verdict]
       context-sections:
         - review-task
         - worktree-rules

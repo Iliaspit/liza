@@ -1123,10 +1123,12 @@ var customMasterRefPromptPipelineYAML = `pipeline:
     code-planner:
       type: doer
       display-name: "Code Planner"
+      allowed-operations: [mark-blocked]
       context-sections: [assigned-task, code-planner-tools]
     code-plan-reviewer:
       type: reviewer
       display-name: "Code Plan Reviewer"
+      allowed-operations: [submit-verdict]
   role-pairs:
     custom-main-pair:
       doer: code-planner
@@ -1146,6 +1148,71 @@ var customMasterRefPromptPipelineYAML = `pipeline:
   entry-points:
     technical-spec: coding-subpipeline.code-planning-pair
 `
+
+func TestPromptPipelineFixturesDeclareCLIFailureRecoveryCapabilities(t *testing.T) {
+	fixtures := map[string][]byte{
+		"default":           testPipelineYAML,
+		"custom-master-ref": []byte(customMasterRefPromptPipelineYAML),
+		"integration":       []byte(integrationTestPipelineYAML),
+		"architect":         []byte(architectTestPipelineYAML),
+		"architect-e2e":     []byte(architectE2EPipelineYAML),
+	}
+
+	for fixtureName, fixtureYAML := range fixtures {
+		t.Run(fixtureName, func(t *testing.T) {
+			cfg, err := pipeline.LoadFromBytes(fixtureYAML)
+			if err != nil {
+				t.Fatalf("LoadFromBytes: %v", err)
+			}
+			resolver := pipeline.NewResolver(cfg)
+
+			for _, roleName := range append(resolver.DoerRoleNames(), resolver.ReviewerRoleNames()...) {
+				t.Run(roleName, func(t *testing.T) {
+					capabilities, err := resolver.EffectiveRoleCapabilities(roleName)
+					if err != nil {
+						t.Fatalf("EffectiveRoleCapabilities(%q): %v", roleName, err)
+					}
+					recoveryOperation := "mark-blocked"
+					if capabilities.RoleType == "reviewer" {
+						recoveryOperation = "submit-verdict"
+					}
+					if !capabilities.Allows(recoveryOperation) {
+						t.Fatalf("role %q allowed operations = %v, want %q before recovery context projection", roleName, capabilities.AllowedOperations, recoveryOperation)
+					}
+
+					sections, err := resolver.ContextSections(roleName)
+					if err != nil {
+						t.Fatalf("ContextSections(%q): %v", roleName, err)
+					}
+					if !slices.Contains(sections, "cli-failure-recovery") {
+						t.Fatalf("ContextSections(%q) = %v, want cli-failure-recovery", roleName, sections)
+					}
+				})
+			}
+		})
+	}
+
+	t.Run("misconfigured custom role fails closed", func(t *testing.T) {
+		resolver := pipeline.NewResolver(&pipeline.PipelineConfig{Pipeline: pipeline.Pipeline{
+			Roles: map[string]pipeline.RoleDef{
+				"custom-doer": {
+					Type:            "doer",
+					ContextSections: []string{"assigned-task"},
+				},
+			},
+		}})
+
+		_, err := resolver.ContextSections("custom-doer")
+		if err == nil {
+			t.Fatal("ContextSections(custom-doer): expected capability error, got nil")
+		}
+		for _, want := range []string{"custom-doer", "mark-blocked", "cli-failure-recovery"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("ContextSections(custom-doer) error %q missing %q", err, want)
+			}
+		}
+	})
+}
 
 func TestBuildPromptWithContextScipSearchOmitsEmptyAvailableIndexes(t *testing.T) {
 	projectRoot := t.TempDir()
@@ -3714,21 +3781,25 @@ var integrationTestPipelineYAML = `pipeline:
     integration-analyst:
       type: doer
       display-name: "Integration Analyst"
+      allowed-operations: [mark-blocked]
       context-sections:
         - assigned-task
     integration-reviewer:
       type: reviewer
       display-name: "Integration Reviewer"
+      allowed-operations: [submit-verdict]
       context-sections:
         - review-task
     coder:
       type: doer
       display-name: "Coder"
+      allowed-operations: [mark-blocked]
       context-sections:
         - assigned-task
     code-reviewer:
       type: reviewer
       display-name: "Code Reviewer"
+      allowed-operations: [submit-verdict]
       context-sections:
         - review-task
     orchestrator:
@@ -4001,21 +4072,25 @@ var architectTestPipelineYAML = `pipeline:
     architect:
       type: doer
       display-name: "Architect"
+      allowed-operations: [mark-blocked]
       context-sections:
         - assigned-task
     architecture-reviewer:
       type: reviewer
       display-name: "Architecture Reviewer"
+      allowed-operations: [submit-verdict]
       context-sections:
         - review-task
     coder:
       type: doer
       display-name: "Coder"
+      allowed-operations: [mark-blocked]
       context-sections:
         - assigned-task
     code-reviewer:
       type: reviewer
       display-name: "Code Reviewer"
+      allowed-operations: [submit-verdict]
       context-sections:
         - review-task
     orchestrator:
@@ -4267,6 +4342,7 @@ var architectE2EPipelineYAML = `pipeline:
     architect:
       type: doer
       display-name: "Architect"
+      allowed-operations: [mark-blocked]
       context-sections:
         - assigned-task
         - parent-tasks-context
@@ -4283,6 +4359,7 @@ var architectE2EPipelineYAML = `pipeline:
     architecture-reviewer:
       type: reviewer
       display-name: "Architecture Reviewer"
+      allowed-operations: [submit-verdict]
       context-sections:
         - review-task
         - worktree-rules
@@ -4301,11 +4378,13 @@ var architectE2EPipelineYAML = `pipeline:
     coder:
       type: doer
       display-name: "Coder"
+      allowed-operations: [mark-blocked]
       context-sections:
         - assigned-task
     code-reviewer:
       type: reviewer
       display-name: "Code Reviewer"
+      allowed-operations: [submit-verdict]
       context-sections:
         - review-task
     orchestrator:
