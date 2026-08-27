@@ -350,6 +350,85 @@ func TestAssessBlocked_ReconcilesCanonicalMetadata(t *testing.T) {
 	}
 }
 
+func TestAssessBlocked_RecordsDependencyDescendantWakeSnapshot(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	testhelpers.CreateSpecFile(t, tmpDir, "vision.md", "# Vision\n")
+	baseTime := time.Date(2026, 8, 24, 10, 0, 0, 0, time.UTC)
+	state := testhelpers.CreateValidState()
+	blocked := testhelpers.BuildTaskByStatus("blocked-evaluator", models.TaskStatusBlocked, baseTime)
+	blocked.AssignedTo = nil
+	blocked.DependsOn = []string{"provider-plan"}
+	oldReason := "existing reason"
+	blocked.BlockedReason = &oldReason
+	blocked.BlockedQuestions = []string{"existing question"}
+	blocked.RepairRequest = testAssessBlockedRepairRequest()
+	provider := testhelpers.BuildTaskByStatus("provider-plan", models.TaskStatusMerged, baseTime)
+	zChild := testhelpers.BuildTaskByStatus("z-child", models.TaskStatusReady, baseTime)
+	zChild.ParentTasks = []string{"provider-plan"}
+	aChild := testhelpers.BuildTaskByStatus("a-child", models.TaskStatusReady, baseTime)
+	aChild.ParentTasks = []string{"provider-plan"}
+	state.Tasks = []models.Task{blocked, provider, zChild, aChild}
+	setTaskSpecRefs(state)
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	wantRaw := BuildDependencyDescendantWakeSnapshot(state, &state.Tasks[0])
+	want, ok := NormalizeDependencyDescendantWakeSnapshot(wantRaw)
+	if !ok {
+		t.Fatalf("NormalizeDependencyDescendantWakeSnapshot(producer value) rejected %#v", wantRaw)
+	}
+	if len(want) != 2 || want[0].TaskID != "a-child" || want[1].TaskID != "z-child" {
+		t.Fatalf("producer snapshot order = %#v, want a-child then z-child", want)
+	}
+
+	if _, err := AssessBlocked(tmpDir, "blocked-evaluator", "note only", "orchestrator-1"); err != nil {
+		t.Fatalf("AssessBlocked() error: %v", err)
+	}
+	afterNote := readAssessBlockedTask(t, stateFile, "blocked-evaluator")
+	if !reflect.DeepEqual(afterNote.DependsOn, []string{"provider-plan"}) {
+		t.Fatalf("note-only depends_on = %#v, want provider-plan", afterNote.DependsOn)
+	}
+	if afterNote.BlockedReason == nil || *afterNote.BlockedReason != oldReason ||
+		!reflect.DeepEqual(afterNote.BlockedQuestions, []string{"existing question"}) ||
+		!reflect.DeepEqual(afterNote.RepairRequest, testAssessBlockedRepairRequest()) {
+		t.Fatalf("note-only assessment changed canonical blocker fields: %#v", afterNote)
+	}
+	noteEntry := afterNote.History[len(afterNote.History)-1]
+	noteSnapshot, ok := NormalizeDependencyDescendantWakeSnapshot(noteEntry.Extra[DependencyDescendantWakeSnapshotExtraKey])
+	if !ok || !reflect.DeepEqual(noteSnapshot, want) {
+		t.Fatalf("YAML-decoded note-only snapshot = %#v, ok=%v, want %#v", noteSnapshot, ok, want)
+	}
+
+	if _, err := AssessBlockedWithOptions(
+		tmpDir,
+		"blocked-evaluator",
+		"reconciled",
+		"orchestrator-1",
+		AssessBlockedOptions{Reason: "current reason", Questions: []string{"current question"}},
+	); err != nil {
+		t.Fatalf("AssessBlockedWithOptions() error: %v", err)
+	}
+	afterReconcile := readAssessBlockedTask(t, stateFile, "blocked-evaluator")
+	if !reflect.DeepEqual(afterReconcile.DependsOn, []string{"provider-plan"}) {
+		t.Fatalf("reconciliation depends_on = %#v, want provider-plan", afterReconcile.DependsOn)
+	}
+	if afterReconcile.BlockedReason == nil || *afterReconcile.BlockedReason != "current reason" ||
+		!reflect.DeepEqual(afterReconcile.BlockedQuestions, []string{"current question"}) ||
+		afterReconcile.RepairRequest != nil {
+		t.Fatalf("reconciled canonical blocker fields = %#v", afterReconcile)
+	}
+	reconcileEntry := afterReconcile.History[len(afterReconcile.History)-1]
+	reconcileSnapshot, ok := NormalizeDependencyDescendantWakeSnapshot(reconcileEntry.Extra[DependencyDescendantWakeSnapshotExtraKey])
+	if !ok || !reflect.DeepEqual(reconcileSnapshot, want) {
+		t.Fatalf("YAML-decoded reconciliation snapshot = %#v, ok=%v, want %#v", reconcileSnapshot, ok, want)
+	}
+	if !reflect.DeepEqual(noteSnapshot, reconcileSnapshot) {
+		t.Fatalf("note-only snapshot = %#v, reconciliation snapshot = %#v", noteSnapshot, reconcileSnapshot)
+	}
+}
+
 func TestAssessBlocked_CandidateValidationRollback(t *testing.T) {
 	t.Parallel()
 

@@ -280,6 +280,177 @@ func TestOrchestratorWakeTriggerSpecs(t *testing.T) {
 	}
 }
 
+func TestDetectOrchestratorWakeTriggers_BlockedDependencyDescendantSnapshot(t *testing.T) {
+	baseTime := time.Date(2026, 8, 24, 10, 0, 0, 0, time.UTC)
+	assessmentTime := baseTime.Add(time.Hour)
+	laterTime := assessmentTime.Add(time.Hour)
+	orchestrator := "orchestrator-1"
+	coder := "coder-1"
+
+	newState := func() *models.State {
+		state := testhelpers.CreateValidState()
+		blocked := testhelpers.BuildTaskByStatus("blocked-evaluator", models.TaskStatusBlocked, baseTime)
+		blocked.DependsOn = []string{"provider-plan"}
+		provider := testhelpers.BuildTaskByStatus("provider-plan", models.TaskStatusMerged, baseTime)
+		state.Tasks = []models.Task{blocked, provider}
+		return state
+	}
+	addChild := func(state *models.State, id, parent string, created time.Time) {
+		child := testhelpers.BuildTaskByStatus(id, models.TaskStatusReady, created)
+		child.ParentTasks = []string{parent}
+		child.History = nil
+		state.Tasks = append(state.Tasks, child)
+	}
+	recordAssessment := func(state *models.State, at time.Time, withBaseline bool) {
+		blocked := state.FindTask("blocked-evaluator")
+		entry := models.TaskHistoryEntry{
+			Time:  at,
+			Event: models.TaskEventOrchestratorAssessment,
+			Agent: &orchestrator,
+		}
+		if withBaseline {
+			entry.Extra = map[string]any{
+				ops.DependencyDescendantWakeSnapshotExtraKey: ops.BuildDependencyDescendantWakeSnapshot(state, blocked),
+			}
+		}
+		blocked.History = append(blocked.History, entry)
+	}
+	assertWake := func(t *testing.T, state *models.State, wantTrigger OrchestratorWakeTrigger) {
+		t.Helper()
+		got := DetectOrchestratorWakeTriggers(state, nil, nil, nil)
+		wantCount := 0
+		if wantTrigger == WakeTriggerBlocked {
+			wantCount = 1
+		}
+		if got.Trigger != wantTrigger || got.Count != wantCount {
+			t.Fatalf("DetectOrchestratorWakeTriggers() = %#v, want %s count %d", got, wantTrigger, wantCount)
+		}
+	}
+
+	t.Run("descendant inserted after recorded empty baseline wakes without timestamp evidence", func(t *testing.T) {
+		state := newState()
+		recordAssessment(state, assessmentTime, true)
+		addChild(state, "provider-coding", "provider-plan", baseTime)
+
+		assertWake(t, state, WakeTriggerBlocked)
+	})
+
+	t.Run("identical recorded and current empty baseline does not wake", func(t *testing.T) {
+		state := newState()
+		recordAssessment(state, assessmentTime, true)
+
+		assertWake(t, state, WakeTriggerNone)
+	})
+
+	t.Run("existing descendant non-assessment lifecycle change wakes", func(t *testing.T) {
+		state := newState()
+		addChild(state, "provider-coding", "provider-plan", baseTime)
+		recordAssessment(state, assessmentTime, true)
+		child := state.FindTask("provider-coding")
+		child.Status = models.TaskStatusImplementing
+		child.History = append(child.History, models.TaskHistoryEntry{
+			Time: laterTime, Event: models.TaskEventClaimed, Agent: &coder,
+		})
+
+		assertWake(t, state, WakeTriggerBlocked)
+	})
+
+	t.Run("existing descendant assessment-only change does not wake", func(t *testing.T) {
+		state := newState()
+		addChild(state, "provider-coding", "provider-plan", baseTime)
+		recordAssessment(state, assessmentTime, true)
+		child := state.FindTask("provider-coding")
+		child.History = append(child.History, models.TaskHistoryEntry{
+			Time: laterTime, Event: models.TaskEventOrchestratorAssessment, Agent: &orchestrator,
+		})
+
+		assertWake(t, state, WakeTriggerNone)
+	})
+
+	t.Run("descendant beneath resolver-selected replacement root wakes", func(t *testing.T) {
+		state := newState()
+		blocked := state.FindTask("blocked-evaluator")
+		blocked.DependsOn = []string{"provider-old"}
+		raw := testhelpers.BuildTaskByStatus("provider-old", models.TaskStatusSuperseded, baseTime)
+		raw.SupersededBy = []string{"provider-replacement"}
+		replacement := testhelpers.BuildTaskByStatus("provider-replacement", models.TaskStatusMerged, baseTime)
+		state.Tasks = []models.Task{*blocked, raw, replacement}
+		recordAssessment(state, assessmentTime, true)
+		addChild(state, "replacement-coding", "provider-replacement", baseTime)
+
+		assertWake(t, state, WakeTriggerBlocked)
+	})
+
+	t.Run("descendant attached only to stale superseded root does not wake", func(t *testing.T) {
+		state := newState()
+		blocked := state.FindTask("blocked-evaluator")
+		blocked.DependsOn = []string{"provider-old"}
+		raw := testhelpers.BuildTaskByStatus("provider-old", models.TaskStatusSuperseded, baseTime)
+		raw.SupersededBy = []string{"provider-replacement"}
+		replacement := testhelpers.BuildTaskByStatus("provider-replacement", models.TaskStatusMerged, baseTime)
+		state.Tasks = []models.Task{*blocked, raw, replacement}
+		recordAssessment(state, assessmentTime, true)
+		addChild(state, "stale-root-coding", "provider-old", laterTime)
+
+		assertWake(t, state, WakeTriggerNone)
+	})
+
+	t.Run("legacy assessment wakes for relevant descendant created afterward", func(t *testing.T) {
+		state := newState()
+		recordAssessment(state, assessmentTime, false)
+		addChild(state, "provider-coding", "provider-plan", laterTime)
+
+		assertWake(t, state, WakeTriggerBlocked)
+	})
+
+	t.Run("legacy assessment wakes for relevant descendant changed afterward", func(t *testing.T) {
+		state := newState()
+		addChild(state, "provider-coding", "provider-plan", baseTime)
+		recordAssessment(state, assessmentTime, false)
+		child := state.FindTask("provider-coding")
+		child.History = append(child.History, models.TaskHistoryEntry{
+			Time: laterTime, Event: models.TaskEventClaimed, Agent: &coder,
+		})
+
+		assertWake(t, state, WakeTriggerBlocked)
+	})
+
+	t.Run("descendant beneath unrelated root does not wake", func(t *testing.T) {
+		state := newState()
+		recordAssessment(state, assessmentTime, false)
+		unrelated := testhelpers.BuildTaskByStatus("unrelated-plan", models.TaskStatusMerged, baseTime)
+		state.Tasks = append(state.Tasks, unrelated)
+		addChild(state, "unrelated-coding", "unrelated-plan", laterTime)
+
+		assertWake(t, state, WakeTriggerNone)
+	})
+
+	t.Run("baseline-present historical descendant does not wake", func(t *testing.T) {
+		state := newState()
+		addChild(state, "provider-coding", "provider-plan", baseTime)
+		recordAssessment(state, assessmentTime, true)
+
+		assertWake(t, state, WakeTriggerNone)
+	})
+
+	t.Run("legacy historical descendant does not wake", func(t *testing.T) {
+		state := newState()
+		addChild(state, "provider-coding", "provider-plan", baseTime)
+		recordAssessment(state, assessmentTime, false)
+
+		assertWake(t, state, WakeTriggerNone)
+	})
+
+	t.Run("refreshed repeated assessment baseline suppresses prior change", func(t *testing.T) {
+		state := newState()
+		recordAssessment(state, assessmentTime, true)
+		addChild(state, "provider-coding", "provider-plan", baseTime)
+		recordAssessment(state, laterTime, true)
+
+		assertWake(t, state, WakeTriggerNone)
+	})
+}
+
 func TestDetectOrchestratorWakeTriggers(t *testing.T) {
 	now := time.Now().UTC()
 

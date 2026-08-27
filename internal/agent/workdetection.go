@@ -269,6 +269,19 @@ func isTaskActionableSinceAssessment(task *models.Task, state *models.State) boo
 		}
 	}
 
+	// Only BLOCKED tasks use dependency-descendant cursors. Hypothesis exhaustion
+	// shares this predicate but retains its existing direct-dependency behavior.
+	if task.Status == models.TaskStatusBlocked {
+		recorded, hasSnapshot := lastAssessment.Extra[ops.DependencyDescendantWakeSnapshotExtraKey]
+		if hasSnapshot {
+			if ops.DependencyDescendantWakeSnapshotChanged(state, task, recorded) {
+				return true
+			}
+		} else if ops.DependencyDescendantChangedAfter(state, task, lastAssessment.Time) {
+			return true
+		}
+	}
+
 	// Check human notes targeting this task (by ID or "all") after last assessment.
 	// Design choice: notes on dependency tasks do NOT re-activate this blocked task.
 	// Rationale: human targets specific tasks by ID; if they want to wake all

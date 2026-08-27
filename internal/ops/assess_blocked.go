@@ -1,8 +1,10 @@
 package ops
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
+	"sort"
 	"time"
 
 	"github.com/liza-mas/liza/internal/alerts"
@@ -14,6 +16,156 @@ import (
 	"github.com/liza-mas/liza/internal/roles"
 	"github.com/liza-mas/liza/internal/statevalidate"
 )
+
+// DependencyDescendantWakeSnapshotExtraKey identifies the versioned blocked
+// assessment cursor consumed by orchestrator wake detection.
+const DependencyDescendantWakeSnapshotExtraKey = "dependency_descendant_wake_snapshot_v1"
+
+// DependencyDescendantWakeSnapshotEntry fingerprints one descendant beneath a
+// canonical dependency root. LifecycleVersion excludes assessment-only events.
+type DependencyDescendantWakeSnapshotEntry struct {
+	TaskID           string    `json:"task_id" yaml:"task_id"`
+	Created          time.Time `json:"created" yaml:"created"`
+	Status           string    `json:"status" yaml:"status"`
+	LifecycleVersion int       `json:"lifecycle_version" yaml:"lifecycle_version"`
+}
+
+// BuildDependencyDescendantWakeSnapshot returns a deterministic baseline for
+// descendants beneath the task's resolver-selected dependency roots.
+func BuildDependencyDescendantWakeSnapshot(state *models.State, task *models.Task) []DependencyDescendantWakeSnapshotEntry {
+	descendants := dependencyDescendantTasks(state, task)
+	snapshot := make([]DependencyDescendantWakeSnapshotEntry, 0, len(descendants))
+	for _, descendant := range descendants {
+		lifecycleVersion := 0
+		for i := range descendant.History {
+			if descendant.History[i].Event != models.TaskEventOrchestratorAssessment {
+				lifecycleVersion++
+			}
+		}
+		snapshot = append(snapshot, DependencyDescendantWakeSnapshotEntry{
+			TaskID:           descendant.ID,
+			Created:          descendant.Created,
+			Status:           string(descendant.Status),
+			LifecycleVersion: lifecycleVersion,
+		})
+	}
+	return snapshot
+}
+
+// NormalizeDependencyDescendantWakeSnapshot accepts both the producer's typed
+// value and the generic maps/slices produced by YAML decoding.
+func NormalizeDependencyDescendantWakeSnapshot(value any) ([]DependencyDescendantWakeSnapshotEntry, bool) {
+	if value == nil {
+		return nil, false
+	}
+	data, err := json.Marshal(value)
+	if err != nil {
+		return nil, false
+	}
+	var snapshot []DependencyDescendantWakeSnapshotEntry
+	if err := json.Unmarshal(data, &snapshot); err != nil || snapshot == nil {
+		return nil, false
+	}
+	sort.Slice(snapshot, func(i, j int) bool { return snapshot[i].TaskID < snapshot[j].TaskID })
+	for i := range snapshot {
+		if snapshot[i].TaskID == "" || snapshot[i].LifecycleVersion < 0 {
+			return nil, false
+		}
+		if i > 0 && snapshot[i-1].TaskID == snapshot[i].TaskID {
+			return nil, false
+		}
+	}
+	return snapshot, true
+}
+
+// DependencyDescendantWakeSnapshotChanged compares a persisted baseline with
+// the current canonical descendant state. Malformed persisted values fail open
+// so the next assessment can replace them with a valid cursor.
+func DependencyDescendantWakeSnapshotChanged(state *models.State, task *models.Task, recorded any) bool {
+	baseline, ok := NormalizeDependencyDescendantWakeSnapshot(recorded)
+	if !ok {
+		return true
+	}
+	current := BuildDependencyDescendantWakeSnapshot(state, task)
+	if len(baseline) != len(current) {
+		return true
+	}
+	for i := range current {
+		if baseline[i] != current[i] {
+			return true
+		}
+	}
+	return false
+}
+
+// DependencyDescendantChangedAfter reports legacy timestamp evidence for a
+// relevant descendant creation or non-assessment lifecycle event.
+func DependencyDescendantChangedAfter(state *models.State, task *models.Task, after time.Time) bool {
+	for _, descendant := range dependencyDescendantTasks(state, task) {
+		if descendant.Created.After(after) {
+			return true
+		}
+		for i := range descendant.History {
+			entry := descendant.History[i]
+			if entry.Event != models.TaskEventOrchestratorAssessment && entry.Time.After(after) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func dependencyDescendantTasks(state *models.State, task *models.Task) []*models.Task {
+	if state == nil || task == nil {
+		return nil
+	}
+	childrenByParent := make(map[string][]*models.Task)
+	for i := range state.Tasks {
+		candidate := &state.Tasks[i]
+		for _, parentID := range candidate.EffectiveParentTasks() {
+			childrenByParent[parentID] = append(childrenByParent[parentID], candidate)
+		}
+	}
+
+	resolver := models.NewDependencyResolver(state)
+	rootSet := make(map[string]struct{})
+	for _, dependencyID := range task.DependsOn {
+		for _, pathID := range resolver.Resolve(dependencyID).Path {
+			candidate := state.FindTask(pathID)
+			if candidate != nil && candidate.Status != models.TaskStatusSuperseded {
+				rootSet[pathID] = struct{}{}
+			}
+		}
+	}
+	roots := make([]string, 0, len(rootSet))
+	for rootID := range rootSet {
+		roots = append(roots, rootID)
+	}
+	sort.Strings(roots)
+
+	visited := make(map[string]struct{}, len(roots))
+	queue := append([]string(nil), roots...)
+	for _, rootID := range roots {
+		visited[rootID] = struct{}{}
+	}
+	var descendants []*models.Task
+	for len(queue) > 0 {
+		parentID := queue[0]
+		queue = queue[1:]
+		children := childrenByParent[parentID]
+		sort.Slice(children, func(i, j int) bool { return children[i].ID < children[j].ID })
+		for _, child := range children {
+			if _, seen := visited[child.ID]; seen {
+				continue
+			}
+			visited[child.ID] = struct{}{}
+			descendants = append(descendants, child)
+			queue = append(queue, child.ID)
+		}
+	}
+	sort.Slice(descendants, func(i, j int) bool { return descendants[i].ID < descendants[j].ID })
+	return descendants
+}
 
 // AssessBlockedResult contains the outcome of recording an orchestrator assessment.
 type AssessBlockedResult struct {
@@ -105,6 +257,9 @@ func AssessBlockedWithOptions(projectRoot, taskID, note, agentID string, opts As
 			Time:  now,
 			Event: models.TaskEventOrchestratorAssessment,
 			Agent: &agentID,
+			Extra: map[string]any{
+				DependencyDescendantWakeSnapshotExtraKey: BuildDependencyDescendantWakeSnapshot(state, task),
+			},
 		}
 		if note != "" {
 			entry.Note = &note
@@ -116,10 +271,8 @@ func AssessBlockedWithOptions(projectRoot, taskID, note, agentID string, opts As
 			task.BlockedQuestions = questions
 			task.RepairRequest = repairRequest
 			entry.Reason = &reason
-			entry.Extra = map[string]any{
-				"blocked_questions": append([]string(nil), questions...),
-				"repair_request":    repairRequest,
-			}
+			entry.Extra["blocked_questions"] = append([]string(nil), questions...)
+			entry.Extra["repair_request"] = repairRequest
 		}
 
 		task.History = append(task.History, entry)
