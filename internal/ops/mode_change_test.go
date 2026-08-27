@@ -2,6 +2,7 @@ package ops
 
 import (
 	"errors"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -82,6 +83,245 @@ func TestStart_FromPaused(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "PAUSED") {
 		t.Errorf("Error = %q, want to contain 'PAUSED'", err.Error())
+	}
+}
+
+func TestCircuitBreakerHaltSurvivesStopStart(t *testing.T) {
+	tmpDir := t.TempDir()
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+
+	now := time.Now().UTC()
+	state := testhelpers.CreateValidState()
+	state.Anomalies = []models.Anomaly{
+		retryLoopAnomaly(now, "coder-1"),
+		retryLoopAnomaly(now.Add(time.Minute), "coder-1"),
+		retryLoopAnomaly(now.Add(2*time.Minute), "coder-1"),
+	}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	analyzeResult, err := Analyze(tmpDir)
+	if err != nil {
+		t.Fatalf("Analyze() error: %v", err)
+	}
+	if analyzeResult.Pattern != "retry_cluster" || analyzeResult.Response != models.CircuitBreakerResponseHalt || !analyzeResult.Triggered {
+		t.Fatalf("Analyze() result = {pattern:%q response:%q triggered:%v}, want retry_cluster/HALT/true", analyzeResult.Pattern, analyzeResult.Response, analyzeResult.Triggered)
+	}
+
+	beforeStop, err := db.New(stateFile).Read()
+	if err != nil {
+		t.Fatalf("read active HALT state: %v", err)
+	}
+	if beforeStop.CircuitBreaker.CurrentTrigger == nil || beforeStop.CircuitBreaker.CurrentResponse == nil {
+		t.Fatalf("Analyze() did not persist trigger and response: %+v", beforeStop.CircuitBreaker)
+	}
+	trigger := *beforeStop.CircuitBreaker.CurrentTrigger
+	response := *beforeStop.CircuitBreaker.CurrentResponse
+	historyLen := len(beforeStop.CircuitBreaker.History)
+	if historyLen == 0 {
+		t.Fatal("Analyze() did not append a HALT history boundary")
+	}
+	boundaryIndex := historyLen - 1
+	boundary := beforeStop.CircuitBreaker.History[boundaryIndex]
+	if boundary.Resolution != nil || boundary.ResolvedAt != nil || !boundary.Timestamp.Equal(response.Timestamp) || boundary.Response != response.Response || boundary.Pattern == nil || *boundary.Pattern != response.Pattern {
+		t.Fatalf("Analyze() history boundary does not match active response: response=%+v boundary=%+v", response, boundary)
+	}
+
+	if _, err := Stop(tmpDir, "maintenance", "human"); err != nil {
+		t.Fatalf("Stop() error: %v", err)
+	}
+
+	assertStoppedHaltPreserved := func(stage string) {
+		t.Helper()
+		current, err := db.New(stateFile).Read()
+		if err != nil {
+			t.Fatalf("%s: read state: %v", stage, err)
+		}
+		if current.Config.Mode != models.SystemModeStopped {
+			t.Errorf("%s: mode = %s, want STOPPED", stage, current.Config.Mode)
+		}
+		if !reflect.DeepEqual(current.CircuitBreaker.CurrentTrigger, &trigger) {
+			t.Errorf("%s: current trigger changed: got %+v, want %+v", stage, current.CircuitBreaker.CurrentTrigger, trigger)
+		}
+		if !reflect.DeepEqual(current.CircuitBreaker.CurrentResponse, &response) {
+			t.Errorf("%s: current response changed: got %+v, want %+v", stage, current.CircuitBreaker.CurrentResponse, response)
+		}
+		if len(current.CircuitBreaker.History) != historyLen {
+			t.Fatalf("%s: history length = %d, want %d", stage, len(current.CircuitBreaker.History), historyLen)
+		}
+		if !reflect.DeepEqual(current.CircuitBreaker.History[boundaryIndex], boundary) {
+			t.Errorf("%s: unresolved history boundary changed: got %+v, want %+v", stage, current.CircuitBreaker.History[boundaryIndex], boundary)
+		}
+	}
+
+	assertStoppedHaltPreserved("after Stop")
+
+	if _, err := Start(tmpDir, "restart", "human"); err == nil {
+		t.Fatal("Start() released an unresolved HALT")
+	} else if !strings.Contains(err.Error(), "HALT") || !strings.Contains(err.Error(), "resume") {
+		t.Fatalf("Start() error = %q, want active HALT acknowledgement guidance", err)
+	}
+	assertStoppedHaltPreserved("after rejected Start")
+
+	if _, err := AutoResume(tmpDir, "auto-resume"); err == nil {
+		t.Fatal("AutoResume() acknowledged a STOPPED active HALT")
+	} else if !strings.Contains(err.Error(), "STOPPED") {
+		t.Fatalf("AutoResume() error = %q, want STOPPED precondition", err)
+	}
+	assertStoppedHaltPreserved("after rejected automatic resume")
+
+	resumeResult, err := Resume(tmpDir, "human")
+	if err != nil {
+		t.Fatalf("Resume() error: %v", err)
+	}
+	if resumeResult.ResumedFrom != "active HALT response" {
+		t.Errorf("Resume().ResumedFrom = %q, want active HALT response", resumeResult.ResumedFrom)
+	}
+
+	afterResume, err := db.New(stateFile).Read()
+	if err != nil {
+		t.Fatalf("read acknowledged HALT state: %v", err)
+	}
+	if afterResume.Config.Mode != models.SystemModeStopped {
+		t.Errorf("mode after Resume() = %s, want STOPPED", afterResume.Config.Mode)
+	}
+	if afterResume.CircuitBreaker.Status != "OK" || afterResume.CircuitBreaker.CurrentTrigger != nil || afterResume.CircuitBreaker.CurrentResponse != nil {
+		t.Errorf("Resume() left active HALT state: %+v", afterResume.CircuitBreaker)
+	}
+	if len(afterResume.CircuitBreaker.History) != historyLen {
+		t.Fatalf("history length after Resume() = %d, want %d", len(afterResume.CircuitBreaker.History), historyLen)
+	}
+	resolvedBoundary := afterResume.CircuitBreaker.History[boundaryIndex]
+	if resolvedBoundary.Resolution == nil || *resolvedBoundary.Resolution != "resumed by human" || resolvedBoundary.ResolvedAt == nil {
+		t.Fatalf("Resume() did not resolve the exact HALT boundary: %+v", resolvedBoundary)
+	}
+	resolvedBoundary.Resolution = nil
+	resolvedBoundary.ResolvedAt = nil
+	if !reflect.DeepEqual(resolvedBoundary, boundary) {
+		t.Errorf("Resume() changed HALT boundary evidence: got %+v, want %+v", resolvedBoundary, boundary)
+	}
+
+	if _, err := Start(tmpDir, "restart after acknowledgement", "human"); err != nil {
+		t.Fatalf("Start() after Resume() error: %v", err)
+	}
+	started, err := db.New(stateFile).Read()
+	if err != nil {
+		t.Fatalf("read started state: %v", err)
+	}
+	if started.Config.Mode != models.SystemModeRunning {
+		t.Errorf("mode after acknowledged Start() = %s, want RUNNING", started.Config.Mode)
+	}
+}
+
+func TestLegacyCircuitBreakerHaltSurvivesStopStart(t *testing.T) {
+	tmpDir := t.TempDir()
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+
+	triggeredAt := time.Date(2026, 8, 24, 10, 0, 0, 0, time.UTC)
+	pattern := "retry_cluster"
+	severity := "HIGH"
+	state := testhelpers.CreateValidState()
+	state.Config.Mode = models.SystemModeCircuitBreakerTripped
+	state.CircuitBreaker = models.CircuitBreaker{
+		LastCheck: triggeredAt.Add(time.Minute),
+		Status:    "TRIGGERED",
+		CurrentTrigger: &models.CircuitBreakerTrigger{
+			Timestamp:  triggeredAt,
+			Pattern:    pattern,
+			Severity:   severity,
+			ReportFile: ".liza/circuit_breaker_report.md",
+			Extra:      map[string]any{"legacy_trigger_field": "preserved"},
+		},
+		History: []models.CircuitBreakerHistory{
+			{
+				Timestamp: triggeredAt,
+				Pattern:   &pattern,
+				Severity:  &severity,
+				Result:    "TRIGGERED",
+				Extra:     map[string]any{"legacy_history_field": "preserved"},
+			},
+		},
+		Extra: map[string]any{"legacy_breaker_field": "preserved"},
+	}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	beforeStop, err := db.New(stateFile).Read()
+	if err != nil {
+		t.Fatalf("read legacy active HALT state: %v", err)
+	}
+	if beforeStop.CircuitBreaker.CurrentResponse != nil {
+		t.Fatalf("legacy fixture has typed current response: %+v", beforeStop.CircuitBreaker.CurrentResponse)
+	}
+
+	if _, err := Stop(tmpDir, "maintenance", "human"); err != nil {
+		t.Fatalf("Stop() error: %v", err)
+	}
+	stopped, err := db.New(stateFile).Read()
+	if err != nil {
+		t.Fatalf("read stopped legacy HALT state: %v", err)
+	}
+	if stopped.Config.Mode != models.SystemModeStopped {
+		t.Fatalf("mode after Stop() = %s, want STOPPED", stopped.Config.Mode)
+	}
+	if !reflect.DeepEqual(stopped.CircuitBreaker, beforeStop.CircuitBreaker) {
+		t.Fatalf("Stop() changed legacy circuit-breaker state: got %+v, want %+v", stopped.CircuitBreaker, beforeStop.CircuitBreaker)
+	}
+
+	assertStoppedStateUnchanged := func(stage string) {
+		t.Helper()
+		current, err := db.New(stateFile).Read()
+		if err != nil {
+			t.Fatalf("%s: read state: %v", stage, err)
+		}
+		if !reflect.DeepEqual(current, stopped) {
+			t.Errorf("%s mutated stopped legacy HALT state: got %+v, want %+v", stage, current, stopped)
+		}
+	}
+
+	if _, err := Start(tmpDir, "restart", "human"); err == nil {
+		t.Fatal("Start() released an unresolved legacy HALT")
+	} else if !strings.Contains(err.Error(), "HALT") || !strings.Contains(err.Error(), "resume") {
+		t.Fatalf("Start() error = %q, want active HALT acknowledgement guidance", err)
+	}
+	assertStoppedStateUnchanged("rejected Start")
+
+	if _, err := AutoResume(tmpDir, "auto-resume"); err == nil {
+		t.Fatal("AutoResume() acknowledged a STOPPED legacy HALT")
+	} else if !strings.Contains(err.Error(), "STOPPED") {
+		t.Fatalf("AutoResume() error = %q, want STOPPED precondition", err)
+	}
+	assertStoppedStateUnchanged("rejected automatic resume")
+
+	resumeResult, err := Resume(tmpDir, "human")
+	if err != nil {
+		t.Fatalf("Resume() error: %v", err)
+	}
+	if resumeResult.ResumedFrom != "active HALT response" || !resumeResult.SystemRemainsStopped {
+		t.Errorf("Resume() result = %+v, want acknowledged HALT while stopped", resumeResult)
+	}
+
+	afterResume, err := db.New(stateFile).Read()
+	if err != nil {
+		t.Fatalf("read acknowledged legacy HALT state: %v", err)
+	}
+	if !reflect.DeepEqual(afterResume.Config, stopped.Config) {
+		t.Errorf("Resume() changed stopped mode config: got %+v, want %+v", afterResume.Config, stopped.Config)
+	}
+	expectedBreaker := stopped.CircuitBreaker
+	expectedBreaker.Status = "OK"
+	expectedBreaker.CurrentTrigger = nil
+	if !reflect.DeepEqual(afterResume.CircuitBreaker, expectedBreaker) {
+		t.Errorf("Resume() changed legacy data beyond trigger acknowledgement: got %+v, want %+v", afterResume.CircuitBreaker, expectedBreaker)
+	}
+
+	if _, err := Start(tmpDir, "restart after acknowledgement", "human"); err != nil {
+		t.Fatalf("Start() after legacy HALT acknowledgement error: %v", err)
+	}
+	started, err := db.New(stateFile).Read()
+	if err != nil {
+		t.Fatalf("read started state: %v", err)
+	}
+	if started.Config.Mode != models.SystemModeRunning {
+		t.Errorf("mode after acknowledged Start() = %s, want RUNNING", started.Config.Mode)
 	}
 }
 
@@ -517,6 +757,82 @@ func TestPause_FromStopped(t *testing.T) {
 }
 
 // --- Resume ---
+
+func TestResumeAcknowledgesCircuitBreakerResponse(t *testing.T) {
+	observedAt := time.Date(2026, 8, 24, 10, 0, 0, 0, time.UTC)
+	registeredAt := observedAt.Add(-time.Hour)
+
+	for _, response := range []models.CircuitBreakerResponseType{
+		models.CircuitBreakerResponseCheckpoint,
+		models.CircuitBreakerResponseHalt,
+	} {
+		t.Run(string(response), func(t *testing.T) {
+			tmpDir := t.TempDir()
+			stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+			state := testhelpers.CreateValidState()
+			state.Anomalies = []models.Anomaly{
+				providerAuditAnomaly(observedAt, "coder-1"),
+				providerAuditAnomaly(observedAt.Add(time.Minute), "coder-2"),
+			}
+			if response == models.CircuitBreakerResponseHalt {
+				setAnalyzeProviderAuditEpochs(state, "codex", models.AgentHealthDegraded, registeredAt)
+			}
+			testhelpers.WriteInitialState(t, stateFile, state)
+
+			analyzeResult, err := Analyze(tmpDir)
+			if err != nil {
+				t.Fatalf("Analyze() error: %v", err)
+			}
+			if analyzeResult.Response != response {
+				t.Fatalf("Analyze() response = %q, want %q", analyzeResult.Response, response)
+			}
+
+			beforeResume, err := db.New(stateFile).Read()
+			if err != nil {
+				t.Fatalf("read active response: %v", err)
+			}
+			if beforeResume.CircuitBreaker.CurrentResponse == nil {
+				t.Fatal("Analyze() did not persist an active response")
+			}
+			boundary := beforeResume.CircuitBreaker.CurrentResponse.Timestamp
+
+			if _, err := Resume(tmpDir, "human"); err != nil {
+				t.Fatalf("Resume() error: %v", err)
+			}
+
+			afterResume, err := db.New(stateFile).Read()
+			if err != nil {
+				t.Fatalf("read resumed state: %v", err)
+			}
+			if afterResume.CircuitBreaker.CurrentResponse != nil || afterResume.CircuitBreaker.CurrentTrigger != nil {
+				t.Errorf("resume left active circuit-breaker state: %+v", afterResume.CircuitBreaker)
+			}
+			if afterResume.CircuitBreaker.Status != "OK" || afterResume.Config.Mode != models.SystemModeRunning {
+				t.Errorf("resume status/mode = %s/%s, want OK/RUNNING", afterResume.CircuitBreaker.Status, afterResume.Config.Mode)
+			}
+
+			var resolved *models.CircuitBreakerHistory
+			for i := range afterResume.CircuitBreaker.History {
+				entry := &afterResume.CircuitBreaker.History[i]
+				if entry.Timestamp.Equal(boundary) && entry.Response == response {
+					resolved = entry
+					break
+				}
+			}
+			if resolved == nil || resolved.ResolvedAt == nil || resolved.Resolution == nil {
+				t.Fatalf("resume did not resolve response at committed boundary %s: %+v", boundary, afterResume.CircuitBreaker.History)
+			}
+
+			reanalyzed, err := Analyze(tmpDir)
+			if err != nil {
+				t.Fatalf("Analyze() after resume error: %v", err)
+			}
+			if reanalyzed.Triggered || reanalyzed.Response != models.CircuitBreakerResponseWarning || reanalyzed.Classification != models.CircuitBreakerEvidenceAcknowledgedHistorical {
+				t.Errorf("unchanged re-analysis = {triggered:%v response:%q classification:%q}, want historical WARNING", reanalyzed.Triggered, reanalyzed.Response, reanalyzed.Classification)
+			}
+		})
+	}
+}
 
 func TestResume_FromPaused(t *testing.T) {
 	tmpDir := t.TempDir()

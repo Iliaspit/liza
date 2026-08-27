@@ -12,7 +12,7 @@
 | `log.yaml` | Activity history | Append-only |
 | `alerts.log` | Persistent watcher alerts | Append-only |
 | `archive/` | Terminal-state tasks older than threshold | Periodic pruning |
-| `circuit_breaker_report.md` | CB trigger report | Write-once per trigger |
+| `circuit_breaker_report.md` | Latest qualifying circuit-breaker response report | Rewritten by `analyze` for each qualifying response |
 | `ESCALATION` | Stale checkpoint notification | Overwrite by watcher |
 
 ### Sections within state.yaml
@@ -843,7 +843,8 @@ sprint:
 circuit_breaker:
   last_check: 2025-01-18T17:30:00Z
   status: OK  # OK, TRIGGERED
-  current_trigger: null
+  current_trigger: null  # HALT-only, retained for backward compatibility
+  current_response: null # active CHECKPOINT or HALT; WARNING never becomes active
   history:
     - timestamp: 2025-01-17T12:00:00Z
       pattern: null
@@ -869,13 +870,63 @@ config:
   escalation_webhook: null      # Optional: URL for external notifications
 ```
 
-**Circuit-breaker acknowledgement watermark:** When
-`circuit_breaker.status == OK` and `current_trigger == null`, the latest
-history entry with `result: TRIGGERED` is the acknowledgement watermark for
-future circuit-breaker checks. `liza analyze` and `liza tui` consider only
-anomalies with `timestamp` strictly after that watermark. Later `OK` entries do
-not move the watermark. If `status == TRIGGERED` or `current_trigger` is
-non-null, no watermark applies.
+**Circuit-breaker response and compatibility model:** `WARNING`, `CHECKPOINT`,
+and `HALT` are typed responses. Only `HALT` is a trigger: it sets
+`status: TRIGGERED`, populates `current_trigger`, and moves mode to
+`CIRCUIT_BREAKER_TRIPPED`. `CHECKPOINT` leaves mode `RUNNING`, status `OK`, and
+`current_trigger: null`; it stores this active non-trigger hard-checkpoint
+response and moves the sprint to `CHECKPOINT`, gating downstream transition
+creation while work already available to doer/reviewer agents may continue. `WARNING` is
+observation-only and creates no `current_response`.
+
+An active `current_response` contains `timestamp`, `pattern`, `severity`, typed
+`response`, provider-evidence `classification`, `explanation`, and
+`report_file`. History entries may carry `response`, `classification`, and
+`explanation` alongside their existing fields. A history entry may also carry
+`superseded_by_response: HALT`, an optional HALT-only replacement marker written
+when an active provider-audit `CHECKPOINT` escalates. These additions are
+optional for backward compatibility: readers accept legacy state without them,
+and existing `result: TRIGGERED` entries remain generic acknowledgement
+boundaries.
+
+An active provider-audit response is monotonic until `resume`: `HALT` remains
+active against every later analysis, while `CHECKPOINT` remains active for no
+match or a non-HALT candidate. A committed `HALT` candidate supersedes the
+checkpoint atomically by marking the former boundary with
+`superseded_by_response: HALT` and appending exactly one unresolved `HALT`
+boundary matching the new `current_response`. The superseded checkpoint keeps
+both `resolution` and `resolved_at` absent. Supersession is therefore not
+operator acknowledgement and does not establish the provider-evidence
+watermark.
+
+Provider-audit classifications are `ACKNOWLEDGED_HISTORICAL` (qualifying
+evidence entirely at or before a resolved boundary), `NEW` (later evidence
+qualifies without same-provider acknowledged evidence), and `CONTINUING`
+(same-provider evidence spans the boundary and qualifies in combination).
+The `resume` command resolves the matching active `CHECKPOINT` or `HALT` history
+entry, records the paired `resolution`/`resolved_at` acknowledgement fields, and
+clears `current_response`; for `HALT` it also clears trigger state. A superseded
+checkpoint is never resolved by that operation. The resolved winning response
+timestamp remains the provider evidence boundary, so unchanged evidence returns
+`ACKNOWLEDGED_HISTORICAL`/`WARNING` rather than checkpointing or halting again.
+
+Provider-audit `NEW` or `CONTINUING` evidence can become `HALT` only when at
+least one current registration exactly matches the anomaly provider and every
+exact match has degraded health for the same agent ID, provider, PID, and
+registration time. Alias-only provider equality, empty or missing identity,
+missing health, or a stale/mismatched PID or registration epoch is unknown and
+therefore remains `CHECKPOINT`.
+
+The operation result exposes `AnalyzeResult.Response`,
+`AnalyzeResult.Classification`, and `AnalyzeResult.Explanation`; JSON projects
+them as `response`, `classification`, and `explanation`, in addition to the
+legacy `pattern`, `severity`, `evidence`, `triggered`, and `report_path` fields.
+`triggered` is true only for `HALT`.
+
+For generic patterns, when `status == OK` and `current_trigger == null`, the
+latest history entry with `result: TRIGGERED` remains the acknowledgement
+watermark. Later `OK` entries do not move it. If `status == TRIGGERED` or
+`current_trigger` is non-null, no generic watermark applies.
 
 **Config Scope:**
 - Config values are **goal-level defaults** (apply to all tasks in current goal)

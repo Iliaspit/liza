@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/liza-mas/liza/internal/analysis"
 	"github.com/liza-mas/liza/internal/db"
 	lizalog "github.com/liza-mas/liza/internal/log"
 	"github.com/liza-mas/liza/internal/models"
@@ -1916,19 +1917,30 @@ func TestRunChecks_SuppressesAcknowledgedCircuitBreakerPattern(t *testing.T) {
 	lizaPaths := paths.New(tmpDir)
 
 	watermark := time.Date(2026, 5, 20, 11, 0, 0, 0, time.UTC)
-	pattern := "provider_audit_degradation"
-	severity := "OBSERVABILITY_DEGRADED"
+	resolvedAt := watermark.Add(time.Minute)
 	state := testhelpers.CreateValidState()
 	state.CircuitBreaker = models.CircuitBreaker{
 		Status: "OK",
 		History: []models.CircuitBreakerHistory{
-			{Timestamp: watermark, Pattern: &pattern, Severity: &severity, Result: "TRIGGERED"},
+			{
+				Timestamp:      watermark,
+				Result:         "CHECKPOINT",
+				Response:       models.CircuitBreakerResponseCheckpoint,
+				Classification: models.CircuitBreakerEvidenceNew,
+				ResolvedAt:     &resolvedAt,
+			},
 		},
 	}
 	state.Anomalies = []models.Anomaly{
 		watchProviderAuditAnomaly(watermark.Add(-time.Minute), "old-coder-1"),
 		watchProviderAuditAnomaly(watermark, "old-coder-2"),
 		watchProviderAuditAnomaly(watermark.Add(-2*time.Minute), "old-coder-3"),
+	}
+	patternResult, _, _ := analysis.DetectUnacknowledgedPatterns(state)
+	if patternResult.Classification != models.CircuitBreakerEvidenceAcknowledgedHistorical ||
+		patternResult.Response != models.CircuitBreakerResponseWarning || patternResult.Triggered {
+		t.Fatalf("provider-audit result = {class:%q response:%q triggered:%v}, want {ACKNOWLEDGED_HISTORICAL WARNING false}",
+			patternResult.Classification, patternResult.Response, patternResult.Triggered)
 	}
 	testhelpers.WriteInitialState(t, stateFile, state)
 
@@ -1955,46 +1967,82 @@ func TestRunChecks_SuppressesAcknowledgedCircuitBreakerPattern(t *testing.T) {
 	}
 }
 
-func TestRunChecks_AlertsOnUnacknowledgedCircuitBreakerPattern(t *testing.T) {
-	tmpDir := t.TempDir()
-	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
-	testhelpers.SetupPipelineConfig(t, tmpDir)
-	lizaPaths := paths.New(tmpDir)
-
+func TestCheckCircuitBreakerEscalation_ProviderAuditResponses(t *testing.T) {
 	watermark := time.Date(2026, 5, 20, 11, 0, 0, 0, time.UTC)
-	pattern := "provider_audit_degradation"
-	severity := "OBSERVABILITY_DEGRADED"
-	state := testhelpers.CreateValidState()
-	state.CircuitBreaker = models.CircuitBreaker{
-		Status: "OK",
-		History: []models.CircuitBreakerHistory{
-			{Timestamp: watermark, Pattern: &pattern, Severity: &severity, Result: "TRIGGERED"},
-		},
-	}
-	state.Anomalies = []models.Anomaly{
-		watchProviderAuditAnomaly(watermark.Add(-time.Minute), "old-coder"),
-		watchProviderAuditAnomaly(watermark.Add(time.Minute), "new-coder-1"),
-		watchProviderAuditAnomaly(watermark.Add(2*time.Minute), "new-coder-2"),
-	}
-	testhelpers.WriteInitialState(t, stateFile, state)
-
-	config := WatchConfig{
-		ProjectRoot: tmpDir,
-		AlertsLog:   lizaPaths.AlertsLogPath(),
-		StateCache:  make(map[string]time.Time),
-	}
-
-	if err := runChecks(context.Background(), config); err != nil {
-		t.Fatalf("runChecks() error: %v", err)
+	resolvedAt := watermark.Add(30 * time.Second)
+	providerAuditState := func() *models.State {
+		state := testhelpers.CreateValidState()
+		state.CircuitBreaker = models.CircuitBreaker{
+			Status: "OK",
+			History: []models.CircuitBreakerHistory{{
+				Timestamp:      watermark,
+				Result:         "CHECKPOINT",
+				Response:       models.CircuitBreakerResponseCheckpoint,
+				Classification: models.CircuitBreakerEvidenceNew,
+				ResolvedAt:     &resolvedAt,
+			}},
+		}
+		state.Anomalies = []models.Anomaly{
+			watchProviderAuditAnomaly(watermark.Add(-time.Minute), "old-coder"),
+			watchProviderAuditAnomaly(watermark.Add(time.Minute), "new-coder-1"),
+			watchProviderAuditAnomaly(watermark.Add(2*time.Minute), "new-coder-2"),
+		}
+		return state
 	}
 
-	alertLogData, err := os.ReadFile(lizaPaths.AlertsLogPath())
-	if err != nil {
-		t.Fatalf("failed to read alerts log: %v", err)
-	}
-	if !strings.Contains(string(alertLogData), "CIRCUIT BREAKER") {
-		t.Fatalf("expected CIRCUIT BREAKER alert for unacknowledged pattern:\n%s", string(alertLogData))
-	}
+	t.Run("checkpoint without exact current degraded provider epoch emits no alert", func(t *testing.T) {
+		state := providerAuditState()
+		patternResult, _, _ := analysis.DetectUnacknowledgedPatterns(state)
+		if patternResult.Classification != models.CircuitBreakerEvidenceContinuing ||
+			patternResult.Response != models.CircuitBreakerResponseCheckpoint || patternResult.Triggered {
+			t.Fatalf("provider-audit result = {class:%q response:%q triggered:%v}, want {CONTINUING CHECKPOINT false}",
+				patternResult.Classification, patternResult.Response, patternResult.Triggered)
+		}
+
+		if alerts := checkCircuitBreakerEscalation(state, make(map[string]time.Time)); len(alerts) != 0 {
+			t.Fatalf("alerts = %+v, want none for CHECKPOINT response", alerts)
+		}
+	})
+
+	t.Run("halt with exact current degraded provider epochs emits one alert", func(t *testing.T) {
+		state := providerAuditState()
+		registeredAt := watermark.Add(-time.Hour)
+		state.Agents = map[string]models.Agent{
+			"new-coder-1": {
+				Role: "coder", Status: models.AgentStatusIdle, Heartbeat: watermark,
+				Provider: "codex", PID: 101, RegisteredAt: registeredAt,
+			},
+			"new-coder-2": {
+				Role: "coder", Status: models.AgentStatusIdle, Heartbeat: watermark,
+				Provider: "codex", PID: 102, RegisteredAt: registeredAt,
+			},
+		}
+		state.AgentHealth = map[string]models.AgentHealth{
+			"new-coder-1": {
+				State: models.AgentHealthDegraded, Role: "coder", Provider: "codex",
+				PID: 101, RegisteredAt: &registeredAt, DegradedAt: watermark,
+			},
+			"new-coder-2": {
+				State: models.AgentHealthDegraded, Role: "coder", Provider: "codex",
+				PID: 102, RegisteredAt: &registeredAt, DegradedAt: watermark,
+			},
+		}
+
+		patternResult, _, _ := analysis.DetectUnacknowledgedPatterns(state)
+		if patternResult.Classification != models.CircuitBreakerEvidenceContinuing ||
+			patternResult.Response != models.CircuitBreakerResponseHalt || !patternResult.Triggered {
+			t.Fatalf("provider-audit result = {class:%q response:%q triggered:%v}, want {CONTINUING HALT true}",
+				patternResult.Classification, patternResult.Response, patternResult.Triggered)
+		}
+
+		alerts := checkCircuitBreakerEscalation(state, make(map[string]time.Time))
+		if len(alerts) != 1 {
+			t.Fatalf("alerts = %+v, want one CIRCUIT BREAKER alert for HALT response", alerts)
+		}
+		if alerts[0].Category != "CIRCUIT BREAKER" {
+			t.Errorf("alert category = %q, want CIRCUIT BREAKER", alerts[0].Category)
+		}
+	})
 }
 
 func TestRunChecks_CircuitBreakerAlertCoexistsWithOtherAlerts(t *testing.T) {

@@ -24,7 +24,7 @@ import (
 
 var analyzeCmd = &cobra.Command{
 	Use:   "analyze",
-	Short: "Run circuit breaker pattern detection analysis",
+	Short: "Run circuit breaker response analysis",
 	Long: fmt.Sprintf(`Analyze anomalies and planning task review evidence in the blackboard to detect systemic failure patterns.
 
 Detects the following patterns:
@@ -37,15 +37,16 @@ Detects the following patterns:
   - provider_audit_degradation: 2+ agents or 3+ hits for same provider (OBSERVABILITY_DEGRADED)
   - planning_review_churn: four or more durable planning rejection cycles; %[3]s tasks remain eligible (PLANNING_CONVERGENCE_DEGRADED)
 
-If a pattern is detected:
-  - Updates circuit_breaker.status to TRIGGERED
-  - Generates %[1]s/circuit_breaker_report.md with evidence
-  - Sets sprint.status to CHECKPOINT (equivalent to '%[2]s')
-  - Requires human review and resolution
+Every detected pattern generates %[1]s/circuit_breaker_report.md with its evidence class, response, and explanation.
+Provider-audit evidence receives a proportional response:
+  - WARNING: acknowledged historical evidence remains visible with no state action
+  - CHECKPOINT: new or continuing OBSERVABILITY_DEGRADED evidence pauses at a sprint checkpoint when current health proof is unknown; run '%[2]s' after review
+  - HALT: a circuit-breaker trigger only when exact current provider and agent epoch health proves execution compromise; sets circuit_breaker.status to TRIGGERED
+Other systemic failure patterns use HALT. Only HALT is a circuit-breaker trigger.
 
-If no patterns are detected:
+If no patterns are detected and no active HALT exists:
   - Updates circuit_breaker.status to OK
-  - Continues normal operation`, paths.ProjectDirName(), brand.Command("checkpoint"), "`MERGED`"),
+  - Continues normal operation`, paths.ProjectDirName(), brand.Command("resume"), "`MERGED`"),
 	RunE: func(cmd *cobra.Command, args []string) (retErr error) {
 		if isJSON(cmd) {
 			log.SetOutput(io.Discard)
@@ -292,6 +293,8 @@ var startCmd = &cobra.Command{
 
 This command transitions from STOPPED back to RUNNING mode.
 After starting, you must manually restart agent processes to resume work.
+If an unresolved HALT response survived the stop, start is rejected; run
+%s to acknowledge the HALT while remaining STOPPED, then start normally.
 
 Difference from resume:
 - RESUME: For PAUSED or CHECKPOINT states (agents still running)
@@ -303,8 +306,8 @@ Use this for:
 - Recovering from a graceful shutdown
 
 After running this command, restart agents manually:
-  %[2]s=coder-1 %[3]s &
-  %[2]s=code-reviewer-1 %[4]s &`, brand.NameTitle, brand.EnvName("AGENT_ID"), brand.Command("agent", "coder"), brand.Command("agent", "code-reviewer")),
+  %[3]s=coder-1 %[4]s &
+  %[3]s=code-reviewer-1 %[5]s &`, brand.NameTitle, brand.Command("resume"), brand.EnvName("AGENT_ID"), brand.Command("agent", "coder"), brand.Command("agent", "code-reviewer")),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		reason, _ := cmd.Flags().GetString("reason")
 		changedBy := resolveChangedBy(cmd)
@@ -399,18 +402,21 @@ Example workflow:
 
 var resumeCmd = &cobra.Command{
 	Use:   "resume",
-	Short: fmt.Sprintf("Resume the %s system from PAUSED mode, CHECKPOINT, or COMPLETED sprint", brand.NameTitle),
-	Long: fmt.Sprintf(`Resume the %s system by setting config.mode to RUNNING and sprint.status to IN_PROGRESS.
+	Short: fmt.Sprintf("Resume the %s system or acknowledge an active HALT response", brand.NameTitle),
+	Long: fmt.Sprintf(`Resume the %s system from a resumable mode or sprint state, or acknowledge an active HALT response.
 
 This command can be used when:
 - System is in PAUSED mode (sets mode to RUNNING)
 - Sprint is at CHECKPOINT status (sets status to IN_PROGRESS)
 - Both (resumes from both states)
+- System is STOPPED with an unresolved HALT (acknowledges it and remains STOPPED)
 
-Agents will detect the status changes and resume normal operation at their next check.
+For transitions to RUNNING or IN_PROGRESS, agents resume normal operation at
+their next check.
 
-If the system is STOPPED, agents must be restarted manually - resume
-cannot be used to restart stopped agents.`, brand.NameTitle),
+%[2]s cannot restart stopped agents. After it acknowledges a HALT while
+STOPPED, run %[3]s and restart agents manually. STOPPED without an active
+HALT remains invalid for resume.`, brand.NameTitle, brand.Command("resume"), brand.Command("start")),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		changedBy := resolveChangedBy(cmd)
 

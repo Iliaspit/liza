@@ -17,6 +17,11 @@ This file is written to `§BRAND_PROJECT_DIRNAME§/SUPPORT.md` during `§BRAND_B
 §BRAND_BINARY_NAME§ analyze                       # Circuit breaker pattern detection
 ```
 
+`§BRAND_BINARY_NAME§ analyze --json` reports the selected `response`
+(`WARNING`, `CHECKPOINT`, or `HALT`), provider-evidence `classification`
+(`ACKNOWLEDGED_HISTORICAL`, `NEW`, or `CONTINUING`), and `explanation` from the
+same `AnalyzeResult` used for human output. `triggered` is true only for `HALT`.
+
 `§BRAND_BINARY_NAME§ status --format json` and `§BRAND_BINARY_NAME§ get agents --format json` include `process_status_source` and `process_status_detail` for agents; status also includes them for phase-handoff blockers. Use these fields when a task appears assigned but the process state is ambiguous. On Linux, procfs identity checks distinguish a matching §BRAND_NAME_TITLE§ supervisor from a dead or PID-reused/mismatched process; when process identity is unavailable, active leases are treated conservatively.
 PID-based `process_status` is local to the namespace running the command. In containers, sandboxes, or SSH/host boundary situations, a live host agent can appear as `process_status: stopped` because its PID is not observable from the current namespace. Do not recover from `process_status: stopped` alone in that environment; recent heartbeat, active lease, and growing `§BRAND_PROJECT_DIRNAME§/agent-outputs/` are stronger liveness evidence. Treat contradictory signals as ambiguous and inspect `process_status_source` / `process_status_detail` before recovery.
 Agent health is separate from lifecycle status. A degraded agent epoch remains visible in status/get-agents health fields and does not count as repair-agent-pool capacity until it is cleared or a newer successful claim proves capacity. If the agent process exits and unregisters, the health marker stays visible as degraded capacity context for repair/status output.
@@ -116,9 +121,11 @@ Approved transition-source output can make a task sprint-terminal before it is i
 
 ### Checkpoint Actions
 
-When a sprint checkpoints (status: CHECKPOINT), hard checkpoints pause all agents. Transition
-checkpoints (`PLANNING_COMPLETE`, `MANY_TO_ONE_READY`) pause orchestrator transition execution only;
-doer/reviewer agents may continue already-available work in the current sprint. The human decides:
+When a sprint checkpoints (status: CHECKPOINT), it is not auto-cleared.
+Transition checkpoints (`PLANNING_COMPLETE`, `MANY_TO_ONE_READY`) and a
+circuit-breaker `CHECKPOINT` response gate downstream transition creation;
+doer/reviewer agents may continue already-available work in the current sprint
+unless system mode is `PAUSED` or `CIRCUIT_BREAKER_TRIPPED`. The human decides:
 
 | Action | Command | When |
 |--------|---------|------|
@@ -381,12 +388,37 @@ The candidate dependency, repair request, and task history remain unchanged, and
 **Symptom**: Agent work may complete, but `§BRAND_PROJECT_DIRNAME§/agent-outputs/*.err` or `§BRAND_PROJECT_DIRNAME§/alerts.log` contains `PROVIDER AUDIT DEGRADED`, for example Codex `failed to record rollout items: thread ... not found`.
 **Impact**: Treat task state and explicit task outputs as the source of truth. The provider transcript or rollout audit trail may be incomplete for the affected session.
 **Diagnosis**: Upgrade or retest the provider CLI first. Then inspect `§BRAND_PROJECT_DIRNAME§/agent-outputs/*.err`, `§BRAND_PROJECT_DIRNAME§/alerts.log`, task state, and blackboard outputs before relying on the session transcript.
-**Fix**: A single occurrence does not stop workers. Repeated occurrences across agents are recorded as `provider_audit_degraded` anomalies and can trip `§BRAND_BINARY_NAME§ analyze` as systemic observability degradation. Raw provider events are not stored in `state.yaml`; inspect `§BRAND_PROJECT_DIRNAME§/agent-outputs/` for full transcript evidence. If an older state contains raw provider JSON in anomaly messages, run `§BRAND_BINARY_NAME§ migrate` to scrub those fields while keeping the anomaly record.
-After a circuit-breaker trigger is reviewed and `§BRAND_BINARY_NAME§ resume` clears it (`status: OK` and `current_trigger: null`), those historical anomalies are acknowledged. Future `§BRAND_BINARY_NAME§ analyze` and `§BRAND_BINARY_NAME§ tui` checks only count anomalies with timestamps after the latest cleared `TRIGGERED` history entry; reports include a suppressed-count line instead of mixing acknowledged anomalies into current evidence.
+**Response**: A single occurrence does not stop workers. A qualifying
+same-provider group is classified as `ACKNOWLEDGED_HISTORICAL`, `NEW`, or
+`CONTINUING`. Historical-only evidence is `WARNING` and takes no
+mode/sprint/trigger/active-response action. New or continuing evidence is a
+non-trigger hard `CHECKPOINT` by default: mode remains `RUNNING`, downstream
+transition creation pauses, and already-available sprint work may continue.
+
+`HALT` is permitted only when at least one current registration exactly matches
+the anomaly provider and every exact match has a degraded health record for the
+same agent ID, provider, PID, and registration time. An alias-only match (such
+as `codex` evidence versus a `codex-acp` registration), empty/missing identity,
+missing health, or a stale/mismatched PID or registration epoch is non-halting
+unknown and remains `CHECKPOINT`. `OBSERVABILITY_DEGRADED` therefore does not by
+itself trip system mode.
+
+**Recovery**: Review the report, then run exactly `§BRAND_BINARY_NAME§ resume`.
+Resume resolves the active `CHECKPOINT` or `HALT` response, records its history
+boundary, and clears it; a `HALT` acknowledgement also clears the trigger.
+Unchanged qualifying evidence subsequently reports
+`ACKNOWLEDGED_HISTORICAL`/`WARNING` rather than checkpointing or halting again.
+Raw provider events are not stored in `state.yaml`; inspect
+`§BRAND_PROJECT_DIRNAME§/agent-outputs/` for full transcript evidence. If an
+older state contains raw provider JSON in anomaly messages, run
+`§BRAND_BINARY_NAME§ migrate` to scrub those fields while keeping the anomaly
+record. Legacy circuit-breaker state without `current_response`, `response`,
+`classification`, or `explanation` remains readable; cleared legacy
+`TRIGGERED` history still acts as an acknowledgement boundary.
 
 ### Circuit breaker
 
-`§BRAND_BINARY_NAME§ analyze` detects systemic patterns. Supervisor auto-triggers on:
+`§BRAND_BINARY_NAME§ analyze` detects systemic patterns and selects a response:
 
 | Condition | Action |
 |-----------|--------|
@@ -394,7 +426,10 @@ After a circuit-breaker trigger is reviewed and `§BRAND_BINARY_NAME§ resume` c
 | Blackboard validation fails | All agents pause |
 | Submit/merge integration branch conflict | Task set to INTEGRATION_FAILED |
 | Unblock-time `--rebase-on` conflict | Task remains BLOCKED with fresh repair metadata |
-| Circuit-breaker pattern in anomalies | CIRCUIT_BREAKER_TRIPPED mode, sprint CHECKPOINT, reports written |
+| Historical provider-audit evidence (`ACKNOWLEDGED_HISTORICAL`) | `WARNING`; report only, no state action |
+| New/continuing provider-audit evidence with unknown or non-degraded current health | Non-trigger `CHECKPOINT`; mode stays RUNNING and report is written |
+| Provider-audit evidence with exact all-degraded current provider/agent-ID/PID/registration-time proof | `HALT`; circuit breaker triggers and mode becomes CIRCUIT_BREAKER_TRIPPED |
+| Other qualifying systemic pattern | `HALT`; circuit breaker triggers and report is written |
 
 ## Validation Invariants
 

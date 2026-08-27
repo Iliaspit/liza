@@ -185,13 +185,48 @@ func (a *Anomaly) IsValidType() bool {
 	return slices.Contains(validTypes, a.Type)
 }
 
+// CircuitBreakerResponseType identifies the proportional action selected for a
+// circuit-breaker pattern.
+type CircuitBreakerResponseType string
+
+const (
+	CircuitBreakerResponseWarning    CircuitBreakerResponseType = "WARNING"
+	CircuitBreakerResponseCheckpoint CircuitBreakerResponseType = "CHECKPOINT"
+	CircuitBreakerResponseHalt       CircuitBreakerResponseType = "HALT"
+)
+
+// CircuitBreakerEvidenceClass identifies the lifecycle position of qualifying
+// provider-audit evidence relative to the latest resolved response boundary.
+type CircuitBreakerEvidenceClass string
+
+const (
+	CircuitBreakerEvidenceAcknowledgedHistorical CircuitBreakerEvidenceClass = "ACKNOWLEDGED_HISTORICAL"
+	CircuitBreakerEvidenceNew                    CircuitBreakerEvidenceClass = "NEW"
+	CircuitBreakerEvidenceContinuing             CircuitBreakerEvidenceClass = "CONTINUING"
+)
+
+// CircuitBreakerResponse represents an active proportional response. HALT
+// responses also have a CurrentTrigger for backward-compatible hard-trigger
+// state; CHECKPOINT responses do not.
+type CircuitBreakerResponse struct {
+	Timestamp      time.Time                   `yaml:"timestamp"`
+	Pattern        string                      `yaml:"pattern"`
+	Severity       string                      `yaml:"severity"`
+	Response       CircuitBreakerResponseType  `yaml:"response"`
+	Classification CircuitBreakerEvidenceClass `yaml:"classification"`
+	Explanation    string                      `yaml:"explanation"`
+	ReportFile     string                      `yaml:"report_file"`
+	Extra          map[string]any              `yaml:",inline"`
+}
+
 // CircuitBreaker tracks circuit breaker status and history
 type CircuitBreaker struct {
-	LastCheck      time.Time               `yaml:"last_check"`
-	Status         string                  `yaml:"status"` // "OK" or "TRIGGERED"
-	CurrentTrigger *CircuitBreakerTrigger  `yaml:"current_trigger,omitempty"`
-	History        []CircuitBreakerHistory `yaml:"history"`
-	Extra          map[string]any          `yaml:",inline"`
+	LastCheck       time.Time               `yaml:"last_check"`
+	Status          string                  `yaml:"status"` // "OK" or "TRIGGERED"
+	CurrentTrigger  *CircuitBreakerTrigger  `yaml:"current_trigger,omitempty"`
+	CurrentResponse *CircuitBreakerResponse `yaml:"current_response,omitempty"`
+	History         []CircuitBreakerHistory `yaml:"history"`
+	Extra           map[string]any          `yaml:",inline"`
 }
 
 // IsValidStatus checks if the circuit breaker status is valid
@@ -210,11 +245,17 @@ type CircuitBreakerTrigger struct {
 
 // CircuitBreakerHistory tracks historical circuit breaker checks
 type CircuitBreakerHistory struct {
-	Timestamp  time.Time      `yaml:"timestamp"`
-	Pattern    *string        `yaml:"pattern,omitempty"`
-	Severity   *string        `yaml:"severity,omitempty"`
-	Result     string         `yaml:"result"` // "OK" or "TRIGGERED"
-	Resolution *string        `yaml:"resolution,omitempty"`
-	ResolvedAt *time.Time     `yaml:"resolved_at,omitempty"`
-	Extra      map[string]any `yaml:",inline"`
+	Timestamp      time.Time                   `yaml:"timestamp"`
+	Pattern        *string                     `yaml:"pattern,omitempty"`
+	Severity       *string                     `yaml:"severity,omitempty"`
+	Result         string                      `yaml:"result"` // "OK" or "TRIGGERED"
+	Response       CircuitBreakerResponseType  `yaml:"response,omitempty"`
+	Classification CircuitBreakerEvidenceClass `yaml:"classification,omitempty"`
+	Explanation    string                      `yaml:"explanation,omitempty"`
+	// SupersededByResponse records an Analyze-authored replacement without
+	// acknowledging the superseded boundary. It is currently HALT-only.
+	SupersededByResponse CircuitBreakerResponseType `yaml:"superseded_by_response,omitempty"`
+	Resolution           *string                    `yaml:"resolution,omitempty"`
+	ResolvedAt           *time.Time                 `yaml:"resolved_at,omitempty"`
+	Extra                map[string]any             `yaml:",inline"`
 }

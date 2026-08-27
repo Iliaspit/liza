@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/liza-mas/liza/internal/brand"
 	"github.com/liza-mas/liza/internal/models"
 )
 
@@ -12,11 +13,13 @@ func TestDetectPatterns(t *testing.T) {
 	now := time.Now()
 
 	tests := []struct {
-		name          string
-		anomalies     []models.Anomaly
-		wantPattern   string
-		wantSeverity  string
-		wantEvidence  string
+		name         string
+		anomalies    []models.Anomaly
+		wantPattern  string
+		wantSeverity string
+		wantEvidence string
+		wantResponse models.CircuitBreakerResponseType
+
 		wantTriggered bool
 	}{
 		{
@@ -277,10 +280,11 @@ func TestDetectPatterns(t *testing.T) {
 					},
 				},
 			},
-			wantTriggered: true,
+			wantTriggered: false,
 			wantPattern:   "provider_audit_degradation",
 			wantSeverity:  "OBSERVABILITY_DEGRADED",
 			wantEvidence:  "2 provider_audit_degraded anomalies for provider codex across 2 agents",
+			wantResponse:  models.CircuitBreakerResponseCheckpoint,
 		},
 		{
 			name: "provider_audit_degradation - 3+ hits from same agent",
@@ -319,10 +323,11 @@ func TestDetectPatterns(t *testing.T) {
 					},
 				},
 			},
-			wantTriggered: true,
+			wantTriggered: false,
 			wantPattern:   "provider_audit_degradation",
 			wantSeverity:  "OBSERVABILITY_DEGRADED",
 			wantEvidence:  "3 provider_audit_degraded anomalies for provider codex across 1 agents",
+			wantResponse:  models.CircuitBreakerResponseCheckpoint,
 		},
 		{
 			name: "provider_audit_degradation - one hit below threshold",
@@ -409,7 +414,7 @@ func TestDetectPatterns(t *testing.T) {
 				t.Errorf("DetectPatterns() triggered = %v, want %v", result.Triggered, tt.wantTriggered)
 			}
 
-			if !tt.wantTriggered {
+			if tt.wantPattern == "" {
 				return
 			}
 
@@ -423,6 +428,9 @@ func TestDetectPatterns(t *testing.T) {
 
 			if tt.wantEvidence != "" && result.Evidence != tt.wantEvidence {
 				t.Errorf("DetectPatterns() evidence = %v, want %v", result.Evidence, tt.wantEvidence)
+			}
+			if tt.wantResponse != "" && result.Response != tt.wantResponse {
+				t.Errorf("DetectPatterns() response = %v, want %v", result.Response, tt.wantResponse)
 			}
 		})
 	}
@@ -465,7 +473,7 @@ func TestDetectUnacknowledgedPatterns(t *testing.T) {
 			},
 			wantTriggered:       false,
 			wantSuppressedCount: 2,
-			wantConsideredCount: 1,
+			wantConsideredCount: 3,
 		},
 		{
 			name: "latest triggered history wins and later OK entries do not move watermark",
@@ -484,9 +492,9 @@ func TestDetectUnacknowledgedPatterns(t *testing.T) {
 					},
 				},
 			},
-			wantTriggered:       true,
+			wantTriggered:       false,
 			wantSuppressedCount: 1,
-			wantConsideredCount: 2,
+			wantConsideredCount: 3,
 		},
 		{
 			name: "active triggered status does not use acknowledgement watermark",
@@ -502,7 +510,7 @@ func TestDetectUnacknowledgedPatterns(t *testing.T) {
 					},
 				},
 			},
-			wantTriggered:       true,
+			wantTriggered:       false,
 			wantSuppressedCount: 0,
 			wantConsideredCount: 2,
 		},
@@ -521,7 +529,7 @@ func TestDetectUnacknowledgedPatterns(t *testing.T) {
 					},
 				},
 			},
-			wantTriggered:       true,
+			wantTriggered:       false,
 			wantSuppressedCount: 0,
 			wantConsideredCount: 2,
 		},
@@ -534,7 +542,7 @@ func TestDetectUnacknowledgedPatterns(t *testing.T) {
 				},
 				CircuitBreaker: models.CircuitBreaker{Status: "OK"},
 			},
-			wantTriggered:       true,
+			wantTriggered:       false,
 			wantSuppressedCount: 0,
 			wantConsideredCount: 2,
 		},
@@ -553,6 +561,196 @@ func TestDetectUnacknowledgedPatterns(t *testing.T) {
 				t.Errorf("considered count = %d, want %d", len(considered), tt.wantConsideredCount)
 			}
 		})
+	}
+}
+
+func TestResolvedProviderResponseDoesNotAcknowledgeRetryEvidence(t *testing.T) {
+	boundary := time.Date(2026, 8, 21, 10, 0, 0, 0, time.UTC)
+	resolvedAt := boundary.Add(time.Minute)
+	state := &models.State{
+		Anomalies: []models.Anomaly{
+			{Timestamp: boundary.Add(-3 * time.Minute), Type: "retry_loop", Details: map[string]any{"error_pattern": "provider timeout"}},
+			{Timestamp: boundary.Add(-2 * time.Minute), Type: "retry_loop", Details: map[string]any{"error_pattern": "provider timeout"}},
+			{Timestamp: boundary.Add(-time.Minute), Type: "retry_loop", Details: map[string]any{"error_pattern": "provider timeout"}},
+		},
+		CircuitBreaker: models.CircuitBreaker{
+			Status: "OK",
+			History: []models.CircuitBreakerHistory{{
+				Timestamp:  boundary,
+				Result:     "CHECKPOINT",
+				Response:   models.CircuitBreakerResponseCheckpoint,
+				ResolvedAt: &resolvedAt,
+			}},
+		},
+	}
+
+	result, considered, suppressedCount := DetectUnacknowledgedPatterns(state)
+	if result.Pattern != "retry_cluster" || !result.Triggered || result.Response != models.CircuitBreakerResponseHalt {
+		t.Fatalf("result = {pattern:%q triggered:%v response:%q}, want retry_cluster/true/HALT", result.Pattern, result.Triggered, result.Response)
+	}
+	if len(considered) != 3 || suppressedCount != 0 {
+		t.Fatalf("considered = %d, suppressed = %d, want 3 and 0", len(considered), suppressedCount)
+	}
+}
+
+func TestProviderAuditEvidenceLifecycle(t *testing.T) {
+	boundary := time.Date(2026, 8, 21, 10, 0, 0, 0, time.UTC)
+	registeredAt := boundary.Add(-time.Hour)
+	resolvedAt := boundary.Add(time.Minute)
+	resolvedBoundary := models.CircuitBreaker{
+		Status: "OK",
+		History: []models.CircuitBreakerHistory{{
+			Timestamp: boundary, Result: "CHECKPOINT",
+			Response: models.CircuitBreakerResponseCheckpoint, Classification: models.CircuitBreakerEvidenceNew,
+			ResolvedAt: &resolvedAt,
+		}},
+	}
+	assertResult := func(t *testing.T, state *models.State, wantClass models.CircuitBreakerEvidenceClass, wantResponse models.CircuitBreakerResponseType, wantTriggered bool) PatternResult {
+		t.Helper()
+		result, _, _ := DetectUnacknowledgedPatterns(state)
+		if result.Classification != wantClass || result.Response != wantResponse || result.Triggered != wantTriggered {
+			t.Errorf("result = {class:%q response:%q triggered:%v}, want {%q %q %v}", result.Classification, result.Response, result.Triggered, wantClass, wantResponse, wantTriggered)
+		}
+		return result
+	}
+
+	lifecycleCases := []struct {
+		name      string
+		anomalies []models.Anomaly
+		resolved  bool
+		class     models.CircuitBreakerEvidenceClass
+		response  models.CircuitBreakerResponseType
+		unknown   bool
+	}{
+		{
+			name: "qualifying historical evidence is acknowledged warning", resolved: true,
+			anomalies: []models.Anomaly{providerAuditAnomaly(boundary.Add(-2*time.Minute), "coder-1"), providerAuditAnomaly(boundary.Add(-time.Minute), "coder-2")},
+			class:     models.CircuitBreakerEvidenceAcknowledgedHistorical, response: models.CircuitBreakerResponseWarning,
+		},
+		{
+			name:      "fresh qualifying evidence checkpoints without current health proof",
+			anomalies: []models.Anomaly{providerAuditAnomaly(boundary.Add(time.Minute), "coder-1"), providerAuditAnomaly(boundary.Add(2*time.Minute), "coder-2")},
+			class:     models.CircuitBreakerEvidenceNew, response: models.CircuitBreakerResponseCheckpoint, unknown: true,
+		},
+		{
+			name: "new occurrence continues qualifying historical group", resolved: true,
+			anomalies: []models.Anomaly{providerAuditAnomaly(boundary.Add(-2*time.Minute), "coder-1"), providerAuditAnomaly(boundary.Add(-time.Minute), "coder-2"), providerAuditAnomaly(boundary.Add(time.Minute), "coder-1")},
+			class:     models.CircuitBreakerEvidenceContinuing, response: models.CircuitBreakerResponseCheckpoint,
+		},
+		{
+			name: "new distinct agent completes historical sub-threshold group", resolved: true,
+			anomalies: []models.Anomaly{providerAuditAnomaly(boundary.Add(-time.Minute), "coder-1"), providerAuditAnomaly(boundary.Add(time.Minute), "coder-2")},
+			class:     models.CircuitBreakerEvidenceContinuing, response: models.CircuitBreakerResponseCheckpoint,
+		},
+	}
+	for _, tt := range lifecycleCases {
+		t.Run(tt.name, func(t *testing.T) {
+			state := &models.State{Anomalies: tt.anomalies}
+			if tt.resolved {
+				state.CircuitBreaker = resolvedBoundary
+			}
+			result := assertResult(t, state, tt.class, tt.response, false)
+			if tt.unknown && !strings.Contains(strings.ToLower(result.Explanation), "unknown") {
+				t.Errorf("Explanation = %q, want unknown-health reason", result.Explanation)
+			}
+		})
+	}
+
+	t.Run("mixed providers prioritize current response with deterministic tie break", func(t *testing.T) {
+		state := &models.State{
+			Anomalies: []models.Anomaly{
+				providerAuditAnomalyForProvider(boundary.Add(-2*time.Minute), "historical-1", "archive"),
+				providerAuditAnomalyForProvider(boundary.Add(-time.Minute), "historical-2", "archive"),
+				providerAuditAnomalyForProvider(boundary.Add(time.Minute), "zeta-1", "zeta"),
+				providerAuditAnomalyForProvider(boundary.Add(2*time.Minute), "zeta-2", "zeta"),
+				providerAuditAnomalyForProvider(boundary.Add(3*time.Minute), "alpha-1", "alpha"),
+				providerAuditAnomalyForProvider(boundary.Add(4*time.Minute), "alpha-2", "alpha"),
+			},
+			CircuitBreaker: resolvedBoundary,
+		}
+
+		for range 50 {
+			result := assertResult(t, state, models.CircuitBreakerEvidenceNew, models.CircuitBreakerResponseCheckpoint, false)
+			if !strings.Contains(result.Evidence, "provider alpha") {
+				t.Fatalf("Evidence = %q, want deterministic alpha provider tie break", result.Evidence)
+			}
+		}
+	})
+
+	t.Run("all exact current provider epochs degraded promotes halt", func(t *testing.T) {
+		state := freshProviderAuditState(boundary)
+		state.Agents = map[string]models.Agent{
+			"coder-1": providerAgent("codex", 101, registeredAt), "coder-2": providerAgent("codex", 102, registeredAt),
+		}
+		state.AgentHealth = map[string]models.AgentHealth{
+			"coder-1": degradedProviderHealth("codex", 101, registeredAt), "coder-2": degradedProviderHealth("codex", 102, registeredAt),
+		}
+		assertResult(t, state, models.CircuitBreakerEvidenceNew, models.CircuitBreakerResponseHalt, true)
+	})
+
+	unknownHealthCases := []struct {
+		name  string
+		setup func(*models.State)
+	}{
+		{"alias-only provider registration", func(s *models.State) { setProviderEpoch(s, "codex-acp", "codex-acp", 101, registeredAt) }},
+		{"empty registered provider identity", func(s *models.State) { setProviderEpoch(s, "", "", 101, registeredAt) }},
+		{"missing health record", func(s *models.State) {
+			s.Agents = map[string]models.Agent{"coder-1": providerAgent("codex", 101, registeredAt)}
+		}},
+		{"mismatched health provider", func(s *models.State) { setProviderEpoch(s, "codex", "codex-acp", 101, registeredAt) }},
+		{"stale health pid", func(s *models.State) { setProviderEpoch(s, "codex", "codex", 100, registeredAt) }},
+		{"stale health registration time", func(s *models.State) {
+			setProviderEpoch(s, "codex", "codex", 101, registeredAt)
+			stale := registeredAt.Add(-time.Minute)
+			health := s.AgentHealth["coder-1"]
+			health.RegisteredAt = &stale
+			s.AgentHealth["coder-1"] = health
+		}},
+		{"one exact match lacks health proof", func(s *models.State) {
+			setProviderEpoch(s, "codex", "codex", 101, registeredAt)
+			s.Agents["coder-2"] = providerAgent("codex", 102, registeredAt)
+		}},
+	}
+	for _, tt := range unknownHealthCases {
+		t.Run(tt.name, func(t *testing.T) {
+			state := freshProviderAuditState(boundary)
+			tt.setup(state)
+			result := assertResult(t, state, models.CircuitBreakerEvidenceNew, models.CircuitBreakerResponseCheckpoint, false)
+			if !strings.Contains(strings.ToLower(result.Explanation), "unknown") {
+				t.Errorf("Explanation = %q, want unknown-health reason", result.Explanation)
+			}
+		})
+	}
+}
+
+func TestProviderAuditSupersededCheckpointDoesNotAcknowledgeEvidence(t *testing.T) {
+	boundary := time.Date(2026, 8, 21, 10, 0, 0, 0, time.UTC)
+	pattern := "provider_audit_degradation"
+	state := &models.State{
+		Anomalies: []models.Anomaly{
+			providerAuditAnomaly(boundary.Add(-2*time.Minute), "coder-1"),
+			providerAuditAnomaly(boundary.Add(-time.Minute), "coder-2"),
+		},
+		CircuitBreaker: models.CircuitBreaker{
+			Status: "OK",
+			History: []models.CircuitBreakerHistory{{
+				Timestamp:            boundary,
+				Pattern:              &pattern,
+				Result:               "CHECKPOINT",
+				Response:             models.CircuitBreakerResponseCheckpoint,
+				Classification:       models.CircuitBreakerEvidenceNew,
+				SupersededByResponse: models.CircuitBreakerResponseHalt,
+			}},
+		},
+	}
+
+	if watermark, ok := latestResolvedResponseWatermark(state); ok {
+		t.Fatalf("latestResolvedResponseWatermark() = %s, true; want zero, false for unresolved superseded checkpoint", watermark)
+	}
+
+	result, _, _ := DetectUnacknowledgedPatterns(state)
+	if result.Classification != models.CircuitBreakerEvidenceNew || result.Response != models.CircuitBreakerResponseCheckpoint {
+		t.Fatalf("unacknowledged superseded evidence = {classification:%q response:%q}, want NEW/CHECKPOINT", result.Classification, result.Response)
 	}
 }
 
@@ -743,10 +941,13 @@ func TestGenerateReport(t *testing.T) {
 	}
 
 	result := PatternResult{
-		Triggered: true,
-		Pattern:   "retry_cluster",
-		Severity:  "ARCHITECTURE_FLAW",
-		Evidence:  "3 retry_loop anomalies with similar error patterns",
+		Triggered:      true,
+		Pattern:        "retry_cluster",
+		Severity:       "ARCHITECTURE_FLAW",
+		Evidence:       "3 retry_loop anomalies with similar error patterns",
+		Response:       models.CircuitBreakerResponseHalt,
+		Classification: models.CircuitBreakerEvidenceNew,
+		Explanation:    "retry failures prove an architecture flaw",
 	}
 
 	report := GenerateReport(result, anomalies, now, 0)
@@ -758,11 +959,17 @@ func TestGenerateReport(t *testing.T) {
 
 	expectedSections := []string{
 		"# Circuit Breaker Report",
-		"**Triggered:**",
+		"**Analyzed:**",
 		"**Pattern:** retry_cluster",
 		"**Severity:** ARCHITECTURE_FLAW",
-		"## Trigger Evidence",
+		"**Evidence class:** NEW",
+		"**Response:** HALT",
+		"**Explanation:** retry failures prove an architecture flaw",
+		"## Evidence",
 		"3 retry_loop anomalies with similar error patterns",
+		"## Response Action",
+		"Circuit breaker triggered and execution halted.",
+		"Run `" + brand.Command("resume") + "` after remediation.",
 		"## Anomalies (trimmed)",
 		"## Anomalies (raw)",
 		"## Human Decision Required",
@@ -776,6 +983,90 @@ func TestGenerateReport(t *testing.T) {
 		if !contains(report, section) {
 			t.Errorf("GenerateReport() missing expected section: %q", section)
 		}
+	}
+}
+
+func TestGenerateReportProjectsProviderAuditResponse(t *testing.T) {
+	now := time.Date(2026, 8, 25, 9, 30, 0, 0, time.UTC)
+	tests := []struct {
+		name    string
+		result  PatternResult
+		want    []string
+		notWant []string
+	}{
+		{
+			name: "acknowledged historical warning has no state action",
+			result: PatternResult{
+				Pattern:        "provider_audit_degradation",
+				Severity:       "OBSERVABILITY_DEGRADED",
+				Evidence:       "historical provider-audit evidence",
+				Response:       models.CircuitBreakerResponseWarning,
+				Classification: models.CircuitBreakerEvidenceAcknowledgedHistorical,
+				Explanation:    "qualifying evidence is entirely at or before the resolved response boundary",
+			},
+			want: []string{
+				"**Response:** WARNING",
+				"**Evidence class:** ACKNOWLEDGED_HISTORICAL",
+				"**Explanation:** qualifying evidence is entirely at or before the resolved response boundary",
+				"No state action — this evidence was already acknowledged.",
+			},
+			notWant: []string{"triggered", "Run `" + brand.Command("resume") + "`"},
+		},
+		{
+			name: "continuing evidence checkpoints with unknown alias health",
+			result: PatternResult{
+				Pattern:        "provider_audit_degradation",
+				Severity:       "OBSERVABILITY_DEGRADED",
+				Evidence:       "continuing provider-audit evidence",
+				Response:       models.CircuitBreakerResponseCheckpoint,
+				Classification: models.CircuitBreakerEvidenceContinuing,
+				Explanation:    "current health is unknown: provider codex has no exact match for registered alias codex-acp",
+			},
+			want: []string{
+				"**Severity:** OBSERVABILITY_DEGRADED",
+				"**Response:** CHECKPOINT",
+				"**Evidence class:** CONTINUING",
+				"**Explanation:** current health is unknown: provider codex has no exact match for registered alias codex-acp",
+				"Sprint moved to CHECKPOINT.",
+				"Run `" + brand.Command("resume") + "` to continue.",
+			},
+			notWant: []string{"triggered"},
+		},
+		{
+			name: "halt names exact current provider epoch proof",
+			result: PatternResult{
+				Triggered:      true,
+				Pattern:        "provider_audit_degradation",
+				Severity:       "OBSERVABILITY_DEGRADED",
+				Evidence:       "current provider-audit evidence",
+				Response:       models.CircuitBreakerResponseHalt,
+				Classification: models.CircuitBreakerEvidenceNew,
+				Explanation:    "all 2 exact provider codex matches have degraded health for the same agent ID, provider, PID, and registration-time epoch",
+			},
+			want: []string{
+				"**Response:** HALT",
+				"**Explanation:** all 2 exact provider codex matches have degraded health for the same agent ID, provider, PID, and registration-time epoch",
+				"Circuit breaker triggered and execution halted.",
+				"Run `" + brand.Command("resume") + "` after remediation.",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			report := GenerateReport(tt.result, nil, now, 0)
+			for _, want := range tt.want {
+				if !strings.Contains(report, want) {
+					t.Errorf("report missing %q\n%s", want, report)
+				}
+			}
+			lowerReport := strings.ToLower(report)
+			for _, notWant := range tt.notWant {
+				if strings.Contains(lowerReport, strings.ToLower(notWant)) {
+					t.Errorf("report unexpectedly contains %q\n%s", notWant, report)
+				}
+			}
+		})
 	}
 }
 
@@ -798,10 +1089,12 @@ func TestGenerateReportTrimsProviderAuditMessages(t *testing.T) {
 	}
 
 	report := GenerateReport(PatternResult{
-		Triggered: true,
-		Pattern:   "provider_audit_degradation",
-		Severity:  "OBSERVABILITY_DEGRADED",
-		Evidence:  "1 provider_audit_degraded anomaly",
+		Pattern:        "provider_audit_degradation",
+		Severity:       "OBSERVABILITY_DEGRADED",
+		Evidence:       "1 provider_audit_degraded anomaly",
+		Response:       models.CircuitBreakerResponseCheckpoint,
+		Classification: models.CircuitBreakerEvidenceNew,
+		Explanation:    "current provider health is unknown",
 	}, anomalies, now, 0)
 
 	trimmedStart := strings.Index(report, "## Anomalies (trimmed)")
@@ -841,10 +1134,12 @@ func TestGenerateReportTrimsProviderAuditMessages(t *testing.T) {
 func TestGenerateReportIncludesSuppressedAcknowledgedAnomalyCount(t *testing.T) {
 	now := time.Date(2026, 5, 20, 12, 0, 0, 0, time.UTC)
 	report := GenerateReport(PatternResult{
-		Triggered: true,
-		Pattern:   "provider_audit_degradation",
-		Severity:  "OBSERVABILITY_DEGRADED",
-		Evidence:  "2 provider_audit_degraded anomalies for provider codex across 2 agents",
+		Pattern:        "provider_audit_degradation",
+		Severity:       "OBSERVABILITY_DEGRADED",
+		Evidence:       "2 provider_audit_degraded anomalies for provider codex across 2 agents",
+		Response:       models.CircuitBreakerResponseWarning,
+		Classification: models.CircuitBreakerEvidenceAcknowledgedHistorical,
+		Explanation:    "historical evidence was acknowledged",
 	}, []models.Anomaly{
 		providerAuditAnomaly(now, "coder-1"),
 		providerAuditAnomaly(now.Add(time.Minute), "coder-2"),
@@ -856,16 +1151,45 @@ func TestGenerateReportIncludesSuppressedAcknowledgedAnomalyCount(t *testing.T) 
 }
 
 func providerAuditAnomaly(timestamp time.Time, agentID string) models.Anomaly {
+	return providerAuditAnomalyForProvider(timestamp, agentID, "codex")
+}
+
+func providerAuditAnomalyForProvider(timestamp time.Time, agentID, provider string) models.Anomaly {
 	return models.Anomaly{
 		Timestamp: timestamp,
 		Reporter:  agentID,
 		Type:      "provider_audit_degraded",
 		Details: map[string]any{
-			"provider": "codex",
+			"provider": provider,
 			"agent_id": agentID,
 			"message":  "failed to record rollout items",
 		},
 	}
+}
+
+func freshProviderAuditState(timestamp time.Time) *models.State {
+	return &models.State{Anomalies: []models.Anomaly{
+		providerAuditAnomaly(timestamp, "coder-1"),
+		providerAuditAnomaly(timestamp.Add(time.Minute), "coder-2"),
+	}}
+}
+
+func providerAgent(provider string, pid int, registeredAt time.Time) models.Agent {
+	return models.Agent{Provider: provider, PID: pid, RegisteredAt: registeredAt}
+}
+
+func degradedProviderHealth(provider string, pid int, registeredAt time.Time) models.AgentHealth {
+	return models.AgentHealth{
+		State:        models.AgentHealthDegraded,
+		Provider:     provider,
+		PID:          pid,
+		RegisteredAt: &registeredAt,
+	}
+}
+
+func setProviderEpoch(state *models.State, agentProvider, healthProvider string, healthPID int, registeredAt time.Time) {
+	state.Agents = map[string]models.Agent{"coder-1": providerAgent(agentProvider, 101, registeredAt)}
+	state.AgentHealth = map[string]models.AgentHealth{"coder-1": degradedProviderHealth(healthProvider, healthPID, registeredAt)}
 }
 
 func stringPtr(value string) *string {

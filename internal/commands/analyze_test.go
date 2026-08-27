@@ -1,11 +1,14 @@
 package commands
 
 import (
+	"bytes"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/liza-mas/liza/internal/models"
+	"github.com/liza-mas/liza/internal/ops"
 	"github.com/liza-mas/liza/internal/paths"
 	"github.com/liza-mas/liza/internal/testhelpers"
 )
@@ -185,10 +188,10 @@ func TestAnalyzeCommand(t *testing.T) {
 				report := string(reportData)
 				expectedSections := []string{
 					"# Circuit Breaker Report",
-					"**Triggered:**",
+					"**Analyzed:**",
 					"**Pattern:**",
 					"**Severity:**",
-					"## Trigger Evidence",
+					"## Evidence",
 					"## Anomalies (trimmed)",
 					"## Anomalies (raw)",
 					"## Human Decision Required",
@@ -198,6 +201,99 @@ func TestAnalyzeCommand(t *testing.T) {
 					if !contains(report, section) {
 						t.Errorf("Report missing expected section: %q", section)
 					}
+				}
+			}
+		})
+	}
+}
+
+func TestWriteAnalyzeResultProjectsTypedResponse(t *testing.T) {
+	tests := []struct {
+		name    string
+		result  *ops.AnalyzeResult
+		want    []string
+		notWant []string
+	}{
+		{
+			name:   "no pattern",
+			result: &ops.AnalyzeResult{},
+			want:   []string{"Circuit breaker: OK — no patterns detected"},
+		},
+		{
+			name: "acknowledged historical warning",
+			result: &ops.AnalyzeResult{
+				Pattern:        "provider_audit_degradation",
+				Severity:       "OBSERVABILITY_DEGRADED",
+				Evidence:       "historical evidence",
+				Response:       models.CircuitBreakerResponseWarning,
+				Classification: models.CircuitBreakerEvidenceAcknowledgedHistorical,
+				Explanation:    "qualifying evidence is entirely at or before the resolved response boundary",
+				ReportPath:     "/tmp/report.md",
+			},
+			want: []string{
+				"Circuit breaker response: WARNING",
+				"Evidence class: ACKNOWLEDGED_HISTORICAL",
+				"Explanation: qualifying evidence is entirely at or before the resolved response boundary",
+				"State action: none — this evidence was already acknowledged",
+			},
+			notWant: []string{"TRIGGERED", "Recovery:"},
+		},
+		{
+			name: "checkpoint with unknown alias health",
+			result: &ops.AnalyzeResult{
+				Pattern:        "provider_audit_degradation",
+				Severity:       "OBSERVABILITY_DEGRADED",
+				Evidence:       "continuing evidence",
+				Response:       models.CircuitBreakerResponseCheckpoint,
+				Classification: models.CircuitBreakerEvidenceContinuing,
+				Explanation:    "current health is unknown: provider codex has no exact match for registered alias codex-acp",
+				ReportPath:     "/tmp/report.md",
+			},
+			want: []string{
+				"Circuit breaker response: CHECKPOINT",
+				"Severity: OBSERVABILITY_DEGRADED",
+				"Evidence class: CONTINUING",
+				"Explanation: current health is unknown: provider codex has no exact match for registered alias codex-acp",
+				"State action: sprint moved to CHECKPOINT",
+				"Recovery: run `",
+				" resume`",
+			},
+			notWant: []string{"TRIGGERED"},
+		},
+		{
+			name: "halt with exact provider epoch proof",
+			result: &ops.AnalyzeResult{
+				Triggered:      true,
+				Pattern:        "provider_audit_degradation",
+				Severity:       "OBSERVABILITY_DEGRADED",
+				Evidence:       "current evidence",
+				Response:       models.CircuitBreakerResponseHalt,
+				Classification: models.CircuitBreakerEvidenceNew,
+				Explanation:    "all 2 exact provider codex matches have degraded health for the same agent ID, provider, PID, and registration-time epoch",
+				ReportPath:     "/tmp/report.md",
+			},
+			want: []string{
+				"CIRCUIT BREAKER TRIGGERED — HALT",
+				"Response: HALT",
+				"Evidence class: NEW",
+				"Explanation: all 2 exact provider codex matches have degraded health for the same agent ID, provider, PID, and registration-time epoch",
+				"State action: execution halted",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var output bytes.Buffer
+			writeAnalyzeResult(&output, tt.result)
+			for _, want := range tt.want {
+				if !strings.Contains(output.String(), want) {
+					t.Errorf("output missing %q\n%s", want, output.String())
+				}
+			}
+			for _, notWant := range tt.notWant {
+				if strings.Contains(output.String(), notWant) {
+					t.Errorf("output unexpectedly contains %q\n%s", notWant, output.String())
 				}
 			}
 		})

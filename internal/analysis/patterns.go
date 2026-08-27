@@ -6,21 +6,29 @@ import (
 	"strings"
 	"time"
 
+	"github.com/liza-mas/liza/internal/brand"
 	"github.com/liza-mas/liza/internal/models"
 	"gopkg.in/yaml.v3"
 )
 
 // PatternResult represents the result of pattern detection
 type PatternResult struct {
-	Triggered bool
-	Pattern   string
-	Severity  string
-	Evidence  string
+	Triggered      bool
+	Pattern        string
+	Severity       string
+	Evidence       string
+	Response       models.CircuitBreakerResponseType
+	Classification models.CircuitBreakerEvidenceClass
+	Explanation    string
 }
 
 // DetectPatterns analyzes anomalies and detects circuit breaker patterns.
 // Returns the first matching pattern (checked in priority order), or a non-triggered result if none match.
 func DetectPatterns(anomalies []models.Anomaly) PatternResult {
+	return detectPatterns(anomalies, true)
+}
+
+func detectPatterns(anomalies []models.Anomaly, includeProviderAudit bool) PatternResult {
 	checks := []func([]models.Anomaly) PatternResult{
 		checkRetryCluster,
 		checkDebtAccumulation,
@@ -28,10 +36,15 @@ func DetectPatterns(anomalies []models.Anomaly) PatternResult {
 		checkSpecGapCluster,
 		checkWorkaroundPattern,
 		checkExternalServiceOutage,
-		checkProviderAuditDegradation,
+	}
+	if includeProviderAudit {
+		checks = append(checks, checkProviderAuditDegradation)
 	}
 	for _, check := range checks {
-		if result := check(anomalies); result.Triggered {
+		if result := check(anomalies); result.Pattern != "" {
+			if result.Response == "" {
+				result.Response = models.CircuitBreakerResponseHalt
+			}
 			return result
 		}
 	}
@@ -40,25 +53,35 @@ func DetectPatterns(anomalies []models.Anomaly) PatternResult {
 
 // DetectUnacknowledgedPatterns runs circuit-breaker detection on anomalies and
 // planning-task review evidence that have not already been acknowledged by a
-// cleared circuit-breaker trigger.
+// cleared circuit-breaker trigger. Provider-audit evidence is classified
+// separately across its latest resolved-response boundary.
 //
-// "Cleared" means circuit_breaker.status == OK and current_trigger == nil.
-// In any active or partially stale triggered state, all anomalies are considered.
-// When cleared, the latest TRIGGERED history timestamp is the acknowledgement
-// watermark; only anomalies strictly after that timestamp are considered new.
+// Legacy cleared triggers remain generic acknowledgement boundaries. A provider
+// response boundary applies only to provider-audit classification and only after
+// the active response is resolved.
 func DetectUnacknowledgedPatterns(state *models.State) (PatternResult, []models.Anomaly, int) {
 	if state == nil {
 		return DetectPatterns(nil), nil, 0
 	}
 
 	considered, suppressedCount := UnacknowledgedAnomalies(state)
-	if result := DetectPatterns(considered); result.Triggered {
+	if result := detectPatterns(considered, false); result.Pattern != "" {
 		return result, considered, suppressedCount
 	}
-	return checkPlanningReviewChurn(state), considered, suppressedCount
+
+	watermark, hasWatermark := latestResolvedResponseWatermark(state)
+	if result, evidence := checkProviderAuditEvidence(state, watermark, hasWatermark); result.Pattern != "" {
+		return result, evidence, suppressedCount
+	}
+
+	result := checkPlanningReviewChurn(state)
+	if result.Pattern != "" {
+		result.Response = models.CircuitBreakerResponseHalt
+	}
+	return result, considered, suppressedCount
 }
 
-// UnacknowledgedAnomalies returns the anomaly slice eligible for current
+// UnacknowledgedAnomalies returns the anomaly slice eligible for generic
 // circuit-breaker detection plus the number suppressed by the cleared-trigger
 // acknowledgement watermark.
 func UnacknowledgedAnomalies(state *models.State) ([]models.Anomaly, int) {
@@ -78,6 +101,25 @@ func UnacknowledgedAnomalies(state *models.State) ([]models.Anomaly, int) {
 		}
 	}
 	return considered, len(state.Anomalies) - len(considered)
+}
+
+func latestResolvedResponseWatermark(state *models.State) (time.Time, bool) {
+	if state.CircuitBreaker.Status != "OK" || state.CircuitBreaker.CurrentTrigger != nil || state.CircuitBreaker.CurrentResponse != nil {
+		return time.Time{}, false
+	}
+
+	var latest time.Time
+	for _, entry := range state.CircuitBreaker.History {
+		legacyTrigger := entry.Result == "TRIGGERED"
+		resolvedResponse := entry.ResolvedAt != nil && (entry.Response == models.CircuitBreakerResponseCheckpoint || entry.Response == models.CircuitBreakerResponseHalt)
+		if !legacyTrigger && !resolvedResponse {
+			continue
+		}
+		if latest.IsZero() || entry.Timestamp.After(latest) {
+			latest = entry.Timestamp
+		}
+	}
+	return latest, !latest.IsZero()
 }
 
 func latestClearedTriggerWatermark(state *models.State) (time.Time, bool) {
@@ -263,22 +305,130 @@ func checkProviderAuditDegradation(anomalies []models.Anomaly) PatternResult {
 	auditDegraded := filterByType(anomalies, "provider_audit_degraded")
 	groups := groupByField(auditDegraded, "provider")
 	for provider, group := range groups {
-		agents := make(map[string]bool)
-		for _, anomaly := range group {
-			if agentID, ok := anomaly.Details["agent_id"].(string); ok && agentID != "" {
-				agents[agentID] = true
-			}
-		}
-		if len(agents) >= 2 || len(group) >= 3 {
+		agentCount, qualifies := providerAuditThreshold(group)
+		if qualifies {
 			return PatternResult{
-				Triggered: true,
-				Pattern:   "provider_audit_degradation",
-				Severity:  "OBSERVABILITY_DEGRADED",
-				Evidence:  fmt.Sprintf("%d provider_audit_degraded anomalies for provider %s across %d agents", len(group), provider, len(agents)),
+				Pattern:        "provider_audit_degradation",
+				Severity:       "OBSERVABILITY_DEGRADED",
+				Evidence:       fmt.Sprintf("%d provider_audit_degraded anomalies for provider %s across %d agents", len(group), provider, agentCount),
+				Response:       models.CircuitBreakerResponseCheckpoint,
+				Classification: models.CircuitBreakerEvidenceNew,
+				Explanation:    fmt.Sprintf("current health for provider %s is unknown without a registered-agent state snapshot", provider),
 			}
 		}
 	}
 	return PatternResult{Triggered: false}
+}
+
+func checkProviderAuditEvidence(state *models.State, watermark time.Time, hasWatermark bool) (PatternResult, []models.Anomaly) {
+	groups := groupByField(filterByType(state.Anomalies, "provider_audit_degraded"), "provider")
+	var selected PatternResult
+	var selectedEvidence []models.Anomaly
+	selectedProvider := ""
+	for provider, group := range groups {
+		agentCount, qualifies := providerAuditThreshold(group)
+		if !qualifies {
+			continue
+		}
+
+		hasHistorical := false
+		hasCurrent := !hasWatermark
+		for _, anomaly := range group {
+			if anomaly.Timestamp.After(watermark) {
+				hasCurrent = true
+			} else {
+				hasHistorical = true
+			}
+		}
+		result := PatternResult{
+			Pattern:  "provider_audit_degradation",
+			Severity: "OBSERVABILITY_DEGRADED",
+			Evidence: fmt.Sprintf("%d provider_audit_degraded anomalies for provider %s across %d agents", len(group), provider, agentCount),
+		}
+		switch {
+		case hasWatermark && !hasCurrent:
+			result.Classification = models.CircuitBreakerEvidenceAcknowledgedHistorical
+			result.Response = models.CircuitBreakerResponseWarning
+			result.Explanation = fmt.Sprintf("qualifying provider-audit evidence for %s is entirely at or before the resolved response boundary", provider)
+		case hasWatermark && hasHistorical:
+			result.Classification = models.CircuitBreakerEvidenceContinuing
+			selectProviderAuditAction(state, provider, &result)
+		default:
+			result.Classification = models.CircuitBreakerEvidenceNew
+			selectProviderAuditAction(state, provider, &result)
+		}
+
+		priority := providerAuditResponsePriority(result.Response)
+		selectedPriority := providerAuditResponsePriority(selected.Response)
+		if selected.Pattern == "" || priority > selectedPriority || (priority == selectedPriority && provider < selectedProvider) {
+			selected = result
+			selectedEvidence = group
+			selectedProvider = provider
+		}
+	}
+	return selected, selectedEvidence
+}
+
+func providerAuditResponsePriority(response models.CircuitBreakerResponseType) int {
+	switch response {
+	case models.CircuitBreakerResponseHalt:
+		return 3
+	case models.CircuitBreakerResponseCheckpoint:
+		return 2
+	case models.CircuitBreakerResponseWarning:
+		return 1
+	default:
+		return 0
+	}
+}
+
+func selectProviderAuditAction(state *models.State, provider string, result *PatternResult) {
+	explanation, halt := allExactProviderEpochsDegraded(state, provider)
+	if halt {
+		result.Triggered = true
+		result.Response = models.CircuitBreakerResponseHalt
+		result.Explanation = explanation
+		return
+	}
+	result.Response = models.CircuitBreakerResponseCheckpoint
+	result.Explanation = explanation
+}
+
+func allExactProviderEpochsDegraded(state *models.State, provider string) (string, bool) {
+	exactMatches := 0
+	for agentID, agent := range state.Agents {
+		if agent.Provider != provider {
+			continue
+		}
+		exactMatches++
+		if agent.PID == 0 || agent.RegisteredAt.IsZero() {
+			return fmt.Sprintf("current health for provider %s is unknown: registered agent %s lacks exact PID or registration-time identity", provider, agentID), false
+		}
+		health, ok := state.AgentHealth[agentID]
+		if !ok {
+			return fmt.Sprintf("current health for provider %s is unknown: registered agent %s has no health record", provider, agentID), false
+		}
+		if health.Provider != agent.Provider || health.PID != agent.PID || health.RegisteredAt == nil || !health.RegisteredAt.Equal(agent.RegisteredAt) {
+			return fmt.Sprintf("current health for provider %s is unknown: agent %s health does not match its provider, PID, and registration-time epoch", provider, agentID), false
+		}
+		if !health.IsCurrentDegradedFor(agent) {
+			return fmt.Sprintf("current health for provider %s is not degraded for registered agent %s", provider, agentID), false
+		}
+	}
+	if exactMatches == 0 {
+		return fmt.Sprintf("current health for provider %s is unknown: no currently registered agent has an exact provider match", provider), false
+	}
+	return fmt.Sprintf("all %d currently registered agents with exact provider %s matches have degraded health for the same agent ID, provider, PID, and registration-time epoch", exactMatches, provider), true
+}
+
+func providerAuditThreshold(group []models.Anomaly) (int, bool) {
+	agents := make(map[string]struct{})
+	for _, anomaly := range group {
+		if agentID, ok := anomaly.Details["agent_id"].(string); ok && agentID != "" {
+			agents[agentID] = struct{}{}
+		}
+	}
+	return len(agents), len(agents) >= 2 || len(group) >= 3
 }
 
 // checkGroupedThreshold detects patterns where anomalies of a given type share a field value
@@ -317,23 +467,27 @@ func groupByField(anomalies []models.Anomaly, field string) map[string][]models.
 	return groups
 }
 
-// GenerateReport creates a markdown report for a triggered circuit breaker.
+// GenerateReport creates a markdown report for a circuit-breaker analysis response.
 // The anomalies slice must be the exact anomaly set considered for detection.
 func GenerateReport(result PatternResult, anomalies []models.Anomaly, timestamp time.Time, suppressedCount int) string {
 	var sb strings.Builder
 
 	sb.WriteString("# Circuit Breaker Report\n\n")
-	fmt.Fprintf(&sb, "**Triggered:** %s\n", timestamp.Format(time.RFC3339))
+	fmt.Fprintf(&sb, "**Analyzed:** %s\n", timestamp.Format(time.RFC3339))
 	fmt.Fprintf(&sb, "**Pattern:** %s\n", result.Pattern)
-	fmt.Fprintf(&sb, "**Severity:** %s\n\n", result.Severity)
+	fmt.Fprintf(&sb, "**Severity:** %s\n", result.Severity)
+	fmt.Fprintf(&sb, "**Evidence class:** %s\n", result.Classification)
+	fmt.Fprintf(&sb, "**Response:** %s\n", result.Response)
+	fmt.Fprintf(&sb, "**Explanation:** %s\n\n", result.Explanation)
 	if suppressedCount > 0 {
 		fmt.Fprintf(&sb, "**Acknowledged anomalies suppressed:** %d\n\n", suppressedCount)
 	}
 
-	sb.WriteString("## Trigger Evidence\n\n")
+	sb.WriteString("## Evidence\n\n")
 	sb.WriteString(result.Evidence)
 	sb.WriteString("\n\n")
 
+	writeResponseAction(&sb, result.Response)
 	writeTrimmedAnomalies(&sb, anomalies)
 
 	sb.WriteString("## Anomalies (raw)\n\n")
@@ -347,13 +501,29 @@ func GenerateReport(result PatternResult, anomalies []models.Anomaly, timestamp 
 
 	sb.WriteString("```\n\n")
 
-	sb.WriteString("## Human Decision Required\n\n")
-	sb.WriteString("- [ ] Acknowledge report\n")
-	sb.WriteString("- [ ] Confirm severity assessment\n")
-	sb.WriteString("- [ ] Determine remediation\n")
-	sb.WriteString("- [ ] Release checkpoint with decision logged\n")
+	if result.Response != models.CircuitBreakerResponseWarning {
+		sb.WriteString("## Human Decision Required\n\n")
+		sb.WriteString("- [ ] Acknowledge report\n")
+		sb.WriteString("- [ ] Confirm severity assessment\n")
+		sb.WriteString("- [ ] Determine remediation\n")
+		sb.WriteString("- [ ] Release checkpoint with decision logged\n")
+	}
 
 	return sb.String()
+}
+
+func writeResponseAction(sb *strings.Builder, response models.CircuitBreakerResponseType) {
+	sb.WriteString("## Response Action\n\n")
+	switch response {
+	case models.CircuitBreakerResponseWarning:
+		sb.WriteString("No state action — this evidence was already acknowledged.\n\n")
+	case models.CircuitBreakerResponseCheckpoint:
+		fmt.Fprintf(sb, "Sprint moved to CHECKPOINT. Review the explanation. Run `%s` to continue.\n\n", brand.Command("resume"))
+	case models.CircuitBreakerResponseHalt:
+		fmt.Fprintf(sb, "Circuit breaker triggered and execution halted. Review the explanation. Run `%s` after remediation.\n\n", brand.Command("resume"))
+	default:
+		sb.WriteString("No response action recorded.\n\n")
+	}
 }
 
 func writeTrimmedAnomalies(sb *strings.Builder, anomalies []models.Anomaly) {

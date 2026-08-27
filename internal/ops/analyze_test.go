@@ -2,10 +2,12 @@ package ops
 
 import (
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/liza-mas/liza/internal/analysis"
 	"github.com/liza-mas/liza/internal/db"
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/testhelpers"
@@ -140,6 +142,505 @@ func TestAnalyze_BelowThreshold(t *testing.T) {
 	}
 }
 
+func TestAnalyzeProviderAuditResponsesAtCommitBoundary(t *testing.T) {
+	observedAt := time.Date(2026, 8, 24, 9, 0, 0, 0, time.UTC)
+	registeredAt := observedAt.Add(-time.Hour)
+
+	tests := []struct {
+		name         string
+		setup        func(*models.State)
+		beforeModify func(*models.State)
+		wantResponse models.CircuitBreakerResponseType
+		wantClass    models.CircuitBreakerEvidenceClass
+		wantMode     models.SystemMode
+		wantSprint   models.SprintStatus
+	}{
+		{
+			name: "warning leaves mode and sprint unchanged",
+			setup: func(state *models.State) {
+				state.Config.Mode = models.SystemModePaused
+				addResolvedProviderAuditBoundary(state, observedAt.Add(2*time.Minute))
+			},
+			wantResponse: models.CircuitBreakerResponseWarning,
+			wantClass:    models.CircuitBreakerEvidenceAcknowledgedHistorical,
+			wantMode:     models.SystemModePaused,
+			wantSprint:   models.SprintStatusInProgress,
+		},
+		{
+			name:         "new evidence checkpoints without current health proof",
+			wantResponse: models.CircuitBreakerResponseCheckpoint,
+			wantClass:    models.CircuitBreakerEvidenceNew,
+			wantMode:     models.SystemModeRunning,
+			wantSprint:   models.SprintStatusCheckpoint,
+		},
+		{
+			name: "exact current degraded epochs halt",
+			setup: func(state *models.State) {
+				setAnalyzeProviderAuditEpochs(state, "codex", models.AgentHealthDegraded, registeredAt)
+			},
+			wantResponse: models.CircuitBreakerResponseHalt,
+			wantClass:    models.CircuitBreakerEvidenceNew,
+			wantMode:     models.SystemModeCircuitBreakerTripped,
+			wantSprint:   models.SprintStatusInProgress,
+		},
+		{
+			name: "epoch health change before commit prevents stale halt",
+			setup: func(state *models.State) {
+				setAnalyzeProviderAuditEpochs(state, "codex", models.AgentHealthDegraded, registeredAt)
+			},
+			beforeModify: func(state *models.State) {
+				health := state.AgentHealth["coder-2"]
+				health.State = models.AgentHealthOK
+				state.AgentHealth["coder-2"] = health
+			},
+			wantResponse: models.CircuitBreakerResponseCheckpoint,
+			wantClass:    models.CircuitBreakerEvidenceNew,
+			wantMode:     models.SystemModeRunning,
+			wantSprint:   models.SprintStatusCheckpoint,
+		},
+		{
+			name: "exact provider identity change before commit prevents stale halt",
+			setup: func(state *models.State) {
+				setAnalyzeProviderAuditEpochs(state, "codex", models.AgentHealthDegraded, registeredAt)
+			},
+			beforeModify: func(state *models.State) {
+				for agentID, agent := range state.Agents {
+					agent.Provider = "codex-acp"
+					state.Agents[agentID] = agent
+				}
+			},
+			wantResponse: models.CircuitBreakerResponseCheckpoint,
+			wantClass:    models.CircuitBreakerEvidenceNew,
+			wantMode:     models.SystemModeRunning,
+			wantSprint:   models.SprintStatusCheckpoint,
+		},
+		{
+			name: "acknowledgement advance prevents stale checkpoint",
+			beforeModify: func(state *models.State) {
+				addResolvedProviderAuditBoundary(state, observedAt.Add(2*time.Minute))
+			},
+			wantResponse: models.CircuitBreakerResponseWarning,
+			wantClass:    models.CircuitBreakerEvidenceAcknowledgedHistorical,
+			wantMode:     models.SystemModeRunning,
+			wantSprint:   models.SprintStatusInProgress,
+		},
+		{
+			name: "acknowledgement advance prevents stale halt",
+			setup: func(state *models.State) {
+				setAnalyzeProviderAuditEpochs(state, "codex", models.AgentHealthDegraded, registeredAt)
+			},
+			beforeModify: func(state *models.State) {
+				addResolvedProviderAuditBoundary(state, observedAt.Add(2*time.Minute))
+			},
+			wantResponse: models.CircuitBreakerResponseWarning,
+			wantClass:    models.CircuitBreakerEvidenceAcknowledgedHistorical,
+			wantMode:     models.SystemModeRunning,
+			wantSprint:   models.SprintStatusInProgress,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+			state := testhelpers.CreateValidState()
+			state.Anomalies = []models.Anomaly{
+				providerAuditAnomaly(observedAt, "coder-1"),
+				providerAuditAnomaly(observedAt.Add(time.Minute), "coder-2"),
+			}
+			if tt.setup != nil {
+				tt.setup(state)
+			}
+			testhelpers.WriteInitialState(t, stateFile, state)
+
+			if tt.beforeModify != nil {
+				bb := db.New(stateFile)
+				testAnalyzeHooks = &analyzeTestHooks{beforeModify: func() {
+					if err := bb.Modify(func(current *models.State) error {
+						tt.beforeModify(current)
+						return nil
+					}); err != nil {
+						t.Fatalf("beforeModify state update failed: %v", err)
+					}
+				}}
+			}
+			t.Cleanup(func() { testAnalyzeHooks = nil })
+
+			result, err := Analyze(tmpDir)
+			if err != nil {
+				t.Fatalf("Analyze() error: %v", err)
+			}
+			testAnalyzeHooks = nil
+
+			if result.Response != tt.wantResponse || result.Classification != tt.wantClass {
+				t.Fatalf("result = {response:%q classification:%q}, want {%q %q}", result.Response, result.Classification, tt.wantResponse, tt.wantClass)
+			}
+			if result.Triggered != (tt.wantResponse == models.CircuitBreakerResponseHalt) {
+				t.Errorf("Triggered = %v for response %q", result.Triggered, result.Response)
+			}
+			if result.Explanation == "" {
+				t.Error("Explanation should describe the committed response")
+			}
+			if result.ReportPath == "" {
+				t.Fatal("ReportPath should be populated for every provider-audit response")
+			}
+
+			readState, err := db.New(stateFile).Read()
+			if err != nil {
+				t.Fatalf("read committed state: %v", err)
+			}
+			if readState.Config.Mode != tt.wantMode || readState.Sprint.Status != tt.wantSprint {
+				t.Errorf("committed mode/sprint = %s/%s, want %s/%s", readState.Config.Mode, readState.Sprint.Status, tt.wantMode, tt.wantSprint)
+			}
+			assertAnalyzeResponseHistory(t, readState, result)
+
+			switch tt.wantResponse {
+			case models.CircuitBreakerResponseWarning:
+				if readState.CircuitBreaker.Status != "OK" || readState.CircuitBreaker.CurrentTrigger != nil || readState.CircuitBreaker.CurrentResponse != nil {
+					t.Errorf("WARNING mutated active circuit-breaker state: %+v", readState.CircuitBreaker)
+				}
+			case models.CircuitBreakerResponseCheckpoint:
+				if readState.CircuitBreaker.Status != "OK" || readState.CircuitBreaker.CurrentTrigger != nil {
+					t.Errorf("CHECKPOINT hard-triggered circuit breaker: %+v", readState.CircuitBreaker)
+				}
+				assertActiveAnalyzeResponse(t, readState, result)
+			case models.CircuitBreakerResponseHalt:
+				if readState.CircuitBreaker.Status != "TRIGGERED" || readState.CircuitBreaker.CurrentTrigger == nil {
+					t.Errorf("HALT did not hard-trigger circuit breaker: %+v", readState.CircuitBreaker)
+				}
+				assertActiveAnalyzeResponse(t, readState, result)
+			}
+		})
+	}
+}
+
+func TestAnalyzePreservesActiveProviderResponseUntilResume(t *testing.T) {
+	observedAt := time.Date(2026, 8, 24, 9, 0, 0, 0, time.UTC)
+	registeredAt := observedAt.Add(-time.Hour)
+
+	tests := []struct {
+		name            string
+		activeResponse  models.CircuitBreakerResponseType
+		candidate       string
+		wantEscalation  bool
+		wantPattern     string
+		resumeAndVerify bool
+	}{
+		{name: "halt followed by no match", activeResponse: models.CircuitBreakerResponseHalt, candidate: "none"},
+		{name: "halt followed by provider checkpoint", activeResponse: models.CircuitBreakerResponseHalt, candidate: "provider_checkpoint"},
+		{name: "halt followed by provider halt", activeResponse: models.CircuitBreakerResponseHalt, candidate: "provider_halt"},
+		{name: "halt followed by generic halt", activeResponse: models.CircuitBreakerResponseHalt, candidate: "generic_halt"},
+		{name: "checkpoint followed by no match", activeResponse: models.CircuitBreakerResponseCheckpoint, candidate: "none"},
+		{name: "checkpoint followed by provider checkpoint", activeResponse: models.CircuitBreakerResponseCheckpoint, candidate: "provider_checkpoint"},
+		{
+			name: "checkpoint followed by exact provider halt", activeResponse: models.CircuitBreakerResponseCheckpoint,
+			candidate: "provider_halt", wantEscalation: true, wantPattern: "provider_audit_degradation", resumeAndVerify: true,
+		},
+		{
+			name: "checkpoint followed by generic halt", activeResponse: models.CircuitBreakerResponseCheckpoint,
+			candidate: "generic_halt", wantEscalation: true, wantPattern: "retry_cluster",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+			state := testhelpers.CreateValidState()
+			state.Anomalies = []models.Anomaly{
+				providerAuditAnomaly(observedAt, "coder-1"),
+				providerAuditAnomaly(observedAt.Add(time.Minute), "coder-2"),
+			}
+			if tt.activeResponse == models.CircuitBreakerResponseHalt {
+				setAnalyzeProviderAuditEpochs(state, "codex", models.AgentHealthDegraded, registeredAt)
+			}
+			testhelpers.WriteInitialState(t, stateFile, state)
+
+			firstResult, err := Analyze(tmpDir)
+			if err != nil {
+				t.Fatalf("first Analyze() error: %v", err)
+			}
+			if firstResult.Response != tt.activeResponse {
+				t.Fatalf("first response = %q, want %q", firstResult.Response, tt.activeResponse)
+			}
+
+			bb := db.New(stateFile)
+			activeReportPath := firstResult.ReportPath + ".active"
+			report, err := os.ReadFile(firstResult.ReportPath)
+			if err != nil {
+				t.Fatalf("read first report: %v", err)
+			}
+			if err := os.WriteFile(activeReportPath, report, 0644); err != nil {
+				t.Fatalf("write distinct active report fixture: %v", err)
+			}
+			if err := bb.Modify(func(current *models.State) error {
+				current.CircuitBreaker.CurrentResponse.ReportFile = activeReportPath
+				if current.CircuitBreaker.CurrentTrigger != nil {
+					current.CircuitBreaker.CurrentTrigger.ReportFile = activeReportPath
+				}
+				return nil
+			}); err != nil {
+				t.Fatalf("set distinct active report reference: %v", err)
+			}
+			before, err := bb.Read()
+			if err != nil {
+				t.Fatalf("read active response: %v", err)
+			}
+			if before.CircuitBreaker.CurrentResponse == nil {
+				t.Fatal("first Analyze() did not persist an active provider response")
+			}
+			beforeResponse := *before.CircuitBreaker.CurrentResponse
+			beforeTrigger := before.CircuitBreaker.CurrentTrigger
+			beforeHistory := append([]models.CircuitBreakerHistory(nil), before.CircuitBreaker.History...)
+			beforeStatus := before.CircuitBreaker.Status
+			beforeMode := before.Config.Mode
+			beforeSprint := before.Sprint.Status
+
+			if err := bb.Modify(func(current *models.State) error {
+				switch tt.candidate {
+				case "none":
+					current.Anomalies = nil
+					current.Agents = nil
+					current.AgentHealth = nil
+				case "provider_checkpoint":
+					current.Agents = nil
+					current.AgentHealth = nil
+				case "provider_halt":
+					setAnalyzeProviderAuditEpochs(current, "codex", models.AgentHealthDegraded, registeredAt)
+				case "generic_halt":
+					current.Anomalies = []models.Anomaly{
+						retryLoopAnomaly(observedAt.Add(2*time.Minute), "coder-1"),
+						retryLoopAnomaly(observedAt.Add(3*time.Minute), "coder-1"),
+						retryLoopAnomaly(observedAt.Add(4*time.Minute), "coder-1"),
+					}
+					current.Agents = nil
+					current.AgentHealth = nil
+				default:
+					t.Fatalf("unknown candidate fixture %q", tt.candidate)
+				}
+				return nil
+			}); err != nil {
+				t.Fatalf("prepare second analysis: %v", err)
+			}
+
+			secondResult, err := Analyze(tmpDir)
+			if err != nil {
+				t.Fatalf("second Analyze() error: %v", err)
+			}
+			after, err := bb.Read()
+			if err != nil {
+				t.Fatalf("read second analysis: %v", err)
+			}
+
+			if !tt.wantEscalation {
+				if after.CircuitBreaker.Status != beforeStatus || after.Config.Mode != beforeMode || after.Sprint.Status != beforeSprint {
+					t.Errorf("active response state changed: status/mode/sprint = %s/%s/%s, want %s/%s/%s", after.CircuitBreaker.Status, after.Config.Mode, after.Sprint.Status, beforeStatus, beforeMode, beforeSprint)
+				}
+				if !reflect.DeepEqual(after.CircuitBreaker.CurrentTrigger, beforeTrigger) {
+					t.Errorf("current trigger changed: got %+v, want %+v", after.CircuitBreaker.CurrentTrigger, beforeTrigger)
+				}
+				if !reflect.DeepEqual(after.CircuitBreaker.CurrentResponse, &beforeResponse) {
+					t.Errorf("current response changed: got %+v, want %+v", after.CircuitBreaker.CurrentResponse, beforeResponse)
+				}
+				if !reflect.DeepEqual(after.CircuitBreaker.History, beforeHistory) {
+					t.Errorf("history changed while active response won: got %+v, want %+v", after.CircuitBreaker.History, beforeHistory)
+				}
+				assertAnalyzeResultMatchesResponse(t, secondResult, &beforeResponse)
+				return
+			}
+
+			if secondResult.Response != models.CircuitBreakerResponseHalt || secondResult.Pattern != tt.wantPattern || !secondResult.Triggered {
+				t.Fatalf("escalated result = {pattern:%q response:%q triggered:%v}, want {%q HALT true}", secondResult.Pattern, secondResult.Response, secondResult.Triggered, tt.wantPattern)
+			}
+			if len(after.CircuitBreaker.History) != len(beforeHistory)+1 {
+				t.Fatalf("history length = %d, want %d after one escalation boundary", len(after.CircuitBreaker.History), len(beforeHistory)+1)
+			}
+			formerCheckpoint := after.CircuitBreaker.History[len(beforeHistory)-1]
+			if formerCheckpoint.SupersededByResponse != models.CircuitBreakerResponseHalt || formerCheckpoint.Resolution != nil || formerCheckpoint.ResolvedAt != nil {
+				t.Errorf("former checkpoint = %+v, want HALT supersession without acknowledgement", formerCheckpoint)
+			}
+			haltBoundary := after.CircuitBreaker.History[len(after.CircuitBreaker.History)-1]
+			if haltBoundary.Response != models.CircuitBreakerResponseHalt || haltBoundary.Resolution != nil || haltBoundary.ResolvedAt != nil {
+				t.Errorf("halt boundary = %+v, want unresolved HALT", haltBoundary)
+			}
+			assertActiveAnalyzeResponse(t, after, secondResult)
+			assertAnalyzeResponseHistory(t, after, secondResult)
+
+			if tt.resumeAndVerify {
+				haltTimestamp := haltBoundary.Timestamp
+				if _, err := Resume(tmpDir, "human"); err != nil {
+					t.Fatalf("Resume() error: %v", err)
+				}
+				resumed, err := bb.Read()
+				if err != nil {
+					t.Fatalf("read resumed state: %v", err)
+				}
+				checkpointAfterResume := resumed.CircuitBreaker.History[len(beforeHistory)-1]
+				if checkpointAfterResume.SupersededByResponse != models.CircuitBreakerResponseHalt || checkpointAfterResume.Resolution != nil || checkpointAfterResume.ResolvedAt != nil {
+					t.Errorf("resume acknowledged superseded checkpoint: %+v", checkpointAfterResume)
+				}
+				resolvedHalt := resumed.CircuitBreaker.History[len(beforeHistory)]
+				if !resolvedHalt.Timestamp.Equal(haltTimestamp) || resolvedHalt.Resolution == nil || resolvedHalt.ResolvedAt == nil {
+					t.Errorf("resume did not acknowledge winning HALT boundary: %+v", resolvedHalt)
+				}
+
+				reanalyzed, err := Analyze(tmpDir)
+				if err != nil {
+					t.Fatalf("Analyze() after resume error: %v", err)
+				}
+				if reanalyzed.Triggered || reanalyzed.Response != models.CircuitBreakerResponseWarning || reanalyzed.Classification != models.CircuitBreakerEvidenceAcknowledgedHistorical {
+					t.Errorf("unchanged post-resume evidence = {triggered:%v response:%q classification:%q}, want historical WARNING", reanalyzed.Triggered, reanalyzed.Response, reanalyzed.Classification)
+				}
+			}
+		})
+	}
+
+	genericHaltCases := []struct {
+		name         string
+		candidate    string
+		wantPattern  string
+		wantResponse models.CircuitBreakerResponseType
+	}{
+		{name: "generic halt followed by no match", candidate: "none"},
+		{name: "generic halt followed by repeated equal halt", candidate: "generic_halt", wantPattern: "retry_cluster", wantResponse: models.CircuitBreakerResponseHalt},
+		{name: "generic halt followed by weaker provider checkpoint", candidate: "provider_checkpoint", wantPattern: "provider_audit_degradation", wantResponse: models.CircuitBreakerResponseCheckpoint},
+	}
+
+	for _, tt := range genericHaltCases {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+			state := testhelpers.CreateValidState()
+			state.Anomalies = []models.Anomaly{
+				retryLoopAnomaly(observedAt, "coder-1"),
+				retryLoopAnomaly(observedAt.Add(time.Minute), "coder-1"),
+				retryLoopAnomaly(observedAt.Add(2*time.Minute), "coder-1"),
+			}
+			testhelpers.WriteInitialState(t, stateFile, state)
+
+			firstResult, err := Analyze(tmpDir)
+			if err != nil {
+				t.Fatalf("first Analyze() error: %v", err)
+			}
+			if firstResult.Pattern != "retry_cluster" || firstResult.Response != models.CircuitBreakerResponseHalt || !firstResult.Triggered {
+				t.Fatalf("first result = {pattern:%q response:%q triggered:%v}, want retry_cluster/HALT/true", firstResult.Pattern, firstResult.Response, firstResult.Triggered)
+			}
+
+			bb := db.New(stateFile)
+			activeReportPath := firstResult.ReportPath + ".active"
+			report, err := os.ReadFile(firstResult.ReportPath)
+			if err != nil {
+				t.Fatalf("read first report: %v", err)
+			}
+			if err := os.WriteFile(activeReportPath, report, 0644); err != nil {
+				t.Fatalf("write distinct active report fixture: %v", err)
+			}
+			if err := bb.Modify(func(current *models.State) error {
+				current.CircuitBreaker.CurrentResponse.ReportFile = activeReportPath
+				current.CircuitBreaker.CurrentTrigger.ReportFile = activeReportPath
+				return nil
+			}); err != nil {
+				t.Fatalf("set distinct active report reference: %v", err)
+			}
+			before, err := bb.Read()
+			if err != nil {
+				t.Fatalf("read active generic response: %v", err)
+			}
+			if before.CircuitBreaker.CurrentResponse == nil || before.CircuitBreaker.CurrentTrigger == nil {
+				t.Fatal("first Analyze() did not persist an active generic HALT")
+			}
+			beforeResponse := *before.CircuitBreaker.CurrentResponse
+			beforeTrigger := *before.CircuitBreaker.CurrentTrigger
+			beforeHistory := append([]models.CircuitBreakerHistory(nil), before.CircuitBreaker.History...)
+			boundaryIndex := len(beforeHistory) - 1
+			if boundaryIndex < 0 || beforeHistory[boundaryIndex].Resolution != nil || beforeHistory[boundaryIndex].ResolvedAt != nil {
+				t.Fatalf("active HALT boundary is not unresolved: %+v", beforeHistory)
+			}
+
+			if err := bb.Modify(func(current *models.State) error {
+				switch tt.candidate {
+				case "none":
+					current.Anomalies = nil
+					current.Agents = nil
+					current.AgentHealth = nil
+				case "generic_halt":
+					// Keep the same retry-cluster evidence to produce an equal HALT candidate.
+				case "provider_checkpoint":
+					current.Anomalies = []models.Anomaly{
+						providerAuditAnomaly(observedAt.Add(3*time.Minute), "coder-1"),
+						providerAuditAnomaly(observedAt.Add(4*time.Minute), "coder-2"),
+					}
+					current.Agents = nil
+					current.AgentHealth = nil
+				default:
+					t.Fatalf("unknown candidate fixture %q", tt.candidate)
+				}
+				return nil
+			}); err != nil {
+				t.Fatalf("prepare second analysis: %v", err)
+			}
+			prepared, err := bb.Read()
+			if err != nil {
+				t.Fatalf("read prepared candidate: %v", err)
+			}
+			candidate, _, _ := analysis.DetectUnacknowledgedPatterns(prepared)
+			if candidate.Pattern != tt.wantPattern || candidate.Response != tt.wantResponse {
+				t.Fatalf("committed candidate fixture = {pattern:%q response:%q}, want {%q %q}", candidate.Pattern, candidate.Response, tt.wantPattern, tt.wantResponse)
+			}
+
+			result, err := Analyze(tmpDir)
+			if err != nil {
+				t.Fatalf("second Analyze() error: %v", err)
+			}
+			after, err := bb.Read()
+			if err != nil {
+				t.Fatalf("read generic re-analysis: %v", err)
+			}
+			if after.CircuitBreaker.Status != "TRIGGERED" || after.Config.Mode != models.SystemModeCircuitBreakerTripped {
+				t.Errorf("retained status/mode = %s/%s, want TRIGGERED/CIRCUIT_BREAKER_TRIPPED", after.CircuitBreaker.Status, after.Config.Mode)
+			}
+			if !reflect.DeepEqual(after.CircuitBreaker.CurrentTrigger, &beforeTrigger) {
+				t.Errorf("current trigger changed: got %+v, want %+v", after.CircuitBreaker.CurrentTrigger, beforeTrigger)
+			}
+			if !reflect.DeepEqual(after.CircuitBreaker.CurrentResponse, &beforeResponse) {
+				t.Errorf("current response changed: got %+v, want %+v", after.CircuitBreaker.CurrentResponse, beforeResponse)
+			}
+			if after.CircuitBreaker.CurrentResponse == nil || after.CircuitBreaker.CurrentResponse.ReportFile != activeReportPath {
+				t.Errorf("active report reference = %v, want %q", after.CircuitBreaker.CurrentResponse, activeReportPath)
+			}
+			if len(after.CircuitBreaker.History) != len(beforeHistory) || !reflect.DeepEqual(after.CircuitBreaker.History, beforeHistory) {
+				t.Errorf("history changed while active HALT won: got %+v, want %+v", after.CircuitBreaker.History, beforeHistory)
+			}
+			retainedBoundary := after.CircuitBreaker.History[boundaryIndex]
+			if !retainedBoundary.Timestamp.Equal(beforeResponse.Timestamp) || retainedBoundary.Response != models.CircuitBreakerResponseHalt || retainedBoundary.Resolution != nil || retainedBoundary.ResolvedAt != nil {
+				t.Errorf("retained HALT boundary = %+v, want exact unresolved boundary at %s", retainedBoundary, beforeResponse.Timestamp)
+			}
+			assertAnalyzeResultMatchesResponse(t, result, &beforeResponse)
+
+			if _, err := Resume(tmpDir, "human"); err != nil {
+				t.Fatalf("Resume() error: %v", err)
+			}
+			resumed, err := bb.Read()
+			if err != nil {
+				t.Fatalf("read resumed state: %v", err)
+			}
+			if resumed.CircuitBreaker.CurrentResponse != nil || resumed.CircuitBreaker.CurrentTrigger != nil {
+				t.Errorf("resume left active circuit-breaker state: %+v", resumed.CircuitBreaker)
+			}
+			if resumed.CircuitBreaker.Status != "OK" || resumed.Config.Mode != models.SystemModeRunning {
+				t.Errorf("resume status/mode = %s/%s, want OK/RUNNING", resumed.CircuitBreaker.Status, resumed.Config.Mode)
+			}
+			if len(resumed.CircuitBreaker.History) != len(beforeHistory) {
+				t.Fatalf("resume history length = %d, want %d", len(resumed.CircuitBreaker.History), len(beforeHistory))
+			}
+			resolvedBoundary := resumed.CircuitBreaker.History[boundaryIndex]
+			if !resolvedBoundary.Timestamp.Equal(beforeResponse.Timestamp) || resolvedBoundary.Response != models.CircuitBreakerResponseHalt || resolvedBoundary.Resolution == nil || resolvedBoundary.ResolvedAt == nil {
+				t.Errorf("resume did not resolve exact HALT boundary: %+v", resolvedBoundary)
+			}
+		})
+	}
+}
+
 func TestAnalyze_ReportsOnlyUnacknowledgedAnomalies(t *testing.T) {
 	t.Parallel()
 
@@ -147,8 +648,8 @@ func TestAnalyze_ReportsOnlyUnacknowledgedAnomalies(t *testing.T) {
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
 	watermark := time.Date(2026, 5, 20, 11, 0, 0, 0, time.UTC)
-	pattern := "provider_audit_degradation"
-	severity := "OBSERVABILITY_DEGRADED"
+	pattern := "retry_cluster"
+	severity := "ARCHITECTURE_FLAW"
 	state := testhelpers.CreateValidState()
 	state.CircuitBreaker = models.CircuitBreaker{
 		Status: "OK",
@@ -157,10 +658,11 @@ func TestAnalyze_ReportsOnlyUnacknowledgedAnomalies(t *testing.T) {
 		},
 	}
 	state.Anomalies = []models.Anomaly{
-		providerAuditAnomaly(watermark.Add(-time.Minute), "old-coder"),
-		providerAuditAnomaly(watermark, "equal-coder"),
-		providerAuditAnomaly(watermark.Add(time.Minute), "new-coder-1"),
-		providerAuditAnomaly(watermark.Add(2*time.Minute), "new-coder-2"),
+		retryLoopAnomaly(watermark.Add(-time.Minute), "old-coder"),
+		retryLoopAnomaly(watermark, "equal-coder"),
+		retryLoopAnomaly(watermark.Add(time.Minute), "new-coder-1"),
+		retryLoopAnomaly(watermark.Add(2*time.Minute), "new-coder-2"),
+		retryLoopAnomaly(watermark.Add(3*time.Minute), "new-coder-3"),
 	}
 	testhelpers.WriteInitialState(t, stateFile, state)
 
@@ -183,7 +685,7 @@ func TestAnalyze_ReportsOnlyUnacknowledgedAnomalies(t *testing.T) {
 	if strings.Contains(report, "old-coder") || strings.Contains(report, "equal-coder") {
 		t.Fatalf("report includes acknowledged anomalies:\n%s", report)
 	}
-	if !strings.Contains(report, "new-coder-1") || !strings.Contains(report, "new-coder-2") {
+	if !strings.Contains(report, "new-coder-1") || !strings.Contains(report, "new-coder-2") || !strings.Contains(report, "new-coder-3") {
 		t.Fatalf("report missing unacknowledged anomalies:\n%s", report)
 	}
 }
@@ -210,5 +712,82 @@ func providerAuditAnomaly(timestamp time.Time, agentID string) models.Anomaly {
 			"agent_id": agentID,
 			"message":  "failed to record rollout items",
 		},
+	}
+}
+
+func retryLoopAnomaly(timestamp time.Time, agentID string) models.Anomaly {
+	return models.Anomaly{
+		Timestamp: timestamp,
+		Reporter:  agentID,
+		Type:      "retry_loop",
+		Details: map[string]any{
+			"error_pattern": "connection refused",
+		},
+	}
+}
+
+func addResolvedProviderAuditBoundary(state *models.State, boundary time.Time) {
+	resolvedAt := boundary.Add(time.Second)
+	state.CircuitBreaker.Status = "OK"
+	state.CircuitBreaker.CurrentTrigger = nil
+	state.CircuitBreaker.CurrentResponse = nil
+	state.CircuitBreaker.History = append(state.CircuitBreaker.History, models.CircuitBreakerHistory{
+		Timestamp:      boundary,
+		Result:         "CHECKPOINT",
+		Response:       models.CircuitBreakerResponseCheckpoint,
+		Classification: models.CircuitBreakerEvidenceNew,
+		ResolvedAt:     &resolvedAt,
+	})
+}
+
+func setAnalyzeProviderAuditEpochs(state *models.State, provider string, healthState models.AgentHealthState, registeredAt time.Time) {
+	state.Agents = map[string]models.Agent{
+		"coder-1": {Provider: provider, PID: 101, RegisteredAt: registeredAt},
+		"coder-2": {Provider: provider, PID: 102, RegisteredAt: registeredAt},
+	}
+	state.AgentHealth = map[string]models.AgentHealth{
+		"coder-1": {State: healthState, Provider: provider, PID: 101, RegisteredAt: &registeredAt},
+		"coder-2": {State: healthState, Provider: provider, PID: 102, RegisteredAt: &registeredAt},
+	}
+}
+
+func assertActiveAnalyzeResponse(t *testing.T, state *models.State, result *AnalyzeResult) {
+	t.Helper()
+	response := state.CircuitBreaker.CurrentResponse
+	if response == nil {
+		t.Fatal("active circuit-breaker response was not persisted")
+	}
+	if response.Response != result.Response || response.Classification != result.Classification || response.Explanation != result.Explanation {
+		t.Errorf("active response = {%q %q %q}, want result {%q %q %q}", response.Response, response.Classification, response.Explanation, result.Response, result.Classification, result.Explanation)
+	}
+	if response.ReportFile != result.ReportPath {
+		t.Errorf("active response report = %q, want %q", response.ReportFile, result.ReportPath)
+	}
+}
+
+func assertAnalyzeResultMatchesResponse(t *testing.T, result *AnalyzeResult, response *models.CircuitBreakerResponse) {
+	t.Helper()
+	if result.Pattern != response.Pattern || result.Severity != response.Severity || result.Response != response.Response || result.Classification != response.Classification || result.Explanation != response.Explanation {
+		t.Errorf("AnalyzeResult = {pattern:%q severity:%q response:%q classification:%q explanation:%q}, want active response %+v", result.Pattern, result.Severity, result.Response, result.Classification, result.Explanation, response)
+	}
+	if result.Triggered != (response.Response == models.CircuitBreakerResponseHalt) {
+		t.Errorf("AnalyzeResult.Triggered = %v for active response %q", result.Triggered, response.Response)
+	}
+	if result.ReportPath != response.ReportFile {
+		t.Errorf("AnalyzeResult.ReportPath = %q, want active report %q", result.ReportPath, response.ReportFile)
+	}
+	if _, err := os.Stat(result.ReportPath); err != nil {
+		t.Errorf("AnalyzeResult.ReportPath does not reference the existing active report: %v", err)
+	}
+}
+
+func assertAnalyzeResponseHistory(t *testing.T, state *models.State, result *AnalyzeResult) {
+	t.Helper()
+	if len(state.CircuitBreaker.History) == 0 {
+		t.Fatal("circuit-breaker response history was not persisted")
+	}
+	history := state.CircuitBreaker.History[len(state.CircuitBreaker.History)-1]
+	if history.Response != result.Response || history.Classification != result.Classification || history.Explanation != result.Explanation {
+		t.Errorf("history response = {%q %q %q}, want result {%q %q %q}", history.Response, history.Classification, history.Explanation, result.Response, result.Classification, result.Explanation)
 	}
 }

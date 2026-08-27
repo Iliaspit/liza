@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -117,6 +118,69 @@ func TestWaitWhilePausedAutoResumePrecedesTransitionCheckpointRoleException(t *t
 	}
 	if updated.Sprint.Status != models.SprintStatusInProgress {
 		t.Fatalf("sprint status = %s, want %s", updated.Sprint.Status, models.SprintStatusInProgress)
+	}
+}
+
+func TestWaitWhilePausedAutoResumePreservesStoppedActiveHalt(t *testing.T) {
+	tmpDir := t.TempDir()
+	statePath, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	testhelpers.SetupPipelineConfig(t, tmpDir)
+
+	now := time.Now().UTC()
+	state := testhelpers.CreateValidState()
+	state.Anomalies = []models.Anomaly{
+		{Timestamp: now, Reporter: "coder-1", Type: "retry_loop", Details: map[string]any{"error_pattern": "connection refused"}},
+		{Timestamp: now.Add(time.Minute), Reporter: "coder-1", Type: "retry_loop", Details: map[string]any{"error_pattern": "connection refused"}},
+		{Timestamp: now.Add(2 * time.Minute), Reporter: "coder-1", Type: "retry_loop", Details: map[string]any{"error_pattern": "connection refused"}},
+	}
+	testhelpers.WriteInitialState(t, statePath, state)
+
+	if _, err := ops.Analyze(tmpDir); err != nil {
+		t.Fatalf("Analyze() error: %v", err)
+	}
+	if err := db.For(statePath).Modify(func(current *models.State) error {
+		current.Config.AutoResume = true
+		current.Sprint.Status = models.SprintStatusCheckpoint
+		return nil
+	}); err != nil {
+		t.Fatalf("prepare stopped checkpoint state: %v", err)
+	}
+	if _, err := ops.Stop(tmpDir, "maintenance", "human"); err != nil {
+		t.Fatalf("Stop() error: %v", err)
+	}
+
+	before, err := db.For(statePath).Read()
+	if err != nil {
+		t.Fatalf("read before automatic resume: %v", err)
+	}
+	if before.CircuitBreaker.CurrentTrigger == nil || before.CircuitBreaker.CurrentResponse == nil {
+		t.Fatalf("missing active HALT before automatic resume: %+v", before.CircuitBreaker)
+	}
+	if before.CircuitBreaker.CurrentResponse.ReportFile == "" {
+		t.Fatal("active HALT has no report reference")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+	if err := waitWhilePaused(ctx, tmpDir, "doer"); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("waitWhilePaused() error = %v, want context deadline while HALT remains blocked", err)
+	}
+
+	after, err := db.For(statePath).Read()
+	if err != nil {
+		t.Fatalf("read after automatic resume attempt: %v", err)
+	}
+	if after.Config.Mode != models.SystemModeStopped {
+		t.Errorf("mode = %s, want STOPPED", after.Config.Mode)
+	}
+	if !reflect.DeepEqual(after.CircuitBreaker.CurrentTrigger, before.CircuitBreaker.CurrentTrigger) {
+		t.Errorf("current trigger changed: got %+v, want %+v", after.CircuitBreaker.CurrentTrigger, before.CircuitBreaker.CurrentTrigger)
+	}
+	if !reflect.DeepEqual(after.CircuitBreaker.CurrentResponse, before.CircuitBreaker.CurrentResponse) {
+		t.Errorf("current response changed: got %+v, want %+v", after.CircuitBreaker.CurrentResponse, before.CircuitBreaker.CurrentResponse)
+	}
+	if !reflect.DeepEqual(after.CircuitBreaker.History, before.CircuitBreaker.History) {
+		t.Errorf("circuit-breaker history changed: got %+v, want %+v", after.CircuitBreaker.History, before.CircuitBreaker.History)
 	}
 }
 

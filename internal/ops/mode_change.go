@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/liza-mas/liza/internal/brand"
 	"github.com/liza-mas/liza/internal/db"
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/paths"
@@ -254,6 +255,9 @@ func changeMode(projectRoot, reason, changedBy string, target models.SystemMode)
 		if err := previousMode.ValidateTransition(target); err != nil {
 			return &PreconditionError{Reason: err.Error()}
 		}
+		if target == models.SystemModeRunning && hasActiveHaltResponse(s) {
+			return &PreconditionError{Reason: fmt.Sprintf("cannot start while an active HALT response is unresolved; use %q to acknowledge it", brand.Command("resume"))}
+		}
 
 		s.Config.Mode = target
 		s.Config.ModeChangedAt = &timestamp
@@ -274,13 +278,21 @@ func changeMode(projectRoot, reason, changedBy string, target models.SystemMode)
 	}, nil
 }
 
+func hasActiveHaltResponse(s *models.State) bool {
+	if s.CircuitBreaker.CurrentResponse != nil {
+		return s.CircuitBreaker.CurrentResponse.Response == models.CircuitBreakerResponseHalt
+	}
+	return s.CircuitBreaker.Status == "TRIGGERED" && s.CircuitBreaker.CurrentTrigger != nil
+}
+
 // ResumeResult contains the outcome of a system resume.
 type ResumeResult struct {
-	ResumedFrom         string
-	ChangedBy           string
-	SprintAdvanced      *AdvanceSprintResult // non-nil when sprint was advanced to next
-	TransitionsExecuted int                  // number of transitions fired on advance
-	TransitionError     string               // non-empty if post-advance transitions failed
+	ResumedFrom          string
+	ChangedBy            string
+	SystemRemainsStopped bool                 // true when Resume acknowledged a HALT without restarting a stopped system
+	SprintAdvanced       *AdvanceSprintResult // non-nil when sprint was advanced to next
+	TransitionsExecuted  int                  // number of transitions fired on advance
+	TransitionError      string               // non-empty if post-advance transitions failed
 }
 
 // resumeSystemMode transitions PAUSED or CIRCUIT_BREAKER_TRIPPED to RUNNING.
@@ -302,6 +314,35 @@ func resumeSystemMode(s *models.State, timestamp time.Time, changedBy string) st
 	default:
 		return ""
 	}
+}
+
+func acknowledgeCircuitBreakerResponse(s *models.State, timestamp time.Time, changedBy string) error {
+	response := s.CircuitBreaker.CurrentResponse
+	if response == nil {
+		return nil
+	}
+	if response.Response != models.CircuitBreakerResponseCheckpoint && response.Response != models.CircuitBreakerResponseHalt {
+		return fmt.Errorf("cannot acknowledge unsupported circuit-breaker response %q", response.Response)
+	}
+
+	for i := len(s.CircuitBreaker.History) - 1; i >= 0; i-- {
+		entry := &s.CircuitBreaker.History[i]
+		if !entry.Timestamp.Equal(response.Timestamp) || entry.Response != response.Response || entry.Pattern == nil || *entry.Pattern != response.Pattern {
+			continue
+		}
+
+		resolution := fmt.Sprintf("resumed by %s", changedBy)
+		entry.Resolution = &resolution
+		entry.ResolvedAt = &timestamp
+		s.CircuitBreaker.CurrentResponse = nil
+		if response.Response == models.CircuitBreakerResponseHalt {
+			s.CircuitBreaker.Status = "OK"
+			s.CircuitBreaker.CurrentTrigger = nil
+		}
+		return nil
+	}
+
+	return fmt.Errorf("active circuit-breaker response has no matching history boundary")
 }
 
 // resumeSprint handles CHECKPOINT and COMPLETED sprint transitions.
@@ -378,8 +419,17 @@ func resumeRequiresEffectiveIntegrationCompletion(state *models.State, projectRo
 	}
 }
 
+type resumeOrigin uint8
+
+const (
+	resumeOriginOperator resumeOrigin = iota
+	resumeOriginAutomatic
+)
+
 // Resume transitions from PAUSED or CIRCUIT_BREAKER_TRIPPED to RUNNING,
-// and/or resumes sprint from CHECKPOINT or COMPLETED. No terminal I/O.
+// and/or resumes sprint from CHECKPOINT or COMPLETED. As an explicit operator
+// action, it may acknowledge an active HALT while leaving a STOPPED system
+// stopped. No terminal I/O.
 //
 // Sprint transitions:
 //   - CHECKPOINT + not all terminal → IN_PROGRESS (mid-sprint resume)
@@ -389,6 +439,17 @@ func resumeRequiresEffectiveIntegrationCompletion(state *models.State, projectRo
 // Mode changes and sprint operations happen in a single Modify to avoid
 // partial mutations on failure.
 func Resume(projectRoot, changedBy string) (*ResumeResult, error) {
+	return resume(projectRoot, changedBy, resumeOriginOperator)
+}
+
+// AutoResume performs automatic checkpoint/completion recovery. It cannot
+// acknowledge an active HALT while the system is STOPPED; that boundary
+// requires an explicit operator Resume.
+func AutoResume(projectRoot, changedBy string) (*ResumeResult, error) {
+	return resume(projectRoot, changedBy, resumeOriginAutomatic)
+}
+
+func resume(projectRoot, changedBy string, origin resumeOrigin) (*ResumeResult, error) {
 	lizaPaths := paths.New(projectRoot)
 	statePath := lizaPaths.StatePath()
 	blackboard := db.For(statePath)
@@ -396,64 +457,89 @@ func Resume(projectRoot, changedBy string) (*ResumeResult, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to read state before resume: %w", err)
 	}
-	requiresCompletion, err := resumeRequiresEffectiveIntegrationCompletion(preflightState, projectRoot)
-	if err != nil {
-		return nil, fmt.Errorf("failed to evaluate resume completion branch: %w", err)
+	preflightStoppedWithActiveHalt := origin == resumeOriginOperator &&
+		preflightState.Config.Mode == models.SystemModeStopped && hasActiveHaltResponse(preflightState)
+	requiresCompletion := false
+	if !preflightStoppedWithActiveHalt {
+		requiresCompletion, err = resumeRequiresEffectiveIntegrationCompletion(preflightState, projectRoot)
+		if err != nil {
+			return nil, fmt.Errorf("failed to evaluate resume completion branch: %w", err)
+		}
 	}
 	timestamp := time.Now()
 	var resumedFrom string
+	var systemRemainsStopped bool
 	var advanceResult *AdvanceSprintResult
 	runTransitionsAfterResume := false
 
 	resumeMutation := func(completionAuthorization *effectiveIntegrationCompletionAuthorization) error {
 		return blackboard.Modify(func(s *models.State) error {
+			timestamp = time.Now()
 			currentMode := s.Config.Mode
 			if currentMode == "" {
 				currentMode = models.SystemModeRunning
 			}
 
-			// Fail fast on STOPPED — no sprint mutations allowed while system is stopped.
-			if currentMode == models.SystemModeStopped {
+			stoppedWithActiveHalt := origin == resumeOriginOperator &&
+				currentMode == models.SystemModeStopped && hasActiveHaltResponse(s)
+			// STOPPED normally rejects resume. An active HALT is the sole exception:
+			// acknowledge it without restarting agents or mutating sprint state.
+			if currentMode == models.SystemModeStopped && !stoppedWithActiveHalt {
 				return &PreconditionError{Reason: "cannot resume from STOPPED state (system must be restarted)"}
 			}
 
-			canResumeMode := currentMode == models.SystemModePaused || currentMode == models.SystemModeCircuitBreakerTripped
+			canResumeMode := currentMode == models.SystemModePaused || currentMode == models.SystemModeCircuitBreakerTripped || stoppedWithActiveHalt
 			canResumeSprint := s.Sprint.Status == models.SprintStatusCheckpoint || s.Sprint.Status == models.SprintStatusCompleted
 
 			if !canResumeMode && !canResumeSprint {
 				return &PreconditionError{Reason: fmt.Sprintf("system is not PAUSED, circuit breaker not tripped, and sprint is not at CHECKPOINT or COMPLETED (current mode: %s, sprint status: %s)", currentMode, s.Sprint.Status)}
 			}
-			currentRequiresCompletion, completionErr := resumeRequiresEffectiveIntegrationCompletion(s, projectRoot)
-			if completionErr != nil {
-				return completionErr
-			}
-			if currentRequiresCompletion {
-				if completionAuthorization == nil {
-					return integrationCompletionPreconditionError(&IntegrationProgressReason{Code: "integration_state_changed"})
+			if !stoppedWithActiveHalt {
+				currentRequiresCompletion, completionErr := resumeRequiresEffectiveIntegrationCompletion(s, projectRoot)
+				if completionErr != nil {
+					return completionErr
 				}
-				if err := completionAuthorization.validateState(s, false); err != nil {
-					return err
+				if currentRequiresCompletion {
+					if completionAuthorization == nil {
+						return integrationCompletionPreconditionError(&IntegrationProgressReason{Code: "integration_state_changed"})
+					}
+					if err := completionAuthorization.validateState(s, false); err != nil {
+						return err
+					}
 				}
 			}
 
 			wasTransitionCheckpoint := s.Sprint.Status == models.SprintStatusCheckpoint &&
 				models.IsTransitionCheckpointTrigger(s.Sprint.CheckpointTrigger)
 
-			resumedFrom = resumeSystemMode(s, timestamp, changedBy)
-
-			sprintDesc, advResult, err := resumeSprint(s, lizaPaths, projectRoot, timestamp)
-			if err != nil {
-				return err
-			}
-			advanceResult = advResult
-			runTransitionsAfterResume = advResult != nil ||
-				(wasTransitionCheckpoint && s.Sprint.Status == models.SprintStatusInProgress)
-			if sprintDesc != "" {
-				if resumedFrom != "" {
-					resumedFrom += " and " + sprintDesc
-				} else {
-					resumedFrom = sprintDesc
+			if stoppedWithActiveHalt {
+				resumedFrom = "active HALT response"
+				systemRemainsStopped = true
+				if s.CircuitBreaker.CurrentResponse == nil {
+					// Legacy HALTs have no typed history boundary to resolve.
+					s.CircuitBreaker.Status = "OK"
+					s.CircuitBreaker.CurrentTrigger = nil
 				}
+			} else {
+				resumedFrom = resumeSystemMode(s, timestamp, changedBy)
+
+				sprintDesc, advResult, err := resumeSprint(s, lizaPaths, projectRoot, timestamp)
+				if err != nil {
+					return err
+				}
+				advanceResult = advResult
+				runTransitionsAfterResume = advResult != nil ||
+					(wasTransitionCheckpoint && s.Sprint.Status == models.SprintStatusInProgress)
+				if sprintDesc != "" {
+					if resumedFrom != "" {
+						resumedFrom += " and " + sprintDesc
+					} else {
+						resumedFrom = sprintDesc
+					}
+				}
+			}
+			if err := acknowledgeCircuitBreakerResponse(s, timestamp, changedBy); err != nil {
+				return err
 			}
 
 			return nil
@@ -490,11 +576,12 @@ func Resume(projectRoot, changedBy string) (*ResumeResult, error) {
 	}
 
 	return &ResumeResult{
-		ResumedFrom:         resumedFrom,
-		ChangedBy:           changedBy,
-		SprintAdvanced:      advanceResult,
-		TransitionsExecuted: transitionsExecuted,
-		TransitionError:     transitionError,
+		ResumedFrom:          resumedFrom,
+		ChangedBy:            changedBy,
+		SystemRemainsStopped: systemRemainsStopped,
+		SprintAdvanced:       advanceResult,
+		TransitionsExecuted:  transitionsExecuted,
+		TransitionError:      transitionError,
 	}, nil
 }
 

@@ -15,12 +15,13 @@ circuit_breaker:
   identity: observer
   permissions:
     read: [.liza/state.yaml (anomalies, planning task review evidence), .liza/log.yaml, sprint.metrics]
-    write: [.liza/circuit_breaker_report.md, circuit_breaker fields, config.mode → CIRCUIT_BREAKER_TRIPPED]
+    write: [circuit-breaker report, circuit_breaker response/history fields, sprint.status → CHECKPOINT, config.mode → CIRCUIT_BREAKER_TRIPPED on HALT]
     execute: NOTHING
   prohibitions:
     - NEVER propose solutions
     - NEVER modify specs, code, or tasks
-    - NEVER continue execution after triggering
+    - NEVER call WARNING or CHECKPOINT a trigger
+    - NEVER continue execution after a HALT trigger
 ```
 
 ---
@@ -127,7 +128,7 @@ circuit_breaker_rules:
       description: "Provider transcript or rollout persistence degraded across agent work"
       condition: count(type=provider_audit_degraded, same(provider), distinct(agent_id) >= 2) OR count(type=provider_audit_degraded, same(provider)) >= 3
       severity: OBSERVABILITY_DEGRADED
-      action: TRIP_MODE
+      action: PROPORTIONAL_RESPONSE  # WARNING, CHECKPOINT, or HALT from evidence lifecycle and exact current-health proof
 
     - name: planning_review_churn
       description: "Four or more durable rejection cycles on a planning task; `MERGED` tasks remain eligible"
@@ -144,46 +145,73 @@ The pattern conditions use pseudo-functions for matching:
 
 | Function | v1 Implementation | v2 (Future) |
 |----------|-------------------|-------------|
-| `similar(field)` | **Exact match only** — `liza analyze` uses `group_by(.)` | String similarity threshold (Levenshtein ≥ 0.7) |
+| `similar(field)` | **Exact match only** — `§BRAND_BINARY_NAME§ analyze` uses `group_by(.)` | String similarity threshold (Levenshtein ≥ 0.7) |
 | `same(field)` | **Exact match** — string equality comparison | Exact match after normalization |
 | `count(...)` | Go implementation counts matching entries | Same |
 
 **v1 Limitations:**
-- ``liza analyze`` uses **exact string matching** for pattern detection
+- `§BRAND_BINARY_NAME§ analyze` uses **exact string matching** for pattern detection
 - Anomalies with `error_pattern: "timeout"` and `error_pattern: "connection timeout"` are counted separately
 - Human must review script output and apply judgment for similar-but-not-identical patterns
 - Thresholds may need adjustment: exact matching misses related errors, so lower counts may indicate real patterns
 
 **v1 Workflow:**
-1. Run ``liza analyze`` — outputs exact-match counts per pattern
+1. Run `§BRAND_BINARY_NAME§ analyze` — outputs exact-match counts per pattern
 2. Human reviews output, anomalies, and qualifying planning-task rejection evidence
 3. Human applies judgment: "these 2 exact + 1 similar = pattern"
-4. Human triggers circuit breaker if pattern warrants
+4. Human reviews the selected response; only `HALT` is a circuit-breaker trigger
 
 **v2 Implementation:** Requires defining similarity thresholds and normalization rules. Defer until v1 proves which patterns are valuable.
 
 ### Acknowledgement Watermark
 
 Circuit-breaker detection evaluates durable anomalies and planning task review evidence.
-When a prior trigger has been cleared, old evidence must not re-alert by itself.
-A trigger is considered cleared only when:
+Generic patterns keep the backward-compatible cleared-trigger
+watermark: when `status == OK` and `current_trigger == null`, the latest history
+entry with `result: TRIGGERED` suppresses generic anomalies at or before its
+timestamp. If either hard-trigger field is active, no generic watermark applies.
 
-- `circuit_breaker.status == OK`
-- `circuit_breaker.current_trigger == null`
+Provider-audit evaluation instead uses the latest resolved actionable response
+(`CHECKPOINT` or `HALT`) as its evidence boundary. The `resume` command resolves the
+matching history entry, sets `resolved_at` and `resolution`, and clears
+`current_response`; it also clears `current_trigger`/`TRIGGERED` state for a
+`HALT`. The response timestamp remains durable, so unchanged evidence cannot
+immediately checkpoint or halt again. Qualifying provider evidence is classified:
 
-In that cleared state, the latest `TRIGGERED` entry in
-`circuit_breaker.history` becomes the acknowledgement watermark. Pattern
-detection considers only anomalies with `anomaly.timestamp` strictly after that
-history timestamp. Anomalies at or before the watermark are suppressed for
-detection and report evidence, and the report records their suppressed count.
+| Classification | Evidence relative to the resolved boundary | Default response |
+|----------------|---------------------------------------------|------------------|
+| `ACKNOWLEDGED_HISTORICAL` | Qualifies entirely at or before the boundary, with nothing later | `WARNING` |
+| `NEW` | No same-provider acknowledged evidence exists and later evidence independently qualifies | `CHECKPOINT` |
+| `CONTINUING` | Same-provider evidence exists on both sides and the combined group qualifies, including new evidence completing a historical sub-threshold group | `CHECKPOINT` |
+
+`WARNING` is observation-only: it writes the report/history result but leaves
+mode, sprint, trigger, and active-response state unchanged. `NEW` and
+`CONTINUING` are promoted from `CHECKPOINT` to `HALT` only by the exact
+current-execution proof below.
 
 For `planning_review_churn`, the task's durable rejection count remains the
 threshold evidence, but retrigger eligibility requires a timestamped rejection
-strictly after the watermark. A counter at or above four with no later rejection
-remains suppressed; `MERGED` tasks remain eligible when later evidence arrives.
+strictly after the watermark (the generic watermark above). A counter at or
+above four with no later rejection remains suppressed; `MERGED` tasks remain
+eligible when later evidence arrives.
 
-If `status == TRIGGERED` or `current_trigger` is non-null, no watermark applies:
-the trigger is still active or stale, so all anomalies and planning task review evidence remain eligible.
+### Provider-Audit HALT Proof
+
+`NEW` or `CONTINUING` provider-audit evidence may select `HALT` only when the
+state committed by analysis proves all of the following:
+
+1. The qualifying anomaly group has one non-empty provider key.
+2. At least one currently registered agent has `Agent.Provider` exactly equal
+   to that key.
+3. Every exact-matching registration has a degraded `agent_health` entry for
+   the same agent ID, provider, PID, and registration time.
+4. No exact-matching registration lacks that current epoch-matched degraded
+   record.
+
+An alias-only match (for example `codex` evidence with a `codex-acp`
+registration), empty or absent identity, missing health, or a mismatched/stale
+PID or registration-time epoch is non-halting unknown. Analysis returns
+`CHECKPOINT` and explains the failed join; it does not guess canonical identity.
 
 ---
 
@@ -197,6 +225,7 @@ the trigger is still active or stale, so all anomalies and planning task review 
 | `ARCHITECTURE_FLAW` | How we're building | Pause, new ADR, possible refactor |
 | `TECH_STACK_FLAW` | Tools/frameworks | Spike needed, possible tech pivot |
 | `EXTERNAL_DEPENDENCY` | External services | Halt sprint — external issue, not agent problem; wait or escalate |
+| `OBSERVABILITY_DEGRADED` | Provider transcript/rollout auditability | Warning or checkpoint by default; halt only with exact current execution-compromise proof |
 | `PLANNING_CONVERGENCE_DEGRADED` | code-planning convergence | pause downstream fan-out and inspect rejection evidence before choosing remediation |
 
 **Note:** `TECH_STACK_FLAW` is reserved for future patterns (e.g., library version conflicts). No current pattern triggers it.
@@ -205,76 +234,108 @@ the trigger is still active or stale, so all anomalies and planning task review 
 
 ## Circuit Breaker Activation
 
-```
-1. TRIGGER — Pattern rule matches, classify severity, log to blackboard
-2. HALT — Set config.mode to CIRCUIT_BREAKER_TRIPPED, agents stop, supervisors wait
-3. GENERATE REPORT — Write .liza/circuit_breaker_report.md
-4. CHECKPOINT — `liza tui` auto-creates sprint CHECKPOINT on trigger
-5. WAIT FOR HUMAN — Human reviews, decides, documents, releases (`liza resume` or `liza stop`)
-```
+1. **MATCH** — Qualify the pattern and classify provider evidence when applicable.
+2. **SELECT** — Choose `WARNING`, `CHECKPOINT`, or `HALT` from the state observed
+   inside the committing blackboard mutation.
+3. **REPORT** — Write the project circuit-breaker report with response,
+   classification, explanation, and evidence.
+4. **APPLY**:
+   - `WARNING`: observation only; no mode, sprint, trigger, or active-response mutation.
+   - `CHECKPOINT`: persist a non-trigger `current_response` as a hard checkpoint,
+     keep mode `RUNNING`, keep status `OK` and `current_trigger: null`, and set
+     sprint status to `CHECKPOINT`. Downstream transition creation pauses;
+     already-available doer/reviewer work may continue.
+   - `HALT`: create the hard trigger/response, set status `TRIGGERED` and mode
+     `CIRCUIT_BREAKER_TRIPPED`; execution never continues after this trigger.
+5. **ACKNOWLEDGE** — After review or remediation, run the `resume` command to
+   resolve the active `CHECKPOINT` or `HALT` response and preserve its evidence
+   boundary. The `stop` command remains the abort action.
+
+Only `HALT` is a circuit-breaker **trigger**. A matched pattern, `WARNING`, or
+`CHECKPOINT` must not be described as triggering the circuit breaker.
 
 ---
 
 ## Circuit Breaker Report Format
 
-```markdown
+The operation result exposes `AnalyzeResult.Response`,
+`AnalyzeResult.Classification`, and `AnalyzeResult.Explanation`; JSON projects
+the same typed decision as `response`, `classification`, and `explanation`.
+`triggered` is true only for `HALT`; provider responses use the three evidence
+classifications above.
+
+````markdown
 # Circuit Breaker Report
 
-**Triggered:** 2025-01-18T17:30:00Z
-**Pattern:** retry_cluster
-**Severity:** ARCHITECTURE_FLAW
+**Analyzed:** 2025-01-18T17:30:00Z
+**Pattern:** provider_audit_degradation
+**Severity:** OBSERVABILITY_DEGRADED
+**Evidence Class:** `CONTINUING`
+**Response:** `CHECKPOINT`
+**Explanation:** qualifying provider evidence spans the last acknowledged boundary, but current registered-provider health cannot be proved for the same process epoch
 
-## Trigger Evidence
-| Task | Anomaly | Error Pattern |
-|-------|---------|---------------|
-| task-3 | retry_loop | serialization failure on nested entity |
-| task-5 | retry_loop | serialization failure on nested entity |
+## Evidence
+| Agent | Provider | Anomaly | Timestamp |
+|-------|----------|---------|-----------|
+| coder-1 | codex | provider_audit_degraded | 2025-01-18T17:29:00Z |
+| coder-2 | codex | provider_audit_degraded | 2025-01-18T17:29:30Z |
 
-**Common factor:** Nested entity serialization not handled
+## Response Action
 
-## Affected Artifacts
-| Artifact | Issue |
-|----------|-------|
-| `specs/data-model.md` | Silent on nesting |
-| `docs/architecture.md` | No serialization ADR |
+`CHECKPOINT` is a non-trigger hard checkpoint: pause downstream transition
+creation, preserve already-available doer/reviewer work, and leave the recovery
+decision to the operator. After review or remediation, run
+`§BRAND_BINARY_NAME§ resume`.
 
-## Recommended Actions
-1. HALT current sprint (done)
-2. CREATE ADR for nested entity serialization
-3. UPDATE specs/data-model.md
-4. REASSESS affected tasks
-5. RESUME after artifacts updated
+- `WARNING` is observation-only and does not create an active response.
+- `CHECKPOINT` is a non-trigger hard checkpoint with an active response.
+- `HALT` is the only circuit-breaker trigger and stops execution until resume.
 
 ## Anomalies (trimmed)
-1. `retry_loop` at `2025-01-18T17:29:00Z`
-   - task: `task-3`
+1. `provider_audit_degraded` at `2025-01-18T17:29:00Z`
+   - task: `task-7`
    - reporter: `coder-1`
-   - message_excerpt: `serialization failure on nested entity`
+   - message_excerpt: `provider transcript persistence failed`
 
 ## Anomalies (raw)
 ```yaml
-# Full anomaly payloads for audit/debugging.
+anomalies:
+  - timestamp: 2025-01-18T17:29:00Z
+    reporter: coder-1
+    type: provider_audit_degraded
+    details:
+      provider: codex
+      agent_id: coder-1
+      message: provider transcript persistence failed
+  - timestamp: 2025-01-18T17:29:30Z
+    reporter: coder-2
+    type: provider_audit_degraded
+    details:
+      provider: codex
+      agent_id: coder-2
+      message: provider rollout persistence failed
 ```
 
 ## Human Decision Required
 - [ ] Acknowledge report
 - [ ] Confirm severity assessment
-- [ ] Assign ADR creation
-- [ ] Release checkpoint with decision logged
-```
+- [ ] Choose and record remediation
+- [ ] Release the active response with `§BRAND_BINARY_NAME§ resume`
+````
 
 ---
 
 ## Implementation: v1 vs v2
 
 **v1: Human-triggered analysis**
-- Human runs ``liza analyze`` on demand (commonly during checkpoint review)
+- Human runs `§BRAND_BINARY_NAME§ analyze` on demand (commonly during checkpoint review)
 - Script parses anomalies, applies rules, generates report
 - No background daemon
 
 **v2: Continuous monitoring**
-- ``liza tui`` extended with pattern detection
-- Auto-trips mode and auto-creates sprint CHECKPOINT if pattern matches
+- `§BRAND_BINARY_NAME§ tui` extended with pattern detection
+- Every match receives the same proportional response. Only `HALT` trips mode;
+  `CHECKPOINT` is a non-trigger checkpoint, and `WARNING` is observation-only.
 
 **Recommendation:** Start with v1. Promote to v2 if manual analysis becomes bottleneck.
 
@@ -285,22 +346,29 @@ the trigger is still active or stale, so all anomalies and planning task review 
 ```yaml
 circuit_breaker:
   last_check: 2025-01-18T17:30:00Z
-  status: TRIGGERED  # OK, TRIGGERED
-  current_trigger:
+  status: OK  # OK, TRIGGERED; TRIGGERED is HALT-only
+  current_trigger: null  # HALT-only, retained for backward compatibility
+  current_response:
     timestamp: 2025-01-18T17:30:00Z
-    pattern: retry_cluster
-    severity: ARCHITECTURE_FLAW
+    pattern: provider_audit_degradation
+    severity: OBSERVABILITY_DEGRADED
+    response: CHECKPOINT
+    classification: CONTINUING
+    explanation: current provider health is unknown because the registered alias does not exactly match the anomaly provider
     report_file: .liza/circuit_breaker_report.md
   history:
     - timestamp: 2025-01-17T12:00:00Z
       pattern: null
       result: OK
     - timestamp: 2025-01-18T17:30:00Z
-      pattern: retry_cluster
-      severity: ARCHITECTURE_FLAW
-      result: TRIGGERED
-      resolution: "ADR-003 created, specs updated"  # Added by human after resolution
-      resolved_at: 2025-01-18T19:00:00Z             # Added by human after resolution
+      pattern: provider_audit_degradation
+      severity: OBSERVABILITY_DEGRADED
+      result: CHECKPOINT
+      response: CHECKPOINT
+      classification: CONTINUING
+      explanation: current provider health is unknown because the registered alias does not exactly match the anomaly provider
+      resolution: "resumed by human"                 # Added by resume acknowledgement
+      resolved_at: 2025-01-18T19:00:00Z
 ```
 
 ### History Entry Fields
@@ -309,31 +377,72 @@ circuit_breaker:
 |-------|--------|------|-------|
 | `timestamp` | Script | On check | ISO 8601 timestamp of check |
 | `pattern` | Script | On check | Pattern name (null if OK) |
-| `severity` | Script | On TRIGGERED | Severity classification |
-| `result` | Script | On check | `OK` or `TRIGGERED` |
-| `resolution` | Human | After fix | Free text describing corrective action |
-| `resolved_at` | Human | After fix | Timestamp of resolution |
+| `severity` | Script | On a qualifying response | Severity classification |
+| `result` | Script | On check | `OK`, `WARNING`, `CHECKPOINT`, or backward-compatible `TRIGGERED` for `HALT` |
+| `response` | Script | On a qualifying response | Typed `WARNING`, `CHECKPOINT`, or `HALT`; optional for legacy entries |
+| `classification` | Script | On provider-audit response | `ACKNOWLEDGED_HISTORICAL`, `NEW`, or `CONTINUING`; optional for legacy/non-provider entries |
+| `explanation` | Script | On a qualifying response | Why the evidence supports the selected action; optional for legacy entries |
+| `superseded_by_response` | Analyze | On provider checkpoint escalation | Optional `HALT`-only replacement marker; not an acknowledgement or provider watermark |
+| `resolution` | Resume/human | On acknowledgement | Free text describing acknowledgement/corrective action |
+| `resolved_at` | Resume/human | On acknowledgement | Timestamp that makes the response an evidence boundary |
+
+`current_response` uses the same timestamp, pattern, severity, response,
+classification, explanation, and report-file fields. It exists only for active
+`CHECKPOINT` and `HALT` responses. `HALT` additionally populates the legacy
+`current_trigger` and `status: TRIGGERED` fields; `CHECKPOINT` does not.
+Readers must accept older state without `current_response`, `response`,
+`classification`, or `explanation`. Existing `result: TRIGGERED` history remains
+a valid cleared-trigger acknowledgement boundary.
 
 ### Resolution Workflow
 
-When circuit breaker is triggered:
+For a `CHECKPOINT`, the `analyze` command records `current_response`, leaves mode
+`RUNNING`, keeps status `OK`/`current_trigger: null`, and checkpoints the sprint.
+For a `HALT`, it also records `current_trigger`, sets status `TRIGGERED`, and
+sets mode `CIRCUIT_BREAKER_TRIPPED`. A `WARNING` has no active response to clear.
 
-1. **Automatic (`liza analyze`):** sets `status: TRIGGERED`, populates `current_trigger`
-2. **Automatic (`liza analyze`):** sets `config.mode: CIRCUIT_BREAKER_TRIPPED`
-3. **Automatic (`liza tui`):** creates sprint CHECKPOINT (`sprint.status: CHECKPOINT`)
-4. **Human review:** Human analyzes report, takes corrective action (ADR, spec update, etc.)
-5. **Optional audit enrichment:** Human may annotate history entries with `resolution` and `resolved_at`
-6. **Human resumes:** `liza resume` (sets mode to RUNNING, clears `current_trigger`, sets status to OK)
-7. **Agents resume**
+Analysis recomputes the candidate inside the committing mutation before
+reconciling an active response. Candidate detection and existing pattern priority
+remain authoritative.
 
-After step 6, the latest `TRIGGERED` history timestamp acts as an
-acknowledgement watermark for future `liza analyze` and `liza tui` checks. Only
-anomalies with timestamps after that watermark can cause a new trigger. Later
-`OK` history entries do not move the watermark.
+| Active response | Committed candidate | Result |
+|-----------------|---------------------|--------|
+| `HALT` of any pattern | No match or any response | Retain the active `HALT` unchanged |
+| Provider `CHECKPOINT` | No match or any non-`HALT` candidate | Retain the active `CHECKPOINT` unchanged |
+| Provider `CHECKPOINT` | `HALT` | Atomically supersede the checkpoint and create the active `HALT` |
 
-**Note:** A subsequent clean ``liza analyze`` run also sets status to `OK` and clears `CIRCUIT_BREAKER_TRIPPED` mode. This does not clear sprint `CHECKPOINT`; checkpoint resume still requires `liza resume`.
+An active `HALT` of any pattern is latched across re-analysis until resume and
+wins over no match and every matched candidate. An active provider-audit `HALT`
+is latched by this same rule. An active provider checkpoint therefore wins over
+no match or any non-`HALT` candidate, but escalates when the committed candidate
+is `HALT`. The exact current degraded-epoch proof remains eligible to produce
+that provider `HALT`, and a generic `HALT` candidate selected by existing pattern
+priority remains eligible at checkpoint; neither is suppressed before
+reconciliation.
 
-**Resolution field:** Human-written summary of corrective action taken (free text, should reference ADRs/specs if applicable).
+Escalation gives the former checkpoint exactly
+`superseded_by_response: HALT`, with its `resolution` and `resolved_at` absent,
+and the same atomic transition creates exactly one matching unresolved `HALT`
+history boundary for the new active response. The supersession marker is not an
+acknowledgement and does not advance the provider-evidence watermark. Resume
+later resolves only the active `HALT`; the superseded checkpoint remains
+unresolved.
+
+When an active response wins, repeated analysis projects that response's
+pattern, severity, typed response, classification, explanation, and report path
+through `AnalyzeResult` and report output rather than returning `OK`. After
+review or remediation, `§BRAND_BINARY_NAME§ resume` is the sole release and
+acknowledgement action:
+it resolves the history entry matching the active response's timestamp, pattern,
+and response; records `resolution` and `resolved_at`; clears `current_response`;
+and, for `HALT`, clears the trigger and returns mode/status to normal. The
+resolved response timestamp becomes the provider-evidence boundary, so unchanged
+qualifying evidence subsequently reports `ACKNOWLEDGED_HISTORICAL`/`WARNING`
+instead of checkpointing or halting again.
+
+Legacy `TRIGGERED` history remains the generic acknowledgement watermark.
+Later `OK` entries do not move that watermark. A clean analysis does not release
+a sprint checkpoint or latched halt.
 
 ## Related Documents
 

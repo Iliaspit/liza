@@ -12,6 +12,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/liza-mas/liza/internal/agent"
 	"github.com/liza-mas/liza/internal/commands"
+	"github.com/liza-mas/liza/internal/db"
 	"github.com/liza-mas/liza/internal/embedded"
 	"github.com/liza-mas/liza/internal/log"
 	"github.com/liza-mas/liza/internal/models"
@@ -331,6 +332,69 @@ func TestResumeSystemCmd_ClearsProviderSignals(t *testing.T) {
 	}
 	if _, err := os.Stat(unavailableSignalPath); !os.IsNotExist(err) {
 		t.Error("provider unavailable signal file should have been removed after resume")
+	}
+}
+
+func TestResumeSystemCmd_ReportsStoppedHaltAcknowledgement(t *testing.T) {
+	tmpDir := t.TempDir()
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+
+	triggeredAt := time.Now().UTC()
+	pattern := "retry_cluster"
+	severity := "ARCHITECTURE_FLAW"
+	state := testhelpers.CreateValidState()
+	state.Config.Mode = models.SystemModeStopped
+	state.CircuitBreaker.Status = "TRIGGERED"
+	state.CircuitBreaker.CurrentTrigger = &models.CircuitBreakerTrigger{
+		Timestamp:  triggeredAt,
+		Pattern:    pattern,
+		Severity:   severity,
+		ReportFile: ".liza/reports/active-halt.md",
+	}
+	state.CircuitBreaker.CurrentResponse = &models.CircuitBreakerResponse{
+		Timestamp:  triggeredAt,
+		Pattern:    pattern,
+		Severity:   severity,
+		Response:   models.CircuitBreakerResponseHalt,
+		ReportFile: ".liza/reports/active-halt.md",
+	}
+	state.CircuitBreaker.History = append(state.CircuitBreaker.History, models.CircuitBreakerHistory{
+		Timestamp: triggeredAt,
+		Pattern:   &pattern,
+		Severity:  &severity,
+		Result:    "TRIGGERED",
+		Response:  models.CircuitBreakerResponseHalt,
+	})
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	if err := agent.WriteQuotaSignal(tmpDir, "codex", "quota hit"); err != nil {
+		t.Fatal(err)
+	}
+	quotaSignalPath := agent.QuotaSignalPath(tmpDir, "codex")
+
+	msg := resumeSystemCmd(tmpDir)()
+	result, ok := msg.(CmdResultMsg)
+	if !ok {
+		t.Fatalf("expected CmdResultMsg, got %T", msg)
+	}
+	if !result.Success {
+		t.Fatalf("resume failed: %s", result.Message)
+	}
+	for _, want := range []string{"HALT response acknowledged", "STOPPED", "start"} {
+		if !strings.Contains(result.Message, want) {
+			t.Errorf("message missing %q: %q", want, result.Message)
+		}
+	}
+
+	updated, err := db.New(stateFile).Read()
+	if err != nil {
+		t.Fatalf("read state: %v", err)
+	}
+	if updated.Config.Mode != models.SystemModeStopped || updated.CircuitBreaker.CurrentResponse != nil {
+		t.Errorf("resume result state = mode %s, response %+v; want STOPPED with acknowledged response", updated.Config.Mode, updated.CircuitBreaker.CurrentResponse)
+	}
+	if _, err := os.Stat(quotaSignalPath); !os.IsNotExist(err) {
+		t.Error("quota signal should be cleared by explicit operator acknowledgement")
 	}
 }
 

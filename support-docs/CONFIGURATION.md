@@ -923,7 +923,7 @@ Worktrees are bare checkouts — they lack build artifacts like `node_modules/`,
 | `RUNNING` | Work normally | Yes | `§BRAND_BINARY_NAME§ resume` / `§BRAND_BINARY_NAME§ start` |
 | `PAUSED` | Block, don't claim | Yes | `§BRAND_BINARY_NAME§ pause` |
 | `STOPPED` | Exit cleanly | Stop | `§BRAND_BINARY_NAME§ stop` |
-| `CIRCUIT_BREAKER_TRIPPED` | Halt | Yes | `§BRAND_BINARY_NAME§ analyze` or `§BRAND_BINARY_NAME§ tui` (auto on pattern trigger) |
+| `CIRCUIT_BREAKER_TRIPPED` | Halt | Yes | `§BRAND_BINARY_NAME§ analyze` on a `HALT` response |
 
 **PAUSED**: Agents stay alive, resume instantly. Use for manual edits.
 **STOPPED**: Agents exit. Must restart manually. Use for end of session.
@@ -932,10 +932,32 @@ Worktrees are bare checkouts — they lack build artifacts like `node_modules/`,
 RUNNING <-> PAUSED (§BRAND_BINARY_NAME§ pause / §BRAND_BINARY_NAME§ resume)
 RUNNING -> STOPPED (§BRAND_BINARY_NAME§ stop)
 STOPPED -> RUNNING (§BRAND_BINARY_NAME§ start, then restart agents)
-CIRCUIT_BREAKER_TRIPPED -> RUNNING (§BRAND_BINARY_NAME§ resume, after fixing root cause)
+CIRCUIT_BREAKER_TRIPPED -> RUNNING (§BRAND_BINARY_NAME§ resume, after review/remediation)
 ```
 
-When `§BRAND_BINARY_NAME§ tui` triggers the circuit breaker, it also sets `sprint.status` to `CHECKPOINT`.
+Only `HALT` is a circuit-breaker trigger and selects
+`CIRCUIT_BREAKER_TRIPPED`; execution does not continue after that response.
+`WARNING` is observation-only. A non-trigger hard `CHECKPOINT` response keeps
+mode `RUNNING`, leaves circuit-breaker status `OK` and `current_trigger` empty,
+and sets `sprint.status` to `CHECKPOINT`. This gates downstream transition
+creation, while doer/reviewer work already available in the sprint may continue.
+
+For provider-audit degradation, analysis classifies qualifying evidence as
+`ACKNOWLEDGED_HISTORICAL`, `NEW`, or `CONTINUING`. `NEW` and `CONTINUING`
+default to `CHECKPOINT`; `HALT` requires at least one registered agent whose
+provider exactly matches the anomaly provider and degraded health for every
+exact match at the same agent ID, provider, PID, and registration time. Alias,
+missing-identity, missing-health, and stale/mismatched-epoch joins are unknown
+and remain non-halting. `OBSERVABILITY_DEGRADED` alone does not trip mode.
+
+After reviewing an active circuit-breaker response, run exactly
+`§BRAND_BINARY_NAME§ resume`. Resume resolves its history entry and clears
+`current_response`; a `HALT` acknowledgement also clears trigger state. The
+resolved response timestamp remains the evidence boundary, so unchanged
+evidence is subsequently `ACKNOWLEDGED_HISTORICAL`/`WARNING`. Older state and
+history without `current_response`, `response`, `classification`, or
+`explanation` remain readable; legacy `TRIGGERED` history still participates in
+acknowledgement.
 
 `§BRAND_BINARY_NAME§ tui` also auto-checkpoints when all non-terminal planned tasks are BLOCKED (sprint stalled), since no agent can make further progress without human intervention.
 

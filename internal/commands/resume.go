@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/liza-mas/liza/internal/agent"
+	"github.com/liza-mas/liza/internal/brand"
 	"github.com/liza-mas/liza/internal/ops"
 )
 
@@ -17,8 +18,13 @@ func ResumeCommand(projectRoot, changedBy string) error {
 		return fmt.Errorf("resume: %w", err)
 	}
 
-	fmt.Println("System resumed")
-	fmt.Printf("  Resumed from: %s\n", result.ResumedFrom)
+	if result.SystemRemainsStopped {
+		fmt.Println("HALT response acknowledged")
+		fmt.Println("  System remains STOPPED")
+	} else {
+		fmt.Println("System resumed")
+		fmt.Printf("  Resumed from: %s\n", result.ResumedFrom)
+	}
 	fmt.Printf("  Changed by: %s\n", result.ChangedBy)
 
 	if sa := result.SprintAdvanced; sa != nil {
@@ -62,6 +68,10 @@ func ResumeCommand(projectRoot, changedBy string) error {
 	}
 
 	fmt.Println()
-	fmt.Println("Agents will resume at their next check.")
+	if result.SystemRemainsStopped {
+		fmt.Printf("Run %q to enter RUNNING mode, then restart agent processes.\n", brand.Command("start"))
+	} else {
+		fmt.Println("Agents will resume at their next check.")
+	}
 	return nil
 }

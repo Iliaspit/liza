@@ -55,7 +55,8 @@ func isGoalComplete(result *ops.ResumeResult) bool {
 type goalCompletionStopFunc func(projectRoot, reason string) (*ops.ModeChangeResult, error)
 
 var (
-	resumeCompletedSprint = ops.Resume
+	resumeCheckpoint      = ops.AutoResume
+	resumeCompletedSprint = ops.AutoResume
 	stopCompletedGoal     = ops.StopForGoalCompletion
 )
 
@@ -110,7 +111,7 @@ func waitWhilePaused(ctx context.Context, projectRoot string, roleType string) e
 				case state.Sprint.Status == models.SprintStatusCheckpoint:
 					if state.Config.AutoResume {
 						logger.Info("Auto-resuming from CHECKPOINT")
-						if _, resumeErr := ops.Resume(projectRoot, "auto-resume"); resumeErr != nil {
+						if _, resumeErr := resumeCheckpoint(projectRoot, "auto-resume"); resumeErr != nil {
 							logger.Warn("Auto-resume failed, waiting for next poll", "error", resumeErr)
 						} else {
 							continue // state changed, re-read immediately

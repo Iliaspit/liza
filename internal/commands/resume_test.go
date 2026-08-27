@@ -125,6 +125,58 @@ func TestResumeCommand(t *testing.T) {
 	}
 }
 
+func TestResumeCommand_AcknowledgesStoppedHaltWithoutRestarting(t *testing.T) {
+	tmpDir := t.TempDir()
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	testhelpers.SetupPipelineConfig(t, tmpDir)
+
+	triggeredAt := time.Now().UTC()
+	pattern := "retry_cluster"
+	severity := "ARCHITECTURE_FLAW"
+	state := testhelpers.CreateValidState()
+	state.Config.Mode = models.SystemModeStopped
+	state.CircuitBreaker.Status = "TRIGGERED"
+	state.CircuitBreaker.CurrentTrigger = &models.CircuitBreakerTrigger{
+		Timestamp: triggeredAt,
+		Pattern:   pattern,
+		Severity:  severity,
+	}
+	state.CircuitBreaker.CurrentResponse = &models.CircuitBreakerResponse{
+		Timestamp: triggeredAt,
+		Pattern:   pattern,
+		Severity:  severity,
+		Response:  models.CircuitBreakerResponseHalt,
+	}
+	state.CircuitBreaker.History = append(state.CircuitBreaker.History, models.CircuitBreakerHistory{
+		Timestamp: triggeredAt,
+		Pattern:   &pattern,
+		Severity:  &severity,
+		Result:    "TRIGGERED",
+		Response:  models.CircuitBreakerResponseHalt,
+	})
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	stdout := captureStdout(t, func() {
+		if err := ResumeCommand(tmpDir, "human"); err != nil {
+			t.Fatalf("ResumeCommand() error = %v", err)
+		}
+	})
+
+	for _, want := range []string{"HALT response acknowledged", "System remains STOPPED", "start"} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("stdout missing %q:\n%s", want, stdout)
+		}
+	}
+
+	updated, err := db.New(stateFile).Read()
+	if err != nil {
+		t.Fatalf("read state: %v", err)
+	}
+	if updated.Config.Mode != models.SystemModeStopped {
+		t.Errorf("mode = %s, want STOPPED", updated.Config.Mode)
+	}
+}
+
 func TestResumeCommand_WarnsOnProviderSignalClearFailure(t *testing.T) {
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)

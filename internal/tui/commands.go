@@ -13,6 +13,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/liza-mas/liza/internal/agent"
 	"github.com/liza-mas/liza/internal/alerts"
+	"github.com/liza-mas/liza/internal/brand"
 	"github.com/liza-mas/liza/internal/commands"
 	"github.com/liza-mas/liza/internal/db"
 	"github.com/liza-mas/liza/internal/log"
@@ -211,7 +212,7 @@ func pauseSystemCmd(projectRoot, reason string) tea.Cmd {
 // Returns CmdResultMsg with result.
 func resumeSystemCmd(projectRoot string) tea.Cmd {
 	return func() tea.Msg {
-		_, err := ops.Resume(projectRoot, "operator")
+		result, err := ops.Resume(projectRoot, "operator")
 		if err != nil {
 			return CmdResultMsg{Success: false, Message: fmt.Sprintf("resume: %v", err)}
 		}
@@ -236,6 +237,9 @@ func resumeSystemCmd(projectRoot string) tea.Cmd {
 		}
 
 		msg := "System resumed"
+		if result.SystemRemainsStopped {
+			msg = fmt.Sprintf("HALT response acknowledged; system remains STOPPED; run %q before restarting agents", brand.Command("start"))
+		}
 		if len(clearErrors) > 0 {
 			msg += fmt.Sprintf(" (warning: failed to clear provider signals: %s)", strings.Join(clearErrors, "; "))
 		}

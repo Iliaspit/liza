@@ -1,6 +1,7 @@
 package models
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -221,4 +222,75 @@ func TestHandoffEvent_YAMLRoundTrip(t *testing.T) {
 			t.Errorf("task without handoff events should omit field, got:\n%s", string(data))
 		}
 	})
+}
+
+func TestCircuitBreakerResponseYAMLRoundTripAndLegacyCompatibility(t *testing.T) {
+	timestamp := time.Date(2026, 8, 21, 10, 0, 0, 0, time.UTC)
+	haltTimestamp := timestamp.Add(time.Minute)
+	pattern := "provider_audit_degradation"
+	original := CircuitBreaker{
+		Status: "TRIGGERED",
+		CurrentTrigger: &CircuitBreakerTrigger{
+			Timestamp: haltTimestamp, Pattern: pattern, Severity: "OBSERVABILITY_DEGRADED",
+			ReportFile: ".liza/circuit_breaker_report.md",
+		},
+		CurrentResponse: &CircuitBreakerResponse{
+			Timestamp: haltTimestamp, Pattern: pattern, Severity: "OBSERVABILITY_DEGRADED",
+			Response:       CircuitBreakerResponseHalt,
+			Classification: CircuitBreakerEvidenceContinuing,
+			Explanation:    "all exact current provider epochs are degraded",
+			ReportFile:     ".liza/circuit_breaker_report.md",
+		},
+		History: []CircuitBreakerHistory{
+			{
+				Timestamp: timestamp, Pattern: &pattern, Result: "CHECKPOINT",
+				Response:             CircuitBreakerResponseCheckpoint,
+				Classification:       CircuitBreakerEvidenceContinuing,
+				Explanation:          "current provider health is unknown",
+				SupersededByResponse: CircuitBreakerResponseHalt,
+			},
+			{
+				Timestamp: haltTimestamp, Pattern: &pattern, Result: "TRIGGERED",
+				Response:       CircuitBreakerResponseHalt,
+				Classification: CircuitBreakerEvidenceContinuing,
+				Explanation:    "all exact current provider epochs are degraded",
+			},
+		},
+	}
+
+	data, err := yaml.Marshal(original)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var decoded CircuitBreaker
+	if err := yaml.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if !reflect.DeepEqual(decoded, original) {
+		t.Errorf("round trip = %#v, want %#v", decoded, original)
+	}
+	if !strings.Contains(string(data), "superseded_by_response: HALT") {
+		t.Fatalf("marshal missing superseded_by_response:\n%s", data)
+	}
+
+	legacyYAML := `status: OK
+history:
+  - timestamp: 2026-08-21T10:00:00Z
+    pattern: retry_cluster
+    severity: ARCHITECTURE_FLAW
+    result: TRIGGERED
+`
+	var legacy CircuitBreaker
+	if err := yaml.Unmarshal([]byte(legacyYAML), &legacy); err != nil {
+		t.Fatalf("unmarshal legacy circuit breaker: %v", err)
+	}
+	if legacy.CurrentResponse != nil {
+		t.Errorf("legacy CurrentResponse = %#v, want nil", legacy.CurrentResponse)
+	}
+	if len(legacy.History) != 1 {
+		t.Fatalf("legacy History length = %d, want 1", len(legacy.History))
+	}
+	if legacy.History[0].Response != "" || legacy.History[0].Classification != "" || legacy.History[0].Explanation != "" || legacy.History[0].SupersededByResponse != "" {
+		t.Errorf("legacy typed fields = %#v, want zero values", legacy.History[0])
+	}
 }
