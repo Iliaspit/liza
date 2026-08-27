@@ -245,14 +245,15 @@ func getAgentComputedField(state *models.State, agentID, field string) (any, err
 		duration := calculateTimeSinceHeartbeat(&agent)
 		return render.FormatDuration(duration), nil
 	case "time_on_task":
-		// Find the task assigned to this agent
-		for _, task := range state.Tasks {
-			if task.AssignedTo != nil && *task.AssignedTo == agentID {
-				duration := calculateTimeOnTask(&task)
-				return render.FormatDuration(duration), nil
-			}
+		if agent.CurrentTask == nil {
+			return "0s", nil
 		}
-		return "0s", nil
+		task := state.FindTask(*agent.CurrentTask)
+		if task == nil {
+			return "0s", nil
+		}
+		duration := calculateAgentTimeOnTask(task, agentID)
+		return render.FormatDuration(duration), nil
 	default:
 		return nil, &errors.NotFoundError{Entity: "agent", ID: agentID, Field: field}
 	}

@@ -50,6 +50,13 @@ func TestGetCommand(t *testing.T) {
 	task2 := "fix-auth-bug"    // Non-standard task ID
 	task3 := "feature-xyz-123" // Another non-standard task ID
 	task4 := "task-repair-request"
+	sequentialReviewer := "code-reviewer-2"
+	sequentialDoer := "coder-2"
+	previousDoer := "coder-previous"
+	reviewerTaskA := "reviewer-sequence-task-a"
+	reviewerTaskB := "reviewer-sequence-task-b"
+	doerTaskA := "doer-sequence-task-a"
+	doerTaskB := "doer-sequence-task-b"
 	blockedReason := "Required state repair is orchestrator-only"
 
 	state := &models.State{
@@ -129,6 +136,63 @@ func TestGetCommand(t *testing.T) {
 				Scope:    "Blackboard task state",
 				Created:  now.Add(-5 * time.Hour),
 			},
+			{
+				ID:          reviewerTaskA,
+				Description: "Completed reviewer task",
+				Status:      models.TaskStatusMerged,
+				Priority:    4,
+				SpecRef:     "specs/reviewer-sequence.md",
+				DoneWhen:    "Review is complete",
+				Scope:       "Reviewer sequence task A",
+				Created:     now.Add(-6 * time.Hour),
+				History: []models.TaskHistoryEntry{
+					{Time: now.Add(-5 * time.Hour), Event: models.TaskEventClaimed, Agent: &sequentialReviewer},
+				},
+			},
+			{
+				ID:          reviewerTaskB,
+				Description: "Current reviewer task",
+				Status:      models.TaskStatusReviewing,
+				Priority:    4,
+				ReviewingBy: &sequentialReviewer,
+				SpecRef:     "specs/reviewer-sequence.md",
+				DoneWhen:    "Review is complete",
+				Scope:       "Reviewer sequence task B",
+				Created:     now.Add(-3 * time.Hour),
+				History: []models.TaskHistoryEntry{
+					{Time: now.Add(-2 * time.Hour), Event: models.TaskEventClaimed, Agent: &previousDoer},
+					{Time: now.Add(-17 * time.Minute), Event: models.TaskEventClaimed, Agent: &sequentialReviewer},
+				},
+			},
+			{
+				ID:          doerTaskA,
+				Description: "Completed doer task",
+				Status:      models.TaskStatusMerged,
+				Priority:    4,
+				AssignedTo:  &sequentialDoer,
+				SpecRef:     "specs/doer-sequence.md",
+				DoneWhen:    "Implementation is complete",
+				Scope:       "Doer sequence task A",
+				Created:     now.Add(-5 * time.Hour),
+				History: []models.TaskHistoryEntry{
+					{Time: now.Add(-4 * time.Hour), Event: models.TaskEventClaimed, Agent: &sequentialDoer},
+				},
+			},
+			{
+				ID:          doerTaskB,
+				Description: "Current doer task",
+				Status:      models.TaskStatusIntegrationFailed,
+				Priority:    4,
+				AssignedTo:  &sequentialDoer,
+				SpecRef:     "specs/doer-sequence.md",
+				DoneWhen:    "Implementation is complete",
+				Scope:       "Doer sequence task B",
+				Created:     now.Add(-2 * time.Hour),
+				History: []models.TaskHistoryEntry{
+					{Time: now.Add(-70 * time.Minute), Event: models.TaskEventClaimed, Agent: &sequentialDoer},
+					{Time: now.Add(-11 * time.Minute), Event: models.TaskEventClaimedForIntegrationFix, Agent: &sequentialDoer},
+				},
+			},
 		},
 		Agents: map[string]models.Agent{
 			coder1: {
@@ -153,6 +217,20 @@ func TestGetCommand(t *testing.T) {
 				Status:    models.AgentStatusIdle,
 				Heartbeat: now,
 				Terminal:  "terminal3",
+			},
+			sequentialReviewer: {
+				Role:        "code-reviewer",
+				Status:      models.AgentStatusReviewing,
+				CurrentTask: &reviewerTaskB,
+				Heartbeat:   now,
+				Terminal:    "terminal4",
+			},
+			sequentialDoer: {
+				Role:        "coder",
+				Status:      models.AgentStatusWorking,
+				CurrentTask: &doerTaskB,
+				Heartbeat:   now,
+				Terminal:    "terminal5",
 			},
 		},
 		Anomalies: []models.Anomaly{
@@ -242,6 +320,54 @@ func TestGetCommand(t *testing.T) {
 			name:         "get specific agent",
 			args:         []string{"get", "agents", "coder-1", "--format", "value"},
 			wantContains: []string{"ID: coder-1", "Role: coder", "Status: WORKING"},
+		},
+		{
+			name:           "reviewer sequential assignment - value",
+			args:           []string{"get", "agents", sequentialReviewer, "--format", "value"},
+			wantContains:   []string{"Current Task: " + reviewerTaskB, "Time on Task: 17m"},
+			wantNotContain: []string{"5h 0m", "2h 0m"},
+		},
+		{
+			name:           "reviewer sequential assignment - table",
+			args:           []string{"get", "agents", sequentialReviewer, "--format", "table"},
+			wantContains:   []string{sequentialReviewer, reviewerTaskB, "17m"},
+			wantNotContain: []string{"5h 0m", "2h 0m"},
+		},
+		{
+			name:           "reviewer sequential assignment - JSON",
+			args:           []string{"get", "agents", sequentialReviewer, "--format", "json"},
+			wantContains:   []string{`"current_task": "` + reviewerTaskB + `"`, `"time_on_task": "17m"`},
+			wantNotContain: []string{"5h 0m", "2h 0m"},
+		},
+		{
+			name:           "reviewer sequential assignment - direct field",
+			args:           []string{"get", "agent." + sequentialReviewer + ".time_on_task"},
+			wantContains:   []string{"17m"},
+			wantNotContain: []string{"5h 0m", "2h 0m"},
+		},
+		{
+			name:           "doer sequential assignment - value",
+			args:           []string{"get", "agents", sequentialDoer, "--format", "value"},
+			wantContains:   []string{"Current Task: " + doerTaskB, "Time on Task: 11m"},
+			wantNotContain: []string{"4h 0m", "1h 10m"},
+		},
+		{
+			name:           "doer sequential assignment - table",
+			args:           []string{"get", "agents", sequentialDoer, "--format", "table"},
+			wantContains:   []string{sequentialDoer, doerTaskB, "11m"},
+			wantNotContain: []string{"4h 0m", "1h 10m"},
+		},
+		{
+			name:           "doer sequential assignment - JSON",
+			args:           []string{"get", "agents", sequentialDoer, "--format", "json"},
+			wantContains:   []string{`"current_task": "` + doerTaskB + `"`, `"time_on_task": "11m"`},
+			wantNotContain: []string{"4h 0m", "1h 10m"},
+		},
+		{
+			name:           "doer sequential assignment - direct field",
+			args:           []string{"get", "agent." + sequentialDoer + ".time_on_task"},
+			wantContains:   []string{"11m"},
+			wantNotContain: []string{"4h 0m", "1h 10m"},
 		},
 		{
 			name:         "get metrics",

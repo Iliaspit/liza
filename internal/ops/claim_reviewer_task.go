@@ -252,6 +252,11 @@ func ClaimReviewerTask(input ClaimReviewerTaskInput) (*ClaimReviewerTaskResult, 
 			}
 			task.ReviewingBy = &input.AgentID
 			task.ReviewLeaseExpires = &leaseExpires
+			task.History = append(task.History, models.TaskHistoryEntry{
+				Time:  now,
+				Event: models.TaskEventClaimed,
+				Agent: &input.AgentID,
+			})
 
 			agent := claimingAgent
 			agent.Status = models.AgentStatusReviewing

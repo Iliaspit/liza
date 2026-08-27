@@ -481,7 +481,7 @@ func TestAgentInfo_ComputedFields(t *testing.T) {
 		AssignedTo: strPtr("coder-1"),
 		Created:    now.Add(-1 * time.Hour),
 		History: []models.TaskHistoryEntry{
-			{Time: now.Add(-30 * time.Minute), Event: "claimed"},
+			{Time: now.Add(-30 * time.Minute), Event: models.TaskEventClaimed, Agent: strPtr("coder-1")},
 		},
 	}
 
@@ -510,6 +510,96 @@ func TestAgentInfo_ComputedFields(t *testing.T) {
 		t.Errorf("expected LeaseExpires to be set, got nil")
 	} else if !strings.Contains(*info.LeaseExpires, "5m") {
 		t.Errorf("expected LeaseExpires to contain '5m', got %q", *info.LeaseExpires)
+	}
+}
+
+func TestInspectAgent_TimeOnTaskUsesCurrentTaskMatchingAssignment(t *testing.T) {
+	now := time.Now()
+	reviewerID := "reviewer-r"
+	doerID := "doer-d"
+	oldDoerID := "old-doer"
+	reviewTaskID := "review-task-b"
+	doerTaskID := "doer-task-b"
+
+	state := &models.State{
+		Agents: map[string]models.Agent{
+			reviewerID: {
+				Role:        "code-reviewer",
+				Status:      models.AgentStatusReviewing,
+				CurrentTask: &reviewTaskID,
+				Heartbeat:   now,
+			},
+			doerID: {
+				Role:        "coder",
+				Status:      models.AgentStatusWorking,
+				CurrentTask: &doerTaskID,
+				Heartbeat:   now,
+			},
+		},
+		Tasks: []models.Task{
+			{
+				ID:     "review-task-a",
+				Status: models.TaskStatusMerged,
+				History: []models.TaskHistoryEntry{
+					{Time: now.Add(-5 * time.Hour), Event: models.TaskEventClaimed, Agent: &reviewerID},
+				},
+			},
+			{
+				ID:          reviewTaskID,
+				Status:      models.TaskStatusReviewing,
+				ReviewingBy: &reviewerID,
+				History: []models.TaskHistoryEntry{
+					{Time: now.Add(-2 * time.Hour), Event: models.TaskEventClaimed, Agent: &oldDoerID},
+					{Time: now.Add(-17 * time.Minute), Event: models.TaskEventClaimed, Agent: &reviewerID},
+				},
+			},
+			{
+				ID:     "doer-task-a",
+				Status: models.TaskStatusMerged,
+				History: []models.TaskHistoryEntry{
+					{Time: now.Add(-4 * time.Hour), Event: models.TaskEventClaimed, Agent: &doerID},
+				},
+			},
+			{
+				ID:         doerTaskID,
+				Status:     models.TaskStatusIntegrationFailed,
+				AssignedTo: &doerID,
+				History: []models.TaskHistoryEntry{
+					{Time: now.Add(-70 * time.Minute), Event: models.TaskEventClaimed, Agent: &doerID},
+					{Time: now.Add(-11 * time.Minute), Event: models.TaskEventClaimedForIntegrationFix, Agent: &doerID},
+				},
+			},
+		},
+	}
+
+	tests := []struct {
+		agentID string
+		want    string
+		reject  []string
+	}{
+		{agentID: reviewerID, want: "17m", reject: []string{"2h", "5h"}},
+		{agentID: doerID, want: "11m", reject: []string{"1h", "4h"}},
+	}
+	formats := []string{"value", "table", "json"}
+
+	for _, tt := range tests {
+		for _, format := range formats {
+			t.Run(tt.agentID+"/"+format, func(t *testing.T) {
+				result, err := inspectAgent(state, tt.agentID, inspectAgentsOptions{Format: format})
+				if err != nil {
+					t.Fatalf("inspectAgent() error = %v", err)
+				}
+				output := result.(string)
+				if !strings.Contains(output, tt.want) {
+					t.Fatalf("inspectAgent() output = %q, want current assignment duration %q", output, tt.want)
+				}
+				for _, rejected := range tt.reject {
+					if strings.Contains(output, rejected) {
+						t.Fatalf("inspectAgent() output = %q, unexpectedly contains stale duration %q", output, rejected)
+					}
+				}
+			})
+		}
 	}
 }
 

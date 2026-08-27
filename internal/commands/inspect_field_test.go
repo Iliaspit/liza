@@ -337,24 +337,75 @@ func TestGetComputedField(t *testing.T) {
 
 func TestGetComputedFieldAgentSpecific(t *testing.T) {
 	now := time.Now()
+	reviewerTask := "review-task-b"
+	doerTask := "doer-task-b"
+	legacyTask := "legacy-task"
 	state := &models.State{
 		Agents: map[string]models.Agent{
 			"coder-1": {
+				Role:        "coder",
+				Status:      models.AgentStatusWorking,
+				Heartbeat:   now.Add(-30 * time.Second),
+				CurrentTask: &doerTask,
+			},
+			"reviewer-1": {
+				Role:        "code-reviewer",
+				Status:      models.AgentStatusReviewing,
+				Heartbeat:   now,
+				CurrentTask: &reviewerTask,
+			},
+			"legacy-1": {
+				Role:        "coder",
+				Status:      models.AgentStatusWorking,
+				Heartbeat:   now,
+				CurrentTask: &legacyTask,
+			},
+			"idle-1": {
 				Role:      "coder",
-				Status:    models.AgentStatusWorking,
-				Heartbeat: now.Add(-30 * time.Second),
+				Status:    models.AgentStatusIdle,
+				Heartbeat: now,
 			},
 		},
 		Tasks: []models.Task{
 			{
-				ID:     "task-1",
+				ID:         "review-task-a",
+				Status:     models.TaskStatusMerged,
+				AssignedTo: stringPtr("reviewer-1"),
+				History: []models.TaskHistoryEntry{
+					{Time: now.Add(-5 * time.Hour), Event: models.TaskEventClaimed, Agent: stringPtr("reviewer-1")},
+				},
+			},
+			{
+				ID:          reviewerTask,
+				Status:      models.TaskStatusReviewing,
+				ReviewingBy: stringPtr("reviewer-1"),
+				History: []models.TaskHistoryEntry{
+					{Time: now.Add(-2 * time.Hour), Event: models.TaskEventClaimed, Agent: stringPtr("old-doer")},
+					{Time: now.Add(-17 * time.Minute), Event: models.TaskEventClaimed, Agent: stringPtr("reviewer-1")},
+				},
+			},
+			{
+				ID:         "doer-task-a",
+				Status:     models.TaskStatusMerged,
+				AssignedTo: stringPtr("coder-1"),
+				History: []models.TaskHistoryEntry{
+					{Time: now.Add(-4 * time.Hour), Event: models.TaskEventClaimed, Agent: stringPtr("coder-1")},
+				},
+			},
+			{
+				ID:         doerTask,
+				Status:     models.TaskStatusIntegrationFailed,
+				AssignedTo: stringPtr("coder-1"),
+				History: []models.TaskHistoryEntry{
+					{Time: now.Add(-70 * time.Minute), Event: models.TaskEventClaimed, Agent: stringPtr("coder-1")},
+					{Time: now.Add(-11 * time.Minute), Event: models.TaskEventClaimedForIntegrationFix, Agent: stringPtr("coder-1")},
+				},
+			},
+			{
+				ID:     legacyTask,
 				Status: models.TaskStatusImplementing,
 				History: []models.TaskHistoryEntry{
-					{
-						Time:  now.Add(-15 * time.Minute),
-						Event: "claimed",
-						Agent: stringPtr("coder-1"),
-					},
+					{Time: now.Add(-45 * time.Minute), Event: models.TaskEventClaimed},
 				},
 			},
 		},
@@ -363,12 +414,32 @@ func TestGetComputedFieldAgentSpecific(t *testing.T) {
 	tests := []struct {
 		name      string
 		fieldPath string
-		wantType  string
+		want      string
 	}{
 		{
 			name:      "agent.coder-1.time_since_heartbeat",
 			fieldPath: "agent.coder-1.time_since_heartbeat",
-			wantType:  "string",
+			want:      "30s",
+		},
+		{
+			name:      "doer current task latest matching assignment",
+			fieldPath: "agent.coder-1.time_on_task",
+			want:      "11m",
+		},
+		{
+			name:      "reviewer current task latest matching assignment",
+			fieldPath: "agent.reviewer-1.time_on_task",
+			want:      "17m",
+		},
+		{
+			name:      "active legacy agent without matching start",
+			fieldPath: "agent.legacy-1.time_on_task",
+			want:      "0s",
+		},
+		{
+			name:      "idle agent",
+			fieldPath: "agent.idle-1.time_on_task",
+			want:      "0s",
 		},
 	}
 
@@ -380,13 +451,13 @@ func TestGetComputedFieldAgentSpecific(t *testing.T) {
 				return
 			}
 
-			// Check type and that it's a duration string
-			if str, ok := got.(string); ok {
-				if !strings.Contains(str, "s") && !strings.Contains(str, "m") && !strings.Contains(str, "h") {
-					t.Errorf("getComputedField() = %q, doesn't look like a duration", str)
-				}
-			} else {
+			str, ok := got.(string)
+			if !ok {
 				t.Errorf("getComputedField() type = %T, want string", got)
+				return
+			}
+			if !strings.Contains(str, tt.want) {
+				t.Errorf("getComputedField() = %q, want duration containing %q", str, tt.want)
 			}
 		})
 	}

@@ -34,6 +34,37 @@ func calculateTimeOnTask(task *models.Task) time.Duration {
 	return time.Since(claimedTime)
 }
 
+// calculateAgentTimeOnTask returns how long the agent has been on the current
+// task by finding its most recent actor-bearing assignment-start event.
+func calculateAgentTimeOnTask(task *models.Task, agentID string) time.Duration {
+	var assignmentStart time.Time
+	for _, entry := range task.History {
+		if entry.Agent == nil || *entry.Agent != agentID || !isAssignmentStartEvent(entry.Event) {
+			continue
+		}
+		if assignmentStart.IsZero() || entry.Time.After(assignmentStart) {
+			assignmentStart = entry.Time
+		}
+	}
+
+	if assignmentStart.IsZero() {
+		return 0
+	}
+	return time.Since(assignmentStart)
+}
+
+func isAssignmentStartEvent(event models.TaskEventName) bool {
+	switch event {
+	case models.TaskEventClaimed,
+		models.TaskEventReclaimedAfterRejection,
+		models.TaskEventReassignedAfterRejection,
+		models.TaskEventClaimedForIntegrationFix:
+		return true
+	default:
+		return false
+	}
+}
+
 // calculateTimeSinceHeartbeat returns duration since agent's last heartbeat.
 func calculateTimeSinceHeartbeat(agent *models.Agent) time.Duration {
 	return time.Since(agent.Heartbeat)

@@ -330,6 +330,128 @@ func TestClaimReviewerTask_Success(t *testing.T) {
 	}
 }
 
+func TestClaimReviewerTask_RecordsAssignmentStart(t *testing.T) {
+	t.Parallel()
+
+	const leaseDuration = 1800
+	reviewerID := "code-reviewer-1"
+	doerID := "coder-1"
+	tmpDir := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, tmpDir)
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+
+	now := time.Now().UTC()
+	state := testhelpers.CreateValidState()
+	registerClaimReviewerTaskTestAgents(state)
+	worktreeA, reviewCommitA := createClaimReviewWorktree(t, tmpDir, "task-a")
+	baseCommitA := testhelpers.MustGit(t, tmpDir, "merge-base", reviewCommitA, "integration")
+	worktreeB, reviewCommitB := createClaimReviewWorktree(t, tmpDir, "task-b")
+	baseCommitB := testhelpers.MustGit(t, tmpDir, "merge-base", reviewCommitB, "integration")
+	olderDoerClaim := now.Add(-time.Hour)
+	state.Tasks = []models.Task{
+		{
+			ID:           "task-a",
+			Status:       models.TaskStatusReadyForReview,
+			RolePair:     "coding-pair",
+			Priority:     1,
+			Worktree:     &worktreeA,
+			BaseCommit:   &baseCommitA,
+			ReviewCommit: &reviewCommitA,
+			Created:      now,
+		},
+		{
+			ID:           "task-b",
+			Status:       models.TaskStatusReadyForReview,
+			RolePair:     "coding-pair",
+			Priority:     1,
+			Worktree:     &worktreeB,
+			BaseCommit:   &baseCommitB,
+			ReviewCommit: &reviewCommitB,
+			History: []models.TaskHistoryEntry{
+				{Time: olderDoerClaim, Event: models.TaskEventClaimed, Agent: &doerID},
+			},
+			Created: now,
+		},
+	}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	claim := func(taskID string) *ClaimReviewerTaskResult {
+		t.Helper()
+		result, err := ClaimReviewerTask(ClaimReviewerTaskInput{
+			ProjectRoot:   tmpDir,
+			AgentID:       reviewerID,
+			TaskID:        taskID,
+			LeaseDuration: leaseDuration,
+		})
+		if err != nil {
+			t.Fatalf("ClaimReviewerTask(%q) error: %v", taskID, err)
+		}
+		return result
+	}
+
+	bb := db.New(stateFile)
+	resultA := claim("task-a")
+	readState, err := bb.Read()
+	if err != nil {
+		t.Fatalf("read state after task A claim: %v", err)
+	}
+	taskA := readState.FindTask("task-a")
+	if taskA == nil || len(taskA.History) != 1 {
+		t.Fatalf("task A history = %#v, want one assignment-start event", taskA)
+	}
+	claimA := taskA.History[0]
+	if claimA.Event != models.TaskEventClaimed || claimA.Agent == nil || *claimA.Agent != reviewerID {
+		t.Fatalf("task A history event = %#v, want claimed by %q", claimA, reviewerID)
+	}
+	wantStartA := resultA.LeaseExpires.Add(-leaseDuration * time.Second)
+	if !claimA.Time.Equal(wantStartA) {
+		t.Errorf("task A claim time = %v, want atomic claim time %v", claimA.Time, wantStartA)
+	}
+
+	taskA.Status = models.TaskStatusMerged
+	taskA.ReviewingBy = nil
+	taskA.ReviewLeaseExpires = nil
+	readState.Agents[reviewerID] = testhelpers.RegisteredTestAgent(models.RoleCodeReviewer)
+	testhelpers.WriteInitialState(t, stateFile, readState)
+
+	resultB := claim("task-b")
+	readState, err = bb.Read()
+	if err != nil {
+		t.Fatalf("read state after task B claim: %v", err)
+	}
+	taskB := readState.FindTask("task-b")
+	if taskB == nil || len(taskB.History) != 2 {
+		t.Fatalf("task B history = %#v, want older doer claim and reviewer assignment start", taskB)
+	}
+	claimB := taskB.History[1]
+	if claimB.Event != models.TaskEventClaimed || claimB.Agent == nil || *claimB.Agent != reviewerID {
+		t.Fatalf("task B history event = %#v, want claimed by %q", claimB, reviewerID)
+	}
+	wantStartB := resultB.LeaseExpires.Add(-leaseDuration * time.Second)
+	if !claimB.Time.Equal(wantStartB) {
+		t.Errorf("task B claim time = %v, want atomic claim time %v", claimB.Time, wantStartB)
+	}
+	if !claimB.Time.After(claimA.Time) || !claimB.Time.After(olderDoerClaim) {
+		t.Errorf("task B claim time %v must be newer than task A %v and older doer claim %v", claimB.Time, claimA.Time, olderDoerClaim)
+	}
+
+	historyLen := len(taskB.History)
+	if _, err := ClaimReviewerTask(ClaimReviewerTaskInput{
+		ProjectRoot: tmpDir,
+		AgentID:     reviewerID,
+		TaskID:      "task-b",
+	}); err == nil {
+		t.Fatal("repeat claim of task B succeeded, want rejection")
+	}
+	readState, err = bb.Read()
+	if err != nil {
+		t.Fatalf("read state after rejected claim: %v", err)
+	}
+	if got := len(readState.FindTask("task-b").History); got != historyLen {
+		t.Errorf("task B history length after rejected claim = %d, want %d", got, historyLen)
+	}
+}
+
 func TestClaimReviewerTask_RejectsReviewCommitMismatch(t *testing.T) {
 	t.Parallel()
 

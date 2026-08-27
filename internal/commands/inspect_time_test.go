@@ -90,6 +90,84 @@ func TestCalculateTimeOnTask(t *testing.T) {
 	}
 }
 
+func TestCalculateAgentTimeOnTask(t *testing.T) {
+	now := time.Now()
+	currentAgent := "agent-current"
+	otherAgent := "agent-other"
+
+	tests := []struct {
+		name      string
+		history   []models.TaskHistoryEntry
+		wantStart time.Duration
+	}{
+		{
+			name: "fresh doer claim ignores older actor claim",
+			history: []models.TaskHistoryEntry{
+				{Time: now.Add(-2 * time.Hour), Event: models.TaskEventClaimed, Agent: &otherAgent},
+				{Time: now.Add(-15 * time.Minute), Event: models.TaskEventClaimed, Agent: &currentAgent},
+			},
+			wantStart: 15 * time.Minute,
+		},
+		{
+			name: "preserved claim selects newest claim by same agent",
+			history: []models.TaskHistoryEntry{
+				{Time: now.Add(-90 * time.Minute), Event: models.TaskEventClaimed, Agent: &currentAgent},
+				{Time: now.Add(-12 * time.Minute), Event: models.TaskEventClaimed, Agent: &currentAgent},
+			},
+			wantStart: 12 * time.Minute,
+		},
+		{
+			name: "same-agent rejected-task reclaim",
+			history: []models.TaskHistoryEntry{
+				{Time: now.Add(-80 * time.Minute), Event: models.TaskEventClaimed, Agent: &currentAgent},
+				{Time: now.Add(-10 * time.Minute), Event: models.TaskEventReclaimedAfterRejection, Agent: &currentAgent},
+			},
+			wantStart: 10 * time.Minute,
+		},
+		{
+			name: "different-agent reassignment",
+			history: []models.TaskHistoryEntry{
+				{Time: now.Add(-70 * time.Minute), Event: models.TaskEventClaimed, Agent: &otherAgent},
+				{Time: now.Add(-8 * time.Minute), Event: models.TaskEventReassignedAfterRejection, Agent: &currentAgent},
+			},
+			wantStart: 8 * time.Minute,
+		},
+		{
+			name: "integration-fix claim",
+			history: []models.TaskHistoryEntry{
+				{Time: now.Add(-60 * time.Minute), Event: models.TaskEventClaimed, Agent: &currentAgent},
+				{Time: now.Add(-6 * time.Minute), Event: models.TaskEventClaimedForIntegrationFix, Agent: &currentAgent},
+			},
+			wantStart: 6 * time.Minute,
+		},
+		{
+			name: "legacy task without matching actor-bearing start",
+			history: []models.TaskHistoryEntry{
+				{Time: now.Add(-45 * time.Minute), Event: models.TaskEventClaimed},
+				{Time: now.Add(-5 * time.Minute), Event: models.TaskEventClaimed, Agent: &otherAgent},
+			},
+			wantStart: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			task := &models.Task{ID: "task-b", History: tt.history}
+			got := calculateAgentTimeOnTask(task, currentAgent)
+			if tt.wantStart == 0 {
+				if got != 0 {
+					t.Fatalf("calculateAgentTimeOnTask() = %v, want 0", got)
+				}
+				return
+			}
+
+			if got < tt.wantStart || got > tt.wantStart+time.Second {
+				t.Fatalf("calculateAgentTimeOnTask() = %v, want between %v and %v", got, tt.wantStart, tt.wantStart+time.Second)
+			}
+		})
+	}
+}
+
 func TestCalculateTimeSinceHeartbeat(t *testing.T) {
 	now := time.Now()
 	tests := []struct {
