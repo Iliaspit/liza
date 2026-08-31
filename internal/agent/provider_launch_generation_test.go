@@ -352,6 +352,13 @@ func TestAgentProcessGenerationEnv(t *testing.T) {
 func TestSupervisorGenerationCancellation(t *testing.T) {
 	fixture := newProviderGenerationFixture(t)
 	heartbeatA := NewHeartbeat(HeartbeatConfig{Authority: fixture.authorityA, StatePath: fixture.statePath, Interval: 10 * time.Millisecond, LeaseDuration: time.Minute})
+	fixture.expireCurrent(t)
+	authorityB := fixture.registerReplacement(t)
+	heartbeatB := NewHeartbeat(HeartbeatConfig{Authority: authorityB, StatePath: fixture.statePath, Interval: 10 * time.Millisecond, LeaseDuration: time.Minute})
+	if err := heartbeatB.beat(); err != nil {
+		t.Fatalf("generation B heartbeat: %v", err)
+	}
+
 	ctxA, cancelA := context.WithCancel(context.Background())
 	defer cancelA()
 	heartbeatErr := make(chan error, 1)
@@ -360,13 +367,6 @@ func TestSupervisorGenerationCancellation(t *testing.T) {
 		cancelA()
 	})
 	defer stopA()
-
-	fixture.expireCurrent(t)
-	authorityB := fixture.registerReplacement(t)
-	heartbeatB := NewHeartbeat(HeartbeatConfig{Authority: authorityB, StatePath: fixture.statePath, Interval: 10 * time.Millisecond, LeaseDuration: time.Minute})
-	if err := heartbeatB.beat(); err != nil {
-		t.Fatalf("generation B heartbeat: %v", err)
-	}
 
 	select {
 	case err := <-heartbeatErr:
@@ -378,8 +378,8 @@ func TestSupervisorGenerationCancellation(t *testing.T) {
 	}
 	select {
 	case <-ctxA.Done():
-	default:
-		t.Fatal("A provider context remained live for another work cycle")
+	case <-time.After(time.Second):
+		t.Fatal("generation mismatch did not cancel A provider context")
 	}
 	if err := heartbeatB.beat(); err != nil {
 		t.Fatalf("generation B did not continue after A cancellation: %v", err)
