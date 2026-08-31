@@ -52,6 +52,15 @@ func TestSetupTestGitRepo(t *testing.T) {
 		t.Errorf("Expected user.name=Test User, got %q", string(output))
 	}
 
+	cmd = exec.Command("git", "-C", tmpDir, "config", "--bool", "maintenance.auto")
+	output, err = cmd.Output()
+	if err != nil {
+		t.Fatalf("Failed to get maintenance.auto: %v", err)
+	}
+	if string(output) != "false\n" {
+		t.Errorf("Expected maintenance.auto=false, got %q", string(output))
+	}
+
 	cmd = exec.Command("git", "-C", tmpDir, "config", "core.hooksPath")
 	output, err = cmd.Output()
 	if err != nil {

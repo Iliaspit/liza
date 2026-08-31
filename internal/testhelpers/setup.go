@@ -123,6 +123,10 @@ func initializeTestGitRepo(dir string, includeIntegrationBranch bool) error {
 	if err := runGitForSetup(dir, "init", "-b", "main"); err != nil {
 		return err
 	}
+	// Keep the prepared fixture stable while it is snapshotted.
+	if err := runGitForSetup(dir, "config", "maintenance.auto", "false"); err != nil {
+		return err
+	}
 	if err := runGitForSetup(dir, "config", "user.email", "test@example.com"); err != nil {
 		return err
 	}
