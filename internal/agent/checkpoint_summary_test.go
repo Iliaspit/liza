@@ -22,19 +22,21 @@ import (
 // restore below, and the detector would report it against whichever test
 // happened to be running at the time.
 //
-// Only BinaryName and ProjectDirName are captured, since those are what the
-// callers change. Rather than track that list by hand — a mutation of any other
-// field would leak into every later test in the package, silently — the restore
-// checks the whole struct and fails if anything is left behind.
+// Only BinaryName, ProjectDirName, and EnvPrefix are captured, since those are
+// what the callers change. Rather than track that list by hand — a mutation of
+// any other field would leak into every later test in the package, silently —
+// the restore checks the whole struct and fails if anything is left behind.
 func withAgentBrandValues(t *testing.T, mutate func()) {
 	t.Helper()
 	before := brand.RuntimeValues()
 	oldBinaryName := brand.BinaryName
 	oldProjectDirName := brand.ProjectDirName
+	oldEnvPrefix := brand.EnvPrefix
 	mutate()
 	t.Cleanup(func() {
 		brand.BinaryName = oldBinaryName
 		brand.ProjectDirName = oldProjectDirName
+		brand.EnvPrefix = oldEnvPrefix
 		// A field left as "" rather than mutated is masked here: RuntimeValues()
 		// runs withDerivedDefaults(), which refills empty fields from
 		// NameLower, so a blanked field compares equal and this check misses it.
