@@ -8,12 +8,22 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
+	"github.com/liza-mas/liza/internal/filelock"
 	"github.com/liza-mas/liza/internal/gitenv"
 	"github.com/liza-mas/liza/internal/paths"
 )
 
 const maxProgressSignatureFileBytes = 1 << 20
+const worktreeMutationLockTimeout = 30 * time.Minute
+
+func (g *Git) withWorktreeMutationLock(operation string, fn func() error) error {
+	lockPath := filepath.Join(g.projectRoot, paths.GitDirName, "worktree-mutation")
+	return filelock.New(lockPath).
+		WithTimeout(worktreeMutationLockTimeout).
+		WithLockOperation(operation, fn)
+}
 
 // CreateWorktree creates a worktree for the given task from the specified branch.
 // Returns the base commit (full SHA) for drift tracking.
@@ -43,7 +53,10 @@ func (g *Git) CreateWorktree(taskID, fromBranch string) (string, error) {
 	}
 
 	// Create worktree with new branch
-	_, err = g.exec("worktree", "add", worktreePath, fromBranch, "-b", branchName)
+	err = g.withWorktreeMutationLock("worktree-add", func() error {
+		_, execErr := g.exec("worktree", "add", worktreePath, fromBranch, "-b", branchName)
+		return execErr
+	})
 	if err != nil {
 		return "", fmt.Errorf("failed to create worktree: %w", err)
 	}
@@ -68,7 +81,10 @@ func (g *Git) AttachWorktree(taskID, existingBranch string) error {
 		return fmt.Errorf("failed to create .worktrees directory: %w", err)
 	}
 
-	_, err := g.exec("worktree", "add", worktreePath, existingBranch)
+	err := g.withWorktreeMutationLock("worktree-attach", func() error {
+		_, execErr := g.exec("worktree", "add", worktreePath, existingBranch)
+		return execErr
+	})
 	if err != nil {
 		return fmt.Errorf("failed to attach worktree: %w", err)
 	}
@@ -93,29 +109,28 @@ func (g *Git) RemoveWorktreeDir(taskID string) error {
 	if err := paths.ValidateTaskID(taskID); err != nil {
 		return fmt.Errorf("invalid task ID: %w", err)
 	}
-	worktreePath := filepath.Join(g.projectRoot, paths.WorktreesDirName, taskID)
+	return g.withWorktreeMutationLock("worktree-remove", func() error {
+		worktreePath := filepath.Join(g.projectRoot, paths.WorktreesDirName, taskID)
+		metadataDir := filepath.Join(g.projectRoot, paths.GitDirName, "worktrees", taskID)
 
-	metadataDir := filepath.Join(g.projectRoot, ".git", "worktrees", taskID)
+		// If the directory is already gone, Git may still have a stale worktree
+		// registration that keeps the task branch "checked out". Clear only this
+		// task's metadata; global prune can interfere with concurrent worktree adds.
+		if _, err := os.Stat(worktreePath); os.IsNotExist(err) {
+			_ = os.RemoveAll(metadataDir)
+			return nil
+		}
 
-	// If the directory is already gone, Git may still have a stale worktree
-	// registration that keeps the task branch "checked out". Clear only this
-	// task's metadata; global prune can interfere with concurrent worktree adds.
-	if _, err := os.Stat(worktreePath); os.IsNotExist(err) {
+		// Remove worktree (force to handle any uncommitted changes)
+		if _, err := g.exec("worktree", "remove", "--force", worktreePath); err != nil {
+			// If git worktree remove fails, try manual cleanup.
+			if err := os.RemoveAll(worktreePath); err != nil {
+				return fmt.Errorf("failed to remove worktree directory: %w", err)
+			}
+		}
 		_ = os.RemoveAll(metadataDir)
 		return nil
-	}
-
-	// Remove worktree (force to handle any uncommitted changes)
-	_, err := g.exec("worktree", "remove", "--force", worktreePath)
-	if err != nil {
-		// If git worktree remove fails, try manual cleanup
-		if err := os.RemoveAll(worktreePath); err != nil {
-			return fmt.Errorf("failed to remove worktree directory: %w", err)
-		}
-	}
-	_ = os.RemoveAll(metadataDir)
-
-	return nil
+	})
 }
 
 // RemoveWorktree removes a worktree and its associated branch.
