@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/liza-mas/liza/internal/db"
+	"github.com/liza-mas/liza/internal/paths"
 )
 
 // newTestModel creates a Model suitable for tests that don't need a real
@@ -21,11 +22,11 @@ func newTestModel() Model {
 }
 
 func TestNewValidProjectRoot(t *testing.T) {
-	// Create a temp dir with .liza/ subdir so the watcher can watch it.
+	// Create a temp dir with project runtime subdir so the watcher can watch it.
 	tmpDir := t.TempDir()
-	lizaDir := filepath.Join(tmpDir, ".liza")
+	lizaDir := filepath.Join(tmpDir, paths.ProjectDirName())
 	if err := os.MkdirAll(lizaDir, 0o755); err != nil {
-		t.Fatalf("failed to create .liza dir: %v", err)
+		t.Fatalf("failed to create project runtime dir: %v", err)
 	}
 	// Create state.yaml so Blackboard has a valid path.
 	if err := os.WriteFile(filepath.Join(lizaDir, "state.yaml"), []byte("{}"), 0o644); err != nil {
@@ -68,9 +69,9 @@ func TestNewNonExistentPath(t *testing.T) {
 
 func TestNewDefaults(t *testing.T) {
 	tmpDir := t.TempDir()
-	lizaDir := filepath.Join(tmpDir, ".liza")
+	lizaDir := filepath.Join(tmpDir, paths.ProjectDirName())
 	if err := os.MkdirAll(lizaDir, 0o755); err != nil {
-		t.Fatalf("failed to create .liza dir: %v", err)
+		t.Fatalf("failed to create project runtime dir: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(lizaDir, "state.yaml"), []byte("{}"), 0o644); err != nil {
 		t.Fatalf("failed to create state.yaml: %v", err)
@@ -189,9 +190,9 @@ func TestInlineActionEnum(t *testing.T) {
 
 func TestNewTextInputInitialized(t *testing.T) {
 	tmpDir := t.TempDir()
-	lizaDir := filepath.Join(tmpDir, ".liza")
+	lizaDir := filepath.Join(tmpDir, paths.ProjectDirName())
 	if err := os.MkdirAll(lizaDir, 0o755); err != nil {
-		t.Fatalf("failed to create .liza dir: %v", err)
+		t.Fatalf("failed to create project runtime dir: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(lizaDir, "state.yaml"), []byte("{}"), 0o644); err != nil {
 		t.Fatalf("failed to create state.yaml: %v", err)

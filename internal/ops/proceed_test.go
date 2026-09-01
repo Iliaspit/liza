@@ -9,8 +9,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/liza-mas/liza/internal/brand"
+
 	"github.com/liza-mas/liza/internal/db"
 	"github.com/liza-mas/liza/internal/models"
+	"github.com/liza-mas/liza/internal/paths"
 	"github.com/liza-mas/liza/internal/pipeline"
 	"github.com/liza-mas/liza/internal/taskkind"
 	"github.com/liza-mas/liza/internal/testhelpers"
@@ -413,7 +416,7 @@ func TestProceed_CrashRecovery_CreatesMissingChildren(t *testing.T) {
 				DoneWhen:      "Done 1",
 				Scope:         "s1",
 				SpecRef:       "README.md",
-				Validation:    []string{"LIZA_ALLOW_DESTRUCTIVE_DB=1 make test ./child1"},
+				Validation:    []string{brand.EnvName("ALLOW_DESTRUCTIVE_DB") + "=1 make test ./child1"},
 				DestructiveDB: true,
 			},
 		},
@@ -467,8 +470,9 @@ func TestProceed_CrashRecovery_CreatesMissingChildren(t *testing.T) {
 	if child1.Description != "Child 1" {
 		t.Errorf("Child 1 desc = %q, want %q", child1.Description, "Child 1")
 	}
-	if !slices.Equal(child1.Validation, []string{"LIZA_ALLOW_DESTRUCTIVE_DB=1 make test ./child1"}) {
-		t.Errorf("Child 1 validation = %v, want [LIZA_ALLOW_DESTRUCTIVE_DB=1 make test ./child1]", child1.Validation)
+	wantValidation := []string{brand.EnvName("ALLOW_DESTRUCTIVE_DB") + "=1 make test ./child1"}
+	if !slices.Equal(child1.Validation, wantValidation) {
+		t.Errorf("Child 1 validation = %v, want %v", child1.Validation, wantValidation)
 	}
 	if !child1.DestructiveDB {
 		t.Errorf("Child 1 DestructiveDB = false, want true")
@@ -619,7 +623,7 @@ func TestProceed_RejectsDestructiveDBOutputWithoutMarker(t *testing.T) {
 	testhelpers.WriteInitialState(t, stateFile, state)
 
 	_, err := Proceed(tmpDir, "plan-destructive", "code-plan-to-coding")
-	testhelpers.RequireErrorContains(t, err, "output[0].validation[0] destructive_db requires command to start with LIZA_ALLOW_DESTRUCTIVE_DB=1 or env LIZA_ALLOW_DESTRUCTIVE_DB=1")
+	testhelpers.RequireErrorContains(t, err, "output[0].validation[0] destructive_db requires command to start with "+brand.EnvName("ALLOW_DESTRUCTIVE_DB")+"=1 or env "+brand.EnvName("ALLOW_DESTRUCTIVE_DB")+"=1")
 }
 
 // --- Pipeline-aware Proceed tests ---
@@ -630,12 +634,12 @@ func setupPipelineProceedTest(t *testing.T) (string, string) {
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
-	// Copy the valid pipeline YAML to .liza/pipeline.yaml (frozen config).
+	// Copy the valid pipeline YAML to the project runtime directory (frozen config).
 	src, err := os.ReadFile(filepath.Join(testhelpers.FindRepoRoot(t), "internal", "pipeline", "testdata", "valid-coding-subpipeline.yaml"))
 	if err != nil {
 		t.Fatalf("Failed to read pipeline testdata: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(tmpDir, ".liza", "pipeline.yaml"), src, 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(tmpDir, paths.ProjectDirName(), "pipeline.yaml"), src, 0o644); err != nil {
 		t.Fatalf("Failed to write frozen pipeline config: %v", err)
 	}
 
@@ -1363,7 +1367,7 @@ func TestProceed_PipelineRejectsAutoTransition(t *testing.T) {
   entry-points:
     detailed-spec: coding-subpipeline.code-planning-pair
 `
-	if err := os.WriteFile(filepath.Join(tmpDir, ".liza", "pipeline.yaml"), []byte(autoYAML), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(tmpDir, paths.ProjectDirName(), "pipeline.yaml"), []byte(autoYAML), 0o644); err != nil {
 		t.Fatalf("Failed to write pipeline config: %v", err)
 	}
 
@@ -1416,12 +1420,12 @@ func setupPhase2PipelineProceedTest(t *testing.T) (string, string) {
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
-	// Copy the full Phase 2 pipeline YAML to .liza/pipeline.yaml (frozen config).
+	// Copy the full Phase 2 pipeline YAML to the project runtime directory (frozen config).
 	src, err := os.ReadFile(filepath.Join(testhelpers.FindRepoRoot(t), "internal", "pipeline", "testdata", "valid-phase2-full.yaml"))
 	if err != nil {
 		t.Fatalf("Failed to read pipeline testdata: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(tmpDir, ".liza", "pipeline.yaml"), src, 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(tmpDir, paths.ProjectDirName(), "pipeline.yaml"), src, 0o644); err != nil {
 		t.Fatalf("Failed to write frozen pipeline config: %v", err)
 	}
 
@@ -3637,7 +3641,7 @@ func TestProceed_OneToOne_InheritsPlanRefFromParent(t *testing.T) {
 		ParentTasks:   []string{cohortParentID},
 		SpecRef:       "specs/feature.md",
 		EpicRef:       "specs/epics/auth-epic.md#capability-cap-001---authentication",
-		Validation:    []string{"LIZA_ALLOW_DESTRUCTIVE_DB=1 make test ./should-not-copy"},
+		Validation:    []string{brand.EnvName("ALLOW_DESTRUCTIVE_DB") + "=1 make test ./should-not-copy"},
 		DestructiveDB: true,
 		DoneWhen:      "US approved",
 		Scope:         "auth module",
@@ -4012,7 +4016,7 @@ func TestProceed_OneToOne_InheritsArchRef(t *testing.T) {
 		SpecRef:       "README.md",
 		ArchRef:       "specs/arch-plan/feature.md",
 		PlanRef:       "specs/plans/plan.md",
-		Validation:    []string{"LIZA_ALLOW_DESTRUCTIVE_DB=1 make test ./should-not-copy"},
+		Validation:    []string{brand.EnvName("ALLOW_DESTRUCTIVE_DB") + "=1 make test ./should-not-copy"},
 		DestructiveDB: true,
 		DoneWhen:      "Plan approved",
 		Scope:         "auth module",
@@ -5362,7 +5366,7 @@ func setupIntegrationPipelineProceedTest(t *testing.T) (string, string) {
 	if err != nil {
 		t.Fatalf("Failed to read pipeline testdata: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(tmpDir, ".liza", "pipeline.yaml"), src, 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(tmpDir, paths.ProjectDirName(), "pipeline.yaml"), src, 0o644); err != nil {
 		t.Fatalf("Failed to write frozen pipeline config: %v", err)
 	}
 
@@ -5526,7 +5530,7 @@ func setupPhase2GitProceedTest(t *testing.T) (string, string) {
 	// Initialize a real git repo with an integration branch.
 	testhelpers.SetupTestGitRepo(t, tmpDir)
 
-	// Set up .liza dir (state.yaml, lock file).
+	// Set up the project runtime directory (state.yaml, lock file).
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
 	// Copy the Phase 2 pipeline YAML (has code-plan-to-coding targeting coding-pair).
@@ -5534,7 +5538,7 @@ func setupPhase2GitProceedTest(t *testing.T) (string, string) {
 	if err != nil {
 		t.Fatalf("Failed to read pipeline testdata: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(tmpDir, ".liza", "pipeline.yaml"), src, 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(tmpDir, paths.ProjectDirName(), "pipeline.yaml"), src, 0o644); err != nil {
 		t.Fatalf("Failed to write frozen pipeline config: %v", err)
 	}
 
@@ -6582,7 +6586,7 @@ func setupTaskSlugProceedTest(t *testing.T) (string, string) {
 	if err != nil {
 		t.Fatalf("Failed to read pipeline testdata: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(tmpDir, ".liza", "pipeline.yaml"), src, 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(tmpDir, paths.ProjectDirName(), "pipeline.yaml"), src, 0o644); err != nil {
 		t.Fatalf("Failed to write frozen pipeline config: %v", err)
 	}
 	return tmpDir, stateFile

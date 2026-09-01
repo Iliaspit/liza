@@ -10,8 +10,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/liza-mas/liza/internal/brand"
+
 	"github.com/liza-mas/liza/internal/commands"
 	"github.com/liza-mas/liza/internal/db"
+	"github.com/liza-mas/liza/internal/paths"
 	"github.com/liza-mas/liza/internal/scipsearch"
 	"github.com/liza-mas/liza/internal/semble"
 	"github.com/liza-mas/liza/internal/testhelpers"
@@ -314,7 +317,7 @@ func TestHasExplicitInitFlags_SembleEnvDoesNotForceWorkspaceInit(t *testing.T) {
 	t.Setenv(semble.EnvEnableSemble, "true")
 
 	if hasExplicitInitFlags(initCmd) {
-		t.Fatal("hasExplicitInitFlags() = true for LIZA_ENABLE_SEMBLE=true, want false")
+		t.Fatalf("hasExplicitInitFlags() = true for %s=true, want false", semble.EnvEnableSemble)
 	}
 
 	projectRoot := t.TempDir()
@@ -325,14 +328,14 @@ func TestHasExplicitInitFlags_SembleEnvDoesNotForceWorkspaceInit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("pairing init with Semble env failed: %v", err)
 	}
-	if _, statErr := os.Stat(filepath.Join(projectRoot, ".liza")); !os.IsNotExist(statErr) {
-		t.Fatalf(".liza stat error = %v, want missing so Semble env does not force full workspace init", statErr)
+	if _, statErr := os.Stat(filepath.Join(projectRoot, paths.ProjectDirName())); !os.IsNotExist(statErr) {
+		t.Fatalf("%s stat error = %v, want missing so Semble env does not force full workspace init", paths.ProjectDirName(), statErr)
 	}
 	linkTarget, err := os.Readlink(filepath.Join(fakeHome, ".gemini", "GEMINI.md"))
 	if err != nil {
 		t.Fatalf("GEMINI.md symlink missing after pairing init: %v", err)
 	}
-	if !strings.HasSuffix(linkTarget, filepath.Join(".liza", "CORE.md")) {
+	if !strings.HasSuffix(linkTarget, filepath.Join(paths.GlobalDirName(), "CORE.md")) {
 		t.Fatalf("GEMINI.md target = %q, want global CORE.md symlink", linkTarget)
 	}
 }
@@ -356,16 +359,16 @@ func TestInitDispatch_PairingScipSearchFlagIsAllowedWithAgent(t *testing.T) {
 		t.Fatalf("pairing init with --scip-search failed: %v", err)
 	}
 
-	scriptPath := filepath.Join(projectRoot, ".git", "hooks", "liza-index.sh")
+	scriptPath := filepath.Join(projectRoot, ".git", "hooks", brand.BinaryName+"-index.sh")
 	script, err := os.ReadFile(scriptPath)
 	if err != nil {
-		t.Fatalf("liza-index.sh missing after pairing SCIP init: %v", err)
+		t.Fatalf("%s-index.sh missing after pairing SCIP init: %v", brand.BinaryName, err)
 	}
 	if !strings.Contains(string(script), "scip-go index --module-root") {
-		t.Fatalf("liza-index.sh missing Go SCIP command:\n%s", string(script))
+		t.Fatalf("%s-index.sh missing Go SCIP command:\n%s", brand.BinaryName, string(script))
 	}
-	if _, statErr := os.Stat(filepath.Join(projectRoot, ".liza")); !os.IsNotExist(statErr) {
-		t.Fatalf(".liza stat error = %v, want missing so --scip-search keeps pairing mode", statErr)
+	if _, statErr := os.Stat(filepath.Join(projectRoot, paths.ProjectDirName())); !os.IsNotExist(statErr) {
+		t.Fatalf("%s stat error = %v, want missing so --scip-search keeps pairing mode", paths.ProjectDirName(), statErr)
 	}
 }
 
@@ -405,10 +408,10 @@ func TestInitDispatch_PairingScipSearchPlanFlagWritesOverrideCommands(t *testing
 		t.Fatalf("pairing init with --scip-search-plan failed: %v", err)
 	}
 
-	scriptPath := filepath.Join(projectRoot, ".git", "hooks", "liza-index.sh")
+	scriptPath := filepath.Join(projectRoot, ".git", "hooks", brand.BinaryName+"-index.sh")
 	script, err := os.ReadFile(scriptPath)
 	if err != nil {
-		t.Fatalf("liza-index.sh missing after pairing SCIP init: %v", err)
+		t.Fatalf("%s-index.sh missing after pairing SCIP init: %v", brand.BinaryName, err)
 	}
 	for _, want := range []string{
 		"scip-go index --module-root " + projectRoot + "/services/design-diagnosis/cli --output ",
@@ -423,7 +426,7 @@ func TestInitDispatch_PairingScipSearchPlanFlagWritesOverrideCommands(t *testing
 		"--out " + projectRoot + "/python.scip",
 	} {
 		if !strings.Contains(string(script), want) {
-			t.Fatalf("liza-index.sh missing override command %q:\n%s", want, string(script))
+			t.Fatalf("%s-index.sh missing override command %q:\n%s", brand.BinaryName, want, string(script))
 		}
 	}
 }
@@ -476,7 +479,7 @@ func TestInitDispatch_ScipSearchRepeatableFlagPersistsConfig(t *testing.T) {
 		t.Fatalf("init with repeated --scip-search failed: %v", err)
 	}
 
-	statePath := filepath.Join(projectRoot, ".liza", "state.yaml")
+	statePath := filepath.Join(projectRoot, paths.ProjectDirName(), "state.yaml")
 	state, err := db.New(statePath).Read()
 	if err != nil {
 		t.Fatalf("read state: %v", err)
@@ -523,8 +526,8 @@ func TestInitDispatch_FullInitSkipsScipSearchWhenEnvDisabled(t *testing.T) {
 	if err != nil {
 		t.Fatalf("init failed with scip-search disabled: %v", err)
 	}
-	if _, statErr := os.Stat(filepath.Join(projectRoot, ".liza")); statErr != nil {
-		t.Fatalf(".liza missing after init with scip-search disabled: stat err = %v", statErr)
+	if _, statErr := os.Stat(filepath.Join(projectRoot, paths.ProjectDirName())); statErr != nil {
+		t.Fatalf("%s missing after init with scip-search disabled: stat err = %v", paths.ProjectDirName(), statErr)
 	}
 	if len(calls) != 0 {
 		t.Fatalf("calls = %v, want no scip-search calls", calls)
@@ -561,16 +564,16 @@ func TestInitDispatch_SembleEnabledFullInitThroughCobraHasNoDurableSurface(t *te
 		t.Fatalf("read fake Semble log: %v", err)
 	}
 	logText := string(logContent)
-	if got := strings.Count(logText, "__liza_semble_prewarm__"); got != 2 {
+	if got := strings.Count(logText, "__semble_prewarm__"); got != 2 {
 		t.Fatalf("Semble invocation count = %d, want prewarm and offline validation; log:\n%s", got, logText)
 	}
-	for _, want := range []string{"search __liza_semble_prewarm__", "--top-k 1", "--content code", "HF_HUB_OFFLINE=1"} {
+	for _, want := range []string{"search __semble_prewarm__", "--top-k 1", "--content code", "HF_HUB_OFFLINE=1"} {
 		if !strings.Contains(logText, want) {
 			t.Fatalf("fake Semble log missing %q:\n%s", want, logText)
 		}
 	}
 
-	statePath := filepath.Join(projectRoot, ".liza", "state.yaml")
+	statePath := filepath.Join(projectRoot, paths.ProjectDirName(), "state.yaml")
 	state, err := db.New(statePath).Read()
 	if err != nil {
 		t.Fatalf("read state: %v", err)
@@ -590,8 +593,8 @@ func TestInitDispatch_SembleEnabledFullInitThroughCobraHasNoDurableSurface(t *te
 
 func TestInitDispatch_AgentFlagAlonePassesDispatch(t *testing.T) {
 	// Run in a temp dir with fake HOME to prevent side effects on the
-	// developer's workspace. The command will fail downstream (no git repo,
-	// no ~/.liza), but it must NOT fail at the dispatch level.
+	// developer's workspace. The command will fail downstream (no git repo or
+	// global runtime directory), but it must NOT fail at the dispatch level.
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
 
@@ -620,11 +623,11 @@ func TestInitDispatch_AgentFlagAlonePassesDispatch(t *testing.T) {
 }
 
 func TestInitDispatch_WizardPathForwardsConfigDefault(t *testing.T) {
-	// Create a temp HOME with ~/.liza/pipeline.yaml to simulate the scenario
+	// Create a temp HOME with a global pipeline config to simulate the scenario
 	// where defaultPipelineConfigPath() returns a real path at init() time.
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
-	lizaDir := filepath.Join(tmpDir, ".liza")
+	lizaDir := filepath.Join(tmpDir, paths.GlobalDirName())
 	if err := os.MkdirAll(lizaDir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}

@@ -397,7 +397,7 @@ func copyFilePreserveMode(src, dst string) error {
 // persisted safely (see PostWorktreeSetupError), so buffering it would only risk
 // exposure; the operator reruns the command in the worktree to see it.
 //
-// Trust model: the command comes from state.yaml which lives inside .liza/ in
+// Trust model: the command comes from state.yaml in the project runtime directory in
 // the project root. Write access to state.yaml implies write access to the
 // repo (same trust boundary as Makefile, .github/workflows/, package.json
 // scripts). No additional confirmation gate is needed.

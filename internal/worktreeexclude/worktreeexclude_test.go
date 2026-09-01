@@ -7,6 +7,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/liza-mas/liza/internal/paths"
 )
 
 func TestEnsurePrivateExcludeIdempotent(t *testing.T) {
@@ -24,7 +26,7 @@ func TestEnsurePrivateExcludeIdempotent(t *testing.T) {
 	}
 
 	for i := 0; i < 2; i++ {
-		if err := EnsurePrivateExclude(worktree, ".liza/scip/", ".sembleignore"); err != nil {
+		if err := EnsurePrivateExclude(worktree, paths.ProjectDirName()+"/scip/", ".sembleignore"); err != nil {
 			t.Fatalf("EnsurePrivateExclude() iteration %d error = %v", i+1, err)
 		}
 	}
@@ -35,7 +37,7 @@ func TestEnsurePrivateExcludeIdempotent(t *testing.T) {
 			t.Fatalf("private exclude content = %q, want preserved %q", content, want)
 		}
 	}
-	assertLineCount(t, content, ".liza/scip/", 1)
+	assertLineCount(t, content, paths.ProjectDirName()+"/scip/", 1)
 	assertLineCount(t, content, ".sembleignore", 1)
 	if got := gitOutput(t, worktree, "config", "--worktree", "--get", "core.excludesFile"); filepath.Clean(got) != filepath.Clean(privateExclude) {
 		t.Fatalf("core.excludesFile = %q, want %q", got, privateExclude)
@@ -93,7 +95,7 @@ func TestEnsurePrivateExcludeConcurrentSetup(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			errs <- EnsurePrivateExclude(worktree, ".liza/scip/", ".sembleignore")
+			errs <- EnsurePrivateExclude(worktree, paths.ProjectDirName()+"/scip/", ".sembleignore")
 		}()
 	}
 	wg.Wait()
@@ -105,7 +107,7 @@ func TestEnsurePrivateExcludeConcurrentSetup(t *testing.T) {
 	}
 
 	content := readFileString(t, privateExclude)
-	assertLineCount(t, content, ".liza/scip/", 1)
+	assertLineCount(t, content, paths.ProjectDirName()+"/scip/", 1)
 	assertLineCount(t, content, ".sembleignore", 1)
 	if got := gitOutput(t, worktree, "config", "--worktree", "--get", "core.excludesFile"); filepath.Clean(got) != filepath.Clean(privateExclude) {
 		t.Fatalf("core.excludesFile = %q, want %q", got, privateExclude)

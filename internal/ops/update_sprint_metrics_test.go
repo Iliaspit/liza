@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/liza-mas/liza/internal/models"
+	"github.com/liza-mas/liza/internal/paths"
 	"github.com/liza-mas/liza/internal/testhelpers"
 )
 
@@ -338,7 +339,7 @@ func TestUpdateSprintMetrics_CountsPipelineCleanStatusAsDone(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read pipeline fixture: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(tmpDir, ".liza", "pipeline.yaml"), pipelineData, 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(tmpDir, paths.ProjectDirName(), "pipeline.yaml"), pipelineData, 0o644); err != nil {
 		t.Fatalf("write pipeline fixture: %v", err)
 	}
 

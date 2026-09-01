@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/liza-mas/liza/internal/paths"
+
 	"github.com/liza-mas/liza/internal/db"
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/ops"
@@ -480,7 +482,7 @@ func TestEffectiveIntegrationCompletionConsumers(t *testing.T) {
 		if err := stopAfterCompletedResume(cleanRoot, completeResume, ops.StopForGoalCompletion); !errors.Is(err, errGoalComplete) {
 			t.Fatalf("current-HEAD clean completion error: %s", deepestTestError(err))
 		}
-		cleanState, err := db.For(filepath.Join(cleanRoot, ".liza", "state.yaml")).Read()
+		cleanState, err := db.For(filepath.Join(cleanRoot, paths.ProjectDirName(), "state.yaml")).Read()
 		if err != nil || cleanState.Config.Mode != models.SystemModeStopped {
 			t.Fatalf("clean completion state mode=%s error=%v", cleanState.Config.Mode, err)
 		}
@@ -489,7 +491,7 @@ func TestEffectiveIntegrationCompletionConsumers(t *testing.T) {
 		if err := stopAfterCompletedResume(staleRoot, completeResume, ops.StopForGoalCompletion); err == nil || errors.Is(err, errGoalComplete) {
 			t.Fatalf("stale clean evidence error = %v, want non-terminal precondition failure", err)
 		}
-		staleState, err := db.For(filepath.Join(staleRoot, ".liza", "state.yaml")).Read()
+		staleState, err := db.For(filepath.Join(staleRoot, paths.ProjectDirName(), "state.yaml")).Read()
 		if err != nil || staleState.Config.Mode != models.SystemModeRunning {
 			t.Fatalf("stale completion state mode=%s error=%v", staleState.Config.Mode, err)
 		}

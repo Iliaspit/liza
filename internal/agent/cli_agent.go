@@ -11,10 +11,9 @@ import (
 	"time"
 
 	"github.com/liza-mas/liza/internal/brand"
+	"github.com/liza-mas/liza/internal/envgate"
 	"github.com/liza-mas/liza/internal/models"
 )
-
-const envLizaCodexVersion = "LIZA_CODEX_VERSION"
 
 type codexLaunchConfig struct {
 	PackageVersion string
@@ -331,7 +330,7 @@ func (d *CLIAgent) ExecuteInteractive(ctx context.Context, cliName string, agent
 
 func (d *CLIAgent) buildRunCommand(ctx context.Context, req LLMAgentRunRequest) (*exec.Cmd, func(), error) {
 	cmdEnv := os.Environ()
-	disableSubagents := envValue(cmdEnv, "LIZA_DISABLE_CLAUDE_SUBAGENTS") == "1"
+	disableSubagents := brandedEnvListGateValue(cmdEnv, "DISABLE_CLAUDE_SUBAGENTS") == "1"
 	promptFile := req.PromptFile
 	cleanup := func() {}
 	if promptFile == "" {
@@ -352,7 +351,7 @@ func (d *CLIAgent) buildRunCommand(ctx context.Context, req LLMAgentRunRequest) 
 			return nil, nil, err
 		}
 		if plan.UsesPromptFile {
-			file, err := os.CreateTemp("", "liza-agent-prompt-*.md")
+			file, err := os.CreateTemp("", brand.RuntimeValues().BinaryName+"-agent-prompt-*.md")
 			if err != nil {
 				return nil, nil, fmt.Errorf("create prompt file: %w", err)
 			}
@@ -434,7 +433,7 @@ func (d *CLIAgent) buildRunCommand(ctx context.Context, req LLMAgentRunRequest) 
 func resolveCodexLaunchConfig(config models.Config, env []string) codexLaunchConfig {
 	version := strings.TrimSpace(config.CodexPackageVersion)
 	if version == "" {
-		version = strings.TrimSpace(envValue(env, envLizaCodexVersion))
+		version = strings.TrimSpace(brandedEnvListValue(env, "CODEX_VERSION"))
 	}
 	return codexLaunchConfig{PackageVersion: version}
 }
@@ -499,13 +498,39 @@ func codexCommandContext(ctx context.Context, version string, args []string) (*e
 }
 
 func envValue(env []string, key string) string {
+	value, _ := envLookup(env, key)
+	return value
+}
+
+func envLookup(env []string, key string) (string, bool) {
 	prefix := key + "="
 	for i := len(env) - 1; i >= 0; i-- {
 		if val, ok := strings.CutPrefix(env[i], prefix); ok {
-			return val
+			return val, true
 		}
 	}
-	return ""
+	return "", false
+}
+
+func brandedEnvListValue(env []string, suffix string) string {
+	lookup := brand.LookupEnv(func(key string) string {
+		return envValue(env, key)
+	}, suffix)
+	return warnBrandedEnvLookup(lookup)
+}
+
+func brandedEnvListGateValue(env []string, suffix string) string {
+	lookup := envgate.LookupFunc(func(key string) (string, bool) {
+		return envLookup(env, key)
+	}, suffix)
+	return warnBrandedEnvLookup(lookup)
+}
+
+func warnBrandedEnvLookup(lookup brand.EnvLookup) string {
+	if lookup.Warning != "" {
+		fmt.Fprintf(os.Stderr, "Warning: %s\n", lookup.Warning)
+	}
+	return lookup.Value
 }
 
 func agentProcessEnv(base []string, agentID, generation string) []string {

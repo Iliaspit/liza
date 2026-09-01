@@ -23,6 +23,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/liza-mas/liza/internal/paths"
+
 	"github.com/liza-mas/liza/internal/brand"
 )
 
@@ -134,9 +136,9 @@ func tempHome(t *testing.T) string {
 
 func writePrefsForTest(t *testing.T, home string, prefs preferences) {
 	t.Helper()
-	dir := filepath.Join(home, ".liza")
+	dir := filepath.Join(home, paths.GlobalDirName())
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatalf("create temp .liza dir: %v", err)
+		t.Fatalf("create temp global runtime directory: %v", err)
 	}
 	data, err := json.MarshalIndent(prefs, "", "  ")
 	if err != nil {
@@ -150,7 +152,7 @@ func writePrefsForTest(t *testing.T, home string, prefs preferences) {
 
 func readPrefsForTest(t *testing.T, home string) preferences {
 	t.Helper()
-	data, err := os.ReadFile(filepath.Join(home, ".liza", updatePrefs))
+	data, err := os.ReadFile(filepath.Join(home, paths.GlobalDirName(), updatePrefs))
 	if err != nil {
 		t.Fatalf("read prefs: %v", err)
 	}
@@ -343,7 +345,7 @@ func TestMaybeUpdateAndReexecDeclineRunsOriginalVersion(t *testing.T) {
 	if stdout.String() != "" {
 		t.Fatalf("stdout should be empty for updater prompts, got: %s", stdout.String())
 	}
-	if !strings.Contains(stderr.String(), "Liza stable update is available (v1.0.0 -> v1.2.3)") {
+	if !strings.Contains(stderr.String(), brand.NameTitle+" stable update is available (v1.0.0 -> v1.2.3)") {
 		t.Fatalf("stderr missing prompt text:\n%s", stderr.String())
 	}
 	if !strings.Contains(stderr.String(), "Disable update checks for future runs?") {
@@ -369,7 +371,7 @@ func TestMaybeUpdateAndReexecInstallsAndReexecsOriginalCommand(t *testing.T) {
 	err := MaybeUpdateAndReexec(context.Background(), Config{
 		CurrentVersion: "v1.0.0",
 		CheckUpdate:    true,
-		Args:           []string{"/tmp/old-liza", "agent", "orchestrator", "--agent-id", "orchestrator-1"},
+		Args:           []string{"/tmp/old-" + brand.NameLower, "agent", "orchestrator", "--agent-id", "orchestrator-1"},
 		Env:            []string{"PATH=/bin"},
 		Stdin:          strings.NewReader("yes\n"),
 		Stdout:         &stdout,
@@ -381,7 +383,7 @@ func TestMaybeUpdateAndReexecInstallsAndReexecsOriginalCommand(t *testing.T) {
 			return nil
 		},
 		InstallTarget: func() (string, error) {
-			return "/home/user/go/bin/liza", nil
+			return "/home/user/go/bin/" + brand.BinaryName, nil
 		},
 		VerifyInstall: func(context.Context, string, io.Writer) error {
 			return nil
@@ -399,10 +401,10 @@ func TestMaybeUpdateAndReexecInstallsAndReexecsOriginalCommand(t *testing.T) {
 	if installedVersion != "v1.2.3" {
 		t.Fatalf("installed version = %q, want v1.2.3", installedVersion)
 	}
-	if execPath != "/home/user/go/bin/liza" {
+	if execPath != "/home/user/go/bin/"+brand.BinaryName {
 		t.Fatalf("exec path = %q, want installed liza path", execPath)
 	}
-	wantArgs := []string{"liza", "agent", "orchestrator", "--agent-id", "orchestrator-1"}
+	wantArgs := []string{brand.BinaryName, "agent", "orchestrator", "--agent-id", "orchestrator-1"}
 	if !slices.Equal(execArgs, wantArgs) {
 		t.Fatalf("exec args = %v, want %v", execArgs, wantArgs)
 	}
@@ -410,7 +412,7 @@ func TestMaybeUpdateAndReexecInstallsAndReexecsOriginalCommand(t *testing.T) {
 	if stdout.String() != "" {
 		t.Fatalf("stdout should be empty for updater prompts, got: %s", stdout.String())
 	}
-	if !slices.Contains(execEnv, "LIZA_SKIP_AUTO_UPDATE=1") {
+	if !slices.Contains(execEnv, brand.EnvName("SKIP_AUTO_UPDATE")+"=1") {
 		t.Fatalf("exec env missing skip marker: %v", execEnv)
 	}
 	if !strings.Contains(stderr.String(), "Installing release binary v1.2.3") {
@@ -477,14 +479,14 @@ func TestMaybeUpdateAndReexecPromptsToStderr(t *testing.T) {
 	err := MaybeUpdateAndReexec(context.Background(), Config{
 		CurrentVersion: "v1.0.0",
 		CheckUpdate:    true,
-		Args:           []string{"/tmp/liza", "version"},
+		Args:           []string{"/tmp/" + brand.BinaryName, "version"},
 		Stdin:          strings.NewReader("y\n"),
 		Stdout:         &stdout,
 		Stderr:         &stderr,
 		IsInteractive:  func() bool { return true },
 		LookupLatest:   func(context.Context) (string, error) { return "v1.2.3", nil },
 		Install:        func(context.Context, candidate, string, io.Writer, io.Writer) error { return nil },
-		InstallTarget:  func() (string, error) { return "/tmp/liza", nil },
+		InstallTarget:  func() (string, error) { return "/tmp/" + brand.BinaryName, nil },
 		VerifyInstall:  func(context.Context, string, io.Writer) error { return nil },
 		Reexec:         func(string, []string, []string) error { return reexecErr },
 	})
@@ -494,7 +496,7 @@ func TestMaybeUpdateAndReexecPromptsToStderr(t *testing.T) {
 	if stdout.String() != "" {
 		t.Fatalf("stdout should be empty for accepted update, got: %s", stdout.String())
 	}
-	if !strings.Contains(stderr.String(), "Liza stable update is available") {
+	if !strings.Contains(stderr.String(), brand.NameTitle+" stable update is available") {
 		t.Fatalf("stderr missing prompt for accepted update:\n%s", stderr.String())
 	}
 
@@ -504,7 +506,7 @@ func TestMaybeUpdateAndReexecPromptsToStderr(t *testing.T) {
 	err = MaybeUpdateAndReexec(context.Background(), Config{
 		CurrentVersion: "v1.0.0",
 		CheckUpdate:    true,
-		Args:           []string{"/tmp/liza", "version"},
+		Args:           []string{"/tmp/" + brand.BinaryName, "version"},
 		Stdin:          strings.NewReader("n\nn\n"),
 		Stdout:         &stdout,
 		Stderr:         &stderr,
@@ -519,7 +521,7 @@ func TestMaybeUpdateAndReexecPromptsToStderr(t *testing.T) {
 	if stdout.String() != "" {
 		t.Fatalf("stdout should be empty for declined update, got: %s", stdout.String())
 	}
-	if !strings.Contains(stderr.String(), "Liza stable update is available") {
+	if !strings.Contains(stderr.String(), brand.NameTitle+" stable update is available") {
 		t.Fatalf("stderr missing prompt for declined update:\n%s", stderr.String())
 	}
 }
@@ -838,7 +840,7 @@ func TestParseMainCommit(t *testing.T) {
 
 func TestInstallBinaryFromTarGzReplacesTarget(t *testing.T) {
 	dir := t.TempDir()
-	target := filepath.Join(dir, "liza")
+	target := filepath.Join(dir, brand.BinaryName)
 	if err := os.WriteFile(target, []byte("old"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -848,7 +850,7 @@ func TestInstallBinaryFromTarGzReplacesTarget(t *testing.T) {
 	tw := tar.NewWriter(gz)
 	body := []byte("#!/bin/sh\necho new\n")
 	if err := tw.WriteHeader(&tar.Header{
-		Name: "liza",
+		Name: brand.BinaryName,
 		Mode: 0o755,
 		Size: int64(len(body)),
 	}); err != nil {
@@ -1039,7 +1041,7 @@ func TestInstallReleaseBinaryWithChecksum(t *testing.T) {
 	tw := tar.NewWriter(gz)
 	body := []byte("#!/bin/sh\necho new\n")
 	if err := tw.WriteHeader(&tar.Header{
-		Name: "liza",
+		Name: brand.BinaryName,
 		Mode: 0o755,
 		Size: int64(len(body)),
 	}); err != nil {
@@ -1076,7 +1078,7 @@ func TestInstallReleaseBinaryWithChecksum(t *testing.T) {
 	defer server.Close()
 
 	dir := t.TempDir()
-	target := filepath.Join(dir, "liza")
+	target := filepath.Join(dir, brand.BinaryName)
 	if err := os.WriteFile(target, []byte("old"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -1101,7 +1103,7 @@ func TestInstallReleaseBinaryChecksumMismatch(t *testing.T) {
 	tw := tar.NewWriter(gz)
 	body := []byte("#!/bin/sh\necho new\n")
 	if err := tw.WriteHeader(&tar.Header{
-		Name: "liza",
+		Name: brand.BinaryName,
 		Mode: 0o755,
 		Size: int64(len(body)),
 	}); err != nil {
@@ -1134,7 +1136,7 @@ func TestInstallReleaseBinaryChecksumMismatch(t *testing.T) {
 	defer server.Close()
 
 	dir := t.TempDir()
-	target := filepath.Join(dir, "liza")
+	target := filepath.Join(dir, brand.BinaryName)
 
 	ctx := context.Background()
 	if err := installReleaseBinaryWithChecksumBase(ctx, "v1.0.0", target, io.Discard, server.URL, server.URL); err == nil {
@@ -1148,7 +1150,7 @@ func TestInstallReleaseBinaryMissingChecksum(t *testing.T) {
 	tw := tar.NewWriter(gz)
 	body := []byte("#!/bin/sh\necho new\n")
 	if err := tw.WriteHeader(&tar.Header{
-		Name: "liza",
+		Name: brand.BinaryName,
 		Mode: 0o755,
 		Size: int64(len(body)),
 	}); err != nil {
@@ -1181,7 +1183,7 @@ func TestInstallReleaseBinaryMissingChecksum(t *testing.T) {
 	defer server.Close()
 
 	dir := t.TempDir()
-	target := filepath.Join(dir, "liza")
+	target := filepath.Join(dir, brand.BinaryName)
 
 	ctx := context.Background()
 	if err := installReleaseBinaryWithChecksumBase(ctx, "v1.0.0", target, io.Discard, server.URL, server.URL); err == nil {
@@ -1194,7 +1196,7 @@ func TestInstallBinaryFromTarGzRejectsSymlink(t *testing.T) {
 	gz := gzip.NewWriter(&archive)
 	tw := tar.NewWriter(gz)
 	if err := tw.WriteHeader(&tar.Header{
-		Name:     "liza",
+		Name:     brand.BinaryName,
 		Typeflag: tar.TypeSymlink,
 		Linkname: "/etc/passwd",
 	}); err != nil {
@@ -1220,7 +1222,7 @@ func TestInstallBinaryFromTarGzRejectsHardlink(t *testing.T) {
 	gz := gzip.NewWriter(&archive)
 	tw := tar.NewWriter(gz)
 	if err := tw.WriteHeader(&tar.Header{
-		Name:     "liza",
+		Name:     brand.BinaryName,
 		Typeflag: tar.TypeLink,
 		Linkname: "/bin/sh",
 	}); err != nil {
@@ -1264,7 +1266,7 @@ func TestInstallBinaryFromTarGzRejectsPathTraversal(t *testing.T) {
 	}
 
 	dir := t.TempDir()
-	target := filepath.Join(dir, "liza")
+	target := filepath.Join(dir, brand.BinaryName)
 
 	if err := installBinaryFromTarGz(bytes.NewReader(archive.Bytes()), target); err == nil {
 		t.Fatal("installBinaryFromTarGz should reject path traversal")
@@ -1278,7 +1280,7 @@ func TestInstallBinaryFromTarGzStripsDangerousPermissions(t *testing.T) {
 	body := []byte("#!/bin/sh\necho new\n")
 	// Set setuid, setgid, and sticky bits
 	if err := tw.WriteHeader(&tar.Header{
-		Name: "liza",
+		Name: brand.BinaryName,
 		Mode: 0o755 | 0o7000, // 0o755 + setuid(0o4000) + setgid(0o2000) + sticky(0o1000)
 		Size: int64(len(body)),
 	}); err != nil {
@@ -1295,7 +1297,7 @@ func TestInstallBinaryFromTarGzStripsDangerousPermissions(t *testing.T) {
 	}
 
 	dir := t.TempDir()
-	target := filepath.Join(dir, "liza")
+	target := filepath.Join(dir, brand.BinaryName)
 
 	if err := installBinaryFromTarGz(bytes.NewReader(archive.Bytes()), target); err != nil {
 		t.Fatalf("installBinaryFromTarGz failed: %v", err)
@@ -1336,7 +1338,7 @@ func TestInstallFromSourceShallowFetchFallback(t *testing.T) {
 	runStreaming = mockRun
 
 	dir := t.TempDir()
-	target := filepath.Join(dir, "liza")
+	target := filepath.Join(dir, brand.BinaryName)
 
 	ctx := context.Background()
 	err := installFromSource(ctx, "deadbeef123456", target, io.Discard)
@@ -1685,7 +1687,7 @@ func TestMaybeUpdateAndReexecVerificationFailurePreventsReexec(t *testing.T) {
 
 func TestMaybeUpdateAndReexecRestoresTargetWhenVerificationFails(t *testing.T) {
 	dir := t.TempDir()
-	target := filepath.Join(dir, "liza")
+	target := filepath.Join(dir, brand.BinaryName)
 	oldBody := []byte("#!/bin/sh\necho old\n")
 	if err := os.WriteFile(target, oldBody, 0o755); err != nil {
 		t.Fatal(err)

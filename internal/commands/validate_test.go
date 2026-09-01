@@ -91,9 +91,9 @@ func TestValidateCommandWithOptions_FailsOnZombieAgent(t *testing.T) {
 	if err == nil {
 		t.Fatal("ValidateCommandWithOptions() error = nil, want zombie validation failure")
 	}
-	testhelpers.AssertErrorContains(t, err, "zombie liza agent process detected")
+	testhelpers.AssertErrorContains(t, err, "zombie "+brand.BinaryName+" agent process detected")
 	testhelpers.AssertErrorContains(t, err, "pid 222 role coder")
-	testhelpers.AssertErrorContains(t, err, "liza get agents --zombies")
+	testhelpers.AssertErrorContains(t, err, brand.BinaryName+" get agents --zombies")
 }
 
 func TestValidateCommandWithOptions_RecentlySpawnedPIDDoesNotSuppressOtherZombies(t *testing.T) {
@@ -553,7 +553,7 @@ func TestValidateCommandWithOptions_RepairInvalidDoerOwnershipLivePIDRefuses(t *
 	if !strings.Contains(warnBuf.String(), "assigned agent coder-1 has live PID") {
 		t.Fatalf("repair warning = %q, want live PID refusal", warnBuf.String())
 	}
-	if !strings.Contains(warnBuf.String(), "use liza recover-agent coder-1 --force or liza release-claim task-1 --role doer --force") {
+	if !strings.Contains(warnBuf.String(), "use "+brand.BinaryName+" recover-agent coder-1 --force or "+brand.BinaryName+" release-claim task-1 --role doer --force") {
 		t.Fatalf("repair warning = %q, want recovery commands", warnBuf.String())
 	}
 

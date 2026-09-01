@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/liza-mas/liza/internal/paths"
+
 	"github.com/liza-mas/liza/internal/db"
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/testhelpers"
@@ -431,7 +433,7 @@ func newLifecycleGenerationFixture(t *testing.T, agentID, role string, withGit b
 	return lifecycleGenerationFixture{
 		projectRoot: projectRoot,
 		statePath:   statePath,
-		logPath:     filepath.Join(projectRoot, ".liza", "log.jsonl"),
+		logPath:     filepath.Join(projectRoot, paths.ProjectDirName(), "log.jsonl"),
 		authorityA:  models.AgentAuthority{ID: agentID, Generation: taskLifecycleGenerationA},
 		authorityB:  models.AgentAuthority{ID: agentID, Generation: taskLifecycleGenerationB},
 	}

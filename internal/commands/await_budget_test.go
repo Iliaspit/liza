@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/liza-mas/liza/internal/paths"
+
 	"github.com/liza-mas/liza/internal/db"
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/ops"
@@ -437,7 +439,7 @@ func TestAwaitVerdictWithAuthority_BudgetCleanupPropagatesGenerationFence(t *tes
 	}
 	t.Cleanup(func() { runAwaitVerdictWithAuthorityOptions = previousAwait })
 
-	statePath := filepath.Join(fixture.projectRoot, ".liza", "state.yaml")
+	statePath := filepath.Join(fixture.projectRoot, paths.ProjectDirName(), "state.yaml")
 	before, err := os.ReadFile(statePath)
 	if err != nil {
 		t.Fatalf("read state before stale cleanup: %v", err)

@@ -8,6 +8,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/liza-mas/liza/internal/paths"
 	"github.com/liza-mas/liza/internal/semble"
 	"github.com/liza-mas/liza/internal/testhelpers"
 	"github.com/liza-mas/liza/internal/worktreeexclude"
@@ -38,8 +39,8 @@ func TestPrepareSembleWorktreeIgnoreAppendsMissingGeneratedPatterns(t *testing.T
 
 func TestPrepareSembleWorktreeIgnoreUsesSharedPrivateExcludeWithScip(t *testing.T) {
 	fixture := newPrepareSembleWorktreeIgnoreFixture(t)
-	if err := worktreeexclude.EnsurePrivateExclude(fixture.worktree, ".liza/scip/"); err != nil {
-		t.Fatalf("EnsurePrivateExclude(.liza/scip/) error = %v", err)
+	if err := worktreeexclude.EnsurePrivateExclude(fixture.worktree, paths.ProjectDirName()+"/scip/"); err != nil {
+		t.Fatalf("EnsurePrivateExclude(%s/scip/) error = %v", paths.ProjectDirName(), err)
 	}
 
 	warnings := PrepareSembleWorktreeIgnore(fixture.worktree)
@@ -49,7 +50,7 @@ func TestPrepareSembleWorktreeIgnoreUsesSharedPrivateExcludeWithScip(t *testing.
 	if got := runGitInDir(t, fixture.worktree, "config", "--worktree", "--get", "core.excludesFile"); filepath.Clean(got) != filepath.Clean(privateExclude) {
 		t.Fatalf("core.excludesFile = %q, want shared private exclude %q", got, privateExclude)
 	}
-	assertPrepareSemblePrivateExcludeCount(t, fixture.worktree, ".liza/scip/", 1)
+	assertPrepareSemblePrivateExcludeCount(t, fixture.worktree, paths.ProjectDirName()+"/scip/", 1)
 	assertPrepareSemblePrivateExcludeCount(t, fixture.worktree, ".sembleignore", 1)
 	assertGitStatusClean(t, fixture.worktree)
 }
@@ -110,7 +111,7 @@ func TestPrepareSembleWorktreeIgnoreLeavesTrackedCompleteFileVisible(t *testing.
 
 func TestPrepareSembleWorktreeIgnoreReportsTrackedIncompleteWithoutMutation(t *testing.T) {
 	fixture := newPrepareSembleWorktreeIgnoreFixture(t)
-	before := "operator-owned marker\n.liza/\n"
+	before := "operator-owned marker\n" + paths.ProjectDirName() + "/\n"
 	writePrepareSembleIgnorePayload(t, fixture.worktree, before)
 	runGitInDir(t, fixture.worktree, "add", ".sembleignore")
 	runGitInDir(t, fixture.worktree, "commit", "-m", "track incomplete semble ignore")
@@ -142,7 +143,7 @@ func TestPrepareSembleWorktreeIgnoreReportsTrackedIncompleteWithoutMutation(t *t
 func TestPrepareSembleWorktreeIgnoreWarningPreventsPromptMetadata(t *testing.T) {
 	t.Setenv(semble.EnvEnableSemble, "true")
 	fixture := newPrepareSembleWorktreeIgnoreFixture(t)
-	writePrepareSembleIgnorePayload(t, fixture.worktree, "operator-owned marker\n.liza/\n")
+	writePrepareSembleIgnorePayload(t, fixture.worktree, "operator-owned marker\n"+paths.ProjectDirName()+"/\n")
 	runGitInDir(t, fixture.worktree, "add", ".sembleignore")
 	runGitInDir(t, fixture.worktree, "commit", "-m", "track incomplete semble ignore")
 

@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/liza-mas/liza/internal/models"
+	"github.com/liza-mas/liza/internal/paths"
 	"github.com/liza-mas/liza/internal/testhelpers"
 	"gopkg.in/yaml.v3"
 )
@@ -675,7 +676,7 @@ func TestLoadFrozen_NoFile(t *testing.T) {
 
 func TestLoadFrozen_ValidFile(t *testing.T) {
 	dir := t.TempDir()
-	lizaDir := filepath.Join(dir, ".liza")
+	lizaDir := filepath.Join(dir, paths.ProjectDirName())
 	if err := os.MkdirAll(lizaDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -760,7 +761,7 @@ func TestLoadFrozenEffectiveRoleCapabilities(t *testing.T) {
 
 func TestLoadFrozen_BackfillsLegacyMasterDecompositionOutputRefs(t *testing.T) {
 	dir := t.TempDir()
-	lizaDir := filepath.Join(dir, ".liza")
+	lizaDir := filepath.Join(dir, paths.ProjectDirName())
 	if err := os.MkdirAll(lizaDir, 0o755); err != nil {
 		t.Fatal(err)
 	}

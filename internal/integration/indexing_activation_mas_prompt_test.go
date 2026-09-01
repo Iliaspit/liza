@@ -9,6 +9,7 @@ import (
 	"github.com/liza-mas/liza/internal/agent"
 	"github.com/liza-mas/liza/internal/functionalclusters"
 	"github.com/liza-mas/liza/internal/models"
+	"github.com/liza-mas/liza/internal/paths"
 	"github.com/liza-mas/liza/internal/scipsearch"
 	"github.com/liza-mas/liza/internal/semble"
 	"github.com/liza-mas/liza/internal/stacklit"
@@ -21,7 +22,7 @@ func TestIndexingActivationMASPromptsRenderEnabledMetadataFromRoleTargetRoots(t 
 	enableOptionalIndexingForTest(t)
 
 	pairingStacklitIndex := filepath.Join(projectRoot, "stacklit.json")
-	pairingScipIndex := filepath.Join(projectRoot, ".liza", "scip", "go.scip")
+	pairingScipIndex := filepath.Join(projectRoot, paths.ProjectDirName(), "scip", "go.scip")
 	writeIndexingActivationFile(t, pairingStacklitIndex, `{"project":{"name":"pairing-root"}}`)
 	writeIndexingActivationFile(t, pairingScipIndex, "pairing root go index")
 	writeIndexingActivationFile(t, filepath.Join(projectRoot, ".sembleignore"), semble.DefaultIgnorePayload())
@@ -80,22 +81,22 @@ func TestIndexingActivationMASPromptsRenderEnabledMetadataFromRoleTargetRoots(t 
 
 			prompt := buildIndexingActivationMASPrompt(t, projectRoot, tt.role, tt.agentID, tt.taskID, tt.worktreeRel)
 			stacklitIndex := filepath.Join(tt.targetRoot, "stacklit.json")
-			scipIndex := filepath.Join(tt.targetRoot, ".liza", "scip", "go.scip")
+			scipIndex := filepath.Join(tt.targetRoot, paths.ProjectDirName(), "scip", "go.scip")
 			functionalClustersArtifact := filepath.Join(tt.targetRoot, "functional-clusters.json")
 
 			assertIndexingActivationContainsAll(t, prompt,
 				"=== STACKLIT INDEX ===",
 				"Stacklit index: "+shellQuoteForIndexingActivationTest(stacklitIndex),
-				"Use `~/.liza/AGENT_TOOLS.md` for Stacklit command syntax, routing rules, and freshness caveats.",
+				"Use `~/"+paths.GlobalDirName()+"/AGENT_TOOLS.md` for Stacklit command syntax, routing rules, and freshness caveats.",
 				"=== SCIP-SEARCH INDEXES ===",
 				"Go index: "+shellQuoteForIndexingActivationTest(scipIndex),
-				"Use `~/.liza/AGENT_TOOLS.md` for `scip-search` command syntax, routing rules, and freshness caveats.",
+				"Use `~/"+paths.GlobalDirName()+"/AGENT_TOOLS.md` for `scip-search` command syntax, routing rules, and freshness caveats.",
 				"=== FUNCTIONAL CLUSTERS ===",
 				"Functional Clusters artifact: "+shellQuoteForIndexingActivationTest(functionalClustersArtifact),
-				"Use `~/.liza/AGENT_TOOLS.md` for Functional Clusters command syntax, routing rules, and freshness caveats.",
+				"Use `~/"+paths.GlobalDirName()+"/AGENT_TOOLS.md` for Functional Clusters command syntax, routing rules, and freshness caveats.",
 				"=== SEMBLE SEARCH ===",
 				shellQuoteForIndexingActivationTest(tt.targetRoot),
-				"Use `~/.liza/AGENT_TOOLS.md` for Semble command syntax, content modes, routing rules, and proof requirements.",
+				"Use `~/"+paths.GlobalDirName()+"/AGENT_TOOLS.md` for Semble command syntax, content modes, routing rules, and proof requirements.",
 			)
 			assertIndexingActivationContainsNone(t, prompt, tt.forbiddenPaths...)
 		})
@@ -118,7 +119,7 @@ func TestIndexingActivationMASPromptsOmitDisabledSectionsDespiteStaleArtifacts(t
 				"=== FUNCTIONAL CLUSTERS ===",
 				"=== SEMBLE SEARCH ===",
 				filepath.Join(targetRoot, "stacklit.json"),
-				filepath.Join(targetRoot, ".liza", "scip", "go.scip"),
+				filepath.Join(targetRoot, paths.ProjectDirName(), "scip", "go.scip"),
 				filepath.Join(targetRoot, "functional-clusters.json"),
 			)...)
 		})
@@ -141,7 +142,7 @@ func TestIndexingActivationMASPromptsOmitFailedOptionalToolOnly(t *testing.T) {
 			assertIndexingActivationContainsAll(t, prompt,
 				"=== STACKLIT INDEX ===",
 				"Stacklit index: "+shellQuoteForIndexingActivationTest(filepath.Join(targetRoot, "stacklit.json")),
-				"Use `~/.liza/AGENT_TOOLS.md` for Stacklit command syntax, routing rules, and freshness caveats.",
+				"Use `~/"+paths.GlobalDirName()+"/AGENT_TOOLS.md` for Stacklit command syntax, routing rules, and freshness caveats.",
 			)
 			assertIndexingActivationContainsNone(t, prompt,
 				"=== SCIP-SEARCH INDEXES ===",
@@ -224,7 +225,7 @@ func prepareOptionalIndexTargetRoot(t *testing.T, targetRoot string) {
 	testhelpers.MustGit(t, targetRoot, "add", "go.mod")
 	testhelpers.MustGit(t, targetRoot, "commit", "-m", "Add go module")
 	writeIndexingActivationFile(t, filepath.Join(targetRoot, "stacklit.json"), `{"project":{"name":"target"}}`)
-	writeIndexingActivationFile(t, filepath.Join(targetRoot, ".liza", "scip", "go.scip"), "target go index")
+	writeIndexingActivationFile(t, filepath.Join(targetRoot, paths.ProjectDirName(), "scip", "go.scip"), "target go index")
 	writeIndexingActivationFile(t, filepath.Join(targetRoot, "functional-clusters.json"), "{}\n")
 	writeIndexingActivationFile(t, filepath.Join(targetRoot, ".sembleignore"), semble.DefaultIgnorePayload())
 }
@@ -267,7 +268,7 @@ func buildIndexingActivationMASPrompt(t *testing.T, projectRoot, role, agentID, 
 		AgentID:     agentID,
 		ProjectRoot: projectRoot,
 		SpecsDir:    filepath.Join(projectRoot, "specs"),
-		StatePath:   filepath.Join(projectRoot, ".liza", "state.yaml"),
+		StatePath:   filepath.Join(projectRoot, paths.ProjectDirName(), "state.yaml"),
 	}, taskID)
 	if err != nil {
 		t.Fatalf("BuildPrompt(%s): %v", role, err)

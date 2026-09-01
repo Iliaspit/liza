@@ -30,10 +30,10 @@ func TestGetCommand(t *testing.T) {
 		t.Fatalf("failed to init git repo: %v\n%s", err, out)
 	}
 
-	// Create .liza directory
+	// Create the project runtime directory.
 	lizaDir := filepath.Join(tmpDir, paths.LizaDirName)
 	if err := os.MkdirAll(lizaDir, 0755); err != nil {
-		t.Fatalf("failed to create .liza dir: %v", err)
+		t.Fatalf("failed to create project runtime dir: %v", err)
 	}
 
 	// Write pipeline config so role-based agent ID detection works

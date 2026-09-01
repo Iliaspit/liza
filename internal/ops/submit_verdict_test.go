@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/liza-mas/liza/internal/brand"
+
 	"github.com/liza-mas/liza/internal/db"
 	"github.com/liza-mas/liza/internal/errors"
 	"github.com/liza-mas/liza/internal/git"
@@ -40,7 +42,7 @@ func TestSubmitVerdict_Validation(t *testing.T) {
 		},
 		{
 			name: "empty agent ID", taskID: "t1", verdict: "APPROVED",
-			errContains: "LIZA_AGENT_ID is required",
+			errContains: brand.EnvName("AGENT_ID") + " is required",
 		},
 		{
 			name: "invalid verdict", taskID: "t1", verdict: "MAYBE", agentID: "r1",
@@ -345,7 +347,7 @@ func TestSubmitVerdict_RejectionReasonByteLimit(t *testing.T) {
 		if !ok {
 			t.Fatalf("SubmitVerdict() error = %T %v, want *PreconditionError", err, err)
 		}
-		for _, part := range []string{"4097 bytes", "4096-byte maximum", ".liza/agent-outputs/", "bounded summary", "artifact reference"} {
+		for _, part := range []string{"4097 bytes", "4096-byte maximum", paths.ProjectDirName() + "/agent-outputs/", "bounded summary", "artifact reference"} {
 			if !strings.Contains(precondition.Reason, part) {
 				t.Errorf("PreconditionError.Reason = %q, want substring %q", precondition.Reason, part)
 			}
@@ -358,7 +360,7 @@ func TestSubmitVerdict_RejectionReasonByteLimit(t *testing.T) {
 		if !bytes.Equal(after, before) {
 			t.Fatal("oversized rejection changed state")
 		}
-		if _, statErr := os.Stat(filepath.Join(projectRoot, ".liza", "log.yaml")); !os.IsNotExist(statErr) {
+		if _, statErr := os.Stat(filepath.Join(projectRoot, paths.ProjectDirName(), "log.yaml")); !os.IsNotExist(statErr) {
 			t.Fatalf("oversized rejection created activity log: %v", statErr)
 		}
 	})
@@ -1267,7 +1269,7 @@ func TestQuorumEvaluation(t *testing.T) {
 		stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
 		// Write custom pipeline config
-		pipelinePath := filepath.Join(tmpDir, ".liza", "pipeline.yaml")
+		pipelinePath := filepath.Join(tmpDir, paths.ProjectDirName(), "pipeline.yaml")
 		if err := os.WriteFile(pipelinePath, []byte(pipelineYAML), 0644); err != nil {
 			t.Fatalf("Failed to write pipeline config: %v", err)
 		}
@@ -1595,7 +1597,7 @@ func TestSubmitVerdict_CleanScanRouting(t *testing.T) {
 		stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
 		// Overwrite with clean-aware pipeline
-		pipelinePath := filepath.Join(tmpDir, ".liza", "pipeline.yaml")
+		pipelinePath := filepath.Join(tmpDir, paths.ProjectDirName(), "pipeline.yaml")
 		if err := os.WriteFile(pipelinePath, []byte(cleanPipeline), 0644); err != nil {
 			t.Fatalf("Failed to write pipeline config: %v", err)
 		}
@@ -1646,7 +1648,7 @@ func TestSubmitVerdict_CleanScanRouting(t *testing.T) {
 			t.Errorf("Verdict = %q, want %q", result.Verdict, "APPROVED")
 		}
 
-		bb := db.New(filepath.Join(tmpDir, ".liza", "state.yaml"))
+		bb := db.New(filepath.Join(tmpDir, paths.ProjectDirName(), "state.yaml"))
 		readState, err := bb.Read()
 		if err != nil {
 			t.Fatalf("Failed to read state: %v", err)
@@ -1676,7 +1678,7 @@ func TestSubmitVerdict_CleanScanRouting(t *testing.T) {
 			t.Errorf("Verdict = %q, want %q", result.Verdict, "APPROVED")
 		}
 
-		bb := db.New(filepath.Join(tmpDir, ".liza", "state.yaml"))
+		bb := db.New(filepath.Join(tmpDir, paths.ProjectDirName(), "state.yaml"))
 		readState, err := bb.Read()
 		if err != nil {
 			t.Fatalf("Failed to read state: %v", err)
@@ -1706,7 +1708,7 @@ func TestSubmitVerdict_CleanScanRouting(t *testing.T) {
 			t.Errorf("Verdict = %q, want %q", result.Verdict, "APPROVED")
 		}
 
-		bb := db.New(filepath.Join(tmpDir, ".liza", "state.yaml"))
+		bb := db.New(filepath.Join(tmpDir, paths.ProjectDirName(), "state.yaml"))
 		readState, err := bb.Read()
 		if err != nil {
 			t.Fatalf("Failed to read state: %v", err)
@@ -2820,7 +2822,7 @@ func (fixture *submitVerdictIntegrationFixture) installPriorGlobalGeneration(t *
 
 func enableSubmitVerdictIntegrationQuorum(t *testing.T, projectRoot, rolePair string) {
 	t.Helper()
-	pipelinePath := filepath.Join(projectRoot, ".liza", "pipeline.yaml")
+	pipelinePath := filepath.Join(projectRoot, paths.ProjectDirName(), "pipeline.yaml")
 	content, err := os.ReadFile(pipelinePath)
 	if err != nil {
 		t.Fatalf("ReadFile(%s) error = %v", pipelinePath, err)

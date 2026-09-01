@@ -81,7 +81,7 @@ var codexHookContents = map[string][]byte{
 // — that directory holds Claude Code PreToolUse hooks that get written to
 // .claude/hooks/ and referenced from claude-settings.json. This one is a
 // git-native pre-commit hook rendered per-worktree by
-// RenderWorktreePreCommitHook and installed into <worktree>/.liza-hooks/
+// RenderWorktreePreCommitHook and installed into the branded worktree hook directory
 // (see ops.InstallWorktreePreCommitHook). Different transport, different
 // lifecycle, different directory.
 //
@@ -173,7 +173,7 @@ func PlanGlobalFiles(targetDir string) []string {
 }
 
 // WriteGlobalFiles writes contracts, skills, and support docs to the global
-// Liza directory (~/.liza/). Contracts are written flat into targetDir/,
+// runtime directory. Contracts are written flat into targetDir/,
 // skills into targetDir/skills/, and support docs into
 // targetDir/support-docs/. Markdown files are prepended with YAML frontmatter
 // containing version metadata. Files whose absolute path appears in skipFiles
@@ -1545,8 +1545,8 @@ func WriteBashPolicyConfigWithOptions(projectRoot string, reader *bufio.Reader, 
 	return nil
 }
 
-// WriteSupportDoc writes the canonical SUPPORT.md body to the .liza/
-// directory. Always overwrites — content tracks the Liza version.
+// WriteSupportDoc writes the canonical SUPPORT.md body to the runtime
+// directory. Always overwrites — content tracks the binary version.
 func WriteSupportDoc(lizaDir string) error {
 	content, err := supportDocsFS.ReadFile(supportDocEmbeddedPath)
 	if err != nil {

@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/liza-mas/liza/internal/paths"
 )
 
 const wantCodexSessionAccessDiagnostic = "thread/start failed: error creating thread: Codex cannot access session files under .codex/sessions (permission denied)"
@@ -68,7 +70,7 @@ func TestDetectProviderUnavailable_RequiresBoundedEvidenceLine(t *testing.T) {
 
 func TestProviderUnavailableSignal_WriteCheckClear(t *testing.T) {
 	projectRoot := t.TempDir()
-	lizaDir := filepath.Join(projectRoot, ".liza")
+	lizaDir := filepath.Join(projectRoot, paths.ProjectDirName())
 	if err := os.MkdirAll(lizaDir, 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -100,7 +102,7 @@ func TestProviderUnavailableSignal_WriteCheckClear(t *testing.T) {
 
 func TestProviderUnavailableSignal_NormalizesACPXProviderAliases(t *testing.T) {
 	projectRoot := t.TempDir()
-	lizaDir := filepath.Join(projectRoot, ".liza")
+	lizaDir := filepath.Join(projectRoot, paths.ProjectDirName())
 	if err := os.MkdirAll(lizaDir, 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -167,7 +169,7 @@ func TestProviderUnavailableSignalUsesBrandedProjectDir(t *testing.T) {
 
 func TestHandleClassifiedProviderCrash_WritesProviderUnavailableSignal(t *testing.T) {
 	projectRoot := t.TempDir()
-	lizaDir := filepath.Join(projectRoot, ".liza")
+	lizaDir := filepath.Join(projectRoot, paths.ProjectDirName())
 	if err := os.MkdirAll(lizaDir, 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -198,7 +200,7 @@ func TestHandleClassifiedProviderCrash_WritesProviderUnavailableSignal(t *testin
 
 func TestHandleClassifiedProviderCrash_PersistsOnlyBoundedDiagnostic(t *testing.T) {
 	projectRoot := t.TempDir()
-	lizaDir := filepath.Join(projectRoot, ".liza")
+	lizaDir := filepath.Join(projectRoot, paths.ProjectDirName())
 	if err := os.MkdirAll(lizaDir, 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -236,7 +238,7 @@ func TestHandleClassifiedProviderCrash_PersistsOnlyBoundedDiagnostic(t *testing.
 
 func TestHandleClassifiedProviderCrash_CodexACPWritesCanonicalSignal(t *testing.T) {
 	projectRoot := t.TempDir()
-	lizaDir := filepath.Join(projectRoot, ".liza")
+	lizaDir := filepath.Join(projectRoot, paths.ProjectDirName())
 	if err := os.MkdirAll(lizaDir, 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -257,7 +259,7 @@ func TestHandleClassifiedProviderCrash_CodexACPWritesCanonicalSignal(t *testing.
 
 func TestHandleClassifiedProviderCrash_IgnoresStaleOutputFiles(t *testing.T) {
 	projectRoot := t.TempDir()
-	lizaDir := filepath.Join(projectRoot, ".liza")
+	lizaDir := filepath.Join(projectRoot, paths.ProjectDirName())
 	outputsDir := filepath.Join(lizaDir, "agent-outputs")
 	if err := os.MkdirAll(outputsDir, 0755); err != nil {
 		t.Fatal(err)
@@ -282,7 +284,7 @@ func TestHandleClassifiedProviderCrash_IgnoresStaleOutputFiles(t *testing.T) {
 
 func TestHandleProviderUnavailableSignal(t *testing.T) {
 	projectRoot := t.TempDir()
-	lizaDir := filepath.Join(projectRoot, ".liza")
+	lizaDir := filepath.Join(projectRoot, paths.ProjectDirName())
 	if err := os.MkdirAll(lizaDir, 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -302,7 +304,7 @@ func TestHandleProviderUnavailableSignal(t *testing.T) {
 
 func TestHandleProviderUnavailableSignal_CodexAliasesObserveCanonicalSignal(t *testing.T) {
 	projectRoot := t.TempDir()
-	lizaDir := filepath.Join(projectRoot, ".liza")
+	lizaDir := filepath.Join(projectRoot, paths.ProjectDirName())
 	if err := os.MkdirAll(lizaDir, 0755); err != nil {
 		t.Fatal(err)
 	}

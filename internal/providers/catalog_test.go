@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path"
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -15,6 +16,7 @@ import (
 	"time"
 
 	"github.com/liza-mas/liza/internal/brand"
+	"github.com/liza-mas/liza/internal/paths"
 )
 
 func TestEmbeddedCatalogResolvesBuiltInsAndAliases(t *testing.T) {
@@ -196,8 +198,9 @@ func TestRepositoryCatalogAddsRemoteProviders(t *testing.T) {
 	if !ok {
 		t.Fatal("provider-catalog.yaml missing devin")
 	}
-	if devin.Setup.Contract.RepoFile != ".windsurf/rules/liza.md" {
-		t.Fatalf("devin contract repo file = %q, want .windsurf/rules/liza.md", devin.Setup.Contract.RepoFile)
+	wantRepoFile := path.Join(".windsurf", "rules", brand.NameLower+".md")
+	if devin.Setup.Contract.RepoFile != wantRepoFile {
+		t.Fatalf("devin contract repo file = %q, want %q", devin.Setup.Contract.RepoFile, wantRepoFile)
 	}
 	devinACP, ok := cat.Resolve("devin-acp")
 	if !ok {
@@ -609,6 +612,67 @@ providers:
 	})
 	if len(results) != 1 || !results[0].Installed || results[0].Executable != "/tmp/bin/qwen" {
 		t.Fatalf("Detect() = %+v, want installed qwen", results)
+	}
+}
+
+func TestCatalogUsesActiveBrandNames(t *testing.T) {
+	if EnvCatalogURL != brand.EnvName(envCatalogURLSuffix) || EnvCatalogTTL != brand.EnvName(envCatalogTTLSuffix) || EnvCatalogTimeout != brand.EnvName(envCatalogTimeoutSuffix) {
+		t.Fatalf("catalog env names = %q, %q, %q; want active brand prefix", EnvCatalogURL, EnvCatalogTTL, EnvCatalogTimeout)
+	}
+	previousGlobalDirName := brand.GlobalDirName
+	brand.GlobalDirName = ".acme-agent"
+	t.Cleanup(func() { brand.GlobalDirName = previousGlobalDirName })
+
+	home := t.TempDir()
+	catalogPath, metaPath := CachePaths(home)
+	wantDir := filepath.Join(home, paths.GlobalDirName(), "cache")
+	if filepath.Dir(catalogPath) != wantDir || filepath.Dir(metaPath) != wantDir {
+		t.Fatalf("CachePaths() = %q, %q; want files under %q", catalogPath, metaPath, wantDir)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(testQwenCatalogYAML()))
+	}))
+	t.Cleanup(server.Close)
+	if _, err := Load(context.Background(), LoadOptions{URL: server.URL, HomeDir: home, Force: true}); err != nil {
+		t.Fatalf("Load() branded refresh error = %v", err)
+	}
+	for _, path := range []string{catalogPath, metaPath} {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("branded cache artifact %q missing: %v", path, err)
+		}
+	}
+}
+
+func TestLoadFallsBackToLegacyCacheWhenBrandedCacheIsAbsent(t *testing.T) {
+	previousGlobalDirName := brand.GlobalDirName
+	brand.GlobalDirName = ".acme-agent"
+	t.Cleanup(func() { brand.GlobalDirName = previousGlobalDirName })
+
+	home := t.TempDir()
+	// Pre-brand cache path deliberately remains a frozen compatibility literal.
+	legacyPath := filepath.Join(home, ".liza", "cache", "provider-catalog.yaml")
+	if err := os.MkdirAll(filepath.Dir(legacyPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(legacyPath, []byte(testQwenCatalogYAML()), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cat, err := Load(context.Background(), LoadOptions{
+		HomeDir: home,
+		Client: &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+			return nil, errors.New("offline")
+		})},
+	})
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if _, ok := cat.Resolve("qwen"); !ok {
+		t.Fatalf("Load() did not return legacy cached qwen catalog")
+	}
+	brandedPath, _ := CachePaths(home)
+	if _, err := os.Stat(brandedPath); !os.IsNotExist(err) {
+		t.Fatalf("legacy fallback wrote branded cache unexpectedly: %v", err)
 	}
 }
 

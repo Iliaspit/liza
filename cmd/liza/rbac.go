@@ -21,7 +21,7 @@ func runAfterRBACAdmissionTestHook(agentID string) {
 }
 
 // loadResolverForRBAC loads a pipeline resolver from the project root using the
-// frozen config (.liza/pipeline.yaml). Returns a fail-closed error on load failure.
+// frozen project pipeline config. Returns a fail-closed error on load failure.
 func loadResolverForRBAC(projectRoot string) (*pipeline.Resolver, error) {
 	cfg, err := pipeline.LoadFrozen(projectRoot)
 	if err != nil {
@@ -30,7 +30,7 @@ func loadResolverForRBAC(projectRoot string) (*pipeline.Resolver, error) {
 	return pipeline.NewResolver(cfg), nil
 }
 
-// loadResolverFromDir loads a pipeline resolver from a .liza directory path using
+// loadResolverFromDir loads a pipeline resolver from a runtime directory path using
 // pipeline.Load(filepath.Join(lizaDir, "pipeline.yaml")). Used by commands that
 // operate without project root detection (e.g. add-task/add-tasks).
 func loadResolverFromDir(lizaDir string) (*pipeline.Resolver, error) {

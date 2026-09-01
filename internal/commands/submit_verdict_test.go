@@ -4,6 +4,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/liza-mas/liza/internal/brand"
+
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/testhelpers"
 )
@@ -235,7 +237,7 @@ func TestSubmitVerdictCommand(t *testing.T) {
 			reason:     "",
 			agentID:    "",
 			wantErr:    true,
-			wantErrMsg: "LIZA_AGENT_ID is required",
+			wantErrMsg: brand.EnvName("AGENT_ID") + " is required",
 		},
 		{
 			name:       "REJECTED without reason",

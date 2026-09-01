@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/liza-mas/liza/internal/models"
+	"github.com/liza-mas/liza/internal/paths"
 	"github.com/liza-mas/liza/internal/testhelpers"
 	acpplugin "github.com/liza-mas/liza/plugin/acp"
 )
@@ -204,7 +205,7 @@ func runRealACPXBenchmark(t *testing.T, mode string) []acpplugin.RunMetric {
 		Role:                     "coder",
 		ProjectRoot:              projectRoot,
 		StatePath:                statePath,
-		LogPath:                  filepath.Join(projectRoot, ".liza", "log.yaml"),
+		LogPath:                  filepath.Join(projectRoot, paths.ProjectDirName(), "log.yaml"),
 		SpecsDir:                 filepath.Join(projectRoot, "specs"),
 		CLIName:                  mode,
 		LLMAgent:                 benchAgent,

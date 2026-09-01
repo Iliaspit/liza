@@ -428,7 +428,7 @@ func (t *spinningTracker) reset(taskID string) {
 	delete(t.byTask, taskID)
 }
 
-const unknownLizaJSONCommand = "liza-json-envelope"
+const unknownJSONCommand = "unknown-json-envelope"
 
 type observedRuntimeFailure struct {
 	Command string
@@ -541,7 +541,7 @@ func detectFailedCommandEvent(line string) *observedRuntimeFailure {
 		}
 		return &observedRuntimeFailure{Command: command, Code: env.Error.Code}
 	}
-	if event.Item.ExitCode != nil && *event.Item.ExitCode != 0 && command != unknownLizaJSONCommand {
+	if event.Item.ExitCode != nil && *event.Item.ExitCode != 0 && command != unknownJSONCommand {
 		return &observedRuntimeFailure{Command: command, Code: fmt.Sprintf("exit_%d", *event.Item.ExitCode)}
 	}
 	return nil
@@ -562,7 +562,7 @@ func detectLizaCommandContext(output string) string {
 			return command
 		}
 	}
-	return unknownLizaJSONCommand
+	return unknownJSONCommand
 }
 
 func successfulTurnProgressSignature(_, _, taskSnapshot string) string {

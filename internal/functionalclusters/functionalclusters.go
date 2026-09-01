@@ -1,4 +1,4 @@
-// Package functionalclusters owns Liza's optional Functional Clusters runtime
+// Package functionalclusters owns the optional Functional Clusters runtime
 // indexing contract.
 //
 // Functional Clusters is downstream of Stacklit and scip-search: refresh callers
@@ -209,7 +209,7 @@ func AvailableIndexes(opts RuntimePlanOptions) ([]IndexRef, error) {
 }
 
 func runBuild(targetRoot, outputPath string, stacklitIndex stacklit.IndexRef, scipIndexes []scipsearch.IndexRef, runner RuntimeRunner) (string, error) {
-	tmpDir, err := os.MkdirTemp(targetRoot, ".liza-functional-clusters-")
+	tmpDir, err := os.MkdirTemp(targetRoot, "."+brand.RuntimeValues().BinaryName+"-functional-clusters-")
 	if err != nil {
 		return "", fmt.Errorf("create temporary functional-clusters directory: %w", err)
 	}

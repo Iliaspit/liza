@@ -12,6 +12,7 @@ import (
 	"github.com/liza-mas/liza/internal/db"
 	"github.com/liza-mas/liza/internal/embedded"
 	"github.com/liza-mas/liza/internal/models"
+	"github.com/liza-mas/liza/internal/paths"
 	"github.com/liza-mas/liza/internal/testhelpers"
 )
 
@@ -40,9 +41,9 @@ func setupAgentTestProject(t *testing.T, defaultCLI string) string {
 		}
 	}
 
-	lizaDir := filepath.Join(projectRoot, ".liza")
+	lizaDir := filepath.Join(projectRoot, paths.ProjectDirName())
 	if err := os.MkdirAll(lizaDir, 0o755); err != nil {
-		t.Fatalf("mkdir .liza: %v", err)
+		t.Fatalf("mkdir project runtime directory: %v", err)
 	}
 
 	if err := os.WriteFile(filepath.Join(lizaDir, "pipeline.yaml"), embedded.PipelineConfigContent(), 0o644); err != nil {
@@ -143,7 +144,7 @@ func TestAgentCmd_ExplainLaunchUsesConfiguredToolProfile(t *testing.T) {
 	t.Setenv("LIZA_DEFAULT_REVIEWER_CLI", "")
 	projectRoot := setupAgentTestProject(t, "")
 
-	statePath := filepath.Join(projectRoot, ".liza", "state.yaml")
+	statePath := filepath.Join(projectRoot, paths.ProjectDirName(), "state.yaml")
 	bb := db.For(statePath)
 	state, err := bb.Read()
 	if err != nil {

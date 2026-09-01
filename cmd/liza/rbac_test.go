@@ -12,6 +12,7 @@ import (
 
 	lizaerrors "github.com/liza-mas/liza/internal/errors"
 	"github.com/liza-mas/liza/internal/models"
+	"github.com/liza-mas/liza/internal/paths"
 	"github.com/liza-mas/liza/internal/pipeline"
 	"github.com/liza-mas/liza/internal/prompts"
 	"github.com/liza-mas/liza/internal/testhelpers"
@@ -376,7 +377,7 @@ func TestLoadResolverForRBAC_MissingConfig(t *testing.T) {
 func TestLoadResolverFromDir_Success(t *testing.T) {
 	tmpDir := t.TempDir()
 	testhelpers.SetupPipelineConfig(t, tmpDir)
-	lizaDir := filepath.Join(tmpDir, ".liza")
+	lizaDir := filepath.Join(tmpDir, paths.ProjectDirName())
 	resolver, err := loadResolverFromDir(lizaDir)
 	if err != nil {
 		t.Fatalf("expected nil error, got: %v", err)

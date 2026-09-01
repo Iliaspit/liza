@@ -1620,7 +1620,7 @@ func freezeLegacyIntegrationPipeline(t *testing.T, root string) {
 	if err != nil {
 		t.Fatalf("marshal legacy pipeline: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(root, ".liza", "pipeline.yaml"), data, 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, paths.ProjectDirName(), "pipeline.yaml"), data, 0o644); err != nil {
 		t.Fatalf("write legacy pipeline: %v", err)
 	}
 }

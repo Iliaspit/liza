@@ -9,6 +9,7 @@ import (
 	"github.com/liza-mas/liza/internal/db"
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/ops"
+	"github.com/liza-mas/liza/internal/paths"
 	"github.com/liza-mas/liza/internal/testhelpers"
 )
 
@@ -407,7 +408,7 @@ func TestHeartbeatConcurrency(t *testing.T) {
 
 func TestHeartbeatDefaultValues(t *testing.T) {
 	tmpDir := t.TempDir()
-	stateFile := filepath.Join(tmpDir, ".liza", "state.yaml")
+	stateFile := filepath.Join(tmpDir, paths.ProjectDirName(), "state.yaml")
 
 	config := HeartbeatConfig{
 		AgentID:   "coder-1",

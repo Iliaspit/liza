@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/liza-mas/liza/internal/brand"
+	"github.com/liza-mas/liza/internal/paths"
 )
 
 func withTestBrandDirs(t *testing.T, globalDir, projectDir string) {
@@ -399,7 +400,7 @@ func TestSetupCommand_CustomAgentTools(t *testing.T) {
 	if !strings.HasPrefix(toolsStr, "---\n") {
 		t.Error("Custom AGENT_TOOLS.md missing frontmatter")
 	}
-	if !strings.Contains(toolsStr, "liza_version:") {
+	if !strings.Contains(toolsStr, brand.MetadataKey("version")+":") {
 		t.Error("Custom AGENT_TOOLS.md missing version metadata")
 	}
 
@@ -532,7 +533,7 @@ func assertAgentToolsOptionalIndexGuidance(t *testing.T, content string) {
 		"/home/tangi/",
 		"/home/",
 		".worktrees/",
-		".liza/scip/",
+		paths.ProjectDirName() + "/scip/",
 		"stacklit.json in pairing mode",
 		"<task-worktree-path>",
 	}
@@ -567,8 +568,8 @@ func setupWithAgents(t *testing.T, agents []string) (lizaDir, homeDir string) {
 
 func TestSetupCommand_QwenRelativeHomeSkipsGlobalContractRepair(t *testing.T) {
 	previousNameLower, previousGlobalDirName := brand.NameLower, brand.GlobalDirName
-	brand.NameLower = "omni"
-	brand.GlobalDirName = ".omni-ee"
+	brand.NameLower = "acme"
+	brand.GlobalDirName = ".acme-agent"
 	t.Cleanup(func() {
 		brand.NameLower = previousNameLower
 		brand.GlobalDirName = previousGlobalDirName
@@ -588,7 +589,7 @@ func TestSetupCommand_QwenRelativeHomeSkipsGlobalContractRepair(t *testing.T) {
 
 	stderr := captureSetupStderr(t, func() {
 		err = SetupCommand(SetupParams{
-			TargetDir:   filepath.Join(homeDir, ".omni-ee"),
+			TargetDir:   filepath.Join(homeDir, paths.GlobalDirName()),
 			HomeDir:     homeDir,
 			Agents:      []string{"qwen"},
 			Force:       true,
@@ -609,8 +610,8 @@ func TestSetupCommand_QwenRelativeHomeSkipsGlobalContractRepair(t *testing.T) {
 
 func TestSetupCommand_UnexpandableClaudeConfigWarnsAndContinues(t *testing.T) {
 	previousNameLower, previousGlobalDirName := brand.NameLower, brand.GlobalDirName
-	brand.NameLower = "omni"
-	brand.GlobalDirName = ".omni-ee"
+	brand.NameLower = "acme"
+	brand.GlobalDirName = ".acme-agent"
 	t.Cleanup(func() {
 		brand.NameLower = previousNameLower
 		brand.GlobalDirName = previousGlobalDirName
@@ -622,7 +623,7 @@ func TestSetupCommand_UnexpandableClaudeConfigWarnsAndContinues(t *testing.T) {
 	var setupErr error
 	stderr := captureSetupStderr(t, func() {
 		setupErr = SetupCommand(SetupParams{
-			TargetDir:   filepath.Join(homeDir, ".omni-ee"),
+			TargetDir:   filepath.Join(homeDir, paths.GlobalDirName()),
 			HomeDir:     homeDir,
 			Agents:      []string{"claude", "codex"},
 			Force:       true,
@@ -643,8 +644,8 @@ func TestSetupCommand_UnexpandableClaudeConfigWarnsAndContinues(t *testing.T) {
 
 func TestRepairExistingProviderContractSymlinkWarnsOnUnexpectedGlobalPathErrors(t *testing.T) {
 	previousNameLower, previousGlobalDirName := brand.NameLower, brand.GlobalDirName
-	brand.NameLower = "omni"
-	brand.GlobalDirName = ".omni-ee"
+	brand.NameLower = "acme"
+	brand.GlobalDirName = ".acme-agent"
 	t.Cleanup(func() {
 		brand.NameLower = previousNameLower
 		brand.GlobalDirName = previousGlobalDirName
@@ -660,7 +661,7 @@ func TestRepairExistingProviderContractSymlinkWarnsOnUnexpectedGlobalPathErrors(
 		t.Fatalf("resolved providers = %+v, want one Qwen provider", selected)
 	}
 	stderr := captureSetupStderr(t, func() {
-		err = repairExistingProviderContractSymlink(homeDir, filepath.Join(homeDir, ".omni-ee"), selected[0])
+		err = repairExistingProviderContractSymlink(homeDir, filepath.Join(homeDir, paths.GlobalDirName()), selected[0])
 	})
 	if err != nil {
 		t.Fatalf("repair error = %v, want best-effort success", err)
@@ -963,8 +964,8 @@ func TestSetupCommand_AgentExistingWrongSymlink(t *testing.T) {
 
 func TestSetupCommand_RepairsNameDerivedProviderContractSymlink(t *testing.T) {
 	previousNameLower, previousGlobalDirName := brand.NameLower, brand.GlobalDirName
-	brand.NameLower = "omni"
-	brand.GlobalDirName = ".omni-ee"
+	brand.NameLower = "acme"
+	brand.GlobalDirName = ".acme-agent"
 	t.Cleanup(func() {
 		brand.NameLower = previousNameLower
 		brand.GlobalDirName = previousGlobalDirName
@@ -973,7 +974,7 @@ func TestSetupCommand_RepairsNameDerivedProviderContractSymlink(t *testing.T) {
 	homeDir := t.TempDir()
 	codexHome := t.TempDir()
 	t.Setenv("CODEX_HOME", codexHome)
-	targetDir := filepath.Join(homeDir, ".omni-ee")
+	targetDir := filepath.Join(homeDir, paths.GlobalDirName())
 	if err := SetupCommand(SetupParams{TargetDir: targetDir, HomeDir: homeDir}); err != nil {
 		t.Fatalf("initial SetupCommand failed: %v", err)
 	}
@@ -981,7 +982,7 @@ func TestSetupCommand_RepairsNameDerivedProviderContractSymlink(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(contractLink), 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(filepath.Join(homeDir, ".omni", "CORE.md"), contractLink); err != nil {
+	if err := os.Symlink(filepath.Join(homeDir, "."+brand.NameLower, "CORE.md"), contractLink); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1008,8 +1009,8 @@ func TestSetupCommand_RepairsNameDerivedProviderContractSymlink(t *testing.T) {
 
 func TestSetupCommand_RepairsDefaultProviderContractPathWithEnvironmentOverride(t *testing.T) {
 	previousNameLower, previousGlobalDirName := brand.NameLower, brand.GlobalDirName
-	brand.NameLower = "omni"
-	brand.GlobalDirName = ".omni-ee"
+	brand.NameLower = "acme"
+	brand.GlobalDirName = ".acme-agent"
 	t.Cleanup(func() {
 		brand.NameLower = previousNameLower
 		brand.GlobalDirName = previousGlobalDirName
@@ -1017,12 +1018,12 @@ func TestSetupCommand_RepairsDefaultProviderContractPathWithEnvironmentOverride(
 
 	homeDir := t.TempDir()
 	t.Setenv("CODEX_HOME", t.TempDir())
-	targetDir := filepath.Join(homeDir, ".omni-ee")
+	targetDir := filepath.Join(homeDir, paths.GlobalDirName())
 	contractLink := filepath.Join(homeDir, ".codex", "AGENTS.md")
 	if err := os.MkdirAll(filepath.Dir(contractLink), 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(filepath.Join(homeDir, ".omni", "CORE.md"), contractLink); err != nil {
+	if err := os.Symlink(filepath.Join(homeDir, "."+brand.NameLower, "CORE.md"), contractLink); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1047,8 +1048,8 @@ func TestSetupCommand_RepairsDefaultProviderContractPathWithEnvironmentOverride(
 
 func TestRepairExistingProviderContractSymlinkPreservesUnmanagedPaths(t *testing.T) {
 	previousNameLower, previousGlobalDirName := brand.NameLower, brand.GlobalDirName
-	brand.NameLower = "omni"
-	brand.GlobalDirName = ".omni-ee"
+	brand.NameLower = "acme"
+	brand.GlobalDirName = ".acme-agent"
 	t.Cleanup(func() {
 		brand.NameLower = previousNameLower
 		brand.GlobalDirName = previousGlobalDirName
@@ -1056,7 +1057,7 @@ func TestRepairExistingProviderContractSymlinkPreservesUnmanagedPaths(t *testing
 
 	homeDir := t.TempDir()
 	t.Setenv("CODEX_HOME", "")
-	targetDir := filepath.Join(homeDir, ".omni-ee")
+	targetDir := filepath.Join(homeDir, paths.GlobalDirName())
 	catalog := loadProviderCatalog(homeDir)
 	codex, ok := catalog.Resolve("codex")
 	if !ok {

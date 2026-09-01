@@ -14,6 +14,7 @@ import (
 	"github.com/liza-mas/liza/internal/brand"
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/ops"
+	"github.com/liza-mas/liza/internal/paths"
 	"github.com/liza-mas/liza/internal/pipeline"
 	"github.com/liza-mas/liza/internal/prompts"
 	"github.com/liza-mas/liza/internal/render"
@@ -1112,7 +1113,7 @@ func planningTaskWithOutput(id string, status models.TaskStatus) models.Task {
 func TestBuildStatusData_NoFollowUpHidesPipelineTransitions(t *testing.T) {
 	now := time.Now().UTC()
 	projectRoot := setupPipelineRoot(t)
-	statePath := filepath.Join(projectRoot, ".liza", "state.yaml")
+	statePath := filepath.Join(projectRoot, paths.ProjectDirName(), "state.yaml")
 
 	state := testhelpers.CreateValidState()
 	state.Config.NoFollowUp = true

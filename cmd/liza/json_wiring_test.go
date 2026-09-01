@@ -14,6 +14,7 @@ import (
 	"github.com/liza-mas/liza/internal/commands"
 	activitylog "github.com/liza-mas/liza/internal/log"
 	"github.com/liza-mas/liza/internal/models"
+	"github.com/liza-mas/liza/internal/paths"
 	"github.com/liza-mas/liza/internal/pipeline"
 	"github.com/liza-mas/liza/internal/prompts"
 	"github.com/liza-mas/liza/internal/statehygiene"
@@ -168,7 +169,7 @@ func TestJSON_SubmitVerdict_OversizedReasonIsActionableAndSideEffectFree(t *test
 	assertJSONError(t, stdout, "validation",
 		"4097 bytes",
 		"4096-byte maximum",
-		".liza/agent-outputs/",
+		paths.ProjectDirName()+"/agent-outputs/",
 		"bounded summary",
 		"artifact reference",
 	)
@@ -180,7 +181,7 @@ func TestJSON_SubmitVerdict_OversizedReasonIsActionableAndSideEffectFree(t *test
 	if !bytes.Equal(after, before) {
 		t.Fatal("oversized rejection changed state")
 	}
-	if _, statErr := os.Stat(filepath.Join(projectRoot, ".liza", "log.yaml")); !os.IsNotExist(statErr) {
+	if _, statErr := os.Stat(filepath.Join(projectRoot, paths.ProjectDirName(), "log.yaml")); !os.IsNotExist(statErr) {
 		t.Fatalf("oversized rejection created activity log: %v", statErr)
 	}
 }
@@ -1112,7 +1113,7 @@ func TestJSON_RetargetDependency_RejectsTransitiveCycle(t *testing.T) {
 		t.Fatalf("RepairRequest changed after rejected retarget: got %#v, want %#v", after.RepairRequest, before.RepairRequest)
 	}
 
-	entries, err := activitylog.New(filepath.Join(projectRoot, ".liza", "log.yaml")).Read()
+	entries, err := activitylog.New(filepath.Join(projectRoot, paths.ProjectDirName(), "log.yaml")).Read()
 	if err != nil {
 		t.Fatalf("read activity log: %v", err)
 	}
@@ -1373,7 +1374,7 @@ func TestJSON_RepairSupersededDependencies_Success(t *testing.T) {
 			testhelpers.BuildTaskByStatus("replacement-plan", models.TaskStatusDraftCodingPlan, now),
 		}
 	})
-	logPath := filepath.Join(projectRoot, ".liza", "log.yaml")
+	logPath := filepath.Join(projectRoot, paths.ProjectDirName(), "log.yaml")
 	if err := os.RemoveAll(logPath); err != nil {
 		t.Fatalf("remove log path: %v", err)
 	}
@@ -1457,7 +1458,7 @@ func TestJSON_MarkBlocked_AlertWriteFailureReturnsWarning(t *testing.T) {
 		}
 		state.Agents["coder-1"] = testhelpers.RegisteredTestAgent("coder")
 	})
-	alertsPath := filepath.Join(projectRoot, ".liza", "alerts.log")
+	alertsPath := filepath.Join(projectRoot, paths.ProjectDirName(), "alerts.log")
 	if err := os.RemoveAll(alertsPath); err != nil {
 		t.Fatalf("remove alerts.log path: %v", err)
 	}
@@ -1493,7 +1494,7 @@ func TestJSON_Status_WithWarnings(t *testing.T) {
 	projectRoot, _ := setupMutationTestProject(t, nil)
 
 	// Corrupt pipeline.yaml so resolver fails, producing a warning.
-	pipelinePath := filepath.Join(projectRoot, ".liza", "pipeline.yaml")
+	pipelinePath := filepath.Join(projectRoot, paths.ProjectDirName(), "pipeline.yaml")
 	if err := os.WriteFile(pipelinePath, []byte("invalid: [yaml: {{broken"), 0644); err != nil {
 		t.Fatalf("failed to corrupt pipeline.yaml: %v", err)
 	}
@@ -1792,7 +1793,7 @@ func TestJSON_InitialPlanningRoutesRenderOneTaskContractsFromInitializedCLIState
 
 func TestJSON_InitialPlanningMissingMasterRendersOneSpecializedFallback(t *testing.T) {
 	projectRoot, statePath := setupInitializedProjectWithEntryPoint(t, "functional-spec")
-	pipelinePath := filepath.Join(projectRoot, ".liza", "pipeline.yaml")
+	pipelinePath := filepath.Join(projectRoot, paths.ProjectDirName(), "pipeline.yaml")
 	content, err := os.ReadFile(pipelinePath)
 	if err != nil {
 		t.Fatalf("read pipeline.yaml: %v", err)
@@ -1881,7 +1882,7 @@ func TestJSON_Validate_ProjectRootFlagRejectsGitRepoWithoutLizaMarker(t *testing
 		t.Fatalf("expected project root error for non-Liza -C target")
 	}
 
-	assertJSONError(t, stdout, "project_root", "missing .liza directory")
+	assertJSONError(t, stdout, "project_root", "missing "+paths.ProjectDirName()+" directory")
 }
 
 func TestJSON_Validate_DefaultStatePathRejectsExternalLinkedWorktree(t *testing.T) {
@@ -1970,7 +1971,7 @@ func TestJSON_Validate_Invalid(t *testing.T) {
 	testhelpers.SetupPipelineConfig(t, projectRoot)
 
 	// Write an empty/minimal state that will fail validation (no version, no goal)
-	statePath := filepath.Join(projectRoot, ".liza", "state.yaml")
+	statePath := filepath.Join(projectRoot, paths.ProjectDirName(), "state.yaml")
 	if err := os.WriteFile(statePath, []byte("version: 0\n"), 0644); err != nil {
 		t.Fatalf("failed to write invalid state: %v", err)
 	}
@@ -2150,7 +2151,7 @@ func TestJSON_PipelineConfigErrorReportsActionableContext(t *testing.T) {
 			testhelpers.BuildTaskByStatus("task-pipeline-json", models.TaskStatusReady, now),
 		}
 	})
-	pipelinePath := filepath.Join(projectRoot, ".liza", "pipeline.yaml")
+	pipelinePath := filepath.Join(projectRoot, paths.ProjectDirName(), "pipeline.yaml")
 	if err := os.WriteFile(pipelinePath, []byte("roles: [\n"), 0644); err != nil {
 		t.Fatalf("failed to corrupt pipeline config: %v", err)
 	}
@@ -2836,7 +2837,7 @@ func setupInitializedProjectWithEntryPoint(t *testing.T, entryPoint string) (str
 		t.Fatalf("init with entry-point %q failed: %v", entryPoint, err)
 	}
 
-	return projectRoot, filepath.Join(projectRoot, ".liza", "state.yaml")
+	return projectRoot, filepath.Join(projectRoot, paths.ProjectDirName(), "state.yaml")
 }
 
 func extractInitialPlanningExampleTasks(t *testing.T, rendered, label string) []map[string]any {

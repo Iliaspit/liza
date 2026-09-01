@@ -19,6 +19,7 @@ import (
 	"github.com/liza-mas/liza/internal/db"
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/ops"
+	"github.com/liza-mas/liza/internal/paths"
 	"github.com/liza-mas/liza/internal/pipeline"
 	"github.com/liza-mas/liza/internal/testhelpers"
 )
@@ -61,8 +62,8 @@ func setupIntegrationTest(t *testing.T, projectDir string, taskIDs []string) (*d
 		t.Fatalf("Init failed: %v", err)
 	}
 
-	statePath := filepath.Join(projectDir, ".liza", "state.yaml")
-	logPath := filepath.Join(projectDir, ".liza", "log.yaml")
+	statePath := filepath.Join(projectDir, paths.ProjectDirName(), "state.yaml")
+	logPath := filepath.Join(projectDir, paths.ProjectDirName(), "log.yaml")
 	bb := db.New(statePath)
 
 	for _, taskID := range taskIDs {
@@ -335,8 +336,8 @@ func TestIntegrationPipelineWithFindings(t *testing.T) {
 		t.Fatalf("Init failed: %v", err)
 	}
 
-	statePath := filepath.Join(projectDir, ".liza", "state.yaml")
-	logPath := filepath.Join(projectDir, ".liza", "log.yaml")
+	statePath := filepath.Join(projectDir, paths.ProjectDirName(), "state.yaml")
+	logPath := filepath.Join(projectDir, paths.ProjectDirName(), "log.yaml")
 	bb := db.New(statePath)
 
 	// Step 2: Add an integration-pair task
@@ -560,8 +561,8 @@ func TestIntegrationPipelineCleanScan(t *testing.T) {
 		t.Fatalf("Init failed: %v", err)
 	}
 
-	statePath := filepath.Join(projectDir, ".liza", "state.yaml")
-	logPath := filepath.Join(projectDir, ".liza", "log.yaml")
+	statePath := filepath.Join(projectDir, paths.ProjectDirName(), "state.yaml")
+	logPath := filepath.Join(projectDir, paths.ProjectDirName(), "log.yaml")
 	bb := db.New(statePath)
 
 	taskID := "integ-clean-1"
@@ -684,8 +685,8 @@ func TestArchitecturePairWorkflow(t *testing.T) {
 		t.Fatalf("Init failed: %v", err)
 	}
 
-	statePath := filepath.Join(projectDir, ".liza", "state.yaml")
-	logPath := filepath.Join(projectDir, ".liza", "log.yaml")
+	statePath := filepath.Join(projectDir, paths.ProjectDirName(), "state.yaml")
+	logPath := filepath.Join(projectDir, paths.ProjectDirName(), "log.yaml")
 	bb := db.New(statePath)
 
 	// Step 2: Add architecture task
@@ -1128,8 +1129,8 @@ func TestMasterPlanningLifecycleAcceptance(t *testing.T) {
 		t.Fatalf("Init failed: %v", err)
 	}
 
-	statePath := filepath.Join(projectDir, ".liza", "state.yaml")
-	logPath := filepath.Join(projectDir, ".liza", "log.yaml")
+	statePath := filepath.Join(projectDir, paths.ProjectDirName(), "state.yaml")
+	logPath := filepath.Join(projectDir, paths.ProjectDirName(), "log.yaml")
 	bb := db.New(statePath)
 
 	masterID := "architecture-master-1"
@@ -1321,8 +1322,8 @@ func TestManyToOneTransitionLifecycle(t *testing.T) {
 		t.Fatalf("Init failed: %v", err)
 	}
 
-	statePath := filepath.Join(projectDir, ".liza", "state.yaml")
-	logPath := filepath.Join(projectDir, ".liza", "log.yaml")
+	statePath := filepath.Join(projectDir, paths.ProjectDirName(), "state.yaml")
+	logPath := filepath.Join(projectDir, paths.ProjectDirName(), "log.yaml")
 	bb := db.New(statePath)
 
 	// Step 2: Create parent epic-plan task with 3 output entries
@@ -1633,8 +1634,8 @@ func TestArchRefPropagation(t *testing.T) {
 		t.Fatalf("Init failed: %v", err)
 	}
 
-	statePath := filepath.Join(projectDir, ".liza", "state.yaml")
-	logPath := filepath.Join(projectDir, ".liza", "log.yaml")
+	statePath := filepath.Join(projectDir, paths.ProjectDirName(), "state.yaml")
+	logPath := filepath.Join(projectDir, paths.ProjectDirName(), "log.yaml")
 	bb := db.New(statePath)
 
 	// Step 2: Add architecture task
@@ -2035,7 +2036,7 @@ func buildIntegrationTaskPrompt(t *testing.T, projectDir string, state *models.S
 		AgentID:     agentID,
 		Role:        role,
 		ProjectRoot: projectDir,
-		StatePath:   filepath.Join(projectDir, ".liza", "state.yaml"),
+		StatePath:   filepath.Join(projectDir, paths.ProjectDirName(), "state.yaml"),
 		SpecsDir:    filepath.Join(projectDir, "specs"),
 	}, taskID)
 	if err != nil {

@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/liza-mas/liza/internal/brand"
+
 	"github.com/liza-mas/liza/internal/git"
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/testhelpers"
@@ -49,7 +51,7 @@ func TestSubmitForReviewCommand(t *testing.T) {
 			commitRef:  "abc123",
 			agentID:    "",
 			wantErr:    true,
-			wantErrMsg: "LIZA_AGENT_ID is required",
+			wantErrMsg: brand.EnvName("AGENT_ID") + " is required",
 		},
 		{
 			name:       "task not found",

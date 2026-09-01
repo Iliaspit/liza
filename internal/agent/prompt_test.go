@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/liza-mas/liza/internal/brand"
+
 	"github.com/liza-mas/liza/internal/embedded"
 	"github.com/liza-mas/liza/internal/errors"
 	"github.com/liza-mas/liza/internal/functionalclusters"
@@ -207,9 +209,9 @@ func TestBuildOrchestratorRoleContextDataScipIndexesUseProjectRoot(t *testing.T)
 	testhelpers.MustGit(t, tmpDir, "add", "go.mod", "web.ts", "tool.py")
 	testhelpers.MustGit(t, tmpDir, "commit", "-m", "Add language fixtures")
 
-	projectGoIndex := filepath.Join(tmpDir, ".liza", "scip", "go.scip")
+	projectGoIndex := filepath.Join(tmpDir, paths.ProjectDirName(), "scip", "go.scip")
 	writePromptTestFile(t, projectGoIndex, "go index")
-	taskTypescriptIndex := filepath.Join(tmpDir, ".worktrees", "task-1", ".liza", "scip", "typescript.scip")
+	taskTypescriptIndex := filepath.Join(tmpDir, ".worktrees", "task-1", paths.ProjectDirName(), "scip", "typescript.scip")
 	writePromptTestFile(t, taskTypescriptIndex, "task typescript index")
 
 	state := &models.State{
@@ -226,7 +228,7 @@ func TestBuildOrchestratorRoleContextDataScipIndexesUseProjectRoot(t *testing.T)
 		AgentID:     "orchestrator-1",
 		ProjectRoot: tmpDir,
 		SpecsDir:    filepath.Join(tmpDir, "specs"),
-		StatePath:   filepath.Join(tmpDir, ".liza", "state.yaml"),
+		StatePath:   filepath.Join(tmpDir, paths.ProjectDirName(), "state.yaml"),
 	}
 
 	data, err := buildOrchestratorRoleContextData(state, config, testResolver(t))
@@ -268,12 +270,12 @@ func TestBuildPromptWithContextScipIndexesUseTaskWorktree(t *testing.T) {
 	testhelpers.MustGit(t, taskWorktree, "add", "go.mod", "web.ts", "tool.py")
 	testhelpers.MustGit(t, taskWorktree, "commit", "-m", "Add task language fixtures")
 
-	taskGoIndex := filepath.Join(taskWorktree, ".liza", "scip", "go.scip")
+	taskGoIndex := filepath.Join(taskWorktree, paths.ProjectDirName(), "scip", "go.scip")
 	writePromptTestFile(t, taskGoIndex, "task go index")
-	taskPythonIndex := filepath.Join(taskWorktree, ".liza", "scip", "python.scip")
+	taskPythonIndex := filepath.Join(taskWorktree, paths.ProjectDirName(), "scip", "python.scip")
 	writePromptTestFile(t, taskPythonIndex, "task python index")
-	taskTypescriptIndex := filepath.Join(taskWorktree, ".liza", "scip", "typescript.scip")
-	projectGoIndex := filepath.Join(projectRoot, ".liza", "scip", "go.scip")
+	taskTypescriptIndex := filepath.Join(taskWorktree, paths.ProjectDirName(), "scip", "typescript.scip")
+	projectGoIndex := filepath.Join(projectRoot, paths.ProjectDirName(), "scip", "go.scip")
 	writePromptTestFile(t, projectGoIndex, "project go index")
 
 	worktree := ".worktrees/task-1"
@@ -301,7 +303,7 @@ func TestBuildPromptWithContextScipIndexesUseTaskWorktree(t *testing.T) {
 		AgentID:     "coder-1",
 		ProjectRoot: projectRoot,
 		SpecsDir:    filepath.Join(projectRoot, "specs"),
-		StatePath:   filepath.Join(projectRoot, ".liza", "state.yaml"),
+		StatePath:   filepath.Join(projectRoot, paths.ProjectDirName(), "state.yaml"),
 	}
 
 	prompt, err := buildPromptWithContext(state, config, "task-1", testResolver(t))
@@ -321,7 +323,7 @@ func TestBuildPromptWithContextScipIndexesUseTaskWorktree(t *testing.T) {
 	if strings.Contains(prompt, taskTypescriptIndex) {
 		t.Fatalf("prompt contains missing task typescript SCIP index path %q", taskTypescriptIndex)
 	}
-	if !strings.Contains(prompt, "Use `~/.liza/AGENT_TOOLS.md` for `scip-search` command syntax, routing rules, and freshness caveats.") {
+	if !strings.Contains(prompt, "Use `~/"+paths.GlobalDirName()+"/AGENT_TOOLS.md` for `scip-search` command syntax, routing rules, and freshness caveats.") {
 		t.Fatalf("prompt missing AGENT_TOOLS scip-search usage pointer")
 	}
 	if strings.Contains(prompt, "scip-search implementations --index") {
@@ -352,7 +354,7 @@ func TestBuildPromptWithContextScipSearchGateOmitsStaleIndexes(t *testing.T) {
 			projectRoot := t.TempDir()
 			testhelpers.SetupPipelineConfig(t, projectRoot)
 			taskWorktree := filepath.Join(projectRoot, ".worktrees", "task-1")
-			writePromptTestFile(t, filepath.Join(taskWorktree, ".liza", "scip", "go.scip"), "stale go index")
+			writePromptTestFile(t, filepath.Join(taskWorktree, paths.ProjectDirName(), "scip", "go.scip"), "stale go index")
 			t.Setenv(scipsearch.EnvEnableScipSearch, tt.envValue)
 
 			worktree := ".worktrees/task-1"
@@ -380,7 +382,7 @@ func TestBuildPromptWithContextScipSearchGateOmitsStaleIndexes(t *testing.T) {
 				AgentID:     "coder-1",
 				ProjectRoot: projectRoot,
 				SpecsDir:    filepath.Join(projectRoot, "specs"),
-				StatePath:   filepath.Join(projectRoot, ".liza", "state.yaml"),
+				StatePath:   filepath.Join(projectRoot, paths.ProjectDirName(), "state.yaml"),
 			}
 
 			prompt, err := buildPromptWithContext(state, config, "task-1", testResolver(t))
@@ -436,7 +438,7 @@ func TestBuildPromptWithContextStacklitIndexUsesTaskWorktree(t *testing.T) {
 		AgentID:     "coder-1",
 		ProjectRoot: projectRoot,
 		SpecsDir:    filepath.Join(projectRoot, "specs"),
-		StatePath:   filepath.Join(projectRoot, ".liza", "state.yaml"),
+		StatePath:   filepath.Join(projectRoot, paths.ProjectDirName(), "state.yaml"),
 	}
 
 	prompt, err := buildPromptWithContext(state, config, "task-1", testResolver(t))
@@ -447,7 +449,7 @@ func TestBuildPromptWithContextStacklitIndexUsesTaskWorktree(t *testing.T) {
 	if !strings.Contains(prompt, "Stacklit index: "+shellQuoteForTest(taskStacklitIndex)) {
 		t.Fatalf("prompt missing task worktree Stacklit index path %q", taskStacklitIndex)
 	}
-	if !strings.Contains(prompt, "Use `~/.liza/AGENT_TOOLS.md` for Stacklit command syntax, routing rules, and freshness caveats.") {
+	if !strings.Contains(prompt, "Use `~/"+paths.GlobalDirName()+"/AGENT_TOOLS.md` for Stacklit command syntax, routing rules, and freshness caveats.") {
 		t.Fatalf("prompt missing AGENT_TOOLS Stacklit usage pointer")
 	}
 	if strings.Contains(prompt, "stacklit derive --ai-summary -i") {
@@ -494,7 +496,7 @@ func TestBuildPromptWithContextFunctionalClustersUsesTaskWorktree(t *testing.T) 
 		AgentID:     "coder-1",
 		ProjectRoot: projectRoot,
 		SpecsDir:    filepath.Join(projectRoot, "specs"),
-		StatePath:   filepath.Join(projectRoot, ".liza", "state.yaml"),
+		StatePath:   filepath.Join(projectRoot, paths.ProjectDirName(), "state.yaml"),
 	}
 
 	prompt, err := buildPromptWithContext(state, config, "task-1", testResolver(t))
@@ -505,7 +507,7 @@ func TestBuildPromptWithContextFunctionalClustersUsesTaskWorktree(t *testing.T) 
 	if !strings.Contains(prompt, "Functional Clusters artifact: "+shellQuoteForTest(taskArtifact)) {
 		t.Fatalf("prompt missing task worktree Functional Clusters artifact path %q", taskArtifact)
 	}
-	if !strings.Contains(prompt, "Use `~/.liza/AGENT_TOOLS.md` for Functional Clusters command syntax, routing rules, and freshness caveats.") {
+	if !strings.Contains(prompt, "Use `~/"+paths.GlobalDirName()+"/AGENT_TOOLS.md` for Functional Clusters command syntax, routing rules, and freshness caveats.") {
 		t.Fatalf("prompt missing AGENT_TOOLS Functional Clusters usage pointer")
 	}
 	if strings.Contains(prompt, "functional-clusters list --clusters") {
@@ -564,7 +566,7 @@ func TestBuildPromptWithContextSembleSearchUsesRoleWorktreeRoot(t *testing.T) {
 				AgentID:     tt.role + "-1",
 				ProjectRoot: projectRoot,
 				SpecsDir:    filepath.Join(projectRoot, "specs"),
-				StatePath:   filepath.Join(projectRoot, ".liza", "state.yaml"),
+				StatePath:   filepath.Join(projectRoot, paths.ProjectDirName(), "state.yaml"),
 			}
 
 			prompt, err := buildPromptWithContext(state, config, "task-1", testResolver(t))
@@ -581,7 +583,7 @@ func TestBuildPromptWithContextSembleSearchUsesRoleWorktreeRoot(t *testing.T) {
 			if !strings.Contains(prompt, shellQuoteForTest(taskWorktree)) {
 				t.Fatalf("prompt missing shell-quoted role worktree Semble target root for %q", taskWorktree)
 			}
-			if !strings.Contains(prompt, "Use `~/.liza/AGENT_TOOLS.md` for Semble command syntax, content modes, routing rules, and proof requirements.") {
+			if !strings.Contains(prompt, "Use `~/"+paths.GlobalDirName()+"/AGENT_TOOLS.md` for Semble command syntax, content modes, routing rules, and proof requirements.") {
 				t.Fatalf("prompt missing AGENT_TOOLS Semble usage pointer")
 			}
 			if strings.Contains(prompt, "env HF_HUB_OFFLINE=1 semble search") {
@@ -629,7 +631,7 @@ func TestBuildPromptWithContextSembleSearchOmittedWhenPromptMetadataUnavailable(
 				AgentID:     "coder-1",
 				ProjectRoot: projectRoot,
 				SpecsDir:    filepath.Join(projectRoot, "specs"),
-				StatePath:   filepath.Join(projectRoot, ".liza", "state.yaml"),
+				StatePath:   filepath.Join(projectRoot, paths.ProjectDirName(), "state.yaml"),
 			}
 
 			prompt, err := buildPromptWithContext(state, config, "task-1", testResolver(t))
@@ -652,10 +654,10 @@ func TestBuildPromptWithContextSembleSearchRequiresCompleteTaskIgnore(t *testing
 		wantSemble bool
 	}{
 		{name: "coder missing ignore", role: "coder"},
-		{name: "coder incomplete ignore", role: "coder", ignoreFile: ".liza/\n"},
+		{name: "coder incomplete ignore", role: "coder", ignoreFile: paths.ProjectDirName() + "/\n"},
 		{name: "coder complete ignore", role: "coder", ignoreFile: semble.GeneratedWorktreeIgnorePayload(), wantSemble: true},
 		{name: "reviewer missing ignore", role: "code-reviewer"},
-		{name: "reviewer incomplete ignore", role: "code-reviewer", ignoreFile: ".liza/\n"},
+		{name: "reviewer incomplete ignore", role: "code-reviewer", ignoreFile: paths.ProjectDirName() + "/\n"},
 		{name: "reviewer complete ignore", role: "code-reviewer", ignoreFile: semble.GeneratedWorktreeIgnorePayload(), wantSemble: true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -703,7 +705,7 @@ func TestBuildPromptWithContextSembleSearchRequiresCompleteTaskIgnore(t *testing
 				AgentID:     tt.role + "-1",
 				ProjectRoot: projectRoot,
 				SpecsDir:    filepath.Join(projectRoot, "specs"),
-				StatePath:   filepath.Join(projectRoot, ".liza", "state.yaml"),
+				StatePath:   filepath.Join(projectRoot, paths.ProjectDirName(), "state.yaml"),
 			}
 
 			prompt, err := buildPromptWithContext(state, config, "task-1", testResolver(t))
@@ -760,7 +762,7 @@ func TestBuildPromptWithContext_DecompositionRootDoerMandate(t *testing.T) {
 				AgentID:     tt.role + "-1",
 				ProjectRoot: projectRoot,
 				SpecsDir:    filepath.Join(projectRoot, "specs"),
-				StatePath:   filepath.Join(projectRoot, ".liza", "state.yaml"),
+				StatePath:   filepath.Join(projectRoot, paths.ProjectDirName(), "state.yaml"),
 			}
 
 			prompt, err := buildPromptWithContext(state, config, "task-1", resolver)
@@ -783,7 +785,7 @@ func TestBuildPromptWithContext_DecompositionRootDoerMandate(t *testing.T) {
 				"6. Completeness.",
 				"Systemic Decomposition Review",
 				"systemic-thinking",
-				"before `liza set-task-output` or submission",
+				"before `"+brand.BinaryName+" set-task-output` or submission",
 				"typed decomposition metadata",
 				"decomposition:",
 				"owned_files",
@@ -855,7 +857,7 @@ func TestBuildPromptWithContext_DecompositionRootReviewerReview(t *testing.T) {
 				AgentID:     tt.role + "-1",
 				ProjectRoot: projectRoot,
 				SpecsDir:    filepath.Join(projectRoot, "specs"),
-				StatePath:   filepath.Join(projectRoot, ".liza", "state.yaml"),
+				StatePath:   filepath.Join(projectRoot, paths.ProjectDirName(), "state.yaml"),
 			}
 
 			prompt, err := buildPromptWithContext(state, config, "task-1", resolver)
@@ -932,7 +934,7 @@ func TestBuildPromptWithContext_NonRootDoersRenderNoMasterMandate(t *testing.T) 
 				AgentID:     tt.role + "-1",
 				ProjectRoot: projectRoot,
 				SpecsDir:    filepath.Join(projectRoot, "specs"),
-				StatePath:   filepath.Join(projectRoot, ".liza", "state.yaml"),
+				StatePath:   filepath.Join(projectRoot, paths.ProjectDirName(), "state.yaml"),
 			}
 
 			prompt, err := buildPromptWithContext(state, config, "task-1", resolver)
@@ -996,7 +998,7 @@ func TestBuildPromptWithContext_NonRootReviewersRenderNoMasterReview(t *testing.
 				AgentID:     tt.role + "-1",
 				ProjectRoot: projectRoot,
 				SpecsDir:    filepath.Join(projectRoot, "specs"),
-				StatePath:   filepath.Join(projectRoot, ".liza", "state.yaml"),
+				StatePath:   filepath.Join(projectRoot, paths.ProjectDirName(), "state.yaml"),
 			}
 
 			prompt, err := buildPromptWithContext(state, config, "task-1", resolver)
@@ -1036,7 +1038,7 @@ func TestBuildPromptWithContext_CustomDecompositionRootDoerUsesConfiguredArtifac
 		AgentID:     "code-planner-1",
 		ProjectRoot: projectRoot,
 		SpecsDir:    filepath.Join(projectRoot, "specs"),
-		StatePath:   filepath.Join(projectRoot, ".liza", "state.yaml"),
+		StatePath:   filepath.Join(projectRoot, paths.ProjectDirName(), "state.yaml"),
 	}
 
 	prompt, err := buildPromptWithContext(state, config, "task-1", resolver)
@@ -1079,7 +1081,7 @@ func TestBuildPromptWithContext_CustomDecompositionRootReviewerUsesConfiguredArt
 		AgentID:     "code-plan-reviewer-1",
 		ProjectRoot: projectRoot,
 		SpecsDir:    filepath.Join(projectRoot, "specs"),
-		StatePath:   filepath.Join(projectRoot, ".liza", "state.yaml"),
+		StatePath:   filepath.Join(projectRoot, paths.ProjectDirName(), "state.yaml"),
 	}
 
 	prompt, err := buildPromptWithContext(state, config, "task-1", resolver)
@@ -1253,7 +1255,7 @@ func TestBuildPromptWithContextScipSearchOmitsEmptyAvailableIndexes(t *testing.T
 		AgentID:     "coder-1",
 		ProjectRoot: projectRoot,
 		SpecsDir:    filepath.Join(projectRoot, "specs"),
-		StatePath:   filepath.Join(projectRoot, ".liza", "state.yaml"),
+		StatePath:   filepath.Join(projectRoot, paths.ProjectDirName(), "state.yaml"),
 	}
 
 	prompt, err := buildPromptWithContext(state, config, "task-1", testResolver(t))
@@ -1317,7 +1319,7 @@ func TestBuildPromptWithContextScipAvailableIndexErrorOmitsScipAndKeepsStacklit(
 				AgentID:     tt.role + "-1",
 				ProjectRoot: projectRoot,
 				SpecsDir:    filepath.Join(projectRoot, "specs"),
-				StatePath:   filepath.Join(projectRoot, ".liza", "state.yaml"),
+				StatePath:   filepath.Join(projectRoot, paths.ProjectDirName(), "state.yaml"),
 			}
 
 			prompt, err := buildPromptWithContext(state, config, "task-1", testResolver(t))
@@ -1344,7 +1346,7 @@ func TestBuildOrchestratorPromptContextScipIndexesRenderFromProjectRoot(t *testi
 	testhelpers.MustGit(t, tmpDir, "add", "go.mod")
 	testhelpers.MustGit(t, tmpDir, "commit", "-m", "Add go module")
 
-	projectGoIndex := filepath.Join(tmpDir, ".liza", "scip", "go.scip")
+	projectGoIndex := filepath.Join(tmpDir, paths.ProjectDirName(), "scip", "go.scip")
 	writePromptTestFile(t, projectGoIndex, "go index")
 
 	state := &models.State{
@@ -1361,7 +1363,7 @@ func TestBuildOrchestratorPromptContextScipIndexesRenderFromProjectRoot(t *testi
 		AgentID:     "orchestrator-1",
 		ProjectRoot: tmpDir,
 		SpecsDir:    filepath.Join(tmpDir, "specs"),
-		StatePath:   filepath.Join(tmpDir, ".liza", "state.yaml"),
+		StatePath:   filepath.Join(tmpDir, paths.ProjectDirName(), "state.yaml"),
 	}
 
 	prompt, err := buildOrchestratorPromptContext(state, config, testResolver(t))
@@ -1372,7 +1374,7 @@ func TestBuildOrchestratorPromptContextScipIndexesRenderFromProjectRoot(t *testi
 	if !strings.Contains(prompt, projectGoIndex) {
 		t.Fatalf("prompt missing project-root SCIP index path %q", projectGoIndex)
 	}
-	if !strings.Contains(prompt, "Use `~/.liza/AGENT_TOOLS.md` for `scip-search` command syntax, routing rules, and freshness caveats.") {
+	if !strings.Contains(prompt, "Use `~/"+paths.GlobalDirName()+"/AGENT_TOOLS.md` for `scip-search` command syntax, routing rules, and freshness caveats.") {
 		t.Fatalf("prompt missing AGENT_TOOLS scip-search usage pointer")
 	}
 	if strings.Contains(prompt, "scip-search symbols --index") {
@@ -1401,7 +1403,7 @@ func TestBuildOrchestratorPromptContextStacklitIndexRendersFromProjectRoot(t *te
 		AgentID:     "orchestrator-1",
 		ProjectRoot: tmpDir,
 		SpecsDir:    filepath.Join(tmpDir, "specs"),
-		StatePath:   filepath.Join(tmpDir, ".liza", "state.yaml"),
+		StatePath:   filepath.Join(tmpDir, paths.ProjectDirName(), "state.yaml"),
 	}
 
 	prompt, err := buildOrchestratorPromptContext(state, config, testResolver(t))
@@ -1412,7 +1414,7 @@ func TestBuildOrchestratorPromptContextStacklitIndexRendersFromProjectRoot(t *te
 	if !strings.Contains(prompt, "Stacklit index: "+shellQuoteForTest(projectStacklitIndex)) {
 		t.Fatalf("prompt missing project-root Stacklit index path %q", projectStacklitIndex)
 	}
-	if !strings.Contains(prompt, "Use `~/.liza/AGENT_TOOLS.md` for Stacklit command syntax, routing rules, and freshness caveats.") {
+	if !strings.Contains(prompt, "Use `~/"+paths.GlobalDirName()+"/AGENT_TOOLS.md` for Stacklit command syntax, routing rules, and freshness caveats.") {
 		t.Fatalf("prompt missing AGENT_TOOLS Stacklit usage pointer")
 	}
 	if strings.Contains(prompt, "stacklit derive --ai-summary -i") {
@@ -1444,7 +1446,7 @@ func TestBuildOrchestratorPromptContextFunctionalClustersRendersFromProjectRoot(
 		AgentID:     "orchestrator-1",
 		ProjectRoot: tmpDir,
 		SpecsDir:    filepath.Join(tmpDir, "specs"),
-		StatePath:   filepath.Join(tmpDir, ".liza", "state.yaml"),
+		StatePath:   filepath.Join(tmpDir, paths.ProjectDirName(), "state.yaml"),
 	}
 
 	prompt, err := buildOrchestratorPromptContext(state, config, testResolver(t))
@@ -1455,7 +1457,7 @@ func TestBuildOrchestratorPromptContextFunctionalClustersRendersFromProjectRoot(
 	if !strings.Contains(prompt, "Functional Clusters artifact: "+shellQuoteForTest(projectArtifact)) {
 		t.Fatalf("prompt missing project-root Functional Clusters artifact path %q", projectArtifact)
 	}
-	if !strings.Contains(prompt, "Use `~/.liza/AGENT_TOOLS.md` for Functional Clusters command syntax, routing rules, and freshness caveats.") {
+	if !strings.Contains(prompt, "Use `~/"+paths.GlobalDirName()+"/AGENT_TOOLS.md` for Functional Clusters command syntax, routing rules, and freshness caveats.") {
 		t.Fatalf("prompt missing AGENT_TOOLS Functional Clusters usage pointer")
 	}
 	if strings.Contains(prompt, "functional-clusters list --clusters") {
@@ -1475,7 +1477,7 @@ func TestBuildOrchestratorPromptContextStacklitAvailableIndexErrorOmitsStacklitA
 	writePromptTestFile(t, filepath.Join(projectRoot, "go.mod"), "module example.com/project\n")
 	testhelpers.MustGit(t, projectRoot, "add", "go.mod")
 	testhelpers.MustGit(t, projectRoot, "commit", "-m", "Add go module")
-	projectGoIndex := filepath.Join(projectRoot, ".liza", "scip", "go.scip")
+	projectGoIndex := filepath.Join(projectRoot, paths.ProjectDirName(), "scip", "go.scip")
 	writePromptTestFile(t, projectGoIndex, "go index")
 	restore := replaceStacklitAvailableIndexesForTest(t, func(opts stacklit.RuntimePlanOptions) ([]stacklit.IndexRef, error) {
 		if opts.TargetRoot != projectRoot {
@@ -1497,7 +1499,7 @@ func TestBuildOrchestratorPromptContextStacklitAvailableIndexErrorOmitsStacklitA
 		AgentID:     "orchestrator-1",
 		ProjectRoot: projectRoot,
 		SpecsDir:    filepath.Join(projectRoot, "specs"),
-		StatePath:   filepath.Join(projectRoot, ".liza", "state.yaml"),
+		StatePath:   filepath.Join(projectRoot, paths.ProjectDirName(), "state.yaml"),
 	}
 
 	prompt, err := buildOrchestratorPromptContext(state, config, testResolver(t))
@@ -1536,7 +1538,7 @@ func TestBuildOrchestratorPromptContextSembleSearchUsesSafeProjectRoot(t *testin
 		AgentID:     "orchestrator-1",
 		ProjectRoot: tmpDir,
 		SpecsDir:    filepath.Join(tmpDir, "specs"),
-		StatePath:   filepath.Join(tmpDir, ".liza", "state.yaml"),
+		StatePath:   filepath.Join(tmpDir, paths.ProjectDirName(), "state.yaml"),
 	}
 
 	prompt, err := buildOrchestratorPromptContext(state, config, testResolver(t))
@@ -1550,7 +1552,7 @@ func TestBuildOrchestratorPromptContextSembleSearchUsesSafeProjectRoot(t *testin
 	if !strings.Contains(prompt, shellQuoteForTest(tmpDir)) {
 		t.Fatalf("prompt missing safe project-root Semble target root for %q", tmpDir)
 	}
-	if !strings.Contains(prompt, "Use `~/.liza/AGENT_TOOLS.md` for Semble command syntax, content modes, routing rules, and proof requirements.") {
+	if !strings.Contains(prompt, "Use `~/"+paths.GlobalDirName()+"/AGENT_TOOLS.md` for Semble command syntax, content modes, routing rules, and proof requirements.") {
 		t.Fatalf("prompt missing AGENT_TOOLS Semble usage pointer")
 	}
 	if strings.Contains(prompt, "env HF_HUB_OFFLINE=1 semble search") {
@@ -1580,7 +1582,7 @@ func TestBuildOrchestratorPromptContextSembleSearchOmittedWhenProjectRootUnsafe(
 		AgentID:     "orchestrator-1",
 		ProjectRoot: tmpDir,
 		SpecsDir:    filepath.Join(tmpDir, "specs"),
-		StatePath:   filepath.Join(tmpDir, ".liza", "state.yaml"),
+		StatePath:   filepath.Join(tmpDir, paths.ProjectDirName(), "state.yaml"),
 	}
 
 	prompt, err := buildOrchestratorPromptContext(state, config, testResolver(t))
@@ -1834,9 +1836,9 @@ func TestBuildPrompt_RelevantTaskGraphDigest(t *testing.T) {
 		"Artifact refs below are repo-relative.",
 		"git -C " + filepath.Join(tmpDir, worktree) + " show main:<file-ref>",
 		"RELEVANT TASK GRAPH DIGEST",
-		"Use listed entries before broad state queries. Active tasks fallback: `liza get tasks --active --summary --json`.",
-		"Task detail: `liza get <id> --json` for full task state and `artifact-ref` tasks.",
-		"Produced outputs: `liza get <id> --output-summary --json` for `artifact-producer` tasks.",
+		"Use listed entries before broad state queries. Active tasks fallback: `" + brand.BinaryName + " get tasks --active --summary --json`.",
+		"Task detail: `" + brand.BinaryName + " get <id> --json` for full task state and `artifact-ref` tasks.",
+		"Produced outputs: `" + brand.BinaryName + " get <id> --output-summary --json` for `artifact-producer` tasks.",
 		"task-dep [BLOCKED; dependency, blocked, artifact-producer]: Prepare migration contract",
 		"blocker: waiting for migration plan",
 		"task-blocked-sibling [BLOCKED; blocked, sibling, file-overlap]: Coordinate repository behavior",
@@ -1861,7 +1863,7 @@ func TestBuildPrompt_RelevantTaskGraphDigest(t *testing.T) {
 		"Siblings with overlapping file refs:",
 		"Completed artifacts:",
 		"Plan siblings (scope boundary only):",
-		"task detail: liza get task-dep --json",
+		"task detail: " + brand.BinaryName + " get task-dep --json",
 	} {
 		if strings.Contains(prompt, unwanted) {
 			t.Errorf("buildPrompt() should not pre-inline task graph detail %q", unwanted)
@@ -4523,7 +4525,7 @@ func TestBuildPromptWithContext_Architect(t *testing.T) {
 		"ASSIGNED ARCHITECTURE TASK",
 		"Submission requires a new worktree commit for this task",
 		"Do NOT submit the pre-change HEAD",
-		"Submission proof: `liza submit-for-review` must actually run successfully after step 9g",
+		"Submission proof: `" + brand.BinaryName + " submit-for-review` must actually run successfully after step 9g",
 		"BOOTSTRAP-PRECOMMIT REQUIREMENTS",
 		`Set "kind": "bootstrap-precommit"`,
 		`"kind": "<optional typed marker — see BOOTSTRAP-PRECOMMIT REQUIREMENTS in IMPLEMENTATION PHASE>"`,

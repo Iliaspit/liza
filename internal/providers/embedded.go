@@ -66,7 +66,7 @@ providers:
       required_executables: [acpx]
       contract_key: codex
       acpx_agent: codex
-      acpx_session_name: liza-{{agentID}}
+      acpx_session_name: §BRAND_BINARY_NAME§-{{agentID}}
       acpx_show_args: [--cwd, "{{projectRoot}}", "{{acpxAgent}}", sessions, show, --name, "{{sessionName}}"]
       acpx_ensure_args: [--cwd, "{{projectRoot}}", "{{acpxAgent}}", sessions, ensure, --name, "{{sessionName}}"]
       acpx_prompt_args: [--cwd, "{{projectRoot}}", --format, json, --approve-all, "{{acpxAgent}}", prompt, -s, "{{sessionName}}", --file, "-"]
@@ -100,7 +100,7 @@ providers:
       required_executables: [acpx, cursor-agent]
       contract_key: codex
       acpx_agent: cursor
-      acpx_session_name: liza-{{agentID}}
+      acpx_session_name: §BRAND_BINARY_NAME§-{{agentID}}
       acpx_show_args: [--cwd, "{{projectRoot}}", "{{acpxAgent}}", sessions, show, --name, "{{sessionName}}"]
       acpx_ensure_args: [--cwd, "{{projectRoot}}", "{{acpxAgent}}", sessions, ensure, --name, "{{sessionName}}"]
       acpx_set_mode_args: [--cwd, "{{projectRoot}}", "{{acpxAgent}}", set-mode, agent, -s, "{{sessionName}}"]
@@ -138,7 +138,7 @@ providers:
       required_executables: [acpx]
       contract_key: opencode
       acpx_agent: opencode
-      acpx_session_name: liza-{{agentID}}
+      acpx_session_name: §BRAND_BINARY_NAME§-{{agentID}}
       acpx_show_args: [--cwd, "{{projectRoot}}", "{{acpxAgent}}", sessions, show, --name, "{{sessionName}}"]
       acpx_ensure_args: [--cwd, "{{projectRoot}}", "{{acpxAgent}}", sessions, ensure, --name, "{{sessionName}}"]
       acpx_prompt_args: [--cwd, "{{projectRoot}}", --format, json, --approve-all, "{{acpxAgent}}", prompt, -s, "{{sessionName}}", --file, "-"]
@@ -240,7 +240,7 @@ providers:
       required_executables: [acpx]
       contract_key: qwen
       acpx_agent: qwen
-      acpx_session_name: liza-qwen-{{agentID}}
+      acpx_session_name: §BRAND_BINARY_NAME§-qwen-{{agentID}}
       acpx_show_args: [--cwd, "{{projectRoot}}", "{{acpxAgent}}", sessions, show, --name, "{{sessionName}}"]
       acpx_ensure_args: [--cwd, "{{projectRoot}}", "{{acpxAgent}}", sessions, ensure, --name, "{{sessionName}}"]
       acpx_prompt_args: [--cwd, "{{projectRoot}}", --format, json, --approve-all, "{{acpxAgent}}", prompt, -s, "{{sessionName}}", --file, "-"]
@@ -271,7 +271,7 @@ providers:
       required_executables: [acpx, devin]
       contract_key: devin
       acpx_agent: devin acp
-      acpx_session_name: liza-devin-{{agentID}}
+      acpx_session_name: §BRAND_BINARY_NAME§-devin-{{agentID}}
       acpx_show_args: [--cwd, "{{projectRoot}}", --agent, "{{acpxAgent}}", sessions, show, --name, "{{sessionName}}"]
       acpx_ensure_args: [--cwd, "{{projectRoot}}", --agent, "{{acpxAgent}}", sessions, ensure, --name, "{{sessionName}}"]
       acpx_prompt_args: [--cwd, "{{projectRoot}}", --format, json, --approve-all, --agent, "{{acpxAgent}}", prompt, -s, "{{sessionName}}", --file, "-"]

@@ -53,7 +53,7 @@ type Sprint struct {
 }
 
 // SprintSummary is a lightweight record of a completed sprint kept in state.yaml.
-// Full sprint data (metrics, scope, retrospective) is archived to .liza/archive/sprint-N.yaml.
+// Full sprint data (metrics, scope, retrospective) is archived in the project runtime directory.
 type SprintSummary struct {
 	ID        string       `yaml:"id"`
 	Number    int          `yaml:"number"`

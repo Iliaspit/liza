@@ -15,6 +15,7 @@ import (
 	"github.com/liza-mas/liza/internal/commands"
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/ops"
+	"github.com/liza-mas/liza/internal/paths"
 	"github.com/liza-mas/liza/internal/pipeline"
 	"github.com/liza-mas/liza/internal/testhelpers"
 	"gopkg.in/yaml.v3"
@@ -131,7 +132,7 @@ func TestStatusLegacyPipelineMatchesResumeMergeBlocker(t *testing.T) {
 		state.Sprint.Scope.Planned = []string{"legacy-plan"}
 		state.Tasks = []models.Task{statusPipelinePlanningTask("legacy-plan", now)}
 	})
-	if err := os.Remove(filepath.Join(projectRoot, ".liza", "pipeline.yaml")); err != nil {
+	if err := os.Remove(filepath.Join(projectRoot, paths.ProjectDirName(), "pipeline.yaml")); err != nil {
 		t.Fatalf("remove pipeline config: %v", err)
 	}
 
@@ -220,7 +221,7 @@ func statusPipelinePlanningTask(id string, now time.Time) models.Task {
 
 func addStatusPipelineCustomRolePair(t *testing.T, projectRoot string) {
 	t.Helper()
-	pipelinePath := filepath.Join(projectRoot, ".liza", "pipeline.yaml")
+	pipelinePath := filepath.Join(projectRoot, paths.ProjectDirName(), "pipeline.yaml")
 	cfg, err := pipeline.Load(pipelinePath)
 	if err != nil {
 		t.Fatalf("load fixture pipeline: %v", err)

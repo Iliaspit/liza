@@ -47,7 +47,7 @@ func TestACPXAgentRunUsesPersistentCodexSession(t *testing.T) {
 	if first.Output != "done from acpx" {
 		t.Fatalf("first Output = %q, want fake acpx message", first.Output)
 	}
-	if first.SessionID != "liza-coder-1-task-acp" {
+	if first.SessionID != brand.BinaryName+"-coder-1-task-acp" {
 		t.Fatalf("first SessionID = %q, want liza-coder-1-task-acp", first.SessionID)
 	}
 	if first.WarmUsage {
@@ -69,8 +69,8 @@ func TestACPXAgentRunUsesPersistentCodexSession(t *testing.T) {
 	log := readTextForTest(t, logPath)
 	for _, want := range []string{
 		"ENV_LIZA_AGENT_ID:coder-1",
-		"ARGS:--cwd " + req.ProjectRoot + " codex sessions ensure --name liza-coder-1-task-acp",
-		"ARGS:--cwd " + req.ProjectRoot + " --format json --approve-all codex prompt -s liza-coder-1-task-acp --file -",
+		"ARGS:--cwd " + req.ProjectRoot + " codex sessions ensure --name " + brand.BinaryName + "-coder-1-task-acp",
+		"ARGS:--cwd " + req.ProjectRoot + " --format json --approve-all codex prompt -s " + brand.BinaryName + "-coder-1-task-acp --file -",
 		"STDIN:implement the requested change",
 	} {
 		if !strings.Contains(log, want) {
@@ -119,8 +119,8 @@ func TestACPXAgentRunUsesOpenCodeTarget(t *testing.T) {
 
 	log := readTextForTest(t, logPath)
 	for _, want := range []string{
-		"ARGS:--cwd " + req.ProjectRoot + " opencode sessions ensure --name liza-coder-1",
-		"ARGS:--cwd " + req.ProjectRoot + " --format json --approve-all opencode prompt -s liza-coder-1 --file -",
+		"ARGS:--cwd " + req.ProjectRoot + " opencode sessions ensure --name " + brand.BinaryName + "-coder-1",
+		"ARGS:--cwd " + req.ProjectRoot + " --format json --approve-all opencode prompt -s " + brand.BinaryName + "-coder-1 --file -",
 		"STDIN:implement the requested change",
 	} {
 		if !strings.Contains(log, want) {
@@ -166,9 +166,9 @@ func TestACPXAgentRunUsesCursorTarget(t *testing.T) {
 
 	log := readTextForTest(t, logPath)
 	for _, want := range []string{
-		"ARGS:--cwd " + req.ProjectRoot + " cursor sessions ensure --name liza-coder-1",
-		"ARGS:--cwd " + req.ProjectRoot + " cursor set-mode agent -s liza-coder-1",
-		"ARGS:--cwd " + req.ProjectRoot + " --format json --approve-all cursor prompt -s liza-coder-1 --file -",
+		"ARGS:--cwd " + req.ProjectRoot + " cursor sessions ensure --name " + brand.BinaryName + "-coder-1",
+		"ARGS:--cwd " + req.ProjectRoot + " cursor set-mode agent -s " + brand.BinaryName + "-coder-1",
+		"ARGS:--cwd " + req.ProjectRoot + " --format json --approve-all cursor prompt -s " + brand.BinaryName + "-coder-1 --file -",
 		"STDIN:implement the requested change",
 	} {
 		if !strings.Contains(log, want) {
@@ -176,9 +176,9 @@ func TestACPXAgentRunUsesCursorTarget(t *testing.T) {
 		}
 	}
 	assertLogOrder(t, log,
-		"cursor sessions ensure --name liza-coder-1",
-		"cursor set-mode agent -s liza-coder-1",
-		"cursor prompt -s liza-coder-1",
+		"cursor sessions ensure --name "+brand.BinaryName+"-coder-1",
+		"cursor set-mode agent -s "+brand.BinaryName+"-coder-1",
+		"cursor prompt -s "+brand.BinaryName+"-coder-1",
 	)
 }
 

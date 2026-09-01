@@ -5,6 +5,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/liza-mas/liza/internal/paths"
+
 	"github.com/liza-mas/liza/internal/brand"
 	"github.com/liza-mas/liza/internal/models"
 )
@@ -32,7 +34,7 @@ func TestValidateStateRejectsRawProviderTranscriptPayload(t *testing.T) {
 				"impact":   "provider transcript or rollout persistence may be incomplete",
 				"message":  rawProviderTranscript(),
 				"log_ref": map[string]any{
-					"output_file": ".liza/agent-outputs/orchestrator-1-20260515-101530.txt",
+					"output_file": paths.ProjectDirName() + "/agent-outputs/orchestrator-1-20260515-101530.txt",
 					"event_id":    "item_abc123",
 				},
 			},
@@ -163,7 +165,7 @@ func TestScrubStateForMigrationPreservesAnomalyAndScrubsMessage(t *testing.T) {
 				"impact":   "provider transcript or rollout persistence may be incomplete",
 				"message":  rawProviderTranscript(),
 				"log_ref": map[string]any{
-					"output_file": ".liza/agent-outputs/orchestrator-1-20260515-101530.txt",
+					"output_file": paths.ProjectDirName() + "/agent-outputs/orchestrator-1-20260515-101530.txt",
 					"event_id":    "item_abc123",
 				},
 			},
@@ -204,7 +206,7 @@ func TestScrubStateForMigrationPreservesAnomalyAndScrubsMessage(t *testing.T) {
 	if !ok {
 		t.Fatalf("log_ref = %#v, want retained map", details["log_ref"])
 	}
-	if logRef["output_file"] != ".liza/agent-outputs/orchestrator-1-20260515-101530.txt" {
+	if logRef["output_file"] != paths.ProjectDirName()+"/agent-outputs/orchestrator-1-20260515-101530.txt" {
 		t.Fatalf("log_ref output_file = %v, want retained output file", logRef["output_file"])
 	}
 	if got := state.Anomalies[1].Details["message"]; got != "short operational message" {
@@ -298,7 +300,7 @@ func TestScrubStateForMigrationUsesBrandedAgentOutputsPath(t *testing.T) {
 }
 
 func rawProviderTranscript() string {
-	return `{"type":"item.completed","item":{"type":"command_execution","command":"/usr/bin/zsh -lc 'cat .liza/SUPPORT.md'","aggregated_output":"SUPPORT_FULL_TEXT","exit_code":0,"status":"completed"}}`
+	return "{\"type\":\"item.completed\",\"item\":{\"type\":\"command_execution\",\"command\":\"/usr/bin/zsh -lc 'cat " + paths.ProjectDirName() + "/SUPPORT.md'\",\"aggregated_output\":\"SUPPORT_FULL_TEXT\",\"exit_code\":0,\"status\":\"completed\"}}"
 }
 
 func createState() *models.State {

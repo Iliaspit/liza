@@ -12,6 +12,7 @@ import (
 	"github.com/liza-mas/liza/internal/errors"
 	"github.com/liza-mas/liza/internal/git"
 	"github.com/liza-mas/liza/internal/models"
+	"github.com/liza-mas/liza/internal/paths"
 	"github.com/liza-mas/liza/internal/statevalidate"
 	"github.com/liza-mas/liza/internal/testhelpers"
 )
@@ -664,7 +665,7 @@ func TestReleaseClaim_PipelineReviewerClaim_LegacySubmittedStatus(t *testing.T) 
 	t.Parallel()
 
 	tmpDir, stateFile := setupPipelineTest(t)
-	pipelinePath := filepath.Join(tmpDir, ".liza", "pipeline.yaml")
+	pipelinePath := filepath.Join(tmpDir, paths.ProjectDirName(), "pipeline.yaml")
 	data, err := os.ReadFile(pipelinePath)
 	if err != nil {
 		t.Fatalf("read pipeline config: %v", err)

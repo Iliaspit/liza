@@ -20,14 +20,22 @@ func resolveCatalogProviders(cat providers.Catalog, ids []string) ([]providers.P
 		provider, ok := cat.Resolve(id)
 		if !ok {
 			// Backfill embedded built-ins when a stale or partial catalog omits
-			// providers that Liza requires for convenience setup paths.
+			// providers that the runtime requires for convenience setup paths.
 			provider, ok = embeddedCatalog.Resolve(id)
 		}
 		if !ok {
 			return nil, fmt.Errorf("unknown provider: %s", id)
 		}
-		if embedded, builtIn := embeddedCatalog.Resolve(provider.ID); builtIn && cat.Version < 2 {
-			provider.Setup.Contract = backfillLegacyContractPolicy(provider.ID, provider.Setup.Contract, embedded.Setup.Contract)
+		if embedded, builtIn := embeddedCatalog.Resolve(provider.ID); builtIn {
+			if cat.Version < 2 {
+				provider.Setup.Contract = backfillLegacyContractPolicy(provider.ID, provider.Setup.Contract, embedded.Setup.Contract)
+			}
+			if cat.Version >= 2 && (provider.ID == "devin" || provider.ID == "devin-acp") {
+				// The Devin repo filename identifies the active build's brand.
+				// Published catalogs use the canonical brand, so the rendered
+				// embedded value remains authoritative for this built-in.
+				provider.Setup.Contract.RepoFile = embedded.Setup.Contract.RepoFile
+			}
 		}
 		if seen[provider.ID] {
 			continue
@@ -92,7 +100,7 @@ func isKnownLegacyRepoOnlyGlobalFallback(providerID, globalFallback string) bool
 	case "kimi":
 		return globalFallback == ".claude/CLAUDE.md"
 	case "devin", "devin-acp":
-		return globalFallback == ".config/devin/liza.md"
+		return globalFallback == ".config/devin/liza.md" // Pre-brand literal shipped in legacy catalogs.
 	default:
 		return false
 	}

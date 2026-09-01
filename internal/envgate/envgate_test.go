@@ -45,6 +45,24 @@ func TestValueEmptyBrandedEnvSuppressesLegacyAlias(t *testing.T) {
 	}
 }
 
+func TestLookupFuncEmptyBrandedEnvSuppressesLegacyAlias(t *testing.T) {
+	restore := setTestBrandEnvPrefix(t, "ACME_AGENT")
+	defer restore()
+
+	env := map[string]string{
+		"ACME_AGENT_ENABLE_STACKLIT": "",
+		"LIZA_ENABLE_STACKLIT":       "true",
+	}
+	lookup := LookupFunc(func(key string) (string, bool) {
+		value, ok := env[key]
+		return value, ok
+	}, "ENABLE_STACKLIT")
+
+	if lookup.Value != "" || lookup.Source != "ACME_AGENT_ENABLE_STACKLIT" {
+		t.Fatalf("LookupFunc() = %+v, want empty branded value", lookup)
+	}
+}
+
 func setTestBrandEnvPrefix(t *testing.T, prefix string) func() {
 	t.Helper()
 	previous := brand.EnvPrefix

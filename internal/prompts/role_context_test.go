@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/liza-mas/liza/internal/models"
+	"github.com/liza-mas/liza/internal/paths"
 )
 
 func TestRoleContextData_CoderPopulation(t *testing.T) {
@@ -44,7 +45,7 @@ func TestRoleContextData_CoderPopulation(t *testing.T) {
 
 		// Config/state
 		ProjectRoot: "/project",
-		StatePath:   "/project/.liza/state.yaml",
+		StatePath:   "/project/" + paths.ProjectDirName() + "/state.yaml",
 		SpecsDir:    "/project/specs",
 		GoalDesc:    "Build a web API",
 
@@ -165,7 +166,7 @@ func TestRoleContextData_CodeReviewerPopulation(t *testing.T) {
 
 		// Config/state
 		ProjectRoot: "/project",
-		StatePath:   "/project/.liza/state.yaml",
+		StatePath:   "/project/" + paths.ProjectDirName() + "/state.yaml",
 		SpecsDir:    "/project/specs",
 		GoalDesc:    "Build a web API",
 
@@ -237,12 +238,12 @@ func TestRoleContextData_OrchestratorPopulation(t *testing.T) {
 		CheckpointSummary: "Last checkpoint: 2h ago",
 		PipelineConfig:    "pipeline v2 loaded",
 		ScipIndexes: []ScipIndexRef{
-			{Language: "go", Path: "/project/.liza/scip/go.scip"},
+			{Language: "go", Path: "/project/" + paths.ProjectDirName() + "/scip/go.scip"},
 		},
 
 		// Config/state
 		ProjectRoot: "/project",
-		StatePath:   "/project/.liza/state.yaml",
+		StatePath:   "/project/" + paths.ProjectDirName() + "/state.yaml",
 		SpecsDir:    "/project/specs",
 		GoalDesc:    "Build a web API",
 
@@ -290,7 +291,7 @@ func TestRoleContextData_OrchestratorPopulation(t *testing.T) {
 	if data.ScipIndexes[0].Language != "go" {
 		t.Errorf("ScipIndexes[0].Language = %q, want go", data.ScipIndexes[0].Language)
 	}
-	if data.ScipIndexes[0].Path != "/project/.liza/scip/go.scip" {
+	if data.ScipIndexes[0].Path != "/project/"+paths.ProjectDirName()+"/scip/go.scip" {
 		t.Errorf("ScipIndexes[0].Path = %q, want project-root SCIP path", data.ScipIndexes[0].Path)
 	}
 
@@ -360,7 +361,7 @@ func TestRoleContextData_Architect(t *testing.T) {
 
 		// Config/state
 		ProjectRoot: "/project",
-		StatePath:   "/project/.liza/state.yaml",
+		StatePath:   "/project/" + paths.ProjectDirName() + "/state.yaml",
 		SpecsDir:    "/project/specs",
 		GoalDesc:    "Build user management",
 	}

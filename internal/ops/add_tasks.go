@@ -94,7 +94,7 @@ func addTaskWithOptionalAuthority(statePath, logPath string, input *AddTaskInput
 		}
 	}
 
-	// Derive project root from state path (.liza/state.yaml → project root)
+	// Derive the project root from the runtime state path.
 	projectRoot := filepath.Dir(filepath.Dir(statePath))
 	resolver, _, err := loadResolver(projectRoot)
 	if err != nil {

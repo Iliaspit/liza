@@ -13,6 +13,7 @@ import (
 	"github.com/liza-mas/liza/internal/embedded"
 	"github.com/liza-mas/liza/internal/functionalclusters"
 	"github.com/liza-mas/liza/internal/models"
+	"github.com/liza-mas/liza/internal/paths"
 	"github.com/liza-mas/liza/internal/pipeline"
 	"github.com/liza-mas/liza/internal/scipsearch"
 	"github.com/liza-mas/liza/internal/semble"
@@ -112,7 +113,7 @@ func buildDisabledOptionalIndexPrompt(t *testing.T, projectRoot string) string {
 	worktree := ".worktrees/task-1"
 	taskWorktree := filepath.Join(projectRoot, worktree)
 	writeIndexingActivationFile(t, filepath.Join(taskWorktree, "stacklit.json"), `{"project":{"name":"stale"}}`)
-	writeIndexingActivationFile(t, filepath.Join(taskWorktree, ".liza", "scip", "go.scip"), "stale go index")
+	writeIndexingActivationFile(t, filepath.Join(taskWorktree, paths.ProjectDirName(), "scip", "go.scip"), "stale go index")
 	writeIndexingActivationFile(t, filepath.Join(taskWorktree, "functional-clusters.json"), "{}\n")
 	writeIndexingActivationFile(t, filepath.Join(taskWorktree, ".sembleignore"), semble.DefaultIgnorePayload())
 
@@ -149,7 +150,7 @@ func buildDisabledOptionalIndexPrompt(t *testing.T, projectRoot string) string {
 		AgentID:     "coder-1",
 		ProjectRoot: projectRoot,
 		SpecsDir:    filepath.Join(projectRoot, "specs"),
-		StatePath:   filepath.Join(projectRoot, ".liza", "state.yaml"),
+		StatePath:   filepath.Join(projectRoot, paths.ProjectDirName(), "state.yaml"),
 	}, "task-1")
 	if err != nil {
 		t.Fatalf("BuildPrompt(): %v", err)

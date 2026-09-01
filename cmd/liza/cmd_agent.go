@@ -284,17 +284,17 @@ func explainAgentLaunch(cmd *cobra.Command, cliName string, profile agent.Resolv
 func contractInitCommandForProvider(cliName string) string {
 	switch cliName {
 	case "kimi":
-		return "liza init --claude" // kimi uses Claude's config
+		return brand.Command("init", "--claude") // kimi uses Claude's config
 	case "codex-acp":
-		return "liza init --codex" // codex-acp uses Codex's config
+		return brand.Command("init", "--codex") // codex-acp uses Codex's config
 	case "cursor-acp":
-		return "liza init --cursor" // cursor-acp uses the Cursor convenience setup
+		return brand.Command("init", "--cursor") // cursor-acp uses the Cursor convenience setup
 	case "opencode-acp":
-		return "liza init --opencode" // opencode-acp uses OpenCode's config
+		return brand.Command("init", "--opencode") // opencode-acp uses OpenCode's config
 	case "claude", "codex", "cursor", "opencode", "gemini", "mistral":
-		return "liza init --" + cliName
+		return brand.Command("init", "--"+cliName)
 	default:
-		return "liza init --provider " + cliName
+		return brand.Command("init", "--provider", cliName)
 	}
 }
 

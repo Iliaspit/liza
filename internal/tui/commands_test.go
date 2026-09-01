@@ -17,6 +17,7 @@ import (
 	"github.com/liza-mas/liza/internal/log"
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/ops"
+	"github.com/liza-mas/liza/internal/paths"
 	"github.com/liza-mas/liza/internal/pipeline"
 	"github.com/liza-mas/liza/internal/testhelpers"
 	"gopkg.in/yaml.v3"
@@ -225,7 +226,7 @@ func TestSpawnAgentCmd_ReturnsCmdResultMsg(t *testing.T) {
 
 func TestLoadRolesCmd_WithPipelineConfig(t *testing.T) {
 	dir := t.TempDir()
-	lizaDir := filepath.Join(dir, ".liza")
+	lizaDir := filepath.Join(dir, paths.ProjectDirName())
 	if err := os.MkdirAll(lizaDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -349,14 +350,14 @@ func TestResumeSystemCmd_ReportsStoppedHaltAcknowledgement(t *testing.T) {
 		Timestamp:  triggeredAt,
 		Pattern:    pattern,
 		Severity:   severity,
-		ReportFile: ".liza/reports/active-halt.md",
+		ReportFile: paths.ProjectDirName() + "/reports/active-halt.md",
 	}
 	state.CircuitBreaker.CurrentResponse = &models.CircuitBreakerResponse{
 		Timestamp:  triggeredAt,
 		Pattern:    pattern,
 		Severity:   severity,
 		Response:   models.CircuitBreakerResponseHalt,
-		ReportFile: ".liza/reports/active-halt.md",
+		ReportFile: paths.ProjectDirName() + "/reports/active-halt.md",
 	}
 	state.CircuitBreaker.History = append(state.CircuitBreaker.History, models.CircuitBreakerHistory{
 		Timestamp: triggeredAt,
@@ -581,7 +582,7 @@ func TestRunChecksCmdDoesNotWriteValidationWarningsToCommandWarnWriter(t *testin
 	}
 	warnings.Reset()
 
-	cmd := runChecksCmd(tmpDir, filepath.Join(tmpDir, ".liza", "alerts.log"), state, make(map[string]time.Time))
+	cmd := runChecksCmd(tmpDir, filepath.Join(tmpDir, paths.ProjectDirName(), "alerts.log"), state, make(map[string]time.Time))
 	msg := cmd()
 	if _, ok := msg.(alertsMsg); !ok {
 		t.Fatalf("runChecksCmd() message = %T, want alertsMsg", msg)

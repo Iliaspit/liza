@@ -144,7 +144,7 @@ func (g *Git) DiffFiles(dir, commitA, commitB string) ([]string, error) {
 // two commits. Required after update-ref advances a branch, since update-ref
 // only moves the ref pointer without touching the working tree or index.
 // Only touches files affected by the merge — safe for working trees with
-// unrelated pending changes (e.g. .liza/state.yaml).
+// unrelated pending changes (for example, project runtime state).
 //
 // Handles all change types: added/modified files are checked out from toCommit,
 // deleted files are removed, and renames are handled by removing the old path

@@ -13,6 +13,7 @@ import (
 	"github.com/liza-mas/liza/internal/db"
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/ops"
+	"github.com/liza-mas/liza/internal/paths"
 	"github.com/liza-mas/liza/internal/scipsearch"
 	"github.com/liza-mas/liza/internal/stacklit"
 	"github.com/liza-mas/liza/internal/testhelpers"
@@ -154,7 +155,7 @@ func TestOrchestratorPreExecutionScipRefreshRunsBeforePromptStateReadForWakeTrig
 			if len(events) != 2 || events[0] != "refresh" || events[1] != "read-state-for-prompt" {
 				t.Fatalf("events = %v, want refresh before prompt-state read", events)
 			}
-			if _, err := os.Stat(filepath.Join(projectRoot, ".liza", "scip", "go.scip")); err != nil {
+			if _, err := os.Stat(filepath.Join(projectRoot, paths.ProjectDirName(), "scip", "go.scip")); err != nil {
 				t.Fatalf("project-root index missing before prompt-state read: %v", err)
 			}
 		})
@@ -248,7 +249,7 @@ func TestOrchestratorPreExecutionScipRefreshErrorDoesNotPreventExecution(t *test
 func TestOrchestratorPreExecutionScipRefreshUsesProjectRootNotTaskWorktree(t *testing.T) {
 	projectRoot := t.TempDir()
 	taskWorktree := filepath.Join(projectRoot, ".worktrees", "task-1")
-	if err := os.MkdirAll(filepath.Join(taskWorktree, ".liza", "scip"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(taskWorktree, paths.ProjectDirName(), "scip"), 0o755); err != nil {
 		t.Fatalf("MkdirAll(task worktree scip dir) error = %v", err)
 	}
 	bb := newOrchestratorScipTestBlackboard(t, projectRoot, func(state *models.State) {
@@ -273,10 +274,10 @@ func TestOrchestratorPreExecutionScipRefreshUsesProjectRootNotTaskWorktree(t *te
 	if err := strategy.PreExecution(bb, orchestratorScipConfig(projectRoot)); err != nil {
 		t.Fatalf("PreExecution() error = %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(projectRoot, ".liza", "scip", "go.scip")); err != nil {
+	if _, err := os.Stat(filepath.Join(projectRoot, paths.ProjectDirName(), "scip", "go.scip")); err != nil {
 		t.Fatalf("project-root index missing: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(taskWorktree, ".liza", "scip", "go.scip")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(taskWorktree, paths.ProjectDirName(), "scip", "go.scip")); !os.IsNotExist(err) {
 		t.Fatalf("task-worktree index stat error = %v, want not exist", err)
 	}
 }
@@ -349,7 +350,7 @@ func orchestratorScipConfig(projectRoot string) SupervisorConfig {
 func writeProjectRootScipIndex(t *testing.T, projectRoot string) string {
 	t.Helper()
 
-	indexPath := filepath.Join(projectRoot, ".liza", "scip", "go.scip")
+	indexPath := filepath.Join(projectRoot, paths.ProjectDirName(), "scip", "go.scip")
 	if err := os.MkdirAll(filepath.Dir(indexPath), 0o755); err != nil {
 		t.Fatalf("MkdirAll(index dir) error = %v", err)
 	}
@@ -440,7 +441,7 @@ func assertOrchestratorRefreshOptions(t *testing.T, opts scipsearch.RefreshOptio
 func assertNoScipIndexDir(t *testing.T, projectRoot string) {
 	t.Helper()
 
-	if _, err := os.Stat(filepath.Join(projectRoot, ".liza", "scip")); !os.IsNotExist(err) {
-		t.Fatalf(".liza/scip stat error = %v, want not exist", err)
+	if _, err := os.Stat(filepath.Join(projectRoot, paths.ProjectDirName(), "scip")); !os.IsNotExist(err) {
+		t.Fatalf("%s/scip stat error = %v, want not exist", paths.ProjectDirName(), err)
 	}
 }

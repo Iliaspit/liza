@@ -701,11 +701,11 @@ func setMistralSystemPrompt(configPath string, reader *bufio.Reader, promptID st
 	return nil
 }
 
-// InitCommand initializes a new Liza workspace.
-// It creates the .liza directory structure, generates initial state.yaml,
+// InitCommand initializes a new workspace.
+// It creates the project runtime directory structure, generates initial state.yaml,
 // validates the spec file exists, and creates the integration branch.
 //
-// Prerequisite: 'liza setup' must have been run to populate ~/.liza/.
+// Prerequisite: the setup command must have populated the global runtime directory.
 // The stdin parameter allows for injected input in tests; pass os.Stdin for CLI usage.
 func InitCommand(description string, specRef string, stdin io.Reader) error {
 	return InitCommandWithConfig(InitParams{
@@ -882,7 +882,7 @@ func InitCommandWithConfig(params InitParams) error {
 		return err
 	}
 
-	// Validate and load pipeline config early (before creating .liza dir)
+	// Validate and load pipeline config early (before creating the project runtime directory).
 	var pipelineCfg *pipeline.PipelineConfig
 	var pipelineData []byte
 	if configPath != "" {

@@ -12,6 +12,7 @@ import (
 	"github.com/liza-mas/liza/internal/db"
 	gitpkg "github.com/liza-mas/liza/internal/git"
 	"github.com/liza-mas/liza/internal/models"
+	"github.com/liza-mas/liza/internal/paths"
 	"github.com/liza-mas/liza/internal/testhelpers"
 )
 
@@ -339,7 +340,7 @@ func TestEffectiveIntegrationCompletionGate(t *testing.T) {
 		fixture := newEffectiveCompletionFixture(t, true)
 		path := effectiveCompletionPaths()[0]
 		path.prepare(t, fixture)
-		reportPath := filepath.Join(fixture.projectRoot, ".liza", "sprint_summary.md")
+		reportPath := filepath.Join(fixture.projectRoot, paths.ProjectDirName(), "sprint_summary.md")
 		const originalSummary = "existing summary\n"
 		if err := os.WriteFile(reportPath, []byte(originalSummary), 0o644); err != nil {
 			t.Fatalf("write existing summary: %v", err)
@@ -529,7 +530,7 @@ func effectiveCompletionPaths() []effectiveCompletionPath {
 				if state.Sprint.Status != models.SprintStatusInProgress || state.Sprint.Timeline.CheckpointAt != nil || state.Sprint.CheckpointTrigger != "" {
 					t.Fatalf("checkpoint progression persisted: %#v", state.Sprint)
 				}
-				if _, err := os.Stat(filepath.Join(fixture.projectRoot, ".liza", "sprint_summary.md")); !errors.Is(err, os.ErrNotExist) {
+				if _, err := os.Stat(filepath.Join(fixture.projectRoot, paths.ProjectDirName(), "sprint_summary.md")); !errors.Is(err, os.ErrNotExist) {
 					t.Fatalf("sprint summary exists after rejection: %v", err)
 				}
 			},
@@ -647,7 +648,7 @@ func assertEffectiveCompletionArchiveRejected(t *testing.T, fixture *effectiveCo
 	if state.Sprint.Number != 1 || len(state.SprintHistory) != 0 {
 		t.Fatalf("archive progression persisted: sprint=%#v history=%v", state.Sprint, state.SprintHistory)
 	}
-	archivePath := filepath.Join(fixture.projectRoot, ".liza", "archive", "sprint-1.yaml")
+	archivePath := filepath.Join(fixture.projectRoot, paths.ProjectDirName(), "archive", "sprint-1.yaml")
 	if _, err := os.Stat(archivePath); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("archive exists after rejection: %v", err)
 	}
@@ -661,12 +662,12 @@ func setupPipelineTest(t *testing.T) (string, string) {
 	testhelpers.SetupTestGitRepo(t, tmpDir)
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
-	// Copy the valid pipeline YAML to .liza/pipeline.yaml (frozen config).
+	// Copy the valid pipeline YAML to the project runtime directory (frozen config).
 	src, err := os.ReadFile(filepath.Join(testhelpers.FindRepoRoot(t), "internal", "pipeline", "testdata", "valid-coding-subpipeline.yaml"))
 	if err != nil {
 		t.Fatalf("Failed to read pipeline testdata: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(tmpDir, ".liza", "pipeline.yaml"), src, 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(tmpDir, paths.ProjectDirName(), "pipeline.yaml"), src, 0644); err != nil {
 		t.Fatalf("Failed to write frozen pipeline config: %v", err)
 	}
 
@@ -691,7 +692,7 @@ func TestLoadDetectionContext_NoPipeline(t *testing.T) {
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
 	testhelpers.SetupLizaDir(t, tmpDir)
-	os.Remove(filepath.Join(tmpDir, ".liza", "pipeline.yaml"))
+	os.Remove(filepath.Join(tmpDir, paths.ProjectDirName(), "pipeline.yaml"))
 	_, err := LoadDetectionContext(tmpDir)
 	if err == nil {
 		t.Fatal("expected error for missing pipeline config")
@@ -702,7 +703,7 @@ func TestLoadPhaseHandoffDetectionContext_NoPipelineUsesLegacyPlanning(t *testin
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
 	testhelpers.SetupLizaDir(t, tmpDir)
-	if err := os.Remove(filepath.Join(tmpDir, ".liza", "pipeline.yaml")); err != nil && !os.IsNotExist(err) {
+	if err := os.Remove(filepath.Join(tmpDir, paths.ProjectDirName(), "pipeline.yaml")); err != nil && !os.IsNotExist(err) {
 		t.Fatalf("remove pipeline config: %v", err)
 	}
 
@@ -720,7 +721,7 @@ func TestLoadPhaseHandoffDetectionContext_NoPipelineUsesLegacyPlanning(t *testin
 
 func TestLoadPhaseHandoffDetectionContext_MalformedPipelineFailsClosed(t *testing.T) {
 	tmpDir, _ := setupPipelineTest(t)
-	pipelinePath := filepath.Join(tmpDir, ".liza", "pipeline.yaml")
+	pipelinePath := filepath.Join(tmpDir, paths.ProjectDirName(), "pipeline.yaml")
 	if err := os.WriteFile(pipelinePath, []byte("pipeline: [not-valid"), 0644); err != nil {
 		t.Fatalf("write malformed pipeline config: %v", err)
 	}
@@ -858,7 +859,7 @@ func TestTransitionSourcePairs_NoPipeline(t *testing.T) {
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
 	testhelpers.SetupLizaDir(t, tmpDir)
-	os.Remove(filepath.Join(tmpDir, ".liza", "pipeline.yaml"))
+	os.Remove(filepath.Join(tmpDir, paths.ProjectDirName(), "pipeline.yaml"))
 
 	_, err := TransitionSourcePairs(tmpDir)
 	if err == nil {
@@ -870,7 +871,7 @@ func TestLoadResolver_NoPipeline(t *testing.T) {
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
 	testhelpers.SetupLizaDir(t, tmpDir)
-	os.Remove(filepath.Join(tmpDir, ".liza", "pipeline.yaml"))
+	os.Remove(filepath.Join(tmpDir, paths.ProjectDirName(), "pipeline.yaml"))
 
 	_, _, err := loadResolver(tmpDir)
 	if err == nil {
@@ -973,7 +974,7 @@ func TestClaimTask_NoPipelineReturnsError(t *testing.T) {
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
-	os.Remove(filepath.Join(tmpDir, ".liza", "pipeline.yaml"))
+	os.Remove(filepath.Join(tmpDir, paths.ProjectDirName(), "pipeline.yaml"))
 
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/liza-mas/liza/internal/models"
+	"github.com/liza-mas/liza/internal/paths"
 	"github.com/liza-mas/liza/internal/testhelpers"
 )
 
@@ -641,7 +642,7 @@ func TestClearStaleReviewClaims_FutureLeaseClearsWhenAgentNotObservingTask(t *te
 // setupLogFile creates the log.yaml file that ClearStaleReviewClaims needs.
 func setupLogFile(t *testing.T, tmpDir string) {
 	t.Helper()
-	logPath := filepath.Join(tmpDir, ".liza", "log.yaml")
+	logPath := filepath.Join(tmpDir, paths.ProjectDirName(), "log.yaml")
 	if err := os.WriteFile(logPath, []byte(""), 0644); err != nil {
 		t.Fatalf("Failed to create log file: %v", err)
 	}

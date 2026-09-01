@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/liza-mas/liza/internal/paths"
+
 	"github.com/liza-mas/liza/internal/commands"
 	"github.com/liza-mas/liza/internal/db"
 	"github.com/liza-mas/liza/internal/models"
@@ -207,8 +209,8 @@ func setupIsolatedAwaitProject(t *testing.T) awaitIntegrationFixture {
 		t.Fatalf("InitProject failed: %v", err)
 	}
 
-	statePath := filepath.Join(projectRoot, ".liza", "state.yaml")
-	logPath := filepath.Join(projectRoot, ".liza", "log.yaml")
+	statePath := filepath.Join(projectRoot, paths.ProjectDirName(), "state.yaml")
+	logPath := filepath.Join(projectRoot, paths.ProjectDirName(), "log.yaml")
 	bb := db.New(statePath)
 	if err := commands.AddTaskCommand(statePath, logPath, &commands.TaskInput{
 		ID:          awaitTaskID,

@@ -8,6 +8,7 @@ import (
 
 	"github.com/liza-mas/liza/internal/db"
 	"github.com/liza-mas/liza/internal/models"
+	"github.com/liza-mas/liza/internal/paths"
 	"github.com/liza-mas/liza/internal/testhelpers"
 )
 
@@ -86,7 +87,7 @@ func TestHandleProviderAuditDegraded_CanonicalizesProviderAliasInAnomaly(t *test
 		t.Fatal("handleProviderAuditDegraded returned false, want true")
 	}
 
-	alertsPath := filepath.Join(projectRoot, ".liza", "alerts.log")
+	alertsPath := filepath.Join(projectRoot, paths.ProjectDirName(), "alerts.log")
 	data, err := os.ReadFile(alertsPath)
 	if err != nil {
 		t.Fatalf("failed to read alerts log: %v", err)

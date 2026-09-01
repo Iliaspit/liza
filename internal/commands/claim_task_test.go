@@ -165,7 +165,7 @@ func TestClaimTaskCommand(t *testing.T) {
 			// Initialize git repo
 			testhelpers.SetupTestGitRepo(t, tmpDir)
 
-			// Create .liza directory
+			// Create the project runtime directory.
 			statePath, _ := testhelpers.SetupLizaDir(t, tmpDir)
 			testhelpers.SetupPipelineConfig(t, tmpDir)
 
@@ -477,7 +477,7 @@ func TestClaimTaskCommandIntegration(t *testing.T) {
 	// Initialize git repo
 	testhelpers.SetupTestGitRepo(t, tmpDir)
 
-	// Create .liza directory
+	// Create the project runtime directory.
 	statePath, _ := testhelpers.SetupLizaDir(t, tmpDir)
 	testhelpers.SetupPipelineConfig(t, tmpDir)
 

@@ -7,8 +7,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/liza-mas/liza/internal/brand"
+
 	"github.com/liza-mas/liza/internal/commands"
 	"github.com/liza-mas/liza/internal/pairingindex"
+	"github.com/liza-mas/liza/internal/paths"
 	"github.com/liza-mas/liza/internal/scipsearch"
 	"github.com/liza-mas/liza/internal/semble"
 	"github.com/liza-mas/liza/internal/stacklit"
@@ -45,12 +48,12 @@ func TestIndexingActivationGeneratedArtifactsStayOutOfGitStatusWhenUntracked(t *
 	assertIndexingActivationContainsNone(t, statusAfterInit,
 		"?? stacklit.json",
 		"?? go.scip",
-		"?? .liza/scip/",
+		"?? "+paths.ProjectDirName()+"/scip/",
 	)
 	assertIndexingActivationContainsNone(t, statusAfterRefresh,
 		"?? stacklit.json",
 		"?? go.scip",
-		"?? .liza/scip/",
+		"?? "+paths.ProjectDirName()+"/scip/",
 	)
 	if got := runIndexingActivationGitOutput(t, projectDir, "check-ignore", "stacklit.json"); got != "stacklit.json" {
 		t.Fatalf("git check-ignore stacklit.json = %q, want private exclude", got)
@@ -111,16 +114,16 @@ func TestIndexingActivationNonDefaultHooksPathUsesEffectiveHookDirectory(t *test
 		t.Fatalf("InitPairingCommand(): %v", err)
 	}
 
-	scriptPath := filepath.Join(projectDir, ".githooks", "liza-index.sh")
+	scriptPath := filepath.Join(projectDir, ".githooks", brand.BinaryName+"-index.sh")
 	assertIndexingActivationContainsAll(t, readIndexingActivationFile(t, scriptPath), pairingindex.ManagedIndexScriptMarker)
 	for _, hook := range pairingindex.DefaultLifecycleHooks() {
 		assertIndexingActivationContainsAll(t, readIndexingActivationFile(t, filepath.Join(projectDir, ".githooks", hook)),
 			pairingindex.ManagedHookMarker,
-			"liza-index.sh",
+			brand.BinaryName+"-index.sh",
 		)
 	}
-	if _, err := os.Stat(filepath.Join(projectDir, ".git", "hooks", "liza-index.sh")); err == nil {
-		t.Fatal("InitPairingCommand installed inert .git/hooks/liza-index.sh despite non-default core.hooksPath")
+	if _, err := os.Stat(filepath.Join(projectDir, ".git", "hooks", brand.BinaryName+"-index.sh")); err == nil {
+		t.Fatal("InitPairingCommand installed inert .git/hooks/" + brand.BinaryName + "-index.sh despite non-default core.hooksPath")
 	} else if !os.IsNotExist(err) {
 		t.Fatalf("inspect .git/hooks/liza-index.sh: %v", err)
 	}
@@ -149,8 +152,8 @@ func TestIndexingActivationUnsafeHooksPathReportsDiagnosticWithoutInertDefaultHo
 		t.Fatal("InitPairingCommand() error = nil, want clear hooksPath diagnostic")
 	}
 	assertIndexingActivationContainsAll(t, err.Error(), "hooks-file", "not a directory")
-	if _, statErr := os.Stat(filepath.Join(projectDir, ".git", "hooks", "liza-index.sh")); statErr == nil {
-		t.Fatal("InitPairingCommand installed inert .git/hooks/liza-index.sh after unsafe core.hooksPath failure")
+	if _, statErr := os.Stat(filepath.Join(projectDir, ".git", "hooks", brand.BinaryName+"-index.sh")); statErr == nil {
+		t.Fatal("InitPairingCommand installed inert .git/hooks/" + brand.BinaryName + "-index.sh after unsafe core.hooksPath failure")
 	} else if !os.IsNotExist(statErr) {
 		t.Fatalf("inspect .git/hooks/liza-index.sh: %v", statErr)
 	}
@@ -171,7 +174,7 @@ func assertIndexingActivationDefaultHooksUnmanaged(t *testing.T, projectDir stri
 		}
 		assertIndexingActivationContainsNone(t, string(content),
 			pairingindex.ManagedHookMarker,
-			"liza-index.sh",
+			brand.BinaryName+"-index.sh",
 		)
 	}
 }

@@ -126,7 +126,7 @@ func TestRenderHeader_TruncatesLongGoalDescription(t *testing.T) {
 	if lipgloss.Width(got) > m.width {
 		t.Fatalf("renderHeader() width = %d, want <= %d; got %q", lipgloss.Width(got), m.width, got)
 	}
-	assertContains(t, got, "⚡  LIZA  |", "header should preserve branded prefix")
+	assertContains(t, got, "⚡  "+brand.NameUpper+"  |", "header should preserve branded prefix")
 	assertContains(t, got, "sprint:", "header should preserve sprint label")
 	assertContains(t, got, "sprint-1", "header should preserve sprint ID")
 	assertContains(t, got, "system:", "header should preserve system label")

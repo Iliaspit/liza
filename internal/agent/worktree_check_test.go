@@ -248,7 +248,7 @@ func TestEnsureReviewerWorktree_MissingRecoverable_RefreshesScipAfterPostWorktre
 	if len(calls) != 2 {
 		t.Fatalf("indexer calls = %#v, want go indexer and aggregate refresh", calls)
 	}
-	wantIndexPath := filepath.Join(wtPath, ".liza", "scip", "go.scip")
+	wantIndexPath := filepath.Join(wtPath, paths.ProjectDirName(), "scip", "go.scip")
 	if calls[0].Language != "go" || calls[0].Dir != wtPath || calls[1].Name != "scip-search" || !strings.HasSuffix(calls[1].OutputPath, "go-aggregate.scip") {
 		t.Fatalf("indexer calls = %#v, want go plan and aggregate for recovered worktree", calls)
 	}
@@ -455,7 +455,7 @@ func TestEnsureReviewerWorktreeRecoveryLogsBoundedSembleWarning(t *testing.T) {
 	statePath, _ := testhelpers.SetupLizaDir(t, tmpDir)
 	testhelpers.SetupPipelineConfig(t, tmpDir)
 
-	if err := os.WriteFile(filepath.Join(tmpDir, ".sembleignore"), []byte(".liza/\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(tmpDir, ".sembleignore"), []byte(paths.ProjectDirName()+"/\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	testhelpers.MustGit(t, tmpDir, "add", ".sembleignore")

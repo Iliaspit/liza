@@ -4,6 +4,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/liza-mas/liza/internal/brand"
+
 	"github.com/liza-mas/liza/internal/db"
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/testhelpers"
@@ -140,11 +142,11 @@ func TestSetTaskOutput_Validation(t *testing.T) {
 					DoneWhen:      "dw",
 					Scope:         "s",
 					SpecRef:       "specs/feature.md",
-					Validation:    []string{"env LIZA_ALLOW_DESTRUCTIVE_DB=1 make test ./db", "make test ./db"},
+					Validation:    []string{"env " + brand.EnvName("ALLOW_DESTRUCTIVE_DB") + "=1 make test ./db", "make test ./db"},
 					DestructiveDB: true,
 				}},
 			},
-			errContains: "output[0].validation[1] destructive_db requires command to start with LIZA_ALLOW_DESTRUCTIVE_DB=1 or env LIZA_ALLOW_DESTRUCTIVE_DB=1",
+			errContains: "output[0].validation[1] destructive_db requires command to start with " + brand.EnvName("ALLOW_DESTRUCTIVE_DB") + "=1 or env " + brand.EnvName("ALLOW_DESTRUCTIVE_DB") + "=1",
 		},
 	}
 

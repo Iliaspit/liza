@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/liza-mas/liza/internal/brand"
+
 	"github.com/liza-mas/liza/internal/commands"
 	"github.com/liza-mas/liza/internal/scipsearch"
 	"github.com/liza-mas/liza/internal/testhelpers"
@@ -241,7 +243,7 @@ func commitScipIndexingActivationFiles(t *testing.T, projectDir string, files ma
 func readScipIndexingActivationHookScript(t *testing.T, projectDir string) string {
 	t.Helper()
 
-	path := filepath.Join(projectDir, ".git", "hooks", "liza-index.sh")
+	path := filepath.Join(projectDir, ".git", "hooks", brand.BinaryName+"-index.sh")
 	content, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("ReadFile(%q): %v", path, err)

@@ -18,6 +18,7 @@ import (
 	lizaerrors "github.com/liza-mas/liza/internal/errors"
 	"github.com/liza-mas/liza/internal/git"
 	"github.com/liza-mas/liza/internal/models"
+	"github.com/liza-mas/liza/internal/paths"
 	"github.com/liza-mas/liza/internal/pipeline"
 	"github.com/liza-mas/liza/internal/statevalidate"
 	"github.com/liza-mas/liza/internal/testhelpers"
@@ -3066,7 +3067,7 @@ func TestMergeWorktree_CleansWorkingTreeWhenNotOnIntegration(t *testing.T) {
 	}
 
 	// After merge, working tree should be clean (relative to checked-out branch HEAD).
-	// .liza/ and .worktrees/ are infra dirs excluded from this assertion.
+	// Runtime and worktree infrastructure directories are excluded from this assertion.
 	status := testhelpers.MustGit(t, tmpDir, "status", "--short")
 	for _, line := range strings.Split(status, "\n") {
 		line = strings.TrimSpace(line)
@@ -3084,7 +3085,7 @@ func TestMergeWorktree_CleansWorkingTreeWhenNotOnIntegration(t *testing.T) {
 		if len(fields) >= 4 && fields[2] == "->" {
 			path = fields[3]
 		}
-		if strings.HasPrefix(path, ".liza/") || strings.HasPrefix(path, ".worktrees/") {
+		if strings.HasPrefix(path, paths.ProjectDirName()+"/") || strings.HasPrefix(path, ".worktrees/") {
 			continue
 		}
 		t.Errorf("working tree not clean after merge: %s", line)

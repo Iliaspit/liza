@@ -11,6 +11,7 @@ import (
 	"github.com/liza-mas/liza/internal/agent"
 	"github.com/liza-mas/liza/internal/db"
 	"github.com/liza-mas/liza/internal/models"
+	"github.com/liza-mas/liza/internal/paths"
 	"github.com/liza-mas/liza/internal/testhelpers"
 )
 
@@ -285,7 +286,7 @@ func TestResumeCommand_ArchiveWriteFailure(t *testing.T) {
 	testhelpers.SetupPipelineConfig(t, tmpDir)
 
 	// Make archive directory unwritable so writeSprintArchive fails.
-	archiveDir := filepath.Join(tmpDir, ".liza", "archive")
+	archiveDir := filepath.Join(tmpDir, paths.ProjectDirName(), "archive")
 	if err := os.MkdirAll(archiveDir, 0755); err != nil {
 		t.Fatalf("Failed to create archive dir: %v", err)
 	}

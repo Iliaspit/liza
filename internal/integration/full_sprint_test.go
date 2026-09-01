@@ -403,8 +403,8 @@ func TestFullSprintSequence(t *testing.T) {
 		t.Fatalf("InitCommandWithConfig failed: %v", err)
 	}
 
-	statePath := filepath.Join(projectDir, ".liza", "state.yaml")
-	logPath := filepath.Join(projectDir, ".liza", "log.yaml")
+	statePath := filepath.Join(projectDir, paths.ProjectDirName(), "state.yaml")
+	logPath := filepath.Join(projectDir, paths.ProjectDirName(), "log.yaml")
 	specsDir := filepath.Join(projectDir, "specs")
 
 	// Add the initial epic-planning task.

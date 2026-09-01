@@ -7,6 +7,7 @@ import (
 
 	"github.com/liza-mas/liza/internal/brand"
 	"github.com/liza-mas/liza/internal/models"
+	"github.com/liza-mas/liza/internal/paths"
 )
 
 func TestDetectPatterns(t *testing.T) {
@@ -446,7 +447,7 @@ func TestDetectUnacknowledgedPatterns(t *testing.T) {
 		Timestamp:  watermark2,
 		Pattern:    triggerPattern,
 		Severity:   "OBSERVABILITY_DEGRADED",
-		ReportFile: ".liza/circuit_breaker_report.md",
+		ReportFile: paths.ProjectDirName() + "/circuit_breaker_report.md",
 	}
 
 	tests := []struct {
@@ -1073,7 +1074,7 @@ func TestGenerateReportProjectsProviderAuditResponse(t *testing.T) {
 func TestGenerateReportTrimsProviderAuditMessages(t *testing.T) {
 	now := time.Date(2026, 5, 14, 10, 45, 25, 0, time.UTC)
 	longOutput := strings.Repeat("SUPPORT_FULL_TEXT ", 200)
-	message := `{"type":"item.completed","item":{"type":"command_execution","command":"/usr/bin/zsh -lc 'cat .liza/SUPPORT.md'","aggregated_output":"` + longOutput + `","exit_code":0,"status":"completed"}}`
+	message := "{\"type\":\"item.completed\",\"item\":{\"type\":\"command_execution\",\"command\":\"/usr/bin/zsh -lc 'cat " + paths.ProjectDirName() + "/SUPPORT.md'\",\"aggregated_output\":\"" + longOutput + `","exit_code":0,"status":"completed"}}`
 	anomalies := []models.Anomaly{
 		{
 			Timestamp: now,
@@ -1114,7 +1115,7 @@ func TestGenerateReportTrimsProviderAuditMessages(t *testing.T) {
 		"provider: `codex`",
 		"agent_id: `orchestrator-1`",
 		"provider_event: `item.completed / command_execution`",
-		"command: `/usr/bin/zsh -lc 'cat .liza/SUPPORT.md'`",
+		"command: `/usr/bin/zsh -lc 'cat " + paths.ProjectDirName() + "/SUPPORT.md'`",
 		"status: `completed`, exit_code: `0`",
 		"aggregated_output_chars:",
 	}

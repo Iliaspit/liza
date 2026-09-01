@@ -10,6 +10,7 @@ import (
 	"github.com/liza-mas/liza/internal/db"
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/ops"
+	"github.com/liza-mas/liza/internal/paths"
 	"github.com/liza-mas/liza/internal/testhelpers"
 )
 
@@ -308,7 +309,7 @@ func TestHasPendingMerges_Pipeline(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to read pipeline testdata: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(tmpDir, ".liza", "pipeline.yaml"), src, 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(tmpDir, paths.ProjectDirName(), "pipeline.yaml"), src, 0644); err != nil {
 		t.Fatalf("Failed to write frozen pipeline config: %v", err)
 	}
 
@@ -387,7 +388,7 @@ func TestHasPendingMerges_Phase2Pipeline(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to read Phase 2 pipeline testdata: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(tmpDir, ".liza", "pipeline.yaml"), src, 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(tmpDir, paths.ProjectDirName(), "pipeline.yaml"), src, 0644); err != nil {
 		t.Fatalf("Failed to write frozen pipeline config: %v", err)
 	}
 
@@ -493,7 +494,7 @@ func TestLogTaskSubmissionIfCompleted_Phase2Pipeline(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to read Phase 2 pipeline testdata: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(tmpDir, ".liza", "pipeline.yaml"), src, 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(tmpDir, paths.ProjectDirName(), "pipeline.yaml"), src, 0644); err != nil {
 		t.Fatalf("Failed to write frozen pipeline config: %v", err)
 	}
 

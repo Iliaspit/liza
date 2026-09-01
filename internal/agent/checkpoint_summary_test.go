@@ -9,6 +9,7 @@ import (
 
 	"github.com/liza-mas/liza/internal/brand"
 	"github.com/liza-mas/liza/internal/models"
+	"github.com/liza-mas/liza/internal/paths"
 	"github.com/liza-mas/liza/internal/testhelpers"
 )
 
@@ -235,8 +236,8 @@ func TestRunCheckpointSummaryCLI_WritesLizaOwnedReport(t *testing.T) {
 	tmp := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmp)
 	installFakeCLI(t, "claude", []string{
-		"mkdir -p .liza",
-		"printf '# checkpoint summary\\n' > .liza/checkpoint-summary.md",
+		"mkdir -p " + paths.ProjectDirName(),
+		"printf '# checkpoint summary\\n' > " + paths.ProjectDirName() + "/checkpoint-summary.md",
 	})
 
 	err := runCheckpointSummaryCLI(tmp, "claude", "prompt", models.Config{})
@@ -289,8 +290,8 @@ func TestRunCheckpointSummaryCLI_RejectsUnexpectedProjectMutation(t *testing.T) 
 	tmp := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmp)
 	installFakeCLI(t, "claude", []string{
-		"mkdir -p .liza",
-		"printf '# checkpoint summary\\n' > .liza/checkpoint-summary.md",
+		"mkdir -p " + paths.ProjectDirName(),
+		"printf '# checkpoint summary\\n' > " + paths.ProjectDirName() + "/checkpoint-summary.md",
 		"printf 'unexpected\\n' > unexpected.txt",
 	})
 
@@ -310,17 +311,17 @@ func TestRunCheckpointSummaryCLI_RejectsUnexpectedLizaMutation(t *testing.T) {
 	tmp := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmp)
 	installFakeCLI(t, "claude", []string{
-		"mkdir -p .liza",
-		"printf '# checkpoint summary\\n' > .liza/checkpoint-summary.md",
-		"printf 'unexpected\\n' > .liza/other.md",
+		"mkdir -p " + paths.ProjectDirName(),
+		"printf '# checkpoint summary\\n' > " + paths.ProjectDirName() + "/checkpoint-summary.md",
+		"printf 'unexpected\\n' > " + paths.ProjectDirName() + "/other.md",
 	})
 
 	err := runCheckpointSummaryCLI(tmp, "claude", "prompt", models.Config{})
 	if err == nil {
-		t.Fatal("expected unexpected .liza mutation error, got nil")
+		t.Fatal("expected unexpected runtime-directory mutation error, got nil")
 	}
-	if !strings.Contains(err.Error(), ".liza/other.md") {
-		t.Fatalf("error = %q, want .liza/other.md", err.Error())
+	if !strings.Contains(err.Error(), paths.ProjectDirName()+"/other.md") {
+		t.Fatalf("error = %q, want %s/other.md", err.Error(), paths.ProjectDirName())
 	}
 }
 
@@ -337,8 +338,8 @@ func TestRunCheckpointSummaryCLI_RejectsAlreadyDirtyMutation(t *testing.T) {
 	}
 
 	installFakeCLI(t, "claude", []string{
-		"mkdir -p .liza",
-		"printf '# checkpoint summary\\n' > .liza/checkpoint-summary.md",
+		"mkdir -p " + paths.ProjectDirName(),
+		"printf '# checkpoint summary\\n' > " + paths.ProjectDirName() + "/checkpoint-summary.md",
 		"printf 'cli overwrite with different size\\n' > notes.md",
 	})
 

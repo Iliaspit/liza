@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/liza-mas/liza/internal/models"
+	"github.com/liza-mas/liza/internal/paths"
 	"github.com/liza-mas/liza/internal/testhelpers"
 )
 
@@ -23,7 +24,7 @@ func TestCheckCommitAllowed_StateMissing(t *testing.T) {
 	t.Parallel()
 
 	// Directly exercises the spec risk "hook must handle missing state gracefully":
-	// no .liza/state.yaml on disk must result in fail-safe allow.
+	// No project state on disk must result in fail-safe allow.
 	tmpDir := t.TempDir()
 	result := CheckCommitAllowed(tmpDir, "task-1")
 	if !result.Allowed {
@@ -201,9 +202,9 @@ func TestCheckCommitAllowed_PipelineMissing(t *testing.T) {
 	_, _ = testhelpers.SetupLizaDir(t, tmpDir)
 
 	// Remove pipeline.yaml that SetupLizaDir installed.
-	_ = os.Remove(filepath.Join(tmpDir, ".liza", "pipeline.yaml"))
+	_ = os.Remove(filepath.Join(tmpDir, paths.ProjectDirName(), "pipeline.yaml"))
 
-	stateFile := filepath.Join(tmpDir, ".liza", "state.yaml")
+	stateFile := filepath.Join(tmpDir, paths.ProjectDirName(), "state.yaml")
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()
 	state.Tasks = []models.Task{testhelpers.BuildTaskByStatus("task-1", models.TaskStatusReviewing, now)}

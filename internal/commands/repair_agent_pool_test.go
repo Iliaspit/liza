@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/liza-mas/liza/internal/brand"
+
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/ops"
 	"github.com/liza-mas/liza/internal/testhelpers"
@@ -198,9 +200,9 @@ func TestParseAutoRepairAgentPoolEnv(t *testing.T) {
 }
 
 func TestRepairAgentPool_DryRunUsesConfiguredDefaultCLI(t *testing.T) {
-	t.Setenv("LIZA_DEFAULT_CLI", "")
-	t.Setenv("LIZA_DEFAULT_DOER_CLI", "")
-	t.Setenv("LIZA_DEFAULT_REVIEWER_CLI", "")
+	t.Setenv(brand.EnvName("DEFAULT_CLI"), "")
+	t.Setenv(brand.EnvName("DEFAULT_DOER_CLI"), "")
+	t.Setenv(brand.EnvName("DEFAULT_REVIEWER_CLI"), "")
 
 	state := testhelpers.CreateValidState()
 	state.Config.DefaultCLI = "gemini"
@@ -232,7 +234,7 @@ func TestRepairAgentPool_DryRunUsesConfiguredDefaultCLI(t *testing.T) {
 	if result.Missing[0].Role != "code-planner" {
 		t.Errorf("missing role = %q, want code-planner", result.Missing[0].Role)
 	}
-	if result.Commands[0] != "liza agent code-planner --cli gemini" {
+	if result.Commands[0] != brand.BinaryName+" agent code-planner --cli gemini" {
 		t.Errorf("command = %q", result.Commands[0])
 	}
 }
@@ -271,10 +273,10 @@ func TestRepairAgentPool_DryRunUsesRoleSpecificDefaultCLIs(t *testing.T) {
 	if result.RoleCLIs["code-reviewer"] != "gemini" {
 		t.Errorf("RoleCLIs[code-reviewer] = %q, want gemini", result.RoleCLIs["code-reviewer"])
 	}
-	if !slices.Contains(result.Commands, "liza agent coder --cli codex") {
+	if !slices.Contains(result.Commands, brand.BinaryName+" agent coder --cli codex") {
 		t.Errorf("commands = %v, want coder codex command", result.Commands)
 	}
-	if !slices.Contains(result.Commands, "liza agent code-reviewer --cli gemini") {
+	if !slices.Contains(result.Commands, brand.BinaryName+" agent code-reviewer --cli gemini") {
 		t.Errorf("commands = %v, want code-reviewer gemini command", result.Commands)
 	}
 }

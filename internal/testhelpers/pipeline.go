@@ -6,32 +6,33 @@ import (
 	"testing"
 
 	"github.com/liza-mas/liza/internal/embedded"
+	"github.com/liza-mas/liza/internal/paths"
 )
 
-// SetupPipelineConfig writes the embedded pipeline.yaml into the .liza/ directory
-// of the given tmpDir. Creates the .liza directory if it doesn't exist.
+// SetupPipelineConfig writes the embedded pipeline.yaml into the active project
+// runtime directory under tmpDir, creating that directory when needed.
 func SetupPipelineConfig(t *testing.T, tmpDir string) {
 	t.Helper()
 
-	lizaDir := filepath.Join(tmpDir, ".liza")
-	if err := os.MkdirAll(lizaDir, 0755); err != nil {
-		t.Fatalf("Failed to create .liza directory: %v", err)
+	projectDir := filepath.Join(tmpDir, paths.ProjectDirName())
+	if err := os.MkdirAll(projectDir, 0755); err != nil {
+		t.Fatalf("Failed to create project runtime directory %s: %v", paths.ProjectDirName(), err)
 	}
-	if err := embedded.WritePipelineConfig(lizaDir, nil); err != nil {
+	if err := embedded.WritePipelineConfig(projectDir, nil); err != nil {
 		t.Fatalf("Failed to write pipeline config: %v", err)
 	}
 }
 
-// SetupPipelineConfigBytes writes the supplied pipeline config into the .liza/
-// directory of tmpDir. It is useful for exercising frozen legacy topologies.
+// SetupPipelineConfigBytes writes the supplied pipeline config into the active
+// project runtime directory. It is useful for exercising frozen legacy topologies.
 func SetupPipelineConfigBytes(t *testing.T, tmpDir string, content []byte) {
 	t.Helper()
 
-	lizaDir := filepath.Join(tmpDir, ".liza")
-	if err := os.MkdirAll(lizaDir, 0o755); err != nil {
-		t.Fatalf("Failed to create .liza directory: %v", err)
+	projectDir := filepath.Join(tmpDir, paths.ProjectDirName())
+	if err := os.MkdirAll(projectDir, 0o755); err != nil {
+		t.Fatalf("Failed to create project runtime directory %s: %v", paths.ProjectDirName(), err)
 	}
-	if err := os.WriteFile(filepath.Join(lizaDir, "pipeline.yaml"), content, 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(projectDir, "pipeline.yaml"), content, 0o644); err != nil {
 		t.Fatalf("Failed to write pipeline config: %v", err)
 	}
 }

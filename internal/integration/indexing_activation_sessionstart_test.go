@@ -9,7 +9,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/liza-mas/liza/internal/brand"
+
 	"github.com/liza-mas/liza/internal/commands"
+	"github.com/liza-mas/liza/internal/paths"
 	"github.com/liza-mas/liza/internal/scipsearch"
 	"github.com/liza-mas/liza/internal/semble"
 	"github.com/liza-mas/liza/internal/stacklit"
@@ -92,7 +95,7 @@ func TestIndexingActivationSemblePairingInitVerifiesExistingSafeProjectRootIgnor
 
 func TestIndexingActivationSemblePairingInitReportsUnsafeProjectRootIgnore(t *testing.T) {
 	projectDir := newIndexingActivationProject(t)
-	writeIndexingActivationFile(t, filepath.Join(projectDir, ".sembleignore"), ".liza/\n")
+	writeIndexingActivationFile(t, filepath.Join(projectDir, ".sembleignore"), paths.ProjectDirName()+"/\n")
 	disableStacklitAndScipForIndexingActivation(t)
 	t.Setenv(semble.EnvEnableSemble, "true")
 
@@ -263,7 +266,7 @@ func pairingSessionStartEnv(projectDir string, overrides map[string]string) []st
 func writeIndexingActivationLizaIndexHook(t *testing.T, projectDir string) {
 	t.Helper()
 	hookPath := filepath.Join(projectDir, ".git", "hooks", "post-commit")
-	writeIndexingActivationFile(t, hookPath, "#!/bin/sh\nliza-index\n")
+	writeIndexingActivationFile(t, hookPath, "#!/bin/sh\n"+brand.BinaryName+"-index\n")
 	if err := os.Chmod(hookPath, 0o755); err != nil {
 		t.Fatalf("Chmod(%q): %v", hookPath, err)
 	}

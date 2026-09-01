@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/liza-mas/liza/internal/brand"
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/providers"
 )
@@ -196,6 +197,85 @@ func TestResolveLaunchPlanRejectsUnknownTemplateVariable(t *testing.T) {
 	_, err := ResolveLaunchPlan(LaunchPlanRequest{ToolName: "cursor", RuntimeConfig: config})
 	if err == nil || !strings.Contains(err.Error(), "unknown template variable") {
 		t.Fatalf("error = %v, want unknown template variable error", err)
+	}
+}
+
+func TestCatalogMergePreservesEmbeddedBrandOwnedFields(t *testing.T) {
+	previousBinaryName := brand.BinaryName
+	brand.BinaryName = "acme"
+	t.Cleanup(func() { brand.BinaryName = previousBinaryName })
+
+	loaded, err := providers.ParseCatalog([]byte(`version: 2
+providers:
+  - id: codex
+    display_name: Codex
+    backend: cli
+    runtime:
+      executable: codex
+    acp_runtime:
+      executable: custom-acpx
+      acpx_session_name: liza-{{agentID}}
+  - id: cursor
+    display_name: Cursor
+    backend: cli
+    runtime:
+      executable: cursor-agent
+    acp_runtime:
+      executable: acpx
+      acpx_session_name: liza-{{agentID}}
+  - id: opencode
+    display_name: OpenCode
+    backend: cli
+    runtime:
+      executable: opencode
+    acp_runtime:
+      executable: acpx
+      acpx_session_name: liza-{{agentID}}
+  - id: qwen
+    display_name: Qwen
+    backend: cli
+    runtime:
+      executable: qwen
+    acp_runtime:
+      executable: acpx
+      acpx_session_name: liza-qwen-{{agentID}}
+  - id: devin
+    display_name: Devin
+    backend: cli
+    runtime:
+      executable: devin
+    acp_runtime:
+      executable: acpx
+      acpx_session_name: liza-devin-{{agentID}}
+  - id: external-tool
+    display_name: External Tool
+    backend: acpx
+    runtime:
+      executable: acpx
+      acpx_session_name: custom-{{agentID}}
+`))
+	if err != nil {
+		t.Fatalf("ParseCatalog() error = %v", err)
+	}
+
+	tools := agentToolsFromCatalogs(providers.EmbeddedCatalog(), loaded)
+	wantSessions := map[string]string{
+		"codex-acp":    "acme-{{agentID}}",
+		"cursor-acp":   "acme-{{agentID}}",
+		"opencode-acp": "acme-{{agentID}}",
+		"qwen-acp":     "acme-qwen-{{agentID}}",
+		"devin-acp":    "acme-devin-{{agentID}}",
+	}
+	for name, want := range wantSessions {
+		if got := tools[name].ACPXSessionName; got != want {
+			t.Errorf("%s ACPXSessionName = %q, want brand-rendered %q", name, got, want)
+		}
+	}
+	if got := tools["codex-acp"].Executable; got != "custom-acpx" {
+		t.Errorf("codex-acp executable = %q, want loaded operational override", got)
+	}
+	if got := tools["external-tool"].ACPXSessionName; got != "custom-{{agentID}}" {
+		t.Errorf("external-tool ACPXSessionName = %q, want custom catalog value", got)
 	}
 }
 

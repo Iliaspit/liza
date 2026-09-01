@@ -9,8 +9,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/liza-mas/liza/internal/brand"
+
 	"github.com/liza-mas/liza/internal/db"
 	"github.com/liza-mas/liza/internal/models"
+	"github.com/liza-mas/liza/internal/paths"
 	"github.com/liza-mas/liza/internal/testhelpers"
 )
 
@@ -79,8 +82,8 @@ func TestAddTask_Validation(t *testing.T) {
 		},
 		{
 			name:        "destructive db requires every validation command to start with marker",
-			input:       AddTaskInput{ID: "t1", Description: "d", SpecRef: "s", DoneWhen: "w", Validation: []string{"LIZA_ALLOW_DESTRUCTIVE_DB=1 make test", "make test ./safe"}, DestructiveDB: true, Scope: "sc", Priority: 1},
-			errContains: "validation[1] destructive_db requires command to start with LIZA_ALLOW_DESTRUCTIVE_DB=1 or env LIZA_ALLOW_DESTRUCTIVE_DB=1",
+			input:       AddTaskInput{ID: "t1", Description: "d", SpecRef: "s", DoneWhen: "w", Validation: []string{brand.EnvName("ALLOW_DESTRUCTIVE_DB") + "=1 make test", "make test ./safe"}, DestructiveDB: true, Scope: "sc", Priority: 1},
+			errContains: "validation[1] destructive_db requires command to start with " + brand.EnvName("ALLOW_DESTRUCTIVE_DB") + "=1 or env " + brand.EnvName("ALLOW_DESTRUCTIVE_DB") + "=1",
 		},
 	}
 
@@ -102,7 +105,7 @@ func TestAddTask_PersistsDestructiveDB(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
-	logFile := filepath.Join(tmpDir, ".liza", "log.jsonl")
+	logFile := filepath.Join(tmpDir, paths.ProjectDirName(), "log.jsonl")
 	testhelpers.CreateSpecFile(t, tmpDir, "vision.md", "# Vision\n")
 	testhelpers.CreateSpecFile(t, tmpDir, "destructive.md", "# Destructive\n")
 
@@ -115,7 +118,7 @@ func TestAddTask_PersistsDestructiveDB(t *testing.T) {
 		Description:   "Reset disposable DB",
 		SpecRef:       "specs/destructive.md",
 		DoneWhen:      "Disposable DB reset path is tested",
-		Validation:    []string{"LIZA_ALLOW_DESTRUCTIVE_DB=1 make test ./internal/dbreset"},
+		Validation:    []string{brand.EnvName("ALLOW_DESTRUCTIVE_DB") + "=1 make test ./internal/dbreset"},
 		DestructiveDB: true,
 		Scope:         "internal/dbreset",
 		Priority:      1,
@@ -143,7 +146,7 @@ func TestAddTask_PersistsRCARequired(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
-	logFile := filepath.Join(tmpDir, ".liza", "log.jsonl")
+	logFile := filepath.Join(tmpDir, paths.ProjectDirName(), "log.jsonl")
 	testhelpers.CreateSpecFile(t, tmpDir, "vision.md", "# Vision\n")
 	testhelpers.CreateSpecFile(t, tmpDir, "regression.md", "# Regression\n")
 
@@ -183,7 +186,7 @@ func TestAddTask_Success(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
-	logFile := filepath.Join(tmpDir, ".liza", "log.jsonl")
+	logFile := filepath.Join(tmpDir, paths.ProjectDirName(), "log.jsonl")
 	testhelpers.CreateSpecFile(t, tmpDir, "vision.md", "# Vision\n")
 	testhelpers.CreateSpecFile(t, tmpDir, "feature-x.md", "# Feature X\n")
 
@@ -395,17 +398,17 @@ const minimalPipelineYAML = `pipeline:
     detailed-spec: coding-subpipeline.code-planning-pair
 `
 
-// setupPipelineProject creates a temp dir with .liza/pipeline.yaml, state.yaml, and specs.
+// setupPipelineProject creates a temp project with pipeline config, state, and specs.
 func setupPipelineProject(t *testing.T) (stateFile, logFile string) {
 	t.Helper()
 	tmpDir := t.TempDir()
 	stateFile, _ = testhelpers.SetupLizaDir(t, tmpDir)
-	logFile = filepath.Join(tmpDir, ".liza", "log.jsonl")
+	logFile = filepath.Join(tmpDir, paths.ProjectDirName(), "log.jsonl")
 	testhelpers.CreateSpecFile(t, tmpDir, "vision.md", "# Vision\n")
 	testhelpers.CreateSpecFile(t, tmpDir, "feature.md", "# Feature\n")
 
 	// Write pipeline config
-	pipelinePath := filepath.Join(tmpDir, ".liza", "pipeline.yaml")
+	pipelinePath := filepath.Join(tmpDir, paths.ProjectDirName(), "pipeline.yaml")
 	if err := os.WriteFile(pipelinePath, []byte(minimalPipelineYAML), 0644); err != nil {
 		t.Fatalf("Failed to write pipeline.yaml: %v", err)
 	}
@@ -581,7 +584,7 @@ func TestAddTask_RejectsManualPipelineTransitionChild(t *testing.T) {
 				t.Fatal("expected error for manual transition child")
 			}
 			testhelpers.AssertErrorContains(t, err, "shadows pipeline transition child")
-			testhelpers.AssertErrorContains(t, err, "use liza proceed/liza resume")
+			testhelpers.AssertErrorContains(t, err, "use "+brand.BinaryName+" proceed/"+brand.BinaryName+" resume")
 
 			readState, err := bb.Read()
 			if err != nil {
@@ -644,7 +647,7 @@ func TestAddTask_RejectsManualOneToOnePipelineTransitionChild(t *testing.T) {
 				t.Fatal("expected error for manual one-to-one transition child")
 			}
 			testhelpers.AssertErrorContains(t, err, "shadows pipeline transition child")
-			testhelpers.AssertErrorContains(t, err, "use liza proceed/liza resume")
+			testhelpers.AssertErrorContains(t, err, "use "+brand.BinaryName+" proceed/"+brand.BinaryName+" resume")
 
 			readState, err := bb.Read()
 			if err != nil {
@@ -709,7 +712,7 @@ func TestAddTask_RejectsManualManyToOnePipelineTransitionChild(t *testing.T) {
 				t.Fatal("expected error for manual many-to-one transition child")
 			}
 			testhelpers.AssertErrorContains(t, err, "shadows pipeline transition child")
-			testhelpers.AssertErrorContains(t, err, "use liza proceed/liza resume")
+			testhelpers.AssertErrorContains(t, err, "use "+brand.BinaryName+" proceed/"+brand.BinaryName+" resume")
 
 			readState, err := bb.Read()
 			if err != nil {
@@ -765,7 +768,7 @@ func TestAddTask_DuplicateID(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
-	logFile := filepath.Join(tmpDir, ".liza", "log.jsonl")
+	logFile := filepath.Join(tmpDir, paths.ProjectDirName(), "log.jsonl")
 
 	state := testhelpers.CreateValidState()
 	state.Tasks = []models.Task{
@@ -793,7 +796,7 @@ func TestAddTask_DegradedCurrentStatePersistsTaskWithWarning(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
-	logFile := filepath.Join(tmpDir, ".liza", "log.jsonl")
+	logFile := filepath.Join(tmpDir, paths.ProjectDirName(), "log.jsonl")
 	testhelpers.CreateSpecFile(t, tmpDir, "vision.md", "# Vision\n")
 	testhelpers.CreateSpecFile(t, tmpDir, "feature-x.md", "# Feature X\n")
 
@@ -865,7 +868,7 @@ func TestAddTask_RejectsSemicolonJoinedSpecRef(t *testing.T) {
 		RolePair:    "coding-pair",
 	}
 
-	_, err := AddTask("/nonexistent/.liza/state.yaml", "/dev/null", input, "orchestrator-1")
+	_, err := AddTask("/nonexistent/"+paths.ProjectDirName()+"/state.yaml", "/dev/null", input, "orchestrator-1")
 	if err == nil {
 		t.Fatal("expected error for semicolon-joined spec_ref")
 	}
@@ -879,7 +882,7 @@ func TestAddTasks_PartialSuccess(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
-	logFile := filepath.Join(tmpDir, ".liza", "log.jsonl")
+	logFile := filepath.Join(tmpDir, paths.ProjectDirName(), "log.jsonl")
 	testhelpers.CreateSpecFile(t, tmpDir, "vision.md", "# Vision\n")
 	testhelpers.CreateSpecFile(t, tmpDir, "feature.md", "# Feature\n")
 
@@ -964,7 +967,7 @@ func TestAddTasks_DegradedCurrentStatePersistsValidTasksWithWarning(t *testing.T
 
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
-	logFile := filepath.Join(tmpDir, ".liza", "log.jsonl")
+	logFile := filepath.Join(tmpDir, paths.ProjectDirName(), "log.jsonl")
 	testhelpers.CreateSpecFile(t, tmpDir, "vision.md", "# Vision\n")
 	testhelpers.CreateSpecFile(t, tmpDir, "feature.md", "# Feature\n")
 

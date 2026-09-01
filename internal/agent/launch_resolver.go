@@ -89,7 +89,15 @@ func BuiltInAgentTools() map[string]models.AgentToolConfig {
 func agentToolsFromCatalogs(embedded, loaded providers.Catalog) map[string]models.AgentToolConfig {
 	registry := embedded.RuntimeTools()
 	for name, tool := range loaded.RuntimeTools() {
-		registry[name] = mergeAgentToolConfig(name, registry[name], tool)
+		embeddedTool, builtIn := registry[name]
+		merged := mergeAgentToolConfig(name, embeddedTool, tool)
+		if builtIn {
+			// Embedded session templates are rendered for this build's brand.
+			// Loaded catalogs may be stale or default-branded, so merge their
+			// operational fields without replacing built-in session identity.
+			merged.ACPXSessionName = embeddedTool.ACPXSessionName
+		}
+		registry[name] = merged
 	}
 	return registry
 }

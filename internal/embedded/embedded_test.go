@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/liza-mas/liza/internal/brand"
+	"github.com/liza-mas/liza/internal/paths"
 )
 
 func TestListEmbeddedFiles(t *testing.T) {
@@ -144,13 +145,13 @@ func TestFrontmatter(t *testing.T) {
 	fm := frontmatter()
 
 	// Verify frontmatter contains all metadata
-	if !strings.Contains(fm, `liza_version: "1.2.3"`) {
+	if !strings.Contains(fm, brand.MetadataKey("version")+": \"1.2.3\"") {
 		t.Errorf("Frontmatter missing version: %s", fm)
 	}
-	if !strings.Contains(fm, `liza_git_commit: "abc123"`) {
+	if !strings.Contains(fm, brand.MetadataKey("git_commit")+": \"abc123\"") {
 		t.Errorf("Frontmatter missing git commit: %s", fm)
 	}
-	if !strings.Contains(fm, `liza_build_date: "2026-02-03T10:00:00Z"`) {
+	if !strings.Contains(fm, brand.MetadataKey("build_date")+": \"2026-02-03T10:00:00Z\"") {
 		t.Errorf("Frontmatter missing build date: %s", fm)
 	}
 
@@ -193,7 +194,7 @@ func assertAgentToolsOptionalIndexGuidance(t *testing.T, content string) {
 		"/home/tangi/",
 		"/home/",
 		".worktrees/",
-		".liza/scip/",
+		paths.ProjectDirName() + "/scip/",
 		"stacklit.json in pairing mode",
 		"<task-worktree-path>",
 	}
@@ -249,15 +250,15 @@ func TestPrependFrontmatter_ReplacesExisting(t *testing.T) {
 	}()
 
 	// Content that already has frontmatter
-	input := []byte("---\nliza_version: \"1.0.0\"\nliza_git_commit: \"old123\"\nliza_build_date: \"2026-01-01T00:00:00Z\"\n---\n\n# Real Content\n\nBody text.")
+	input := []byte("---\n" + brand.MetadataKey("version") + ": \"1.0.0\"\n" + brand.MetadataKey("git_commit") + ": \"old123\"\n" + brand.MetadataKey("build_date") + ": \"2026-01-01T00:00:00Z\"\n---\n\n# Real Content\n\nBody text.")
 	result := PrependFrontmatter(input)
 	resultStr := string(result)
 
 	// Should have exactly one frontmatter block with the NEW values
-	if strings.Count(resultStr, "liza_version:") != 1 {
-		t.Errorf("Expected exactly one liza_version, got:\n%s", resultStr)
+	if strings.Count(resultStr, brand.MetadataKey("version")+":") != 1 {
+		t.Errorf("Expected exactly one %s, got:\n%s", brand.MetadataKey("version"), resultStr)
 	}
-	if !strings.Contains(resultStr, `liza_version: "2.0.0"`) {
+	if !strings.Contains(resultStr, brand.MetadataKey("version")+": \"2.0.0\"") {
 		t.Error("Expected new version in frontmatter")
 	}
 	if strings.Contains(resultStr, "old123") {
@@ -297,10 +298,10 @@ func TestPrependFrontmatter_PreservesNonLizaFields(t *testing.T) {
 	}
 
 	// Version metadata must be present
-	if !strings.Contains(resultStr, `liza_version: "2.0.0"`) {
+	if !strings.Contains(resultStr, brand.MetadataKey("version")+": \"2.0.0\"") {
 		t.Error("Version metadata missing")
 	}
-	if !strings.Contains(resultStr, `liza_git_commit: "new456"`) {
+	if !strings.Contains(resultStr, brand.MetadataKey("git_commit")+": \"new456\"") {
 		t.Error("Git commit metadata missing")
 	}
 
@@ -326,23 +327,23 @@ func TestPrependFrontmatter_ReplacesOldLizaFieldsInMixed(t *testing.T) {
 	}()
 
 	// Simulate re-running setup on an already-merged skill file
-	input := []byte("---\nname: testing\ndescription: Test Protocol\nliza_version: \"2.0.0\"\nliza_git_commit: \"old456\"\nliza_build_date: \"2026-02-01T00:00:00Z\"\n---\n\nBody.")
+	input := []byte("---\nname: testing\ndescription: Test Protocol\n" + brand.MetadataKey("version") + ": \"2.0.0\"\n" + brand.MetadataKey("git_commit") + ": \"old456\"\n" + brand.MetadataKey("build_date") + ": \"2026-02-01T00:00:00Z\"\n---\n\nBody.")
 	result := PrependFrontmatter(input)
 	resultStr := string(result)
 
-	// Non-liza fields preserved
+	// Non-metadata fields preserved.
 	if !strings.Contains(resultStr, "name: testing") {
 		t.Error("Skill name field was lost")
 	}
 
-	// Old liza values replaced
+	// Old metadata values replaced.
 	if strings.Contains(resultStr, "old456") {
-		t.Error("Old liza_git_commit should be replaced")
+		t.Error("Old " + brand.MetadataKey("git_commit") + " should be replaced")
 	}
-	if strings.Count(resultStr, "liza_version:") != 1 {
-		t.Errorf("Expected exactly one liza_version, got:\n%s", resultStr)
+	if strings.Count(resultStr, brand.MetadataKey("version")+":") != 1 {
+		t.Errorf("Expected exactly one %s, got:\n%s", brand.MetadataKey("version"), resultStr)
 	}
-	if !strings.Contains(resultStr, `liza_version: "3.0.0"`) {
+	if !strings.Contains(resultStr, brand.MetadataKey("version")+": \"3.0.0\"") {
 		t.Error("New version not present")
 	}
 }
@@ -421,7 +422,7 @@ func TestSupportDocCanonicalContent(t *testing.T) {
 }
 
 func TestWriteGlobalFiles(t *testing.T) {
-	// Create temporary directory for testing (acts as ~/.liza/)
+	// Create a temporary directory that acts as the global runtime directory.
 	tmpDir := t.TempDir()
 
 	// Write global files
@@ -514,14 +515,14 @@ func TestWriteGlobalFiles_FrontmatterInAllFiles(t *testing.T) {
 		}
 
 		// Verify metadata fields are present
-		if !strings.Contains(contentStr, "liza_version:") {
-			t.Errorf("File %s missing liza_version field", file)
+		if !strings.Contains(contentStr, brand.MetadataKey("version")+":") {
+			t.Errorf("File %s missing %s field", file, brand.MetadataKey("version"))
 		}
-		if !strings.Contains(contentStr, "liza_git_commit:") {
-			t.Errorf("File %s missing liza_git_commit field", file)
+		if !strings.Contains(contentStr, brand.MetadataKey("git_commit")+":") {
+			t.Errorf("File %s missing %s field", file, brand.MetadataKey("git_commit"))
 		}
-		if !strings.Contains(contentStr, "liza_build_date:") {
-			t.Errorf("File %s missing liza_build_date field", file)
+		if !strings.Contains(contentStr, brand.MetadataKey("build_date")+":") {
+			t.Errorf("File %s missing %s field", file, brand.MetadataKey("build_date"))
 		}
 
 		// Verify test values are present
@@ -590,7 +591,7 @@ func TestWriteGlobalFiles_OverwritesExisting(t *testing.T) {
 
 	// Should have original content (after frontmatter)
 	if !strings.Contains(currentStr, string(originalContent)) {
-		if !strings.Contains(currentStr, "liza_version:") {
+		if !strings.Contains(currentStr, brand.MetadataKey("version")+":") {
 			t.Errorf("File does not contain expected content after overwrite")
 		}
 	}
@@ -676,14 +677,14 @@ func TestUnionStringArrays(t *testing.T) {
 func TestMergePermissions(t *testing.T) {
 	tests := []struct {
 		name     string
-		liza     map[string]any
+		managed  map[string]any
 		existing map[string]any
 		wantLen  int // expected length of allow array
 	}{
 		{
 			name: "existing defaultMode is dropped, not preserved",
-			liza: map[string]any{
-				"allow": []any{"Bash(liza:*)"},
+			managed: map[string]any{
+				"allow": []any{"Bash(" + brand.BinaryName + ":*)"},
 			},
 			existing: map[string]any{
 				"defaultMode": "prompt",
@@ -693,29 +694,29 @@ func TestMergePermissions(t *testing.T) {
 		},
 		{
 			name: "merge with overlapping permissions",
-			liza: map[string]any{
-				"allow": []any{"Bash(liza:*)", "Bash(git:*)"},
+			managed: map[string]any{
+				"allow": []any{"Bash(" + brand.BinaryName + ":*)", "Bash(git:*)"},
 			},
 			existing: map[string]any{
 				"allow": []any{"Bash(git:*)", "Read(**)"},
 			},
-			wantLen: 3, // Bash(liza:*), Bash(git:*), Read(**) - deduplicated
+			wantLen: 3, // managed binary, Git, and read permissions - deduplicated
 		},
 		{
 			name: "existing has no allow",
-			liza: map[string]any{
-				"allow": []any{"Bash(liza:*)"},
+			managed: map[string]any{
+				"allow": []any{"Bash(" + brand.BinaryName + ":*)"},
 			},
 			existing: map[string]any{
 				"defaultMode": "prompt",
 			},
-			wantLen: 1, // only liza allows
+			wantLen: 1, // only managed permissions
 		},
 		{
 			name: "defaultMode from either side is dropped",
-			liza: map[string]any{
+			managed: map[string]any{
 				"defaultMode": "acceptEdits",
-				"allow":       []any{"Bash(liza:*)"},
+				"allow":       []any{"Bash(" + brand.BinaryName + ":*)"},
 			},
 			existing: map[string]any{
 				"defaultMode": "auto",
@@ -727,7 +728,7 @@ func TestMergePermissions(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := mergePermissions(tt.liza, tt.existing)
+			result := mergePermissions(tt.managed, tt.existing)
 
 			// defaultMode must never survive a merge: project-scope settings
 			// shadow the mode the user set in their own Claude settings.
@@ -751,15 +752,15 @@ func TestMergePermissions(t *testing.T) {
 func TestMergeSettings(t *testing.T) {
 	tests := []struct {
 		name     string
-		liza     map[string]any
+		managed  map[string]any
 		existing map[string]any
 		checks   func(t *testing.T, result map[string]any)
 	}{
 		{
 			name: "simple merge - existing overrides",
-			liza: map[string]any{
-				"foo": "liza-value",
-				"bar": "liza-bar",
+			managed: map[string]any{
+				"foo": "managed-value",
+				"bar": "managed-bar",
 			},
 			existing: map[string]any{
 				"foo": "existing-value",
@@ -768,17 +769,17 @@ func TestMergeSettings(t *testing.T) {
 				if result["foo"] != "existing-value" {
 					t.Errorf("Expected foo=existing-value, got %v", result["foo"])
 				}
-				if result["bar"] != "liza-bar" {
-					t.Errorf("Expected bar=liza-bar, got %v", result["bar"])
+				if result["bar"] != "managed-bar" {
+					t.Errorf("Expected bar=managed-bar, got %v", result["bar"])
 				}
 			},
 		},
 		{
 			name: "permissions are merged specially",
-			liza: map[string]any{
+			managed: map[string]any{
 				"permissions": map[string]any{
 					"defaultMode": "acceptEdits",
-					"allow":       []any{"Bash(liza:*)"},
+					"allow":       []any{"Bash(" + brand.BinaryName + ":*)"},
 				},
 			},
 			existing: map[string]any{
@@ -810,7 +811,7 @@ func TestMergeSettings(t *testing.T) {
 		},
 		{
 			name: "hooks are deep-merged",
-			liza: map[string]any{
+			managed: map[string]any{
 				"hooks": map[string]any{
 					"PreToolUse": []any{
 						map[string]any{
@@ -841,7 +842,7 @@ func TestMergeSettings(t *testing.T) {
 				if !ok {
 					t.Fatalf("PreToolUse is not []any")
 				}
-				// Both liza and existing hooks should be present
+				// Both managed and existing hooks should be present.
 				if len(entries) != 2 {
 					t.Errorf("Expected 2 PreToolUse entries, got %d", len(entries))
 				}
@@ -849,7 +850,7 @@ func TestMergeSettings(t *testing.T) {
 		},
 		{
 			name: "hooks collision preserves existing customizations",
-			liza: map[string]any{
+			managed: map[string]any{
 				"hooks": map[string]any{
 					"PreToolUse": []any{
 						map[string]any{
@@ -877,7 +878,7 @@ func TestMergeSettings(t *testing.T) {
 				if len(entries) != 1 {
 					t.Errorf("Expected 1 deduplicated entry, got %d", len(entries))
 				}
-				// Existing entry (timeout=30) should win over liza (timeout=5)
+				// Existing entry (timeout=30) should win over the managed entry (timeout=5).
 				entry := entries[0].(map[string]any)
 				hooksList := entry["hooks"].([]any)
 				hook := hooksList[0].(map[string]any)
@@ -887,10 +888,10 @@ func TestMergeSettings(t *testing.T) {
 			},
 		},
 		{
-			name: "additionalDirectories unioned - liza dirs preserved when existing is empty",
-			liza: map[string]any{
+			name: "additionalDirectories unioned - managed dirs preserved when existing is empty",
+			managed: map[string]any{
 				"permissions": map[string]any{
-					"additionalDirectories": []any{"~/.liza"},
+					"additionalDirectories": []any{"~/" + paths.GlobalDirName()},
 				},
 			},
 			existing: map[string]any{
@@ -900,16 +901,16 @@ func TestMergeSettings(t *testing.T) {
 			},
 			checks: func(t *testing.T, result map[string]any) {
 				dirs := claudeSettingsAdditionalDirectories(t, result)
-				if len(dirs) != 1 || dirs[0] != "~/.liza" {
-					t.Errorf("Expected [~/.liza], got %v", dirs)
+				if len(dirs) != 1 || dirs[0] != "~/"+paths.GlobalDirName() {
+					t.Errorf("expected the global runtime directory, got %v", dirs)
 				}
 			},
 		},
 		{
 			name: "additionalDirectories unioned - both sources merged",
-			liza: map[string]any{
+			managed: map[string]any{
 				"permissions": map[string]any{
-					"additionalDirectories": []any{"~/.liza"},
+					"additionalDirectories": []any{"~/" + paths.GlobalDirName()},
 				},
 			},
 			existing: map[string]any{
@@ -926,9 +927,9 @@ func TestMergeSettings(t *testing.T) {
 		},
 		{
 			name: "legacy top-level additionalDirectories migrated into permissions",
-			liza: map[string]any{
+			managed: map[string]any{
 				"permissions": map[string]any{
-					"additionalDirectories": []any{"~/.liza"},
+					"additionalDirectories": []any{"~/" + paths.GlobalDirName()},
 				},
 			},
 			existing: map[string]any{
@@ -940,16 +941,16 @@ func TestMergeSettings(t *testing.T) {
 				}
 				dirs := claudeSettingsAdditionalDirectories(t, result)
 				dirSet := stringSet(dirs)
-				if !dirSet["~/.liza"] || !dirSet["/custom/path"] {
+				if !dirSet["~/"+paths.GlobalDirName()] || !dirSet["/custom/path"] {
 					t.Errorf("Expected merged dirs under permissions, got %v", dirs)
 				}
 			},
 		},
 		{
 			name: "legacy top-level additionalDirectories preserved alongside existing permissions",
-			liza: map[string]any{
+			managed: map[string]any{
 				"permissions": map[string]any{
-					"additionalDirectories": []any{"~/.liza"},
+					"additionalDirectories": []any{"~/" + paths.GlobalDirName()},
 				},
 			},
 			existing: map[string]any{
@@ -964,7 +965,7 @@ func TestMergeSettings(t *testing.T) {
 				}
 				dirs := claudeSettingsAdditionalDirectories(t, result)
 				dirSet := stringSet(dirs)
-				for _, expected := range []string{"~/.liza", "/custom/path", "/legacy/path"} {
+				for _, expected := range []string{"~/" + paths.GlobalDirName(), "/custom/path", "/legacy/path"} {
 					if !dirSet[expected] {
 						t.Errorf("Expected %s in merged dirs, got %v", expected, dirs)
 					}
@@ -975,7 +976,7 @@ func TestMergeSettings(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := mergeSettings(tt.liza, tt.existing)
+			result := mergeSettings(tt.managed, tt.existing)
 			tt.checks(t, result)
 		})
 	}
@@ -1052,7 +1053,7 @@ func TestWriteClaudeSettings_NewFile(t *testing.T) {
 		if !ok {
 			continue
 		}
-		if permStr == "Bash(liza:*)" {
+		if permStr == "Bash("+brand.BinaryName+":*)" {
 			foundLizaCLI = true
 			break
 		}
@@ -1223,8 +1224,8 @@ func TestWriteClaudeSettings_MergeAccepted(t *testing.T) {
 	if !dirSet["/custom/path"] {
 		t.Errorf("existing /custom/path not preserved after merge")
 	}
-	if !dirSet["~/.liza"] {
-		t.Errorf("embedded ~/.liza not preserved after merge")
+	if !dirSet["~/"+paths.GlobalDirName()] {
+		t.Errorf("embedded global runtime directory not preserved after merge")
 	}
 	if !dirSet["/tmp"] {
 		t.Errorf("embedded /tmp not preserved after merge")
@@ -1382,8 +1383,8 @@ func TestEmbeddedClaudeSettingsTmpPermissions(t *testing.T) {
 
 	dirs := claudeSettingsAdditionalDirectories(t, settings)
 	dirSet := stringSet(dirs)
-	if !dirSet["~/.liza"] {
-		t.Errorf("permissions.additionalDirectories missing ~/.liza: %v", dirs)
+	if !dirSet["~/"+paths.GlobalDirName()] {
+		t.Errorf("permissions.additionalDirectories missing global runtime directory: %v", dirs)
 	}
 	if !dirSet["/tmp"] {
 		t.Errorf("permissions.additionalDirectories missing /tmp: %v", dirs)
@@ -1683,11 +1684,11 @@ writable_roots = [
 	if got != want {
 		t.Fatalf("rendered config mismatch\nwant:\n%s\ngot:\n%s", want, got)
 	}
-	if strings.Contains(got, tomlStringValue(filepath.Join(fakeHome, ".liza"))+` = "write"`) {
-		t.Fatalf("rendered config should only grant ~/.liza through writable_roots, not permissions.workspace.filesystem:\n%s", got)
+	if strings.Contains(got, tomlStringValue(filepath.Join(fakeHome, paths.GlobalDirName()))+` = "write"`) {
+		t.Fatalf("rendered config should only grant the global runtime directory through writable_roots, not permissions.workspace.filesystem:\n%s", got)
 	}
-	if !strings.Contains(got, tomlStringValue(filepath.Join(fakeHome, ".liza"))+",") {
-		t.Fatalf("rendered config should include ~/.liza in writable_roots:\n%s", got)
+	if !strings.Contains(got, tomlStringValue(filepath.Join(fakeHome, paths.GlobalDirName()))+",") {
+		t.Fatalf("rendered config should include the global runtime directory in writable_roots:\n%s", got)
 	}
 }
 
@@ -1947,7 +1948,7 @@ exclude_tmpdir_env_var = false
 exclude_slash_tmp = false
 writable_roots = [
   "/home/test/.codex",
-  "/home/test/.liza",
+  "/home/test/` + paths.GlobalDirName() + `",
   "/home/test/.npm",
   "/home/test/.pyenv/shims",
 ]
@@ -1971,7 +1972,7 @@ exclude_tmpdir_env_var = false
 exclude_slash_tmp = false
 writable_roots = [
   "/home/test/.codex",
-  "/home/test/.liza",
+  "/home/test/` + paths.GlobalDirName() + `",
   "/home/test/.npm",
   "/home/test/.pyenv/shims",
 ]
@@ -2675,14 +2676,14 @@ func TestOpenCodeExecToolSchemaAllowsOmittedAndNullOptionals(t *testing.T) {
 func TestOpenCodeExecToolInstructionsMentionExecAndAntiLoop(t *testing.T) {
 	content := string(OpenCodeExecToolContent())
 	for _, want := range []string{
-		"trusted Liza bridge work",
+		"trusted " + brand.NameTitle + " bridge work",
 		"executed through the system shell",
 		"not safe for less-trusted contexts",
 		"Prefer this exec tool",
 		"Omit optional fields",
 		"null is tolerated",
 		"Do not repeat the same successful command",
-		"move to the next Liza protocol step",
+		"move to the next " + brand.NameTitle + " protocol step",
 	} {
 		if !strings.Contains(content, want) {
 			t.Fatalf("exec tool instructions missing %q:\n%s", want, content)

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/liza-mas/liza/internal/paths"
 	"github.com/liza-mas/liza/internal/providers"
 )
 
@@ -13,7 +14,7 @@ func TestInitPairingCommand_GlobalFirstDeduplicatesUnownedRepoFallback(t *testin
 	gitDir := setupGitRepo(t)
 	defer os.RemoveAll(gitDir)
 	fakeHome := setupGlobalLiza(t)
-	contractTarget := filepath.Join(fakeHome, ".liza", "CORE.md")
+	contractTarget := filepath.Join(fakeHome, paths.GlobalDirName(), "CORE.md")
 	globalPath := filepath.Join(fakeHome, ".codex", "AGENTS.md")
 	if err := os.MkdirAll(filepath.Dir(globalPath), 0755); err != nil {
 		t.Fatal(err)
@@ -67,7 +68,7 @@ func TestInitPairingCommand_MixedGlobalOutcomesRecordOnlyRepoFallbackOwner(t *te
 	t.Setenv("CODEX_HOME", "")
 	t.Setenv("XDG_CONFIG_HOME", "")
 	t.Setenv(providers.EnvCatalogURL, "://invalid")
-	contractTarget := filepath.Join(fakeHome, ".liza", "CORE.md")
+	contractTarget := filepath.Join(fakeHome, paths.GlobalDirName(), "CORE.md")
 	codexGlobalPath := filepath.Join(fakeHome, ".codex", "AGENTS.md")
 	if err := os.MkdirAll(filepath.Dir(codexGlobalPath), 0755); err != nil {
 		t.Fatal(err)
@@ -246,7 +247,7 @@ func TestInitPairingCommand_IdempotentRepoOnlyActivationRetainsOwnership(t *test
 	if got := state.ProviderPaths["kimi"]; got != "CLAUDE.md" {
 		t.Fatalf("Kimi activation after idempotent init = %q, want CLAUDE.md; state = %+v", got, state.ProviderPaths)
 	}
-	contractTarget := filepath.Join(fakeHome, ".liza", "CORE.md")
+	contractTarget := filepath.Join(fakeHome, paths.GlobalDirName(), "CORE.md")
 	if target, err := os.Readlink(filepath.Join(projectRoot, "CLAUDE.md")); err != nil || target != contractTarget {
 		t.Fatalf("Kimi contract target after idempotent init = %q, err = %v; want %q", target, err, contractTarget)
 	}
@@ -256,7 +257,7 @@ func TestActivateProviderContractsPreservesRecordedGlobalFirstLocalFallback(t *t
 	projectRoot := setupGitRepo(t)
 	defer os.RemoveAll(projectRoot)
 	fakeHome := setupGlobalLiza(t)
-	contractTarget := filepath.Join(fakeHome, ".liza", "CORE.md")
+	contractTarget := filepath.Join(fakeHome, paths.GlobalDirName(), "CORE.md")
 	if err := os.WriteFile(filepath.Join(projectRoot, "CLAUDE.md"), []byte("user-owned\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -335,7 +336,7 @@ func TestActivateProviderContractsReconcilesRecordedLocalFallbackAcrossReruns(t 
 	projectRoot := setupGitRepo(t)
 	defer os.RemoveAll(projectRoot)
 	fakeHome := setupGlobalLiza(t)
-	contractTarget := filepath.Join(fakeHome, ".liza", "CORE.md")
+	contractTarget := filepath.Join(fakeHome, paths.GlobalDirName(), "CORE.md")
 	repoPath := filepath.Join(projectRoot, "CLAUDE.md")
 	localPath := filepath.Join(projectRoot, "CLAUDE.local.md")
 	globalPath := filepath.Join(fakeHome, ".claude", "CLAUDE.md")
@@ -427,7 +428,7 @@ func TestActivateProviderContractsReplacesRecordedLocalFallbackWithRepoPath(t *t
 			projectRoot := setupGitRepo(t)
 			defer os.RemoveAll(projectRoot)
 			fakeHome := setupGlobalLiza(t)
-			contractTarget := filepath.Join(fakeHome, ".liza", "CORE.md")
+			contractTarget := filepath.Join(fakeHome, paths.GlobalDirName(), "CORE.md")
 			repoPath := filepath.Join(projectRoot, "CLAUDE.md")
 			localPath := filepath.Join(projectRoot, "CLAUDE.local.md")
 			if err := os.WriteFile(repoPath, []byte("user-owned\n"), 0644); err != nil {
@@ -502,7 +503,7 @@ func TestActivateProviderContractsReportsSharedPreviousRepoActivation(t *testing
 	projectRoot := setupGitRepo(t)
 	defer os.RemoveAll(projectRoot)
 	fakeHome := setupGlobalLiza(t)
-	contractTarget := filepath.Join(fakeHome, ".liza", "CORE.md")
+	contractTarget := filepath.Join(fakeHome, paths.GlobalDirName(), "CORE.md")
 	repoPath := filepath.Join(projectRoot, "AGENTS.md")
 	if err := os.Symlink(contractTarget, repoPath); err != nil {
 		t.Fatal(err)
@@ -570,7 +571,7 @@ func TestInitPairingCommand_PreservesManagedLinksForUntrustedActivationState(t *
 			projectRoot := setupGitRepo(t)
 			defer os.RemoveAll(projectRoot)
 			fakeHome := setupGlobalLiza(t)
-			contractTarget := filepath.Join(fakeHome, ".liza", "CORE.md")
+			contractTarget := filepath.Join(fakeHome, paths.GlobalDirName(), "CORE.md")
 			repoPath := filepath.Join(projectRoot, "AGENTS.md")
 			if err := os.Symlink(contractTarget, repoPath); err != nil {
 				t.Fatal(err)

@@ -11,6 +11,7 @@ import (
 	"github.com/liza-mas/liza/internal/db"
 	"github.com/liza-mas/liza/internal/git"
 	"github.com/liza-mas/liza/internal/models"
+	"github.com/liza-mas/liza/internal/paths"
 	"github.com/liza-mas/liza/internal/testhelpers"
 )
 
@@ -270,10 +271,10 @@ func TestRecoverTask_ReviewingTask(t *testing.T) {
 func TestRecoverTask_MissingPipelineConfigPreservesReviewerAgent(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	// Manually create .liza dir WITHOUT pipeline config so resolver loading fails.
-	lizaDir := filepath.Join(tmpDir, ".liza")
+	// Manually create the project runtime directory WITHOUT pipeline config so resolver loading fails.
+	lizaDir := filepath.Join(tmpDir, paths.ProjectDirName())
 	if err := os.MkdirAll(lizaDir, 0755); err != nil {
-		t.Fatalf("Failed to create .liza dir: %v", err)
+		t.Fatalf("failed to create project runtime directory: %v", err)
 	}
 	lockPath := filepath.Join(lizaDir, "state.yaml.lock")
 	if err := os.WriteFile(lockPath, []byte{}, 0644); err != nil {

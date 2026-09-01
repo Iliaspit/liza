@@ -54,7 +54,7 @@ func TestRenderPathAppliesGeneratedNameMap(t *testing.T) {
 	values.BinaryName = "acme-cli"
 	values.ProjectDirName = ".acme-agent"
 	got := RenderPath("check-liza-input-readiness/SKILL.md/liza-logs/tools/liza-session-analyzer.html/scripts/liza-index.sh/liza-operator/.liza-hooks/pre-commit", values)
-	if got != "check-acme-agent-input-readiness/SKILL.md/acme-cli-logs/tools/acme-cli-session-analyzer.html/scripts/acme-cli-index.sh/acme-agent-operator/.acme-agent-hooks/pre-commit" {
+	if got != "check-acme-agent-input-readiness/SKILL.md/acme-cli-logs/tools/acme-cli-session-analyzer.html/scripts/acme-cli-index.sh/acme-cli-operator/.acme-agent-hooks/pre-commit" {
 		t.Fatalf("RenderPath = %q", got)
 	}
 }
@@ -180,7 +180,7 @@ func TestSyncEmbeddedRewritesChangedContent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read target: %v", err)
 	}
-	if string(got) != "changed Liza\n" {
+	if string(got) != "changed "+brand.NameTitle+"\n" {
 		t.Fatalf("target content = %q", got)
 	}
 	info, err := os.Stat(target)
@@ -375,14 +375,14 @@ func TestExpectedEmbeddedFilesUseNonDefaultBrand(t *testing.T) {
 	}
 
 	var sawBinaryLogsSkill bool
-	var sawNameLowerOperatorSkill bool
+	var sawBinaryOperatorSkill bool
 	for _, file := range files {
 		rendered := string(file.Content)
 		if strings.Contains(file.RelPath, "acme-cli-logs") {
 			sawBinaryLogsSkill = true
 		}
-		if strings.Contains(file.RelPath, "acme-agent-operator") {
-			sawNameLowerOperatorSkill = true
+		if strings.Contains(file.RelPath, "acme-cli-operator") {
+			sawBinaryOperatorSkill = true
 		}
 		if strings.Contains(file.RelPath, "liza-operator") {
 			t.Fatalf("%s contains raw default operator skill path", file.RelPath)
@@ -397,8 +397,8 @@ func TestExpectedEmbeddedFilesUseNonDefaultBrand(t *testing.T) {
 	if !sawBinaryLogsSkill {
 		t.Fatalf("expected generated logs skill path to use binary name")
 	}
-	if !sawNameLowerOperatorSkill {
-		t.Fatalf("expected generated operator skill path to use name-lower")
+	if !sawBinaryOperatorSkill {
+		t.Fatalf("expected generated operator skill path to use binary name")
 	}
 }
 
@@ -418,7 +418,7 @@ func TestRenderedRepairAgentPoolDocsDescribeClaimEligibleReviewerCapacity(t *tes
 		"support-docs/USAGE_MULTI_AGENTS.md",
 		"support-docs/CONFIGURATION.md",
 		"support-docs/TROUBLESHOOTING.md",
-		"skills/acme-agent-operator/SKILL.md",
+		"skills/acme-cli-operator/SKILL.md",
 	} {
 		content, ok := renderedByPath[relPath]
 		if !ok {

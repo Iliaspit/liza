@@ -21,9 +21,9 @@ var EnvEnableSemble = brand.EnvName("ENABLE_SEMBLE")
 
 const (
 	sembleExecutableName      = "semble"
-	prewarmQuery              = "__liza_semble_prewarm__"
+	prewarmQuery              = "__semble_prewarm__"
 	validationFixtureFileName = "prewarm.py"
-	validationFixtureContent  = "def liza_semble_prewarm(): pass\n"
+	validationFixtureContent  = "def semble_prewarm(): pass\n"
 	validationTopK            = 1
 	validationContentMode     = "code"
 )
@@ -546,7 +546,7 @@ func createValidationFixture(targetRoot string, fixture FixtureIdentity) (string
 	if fixture == (FixtureIdentity{}) {
 		fixture = DefaultValidationFixtureIdentity()
 	}
-	dir, err := os.MkdirTemp("", "liza-semble-validation-*")
+	dir, err := os.MkdirTemp("", brand.RuntimeValues().BinaryName+"-semble-validation-*")
 	if err != nil {
 		return "", func() {}, fmt.Errorf("create temp dir: %w", err)
 	}

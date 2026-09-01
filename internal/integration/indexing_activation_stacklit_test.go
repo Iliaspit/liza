@@ -7,8 +7,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/liza-mas/liza/internal/brand"
+
 	"github.com/liza-mas/liza/internal/commands"
 	"github.com/liza-mas/liza/internal/pairingindex"
+	"github.com/liza-mas/liza/internal/paths"
 	"github.com/liza-mas/liza/internal/scipsearch"
 	"github.com/liza-mas/liza/internal/semble"
 	"github.com/liza-mas/liza/internal/stacklit"
@@ -22,7 +25,7 @@ func TestIndexingActivationStacklitPairingInitInstallsLifecycleRefreshWithoutGlo
 	t.Setenv(scipsearch.EnvEnableScipSearch, "false")
 	t.Setenv(semble.EnvEnableSemble, "false")
 
-	toolsPath := filepath.Join(os.Getenv("HOME"), ".liza", "AGENT_TOOLS.md")
+	toolsPath := filepath.Join(os.Getenv("HOME"), paths.GlobalDirName(), "AGENT_TOOLS.md")
 	writeIndexingActivationFile(t, toolsPath, "global tools sentinel\n")
 	beforeTools := readIndexingActivationFile(t, toolsPath)
 
@@ -34,7 +37,7 @@ func TestIndexingActivationStacklitPairingInitInstallsLifecycleRefreshWithoutGlo
 		t.Fatalf("InitPairingCommand(): %v", err)
 	}
 
-	scriptPath := filepath.Join(projectDir, ".git", "hooks", "liza-index.sh")
+	scriptPath := filepath.Join(projectDir, ".git", "hooks", brand.BinaryName+"-index.sh")
 	script := readIndexingActivationFile(t, scriptPath)
 	assertIndexingActivationContainsAll(t, script,
 		pairingindex.ManagedIndexScriptMarker,
@@ -47,9 +50,9 @@ func TestIndexingActivationStacklitPairingInitInstallsLifecycleRefreshWithoutGlo
 		content := readIndexingActivationFile(t, filepath.Join(projectDir, ".git", "hooks", hook))
 		assertIndexingActivationContainsAll(t, content,
 			pairingindex.ManagedHookMarker,
-			"liza-index.sh",
+			brand.BinaryName+"-index.sh",
 		)
-		assertIndexingActivationContainsNone(t, content, "liza-index.sh ai")
+		assertIndexingActivationContainsNone(t, content, brand.BinaryName+"-index.sh ai")
 	}
 	if got := readIndexingActivationFile(t, toolsPath); got != beforeTools {
 		t.Fatalf("pairing init modified AGENT_TOOLS.md: before %q after %q", beforeTools, got)

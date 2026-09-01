@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/liza-mas/liza/internal/brand"
+
 	"github.com/liza-mas/liza/internal/errors"
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/render"
@@ -1266,7 +1268,7 @@ func TestFormatTaskOutputSummaryValue_IncludesDestructiveDB(t *testing.T) {
 				Index:         1,
 				Kind:          "code-task",
 				SpecRef:       "specs/api.md",
-				Validation:    []string{"LIZA_ALLOW_DESTRUCTIVE_DB=1 make test ./internal/api"},
+				Validation:    []string{brand.EnvName("ALLOW_DESTRUCTIVE_DB") + "=1 make test ./internal/api"},
 				DestructiveDB: true,
 				Desc:          "Implement API",
 			},
@@ -1275,7 +1277,7 @@ func TestFormatTaskOutputSummaryValue_IncludesDestructiveDB(t *testing.T) {
 
 	output := formatTaskOutputSummaryValue(task)
 	for _, expected := range []string{
-		"validation=LIZA_ALLOW_DESTRUCTIVE_DB=1 make test ./internal/api",
+		"validation=" + brand.EnvName("ALLOW_DESTRUCTIVE_DB") + "=1 make test ./internal/api",
 		"destructive_db=true",
 	} {
 		if !strings.Contains(output, expected) {

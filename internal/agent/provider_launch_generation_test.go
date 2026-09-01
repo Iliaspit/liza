@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/liza-mas/liza/internal/paths"
+
 	"github.com/liza-mas/liza/internal/brand"
 	"github.com/liza-mas/liza/internal/db"
 	"github.com/liza-mas/liza/internal/models"
@@ -225,7 +227,7 @@ func TestProviderLaunchFenceFailureSemantics(t *testing.T) {
 				name: "state read",
 				gate: func(t *testing.T, fixture providerGenerationFixture) LLMAgentLaunchGate {
 					config := fixture.config(fixture.authorityA)
-					config.StatePath = filepath.Join(fixture.projectRoot, ".liza", "missing-state.yaml")
+					config.StatePath = filepath.Join(fixture.projectRoot, paths.ProjectDirName(), "missing-state.yaml")
 					return newProviderLaunchGate(config)
 				},
 			},

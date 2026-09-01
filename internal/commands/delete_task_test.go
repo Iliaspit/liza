@@ -269,7 +269,7 @@ func TestDeleteTaskCommand(t *testing.T) {
 			// Setup temp directory
 			tmpDir := t.TempDir()
 
-			// Create .liza directory
+			// Create the project runtime directory.
 			lizaDir := paths.New(tmpDir).LizaDir()
 			if err := os.MkdirAll(lizaDir, 0755); err != nil {
 				t.Fatal(err)
@@ -357,7 +357,7 @@ func TestDeleteTaskCommand(t *testing.T) {
 func TestDeleteTaskCommand_APPROVED(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	// Create .liza directory
+	// Create the project runtime directory.
 	lizaDir := filepath.Join(tmpDir, paths.LizaDirName)
 	if err := os.MkdirAll(lizaDir, 0755); err != nil {
 		t.Fatal(err)

@@ -203,7 +203,7 @@ func checkpointSummaryCLICommand(
 func checkpointSummaryCLIArgs(cliName, prompt string, env []string) ([]string, bool, error) {
 	switch cliName {
 	case "claude":
-		disableSubagents := envValue(env, "LIZA_DISABLE_CLAUDE_SUBAGENTS") == "1"
+		disableSubagents := brandedEnvListGateValue(env, "DISABLE_CLAUDE_SUBAGENTS") == "1"
 		return buildClaudeArgs(prompt, true, "", disableSubagents), true, nil
 	case "codex":
 		return buildCodexArgs(prompt, true, ""), true, nil

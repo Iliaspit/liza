@@ -221,7 +221,7 @@ func TestDeleteAgentCommand(t *testing.T) {
 			// Setup temp directory
 			tmpDir := t.TempDir()
 
-			// Create .liza directory
+			// Create the project runtime directory.
 			lizaDir := paths.New(tmpDir).LizaDir()
 			if err := os.MkdirAll(lizaDir, 0755); err != nil {
 				t.Fatal(err)
@@ -328,7 +328,7 @@ func TestDeleteAgentWithPID(t *testing.T) {
 			// Setup temp directory
 			tmpDir := t.TempDir()
 
-			// Create .liza directory
+			// Create the project runtime directory.
 			lizaDir := paths.New(tmpDir).LizaDir()
 			if err := os.MkdirAll(lizaDir, 0755); err != nil {
 				t.Fatal(err)

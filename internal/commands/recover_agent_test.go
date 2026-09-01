@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/liza-mas/liza/internal/brand"
+
 	"github.com/liza-mas/liza/internal/db"
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/paths"
@@ -26,21 +28,21 @@ func TestBuildRespawnArgs(t *testing.T) {
 			role:    "coder",
 			agentID: "coder-1",
 			cli:     "claude",
-			want:    []string{"liza", "agent", "coder", "--agent-id", "coder-1", "--cli", "claude"},
+			want:    []string{brand.BinaryName, "agent", "coder", "--agent-id", "coder-1", "--cli", "claude"},
 		},
 		{
 			name:    "code-reviewer respawn uses hyphenated role",
 			role:    "code-reviewer",
 			agentID: "code-reviewer-1",
 			cli:     "claude",
-			want:    []string{"liza", "agent", "code-reviewer", "--agent-id", "code-reviewer-1", "--cli", "claude"},
+			want:    []string{brand.BinaryName, "agent", "code-reviewer", "--agent-id", "code-reviewer-1", "--cli", "claude"},
 		},
 		{
 			name:    "orchestrator respawn",
 			role:    "orchestrator",
 			agentID: "orchestrator-1",
 			cli:     "codex",
-			want:    []string{"liza", "agent", "orchestrator", "--agent-id", "orchestrator-1", "--cli", "codex"},
+			want:    []string{brand.BinaryName, "agent", "orchestrator", "--agent-id", "orchestrator-1", "--cli", "codex"},
 		},
 	}
 

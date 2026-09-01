@@ -1,9 +1,9 @@
-// Package testhelpers provides shared test utilities for the liza test suite.
+// Package testhelpers provides shared test utilities for the project test suite.
 //
 // This package consolidates duplicated test setup code found across multiple test files,
 // improving maintainability and consistency. It includes helpers for:
 //   - Git repository initialization
-//   - Liza directory structure creation
+//   - Runtime directory structure creation
 //   - Test worktree management
 //   - Spec file creation
 //
@@ -18,7 +18,7 @@
 package testhelpers
 
 // setup.go contains test helpers for setting up test environments including
-// git repositories, liza directory structures, worktrees, and spec files.
+// git repositories, runtime directory structures, worktrees, and spec files.
 //
 // Functions in this file handle the physical filesystem and git operations
 // required to create realistic test environments that mirror production usage.
@@ -31,7 +31,9 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/liza-mas/liza/internal/brand"
 	"github.com/liza-mas/liza/internal/gitenv"
+	"github.com/liza-mas/liza/internal/paths"
 )
 
 type preparedGitRepoTemplate struct {
@@ -104,7 +106,7 @@ func gitRepoTemplate(t *testing.T, template *preparedGitRepoTemplate, includeInt
 }
 
 func createTestGitRepoTemplate(includeIntegrationBranch bool) (entries []gitRepoTemplateEntry, err error) {
-	dir, err := os.MkdirTemp("", "liza-test-git-template-*")
+	dir, err := os.MkdirTemp("", brand.RuntimeValues().BinaryName+"-test-git-template-*")
 	if err != nil {
 		return nil, err
 	}
@@ -304,9 +306,9 @@ func materializeGitRepoTemplate(entries []gitRepoTemplateEntry, dst string) erro
 	return nil
 }
 
-// SetupLizaDir creates the .liza directory structure and returns paths to the state file and lock file.
+// SetupLizaDir creates the active project runtime directory and returns paths to the state file and lock file.
 // It performs the following:
-//   - Creates .liza directory with 0755 permissions
+//   - Creates the project runtime directory with 0755 permissions
 //   - Creates state.yaml.lock file (empty)
 //   - Returns (stateFile path, lockFile path)
 //
@@ -315,13 +317,13 @@ func materializeGitRepoTemplate(entries []gitRepoTemplateEntry, dst string) erro
 func SetupLizaDir(t *testing.T, tmpDir string) (statePath, lockPath string) {
 	t.Helper()
 
-	lizaDir := filepath.Join(tmpDir, ".liza")
-	if err := os.MkdirAll(lizaDir, 0755); err != nil {
-		t.Fatalf("Failed to create .liza directory: %v", err)
+	projectDir := filepath.Join(tmpDir, paths.ProjectDirName())
+	if err := os.MkdirAll(projectDir, 0755); err != nil {
+		t.Fatalf("Failed to create project runtime directory %s: %v", paths.ProjectDirName(), err)
 	}
 
-	statePath = filepath.Join(lizaDir, "state.yaml")
-	lockPath = filepath.Join(lizaDir, "state.yaml.lock")
+	statePath = filepath.Join(projectDir, "state.yaml")
+	lockPath = filepath.Join(projectDir, "state.yaml.lock")
 
 	// Create lock file
 	if err := os.WriteFile(lockPath, []byte{}, 0644); err != nil {
@@ -334,19 +336,19 @@ func SetupLizaDir(t *testing.T, tmpDir string) (statePath, lockPath string) {
 	return statePath, lockPath
 }
 
-// SetupGlobalLiza creates a fake ~/.liza/CORE.md so that commands requiring
-// 'liza setup' to have been run (like InitCommand) pass their prerequisite check.
+// SetupGlobalLiza creates a fake global CORE.md so commands requiring global
+// setup (like InitCommand) pass their prerequisite check.
 // It overrides $HOME via t.Setenv (auto-reverted on test cleanup).
 // Returns the fake home directory path.
 func SetupGlobalLiza(t *testing.T) string {
 	t.Helper()
 	fakeHome := t.TempDir()
 	t.Setenv("HOME", fakeHome)
-	globalLiza := filepath.Join(fakeHome, ".liza")
-	if err := os.MkdirAll(globalLiza, 0755); err != nil {
+	globalDir := filepath.Join(fakeHome, paths.GlobalDirName())
+	if err := os.MkdirAll(globalDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(globalLiza, "CORE.md"), []byte("# CORE\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(globalDir, "CORE.md"), []byte("# CORE\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
 	InstallFakeScipSearchTools(t, fakeHome)

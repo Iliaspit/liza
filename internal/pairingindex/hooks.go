@@ -27,7 +27,7 @@ const legacyManagedIndexScriptMarker = "# LIZA-PAIRING-INDEX-SCRIPT: managed"
 //
 // When the hook is a symlink to the dispatcher, the dispatcher reads the name
 // from $0. The wrapper installed where symlinks are unavailable execs the
-// dispatcher by its own name, so $0 says "liza-index-hook.sh" and the
+// dispatcher by its own name, so $0 says the dispatcher filename and the
 // post-checkout file-checkout short-circuit would never fire. The wrapper
 // therefore states the name explicitly.
 const hookNameEnvVar = "PAIRING_INDEX_HOOK_NAME"
@@ -36,26 +36,16 @@ const stacklitArtifactName = "stacklit.json"
 const stacklitInsightsArtifactName = "stacklit-insights.json"
 const stacklitArchitectureArtifactName = "stacklit-architecture.json"
 const functionalClustersArtifactName = "functional-clusters.json"
-const defaultScriptName = "liza-index.sh"
-const defaultHookDispatcherName = "liza-index-hook.sh"
 
 var defaultLifecycleHooks = []string{"post-commit", "post-checkout", "post-merge", "post-rewrite"}
 var stacklitArtifactExcludeMu sync.Mutex
 
 func scriptName() string {
-	binaryName := brand.RuntimeValues().BinaryName
-	if binaryName == "liza" {
-		return defaultScriptName
-	}
-	return binaryName + "-index.sh"
+	return brand.RuntimeValues().BinaryName + "-index.sh"
 }
 
 func hookDispatcherName() string {
-	binaryName := brand.RuntimeValues().BinaryName
-	if binaryName == "liza" {
-		return defaultHookDispatcherName
-	}
-	return binaryName + "-index-hook.sh"
+	return brand.RuntimeValues().BinaryName + "-index-hook.sh"
 }
 
 // DefaultLifecycleHooks returns the Git lifecycle hooks used for pairing index refresh.
@@ -103,15 +93,15 @@ type HookInstallResult struct {
 type HookAction string
 
 const (
-	// HookActionInstalled means Liza wrote a missing managed hook wrapper.
+	// HookActionInstalled means the tool wrote a missing managed hook wrapper.
 	HookActionInstalled HookAction = "installed"
-	// HookActionVerified means an existing wrapper already matched Liza's content.
+	// HookActionVerified means an existing wrapper already matched the managed content.
 	HookActionVerified HookAction = "verified"
-	// HookActionUpdated means an existing Liza-managed wrapper was refreshed.
+	// HookActionUpdated means an existing managed wrapper was refreshed.
 	HookActionUpdated HookAction = "updated"
 )
 
-// HookCollision identifies an existing non-Liza hook that must not be overwritten.
+// HookCollision identifies an existing unmanaged hook that must not be overwritten.
 type HookCollision struct {
 	Hook string
 	Path string
@@ -131,7 +121,7 @@ type InstallIndexScriptResult struct {
 	Action HookAction
 }
 
-// HookCollisionError reports all non-Liza lifecycle hook collisions found during preflight.
+// HookCollisionError reports all unmanaged lifecycle hook collisions found during preflight.
 type HookCollisionError struct {
 	Collisions []HookCollision
 }
@@ -237,7 +227,7 @@ func ResolveEffectiveHooksDir(repoRoot string) (string, error) {
 	return filepath.Clean(filepath.Dir(hookPath)), nil
 }
 
-// InstallLifecycleHooks installs or verifies Liza-managed pairing index wrappers.
+// InstallLifecycleHooks installs or verifies managed pairing index wrappers.
 func InstallLifecycleHooks(opts InstallHooksOptions) (InstallHooksResult, error) {
 	hooks := opts.Hooks
 	if len(hooks) == 0 {

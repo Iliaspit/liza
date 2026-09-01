@@ -5,6 +5,8 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/liza-mas/liza/internal/paths"
+
 	"github.com/liza-mas/liza/internal/brand"
 )
 
@@ -15,7 +17,7 @@ func TestSupportWritableRoots(t *testing.T) {
 	got := SupportWritableRoots(home, cache)
 	want := []string{
 		filepath.Join(home, ".codex"),
-		filepath.Join(home, ".liza"),
+		filepath.Join(home, paths.GlobalDirName()),
 		filepath.Join(home, ".npm"),
 		filepath.Join(home, ".pyenv", "shims"),
 		cache,
@@ -28,8 +30,8 @@ func TestSupportWritableRoots(t *testing.T) {
 
 func TestSupportWritableRootsIncludesNameAndGlobalNamespacesWhenDistinct(t *testing.T) {
 	previousNameLower, previousGlobalDirName := brand.NameLower, brand.GlobalDirName
-	brand.NameLower = "omni"
-	brand.GlobalDirName = ".omni-ee"
+	brand.NameLower = "acme"
+	brand.GlobalDirName = ".acme-agent"
 	t.Cleanup(func() {
 		brand.NameLower = previousNameLower
 		brand.GlobalDirName = previousGlobalDirName
@@ -38,8 +40,8 @@ func TestSupportWritableRootsIncludesNameAndGlobalNamespacesWhenDistinct(t *test
 	home := filepath.Join(string(filepath.Separator), "home", "user")
 	got := SupportWritableRoots(home, filepath.Join(home, ".cache"))
 	wantRoots := []string{
-		filepath.Join(home, ".omni"),
-		filepath.Join(home, ".omni-ee"),
+		filepath.Join(home, "."+brand.NameLower),
+		filepath.Join(home, paths.GlobalDirName()),
 	}
 	for _, want := range wantRoots {
 		if !containsString(got, want) {

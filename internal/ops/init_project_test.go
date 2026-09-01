@@ -83,10 +83,10 @@ func TestInitProject_Success(t *testing.T) {
 		t.Fatalf("InitProject() error: %v", err)
 	}
 
-	// Verify .liza directory exists
-	lizaDir := filepath.Join(projectRoot, ".liza")
+	// Verify the project runtime directory exists.
+	lizaDir := filepath.Join(projectRoot, paths.ProjectDirName())
 	if _, err := os.Stat(lizaDir); os.IsNotExist(err) {
-		t.Fatal(".liza directory was not created")
+		t.Fatal("project runtime directory was not created")
 	}
 
 	// Verify state.yaml is readable with expected values
@@ -175,7 +175,7 @@ func TestGlobalIntegrationGenerationLimitDefaults(t *testing.T) {
 				t.Fatalf("InitProject() error: %v", err)
 			}
 
-			statePath := filepath.Join(projectRoot, ".liza", "state.yaml")
+			statePath := filepath.Join(projectRoot, paths.ProjectDirName(), "state.yaml")
 			state, err := db.For(statePath).Read()
 			if err != nil {
 				t.Fatalf("read typed state: %v", err)
@@ -216,7 +216,7 @@ func TestInitProject_CopyWorktreeEnvFiles(t *testing.T) {
 		t.Fatalf("InitProject() error: %v", err)
 	}
 
-	bb := db.For(filepath.Join(projectRoot, ".liza", "state.yaml"))
+	bb := db.For(filepath.Join(projectRoot, paths.ProjectDirName(), "state.yaml"))
 	state, err := bb.Read()
 	if err != nil {
 		t.Fatalf("Failed to read state: %v", err)
@@ -238,7 +238,7 @@ func TestInitProject_CopyWorktreeEnvFilesFromEnv(t *testing.T) {
 		t.Fatalf("InitProject() error: %v", err)
 	}
 
-	bb := db.For(filepath.Join(projectRoot, ".liza", "state.yaml"))
+	bb := db.For(filepath.Join(projectRoot, paths.ProjectDirName(), "state.yaml"))
 	state, err := bb.Read()
 	if err != nil {
 		t.Fatalf("Failed to read state: %v", err)
@@ -334,8 +334,8 @@ func TestInitProject_SembleEnabledSkipsLookupWhenHardPreconditionsFail(t *testin
 	if len(diagnostics) != 0 {
 		t.Fatalf("Semble diagnostics = %#v, want none", diagnostics)
 	}
-	if _, statErr := os.Stat(filepath.Join(projectRoot, ".liza")); !os.IsNotExist(statErr) {
-		t.Fatalf(".liza directory state after failed init = %v, want not exist", statErr)
+	if _, statErr := os.Stat(filepath.Join(projectRoot, paths.ProjectDirName())); !os.IsNotExist(statErr) {
+		t.Fatalf("project runtime directory state after failed init = %v, want not exist", statErr)
 	}
 }
 
@@ -352,8 +352,8 @@ func TestInitProject_SembleEnabledRunsPrewarmAndOfflineValidationBeforeLizaCreat
 			return executablePath, nil
 		},
 		func(plan semble.CommandPlan) (semble.CommandResult, error) {
-			if _, statErr := os.Stat(filepath.Join(projectRoot, ".liza")); !os.IsNotExist(statErr) {
-				t.Fatalf(".liza state during Semble validation = %v, want not exist", statErr)
+			if _, statErr := os.Stat(filepath.Join(projectRoot, paths.ProjectDirName())); !os.IsNotExist(statErr) {
+				t.Fatalf("project runtime directory state during Semble validation = %v, want not exist", statErr)
 			}
 			if hasOfflineEnv(plan.Env) {
 				runnerCalls = append(runnerCalls, "offline")
@@ -475,8 +475,8 @@ func TestInitProject_SembleDiagnosticsAreTransientNonFatalAndSilent(t *testing.T
 			if len(diagnostics[0]) > 1024 {
 				t.Fatalf("Semble diagnostic length = %d, want bounded <= 1024", len(diagnostics[0]))
 			}
-			if _, statErr := os.Stat(filepath.Join(projectRoot, ".liza")); statErr != nil {
-				t.Fatalf(".liza after non-fatal Semble diagnostic = %v, want created", statErr)
+			if _, statErr := os.Stat(filepath.Join(projectRoot, paths.ProjectDirName())); statErr != nil {
+				t.Fatalf("project runtime directory after non-fatal Semble diagnostic = %v, want created", statErr)
 			}
 			assertNoSembleState(t, projectRoot)
 		})
@@ -486,10 +486,10 @@ func TestInitProject_SembleDiagnosticsAreTransientNonFatalAndSilent(t *testing.T
 func TestInitProject_AlreadyExists(t *testing.T) {
 	projectRoot, specFile := setupInitTestDir(t)
 
-	// Pre-create .liza directory
-	lizaDir := filepath.Join(projectRoot, ".liza")
+	// Pre-create the project runtime directory.
+	lizaDir := filepath.Join(projectRoot, paths.ProjectDirName())
 	if err := os.MkdirAll(lizaDir, 0755); err != nil {
-		t.Fatalf("Failed to create .liza dir: %v", err)
+		t.Fatalf("failed to create project runtime directory: %v", err)
 	}
 
 	err := InitProject(projectRoot, InitProjectParams{
@@ -497,7 +497,7 @@ func TestInitProject_AlreadyExists(t *testing.T) {
 		SpecRef:     specFile,
 	})
 	if err == nil {
-		t.Fatal("Expected error when .liza already exists")
+		t.Fatal("expected error when project runtime directory already exists")
 	}
 	if !strings.Contains(err.Error(), "already exists") {
 		t.Errorf("Error = %q, want to contain 'already exists'", err.Error())
@@ -553,7 +553,7 @@ func TestInitProject_EmptyBranchDefaultsToIntegration(t *testing.T) {
 		t.Fatalf("InitProject() error: %v", err)
 	}
 
-	statePath := filepath.Join(projectRoot, ".liza", "state.yaml")
+	statePath := filepath.Join(projectRoot, paths.ProjectDirName(), "state.yaml")
 	bb := db.For(statePath)
 	state, err := bb.Read()
 	if err != nil {
@@ -592,7 +592,7 @@ func TestInitProject_StateReadableAfterSuccess(t *testing.T) {
 	}
 
 	// Use db.For() as specified in done_when
-	statePath := filepath.Join(projectRoot, ".liza", "state.yaml")
+	statePath := filepath.Join(projectRoot, paths.ProjectDirName(), "state.yaml")
 	bb := db.For(statePath)
 	state, err := bb.Read()
 	if err != nil {
@@ -648,8 +648,8 @@ func TestInitProject_UncommittedSpecFailsBeforeArtifacts(t *testing.T) {
 	if !strings.Contains(err.Error(), "spec file") || !strings.Contains(err.Error(), "commit") {
 		t.Fatalf("InitProject() error = %v, want spec commit precondition", err)
 	}
-	if _, statErr := os.Stat(filepath.Join(projectRoot, ".liza")); !os.IsNotExist(statErr) {
-		t.Fatalf(".liza directory state after failed init = %v, want not exist", statErr)
+	if _, statErr := os.Stat(filepath.Join(projectRoot, paths.ProjectDirName())); !os.IsNotExist(statErr) {
+		t.Fatalf("project runtime directory state after failed init = %v, want not exist", statErr)
 	}
 }
 
@@ -670,8 +670,8 @@ func TestInitProject_MissingPreCommitConfigFailsBeforeArtifacts(t *testing.T) {
 	if !strings.Contains(err.Error(), "pre-commit config") {
 		t.Fatalf("InitProject() error = %v, want pre-commit config precondition", err)
 	}
-	if _, statErr := os.Stat(filepath.Join(projectRoot, ".liza")); !os.IsNotExist(statErr) {
-		t.Fatalf(".liza directory state after failed init = %v, want not exist", statErr)
+	if _, statErr := os.Stat(filepath.Join(projectRoot, paths.ProjectDirName())); !os.IsNotExist(statErr) {
+		t.Fatalf("project runtime directory state after failed init = %v, want not exist", statErr)
 	}
 }
 
@@ -719,8 +719,8 @@ func TestInitProject_PreCommitConfigMustBeClean(t *testing.T) {
 			if !strings.Contains(err.Error(), "pre-commit config") || !strings.Contains(err.Error(), "changes") {
 				t.Fatalf("InitProject() error = %v, want dirty pre-commit config precondition", err)
 			}
-			if _, statErr := os.Stat(filepath.Join(projectRoot, ".liza")); !os.IsNotExist(statErr) {
-				t.Fatalf(".liza directory state after failed init = %v, want not exist", statErr)
+			if _, statErr := os.Stat(filepath.Join(projectRoot, paths.ProjectDirName())); !os.IsNotExist(statErr) {
+				t.Fatalf("project runtime directory state after failed init = %v, want not exist", statErr)
 			}
 		})
 	}
@@ -738,7 +738,7 @@ func TestInitProject_CustomBranch(t *testing.T) {
 		t.Fatalf("InitProject() error: %v", err)
 	}
 
-	statePath := filepath.Join(projectRoot, ".liza", "state.yaml")
+	statePath := filepath.Join(projectRoot, paths.ProjectDirName(), "state.yaml")
 	bb := db.For(statePath)
 	state, err := bb.Read()
 	if err != nil {
@@ -761,7 +761,7 @@ func TestInitProject_AutoResumeFlag(t *testing.T) {
 		t.Fatalf("InitProject() error: %v", err)
 	}
 
-	statePath := filepath.Join(projectRoot, ".liza", "state.yaml")
+	statePath := filepath.Join(projectRoot, paths.ProjectDirName(), "state.yaml")
 	bb := db.For(statePath)
 	state, err := bb.Read()
 	if err != nil {
@@ -784,7 +784,7 @@ func TestInitProject_NoFollowUpFlag(t *testing.T) {
 		t.Fatalf("InitProject() error: %v", err)
 	}
 
-	statePath := filepath.Join(projectRoot, ".liza", "state.yaml")
+	statePath := filepath.Join(projectRoot, paths.ProjectDirName(), "state.yaml")
 	bb := db.For(statePath)
 	state, err := bb.Read()
 	if err != nil {
@@ -807,7 +807,7 @@ func TestInitProject_DefaultCLI(t *testing.T) {
 		t.Fatalf("InitProject() error: %v", err)
 	}
 
-	statePath := filepath.Join(projectRoot, ".liza", "state.yaml")
+	statePath := filepath.Join(projectRoot, paths.ProjectDirName(), "state.yaml")
 	bb := db.For(statePath)
 	state, err := bb.Read()
 	if err != nil {
@@ -831,7 +831,7 @@ func TestInitProject_RoleSpecificDefaultCLIs(t *testing.T) {
 		t.Fatalf("InitProject() error: %v", err)
 	}
 
-	statePath := filepath.Join(projectRoot, ".liza", "state.yaml")
+	statePath := filepath.Join(projectRoot, paths.ProjectDirName(), "state.yaml")
 	bb := db.For(statePath)
 	state, err := bb.Read()
 	if err != nil {
@@ -856,7 +856,7 @@ func TestInitProject_DefaultCLIEmpty(t *testing.T) {
 		t.Fatalf("InitProject() error: %v", err)
 	}
 
-	statePath := filepath.Join(projectRoot, ".liza", "state.yaml")
+	statePath := filepath.Join(projectRoot, paths.ProjectDirName(), "state.yaml")
 	bb := db.For(statePath)
 	state, err := bb.Read()
 	if err != nil {
@@ -967,7 +967,7 @@ func captureInitProjectOutput(t *testing.T, fn func() error) (string, string, er
 
 func assertNoSembleState(t *testing.T, projectRoot string) {
 	t.Helper()
-	statePath := filepath.Join(projectRoot, ".liza", "state.yaml")
+	statePath := filepath.Join(projectRoot, paths.ProjectDirName(), "state.yaml")
 	data, err := os.ReadFile(statePath)
 	if err != nil {
 		t.Fatalf("Failed to read state.yaml: %v", err)

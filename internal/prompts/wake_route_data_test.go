@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/liza-mas/liza/internal/embedded"
+	"github.com/liza-mas/liza/internal/paths"
 )
 
 func TestBuildWakeTemplateDataRouteData(t *testing.T) {
@@ -266,9 +267,9 @@ func assertWakeRouteData(t *testing.T, ep wakeEntryPointData, simpleRolePair, si
 func setupPipelineConfigContent(t *testing.T, content []byte) string {
 	t.Helper()
 	dir := t.TempDir()
-	lizaDir := filepath.Join(dir, ".liza")
+	lizaDir := filepath.Join(dir, paths.ProjectDirName())
 	if err := os.MkdirAll(lizaDir, 0o755); err != nil {
-		t.Fatalf("mkdir .liza: %v", err)
+		t.Fatalf("mkdir project runtime directory: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(lizaDir, "pipeline.yaml"), content, 0o644); err != nil {
 		t.Fatalf("write pipeline.yaml: %v", err)

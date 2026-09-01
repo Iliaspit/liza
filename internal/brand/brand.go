@@ -86,19 +86,35 @@ func ValuesFromEnv(getenv func(string) string) Values {
 	if getenv == nil {
 		getenv = func(string) string { return "" }
 	}
-	nameLower := envOr(getenv, "BRAND_NAME_LOWER", "liza")
+	rawNameLower := strings.TrimSpace(getenv("BRAND_NAME_LOWER"))
+	nameLower := rawNameLower
+	if nameLower == "" {
+		nameLower = NameLower
+	}
+	nameUpperFallback := NameUpper
+	nameTitleFallback := NameTitle
+	binaryFallback := BinaryName
+	globalDirFallback := GlobalDirName
+	projectDirFallback := ProjectDirName
+	if rawNameLower != "" {
+		nameUpperFallback = upperFromLower(nameLower)
+		nameTitleFallback = titleFromLower(nameLower)
+		binaryFallback = nameLower
+		globalDirFallback = "." + nameLower
+		projectDirFallback = "." + nameLower
+	}
 	values := Values{
 		NameLower: nameLower,
-		NameUpper: envOr(getenv, "BRAND_NAME_UPPER", upperFromLower(nameLower)),
-		NameTitle: envOr(getenv, "BRAND_NAME_TITLE", titleFromLower(nameLower)),
-		Repo:      envOr(getenv, "BRAND_REPO", "liza-mas/liza"),
+		NameUpper: envOr(getenv, "BRAND_NAME_UPPER", nameUpperFallback),
+		NameTitle: envOr(getenv, "BRAND_NAME_TITLE", nameTitleFallback),
+		Repo:      envOr(getenv, "BRAND_REPO", Repo),
 	}
-	values.BinaryName = envOr(getenv, "BRAND_BINARY_NAME", values.NameLower)
-	values.GlobalDirName = envOr(getenv, "BRAND_GLOBAL_DIRNAME", "."+values.NameLower)
-	values.ProjectDirName = envOr(getenv, "BRAND_PROJECT_DIRNAME", "."+values.NameLower)
+	values.BinaryName = envOr(getenv, "BRAND_BINARY_NAME", binaryFallback)
+	values.GlobalDirName = envOr(getenv, "BRAND_GLOBAL_DIRNAME", globalDirFallback)
+	values.ProjectDirName = envOr(getenv, "BRAND_PROJECT_DIRNAME", projectDirFallback)
 	values.EnvPrefix = envOr(getenv, "BRAND_ENV_PREFIX", values.NameUpper)
 	// Render-time only until provider verification proves branded prompt IDs work.
-	values.MistralPromptID = envOr(getenv, "BRAND_MISTRAL_PROMPT_ID", values.NameLower)
+	values.MistralPromptID = envOr(getenv, "BRAND_MISTRAL_PROMPT_ID", CanonicalMistralPromptID)
 	values.ArchivePrefix = envOr(getenv, "BRAND_ARCHIVE_PREFIX", values.BinaryName)
 	values.ReleaseRepo = envOr(getenv, "BRAND_RELEASE_REPO", values.Repo)
 	values.ReleaseBaseURL = envOr(getenv, "BRAND_RELEASE_BASE_URL", "https://github.com/"+values.ReleaseRepo+"/releases/download")
@@ -127,7 +143,7 @@ func (v Values) withDerivedDefaults() Values {
 		v.EnvPrefix = v.NameUpper
 	}
 	if v.MistralPromptID == "" {
-		v.MistralPromptID = v.NameLower
+		v.MistralPromptID = CanonicalMistralPromptID
 	}
 	if v.ArchivePrefix == "" {
 		v.ArchivePrefix = v.BinaryName

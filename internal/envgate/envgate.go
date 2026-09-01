@@ -27,15 +27,25 @@ func Value(name string) string {
 
 // Lookup returns detailed alias resolution for a user-facing env var.
 func Lookup(name string) brand.EnvLookup {
+	return LookupFunc(os.LookupEnv, name)
+}
+
+// LookupFunc returns detailed alias resolution using the supplied environment
+// lookup function. It is useful for resolving environment slices prepared for
+// child processes while preserving the same precedence as process-level lookup.
+func LookupFunc(lookupEnv func(string) (string, bool), name string) brand.EnvLookup {
+	if lookupEnv == nil {
+		lookupEnv = func(string) (string, bool) { return "", false }
+	}
 	suffix := envSuffix(name)
 	values := brand.RuntimeValues()
 	brandedName := values.EnvName(suffix)
 	legacyName := brand.LegacyEnvName(suffix)
 	// Feature gates are presence-aware so an explicitly empty branded env value
 	// disables the gate instead of falling through to a legacy LIZA_* alias.
-	if branded, ok := os.LookupEnv(brandedName); ok {
+	if branded, ok := lookupEnv(brandedName); ok {
 		out := brand.EnvLookup{Value: strings.TrimSpace(branded), Source: brandedName}
-		if legacy, ok := os.LookupEnv(legacyName); ok && legacyName != brandedName {
+		if legacy, ok := lookupEnv(legacyName); ok && legacyName != brandedName {
 			legacy = strings.TrimSpace(legacy)
 			if legacy != "" && legacy != out.Value {
 				out.Warning = fmt.Sprintf("%s and %s are both set; using %s", brandedName, legacyName, brandedName)
@@ -43,7 +53,7 @@ func Lookup(name string) brand.EnvLookup {
 		}
 		return out
 	}
-	if legacy, ok := os.LookupEnv(legacyName); ok {
+	if legacy, ok := lookupEnv(legacyName); ok {
 		return brand.EnvLookup{Value: strings.TrimSpace(legacy), Source: legacyName}
 	}
 	return brand.EnvLookup{}

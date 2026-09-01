@@ -15,6 +15,7 @@ import (
 	"github.com/liza-mas/liza/internal/errors"
 	"github.com/liza-mas/liza/internal/git"
 	"github.com/liza-mas/liza/internal/models"
+	"github.com/liza-mas/liza/internal/paths"
 	"github.com/liza-mas/liza/internal/scipsearch"
 	"github.com/liza-mas/liza/internal/stacklit"
 	"github.com/liza-mas/liza/internal/testhelpers"
@@ -46,7 +47,7 @@ func TestSubmitForReview_Validation(t *testing.T) {
 		},
 		{
 			name: "empty agent ID", taskID: "t1", commitRef: "abc123",
-			errContains: "LIZA_AGENT_ID is required",
+			errContains: brand.EnvName("AGENT_ID") + " is required",
 		},
 	}
 
@@ -809,7 +810,7 @@ func TestSubmitForReview_ScipRefreshesPostRebaseCandidateBeforeSubmittedTransiti
 	}
 
 	postRebaseHead := testhelpers.MustGit(t, wtPath, "rev-parse", "HEAD")
-	indexPath := filepath.Join(wtPath, ".liza", "scip", "go.scip")
+	indexPath := filepath.Join(wtPath, paths.ProjectDirName(), "scip", "go.scip")
 	indexContent, err := os.ReadFile(indexPath)
 	if err != nil {
 		t.Fatalf("read regenerated index: %v", err)
@@ -1141,7 +1142,7 @@ func TestSubmitForReview_TDDEnforcement_CustomDoerRole(t *testing.T) {
   pipeline-transitions: []
   entry-points: {}
 `
-	if err := os.WriteFile(filepath.Join(tmpDir, ".liza", "pipeline.yaml"), []byte(customPipeline), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(tmpDir, paths.ProjectDirName(), "pipeline.yaml"), []byte(customPipeline), 0644); err != nil {
 		t.Fatalf("Failed to write custom pipeline config: %v", err)
 	}
 

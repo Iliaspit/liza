@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/liza-mas/liza/internal/paths"
 )
 
 func TestSetupTestGitRepo(t *testing.T) {
@@ -167,9 +169,9 @@ func TestCreateTestGitRepoTemplateRemovesPreparationDirectory(t *testing.T) {
 
 func TestSetupTestGitRepoPreservesExistingNonGitContents(t *testing.T) {
 	tmpDir := t.TempDir()
-	lizaDir := filepath.Join(tmpDir, ".liza")
+	lizaDir := filepath.Join(tmpDir, paths.ProjectDirName())
 	if err := os.MkdirAll(lizaDir, 0755); err != nil {
-		t.Fatalf("create .liza dir: %v", err)
+		t.Fatalf("create project runtime directory: %v", err)
 	}
 	statePath := filepath.Join(lizaDir, "state.yaml")
 	if err := os.WriteFile(statePath, []byte("version: 1\n"), 0644); err != nil {
@@ -182,7 +184,7 @@ func TestSetupTestGitRepoPreservesExistingNonGitContents(t *testing.T) {
 		t.Fatalf(".git stat err = %v, want initialized repo", err)
 	}
 	if _, err := os.Stat(statePath); err != nil {
-		t.Fatalf(".liza state stat err = %v, want preserved non-git contents", err)
+		t.Fatalf("project runtime state stat err = %v, want preserved non-git contents", err)
 	}
 }
 
@@ -216,24 +218,24 @@ func TestSetupLizaDir(t *testing.T) {
 	statePath, lockPath := SetupLizaDir(t, tmpDir)
 
 	// Verify paths are correct
-	expectedStatePath := filepath.Join(tmpDir, ".liza", "state.yaml")
+	expectedStatePath := filepath.Join(tmpDir, paths.ProjectDirName(), "state.yaml")
 	if statePath != expectedStatePath {
 		t.Errorf("Expected statePath=%q, got %q", expectedStatePath, statePath)
 	}
 
-	expectedLockPath := filepath.Join(tmpDir, ".liza", "state.yaml.lock")
+	expectedLockPath := filepath.Join(tmpDir, paths.ProjectDirName(), "state.yaml.lock")
 	if lockPath != expectedLockPath {
 		t.Errorf("Expected lockPath=%q, got %q", expectedLockPath, lockPath)
 	}
 
-	// Verify .liza directory exists
-	lizaDir := filepath.Join(tmpDir, ".liza")
+	// Verify project runtime directory exists
+	lizaDir := filepath.Join(tmpDir, paths.ProjectDirName())
 	info, err := os.Stat(lizaDir)
 	if os.IsNotExist(err) {
-		t.Fatal(".liza directory does not exist")
+		t.Fatal("project runtime directory does not exist")
 	}
 	if !info.IsDir() {
-		t.Error(".liza is not a directory")
+		t.Error("project runtime path is not a directory")
 	}
 
 	// Verify lock file exists

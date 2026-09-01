@@ -10,6 +10,7 @@ import (
 
 	"github.com/liza-mas/liza/internal/db"
 	"github.com/liza-mas/liza/internal/models"
+	"github.com/liza-mas/liza/internal/paths"
 	"github.com/liza-mas/liza/internal/statevalidate"
 	"github.com/liza-mas/liza/internal/testhelpers"
 	"gopkg.in/yaml.v3"
@@ -19,7 +20,7 @@ func setupAdvanceTest(t *testing.T) (tmpDir, stateFile string) {
 	t.Helper()
 	tmpDir = t.TempDir()
 	stateFile, _ = testhelpers.SetupLizaDir(t, tmpDir)
-	archiveDir := filepath.Join(tmpDir, ".liza", "archive")
+	archiveDir := filepath.Join(tmpDir, paths.ProjectDirName(), "archive")
 	if err := os.MkdirAll(archiveDir, 0755); err != nil {
 		t.Fatalf("Failed to create archive dir: %v", err)
 	}
@@ -524,7 +525,7 @@ func TestResumeWithSprintAdvance_BlocksApprovedUnmergedPlanning(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			tmpDir, stateFile := setupAdvanceTest(t)
 			if tt.removePipelineConfig {
-				pipelinePath := filepath.Join(tmpDir, ".liza", "pipeline.yaml")
+				pipelinePath := filepath.Join(tmpDir, paths.ProjectDirName(), "pipeline.yaml")
 				if err := os.Remove(pipelinePath); err != nil {
 					t.Fatalf("failed to remove pipeline config for legacy fallback test: %v", err)
 				}
@@ -565,7 +566,7 @@ func TestResumeWithSprintAdvance_BlocksApprovedUnmergedPlanning(t *testing.T) {
 				t.Fatalf("Resume() error = %q, want merge-first message naming %s", err, tt.taskID)
 			}
 
-			archivePath := filepath.Join(tmpDir, ".liza", "archive", "sprint-1.yaml")
+			archivePath := filepath.Join(tmpDir, paths.ProjectDirName(), "archive", "sprint-1.yaml")
 			if _, statErr := os.Stat(archivePath); !os.IsNotExist(statErr) {
 				t.Fatalf("archive path stat error = %v, want archive not written at %s", statErr, archivePath)
 			}

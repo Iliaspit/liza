@@ -1766,7 +1766,7 @@ func TestClaimTask_ScipIndexesEnabledWorktreeAfterPostWorktreeCmd(t *testing.T) 
 	}
 
 	worktreeDir := filepath.Join(tmpDir, paths.WorktreesDirName, "task-1")
-	wantIndexPath := filepath.Join(worktreeDir, ".liza", "scip", "go.scip")
+	wantIndexPath := filepath.Join(worktreeDir, paths.ProjectDirName(), "scip", "go.scip")
 	indexes := availableClaimScipIndexes(t, worktreeDir, []string{"go"})
 	if len(indexes) != 1 || indexes[0].Language != "go" || indexes[0].Path != wantIndexPath {
 		t.Fatalf("AvailableIndexes() = %#v, want go index at %s", indexes, wantIndexPath)
@@ -1788,7 +1788,7 @@ func TestClaimTaskSembleIgnorePreparationRunsAfterPostWorktreeBeforeIndexRefresh
 	state := testhelpers.CreateValidState()
 	registerClaimTaskTestAgents(state)
 	state.Config.ScipSearch = []string{"go"}
-	postCmd := "printf '.liza/\\n' > .sembleignore"
+	postCmd := "printf '" + paths.ProjectDirName() + "/\\n' > .sembleignore"
 	state.Config.PostWorktreeCmd = &postCmd
 	state.Tasks = []models.Task{
 		testhelpers.BuildTaskByStatus("task-1", models.TaskStatusReady, time.Now().UTC()),
@@ -1812,7 +1812,7 @@ func TestClaimTaskSembleIgnorePreparationRunsAfterPostWorktreeBeforeIndexRefresh
 	}
 	worktreeDir := filepath.Join(tmpDir, paths.WorktreesDirName, "task-1")
 	assertPrepareSembleIgnorePayload(t, worktreeDir)
-	assertPrepareSemblePrivateExcludeCount(t, worktreeDir, ".liza/scip/", 1)
+	assertPrepareSemblePrivateExcludeCount(t, worktreeDir, paths.ProjectDirName()+"/scip/", 1)
 	assertPrepareSemblePrivateExcludeCount(t, worktreeDir, ".sembleignore", 1)
 	assertGitStatusClean(t, worktreeDir)
 }
@@ -1847,8 +1847,8 @@ func TestClaimTask_ScipDisabledActivationNoop(t *testing.T) {
 	}
 
 	worktreeDir := filepath.Join(tmpDir, paths.WorktreesDirName, "task-1")
-	if _, err := os.Stat(filepath.Join(worktreeDir, ".liza", "scip")); !os.IsNotExist(err) {
-		t.Fatalf(".liza/scip stat error = %v, want not exist", err)
+	if _, err := os.Stat(filepath.Join(worktreeDir, paths.ProjectDirName(), "scip")); !os.IsNotExist(err) {
+		t.Fatalf("%s/scip stat error = %v, want not exist", paths.ProjectDirName(), err)
 	}
 	if indexes := availableClaimScipIndexes(t, worktreeDir, []string{"go"}); len(indexes) != 0 {
 		t.Fatalf("AvailableIndexes() = %#v, want none", indexes)
@@ -1953,7 +1953,7 @@ func TestClaimTask_FunctionalClustersFailedBuildWarningReturned(t *testing.T) {
 func TestClaimTaskSembleIgnorePreparationWarningsAreBounded(t *testing.T) {
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
-	if err := os.WriteFile(filepath.Join(tmpDir, ".sembleignore"), []byte("operator-owned marker\n.liza/\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(tmpDir, ".sembleignore"), []byte("operator-owned marker\n"+paths.ProjectDirName()+"/\n"), 0o644); err != nil {
 		t.Fatalf("WriteFile(.sembleignore) error: %v", err)
 	}
 	testhelpers.MustGit(t, tmpDir, "add", ".sembleignore")
@@ -1990,7 +1990,7 @@ func TestClaimTaskSembleIgnorePreparationWarningsAreBounded(t *testing.T) {
 	}
 
 	worktreeDir := filepath.Join(tmpDir, paths.WorktreesDirName, "task-1")
-	if got := readPrepareSembleIgnoreFile(t, worktreeDir); got != "operator-owned marker\n.liza/\n" {
+	if got := readPrepareSembleIgnoreFile(t, worktreeDir); got != "operator-owned marker\n"+paths.ProjectDirName()+"/\n" {
 		t.Fatalf("tracked .sembleignore mutated: got %q", got)
 	}
 	assertPrepareSemblePrivateExcludeCount(t, worktreeDir, ".sembleignore", 0)
@@ -2019,7 +2019,7 @@ func TestClaimTask_ScipConcurrentClaimsUseIsolatedIndexes(t *testing.T) {
 	outputs := map[string]string{}
 	withClaimTaskScipRuntimeRunner(t, func(plan scipsearch.RuntimeCommandPlan) (string, error) {
 		if plan.Name == "scip-search" {
-			finalPath := filepath.Join(plan.Dir, ".liza", "scip", plan.Language+".scip")
+			finalPath := filepath.Join(plan.Dir, paths.ProjectDirName(), "scip", plan.Language+".scip")
 			mu.Lock()
 			outputs[finalPath] = plan.Dir
 			mu.Unlock()
@@ -2055,8 +2055,8 @@ func TestClaimTask_ScipConcurrentClaimsUseIsolatedIndexes(t *testing.T) {
 		}
 	}
 
-	task1Index := filepath.Join(tmpDir, paths.WorktreesDirName, "task-1", ".liza", "scip", "go.scip")
-	task2Index := filepath.Join(tmpDir, paths.WorktreesDirName, "task-2", ".liza", "scip", "go.scip")
+	task1Index := filepath.Join(tmpDir, paths.WorktreesDirName, "task-1", paths.ProjectDirName(), "scip", "go.scip")
+	task2Index := filepath.Join(tmpDir, paths.WorktreesDirName, "task-2", paths.ProjectDirName(), "scip", "go.scip")
 	if task1Index == task2Index {
 		t.Fatal("concurrent claims produced identical index paths")
 	}

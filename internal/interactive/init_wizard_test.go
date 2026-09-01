@@ -6,13 +6,14 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/liza-mas/liza/internal/paths"
 	"github.com/liza-mas/liza/internal/providers"
 )
 
 func TestDetectContractConflicts_PreferredGlobalPathAvailable(t *testing.T) {
 	projectRoot := t.TempDir()
 	homeDir := t.TempDir()
-	contractTarget := filepath.Join(homeDir, ".liza", "CORE.md")
+	contractTarget := filepath.Join(homeDir, paths.GlobalDirName(), "CORE.md")
 	if err := os.WriteFile(filepath.Join(projectRoot, "CLAUDE.md"), []byte("user-owned\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -28,7 +29,7 @@ func TestDetectContractConflicts_PreferredGlobalPathAvailable(t *testing.T) {
 func TestDetectContractConflicts_PreferredGlobalPathUnavailable(t *testing.T) {
 	projectRoot := t.TempDir()
 	homeDir := t.TempDir()
-	contractTarget := filepath.Join(homeDir, ".liza", "CORE.md")
+	contractTarget := filepath.Join(homeDir, paths.GlobalDirName(), "CORE.md")
 	if err := os.WriteFile(filepath.Join(projectRoot, "CLAUDE.md"), []byte("repo instructions\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -54,7 +55,7 @@ func TestDetectContractConflicts_PreferredGlobalPathUnavailable(t *testing.T) {
 func TestDetectContractConflicts_RepoOnlyProvider(t *testing.T) {
 	projectRoot := t.TempDir()
 	homeDir := t.TempDir()
-	contractTarget := filepath.Join(homeDir, ".liza", "CORE.md")
+	contractTarget := filepath.Join(homeDir, paths.GlobalDirName(), "CORE.md")
 	if err := os.WriteFile(filepath.Join(projectRoot, "AGENTS.md"), []byte("user-owned\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +71,7 @@ func TestDetectContractConflicts_RepoOnlyProvider(t *testing.T) {
 func TestDetectContractConflicts_ManagedRepoSymlink(t *testing.T) {
 	projectRoot := t.TempDir()
 	homeDir := t.TempDir()
-	contractTarget := filepath.Join(homeDir, ".liza", "CORE.md")
+	contractTarget := filepath.Join(homeDir, paths.GlobalDirName(), "CORE.md")
 	if err := os.Symlink(contractTarget, filepath.Join(projectRoot, "AGENTS.md")); err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +87,7 @@ func TestDetectContractConflicts_ManagedRepoSymlink(t *testing.T) {
 func TestDetectContractConflicts_UnresolvablePreferredGlobalPath(t *testing.T) {
 	projectRoot := t.TempDir()
 	homeDir := t.TempDir()
-	contractTarget := filepath.Join(homeDir, ".liza", "CORE.md")
+	contractTarget := filepath.Join(homeDir, paths.GlobalDirName(), "CORE.md")
 	t.Setenv("CLAUDE_CONFIG_DIR", "~/.claude")
 	if err := os.WriteFile(filepath.Join(projectRoot, "CLAUDE.md"), []byte("user-owned\n"), 0644); err != nil {
 		t.Fatal(err)
@@ -107,7 +108,7 @@ func TestDetectContractConflicts_UnresolvablePreferredGlobalPath(t *testing.T) {
 func TestDetectContractConflicts_OccupiedLocalFallbackIsUnavailable(t *testing.T) {
 	projectRoot := t.TempDir()
 	homeDir := t.TempDir()
-	contractTarget := filepath.Join(homeDir, ".liza", "CORE.md")
+	contractTarget := filepath.Join(homeDir, paths.GlobalDirName(), "CORE.md")
 	for path, content := range map[string]string{
 		filepath.Join(projectRoot, "CLAUDE.md"):        "repo instructions\n",
 		filepath.Join(projectRoot, "CLAUDE.local.md"):  "local instructions\n",
@@ -144,7 +145,7 @@ func TestDetectContractConflicts_EmptyProjectRoot(t *testing.T) {
 func TestDetectContractConflicts_GroupsProvidersSharingRepoPath(t *testing.T) {
 	projectRoot := t.TempDir()
 	homeDir := t.TempDir()
-	contractTarget := filepath.Join(homeDir, ".liza", "CORE.md")
+	contractTarget := filepath.Join(homeDir, paths.GlobalDirName(), "CORE.md")
 	if err := os.WriteFile(filepath.Join(projectRoot, "AGENTS.md"), []byte("user-owned\n"), 0644); err != nil {
 		t.Fatal(err)
 	}

@@ -5,6 +5,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/liza-mas/liza/internal/paths"
+
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/prompts"
 	"github.com/liza-mas/liza/internal/roles"
@@ -422,6 +424,6 @@ func integrationSupervisorConfig(role string) SupervisorConfig {
 		AgentID:     role + "-1",
 		ProjectRoot: "/project",
 		SpecsDir:    "/project/specs",
-		StatePath:   "/project/.liza/state.yaml",
+		StatePath:   "/project/" + paths.ProjectDirName() + "/state.yaml",
 	}
 }

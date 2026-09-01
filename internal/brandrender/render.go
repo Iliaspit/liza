@@ -414,7 +414,7 @@ func RenderPath(rel string, values brand.Values) string {
 		{"liza-logs", values.BinaryName + "-logs"},
 		{"liza-index", values.BinaryName + "-index"},
 		{"liza-session", values.BinaryName + "-session"},
-		{"liza-operator", values.NameLower + "-operator"},
+		{"liza-operator", values.BinaryName + "-operator"},
 		{".liza-hooks", values.ProjectDirName + "-hooks"},
 	}
 	for _, replacement := range replacements {

@@ -165,9 +165,9 @@ type Config struct {
 	NoFollowUp               bool                          `yaml:"no_follow_up,omitempty"`
 	PostWorktreeCmd          *string                       `yaml:"post_worktree_cmd,omitempty"`
 	CopyWorktreeEnvFiles     bool                          `yaml:"copy_worktree_env_files,omitempty"`
-	// AutoCheckpointSummary controls whether Liza auto-invokes the
+	// AutoCheckpointSummary controls whether the runtime auto-invokes the
 	// checkpoint-summary skill against a task that just reached MERGED and
-	// writes the result to .liza/checkpoint-summary.md. Default (nil) is ON.
+	// writes the result to the project runtime directory. Default (nil) is ON.
 	// Set explicitly to false to opt out.
 	AutoCheckpointSummary *bool          `yaml:"auto_checkpoint_summary,omitempty"`
 	Extra                 map[string]any `yaml:",inline"`

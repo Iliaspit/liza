@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/liza-mas/liza/internal/paths"
 )
 
 func TestActivation(t *testing.T) {
@@ -87,13 +89,13 @@ func TestCommandPlan(t *testing.T) {
 		Enabled:        true,
 		Name:           "semble",
 		ExecutablePath: "/opt/bin/semble",
-		Args:           []string{"search", "__liza_semble_prewarm__", fixtureDir, "--top-k", "1", "--content", "code"},
+		Args:           []string{"search", "__semble_prewarm__", fixtureDir, "--top-k", "1", "--content", "code"},
 		Dir:            fixtureDir,
 		Timeout:        SembleValidationTimeout,
 		Fixture: FixtureIdentity{
 			FileName:    "prewarm.py",
-			FileContent: "def liza_semble_prewarm(): pass\n",
-			Query:       "__liza_semble_prewarm__",
+			FileContent: "def semble_prewarm(): pass\n",
+			Query:       "__semble_prewarm__",
 			TopK:        1,
 			ContentMode: "code",
 		},
@@ -135,7 +137,7 @@ func TestCommandPlanMissingExecutable(t *testing.T) {
 
 func TestDefaultIgnorePatterns(t *testing.T) {
 	want := []string{
-		".liza/",
+		paths.ProjectDirName() + "/",
 		".worktrees/",
 		"stacklit.json",
 		"*.scip",
@@ -167,7 +169,7 @@ func TestDefaultIgnorePatterns(t *testing.T) {
 		t.Fatalf("DefaultIgnorePatterns() = %#v, want %#v", got, want)
 	}
 	got[0] = "mutated"
-	if again := DefaultIgnorePatterns(); again[0] != ".liza/" {
+	if again := DefaultIgnorePatterns(); again[0] != paths.ProjectDirName()+"/" {
 		t.Fatalf("DefaultIgnorePatterns() returned mutable backing slice: %#v", again)
 	}
 }
@@ -301,10 +303,10 @@ func TestValidation(t *testing.T) {
 				if err != nil {
 					t.Fatalf("read fixture: %v", err)
 				}
-				if string(content) != "def liza_semble_prewarm(): pass\n" {
+				if string(content) != "def semble_prewarm(): pass\n" {
 					t.Fatalf("fixture content = %q", content)
 				}
-				if !reflect.DeepEqual(plan.Args, []string{"search", "__liza_semble_prewarm__", fixtureDir, "--top-k", "1", "--content", "code"}) {
+				if !reflect.DeepEqual(plan.Args, []string{"search", "__semble_prewarm__", fixtureDir, "--top-k", "1", "--content", "code"}) {
 					t.Fatalf("prewarm args = %#v", plan.Args)
 				}
 				return CommandResult{ExitCode: 0, Stdout: "no hits"}, nil
@@ -332,7 +334,7 @@ func TestValidation(t *testing.T) {
 			LookPath:   fixedLookPath("/opt/bin/semble"),
 			Runner: func(plan CommandPlan) (CommandResult, error) {
 				gotEnv = plan.Env
-				if !reflect.DeepEqual(plan.Args, []string{"search", "__liza_semble_prewarm__", plan.Dir, "--top-k", "1", "--content", "code"}) {
+				if !reflect.DeepEqual(plan.Args, []string{"search", "__semble_prewarm__", plan.Dir, "--top-k", "1", "--content", "code"}) {
 					t.Fatalf("offline args = %#v", plan.Args)
 				}
 				return CommandResult{ExitCode: 0}, nil
@@ -386,7 +388,7 @@ func TestReadinessCache(t *testing.T) {
 		{name: "hf home env", opts: opts, env: map[string]string{"HF_HOME": "/tmp/hf-cache"}, calls: 4},
 		{name: "xdg cache env", opts: opts, env: map[string]string{"XDG_CACHE_HOME": "/tmp/xdg-cache"}, calls: 5},
 		{name: "timeout", opts: ValidationOptions{TargetRoot: opts.TargetRoot, LookPath: opts.LookPath, Runner: opts.Runner, Timeout: time.Second}, calls: 6},
-		{name: "fixture", opts: ValidationOptions{TargetRoot: opts.TargetRoot, LookPath: opts.LookPath, Runner: opts.Runner, Fixture: FixtureIdentity{FileName: "prewarm.py", FileContent: "def changed(): pass\n", Query: "__liza_semble_prewarm__", TopK: 1, ContentMode: "code"}}, calls: 7},
+		{name: "fixture", opts: ValidationOptions{TargetRoot: opts.TargetRoot, LookPath: opts.LookPath, Runner: opts.Runner, Fixture: FixtureIdentity{FileName: "prewarm.py", FileContent: "def changed(): pass\n", Query: "__semble_prewarm__", TopK: 1, ContentMode: "code"}}, calls: 7},
 	}
 
 	for _, tc := range cacheMissCases {

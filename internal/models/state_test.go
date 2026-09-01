@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/liza-mas/liza/internal/paths"
 	"gopkg.in/yaml.v3"
 )
 
@@ -918,7 +919,7 @@ func TestCircuitBreakerTriggerYAML(t *testing.T) {
 		Timestamp:  now,
 		Pattern:    "retry_cluster",
 		Severity:   "ARCHITECTURE_FLAW",
-		ReportFile: ".liza/circuit_breaker_report.md",
+		ReportFile: paths.ProjectDirName() + "/circuit_breaker_report.md",
 	}
 
 	yamlData, err := yaml.Marshal(&trigger)

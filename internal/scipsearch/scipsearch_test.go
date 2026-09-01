@@ -17,6 +17,7 @@ import (
 	"testing"
 
 	"github.com/liza-mas/liza/internal/brand"
+	"github.com/liza-mas/liza/internal/paths"
 	"github.com/liza-mas/liza/internal/worktreeexclude"
 )
 
@@ -92,6 +93,8 @@ func unsetEnvForTest(t *testing.T, key string) {
 }
 
 func TestRuntimeActivationContractIsDocumented(t *testing.T) {
+	const envSuffix = "ENABLE_SCIP_SEARCH"
+
 	fset := token.NewFileSet()
 	files := make([]*ast.File, 0, 2)
 	for _, path := range []string{"doc.go", "scipsearch.go"} {
@@ -107,7 +110,7 @@ func TestRuntimeActivationContractIsDocumented(t *testing.T) {
 		t.Fatalf("NewFromFiles() error = %v", err)
 	}
 	packageDoc := pkg.Doc
-	if !strings.Contains(packageDoc, "RuntimeEnabled") || !strings.Contains(packageDoc, EnvEnableScipSearch) || !strings.Contains(packageDoc, "Config.ScipSearch") {
+	if !strings.Contains(packageDoc, "RuntimeEnabled") || !strings.Contains(packageDoc, envSuffix) || !strings.Contains(packageDoc, "Config.ScipSearch") {
 		t.Fatalf("package doc = %q, want runtime activation contract for later callers", packageDoc)
 	}
 
@@ -118,7 +121,7 @@ func TestRuntimeActivationContractIsDocumented(t *testing.T) {
 			break
 		}
 	}
-	if !strings.Contains(runtimeEnabledDoc, EnvEnableScipSearch) || !strings.Contains(runtimeEnabledDoc, "configured language") {
+	if !strings.Contains(runtimeEnabledDoc, envSuffix) || !strings.Contains(runtimeEnabledDoc, "configured language") {
 		t.Fatalf("RuntimeEnabled doc = %q, want env and configured-language contract", runtimeEnabledDoc)
 	}
 }
@@ -723,7 +726,7 @@ func TestRuntimeCommandPlanningFiltersDetectedConfiguredLanguagesInDeterministic
 		t.Fatalf("plan languages = %v, want %v", got, want)
 	}
 	for _, plan := range plans {
-		wantOutput := filepath.Join(target, ".liza", "scip", plan.Language+".scip")
+		wantOutput := filepath.Join(target, paths.ProjectDirName(), "scip", plan.Language+".scip")
 		if plan.OutputPath != wantOutput {
 			t.Fatalf("%s OutputPath = %q, want %q", plan.Language, plan.OutputPath, wantOutput)
 		}
@@ -769,9 +772,9 @@ func TestRuntimeCommandPlanningBuildsExactCommandPlans(t *testing.T) {
 	}
 
 	wantArgs := [][]string{
-		{"index", "--module-root", target, "--output", filepath.Join(target, ".liza", "scip", "go.scip")},
-		{"index", "--cwd", target, "--output", filepath.Join(target, ".liza", "scip", "typescript.scip"), target},
-		{"index", "--cwd", target, "--output", filepath.Join(target, ".liza", "scip", "python.scip")},
+		{"index", "--module-root", target, "--output", filepath.Join(target, paths.ProjectDirName(), "scip", "go.scip")},
+		{"index", "--cwd", target, "--output", filepath.Join(target, paths.ProjectDirName(), "scip", "typescript.scip"), target},
+		{"index", "--cwd", target, "--output", filepath.Join(target, paths.ProjectDirName(), "scip", "python.scip")},
 	}
 	if got, want := planLanguages(plans), []string{"go", "typescript", "python"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("plan languages = %v, want %v", got, want)
@@ -847,7 +850,7 @@ func TestRuntimeCommandPlanningInfersTypeScriptCwdFromFilesParent(t *testing.T) 
 		t.Fatalf("PlanRuntimeCommands() error = %v", err)
 	}
 
-	outputPath := filepath.Join(target, ".liza", "scip", "typescript.scip")
+	outputPath := filepath.Join(target, paths.ProjectDirName(), "scip", "typescript.scip")
 	wantArgs := []string{"index", "--cwd", filepath.Join(target, "apps", "web"), "--output", outputPath, filepath.Join(target, "apps", "web")}
 	if len(plans) != 1 || !reflect.DeepEqual(realizedFirstIndexArgs(plans[0]), wantArgs) {
 		t.Fatalf("PlanRuntimeCommands() = %#v, want TypeScript args %#v", plans, wantArgs)
@@ -872,7 +875,7 @@ func TestRuntimeCommandPlanningPreservesDottedTypeScriptIncludeDirectory(t *test
 		t.Fatalf("PlanRuntimeCommands() error = %v", err)
 	}
 
-	outputPath := filepath.Join(target, ".liza", "scip", "typescript.scip")
+	outputPath := filepath.Join(target, paths.ProjectDirName(), "scip", "typescript.scip")
 	wantArgs := []string{"index", "--cwd", filepath.Join(target, "apps", "web", ".storybook"), "--output", outputPath, filepath.Join(target, "apps", "web")}
 	if len(plans) != 1 || !reflect.DeepEqual(realizedFirstIndexArgs(plans[0]), wantArgs) {
 		t.Fatalf("plans = %#v, want TypeScript args %#v", plans, wantArgs)
@@ -898,7 +901,7 @@ func TestRuntimeCommandPlanningMapsExistingTypeScriptIncludeFileToParent(t *test
 		t.Fatalf("PlanRuntimeCommands() error = %v", err)
 	}
 
-	outputPath := filepath.Join(target, ".liza", "scip", "typescript.scip")
+	outputPath := filepath.Join(target, paths.ProjectDirName(), "scip", "typescript.scip")
 	wantArgs := []string{"index", "--cwd", filepath.Join(target, "apps", "web"), "--output", outputPath, filepath.Join(target, "apps", "web")}
 	if len(plans) != 1 || !reflect.DeepEqual(realizedFirstIndexArgs(plans[0]), wantArgs) {
 		t.Fatalf("plans = %#v, want TypeScript args %#v", plans, wantArgs)
@@ -935,7 +938,7 @@ func TestRuntimeCommandPlanningPrefersOmittedReferenceJSONFileOverDirectory(t *t
 		t.Fatalf("PlanRuntimeCommands() error = %v", err)
 	}
 
-	outputPath := filepath.Join(target, ".liza", "scip", "typescript.scip")
+	outputPath := filepath.Join(target, paths.ProjectDirName(), "scip", "typescript.scip")
 	wantArgs := []string{"index", "--cwd", filepath.Join(target, "apps", "web", "src"), "--output", outputPath, filepath.Join(target, "apps", "web")}
 	if len(plans) != 1 || !reflect.DeepEqual(realizedFirstIndexArgs(plans[0]), wantArgs) {
 		t.Fatalf("plans = %#v, want TypeScript args %#v", plans, wantArgs)
@@ -966,7 +969,7 @@ func TestRuntimeCommandPlanningSkipsInvalidTypeScriptRootAndUsesNextCandidate(t 
 		t.Fatalf("PlanRuntimeCommands() error = %v", err)
 	}
 
-	outputPath := filepath.Join(target, ".liza", "scip", "typescript.scip")
+	outputPath := filepath.Join(target, paths.ProjectDirName(), "scip", "typescript.scip")
 	wantArgs := []string{"index", "--cwd", filepath.Join(target, "apps", "b", "src"), "--output", outputPath, filepath.Join(target, "apps", "b")}
 	if len(plans) != 1 || !reflect.DeepEqual(realizedFirstIndexArgs(plans[0]), wantArgs) {
 		t.Fatalf("plans = %#v, want TypeScript args %#v", plans, wantArgs)
@@ -1002,7 +1005,7 @@ func TestRuntimeCommandPlanningFallsBackWhenTypeScriptConfigCannotInferTargetLoc
 		t.Fatalf("PlanRuntimeCommands() error = %v", err)
 	}
 
-	outputPath := filepath.Join(target, ".liza", "scip", "typescript.scip")
+	outputPath := filepath.Join(target, paths.ProjectDirName(), "scip", "typescript.scip")
 	wantArgs := []string{"index", "--cwd", target, "--output", outputPath, target}
 	if len(plans) != 1 || !reflect.DeepEqual(realizedFirstIndexArgs(plans[0]), wantArgs) {
 		t.Fatalf("PlanRuntimeCommands() = %#v, want fallback args %#v", plans, wantArgs)
@@ -1029,7 +1032,7 @@ func TestRuntimeCommandPlanningInfersPythonCwdAndTargetOnlyForSrcLayout(t *testi
 		t.Fatalf("PlanRuntimeCommands() error = %v", err)
 	}
 
-	outputPath := filepath.Join(target, ".liza", "scip", "python.scip")
+	outputPath := filepath.Join(target, paths.ProjectDirName(), "scip", "python.scip")
 	wantArgs := []string{"index", "--cwd", filepath.Join(target, "apps", "api"), "--output", outputPath, "--target-only=src"}
 	if len(plans) != 1 || !reflect.DeepEqual(realizedFirstIndexArgs(plans[0]), wantArgs) {
 		t.Fatalf("PlanRuntimeCommands() = %#v, want Python args %#v", plans, wantArgs)
@@ -1052,7 +1055,7 @@ func TestRuntimeCommandPlanningPythonFlatProjectOmitsTargetOnly(t *testing.T) {
 		t.Fatalf("PlanRuntimeCommands() error = %v", err)
 	}
 
-	outputPath := filepath.Join(target, ".liza", "scip", "python.scip")
+	outputPath := filepath.Join(target, paths.ProjectDirName(), "scip", "python.scip")
 	wantArgs := []string{"index", "--cwd", target, "--output", outputPath}
 	if len(plans) != 1 || !reflect.DeepEqual(realizedFirstIndexArgs(plans[0]), wantArgs) {
 		t.Fatalf("plans = %#v, want Python args %#v", plans, wantArgs)
@@ -1083,7 +1086,7 @@ func TestRuntimeCommandPlanningPythonNestedProjectWinsWhenRootIsUmbrella(t *test
 		t.Fatalf("PlanRuntimeCommands() error = %v", err)
 	}
 
-	outputPath := filepath.Join(target, ".liza", "scip", "python.scip")
+	outputPath := filepath.Join(target, paths.ProjectDirName(), "scip", "python.scip")
 	wantArgs := []string{"index", "--cwd", filepath.Join(target, "apps", "api"), "--output", outputPath, "--target-only=src"}
 	if len(plans) != 1 || !reflect.DeepEqual(realizedFirstIndexArgs(plans[0]), wantArgs) {
 		t.Fatalf("plans = %#v, want Python args %#v", plans, wantArgs)
@@ -1112,7 +1115,7 @@ func TestRuntimeCommandPlanningPythonSiblingProjectsAggregateAllCandidates(t *te
 		t.Fatalf("PlanRuntimeCommands() error = %v", err)
 	}
 
-	outputPath := filepath.Join(target, ".liza", "scip", "python.scip")
+	outputPath := filepath.Join(target, paths.ProjectDirName(), "scip", "python.scip")
 	wantArgs := []string{"index", "--cwd", filepath.Join(target, "apps", "api"), "--output", outputPath, "--target-only=src"}
 	if len(plans) != 1 || !reflect.DeepEqual(realizedFirstIndexArgs(plans[0]), wantArgs) {
 		t.Fatalf("plans = %#v, want first deterministic Python project args %#v", plans, wantArgs)
@@ -1200,7 +1203,7 @@ func TestRuntimeCommandPlanningPythonRootRetainedWhenItHasEligibleFilesOutsideNe
 		t.Fatalf("PlanRuntimeCommands() error = %v", err)
 	}
 
-	outputPath := filepath.Join(target, ".liza", "scip", "python.scip")
+	outputPath := filepath.Join(target, paths.ProjectDirName(), "scip", "python.scip")
 	wantArgs := []string{"index", "--cwd", target, "--output", outputPath}
 	if len(plans) != 1 || !reflect.DeepEqual(realizedFirstIndexArgs(plans[0]), wantArgs) {
 		t.Fatalf("plans = %#v, want Python args %#v", plans, wantArgs)
@@ -1227,7 +1230,7 @@ func TestRuntimeCommandPlanningPythonMixedSrcAndPackageLayoutOmitsTargetOnly(t *
 		t.Fatalf("PlanRuntimeCommands() error = %v", err)
 	}
 
-	outputPath := filepath.Join(target, ".liza", "scip", "python.scip")
+	outputPath := filepath.Join(target, paths.ProjectDirName(), "scip", "python.scip")
 	wantArgs := []string{"index", "--cwd", target, "--output", outputPath}
 	if len(plans) != 1 || !reflect.DeepEqual(realizedFirstIndexArgs(plans[0]), wantArgs) {
 		t.Fatalf("plans = %#v, want Python args %#v", plans, wantArgs)
@@ -1268,7 +1271,7 @@ func TestRuntimeCommandPlanningPythonNoMarkerFallsBackToTargetRootForTrackedPyth
 		t.Fatalf("PlanRuntimeCommands() error = %v", err)
 	}
 
-	outputPath := filepath.Join(target, ".liza", "scip", "python.scip")
+	outputPath := filepath.Join(target, paths.ProjectDirName(), "scip", "python.scip")
 	wantArgs := []string{"index", "--cwd", target, "--output", outputPath}
 	if len(plans) != 1 || !reflect.DeepEqual(realizedFirstIndexArgs(plans[0]), wantArgs) {
 		t.Fatalf("PlanRuntimeCommands() = %#v, want fallback args %#v", plans, wantArgs)
@@ -1298,8 +1301,8 @@ func TestRuntimeRefreshCreatesParentAndRunsExactCommandPlans(t *testing.T) {
 		t.Fatalf("RefreshIndexes() error = %v", err)
 	}
 
-	goPath := filepath.Join(target, ".liza", "scip", "go.scip")
-	tsPath := filepath.Join(target, ".liza", "scip", "typescript.scip")
+	goPath := filepath.Join(target, paths.ProjectDirName(), "scip", "go.scip")
+	tsPath := filepath.Join(target, paths.ProjectDirName(), "scip", "typescript.scip")
 	if got, want := len(calls), 4; got != want {
 		t.Fatalf("runner calls = %#v, want %d calls", calls, want)
 	}
@@ -1328,8 +1331,8 @@ func TestRuntimeRefreshCreatesParentAndRunsExactCommandPlans(t *testing.T) {
 	if len(result.Failures) != 0 {
 		t.Fatalf("failures = %#v, want none", result.Failures)
 	}
-	if _, err := os.Stat(filepath.Join(target, ".liza", "scip")); err != nil {
-		t.Fatalf("Stat(.liza/scip) error = %v", err)
+	if _, err := os.Stat(filepath.Join(target, paths.ProjectDirName(), "scip")); err != nil {
+		t.Fatalf("Stat(%s/scip) error = %v", paths.ProjectDirName(), err)
 	}
 }
 
@@ -1337,7 +1340,7 @@ func TestRuntimeRefreshReportsBoundedFailureWithoutSuppressingSuccesses(t *testi
 	t.Setenv(EnvEnableScipSearch, "true")
 	target := t.TempDir()
 	longOutput := strings.Repeat("x", maxFailureDiagnosticBytes+100)
-	staleGoPath := filepath.Join(target, ".liza", "scip", "go.scip")
+	staleGoPath := filepath.Join(target, paths.ProjectDirName(), "scip", "go.scip")
 	if err := os.MkdirAll(filepath.Dir(staleGoPath), 0o755); err != nil {
 		t.Fatalf("MkdirAll() error = %v", err)
 	}
@@ -1368,7 +1371,7 @@ func TestRuntimeRefreshReportsBoundedFailureWithoutSuppressingSuccesses(t *testi
 		t.Fatalf("RefreshIndexes() error = %v", err)
 	}
 
-	tsPath := filepath.Join(target, ".liza", "scip", "typescript.scip")
+	tsPath := filepath.Join(target, paths.ProjectDirName(), "scip", "typescript.scip")
 	if !reflect.DeepEqual(result.Successes, []IndexRef{{Language: "typescript", Path: tsPath}}) {
 		t.Fatalf("successes = %#v, want only typescript", result.Successes)
 	}
@@ -1407,7 +1410,7 @@ func TestRuntimeRefreshReportsBoundedFailureWithoutSuppressingSuccesses(t *testi
 func TestRuntimeAvailableIndexesReturnsOnlyExistingAbsolutePaths(t *testing.T) {
 	t.Setenv(EnvEnableScipSearch, "true")
 	target := t.TempDir()
-	goPath := filepath.Join(target, ".liza", "scip", "go.scip")
+	goPath := filepath.Join(target, paths.ProjectDirName(), "scip", "go.scip")
 	if err := os.MkdirAll(filepath.Dir(goPath), 0o755); err != nil {
 		t.Fatalf("MkdirAll() error = %v", err)
 	}
@@ -1466,7 +1469,7 @@ func TestRefreshTaskWorktreeScipUsesSharedExclude(t *testing.T) {
 		t.Fatalf("RefreshIndexes() error = %v", err)
 	}
 
-	wantPath := filepath.Join(worktree, ".liza", "scip", "go.scip")
+	wantPath := filepath.Join(worktree, paths.ProjectDirName(), "scip", "go.scip")
 	if !reflect.DeepEqual(result.Successes, []IndexRef{{Language: "go", Path: wantPath}}) {
 		t.Fatalf("successes = %#v, want go index at %q", result.Successes, wantPath)
 	}
@@ -1499,8 +1502,8 @@ func TestRefreshTaskWorktreeScipHidesGeneratedIndexes(t *testing.T) {
 		TargetKind:          TargetKindTaskWorktree,
 		ConfiguredLanguages: []string{"go"},
 		Runner: func(plan RuntimeCommandPlan) (string, error) {
-			if plan.Name == "scip-search" && !strings.HasPrefix(plan.OutputPath, filepath.Join(worktree, ".liza", "scip")+string(os.PathSeparator)) {
-				return "", fmt.Errorf("output path %q is not prompt-local under task .liza/scip", plan.OutputPath)
+			if plan.Name == "scip-search" && !strings.HasPrefix(plan.OutputPath, filepath.Join(worktree, paths.ProjectDirName(), "scip")+string(os.PathSeparator)) {
+				return "", fmt.Errorf("output path %q is not prompt-local under task %s/scip", plan.OutputPath, paths.ProjectDirName())
 			}
 			if err := os.WriteFile(plan.OutputPath, []byte("go"), 0o644); err != nil {
 				return "", err
@@ -1512,7 +1515,7 @@ func TestRefreshTaskWorktreeScipHidesGeneratedIndexes(t *testing.T) {
 		t.Fatalf("RefreshIndexes() error = %v", err)
 	}
 
-	wantPath := filepath.Join(worktree, ".liza", "scip", "go.scip")
+	wantPath := filepath.Join(worktree, paths.ProjectDirName(), "scip", "go.scip")
 	if !reflect.DeepEqual(result.Successes, []IndexRef{{Language: "go", Path: wantPath}}) {
 		t.Fatalf("successes = %#v, want go index at %q", result.Successes, wantPath)
 	}
@@ -1629,7 +1632,7 @@ func TestRefreshTaskWorktreeScipConcurrentExcludeSetup(t *testing.T) {
 					if !filepath.IsAbs(plan.OutputPath) {
 						return "", errors.New("output path is not absolute")
 					}
-					if plan.Name == "scip-search" && !strings.HasPrefix(plan.OutputPath, filepath.Join(worktree, ".liza", "scip")+string(os.PathSeparator)) {
+					if plan.Name == "scip-search" && !strings.HasPrefix(plan.OutputPath, filepath.Join(worktree, paths.ProjectDirName(), "scip")+string(os.PathSeparator)) {
 						return "", errors.New("output path is outside task worktree scip directory")
 					}
 					if err := ignoreEntryError(privateExcludes[name]); err != nil {
@@ -1670,7 +1673,7 @@ func TestRefreshTaskWorktreeScipConcurrentExcludeSetup(t *testing.T) {
 		t.Fatalf("private excludes share path %q", privateExcludes["task-one"])
 	}
 	for name, worktree := range repo.worktrees {
-		wantPath := filepath.Join(worktree, ".liza", "scip", "go.scip")
+		wantPath := filepath.Join(worktree, paths.ProjectDirName(), "scip", "go.scip")
 		if !reflect.DeepEqual(results[name].Successes, []IndexRef{{Language: "go", Path: wantPath}}) {
 			t.Fatalf("%s successes = %#v, want %q", name, results[name].Successes, wantPath)
 		}
@@ -1917,8 +1920,8 @@ func ignoreEntryError(excludePath string) error {
 	if err != nil {
 		return fmt.Errorf("read %s: %w", excludePath, err)
 	}
-	if count := strings.Count(string(content), ".liza/scip/"); count != 1 {
-		return fmt.Errorf("%s contains .liza/scip/ %d times, want exactly once; content: %q", excludePath, count, content)
+	if count := strings.Count(string(content), paths.ProjectDirName()+"/scip/"); count != 1 {
+		return fmt.Errorf("%s contains %s/scip/ %d times, want exactly once; content: %q", excludePath, paths.ProjectDirName(), count, content)
 	}
 	return nil
 }

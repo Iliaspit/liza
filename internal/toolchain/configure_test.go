@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/liza-mas/liza/internal/brand"
 )
 
 func TestConfigureWritesProfileAndEnv(t *testing.T) {
@@ -48,10 +50,10 @@ func TestConfigureWritesProfileAndEnv(t *testing.T) {
 	if !strings.Contains(env, `export PATH='`+installDir+`':"$PATH"`) {
 		t.Fatalf("env missing install dir PATH:\n%s", env)
 	}
-	if !strings.Contains(env, `export LIZA_ENABLE_STACKLIT='1'`) {
+	if !strings.Contains(env, "export "+brand.EnvName("ENABLE_STACKLIT")+"='1'") {
 		t.Fatalf("env missing stacklit activation:\n%s", env)
 	}
-	if !strings.Contains(env, `export LIZA_ENABLE_BASH_POLICY='1'`) {
+	if !strings.Contains(env, "export "+brand.EnvName("ENABLE_BASH_POLICY")+"='1'") {
 		t.Fatalf("balanced env missing bash-policy activation:\n%s", env)
 	}
 	if strings.Contains(env, "\nexport HF_HUB_OFFLINE=\"1\"") {
@@ -59,11 +61,11 @@ func TestConfigureWritesProfileAndEnv(t *testing.T) {
 	}
 	for _, want := range []string{
 		`case "$-" in`,
-		`command -v liza >/dev/null 2>&1`,
+		"command -v " + brand.BinaryName + " >/dev/null 2>&1",
 		`${BASH_VERSION:-}`,
-		`eval "$(liza completion bash 2>/dev/null)"`,
+		"eval \"$(" + brand.BinaryName + " completion bash 2>/dev/null)\"",
 		`${ZSH_VERSION:-}`,
-		`eval "$(liza completion zsh 2>/dev/null)"`,
+		"eval \"$(" + brand.BinaryName + " completion zsh 2>/dev/null)\"",
 	} {
 		if !strings.Contains(env, want) {
 			t.Fatalf("env missing completion activation %q:\n%s", want, env)
@@ -86,10 +88,10 @@ func TestConfigureFullProfileEnablesBashPolicy(t *testing.T) {
 		t.Fatalf("read env: %v", err)
 	}
 	env := string(envData)
-	if !strings.Contains(env, `export LIZA_ENABLE_BASH_POLICY='1'`) {
+	if !strings.Contains(env, "export "+brand.EnvName("ENABLE_BASH_POLICY")+"='1'") {
 		t.Fatalf("full env missing bash-policy activation:\n%s", env)
 	}
-	if !strings.Contains(env, `export LIZA_ENABLE_FUNCTIONAL_CLUSTERS='1'`) {
+	if !strings.Contains(env, "export "+brand.EnvName("ENABLE_FUNCTIONAL_CLUSTERS")+"='1'") {
 		t.Fatalf("full env missing functional-clusters activation:\n%s", env)
 	}
 	if !contains(got.SelectedTools, "bash-policy") {
@@ -163,7 +165,7 @@ func TestConfigureShellProfileIsIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read profile: %v", err)
 	}
-	if count := strings.Count(string(content), "# Liza toolchain"); count != 1 {
+	if count := strings.Count(string(content), "# "+brand.NameTitle+" toolchain"); count != 1 {
 		t.Fatalf("shell profile contains %d Liza toolchain blocks, want 1:\n%s", count, content)
 	}
 }

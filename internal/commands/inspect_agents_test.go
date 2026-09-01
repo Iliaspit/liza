@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/liza-mas/liza/internal/brand"
+
 	"github.com/liza-mas/liza/internal/errors"
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/ops"
@@ -383,7 +385,7 @@ func TestInspectAgents_Zombies(t *testing.T) {
 			CLI:     "codex",
 			GoalID:  "goal-1",
 			CWD:     "/tmp/project",
-			Cmdline: []string{"liza", "agent", "coder", "--cli", "codex", "--goal-id", "goal-1"},
+			Cmdline: []string{brand.BinaryName, "agent", "coder", "--cli", "codex", "--goal-id", "goal-1"},
 			Reason:  "not_registered_in_state",
 		}}}, nil
 	}
@@ -400,7 +402,7 @@ func TestInspectAgents_Zombies(t *testing.T) {
 		t.Fatalf("inspectAgents() error = %v", err)
 	}
 	output := result.(string)
-	for _, want := range []string{"222", "coder", "codex", "not_registered_in_state", "liza agent coder"} {
+	for _, want := range []string{"222", "coder", "codex", "not_registered_in_state", brand.BinaryName + " agent coder"} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("zombie output missing %q:\n%s", want, output)
 		}

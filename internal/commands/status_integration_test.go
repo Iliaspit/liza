@@ -20,10 +20,10 @@ func TestStatusCommand_Integration(t *testing.T) {
 	}
 	defer os.RemoveAll(tmpDir)
 
-	// Create .liza directory
+	// Create the project runtime directory.
 	lizaDir := paths.New(tmpDir).LizaDir()
 	if err := os.MkdirAll(lizaDir, 0755); err != nil {
-		t.Fatalf("failed to create .liza dir: %v", err)
+		t.Fatalf("failed to create project runtime directory: %v", err)
 	}
 
 	// Create a test state

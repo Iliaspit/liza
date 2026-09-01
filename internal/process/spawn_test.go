@@ -12,6 +12,7 @@ import (
 	"github.com/liza-mas/liza/internal/agent"
 	"github.com/liza-mas/liza/internal/brand"
 	"github.com/liza-mas/liza/internal/models"
+	"github.com/liza-mas/liza/internal/paths"
 	"github.com/liza-mas/liza/internal/testhelpers"
 )
 
@@ -281,7 +282,7 @@ func splitSupervisorLogArgs(t *testing.T, args []string) ([]string, map[string]s
 
 func assertSupervisorLogPaths(t *testing.T, projectRoot, role string, logPaths map[string]string) {
 	t.Helper()
-	outputsDir := filepath.Join(projectRoot, ".liza", "agent-outputs")
+	outputsDir := filepath.Join(projectRoot, paths.ProjectDirName(), "agent-outputs")
 	for flag, suffix := range map[string]string{
 		agent.SupervisorStdoutLogFlag: ".stdout.log",
 		agent.SupervisorStderrLogFlag: ".stderr.log",
@@ -300,7 +301,7 @@ func assertSupervisorLogPaths(t *testing.T, projectRoot, role string, logPaths m
 
 func TestSpawnAgent_QuotaSignalBlocksSpawnAndAlerts(t *testing.T) {
 	projectRoot := t.TempDir()
-	lizaDir := filepath.Join(projectRoot, ".liza")
+	lizaDir := filepath.Join(projectRoot, paths.ProjectDirName())
 	if err := os.MkdirAll(lizaDir, 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -338,7 +339,7 @@ func TestSpawnAgent_QuotaSignalBlocksSpawnAndAlerts(t *testing.T) {
 
 func TestSpawnAgent_ProviderUnavailableSignalBlocksSpawnAndAlerts(t *testing.T) {
 	projectRoot := t.TempDir()
-	lizaDir := filepath.Join(projectRoot, ".liza")
+	lizaDir := filepath.Join(projectRoot, paths.ProjectDirName())
 	if err := os.MkdirAll(lizaDir, 0755); err != nil {
 		t.Fatal(err)
 	}

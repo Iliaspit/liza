@@ -1,9 +1,18 @@
 package brand
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 )
+
+func TestValuesFromEnvUsesRuntimeDefaults(t *testing.T) {
+	got := ValuesFromEnv(func(string) string { return "" })
+	want := RuntimeValues()
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("ValuesFromEnv(empty) = %+v, want runtime defaults %+v", got, want)
+	}
+}
 
 func TestValuesFromEnvDerivedDefaults(t *testing.T) {
 	values := ValuesFromEnv(func(key string) string {
@@ -40,6 +49,13 @@ func TestValuesFromEnvDerivedDefaults(t *testing.T) {
 
 func TestRuntimeValuesUseCanonicalMistralPromptID(t *testing.T) {
 	values := RuntimeValues()
+	if values.MistralPromptID != CanonicalMistralPromptID {
+		t.Fatalf("MistralPromptID = %q, want canonical %q", values.MistralPromptID, CanonicalMistralPromptID)
+	}
+}
+
+func TestNormalizeUsesCanonicalMistralPromptID(t *testing.T) {
+	values := Normalize(Values{NameLower: "acme-agent"})
 	if values.MistralPromptID != CanonicalMistralPromptID {
 		t.Fatalf("MistralPromptID = %q, want canonical %q", values.MistralPromptID, CanonicalMistralPromptID)
 	}

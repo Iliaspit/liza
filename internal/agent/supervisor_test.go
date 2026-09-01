@@ -13,10 +13,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/liza-mas/liza/internal/brand"
 	"github.com/liza-mas/liza/internal/db"
 	lizagit "github.com/liza-mas/liza/internal/git"
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/ops"
+	"github.com/liza-mas/liza/internal/paths"
 	"github.com/liza-mas/liza/internal/pipeline"
 	"github.com/liza-mas/liza/internal/precommit"
 	"github.com/liza-mas/liza/internal/testhelpers"
@@ -221,7 +223,7 @@ func TestRunSupervisorPassesResolverDerivedRoleTypeToPauseWait(t *testing.T) {
 	statePath, _ := testhelpers.SetupLizaDir(t, tmpDir)
 	testhelpers.SetupPipelineConfig(t, tmpDir)
 
-	pipelinePath := filepath.Join(tmpDir, ".liza", "pipeline.yaml")
+	pipelinePath := filepath.Join(tmpDir, paths.ProjectDirName(), "pipeline.yaml")
 	content, err := os.ReadFile(pipelinePath)
 	if err != nil {
 		t.Fatalf("read pipeline config: %v", err)
@@ -481,7 +483,7 @@ func TestDefaultCLIExecutorStreamsMaskedOutputFiles(t *testing.T) {
 	}
 
 	projectRoot := t.TempDir()
-	outputsDir := filepath.Join(projectRoot, ".liza", "agent-outputs")
+	outputsDir := filepath.Join(projectRoot, paths.ProjectDirName(), "agent-outputs")
 	binDir := t.TempDir()
 	fakeClaude := filepath.Join(binDir, "claude")
 	script := `#!/bin/sh
@@ -556,7 +558,7 @@ func TestCLIAgentEmitsObservabilityEvents(t *testing.T) {
 	}
 
 	projectRoot := t.TempDir()
-	outputsDir := filepath.Join(projectRoot, ".liza", "agent-outputs")
+	outputsDir := filepath.Join(projectRoot, paths.ProjectDirName(), "agent-outputs")
 	binDir := t.TempDir()
 	fakeClaude := filepath.Join(binDir, "claude")
 	script := `#!/bin/sh
@@ -679,7 +681,7 @@ func TestCLIAgentRunsOpenCodePromptAsArgument(t *testing.T) {
 	}
 
 	projectRoot := t.TempDir()
-	outputsDir := filepath.Join(projectRoot, ".liza", "agent-outputs")
+	outputsDir := filepath.Join(projectRoot, paths.ProjectDirName(), "agent-outputs")
 	binDir := t.TempDir()
 	fakeOpenCode := filepath.Join(binDir, "opencode")
 	script := `#!/bin/sh
@@ -736,7 +738,7 @@ func TestDefaultCLIExecutorDisallowsClaudeSubagentToolsWhenEnvEnabled(t *testing
 	}
 
 	projectRoot := t.TempDir()
-	outputsDir := filepath.Join(projectRoot, ".liza", "agent-outputs")
+	outputsDir := filepath.Join(projectRoot, paths.ProjectDirName(), "agent-outputs")
 	binDir := t.TempDir()
 	fakeClaude := filepath.Join(binDir, "claude")
 	script := `#!/bin/sh
@@ -749,7 +751,7 @@ done
 	}
 
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
-	t.Setenv("LIZA_DISABLE_CLAUDE_SUBAGENTS", "1")
+	t.Setenv(brand.EnvName("DISABLE_CLAUDE_SUBAGENTS"), "1")
 
 	executor := NewCLIAgent(outputsDir)
 	result, err := executor.Run(context.Background(), LLMAgentRunRequest{BackendName: "claude", AgentID: "coder-1", Prompt: "prompt body", ProjectRoot: projectRoot, LaunchGate: immediateLaunchGate})
@@ -773,7 +775,7 @@ func TestDefaultCLIExecutorExportsResolvedAgentIDLast(t *testing.T) {
 	}
 
 	projectRoot := t.TempDir()
-	outputsDir := filepath.Join(projectRoot, ".liza", "agent-outputs")
+	outputsDir := filepath.Join(projectRoot, paths.ProjectDirName(), "agent-outputs")
 	binDir := t.TempDir()
 	fakeClaude := filepath.Join(binDir, "claude")
 	script := `#!/bin/sh
@@ -936,7 +938,7 @@ func TestSupervisor_Exit0ProviderAuditDegradedContinuesPostExecution(t *testing.
 		Role:             "coder",
 		ProjectRoot:      projectRoot,
 		StatePath:        statePath,
-		LogPath:          filepath.Join(projectRoot, ".liza", "log.yaml"),
+		LogPath:          filepath.Join(projectRoot, paths.ProjectDirName(), "log.yaml"),
 		SpecsDir:         filepath.Join(projectRoot, "specs"),
 		CLIName:          "codex",
 		LLMAgent:         mock,
@@ -968,7 +970,7 @@ func TestSupervisor_Exit0ProviderAuditDegradedContinuesPostExecution(t *testing.
 		t.Fatalf("anomaly.Type = %q, want %q", updated.Anomalies[0].Type, ProviderAuditDegradedAnomalyType)
 	}
 
-	alerts, err := os.ReadFile(filepath.Join(projectRoot, ".liza", "alerts.log"))
+	alerts, err := os.ReadFile(filepath.Join(projectRoot, paths.ProjectDirName(), "alerts.log"))
 	if err != nil {
 		t.Fatalf("read alerts.log: %v", err)
 	}
@@ -1012,7 +1014,7 @@ func TestRunSupervisor_HeartbeatMissingAgentStopsSupervisor(t *testing.T) {
 		Role:             "coder",
 		ProjectRoot:      projectRoot,
 		StatePath:        statePath,
-		LogPath:          filepath.Join(projectRoot, ".liza", "log.yaml"),
+		LogPath:          filepath.Join(projectRoot, paths.ProjectDirName(), "log.yaml"),
 		SpecsDir:         filepath.Join(projectRoot, "specs"),
 		CLIName:          "codex",
 		LLMAgent:         mock,
@@ -1273,8 +1275,8 @@ func TestDetectObservedRuntimeFailure_LizaJSONEnvelopeWithoutCommandContext(t *t
 	if failure == nil {
 		t.Fatal("detectObservedRuntimeFailure() = nil, want failure")
 	}
-	if failure.Command != unknownLizaJSONCommand {
-		t.Fatalf("Command = %q, want %s", failure.Command, unknownLizaJSONCommand)
+	if failure.Command != unknownJSONCommand {
+		t.Fatalf("Command = %q, want %s", failure.Command, unknownJSONCommand)
 	}
 	if failure.Code != "internal" {
 		t.Fatalf("Code = %q, want internal", failure.Code)
@@ -1333,7 +1335,7 @@ func TestDetectObservedRuntimeFailure_RetargetDependency(t *testing.T) {
 		{
 			name:        "no command context",
 			output:      errorEnvelope,
-			wantCommand: unknownLizaJSONCommand,
+			wantCommand: unknownJSONCommand,
 		},
 	}
 
@@ -1482,7 +1484,7 @@ func TestRunSupervisor_CodexCommandRuntimeFailureBlocksWithoutGenericSpin(t *tes
 		Role:             models.RoleCoder,
 		ProjectRoot:      projectRoot,
 		StatePath:        statePath,
-		LogPath:          filepath.Join(projectRoot, ".liza", "log.yaml"),
+		LogPath:          filepath.Join(projectRoot, paths.ProjectDirName(), "log.yaml"),
 		SpecsDir:         filepath.Join(projectRoot, "specs"),
 		CLIName:          "codex",
 		Executor:         mock,
@@ -1553,7 +1555,7 @@ func TestRunSupervisor_OpenCodeNoProgressBlocksBeforeSecondExecution(t *testing.
 		Role:             models.RoleCoder,
 		ProjectRoot:      projectRoot,
 		StatePath:        statePath,
-		LogPath:          filepath.Join(projectRoot, ".liza", "log.yaml"),
+		LogPath:          filepath.Join(projectRoot, paths.ProjectDirName(), "log.yaml"),
 		SpecsDir:         filepath.Join(projectRoot, "specs"),
 		CLIName:          "opencode",
 		Executor:         mock,
@@ -1615,7 +1617,7 @@ func TestRunSupervisor_NonzeroAgentErrorBlocksBeforeAutoRepairCanRespawn(t *test
 		Role:             models.RoleCoder,
 		ProjectRoot:      projectRoot,
 		StatePath:        statePath,
-		LogPath:          filepath.Join(projectRoot, ".liza", "log.yaml"),
+		LogPath:          filepath.Join(projectRoot, paths.ProjectDirName(), "log.yaml"),
 		SpecsDir:         filepath.Join(projectRoot, "specs"),
 		CLIName:          "codex-acp",
 		LLMAgent:         mock,
@@ -2074,12 +2076,25 @@ func TestBuildClaudeArgsAllowsTaskByDefault(t *testing.T) {
 
 func TestEnvValueUsesLastEnvValue(t *testing.T) {
 	got := envValue([]string{
-		"LIZA_DISABLE_CLAUDE_SUBAGENTS=0",
-		"LIZA_DISABLE_CLAUDE_SUBAGENTS=1",
-	}, "LIZA_DISABLE_CLAUDE_SUBAGENTS")
+		"KEY=0",
+		"KEY=1",
+	}, "KEY")
 
 	if got != "1" {
 		t.Fatalf("envValue() = %q, want later env value", got)
+	}
+}
+
+func TestBrandedEnvListGateValueEmptyBrandedSuppressesLegacy(t *testing.T) {
+	withAgentBrandValues(t, func() { brand.EnvPrefix = "ACME_AGENT" })
+
+	got := brandedEnvListGateValue([]string{
+		brand.LegacyEnvName("DISABLE_CLAUDE_SUBAGENTS") + "=1",
+		brand.EnvName("DISABLE_CLAUDE_SUBAGENTS") + "=",
+	}, "DISABLE_CLAUDE_SUBAGENTS")
+
+	if got != "" {
+		t.Fatalf("brandedEnvListGateValue() = %q, want empty branded value to suppress legacy alias", got)
 	}
 }
 
@@ -2119,7 +2134,7 @@ func TestResolveCodexLaunchConfig(t *testing.T) {
 		got := resolveCodexLaunchConfig(models.Config{
 			CodexPackageVersion: "0.125.0",
 		}, []string{
-			envLizaCodexVersion + "=0.132.0",
+			brand.EnvName("CODEX_VERSION") + "=0.132.0",
 		})
 
 		if got.PackageVersion != "0.125.0" {
@@ -2129,11 +2144,34 @@ func TestResolveCodexLaunchConfig(t *testing.T) {
 
 	t.Run("environment supplies process-local fallback", func(t *testing.T) {
 		got := resolveCodexLaunchConfig(models.Config{}, []string{
-			envLizaCodexVersion + "=0.125.0",
+			brand.EnvName("CODEX_VERSION") + "=0.125.0",
 		})
 
 		if got.PackageVersion != "0.125.0" {
 			t.Fatalf("PackageVersion = %q, want env value", got.PackageVersion)
+		}
+	})
+
+	t.Run("branded environment wins over legacy alias", func(t *testing.T) {
+		withAgentBrandValues(t, func() { brand.EnvPrefix = "ACME_AGENT" })
+		got := resolveCodexLaunchConfig(models.Config{}, []string{
+			brand.LegacyEnvName("CODEX_VERSION") + "=0.124.0",
+			brand.EnvName("CODEX_VERSION") + "=0.125.0",
+		})
+
+		if got.PackageVersion != "0.125.0" {
+			t.Fatalf("PackageVersion = %q, want branded env value", got.PackageVersion)
+		}
+	})
+
+	t.Run("legacy environment remains a fallback", func(t *testing.T) {
+		withAgentBrandValues(t, func() { brand.EnvPrefix = "ACME_AGENT" })
+		got := resolveCodexLaunchConfig(models.Config{}, []string{
+			brand.LegacyEnvName("CODEX_VERSION") + "=0.125.0",
+		})
+
+		if got.PackageVersion != "0.125.0" {
+			t.Fatalf("PackageVersion = %q, want legacy env fallback", got.PackageVersion)
 		}
 	})
 }

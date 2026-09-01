@@ -449,7 +449,7 @@ func handleApprovedMergesWithOptionalAuthority(projectRoot, agentID string, auth
 			logger.Info("Successfully merged task", "task_id", task.ID)
 
 			// Auto-emit checkpoint-summary so humans get a fresh report under
-			// .liza/ without manually invoking the skill.
+			// the project runtime directory without manually invoking the skill.
 			// Best-effort: failures are logged inside the helper and do not
 			// fail or roll back the completed merge. Re-read state here so
 			// the config flag reflects the post-merge view, not a stale

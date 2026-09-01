@@ -55,17 +55,17 @@ func TestInstallLifecycleHooksDefaultHooks(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s is not a dispatcher symlink: %v", hookPath, err)
 		}
-		if target != defaultHookDispatcherName {
-			t.Fatalf("%s symlink target = %q, want %q", hookPath, target, defaultHookDispatcherName)
+		if target != hookDispatcherName() {
+			t.Fatalf("%s symlink target = %q, want %q", hookPath, target, hookDispatcherName())
 		}
 		content := readFile(t, hookPath)
 		if !strings.Contains(content, ManagedHookMarker) {
 			t.Fatalf("%s missing managed marker in:\n%s", hook, content)
 		}
-		if !strings.Contains(content, "liza-index.sh") {
+		if !strings.Contains(content, brand.BinaryName+"-index.sh") {
 			t.Fatalf("%s does not invoke liza-index.sh in:\n%s", hook, content)
 		}
-		if strings.Contains(content, "liza-index.sh ai") {
+		if strings.Contains(content, brand.BinaryName+"-index.sh ai") {
 			t.Fatalf("%s lifecycle wrapper must not request AI summary in:\n%s", hook, content)
 		}
 	}
@@ -132,8 +132,8 @@ func TestInstallLifecycleHooksIsIdempotentForManagedHooks(t *testing.T) {
 	assertHookActions(t, second, HookActionVerified)
 	for _, hook := range DefaultLifecycleHooks() {
 		hookPath := filepath.Join(first.HooksDir, hook)
-		if got, err := os.Readlink(hookPath); err != nil || got != defaultHookDispatcherName {
-			t.Fatalf("%s symlink = %q, err=%v; want %q", hook, got, err, defaultHookDispatcherName)
+		if got, err := os.Readlink(hookPath); err != nil || got != hookDispatcherName() {
+			t.Fatalf("%s symlink = %q, err=%v; want %q", hook, got, err, hookDispatcherName())
 		}
 	}
 }
@@ -142,7 +142,7 @@ func TestInstallLifecycleHooksRefreshesStaleManagedHook(t *testing.T) {
 	repo := initGitRepo(t)
 	hooksDir := filepath.Join(repo, ".git", "hooks")
 	hookPath := filepath.Join(hooksDir, "post-merge")
-	staleContent := ManagedHookMarker + "\n# stale wrapper from an older Liza release\n"
+	staleContent := ManagedHookMarker + "\n# stale wrapper from an older release\n"
 	if err := os.WriteFile(hookPath, []byte(staleContent), 0644); err != nil {
 		t.Fatalf("write stale managed hook: %v", err)
 	}
@@ -161,8 +161,8 @@ func TestInstallLifecycleHooksRefreshesStaleManagedHook(t *testing.T) {
 	if result.Hooks[index].Action != HookActionUpdated {
 		t.Fatalf("post-merge action = %q, want %q", result.Hooks[index].Action, HookActionUpdated)
 	}
-	if got, err := os.Readlink(hookPath); err != nil || got != defaultHookDispatcherName {
-		t.Fatalf("post-merge symlink = %q, err=%v; want %q", got, err, defaultHookDispatcherName)
+	if got, err := os.Readlink(hookPath); err != nil || got != hookDispatcherName() {
+		t.Fatalf("post-merge symlink = %q, err=%v; want %q", got, err, hookDispatcherName())
 	}
 	info, err := os.Stat(hookPath)
 	if err != nil {
@@ -218,7 +218,7 @@ func TestManagedHookDispatcherInvokesLocalIndexScriptWithoutLifecycleArguments(t
 		t.Fatalf("InstallLifecycleHooks() error = %v", err)
 	}
 	logPath := filepath.Join(t.TempDir(), "args.log")
-	scriptPath := filepath.Join(result.HooksDir, "liza-index.sh")
+	scriptPath := filepath.Join(result.HooksDir, brand.BinaryName+"-index.sh")
 	script := "#!/bin/sh\nprintf 'args:%s\\n' \"$*\" > \"$LIZA_TEST_HOOK_LOG\"\n"
 	if err := os.WriteFile(scriptPath, []byte(script), 0755); err != nil {
 		t.Fatalf("write liza-index.sh fixture: %v", err)
@@ -251,7 +251,7 @@ func TestManagedHookDispatcherSkipsPostCheckoutFileCheckout(t *testing.T) {
 		t.Fatalf("InstallLifecycleHooks() error = %v", err)
 	}
 	logPath := filepath.Join(t.TempDir(), "args.log")
-	scriptPath := filepath.Join(result.HooksDir, "liza-index.sh")
+	scriptPath := filepath.Join(result.HooksDir, brand.BinaryName+"-index.sh")
 	script := "#!/bin/sh\nprintf 'ran\\n' > \"$LIZA_TEST_HOOK_LOG\"\n"
 	if err := os.WriteFile(scriptPath, []byte(script), 0755); err != nil {
 		t.Fatalf("write liza-index.sh fixture: %v", err)
@@ -369,7 +369,7 @@ func TestInstallActivationWritesScipCommandsWithoutStacklit(t *testing.T) {
 		}
 	}
 	hook := readFile(t, filepath.Join(result.HooksDir, "post-commit"))
-	if !strings.Contains(hook, ManagedHookMarker) || !strings.Contains(hook, "liza-index.sh") {
+	if !strings.Contains(hook, ManagedHookMarker) || !strings.Contains(hook, brand.BinaryName+"-index.sh") {
 		t.Fatalf("post-commit hook missing managed wrapper:\n%s", hook)
 	}
 	if got := runGitOutput(t, repo, "check-ignore", "go.scip"); got != "go.scip" {
@@ -407,7 +407,7 @@ func TestInstallIndexScriptWritesExecutableManagedScript(t *testing.T) {
 		t.Fatalf("InstallIndexScript() error = %v", err)
 	}
 
-	wantPath := filepath.Join(repo, ".git", "hooks", "liza-index.sh")
+	wantPath := filepath.Join(repo, ".git", "hooks", brand.BinaryName+"-index.sh")
 	if result.Path != wantPath {
 		t.Fatalf("script path = %q, want %q", result.Path, wantPath)
 	}
@@ -553,8 +553,8 @@ func TestInstallIndexScriptRejectsUnsafeUntrackedStacklitJSON(t *testing.T) {
 	if !strings.Contains(err.Error(), "stacklit.json is untracked") {
 		t.Fatalf("error = %v, want unsafe untracked stacklit.json diagnostic", err)
 	}
-	if _, statErr := os.Stat(filepath.Join(repo, ".git", "hooks", "liza-index.sh")); statErr == nil {
-		t.Fatal("liza-index.sh installed despite unsafe untracked stacklit.json")
+	if _, statErr := os.Stat(filepath.Join(repo, ".git", "hooks", brand.BinaryName+"-index.sh")); statErr == nil {
+		t.Fatal(brand.BinaryName + "-index.sh installed despite unsafe untracked stacklit.json")
 	} else if !os.IsNotExist(statErr) {
 		t.Fatalf("inspect liza-index.sh: %v", statErr)
 	}

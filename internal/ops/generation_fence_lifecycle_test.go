@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/liza-mas/liza/internal/paths"
+
 	"github.com/liza-mas/liza/internal/db"
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/testhelpers"
@@ -499,7 +501,7 @@ func testWtMergeMutationGenerationFence(t *testing.T) {
 
 func testSubmitForReviewMutationGenerationFence(t *testing.T) {
 	projectRoot, taskID, commit, agentID, bb := setupSuccessfulSubmitScenario(t)
-	statePath := filepath.Join(projectRoot, ".liza", "state.yaml")
+	statePath := filepath.Join(projectRoot, paths.ProjectDirName(), "state.yaml")
 	setLifecycleAgentGeneration(t, bb, agentID, lifecycleGenerationA)
 	stale := models.AgentAuthority{ID: agentID, Generation: lifecycleGenerationA}
 	current := models.AgentAuthority{ID: agentID, Generation: lifecycleGenerationB}

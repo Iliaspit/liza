@@ -9,6 +9,7 @@ import (
 
 	"github.com/liza-mas/liza/internal/db"
 	"github.com/liza-mas/liza/internal/models"
+	"github.com/liza-mas/liza/internal/paths"
 	"github.com/liza-mas/liza/internal/testhelpers"
 )
 
@@ -523,7 +524,7 @@ func TestRecoverAgent_CustomDoerRole_WorktreeRemoval(t *testing.T) {
   entry-points:
     default: data-subpipeline.data-pair
 `)
-	pipelinePath := filepath.Join(tmpDir, ".liza", "pipeline.yaml")
+	pipelinePath := filepath.Join(tmpDir, paths.ProjectDirName(), "pipeline.yaml")
 	if err := os.WriteFile(pipelinePath, customPipeline, 0644); err != nil {
 		t.Fatalf("Failed to write custom pipeline: %v", err)
 	}
@@ -604,10 +605,10 @@ func TestRecoverAgent_NilResolver_WarningLogLine(t *testing.T) {
 
 	tmpDir := t.TempDir()
 
-	// Manually create .liza dir WITHOUT pipeline config so resolver is nil.
-	lizaDir := filepath.Join(tmpDir, ".liza")
+	// Manually create the project runtime directory WITHOUT pipeline config so resolver is nil.
+	lizaDir := filepath.Join(tmpDir, paths.ProjectDirName())
 	if err := os.MkdirAll(lizaDir, 0755); err != nil {
-		t.Fatalf("Failed to create .liza dir: %v", err)
+		t.Fatalf("failed to create project runtime directory: %v", err)
 	}
 	lockPath := filepath.Join(lizaDir, "state.yaml.lock")
 	if err := os.WriteFile(lockPath, []byte{}, 0644); err != nil {

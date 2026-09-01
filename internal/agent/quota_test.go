@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/liza-mas/liza/internal/brand"
+	"github.com/liza-mas/liza/internal/paths"
 )
 
 func withTestProjectDirName(t *testing.T, dirName string) {
@@ -137,7 +138,7 @@ func TestDetectQuotaExhaustion_EmptyOutput(t *testing.T) {
 
 func TestQuotaSignal_WriteCheckClear(t *testing.T) {
 	projectRoot := t.TempDir()
-	lizaDir := filepath.Join(projectRoot, ".liza")
+	lizaDir := filepath.Join(projectRoot, paths.ProjectDirName())
 	if err := os.MkdirAll(lizaDir, 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -198,7 +199,7 @@ func TestQuotaSignalUsesBrandedProjectDir(t *testing.T) {
 
 func TestQuotaSignal_NormalizesACPXProviderAliases(t *testing.T) {
 	projectRoot := t.TempDir()
-	lizaDir := filepath.Join(projectRoot, ".liza")
+	lizaDir := filepath.Join(projectRoot, paths.ProjectDirName())
 	if err := os.MkdirAll(lizaDir, 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -227,7 +228,7 @@ func TestQuotaSignal_NormalizesACPXProviderAliases(t *testing.T) {
 
 func TestRaiseQuotaExhaustion_WritesAlertAndSignal(t *testing.T) {
 	projectRoot := t.TempDir()
-	lizaDir := filepath.Join(projectRoot, ".liza")
+	lizaDir := filepath.Join(projectRoot, paths.ProjectDirName())
 	if err := os.MkdirAll(lizaDir, 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -268,7 +269,7 @@ func TestClearQuotaSignal_Idempotent(t *testing.T) {
 
 func TestHandleQuotaSignal_DoesNotWriteObserverAlert(t *testing.T) {
 	projectRoot := t.TempDir()
-	lizaDir := filepath.Join(projectRoot, ".liza")
+	lizaDir := filepath.Join(projectRoot, paths.ProjectDirName())
 	if err := os.MkdirAll(lizaDir, 0755); err != nil {
 		t.Fatal(err)
 	}

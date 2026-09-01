@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/liza-mas/liza/internal/brand"
+
 	bashpolicycli "github.com/liza-mas/liza/internal/bash-policy-cli"
 	"github.com/liza-mas/liza/internal/db"
 	"github.com/liza-mas/liza/internal/functionalclusters"
@@ -142,12 +144,12 @@ func TestInitCommand(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name:        ".liza removal declined",
+			name:        "runtime directory removal declined",
 			description: "Test goal",
 			specRef:     "specs/vision.md",
 			setup: func(t *testing.T, tmpDir string) {
 				testhelpers.CreateCommittedSpecFile(t, tmpDir, "vision.md", "# Vision\n")
-				// Create .liza directory
+				// Create the project runtime directory.
 				lizaDir := paths.New(tmpDir).LizaDir()
 				if err := os.Mkdir(lizaDir, 0755); err != nil {
 					t.Fatal(err)
@@ -174,7 +176,7 @@ func TestInitCommand(t *testing.T) {
 				testhelpers.CreateCommittedSpecFile(t, tmpDir, "vision.md", "# Vision\n")
 			},
 			wantErr:     true,
-			errContains: "Run 'liza setup' first",
+			errContains: "Run '" + brand.BinaryName + " setup' first",
 		},
 	}
 
@@ -443,7 +445,7 @@ func TestInitCommandNoCommitsWithUncommittedSpecFailsBeforeArtifacts(t *testing.
 	}
 
 	if _, err := os.Stat(paths.New(tmpDir).LizaDir()); !os.IsNotExist(err) {
-		t.Fatalf(".liza directory state after failed init = %v, want not exist", err)
+		t.Fatalf("project runtime directory state after failed init = %v, want not exist", err)
 	}
 	for _, relPath := range []string{
 		"GUARDRAILS.md",
@@ -563,7 +565,7 @@ func TestInitCommandSpecMustBeFullyCommitted(t *testing.T) {
 				t.Fatalf("InitCommand() error = %v, want spec commit precondition", err)
 			}
 			if _, err := os.Stat(paths.New(tmpDir).LizaDir()); !os.IsNotExist(err) {
-				t.Fatalf(".liza directory state after failed init = %v, want not exist", err)
+				t.Fatalf("project runtime directory state after failed init = %v, want not exist", err)
 			}
 
 			cmd := exec.Command("git", "branch", "--list", "integration")
@@ -604,7 +606,7 @@ func TestInitCommandRequiresCommittedPreCommitConfig(t *testing.T) {
 		t.Fatalf("InitCommand() error = %v, want pre-commit config precondition", err)
 	}
 	if _, statErr := os.Stat(paths.New(tmpDir).LizaDir()); !os.IsNotExist(statErr) {
-		t.Fatalf(".liza directory state after failed init = %v, want not exist", statErr)
+		t.Fatalf("project runtime directory state after failed init = %v, want not exist", statErr)
 	}
 }
 
@@ -639,7 +641,7 @@ func TestInitCommandRequiresPreCommitConfigOnExistingIntegrationBranch(t *testin
 		t.Fatalf("InitCommand() error = %v, want integration pre-commit config precondition", err)
 	}
 	if _, statErr := os.Stat(paths.New(tmpDir).LizaDir()); !os.IsNotExist(statErr) {
-		t.Fatalf(".liza directory state after failed init = %v, want not exist", statErr)
+		t.Fatalf("project runtime directory state after failed init = %v, want not exist", statErr)
 	}
 }
 
@@ -700,7 +702,7 @@ func TestInitCommandPreCommitConfigMustBeClean(t *testing.T) {
 				t.Fatalf("InitCommand() error = %v, want dirty pre-commit config precondition", err)
 			}
 			if _, statErr := os.Stat(paths.New(tmpDir).LizaDir()); !os.IsNotExist(statErr) {
-				t.Fatalf(".liza directory state after failed init = %v, want not exist", statErr)
+				t.Fatalf("project runtime directory state after failed init = %v, want not exist", statErr)
 			}
 		})
 	}
@@ -753,7 +755,7 @@ func TestInitCommandCustomBranch(t *testing.T) {
 	}
 
 	// Verify state.yaml has the custom branch
-	state, err := db.For(filepath.Join(".liza", "state.yaml")).Read()
+	state, err := db.For(filepath.Join(paths.ProjectDirName(), "state.yaml")).Read()
 	if err != nil {
 		t.Fatalf("failed to read state: %v", err)
 	}
@@ -789,8 +791,8 @@ func TestInitCommandInvalidBranchName(t *testing.T) {
 			})
 			if err == nil {
 				t.Errorf("expected error for invalid branch name %q, got nil", name)
-				// Clean up .liza so next subtest can run
-				os.RemoveAll(filepath.Join(tmpDir, ".liza"))
+				// Clean up the project runtime directory so the next subtest can run.
+				os.RemoveAll(filepath.Join(tmpDir, paths.ProjectDirName()))
 			}
 			if err != nil && !strings.Contains(err.Error(), "invalid branch name") {
 				t.Errorf("expected 'invalid branch name' error, got: %v", err)
@@ -1021,7 +1023,7 @@ func TestInitCommand_CreatesContractSymlinks(t *testing.T) {
 	}
 
 	// Verify contract symlinks point to absolute global path
-	globalDir := filepath.Join(fakeHome, ".liza")
+	globalDir := filepath.Join(fakeHome, paths.GlobalDirName())
 	expectedTarget := filepath.Join(globalDir, "CORE.md")
 	for _, rel := range []string{
 		filepath.Join(".claude", "CLAUDE.md"),
@@ -1265,7 +1267,7 @@ func TestInitCommand_OpenCodeCreatesGlobalContractWithoutCodexHooks(t *testing.T
 		t.Fatalf("InitCommand failed: %v", err)
 	}
 
-	coreFile := filepath.Join(fakeHome, ".liza", "CORE.md")
+	coreFile := filepath.Join(fakeHome, paths.GlobalDirName(), "CORE.md")
 	agentsPath := filepath.Join(fakeHome, ".config", "opencode", "AGENTS.md")
 	target, err := os.Readlink(agentsPath)
 	if err != nil {
@@ -1288,7 +1290,7 @@ func TestInitCommand_OpenCodeCreatesGlobalContractWithoutCodexHooks(t *testing.T
 		t.Fatalf("OpenCode exec tool not created at %s: %v", execToolPath, err)
 	}
 	for _, want := range []string{
-		"LIZA MANAGED FILE",
+		brand.NameUpper + " MANAGED FILE",
 		"Prefer this exec tool",
 		"Do not repeat the same successful command",
 	} {
@@ -1359,7 +1361,7 @@ func TestInitCommand_PreservesManagedRepoSymlinkRecordedForRepoOnlyProvider(t *t
 	testhelpers.CreateCommittedSpecFile(t, gitDir, "vision.md", "# Vision\n")
 
 	// Pre-create CLAUDE.md as the correct symlink (absolute to global)
-	globalDir := filepath.Join(fakeHome, ".liza")
+	globalDir := filepath.Join(fakeHome, paths.GlobalDirName())
 	correctTarget := filepath.Join(globalDir, "CORE.md")
 	claudePath := filepath.Join(gitDir, "CLAUDE.md")
 	if err := os.Symlink(correctTarget, claudePath); err != nil {
@@ -1414,7 +1416,7 @@ func TestInitCommand_NoProvidersLeavesManagedRepoSymlinkUntouched(t *testing.T) 
 
 	testhelpers.CreateCommittedSpecFile(t, gitDir, "vision.md", "# Vision\n")
 
-	correctTarget := filepath.Join(fakeHome, ".liza", "CORE.md")
+	correctTarget := filepath.Join(fakeHome, paths.GlobalDirName(), "CORE.md")
 	claudePath := filepath.Join(gitDir, "CLAUDE.md")
 	if err := os.Symlink(correctTarget, claudePath); err != nil {
 		t.Fatal(err)
@@ -1480,7 +1482,7 @@ func TestInitCommand_BrownfieldFallsBackToGlobal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Global fallback symlink not created at %s: %v", globalClaude, err)
 	}
-	coreFile := filepath.Join(fakeHome, ".liza", "CORE.md")
+	coreFile := filepath.Join(fakeHome, paths.GlobalDirName(), "CORE.md")
 	if target != coreFile {
 		t.Errorf("Global fallback → %q, want %q", target, coreFile)
 	}
@@ -1546,7 +1548,7 @@ func TestInitCommand_OpenCodeBrownfieldFallsBackToOpenCodeGlobal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OpenCode global fallback symlink not created at %s: %v", globalOpenCode, err)
 	}
-	coreFile := filepath.Join(fakeHome, ".liza", "CORE.md")
+	coreFile := filepath.Join(fakeHome, paths.GlobalDirName(), "CORE.md")
 	if target != coreFile {
 		t.Errorf("OpenCode global fallback → %q, want %q", target, coreFile)
 	}
@@ -1583,7 +1585,7 @@ func TestInitCommand_CodexAndOpenCodeBrownfieldCreateBothFallbacks(t *testing.T)
 		t.Fatalf("InitCommand failed: %v", err)
 	}
 
-	coreFile := filepath.Join(fakeHome, ".liza", "CORE.md")
+	coreFile := filepath.Join(fakeHome, paths.GlobalDirName(), "CORE.md")
 	for _, path := range []string{
 		filepath.Join(fakeHome, ".codex", "AGENTS.md"),
 		filepath.Join(fakeHome, ".config", "opencode", "AGENTS.md"),
@@ -1610,7 +1612,7 @@ func TestInitCommand_BrownfieldExistingLizaAtGlobalSkipsCreation(t *testing.T) {
 
 	testhelpers.CreateCommittedSpecFile(t, gitDir, "vision.md", "# Vision\n")
 
-	coreFile := filepath.Join(fakeHome, ".liza", "CORE.md")
+	coreFile := filepath.Join(fakeHome, paths.GlobalDirName(), "CORE.md")
 
 	// Pre-create Liza symlink at global fallback
 	globalClaude := filepath.Join(fakeHome, ".claude", "CLAUDE.md")
@@ -1712,7 +1714,7 @@ func TestInitCommand_DuplicateClaudeSymlinkRemovesUnownedRepoCopy(t *testing.T) 
 
 	testhelpers.CreateCommittedSpecFile(t, gitDir, "vision.md", "# Vision\n")
 
-	coreFile := filepath.Join(fakeHome, ".liza", "CORE.md")
+	coreFile := filepath.Join(fakeHome, paths.GlobalDirName(), "CORE.md")
 
 	// Liza symlink at both repo root and global
 	os.Symlink(coreFile, filepath.Join(gitDir, "CLAUDE.md"))
@@ -1750,7 +1752,7 @@ func TestInitCommand_DuplicateCodexSymlinkPreservesRepoCopyForCursor(t *testing.
 
 	testhelpers.CreateCommittedSpecFile(t, gitDir, "vision.md", "# Vision\n")
 
-	coreFile := filepath.Join(fakeHome, ".liza", "CORE.md")
+	coreFile := filepath.Join(fakeHome, paths.GlobalDirName(), "CORE.md")
 	repoAgents := filepath.Join(gitDir, "AGENTS.md")
 	if err := os.Symlink(coreFile, repoAgents); err != nil {
 		t.Fatalf("create repo AGENTS.md symlink: %v", err)
@@ -1822,7 +1824,7 @@ func TestInitPairingCommand_PrefersActiveProviderGlobalRoot(t *testing.T) {
 				t.Fatalf("InitPairingCommand() error = %v", err)
 			}
 
-			contractTarget := filepath.Join(fakeHome, ".liza", "CORE.md")
+			contractTarget := filepath.Join(fakeHome, paths.GlobalDirName(), "CORE.md")
 			activePath := filepath.Join(activeRoot, filepath.FromSlash(tt.globalSuffix))
 			if target, err := os.Readlink(activePath); err != nil || target != contractTarget {
 				t.Fatalf("active global contract target = %q, err = %v; want %q", target, err, contractTarget)
@@ -1856,7 +1858,7 @@ func TestInitPairingCommand_QwenRelativeHomeRetainsRepoContractAcrossWorkingDire
 		t.Fatalf("InitPairingCommand() error = %v", err)
 	}
 
-	contractTarget := filepath.Join(fakeHome, ".liza", "CORE.md")
+	contractTarget := filepath.Join(fakeHome, paths.GlobalDirName(), "CORE.md")
 	repoPath := filepath.Join(gitDir, "QWEN.md")
 	if target, err := os.Readlink(repoPath); err != nil || target != contractTarget {
 		t.Fatalf("repo QWEN.md target = %q, err = %v; want %q", target, err, contractTarget)
@@ -1887,7 +1889,7 @@ func TestPreferredGlobalOccupiedRetainsManagedRepoContract(t *testing.T) {
 	t.Setenv("HOME", homeDir)
 	t.Setenv("CODEX_HOME", "")
 	projectRoot := t.TempDir()
-	contractTarget := filepath.Join(homeDir, ".liza", "CORE.md")
+	contractTarget := filepath.Join(homeDir, paths.GlobalDirName(), "CORE.md")
 	repoPath := filepath.Join(projectRoot, "AGENTS.md")
 	globalPath := filepath.Join(homeDir, ".codex", "AGENTS.md")
 	if err := os.Symlink(contractTarget, repoPath); err != nil {
@@ -1935,7 +1937,7 @@ func TestInitCommand_GlobalClaudeSymlinkPreservesRepoRegularFile(t *testing.T) {
 
 	testhelpers.CreateCommittedSpecFile(t, gitDir, "vision.md", "# Vision\n")
 
-	coreFile := filepath.Join(fakeHome, ".liza", "CORE.md")
+	coreFile := filepath.Join(fakeHome, paths.GlobalDirName(), "CORE.md")
 	repoClaude := filepath.Join(gitDir, "CLAUDE.md")
 	if err := os.WriteFile(repoClaude, []byte("@AGENTS.md\n"), 0644); err != nil {
 		t.Fatalf("write repo CLAUDE.md: %v", err)
@@ -1998,7 +2000,7 @@ func TestInitCommand_ContractActionLocalCreatesCLAUDELocalMd(t *testing.T) {
 	}
 
 	// CLAUDE.local.md should be a symlink to CORE.md
-	coreFile := filepath.Join(fakeHome, ".liza", "CORE.md")
+	coreFile := filepath.Join(fakeHome, paths.GlobalDirName(), "CORE.md")
 	localPath := filepath.Join(gitDir, "CLAUDE.local.md")
 	target, err := os.Readlink(localPath)
 	if err != nil {
@@ -2014,8 +2016,8 @@ func TestCheckContractConfigured_FindsLocalMd(t *testing.T) {
 	fakeHome := t.TempDir()
 	t.Setenv("HOME", fakeHome)
 
-	// Create ~/.liza/CORE.md
-	lizaDir := filepath.Join(fakeHome, ".liza")
+	// Create the global managed contract.
+	lizaDir := filepath.Join(fakeHome, paths.GlobalDirName())
 	os.MkdirAll(lizaDir, 0755)
 	coreFile := filepath.Join(lizaDir, "CORE.md")
 	os.WriteFile(coreFile, []byte("core"), 0644)
@@ -2037,7 +2039,7 @@ func TestCheckContractConfigured_CodexACPUsesCodexContract(t *testing.T) {
 	fakeHome := t.TempDir()
 	t.Setenv("HOME", fakeHome)
 
-	lizaDir := filepath.Join(fakeHome, ".liza")
+	lizaDir := filepath.Join(fakeHome, paths.GlobalDirName())
 	if err := os.MkdirAll(lizaDir, 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -2063,7 +2065,7 @@ func TestCheckContractConfigured_CursorACPUsesAgentsContract(t *testing.T) {
 	fakeHome := t.TempDir()
 	t.Setenv("HOME", fakeHome)
 
-	lizaDir := filepath.Join(fakeHome, ".liza")
+	lizaDir := filepath.Join(fakeHome, paths.GlobalDirName())
 	if err := os.MkdirAll(lizaDir, 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -2090,7 +2092,7 @@ func TestCheckContractConfigured_OpenCodeUsesAgentsContract(t *testing.T) {
 	t.Setenv("HOME", fakeHome)
 	unsetEnvForTest(t, "XDG_CONFIG_HOME")
 
-	lizaDir := filepath.Join(fakeHome, ".liza")
+	lizaDir := filepath.Join(fakeHome, paths.GlobalDirName())
 	if err := os.MkdirAll(lizaDir, 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -2295,8 +2297,8 @@ func TestInitCommandWithConfig_FreezesPipeline(t *testing.T) {
 		t.Fatalf("InitCommandWithConfig() error = %v", err)
 	}
 
-	// Verify .liza/pipeline.yaml exists and is identical to input
-	frozenPath := filepath.Join(tmpDir, ".liza", "pipeline.yaml")
+	// Verify the project pipeline config exists and is identical to the input.
+	frozenPath := filepath.Join(tmpDir, paths.ProjectDirName(), "pipeline.yaml")
 	frozen, err := os.ReadFile(frozenPath)
 	if err != nil {
 		t.Fatalf("Failed to read frozen pipeline.yaml: %v", err)
@@ -2306,7 +2308,7 @@ func TestInitCommandWithConfig_FreezesPipeline(t *testing.T) {
 	}
 
 	// Verify state.yaml has pipeline_version: 2
-	bb := db.New(filepath.Join(tmpDir, ".liza", "state.yaml"))
+	bb := db.New(filepath.Join(tmpDir, paths.ProjectDirName(), "state.yaml"))
 	state, err := bb.Read()
 	if err != nil {
 		t.Fatalf("Failed to read state: %v", err)
@@ -2344,7 +2346,7 @@ func TestInitCommandWithConfig_EntryPoint(t *testing.T) {
 	}
 
 	// Verify goal.entry_point is set
-	bb := db.New(filepath.Join(tmpDir, ".liza", "state.yaml"))
+	bb := db.New(filepath.Join(tmpDir, paths.ProjectDirName(), "state.yaml"))
 	state, err := bb.Read()
 	if err != nil {
 		t.Fatalf("Failed to read state: %v", err)
@@ -2379,7 +2381,7 @@ func TestInitCommandWithConfig_NoFollowUp(t *testing.T) {
 		t.Fatalf("InitCommandWithConfig() error = %v", err)
 	}
 
-	bb := db.New(filepath.Join(tmpDir, ".liza", "state.yaml"))
+	bb := db.New(filepath.Join(tmpDir, paths.ProjectDirName(), "state.yaml"))
 	state, err := bb.Read()
 	if err != nil {
 		t.Fatalf("Failed to read state: %v", err)
@@ -2416,7 +2418,7 @@ func TestInitCommandWithConfig_NewDefaultEntryPoints(t *testing.T) {
 				t.Fatalf("InitCommandWithConfig() error = %v", err)
 			}
 
-			bb := db.New(filepath.Join(tmpDir, ".liza", "state.yaml"))
+			bb := db.New(filepath.Join(tmpDir, paths.ProjectDirName(), "state.yaml"))
 			state, err := bb.Read()
 			if err != nil {
 				t.Fatalf("Failed to read state: %v", err)
@@ -2451,18 +2453,18 @@ func TestInitCommandWithConfig_NoConfigAutoFreezes(t *testing.T) {
 	}
 
 	// Verify pipeline.yaml is auto-frozen from embedded config
-	frozenPath := filepath.Join(tmpDir, ".liza", "pipeline.yaml")
+	frozenPath := filepath.Join(tmpDir, paths.ProjectDirName(), "pipeline.yaml")
 	if _, err := os.Stat(frozenPath); os.IsNotExist(err) {
 		t.Errorf("pipeline.yaml should be auto-frozen from embedded config")
 	}
 
-	supportPath := filepath.Join(tmpDir, ".liza", "SUPPORT.md")
+	supportPath := filepath.Join(tmpDir, paths.ProjectDirName(), "SUPPORT.md")
 	if _, err := os.Stat(supportPath); os.IsNotExist(err) {
 		t.Errorf("SUPPORT.md should be written during init")
 	}
 
 	// Verify pipeline_version is set
-	bb := db.New(filepath.Join(tmpDir, ".liza", "state.yaml"))
+	bb := db.New(filepath.Join(tmpDir, paths.ProjectDirName(), "state.yaml"))
 	state, err := bb.Read()
 	if err != nil {
 		t.Fatalf("Failed to read state: %v", err)
@@ -2509,10 +2511,10 @@ func TestInitCommandWithConfig_InvalidConfig(t *testing.T) {
 	}
 	testhelpers.AssertErrorContains(t, err, "invalid pipeline config")
 
-	// Verify .liza was not created (early validation)
-	lizaDir := filepath.Join(tmpDir, ".liza")
+	// Verify the project runtime directory was not created (early validation).
+	lizaDir := filepath.Join(tmpDir, paths.ProjectDirName())
 	if _, statErr := os.Stat(lizaDir); !os.IsNotExist(statErr) {
-		t.Errorf(".liza directory should not exist after config validation failure")
+		t.Errorf("project runtime directory should not exist after config validation failure")
 	}
 }
 
@@ -2572,7 +2574,7 @@ func TestInitCommandWithConfig_PostWorktreeCmd(t *testing.T) {
 	}
 
 	// Verify post_worktree_cmd is set in state
-	bb := db.New(filepath.Join(tmpDir, ".liza", "state.yaml"))
+	bb := db.New(filepath.Join(tmpDir, paths.ProjectDirName(), "state.yaml"))
 	state, err := bb.Read()
 	if err != nil {
 		t.Fatalf("Failed to read state: %v", err)
@@ -2610,7 +2612,7 @@ func TestInitCommandWithConfig_CopyWorktreeEnvFiles(t *testing.T) {
 		t.Fatalf("InitCommandWithConfig() error = %v", err)
 	}
 
-	bb := db.New(filepath.Join(tmpDir, ".liza", "state.yaml"))
+	bb := db.New(filepath.Join(tmpDir, paths.ProjectDirName(), "state.yaml"))
 	state, err := bb.Read()
 	if err != nil {
 		t.Fatalf("Failed to read state: %v", err)
@@ -2645,7 +2647,7 @@ func TestInitCommandWithConfig_CopyWorktreeEnvFilesFromEnv(t *testing.T) {
 		t.Fatalf("InitCommandWithConfig() error = %v", err)
 	}
 
-	bb := db.New(filepath.Join(tmpDir, ".liza", "state.yaml"))
+	bb := db.New(filepath.Join(tmpDir, paths.ProjectDirName(), "state.yaml"))
 	state, err := bb.Read()
 	if err != nil {
 		t.Fatalf("Failed to read state: %v", err)
@@ -2687,7 +2689,7 @@ func TestInitCommandWithConfig_ScipSearchPersistsConfig(t *testing.T) {
 		t.Fatalf("InitCommandWithConfig() error = %v", err)
 	}
 
-	statePath := filepath.Join(tmpDir, ".liza", "state.yaml")
+	statePath := filepath.Join(tmpDir, paths.ProjectDirName(), "state.yaml")
 	bb := db.New(statePath)
 	state, err := bb.Read()
 	if err != nil {
@@ -2809,7 +2811,7 @@ func TestInitCommandWithConfig_AutodetectsAndPersistsValidatedScipSearchLanguage
 		t.Fatalf("stderr = %q, want dropped typescript warning", stderr)
 	}
 
-	statePath := filepath.Join(tmpDir, ".liza", "state.yaml")
+	statePath := filepath.Join(tmpDir, paths.ProjectDirName(), "state.yaml")
 	state, err := db.New(statePath).Read()
 	if err != nil {
 		t.Fatalf("Failed to read state: %v", err)
@@ -2891,7 +2893,7 @@ func TestInitCommandWithConfig_SembleDisabledSkipsReadiness(t *testing.T) {
 			if strings.Contains(strings.ToLower(stderr), "semble") {
 				t.Fatalf("stderr = %q, want no Semble diagnostics", stderr)
 			}
-			assertStateHasNoSembleForTest(t, filepath.Join(tmpDir, ".liza", "state.yaml"))
+			assertStateHasNoSembleForTest(t, filepath.Join(tmpDir, paths.ProjectDirName(), "state.yaml"))
 		})
 	}
 }
@@ -2920,7 +2922,7 @@ func TestInitCommandWithConfig_SembleEnabledPrewarmsBeforeStateWrite(t *testing.
 			return filepath.Join(tmpDir, "bin", name), nil
 		},
 		func(plan semble.CommandPlan) (semble.CommandResult, error) {
-			if _, err := os.Stat(filepath.Join(tmpDir, ".liza", "state.yaml")); !os.IsNotExist(err) {
+			if _, err := os.Stat(filepath.Join(tmpDir, paths.ProjectDirName(), "state.yaml")); !os.IsNotExist(err) {
 				t.Fatalf("Semble runner observed state.yaml before returning: %v", err)
 			}
 			if len(plan.Env) == 0 {
@@ -2949,7 +2951,7 @@ func TestInitCommandWithConfig_SembleEnabledPrewarmsBeforeStateWrite(t *testing.
 	if !slices.Equal(calls, wantCalls) {
 		t.Fatalf("Semble calls = %v, want %v", calls, wantCalls)
 	}
-	assertStateHasNoSembleForTest(t, filepath.Join(tmpDir, ".liza", "state.yaml"))
+	assertStateHasNoSembleForTest(t, filepath.Join(tmpDir, paths.ProjectDirName(), "state.yaml"))
 }
 
 func TestInitCommandWithConfig_SembleReadinessDiagnosticsNonFatal(t *testing.T) {
@@ -3050,7 +3052,7 @@ func TestInitCommandWithConfig_SembleReadinessDiagnosticsNonFatal(t *testing.T) 
 			if runs != tt.wantRuns {
 				t.Fatalf("Semble runner calls = %d, want %d", runs, tt.wantRuns)
 			}
-			assertStateHasNoSembleForTest(t, filepath.Join(tmpDir, ".liza", "state.yaml"))
+			assertStateHasNoSembleForTest(t, filepath.Join(tmpDir, paths.ProjectDirName(), "state.yaml"))
 		})
 	}
 }
@@ -3091,7 +3093,7 @@ func TestInitCommandWithConfig_PostWorktreeCmdOmittedWhenEmpty(t *testing.T) {
 	}
 
 	// Verify post_worktree_cmd is nil in state
-	bb := db.New(filepath.Join(tmpDir, ".liza", "state.yaml"))
+	bb := db.New(filepath.Join(tmpDir, paths.ProjectDirName(), "state.yaml"))
 	state, err := bb.Read()
 	if err != nil {
 		t.Fatalf("Failed to read state: %v", err)
@@ -3119,19 +3121,19 @@ func TestInitPairingCommand_Claude(t *testing.T) {
 		t.Fatalf("InitPairingCommand failed: %v", err)
 	}
 
-	// Claude's documented global instruction path should point to ~/.liza/CORE.md.
+	// Claude's documented global instruction path should point to the managed contract.
 	target, err := os.Readlink(filepath.Join(fakeHome, ".claude", "CLAUDE.md"))
 	if err != nil {
 		t.Fatalf("global CLAUDE.md not a symlink: %v", err)
 	}
-	expected := filepath.Join(fakeHome, ".liza", "CORE.md")
+	expected := filepath.Join(fakeHome, paths.GlobalDirName(), "CORE.md")
 	if target != expected {
 		t.Errorf("CLAUDE.md → %q, want %q", target, expected)
 	}
 
-	// .liza/ directory should NOT exist
-	if _, err := os.Stat(filepath.Join(gitDir, ".liza")); !os.IsNotExist(err) {
-		t.Error(".liza/ directory should not be created in pairing mode")
+	// The project runtime directory should not exist.
+	if _, err := os.Stat(filepath.Join(gitDir, paths.ProjectDirName())); !os.IsNotExist(err) {
+		t.Error(paths.ProjectDirName() + "/ directory should not be created in pairing mode")
 	}
 
 	// .claude/settings.json should be written
@@ -3173,7 +3175,7 @@ func TestInitPairingCommand_MultipleAgents(t *testing.T) {
 		t.Fatalf("InitPairingCommand failed: %v", err)
 	}
 
-	expected := filepath.Join(fakeHome, ".liza", "CORE.md")
+	expected := filepath.Join(fakeHome, paths.GlobalDirName(), "CORE.md")
 	for _, tc := range []struct {
 		agent string
 		file  string
@@ -3253,7 +3255,7 @@ func TestInitPairingCommand_CursorSkipsBashPolicyWhenGateDisabled(t *testing.T) 
 	if err != nil {
 		t.Fatalf("AGENTS.md symlink not created: %v", err)
 	}
-	if want := filepath.Join(fakeHome, ".liza", "CORE.md"); target != want {
+	if want := filepath.Join(fakeHome, paths.GlobalDirName(), "CORE.md"); target != want {
 		t.Fatalf("AGENTS.md target = %q, want %q", target, want)
 	}
 	if lookups != 0 {
@@ -3286,7 +3288,7 @@ func TestInitPairingCommand_CursorAndOpenCodeRetainSharedRepoContract(t *testing
 	if err := InitPairingCommand(InitPairingParams{Agents: []string{"cursor", "opencode"}}); err != nil {
 		t.Fatalf("InitPairingCommand() error = %v", err)
 	}
-	contractTarget := filepath.Join(fakeHome, ".liza", "CORE.md")
+	contractTarget := filepath.Join(fakeHome, paths.GlobalDirName(), "CORE.md")
 	repoPath := filepath.Join(gitDir, "AGENTS.md")
 	if target, err := os.Readlink(repoPath); err != nil || target != contractTarget {
 		t.Fatalf("shared repo AGENTS.md target = %q, err = %v; want %q", target, err, contractTarget)
@@ -3325,7 +3327,7 @@ func TestInitPairingCommand_SequentialGlobalInitPreservesRepoOnlyProvider(t *tes
 		t.Run(tt.name, func(t *testing.T) {
 			gitDir := setupGitRepo(t)
 			fakeHome := setupGlobalLiza(t)
-			contractTarget := filepath.Join(fakeHome, ".liza", "CORE.md")
+			contractTarget := filepath.Join(fakeHome, paths.GlobalDirName(), "CORE.md")
 
 			originalDir, err := os.Getwd()
 			if err != nil {
@@ -3358,7 +3360,7 @@ func TestInitPairingCommand_SequentialGlobalInitPreservesRepoOnlyProvider(t *tes
 func TestInitPairingCommand_ProviderScopedConflictActionPreservesGlobalFirst(t *testing.T) {
 	gitDir := setupGitRepo(t)
 	fakeHome := setupGlobalLiza(t)
-	contractTarget := filepath.Join(fakeHome, ".liza", "CORE.md")
+	contractTarget := filepath.Join(fakeHome, paths.GlobalDirName(), "CORE.md")
 	if err := os.WriteFile(filepath.Join(gitDir, "AGENTS.md"), []byte("user-owned\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -3392,7 +3394,7 @@ func TestInitPairingCommand_SharedRepoContractSurvivesGlobalActivationFailure(t 
 	gitDir := setupGitRepo(t)
 	defer os.RemoveAll(gitDir)
 	fakeHome := setupGlobalLiza(t)
-	contractTarget := filepath.Join(fakeHome, ".liza", "CORE.md")
+	contractTarget := filepath.Join(fakeHome, paths.GlobalDirName(), "CORE.md")
 	codexGlobalPath := filepath.Join(fakeHome, ".codex", "AGENTS.md")
 	if err := os.MkdirAll(filepath.Dir(codexGlobalPath), 0755); err != nil {
 		t.Fatal(err)
@@ -3430,7 +3432,7 @@ func TestCreateContractSymlinksForProviders_NormalizesSharedRepoPaths(t *testing
 	homeDir := t.TempDir()
 	t.Setenv("HOME", homeDir)
 	projectRoot := t.TempDir()
-	contractTarget := filepath.Join(homeDir, ".liza", "CORE.md")
+	contractTarget := filepath.Join(homeDir, paths.GlobalDirName(), "CORE.md")
 	blockedGlobalPath := filepath.Join(homeDir, ".first", "AGENTS.md")
 	if err := os.MkdirAll(filepath.Dir(blockedGlobalPath), 0755); err != nil {
 		t.Fatal(err)
@@ -3805,7 +3807,7 @@ func TestInitPairingCommand_DisabledIndexGatesPreserveProviderHooksOnly(t *testi
 	if sembleLookups != 0 {
 		t.Fatalf("Semble lookups = %d, want zero", sembleLookups)
 	}
-	for _, rel := range []string{".git/hooks/liza-index.sh", ".sembleignore"} {
+	for _, rel := range []string{".git/hooks/" + brand.BinaryName + "-index.sh", ".sembleignore"} {
 		if _, err := os.Stat(filepath.Join(gitDir, rel)); !os.IsNotExist(err) {
 			t.Fatalf("%s stat err = %v, want missing", rel, err)
 		}
@@ -3836,7 +3838,7 @@ func TestInitPairingCommand_DisabledScipGateIgnoresExplicitLanguageFilter(t *tes
 	}
 
 	verifyCodexHooks(t, gitDir)
-	if _, statErr := os.Stat(filepath.Join(gitDir, ".git", "hooks", "liza-index.sh")); !os.IsNotExist(statErr) {
+	if _, statErr := os.Stat(filepath.Join(gitDir, ".git", "hooks", brand.BinaryName+"-index.sh")); !os.IsNotExist(statErr) {
 		t.Fatalf("liza-index.sh stat err = %v, want missing when SCIP env gate is disabled", statErr)
 	}
 	exclude, err := os.ReadFile(filepath.Join(gitDir, ".git", "info", "exclude"))
@@ -3854,7 +3856,7 @@ func TestInitPairingCommand_StacklitEnabledInstallsIndexHooksWithoutGlobalToolsM
 	fakeHome := setupGlobalLiza(t)
 	t.Setenv(stacklit.EnvEnableStacklit, "true")
 
-	toolsPath := filepath.Join(fakeHome, ".liza", "AGENT_TOOLS.md")
+	toolsPath := filepath.Join(fakeHome, paths.GlobalDirName(), "AGENT_TOOLS.md")
 	if err := os.WriteFile(toolsPath, []byte("global tools sentinel\n"), 0644); err != nil {
 		t.Fatalf("write AGENT_TOOLS.md sentinel: %v", err)
 	}
@@ -3871,7 +3873,7 @@ func TestInitPairingCommand_StacklitEnabledInstallsIndexHooksWithoutGlobalToolsM
 	}
 
 	verifyCodexHooks(t, gitDir)
-	scriptPath := filepath.Join(gitDir, ".git", "hooks", "liza-index.sh")
+	scriptPath := filepath.Join(gitDir, ".git", "hooks", brand.BinaryName+"-index.sh")
 	script := readFileForTest(t, scriptPath)
 	if !strings.Contains(script, pairingindex.ManagedIndexScriptMarker) {
 		t.Fatalf("liza-index.sh missing managed marker:\n%s", script)
@@ -3916,7 +3918,7 @@ func TestInitPairingCommand_ScipSearchGoFilterPlansConcreteHookCommand(t *testin
 		t.Fatalf("InitPairingCommand() error = %v", err)
 	}
 
-	script := readFileForTest(t, filepath.Join(gitDir, ".git", "hooks", "liza-index.sh"))
+	script := readFileForTest(t, filepath.Join(gitDir, ".git", "hooks", brand.BinaryName+"-index.sh"))
 	if !strings.Contains(script, "scip-go index --module-root") {
 		t.Fatalf("liza-index.sh missing Go SCIP command:\n%s", script)
 	}
@@ -3958,7 +3960,7 @@ func TestInitPairingCommand_ScipSearchPlanOverridesAmbiguousRoots(t *testing.T) 
 		t.Fatalf("InitPairingCommand() error = %v", err)
 	}
 
-	script := readFileForTest(t, filepath.Join(gitDir, ".git", "hooks", "liza-index.sh"))
+	script := readFileForTest(t, filepath.Join(gitDir, ".git", "hooks", brand.BinaryName+"-index.sh"))
 	for _, want := range []string{
 		"scip-go index --module-root " + gitDir + "/services/design-diagnosis/cli --output ",
 		"scip-typescript index --cwd " + gitDir + "/apps/web/src --output ",
@@ -3990,7 +3992,7 @@ func TestInitPairingCommand_ScipSearchEnabledWithNoLanguagesSkipsInertHooks(t *t
 	if err := InitPairingCommand(InitPairingParams{Agents: []string{"codex"}}); err != nil {
 		t.Fatalf("InitPairingCommand() error = %v", err)
 	}
-	if _, statErr := os.Stat(filepath.Join(gitDir, ".git", "hooks", "liza-index.sh")); !os.IsNotExist(statErr) {
+	if _, statErr := os.Stat(filepath.Join(gitDir, ".git", "hooks", brand.BinaryName+"-index.sh")); !os.IsNotExist(statErr) {
 		t.Fatalf("liza-index.sh stat err = %v, want missing with no SCIP language plans", statErr)
 	}
 }
@@ -4011,7 +4013,7 @@ func TestInitPairingCommand_ScipSearchSkipsStrayTypeScriptWithoutTSConfig(t *tes
 	if err := InitPairingCommand(InitPairingParams{Agents: []string{"codex"}}); err != nil {
 		t.Fatalf("InitPairingCommand() error = %v", err)
 	}
-	if _, statErr := os.Stat(filepath.Join(gitDir, ".git", "hooks", "liza-index.sh")); !os.IsNotExist(statErr) {
+	if _, statErr := os.Stat(filepath.Join(gitDir, ".git", "hooks", brand.BinaryName+"-index.sh")); !os.IsNotExist(statErr) {
 		t.Fatalf("liza-index.sh stat err = %v, want missing with only stray TypeScript source", statErr)
 	}
 }
@@ -4037,7 +4039,7 @@ func TestInitPairingCommand_ScipSearchMultiRootInstallsAggregateHooks(t *testing
 	if err != nil {
 		t.Fatalf("InitPairingCommand() error = %v", err)
 	}
-	script := readFileForTest(t, filepath.Join(gitDir, ".git", "hooks", "liza-index.sh"))
+	script := readFileForTest(t, filepath.Join(gitDir, ".git", "hooks", brand.BinaryName+"-index.sh"))
 	for _, want := range []string{"--root service-a --index ", "--root service-b --index ", "--out " + gitDir + "/go.scip"} {
 		if !strings.Contains(script, want) {
 			t.Fatalf("liza-index.sh = %q, want %q", script, want)
@@ -4068,7 +4070,7 @@ func TestInitPairingCommand_AmbientScipSearchAggregatesMultiRoot(t *testing.T) {
 	if stderr != "" {
 		t.Fatalf("stderr = %q, want no multi-root warning", stderr)
 	}
-	script := readFileForTest(t, filepath.Join(gitDir, ".git", "hooks", "liza-index.sh"))
+	script := readFileForTest(t, filepath.Join(gitDir, ".git", "hooks", brand.BinaryName+"-index.sh"))
 	for _, want := range []string{"--root service-a --index ", "--root service-b --index ", "--out " + gitDir + "/go.scip"} {
 		if !strings.Contains(script, want) {
 			t.Fatalf("liza-index.sh = %q, want %q", script, want)
@@ -4101,7 +4103,7 @@ func TestInitPairingCommand_SembleEnabledEnsuresProjectRootIgnore(t *testing.T) 
 	}
 
 	ignore := readFileForTest(t, filepath.Join(gitDir, ".sembleignore"))
-	for _, want := range []string{".liza/", ".worktrees/", "stacklit.json", "*.scip", "*.pem"} {
+	for _, want := range []string{paths.ProjectDirName() + "/", ".worktrees/", "stacklit.json", "*.scip", "*.pem"} {
 		if !strings.Contains(ignore, want) {
 			t.Fatalf(".sembleignore missing %q:\n%s", want, ignore)
 		}
@@ -4119,12 +4121,12 @@ func TestInitPairingCommand_IndexHookFailuresReportDiagnostics(t *testing.T) {
 			setup: func(t *testing.T, repo string) {
 				writeFileForTest(t, filepath.Join(repo, ".git", "hooks", "post-commit"), "#!/bin/sh\necho user hook\n", 0755)
 			},
-			wantError: "not Liza-managed",
+			wantError: "not " + brand.NameTitle + "-managed",
 		},
 		{
 			name: "legacy index script collision",
 			setup: func(t *testing.T, repo string) {
-				writeFileForTest(t, filepath.Join(repo, ".git", "hooks", "liza-index.sh"), "#!/bin/sh\n# Refresh scip and stacklit indexes for current branch in liza pairing mode.\n", 0755)
+				writeFileForTest(t, filepath.Join(repo, ".git", "hooks", brand.BinaryName+"-index.sh"), "#!/bin/sh\n# Refresh scip and stacklit indexes for current branch in liza pairing mode.\n", 0755)
 			},
 			wantError: "appears to be a legacy managed index hook",
 		},
@@ -4185,7 +4187,7 @@ func TestInitPairingCommand_Idempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("global CLAUDE.md not a symlink: %v", err)
 	}
-	expected := filepath.Join(fakeHome, ".liza", "CORE.md")
+	expected := filepath.Join(fakeHome, paths.GlobalDirName(), "CORE.md")
 	if target != expected {
 		t.Errorf("CLAUDE.md → %q, want %q", target, expected)
 	}
@@ -4201,13 +4203,13 @@ func TestInitPairingCommand_Mistral(t *testing.T) {
 		t.Fatalf("InitPairingCommand failed: %v", err)
 	}
 
-	// ~/.vibe/prompts/liza.md should be a symlink to ~/.liza/CORE.md
+	// The provider prompt should be a symlink to the global managed contract.
 	linkPath := filepath.Join(fakeHome, ".vibe", "prompts", "liza.md")
 	target, err := os.Readlink(linkPath)
 	if err != nil {
 		t.Fatalf("liza.md not a symlink: %v", err)
 	}
-	expected := filepath.Join(fakeHome, ".liza", "CORE.md")
+	expected := filepath.Join(fakeHome, paths.GlobalDirName(), "CORE.md")
 	if target != expected {
 		t.Errorf("liza.md → %q, want %q", target, expected)
 	}
@@ -4333,7 +4335,7 @@ func TestInitPairingCommand_ClaudeBrownfieldUsesGlobalFallback(t *testing.T) {
 	defer os.Chdir(originalDir)
 	os.Chdir(gitDir)
 
-	coreFile := filepath.Join(fakeHome, ".liza", "CORE.md")
+	coreFile := filepath.Join(fakeHome, paths.GlobalDirName(), "CORE.md")
 
 	// Pre-create CLAUDE.md as a regular file (brownfield project)
 	os.WriteFile(filepath.Join(gitDir, "CLAUDE.md"), []byte("existing"), 0644)
@@ -4565,8 +4567,8 @@ func TestInitCommandWithConfig_MissingPostWorktreeCmdDeclined(t *testing.T) {
 	if !strings.Contains(err.Error(), "cancelled by user") {
 		t.Errorf("InitCommandWithConfig() error = %v, want cancellation error", err)
 	}
-	if _, statErr := os.Stat(filepath.Join(tmpDir, ".liza")); !os.IsNotExist(statErr) {
-		t.Errorf(".liza/ exists after declined init, want no workspace created")
+	if _, statErr := os.Stat(filepath.Join(tmpDir, paths.ProjectDirName())); !os.IsNotExist(statErr) {
+		t.Errorf("project runtime directory exists after declined init, want no workspace created")
 	}
 }
 
@@ -4596,7 +4598,7 @@ func TestInitCommandWithConfig_MissingPostWorktreeCmdConfirmed(t *testing.T) {
 		t.Fatalf("InitCommandWithConfig() error = %v", err)
 	}
 
-	bb := db.New(filepath.Join(tmpDir, ".liza", "state.yaml"))
+	bb := db.New(filepath.Join(tmpDir, paths.ProjectDirName(), "state.yaml"))
 	state, err := bb.Read()
 	if err != nil {
 		t.Fatalf("Failed to read state: %v", err)
@@ -4634,7 +4636,7 @@ func TestInitCommandWithConfig_MissingPostWorktreeCmdUnansweredContinues(t *test
 		t.Fatalf("InitCommandWithConfig() error = %v", err)
 	}
 
-	bb := db.New(filepath.Join(tmpDir, ".liza", "state.yaml"))
+	bb := db.New(filepath.Join(tmpDir, paths.ProjectDirName(), "state.yaml"))
 	state, err := bb.Read()
 	if err != nil {
 		t.Fatalf("Failed to read state: %v", err)
@@ -4672,7 +4674,7 @@ func TestInitCommandWithConfig_ExplicitPostWorktreeCmdSkipsWarning(t *testing.T)
 		t.Fatalf("InitCommandWithConfig() error = %v", err)
 	}
 
-	bb := db.New(filepath.Join(tmpDir, ".liza", "state.yaml"))
+	bb := db.New(filepath.Join(tmpDir, paths.ProjectDirName(), "state.yaml"))
 	state, err := bb.Read()
 	if err != nil {
 		t.Fatalf("Failed to read state: %v", err)
@@ -4712,7 +4714,7 @@ func TestInitCommandWithConfig_AutoConfirmSkipsMissingPostWorktreePrompt(t *test
 		t.Fatalf("InitCommandWithConfig() error = %v", err)
 	}
 
-	bb := db.New(filepath.Join(tmpDir, ".liza", "state.yaml"))
+	bb := db.New(filepath.Join(tmpDir, paths.ProjectDirName(), "state.yaml"))
 	state, err := bb.Read()
 	if err != nil {
 		t.Fatalf("Failed to read state: %v", err)
@@ -4754,7 +4756,7 @@ func TestInitCommandWithConfig_AutoSuggestsPostWorktreeCmd(t *testing.T) {
 	}
 
 	// Verify post_worktree_cmd is set to "yarn install"
-	bb := db.New(filepath.Join(tmpDir, ".liza", "state.yaml"))
+	bb := db.New(filepath.Join(tmpDir, paths.ProjectDirName(), "state.yaml"))
 	state, err := bb.Read()
 	if err != nil {
 		t.Fatalf("Failed to read state: %v", err)
@@ -4798,7 +4800,7 @@ func TestInitCommandWithConfig_AutoSuggestDeclined(t *testing.T) {
 	}
 
 	// Verify post_worktree_cmd is nil
-	bb := db.New(filepath.Join(tmpDir, ".liza", "state.yaml"))
+	bb := db.New(filepath.Join(tmpDir, paths.ProjectDirName(), "state.yaml"))
 	state, err := bb.Read()
 	if err != nil {
 		t.Fatalf("Failed to read state: %v", err)
@@ -4839,7 +4841,7 @@ func TestInitCommandWithConfig_NonInteractiveSkipsAutoDetect(t *testing.T) {
 	}
 
 	// Verify post_worktree_cmd is nil (no prompt was shown)
-	bb := db.New(filepath.Join(tmpDir, ".liza", "state.yaml"))
+	bb := db.New(filepath.Join(tmpDir, paths.ProjectDirName(), "state.yaml"))
 	state, err := bb.Read()
 	if err != nil {
 		t.Fatalf("Failed to read state: %v", err)
@@ -4882,7 +4884,7 @@ func TestInitCommandWithConfig_AutoConfirmAcceptsPostWorktreeSuggestion(t *testi
 		t.Fatalf("InitCommandWithConfig() error = %v", err)
 	}
 
-	bb := db.New(filepath.Join(tmpDir, ".liza", "state.yaml"))
+	bb := db.New(filepath.Join(tmpDir, paths.ProjectDirName(), "state.yaml"))
 	state, err := bb.Read()
 	if err != nil {
 		t.Fatalf("Failed to read state: %v", err)
@@ -4926,7 +4928,7 @@ func TestInitCommandWithConfig_ExplicitFlagSkipsAutoDetect(t *testing.T) {
 	}
 
 	// Verify the explicit value was used, not the auto-detected one
-	bb := db.New(filepath.Join(tmpDir, ".liza", "state.yaml"))
+	bb := db.New(filepath.Join(tmpDir, paths.ProjectDirName(), "state.yaml"))
 	state, err := bb.Read()
 	if err != nil {
 		t.Fatalf("Failed to read state: %v", err)
@@ -5059,7 +5061,7 @@ func TestInitCommandWithConfig_EntryPointWithoutConfig(t *testing.T) {
 	}
 
 	// Verify entry_point is set
-	bb := db.New(filepath.Join(tmpDir, ".liza", "state.yaml"))
+	bb := db.New(filepath.Join(tmpDir, paths.ProjectDirName(), "state.yaml"))
 	state, err := bb.Read()
 	if err != nil {
 		t.Fatalf("Failed to read state: %v", err)
@@ -5094,7 +5096,7 @@ func TestInitCommandWithConfig_DefaultCLI(t *testing.T) {
 		t.Fatalf("InitCommandWithConfig() error = %v", err)
 	}
 
-	bb := db.New(filepath.Join(tmpDir, ".liza", "state.yaml"))
+	bb := db.New(filepath.Join(tmpDir, paths.ProjectDirName(), "state.yaml"))
 	state, err := bb.Read()
 	if err != nil {
 		t.Fatalf("Failed to read state: %v", err)
@@ -5130,7 +5132,7 @@ func TestInitCommandWithConfig_RoleSpecificDefaultCLIs(t *testing.T) {
 		t.Fatalf("InitCommandWithConfig() error = %v", err)
 	}
 
-	bb := db.New(filepath.Join(tmpDir, ".liza", "state.yaml"))
+	bb := db.New(filepath.Join(tmpDir, paths.ProjectDirName(), "state.yaml"))
 	state, err := bb.Read()
 	if err != nil {
 		t.Fatalf("Failed to read state: %v", err)
@@ -5167,7 +5169,7 @@ func TestInitCommandWithConfig_DefaultCLIOmittedWhenEmpty(t *testing.T) {
 		t.Fatalf("InitCommandWithConfig() error = %v", err)
 	}
 
-	bb := db.New(filepath.Join(tmpDir, ".liza", "state.yaml"))
+	bb := db.New(filepath.Join(tmpDir, paths.ProjectDirName(), "state.yaml"))
 	state, err := bb.Read()
 	if err != nil {
 		t.Fatalf("Failed to read state: %v", err)
@@ -5183,7 +5185,7 @@ func TestInitCommandWithConfig_DefaultCLIOmittedWhenEmpty(t *testing.T) {
 	}
 
 	// Verify omitempty: default_cli should not appear in YAML
-	data, err := os.ReadFile(filepath.Join(tmpDir, ".liza", "state.yaml"))
+	data, err := os.ReadFile(filepath.Join(tmpDir, paths.ProjectDirName(), "state.yaml"))
 	if err != nil {
 		t.Fatalf("Failed to read state.yaml: %v", err)
 	}
@@ -5235,7 +5237,7 @@ func TestInitCommand_WorkspaceInit(t *testing.T) {
 	stdout := string(stdoutBytes)
 
 	// Must contain expected CLI-only output
-	if !strings.Contains(stdout, "Liza initialized at") {
+	if !strings.Contains(stdout, brand.NameTitle+" initialized at") {
 		t.Errorf("Expected 'Liza initialized at' in stdout, got: %s", stdout)
 	}
 	if !strings.Contains(stdout, "Integration branch:") {

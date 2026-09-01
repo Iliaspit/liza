@@ -19,6 +19,7 @@ import (
 	"github.com/liza-mas/liza/internal/brand"
 	"github.com/liza-mas/liza/internal/brandrender"
 	"github.com/liza-mas/liza/internal/models"
+	"github.com/liza-mas/liza/internal/paths"
 	"gopkg.in/yaml.v3"
 )
 
@@ -30,12 +31,18 @@ var (
 )
 
 const (
-	DefaultCatalogURL     = "https://raw.githubusercontent.com/liza-mas/liza/main/provider-catalog.yaml"
-	EnvCatalogURL         = "LIZA_PROVIDER_CATALOG_URL"
-	EnvCatalogTTL         = "LIZA_PROVIDER_CATALOG_TTL"
-	EnvCatalogTimeout     = "LIZA_PROVIDER_CATALOG_TIMEOUT"
-	defaultCatalogTTL     = time.Hour
-	defaultCatalogTimeout = 1500 * time.Millisecond
+	DefaultCatalogURL       = "https://raw.githubusercontent.com/liza-mas/liza/main/provider-catalog.yaml"
+	defaultCatalogTTL       = time.Hour
+	defaultCatalogTimeout   = 1500 * time.Millisecond
+	envCatalogURLSuffix     = "PROVIDER_CATALOG_URL"
+	envCatalogTTLSuffix     = "PROVIDER_CATALOG_TTL"
+	envCatalogTimeoutSuffix = "PROVIDER_CATALOG_TIMEOUT"
+)
+
+var (
+	EnvCatalogURL     = brand.EnvName(envCatalogURLSuffix)
+	EnvCatalogTTL     = brand.EnvName(envCatalogTTLSuffix)
+	EnvCatalogTimeout = brand.EnvName(envCatalogTimeoutSuffix)
 )
 
 type Catalog struct {
@@ -536,7 +543,7 @@ func Detect(cat Catalog, lookPath func(string) (string, error)) []DetectionResul
 }
 
 func Load(ctx context.Context, opts LoadOptions) (Catalog, error) {
-	url := firstNonEmpty(opts.URL, os.Getenv(EnvCatalogURL), DefaultCatalogURL)
+	url := firstNonEmpty(opts.URL, catalogEnvValue(envCatalogURLSuffix), DefaultCatalogURL)
 	homeDir := opts.HomeDir
 	if homeDir == "" {
 		var err error
@@ -550,11 +557,11 @@ func Load(ctx context.Context, opts LoadOptions) (Catalog, error) {
 	}
 	ttl := opts.TTL
 	if ttl <= 0 {
-		ttl = durationFromEnv(EnvCatalogTTL, defaultCatalogTTL)
+		ttl = durationFromEnv(envCatalogTTLSuffix, defaultCatalogTTL)
 	}
 	timeout := opts.Timeout
 	if timeout <= 0 {
-		timeout = durationFromEnv(EnvCatalogTimeout, defaultCatalogTimeout)
+		timeout = durationFromEnv(envCatalogTimeoutSuffix, defaultCatalogTimeout)
 	}
 	now := opts.Now
 	if now == nil {
@@ -612,12 +619,29 @@ func Load(ctx context.Context, opts LoadOptions) (Catalog, error) {
 	if cat, cacheErr := readCatalogFile(cachePath); cacheErr == nil && meta.URL == "" {
 		return cat, nil
 	}
+	if cat, legacyPath, legacyErr := readLegacyCatalogCache(homeDir, cachePath); legacyErr == nil {
+		fmt.Fprintf(os.Stderr, "Warning: using legacy provider catalog cache %s; refresh providers to migrate it to %s\n", legacyPath, cachePath)
+		return cat, nil
+	}
 	return EmbeddedCatalog(), nil
 }
 
 func CachePaths(homeDir string) (catalogPath, metaPath string) {
-	cacheDir := filepath.Join(homeDir, ".liza", "cache")
+	cacheDir := filepath.Join(homeDir, paths.GlobalDirName(), "cache")
 	return filepath.Join(cacheDir, "provider-catalog.yaml"), filepath.Join(cacheDir, "provider-catalog.meta.json")
+}
+
+func readLegacyCatalogCache(homeDir, brandedCachePath string) (Catalog, string, error) {
+	if paths.GlobalDirName() == ".liza" {
+		return Catalog{}, "", os.ErrNotExist
+	}
+	if _, err := os.Stat(brandedCachePath); err == nil || !os.IsNotExist(err) {
+		return Catalog{}, "", os.ErrNotExist
+	}
+	// Pre-brand cache location retained for offline upgrades.
+	legacyPath := filepath.Join(homeDir, ".liza", "cache", "provider-catalog.yaml")
+	cat, err := readCatalogFile(legacyPath)
+	return cat, legacyPath, err
 }
 
 type fetchedCatalog struct {
@@ -725,8 +749,16 @@ func writeMeta(path string, meta CacheMeta) error {
 	return os.WriteFile(path, append(data, '\n'), 0644)
 }
 
-func durationFromEnv(name string, fallback time.Duration) time.Duration {
-	value := strings.TrimSpace(os.Getenv(name))
+func catalogEnvValue(suffix string) string {
+	lookup := brand.LookupEnv(os.Getenv, suffix)
+	if lookup.Warning != "" {
+		fmt.Fprintf(os.Stderr, "Warning: %s\n", lookup.Warning)
+	}
+	return lookup.Value
+}
+
+func durationFromEnv(suffix string, fallback time.Duration) time.Duration {
+	value := strings.TrimSpace(catalogEnvValue(suffix))
 	if value == "" {
 		return fallback
 	}

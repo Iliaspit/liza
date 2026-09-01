@@ -34,7 +34,7 @@ func TestTuiCmd_IntervalFlag(t *testing.T) {
 }
 
 func TestTuiCmd_ShortDescription(t *testing.T) {
-	want := "Interactive TUI dashboard for monitoring Liza"
+	want := "Interactive TUI dashboard for monitoring " + brand.NameTitle
 	if tuiCmd.Short != want {
 		t.Errorf("tuiCmd.Short = %q, want %q", tuiCmd.Short, want)
 	}

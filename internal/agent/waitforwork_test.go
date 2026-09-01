@@ -9,6 +9,7 @@ import (
 
 	"github.com/liza-mas/liza/internal/db"
 	"github.com/liza-mas/liza/internal/models"
+	"github.com/liza-mas/liza/internal/paths"
 	"github.com/liza-mas/liza/internal/testhelpers"
 )
 
@@ -823,7 +824,7 @@ func TestAbortPrecedenceOverWork(t *testing.T) {
 	}
 }
 
-// writePhase2PipelineConfig writes the full Phase 2 pipeline.yaml into tmpDir/.liza/
+// writePhase2PipelineConfig writes the full Phase 2 pipeline config into the project runtime directory.
 // so that LoadResolverForModels can find it.
 func writePhase2PipelineConfig(t *testing.T, tmpDir string) {
 	t.Helper()
@@ -925,7 +926,7 @@ func writePhase2PipelineConfig(t *testing.T, tmpDir string) {
     general-objective: epic-spec-subpipeline.epic-planning-pair
     detailed-spec: coding-subpipeline.code-planning-pair
 `
-	pipelinePath := filepath.Join(tmpDir, ".liza", "pipeline.yaml")
+	pipelinePath := filepath.Join(tmpDir, paths.ProjectDirName(), "pipeline.yaml")
 	if err := os.WriteFile(pipelinePath, []byte(pipelineYAML), 0644); err != nil {
 		t.Fatalf("Failed to write pipeline.yaml: %v", err)
 	}

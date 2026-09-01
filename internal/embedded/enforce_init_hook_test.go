@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/liza-mas/liza/internal/brand"
+	"github.com/liza-mas/liza/internal/paths"
 )
 
 func TestEnforceInitHook_AllowsCodexBashDocReads(t *testing.T) {
@@ -21,15 +22,15 @@ func TestEnforceInitHook_AllowsCodexBashDocReads(t *testing.T) {
 	hookPath := writeEnforceInitHook(t)
 	projectRoot := t.TempDir()
 	sessionID := "test-codex-bash-doc-reads-" + strings.ReplaceAll(t.Name(), "/", "-") + "-" + time.Now().Format("150405.000000000")
-	stateDir := filepath.Join(os.TempDir(), "liza-init-gate-"+sessionID)
+	stateDir := filepath.Join(os.TempDir(), brand.BinaryName+"-init-gate-"+sessionID)
 	defer os.RemoveAll(stateDir)
 
-	runHook(t, hookPath, `{"session_id":"`+sessionID+`","cwd":"`+projectRoot+`","tool_name":"Bash","tool_input":{"command":"cat ~/.liza/CORE.md"}}`, 0)
-	runHook(t, hookPath, `{"session_id":"`+sessionID+`","cwd":"`+projectRoot+`","tool_name":"Bash","tool_input":{"command":"sed -n '1,120p' ~/.liza/AGENT_TOOLS.md"}}`, 0)
-	runHook(t, hookPath, `{"session_id":"`+sessionID+`","cwd":"`+projectRoot+`","tool_name":"Bash","tool_input":{"command":"cat ~/.liza/PAIRING_MODE.md"}}`, 0)
+	runHook(t, hookPath, `{"session_id":"`+sessionID+`","cwd":"`+projectRoot+"\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"cat ~/"+paths.GlobalDirName()+"/CORE.md\"}}", 0)
+	runHook(t, hookPath, `{"session_id":"`+sessionID+`","cwd":"`+projectRoot+"\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"sed -n '1,120p' ~/"+paths.GlobalDirName()+"/AGENT_TOOLS.md\"}}", 0)
+	runHook(t, hookPath, `{"session_id":"`+sessionID+`","cwd":"`+projectRoot+"\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"cat ~/"+paths.GlobalDirName()+"/PAIRING_MODE.md\"}}", 0)
 	runHook(t, hookPath, `{"session_id":"`+sessionID+`","cwd":"`+projectRoot+`","tool_name":"Bash","tool_input":{"command":"sed -n '1,260p' `+projectRoot+`/REPOSITORY.md"}}`, 0)
 	runHook(t, hookPath, `{"session_id":"`+sessionID+`","cwd":"`+projectRoot+`","tool_name":"Bash","tool_input":{"command":"sed -n '1,20p' `+projectRoot+`/docs/USAGE.md"}}`, 0)
-	runHook(t, hookPath, `{"session_id":"`+sessionID+`","cwd":"`+projectRoot+`","tool_name":"Bash","tool_input":{"command":"cat ~/.liza/COLLABORATION_CONTINUITY.md"}}`, 0)
+	runHook(t, hookPath, `{"session_id":"`+sessionID+`","cwd":"`+projectRoot+"\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"cat ~/"+paths.GlobalDirName()+"/COLLABORATION_CONTINUITY.md\"}}", 0)
 
 	if _, err := os.Stat(filepath.Join(stateDir, "CLEARED")); err != nil {
 		t.Fatalf("expected init gate to clear after all Pairing init doc reads: %v", err)
@@ -60,15 +61,15 @@ func TestEnforceInitHook_NativeReadsClearPairingGate(t *testing.T) {
 		}
 	}
 	sessionID := "test-native-pairing-init-" + strings.ReplaceAll(t.Name(), "/", "-") + "-" + time.Now().Format("150405.000000000")
-	stateDir := filepath.Join(os.TempDir(), "liza-init-gate-"+sessionID)
+	stateDir := filepath.Join(os.TempDir(), brand.BinaryName+"-init-gate-"+sessionID)
 	defer os.RemoveAll(stateDir)
 	for _, path := range []string{
-		filepath.Join(homeDir, ".liza", "AGENT_TOOLS.md"),
-		filepath.Join(homeDir, ".liza", "PAIRING_MODE.md"),
+		filepath.Join(homeDir, paths.GlobalDirName(), "AGENT_TOOLS.md"),
+		filepath.Join(homeDir, paths.GlobalDirName(), "PAIRING_MODE.md"),
 		filepath.Join(projectRoot, "GUARDRAILS.md"),
 		filepath.Join(projectRoot, "REPOSITORY.md"),
 		filepath.Join(projectRoot, "docs", "USAGE.md"),
-		filepath.Join(homeDir, ".liza", "COLLABORATION_CONTINUITY.md"),
+		filepath.Join(homeDir, paths.GlobalDirName(), "COLLABORATION_CONTINUITY.md"),
 	} {
 		payload, err := json.Marshal(map[string]any{
 			"session_id": sessionID,
@@ -111,7 +112,7 @@ func TestEnforceInitHook_WrongPathDocumentBasenamesDoNotClearGate(t *testing.T) 
 	}
 
 	sessionID := "test-wrong-path-doc-basenames-" + strings.ReplaceAll(t.Name(), "/", "-") + "-" + time.Now().Format("150405.000000000")
-	stateDir := filepath.Join(os.TempDir(), "liza-init-gate-"+sessionID)
+	stateDir := filepath.Join(os.TempDir(), brand.BinaryName+"-init-gate-"+sessionID)
 	defer os.RemoveAll(stateDir)
 	wrongRoot := t.TempDir()
 	for _, path := range []string{
@@ -148,15 +149,15 @@ func TestEnforceInitHook_AllowsConditionalGuardrailsRead(t *testing.T) {
 	hookPath := writeEnforceInitHook(t)
 	projectRoot := t.TempDir()
 	sessionID := "test-codex-bash-guardrails-conditional-" + strings.ReplaceAll(t.Name(), "/", "-") + "-" + time.Now().Format("150405.000000000")
-	stateDir := filepath.Join(os.TempDir(), "liza-init-gate-"+sessionID)
+	stateDir := filepath.Join(os.TempDir(), brand.BinaryName+"-init-gate-"+sessionID)
 	defer os.RemoveAll(stateDir)
 
-	runHook(t, hookPath, `{"session_id":"`+sessionID+`","cwd":"`+projectRoot+`","tool_name":"Bash","tool_input":{"command":"sed -n '1,120p' ~/.liza/AGENT_TOOLS.md"}}`, 0)
-	runHook(t, hookPath, `{"session_id":"`+sessionID+`","cwd":"`+projectRoot+`","tool_name":"Bash","tool_input":{"command":"cat ~/.liza/PAIRING_MODE.md"}}`, 0)
+	runHook(t, hookPath, `{"session_id":"`+sessionID+`","cwd":"`+projectRoot+"\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"sed -n '1,120p' ~/"+paths.GlobalDirName()+"/AGENT_TOOLS.md\"}}", 0)
+	runHook(t, hookPath, `{"session_id":"`+sessionID+`","cwd":"`+projectRoot+"\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"cat ~/"+paths.GlobalDirName()+"/PAIRING_MODE.md\"}}", 0)
 	runHook(t, hookPath, `{"session_id":"`+sessionID+`","cwd":"`+projectRoot+`","tool_name":"Bash","tool_input":{"command":"if [ -f `+projectRoot+`/GUARDRAILS.md ]; then sed -n '1,260p' `+projectRoot+`/GUARDRAILS.md; fi"}}`, 0)
 	runHook(t, hookPath, `{"session_id":"`+sessionID+`","cwd":"`+projectRoot+`","tool_name":"Bash","tool_input":{"command":"sed -n '1,260p' `+projectRoot+`/REPOSITORY.md"}}`, 0)
 	runHook(t, hookPath, `{"session_id":"`+sessionID+`","cwd":"`+projectRoot+`","tool_name":"Bash","tool_input":{"command":"sed -n '1,20p' `+projectRoot+`/docs/USAGE.md"}}`, 0)
-	runHook(t, hookPath, `{"session_id":"`+sessionID+`","cwd":"`+projectRoot+`","tool_name":"Bash","tool_input":{"command":"cat ~/.liza/COLLABORATION_CONTINUITY.md"}}`, 0)
+	runHook(t, hookPath, `{"session_id":"`+sessionID+`","cwd":"`+projectRoot+"\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"cat ~/"+paths.GlobalDirName()+"/COLLABORATION_CONTINUITY.md\"}}", 0)
 
 	if _, err := os.Stat(filepath.Join(stateDir, "CLEARED")); err != nil {
 		t.Fatalf("expected init gate to clear after full Pairing init including conditional guardrails read: %v", err)
@@ -173,12 +174,12 @@ func TestEnforceInitHook_AllowsPairingInitCompanionDocReadsBeforeGateClear(t *te
 	hookPath := writeEnforceInitHook(t)
 	projectRoot := t.TempDir()
 	sessionID := "test-codex-bash-pairing-init-docs-" + strings.ReplaceAll(t.Name(), "/", "-") + "-" + time.Now().Format("150405.000000000")
-	stateDir := filepath.Join(os.TempDir(), "liza-init-gate-"+sessionID)
+	stateDir := filepath.Join(os.TempDir(), brand.BinaryName+"-init-gate-"+sessionID)
 	defer os.RemoveAll(stateDir)
 
 	runHook(t, hookPath, `{"session_id":"`+sessionID+`","cwd":"`+projectRoot+`","tool_name":"Bash","tool_input":{"command":"sed -n '1,260p' `+projectRoot+`/REPOSITORY.md"}}`, 0)
 	runHook(t, hookPath, `{"session_id":"`+sessionID+`","cwd":"`+projectRoot+`","tool_name":"Bash","tool_input":{"command":"sed -n '1,20p' `+projectRoot+`/docs/USAGE.md"}}`, 0)
-	runHook(t, hookPath, `{"session_id":"`+sessionID+`","cwd":"`+projectRoot+`","tool_name":"Bash","tool_input":{"command":"cat ~/.liza/COLLABORATION_CONTINUITY.md"}}`, 0)
+	runHook(t, hookPath, `{"session_id":"`+sessionID+`","cwd":"`+projectRoot+"\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"cat ~/"+paths.GlobalDirName()+"/COLLABORATION_CONTINUITY.md\"}}", 0)
 
 	if _, err := os.Stat(filepath.Join(stateDir, "CLEARED")); !os.IsNotExist(err) {
 		t.Fatalf("companion init doc reads should not clear the gate, stat err: %v", err)
@@ -203,7 +204,7 @@ func TestEnforceInitHook_BlocksMultiFileInitDocReads(t *testing.T) {
 		},
 		{
 			name:    "multi-file global cat",
-			command: "cat ~/.liza/AGENT_TOOLS.md ~/.liza/PAIRING_MODE.md",
+			command: "cat ~/" + paths.GlobalDirName() + "/AGENT_TOOLS.md ~/" + paths.GlobalDirName() + "/PAIRING_MODE.md",
 		},
 		{
 			name:    "multi-file sed",
@@ -214,7 +215,7 @@ func TestEnforceInitHook_BlocksMultiFileInitDocReads(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			sessionID := "test-codex-bash-multifile-init-read-" + strings.ReplaceAll(t.Name(), "/", "-") + "-" + time.Now().Format("150405.000000000")
-			stateDir := filepath.Join(os.TempDir(), "liza-init-gate-"+sessionID)
+			stateDir := filepath.Join(os.TempDir(), brand.BinaryName+"-init-gate-"+sessionID)
 			defer os.RemoveAll(stateDir)
 
 			output := runHook(t, hookPath, `{"session_id":"`+sessionID+`","cwd":"`+projectRoot+`","tool_name":"Bash","tool_input":{"command":"`+tc.command+`"}}`, 2)
@@ -234,9 +235,9 @@ func TestEnforceInitHook_RejectsStaleGlobalRootAndStopsRepeatedRetries(t *testin
 	}
 
 	previousNameLower, previousBinaryName, previousGlobalDirName := brand.NameLower, brand.BinaryName, brand.GlobalDirName
-	brand.NameLower = "omni"
-	brand.BinaryName = "omni-ee"
-	brand.GlobalDirName = ".omni-ee"
+	brand.NameLower = "acme"
+	brand.BinaryName = "acme-cli"
+	brand.GlobalDirName = ".acme-agent"
 	t.Cleanup(func() {
 		brand.NameLower = previousNameLower
 		brand.BinaryName = previousBinaryName
@@ -246,19 +247,19 @@ func TestEnforceInitHook_RejectsStaleGlobalRootAndStopsRepeatedRetries(t *testin
 	hookPath := writeEnforceInitHook(t)
 	projectRoot := t.TempDir()
 	sessionID := "test-codex-stale-global-root-" + strings.ReplaceAll(t.Name(), "/", "-") + "-" + time.Now().Format("150405.000000000")
-	stateDir := filepath.Join(os.TempDir(), "liza-init-gate-"+sessionID)
+	stateDir := filepath.Join(os.TempDir(), brand.BinaryName+"-init-gate-"+sessionID)
 	defer os.RemoveAll(stateDir)
-	payload := bashPayload(t, sessionID, projectRoot, "cat ~/.omni/PAIRING_MODE.md")
+	payload := bashPayload(t, sessionID, projectRoot, "cat ~/."+brand.NameLower+"/PAIRING_MODE.md")
 
 	first := runHook(t, hookPath, payload, 2)
-	if !strings.Contains(first, "Expected global contract root: ~/.omni-ee/") {
+	if !strings.Contains(first, "Expected global contract root: ~/"+paths.GlobalDirName()+"/") {
 		t.Fatalf("stale root rejection should name the authoritative root, got:\n%s", first)
 	}
 	if strings.Contains(first, "STOP_RETRYING") {
 		t.Fatalf("first invalid read should allow one correction, got:\n%s", first)
 	}
 
-	runHook(t, hookPath, bashPayload(t, sessionID, projectRoot, "cat ~/.omni-ee/PAIRING_MODE.md"), 0)
+	runHook(t, hookPath, bashPayload(t, sessionID, projectRoot, "cat ~/"+paths.GlobalDirName()+"/PAIRING_MODE.md"), 0)
 
 	second := runHook(t, hookPath, payload, 2)
 	if strings.Contains(second, "STOP_RETRYING") {
@@ -286,24 +287,24 @@ func TestEnforceInitHook_SuccessfulNativeReadsResetRepeatedInvalidMarker(t *test
 		{
 			name:      "native Read",
 			toolName:  "Read",
-			toolInput: map[string]any{"file_path": "~/.liza/AGENT_TOOLS.md"},
+			toolInput: map[string]any{"file_path": "~/" + paths.GlobalDirName() + "/AGENT_TOOLS.md"},
 		},
 		{
 			name:      "MCP filesystem read",
 			toolName:  "mcp__filesystem__read_text_file",
-			toolInput: map[string]any{"path": "~/.liza/AGENT_TOOLS.md"},
+			toolInput: map[string]any{"path": "~/" + paths.GlobalDirName() + "/AGENT_TOOLS.md"},
 		},
 		{
 			name:      "MCP filesystem multiple-file read",
 			toolName:  "mcp__filesystem__read_multiple_files",
-			toolInput: map[string]any{"paths": []string{projectRoot + "/unrelated.txt", "~/.liza/AGENT_TOOLS.md"}},
+			toolInput: map[string]any{"paths": []string{projectRoot + "/unrelated.txt", "~/" + paths.GlobalDirName() + "/AGENT_TOOLS.md"}},
 		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			sessionID := "test-codex-native-read-reset-" + strings.ReplaceAll(t.Name(), "/", "-") + "-" + time.Now().Format("150405.000000000")
-			stateDir := filepath.Join(os.TempDir(), "liza-init-gate-"+sessionID)
+			stateDir := filepath.Join(os.TempDir(), brand.BinaryName+"-init-gate-"+sessionID)
 			defer os.RemoveAll(stateDir)
 			invalidPayload := bashPayload(t, sessionID, projectRoot, "cat ~/.wrong/PAIRING_MODE.md")
 
@@ -363,7 +364,7 @@ func TestEnforceInitHook_UnrelatedNativeReadsDoNotResetRepeatedInvalidMarker(t *
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			sessionID := "test-codex-unrelated-read-marker-" + strings.ReplaceAll(t.Name(), "/", "-") + "-" + time.Now().Format("150405.000000000")
-			stateDir := filepath.Join(os.TempDir(), "liza-init-gate-"+sessionID)
+			stateDir := filepath.Join(os.TempDir(), brand.BinaryName+"-init-gate-"+sessionID)
 			defer os.RemoveAll(stateDir)
 			invalidPayload := bashPayload(t, sessionID, projectRoot, "cat ~/.wrong/PAIRING_MODE.md")
 
@@ -420,7 +421,7 @@ func TestEnforceInitHook_AllowsGuardrailsExistenceProbe(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			sessionID := "test-codex-bash-guardrails-probe-" + strings.ReplaceAll(t.Name(), "/", "-") + "-" + time.Now().Format("150405.000000000")
-			stateDir := filepath.Join(os.TempDir(), "liza-init-gate-"+sessionID)
+			stateDir := filepath.Join(os.TempDir(), brand.BinaryName+"-init-gate-"+sessionID)
 			defer os.RemoveAll(stateDir)
 
 			runHook(t, hookPath, `{"session_id":"`+sessionID+`","cwd":"`+projectRoot+`","tool_name":"Bash","tool_input":{"command":"`+tc.command+`"}}`, 0)
@@ -459,7 +460,7 @@ func TestEnforceInitHook_AllowsGuardrailsProbeWrappers(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			sessionID := "test-codex-bash-guardrails-wrapper-" + strings.ReplaceAll(t.Name(), "/", "-") + "-" + time.Now().Format("150405.000000000")
-			stateDir := filepath.Join(os.TempDir(), "liza-init-gate-"+sessionID)
+			stateDir := filepath.Join(os.TempDir(), brand.BinaryName+"-init-gate-"+sessionID)
 			defer os.RemoveAll(stateDir)
 
 			runHook(t, hookPath, bashPayload(t, sessionID, projectRoot, tc.command), 0)
@@ -483,15 +484,15 @@ func TestEnforceInitHook_GuardrailsWrapperClearsAfterRequiredDocs(t *testing.T) 
 	hookPath := writeEnforceInitHook(t)
 	projectRoot := t.TempDir()
 	sessionID := "test-codex-bash-guardrails-wrapper-clears-" + strings.ReplaceAll(t.Name(), "/", "-") + "-" + time.Now().Format("150405.000000000")
-	stateDir := filepath.Join(os.TempDir(), "liza-init-gate-"+sessionID)
+	stateDir := filepath.Join(os.TempDir(), brand.BinaryName+"-init-gate-"+sessionID)
 	defer os.RemoveAll(stateDir)
 
-	runHook(t, hookPath, bashPayload(t, sessionID, projectRoot, "cat ~/.liza/AGENT_TOOLS.md"), 0)
-	runHook(t, hookPath, bashPayload(t, sessionID, projectRoot, "cat ~/.liza/PAIRING_MODE.md"), 0)
+	runHook(t, hookPath, bashPayload(t, sessionID, projectRoot, "cat ~/"+paths.GlobalDirName()+"/AGENT_TOOLS.md"), 0)
+	runHook(t, hookPath, bashPayload(t, sessionID, projectRoot, "cat ~/"+paths.GlobalDirName()+"/PAIRING_MODE.md"), 0)
 	runHook(t, hookPath, bashPayload(t, sessionID, projectRoot, `test -f `+projectRoot+`/GUARDRAILS.md && cat `+projectRoot+`/GUARDRAILS.md || echo ABSENT`), 0)
 	runHook(t, hookPath, `{"session_id":"`+sessionID+`","cwd":"`+projectRoot+`","tool_name":"Bash","tool_input":{"command":"sed -n '1,260p' `+projectRoot+`/REPOSITORY.md"}}`, 0)
 	runHook(t, hookPath, `{"session_id":"`+sessionID+`","cwd":"`+projectRoot+`","tool_name":"Bash","tool_input":{"command":"sed -n '1,20p' `+projectRoot+`/docs/USAGE.md"}}`, 0)
-	runHook(t, hookPath, `{"session_id":"`+sessionID+`","cwd":"`+projectRoot+`","tool_name":"Bash","tool_input":{"command":"cat ~/.liza/COLLABORATION_CONTINUITY.md"}}`, 0)
+	runHook(t, hookPath, `{"session_id":"`+sessionID+`","cwd":"`+projectRoot+"\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"cat ~/"+paths.GlobalDirName()+"/COLLABORATION_CONTINUITY.md\"}}", 0)
 
 	if _, err := os.Stat(filepath.Join(stateDir, "CLEARED")); err != nil {
 		t.Fatalf("guardrails wrapper should clear gate once the full Pairing init set is read: %v", err)
@@ -507,7 +508,7 @@ func TestEnforceInitHook_DoesNotBlockIndexedPairingRepoAfterInit(t *testing.T) {
 	projectRoot := t.TempDir()
 	writeIndexedRepoMarkers(t, projectRoot)
 	sessionID := "test-codex-bash-pairing-index-advisory-" + strings.ReplaceAll(t.Name(), "/", "-") + "-" + time.Now().Format("150405.000000000")
-	stateDir := filepath.Join(os.TempDir(), "liza-init-gate-"+sessionID)
+	stateDir := filepath.Join(os.TempDir(), brand.BinaryName+"-init-gate-"+sessionID)
 	defer os.RemoveAll(stateDir)
 
 	completePairingInit(t, hookPath, sessionID, projectRoot)
@@ -526,7 +527,7 @@ func TestEnforceInitHook_AllowsPairingRepoWithIndexFileButNoLizaIndexHook(t *tes
 		t.Fatalf("write stacklit index: %v", err)
 	}
 	sessionID := "test-codex-bash-no-pairing-index-advisory-" + strings.ReplaceAll(t.Name(), "/", "-") + "-" + time.Now().Format("150405.000000000")
-	stateDir := filepath.Join(os.TempDir(), "liza-init-gate-"+sessionID)
+	stateDir := filepath.Join(os.TempDir(), brand.BinaryName+"-init-gate-"+sessionID)
 	defer os.RemoveAll(stateDir)
 
 	completePairingInit(t, hookPath, sessionID, projectRoot)
@@ -550,16 +551,16 @@ func TestEnforceInitHook_PairingModeListsCompanionDocsUntilRead(t *testing.T) {
 		t.Fatalf("write usage doc: %v", err)
 	}
 	sessionID := "test-codex-bash-pairing-missing-companions-" + strings.ReplaceAll(t.Name(), "/", "-") + "-" + time.Now().Format("150405.000000000")
-	stateDir := filepath.Join(os.TempDir(), "liza-init-gate-"+sessionID)
+	stateDir := filepath.Join(os.TempDir(), brand.BinaryName+"-init-gate-"+sessionID)
 	defer os.RemoveAll(stateDir)
 
-	runHook(t, hookPath, `{"session_id":"`+sessionID+`","cwd":"`+projectRoot+`","tool_name":"Bash","tool_input":{"command":"cat ~/.liza/AGENT_TOOLS.md"}}`, 0)
-	runHook(t, hookPath, `{"session_id":"`+sessionID+`","cwd":"`+projectRoot+`","tool_name":"Bash","tool_input":{"command":"cat ~/.liza/PAIRING_MODE.md"}}`, 0)
+	runHook(t, hookPath, `{"session_id":"`+sessionID+`","cwd":"`+projectRoot+"\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"cat ~/"+paths.GlobalDirName()+"/AGENT_TOOLS.md\"}}", 0)
+	runHook(t, hookPath, `{"session_id":"`+sessionID+`","cwd":"`+projectRoot+"\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"cat ~/"+paths.GlobalDirName()+"/PAIRING_MODE.md\"}}", 0)
 
 	output := runHook(t, hookPath, `{"session_id":"`+sessionID+`","cwd":"`+projectRoot+`","tool_name":"Bash","tool_input":{"command":"git diff --cached"}}`, 2)
 	if !strings.Contains(output, "REPOSITORY.md (repo root)") ||
 		!strings.Contains(output, "docs/USAGE.md (from repo root)") ||
-		!strings.Contains(output, "~/.liza/COLLABORATION_CONTINUITY.md") {
+		!strings.Contains(output, "~/"+paths.GlobalDirName()+"/COLLABORATION_CONTINUITY.md") {
 		t.Fatalf("missing-doc message should mention Pairing companion docs after Pairing mode is selected, got:\n%s", output)
 	}
 	if _, err := os.Stat(filepath.Join(stateDir, "CLEARED")); !os.IsNotExist(err) {
@@ -575,22 +576,22 @@ func TestEnforceInitHook_PairingModeOmitsAbsentProjectCompanionDocs(t *testing.T
 	hookPath := writeEnforceInitHook(t)
 	projectRoot := t.TempDir()
 	sessionID := "test-codex-bash-pairing-absent-project-companions-" + strings.ReplaceAll(t.Name(), "/", "-") + "-" + time.Now().Format("150405.000000000")
-	stateDir := filepath.Join(os.TempDir(), "liza-init-gate-"+sessionID)
+	stateDir := filepath.Join(os.TempDir(), brand.BinaryName+"-init-gate-"+sessionID)
 	defer os.RemoveAll(stateDir)
 
-	runHook(t, hookPath, bashPayload(t, sessionID, projectRoot, "cat ~/.liza/AGENT_TOOLS.md"), 0)
-	runHook(t, hookPath, bashPayload(t, sessionID, projectRoot, "cat ~/.liza/PAIRING_MODE.md"), 0)
+	runHook(t, hookPath, bashPayload(t, sessionID, projectRoot, "cat ~/"+paths.GlobalDirName()+"/AGENT_TOOLS.md"), 0)
+	runHook(t, hookPath, bashPayload(t, sessionID, projectRoot, "cat ~/"+paths.GlobalDirName()+"/PAIRING_MODE.md"), 0)
 
 	output := runHook(t, hookPath, bashPayload(t, sessionID, projectRoot, "git diff --cached"), 2)
 	if strings.Contains(output, "REPOSITORY.md (repo root)") ||
 		strings.Contains(output, "docs/USAGE.md (from repo root)") {
 		t.Fatalf("missing-doc message should omit absent Pairing project companion docs, got:\n%s", output)
 	}
-	if !strings.Contains(output, "~/.liza/COLLABORATION_CONTINUITY.md") {
+	if !strings.Contains(output, "~/"+paths.GlobalDirName()+"/COLLABORATION_CONTINUITY.md") {
 		t.Fatalf("missing-doc message should still require collaboration continuity, got:\n%s", output)
 	}
 
-	runHook(t, hookPath, bashPayload(t, sessionID, projectRoot, "cat ~/.liza/COLLABORATION_CONTINUITY.md"), 0)
+	runHook(t, hookPath, bashPayload(t, sessionID, projectRoot, "cat ~/"+paths.GlobalDirName()+"/COLLABORATION_CONTINUITY.md"), 0)
 	if _, err := os.Stat(filepath.Join(stateDir, "CLEARED")); err != nil {
 		t.Fatalf("pairing mode should clear when absent project companion docs are the only unread docs: %v", err)
 	}
@@ -604,11 +605,11 @@ func TestEnforceInitHook_SubagentModeDoesNotRequirePairingCompanionDocs(t *testi
 	hookPath := writeEnforceInitHook(t)
 	projectRoot := t.TempDir()
 	sessionID := "test-codex-bash-subagent-no-pairing-docs-" + strings.ReplaceAll(t.Name(), "/", "-") + "-" + time.Now().Format("150405.000000000")
-	stateDir := filepath.Join(os.TempDir(), "liza-init-gate-"+sessionID)
+	stateDir := filepath.Join(os.TempDir(), brand.BinaryName+"-init-gate-"+sessionID)
 	defer os.RemoveAll(stateDir)
 
-	runHook(t, hookPath, `{"session_id":"`+sessionID+`","cwd":"`+projectRoot+`","tool_name":"Bash","tool_input":{"command":"cat ~/.liza/AGENT_TOOLS.md"}}`, 0)
-	runHook(t, hookPath, `{"session_id":"`+sessionID+`","cwd":"`+projectRoot+`","tool_name":"Bash","tool_input":{"command":"cat ~/.liza/SUBAGENT_MODE.md"}}`, 0)
+	runHook(t, hookPath, `{"session_id":"`+sessionID+`","cwd":"`+projectRoot+"\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"cat ~/"+paths.GlobalDirName()+"/AGENT_TOOLS.md\"}}", 0)
+	runHook(t, hookPath, `{"session_id":"`+sessionID+`","cwd":"`+projectRoot+"\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"cat ~/"+paths.GlobalDirName()+"/SUBAGENT_MODE.md\"}}", 0)
 
 	if _, err := os.Stat(filepath.Join(stateDir, "CLEARED")); err != nil {
 		t.Fatalf("subagent mode should clear without Pairing companion docs: %v", err)
@@ -623,14 +624,14 @@ func TestEnforceInitHook_OmitsAbsentGuardrailsFromMissingList(t *testing.T) {
 	hookPath := writeEnforceInitHook(t)
 	projectRoot := t.TempDir()
 	sessionID := "test-codex-bash-absent-guardrails-" + strings.ReplaceAll(t.Name(), "/", "-") + "-" + time.Now().Format("150405.000000000")
-	stateDir := filepath.Join(os.TempDir(), "liza-init-gate-"+sessionID)
+	stateDir := filepath.Join(os.TempDir(), brand.BinaryName+"-init-gate-"+sessionID)
 	defer os.RemoveAll(stateDir)
 
 	output := runHook(t, hookPath, `{"session_id":"`+sessionID+`","cwd":"`+projectRoot+`","tool_name":"Bash","tool_input":{"command":"git diff --cached"}}`, 2)
 	if strings.Contains(output, "GUARDRAILS.md") {
 		t.Fatalf("missing-doc message should omit absent GUARDRAILS.md, got:\n%s", output)
 	}
-	if !strings.Contains(output, "~/.liza/AGENT_TOOLS.md") || !strings.Contains(output, "The applicable mode contract from the Mode Selection Gate") {
+	if !strings.Contains(output, "~/"+paths.GlobalDirName()+"/AGENT_TOOLS.md") || !strings.Contains(output, "The applicable mode contract from the Mode Selection Gate") {
 		t.Fatalf("missing-doc message should still mention remaining required docs, got:\n%s", output)
 	}
 	if _, err := os.Stat(filepath.Join(stateDir, "GUARDRAILS.done")); err != nil {
@@ -649,7 +650,7 @@ func TestEnforceInitHook_ListsPresentGuardrailsInMissingList(t *testing.T) {
 		t.Fatalf("write guardrails: %v", err)
 	}
 	sessionID := "test-codex-bash-present-guardrails-" + strings.ReplaceAll(t.Name(), "/", "-") + "-" + time.Now().Format("150405.000000000")
-	stateDir := filepath.Join(os.TempDir(), "liza-init-gate-"+sessionID)
+	stateDir := filepath.Join(os.TempDir(), brand.BinaryName+"-init-gate-"+sessionID)
 	defer os.RemoveAll(stateDir)
 
 	output := runHook(t, hookPath, `{"session_id":"`+sessionID+`","cwd":"`+projectRoot+`","tool_name":"Bash","tool_input":{"command":"git diff --cached"}}`, 2)
@@ -672,10 +673,10 @@ func TestEnforceInitHook_BlocksComplexCodexBashDocReads(t *testing.T) {
 	hookPath := writeEnforceInitHook(t)
 	projectRoot := t.TempDir()
 	sessionID := "test-codex-bash-complex-read-" + strings.ReplaceAll(t.Name(), "/", "-") + "-" + time.Now().Format("150405.000000000")
-	stateDir := filepath.Join(os.TempDir(), "liza-init-gate-"+sessionID)
+	stateDir := filepath.Join(os.TempDir(), brand.BinaryName+"-init-gate-"+sessionID)
 	defer os.RemoveAll(stateDir)
 
-	output := runHook(t, hookPath, `{"session_id":"`+sessionID+`","cwd":"`+projectRoot+`","tool_name":"Bash","tool_input":{"command":"sed -n '1p' ~/.liza/AGENT_TOOLS.md; rm -rf /tmp/not-real"}}`, 2)
+	output := runHook(t, hookPath, `{"session_id":"`+sessionID+`","cwd":"`+projectRoot+"\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"sed -n '1p' ~/"+paths.GlobalDirName()+"/AGENT_TOOLS.md; rm -rf /tmp/not-real\"}}", 2)
 	if !strings.Contains(output, "simple read-only doc commands") {
 		t.Fatalf("expected complex Bash doc read to explain the restriction, got:\n%s", output)
 	}
@@ -695,27 +696,27 @@ func TestEnforceInitHook_BlocksUnsafeCodexBashDocReads(t *testing.T) {
 	}{
 		{
 			name:    "head",
-			command: "head -n 20 ~/.liza/AGENT_TOOLS.md",
+			command: "head -n 20 ~/" + paths.GlobalDirName() + "/AGENT_TOOLS.md",
 		},
 		{
 			name:    "tail",
-			command: "tail -n 20 ~/.liza/AGENT_TOOLS.md",
+			command: "tail -n 20 ~/" + paths.GlobalDirName() + "/AGENT_TOOLS.md",
 		},
 		{
 			name:    "wc",
-			command: "wc -l ~/.liza/AGENT_TOOLS.md",
+			command: "wc -l ~/" + paths.GlobalDirName() + "/AGENT_TOOLS.md",
 		},
 		{
 			name:    "cat extra operand",
-			command: "cat ~/.liza/AGENT_TOOLS.md /tmp/not-a-doc",
+			command: "cat ~/" + paths.GlobalDirName() + "/AGENT_TOOLS.md /tmp/not-a-doc",
 		},
 		{
 			name:    "sed in-place",
-			command: "sed -i s/x/y/ ~/.liza/AGENT_TOOLS.md",
+			command: "sed -i s/x/y/ ~/" + paths.GlobalDirName() + "/AGENT_TOOLS.md",
 		},
 		{
 			name:    "cat redirected",
-			command: "cat ~/.liza/AGENT_TOOLS.md > /tmp/copy",
+			command: "cat ~/" + paths.GlobalDirName() + "/AGENT_TOOLS.md > /tmp/copy",
 		},
 		{
 			name:    "guardrails conditional with extra command",
@@ -723,22 +724,22 @@ func TestEnforceInitHook_BlocksUnsafeCodexBashDocReads(t *testing.T) {
 		},
 		{
 			name:    "guardrails wrapper reads different file",
-			command: "test -f GUARDRAILS.md && cat ~/.liza/AGENT_TOOLS.md || echo absent",
+			command: "test -f GUARDRAILS.md && cat ~/" + paths.GlobalDirName() + "/AGENT_TOOLS.md || echo absent",
 		},
 		{
 			name:    "guardrails wrapper with non-echo else branch",
-			command: "test -f GUARDRAILS.md && cat GUARDRAILS.md || cat ~/.liza/AGENT_TOOLS.md",
+			command: "test -f GUARDRAILS.md && cat GUARDRAILS.md || cat ~/" + paths.GlobalDirName() + "/AGENT_TOOLS.md",
 		},
 		{
 			name:    "multi-file read with non-init path",
-			command: "wc -l ~/.liza/AGENT_TOOLS.md /tmp/not-a-doc",
+			command: "wc -l ~/" + paths.GlobalDirName() + "/AGENT_TOOLS.md /tmp/not-a-doc",
 		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			sessionID := "test-codex-bash-unsafe-read-" + strings.ReplaceAll(t.Name(), "/", "-") + "-" + time.Now().Format("150405.000000000")
-			stateDir := filepath.Join(os.TempDir(), "liza-init-gate-"+sessionID)
+			stateDir := filepath.Join(os.TempDir(), brand.BinaryName+"-init-gate-"+sessionID)
 			defer os.RemoveAll(stateDir)
 
 			payload := `{"session_id":"` + sessionID + `","cwd":"` + projectRoot + `","tool_name":"Bash","tool_input":{"command":"` + tc.command + `"}}`
@@ -765,11 +766,11 @@ func writeEnforceInitHook(t *testing.T) string {
 func completePairingInit(t *testing.T, hookPath, sessionID, projectRoot string) {
 	t.Helper()
 
-	runHook(t, hookPath, bashPayload(t, sessionID, projectRoot, "cat ~/.liza/AGENT_TOOLS.md"), 0)
-	runHook(t, hookPath, bashPayload(t, sessionID, projectRoot, "cat ~/.liza/PAIRING_MODE.md"), 0)
+	runHook(t, hookPath, bashPayload(t, sessionID, projectRoot, "cat ~/"+paths.GlobalDirName()+"/AGENT_TOOLS.md"), 0)
+	runHook(t, hookPath, bashPayload(t, sessionID, projectRoot, "cat ~/"+paths.GlobalDirName()+"/PAIRING_MODE.md"), 0)
 	runHook(t, hookPath, bashPayload(t, sessionID, projectRoot, "sed -n '1,260p' "+projectRoot+"/REPOSITORY.md"), 0)
 	runHook(t, hookPath, bashPayload(t, sessionID, projectRoot, "sed -n '1,20p' "+projectRoot+"/docs/USAGE.md"), 0)
-	runHook(t, hookPath, bashPayload(t, sessionID, projectRoot, "cat ~/.liza/COLLABORATION_CONTINUITY.md"), 0)
+	runHook(t, hookPath, bashPayload(t, sessionID, projectRoot, "cat ~/"+paths.GlobalDirName()+"/COLLABORATION_CONTINUITY.md"), 0)
 }
 
 func writeIndexedRepoMarkers(t *testing.T, projectRoot string) {
@@ -779,7 +780,7 @@ func writeIndexedRepoMarkers(t *testing.T, projectRoot string) {
 	if err := os.MkdirAll(hooksDir, 0755); err != nil {
 		t.Fatalf("create git hooks dir: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(hooksDir, "post-commit"), []byte("#!/bin/sh\nliza-index\n"), 0755); err != nil {
+	if err := os.WriteFile(filepath.Join(hooksDir, "post-commit"), []byte("#!/bin/sh\n"+brand.BinaryName+"-index\n"), 0755); err != nil {
 		t.Fatalf("write post-commit hook: %v", err)
 	}
 	for _, name := range []string{"stacklit.json", "go.scip", "python.scip"} {

@@ -22,8 +22,8 @@ import (
 var EnvEnableScipSearch = brand.EnvName("ENABLE_SCIP_SEARCH")
 
 const maxFailureDiagnosticBytes = 1024
-const outputPathPlaceholder = "__LIZA_SCIP_OUTPUT__"
-const aggregateOutputPathPlaceholder = "__LIZA_SCIP_AGGREGATE_OUTPUT__"
+const outputPathPlaceholder = "__SCIP_OUTPUT__"
+const aggregateOutputPathPlaceholder = "__SCIP_AGGREGATE_OUTPUT__"
 
 var supportedLanguages = []string{"go", "typescript", "python"}
 
@@ -228,8 +228,9 @@ func ParseEnvGate(value string) bool {
 }
 
 // RuntimeEnabled reports whether runtime scip-search behavior is active for the
-// current process. It is true only when LIZA_ENABLE_SCIP_SEARCH is truthy and at
-// least one configured language from Config.ScipSearch remains available.
+// current process. It is true only when the branded ENABLE_SCIP_SEARCH
+// environment variable is truthy and at least one configured language from
+// Config.ScipSearch remains available.
 func RuntimeEnabled(configuredLanguages []string) bool {
 	return ParseEnvGate(envgate.Value(EnvEnableScipSearch)) && len(configuredLanguages) > 0
 }
@@ -315,7 +316,7 @@ func RefreshIndexes(opts RefreshOptions) (RefreshResult, error) {
 }
 
 func runAggregateRefresh(plan LanguageAggregatePlan, runner RuntimeRunner) (string, error) {
-	tmpDir, err := os.MkdirTemp(filepath.Dir(plan.OutputPath), ".liza-scip-"+plan.Language+"-")
+	tmpDir, err := os.MkdirTemp(filepath.Dir(plan.OutputPath), "."+brand.RuntimeValues().BinaryName+"-scip-"+plan.Language+"-")
 	if err != nil {
 		return "", fmt.Errorf("create temporary scip-search index directory: %w", err)
 	}

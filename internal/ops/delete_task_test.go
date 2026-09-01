@@ -11,6 +11,7 @@ import (
 	"github.com/liza-mas/liza/internal/errors"
 	"github.com/liza-mas/liza/internal/git"
 	"github.com/liza-mas/liza/internal/models"
+	"github.com/liza-mas/liza/internal/paths"
 	"github.com/liza-mas/liza/internal/testhelpers"
 )
 
@@ -569,14 +570,14 @@ func TestDeleteTask_CommitFailureDoesNotDeleteWorktreeOrBranch(t *testing.T) {
 
 	// Force state commit failure while keeping lock acquisition possible.
 	// filelock writes state.yaml.lock.pid on each lock, so pre-create it
-	// before making .liza non-writable.
-	lizaDir := filepath.Join(tmpDir, ".liza")
+	// before making the project runtime directory non-writable.
+	lizaDir := filepath.Join(tmpDir, paths.ProjectDirName())
 	pidPath := filepath.Join(lizaDir, "state.yaml.lock.pid")
 	if err := os.WriteFile(pidPath, []byte("0"), 0644); err != nil {
 		t.Fatalf("Failed to pre-create pid file: %v", err)
 	}
 	if err := os.Chmod(lizaDir, 0555); err != nil {
-		t.Fatalf("Failed to make .liza read-only: %v", err)
+		t.Fatalf("failed to make project runtime directory read-only: %v", err)
 	}
 	t.Cleanup(func() {
 		_ = os.Chmod(lizaDir, 0755)

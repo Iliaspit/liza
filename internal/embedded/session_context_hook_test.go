@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/liza-mas/liza/internal/brand"
+	"github.com/liza-mas/liza/internal/paths"
 )
 
 func TestSessionContextHook_EmitsSessionStartContextForIndexedRepo(t *testing.T) {
@@ -39,12 +40,12 @@ func TestSessionContextHook_EmitsSessionStartContextForIndexedRepo(t *testing.T)
 	context := got.HookSpecificOutput.AdditionalContext
 	for _, want := range []string{
 		"MANDATORY: Read CORE.md and the documents listed as required. DO NOT fake reads. DO read them FULLY, one tool call at a time in the required order. DO NOT batch or parallelize reads. Complete the initialization sequence before doing ANYTHING else. User prompt is not a replacement and should be considered only after the init sequence is complete.",
-		"complete. ~/.liza/PAIRING_MODE.md",
-		"~/.liza/AGENT_TOOLS.md",
+		"complete. ~/" + paths.GlobalDirName() + "/PAIRING_MODE.md",
+		"~/" + paths.GlobalDirName() + "/AGENT_TOOLS.md",
 		"REPOSITORY.md",
 		"docs/USAGE.md",
-		"~/.liza/COLLABORATION_CONTINUITY.md",
-		"Liza repository indexes detected",
+		"~/" + paths.GlobalDirName() + "/COLLABORATION_CONTINUITY.md",
+		brand.NameTitle + " repository indexes detected",
 		"stacklit derive --ai-summary -i '" + filepath.Join(projectRoot, "stacklit.json") + "'",
 		"Go index: " + filepath.Join(projectRoot, "go.scip"),
 		"Python index: " + filepath.Join(projectRoot, "python.scip"),
@@ -159,10 +160,10 @@ func TestSessionContextHook_UsesMultiAgentModeForLizaAgentSessions(t *testing.T)
 		"LIZA_AGENT_ID=coder-1",
 	}, 0)
 	context := sessionStartAdditionalContext(t, output)
-	if !strings.Contains(context, "~/.liza/MULTI_AGENT_MODE.md") {
+	if !strings.Contains(context, "~/"+paths.GlobalDirName()+"/MULTI_AGENT_MODE.md") {
 		t.Fatalf("startup context should name MULTI_AGENT_MODE for Liza agents, got:\n%s", context)
 	}
-	if strings.Contains(context, "~/.liza/PAIRING_MODE.md") ||
+	if strings.Contains(context, "~/"+paths.GlobalDirName()+"/PAIRING_MODE.md") ||
 		strings.Contains(context, "REPOSITORY.md") ||
 		strings.Contains(context, "docs/USAGE.md") {
 		t.Fatalf("Liza agent context should not include Pairing-only docs, got:\n%s", context)
@@ -185,7 +186,7 @@ func TestSessionContextHook_EmitsInitContextWithoutLizaIndexHook(t *testing.T) {
 	if !strings.Contains(context, "MANDATORY: Read CORE.md") {
 		t.Fatalf("startup context should include initialization reminder, got:\n%s", context)
 	}
-	if strings.Contains(context, "Liza repository indexes detected") {
+	if strings.Contains(context, brand.NameTitle+" repository indexes detected") {
 		t.Fatalf("startup context should omit index paths without liza-index hook, got:\n%s", context)
 	}
 }
@@ -201,7 +202,7 @@ func TestSessionContextHook_EmitsInitContextWithoutIndexes(t *testing.T) {
 	if err := os.MkdirAll(hooksDir, 0755); err != nil {
 		t.Fatalf("create git hooks dir: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(hooksDir, "post-commit"), []byte("#!/bin/sh\nliza-index\n"), 0755); err != nil {
+	if err := os.WriteFile(filepath.Join(hooksDir, "post-commit"), []byte("#!/bin/sh\n"+brand.BinaryName+"-index\n"), 0755); err != nil {
 		t.Fatalf("write post-commit hook: %v", err)
 	}
 
@@ -210,7 +211,7 @@ func TestSessionContextHook_EmitsInitContextWithoutIndexes(t *testing.T) {
 	if !strings.Contains(context, "MANDATORY: Read CORE.md") {
 		t.Fatalf("startup context should include initialization reminder, got:\n%s", context)
 	}
-	if strings.Contains(context, "Liza repository indexes detected") {
+	if strings.Contains(context, brand.NameTitle+" repository indexes detected") {
 		t.Fatalf("startup context should omit index paths without indexes, got:\n%s", context)
 	}
 }
@@ -231,7 +232,7 @@ func TestSessionContextHook_EmitsAdrDirectoryWhenPresent(t *testing.T) {
 	if !strings.Contains(context, " // ADRs: specs/architecture/ADR") {
 		t.Fatalf("startup context should include ADR directory, got:\n%s", context)
 	}
-	if strings.Contains(context, "Liza repository indexes detected") {
+	if strings.Contains(context, brand.NameTitle+" repository indexes detected") {
 		t.Fatalf("ADR-only context should not claim repository indexes, got:\n%s", context)
 	}
 }
@@ -267,7 +268,7 @@ func TestSessionContextHook_EmitsStacklitBlockOnlyWhenStacklitArtifactExists(t *
 	output := runSessionContextHook(t, hookPath, sessionStartPayload(t, projectRoot), nil, 0)
 	context := sessionStartAdditionalContext(t, output)
 	for _, want := range []string{
-		"Liza repository indexes detected",
+		brand.NameTitle + " repository indexes detected",
 		"Stacklit index: " + filepath.Join(projectRoot, "stacklit.json"),
 		"stacklit derive --ai-summary -i '" + filepath.Join(projectRoot, "stacklit.json") + "'",
 	} {
@@ -301,7 +302,7 @@ func TestSessionContextHook_EmitsScipBlockOnlyWhenScipArtifactExists(t *testing.
 	output := runSessionContextHook(t, hookPath, sessionStartPayload(t, projectRoot), nil, 0)
 	context := sessionStartAdditionalContext(t, output)
 	for _, want := range []string{
-		"Liza repository indexes detected",
+		brand.NameTitle + " repository indexes detected",
 		"SCIP indexes:",
 		"Go index: " + filepath.Join(projectRoot, "go.scip"),
 		"scip-search symbols --index <index-path> --name Foo --name Bar",
@@ -349,7 +350,7 @@ func TestSessionContextHook_EmitsFunctionalClustersWhenEnabledAndArtifactExists(
 		}
 	}
 	for _, notWant := range []string{
-		"Liza repository indexes detected",
+		brand.NameTitle + " repository indexes detected",
 		"Stacklit index:",
 		"SCIP indexes:",
 		"Semble semantic search is available",
@@ -424,9 +425,9 @@ func TestSessionContextHook_FiltersMissingPairingProjectDocs(t *testing.T) {
 
 	output := runSessionContextHook(t, hookPath, sessionStartPayload(t, projectRoot), nil, 0)
 	context := sessionStartAdditionalContext(t, output)
-	if !strings.Contains(context, "~/.liza/PAIRING_MODE.md") ||
-		!strings.Contains(context, "~/.liza/AGENT_TOOLS.md") ||
-		!strings.Contains(context, "~/.liza/COLLABORATION_CONTINUITY.md") {
+	if !strings.Contains(context, "~/"+paths.GlobalDirName()+"/PAIRING_MODE.md") ||
+		!strings.Contains(context, "~/"+paths.GlobalDirName()+"/AGENT_TOOLS.md") ||
+		!strings.Contains(context, "~/"+paths.GlobalDirName()+"/COLLABORATION_CONTINUITY.md") {
 		t.Fatalf("startup context missing required Pairing globals, got:\n%s", context)
 	}
 	for _, notWant := range []string{"REPOSITORY.md", "docs/USAGE.md", "GUARDRAILS.md"} {
@@ -442,8 +443,8 @@ func TestSessionContextHook_UsesGlobalDirNameWhenItDiffersFromNameLower(t *testi
 	}
 
 	previousNameLower, previousGlobalDirName := brand.NameLower, brand.GlobalDirName
-	brand.NameLower = "omni"
-	brand.GlobalDirName = ".omni-ee"
+	brand.NameLower = "acme"
+	brand.GlobalDirName = ".acme-agent"
 	t.Cleanup(func() {
 		brand.NameLower = previousNameLower
 		brand.GlobalDirName = previousGlobalDirName
@@ -455,15 +456,15 @@ func TestSessionContextHook_UsesGlobalDirNameWhenItDiffersFromNameLower(t *testi
 	context := sessionStartAdditionalContext(t, output)
 
 	for _, want := range []string{
-		"~/.omni-ee/PAIRING_MODE.md",
-		"~/.omni-ee/AGENT_TOOLS.md",
-		"~/.omni-ee/COLLABORATION_CONTINUITY.md",
+		"~/" + paths.GlobalDirName() + "/PAIRING_MODE.md",
+		"~/" + paths.GlobalDirName() + "/AGENT_TOOLS.md",
+		"~/" + paths.GlobalDirName() + "/COLLABORATION_CONTINUITY.md",
 	} {
 		if !strings.Contains(context, want) {
 			t.Errorf("startup context missing configured global path %q:\n%s", want, context)
 		}
 	}
-	if strings.Contains(context, "~/.omni/") {
+	if strings.Contains(context, "~/."+brand.NameLower+"/") {
 		t.Fatalf("startup context used name-derived global directory instead of BRAND_GLOBAL_DIRNAME:\n%s", context)
 	}
 }
@@ -488,7 +489,7 @@ func TestSessionContextHook_SuppressesRepoIndexesForLizaAgentSessions(t *testing
 	if !strings.Contains(context, "MANDATORY: Read CORE.md") {
 		t.Fatalf("startup context should include initialization reminder for Liza agents, got:\n%s", context)
 	}
-	if strings.Contains(context, "Liza repository indexes detected") {
+	if strings.Contains(context, brand.NameTitle+" repository indexes detected") {
 		t.Fatalf("startup context should not include repo-root indexes for Liza agent sessions, got:\n%s", context)
 	}
 	if strings.Contains(context, "Functional clusters artifact:") {
@@ -526,7 +527,7 @@ func TestSessionContextHook_EmitsSembleWhenEnabledSafeAndOfflineReady(t *testing
 			t.Fatalf("session context missing %q, got:\n%s", want, context)
 		}
 	}
-	if strings.Contains(context, "Liza repository indexes detected") {
+	if strings.Contains(context, brand.NameTitle+" repository indexes detected") {
 		t.Fatalf("Semble-only context should not claim Stacklit/SCIP indexes, got:\n%s", context)
 	}
 }
@@ -589,7 +590,7 @@ func TestSessionContextHook_OmitsSembleWithIncompleteRootIgnore(t *testing.T) {
 
 	hookPath := writeSessionContextHook(t)
 	projectRoot := t.TempDir()
-	if err := os.WriteFile(filepath.Join(projectRoot, ".sembleignore"), []byte(".liza/\n.worktrees/\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(projectRoot, ".sembleignore"), []byte(paths.ProjectDirName()+"/\n.worktrees/\n"), 0644); err != nil {
 		t.Fatalf("write incomplete root .sembleignore: %v", err)
 	}
 	binDir := writeFakeSembleTools(t, true)
@@ -693,7 +694,7 @@ func writeLizaIndexHook(t *testing.T, projectRoot string) {
 	if err := os.MkdirAll(hooksDir, 0755); err != nil {
 		t.Fatalf("create git hooks dir: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(hooksDir, "post-commit"), []byte("#!/bin/sh\nliza-index\n"), 0755); err != nil {
+	if err := os.WriteFile(filepath.Join(hooksDir, "post-commit"), []byte("#!/bin/sh\n"+brand.BinaryName+"-index\n"), 0755); err != nil {
 		t.Fatalf("write post-commit hook: %v", err)
 	}
 }
@@ -766,7 +767,7 @@ func sessionContextHookEnv(extraEnv []string) []string {
 func writeRootSembleIgnore(t *testing.T, projectRoot string) {
 	t.Helper()
 	content := strings.Join([]string{
-		".liza/",
+		paths.ProjectDirName() + "/",
 		".worktrees/",
 		"stacklit.json",
 		"*.scip",

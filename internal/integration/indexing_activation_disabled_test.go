@@ -6,8 +6,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/liza-mas/liza/internal/brand"
+
 	"github.com/liza-mas/liza/internal/commands"
 	"github.com/liza-mas/liza/internal/functionalclusters"
+	"github.com/liza-mas/liza/internal/paths"
 	"github.com/liza-mas/liza/internal/scipsearch"
 	"github.com/liza-mas/liza/internal/semble"
 	"github.com/liza-mas/liza/internal/stacklit"
@@ -41,7 +44,7 @@ func TestIndexingActivationFreshSetupInstallsGenericOptionalIndexGuidance(t *tes
 	assertIndexingActivationContainsNone(t, text,
 		"/home/",
 		".worktrees/",
-		".liza/scip/",
+		paths.ProjectDirName()+"/scip/",
 		"<task-worktree-path>",
 	)
 }
@@ -107,7 +110,7 @@ func assertNoOptionalIndexHook(t *testing.T, projectDir string) {
 	t.Helper()
 
 	for _, rel := range []string{
-		filepath.Join(".git", "hooks", "liza-index.sh"),
+		filepath.Join(".git", "hooks", brand.BinaryName+"-index.sh"),
 		filepath.Join(".git", "hooks", "post-commit"),
 		filepath.Join(".git", "hooks", "post-checkout"),
 		filepath.Join(".git", "hooks", "post-merge"),

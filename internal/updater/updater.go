@@ -421,7 +421,7 @@ func releaseArchiveURL(version, goos, goarch string, releaseBaseURL string) stri
 	if baseURL == "" {
 		baseURL = brand.ReleaseBaseURL
 		if baseURL == "" {
-			baseURL = "https://github.com/liza-mas/liza/releases/download"
+			baseURL = fmt.Sprintf("https://github.com/%s/releases/download", releaseRepo())
 		}
 	}
 	return fmt.Sprintf("%s/%s/%s", baseURL, version, archive)
@@ -433,7 +433,7 @@ func releaseArchiveName(versionBare, goos, goarch string) string {
 		prefix = brand.BinaryName
 	}
 	if prefix == "" {
-		prefix = "liza"
+		prefix = brand.RuntimeValues().ArchivePrefix
 	}
 	return fmt.Sprintf("%s-%s-%s-%s.tar.gz", prefix, versionBare, goos, goarch)
 }
@@ -449,7 +449,7 @@ func checksumURLWithBase(version, checksumBaseURL string) string {
 	if baseURL == "" {
 		baseURL = brand.ChecksumBaseURL
 		if baseURL == "" {
-			baseURL = "https://github.com/liza-mas/liza/releases/download"
+			baseURL = fmt.Sprintf("https://github.com/%s/releases/download", releaseRepo())
 		}
 	}
 	return fmt.Sprintf("%s/%s/checksums.txt", baseURL, version)
@@ -547,15 +547,12 @@ func installBinaryFromTarGz(r io.Reader, target string) error {
 }
 
 func expectedArchiveBinaryName() string {
-	if brand.BinaryName != "" {
-		return brand.BinaryName
-	}
-	return "liza"
+	return brand.RuntimeValues().BinaryName
 }
 
 func replaceBinary(target string, r io.Reader, mode os.FileMode) error {
 	dir := filepath.Dir(target)
-	tmp, err := os.CreateTemp(dir, ".liza-update-*")
+	tmp, err := os.CreateTemp(dir, "."+binaryName()+"-update-*")
 	if err != nil {
 		return fmt.Errorf("create temporary binary: %w", err)
 	}
@@ -609,7 +606,7 @@ func prepareInstallRollback(target string) (installRollback, error) {
 	}
 	defer src.Close()
 
-	tmp, err := os.CreateTemp(filepath.Dir(target), ".liza-update-backup-*")
+	tmp, err := os.CreateTemp(filepath.Dir(target), "."+binaryName()+"-update-backup-*")
 	if err != nil {
 		return installRollback{}, fmt.Errorf("create backup binary: %w", err)
 	}
@@ -1179,24 +1176,15 @@ func cliPrefix() string {
 }
 
 func binaryName() string {
-	if brand.BinaryName != "" {
-		return brand.BinaryName
-	}
-	return "liza"
+	return brand.RuntimeValues().BinaryName
 }
 
 func nameLower() string {
-	if brand.NameLower != "" {
-		return brand.NameLower
-	}
-	return "liza"
+	return brand.RuntimeValues().NameLower
 }
 
 func nameTitle() string {
-	if brand.NameTitle != "" {
-		return brand.NameTitle
-	}
-	return "Liza"
+	return brand.RuntimeValues().NameTitle
 }
 
 func releaseRepo() string {
@@ -1230,11 +1218,7 @@ func sourceCloneURL() string {
 }
 
 func sourceCheckoutDirName() string {
-	name := nameLower()
-	if name == "" {
-		return "liza"
-	}
-	return name
+	return nameLower()
 }
 
 func sourceInstallMakeArgs(repoDir, installDir string) []string {

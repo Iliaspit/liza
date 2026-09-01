@@ -17,6 +17,7 @@ import (
 	"github.com/liza-mas/liza/internal/embedded"
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/ops"
+	"github.com/liza-mas/liza/internal/paths"
 	"github.com/liza-mas/liza/internal/pipeline"
 	"github.com/liza-mas/liza/internal/testhelpers"
 )
@@ -115,45 +116,45 @@ func TestBuildBasePrompt(t *testing.T) {
 				TaskID:      "task-1",
 				SpecsDir:    "/project/specs",
 				ProjectRoot: "/project",
-				StatePath:   "/project/.liza/state.yaml",
+				StatePath:   "/project/" + paths.ProjectDirName() + "/state.yaml",
 				GoalDesc:    "Build a web API",
 				GoalSpecRef: "specs/vision.md",
 			},
 			wantContains: []string{
-				"You are a Liza code-coder agent",
+				"You are a " + brand.NameTitle + " code-coder agent",
 				"Agent ID: coder-1",
 				"ROLE: code-coder",
 				"PROJECT_SPECS: /project/specs",
 				"PROJECT: /project",
-				"BLACKBOARD: /project/.liza/state.yaml",
+				"BLACKBOARD: /project/" + paths.ProjectDirName() + "/state.yaml",
 				"GOAL: Build a web API",
 				"APPROVED: use CLI commands with escalated permissions",
 				"TWO brand data directories exist",
-				"~/.liza/ = installed contracts & skills",
-				"/project/.liza/ = runtime state & blackboard",
-				"Do NOT create, edit, stage, or commit files under /project/.liza/agent-outputs/",
-				"runtime log state owned by Liza",
+				"~/" + paths.GlobalDirName() + "/ = installed contracts & skills",
+				"/project/" + paths.ProjectDirName() + "/ = runtime state & blackboard",
+				"Do NOT create, edit, stage, or commit files under /project/" + paths.ProjectDirName() + "/agent-outputs/",
+				"runtime log state owned by " + brand.NameTitle,
 				"You have FULL read access to both brand data directories",
-				"For READING state: use liza get --json",
+				"For READING state: use " + brand.BinaryName + " get --json",
 				"For MODIFYING state: use role-specific CLI commands ONLY",
 				"NEVER edit state.yaml directly",
 				"Execute commands immediately",
 				"DO proceed with tool execution",
 				"QUERY TOOLS",
-				"liza get --json",
-				"liza status --json",
-				"liza validate --json",
+				brand.BinaryName + " get --json",
+				brand.BinaryName + " status --json",
+				brand.BinaryName + " validate --json",
 				"COMMUNICATION:",
 				"FORBIDDEN:",
 				"Do NOT attempt to claim tasks",
 				"SESSION EXIT CODES",
 				"TIMESTAMPS:",
 				"FIRST ACTIONS:",
-				`Query your assigned task: liza get task-1 --json`,
+				"Query your assigned task: " + brand.BinaryName + " get task-1 --json",
 				"Read the current spec reference:",
 				"Use the assigned task JSON from step 2. Read its `spec_ref`",
 				"if it is repo-relative and the task has a worktree, read it from that worktree",
-				"If `spec_ref` is empty, run `liza get goal.spec_ref --json`",
+				"If `spec_ref` is empty, run `" + brand.BinaryName + " get goal.spec_ref --json`",
 				"lesson index in GUARDRAILS.md",
 				"matching files under lessons/agents/",
 			},
@@ -182,12 +183,12 @@ func TestBuildBasePrompt(t *testing.T) {
 				AgentID:     "code-reviewer-1",
 				SpecsDir:    "/specs",
 				ProjectRoot: "/project",
-				StatePath:   "/project/.liza/state.yaml",
+				StatePath:   "/project/" + paths.ProjectDirName() + "/state.yaml",
 				GoalDesc:    "Test goal",
 				GoalSpecRef: "specs/test.md",
 			},
 			wantContains: []string{
-				"You are a Liza code-reviewer agent",
+				"You are a " + brand.NameTitle + " code-reviewer agent",
 				"QUERY TOOLS",
 			},
 		},
@@ -198,16 +199,16 @@ func TestBuildBasePrompt(t *testing.T) {
 				AgentID:     "orchestrator-1",
 				SpecsDir:    "/specs",
 				ProjectRoot: "/project",
-				StatePath:   "/project/.liza/state.yaml",
+				StatePath:   "/project/" + paths.ProjectDirName() + "/state.yaml",
 				GoalDesc:    "Test",
 				GoalSpecRef: "specs/vision.md",
 			},
 			wantContains: []string{
-				"You are a Liza orchestrator agent",
+				"You are a " + brand.NameTitle + " orchestrator agent",
 				"QUERY TOOLS",
 				"Use the orchestrator dashboard and active-task digest below first",
-				"Query specific tasks with liza get <task-id> --json",
-				"Run `liza get goal.spec_ref --json`, then read the returned ref from the project root",
+				"Query specific tasks with " + brand.BinaryName + " get <task-id> --json",
+				"Run `" + brand.BinaryName + " get goal.spec_ref --json`, then read the returned ref from the project root",
 				"FORBIDDEN:",
 				"Do NOT manually modify task status",
 				"Do NOT make architecture decisions",
@@ -297,7 +298,7 @@ func TestBuildBasePromptOmitsUniversalCLIFailureMutation(t *testing.T) {
 		TaskID:      "task-1",
 		SpecsDir:    "/project/specs",
 		ProjectRoot: "/project",
-		StatePath:   "/project/.liza/state.yaml",
+		StatePath:   "/project/" + paths.ProjectDirName() + "/state.yaml",
 		GoalDesc:    "Review a change",
 	})
 	if err != nil {
@@ -421,7 +422,7 @@ func TestBuildBasePromptScipSearchOmittedWhenNoIndexes(t *testing.T) {
 		TaskID:      "task-1",
 		SpecsDir:    "/project/specs",
 		ProjectRoot: "/project",
-		StatePath:   "/project/.liza/state.yaml",
+		StatePath:   "/project/" + paths.ProjectDirName() + "/state.yaml",
 		GoalDesc:    "Build a web API",
 		GoalSpecRef: "specs/vision.md",
 	}
@@ -444,19 +445,19 @@ func TestBuildBasePromptScipSearchOmittedWhenNoIndexes(t *testing.T) {
 }
 
 func TestBuildBasePromptScipSearchRendersSuppliedIndexes(t *testing.T) {
-	goPath := "/abs/worktree with spaces/.liza/scip/go.scip"
-	tsPath := "/abs/worktree/.liza/scip/typescript.scip"
-	pythonPath := "/abs/worktree/.liza/scip/python.scip"
-	quotedGoPath := "'/abs/worktree with spaces/.liza/scip/go.scip'"
-	quotedTSPath := "'/abs/worktree/.liza/scip/typescript.scip'"
-	quotedPythonPath := "'/abs/worktree/.liza/scip/python.scip'"
+	goPath := "/abs/worktree with spaces/" + paths.ProjectDirName() + "/scip/go.scip"
+	tsPath := "/abs/worktree/" + paths.ProjectDirName() + "/scip/typescript.scip"
+	pythonPath := "/abs/worktree/" + paths.ProjectDirName() + "/scip/python.scip"
+	quotedGoPath := "'/abs/worktree with spaces/" + paths.ProjectDirName() + "/scip/go.scip'"
+	quotedTSPath := "'/abs/worktree/" + paths.ProjectDirName() + "/scip/typescript.scip'"
+	quotedPythonPath := "'/abs/worktree/" + paths.ProjectDirName() + "/scip/python.scip'"
 	config := BasePromptConfig{
 		Role:        "code-coder",
 		AgentID:     "coder-1",
 		TaskID:      "task-1",
 		SpecsDir:    "/project/specs",
 		ProjectRoot: "/project",
-		StatePath:   "/project/.liza/state.yaml",
+		StatePath:   "/project/" + paths.ProjectDirName() + "/state.yaml",
 		GoalDesc:    "Build a web API",
 		GoalSpecRef: "specs/vision.md",
 		ScipSearchIndexes: []ScipSearchIndex{
@@ -480,7 +481,7 @@ func TestBuildBasePromptScipSearchRendersSuppliedIndexes(t *testing.T) {
 
 	assertContains("=== SCIP-SEARCH INDEXES ===")
 	assertContains("Generated SCIP indexes were refreshed before this prompt was built and reflect the current target tree at prompt construction time; they will not reflect subsequent agent edits.")
-	assertContains("Use `~/.liza/AGENT_TOOLS.md` for `scip-search` command syntax, routing rules, and freshness caveats.")
+	assertContains("Use `~/" + paths.GlobalDirName() + "/AGENT_TOOLS.md` for `scip-search` command syntax, routing rules, and freshness caveats.")
 
 	for _, command := range []string{
 		"scip-search symbols --index",
@@ -514,7 +515,7 @@ func TestBuildBasePromptStacklitOmittedWhenNoIndexes(t *testing.T) {
 		TaskID:      "task-1",
 		SpecsDir:    "/project/specs",
 		ProjectRoot: "/project",
-		StatePath:   "/project/.liza/state.yaml",
+		StatePath:   "/project/" + paths.ProjectDirName() + "/state.yaml",
 		GoalDesc:    "Build a web API",
 		GoalSpecRef: "specs/vision.md",
 	}
@@ -546,7 +547,7 @@ func TestBuildBasePromptStacklitRendersSuppliedIndex(t *testing.T) {
 		TaskID:      "task-1",
 		SpecsDir:    "/project/specs",
 		ProjectRoot: "/project",
-		StatePath:   "/project/.liza/state.yaml",
+		StatePath:   "/project/" + paths.ProjectDirName() + "/state.yaml",
 		GoalDesc:    "Build a web API",
 		GoalSpecRef: "specs/vision.md",
 		StacklitIndexes: []StacklitIndex{
@@ -563,7 +564,7 @@ func TestBuildBasePromptStacklitRendersSuppliedIndex(t *testing.T) {
 		"=== STACKLIT INDEX ===",
 		"Stacklit index: " + quotedPath,
 		"Stacklit index files are available for this target. They are repository snapshots that may lag behind current edits or failed refresh attempts; use them for orientation, then verify against source files before editing.",
-		"Use `~/.liza/AGENT_TOOLS.md` for Stacklit command syntax, routing rules, and freshness caveats.",
+		"Use `~/" + paths.GlobalDirName() + "/AGENT_TOOLS.md` for Stacklit command syntax, routing rules, and freshness caveats.",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("BuildBasePrompt() missing expected stacklit content:\n%q", want)
@@ -584,7 +585,7 @@ func TestBuildBasePromptStacklitAndScipUnifiedQueryRouting(t *testing.T) {
 		TaskID:      "task-1",
 		SpecsDir:    "/project/specs",
 		ProjectRoot: "/project",
-		StatePath:   "/project/.liza/state.yaml",
+		StatePath:   "/project/" + paths.ProjectDirName() + "/state.yaml",
 		GoalDesc:    "Build a web API",
 		GoalSpecRef: "specs/vision.md",
 		StacklitIndexes: []StacklitIndex{
@@ -603,8 +604,8 @@ func TestBuildBasePromptStacklitAndScipUnifiedQueryRouting(t *testing.T) {
 	for _, want := range []string{
 		"Stacklit index: '" + stacklitPath + "'",
 		"Go index: '" + scipPath + "'",
-		"Use `~/.liza/AGENT_TOOLS.md` for Stacklit command syntax, routing rules, and freshness caveats.",
-		"Use `~/.liza/AGENT_TOOLS.md` for `scip-search` command syntax, routing rules, and freshness caveats.",
+		"Use `~/" + paths.GlobalDirName() + "/AGENT_TOOLS.md` for Stacklit command syntax, routing rules, and freshness caveats.",
+		"Use `~/" + paths.GlobalDirName() + "/AGENT_TOOLS.md` for `scip-search` command syntax, routing rules, and freshness caveats.",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("missing supplied index guidance %q", want)
@@ -624,7 +625,7 @@ func TestBuildBasePromptFunctionalClustersRendersSuppliedArtifact(t *testing.T) 
 		TaskID:      "task-1",
 		SpecsDir:    "/project/specs",
 		ProjectRoot: "/project",
-		StatePath:   "/project/.liza/state.yaml",
+		StatePath:   "/project/" + paths.ProjectDirName() + "/state.yaml",
 		GoalDesc:    "Build a web API",
 		GoalSpecRef: "specs/vision.md",
 		FunctionalClusters: []FunctionalClusterIndex{
@@ -641,7 +642,7 @@ func TestBuildBasePromptFunctionalClustersRendersSuppliedArtifact(t *testing.T) 
 		"=== FUNCTIONAL CLUSTERS ===",
 		"Functional Clusters artifact: " + quotedPath,
 		"Functional Clusters artifacts are available for this target. They are advisory capability snapshots that may lag behind current edits or failed refresh attempts; use them for orientation, then verify against source files before editing.",
-		"Use `~/.liza/AGENT_TOOLS.md` for Functional Clusters command syntax, routing rules, and freshness caveats.",
+		"Use `~/" + paths.GlobalDirName() + "/AGENT_TOOLS.md` for Functional Clusters command syntax, routing rules, and freshness caveats.",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("BuildBasePrompt() missing expected Functional Clusters content:\n%q", want)
@@ -660,7 +661,7 @@ func TestBuildBasePromptSembleSearchOmittedWhenNoMetadata(t *testing.T) {
 		TaskID:      "task-1",
 		SpecsDir:    "/project/specs",
 		ProjectRoot: "/project",
-		StatePath:   "/project/.liza/state.yaml",
+		StatePath:   "/project/" + paths.ProjectDirName() + "/state.yaml",
 		GoalDesc:    "Build a web API",
 		GoalSpecRef: "specs/vision.md",
 	}
@@ -691,7 +692,7 @@ func TestBuildBasePromptSembleSearchRendersPromptMetadata(t *testing.T) {
 		TaskID:      "task-1",
 		SpecsDir:    "/project/specs",
 		ProjectRoot: "/project",
-		StatePath:   "/project/.liza/state.yaml",
+		StatePath:   "/project/" + paths.ProjectDirName() + "/state.yaml",
 		GoalDesc:    "Build a web API",
 		GoalSpecRef: "specs/vision.md",
 		SembleSearch: SembleSearchMetadata{
@@ -700,7 +701,7 @@ func TestBuildBasePromptSembleSearchRendersPromptMetadata(t *testing.T) {
 		},
 		StacklitIndexes: []StacklitIndex{{IndexPath: "/abs/worktree with spaces/stacklit.json"}},
 		ScipSearchIndexes: []ScipSearchIndex{
-			{Language: "go", IndexPath: "/abs/worktree with spaces/.liza/scip/go.scip"},
+			{Language: "go", IndexPath: "/abs/worktree with spaces/" + paths.ProjectDirName() + "/scip/go.scip"},
 		},
 	}
 
@@ -713,9 +714,9 @@ func TestBuildBasePromptSembleSearchRendersPromptMetadata(t *testing.T) {
 		"=== SEMBLE SEARCH ===",
 		"Semble is available for semantic repository search in this target root:",
 		quotedRoot,
-		"Use `~/.liza/AGENT_TOOLS.md` for Semble command syntax, content modes, routing rules, and proof requirements.",
+		"Use `~/" + paths.GlobalDirName() + "/AGENT_TOOLS.md` for Semble command syntax, content modes, routing rules, and proof requirements.",
 		"Stacklit index: '/abs/worktree with spaces/stacklit.json'",
-		"Go index: '/abs/worktree with spaces/.liza/scip/go.scip'",
+		"Go index: '/abs/worktree with spaces/" + paths.ProjectDirName() + "/scip/go.scip'",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("BuildBasePrompt() missing expected Semble prompt content:\n%q", want)
@@ -747,7 +748,7 @@ func TestBuildBasePromptSembleOnlyRoutingOmitsUnavailableOptionalTools(t *testin
 		TaskID:      "task-1",
 		SpecsDir:    "/project/specs",
 		ProjectRoot: "/project",
-		StatePath:   "/project/.liza/state.yaml",
+		StatePath:   "/project/" + paths.ProjectDirName() + "/state.yaml",
 		GoalDesc:    "Build a web API",
 		GoalSpecRef: "specs/vision.md",
 		SembleSearch: SembleSearchMetadata{
@@ -763,7 +764,7 @@ func TestBuildBasePromptSembleOnlyRoutingOmitsUnavailableOptionalTools(t *testin
 
 	for _, want := range []string{
 		"=== SEMBLE SEARCH ===",
-		"Use `~/.liza/AGENT_TOOLS.md` for Semble command syntax, content modes, routing rules, and proof requirements.",
+		"Use `~/" + paths.GlobalDirName() + "/AGENT_TOOLS.md` for Semble command syntax, content modes, routing rules, and proof requirements.",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("BuildBasePrompt() missing Semble-only routing guidance:\n%q", want)
@@ -821,15 +822,15 @@ func TestRenderOrchestratorDashboard(t *testing.T) {
 				"- Hypothesis exhausted: 0",
 				"- Immediate discoveries: 0",
 				"ORCHESTRATOR COMMANDS:",
-				"liza add-tasks",
-				"liza assess-blocked",
-				"liza supersede-task",
-				`liza wt-delete`,
-				`liza supersede-task <task-id> [replacement-task-ids] --reason "..." --agent-id "orchestrator-1" --json`,
-				`liza supersede-task <task-id> --reason "Work completed externally" --recoverability-command "liza recover-task <task-id>" --agent-id "orchestrator-1" --json`,
-				`liza wt-delete <task-id> --json`,
-				`liza sprint-checkpoint — Create sprint checkpoint for human review`,
-				`liza update-sprint-metrics — Recompute sprint metrics`,
+				brand.BinaryName + " add-tasks",
+				brand.BinaryName + " assess-blocked",
+				brand.BinaryName + " supersede-task",
+				brand.BinaryName + " wt-delete",
+				brand.BinaryName + " supersede-task <task-id> [replacement-task-ids] --reason \"...\" --agent-id \"orchestrator-1\" --json",
+				brand.BinaryName + " supersede-task <task-id> --reason \"Work completed externally\" --recoverability-command \"" + brand.BinaryName + " recover-task <task-id>\" --agent-id \"orchestrator-1\" --json",
+				brand.BinaryName + " wt-delete <task-id> --json",
+				brand.BinaryName + " sprint-checkpoint — Create sprint checkpoint for human review",
+				brand.BinaryName + " update-sprint-metrics — Recompute sprint metrics",
 				"This is initial planning",
 				"Classify the input document and choose the appropriate entry-point",
 				"AVAILABLE ENTRY-POINTS:",
@@ -839,7 +840,7 @@ func TestRenderOrchestratorDashboard(t *testing.T) {
 			},
 			wantNotContain: []string{
 				`--replacement-ids`,
-				`liza wt-delete <task-id> --agent-id`,
+				brand.BinaryName + " wt-delete <task-id> --agent-id",
 			},
 		},
 		{
@@ -862,8 +863,8 @@ func TestRenderOrchestratorDashboard(t *testing.T) {
 				`"desc": "<short task description>"`,
 				`"done": "<falsifiable completion condition>"`,
 				`"role_pair": "coding-pair"`,
-				"liza supersede-task <task-id> <new-id-1>,<new-id-2>",
-				"liza assess-blocked",
+				brand.BinaryName + " supersede-task <task-id> <new-id-1>,<new-id-2>",
+				brand.BinaryName + " assess-blocked",
 				"Before either stored apply-dependency-repair or direct retarget-dependency operation",
 				"Re-read every affected task and its planning/decomposition context",
 				"Verify provider-before-consumer direction for every proposed edge",
@@ -871,8 +872,8 @@ func TestRenderOrchestratorDashboard(t *testing.T) {
 				"Do not run either repair operation until this shared semantic gate passes",
 				"The repair reason must identify the verified direction or name the explicit relationship that justifies an inverse edge",
 				"If graph repair leaves a current blocker, reconcile its canonical metadata",
-				`liza assess-blocked <task-id> --reason "<current blocker>" --question "<current question>"`,
-				"If graph repair resolves every blocker, use liza unblock-task",
+				brand.BinaryName + " assess-blocked <task-id> --reason \"<current blocker>\" --question \"<current question>\"",
+				"If graph repair resolves every blocker, use " + brand.BinaryName + " unblock-task",
 			}, replacementLineagePolicy...),
 		},
 		{
@@ -892,7 +893,7 @@ func TestRenderOrchestratorDashboard(t *testing.T) {
 				`"desc": "<short task description>"`,
 				`"done": "<falsifiable completion condition>"`,
 				`"role_pair": "coding-pair"`,
-				"liza supersede-task <old-id> <new-id-1>,<new-id-2>",
+				brand.BinaryName + " supersede-task <old-id> <new-id-1>,<new-id-2>",
 			}, replacementLineagePolicy...),
 		},
 		{
@@ -963,7 +964,7 @@ func TestRenderOrchestratorDashboard(t *testing.T) {
 				"- Merged: 2",
 				"Planning sprint tasks have been merged with output[] entries",
 				"Pipeline transitions will execute automatically after checkpoint and human resume",
-				`liza sprint-checkpoint`,
+				brand.BinaryName + " sprint-checkpoint",
 			},
 		},
 		{
@@ -1093,8 +1094,8 @@ func TestRenderOrchestratorDashboard_BlockedDependencyRepairsRequireSemanticDire
 	}
 
 	operations := []string{
-		"liza apply-dependency-repair <blocked-task-id>",
-		"liza retarget-dependency <task-id> <old-dep-id> <new-dep-id[,new-dep-id]>",
+		brand.BinaryName + " apply-dependency-repair <blocked-task-id>",
+		brand.BinaryName + " retarget-dependency <task-id> <old-dep-id> <new-dep-id[,new-dep-id]>",
 	}
 	for _, operation := range operations {
 		operationIndex := strings.Index(wakeInstr, operation)
@@ -1125,13 +1126,13 @@ func TestRenderOrchestratorDashboard_BlockedDependencyRepairsRequireSemanticDire
 }
 
 // setupPipelineConfig writes the production embedded pipeline.yaml into a temp
-// directory's .liza/ folder and returns the temp dir as projectRoot.
+// project runtime directory and returns the temp dir as projectRoot.
 func setupPipelineConfig(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
-	lizaDir := filepath.Join(dir, ".liza")
+	lizaDir := filepath.Join(dir, paths.ProjectDirName())
 	if err := os.MkdirAll(lizaDir, 0o755); err != nil {
-		t.Fatalf("mkdir .liza: %v", err)
+		t.Fatalf("mkdir project runtime directory: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(lizaDir, "pipeline.yaml"), embedded.PipelineConfigContent(), 0o644); err != nil {
 		t.Fatalf("write pipeline.yaml: %v", err)
@@ -1298,7 +1299,7 @@ func TestBasePromptRegressionGuard(t *testing.T) {
 		TaskID:      "task-42",
 		SpecsDir:    "/project/specs",
 		ProjectRoot: "/project",
-		StatePath:   "/project/.liza/state.yaml",
+		StatePath:   "/project/" + paths.ProjectDirName() + "/state.yaml",
 		GoalDesc:    "Build a web API",
 		GoalSpecRef: "specs/vision.md",
 	}
@@ -1330,30 +1331,30 @@ func TestBasePromptRegressionGuard(t *testing.T) {
 
 	// --- BOOTSTRAP CONTEXT: template variables resolve correctly ---
 	assertSection("bootstrap", []string{
-		"You are a Liza code-coder agent",
+		"You are a " + brand.NameTitle + " code-coder agent",
 		"Agent ID: coder-1",
 		"ROLE: code-coder",
 		"PROJECT_SPECS: /project/specs",
 		"PROJECT: /project",
-		"BLACKBOARD: /project/.liza/state.yaml",
+		"BLACKBOARD: /project/" + paths.ProjectDirName() + "/state.yaml",
 		"GOAL: Build a web API",
 	})
 
-	// --- OPERATIONAL RULES: .liza/ directory disambiguation ---
-	assertSection("liza-dirs", []string{
+	// --- OPERATIONAL RULES: project runtime directory disambiguation ---
+	assertSection("runtime-dirs", []string{
 		"TWO brand data directories exist",
-		"~/.liza/ = installed contracts & skills",
-		"/project/.liza/ = runtime state & blackboard",
-		"Do NOT create, edit, stage, or commit files under /project/.liza/agent-outputs/",
-		"runtime log state owned by Liza",
+		"~/" + paths.GlobalDirName() + "/ = installed contracts & skills",
+		"/project/" + paths.ProjectDirName() + "/ = runtime state & blackboard",
+		"Do NOT create, edit, stage, or commit files under /project/" + paths.ProjectDirName() + "/agent-outputs/",
+		"runtime log state owned by " + brand.NameTitle,
 		"FULL read access to both brand data directories",
 	})
 
 	// --- STATE ACCESS: liza get over state.yaml ---
 	assertSection("state-access", []string{
-		"use liza get --json",
+		"use " + brand.BinaryName + " get --json",
 		"NEVER read state.yaml directly",
-		"liza get --json returns only the requested slice",
+		brand.BinaryName + " get --json returns only the requested slice",
 		"NEVER edit state.yaml directly",
 	})
 
@@ -1392,16 +1393,16 @@ func TestBasePromptRegressionGuard(t *testing.T) {
 	// --- QUERY TOOLS: available to all roles ---
 	assertSection("query-tools", []string{
 		"QUERY TOOLS",
-		"invoke Liza state commands as `liza -C /project ...`",
+		"invoke " + brand.NameTitle + " state commands as `" + brand.BinaryName + " -C /project ...`",
 		"If `-C` is unavailable",
-		"`liza -C /project ...`",
+		"`" + brand.BinaryName + " -C /project ...`",
 		"task worktree or any directory inside it",
 		"relative file arguments still resolve against the process working directory",
 		"task worktree for file, git, build, and test operations",
-		"liza get --json",
-		"liza get <id> --output-summary --json",
-		"liza status --json",
-		"liza validate --json",
+		brand.BinaryName + " get --json",
+		brand.BinaryName + " get <id> --output-summary --json",
+		brand.BinaryName + " status --json",
+		brand.BinaryName + " validate --json",
 	})
 
 	// --- COMMUNICATION: blackboard-only ---
@@ -1431,10 +1432,10 @@ func TestBasePromptRegressionGuard(t *testing.T) {
 	// --- FIRST ACTIONS: boot sequence ---
 	assertSection("first-actions", []string{
 		"FIRST ACTIONS:",
-		`Query your assigned task: liza get task-42 --json`,
+		"Query your assigned task: " + brand.BinaryName + " get task-42 --json",
 		"Read the current spec reference:",
 		"Use the assigned task JSON from step 2. Read its `spec_ref`",
-		"If `spec_ref` is empty, run `liza get goal.spec_ref --json`",
+		"If `spec_ref` is empty, run `" + brand.BinaryName + " get goal.spec_ref --json`",
 		"lesson index in GUARDRAILS.md",
 		"matching files under lessons/agents/",
 		"Execute your role's protocol",
@@ -1488,12 +1489,12 @@ func TestRenderOrchestratorDashboard_AutonomyForAllWakeTriggers(t *testing.T) {
 			wantTrigger: "BLOCKED_TASKS",
 			wantContains: []string{
 				"Analyze and resolve immediately",
-				"liza add-tasks --tasks-file",
+				brand.BinaryName + " add-tasks --tasks-file",
 				`"desc": "<short task description>"`,
 				`"done": "<falsifiable completion condition>"`,
-				"liza supersede-task <task-id> <new-id-1>,<new-id-2>",
+				brand.BinaryName + " supersede-task <task-id> <new-id-1>,<new-id-2>",
 				"run commands NOW",
-				"Do NOT call liza sprint-checkpoint",
+				"Do NOT call " + brand.BinaryName + " sprint-checkpoint",
 			},
 		},
 		{
@@ -1512,11 +1513,11 @@ func TestRenderOrchestratorDashboard_AutonomyForAllWakeTriggers(t *testing.T) {
 				"update NOW",
 				`"desc": "<short task description>"`,
 				`"done": "<falsifiable completion condition>"`,
-				"liza supersede-task <old-id> <new-id-1>,<new-id-2>",
+				brand.BinaryName + " supersede-task <old-id> <new-id-1>,<new-id-2>",
 				"Execute changes",
 				"create them all in this session",
 				"All state modifications must be executed before you exit",
-				"Do NOT call liza sprint-checkpoint",
+				"Do NOT call " + brand.BinaryName + " sprint-checkpoint",
 			},
 		},
 		{
@@ -1544,10 +1545,10 @@ func TestRenderOrchestratorDashboard_AutonomyForAllWakeTriggers(t *testing.T) {
 			wantContains: []string{
 				"Urgent discoveries need immediate action",
 				"execute decision NOW",
-				"liza add-tasks --tasks-file",
-				"liza set-discovery-disposition",
+				brand.BinaryName + " add-tasks --tasks-file",
+				brand.BinaryName + " set-discovery-disposition",
 				"All commands must be executed in this session",
-				"Do NOT call liza sprint-checkpoint",
+				"Do NOT call " + brand.BinaryName + " sprint-checkpoint",
 			},
 		},
 		{
@@ -1569,7 +1570,7 @@ func TestRenderOrchestratorDashboard_AutonomyForAllWakeTriggers(t *testing.T) {
 				"Planning sprint tasks have been merged with output[] entries",
 				"Pipeline transitions will execute automatically after checkpoint and human resume",
 				"FULL autonomy to run CLI commands immediately",
-				"liza sprint-checkpoint",
+				brand.BinaryName + " sprint-checkpoint",
 			},
 		},
 	}
@@ -1854,7 +1855,7 @@ func TestBuildRoleContext_MasterDecompositionMandate(t *testing.T) {
 		"`arch_ref`",
 		"`Systemic Decomposition Review`",
 		"systemic-thinking",
-		"before `liza set-task-output` or submission",
+		"before `" + brand.BinaryName + " set-task-output` or submission",
 		"owned_files",
 		"owned_modules",
 		"read_only_depends_on",
@@ -2132,9 +2133,9 @@ func TestBuildRoleContext_AllRoles(t *testing.T) {
 			"CODER STATE TRANSITIONS:",
 			"IMPLEMENTING_CODE",
 			"CODER TOOLS:",
-			"liza submit-for-review",
-			"liza handoff",
-			"liza mark-blocked",
+			brand.BinaryName + " submit-for-review",
+			brand.BinaryName + " handoff",
+			brand.BinaryName + " mark-blocked",
 			"--depends-on",
 			"ANOMALY LOGGING:",
 			"BLOCKING PROTOCOL:",
@@ -2145,7 +2146,7 @@ func TestBuildRoleContext_AllRoles(t *testing.T) {
 			"COMMIT WORKFLOW:",
 			"IMPLEMENTATION PHASE",
 			"Dependency bootstrap exception",
-			"liza get config.post_worktree_cmd --json",
+			brand.BinaryName + " get config.post_worktree_cmd --json",
 			"SUBMISSION (MANDATORY",
 			"Submission requires a new worktree commit for this task",
 			"exact failing command and stderr/error text",
@@ -2206,8 +2207,8 @@ func TestBuildRoleContext_AllRoles(t *testing.T) {
 			"REVIEWING_CODE",
 			"CODE_APPROVED",
 			"REVIEWER TOOLS:",
-			"liza submit-verdict",
-			"liza await-resubmission",
+			brand.BinaryName + " submit-verdict",
+			brand.BinaryName + " await-resubmission",
 			awaitResubmissionBoundaryGuidance,
 			"ANOMALY LOGGING:",
 			"WORKTREE RULES:",
@@ -2282,7 +2283,7 @@ func TestBuildRoleContext_AllRoles(t *testing.T) {
 			"WAKE TRIGGER:",
 			"SPRINT STATE:",
 			"ORCHESTRATOR COMMANDS:",
-			"liza add-tasks",
+			brand.BinaryName + " add-tasks",
 			"ANOMALY LOGGING:",
 			"INSTRUCTIONS:",
 		} {
@@ -2317,7 +2318,7 @@ func TestBuildRoleContext_AllRoles(t *testing.T) {
 			"TASK ID: task-planner",
 			"CODE PLANNER STATE TRANSITIONS:",
 			"CODE PLANNER TOOLS:",
-			"liza set-task-output",
+			brand.BinaryName + " set-task-output",
 			"WORKTREE RULES:",
 			"TASK DECOMPOSITION PRINCIPLE:",
 			"IMPLEMENTATION PHASE:",
@@ -2333,7 +2334,7 @@ func TestBuildRoleContext_AllRoles(t *testing.T) {
 			"For ordering across different transition names, set output[].task_depends_on to existing concrete task IDs",
 			"If the required concrete dependency task does not exist, mark the planning task BLOCKED",
 			"Submission requires a new worktree commit for this task",
-			"Submission proof: `liza submit-for-review` is not optional bookkeeping",
+			"Submission proof: `" + brand.BinaryName + " submit-for-review` is not optional bookkeeping",
 			"COLLECTIVE PLAN SCOPING",
 			"PRIOR REJECTION FEEDBACK",
 			"REQUIRED: blockers, overreach, and rejection-worthy concerns.",
@@ -2375,15 +2376,15 @@ func TestBuildRoleContext_AllRoles(t *testing.T) {
 			"CODE PLAN REVIEWER STATE TRANSITIONS:",
 			"REVIEWING_CODING_PLAN",
 			"CODE PLAN REVIEWER TOOLS:",
-			"liza submit-verdict",
-			"liza await-resubmission",
+			brand.BinaryName + " submit-verdict",
+			brand.BinaryName + " await-resubmission",
 			awaitResubmissionBoundaryGuidance,
 			"REVIEW CHECKLIST:",
 			"TIMESTAMP-task-cpr",           // interpolated task ID in reviewer gate
 			"Plan file location",           // gate label present in checklist
 			"Plan artifact not in diff at", // gate condition wording
 			"Task-output JSON location",
-			"any committed task-output JSON appears under .liza/agent-outputs/",
+			"any committed task-output JSON appears under " + paths.ProjectDirName() + "/agent-outputs/",
 			"validation satisfiable",
 			"durable plan/task text",
 			"Plan claims sibling child-task ordering without output[].depends_on sibling indexes",
@@ -2433,13 +2434,13 @@ func TestBuildRoleContext_AllRoles(t *testing.T) {
 			"TASK ID: task-ep",
 			"EPIC PLANNER STATE TRANSITIONS:",
 			"EPIC PLANNER TOOLS:",
-			"liza set-task-output",
+			brand.BinaryName + " set-task-output",
 			"WORKTREE RULES:",
 			"EPIC-WRITING SKILL:",
 			"IMPLEMENTATION PHASE:",
 			"Any validation[] command is satisfiable for the capability scope",
 			"Submission requires a new worktree commit for this task",
-			"Submission proof: `liza submit-for-review` must actually run successfully",
+			"Submission proof: `" + brand.BinaryName + " submit-for-review` must actually run successfully",
 			"PRIOR REJECTION FEEDBACK",
 			"REQUIRED: blockers, overreach, and rejection-worthy concerns.",
 			"ADVISORY: suggestions and nits.",
@@ -2476,8 +2477,8 @@ func TestBuildRoleContext_AllRoles(t *testing.T) {
 			"EPIC PLAN REVIEWER STATE TRANSITIONS:",
 			"REVIEWING_EPIC_PLAN",
 			"EPIC PLAN REVIEWER TOOLS:",
-			"liza submit-verdict",
-			"liza await-resubmission",
+			brand.BinaryName + " submit-verdict",
+			brand.BinaryName + " await-resubmission",
 			awaitResubmissionBoundaryGuidance,
 			"EPIC-WRITING SKILL:",
 			"REVIEW CHECKLIST:",
@@ -2577,8 +2578,8 @@ func TestBuildRoleContext_AllRoles(t *testing.T) {
 			"US REVIEWER STATE TRANSITIONS:",
 			"REVIEWING_US",
 			"US REVIEWER TOOLS:",
-			"liza submit-verdict",
-			"liza await-resubmission",
+			brand.BinaryName + " submit-verdict",
+			brand.BinaryName + " await-resubmission",
 			awaitResubmissionBoundaryGuidance,
 			"SPEC-REVIEW SKILL:",
 			"USER-STORY ANTI-PATTERNS",
@@ -2633,7 +2634,7 @@ func TestBuildRoleContext_AllRoles(t *testing.T) {
 			"ARCHITECTING",
 			"ARCHITECTURE_TO_REVIEW",
 			"ARCHITECT TOOLS:",
-			"liza set-task-output",
+			brand.BinaryName + " set-task-output",
 			"arch_ref",
 			"IMPLEMENTATION PHASE:",
 			"Architecture document",
@@ -2642,7 +2643,7 @@ func TestBuildRoleContext_AllRoles(t *testing.T) {
 			"Update only architecture artifacts required by DONE WHEN",
 			"Any validation[] command is satisfiable for the generated scope",
 			"Submission requires a new worktree commit for this task",
-			"Submission proof: `liza submit-for-review` must actually run successfully after step 9g",
+			"Submission proof: `" + brand.BinaryName + " submit-for-review` must actually run successfully after step 9g",
 		} {
 			if !strings.Contains(output, key) {
 				t.Errorf("output missing key string %q", key)
@@ -2676,8 +2677,8 @@ func TestBuildRoleContext_AllRoles(t *testing.T) {
 			"ARCHITECTURE REVIEWER STATE TRANSITIONS:",
 			"REVIEWING_ARCHITECTURE",
 			"ARCHITECTURE REVIEWER TOOLS:",
-			"liza submit-verdict",
-			"liza await-resubmission",
+			brand.BinaryName + " submit-verdict",
+			brand.BinaryName + " await-resubmission",
 			awaitResubmissionBoundaryGuidance,
 			"REVIEW CHECKLIST:",
 			"Decomposition completeness",
@@ -2718,7 +2719,7 @@ func TestBuildRoleContext_AwaitVerdictLoopRendersForAllDoers(t *testing.T) {
 	}
 
 	awaitVerdictKeys := []string{
-		"liza await-verdict",
+		brand.BinaryName + " await-verdict",
 		"POLL",
 		"timeout_seconds",
 		"run the same await-verdict command again in the foreground",
@@ -2726,7 +2727,7 @@ func TestBuildRoleContext_AwaitVerdictLoopRendersForAllDoers(t *testing.T) {
 		"stop waiting and exit normally",
 		"sole polling primitive",
 		"If the harness backgrounds await-verdict and says it will notify on completion, end the turn; do NOT call Monitor, search for Monitor, ScheduleWakeup, or read/tail/sleep/poll the output file.",
-		"Do NOT poll liza get",
+		"Do NOT poll " + brand.BinaryName + " get",
 		"Do NOT run more worktree commands after APPROVED, TERMINAL, or ALREADY_TRANSITIONED",
 	}
 	dependencyRepairKeys := []string{
@@ -2968,7 +2969,7 @@ func TestBuildRoleContext_PlanRefAndValidationPlan(t *testing.T) {
 			Worktree:           projectRoot + "/.worktrees/task-destructive-db",
 			IterationNum:       1,
 			IntegrationBranch:  "integration",
-			ValidationCommands: []string{"LIZA_ALLOW_DESTRUCTIVE_DB=1 make test ./internal/dbreset"},
+			ValidationCommands: []string{brand.EnvName("ALLOW_DESTRUCTIVE_DB") + "=1 make test ./internal/dbreset"},
 			DestructiveDB:      true,
 			ProjectRoot:        projectRoot,
 		}
@@ -2983,7 +2984,7 @@ func TestBuildRoleContext_PlanRefAndValidationPlan(t *testing.T) {
 		if !strings.Contains(output, "marker is part of each canonical command and must not be translated away") {
 			t.Fatalf("output missing marker preservation warning:\n%s", output)
 		}
-		if !strings.Contains(output, "- LIZA_ALLOW_DESTRUCTIVE_DB=1 make test ./internal/dbreset") {
+		if !strings.Contains(output, "- "+brand.EnvName("ALLOW_DESTRUCTIVE_DB")+"=1 make test ./internal/dbreset") {
 			t.Fatalf("output missing marked canonical command:\n%s", output)
 		}
 	})
@@ -3281,7 +3282,7 @@ func TestCollectivePlanScoping_PhaseConsistencyRule(t *testing.T) {
 		if !strings.Contains(output, "specs/plan-phase1.md") {
 			t.Error("expected prior task PlanRef in rule")
 		}
-		if !strings.Contains(output, "liza mark-blocked") {
+		if !strings.Contains(output, brand.BinaryName+" mark-blocked") {
 			t.Error("expected BLOCKED instruction in rule")
 		}
 		if !strings.Contains(output, "[MERGED") {
@@ -3427,13 +3428,13 @@ func TestCollectivePlanScoping_PhaseConsistencyRule(t *testing.T) {
 			t.Fatalf("BuildRoleContext: %v", err)
 		}
 
-		if !strings.Contains(output, "Use listed entries before broad state queries. Active tasks fallback: `liza get tasks --active --summary --json`.") {
+		if !strings.Contains(output, "Use listed entries before broad state queries. Active tasks fallback: `"+brand.BinaryName+" get tasks --active --summary --json`.") {
 			t.Error("expected active task command to be framed as fallback")
 		}
-		if !strings.Contains(output, "Task detail: `liza get <id> --json` for full task state and `artifact-ref` tasks.") {
+		if !strings.Contains(output, "Task detail: `"+brand.BinaryName+" get <id> --json` for full task state and `artifact-ref` tasks.") {
 			t.Error("expected full task detail command hint to remain available")
 		}
-		if !strings.Contains(output, "Produced outputs: `liza get <id> --output-summary --json` for `artifact-producer` tasks.") {
+		if !strings.Contains(output, "Produced outputs: `"+brand.BinaryName+" get <id> --output-summary --json` for `artifact-producer` tasks.") {
 			t.Error("expected produced outputs command hint for artifact producers")
 		}
 		if !strings.Contains(output, "plan-1 [MERGED; artifact-producer]: Completed plan") {
@@ -3757,10 +3758,10 @@ func TestReviewInstructions_OutputReviewersUseFullTaskJSON(t *testing.T) {
 			}
 
 			output := buf.String()
-			if !strings.Contains(output, "liza get task-review --json") {
+			if !strings.Contains(output, brand.BinaryName+" get task-review --json") {
 				t.Fatalf("expected full task JSON command, got:\n%s", output)
 			}
-			outputSummaryCommand := regexp.MustCompile(`liza get[^\n]*--output-summary`)
+			outputSummaryCommand := regexp.MustCompile(brand.BinaryName + " get[^\\n]*--output-summary")
 			if outputSummaryCommand.MatchString(output) {
 				t.Fatalf("reviewer prompt should not use output-summary, got:\n%s", output)
 			}

@@ -143,7 +143,7 @@ func TestArtifactConsistencyRendersNonDefaultBrand(t *testing.T) {
 		if strings.Contains(file.RelPath, "acme-cli-logs") {
 			sawRenamedSkill = true
 		}
-		if strings.Contains(file.RelPath, "acme-agent-operator") {
+		if strings.Contains(file.RelPath, "acme-cli-operator") {
 			sawRenamedOperatorSkill = true
 		}
 		if strings.Contains(file.RelPath, "liza-operator") {

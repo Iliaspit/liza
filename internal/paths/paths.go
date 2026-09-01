@@ -119,7 +119,7 @@ func (p LizaPaths) ArchiveDir() string {
 }
 
 // SprintArchivePath returns the path for archiving a specific sprint.
-// Format: .liza/archive/sprint-N.yaml
+// Format: <project-runtime-dir>/archive/sprint-N.yaml
 // Takes the numeric sprint number to avoid path traversal via tampered IDs.
 func (p LizaPaths) SprintArchivePath(sprintNumber int) string {
 	return filepath.Join(p.ArchiveDir(), fmt.Sprintf("sprint-%d.yaml", sprintNumber))
@@ -150,7 +150,7 @@ func (p LizaPaths) SpecsDir() string {
 	return p.get(SpecsDirName)
 }
 
-// ClaudeDir returns the path to the .claude directory (in project root, not .liza).
+// ClaudeDir returns the path to the .claude directory in the project root.
 func (p LizaPaths) ClaudeDir() string {
 	return filepath.Join(p.projectRoot, ClaudeDirName)
 }

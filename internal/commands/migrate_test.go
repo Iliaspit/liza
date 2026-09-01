@@ -8,6 +8,7 @@ import (
 
 	"github.com/liza-mas/liza/internal/db"
 	"github.com/liza-mas/liza/internal/models"
+	"github.com/liza-mas/liza/internal/paths"
 	"github.com/liza-mas/liza/internal/statehygiene"
 	"github.com/liza-mas/liza/internal/testhelpers"
 	"gopkg.in/yaml.v3"
@@ -371,7 +372,7 @@ func TestMigrateCommand_ScrubsRawProviderAuditMessage(t *testing.T) {
 		t.Fatalf("Read() error = %v", err)
 	}
 	got := updated.Anomalies[0].Details["message"]
-	want := "provider audit degraded; raw provider event omitted from state; inspect .liza/agent-outputs and alerts for transcript evidence"
+	want := "provider audit degraded; raw provider event omitted from state; inspect " + paths.ProjectDirName() + "/agent-outputs and alerts for transcript evidence"
 	if got != want {
 		t.Fatalf("scrubbed message = %q, want %q", got, want)
 	}

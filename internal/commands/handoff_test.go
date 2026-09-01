@@ -5,6 +5,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/liza-mas/liza/internal/brand"
+
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/ops"
 	"github.com/liza-mas/liza/internal/testhelpers"
@@ -189,7 +191,7 @@ func TestHandoffCommand(t *testing.T) {
 				NextAction: "next",
 			},
 			wantErr:       true,
-			wantErrSubstr: "LIZA_AGENT_ID is required",
+			wantErrSubstr: brand.EnvName("AGENT_ID") + " is required",
 		},
 		{
 			name: "task not found",

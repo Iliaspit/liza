@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/liza-mas/liza/internal/brand"
+
 	"github.com/liza-mas/liza/internal/analysis"
 	"github.com/liza-mas/liza/internal/db"
 	lizalog "github.com/liza-mas/liza/internal/log"
@@ -2202,7 +2204,7 @@ func TestCheckMissingRoles(t *testing.T) {
 		if !strings.Contains(alerts[0].Message, "task-1") {
 			t.Errorf("Message = %q, expected to contain 'task-1'", alerts[0].Message)
 		}
-		if !strings.Contains(alerts[0].Message, "liza repair-agent-pool --dry-run") {
+		if !strings.Contains(alerts[0].Message, brand.BinaryName+" repair-agent-pool --dry-run") {
 			t.Errorf("Message = %q, expected repair-agent-pool hint", alerts[0].Message)
 		}
 	})
@@ -3528,7 +3530,7 @@ func TestRunAutoRepairAgentPool_LogsSuccessfulSpawnWithoutAlert(t *testing.T) {
 	if entries[0].Agent != "system" || entries[0].Action != "auto_repair_agent_spawned" {
 		t.Fatalf("log entry = %+v, want system auto_repair_agent_spawned", entries[0])
 	}
-	if !strings.Contains(entries[0].Detail, "liza agent architect --cli") || !strings.Contains(entries[0].Detail, "pid=4242") {
+	if !strings.Contains(entries[0].Detail, brand.BinaryName+" agent architect --cli") || !strings.Contains(entries[0].Detail, "pid=4242") {
 		t.Fatalf("log detail = %q, want command and pid", entries[0].Detail)
 	}
 }

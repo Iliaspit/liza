@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/liza-mas/liza/internal/paths"
+
 	"github.com/liza-mas/liza/internal/db"
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/ops"
@@ -224,7 +226,7 @@ func runSupervisorFinalPlanningQuorumApprovalAutoMerges(t *testing.T, firstRevie
 		Role:             "code-plan-reviewer",
 		ProjectRoot:      projectRoot,
 		StatePath:        statePath,
-		LogPath:          filepath.Join(projectRoot, ".liza", "log.yaml"),
+		LogPath:          filepath.Join(projectRoot, paths.ProjectDirName(), "log.yaml"),
 		SpecsDir:         filepath.Join(projectRoot, "specs"),
 		CLIName:          "codex",
 		InitialTask:      taskID,

@@ -5,6 +5,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/liza-mas/liza/internal/brand"
+
 	"github.com/liza-mas/liza/internal/db"
 	"github.com/liza-mas/liza/internal/errors"
 	"github.com/liza-mas/liza/internal/models"
@@ -37,7 +39,7 @@ func TestHandoff_Validation(t *testing.T) {
 		{
 			name:        "empty agent ID",
 			input:       &HandoffInput{TaskID: "t1", Summary: "s", NextAction: "n"},
-			errContains: "LIZA_AGENT_ID is required",
+			errContains: brand.EnvName("AGENT_ID") + " is required",
 		},
 	}
 

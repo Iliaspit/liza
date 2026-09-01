@@ -437,7 +437,7 @@ func TestCreateWorktree_ScipIndexesEnabledNewWorktreeAfterSetup(t *testing.T) {
 		t.Fatalf("indexer calls = %#v, want go indexer and aggregate calls", calls)
 	}
 
-	wantIndexPath := filepath.Join(result.WorktreeDir, ".liza", "scip", "go.scip")
+	wantIndexPath := filepath.Join(result.WorktreeDir, paths.ProjectDirName(), "scip", "go.scip")
 	indexes := availableCreateWorktreeScipIndexes(t, result.WorktreeDir, []string{"go"})
 	if len(indexes) != 1 || indexes[0].Language != "go" || indexes[0].Path != wantIndexPath {
 		t.Fatalf("AvailableIndexes() = %#v, want go index at %s", indexes, wantIndexPath)
@@ -486,7 +486,7 @@ func TestCreateWorktree_ScipExistingWorktreeRefreshesIdempotently(t *testing.T) 
 	if call != 4 {
 		t.Fatalf("indexer call count = %d, want 4", call)
 	}
-	wantPath := filepath.Join(first.WorktreeDir, ".liza", "scip", "go.scip")
+	wantPath := filepath.Join(first.WorktreeDir, paths.ProjectDirName(), "scip", "go.scip")
 	if len(outputPaths) != 4 || outputPaths[1] == wantPath || outputPaths[3] == wantPath ||
 		!strings.HasSuffix(outputPaths[1], "go-aggregate.scip") || !strings.HasSuffix(outputPaths[3], "go-aggregate.scip") {
 		t.Fatalf("output paths = %#v, want repeated temporary aggregate refresh before atomic rename to %s", outputPaths, wantPath)
@@ -530,8 +530,8 @@ func TestCreateWorktree_ScipDisabledActivationNoop(t *testing.T) {
 	if len(result.Warnings) != 0 {
 		t.Fatalf("CreateWorktree() warnings = %v, want none", result.Warnings)
 	}
-	if _, err := os.Stat(filepath.Join(result.WorktreeDir, ".liza", "scip")); !os.IsNotExist(err) {
-		t.Fatalf(".liza/scip stat error = %v, want not exist", err)
+	if _, err := os.Stat(filepath.Join(result.WorktreeDir, paths.ProjectDirName(), "scip")); !os.IsNotExist(err) {
+		t.Fatalf("%s/scip stat error = %v, want not exist", paths.ProjectDirName(), err)
 	}
 	if indexes := availableCreateWorktreeScipIndexes(t, result.WorktreeDir, []string{"go"}); len(indexes) != 0 {
 		t.Fatalf("AvailableIndexes() = %#v, want none", indexes)
@@ -639,7 +639,7 @@ func TestCreateWorktree_ScipConcurrentCreatesUseIsolatedIndexes(t *testing.T) {
 	outputs := map[string]string{}
 	withCreateWorktreeScipRuntimeRunner(t, func(plan scipsearch.RuntimeCommandPlan) (string, error) {
 		if plan.Name == "scip-search" {
-			finalPath := filepath.Join(plan.Dir, ".liza", "scip", plan.Language+".scip")
+			finalPath := filepath.Join(plan.Dir, paths.ProjectDirName(), "scip", plan.Language+".scip")
 			mu.Lock()
 			outputs[finalPath] = plan.Dir
 			mu.Unlock()
@@ -670,8 +670,8 @@ func TestCreateWorktree_ScipConcurrentCreatesUseIsolatedIndexes(t *testing.T) {
 		}
 	}
 
-	task1Index := filepath.Join(tmpDir, paths.WorktreesDirName, "task-1", ".liza", "scip", "go.scip")
-	task2Index := filepath.Join(tmpDir, paths.WorktreesDirName, "task-2", ".liza", "scip", "go.scip")
+	task1Index := filepath.Join(tmpDir, paths.WorktreesDirName, "task-1", paths.ProjectDirName(), "scip", "go.scip")
+	task2Index := filepath.Join(tmpDir, paths.WorktreesDirName, "task-2", paths.ProjectDirName(), "scip", "go.scip")
 	if task1Index == task2Index {
 		t.Fatal("concurrent creates produced identical index paths")
 	}
@@ -800,11 +800,7 @@ func TestCreateWorktree_InstallsBrandedHookDirectory(t *testing.T) {
 	withOpsBrandProjectDir(t, ".acme")
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
-	testhelpers.SetupLizaDir(t, tmpDir)
-	if err := os.Rename(filepath.Join(tmpDir, ".liza"), filepath.Join(tmpDir, ".acme")); err != nil {
-		t.Fatalf("rename test runtime dir: %v", err)
-	}
-	stateFile := filepath.Join(tmpDir, ".acme", "state.yaml")
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
 
 	now := time.Now().UTC()
 	state := testhelpers.CreateValidState()
@@ -1289,8 +1285,8 @@ func assertCreateWorktreeScipExcludeCount(t *testing.T, worktreeDir string, want
 	if err != nil {
 		t.Fatalf("ReadFile(worktree exclude) error: %v", err)
 	}
-	if got := strings.Count(string(content), ".liza/scip/"); got != want {
-		t.Fatalf("worktree exclude contains .liza/scip/ %d times, want %d; content: %q", got, want, content)
+	if got := strings.Count(string(content), paths.ProjectDirName()+"/scip/"); got != want {
+		t.Fatalf("worktree exclude contains %s/scip/ %d times, want %d; content: %q", paths.ProjectDirName(), got, want, content)
 	}
 }
 

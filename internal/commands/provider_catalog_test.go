@@ -7,11 +7,14 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/liza-mas/liza/internal/brand"
+	"github.com/liza-mas/liza/internal/paths"
 	"github.com/liza-mas/liza/internal/providers"
 )
 
@@ -61,7 +64,7 @@ func TestInitPairingCommand_ProviderFromCatalog(t *testing.T) {
 	if err != nil {
 		t.Fatalf("global QWEN.md not a symlink: %v", err)
 	}
-	if want := filepath.Join(fakeHome, ".liza", "CORE.md"); target != want {
+	if want := filepath.Join(fakeHome, paths.GlobalDirName(), "CORE.md"); target != want {
 		t.Fatalf("QWEN.md = %q, want %q", target, want)
 	}
 }
@@ -82,13 +85,13 @@ func TestInitPairingCommand_ProviderFromCatalogCreatesNestedContractParent(t *te
 		t.Fatalf("InitPairingCommand() error = %v", err)
 	}
 
-	linkPath := filepath.Join(gitDir, ".windsurf", "rules", "liza.md")
+	linkPath := filepath.Join(gitDir, ".windsurf", "rules", brand.NameLower+".md")
 	target, err := os.Readlink(linkPath)
 	if err != nil {
-		t.Fatalf(".windsurf/rules/liza.md not a symlink: %v", err)
+		t.Fatalf("%s not a symlink: %v", path.Join(".windsurf", "rules", brand.NameLower+".md"), err)
 	}
-	if want := filepath.Join(fakeHome, ".liza", "CORE.md"); target != want {
-		t.Fatalf(".windsurf/rules/liza.md = %q, want %q", target, want)
+	if want := filepath.Join(fakeHome, paths.GlobalDirName(), "CORE.md"); target != want {
+		t.Fatalf("Windsurf contract target = %q, want %q", target, want)
 	}
 }
 
@@ -150,7 +153,7 @@ providers:
 	}
 
 	projectRoot := t.TempDir()
-	contractTarget := filepath.Join(homeDir, ".liza", "CORE.md")
+	contractTarget := filepath.Join(homeDir, paths.GlobalDirName(), "CORE.md")
 	links := []struct {
 		repoFile  string
 		globalRel string
@@ -255,6 +258,91 @@ providers:
 	}
 }
 
+func TestResolveCatalogProvidersMigratesLegacyDevinRepoOnlyContract(t *testing.T) {
+	cat, err := providers.ParseCatalog([]byte(`version: 1
+providers:
+  - id: devin
+    display_name: Devin
+    backend: cli
+    setup:
+      contract:
+        repo_file: .windsurf/rules/liza.md
+        global_fallback: .config/devin/liza.md
+    runtime:
+      executable: devin
+`))
+	if err != nil {
+		t.Fatalf("ParseCatalog() error = %v", err)
+	}
+
+	selected, err := resolveCatalogProviders(cat, []string{"devin"})
+	if err != nil {
+		t.Fatalf("resolveCatalogProviders() error = %v", err)
+	}
+	if len(selected) != 1 {
+		t.Fatalf("resolved providers = %+v, want one Devin provider", selected)
+	}
+	contract := selected[0].Setup.Contract
+	if contract.GlobalFallback != "" || contract.GlobalFallbackEnv != "" || contract.GlobalFallbackEnvSuffix != "" || contract.PreferGlobal != nil {
+		t.Fatalf("legacy Devin contract was not migrated to repo-only: %+v", contract)
+	}
+}
+
+func TestResolveCatalogProvidersPreservesEmbeddedBrandOwnedDevinRepoFile(t *testing.T) {
+	previousNameLower := brand.NameLower
+	brand.NameLower = "acme"
+	t.Cleanup(func() { brand.NameLower = previousNameLower })
+
+	cat, err := providers.ParseCatalog([]byte(`version: 2
+providers:
+  - id: devin
+    display_name: Devin
+    backend: cli
+    setup:
+      contract:
+        repo_file: .windsurf/rules/liza.md
+    runtime:
+      executable: devin
+    acp_runtime:
+      provider_key: devin
+      executable: acpx
+      prompt_transport: stdin
+      required_executables: [acpx, devin]
+      contract_key: devin
+      acpx_agent: devin acp
+      acpx_session_name: catalog-devin-{{agentID}}
+      acpx_show_args: [--cwd, "{{projectRoot}}", --agent, "{{acpxAgent}}", sessions, show, --name, "{{sessionName}}"]
+      acpx_ensure_args: [--cwd, "{{projectRoot}}", --agent, "{{acpxAgent}}", sessions, ensure, --name, "{{sessionName}}"]
+      acpx_prompt_args: [--cwd, "{{projectRoot}}", --format, json, --approve-all, --agent, "{{acpxAgent}}", prompt, -s, "{{sessionName}}", --file, "-"]
+      acpx_event_mode: json
+  - id: custom-provider
+    display_name: Custom Provider
+    backend: cli
+    setup:
+      contract:
+        repo_file: .custom/provider.md
+    runtime:
+      executable: custom-provider
+`))
+	if err != nil {
+		t.Fatalf("ParseCatalog() error = %v", err)
+	}
+
+	selected, err := resolveCatalogProviders(cat, []string{"devin", "devin-acp", "custom-provider"})
+	if err != nil {
+		t.Fatalf("resolveCatalogProviders() error = %v", err)
+	}
+	if got := selected[0].Setup.Contract.RepoFile; got != ".windsurf/rules/acme.md" {
+		t.Errorf("Devin repo file = %q, want active-brand embedded path", got)
+	}
+	if got := selected[1].Setup.Contract.RepoFile; got != ".windsurf/rules/acme.md" {
+		t.Errorf("Devin ACP repo file = %q, want active-brand embedded path", got)
+	}
+	if got := selected[2].Setup.Contract.RepoFile; got != ".custom/provider.md" {
+		t.Errorf("custom provider repo file = %q, want loaded catalog value", got)
+	}
+}
+
 func TestResolveCatalogProvidersPreservesCustomVersionOneRepoOnlyBuiltInContract(t *testing.T) {
 	cat, err := providers.ParseCatalog([]byte(`version: 1
 providers:
@@ -331,7 +419,7 @@ func TestDuplicateNonPreferGlobalSymlinksWarnsAndRetainsBoth(t *testing.T) {
 	homeDir := t.TempDir()
 	t.Setenv("HOME", homeDir)
 	projectRoot := t.TempDir()
-	contractTarget := filepath.Join(homeDir, ".liza", "CORE.md")
+	contractTarget := filepath.Join(homeDir, paths.GlobalDirName(), "CORE.md")
 	repoPath := filepath.Join(projectRoot, "CUSTOM.md")
 	globalPath := filepath.Join(homeDir, ".custom", "CUSTOM.md")
 	if err := os.MkdirAll(filepath.Dir(globalPath), 0755); err != nil {
@@ -374,7 +462,7 @@ func TestProviderScopedWizardActionOverridesManagedGlobalForNonPreferProvider(t 
 			homeDir := t.TempDir()
 			t.Setenv("HOME", homeDir)
 			projectRoot := t.TempDir()
-			contractTarget := filepath.Join(homeDir, ".liza", "CORE.md")
+			contractTarget := filepath.Join(homeDir, paths.GlobalDirName(), "CORE.md")
 			repoPath := filepath.Join(projectRoot, "CUSTOM.md")
 			globalPath := filepath.Join(homeDir, ".custom", "CUSTOM.md")
 			if err := os.MkdirAll(filepath.Dir(globalPath), 0755); err != nil {
@@ -446,7 +534,7 @@ func useTestProviderCatalog(t *testing.T) {
 	}
 }
 
-const testProviderCatalogYAML = `version: 1
+var testProviderCatalogYAML = `version: 1
 providers:
   - id: qwen
     display_name: Qwen
@@ -478,7 +566,7 @@ providers:
       config_dir: .config/devin
       skills_dir: skills
       contract:
-        repo_file: .windsurf/rules/liza.md
+        repo_file: .windsurf/rules/` + brand.NameLower + `.md
         global_fallback: .config/devin/liza.md
     runtime:
       provider_key: devin

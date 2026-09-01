@@ -10,6 +10,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/liza-mas/liza/internal/brand"
+	"github.com/liza-mas/liza/internal/paths"
+
 	"github.com/liza-mas/liza/internal/agent"
 	"github.com/spf13/cobra"
 )
@@ -86,7 +89,7 @@ func TestPairingSkillPromptUsesCodexSkillTrigger(t *testing.T) {
 
 func TestAdversarialPairingDefaultsToThreeCodexPanes(t *testing.T) {
 	tmpDir := t.TempDir()
-	boardPath := filepath.Join(tmpDir, ".liza", "adversarial", "board.md")
+	boardPath := filepath.Join(tmpDir, paths.ProjectDirName(), "adversarial", "board.md")
 	resetRootCmdForTest(t)
 	var out bytes.Buffer
 	rootCmd.SetOut(&out)
@@ -264,7 +267,7 @@ func TestInitialAdversarialPairingBlackboardIncludesGoalAndYolo(t *testing.T) {
 }
 
 func TestEnsureAdversarialPairingBlackboardRequiresGoalWhenMissing(t *testing.T) {
-	path := filepath.Join(t.TempDir(), ".liza", "adversarial", "retry-client.md")
+	path := filepath.Join(t.TempDir(), paths.ProjectDirName(), "adversarial", "retry-client.md")
 	err := ensureAdversarialPairingBlackboard(path, "", false, false, launchWeztermAdversarialPairingCmd)
 	if err == nil {
 		t.Fatal("expected missing blackboard without goal to fail")
@@ -275,7 +278,7 @@ func TestEnsureAdversarialPairingBlackboardRequiresGoalWhenMissing(t *testing.T)
 }
 
 func TestEnsureAdversarialPairingBlackboardCreatesMissingBoard(t *testing.T) {
-	path := filepath.Join(t.TempDir(), ".liza", "adversarial", "retry-client.md")
+	path := filepath.Join(t.TempDir(), paths.ProjectDirName(), "adversarial", "retry-client.md")
 	if err := ensureAdversarialPairingBlackboard(path, "Fix retry client", false, false, launchWeztermAdversarialPairingCmd); err != nil {
 		t.Fatalf("ensureAdversarialPairingBlackboard returned error: %v", err)
 	}
@@ -289,7 +292,7 @@ func TestEnsureAdversarialPairingBlackboardCreatesMissingBoard(t *testing.T) {
 }
 
 func TestEnsureAdversarialPairingBlackboardDryRunDoesNotCreateMissingBoard(t *testing.T) {
-	path := filepath.Join(t.TempDir(), ".liza", "adversarial", "retry-client.md")
+	path := filepath.Join(t.TempDir(), paths.ProjectDirName(), "adversarial", "retry-client.md")
 	if err := ensureAdversarialPairingBlackboard(path, "Fix retry client", false, true, launchWeztermAdversarialPairingCmd); err != nil {
 		t.Fatalf("ensureAdversarialPairingBlackboard returned error: %v", err)
 	}
@@ -299,11 +302,11 @@ func TestEnsureAdversarialPairingBlackboardDryRunDoesNotCreateMissingBoard(t *te
 }
 
 func TestResolveLaunchPathUsesProvidedWorkingDirectory(t *testing.T) {
-	got, err := resolveLaunchPath("/tmp/project", ".liza/adversarial/retry-client.md")
+	got, err := resolveLaunchPath("/tmp/project", paths.ProjectDirName()+"/adversarial/retry-client.md")
 	if err != nil {
 		t.Fatalf("resolveLaunchPath returned error: %v", err)
 	}
-	want := filepath.Clean("/tmp/project/.liza/adversarial/retry-client.md")
+	want := filepath.Clean("/tmp/project/" + paths.ProjectDirName() + "/adversarial/retry-client.md")
 	if got != want {
 		t.Fatalf("path = %q, want %q", got, want)
 	}
@@ -442,10 +445,10 @@ func TestCmuxMASDefaultsToTechnicalSpecPreset(t *testing.T) {
 	tmpDir := t.TempDir()
 	initGitRepoForLaunchTest(t, tmpDir)
 	// Create a minimal Liza project structure
-	if err := os.MkdirAll(filepath.Join(tmpDir, ".liza"), 0755); err != nil {
-		t.Fatalf("create .liza dir: %v", err)
+	if err := os.MkdirAll(filepath.Join(tmpDir, paths.ProjectDirName()), 0755); err != nil {
+		t.Fatalf("create project runtime directory: %v", err)
 	}
-	statePath := filepath.Join(tmpDir, ".liza", "state.yaml")
+	statePath := filepath.Join(tmpDir, paths.ProjectDirName(), "state.yaml")
 	stateContent := `version: 1
 goal:
   id: goal-test
@@ -474,9 +477,9 @@ agents: {}
 	output := out.String()
 	for _, want := range []string{
 		"cmux", "new-workspace",
-		"liza", "tui",
-		"liza", "agent", "orchestrator",
-		"liza", "agent", "code-planner",
+		brand.BinaryName, "tui",
+		brand.BinaryName, "agent", "orchestrator",
+		brand.BinaryName, "agent", "code-planner",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("dry-run output missing %q\noutput:\n%s", want, output)
@@ -507,7 +510,7 @@ func TestMASLaunchRejectsExplicitCWDOutsideLizaProject(t *testing.T) {
 
 func TestCmuxAdversarialPairingDefaultsToThreeCodexPanes(t *testing.T) {
 	tmpDir := t.TempDir()
-	boardPath := filepath.Join(tmpDir, ".liza", "adversarial", "board.md")
+	boardPath := filepath.Join(tmpDir, paths.ProjectDirName(), "adversarial", "board.md")
 	resetRootCmdForTest(t)
 	var out bytes.Buffer
 	rootCmd.SetOut(&out)

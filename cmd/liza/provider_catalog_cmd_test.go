@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/liza-mas/liza/internal/paths"
 	"github.com/liza-mas/liza/internal/providers"
 )
 
@@ -46,7 +47,7 @@ func TestProvidersRefreshCommandWritesCache(t *testing.T) {
 	if !strings.Contains(out.String(), "provider catalog refreshed") {
 		t.Fatalf("providers refresh output = %q", out.String())
 	}
-	if _, err := os.Stat(filepath.Join(home, ".liza", "cache", "provider-catalog.yaml")); err != nil {
+	if _, err := os.Stat(filepath.Join(home, paths.GlobalDirName(), "cache", "provider-catalog.yaml")); err != nil {
 		t.Fatalf("provider catalog cache not written: %v", err)
 	}
 }

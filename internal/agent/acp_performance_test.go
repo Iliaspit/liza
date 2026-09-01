@@ -211,7 +211,7 @@ func runSimplifiedLizaBenchmark(t *testing.T, mode string) []acpplugin.RunMetric
 		Role:                     "coder",
 		ProjectRoot:              projectRoot,
 		StatePath:                statePath,
-		LogPath:                  filepath.Join(projectRoot, ".liza", "log.yaml"),
+		LogPath:                  filepath.Join(projectRoot, paths.ProjectDirName(), "log.yaml"),
 		SpecsDir:                 filepath.Join(projectRoot, "specs"),
 		CLIName:                  mode,
 		LLMAgent:                 benchAgent,
