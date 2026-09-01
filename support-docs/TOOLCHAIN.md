@@ -79,7 +79,9 @@ the selected directory as their tool binary directory.
 
 With `--write-shell-profile`, `configure` adds the env source line to the
 current shell's startup files: `.zshrc` for Zsh, `.bashrc` and `.profile` for
-Bash, and `.profile` for unknown shells.
+Bash, and `.profile` for unknown shells. On Windows it also queries both
+PowerShell 7 (`pwsh`) and Windows PowerShell (`powershell`) when installed and
+wires each host's `$PROFILE.CurrentUserAllHosts`.
 
 `configure` also supports `--agent-tools auto|skip|force`:
 
@@ -144,3 +146,42 @@ source repository and running `go install ./cmd/<tool>` into the selected
 install directory.
 
 The source fallback requires `git` and `go` on `PATH`.
+
+## Windows
+
+The toolchain installs and activates natively; the differences are in how each
+tool arrives.
+
+**Package managers.** `winget`, `scoop` and `choco` are tried before the Unix
+managers. They identify packages by publisher-qualified IDs, so a tool is only
+installed through them when the catalog states the identifier — otherwise the
+step is skipped with the command to run by hand, rather than installing whatever
+else answers to the same name. Today that affects `mdq` (`cargo install mdq`)
+and `pre-commit` (`uv tool install pre-commit`).
+
+**Install scripts.** Several upstream scripts accept Linux and macOS only. Where
+a source fallback exists it takes over automatically, so `mdtoc`, `scip-search`,
+`functional-clusters` and `bash-policy` still install — given `git` and `go` on
+`PATH`. `rtk` has no source fallback, so it is installed from the native Windows
+archive its publisher ships.
+
+**Binary names.** An install script that builds with `go build -o <dir>/<name>`
+produces a file with no extension, which Windows cannot resolve through
+`PATHEXT`: the install would report success and every later invocation, including
+`§BRAND_BINARY_NAME§ toolchain doctor`, would report the tool missing. Installs
+into the managed directory are renamed to `<name>.exe`, and any tool that is
+neither in that directory nor on `PATH` afterwards is reported as failed.
+
+**Activation.** PowerShell reads none of the POSIX profiles, so
+`§BRAND_BINARY_NAME§ toolchain configure` writes `env.ps1` beside `env.sh` and
+sources it from `$PROFILE.CurrentUserAllHosts` for every installed supported
+host: PowerShell 7 and Windows PowerShell 5.1. Git Bash sessions keep using
+`env.sh`; all installed shells are wired in the same run.
+
+**Known gaps.** Two tools install on Windows without being usable there, and
+nothing here works around either. `bash-policy` does not build: its file locking
+calls `syscall.Flock` with no build tags. `scip-python` builds a regular
+expression from the platform path separator while its module loads, so a
+backslash leaves the pattern unterminated and every invocation — `--version`
+included — dies before it starts; `doctor` reports it as failed, and Python
+projects have no SCIP index on this platform.

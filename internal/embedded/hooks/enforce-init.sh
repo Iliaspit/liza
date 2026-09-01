@@ -9,7 +9,8 @@
 #   - One mode contract from the Mode Selection Gate
 #   - Pairing only: existing REPOSITORY.md/docs/USAGE.md, ~/__BRAND_GLOBAL_DIRNAME__/COLLABORATION_CONTINUITY.md
 #
-# No external dependencies (no jq, no sed -i). Portable across Linux and macOS.
+# No external dependencies (no jq, no sed -i). Portable across Linux, macOS,
+# and Windows under Git Bash.
 
 input=$(cat)
 
@@ -75,10 +76,43 @@ json_array_vals() {
 /g;s/^\"//;s/\"$//;p;}"
 }
 
+is_windows_shell() {
+  case "${OSTYPE:-}" in
+    msys*|cygwin*|win32*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 tool_name=$(json_val tool_name)
 session_id=$(json_val session_id)
 cwd=$(json_val cwd)
 command=$(json_val command)
+
+# Canonicalise Windows filesystem values before any validation.
+#
+# On Windows the backslash is the path separator, but it is also a reserved
+# character that can never appear in a filename — so rewriting it to "/" is
+# lossless for cwd and project_dir. It is also what makes those native values
+# comparable with paths Git reports using forward slashes.
+#
+# Do not rewrite command. The hook can validate only the exact string Bash will
+# execute, and Bash treats native-path backslashes as escapes. Rewriting a local
+# validation copy would let a command mark a document read even though the Bash
+# tool subsequently executes a different, failing path. Native Windows paths
+# on the Bash surface are therefore rejected by the existing metacharacter
+# check; callers must use the equivalent forward-slash form.
+if is_windows_shell; then
+  cwd="${cwd//\\//}"
+  # $HOME needs more than separator rewriting. Git Bash translates it into MSYS
+  # form at startup — /c/Users/... , or /tmp/... for a home under the temp
+  # directory — while the agent sends native Windows paths, so the two never
+  # compare equal however the slashes lean. cygpath brings it back into the
+  # namespace the caller uses. It ships with Git for Windows, which these hooks
+  # already require; where it is absent the comparisons stay as they were.
+  if command -v cygpath >/dev/null 2>&1; then
+    HOME=$(cygpath -m "$HOME" 2>/dev/null || printf '%s' "$HOME")
+  fi
+fi
 
 project_dir="${CLAUDE_PROJECT_DIR:-}"
 if [[ -z "$project_dir" ]]; then
@@ -87,6 +121,17 @@ if [[ -z "$project_dir" ]]; then
   else
     project_dir=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
   fi
+fi
+
+# CLAUDE_PROJECT_DIR is set by the runtime and holds a native path, so it skips
+# the canonicalisation applied to cwd above. The required-document patterns are
+# built from project_dir and matched against reads that have been canonicalised,
+# so leaving it native means an absolute read of GUARDRAILS.md never matches and
+# the gate stays armed after every document has been read. The derived branches
+# above are already forward-slashed — git reports them that way, and cwd was
+# rewritten — which is why only the environment path was exposed.
+if is_windows_shell; then
+  project_dir="${project_dir//\\//}"
 fi
 
 # Fallback: $PPID is the Claude Code process PID (POSIX — the parent that forked this shell).
@@ -356,6 +401,11 @@ BLOCKED — session initialization allows Bash only for simple read-only doc com
 
 Use exactly one file per command and one command per tool call.
 Expected global contract root: ~/__BRAND_GLOBAL_DIRNAME__/
+EOF
+    if is_windows_shell; then
+      echo "On Windows use forward slashes: cat C:/proj/GUARDRAILS.md" >&2
+    fi
+    cat <<EOF >&2
 Allowed commands: cat, sed, an exact GUARDRAILS.md existence
 probe, or a narrow \`test -f GUARDRAILS.md && ... || ...\` wrapper.
 EOF
@@ -388,6 +438,13 @@ if [[ "$tool_name" == "Read" || "$tool_name" =~ ^mcp__filesystem__read ]]; then
   recognized_init_read=0
   while IFS= read -r file_path; do
     [[ -z "$file_path" ]] && continue
+    # Same canonicalisation as $command and $cwd above, for the same reason:
+    # these arrive as native paths and are compared against $project_dir, which
+    # git reports forward-slashed even on Windows. Without it no native Read
+    # clears the gate.
+    if is_windows_shell; then
+      file_path="${file_path//\\//}"
+    fi
     if mark_session_init_doc_path "$file_path"; then
       recognized_init_read=1
     fi

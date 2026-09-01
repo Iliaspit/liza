@@ -993,6 +993,7 @@ func verifyInitialization(t *testing.T, tmpDir, description, specRef string) {
 }
 
 func TestInitCommand_CreatesContractSymlinks(t *testing.T) {
+	testhelpers.RequireSymlinkCapability(t)
 	// Create temporary git repo
 	gitDir := setupGitRepo(t)
 	defer os.RemoveAll(gitDir)
@@ -1047,6 +1048,10 @@ func TestInitCommand_CreatesContractSymlinks(t *testing.T) {
 		t.Fatalf("Codex config not created for --codex: %v", err)
 	}
 	for _, want := range []string{gitDir, filepath.Join(gitDir, ".git")} {
+		// TOML basic strings escape the backslash, so a native Windows path is
+		// written C:\\Users\\... and the raw path never appears verbatim. The
+		// replacement is the identity on Unix.
+		want = strings.ReplaceAll(want, `\`, `\\`)
 		if !strings.Contains(string(configContent), want) {
 			t.Errorf("Codex config missing writable root %q:\n%s", want, string(configContent))
 		}
@@ -1242,6 +1247,7 @@ func TestInitCommandWithConfig_MultiProviderBashPolicyUsesSharedBufferedInput(t 
 }
 
 func TestInitCommand_OpenCodeCreatesGlobalContractWithoutCodexHooks(t *testing.T) {
+	testhelpers.RequireSymlinkCapability(t)
 	gitDir := setupGitRepo(t)
 	defer os.RemoveAll(gitDir)
 
@@ -1344,6 +1350,7 @@ func TestInitCommand_OpenCodePreservesUserExecTool(t *testing.T) {
 }
 
 func TestInitCommand_PreservesManagedRepoSymlinkRecordedForRepoOnlyProvider(t *testing.T) {
+	testhelpers.RequireSymlinkCapability(t)
 	gitDir := setupGitRepo(t)
 	defer os.RemoveAll(gitDir)
 
@@ -1400,6 +1407,7 @@ func TestInitCommand_PreservesManagedRepoSymlinkRecordedForRepoOnlyProvider(t *t
 }
 
 func TestInitCommand_NoProvidersLeavesManagedRepoSymlinkUntouched(t *testing.T) {
+	testhelpers.RequireSymlinkCapability(t)
 	gitDir := setupGitRepo(t)
 	defer os.RemoveAll(gitDir)
 
@@ -1435,6 +1443,7 @@ func TestInitCommand_NoProvidersLeavesManagedRepoSymlinkUntouched(t *testing.T) 
 }
 
 func TestInitCommand_BrownfieldFallsBackToGlobal(t *testing.T) {
+	testhelpers.RequireSymlinkCapability(t)
 	gitDir := setupGitRepo(t)
 	defer os.RemoveAll(gitDir)
 
@@ -1504,6 +1513,7 @@ func TestInitCommand_BrownfieldFallsBackToGlobal(t *testing.T) {
 }
 
 func TestInitCommand_OpenCodeBrownfieldFallsBackToOpenCodeGlobal(t *testing.T) {
+	testhelpers.RequireSymlinkCapability(t)
 	gitDir := setupGitRepo(t)
 	defer os.RemoveAll(gitDir)
 
@@ -1555,6 +1565,7 @@ func TestInitCommand_OpenCodeBrownfieldFallsBackToOpenCodeGlobal(t *testing.T) {
 }
 
 func TestInitCommand_CodexAndOpenCodeBrownfieldCreateBothFallbacks(t *testing.T) {
+	testhelpers.RequireSymlinkCapability(t)
 	gitDir := setupGitRepo(t)
 	defer os.RemoveAll(gitDir)
 
@@ -1601,6 +1612,7 @@ func TestInitCommand_CodexAndOpenCodeBrownfieldCreateBothFallbacks(t *testing.T)
 }
 
 func TestInitCommand_BrownfieldExistingLizaAtGlobalSkipsCreation(t *testing.T) {
+	testhelpers.RequireSymlinkCapability(t)
 	gitDir := setupGitRepo(t)
 	defer os.RemoveAll(gitDir)
 
@@ -1702,6 +1714,7 @@ func TestInitCommand_BrownfieldBothOccupiedWarns(t *testing.T) {
 }
 
 func TestInitCommand_DuplicateClaudeSymlinkRemovesUnownedRepoCopy(t *testing.T) {
+	testhelpers.RequireSymlinkCapability(t)
 	gitDir := setupGitRepo(t)
 	defer os.RemoveAll(gitDir)
 
@@ -1740,6 +1753,7 @@ func TestInitCommand_DuplicateClaudeSymlinkRemovesUnownedRepoCopy(t *testing.T) 
 }
 
 func TestInitCommand_DuplicateCodexSymlinkPreservesRepoCopyForCursor(t *testing.T) {
+	testhelpers.RequireSymlinkCapability(t)
 	gitDir := setupGitRepo(t)
 	defer os.RemoveAll(gitDir)
 
@@ -1790,6 +1804,7 @@ func TestInitCommand_DuplicateCodexSymlinkPreservesRepoCopyForCursor(t *testing.
 }
 
 func TestInitPairingCommand_PrefersActiveProviderGlobalRoot(t *testing.T) {
+	testhelpers.RequireSymlinkCapability(t)
 	tests := []struct {
 		name         string
 		agent        string
@@ -1840,6 +1855,7 @@ func TestInitPairingCommand_PrefersActiveProviderGlobalRoot(t *testing.T) {
 }
 
 func TestInitPairingCommand_QwenRelativeHomeRetainsRepoContractAcrossWorkingDirectories(t *testing.T) {
+	testhelpers.RequireSymlinkCapability(t)
 	gitDir := setupGitRepo(t)
 	defer os.RemoveAll(gitDir)
 	fakeHome := setupGlobalLiza(t)
@@ -1885,6 +1901,7 @@ func TestInitPairingCommand_QwenRelativeHomeRetainsRepoContractAcrossWorkingDire
 }
 
 func TestPreferredGlobalOccupiedRetainsManagedRepoContract(t *testing.T) {
+	testhelpers.RequireSymlinkCapability(t)
 	homeDir := t.TempDir()
 	t.Setenv("HOME", homeDir)
 	t.Setenv("CODEX_HOME", "")
@@ -1925,6 +1942,7 @@ func TestPreferredGlobalOccupiedRetainsManagedRepoContract(t *testing.T) {
 }
 
 func TestInitCommand_GlobalClaudeSymlinkPreservesRepoRegularFile(t *testing.T) {
+	testhelpers.RequireSymlinkCapability(t)
 	gitDir := setupGitRepo(t)
 	defer os.RemoveAll(gitDir)
 
@@ -1969,6 +1987,7 @@ func TestInitCommand_GlobalClaudeSymlinkPreservesRepoRegularFile(t *testing.T) {
 }
 
 func TestInitCommand_ContractActionLocalCreatesCLAUDELocalMd(t *testing.T) {
+	testhelpers.RequireSymlinkCapability(t)
 	gitDir := setupGitRepo(t)
 	defer os.RemoveAll(gitDir)
 
@@ -2012,6 +2031,7 @@ func TestInitCommand_ContractActionLocalCreatesCLAUDELocalMd(t *testing.T) {
 }
 
 func TestCheckContractConfigured_FindsLocalMd(t *testing.T) {
+	testhelpers.RequireSymlinkCapability(t)
 	dir := t.TempDir()
 	fakeHome := t.TempDir()
 	t.Setenv("HOME", fakeHome)
@@ -2035,6 +2055,7 @@ func TestCheckContractConfigured_FindsLocalMd(t *testing.T) {
 }
 
 func TestCheckContractConfigured_CodexACPUsesCodexContract(t *testing.T) {
+	testhelpers.RequireSymlinkCapability(t)
 	dir := t.TempDir()
 	fakeHome := t.TempDir()
 	t.Setenv("HOME", fakeHome)
@@ -2061,6 +2082,7 @@ func TestCheckContractConfigured_CodexACPUsesCodexContract(t *testing.T) {
 }
 
 func TestCheckContractConfigured_CursorACPUsesAgentsContract(t *testing.T) {
+	testhelpers.RequireSymlinkCapability(t)
 	dir := t.TempDir()
 	fakeHome := t.TempDir()
 	t.Setenv("HOME", fakeHome)
@@ -2087,6 +2109,7 @@ func TestCheckContractConfigured_CursorACPUsesAgentsContract(t *testing.T) {
 }
 
 func TestCheckContractConfigured_OpenCodeUsesAgentsContract(t *testing.T) {
+	testhelpers.RequireSymlinkCapability(t)
 	dir := t.TempDir()
 	fakeHome := t.TempDir()
 	t.Setenv("HOME", fakeHome)
@@ -2152,15 +2175,12 @@ func TestInitCommand_WritesClaudeSettings(t *testing.T) {
 
 	// Verify settings.json was created
 	settingsPath := filepath.Join(claudeDir, "settings.json")
-	info, err := os.Stat(settingsPath)
-	if os.IsNotExist(err) {
+	if _, err := os.Stat(settingsPath); os.IsNotExist(err) {
 		t.Fatalf("settings.json not created")
 	}
 
 	// Verify file permissions
-	if info.Mode().Perm() != 0644 {
-		t.Errorf("settings.json has wrong permissions: got %o, want 0644", info.Mode().Perm())
-	}
+	testhelpers.AssertRegularFileMode(t, settingsPath, 0644)
 
 	// Read and parse JSON
 	content, err := os.ReadFile(settingsPath)
@@ -2198,11 +2218,10 @@ func TestInitCommand_WritesClaudeSettings(t *testing.T) {
 
 	// Verify .claude/hooks/enforce-init.sh was deployed
 	hookPath := filepath.Join(claudeDir, "hooks", "enforce-init.sh")
-	hookInfo, hookErr := os.Stat(hookPath)
-	if os.IsNotExist(hookErr) {
+	if _, hookErr := os.Stat(hookPath); os.IsNotExist(hookErr) {
 		t.Error(".claude/hooks/enforce-init.sh not created during workspace init")
-	} else if hookErr == nil && hookInfo.Mode()&0111 == 0 {
-		t.Errorf("enforce-init.sh should be executable, got %o", hookInfo.Mode())
+	} else if hookErr == nil {
+		testhelpers.AssertExecutableScript(t, hookPath)
 	}
 }
 
@@ -3106,6 +3125,8 @@ func TestInitCommandWithConfig_PostWorktreeCmdOmittedWhenEmpty(t *testing.T) {
 // --- InitPairingCommand tests ---
 
 func TestInitPairingCommand_Claude(t *testing.T) {
+	testhelpers.RequireSymlinkCapability(t)
+
 	gitDir := setupGitRepo(t)
 	defer os.RemoveAll(gitDir)
 	fakeHome := setupGlobalLiza(t)
@@ -3144,11 +3165,10 @@ func TestInitPairingCommand_Claude(t *testing.T) {
 
 	// .claude/hooks/enforce-init.sh should be deployed
 	hookPath := filepath.Join(gitDir, ".claude", "hooks", "enforce-init.sh")
-	hookInfo, err := os.Stat(hookPath)
-	if os.IsNotExist(err) {
+	if _, err := os.Stat(hookPath); os.IsNotExist(err) {
 		t.Error(".claude/hooks/enforce-init.sh should be created for --claude pairing")
-	} else if err == nil && hookInfo.Mode()&0111 == 0 {
-		t.Errorf("enforce-init.sh should be executable, got %o", hookInfo.Mode())
+	} else if err == nil {
+		testhelpers.AssertExecutableScript(t, hookPath)
 	}
 
 	// AGENTS.md and GEMINI.md should NOT exist (only --claude)
@@ -3160,6 +3180,7 @@ func TestInitPairingCommand_Claude(t *testing.T) {
 }
 
 func TestInitPairingCommand_MultipleAgents(t *testing.T) {
+	testhelpers.RequireSymlinkCapability(t)
 	gitDir := setupGitRepo(t)
 	defer os.RemoveAll(gitDir)
 	fakeHome := setupGlobalLiza(t)
@@ -3227,6 +3248,8 @@ func TestInitPairingCommand_BashPolicyDisabledSkipsLookup(t *testing.T) {
 }
 
 func TestInitPairingCommand_CursorSkipsBashPolicyWhenGateDisabled(t *testing.T) {
+	testhelpers.RequireSymlinkCapability(t)
+
 	gitDir := setupGitRepo(t)
 	defer os.RemoveAll(gitDir)
 	fakeHome := setupGlobalLiza(t)
@@ -3272,6 +3295,7 @@ func TestInitPairingCommand_CursorSkipsBashPolicyWhenGateDisabled(t *testing.T) 
 }
 
 func TestInitPairingCommand_CursorAndOpenCodeRetainSharedRepoContract(t *testing.T) {
+	testhelpers.RequireSymlinkCapability(t)
 	gitDir := setupGitRepo(t)
 	defer os.RemoveAll(gitDir)
 	fakeHome := setupGlobalLiza(t)
@@ -3391,6 +3415,7 @@ func TestInitPairingCommand_ProviderScopedConflictActionPreservesGlobalFirst(t *
 }
 
 func TestInitPairingCommand_SharedRepoContractSurvivesGlobalActivationFailure(t *testing.T) {
+	testhelpers.RequireSymlinkCapability(t)
 	gitDir := setupGitRepo(t)
 	defer os.RemoveAll(gitDir)
 	fakeHome := setupGlobalLiza(t)
@@ -3429,6 +3454,7 @@ func TestInitPairingCommand_SharedRepoContractSurvivesGlobalActivationFailure(t 
 }
 
 func TestCreateContractSymlinksForProviders_NormalizesSharedRepoPaths(t *testing.T) {
+	testhelpers.RequireSymlinkCapability(t)
 	homeDir := t.TempDir()
 	t.Setenv("HOME", homeDir)
 	projectRoot := t.TempDir()
@@ -3928,6 +3954,7 @@ func TestInitPairingCommand_ScipSearchGoFilterPlansConcreteHookCommand(t *testin
 }
 
 func TestInitPairingCommand_ScipSearchPlanOverridesAmbiguousRoots(t *testing.T) {
+	testhelpers.RequireSymlinkCapability(t)
 	gitDir := setupGitRepo(t)
 	defer os.RemoveAll(gitDir)
 	setupGlobalLiza(t)
@@ -3962,16 +3989,16 @@ func TestInitPairingCommand_ScipSearchPlanOverridesAmbiguousRoots(t *testing.T) 
 
 	script := readFileForTest(t, filepath.Join(gitDir, ".git", "hooks", brand.BinaryName+"-index.sh"))
 	for _, want := range []string{
-		"scip-go index --module-root " + gitDir + "/services/design-diagnosis/cli --output ",
-		"scip-typescript index --cwd " + gitDir + "/apps/web/src --output ",
-		"scip-python index --cwd " + gitDir + "/apps/api --output ",
-		"scip-search aggregate-index --project-root " + gitDir,
+		"scip-go index --module-root " + testhelpers.ShellArg(filepath.Join(gitDir, "services", "design-diagnosis", "cli")) + " --output ",
+		"scip-typescript index --cwd " + testhelpers.ShellArg(filepath.Join(gitDir, "apps", "web", "src")) + " --output ",
+		"scip-python index --cwd " + testhelpers.ShellArg(filepath.Join(gitDir, "apps", "api")) + " --output ",
+		"scip-search aggregate-index --project-root " + testhelpers.ShellArg(gitDir),
 		"--root services/design-diagnosis/cli --index ",
 		"--root apps/web/src --index ",
 		"--root apps/api --index ",
-		"--out " + gitDir + "/go.scip",
-		"--out " + gitDir + "/typescript.scip",
-		"--out " + gitDir + "/python.scip",
+		"--out " + testhelpers.ShellArg(filepath.Join(gitDir, "go.scip")),
+		"--out " + testhelpers.ShellArg(filepath.Join(gitDir, "typescript.scip")),
+		"--out " + testhelpers.ShellArg(filepath.Join(gitDir, "python.scip")),
 	} {
 		if !strings.Contains(script, want) {
 			t.Fatalf("liza-index.sh missing override command %q:\n%s", want, script)
@@ -4019,6 +4046,7 @@ func TestInitPairingCommand_ScipSearchSkipsStrayTypeScriptWithoutTSConfig(t *tes
 }
 
 func TestInitPairingCommand_ScipSearchMultiRootInstallsAggregateHooks(t *testing.T) {
+	testhelpers.RequireSymlinkCapability(t)
 	gitDir := setupGitRepo(t)
 	defer os.RemoveAll(gitDir)
 	setupGlobalLiza(t)
@@ -4040,7 +4068,7 @@ func TestInitPairingCommand_ScipSearchMultiRootInstallsAggregateHooks(t *testing
 		t.Fatalf("InitPairingCommand() error = %v", err)
 	}
 	script := readFileForTest(t, filepath.Join(gitDir, ".git", "hooks", brand.BinaryName+"-index.sh"))
-	for _, want := range []string{"--root service-a --index ", "--root service-b --index ", "--out " + gitDir + "/go.scip"} {
+	for _, want := range []string{"--root service-a --index ", "--root service-b --index ", "--out " + testhelpers.ShellArg(filepath.Join(gitDir, "go.scip"))} {
 		if !strings.Contains(script, want) {
 			t.Fatalf("liza-index.sh = %q, want %q", script, want)
 		}
@@ -4048,6 +4076,7 @@ func TestInitPairingCommand_ScipSearchMultiRootInstallsAggregateHooks(t *testing
 }
 
 func TestInitPairingCommand_AmbientScipSearchAggregatesMultiRoot(t *testing.T) {
+	testhelpers.RequireSymlinkCapability(t)
 	gitDir := setupGitRepo(t)
 	defer os.RemoveAll(gitDir)
 	setupGlobalLiza(t)
@@ -4071,7 +4100,7 @@ func TestInitPairingCommand_AmbientScipSearchAggregatesMultiRoot(t *testing.T) {
 		t.Fatalf("stderr = %q, want no multi-root warning", stderr)
 	}
 	script := readFileForTest(t, filepath.Join(gitDir, ".git", "hooks", brand.BinaryName+"-index.sh"))
-	for _, want := range []string{"--root service-a --index ", "--root service-b --index ", "--out " + gitDir + "/go.scip"} {
+	for _, want := range []string{"--root service-a --index ", "--root service-b --index ", "--out " + testhelpers.ShellArg(filepath.Join(gitDir, "go.scip"))} {
 		if !strings.Contains(script, want) {
 			t.Fatalf("liza-index.sh = %q, want %q", script, want)
 		}
@@ -4165,6 +4194,8 @@ func TestInitPairingCommand_IndexHookFailuresReportDiagnostics(t *testing.T) {
 }
 
 func TestInitPairingCommand_Idempotent(t *testing.T) {
+	testhelpers.RequireSymlinkCapability(t)
+
 	gitDir := setupGitRepo(t)
 	defer os.RemoveAll(gitDir)
 	fakeHome := setupGlobalLiza(t)
@@ -4194,6 +4225,7 @@ func TestInitPairingCommand_Idempotent(t *testing.T) {
 }
 
 func TestInitPairingCommand_Mistral(t *testing.T) {
+	testhelpers.RequireSymlinkCapability(t)
 	fakeHome := setupGlobalLiza(t)
 
 	err := InitPairingCommand(InitPairingParams{
@@ -4226,6 +4258,7 @@ func TestInitPairingCommand_Mistral(t *testing.T) {
 }
 
 func TestInitPairingCommand_MistralReplacesExistingPromptID(t *testing.T) {
+	testhelpers.RequireSymlinkCapability(t)
 	fakeHome := setupGlobalLiza(t)
 
 	// Pre-create config.toml with system_prompt_id = "cli"
@@ -4260,6 +4293,7 @@ func TestInitPairingCommand_MistralReplacesExistingPromptID(t *testing.T) {
 }
 
 func TestInitPairingCommand_MistralAutoConfirmReplacesExistingPromptID(t *testing.T) {
+	testhelpers.RequireSymlinkCapability(t)
 	fakeHome := setupGlobalLiza(t)
 
 	vibeDir := filepath.Join(fakeHome, ".vibe")
@@ -4297,6 +4331,7 @@ func TestInitPairingCommand_MistralAutoConfirmReplacesExistingPromptID(t *testin
 }
 
 func TestInitPairingCommand_MistralDeclinesOverwrite(t *testing.T) {
+	testhelpers.RequireSymlinkCapability(t)
 	fakeHome := setupGlobalLiza(t)
 
 	// Pre-create config.toml with system_prompt_id = "cli"
@@ -4327,6 +4362,7 @@ func TestInitPairingCommand_MistralDeclinesOverwrite(t *testing.T) {
 // TestInitPairingCommand_ClaudeBrownfieldUsesGlobalFallback verifies that when
 // CLAUDE.md already exists at repo root, the Liza symlink goes to ~/.claude/CLAUDE.md.
 func TestInitPairingCommand_ClaudeBrownfieldUsesGlobalFallback(t *testing.T) {
+	testhelpers.RequireSymlinkCapability(t)
 	gitDir := setupGitRepo(t)
 	defer os.RemoveAll(gitDir)
 	fakeHome := setupGlobalLiza(t)
@@ -5431,13 +5467,10 @@ func verifyClaudeArtifacts(t *testing.T, projectRoot string) {
 	}
 
 	hookPath := filepath.Join(projectRoot, ".claude", "hooks", "enforce-init.sh")
-	hookInfo, err := os.Stat(hookPath)
-	if err != nil {
+	if _, err := os.Stat(hookPath); err != nil {
 		t.Fatalf("Claude enforce-init.sh not created: %v", err)
 	}
-	if hookInfo.Mode()&0111 == 0 {
-		t.Errorf("Claude enforce-init.sh should be executable, got %o", hookInfo.Mode())
-	}
+	testhelpers.AssertExecutableScript(t, hookPath)
 }
 
 func verifyCodexHooks(t *testing.T, projectRoot string) {
@@ -5468,12 +5501,10 @@ func verifyCodexHooks(t *testing.T, projectRoot string) {
 	}
 
 	for _, name := range []string{"enforce-init.sh", "git-guard.sh", "worktree-path-guard.sh"} {
-		info, err := os.Stat(filepath.Join(projectRoot, ".codex", "hooks", name))
-		if err != nil {
+		hookPath := filepath.Join(projectRoot, ".codex", "hooks", name)
+		if _, err := os.Stat(hookPath); err != nil {
 			t.Fatalf("Codex hook %s not created: %v", name, err)
 		}
-		if info.Mode()&0111 == 0 {
-			t.Errorf("Codex hook %s should be executable, got %o", name, info.Mode())
-		}
+		testhelpers.AssertExecutableScript(t, hookPath)
 	}
 }

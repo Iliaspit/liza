@@ -1,14 +1,26 @@
 package procscan
 
 import (
-	stderrors "errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
-	"syscall"
 )
+
+// defaultProcRoot is the procfs mount every caller means when it does not name
+// one. Tests name a directory of their own instead, which is what tells the
+// two apart; a test that needs this host to look procfs-less repoints it.
+var defaultProcRoot = "/proc"
+
+// nativeCommandLine reads a live process's argv without going through procfs.
+// It is a variable so a test can stand in for the host.
+var nativeCommandLine = platformCommandLine
+
+// processAlive is the platform liveness probe. It is replaceable in tests so
+// callers can exercise incomplete-probe results that are difficult to force
+// through the operating-system API itself.
+var processAlive = ProcessAlive
 
 // AgentProcessState classifies a registered agent PID using the strongest
 // available host evidence.
@@ -70,7 +82,7 @@ func AgentProcessStatusForPID(pid int, role, agentID, procRoot string) AgentProc
 		}
 	}
 	if procRoot == "" {
-		procRoot = "/proc"
+		procRoot = defaultProcRoot
 	}
 
 	cmdlinePath := filepath.Join(procRoot, strconv.Itoa(pid), "cmdline")
@@ -90,6 +102,30 @@ func AgentProcessStatusForPID(pid int, role, agentID, procRoot string) AgentProc
 			Source: "procfs",
 			Detail: "pid exists but cmdline does not match expected agent supervisor",
 			Alive:  true,
+		}
+	}
+
+	// Procfs did not answer. A host without one can still name its processes,
+	// and without asking, every live agent reads as unknown — indistinguishable
+	// from a PID that has been handed to something unrelated. Only the real
+	// proc root is consulted this way: an injected one means the caller is
+	// describing the host, and the machine underneath is not it.
+	if procRoot == defaultProcRoot {
+		if argv, nativeErr := nativeCommandLine(pid); nativeErr == nil {
+			if MatchesLizaAgentIdentity(argv, role, agentID) {
+				return AgentProcessStatus{
+					State:  AgentProcessLiveMatching,
+					Source: platformCommandLineSource,
+					Detail: "command line matches expected agent supervisor",
+					Alive:  true,
+				}
+			}
+			return AgentProcessStatus{
+				State:  AgentProcessMismatched,
+				Source: platformCommandLineSource,
+				Detail: "pid exists but command line does not match expected agent supervisor",
+				Alive:  true,
+			}
 		}
 	}
 
@@ -145,50 +181,40 @@ func FindExplicitAgentIdentityPIDs(role, agentID, procRoot string) []int {
 }
 
 func signalProcessStatus(pid int, identityErr error, procfsUnavailable bool) AgentProcessStatus {
-	process, err := os.FindProcess(pid)
+	alive, permDenied, err := processAlive(pid)
+	if alive {
+		probeDetail := "process is alive"
+		if permDenied {
+			probeDetail = "process exists but probe permission was denied"
+		}
+		if err != nil {
+			probeDetail = fmt.Sprintf("process appears alive but probe was incomplete: %v", err)
+		}
+		identityDetail := fmt.Sprintf("identity unavailable: %v", identityErr)
+		if procfsUnavailable {
+			identityDetail = "procfs unavailable"
+		}
+		return AgentProcessStatus{
+			State:  AgentProcessUnknown,
+			Source: processProbeSource(),
+			Detail: probeDetail + "; " + identityDetail,
+			Alive:  true,
+		}
+	}
+
 	if err != nil {
+		// Could not even attempt the probe (e.g. os.FindProcess failed). Treat
+		// as dead so we don't hold onto a phantom agent row.
 		return AgentProcessStatus{
 			State:  AgentProcessDead,
-			Source: "os.FindProcess",
+			Source: "process-probe",
 			Detail: err.Error(),
 		}
 	}
 
-	err = process.Signal(syscall.Signal(0))
-	if err == nil {
-		detail := fmt.Sprintf("process accepted signal 0; identity unavailable: %v", identityErr)
-		if procfsUnavailable {
-			detail = "process accepted signal 0; procfs unavailable"
-		}
-		return AgentProcessStatus{
-			State:  AgentProcessUnknown,
-			Source: "signal(0)",
-			Detail: detail,
-			Alive:  true,
-		}
-	}
-	if stderrors.Is(err, syscall.EPERM) {
-		detail := fmt.Sprintf("process exists but signal permission was denied; identity unavailable: %v", identityErr)
-		if procfsUnavailable {
-			detail = "process exists but signal permission was denied; procfs unavailable"
-		}
-		return AgentProcessStatus{
-			State:  AgentProcessUnknown,
-			Source: "signal(0)",
-			Detail: detail,
-			Alive:  true,
-		}
-	}
-	if stderrors.Is(err, syscall.ESRCH) {
-		return AgentProcessStatus{
-			State:  AgentProcessDead,
-			Source: "signal(0)",
-			Detail: "process does not exist",
-		}
-	}
 	return AgentProcessStatus{
 		State:  AgentProcessDead,
-		Source: "signal(0)",
-		Detail: err.Error(),
+		Source: processProbeSource(),
+		Detail: "process does not exist",
 	}
 }

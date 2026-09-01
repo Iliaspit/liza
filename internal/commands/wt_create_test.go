@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -135,7 +136,7 @@ func TestWtCreateCommand(t *testing.T) {
 
 			// Add task if not testing nonexistent task
 			if tt.taskID != "nonexistent" && tt.taskID != "" {
-				worktreePath := filepath.Join(".worktrees", tt.taskID)
+				worktreePath := path.Join(".worktrees", tt.taskID)
 				rolePair := "coding-pair"
 				if tt.taskStatus == models.TaskStatusCodePlanning {
 					rolePair = "code-planning-pair"
@@ -266,7 +267,7 @@ func TestWtCreateCommand_PostWorktreeCmd(t *testing.T) {
 
 	now := time.Now().UTC()
 	agent := "coder-1"
-	worktreePath := filepath.Join(".worktrees", "task-postcmd")
+	worktreePath := path.Join(".worktrees", "task-postcmd")
 	leaseExpires := now.Add(30 * time.Minute)
 	postCmd := "touch .post-worktree-ran"
 
@@ -346,7 +347,7 @@ func TestWtCreateCommand_NoPostWorktreeCmd(t *testing.T) {
 
 	now := time.Now().UTC()
 	agent := "coder-1"
-	worktreePath := filepath.Join(".worktrees", "task-nocmd")
+	worktreePath := path.Join(".worktrees", "task-nocmd")
 	leaseExpires := now.Add(30 * time.Minute)
 
 	initialState := &models.State{
@@ -444,7 +445,7 @@ func TestWtCreateCommand_ProvisionClaudeConfig(t *testing.T) {
 
 	now := time.Now().UTC()
 	agent := "coder-1"
-	worktreePath := filepath.Join(".worktrees", "task-config")
+	worktreePath := path.Join(".worktrees", "task-config")
 	leaseExpires := now.Add(30 * time.Minute)
 
 	initialState := &models.State{
@@ -525,13 +526,11 @@ func TestWtCreateCommand_ProvisionClaudeConfig(t *testing.T) {
 		if string(got) != string(tc.content) {
 			t.Errorf("%s: content mismatch: got %q, want %q", tc.rel, got, tc.content)
 		}
-		info, err := os.Stat(path)
-		if err != nil {
-			t.Errorf("%s: stat failed: %v", tc.rel, err)
-			continue
-		}
-		if info.Mode().Perm() != tc.mode {
-			t.Errorf("%s: mode %v, want %v", tc.rel, info.Mode().Perm(), tc.mode)
+		testhelpers.AssertRegularFileMode(t, path, tc.mode)
+		if tc.mode&0o111 != 0 {
+			// Windows cannot express the exec bit, so assert what it stands
+			// for: the copied hook is still a runnable script.
+			testhelpers.AssertExecutableScript(t, path)
 		}
 	}
 }
@@ -547,7 +546,7 @@ func TestWtCreateCommand_ProvisionClaudeConfig_NoFiles(t *testing.T) {
 
 	now := time.Now().UTC()
 	agent := "coder-1"
-	worktreePath := filepath.Join(".worktrees", "task-noconfig")
+	worktreePath := path.Join(".worktrees", "task-noconfig")
 	leaseExpires := now.Add(30 * time.Minute)
 
 	initialState := &models.State{

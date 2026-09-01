@@ -391,7 +391,226 @@ Warning: failed to create CLAUDE.md symlink: symlink ... A required privilege is
 
 1. **Enable Developer Mode** (recommended): Settings → System → For developers → toggle Developer Mode on. Then re-run `§BRAND_BINARY_NAME§ setup` and `§BRAND_BINARY_NAME§ init`.
 
+   Same effect, no UI: merge a `.reg` file setting the registry value that toggle writes, then elevate to apply it (a UAC prompt merging one key is still a machine-wide change, unlike installing software as a different elevated account — see below). Takes effect immediately, no sign-out needed.
+
+   ```reg
+   Windows Registry Editor Version 5.00
+
+   [HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock]
+   "AllowDevelopmentWithoutDevLicense"=dword:00000001
+   ```
+
 2. **Run elevated**: Open your terminal as Administrator, then re-run the command.
+   Check first that elevation keeps you as the same account — see the next
+   section, where it does not.
+
+### Elevation runs as a different account
+
+**Symptoms** — several, and none of them names the cause:
+
+```
+# after an elevated `setup`
+§BRAND_NAME_TITLE§ global config written to C:\Users\you\§BRAND_GLOBAL_DIRNAME§
+# but from your normal session
+Test-Path C:\Users\you\§BRAND_GLOBAL_DIRNAME§    ->  Access denied
+Get-ChildItem ~/§BRAND_GLOBAL_DIRNAME§  ->  empty
+
+# and an elevated `init`
+Error: failed to determine project root: ... exit status 128
+fatal: detected dubious ownership in repository at '...'
+```
+
+**Cause:** on a domain-joined machine, the administrator you elevate to may be a
+**local** account that merely shares your short name. Windows gives it its own
+profile — `C:\Users\you` next to `C:\Users\you.DOMAIN` — so `~` means something
+different on each side, and Git sees a repository owned by someone else.
+
+Compare both sides; different prefixes mean different accounts:
+
+```powershell
+whoami   # normal session,  e.g. PROGINOV\you
+whoami   # elevated session, e.g. PORT_MACHINE\you
+```
+
+**Preferred fix — stop needing elevation.** Grant the working account the
+privilege the symlinks require, and everything runs in the right profile with no
+juggling: `secpol.msc` → Local Policies → User Rights Assignment → **Create
+symbolic links** → add your account → sign out and back in. Verify with
+`whoami /priv | Select-String Symbolic`. Group policy may revert this on refresh.
+
+Scripted equivalent, same effect, no UI — useful when Developer Mode itself
+will not stick (both `secpol.msc` and Developer Mode need elevation, but they
+are different mechanisms: a group policy blocking one does not necessarily
+block the other):
+
+```powershell
+# Run first, NOT elevated — the SID must be the working account's, not the
+# elevated session's (they can be different accounts; see above).
+$sid = ([System.Security.Principal.WindowsIdentity]::GetCurrent()).User.Value
+Write-Output $sid   # paste into the elevated script below
+
+# Then, in an ELEVATED PowerShell, with the SID from above (the privilege line
+# may not exist in a fresh export, so add rather than assume-and-replace):
+$cfgPath = Join-Path $env:TEMP "secpol_symlink.cfg"
+secedit /export /cfg $cfgPath /areas USER_RIGHTS | Out-Null
+$found = $false
+$content = Get-Content $cfgPath | ForEach-Object {
+    if ($_ -match '^SeCreateSymbolicLinkPrivilege\s*=\s*(.*)$') {
+        $found = $true
+        $existing = $Matches[1].Trim()
+        if ($existing) { "SeCreateSymbolicLinkPrivilege = $existing,*$sid" } else { "SeCreateSymbolicLinkPrivilege = *$sid" }
+    } else { $_ }
+}
+if (-not $found) { $content += "SeCreateSymbolicLinkPrivilege = *$sid" }
+$content | Set-Content $cfgPath
+secedit /configure /db "$env:windir\security\local.sdb" /cfg $cfgPath /areas USER_RIGHTS
+# Sign out and back in, then verify with: whoami /priv | Select-String Symbolic
+```
+
+**Otherwise — elevate, but redirect.** §BRAND_NAME_TITLE§ resolves `~` from
+`HOME` before falling back to the account's profile, so `HOME` is the lever. Git
+needs telling separately that the repository is trustworthy for this account.
+
+```powershell
+$env:HOME = "C:\Users\you.DOMAIN"
+git config --global --add safe.directory C:/path/to/your/repo
+§BRAND_BINARY_NAME§ setup --claude
+cd C:\path\to\your\repo
+§BRAND_BINARY_NAME§ init --claude
+```
+
+- Keep it all in one shell session: `HOME` does not persist.
+- Give Git the **resolved** path it prints in the error, not a junction pointing
+  at it.
+- With `HOME` redirected, `git config --global` writes into *your* `.gitconfig`,
+  not the administrator's. That is usually what you want — later elevated
+  sessions will read it back — and the entry is inert for you, since you own the
+  repository. To keep your config untouched, point `GIT_CONFIG_GLOBAL` at a
+  scratch file first; your `user.name` and `user.email` will then be unread,
+  which is harmless for `init`.
+- Files land in your profile but are created by the other account. ACL
+  inheritance normally still grants you full control; if a later `--force` write
+  fails, check with `icacls`.
+
+**Do not elevate without redirecting `HOME`.** `init` would create `CLAUDE.md`
+pointing at the *other* account's `~/§BRAND_GLOBAL_DIRNAME§/CORE.md` — a symlink
+that looks correct, resolves to a directory your session cannot read, and fails
+later at a point far from its cause.
+
+### init reports "repo root has existing CLAUDE.md" and links globally
+
+`§BRAND_BINARY_NAME§ init` only creates the contract link at the repository root
+when that name is free. If something already occupies it, init falls back to the
+global location and says so:
+
+```
+C:\Users\you\.claude\CLAUDE.md → C:\Users\you\§BRAND_GLOBAL_DIRNAME§\CORE.md (repo root has existing CLAUDE.md)
+```
+
+That fallback works, but it is not the same thing: the contract then applies to
+every project you open, not this one.
+
+A common cause on Windows is a contract link left behind by a WSL or MSYS
+session, which points at a POSIX home that does not exist natively:
+
+```bash
+ls -la CLAUDE.md
+lrwxrwxrwx ... CLAUDE.md -> /home/you/§BRAND_GLOBAL_DIRNAME§/CORE.md
+```
+
+The entry exists, so init sees the name as taken, while nothing can read it —
+`cat CLAUDE.md` reports "No such file or directory" and PowerShell shows a
+zero-length file with no target. Remove the dangling link and re-run init:
+
+```powershell
+Remove-Item -LiteralPath CLAUDE.md -Force
+```
+
+These files are listed in `.gitignore`, so removing one costs nothing in the
+repository.
+
+### Hooks do nothing, or bash reports "No such file or directory" on Windows
+
+**Error:**
+```
+/c/Users/you/project/.claude/hooks/enforce-init.sh: No such file or directory
+```
+or a hook that silently never fires.
+
+**Cause:** `bash` on PATH is the WSL launcher at `C:\Windows\System32\bash.exe`,
+not Git for Windows. The WSL launcher cannot see `C:/...` paths — it expects
+`/mnt/c/...` — so every hook invoked by its native path fails.
+
+**Check:**
+```powershell
+(Get-Command bash).Source
+```
+
+**Fix:** Put Git for Windows ahead of `system32` on PATH. A user-level PATH entry
+cannot win, because the machine PATH is evaluated first, so the Git `bin`
+directory has to be prepended to the **machine** PATH (an elevated change):
+
+```powershell
+# Run as Administrator. Adjust the path to your Git installation.
+$git = "$env:LOCALAPPDATA\Programs\Git\bin"
+$machine = [System.Environment]::GetEnvironmentVariable('PATH', 'Machine')
+[System.Environment]::SetEnvironmentVariable('PATH', "$git;$machine", 'Machine')
+```
+
+Open a new terminal afterwards, and confirm `bash --version` reports a Git
+version rather than a Linux distribution.
+
+### Hooks fail with `$'\r': command not found` on Windows
+
+**Cause:** the shell scripts were checked out with CRLF line endings. `bash` reads
+the carriage return as part of the command.
+
+The repository pins `eol=lf` in `.gitattributes`, so a fresh clone is unaffected.
+A clone made **before** that file existed keeps its CRLF working tree
+indefinitely: `git status` looks clean, because Git compares normalized content
+and hides the difference.
+
+**Check:** `git ls-files --eol | grep w/crlf` — anything listed is CRLF on disk.
+
+**Fix:** renormalize the working tree from the index.
+
+```bash
+git config core.autocrlf false
+git ls-files --eol | grep 'w/crlf' | cut -f2 > /tmp/crlf-files
+xargs -a /tmp/crlf-files -d '\n' rm -f
+git checkout -- .
+```
+
+The index is never modified, so the tree can be restored with `git checkout -- .`
+at any point. Commit any pending work first: this rewrites tracked files.
+
+### A flag value arrives empty, shifted, or missing its quotes on Windows
+
+**Cause:** Windows PowerShell 5.1 rewrites a native command's arguments before
+the process sees them. Two rewrites lose content with no error, so the command
+runs on something other than what was written:
+
+- An **empty** value disappears entirely, taking the next flag's place.
+  `--reason $r --agent-id a1` with `$r` empty reaches the process as
+  `--reason --agent-id a1`, so the parser reads the reason as `--agent-id` and
+  `a1` becomes a stray positional argument.
+- **Double quotes inside a value are stripped.** `He said "no"` arrives as
+  `He said no`, so a rejection reason quoting code or an error message is
+  altered silently.
+
+Spaces, accents, line breaks and a leading `--` all survive intact; only these
+two cases lose content. PowerShell 7 (`pwsh`) has neither behaviour.
+
+**Check:** run the command with `--reason` last. If the value was dropped, the
+following flag shows up as the reason.
+
+**Fix:** attach the value to the flag so an empty string still produces a token,
+and escape embedded quotes with a backslash:
+
+```powershell
+$reason = 'the guard rejects \"draft\" states'
+§BRAND_BINARY_NAME§ submit-verdict task-1 REJECTED --reason="$reason"
+```
 
 ### Error: specs/vision.md required
 

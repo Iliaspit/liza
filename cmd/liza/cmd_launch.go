@@ -5,12 +5,14 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
 	"github.com/liza-mas/liza/internal/agent"
 	"github.com/liza-mas/liza/internal/brand"
 	"github.com/liza-mas/liza/internal/db"
+	"github.com/liza-mas/liza/internal/gitbash"
 	"github.com/liza-mas/liza/internal/paths"
 	"github.com/spf13/cobra"
 )
@@ -496,6 +498,10 @@ func runWeztermLaunch(cmd *cobra.Command, opts weztermLaunchOptions, commands []
 	if len(commands) == 0 {
 		return cliValidationError("no commands to launch")
 	}
+	shell, err := launchShell()
+	if err != nil {
+		return cliValidationWrap("resolve launch shell", err)
+	}
 	script := buildWeztermPaneScript(opts, commands)
 	args := []string{
 		"start",
@@ -503,7 +509,7 @@ func runWeztermLaunch(cmd *cobra.Command, opts weztermLaunchOptions, commands []
 		"--workspace", opts.Workspace,
 		"--cwd", opts.CWD,
 		"--",
-		launchShell(),
+		shell,
 		"-lc",
 		script,
 	}
@@ -528,6 +534,10 @@ func runWeztermInteractiveLaunch(cmd *cobra.Command, opts weztermLaunchOptions, 
 	if len(panes) == 0 {
 		return cliValidationError("no panes to launch")
 	}
+	shell, err := launchShell()
+	if err != nil {
+		return cliValidationWrap("resolve launch shell", err)
+	}
 	script := buildWeztermInteractivePaneScript(opts, panes)
 	args := []string{
 		"start",
@@ -535,7 +545,7 @@ func runWeztermInteractiveLaunch(cmd *cobra.Command, opts weztermLaunchOptions, 
 		"--workspace", opts.Workspace,
 		"--cwd", opts.CWD,
 		"--",
-		launchShell(),
+		shell,
 		"-lc",
 		script,
 	}
@@ -1063,11 +1073,18 @@ func shellSleepSeconds(duration time.Duration) string {
 	return strings.TrimRight(value, ".")
 }
 
-func launchShell() string {
-	if shell := os.Getenv("SHELL"); shell != "" {
-		return shell
+// launchShell returns the shell the terminal is asked to run the pane script
+// with. The script is POSIX, so Windows always needs the shell Git for Windows
+// ships: SHELL may name the WSL launcher, and /bin/sh names nothing the OS can
+// execute.
+func launchShell() (string, error) {
+	if runtime.GOOS == "windows" {
+		return gitbash.Resolve()
 	}
-	return "/bin/sh"
+	if shell := os.Getenv("SHELL"); shell != "" {
+		return shell, nil
+	}
+	return "/bin/sh", nil
 }
 
 func shellIdentifier(value string) string {

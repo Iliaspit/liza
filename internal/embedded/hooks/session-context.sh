@@ -51,6 +51,13 @@ json_val() {
   done
 }
 
+is_windows_shell() {
+  case "${OSTYPE:-}" in
+    msys*|cygwin*|win32*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 quote_for_shell() {
   local value="$1"
   printf "'%s'" "$(printf '%s' "$value" | sed "s/'/'\\\\''/g")"
@@ -76,8 +83,13 @@ repo_brand_index_hook_path() {
 
   hook_path=$(git -C "$project_dir" rev-parse --git-path hooks/post-commit 2>/dev/null || true)
   if [[ -n "$hook_path" ]]; then
+    # git returns this path relative to the repository, unless core.hooksPath is
+    # absolute — then it hands back whatever form that setting holds, which on
+    # Windows is C:\... and starts with no slash. Prefixing project_dir to that
+    # yields a path that exists nowhere, and every index section below is then
+    # silently skipped.
     case "$hook_path" in
-      /*) printf '%s' "$hook_path" ;;
+      /*|[A-Za-z]:*) printf '%s' "$hook_path" ;;
       *) printf '%s/%s' "$project_dir" "$hook_path" ;;
     esac
     return 0
@@ -162,6 +174,20 @@ root_sembleignore_safe() {
 }
 
 cwd=$(json_val cwd)
+
+# Canonicalise Windows path separators, as enforce-init.sh does.
+#
+# git rev-parse --show-toplevel reports a forward-slashed path even on Windows,
+# while the cwd the agent sends is backslashed. Without this, whichever of the
+# two answers wins decides the separator, and the fallback branch below emits
+# paths like C:\Users\proj/stacklit.json — half native, half POSIX. On Windows
+# the backslash is a reserved character that can never appear in a filename, so
+# the rewrite is lossless; on Unix it is a legal filename character, so it must
+# not be touched there.
+if is_windows_shell; then
+  cwd="${cwd//\\//}"
+fi
+
 project_dir="${CLAUDE_PROJECT_DIR:-}"
 if [[ -z "$project_dir" ]]; then
   if [[ -n "$cwd" ]]; then
@@ -169,6 +195,14 @@ if [[ -z "$project_dir" ]]; then
   else
     project_dir=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
   fi
+fi
+
+# CLAUDE_PROJECT_DIR is set by the runtime and holds a native path, so it skips
+# the canonicalisation applied to cwd above. Every path this hook prints is
+# derived from project_dir, which would then be emitted half native and half
+# POSIX depending only on which source supplied it.
+if is_windows_shell; then
+  project_dir="${project_dir//\\//}"
 fi
 
 brand_agent_id_var="__BRAND_ENV_PREFIX__""_AGENT_ID"

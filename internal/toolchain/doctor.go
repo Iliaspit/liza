@@ -2,9 +2,6 @@ package toolchain
 
 import (
 	"fmt"
-	"runtime"
-
-	"github.com/liza-mas/liza/internal/brand"
 )
 
 type DoctorOptions struct {
@@ -13,17 +10,15 @@ type DoctorOptions struct {
 	Exclude []string
 	ToolID  string
 	Runner  Runner
-	GOOS    string
 }
 
 type DoctorStatus string
 
 const (
-	DoctorOK          DoctorStatus = "ok"
-	DoctorMissing     DoctorStatus = "missing"
-	DoctorFailed      DoctorStatus = "failed"
-	DoctorManual      DoctorStatus = "manual"
-	DoctorUnsupported DoctorStatus = "unsupported"
+	DoctorOK      DoctorStatus = "ok"
+	DoctorMissing DoctorStatus = "missing"
+	DoctorFailed  DoctorStatus = "failed"
+	DoctorManual  DoctorStatus = "manual"
 )
 
 type DoctorCheck struct {
@@ -50,23 +45,16 @@ func Doctor(opts DoctorOptions) (DoctorResult, error) {
 	if err != nil {
 		return DoctorResult{}, err
 	}
-	goos := opts.GOOS
-	if goos == "" {
-		goos = runtime.GOOS
-	}
 	result := DoctorResult{Profile: selection.Profile}
 	for _, tool := range selection.Tools {
-		result.Checks = append(result.Checks, doctorOne(tool, goos, runner))
+		result.Checks = append(result.Checks, doctorOne(tool, runner))
 	}
 	return result, nil
 }
 
-func doctorOne(tool Tool, goos string, runner Runner) DoctorCheck {
+func doctorOne(tool Tool, runner Runner) DoctorCheck {
 	if tool.InstallKind == InstallManualOnly {
 		return DoctorCheck{ToolID: tool.ID, Status: DoctorManual, Message: tool.ManualNote}
-	}
-	if goos == "windows" {
-		return DoctorCheck{ToolID: tool.ID, Status: DoctorUnsupported, Message: fmt.Sprintf("native Windows is not a supported %s runtime; use WSL2 for full toolchain support", brand.NameTitle)}
 	}
 	if tool.Binary == "" {
 		return DoctorCheck{ToolID: tool.ID, Status: DoctorFailed, Message: "tool has no binary probe"}

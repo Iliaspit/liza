@@ -15,7 +15,7 @@ git push origin v1.0.0
 ```
 
 This will automatically:
-1. Build binaries for all supported platforms (Linux and macOS)
+1. Build binaries for all supported platforms (Linux, macOS, and Windows)
 2. Create checksums
 3. Generate a changelog
 4. Create a GitHub release with all artifacts
@@ -36,15 +36,17 @@ export VERSION=v1.0.0
 # Create release artifacts (runs tests, builds all platforms, creates checksums)
 make release
 
-# Optionally create distribution packages (tarballs)
+# Optionally create Linux and macOS distribution tarballs
 make package
 ```
 
 This creates the following in the `dist/` directory:
 - Binaries for Linux (amd64, arm64)
 - Binaries for macOS (amd64, arm64)
-- SHA256 checksums file
-- Compressed archives (if using `make package`)
+- Binaries for Windows (amd64, arm64), with a `.exe` suffix
+- SHA256 checksums for the raw binaries (`make package` does not add its later
+  tarballs to this file)
+- Linux and macOS tarballs (if using `make package`)
 
 ### 2. Test the Binaries
 
@@ -57,6 +59,13 @@ This creates the following in the `dist/` directory:
 tar -xzf dist/liza-v1.0.0-linux-amd64.tar.gz
 ./liza version
 ```
+
+GoReleaser produces the complete release archive set, including Windows zip
+archives. `make package` creates only Linux and macOS tarballs and is not a
+substitute for a complete GoReleaser run. Windows archives are zip rather than
+tar.gz because tar is not a given on a Windows host and `install.ps1` extracts
+with `Expand-Archive`, which reads zip only. The updater picks the format from
+the platform, so no release step has to choose between them.
 
 ### 3. Create GitHub Release
 
@@ -195,7 +204,8 @@ Cross-compilation issues are rare with Go, but if you encounter one:
 | Linux | arm64 | Yes |
 | macOS | amd64 (Intel) | Yes |
 | macOS | arm64 (Apple Silicon) | Yes |
-| Windows | amd64 | No - use WSL2 |
+| Windows | amd64 | Yes |
+| Windows | arm64 | Yes |
 
 ### Go Versions
 

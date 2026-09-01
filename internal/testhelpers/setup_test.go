@@ -21,7 +21,11 @@ func TestSetupTestGitRepo(t *testing.T) {
 		t.Fatalf("Failed to create global post-commit hook: %v", err)
 	}
 	globalConfig := filepath.Join(t.TempDir(), "gitconfig")
-	if err := os.WriteFile(globalConfig, []byte("[core]\n\thooksPath = "+globalHooksDir+"\n"), 0644); err != nil {
+	// gitconfig treats backslashes as escape characters; on Windows the absolute
+	// hooks path (C:\Users\...) would corrupt parsing. Use forward slashes, which
+	// git accepts on every platform.
+	hooksPathValue := filepath.ToSlash(globalHooksDir)
+	if err := os.WriteFile(globalConfig, []byte("[core]\n\thooksPath = "+hooksPathValue+"\n"), 0644); err != nil {
 		t.Fatalf("Failed to write global git config: %v", err)
 	}
 	t.Setenv("GIT_CONFIG_GLOBAL", globalConfig)
@@ -72,6 +76,7 @@ func TestSetupTestGitRepo(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to resolve expected hooks path: %v", err)
 	}
+	expectedHooksPath = filepath.ToSlash(expectedHooksPath)
 	if string(output) != expectedHooksPath+"\n" {
 		t.Errorf("Expected core.hooksPath=%q, got %q", expectedHooksPath, string(output))
 	}
