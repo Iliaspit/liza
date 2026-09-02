@@ -381,6 +381,7 @@ func buildTaskRoleContextData(task *models.Task, state *models.State, config Sup
 	if roleType == "doer" && config.Role == "coder" {
 		data.IntegrationFix = task.IntegrationFix
 		data.ControllerNote = latestActionableTaskHumanNote(task, state)
+		data.UnblockReason = latestActionableTaskUnblockReason(task)
 		// Find the last context_exhaustion HandoffEvent for resume context
 		for i := len(task.HandoffEvents) - 1; i >= 0; i-- {
 			if task.HandoffEvents[i].Trigger == models.HandoffTriggerContextExhaustion {
@@ -633,6 +634,39 @@ func populateGlobalIntegrationContext(task *models.Task, state *models.State, da
 }
 
 const maxControllerNotePromptBytes = 8 * 1024
+
+// latestActionableTaskUnblockReason returns the reason from the newest unblock
+// transition while no subsequent semantic execution progress has made it stale.
+// Claim, release, and owned-task resume bookkeeping intentionally do not consume
+// the continuation context recorded by unblock-task.
+func latestActionableTaskUnblockReason(task *models.Task) string {
+	latestProgress := time.Time{}
+	latestUnblock := time.Time{}
+	reason := ""
+	for _, entry := range task.History {
+		switch entry.Event {
+		case models.TaskEventUnblocked:
+			if entry.Reason != nil && strings.TrimSpace(*entry.Reason) != "" && entry.Time.After(latestUnblock) {
+				latestUnblock = entry.Time
+				reason = *entry.Reason
+			}
+		case models.TaskEventPreExecutionCheckpoint,
+			models.TaskEventSubmittedForReview,
+			models.TaskEventBlocked,
+			models.TaskEventRejected,
+			models.TaskEventApproved,
+			models.TaskEventMerged,
+			models.TaskEventNewAttempt:
+			if entry.Time.After(latestProgress) {
+				latestProgress = entry.Time
+			}
+		}
+	}
+	if reason == "" || !latestUnblock.After(latestProgress) {
+		return ""
+	}
+	return prompts.TruncateText(reason, maxControllerNotePromptBytes)
+}
 
 // latestActionableTaskHumanNote returns the newest task-scoped human note only
 // while no subsequent semantic execution progress has made it stale. Claim,

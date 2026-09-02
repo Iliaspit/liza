@@ -1,4 +1,10 @@
 {{- define "handoff-resume" -}}
+{{- if .UnblockReason}}
+
+=== ORCHESTRATOR UNBLOCK CONTEXT ===
+{{.UnblockReason}}
+Apply this repair authority and continuation context before starting another approach.
+{{- end}}
 {{- if .ControllerNote}}
 
 === HUMAN CONTROLLER RESUME NOTE ===

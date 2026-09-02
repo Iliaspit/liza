@@ -274,6 +274,73 @@ func TestBuildPrompt_CoderReceivesLatestActionableTaskHumanNote(t *testing.T) {
 	}
 }
 
+func TestBuildPrompt_CoderReceivesLatestActionableUnblockReason(t *testing.T) {
+	now := time.Now().UTC()
+	blockedReason := "provider schema rejected"
+	unblockReason := "Scope replacement authorizes only provider wire normalization and its direct regression test."
+	state := &models.State{
+		Version: 1,
+		Goal: models.Goal{
+			ID:          "goal-1",
+			Description: "Test goal",
+			SpecRef:     "spec.md",
+			Status:      models.GoalStatusInProgress,
+			Created:     now.Add(-time.Hour),
+		},
+		Tasks: []models.Task{{
+			ID:          "task-1",
+			RolePair:    "coding-pair",
+			Description: "Test task",
+			Status:      models.TaskStatusImplementing,
+			Priority:    1,
+			SpecRef:     "spec.md",
+			DoneWhen:    "Task is complete",
+			Created:     now.Add(-time.Hour),
+			History: []models.TaskHistoryEntry{
+				{Time: now.Add(-2 * time.Minute), Event: models.TaskEventBlocked, Reason: &blockedReason},
+				{Time: now.Add(-time.Minute), Event: models.TaskEventUnblocked, Reason: &unblockReason},
+			},
+		}},
+		Agents: make(map[string]models.Agent),
+		Config: models.Config{IntegrationBranch: "main"},
+	}
+
+	tmpDir := t.TempDir()
+	testhelpers.SetupPipelineConfig(t, tmpDir)
+	config := SupervisorConfig{
+		Role:        "coder",
+		AgentID:     "coder-1",
+		ProjectRoot: tmpDir,
+		SpecsDir:    filepath.Join(tmpDir, "specs"),
+		StatePath:   filepath.Join(tmpDir, "state.yaml"),
+	}
+
+	prompt, err := testBuildPrompt(t, state, config, "task-1")
+	if err != nil {
+		t.Fatalf("BuildPrompt: %v", err)
+	}
+	for _, want := range []string{
+		"=== ORCHESTRATOR UNBLOCK CONTEXT ===",
+		unblockReason,
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("prompt missing %q", want)
+		}
+	}
+
+	state.Tasks[0].History = append(state.Tasks[0].History, models.TaskHistoryEntry{
+		Time:  now,
+		Event: models.TaskEventPreExecutionCheckpoint,
+	})
+	prompt, err = testBuildPrompt(t, state, config, "task-1")
+	if err != nil {
+		t.Fatalf("BuildPrompt after progress: %v", err)
+	}
+	if strings.Contains(prompt, "ORCHESTRATOR UNBLOCK CONTEXT") || strings.Contains(prompt, unblockReason) {
+		t.Fatal("prompt retained unblock context after newer semantic execution progress")
+	}
+}
+
 func TestBuildOrchestratorRoleContextDataScipIndexesUseProjectRoot(t *testing.T) {
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
