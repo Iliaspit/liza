@@ -184,6 +184,9 @@ func GetProjectRoot() (string, error) {
 //
 // It roots all git subprocesses at dir, so callers can resolve an explicit
 // project path without depending on the process working directory.
+// When LIZA_ALLOW_LINKED_PROJECT_ROOT=1, an explicitly selected linked
+// integration worktree may own its own .liza runtime. Child task worktrees
+// below that integration root still resolve to the integration root.
 func GetProjectRootFromDir(dir string) (string, error) {
 	gitDir := dir
 	if gitDir == "" {
@@ -230,6 +233,9 @@ func GetProjectRootFromDir(dir string) (string, error) {
 	// Worktree: git-common-dir points to main repo's .git directory
 	expectedGitDir := filepath.Join(canonicalToplevel, GitDirName)
 	if absCommonDir != expectedGitDir {
+		if os.Getenv("LIZA_ALLOW_LINKED_PROJECT_ROOT") == "1" {
+			return linkedWorktreeProjectRoot(canonicalToplevel), nil
+		}
 		// We're in a worktree - common dir is <main>/.git
 		// Return the parent directory (main repo root)
 		return filepath.Dir(absCommonDir), nil
@@ -237,6 +243,22 @@ func GetProjectRootFromDir(dir string) (string, error) {
 
 	// Regular repo - return toplevel
 	return canonicalToplevel, nil
+}
+
+func linkedWorktreeProjectRoot(toplevel string) string {
+	if info, err := os.Stat(filepath.Join(toplevel, ProjectDirName())); err == nil && info.IsDir() {
+		return toplevel
+	}
+
+	worktreesDir := filepath.Dir(toplevel)
+	if filepath.Base(worktreesDir) == WorktreesDirName {
+		integrationRoot := filepath.Dir(worktreesDir)
+		if info, err := os.Stat(filepath.Join(integrationRoot, ProjectDirName())); err == nil && info.IsDir() {
+			return integrationRoot
+		}
+	}
+
+	return toplevel
 }
 
 // IsLizaTaskWorktree reports whether cwd is exactly one task worktree directory

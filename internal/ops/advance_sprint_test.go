@@ -935,6 +935,29 @@ func TestIsManyToOneReady(t *testing.T) {
 			t.Error("IsManyToOneReady() = true, want false when transitions already executed")
 		}
 	})
+
+	t.Run("PendingReplacement", func(t *testing.T) {
+		state := testhelpers.CreateValidState()
+		parentID := "epic-plan-1"
+
+		us1 := testhelpers.BuildTaskByStatus("us-1", models.TaskStatusMerged, now)
+		us1.RolePair = "us-writing-pair"
+		us1.ParentTask = ptrS(parentID)
+
+		oldUS := testhelpers.BuildTaskByStatus("us-2", models.TaskStatusSuperseded, now)
+		oldUS.RolePair = "us-writing-pair"
+		oldUS.ParentTask = ptrS(parentID)
+		oldUS.SupersededBy = []string{"us-2-r1"}
+
+		replacement := testhelpers.BuildTaskByStatus("us-2-r1", models.TaskStatus("WRITING_US"), now)
+		replacement.RolePair = "us-writing-pair"
+
+		state.Tasks = []models.Task{us1, oldUS, replacement}
+
+		if IsManyToOneReady(&state.Tasks[0], state, m2oTransitions) {
+			t.Error("IsManyToOneReady() = true, want false while replacement is pending")
+		}
+	})
 }
 
 func TestCollectMergedManyToOneWithUnfiredTransition(t *testing.T) {

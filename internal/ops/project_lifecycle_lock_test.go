@@ -37,6 +37,24 @@ func TestProjectLifecycleLockLivesOutsideCleanupTargets(t *testing.T) {
 	}
 }
 
+func TestProjectLifecycleLockSupportsLinkedWorktreeRoot(t *testing.T) {
+	t.Parallel()
+
+	projectRoot := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, projectRoot)
+	testhelpers.CreateTestWorktree(t, projectRoot, "linked-project")
+	linkedRoot := filepath.Join(projectRoot, paths.WorktreesDirName, "linked-project")
+
+	if err := WithProjectLifecycleSharedLock(linkedRoot, "test", func() error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	gitDir := testhelpers.MustGit(t, linkedRoot, "rev-parse", "--absolute-git-dir")
+	lockName := strings.TrimPrefix(paths.ProjectDirName(), ".") + "-project-lifecycle.lock"
+	if _, err := os.Stat(filepath.Join(gitDir, lockName)); err != nil {
+		t.Fatalf("project lifecycle lock missing from linked-worktree Git metadata: %v", err)
+	}
+}
+
 func TestProjectLifecycleSharedLockPreservesNonRepositoryValidation(t *testing.T) {
 	t.Parallel()
 

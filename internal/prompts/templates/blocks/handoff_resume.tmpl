@@ -1,4 +1,10 @@
 {{- define "handoff-resume" -}}
+{{- if .ControllerNote}}
+
+=== HUMAN CONTROLLER RESUME NOTE ===
+{{.ControllerNote.Message}}
+Apply this latest task-scoped controller direction before starting another approach.
+{{- end}}
 {{- if .HandoffNote}}
 
 === HANDOFF RESUME CONTEXT ===

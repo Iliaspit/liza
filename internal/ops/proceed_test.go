@@ -5792,6 +5792,86 @@ func TestProceedManyToOne_HappyPath(t *testing.T) {
 	}
 }
 
+func TestProceedManyToOne_ResolvesSupersededReplacementChain(t *testing.T) {
+	tmpDir, stateFile := setupPhase2PipelineProceedTest(t)
+
+	state := testhelpers.CreateValidState()
+	state.PipelineVersion = 2
+	state.Sprint.Status = models.SprintStatusCompleted
+
+	parentID := "epic-plan-1"
+	cohort := makeManyToOneCohort(parentID, "us-writing-pair", models.TaskStatusMerged, "specs/goal.md", 3)
+	cohort[1].Status = models.TaskStatusSuperseded
+	cohort[1].SupersededBy = []string{"epic-plan-1-us-1-r1"}
+	replacementV1 := makeManyToOneCohort("replacement", "us-writing-pair", models.TaskStatusSuperseded, "specs/goal.md", 1)[0]
+	replacementV1.ID = "epic-plan-1-us-1-r1"
+	replacementV1.ParentTasks = nil
+	replacementV1.SupersededBy = []string{"epic-plan-1-us-1-r2"}
+	replacementV2 := makeManyToOneCohort("replacement", "us-writing-pair", models.TaskStatusMerged, "specs/goal.md", 1)[0]
+	replacementV2.ID = "epic-plan-1-us-1-r2"
+	replacementV2.ParentTasks = nil
+	state.Tasks = append(state.Tasks, cohort...)
+	state.Tasks = append(state.Tasks, replacementV1, replacementV2)
+	for _, task := range cohort {
+		state.Sprint.Scope.Planned = append(state.Sprint.Scope.Planned, task.ID)
+	}
+
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	result, err := Proceed(tmpDir, cohort[0].ID, "us-to-coding")
+	if err != nil {
+		t.Fatalf("Proceed() error: %v", err)
+	}
+	if len(result.ChildTaskIDs) != 1 {
+		t.Fatalf("ChildTaskIDs count = %d, want 1", len(result.ChildTaskIDs))
+	}
+
+	readState, err := db.New(stateFile).Read()
+	if err != nil {
+		t.Fatalf("Failed to read state: %v", err)
+	}
+	child := readState.FindTask(result.ChildTaskIDs[0])
+	if child == nil {
+		t.Fatal("child task not found")
+	}
+	wantParents := []string{cohort[0].ID, replacementV2.ID, cohort[2].ID}
+	if !slices.Equal(child.ParentTasks, wantParents) {
+		t.Fatalf("child ParentTasks = %v, want effective cohort %v", child.ParentTasks, wantParents)
+	}
+	if !slices.Equal(result.CohortTaskIDs, wantParents) {
+		t.Fatalf("CohortTaskIDs = %v, want %v", result.CohortTaskIDs, wantParents)
+	}
+}
+
+func TestProceedManyToOne_PendingReplacementBlocks(t *testing.T) {
+	tmpDir, stateFile := setupPhase2PipelineProceedTest(t)
+
+	state := testhelpers.CreateValidState()
+	state.PipelineVersion = 2
+	state.Sprint.Status = models.SprintStatusCompleted
+
+	parentID := "epic-plan-1"
+	cohort := makeManyToOneCohort(parentID, "us-writing-pair", models.TaskStatusMerged, "specs/goal.md", 2)
+	cohort[1].Status = models.TaskStatusSuperseded
+	cohort[1].SupersededBy = []string{"epic-plan-1-us-1-r1"}
+	replacement := makeManyToOneCohort("replacement", "us-writing-pair", models.TaskStatus("WRITING_US"), "specs/goal.md", 1)[0]
+	replacement.ID = "epic-plan-1-us-1-r1"
+	replacement.ParentTasks = nil
+	replacement.ReviewCommit = nil
+	state.Tasks = append(state.Tasks, cohort...)
+	state.Tasks = append(state.Tasks, replacement)
+	state.Sprint.Scope.Planned = []string{cohort[0].ID, cohort[1].ID, replacement.ID}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	_, err := Proceed(tmpDir, cohort[0].ID, "us-to-coding")
+	if err == nil {
+		t.Fatal("Proceed() should fail while the effective replacement is pending")
+	}
+	if !strings.Contains(err.Error(), replacement.ID) || !strings.Contains(err.Error(), "WRITING_US") {
+		t.Fatalf("error = %q, want pending replacement identity and status", err)
+	}
+}
+
 func TestProceedManyToOne_CohortIncomplete(t *testing.T) {
 	t.Parallel()
 

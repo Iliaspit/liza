@@ -2,6 +2,7 @@ package paths
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -152,6 +153,58 @@ func TestGetProjectRoot(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestGetProjectRootFromDirOptInLinkedIntegrationWorktree(t *testing.T) {
+	repo := t.TempDir()
+	runGit := func(dir string, args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		if output, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v failed: %v\n%s", args, err, output)
+		}
+	}
+	runGit(repo, "init", "-b", "main")
+	runGit(repo, "config", "user.email", "liza-test@example.invalid")
+	runGit(repo, "config", "user.name", "Liza Test")
+	if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("test\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(repo, "add", "README.md")
+	runGit(repo, "commit", "-m", "baseline")
+
+	integration := filepath.Join(t.TempDir(), "integration")
+	runGit(repo, "worktree", "add", "-b", "feature", integration, "main")
+	t.Setenv("LIZA_ALLOW_LINKED_PROJECT_ROOT", "1")
+
+	got, err := GetProjectRootFromDir(integration)
+	if err != nil {
+		t.Fatalf("GetProjectRootFromDir(integration) error = %v", err)
+	}
+	want, err := filepath.EvalSymlinks(integration)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != want {
+		t.Fatalf("GetProjectRootFromDir(integration) = %q, want %q", got, want)
+	}
+
+	if err := os.Mkdir(filepath.Join(integration, ProjectDirName()), 0755); err != nil {
+		t.Fatal(err)
+	}
+	taskWorktree := filepath.Join(integration, WorktreesDirName, "task-1")
+	if err := os.MkdirAll(filepath.Dir(taskWorktree), 0755); err != nil {
+		t.Fatal(err)
+	}
+	runGit(repo, "worktree", "add", "-b", "task/task-1", taskWorktree, "main")
+
+	got, err = GetProjectRootFromDir(taskWorktree)
+	if err != nil {
+		t.Fatalf("GetProjectRootFromDir(task worktree) error = %v", err)
+	}
+	if got != want {
+		t.Fatalf("GetProjectRootFromDir(task worktree) = %q, want integration root %q", got, want)
 	}
 }
 

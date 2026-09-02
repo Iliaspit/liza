@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"time"
 
@@ -356,8 +355,9 @@ type advanceDetectionContext struct {
 
 // IsManyToOneReady checks if a MERGED task is part of a complete many-to-one
 // cohort whose transition has not yet been executed. Used by both carry-forward
-// and wake detection. A cohort is complete when all siblings (same parent, same
-// role_pair) are MERGED with no transitions_executed for the transition name.
+// and wake detection. A cohort is complete when all effective siblings (same
+// historical parent and role_pair, after supersession resolution) are MERGED
+// with no transitions_executed for the transition name.
 func IsManyToOneReady(task *models.Task, state *models.State, m2oTransitions []ManyToOneTransitionInfo) bool {
 	if task == nil || task.Status != models.TaskStatusMerged {
 		return false
@@ -375,17 +375,14 @@ func IsManyToOneReady(task *models.Task, state *models.State, m2oTransitions []M
 			continue
 		}
 
-		// Check if ALL siblings in the cohort are MERGED with unfired transition
+		cohort, _, err := findManyToOneCohort(state, task)
+		if err != nil {
+			continue
+		}
+
+		// Check if ALL effective siblings are MERGED with unfired transition.
 		allReady := true
-		for i := range state.Tasks {
-			sibling := &state.Tasks[i]
-			if sibling.RolePair != task.RolePair {
-				continue
-			}
-			siblingParents := sibling.EffectiveParentTasks()
-			if !slices.Contains(siblingParents, sharedParentID) {
-				continue
-			}
+		for _, sibling := range cohort {
 			if sibling.Status != models.TaskStatusMerged {
 				allReady = false
 				break

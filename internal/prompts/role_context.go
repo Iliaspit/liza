@@ -211,6 +211,7 @@ type RoleContextData struct {
 	// Coder-specific
 	IntegrationFix bool // whether task is in integration fix mode
 	HandoffNote    *models.HandoffEvent
+	ControllerNote *models.HumanNote
 
 	// Orchestrator-specific (pre-rendered content strings)
 	DashboardOutput    string

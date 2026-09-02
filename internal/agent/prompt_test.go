@@ -197,6 +197,83 @@ func TestBuildPrompt(t *testing.T) {
 	}
 }
 
+func TestBuildPrompt_CoderReceivesLatestActionableTaskHumanNote(t *testing.T) {
+	now := time.Now().UTC()
+	blockedReason := "provider schema rejected"
+	state := &models.State{
+		Version: 1,
+		Goal: models.Goal{
+			ID:          "goal-1",
+			Description: "Test goal",
+			SpecRef:     "spec.md",
+			Status:      models.GoalStatusInProgress,
+			Created:     now.Add(-time.Hour),
+		},
+		Tasks: []models.Task{{
+			ID:          "task-1",
+			RolePair:    "coding-pair",
+			Description: "Test task",
+			Status:      models.TaskStatusReady,
+			Priority:    1,
+			SpecRef:     "spec.md",
+			DoneWhen:    "Task is complete",
+			Created:     now.Add(-time.Hour),
+			History: []models.TaskHistoryEntry{{
+				Time:   now.Add(-4 * time.Minute),
+				Event:  models.TaskEventBlocked,
+				Reason: &blockedReason,
+			}},
+		}},
+		HumanNotes: []models.HumanNote{
+			{Timestamp: now.Add(-3 * time.Minute), For: "task-1", Message: "older task direction"},
+			{Timestamp: now.Add(-time.Minute), For: "task-2", Message: "unrelated task direction"},
+			{Timestamp: now, For: "task-1", Message: "inline the two root anyOf branches"},
+		},
+		Agents: make(map[string]models.Agent),
+		Config: models.Config{IntegrationBranch: "main"},
+	}
+
+	tmpDir := t.TempDir()
+	testhelpers.SetupPipelineConfig(t, tmpDir)
+	config := SupervisorConfig{
+		Role:        "coder",
+		AgentID:     "coder-1",
+		ProjectRoot: tmpDir,
+		SpecsDir:    filepath.Join(tmpDir, "specs"),
+		StatePath:   filepath.Join(tmpDir, "state.yaml"),
+	}
+
+	prompt, err := testBuildPrompt(t, state, config, "task-1")
+	if err != nil {
+		t.Fatalf("BuildPrompt: %v", err)
+	}
+	for _, want := range []string{
+		"=== HUMAN CONTROLLER RESUME NOTE ===",
+		"inline the two root anyOf branches",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("prompt missing %q", want)
+		}
+	}
+	for _, unwanted := range []string{"older task direction", "unrelated task direction"} {
+		if strings.Contains(prompt, unwanted) {
+			t.Fatalf("prompt unexpectedly contains %q", unwanted)
+		}
+	}
+
+	state.Tasks[0].History = append(state.Tasks[0].History, models.TaskHistoryEntry{
+		Time:  now.Add(time.Minute),
+		Event: models.TaskEventPreExecutionCheckpoint,
+	})
+	prompt, err = testBuildPrompt(t, state, config, "task-1")
+	if err != nil {
+		t.Fatalf("BuildPrompt after progress: %v", err)
+	}
+	if strings.Contains(prompt, "HUMAN CONTROLLER RESUME NOTE") || strings.Contains(prompt, "inline the two root anyOf branches") {
+		t.Fatal("prompt retained a controller note after newer semantic execution progress")
+	}
+}
+
 func TestBuildOrchestratorRoleContextDataScipIndexesUseProjectRoot(t *testing.T) {
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/liza-mas/liza/internal/filelock"
+	"github.com/liza-mas/liza/internal/gitenv"
 	"github.com/liza-mas/liza/internal/paths"
 )
 
@@ -22,7 +23,19 @@ func projectFileLock(projectRoot, purpose string) (*filelock.FileLock, error) {
 		return nil, fmt.Errorf("resolve project root symlinks for %s lock: %w", purpose, err)
 	}
 
-	gitDir := filepath.Join(root, paths.GitDirName)
+	gitMarker := filepath.Join(root, paths.GitDirName)
+	if _, err := os.Stat(gitMarker); err != nil {
+		return nil, fmt.Errorf("inspect Git metadata for %s lock: %w", purpose, err)
+	}
+
+	output, err := gitenv.Output(root, "rev-parse", "--absolute-git-dir")
+	if err != nil {
+		return nil, fmt.Errorf("resolve Git directory for %s lock: %w", purpose, err)
+	}
+	gitDir := strings.TrimSpace(string(output))
+	if gitDir == "" {
+		return nil, fmt.Errorf("resolve Git directory for %s lock: git returned an empty path", purpose)
+	}
 	info, err := os.Stat(gitDir)
 	if err != nil {
 		return nil, fmt.Errorf("inspect Git directory for %s lock: %w", purpose, err)

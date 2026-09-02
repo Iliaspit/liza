@@ -6,6 +6,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/liza-mas/liza/internal/errors"
 	"github.com/liza-mas/liza/internal/functionalclusters"
@@ -378,6 +379,7 @@ func buildTaskRoleContextData(task *models.Task, state *models.State, config Sup
 	// Doer-specific: coder fields
 	if roleType == "doer" && config.Role == "coder" {
 		data.IntegrationFix = task.IntegrationFix
+		data.ControllerNote = latestActionableTaskHumanNote(task, state)
 		// Find the last context_exhaustion HandoffEvent for resume context
 		for i := len(task.HandoffEvents) - 1; i >= 0; i-- {
 			if task.HandoffEvents[i].Trigger == models.HandoffTriggerContextExhaustion {
@@ -625,6 +627,39 @@ func populateGlobalIntegrationContext(task *models.Task, state *models.State, da
 		if _, ok := seenPlans[planTaskID]; !ok {
 			return fmt.Errorf("global integration context for task %s contains coverage outside the frozen contributing set", task.ID)
 		}
+	}
+	return nil
+}
+
+const maxControllerNotePromptBytes = 8 * 1024
+
+// latestActionableTaskHumanNote returns the newest task-scoped human note only
+// while no subsequent semantic execution progress has made it stale. Claim,
+// release, resume, and unblock bookkeeping intentionally do not consume a note.
+func latestActionableTaskHumanNote(task *models.Task, state *models.State) *models.HumanNote {
+	latestProgress := time.Time{}
+	for _, entry := range task.History {
+		switch entry.Event {
+		case models.TaskEventPreExecutionCheckpoint,
+			models.TaskEventSubmittedForReview,
+			models.TaskEventBlocked,
+			models.TaskEventRejected,
+			models.TaskEventApproved,
+			models.TaskEventMerged,
+			models.TaskEventNewAttempt:
+			if entry.Time.After(latestProgress) {
+				latestProgress = entry.Time
+			}
+		}
+	}
+
+	for i := len(state.HumanNotes) - 1; i >= 0; i-- {
+		note := state.HumanNotes[i]
+		if note.For != task.ID || strings.TrimSpace(note.Message) == "" || !note.Timestamp.After(latestProgress) {
+			continue
+		}
+		note.Message = prompts.TruncateText(note.Message, maxControllerNotePromptBytes)
+		return &note
 	}
 	return nil
 }

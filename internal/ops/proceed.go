@@ -232,29 +232,52 @@ func Proceed(projectRoot, taskID, transitionName string) (*ProceedResult, error)
 	return result, nil
 }
 
-// findManyToOneCohort finds all sibling tasks that form a many-to-one cohort
-// with the trigger task. Siblings share a parent_task and the same role_pair.
-// Returns the cohort members (as pointers into state.Tasks) and the shared parent ID.
+// findManyToOneCohort finds all effective sibling tasks that form a many-to-one
+// cohort with the trigger task. Historical siblings share a parent_task and the
+// same role_pair; superseded siblings resolve recursively to their replacements,
+// while abandoned and unreplaced superseded siblings retire from the cohort.
+// Returns the effective cohort members (as pointers into state.Tasks) and the
+// shared parent ID.
 func findManyToOneCohort(s *models.State, triggerTask *models.Task) ([]*models.Task, string, error) {
 	sharedParentID := triggerTask.CohortParentID()
 	if sharedParentID == "" {
 		return nil, "", fmt.Errorf("trigger task %q has no parent_task — cannot determine many-to-one cohort", triggerTask.ID)
 	}
 
-	var cohort []*models.Task
+	effectiveMembers := make(map[string]*models.Task)
 	for i := range s.Tasks {
 		task := &s.Tasks[i]
 		if task.RolePair != triggerTask.RolePair {
 			continue
 		}
 		taskParents := task.EffectiveParentTasks()
-		if slices.Contains(taskParents, sharedParentID) {
-			cohort = append(cohort, task)
+		if !slices.Contains(taskParents, sharedParentID) {
+			continue
+		}
+
+		memberIDs, _, err := canonicalizeDependencyID(s, task.ID, nil)
+		if err != nil {
+			return nil, "", fmt.Errorf("resolve cohort member %q: %w", task.ID, err)
+		}
+		for _, memberID := range memberIDs {
+			member := s.FindTask(memberID)
+			if member == nil {
+				return nil, "", fmt.Errorf("resolved cohort member %q does not exist", memberID)
+			}
+			if member.RolePair != triggerTask.RolePair {
+				return nil, "", fmt.Errorf("resolved cohort member %q has role_pair %q (want %q)", member.ID, member.RolePair, triggerTask.RolePair)
+			}
+			effectiveMembers[member.ID] = member
 		}
 	}
 
-	if len(cohort) == 0 {
+	if len(effectiveMembers) == 0 {
 		return nil, "", fmt.Errorf("no cohort members found for trigger task %q", triggerTask.ID)
+	}
+
+	cohort := make([]*models.Task, 0, len(effectiveMembers))
+	for _, member := range effectiveMembers {
+		cohort = append(cohort, member)
 	}
 
 	// Sort for deterministic ordering
