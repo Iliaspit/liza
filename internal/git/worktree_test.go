@@ -76,6 +76,24 @@ func TestCreateWorktree(t *testing.T) {
 	}
 }
 
+func TestWorktreeMutationLockSupportsLinkedProjectRoot(t *testing.T) {
+	repoDir := setupTestRepo(t)
+	testhelpers.CreateTestWorktree(t, repoDir, "linked-project")
+	linkedRoot := filepath.Join(repoDir, ".worktrees", "linked-project")
+
+	if err := New(linkedRoot).withWorktreeMutationLock("test", func() error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+
+	commonDir := testhelpers.MustGit(t, linkedRoot, "rev-parse", "--git-common-dir")
+	if !filepath.IsAbs(commonDir) {
+		commonDir = filepath.Join(linkedRoot, commonDir)
+	}
+	if _, err := os.Stat(filepath.Join(filepath.Clean(commonDir), "worktree-mutation.lock")); err != nil {
+		t.Fatalf("worktree mutation lock missing from common Git metadata: %v", err)
+	}
+}
+
 func TestCreateWorktreeAlreadyExists(t *testing.T) {
 	repoDir := setupTestRepo(t)
 	git := New(repoDir)

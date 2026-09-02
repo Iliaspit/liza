@@ -20,7 +20,29 @@ const maxProgressSignatureFileBytes = 1 << 20
 const worktreeMutationLockTimeout = 30 * time.Minute
 
 func (g *Git) withWorktreeMutationLock(operation string, fn func() error) error {
-	lockPath := filepath.Join(g.projectRoot, paths.GitDirName, "worktree-mutation")
+	gitCommonDir, err := g.exec("rev-parse", "--git-common-dir")
+	if err != nil {
+		return fmt.Errorf("resolve Git common directory for worktree mutation lock: %w", err)
+	}
+	if gitCommonDir == "" {
+		return fmt.Errorf("resolve Git common directory for worktree mutation lock: git returned an empty path")
+	}
+	if !filepath.IsAbs(gitCommonDir) {
+		gitCommonDir = filepath.Join(g.projectRoot, gitCommonDir)
+	}
+	gitCommonDir, err = filepath.EvalSymlinks(filepath.Clean(gitCommonDir))
+	if err != nil {
+		return fmt.Errorf("resolve Git common directory symlinks for worktree mutation lock: %w", err)
+	}
+	info, err := os.Stat(gitCommonDir)
+	if err != nil {
+		return fmt.Errorf("inspect Git common directory for worktree mutation lock: %w", err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("Git common directory for worktree mutation lock is not a directory: %s", gitCommonDir)
+	}
+
+	lockPath := filepath.Join(gitCommonDir, "worktree-mutation")
 	return filelock.New(lockPath).
 		WithTimeout(worktreeMutationLockTimeout).
 		WithLockOperation(operation, fn)
