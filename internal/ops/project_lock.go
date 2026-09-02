@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/liza-mas/liza/internal/filelock"
-	"github.com/liza-mas/liza/internal/gitenv"
 	"github.com/liza-mas/liza/internal/paths"
 )
 
@@ -24,19 +23,35 @@ func projectFileLock(projectRoot, purpose string) (*filelock.FileLock, error) {
 	}
 
 	gitMarker := filepath.Join(root, paths.GitDirName)
-	if _, err := os.Stat(gitMarker); err != nil {
+	info, err := os.Stat(gitMarker)
+	if err != nil {
 		return nil, fmt.Errorf("inspect Git metadata for %s lock: %w", purpose, err)
 	}
 
-	output, err := gitenv.Output(root, "rev-parse", "--resolve-git-dir", gitMarker)
-	if err != nil {
-		return nil, fmt.Errorf("resolve Git directory for %s lock: %w", purpose, err)
+	gitDir := gitMarker
+	if !info.IsDir() {
+		contents, err := os.ReadFile(gitMarker)
+		if err != nil {
+			return nil, fmt.Errorf("read Git metadata pointer for %s lock: %w", purpose, err)
+		}
+		pointer := strings.TrimSpace(string(contents))
+		const prefix = "gitdir:"
+		if !strings.HasPrefix(pointer, prefix) {
+			return nil, fmt.Errorf("Git metadata for %s lock is neither a directory nor a gitdir pointer: %s", purpose, gitMarker)
+		}
+		gitDir = strings.TrimSpace(strings.TrimPrefix(pointer, prefix))
+		if gitDir == "" {
+			return nil, fmt.Errorf("Git metadata pointer for %s lock is empty: %s", purpose, gitMarker)
+		}
+		if !filepath.IsAbs(gitDir) {
+			gitDir = filepath.Join(filepath.Dir(gitMarker), gitDir)
+		}
+		gitDir, err = filepath.EvalSymlinks(filepath.Clean(gitDir))
+		if err != nil {
+			return nil, fmt.Errorf("resolve Git metadata pointer for %s lock: %w", purpose, err)
+		}
 	}
-	gitDir := strings.TrimSpace(string(output))
-	if gitDir == "" {
-		return nil, fmt.Errorf("resolve Git directory for %s lock: git returned an empty path", purpose)
-	}
-	info, err := os.Stat(gitDir)
+	info, err = os.Stat(gitDir)
 	if err != nil {
 		return nil, fmt.Errorf("inspect Git directory for %s lock: %w", purpose, err)
 	}
