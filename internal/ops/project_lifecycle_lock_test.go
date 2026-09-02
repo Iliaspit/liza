@@ -1,7 +1,9 @@
 package ops
 
 import (
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -48,10 +50,39 @@ func TestProjectLifecycleLockSupportsLinkedWorktreeRoot(t *testing.T) {
 	if err := WithProjectLifecycleSharedLock(linkedRoot, "test", func() error { return nil }); err != nil {
 		t.Fatal(err)
 	}
-	gitDir := testhelpers.MustGit(t, linkedRoot, "rev-parse", "--absolute-git-dir")
+	gitDir := testhelpers.MustGit(t, linkedRoot, "rev-parse", "--resolve-git-dir", filepath.Join(linkedRoot, paths.GitDirName))
 	lockName := strings.TrimPrefix(paths.ProjectDirName(), ".") + "-project-lifecycle.lock"
 	if _, err := os.Stat(filepath.Join(gitDir, lockName)); err != nil {
 		t.Fatalf("project lifecycle lock missing from linked-worktree Git metadata: %v", err)
+	}
+}
+
+func TestProjectLifecycleLockExplicitlyResolvesLinkedWorktreeGitFile(t *testing.T) {
+	projectRoot := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, projectRoot)
+	testhelpers.CreateTestWorktree(t, projectRoot, "linked-project")
+	linkedRoot := filepath.Join(projectRoot, paths.WorktreesDirName, "linked-project")
+
+	realGit, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fakeBin := t.TempDir()
+	fakeGit := filepath.Join(fakeBin, "git")
+	script := fmt.Sprintf(`#!/bin/sh
+if [ "$1" = "rev-parse" ] && [ "$2" = "--absolute-git-dir" ]; then
+  printf '%%s\n' "$PWD/.git"
+  exit 0
+fi
+exec %q "$@"
+`, realGit)
+	if err := os.WriteFile(fakeGit, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", fakeBin+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	if err := WithProjectLifecycleSharedLock(linkedRoot, "test", func() error { return nil }); err != nil {
+		t.Fatal(err)
 	}
 }
 

@@ -28,7 +28,7 @@ func projectFileLock(projectRoot, purpose string) (*filelock.FileLock, error) {
 		return nil, fmt.Errorf("inspect Git metadata for %s lock: %w", purpose, err)
 	}
 
-	output, err := gitenv.Output(root, "rev-parse", "--absolute-git-dir")
+	output, err := gitenv.Output(root, "rev-parse", "--resolve-git-dir", gitMarker)
 	if err != nil {
 		return nil, fmt.Errorf("resolve Git directory for %s lock: %w", purpose, err)
 	}
