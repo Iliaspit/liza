@@ -2,16 +2,23 @@ package toolchain
 
 import (
 	"errors"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/liza-mas/liza/internal/brand"
 )
 
 type fakeRunner struct {
 	paths             map[string]string
 	runs              []Command
 	failInstallScript bool
+	// resolvesAfterRun names the binaries a successful Run makes available, so
+	// the fake reflects what an installer actually does: the tool is absent
+	// before the command and on PATH after it.
+	resolvesAfterRun []string
 }
 
 func (f *fakeRunner) LookPath(name string) (string, error) {
@@ -26,8 +33,14 @@ func (f *fakeRunner) LookPath(name string) (string, error) {
 
 func (f *fakeRunner) Run(command Command) (CommandOutput, error) {
 	f.runs = append(f.runs, command)
-	if f.failInstallScript && command.Env["LIZA_TOOL_INSTALL_URL"] != "" {
+	if f.failInstallScript && command.Env[toolEnvName("INSTALL_URL")] != "" {
 		return CommandOutput{Stderr: "release metadata unavailable"}, errors.New("exit status 1")
+	}
+	for _, name := range f.resolvesAfterRun {
+		if f.paths == nil {
+			f.paths = map[string]string{}
+		}
+		f.paths[name] = "/fake/bin/" + name
 	}
 	return CommandOutput{Stdout: "ok"}, nil
 }
@@ -107,28 +120,8 @@ func TestInstallManualToolIsSkipped(t *testing.T) {
 	}
 }
 
-func TestInstallNativeWindowsIsUnsupported(t *testing.T) {
-	got, err := Install(InstallOptions{
-		Profile:    ProfileLean,
-		Include:    []string{"rtk"},
-		Exclude:    allToolIDsExcept("rtk"),
-		InstallDir: t.TempDir(),
-		Runner:     &fakeRunner{},
-		GOOS:       "windows",
-	})
-	if err == nil {
-		t.Fatal("Install() error = nil, want unsupported platform error")
-	}
-	if got.Steps[0].Status != InstallUnsupported {
-		t.Fatalf("status = %s, want unsupported", got.Steps[0].Status)
-	}
-	if strings.Contains(got.Steps[0].Message, "doctor-only") {
-		t.Fatalf("message = %q, should not claim Windows is doctor-only", got.Steps[0].Message)
-	}
-}
-
 func TestPackageInstallCommandRequiresKnownPackageManager(t *testing.T) {
-	_, err := packageInstallCommand("jq", &fakeRunner{})
+	_, err := packageInstallCommand(Tool{ID: "jq", PackageName: "jq"}, &fakeRunner{})
 	if err == nil {
 		t.Fatal("packageInstallCommand() error = nil, want missing package manager error")
 	}
@@ -137,8 +130,48 @@ func TestPackageInstallCommandRequiresKnownPackageManager(t *testing.T) {
 	}
 }
 
+// TestPackageInstallCommandSkipsManagerWithoutAKnownPackage covers a catalog
+// shape the shipped one does not have yet: a tool scoop knows and winget does
+// not. Since winget is present on any modern Windows and is checked first, a
+// stop at the first present manager would never reach scoop.
+func TestPackageInstallCommandSkipsManagerWithoutAKnownPackage(t *testing.T) {
+	tool := Tool{
+		ID:                    "example",
+		PackageName:           "example",
+		PackageNamesByManager: map[string]string{"scoop": "example-scoop-id"},
+	}
+	runner := &fakeRunner{paths: map[string]string{
+		"winget": `C:\Windows\winget.exe`,
+		"scoop":  `C:\Users\dev\scoop\shims\scoop.exe`,
+	}}
+
+	got, err := packageInstallCommand(tool, runner)
+	if err != nil {
+		t.Fatalf("packageInstallCommand() error = %v, want the scoop command", err)
+	}
+	if got.Name != "scoop" {
+		t.Fatalf("packageInstallCommand() ran %q, want scoop", got.Name)
+	}
+	if !slices.Contains(got.Args, "example-scoop-id") {
+		t.Fatalf("packageInstallCommand() args = %v, want the scoop package id", got.Args)
+	}
+}
+
+// TestPackageInstallCommandReportsNoPackagePathWhenNoManagerKnowsTheTool keeps
+// the other outcome pinned: skipping a manager must not turn "nobody carries
+// this" into "no manager installed", which reads very differently to a user.
+func TestPackageInstallCommandReportsNoPackagePathWhenNoManagerKnowsTheTool(t *testing.T) {
+	tool := Tool{ID: "example", PackageName: "example"}
+	runner := &fakeRunner{paths: map[string]string{"winget": `C:\Windows\winget.exe`}}
+
+	_, err := packageInstallCommand(tool, runner)
+	if !errors.Is(err, errNoPackagePath) {
+		t.Fatalf("packageInstallCommand() error = %v, want errNoPackagePath", err)
+	}
+}
+
 func TestPackageInstallCommandRejectsURLPackage(t *testing.T) {
-	_, err := packageInstallCommand("https://example.test/tool.rb", &fakeRunner{})
+	_, err := packageInstallCommand(Tool{ID: "tool", PackageName: "https://example.test/tool.rb"}, &fakeRunner{})
 	if err == nil {
 		t.Fatal("packageInstallCommand() error = nil, want URL package rejection")
 	}
@@ -148,7 +181,7 @@ func TestPackageInstallCommandRejectsURLPackage(t *testing.T) {
 }
 
 func TestInstallFallsBackToGoSourceBuildWhenScriptFails(t *testing.T) {
-	runner := &fakeRunner{paths: map[string]string{}, failInstallScript: true}
+	runner := &fakeRunner{paths: map[string]string{}, failInstallScript: true, resolvesAfterRun: []string{"mdtoc"}}
 	got, err := Install(InstallOptions{
 		Profile:    ProfileBalanced,
 		Include:    []string{"mdtoc"},
@@ -169,11 +202,11 @@ func TestInstallFallsBackToGoSourceBuildWhenScriptFails(t *testing.T) {
 		t.Fatalf("runs = %d, want primary script plus fallback", len(runner.runs))
 	}
 	fallback := runner.runs[1]
-	if fallback.Env["LIZA_TOOL_SOURCE_REPO"] != "https://github.com/liza-mas/mdtoc" {
-		t.Fatalf("fallback source repo = %q", fallback.Env["LIZA_TOOL_SOURCE_REPO"])
+	if fallback.Env[toolEnvName("SOURCE_REPO")] != "https://github.com/liza-mas/mdtoc" {
+		t.Fatalf("fallback source repo = %q", fallback.Env[toolEnvName("SOURCE_REPO")])
 	}
-	if fallback.Env["LIZA_TOOL_SOURCE_PACKAGE"] != "./cmd/mdtoc" {
-		t.Fatalf("fallback package = %q", fallback.Env["LIZA_TOOL_SOURCE_PACKAGE"])
+	if fallback.Env[toolEnvName("SOURCE_PACKAGE")] != "./cmd/mdtoc" {
+		t.Fatalf("fallback package = %q", fallback.Env[toolEnvName("SOURCE_PACKAGE")])
 	}
 	if !strings.Contains(strings.Join(fallback.Args, " "), "git clone") || !strings.Contains(strings.Join(fallback.Args, " "), "go install") {
 		t.Fatalf("fallback command does not build from source: %+v", fallback)
@@ -222,15 +255,15 @@ func TestBashPolicyCatalogPlansStandaloneInstaller(t *testing.T) {
 	}
 
 	installDir := filepath.Join(t.TempDir(), "bin")
-	command, err := installCommand(tool, installDir, &fakeRunner{})
+	command, err := installCommand(tool, installDir, &fakeRunner{}, "linux")
 	if err != nil {
 		t.Fatalf("installCommand() error = %v", err)
 	}
 	if command.Name != "bash" {
 		t.Fatalf("command name = %q, want bash", command.Name)
 	}
-	if command.Env["LIZA_TOOL_INSTALL_URL"] != tool.InstallURL {
-		t.Fatalf("LIZA_TOOL_INSTALL_URL = %q", command.Env["LIZA_TOOL_INSTALL_URL"])
+	if command.Env[toolEnvName("INSTALL_URL")] != tool.InstallURL {
+		t.Fatalf("%s = %q", toolEnvName("INSTALL_URL"), command.Env[toolEnvName("INSTALL_URL")])
 	}
 	if command.Env["INSTALL_DIR"] != installDir {
 		t.Fatalf("INSTALL_DIR = %q, want %q", command.Env["INSTALL_DIR"], installDir)
@@ -249,7 +282,7 @@ func allToolIDsExcept(keep ...string) []string {
 }
 
 func TestInstallRunsCommandWhenNotDryRun(t *testing.T) {
-	runner := &fakeRunner{paths: map[string]string{}}
+	runner := &fakeRunner{paths: map[string]string{}, resolvesAfterRun: []string{"rtk"}}
 	installDir := t.TempDir()
 	got, err := Install(InstallOptions{
 		Profile:    ProfileBalanced,
@@ -257,6 +290,7 @@ func TestInstallRunsCommandWhenNotDryRun(t *testing.T) {
 		Exclude:    allToolIDsExcept("rtk"),
 		InstallDir: installDir,
 		Runner:     runner,
+		GOOS:       "linux",
 	})
 	if err != nil {
 		t.Fatalf("Install() error = %v", err)
@@ -296,7 +330,7 @@ func TestInstallReturnsErrorWhenAnyStepFails(t *testing.T) {
 
 func TestInstallNPMUsesPrefixForInstallDirBin(t *testing.T) {
 	installDir := filepath.Join(t.TempDir(), "bin")
-	got, err := installCommand(Tool{ID: "npm-tool", InstallKind: InstallNPM, NPMPackage: "example"}, installDir, &fakeRunner{})
+	got, err := installCommand(Tool{ID: "npm-tool", InstallKind: InstallNPM, NPMPackage: "example"}, installDir, &fakeRunner{}, "linux")
 	if err != nil {
 		t.Fatalf("installCommand() error = %v", err)
 	}
@@ -306,7 +340,7 @@ func TestInstallNPMUsesPrefixForInstallDirBin(t *testing.T) {
 }
 
 func TestInstallNPMRejectsInstallDirOutsideBin(t *testing.T) {
-	_, err := installCommand(Tool{ID: "npm-tool", InstallKind: InstallNPM, NPMPackage: "example"}, t.TempDir(), &fakeRunner{})
+	_, err := installCommand(Tool{ID: "npm-tool", InstallKind: InstallNPM, NPMPackage: "example"}, t.TempDir(), &fakeRunner{}, "linux")
 	if err == nil {
 		t.Fatal("installCommand() error = nil, want npm bin-dir validation")
 	}
@@ -317,11 +351,251 @@ func TestInstallNPMRejectsInstallDirOutsideBin(t *testing.T) {
 
 func TestInstallUVUsesToolBinDir(t *testing.T) {
 	installDir := t.TempDir()
-	got, err := installCommand(Tool{ID: "uv-tool", InstallKind: InstallUVTool, UVPackage: "example"}, installDir, &fakeRunner{})
+	got, err := installCommand(Tool{ID: "uv-tool", InstallKind: InstallUVTool, UVPackage: "example"}, installDir, &fakeRunner{}, "linux")
 	if err != nil {
 		t.Fatalf("installCommand() error = %v", err)
 	}
 	if got.Env["UV_TOOL_BIN_DIR"] != installDir {
 		t.Fatalf("UV_TOOL_BIN_DIR = %q, want %q", got.Env["UV_TOOL_BIN_DIR"], installDir)
+	}
+}
+
+func TestInstallUsesWindowsArchiveWhenScriptCannotRun(t *testing.T) {
+	runner := &fakeRunner{paths: map[string]string{}, resolvesAfterRun: []string{"rtk"}}
+	installDir := t.TempDir()
+
+	got, err := Install(InstallOptions{
+		Profile:    ProfileBalanced,
+		Include:    []string{"rtk"},
+		Exclude:    allToolIDsExcept("rtk"),
+		InstallDir: installDir,
+		Runner:     runner,
+		GOOS:       "windows",
+	})
+	if err != nil {
+		t.Fatalf("Install() error = %v", err)
+	}
+	if got.Steps[0].Status != InstallInstalled {
+		t.Fatalf("status = %s, want installed", got.Steps[0].Status)
+	}
+	if len(runner.runs) != 1 {
+		t.Fatalf("runs = %d, want 1", len(runner.runs))
+	}
+	command := runner.runs[0]
+	if command.Name != "powershell" {
+		t.Fatalf("command = %q, want powershell rather than the Linux-only install script", command.Name)
+	}
+	if command.Env[toolEnvName("ARCHIVE_URL")] == "" {
+		t.Fatal("archive URL not passed to the install command")
+	}
+	if command.Env[toolEnvName("INSTALL_DIR")] != installDir {
+		t.Fatalf("install dir = %q, want %q", command.Env[toolEnvName("INSTALL_DIR")], installDir)
+	}
+}
+
+// TestInstallCommandsCarryTheConfiguredBrand pins the whole TOOL_* family to the
+// configured brand rather than to the default one. The expected names are
+// spelled out rather than derived, so a toolEnvName that stopped consulting the
+// brand would fail here instead of agreeing with itself.
+func TestInstallCommandsCarryTheConfiguredBrand(t *testing.T) {
+	previous := brand.EnvPrefix
+	brand.EnvPrefix = "ACME_AGENT"
+	t.Cleanup(func() { brand.EnvPrefix = previous })
+
+	installDir := t.TempDir()
+	commands := []Command{
+		windowsArchiveCommand(Tool{Binary: "rtk", WindowsArchiveURL: "https://example.test/rtk.zip"}, installDir),
+	}
+	for _, build := range []func() (Command, error){
+		func() (Command, error) {
+			return installCommand(Tool{ID: "rtk", InstallKind: InstallScript, InstallURL: "https://example.test/install.sh"}, installDir, &fakeRunner{}, "linux")
+		},
+		func() (Command, error) {
+			return sourceFallbackCommand(Tool{SourceRepo: "https://example.test/rtk", SourcePackage: "./cmd/rtk"}, installDir)
+		},
+		func() (Command, error) {
+			return packageInstallCommand(Tool{PackageName: "rtk"}, &fakeRunner{paths: map[string]string{"apt-get": "/usr/bin/apt-get"}})
+		},
+	} {
+		command, err := build()
+		if err != nil {
+			t.Fatalf("building install command: %v", err)
+		}
+		commands = append(commands, command)
+	}
+
+	wanted := map[string]bool{
+		"ACME_AGENT_TOOL_ARCHIVE_URL":    false,
+		"ACME_AGENT_TOOL_BINARY":         false,
+		"ACME_AGENT_TOOL_INSTALL_DIR":    false,
+		"ACME_AGENT_TOOL_INSTALL_URL":    false,
+		"ACME_AGENT_TOOL_SOURCE_REPO":    false,
+		"ACME_AGENT_TOOL_SOURCE_PACKAGE": false,
+		"ACME_AGENT_TOOL_PACKAGE":        false,
+	}
+	for _, command := range commands {
+		rendered := command.Name + " " + strings.Join(command.Args, " ")
+		for name := range command.Env {
+			if _, ok := wanted[name]; ok {
+				wanted[name] = true
+			}
+			if strings.HasPrefix(name, "LIZA") {
+				t.Errorf("env %q keeps the default brand under a white-label build", name)
+			}
+			// Every TOOL_* variable exists to be read by the script it travels
+			// with. Renaming one side only would leave both sides looking right
+			// and the install broken, so the two are checked against each other
+			// rather than each against the brand.
+			if strings.HasPrefix(name, "ACME_AGENT_TOOL_") && !strings.Contains(rendered, name) {
+				t.Errorf("env %q is set but the script never reads it: %s", name, rendered)
+			}
+		}
+		if strings.Contains(rendered, "LIZA_TOOL_") {
+			t.Errorf("command script still reads a default-brand variable: %s", rendered)
+		}
+	}
+	for name, seen := range wanted {
+		if !seen {
+			t.Errorf("%s was never set by any install command", name)
+		}
+	}
+}
+
+func TestPackageInstallSkipsWhenNoWindowsPackageIdentifierIsKnown(t *testing.T) {
+	// pre-commit is a Python tool that no Windows package manager carries. The
+	// step has to say so, not install whatever answers to the name "pre-commit".
+	runner := &fakeRunner{paths: map[string]string{"winget": "C:\\winget.exe"}}
+
+	got, err := Install(InstallOptions{
+		Profile:    ProfileBalanced,
+		Include:    []string{"pre-commit"},
+		Exclude:    allToolIDsExcept("pre-commit"),
+		InstallDir: t.TempDir(),
+		Runner:     runner,
+		GOOS:       "windows",
+	})
+	if err != nil {
+		t.Fatalf("Install() error = %v", err)
+	}
+	if got.Steps[0].Status != InstallSkipped {
+		t.Fatalf("status = %s, want skipped", got.Steps[0].Status)
+	}
+	if !strings.Contains(got.Steps[0].Message, "uv tool install pre-commit") {
+		t.Fatalf("message = %q, want the manual install instruction", got.Steps[0].Message)
+	}
+	if len(runner.runs) != 0 {
+		t.Fatalf("runs = %v, want no install attempt", runner.runs)
+	}
+}
+
+func TestPackageInstallUsesWingetIdentifier(t *testing.T) {
+	runner := &fakeRunner{paths: map[string]string{"winget": "C:\\winget.exe"}, resolvesAfterRun: []string{"rg"}}
+
+	if _, err := Install(InstallOptions{
+		Profile:    ProfileBalanced,
+		Include:    []string{"rg"},
+		Exclude:    allToolIDsExcept("rg"),
+		InstallDir: t.TempDir(),
+		Runner:     runner,
+		GOOS:       "windows",
+	}); err != nil {
+		t.Fatalf("Install() error = %v", err)
+	}
+	if len(runner.runs) != 1 {
+		t.Fatalf("runs = %d, want 1", len(runner.runs))
+	}
+	if !slices.Contains(runner.runs[0].Args, "BurntSushi.ripgrep.MSVC") {
+		t.Fatalf("args = %v, want the winget package identifier rather than the plain name", runner.runs[0].Args)
+	}
+}
+
+func TestNPMInstallTargetsTheManagedDirectoryOnWindows(t *testing.T) {
+	// npm writes global executables to <prefix>/bin on Unix but to <prefix>
+	// itself on Windows. Passing the parent there scatters the shims one level
+	// above the managed directory, where nothing on PATH finds them.
+	installDir := filepath.Join(t.TempDir(), "bin")
+	tool := Tool{ID: "npm-tool", Binary: "npm-tool", InstallKind: InstallNPM, NPMPackage: "example"}
+
+	windows, err := installCommand(tool, installDir, &fakeRunner{}, "windows")
+	if err != nil {
+		t.Fatalf("installCommand(windows) error = %v", err)
+	}
+	if got := windows.Env["NPM_CONFIG_PREFIX"]; got != installDir {
+		t.Fatalf("NPM_CONFIG_PREFIX = %q, want the install dir itself %q", got, installDir)
+	}
+
+	unix, err := installCommand(tool, installDir, &fakeRunner{}, "linux")
+	if err != nil {
+		t.Fatalf("installCommand(linux) error = %v", err)
+	}
+	if got := unix.Env["NPM_CONFIG_PREFIX"]; got != filepath.Dir(installDir) {
+		t.Fatalf("NPM_CONFIG_PREFIX = %q, want the parent %q", got, filepath.Dir(installDir))
+	}
+}
+
+func TestPackageManagerInstallIsNotFailedForBeingOffThisProcessPath(t *testing.T) {
+	// winget and friends install into their own prefix and extend PATH for
+	// processes started afterwards. Demanding proof from this process's PATH
+	// would report a successful install as a failure.
+	runner := &fakeRunner{paths: map[string]string{"winget": "C:\\winget.exe"}}
+
+	got, err := Install(InstallOptions{
+		Profile:    ProfileBalanced,
+		Include:    []string{"jq"},
+		Exclude:    allToolIDsExcept("jq"),
+		InstallDir: t.TempDir(),
+		Runner:     runner,
+		GOOS:       "windows",
+	})
+	if err != nil {
+		t.Fatalf("Install() error = %v", err)
+	}
+	if got.Steps[0].Status != InstallInstalled {
+		t.Fatalf("status = %s (%s), want installed", got.Steps[0].Status, got.Steps[0].Message)
+	}
+	if !strings.Contains(got.Steps[0].Message, "new shell") {
+		t.Fatalf("message = %q, want the PATH caveat", got.Steps[0].Message)
+	}
+}
+
+func TestWindowsRenameLeavesNpmShimsAlone(t *testing.T) {
+	// npm writes <name>, <name>.cmd and <name>.ps1. The extensionless one is a
+	// POSIX shell wrapper; renaming it to .exe would shadow the .cmd that
+	// actually runs, because PATHEXT tries .EXE first.
+	installDir := t.TempDir()
+	for _, name := range []string{"npm-tool", "npm-tool.cmd", "npm-tool.ps1"} {
+		if err := os.WriteFile(filepath.Join(installDir, name), []byte("stub"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tool := Tool{ID: "npm-tool", Binary: "npm-tool", InstallKind: InstallNPM}
+
+	step := verifyInstalled(InstallStep{ToolID: tool.ID, Status: InstallInstalled}, tool, installDir, &fakeRunner{}, "windows")
+
+	if step.Status != InstallInstalled {
+		t.Fatalf("status = %s (%s), want installed", step.Status, step.Message)
+	}
+	if _, err := os.Stat(filepath.Join(installDir, "npm-tool.exe")); err == nil {
+		t.Fatal("the shell wrapper was renamed to .exe, shadowing the .cmd shim")
+	}
+	if _, err := os.Stat(filepath.Join(installDir, "npm-tool")); err != nil {
+		t.Fatalf("the shell wrapper should be left in place: %v", err)
+	}
+}
+
+func TestWindowsRenamesWhenNothingRunnableExists(t *testing.T) {
+	installDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(installDir, "built"), []byte("stub"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tool := Tool{ID: "built", Binary: "built", InstallKind: InstallScript}
+
+	step := verifyInstalled(InstallStep{ToolID: tool.ID, Status: InstallInstalled}, tool, installDir, &fakeRunner{}, "windows")
+
+	if step.Status != InstallInstalled {
+		t.Fatalf("status = %s (%s), want installed", step.Status, step.Message)
+	}
+	if _, err := os.Stat(filepath.Join(installDir, "built.exe")); err != nil {
+		t.Fatalf("expected the binary to be renamed so PATH can resolve it: %v", err)
 	}
 }

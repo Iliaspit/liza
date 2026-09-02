@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -1239,7 +1240,7 @@ func TestClaimTask_ReadyWithPrunableWorktreeRegistration_RecreatesCleanWorktree(
 	if task.Status != models.TaskStatusImplementing {
 		t.Errorf("Status = %v, want IMPLEMENTING", task.Status)
 	}
-	if task.Worktree == nil || *task.Worktree != filepath.Join(paths.WorktreesDirName, "task-1") {
+	if task.Worktree == nil || *task.Worktree != path.Join(paths.WorktreesDirName, "task-1") {
 		t.Errorf("Worktree = %v, want .worktrees/task-1", task.Worktree)
 	}
 }
@@ -1259,7 +1260,7 @@ func TestHandleReadyClaimWorktree_ConcurrentWinnerDoesNotDeleteWorktree(t *testi
 		t.Fatalf("Failed to create winning worktree: %v", err)
 	}
 
-	worktreeRel := filepath.Join(paths.WorktreesDirName, "task-1")
+	worktreeRel := path.Join(paths.WorktreesDirName, "task-1")
 	worktreeDir := filepath.Join(tmpDir, worktreeRel)
 
 	err := handleReadyClaimWorktree(
@@ -1312,7 +1313,7 @@ func TestHandleReadyClaimWorktree_CleanupAbortedWhenTaskClaimedConcurrently(t *t
 		t.Fatalf("Failed to create worktree: %v", err)
 	}
 
-	worktreeRel := filepath.Join(paths.WorktreesDirName, "task-1")
+	worktreeRel := path.Join(paths.WorktreesDirName, "task-1")
 	worktreeDir := filepath.Join(tmpDir, worktreeRel)
 
 	// cleanupAllowed=true but task is IMPLEMENTING → guard must abort cleanup.
@@ -1340,6 +1341,7 @@ func TestHandleReadyClaimWorktree_CleanupAbortedWhenTaskClaimedConcurrently(t *t
 }
 
 func TestClaimTask_PostWorktreeCmdRunsOnFreshClaim(t *testing.T) {
+	requirePosixShell(t)
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
@@ -1409,6 +1411,7 @@ func TestClaimTask_CopyWorktreeEnvFilesOnFreshClaim(t *testing.T) {
 // fail closed rather than hand it to a coder session (ADR-0031 amendment
 // 2026-08-23; superseded the earlier warn-and-continue contract).
 func TestClaimTask_PostWorktreeCmdFailureFailsClaimClosed(t *testing.T) {
+	requirePosixShell(t)
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
@@ -1486,6 +1489,7 @@ func TestClaimTask_PostWorktreeCmdFailurePreservesWorktree(t *testing.T) {
 }
 
 func TestClaimTask_PostWorktreeCmdRunsOnSameCoderReclaim(t *testing.T) {
+	requirePosixShell(t)
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
@@ -1689,7 +1693,7 @@ func TestClaimTaskPreparesSembleIgnoreForFreshClaim(t *testing.T) {
 	}
 
 	worktreeDir := filepath.Join(tmpDir, paths.WorktreesDirName, "task-1")
-	if result.WorktreeRel != filepath.Join(paths.WorktreesDirName, "task-1") {
+	if result.WorktreeRel != path.Join(paths.WorktreesDirName, "task-1") {
 		t.Fatalf("WorktreeRel = %q, want task worktree", result.WorktreeRel)
 	}
 	assertPrepareSembleIgnorePayload(t, worktreeDir)
@@ -1726,6 +1730,7 @@ func TestClaimTaskPreparesSembleIgnoreForRejectedReclaim(t *testing.T) {
 }
 
 func TestClaimTask_ScipIndexesEnabledWorktreeAfterPostWorktreeCmd(t *testing.T) {
+	requirePosixShell(t)
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
 	addTrackedGoSourceForClaimScipTest(t, tmpDir)
@@ -1738,7 +1743,9 @@ func TestClaimTask_ScipIndexesEnabledWorktreeAfterPostWorktreeCmd(t *testing.T) 
 	state := testhelpers.CreateValidState()
 	registerClaimTaskTestAgents(state)
 	state.Config.ScipSearch = []string{"go"}
-	postCmd := fmt.Sprintf("touch %s", markerPath)
+	// The command runs in a POSIX shell, which reads a native Windows path as a
+	// string of escapes: "touch C:\dir\marker" creates a file named "Cdirmarker".
+	postCmd := fmt.Sprintf("touch %q", filepath.ToSlash(markerPath))
 	state.Config.PostWorktreeCmd = &postCmd
 	state.Tasks = []models.Task{
 		testhelpers.BuildTaskByStatus("task-1", models.TaskStatusReady, now),
@@ -1778,6 +1785,7 @@ func TestClaimTask_ScipIndexesEnabledWorktreeAfterPostWorktreeCmd(t *testing.T) 
 }
 
 func TestClaimTaskSembleIgnorePreparationRunsAfterPostWorktreeBeforeIndexRefresh(t *testing.T) {
+	requirePosixShell(t)
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
 	addTrackedGoSourceForClaimScipTest(t, tmpDir)
@@ -1951,6 +1959,7 @@ func TestClaimTask_FunctionalClustersFailedBuildWarningReturned(t *testing.T) {
 }
 
 func TestClaimTaskSembleIgnorePreparationWarningsAreBounded(t *testing.T) {
+	requirePosixShell(t)
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)
 	if err := os.WriteFile(filepath.Join(tmpDir, ".sembleignore"), []byte("operator-owned marker\n"+paths.ProjectDirName()+"/\n"), 0o644); err != nil {
@@ -2662,7 +2671,7 @@ func newPreservedInitialClaimFixtureWithBaseFile(t *testing.T, baseFile, baseCon
 	state := testhelpers.CreateValidState()
 	registerClaimTaskTestAgents(state)
 	task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusReady, time.Now().UTC())
-	task.Worktree = testhelpers.StringPtr(filepath.Join(paths.WorktreesDirName, "task-1"))
+	task.Worktree = testhelpers.StringPtr(path.Join(paths.WorktreesDirName, "task-1"))
 	task.BaseCommit = &originalBase
 	state.Tasks = []models.Task{task}
 	testhelpers.WriteInitialState(t, stateFile, state)
@@ -2838,7 +2847,7 @@ func newRejectedHandoffFixture(t *testing.T, createArtifact bool) *rejectedHando
 		projectRoot: projectRoot,
 		stateFile:   stateFile,
 		taskID:      "task-1",
-		worktreeRel: filepath.Join(paths.WorktreesDirName, "task-1"),
+		worktreeRel: path.Join(paths.WorktreesDirName, "task-1"),
 		branchName:  paths.TaskBranchPrefix + "task-1",
 		reviewerID:  "code-reviewer-1",
 		reviewLease: now.Add(30 * time.Minute),

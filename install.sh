@@ -111,12 +111,20 @@ detect_platform() {
         Linux*)     os="linux";;
         Darwin*)    os="darwin";;
         MINGW*|MSYS*|CYGWIN*)
-            echo -e "${RED}Error: Native Windows is not supported.${NC}"
-            echo "Run ${BINARY_NAME} under WSL2 and run this installer from the WSL2 shell."
+            # Refusals go to stderr: this function's stdout is the caller's
+            # command substitution, which would swallow them.
+            echo -e "${RED}Error: this installer does not install Windows releases.${NC}" >&2
+            echo "The Windows archive ships ${BINARY_NAME}.exe, and a file installed" >&2
+            echo "without that extension does not resolve through PATHEXT." >&2
+            echo "" >&2
+            echo "From PowerShell:" >&2
+            echo "  irm https://raw.githubusercontent.com/${REPO}/main/install.ps1 | iex" >&2
+            echo "" >&2
+            echo "Or build from source here by setting BRANCH (requires Go and make)." >&2
             exit 1
             ;;
         *)
-            echo -e "${RED}Error: Unsupported operating system: $(uname -s)${NC}"
+            echo -e "${RED}Error: Unsupported operating system: $(uname -s)${NC}" >&2
             exit 1
             ;;
     esac
@@ -126,7 +134,7 @@ detect_platform() {
         x86_64|amd64)   arch="amd64";;
         arm64|aarch64)  arch="arm64";;
         *)
-            echo -e "${RED}Error: Unsupported architecture: $(uname -m)${NC}"
+            echo -e "${RED}Error: Unsupported architecture: $(uname -m)${NC}" >&2
             exit 1
             ;;
     esac

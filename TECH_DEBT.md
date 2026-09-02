@@ -2,6 +2,64 @@
 
 Deliberate debt with payback triggers. See CORE.md Rule 3 (DoD) for policy.
 
+## Windows ops tests can retain stdio handles after timeout
+
+**What:** A process started by an `internal/ops` test can retain an inherited
+stdout or stderr handle after the parent is terminated, preventing `go test`
+from observing EOF and returning. The Windows CI package timeout is 30 minutes
+and the enclosing job is bounded at 90 minutes so this fails visibly instead of
+occupying a runner indefinitely.
+
+**Why deferred:** Isolating the retaining descendant and changing its Windows
+process/pipe ownership requires a native handle-level reproduction. The current
+Windows-support change establishes a bounded CI signal but does not yet provide
+the evidence needed to change process lifetime behavior safely.
+
+**Payback trigger:** On the next Windows CI timeout, retain the `go test -json`
+event stream and process tree, identify the descendant holding the pipe, and add
+a focused regression that proves the command returns after cancellation. Remove
+the job-level workaround once five consecutive Windows CI runs complete without
+the package timeout or retained-handle stall.
+
+## Toolchain selects two unusable tools on Windows
+
+**What:** `bash-policy` is selected for Windows but its source fallback does not
+compile because file locking uses `syscall.Flock` without platform build tags.
+`scip-python` installs but fails during module initialization because it inserts
+the Windows backslash separator into a regular expression without escaping it.
+Toolchain doctor therefore reports both tools as failed, and Python projects do
+not get SCIP indexing on Windows.
+
+**Why deferred:** Both failures originate in upstream tool implementations. A
+project-local fork or compatibility shim would create ownership and release
+work outside the scope of native Windows support; keeping the failures visible
+in doctor is safer than treating installation alone as success.
+
+**Payback trigger:** On the next `bash-policy` or `scip-python` version update,
+run each tool's version command and a minimal functional smoke test on Windows.
+Remove this entry when upstream releases pass those checks. Before claiming the
+full toolchain profile is supported on Windows, either complete that upgrade or
+exclude the unsupported tools from Windows selection with an explicit reason.
+
+## RTK has no native Windows arm64 release artifact
+
+**What:** The toolchain catalog uses RTK's
+`rtk-x86_64-pc-windows-msvc.zip` for every Windows architecture. The project
+ships a Windows arm64 binary, so those users receive the x64 RTK executable and
+depend on the host's x64 emulation. RTK v0.46.0 publishes Windows x64 but no
+Windows arm64 archive.
+
+**Why deferred:** There is no upstream Windows arm64 artifact to select. Naming
+an inferred download URL would make installation fail deterministically, while
+maintaining a project-owned RTK cross-build would duplicate another project's
+release pipeline.
+
+**Payback trigger:** On each RTK version update, inspect the upstream release
+assets. When a Windows arm64 archive appears, make the catalog URL
+architecture-aware and cover amd64 and arm64 selection in tests. If x64
+emulation fails for a supported Windows arm64 user first, add a documented
+source-build fallback or mark RTK unsupported on that architecture.
+
 ## CI does not yet enforce the split test targets
 
 **What:** Routine `make test` no longer enables the race detector or writes a

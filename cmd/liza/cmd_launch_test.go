@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -14,6 +15,7 @@ import (
 	"github.com/liza-mas/liza/internal/paths"
 
 	"github.com/liza-mas/liza/internal/agent"
+	"github.com/liza-mas/liza/internal/testhelpers"
 	"github.com/spf13/cobra"
 )
 
@@ -127,12 +129,122 @@ func TestPairingInteractiveCLICommandMapsACPToInteractiveBaseCLI(t *testing.T) {
 	}
 }
 
+// TestLaunchShellPrefersGitForWindowsOverAPathMatch stands in for the trap the
+// probe exists for: System32\bash.exe is the WSL launcher, it is on the machine
+// PATH, and the machine PATH is searched before the user's — so whatever is
+// found by name may well be a shell that cannot see C:/... paths at all. The
+// decoy here occupies the same position without needing WSL installed.
+func TestLaunchShellPrefersGitForWindowsOverAPathMatch(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("a bash.exe on PATH that cannot run the pane script is a Windows-only situation")
+	}
+
+	gitBash := ""
+	if local := os.Getenv("LOCALAPPDATA"); local != "" {
+		gitBash = statFirstExisting(filepath.Join(local, "Programs", "Git", "bin", "bash.exe"))
+	}
+	if gitBash == "" {
+		gitBash = statFirstExisting(
+			filepath.Join(os.Getenv("ProgramFiles"), "Git", "bin", "bash.exe"),
+			filepath.Join(os.Getenv("ProgramFiles(x86)"), "Git", "bin", "bash.exe"),
+		)
+	}
+	if gitBash == "" {
+		t.Skip("Git for Windows is not installed in a standard location")
+	}
+
+	decoyDir := t.TempDir()
+	decoy := filepath.Join(decoyDir, "bash.exe")
+	if err := os.WriteFile(decoy, []byte("not a usable shell"), 0755); err != nil {
+		t.Fatalf("write decoy bash: %v", err)
+	}
+	t.Setenv("SHELL", "")
+	t.Setenv("PATH", decoyDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	got, err := launchShell()
+	if err != nil {
+		t.Fatalf("launchShell: %v", err)
+	}
+
+	if strings.EqualFold(got, decoy) {
+		t.Fatalf("launchShell() = %q, the first bash.exe on PATH, want the Git for Windows shell %q", got, gitBash)
+	}
+	if !strings.EqualFold(got, gitBash) {
+		t.Fatalf("launchShell() = %q, want %q", got, gitBash)
+	}
+}
+
+func TestLaunchShellIgnoresWSLLauncherFromShell(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("SHELL can name the WSL launcher only on Windows")
+	}
+
+	gitBash := testhelpers.ResolveBashForScripts(t)
+	windowsRoot := os.Getenv("SystemRoot")
+	if windowsRoot == "" {
+		windowsRoot = `C:\Windows`
+	}
+	wslLauncher := filepath.Join(windowsRoot, "System32", "bash.exe")
+	t.Setenv("SHELL", wslLauncher)
+
+	got, err := launchShell()
+	if err != nil {
+		t.Fatalf("launchShell: %v", err)
+	}
+	if strings.EqualFold(got, wslLauncher) {
+		t.Fatalf("launchShell() honored SHELL=%q, want Git for Windows %q", wslLauncher, gitBash)
+	}
+	if !strings.EqualFold(got, gitBash) {
+		t.Fatalf("launchShell() = %q, want %q", got, gitBash)
+	}
+}
+
+func statFirstExisting(candidates ...string) string {
+	for _, candidate := range candidates {
+		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+			return candidate
+		}
+	}
+	return ""
+}
+
+func TestLaunchShellIsExecutableWhenShellIsUnset(t *testing.T) {
+	// Git for Windows leaves SHELL unset, and the pane script is POSIX, so the
+	// fallback has to name something the OS can actually start.
+	testhelpers.ResolveBashForScripts(t)
+	t.Setenv("SHELL", "")
+
+	got, err := launchShell()
+	if err != nil {
+		t.Fatalf("launchShell: %v", err)
+	}
+
+	if runtime.GOOS != "windows" {
+		if got != "/bin/sh" {
+			t.Fatalf("launchShell() = %q, want /bin/sh", got)
+		}
+		return
+	}
+	if got == "/bin/sh" {
+		t.Fatal("launchShell() = /bin/sh, which Windows cannot execute")
+	}
+	if _, err := exec.LookPath(got); err != nil {
+		t.Fatalf("launchShell() = %q, which is not executable: %v", got, err)
+	}
+}
+
 func TestRunWeztermInteractiveLaunchInjectsPromptsWithNoPasteSubmit(t *testing.T) {
 	tmpDir := t.TempDir()
-	binDir := filepath.Join(tmpDir, "bin")
-	if err := os.MkdirAll(binDir, 0755); err != nil {
+	// The fake wezterm starts its panes in the background on purpose, so those
+	// processes outlive the test. On Windows a running executable cannot be
+	// deleted, and t.TempDir fails the test when its cleanup cannot remove one —
+	// the assertions pass and the test still goes red. Keep the stubs out of the
+	// managed directory and clean up on a best-effort basis instead.
+	binDir, err := os.MkdirTemp("", "wezterm-stubs-*")
+	if err != nil {
 		t.Fatalf("create fake bin dir: %v", err)
 	}
+	t.Cleanup(func() { _ = os.RemoveAll(binDir) })
 	logPath := filepath.Join(tmpDir, "wezterm.log")
 	counterPath := filepath.Join(tmpDir, "pane-counter")
 	if err := os.WriteFile(counterPath, []byte("100"), 0644); err != nil {
@@ -185,8 +297,7 @@ fi
 echo "CODEX $*" >> "$LIZA_FAKE_WEZTERM_LOG"
 sleep 4
 `)
-	shellPath := filepath.Join(binDir, "test-shell")
-	writeExecutable(t, shellPath, `#!/bin/sh
+	shellPath := writeExecutable(t, filepath.Join(binDir, "test-shell"), `#!/bin/sh
 if [ "$1" = "-lc" ]; then
   shift
   exec /bin/sh -c "$1"
@@ -202,7 +313,7 @@ exec /bin/sh "$@"
 
 	primaryPrompt := pairingSkillPrompt("doer", "/tmp/board.md", false)
 	splitPrompt := pairingSkillPrompt("reviewer-codex", "/tmp/board.md", false)
-	err := runWeztermInteractiveLaunch(launchWeztermAdversarialPairingCmd, weztermLaunchOptions{
+	err = runWeztermInteractiveLaunch(launchWeztermAdversarialPairingCmd, weztermLaunchOptions{
 		Class:       "liza-adversarial-test",
 		Workspace:   "liza-adversarial-test",
 		CWD:         tmpDir,
@@ -306,9 +417,17 @@ func TestResolveLaunchPathUsesProvidedWorkingDirectory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolveLaunchPath returned error: %v", err)
 	}
-	want := filepath.Clean("/tmp/project/" + paths.ProjectDirName() + "/adversarial/retry-client.md")
-	if got != want {
-		t.Fatalf("path = %q, want %q", got, want)
+	// Compare on forward-slash form: on Windows filepath.Abs prepends the
+	// current drive to "/tmp/project" (-> C:\tmp\project), and uses backslashes,
+	// so a literal equality check against the Unix-shaped expected path fails.
+	// Assert the cwd and the relative tail are both present instead.
+	gotSlash := filepath.ToSlash(got)
+	if !strings.Contains(gotSlash, "tmp/project") {
+		t.Fatalf("path = %q, want to contain the provided working directory", got)
+	}
+	wantSuffix := filepath.ToSlash(filepath.Join(paths.ProjectDirName(), "adversarial", "retry-client.md"))
+	if !strings.HasSuffix(gotSlash, wantSuffix) {
+		t.Fatalf("path = %q, want to end with the relative target", got)
 	}
 }
 
@@ -906,11 +1025,11 @@ func TestCmuxPromptStillPending(t *testing.T) {
 	}
 }
 
-func writeExecutable(t *testing.T, path, content string) {
+// writeExecutable installs a stub command and returns the path that can be
+// executed, which carries a .cmd extension on Windows.
+func writeExecutable(t *testing.T, path, content string) string {
 	t.Helper()
-	if err := os.WriteFile(path, []byte(content), 0755); err != nil {
-		t.Fatalf("write executable %s: %v", path, err)
-	}
+	return testhelpers.WriteShellStub(t, path, content)
 }
 
 func waitForFileContent(t *testing.T, path string, predicate func(string) bool) string {

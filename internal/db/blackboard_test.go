@@ -7,11 +7,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/liza-mas/liza/internal/models"
+	"github.com/liza-mas/liza/internal/testhelpers/perm"
 )
 
 func TestReadContext_CancelsBlockedLockAcquisition(t *testing.T) {
@@ -46,6 +48,33 @@ func TestReadContext_CancelsBlockedLockAcquisition(t *testing.T) {
 	close(releaseHolder)
 	if err := <-holderDone; err != nil {
 		t.Fatalf("holder error: %v", err)
+	}
+}
+
+// assertRegularFileMode mirrors testhelpers.AssertRegularFileMode. It is
+// duplicated here because internal/testhelpers imports internal/db
+// (testhelpers/fixtures.go), and these tests are in package db, so importing
+// testhelpers back would create an import cycle.
+//
+// Windows has no POSIX mode bits: os.Stat reports 0666 for a writable file and
+// 0444 for one carrying the read-only attribute, so an exact comparison against
+// unixPerm can never hold there; "not read-only" is the observable equivalent.
+func assertRegularFileMode(t *testing.T, path string, unixPerm os.FileMode) {
+	t.Helper()
+
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Errorf("stat %s: %v", path, err)
+		return
+	}
+	if runtime.GOOS == "windows" {
+		if info.Mode().Perm()&0o200 == 0 {
+			t.Errorf("%s is read-only: mode=%v", path, info.Mode().Perm())
+		}
+		return
+	}
+	if info.Mode().Perm() != unixPerm {
+		t.Errorf("%s has wrong permissions: got %o, want %o", path, info.Mode().Perm(), unixPerm)
 	}
 }
 
@@ -892,17 +921,21 @@ func TestBlackboardWriteReadOnlyDir(t *testing.T) {
 	}
 
 	// Make directory read-only
-	if err := os.Chmod(dir, 0555); err != nil {
+	restore, err := perm.DenyWrites(dir)
+	if err != nil {
 		t.Fatalf("Failed to make directory read-only: %v", err)
 	}
-	defer os.Chmod(dir, 0755) // Restore permissions for cleanup
+	defer func() {
+		if err := restore(); err != nil { // Restore permissions for cleanup
+			t.Errorf("restore write access: %v", err)
+		}
+	}()
 
 	// Use shorter timeout for error case since we expect immediate failure
 	bbShortTimeout := bb.WithLockTimeout(500 * time.Millisecond)
 
 	// Try to write again - should fail
-	err := bbShortTimeout.Write(state)
-	if err == nil {
+	if err := bbShortTimeout.Write(state); err == nil {
 		t.Error("Expected error writing to read-only directory, got nil")
 	}
 }
@@ -1174,13 +1207,10 @@ func TestBlackboardWriteWithFsync(t *testing.T) {
 	}
 
 	// Verify state file exists and has correct permissions
-	info, err := os.Stat(statePath)
-	if err != nil {
+	if _, err := os.Stat(statePath); err != nil {
 		t.Fatalf("State file not found: %v", err)
 	}
-	if info.Mode().Perm() != 0644 {
-		t.Errorf("State file has wrong permissions: got %o, want 0644", info.Mode().Perm())
-	}
+	assertRegularFileMode(t, statePath, 0644)
 
 	// Verify temp file was cleaned up
 	tmpPath := statePath + ".tmp"
@@ -1264,28 +1294,30 @@ func TestBlackboardAtomicWriteOnError(t *testing.T) {
 		t.Fatalf("Initial write failed: %v", err)
 	}
 
-	// Make directory read-only to force write error
-	if os.Getuid() != 0 {
-		if err := os.Chmod(dir, 0555); err != nil {
-			t.Fatalf("Failed to make directory read-only: %v", err)
-		}
-		defer os.Chmod(dir, 0755)
+	// Make directory read-only to force write error. os.Chmod cannot express
+	// that on Windows, where the POSIX bits reach only the read-only attribute
+	// and leave directory entry creation untouched — the modify would then
+	// succeed and the assertions below would read a state that did change.
+	restore, err := perm.DenyWrites(dir)
+	if err != nil {
+		t.Fatalf("Failed to make directory read-only: %v", err)
+	}
 
-		// Use shorter timeout for error case since we expect immediate failure
-		bbShortTimeout := bb.WithLockTimeout(500 * time.Millisecond)
+	// Use shorter timeout for error case since we expect immediate failure
+	bbShortTimeout := bb.WithLockTimeout(500 * time.Millisecond)
 
-		// Try to modify - should fail
-		err := bbShortTimeout.Modify(func(s *models.State) error {
-			s.Version = 2
-			return nil
-		})
-		if err == nil {
-			t.Error("Expected error when writing to read-only directory")
-		}
+	// Try to modify - should fail
+	if err := bbShortTimeout.Modify(func(s *models.State) error {
+		s.Version = 2
+		return nil
+	}); err == nil {
+		t.Error("Expected error when writing to read-only directory")
 	}
 
 	// Restore permissions and verify original state is intact
-	os.Chmod(dir, 0755)
+	if err := restore(); err != nil {
+		t.Fatalf("restore write access: %v", err)
+	}
 	readState, err := bb.Read()
 	if err != nil {
 		t.Fatalf("Read after failed modify failed: %v", err)

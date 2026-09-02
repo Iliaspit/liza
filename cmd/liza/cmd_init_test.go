@@ -312,6 +312,8 @@ func TestHasExplicitInitFlags_YesDoesNotForceWorkspaceInit(t *testing.T) {
 }
 
 func TestHasExplicitInitFlags_SembleEnvDoesNotForceWorkspaceInit(t *testing.T) {
+	testhelpers.RequireSymlinkCapability(t)
+
 	resetRootCmdForTest(t)
 	defer resetRootCmdForTest(t)
 	t.Setenv(semble.EnvEnableSemble, "true")
@@ -414,16 +416,16 @@ func TestInitDispatch_PairingScipSearchPlanFlagWritesOverrideCommands(t *testing
 		t.Fatalf("%s-index.sh missing after pairing SCIP init: %v", brand.BinaryName, err)
 	}
 	for _, want := range []string{
-		"scip-go index --module-root " + projectRoot + "/services/design-diagnosis/cli --output ",
-		"scip-typescript index --cwd " + projectRoot + "/apps/web/src --output ",
-		"scip-python index --cwd " + projectRoot + "/apps/api --output ",
-		"scip-search aggregate-index --project-root " + projectRoot,
+		"scip-go index --module-root " + testhelpers.ShellArg(filepath.Join(projectRoot, "services", "design-diagnosis", "cli")) + " --output ",
+		"scip-typescript index --cwd " + testhelpers.ShellArg(filepath.Join(projectRoot, "apps", "web", "src")) + " --output ",
+		"scip-python index --cwd " + testhelpers.ShellArg(filepath.Join(projectRoot, "apps", "api")) + " --output ",
+		"scip-search aggregate-index --project-root " + testhelpers.ShellArg(projectRoot),
 		"--root services/design-diagnosis/cli --index ",
 		"--root apps/web/src --index ",
 		"--root apps/api --index ",
-		"--out " + projectRoot + "/go.scip",
-		"--out " + projectRoot + "/typescript.scip",
-		"--out " + projectRoot + "/python.scip",
+		"--out " + testhelpers.ShellArg(filepath.Join(projectRoot, "go.scip")),
+		"--out " + testhelpers.ShellArg(filepath.Join(projectRoot, "typescript.scip")),
+		"--out " + testhelpers.ShellArg(filepath.Join(projectRoot, "python.scip")),
 	} {
 		if !strings.Contains(string(script), want) {
 			t.Fatalf("%s-index.sh missing override command %q:\n%s", brand.BinaryName, want, string(script))
@@ -695,9 +697,7 @@ func writeFakeSembleForTest(t *testing.T, path string) {
 } >> "$SEMBLE_TEST_LOG"
 exit 0
 `
-	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
-		t.Fatalf("write fake semble: %v", err)
-	}
+	testhelpers.WriteShellStub(t, path, script)
 }
 
 func marshalConfigForTest(t *testing.T, config any) []byte {

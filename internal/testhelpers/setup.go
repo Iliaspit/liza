@@ -135,6 +135,13 @@ func initializeTestGitRepo(dir string, includeIntegrationBranch bool) error {
 	if err := runGitForSetup(dir, "config", "user.name", "Test User"); err != nil {
 		return err
 	}
+	// Fixtures are compared byte for byte. Git for Windows defaults to
+	// core.autocrlf=true, which rewrites LF to CRLF on checkout — including
+	// when a worktree is added — and makes those comparisons fail. Set once on
+	// the template: every copy inherits .git/config as materialized.
+	if err := runGitForSetup(dir, "config", "core.autocrlf", "false"); err != nil {
+		return err
+	}
 	if err := configureTestGitRepoHooks(dir); err != nil {
 		return err
 	}
@@ -169,6 +176,15 @@ func rewriteCopiedTestGitRepoHooks(repoDir string) error {
 	if err != nil {
 		return fmt.Errorf("resolve test hooks path: %w", err)
 	}
+	// Written as text below rather than through `git config`, to avoid a
+	// subprocess on every test's setup. git's config-file syntax treats
+	// backslash as an escape character in a value, so a raw Windows path
+	// (C:\Users\...) produces invalid escapes the next `git` invocation
+	// refuses to parse — "bad config line N in file .git/config" — measured
+	// on windows/amd64. Forward slashes are not path separators to Go's
+	// filepath functions but are accepted by git on every platform, so they
+	// sidestep the escaping problem entirely instead of hand-escaping it.
+	hooksDir = filepath.ToSlash(hooksDir)
 	configPath := filepath.Join(repoDir, ".git", "config")
 	content, err := os.ReadFile(configPath)
 	if err != nil {

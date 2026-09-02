@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -232,7 +233,7 @@ func setupMergeTestRepo(t *testing.T, taskID, agentID string) (string, string) {
 	wtCommit := strings.TrimSpace(string(shaOutput))
 
 	// Create task in state
-	worktreePath := filepath.Join(".worktrees", taskID)
+	worktreePath := path.Join(".worktrees", taskID)
 	baseCommit := "base123"
 	approvedBy := "code-reviewer-1"
 	task := models.Task{
@@ -1829,7 +1830,7 @@ func setupArtifactGuardMergeScenario(t *testing.T, opts artifactGuardMergeOption
 	testhelpers.MustGit(t, tmpDir, "checkout", "main")
 
 	now := time.Now().UTC()
-	worktreePath := filepath.Join(".worktrees", opts.taskID)
+	worktreePath := path.Join(".worktrees", opts.taskID)
 	approvedBy := reviewerID
 	state := testhelpers.CreateValidState()
 	state.Config.IntegrationBranch = "integration"
@@ -2114,7 +2115,7 @@ func TestMergeWorktree_CodingPlanApproved(t *testing.T) {
 	}
 	wtCommit := strings.TrimSpace(string(shaOutput))
 
-	worktreePath := filepath.Join(".worktrees", taskID)
+	worktreePath := path.Join(".worktrees", taskID)
 	baseCommit := "base123"
 	approvedBy := agentID
 	task := models.Task{
@@ -2215,7 +2216,7 @@ func TestMergeWorktree_PipelineCodingPairApproved(t *testing.T) {
 	}
 	wtCommit := strings.TrimSpace(string(shaOutput))
 
-	worktreePath := filepath.Join(".worktrees", taskID)
+	worktreePath := path.Join(".worktrees", taskID)
 	baseCommit := "base123"
 	approvedBy := agentID
 	task := models.Task{
@@ -2906,12 +2907,14 @@ func TestMergeWorktree_NonNotExistStatErrorNotMisclassified(t *testing.T) {
 	agentID := "coder-1"
 	tmpDir, stateFile := setupMergeTestRepo(t, taskID, agentID)
 
-	// Create a regular file at <projectRoot>/scripts so os.Stat on
-	// <projectRoot>/scripts/integration-test.sh returns ENOTDIR.
-	scriptsPath := filepath.Join(tmpDir, "scripts")
-	if err := os.WriteFile(scriptsPath, []byte("not-a-directory"), 0644); err != nil {
-		t.Fatalf("Failed to create scripts path fixture: %v", err)
-	}
+	// The stat has to fail for a reason other than absence. A regular file at
+	// <projectRoot>/scripts gives ENOTDIR on POSIX, but Windows reports that
+	// same layout as "path not found" — os.IsNotExist is true — and an
+	// unprivileged process cannot deny itself access to a path it owns. So the
+	// error is injected.
+	originalStat := statIntegrationScript
+	statIntegrationScript = func(string) (os.FileInfo, error) { return nil, os.ErrPermission }
+	t.Cleanup(func() { statIntegrationScript = originalStat })
 
 	var result *MergeResult
 	var err error

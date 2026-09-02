@@ -17,6 +17,15 @@ BRAND_CHECKSUM_BASE_URL?=$(BRAND_RELEASE_BASE_URL)
 # Binary name
 BINARY_NAME?=$(BRAND_BINARY_NAME)
 
+# Windows will not resolve an extensionless file through PATHEXT, so a binary
+# built as "liza" installs fine and is then found by nothing: not the shell, not
+# exec.LookPath, not `liza toolchain doctor`. $(OS) is the reliable discriminant
+# here — it is set by Windows itself and survives Git Bash, unlike uname.
+ifeq ($(OS),Windows_NT)
+BINARY_EXT := .exe
+endif
+BINARY_FILE := $(BINARY_NAME)$(BINARY_EXT)
+
 # Build variables
 # Derived from git rather than pinned, because a pinned default goes stale and
 # then lies: the binary claimed 0.2.0 long after 0.8.0 shipped. Only an exact,
@@ -57,7 +66,7 @@ sync-embedded:
 # Build the binaries
 build: sync-embedded
 	@echo "Building $(BINARY_NAME) (version=$(VERSION), commit=$(GIT_COMMIT), date=$(BUILD_DATE))"
-	@go build $(LDFLAGS) -o $(BINARY_NAME) ./cmd/liza
+	@go build $(LDFLAGS) -o $(BINARY_FILE) ./cmd/liza
 
 # Run tests
 # IMPORTANT: Always use `make test`, not bare `go test ./...`.
@@ -71,8 +80,13 @@ test-fast: sync-embedded check-testhelpers
 	go test -short ./...
 
 # Run the full suite with race instrumentation
+#
+# The timeout is raised from the 10m default because internal/commands and
+# internal/ops each exceed it under -race on a slower filesystem — measured at
+# 10m12s and 17m55s on Windows. Go kills the whole package when that fires, so
+# the tests after the one running at the time are silently never reported.
 test-race: sync-embedded check-testhelpers
-	go test -race ./...
+	go test -race -timeout 30m ./...
 
 # Run e2e tests (full sprint sequence with mock CLI — ~40s)
 test-e2e: sync-embedded check-testhelpers
@@ -88,7 +102,7 @@ coverage: sync-embedded check-testhelpers
 
 # Clean build artifacts
 clean:
-	rm -f $(BINARY_NAME)
+	rm -f $(BINARY_FILE)
 	rm -f $(BINARY_NAME)-*
 	rm -f coverage.out
 	rm -rf dist
@@ -97,22 +111,68 @@ clean:
 
 # Install the binaries
 # Prefer INSTALL_DIR env var, then ~/.local/bin (same as install.sh)
+# $(HOME) is a native path on Windows, and the recipes below run under Git
+# Bash, which reads its backslashes as escapes: C:\Users\me reaches test(1)
+# as C:Usersme. Give the shell a path it can actually resolve.
+#
+# HOME is not a Windows variable: it exists only when the caller is a POSIX-ish
+# shell such as Git Bash. From PowerShell or cmd it is empty, and the install
+# directory silently becomes /.local/bin — mkdir then fails at the filesystem
+# root. USERPROFILE is what Windows itself sets, so fall back to it.
+ifeq ($(OS),Windows_NT)
+WINDOWS_HOME := $(if $(HOME),$(HOME),$(USERPROFILE))
+INSTALL_DIR ?= $(subst \,/,$(WINDOWS_HOME))/.local/bin
+# Make runs a recipe line straight through CreateProcess when it holds no shell
+# metacharacter, so "mkdir -p <dir>" looks for mkdir.exe and fails: the POSIX
+# utilities ship in Git\usr\bin, which is not on PATH and must not be added
+# there — it would shadow find, grep and sort with MSYS builds. Naming the shell
+# covers the lines that do reach a shell; the install recipe quotes its paths,
+# which both defeats that shortcut and survives a profile containing a space.
+#
+# A bare "bash" resolves by PATH, and C:\Windows\System32\bash.exe — the WSL
+# launcher — is on the machine PATH ahead of any user-level Git for Windows
+# entry; reordering it needs elevation the managed machines this targets do
+# not grant. The runtime resolver probes the standard per-user and machine-wide
+# Git for Windows locations before PATH, so make must cover the same locations.
+# wildcard needs spaces escaped while probing, but returns the original path;
+# keeping each result in its own variable avoids splitting it with firstword.
+empty :=
+space := $(empty) $(empty)
+escape_spaces = $(subst $(space),\$(space),$(1))
+LOCAL_GIT_BASH := $(if $(LOCALAPPDATA),$(wildcard $(call escape_spaces,$(subst \,/,$(LOCALAPPDATA))/Programs/Git/bin/bash.exe)))
+PROGRAM_FILES_GIT_BASH := $(if $(ProgramFiles),$(wildcard $(call escape_spaces,$(subst \,/,$(ProgramFiles))/Git/bin/bash.exe)))
+PROGRAM_FILES_X86_GIT_BASH := $(if ${ProgramFiles(x86)},$(wildcard $(call escape_spaces,$(subst \,/,${ProgramFiles(x86)})/Git/bin/bash.exe)))
+GIT_BASH := $(if $(LOCAL_GIT_BASH),$(LOCAL_GIT_BASH),$(if $(PROGRAM_FILES_GIT_BASH),$(PROGRAM_FILES_GIT_BASH),$(PROGRAM_FILES_X86_GIT_BASH)))
+ifneq ($(GIT_BASH),)
+SHELL := $(call escape_spaces,$(GIT_BASH))
+else
+SHELL := bash
+endif
+.SHELLFLAGS := -c
+# The install directory belongs to the user, and Windows sudo is absent or
+# disabled on managed machines; escalating here only turns a working install
+# into an error.
+SUDO :=
+else
 INSTALL_DIR ?= $(HOME)/.local/bin
 SUDO := $(shell test -w $(INSTALL_DIR) && echo "" || echo "sudo")
+endif
 install: build
-	@mkdir -p $(INSTALL_DIR)
-	$(SUDO) install -m 755 $(BINARY_NAME) $(INSTALL_DIR)/$(BINARY_NAME)
-	@if [ "$(INSTALL_DIR)" != "/usr/local/bin" ] && [ -f /usr/local/bin/$(BINARY_NAME) ]; then \
-		echo "Warning: old $(BINARY_NAME) binary found in /usr/local/bin — run 'sudo rm /usr/local/bin/$(BINARY_NAME)' to avoid shadowing"; \
+	@mkdir -p "$(INSTALL_DIR)"
+	$(SUDO) install -m 755 "$(BINARY_FILE)" "$(INSTALL_DIR)/$(BINARY_FILE)"
+	@if [ "$(INSTALL_DIR)" != "/usr/local/bin" ] && [ -f /usr/local/bin/$(BINARY_FILE) ]; then \
+		echo "Warning: old $(BINARY_NAME) binary found in /usr/local/bin — run 'sudo rm /usr/local/bin/$(BINARY_FILE)' to avoid shadowing"; \
 	fi
 
 # Check that testhelpers package is not imported in production code
 # This prevents test utilities from leaking into production binaries and
 # ensures clear separation between test and production code. Test helpers
 # should only be used in *_test.go files.
+# The check matches text rather than imports, so the package's own directory is
+# excluded: a helper naming its own sub-package is not a leak into production.
 check-testhelpers:
 	@echo "Checking for testhelpers in production code..."
-	@matches="$$(grep -rl --include='*.go' --exclude='*_test.go' 'internal/testhelpers' cmd internal plugin || true)"; \
+	@matches="$$(grep -rl --include='*.go' --exclude='*_test.go' --exclude-dir=testhelpers 'internal/testhelpers' cmd internal plugin || true)"; \
 	if [ -n "$$matches" ]; then \
 		echo "ERROR: testhelpers package imported in production code:"; \
 		printf '%s\n' "$$matches"; \
@@ -147,6 +207,8 @@ build-all: sync-embedded
 	GOOS=linux GOARCH=amd64 go build $(LDFLAGS) -o $(BINARY_NAME)-linux-amd64 ./cmd/liza
 	GOOS=darwin GOARCH=amd64 go build $(LDFLAGS) -o $(BINARY_NAME)-darwin-amd64 ./cmd/liza
 	GOOS=darwin GOARCH=arm64 go build $(LDFLAGS) -o $(BINARY_NAME)-darwin-arm64 ./cmd/liza
+	GOOS=windows GOARCH=amd64 go build $(LDFLAGS) -o $(BINARY_NAME)-windows-amd64.exe ./cmd/liza
+	GOOS=windows GOARCH=arm64 go build $(LDFLAGS) -o $(BINARY_NAME)-windows-arm64.exe ./cmd/liza
 
 # Create release artifacts
 release: clean lint test-race
@@ -157,6 +219,8 @@ release: clean lint test-race
 	GOOS=linux GOARCH=arm64 go build $(LDFLAGS) -o dist/$(BINARY_NAME)-linux-arm64 ./cmd/liza
 	GOOS=darwin GOARCH=amd64 go build $(LDFLAGS) -o dist/$(BINARY_NAME)-darwin-amd64 ./cmd/liza
 	GOOS=darwin GOARCH=arm64 go build $(LDFLAGS) -o dist/$(BINARY_NAME)-darwin-arm64 ./cmd/liza
+	GOOS=windows GOARCH=amd64 go build $(LDFLAGS) -o dist/$(BINARY_NAME)-windows-amd64.exe ./cmd/liza
+	GOOS=windows GOARCH=arm64 go build $(LDFLAGS) -o dist/$(BINARY_NAME)-windows-arm64.exe ./cmd/liza
 	@# Create checksums
 	@cd dist && sha256sum * > checksums.txt
 	@echo "✓ Release artifacts created in dist/"

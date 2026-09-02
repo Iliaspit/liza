@@ -8,7 +8,6 @@ import (
 	"log"
 	"maps"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -49,6 +48,14 @@ var DefaultIntegrationTestTimeout = 10 * time.Minute
 // in each CAS attempt and before merge/ref-update logic runs.
 // Production code leaves this nil.
 var mergeCASRetryTestHook func(attempt int, integrationRef, preMergeHEAD string) error
+
+// statIntegrationScript is a seam for the branch that distinguishes a missing
+// integration script from a stat that failed for another reason. A fixture can
+// produce that on POSIX by putting a regular file where scripts/ belongs
+// (ENOTDIR), but Windows reports the same layout as "path not found", which
+// os.IsNotExist accepts, and an unprivileged process cannot deny itself access
+// to a path it owns. Same seam as statWorktreePath in submit_verdict.go.
+var statIntegrationScript = os.Stat
 
 // artifactGuardPostUpdateTestHook is a test-only hook invoked after a successful
 // CAS merge and before the retained post-merge artifact validation backstop.
@@ -764,22 +771,31 @@ func mergeWorktree(projectRoot, taskID, agentID string, authority *models.AgentA
 	var noTestScriptFound bool
 	var testOutput string
 	integrationTestScript := filepath.Join(projectRoot, integrationTestCommand)
-	if _, statErr := os.Stat(integrationTestScript); statErr == nil {
+	if _, statErr := statIntegrationScript(integrationTestScript); statErr == nil {
 		testsRan = true
 		var combinedOutput bytes.Buffer
 		ctx, cancel := context.WithTimeout(context.Background(), DefaultIntegrationTestTimeout)
 		defer cancel()
-		cmd := exec.CommandContext(ctx, integrationTestScript)
-		cmd.Dir = projectRoot
-		cmd.Stdout = &combinedOutput
-		cmd.Stderr = &combinedOutput
-		// Kill the entire process tree on timeout (Unix: process group kill;
-		// Windows: default CommandContext kill). WaitDelay ensures cmd.Wait
-		// returns even if child processes hold pipes open after kill.
-		configProcessGroupKill(cmd)
-		cmd.WaitDelay = 5 * time.Second
+		// Hand the script to a shell rather than exec it directly: it is a POSIX
+		// script, and Windows cannot fork/exec one — the run failed there with no
+		// output at all, so a project's integration tests never ran. The command
+		// stays repo-relative and the shell resolves it against cmd.Dir, which
+		// keeps a native path out of a shell string.
+		cmd, runErr := shellCommandContext(ctx, integrationTestCommand, projectRoot)
+		if runErr == nil {
+			cmd.Stdout = &combinedOutput
+			cmd.Stderr = &combinedOutput
+			// Kill the entire process tree on timeout (Unix: process group kill;
+			// Windows: default CommandContext kill). WaitDelay ensures cmd.Wait
+			// returns even if child processes hold pipes open after kill.
+			configProcessGroupKill(cmd)
+			cmd.WaitDelay = 5 * time.Second
+			runErr = cmd.Run()
+		} else {
+			combinedOutput.WriteString(runErr.Error())
+		}
 
-		if runErr := cmd.Run(); runErr != nil {
+		if runErr != nil {
 			testOutput = combinedOutput.String()
 			if ctx.Err() == context.DeadlineExceeded {
 				testOutput += fmt.Sprintf("\n[%s] integration test killed after %s timeout", brand.BinaryName, DefaultIntegrationTestTimeout)

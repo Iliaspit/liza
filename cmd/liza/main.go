@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 
 	"github.com/liza-mas/liza/internal/brand"
@@ -205,7 +204,7 @@ func validateReasonFlag(cmd *cobra.Command) (string, error) {
 	}
 
 	return matchedFlag, cliValidationError(fmt.Sprintf(
-		"--reason value %q matches registered flag %s and may have been consumed after an empty shell expansion; quote variables (for example, --reason \"$reason\"). Only registered flag tokens are detected",
+		"--reason value %q matches registered flag %s and may have been consumed after an empty shell expansion; quote variables (for example, --reason \"$reason\"), or attach the value as --reason=\"$reason\", which also holds in PowerShell, where quoting does not prevent an empty argument from being dropped. Only registered flag tokens are detected",
 		reason,
 		matchedFlag,
 	))
@@ -230,13 +229,6 @@ func registeredFlagToken(cmd *cobra.Command, value string) string {
 		}
 	}
 	return ""
-}
-
-func checkSupportedPlatform(goos string) error {
-	if goos == "windows" {
-		return cliValidationError(fmt.Sprintf("native Windows is not supported; run %s under WSL2", brand.BinaryName))
-	}
-	return nil
 }
 
 // resolveOrchestratorID resolves the orchestrator agent ID from flag, env var,
@@ -335,10 +327,6 @@ func addChangedByFlag(cmd *cobra.Command) {
 }
 
 func main() {
-	if err := checkSupportedPlatform(runtime.GOOS); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
-	}
 	if err := updater.MaybeUpdateAndReexec(context.Background(), updater.Config{
 		CurrentVersion: Version,
 		CurrentCommit:  GitCommit,

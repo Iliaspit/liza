@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -402,8 +401,10 @@ func copyFilePreserveMode(src, dst string) error {
 // repo (same trust boundary as Makefile, .github/workflows/, package.json
 // scripts). No additional confirmation gate is needed.
 func RunPostWorktreeCmd(cmdStr, dir string) error {
-	cmd := exec.Command("sh", "-c", cmdStr)
-	cmd.Dir = dir
+	cmd, err := shellCommand(cmdStr, dir)
+	if err != nil {
+		return newPostWorktreeSetupError(cmdStr, dir, err)
+	}
 	if err := cmd.Run(); err != nil {
 		return newPostWorktreeSetupError(cmdStr, dir, err)
 	}

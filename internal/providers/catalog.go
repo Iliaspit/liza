@@ -418,7 +418,7 @@ func validExecutable(value string) bool {
 
 func validRelativePath(value string) bool {
 	value = filepath.Clean(strings.TrimSpace(value))
-	return value != "." && !filepath.IsAbs(value) && !strings.HasPrefix(value, "..") && !strings.ContainsAny(value, "\x00\r\n")
+	return value != "." && !paths.IsAbsAnyPlatform(value) && !strings.HasPrefix(value, "..") && !strings.ContainsAny(value, "\x00\r\n")
 }
 
 func (c Catalog) ProvidersSorted() []Provider {
@@ -547,7 +547,7 @@ func Load(ctx context.Context, opts LoadOptions) (Catalog, error) {
 	homeDir := opts.HomeDir
 	if homeDir == "" {
 		var err error
-		homeDir, err = os.UserHomeDir()
+		homeDir, err = paths.UserHomeDir()
 		if err != nil {
 			if opts.Force {
 				return Catalog{}, err
