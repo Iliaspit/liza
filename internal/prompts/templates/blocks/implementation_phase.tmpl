@@ -83,7 +83,11 @@ planning against a hypothesis.
    plan_ref (repo-relative path to the plan file — set to the plan file path from step 2 for all entries),
    validation (optional canonical commands; hook/check intent must appear in the plan text, desc, or done_when). Commands must be single-purpose and agent-executable. Forbidden validation command shapes: `cd ... &&`, command substitution/backticks, polling or tail pipelines, and task artifact paths outside the worktree.
    depends_on (optional array of sibling index strings, e.g. ["0", "2"] — resolved to child task IDs at transition),
-   task_depends_on (optional array of existing concrete task IDs outside this output[]).
+   task_depends_on (optional array of existing concrete task IDs outside this output[]),
+   dependency_contracts (required for every dependency: provider_output or provider_task, exact purpose,
+   supplied artifact/contract/acceptance check, gate before_start|before_approval_merge|advisory, and
+   severity critical|high|medium|low). before_start providers must exactly match depends_on/task_depends_on;
+   low is advisory-only.
    Automatic child dependency inheritance applies only when an upstream dependency executed the same transition name.
    For ordering across different transition names, set output[].task_depends_on to existing concrete task IDs.
    If the required concrete dependency task does not exist, mark the planning task BLOCKED for authoritative graph reconciliation; do not claim future ordering.
@@ -121,7 +125,7 @@ planning against a hypothesis.
       entry's desc, done_when, scope, and spec_ref is character-identical to the plan.
       If any field was paraphrased, replace it with the verbatim text before submitting.
       Verify any validation[] command is character-identical to the plan, satisfiable for the task scope, and agent-executable under the validation command-shape rule.
-      Verify depends_on indices match the dependency order described in the plan.
+      Verify depends_on indices and dependency_contracts match the dependency meaning described in the plan.
    f. Shared-file audit: for each file appearing in more than one task's scope,
       verify a depends_on chain exists between those tasks. Missing dependency on
       shared files will cause merge conflicts for parallel coders.
@@ -152,7 +156,11 @@ IMPLEMENTATION PHASE:
    epic_ref (epic document path with section anchor — locates the specific capability for downstream agents),
    validation (optional canonical commands; hook/check intent must appear in the epic/story text, desc, or done_when). Commands must be single-purpose and agent-executable. Forbidden validation command shapes: `cd ... &&`, command substitution/backticks, polling or tail pipelines, and task artifact paths outside the worktree.
    depends_on (optional array of sibling index strings for capability ordering),
-   task_depends_on (optional array of existing concrete task IDs outside this output[]).
+   task_depends_on (optional array of existing concrete task IDs outside this output[]),
+   dependency_contracts (required for every dependency: provider_output or provider_task, exact purpose,
+   supplied artifact/contract/acceptance check, gate before_start|before_approval_merge|advisory, and
+   severity critical|high|medium|low). before_start providers must exactly match depends_on/task_depends_on;
+   low is advisory-only.
    desc: extract verbatim from the capability's one-sentence description in the epic.
    done_when: derive a falsifiable condition from the capability description and story documents.
    scope: derive from the capability's story documents table and out-of-scope section.
@@ -225,7 +233,11 @@ document and output[] entries only.
    spec_ref (goal spec — same for all entries), arch_ref (repo-relative path to the arch doc from step 5),
    validation (optional canonical commands; hook/check intent must appear in the arch doc, desc, or done_when). Commands must be single-purpose and agent-executable. Forbidden validation command shapes: `cd ... &&`, command substitution/backticks, polling or tail pipelines, and task artifact paths outside the worktree.
    depends_on (optional array of sibling index strings for ordering constraints),
-   task_depends_on (optional array of existing concrete task IDs outside this output[]).
+   task_depends_on (optional array of existing concrete task IDs outside this output[]),
+   dependency_contracts (required for every dependency: provider_output or provider_task, exact purpose,
+   supplied artifact/contract/acceptance check, gate before_start|before_approval_merge|advisory, and
+   severity critical|high|medium|low). before_start providers must exactly match depends_on/task_depends_on;
+   low is advisory-only.
    Extract each field verbatim from the arch doc — do not compose from memory or paraphrase.
 
 BOOTSTRAP-PRECOMMIT REQUIREMENTS:

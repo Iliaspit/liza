@@ -144,6 +144,7 @@ func supersedeTaskWithOptionalAuthority(projectRoot, taskID string, replacementI
 			return err
 		}
 		currentTask.DependsOn = retainedDependencies
+		currentTask.DependencyContracts = removeDependencyContracts(currentTask.DependencyContracts, removedDependencies)
 
 		if err := currentTask.TransitionWith(models.TaskStatusSuperseded, pb.transitions); err != nil {
 			return err

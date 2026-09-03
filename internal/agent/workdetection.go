@@ -14,6 +14,7 @@ type OrchestratorWakeTrigger string
 
 const (
 	WakeTriggerInitialPlanning        OrchestratorWakeTrigger = "INITIAL_PLANNING"
+	WakeTriggerGraphReplan            OrchestratorWakeTrigger = "GRAPH_REPLAN_REQUEST"
 	WakeTriggerBlocked                OrchestratorWakeTrigger = "BLOCKED_TASKS"
 	WakeTriggerHypothesisExhausted    OrchestratorWakeTrigger = "HYPOTHESIS_EXHAUSTED"
 	WakeTriggerImmediateDiscovery     OrchestratorWakeTrigger = "IMMEDIATE_DISCOVERY"
@@ -58,6 +59,16 @@ type orchestratorWakeTriggerSpec struct {
 }
 
 var orchestratorWakeTriggerSpecs = []orchestratorWakeTriggerSpec{
+	{
+		Trigger:     WakeTriggerGraphReplan,
+		Description: "An identity-bound dependency graph re-plan request needs the native orchestrator.",
+		Count: func(state *models.State) int {
+			if state.OpenGraphReplanRequest() != nil {
+				return 1
+			}
+			return 0
+		},
+	},
 	{
 		Trigger:     WakeTriggerInitialPlanning,
 		Description: "No tasks exist yet, so initial planning is required.",

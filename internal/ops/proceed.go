@@ -317,21 +317,22 @@ func buildManyToOneChild(childID string, cohort []*models.Task, sharedParentID s
 	}
 
 	return models.Task{
-		ID:          childID,
-		Type:        tDef.taskType,
-		RolePair:    tDef.targetRolePair,
-		Description: fmt.Sprintf("%s task consolidating %d approved tasks from %s", doerName, len(cohort), sharedParentID),
-		Status:      tDef.targetStatus,
-		Priority:    cohort[0].Priority,
-		ParentTasks: parentIDs,
-		SpecRef:     paths.NormalizeSpecRef(specRef),
-		EpicRef:     paths.NormalizeSpecRef(epicRef),
-		RCARequired: rcaRequired,
-		DoneWhen:    fmt.Sprintf("Complete %s work based on %d parent tasks from %s", doerName, len(cohort), sharedParentID),
-		Scope:       fmt.Sprintf("Consolidation of %d tasks from %s", len(cohort), sharedParentID),
-		DependsOn:   inheritedDeps,
-		Created:     now,
-		History:     []models.TaskHistoryEntry{},
+		ID:                  childID,
+		Type:                tDef.taskType,
+		RolePair:            tDef.targetRolePair,
+		Description:         fmt.Sprintf("%s task consolidating %d approved tasks from %s", doerName, len(cohort), sharedParentID),
+		Status:              tDef.targetStatus,
+		Priority:            cohort[0].Priority,
+		ParentTasks:         parentIDs,
+		SpecRef:             paths.NormalizeSpecRef(specRef),
+		EpicRef:             paths.NormalizeSpecRef(epicRef),
+		RCARequired:         rcaRequired,
+		DoneWhen:            fmt.Sprintf("Complete %s work based on %d parent tasks from %s", doerName, len(cohort), sharedParentID),
+		Scope:               fmt.Sprintf("Consolidation of %d tasks from %s", len(cohort), sharedParentID),
+		DependsOn:           inheritedDeps,
+		DependencyContracts: ensureBeforeStartDependencyContracts(nil, inheritedDeps, sharedParentID),
+		Created:             now,
+		History:             []models.TaskHistoryEntry{},
 	}
 }
 
@@ -388,6 +389,11 @@ func proceedManyToOneInner(s *models.State, taskID, transitionName string, tDef 
 			if err := validateDependencyDirection(s, resolver, existing.ID, existing.RolePair, mergedDeps); err != nil {
 				return err
 			}
+			contracts := ensureBeforeStartDependencyContracts(existing.DependencyContracts, mergedDeps, sharedParentID)
+			contracts, _, err = canonicalizeConcreteDependencyContracts(s, contracts)
+			if err != nil {
+				return err
+			}
 			// Ensure all cohort members have transitions_executed set (repair partial)
 			for _, member := range cohort {
 				if member.TransitionsExecuted == nil {
@@ -396,6 +402,7 @@ func proceedManyToOneInner(s *models.State, taskID, transitionName string, tDef 
 				member.TransitionsExecuted[transitionName] = true
 			}
 			existing.DependsOn = mergedDeps
+			existing.DependencyContracts = contracts
 			return fmt.Errorf("%w: %q on cohort (parent %s)", errTransitionAlreadyExecuted, transitionName, sharedParentID)
 		}
 		// Child missing — fall through to create it (crash recovery)
@@ -407,6 +414,10 @@ func proceedManyToOneInner(s *models.State, taskID, transitionName string, tDef 
 		return err
 	}
 	child.DependsOn = canonicalDeps
+	child.DependencyContracts, _, err = canonicalizeConcreteDependencyContracts(s, child.DependencyContracts)
+	if err != nil {
+		return err
+	}
 	if err := validateDependencyDirection(s, resolver, child.ID, child.RolePair, child.DependsOn); err != nil {
 		return err
 	}
@@ -535,6 +546,10 @@ func proceedInner(s *models.State, taskID, transitionName string, tDef transitio
 				return err
 			}
 			child.DependsOn = canonicalDeps
+			child.DependencyContracts, _, err = canonicalizeConcreteDependencyContracts(s, child.DependencyContracts)
+			if err != nil {
+				return err
+			}
 			if err := validateDependencyDirection(s, resolver, child.ID, child.RolePair, child.DependsOn); err != nil {
 				return err
 			}
@@ -549,6 +564,10 @@ func proceedInner(s *models.State, taskID, transitionName string, tDef transitio
 			return err
 		}
 		child.DependsOn = canonicalDeps
+		child.DependencyContracts, _, err = canonicalizeConcreteDependencyContracts(s, child.DependencyContracts)
+		if err != nil {
+			return err
+		}
 		if err := validateDependencyDirection(s, resolver, child.ID, child.RolePair, child.DependsOn); err != nil {
 			return err
 		}
@@ -648,13 +667,19 @@ func recoverCrashedTransition(s *models.State, task *models.Task, taskID, transi
 				if err := validateDependencyDirection(s, resolver, existing.ID, existing.RolePair, mergedDeps); err != nil {
 					return err
 				}
-				patches = append(patches, dependencyPatch{taskID: existing.ID, dependsOn: mergedDeps})
+				contracts := ensureBeforeStartDependencyContracts(existing.DependencyContracts, mergedDeps, taskID)
+				contracts, _, err = canonicalizeConcreteDependencyContracts(s, contracts)
+				if err != nil {
+					return err
+				}
+				patches = append(patches, dependencyPatch{taskID: existing.ID, dependsOn: mergedDeps, dependencyContracts: contracts})
 			}
 		}
 		if len(missingChildren) == 0 {
 			for _, patch := range patches {
 				if existing := s.FindTask(patch.taskID); existing != nil {
 					existing.DependsOn = patch.dependsOn
+					existing.DependencyContracts = patch.dependencyContracts
 				}
 			}
 			return fmt.Errorf("%w: %q on task %q", errTransitionAlreadyExecuted, transitionName, taskID)
@@ -667,6 +692,10 @@ func recoverCrashedTransition(s *models.State, task *models.Task, taskID, transi
 				return err
 			}
 			child.DependsOn = canonicalDeps
+			child.DependencyContracts, _, err = canonicalizeConcreteDependencyContracts(s, child.DependencyContracts)
+			if err != nil {
+				return err
+			}
 			if err := validateDependencyDirection(s, resolver, child.ID, child.RolePair, child.DependsOn); err != nil {
 				return err
 			}
@@ -678,6 +707,7 @@ func recoverCrashedTransition(s *models.State, task *models.Task, taskID, transi
 		for _, patch := range patches {
 			if existing := s.FindTask(patch.taskID); existing != nil {
 				existing.DependsOn = patch.dependsOn
+				existing.DependencyContracts = patch.dependencyContracts
 			}
 		}
 		for _, child := range children {
@@ -709,7 +739,13 @@ func recoverCrashedTransition(s *models.State, task *models.Task, taskID, transi
 			if err := validateDependencyDirection(s, resolver, existing.ID, existing.RolePair, mergedDeps); err != nil {
 				return err
 			}
+			contracts := ensureBeforeStartDependencyContracts(existing.DependencyContracts, mergedDeps, taskID)
+			contracts, _, err = canonicalizeConcreteDependencyContracts(s, contracts)
+			if err != nil {
+				return err
+			}
 			existing.DependsOn = mergedDeps
+			existing.DependencyContracts = contracts
 			return fmt.Errorf("%w: %q on task %q", errTransitionAlreadyExecuted, transitionName, taskID)
 		}
 		child := buildOneToOneChild(childID, taskID, task, tDef, inheritedDeps, now)
@@ -718,6 +754,10 @@ func recoverCrashedTransition(s *models.State, task *models.Task, taskID, transi
 			return err
 		}
 		child.DependsOn = canonicalDeps
+		child.DependencyContracts, _, err = canonicalizeConcreteDependencyContracts(s, child.DependencyContracts)
+		if err != nil {
+			return err
+		}
 		if err := validateDependencyDirection(s, resolver, child.ID, child.RolePair, child.DependsOn); err != nil {
 			return err
 		}
@@ -749,6 +789,11 @@ func recoverCrashedTransition(s *models.State, task *models.Task, taskID, transi
 			if err := validateDependencyDirection(s, resolver, existing.ID, existing.RolePair, mergedDeps); err != nil {
 				return err
 			}
+			contracts := ensureBeforeStartDependencyContracts(existing.DependencyContracts, mergedDeps, sharedParentID)
+			contracts, _, err = canonicalizeConcreteDependencyContracts(s, contracts)
+			if err != nil {
+				return err
+			}
 			for _, member := range cohort {
 				if member.TransitionsExecuted == nil {
 					member.TransitionsExecuted = make(map[string]bool)
@@ -756,6 +801,7 @@ func recoverCrashedTransition(s *models.State, task *models.Task, taskID, transi
 				member.TransitionsExecuted[transitionName] = true
 			}
 			existing.DependsOn = mergedDeps
+			existing.DependencyContracts = contracts
 			return fmt.Errorf("%w: %q on cohort (parent %s)", errTransitionAlreadyExecuted, transitionName, sharedParentID)
 		}
 		child := buildManyToOneChild(childID, cohort, sharedParentID, tDef, inheritedDeps, now)
@@ -764,6 +810,10 @@ func recoverCrashedTransition(s *models.State, task *models.Task, taskID, transi
 			return err
 		}
 		child.DependsOn = canonicalDeps
+		child.DependencyContracts, _, err = canonicalizeConcreteDependencyContracts(s, child.DependencyContracts)
+		if err != nil {
+			return err
+		}
 		if err := validateDependencyDirection(s, resolver, child.ID, child.RolePair, child.DependsOn); err != nil {
 			return err
 		}
@@ -802,8 +852,9 @@ type pendingTx struct {
 }
 
 type dependencyPatch struct {
-	taskID    string
-	dependsOn []string
+	taskID              string
+	dependsOn           []string
+	dependencyContracts []models.DependencyContract
 }
 
 // isTransitionIncomplete checks if an executed transition has missing children.
@@ -1329,6 +1380,8 @@ func buildChildTask(childID, parentID string, entry models.OutputEntry, targetSt
 	deps = append(deps, entry.TaskDependsOn...)
 	deps = append(deps, inheritedDeps...)
 	deps = dedupeStrings(deps)
+	dependencyContracts := materializeOutputDependencyContracts(entry.DependencyContracts, siblingIDs)
+	dependencyContracts = ensureBeforeStartDependencyContracts(dependencyContracts, deps, parentID)
 
 	epicRef := entry.EpicRef
 	if epicRef == "" {
@@ -1345,28 +1398,65 @@ func buildChildTask(childID, parentID string, entry models.OutputEntry, targetSt
 	}
 
 	return models.Task{
-		ID:            childID,
-		Type:          taskType,
-		RolePair:      targetRolePair,
-		Description:   entry.Desc,
-		Status:        targetStatus,
-		Priority:      1,
-		ParentTasks:   []string{parentID},
-		SpecRef:       paths.NormalizeSpecRef(entry.SpecRef),
-		EpicRef:       paths.NormalizeSpecRef(epicRef),
-		PlanRef:       paths.NormalizeSpecRef(entry.PlanRef),
-		ArchRef:       paths.NormalizeSpecRef(archRef),
-		Decomposition: entry.Decomposition,
-		Kind:          entry.Kind,
-		RCARequired:   rcaRequired,
-		DoneWhen:      entry.DoneWhen,
-		Validation:    slices.Clone(entry.Validation),
-		DestructiveDB: entry.DestructiveDB,
-		Scope:         entry.Scope,
-		DependsOn:     deps,
-		Created:       now,
-		History:       []models.TaskHistoryEntry{},
+		ID:                  childID,
+		Type:                taskType,
+		RolePair:            targetRolePair,
+		Description:         entry.Desc,
+		Status:              targetStatus,
+		Priority:            1,
+		ParentTasks:         []string{parentID},
+		SpecRef:             paths.NormalizeSpecRef(entry.SpecRef),
+		EpicRef:             paths.NormalizeSpecRef(epicRef),
+		PlanRef:             paths.NormalizeSpecRef(entry.PlanRef),
+		ArchRef:             paths.NormalizeSpecRef(archRef),
+		Decomposition:       entry.Decomposition,
+		Kind:                entry.Kind,
+		RCARequired:         rcaRequired,
+		DoneWhen:            entry.DoneWhen,
+		Validation:          slices.Clone(entry.Validation),
+		DestructiveDB:       entry.DestructiveDB,
+		Scope:               entry.Scope,
+		DependsOn:           deps,
+		DependencyContracts: dependencyContracts,
+		Created:             now,
+		History:             []models.TaskHistoryEntry{},
 	}
+}
+
+func materializeOutputDependencyContracts(contracts []models.DependencyContract, siblingIDs []string) []models.DependencyContract {
+	result := make([]models.DependencyContract, 0, len(contracts))
+	for _, contract := range contracts {
+		copy := contract
+		if copy.ProviderOutput != nil && *copy.ProviderOutput >= 0 && *copy.ProviderOutput < len(siblingIDs) {
+			copy.ProviderTask = siblingIDs[*copy.ProviderOutput]
+			copy.ProviderOutput = nil
+		}
+		result = append(result, copy)
+	}
+	return result
+}
+
+func ensureBeforeStartDependencyContracts(contracts []models.DependencyContract, dependencies []string, parentID string) []models.DependencyContract {
+	seen := make(map[string]bool, len(contracts))
+	for _, contract := range contracts {
+		if contract.Gate == models.DependencyGateBeforeStart {
+			seen[contract.ProviderTask] = true
+		}
+	}
+	for _, provider := range dependencies {
+		if seen[provider] {
+			continue
+		}
+		contracts = append(contracts, models.DependencyContract{
+			ProviderTask: provider,
+			Purpose:      "Preserve dependency ordering materialized from " + parentID,
+			Gate:         models.DependencyGateBeforeStart,
+			Severity:     models.DependencySeverityCritical,
+			Supplies:     "Merged output required by the materialized pipeline transition",
+		})
+		seen[provider] = true
+	}
+	return contracts
 }
 
 // buildOneToOneChild creates a child task for a one-to-one transition.
@@ -1379,23 +1469,24 @@ func buildOneToOneChild(childID, parentID string, parent *models.Task, tDef tran
 	}
 
 	return models.Task{
-		ID:          childID,
-		Type:        tDef.taskType,
-		RolePair:    tDef.targetRolePair,
-		Description: fmt.Sprintf("%s task for: %s", doerName, parent.Description),
-		Status:      tDef.targetStatus,
-		Priority:    parent.Priority,
-		ParentTasks: []string{parentID},
-		SpecRef:     paths.NormalizeSpecRef(parent.SpecRef),
-		EpicRef:     parent.EpicRef,
-		PlanRef:     parent.PlanRef,
-		ArchRef:     parent.ArchRef,
-		RCARequired: parent.RCARequired,
-		DoneWhen:    fmt.Sprintf("Complete %s work based on parent task %s", doerName, parentID),
-		Scope:       fmt.Sprintf("Based on parent task %s", parentID),
-		DependsOn:   inheritedDeps,
-		Created:     now,
-		History:     []models.TaskHistoryEntry{},
+		ID:                  childID,
+		Type:                tDef.taskType,
+		RolePair:            tDef.targetRolePair,
+		Description:         fmt.Sprintf("%s task for: %s", doerName, parent.Description),
+		Status:              tDef.targetStatus,
+		Priority:            parent.Priority,
+		ParentTasks:         []string{parentID},
+		SpecRef:             paths.NormalizeSpecRef(parent.SpecRef),
+		EpicRef:             parent.EpicRef,
+		PlanRef:             parent.PlanRef,
+		ArchRef:             parent.ArchRef,
+		RCARequired:         parent.RCARequired,
+		DoneWhen:            fmt.Sprintf("Complete %s work based on parent task %s", doerName, parentID),
+		Scope:               fmt.Sprintf("Based on parent task %s", parentID),
+		DependsOn:           inheritedDeps,
+		DependencyContracts: ensureBeforeStartDependencyContracts(nil, inheritedDeps, parentID),
+		Created:             now,
+		History:             []models.TaskHistoryEntry{},
 	}
 }
 

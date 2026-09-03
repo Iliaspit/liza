@@ -2,6 +2,7 @@ package ops
 
 import (
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/liza-mas/liza/internal/models"
@@ -23,6 +24,14 @@ func rewriteActiveDependents(state *models.State, resolver *pipeline.Resolver, t
 			}
 			if changed {
 				task.DependsOn = rewritten
+				depsChanged = true
+			}
+			rewrittenContracts, contractsChanged, err := canonicalizeConcreteDependencyContracts(state, task.DependencyContracts)
+			if err != nil {
+				return &PreconditionError{Reason: fmt.Sprintf("cannot rewrite dependency contracts for %s: %v", task.ID, err)}
+			}
+			if contractsChanged {
+				task.DependencyContracts = rewrittenContracts
 				depsChanged = true
 			}
 		}
@@ -108,6 +117,13 @@ func canonicalizeTaskDependsOnForTransition(state *models.State, resolver *pipel
 	if changed {
 		task.DependsOn = rewritten
 	}
+	rewrittenContracts, contractsChanged, err := canonicalizeConcreteDependencyContracts(state, task.DependencyContracts)
+	if err != nil {
+		return &PreconditionError{Reason: fmt.Sprintf("cannot rewrite dependency contracts for %s: %v", task.ID, err)}
+	}
+	if contractsChanged {
+		task.DependencyContracts = rewrittenContracts
+	}
 	return nil
 }
 
@@ -125,6 +141,14 @@ func canonicalizedOutputTaskDependsOnForTarget(state *models.State, resolver *pi
 		}
 		if changed {
 			output[i].TaskDependsOn = rewritten
+			changedAny = true
+		}
+		rewrittenContracts, contractsChanged, err := canonicalizeConcreteDependencyContracts(state, output[i].DependencyContracts)
+		if err != nil {
+			return nil, false, &PreconditionError{Reason: fmt.Sprintf("cannot rewrite dependency contracts for %s: %v", dependentID, err)}
+		}
+		if contractsChanged {
+			output[i].DependencyContracts = rewrittenContracts
 			changedAny = true
 		}
 	}
@@ -159,8 +183,72 @@ func canonicalizeOutputTaskDependsOnForConsumers(state *models.State, resolver *
 			task.Output[i].TaskDependsOn = rewritten
 			changedAny = true
 		}
+		rewrittenContracts, contractsChanged, err := canonicalizeConcreteDependencyContracts(state, task.Output[i].DependencyContracts)
+		if err != nil {
+			return false, &PreconditionError{Reason: fmt.Sprintf("cannot rewrite dependency contracts for %s: %v", dependentID, err)}
+		}
+		if contractsChanged {
+			task.Output[i].DependencyContracts = rewrittenContracts
+			changedAny = true
+		}
 	}
 	return changedAny, nil
+}
+
+// canonicalizeConcreteDependencyContracts keeps typed provider identities in
+// lockstep with Lisa's existing supersession canonicalization. Planner-local
+// provider_output references are intentionally left untouched until materialization.
+func canonicalizeConcreteDependencyContracts(state *models.State, contracts []models.DependencyContract) ([]models.DependencyContract, bool, error) {
+	if len(contracts) == 0 {
+		return contracts, false, nil
+	}
+	rewritten := make([]models.DependencyContract, 0, len(contracts))
+	changed := false
+	for _, contract := range contracts {
+		if contract.ProviderOutput != nil || contract.ProviderTask == "" {
+			rewritten = append(rewritten, contract)
+			continue
+		}
+		providers, providerChanged, err := canonicalizeDependencyID(state, contract.ProviderTask, nil)
+		if err != nil {
+			return nil, false, err
+		}
+		changed = changed || providerChanged
+		for _, provider := range providers {
+			copy := contract
+			copy.ProviderTask = provider
+			rewritten = append(rewritten, copy)
+		}
+	}
+	return rewritten, changed, nil
+}
+
+// replaceDependencyContracts preserves the meaning of an explicitly retargeted
+// dependency while moving its provider identity to the requested replacements.
+func replaceDependencyContracts(contracts []models.DependencyContract, oldProvider string, replacements []string) []models.DependencyContract {
+	result := make([]models.DependencyContract, 0, len(contracts)+len(replacements))
+	for _, contract := range contracts {
+		if contract.ProviderOutput != nil || contract.ProviderTask != oldProvider {
+			result = append(result, contract)
+			continue
+		}
+		for _, replacement := range replacements {
+			copy := contract
+			copy.ProviderTask = replacement
+			result = append(result, copy)
+		}
+	}
+	return result
+}
+
+func removeDependencyContracts(contracts []models.DependencyContract, removedProviders []string) []models.DependencyContract {
+	if len(contracts) == 0 || len(removedProviders) == 0 {
+		return contracts
+	}
+	removed := stringSet(removedProviders)
+	return slices.DeleteFunc(slices.Clone(contracts), func(contract models.DependencyContract) bool {
+		return contract.ProviderOutput == nil && removed[contract.ProviderTask]
+	})
 }
 
 func canonicalizeConcreteDependencyList(state *models.State, resolver *pipeline.Resolver, dependentID, dependentRolePair string, deps []string) ([]string, bool, error) {

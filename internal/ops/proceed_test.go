@@ -7608,3 +7608,22 @@ func TestProceed_PerSubtask_KindDedup_RejectsUnknownKind(t *testing.T) {
 		t.Fatalf("Proceed() error = %v, want unknown kind", err)
 	}
 }
+
+func TestEnsureBeforeStartDependencyContractsCoversMaterializedLegacyDependencies(t *testing.T) {
+	t.Parallel()
+
+	contracts := ensureBeforeStartDependencyContracts([]models.DependencyContract{{
+		ProviderTask: "declared-provider",
+		Purpose:      "Declared dependency",
+		Gate:         models.DependencyGateBeforeStart,
+		Severity:     models.DependencySeverityCritical,
+		Supplies:     "Declared contract",
+	}}, []string{"declared-provider", "inherited-provider"}, "plan-1")
+
+	if len(contracts) != 2 {
+		t.Fatalf("contracts = %+v, want one declared and one materialized contract", contracts)
+	}
+	if contracts[1].ProviderTask != "inherited-provider" || contracts[1].Gate != models.DependencyGateBeforeStart {
+		t.Fatalf("materialized contract = %+v, want inherited-provider before_start", contracts[1])
+	}
+}

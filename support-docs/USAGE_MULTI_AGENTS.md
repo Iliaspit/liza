@@ -528,6 +528,17 @@ artifact yourself and surfaces unflagged decisions agents baked in without marki
 
 For `per-subtask` output, `depends_on` names sibling output indexes (`"0"` means `output[0]`). Use `task_depends_on` when the generated child must depend on existing concrete task IDs outside the current `output[]`. Generated children inherit dependency children only when both tasks execute the same transition name. Different transition names do not propagate child ordering. For cross-transition child ordering, use explicit `output[].task_depends_on` entries containing existing concrete task IDs. Concrete dependencies must follow pipeline direction: a generated child cannot depend on a task whose role-pair is downstream from the child's role-pair, including through `superseded_by` resolution paths.
 
+Every dependency in a newly initialized run also requires a
+`dependency_contracts` entry. Use `provider_output` for a sibling output index
+or `provider_task` for an existing concrete task, then record the exact
+`purpose`, supplied artifact/contract/acceptance check, lifecycle `gate`, and
+`severity`. Gates are `before_start`, `before_approval_merge`, and `advisory`;
+severities are `critical`, `high`, `medium`, and advisory-only `low`.
+`before_start` providers must exactly match `depends_on` plus
+`task_depends_on`. Lisa rejects unresolved providers, missing materialized
+children, gate/scheduler mismatches, and cycles across start and final
+approval dependencies before approving a plan or allowing coding claims.
+
 If task or `output[]` validation may reset/drop DB state, set `destructive_db: true`. Validation must be non-empty, and every command must start with `§BRAND_ENV_PREFIX§_ALLOW_DESTRUCTIVE_DB=1 ` or `env §BRAND_ENV_PREFIX§_ALLOW_DESTRUCTIVE_DB=1 `. The marker is part of the canonical command and should only target disposable DB state.
 
 Master planning output entries also carry `decomposition` metadata. `read_only_depends_on` and `read_only_task_depends_on` describe read-only use only; scheduling still comes from mirrored `depends_on` and `task_depends_on` entries. Master outputs must include the inherited framework ref configured by the role-pair's `decomposition-output-ref`: `plan_ref` for `epic-planning-main-pair`, `arch_ref` for `architecture-main-pair`, and `plan_ref` for `code-planning-main-pair`. Code-planning master outputs additionally require an explicit boolean `rca_required` on every entry.
@@ -625,12 +636,26 @@ Use `§BRAND_BINARY_NAME§ -C <project-root> ...` to select a §BRAND_NAME_TITLE
 | `§BRAND_BINARY_NAME§ update-sprint-metrics` | Recompute sprint metrics from current state                                                                          |
 | `§BRAND_BINARY_NAME§ clear-stale-review-claims` | Clear expired review leases                                                                                          |
 | `§BRAND_BINARY_NAME§ get <query>` | Query state data (tasks, agents, etc.)                                                                               |
+| `§BRAND_BINARY_NAME§ request-graph-replan --run-id <goal-id> --requested-by <controller-id> --reason "..."` | Append a controller request for a proven invalid dependency graph; grants no task mutation authority |
+| `§BRAND_BINARY_NAME§ claim-graph-replan <request-id>` / `complete-graph-replan <request-id>` | Registered orchestrator claims, repairs through native operations, and closes the generation-fenced request after full validation |
+
+An external controller cannot add, replace, retarget, or otherwise mutate Lisa
+tasks through the graph re-plan request. `request-graph-replan` atomically binds
+the request to the exact Lisa goal and dependency-graph generation and is
+idempotent for the same controller identity and reason. The native orchestrator
+is woken, re-reads durable task/candidate/evidence state, claims the request with
+its current registration generation, and performs only the smallest in-scope
+native repair. `complete-graph-replan` records the diagnosis and exact graph
+diff and refuses completion if ownership, scope, acceptance, candidate lineage,
+or final graph validation is unsafe.
 
 For a repair spanning multiple active tasks or complete dependency lists, write
 a JSON request with operation `apply-dependency-repair`, the blocked source task
 as `target`, unique `dependency_updates`, structured evidence, and validation.
 Each update supplies a `task_id` plus explicit `expected_depends_on` and
-`desired_depends_on` arrays; `[]` is meaningful. Omit `command`, then run
+`desired_depends_on` arrays; `[]` is meaningful. Typed runs also compare and
+update `expected_dependency_contracts` and `desired_dependency_contracts`
+atomically before validating the graph. Omit `command`, then run
 `§BRAND_BINARY_NAME§ mark-blocked <blocked-task-id> --repair-request-file <path>
 --reason "..." --questions "..."`. Do not encode dependency repairs as command
 sequences or mix file input with individual `--repair-*` flags.

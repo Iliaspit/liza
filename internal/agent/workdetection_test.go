@@ -256,6 +256,7 @@ func TestOrchestratorWakeTriggerSpecs(t *testing.T) {
 	// SprintComplete is handled separately in DetectOrchestratorWakeTriggers
 	// (requires pipeline-aware terminal state checking), so it's not in the table.
 	wantOrder := []OrchestratorWakeTrigger{
+		WakeTriggerGraphReplan,
 		WakeTriggerInitialPlanning,
 		WakeTriggerBlocked,
 		WakeTriggerHypothesisExhausted,
@@ -460,6 +461,16 @@ func TestDetectOrchestratorWakeTriggers(t *testing.T) {
 		wantTrigger OrchestratorWakeTrigger
 		wantCount   int
 	}{
+		{
+			name: "open graph re-plan request has highest priority",
+			state: func() *models.State {
+				state := testhelpers.CreateValidState()
+				state.GraphReplanRequests = []models.GraphReplanRequest{{ID: "graph-replan-1", Status: models.GraphReplanPending}}
+				return state
+			}(),
+			wantTrigger: WakeTriggerGraphReplan,
+			wantCount:   1,
+		},
 		{
 			name: "initial planning (no tasks)",
 			state: func() *models.State {

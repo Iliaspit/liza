@@ -61,7 +61,25 @@ func TestUnblockTaskPendingDependencyLifecycle(t *testing.T) {
 		"dependency must land first",
 		[]string{"Can the dependency be completed?"},
 		dependentCoderID,
-		ops.MarkBlockedOptions{DependsOn: []string{dependencyTaskID}},
+		ops.MarkBlockedOptions{RepairRequest: &models.RepairRequest{
+			Operation: models.RepairOperationApplyDependencyRepair,
+			Target:    dependentTaskID,
+			DependencyUpdates: []models.DependencyUpdate{{
+				TaskID:                      dependentTaskID,
+				ExpectedDependsOn:           []string{},
+				DesiredDependsOn:            []string{dependencyTaskID},
+				ExpectedDependencyContracts: []models.DependencyContract{},
+				DesiredDependencyContracts: []models.DependencyContract{{
+					ProviderTask: dependencyTaskID,
+					Purpose:      "Dependency must land before dependent work resumes",
+					Gate:         models.DependencyGateBeforeStart,
+					Severity:     models.DependencySeverityCritical,
+					Supplies:     "Merged dependency artifact",
+				}},
+			}},
+			Evidence:   []string{"command=claim-dependent exit_code=1 stderr=dependency provider must land first"},
+			Validation: []string{"verify dependent task remains held until dependency-task is MERGED"},
+		}},
 	); err != nil {
 		t.Fatalf("MarkBlockedWithOptionsCommand() error: %v", err)
 	}
@@ -70,6 +88,9 @@ func TestUnblockTaskPendingDependencyLifecycle(t *testing.T) {
 	dependentTask = findTask(state.Tasks, dependentTaskID)
 	if dependentTask == nil || dependentTask.Status != models.TaskStatusBlocked {
 		t.Fatalf("dependent task status = %v, want BLOCKED", dependentTask)
+	}
+	if _, err := ops.ApplyDependencyRepair(projectDir, dependentTaskID, "record typed dependency gate", orchestratorID); err != nil {
+		t.Fatalf("ApplyDependencyRepair() error: %v", err)
 	}
 
 	_, err = ops.UnblockTaskWithOptions(

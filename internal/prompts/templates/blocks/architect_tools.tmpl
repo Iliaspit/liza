@@ -14,7 +14,7 @@ Every generated task must reference existing dependencies, name concrete provide
   {{binaryName}} set-task-output {{.TaskID}} --output <path.json> --agent-id {{.AgentID}} --json
   Create <path.json> with a file-writing tool, not a Bash heredoc (heredoc with JSON triggers a shell safety block).
   JSON file contains: [
-    {"desc": "...", "done_when": "...", "scope": "...", "spec_ref": "...", "arch_ref": "specs/arch-plan/{{.GoalSlug}}/<doc>.md", "validation": ["<canonical command>"], "depends_on": ["0", "2"], "task_depends_on": ["existing-task-id"], "kind": "<optional typed marker — see BOOTSTRAP-PRECOMMIT REQUIREMENTS in IMPLEMENTATION PHASE>"}
+    {"desc": "...", "done_when": "...", "scope": "...", "spec_ref": "...", "arch_ref": "specs/arch-plan/{{.GoalSlug}}/<doc>.md", "validation": ["<canonical command>"], "depends_on": ["0"], "task_depends_on": ["existing-task-id"], "dependency_contracts": [{"provider_output": 0, "purpose": "...", "gate": "before_start", "severity": "high", "supplies": "..."}, {"provider_task": "existing-task-id", "purpose": "...", "gate": "before_start", "severity": "critical", "supplies": "..."}], "kind": "<optional typed marker — see BOOTSTRAP-PRECOMMIT REQUIREMENTS in IMPLEMENTATION PHASE>"}
   ]
   arch_ref: path to the architecture document (this task's primary artifact).
   validation: optional ordered array of canonical commands the child task should run; each must be satisfiable for the child scope. Commands must be single-purpose and agent-executable. Forbidden validation command shapes: `cd ... &&`, command substitution/backticks, polling or tail pipelines, and task artifact paths outside the worktree.

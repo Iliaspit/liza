@@ -302,6 +302,12 @@ func submitVerdict(projectRoot, taskID, verdict, reason, agentID string, authori
 		}
 
 		if verdict == "APPROVED" {
+			if err := statevalidate.ValidateDependencyGraph(state, resolver); err != nil {
+				return &PreconditionError{Reason: err.Error()}
+			}
+			if err := statevalidate.ValidateApprovalDependencies(state, task); err != nil {
+				return &PreconditionError{Reason: err.Error()}
+			}
 			// A fresh approval supersedes any stale integration attempt metadata
 			// from an earlier failed merge/submission path. Keep review_commit:
 			// wt-merge still needs the approved commit boundary.

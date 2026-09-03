@@ -220,9 +220,11 @@ const RepairOperationApplyDependencyRepair = "apply-dependency-repair"
 // DependencyUpdate describes the complete expected and desired direct
 // dependency state for one task in a declarative graph repair.
 type DependencyUpdate struct {
-	TaskID            string   `yaml:"task_id" json:"task_id"`
-	ExpectedDependsOn []string `yaml:"expected_depends_on" json:"expected_depends_on"`
-	DesiredDependsOn  []string `yaml:"desired_depends_on" json:"desired_depends_on"`
+	TaskID                      string               `yaml:"task_id" json:"task_id"`
+	ExpectedDependsOn           []string             `yaml:"expected_depends_on" json:"expected_depends_on"`
+	DesiredDependsOn            []string             `yaml:"desired_depends_on" json:"desired_depends_on"`
+	ExpectedDependencyContracts []DependencyContract `yaml:"expected_dependency_contracts,omitempty" json:"expected_dependency_contracts,omitempty"`
+	DesiredDependencyContracts  []DependencyContract `yaml:"desired_dependency_contracts,omitempty" json:"desired_dependency_contracts,omitempty"`
 }
 
 // RepairRequest carries a structured request from a blocked doer to the
@@ -303,15 +305,16 @@ type Task struct {
 
 	IntegrationAnalysis *IntegrationAnalysisMetadata `yaml:"integration_analysis,omitempty" json:"integration_analysis,omitempty"`
 
-	Attempt        int                `yaml:"attempt,omitempty"`
-	DependsOn      []string           `yaml:"depends_on,omitempty"`
-	IntegrationFix bool               `yaml:"integration_fix,omitempty"`
-	HandoffPending bool               `yaml:"handoff_pending,omitempty"`
-	HandoffEvents  []HandoffEvent     `yaml:"handoff_events,omitempty"`
-	MaxIterations  int                `yaml:"max_iterations,omitempty"`
-	Created        time.Time          `yaml:"created"`
-	History        []TaskHistoryEntry `yaml:"history"`
-	Extra          map[string]any     `yaml:",inline"`
+	Attempt             int                  `yaml:"attempt,omitempty"`
+	DependsOn           []string             `yaml:"depends_on,omitempty"`
+	DependencyContracts []DependencyContract `yaml:"dependency_contracts,omitempty" json:"dependency_contracts,omitempty"`
+	IntegrationFix      bool                 `yaml:"integration_fix,omitempty"`
+	HandoffPending      bool                 `yaml:"handoff_pending,omitempty"`
+	HandoffEvents       []HandoffEvent       `yaml:"handoff_events,omitempty"`
+	MaxIterations       int                  `yaml:"max_iterations,omitempty"`
+	Created             time.Time            `yaml:"created"`
+	History             []TaskHistoryEntry   `yaml:"history"`
+	Extra               map[string]any       `yaml:",inline"`
 }
 
 // EffectiveParentTasks returns the list of parent task IDs.
@@ -353,19 +356,20 @@ type DecompositionManifest struct {
 // OutputEntry represents a structured subtask definition produced by a doer role.
 // When a task completes with output[], each entry defines a downstream child task.
 type OutputEntry struct {
-	Desc          string                 `yaml:"desc" json:"desc"`
-	DoneWhen      string                 `yaml:"done_when" json:"done_when"`
-	Scope         string                 `yaml:"scope" json:"scope"`
-	SpecRef       string                 `yaml:"spec_ref" json:"spec_ref"`
-	EpicRef       string                 `yaml:"epic_ref,omitempty" json:"epic_ref,omitempty"`
-	PlanRef       string                 `yaml:"plan_ref,omitempty" json:"plan_ref,omitempty"`
-	ArchRef       string                 `yaml:"arch_ref,omitempty" json:"arch_ref,omitempty"`
-	Kind          string                 `yaml:"kind,omitempty" json:"kind,omitempty"`
-	Validation    []string               `yaml:"validation,omitempty" json:"validation,omitempty"`
-	DestructiveDB bool                   `yaml:"destructive_db,omitempty" json:"destructive_db,omitempty"`
-	RCARequired   *bool                  `yaml:"rca_required,omitempty" json:"rca_required,omitempty"`
-	DependsOn     []string               `yaml:"depends_on,omitempty" json:"depends_on,omitempty"`
-	Decomposition *DecompositionManifest `yaml:"decomposition,omitempty" json:"decomposition,omitempty"`
+	Desc                string                 `yaml:"desc" json:"desc"`
+	DoneWhen            string                 `yaml:"done_when" json:"done_when"`
+	Scope               string                 `yaml:"scope" json:"scope"`
+	SpecRef             string                 `yaml:"spec_ref" json:"spec_ref"`
+	EpicRef             string                 `yaml:"epic_ref,omitempty" json:"epic_ref,omitempty"`
+	PlanRef             string                 `yaml:"plan_ref,omitempty" json:"plan_ref,omitempty"`
+	ArchRef             string                 `yaml:"arch_ref,omitempty" json:"arch_ref,omitempty"`
+	Kind                string                 `yaml:"kind,omitempty" json:"kind,omitempty"`
+	Validation          []string               `yaml:"validation,omitempty" json:"validation,omitempty"`
+	DestructiveDB       bool                   `yaml:"destructive_db,omitempty" json:"destructive_db,omitempty"`
+	RCARequired         *bool                  `yaml:"rca_required,omitempty" json:"rca_required,omitempty"`
+	DependsOn           []string               `yaml:"depends_on,omitempty" json:"depends_on,omitempty"`
+	DependencyContracts []DependencyContract   `yaml:"dependency_contracts,omitempty" json:"dependency_contracts,omitempty"`
+	Decomposition       *DecompositionManifest `yaml:"decomposition,omitempty" json:"decomposition,omitempty"`
 	// TaskDependsOn names existing concrete task IDs to copy onto generated child tasks.
 	TaskDependsOn []string `yaml:"task_depends_on,omitempty" json:"task_depends_on,omitempty"`
 }

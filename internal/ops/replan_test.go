@@ -582,9 +582,19 @@ func TestReplan_RetargetsDownstream(t *testing.T) {
 	plan2 := testhelpers.BuildTaskByStatus("plan-2", models.TaskStatus("DRAFT_CODING_PLAN"), now)
 	plan2.RolePair = "code-planning-pair"
 	plan2.DependsOn = []string{"plan-1"}
+	plan2.DependencyContracts = []models.DependencyContract{{
+		ProviderTask: "plan-1", Purpose: "Use the replanned implementation order",
+		Gate: models.DependencyGateBeforeStart, Severity: models.DependencySeverityCritical, Supplies: "Approved implementation plan",
+	}}
+	plan3 := testhelpers.BuildTaskByStatus("plan-3", models.TaskStatus("DRAFT_CODING_PLAN"), now)
+	plan3.RolePair = "code-planning-pair"
+	plan3.DependencyContracts = []models.DependencyContract{{
+		ProviderTask: "plan-1", Purpose: "Use the replanned validation contract",
+		Gate: models.DependencyGateBeforeApproval, Severity: models.DependencySeverityHigh, Supplies: "Final validation contract",
+	}}
 
-	state.Tasks = append(state.Tasks, plan1, plan2)
-	state.Sprint.Scope.Planned = []string{"plan-1", "plan-2"}
+	state.Tasks = append(state.Tasks, plan1, plan2, plan3)
+	state.Sprint.Scope.Planned = []string{"plan-1", "plan-2", "plan-3"}
 	testhelpers.WriteInitialState(t, stateFile, state)
 
 	result, err := Replan(tmpDir, &ReplanInput{TaskID: "plan-1", ChangedBy: "human"})
@@ -605,6 +615,13 @@ func TestReplan_RetargetsDownstream(t *testing.T) {
 	}
 	if len(downstream.DependsOn) != 1 || downstream.DependsOn[0] != result.NewTaskID {
 		t.Errorf("plan-2 DependsOn = %v, want [%s]", downstream.DependsOn, result.NewTaskID)
+	}
+	if len(downstream.DependencyContracts) != 1 || downstream.DependencyContracts[0].ProviderTask != result.NewTaskID {
+		t.Errorf("plan-2 DependencyContracts = %+v, want provider %s", downstream.DependencyContracts, result.NewTaskID)
+	}
+	approvalOnly := readState.FindTask("plan-3")
+	if approvalOnly == nil || len(approvalOnly.DependencyContracts) != 1 || approvalOnly.DependencyContracts[0].ProviderTask != result.NewTaskID {
+		t.Errorf("plan-3 approval contract = %+v, want provider %s", approvalOnly, result.NewTaskID)
 	}
 }
 

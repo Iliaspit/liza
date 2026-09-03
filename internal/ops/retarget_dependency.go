@@ -118,7 +118,13 @@ func retargetDependencyWithOptionalAuthority(projectRoot, taskID, oldDependency 
 			task.RepairRequest = nil
 		}
 
+		contracts := replaceDependencyContracts(task.DependencyContracts, oldDependency, normalizedNewDeps)
+		contracts, _, err = canonicalizeConcreteDependencyContracts(state, contracts)
+		if err != nil {
+			return &PreconditionError{Reason: fmt.Sprintf("cannot retarget dependency contracts for %s: %v", task.ID, err)}
+		}
 		task.DependsOn = canonical
+		task.DependencyContracts = contracts
 		extra := map[string]any{
 			"manual":                 true,
 			"operation":              retargetDependencyOperation,

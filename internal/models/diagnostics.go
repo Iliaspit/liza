@@ -77,7 +77,7 @@ func countRoleReadyTasks(state *State, role string, pr PipelineResolver, now tim
 // available only to its current owner, not to the role queue; malformed
 // ownership without a lease fails closed.
 func IsRoleTaskReady(state *State, task *Task, role string, pr PipelineResolver, now time.Time) bool {
-	if state == nil || task == nil || pr == nil || !task.IsClaimable(role, state.Tasks, pr) {
+	if state == nil || task == nil || pr == nil || state.OpenGraphReplanRequest() != nil || !task.IsClaimable(role, state.Tasks, pr) {
 		return false
 	}
 
@@ -104,6 +104,9 @@ func IsRoleTaskReady(state *State, task *Task, role string, pr PipelineResolver,
 // CountClaimableTasks preserves the legacy lifecycle-level count for a role.
 // It checks task status and dependencies but not rejected-task ownership.
 func CountClaimableTasks(state *State, role string, pr PipelineResolver) int {
+	if state == nil || state.OpenGraphReplanRequest() != nil {
+		return 0
+	}
 	count := 0
 	for i := range state.Tasks {
 		if state.Tasks[i].IsClaimable(role, state.Tasks, pr) {
@@ -124,6 +127,9 @@ func DoerClaimBlockedReason(state *State, task *Task, role, agentID string, pr P
 	}
 	if agentID == "" {
 		return "agent ID is required"
+	}
+	if request := state.OpenGraphReplanRequest(); request != nil {
+		return fmt.Sprintf("dependency graph re-plan %s is %s", request.ID, request.Status)
 	}
 	if !task.IsClaimable(role, state.Tasks, pr) {
 		return fmt.Sprintf("task %s is %s (not claimable by %s)", task.ID, task.Status, role)

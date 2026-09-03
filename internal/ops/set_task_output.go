@@ -140,6 +140,9 @@ func setTaskOutputWithOptionalAuthority(projectRoot string, input *SetTaskOutput
 		}
 
 		task.Output = input.Output
+		if err := statevalidate.ValidateDependencyGraph(state, resolver); err != nil {
+			return &PreconditionError{Reason: err.Error()}
+		}
 		return nil
 	})
 }

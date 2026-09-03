@@ -10,6 +10,18 @@ tightly coupled, combining them is acceptable — but the intent must still be s
 Keep closely related changes together — splitting cohesive work adds overhead without
 reducing risk. Split at natural seams between independent concerns.
 Declare dependency order between tasks — no circular or missing dependencies.
+Every dependency MUST include dependency_contracts metadata naming exactly one provider
+(provider_output for a sibling or provider_task for an existing task), its exact purpose,
+the artifact/contract/acceptance check it supplies, lifecycle gate, and severity.
+Gates are before_start, before_approval_merge, or advisory. before_start contracts must
+exactly match depends_on/task_depends_on; later/advisory contracts must not be scheduler
+dependencies. Severity consequences are deterministic: critical means the consumer
+contract cannot be satisfied safely; high means stop at the declared gate; medium means
+work may proceed only up to the declared gate; low is advisory-only. Put every final
+acceptance check in the validation array of its one owning output task; when another task
+supplies that check, name the provider and exact check in dependency_contracts. Validate
+the complete cross-plan graph before approval; unresolved providers, missing generated
+tasks, reverse validation cycles, and gates stronger than their declaration fail closed.
 Shared-file rule: when two tasks modify the same file, they MUST have a depends_on
 relationship. Parallel coders work in isolated worktrees — shared files without
 dependency ordering cause merge conflicts. Audit scope overlaps before finalizing.

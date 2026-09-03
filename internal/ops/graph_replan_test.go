@@ -1,0 +1,167 @@
+package ops
+
+import (
+	"slices"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/liza-mas/liza/internal/db"
+	"github.com/liza-mas/liza/internal/models"
+	"github.com/liza-mas/liza/internal/testhelpers"
+)
+
+func TestGraphReplanRequestIsControllerReadOnlyAndOrchestratorRepairIsAudited(t *testing.T) {
+	t.Parallel()
+
+	projectRoot := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, projectRoot)
+	statePath, _ := testhelpers.SetupLizaDir(t, projectRoot)
+	state := graphReplanCycleState()
+	testhelpers.WriteInitialState(t, statePath, state)
+
+	beforeA := slices.Clone(state.FindTask("task-a").DependsOn)
+	beforeB := slices.Clone(state.FindTask("task-b").DependsOn)
+	requested, err := RequestGraphReplan(projectRoot, RequestGraphReplanInput{
+		RunID:       state.Goal.ID,
+		RequestedBy: "codex-controller-thread-1",
+		Reason:      "A final runtime gate depends on B while B cannot start before A",
+	})
+	if err != nil {
+		t.Fatalf("RequestGraphReplan() error: %v", err)
+	}
+	if requested.Request.Status != models.GraphReplanPending || requested.Request.Diagnostic == "" {
+		t.Fatalf("request = %+v, want pending request with native diagnostic", requested.Request)
+	}
+
+	afterRequest, err := db.New(statePath).Read()
+	if err != nil {
+		t.Fatalf("read request state: %v", err)
+	}
+	if !slices.Equal(afterRequest.FindTask("task-a").DependsOn, beforeA) || !slices.Equal(afterRequest.FindTask("task-b").DependsOn, beforeB) {
+		t.Fatal("controller request mutated the task graph")
+	}
+
+	replayed, err := RequestGraphReplan(projectRoot, RequestGraphReplanInput{
+		RunID:       state.Goal.ID,
+		RequestedBy: "codex-controller-thread-1",
+		Reason:      "A final runtime gate depends on B while B cannot start before A",
+	})
+	if err != nil {
+		t.Fatalf("replayed RequestGraphReplan() error: %v", err)
+	}
+	afterReplay, err := db.New(statePath).Read()
+	if err != nil {
+		t.Fatalf("read replayed request state: %v", err)
+	}
+	if !replayed.Idempotent || replayed.Request.ID != requested.Request.ID || len(afterReplay.GraphReplanRequests) != 1 {
+		t.Fatalf("replayed request = %+v, want one idempotent request", replayed)
+	}
+
+	authority := models.AgentAuthority{ID: "orchestrator-1", Generation: testhelpers.TestAgentGeneration}
+	claimed, err := ClaimGraphReplan(projectRoot, requested.Request.ID, authority)
+	if err != nil {
+		t.Fatalf("ClaimGraphReplan() error: %v", err)
+	}
+	if claimed.Orchestrator == nil || *claimed.Orchestrator != authority {
+		t.Fatalf("claimed orchestrator = %+v, want %+v", claimed.Orchestrator, authority)
+	}
+
+	taskB := afterRequest.FindTask("task-b")
+	completed, err := CompleteGraphReplan(projectRoot, CompleteGraphReplanInput{
+		RequestID: requested.Request.ID,
+		Diagnosis: "Remove B's unnecessary start gate on A; A's final gate on B remains authoritative.",
+		Updates: []GraphDependencyUpdate{{
+			TaskID:            "task-b",
+			ExpectedDependsOn: slices.Clone(taskB.DependsOn),
+			DesiredDependsOn:  []string{},
+			ExpectedContracts: slices.Clone(taskB.DependencyContracts),
+			DesiredContracts:  []models.DependencyContract{},
+		}},
+	}, authority)
+	if err != nil {
+		t.Fatalf("CompleteGraphReplan() error: %v", err)
+	}
+	if completed.Request.Status != models.GraphReplanCompleted || completed.Request.ValidationResult != "valid" || len(completed.Request.GraphChanges) == 0 {
+		t.Fatalf("completed request = %+v, want audited valid graph changes", completed.Request)
+	}
+
+	finalState, err := db.New(statePath).Read()
+	if err != nil {
+		t.Fatalf("read final state: %v", err)
+	}
+	if finalState.OpenGraphReplanRequest() != nil {
+		t.Fatal("completed request still blocks task allocation")
+	}
+	if got := finalState.FindTask("task-b"); len(got.DependsOn) != 0 || len(got.DependencyContracts) != 0 {
+		t.Fatalf("task-b repair = depends_on %v contracts %v, want both empty", got.DependsOn, got.DependencyContracts)
+	}
+	if finalState.FindTask("task-a").DependencyContracts[0].ProviderTask != "task-b" {
+		t.Fatal("repair changed the surviving final-runtime dependency")
+	}
+}
+
+func TestClaimGraphReplanFailsClosedWhenGraphGenerationChanged(t *testing.T) {
+	t.Parallel()
+
+	projectRoot := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, projectRoot)
+	statePath, _ := testhelpers.SetupLizaDir(t, projectRoot)
+	state := graphReplanCycleState()
+	bb := testhelpers.WriteInitialState(t, statePath, state)
+	request, err := RequestGraphReplan(projectRoot, RequestGraphReplanInput{
+		RunID: state.Goal.ID, RequestedBy: "controller-1", Reason: "proven cycle",
+	})
+	if err != nil {
+		t.Fatalf("RequestGraphReplan() error: %v", err)
+	}
+	if err := bb.Modify(func(current *models.State) error {
+		current.FindTask("task-b").DependencyContracts[0].Purpose = "Concurrent graph change"
+		return nil
+	}); err != nil {
+		t.Fatalf("change graph generation: %v", err)
+	}
+
+	_, err = ClaimGraphReplan(projectRoot, request.Request.ID, models.AgentAuthority{ID: "orchestrator-1", Generation: testhelpers.TestAgentGeneration})
+	if err == nil {
+		t.Fatal("ClaimGraphReplan() succeeded after graph generation changed")
+	}
+}
+
+func TestClaimTaskRejectsUnsafeCompleteDependencyGraph(t *testing.T) {
+	t.Parallel()
+
+	projectRoot := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, projectRoot)
+	statePath, _ := testhelpers.SetupLizaDir(t, projectRoot)
+	state := graphReplanCycleState()
+	testhelpers.WriteInitialState(t, statePath, state)
+
+	_, err := ClaimTaskWithAuthority(projectRoot, "task-a", models.AgentAuthority{ID: "coder-1", Generation: testhelpers.TestAgentGeneration})
+	if err == nil || !strings.Contains(err.Error(), "circular dependency detected") {
+		t.Fatalf("ClaimTaskWithAuthority() error = %v, want dependency-cycle rejection", err)
+	}
+}
+
+func graphReplanCycleState() *models.State {
+	state := testhelpers.CreateValidState()
+	state.DependencyContractVersion = models.DependencyContractVersion
+	state.Goal.SpecRef = "README.md"
+	now := time.Now().UTC()
+	taskA := testhelpers.BuildTaskByStatus("task-a", models.TaskStatusReady, now)
+	taskA.DependencyContracts = []models.DependencyContract{{
+		ProviderTask: "task-b", Purpose: "Final runtime validation", Gate: models.DependencyGateBeforeApproval,
+		Severity: models.DependencySeverityHigh, Supplies: "Runtime validation provider",
+	}}
+	taskB := testhelpers.BuildTaskByStatus("task-b", models.TaskStatusReady, now)
+	taskB.DependsOn = []string{"task-a"}
+	taskB.DependencyContracts = []models.DependencyContract{{
+		ProviderTask: "task-a", Purpose: "Implementation start", Gate: models.DependencyGateBeforeStart,
+		Severity: models.DependencySeverityCritical, Supplies: "Implementation contract",
+	}}
+	state.Tasks = []models.Task{taskA, taskB}
+	state.Sprint.Scope.Planned = []string{"task-a", "task-b"}
+	state.Agents["orchestrator-1"] = testhelpers.RegisteredTestAgent("orchestrator")
+	state.Agents["coder-1"] = testhelpers.RegisteredTestAgent("coder")
+	return state
+}

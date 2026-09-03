@@ -81,6 +81,7 @@ func repairSupersededDependenciesWithOptionalAuthority(projectRoot, taskID, reas
 		}
 
 		task.DependsOn = retained
+		task.DependencyContracts = removeDependencyContracts(task.DependencyContracts, removed)
 		note := fmt.Sprintf("removed downstream dependencies: %s", strings.Join(removed, ", "))
 		task.History = append(task.History, models.TaskHistoryEntry{
 			Time:   now,

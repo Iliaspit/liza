@@ -620,6 +620,12 @@ func mergeWorktree(projectRoot, taskID, agentID string, authority *models.AgentA
 		return nil, fmt.Errorf("failed to load pipeline config: %w", pbErr)
 	}
 	pr := pb.pr
+	if err := statevalidate.ValidateDependencyGraph(state, pb.resolver); err != nil {
+		return nil, &PreconditionError{Reason: err.Error()}
+	}
+	if err := statevalidate.ValidateApprovalDependencies(state, task); err != nil {
+		return nil, &PreconditionError{Reason: err.Error()}
+	}
 
 	if !models.IsApprovedForMerge(task, pr) {
 		return nil, &PreconditionError{Reason: fmt.Sprintf("task must be in an approved state to merge (current status: %s)", task.Status)}

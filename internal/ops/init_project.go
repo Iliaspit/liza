@@ -160,8 +160,9 @@ func InitProject(projectRoot string, params InitProjectParams) error {
 	copyWorktreeEnvFiles := params.CopyWorktreeEnvFiles || envgate.TruthyEnv(models.EnvEnableCopyWorktreeEnvFiles)
 
 	state := &models.State{
-		Version:         1,
-		PipelineVersion: 3,
+		Version:                   1,
+		PipelineVersion:           3,
+		DependencyContractVersion: models.DependencyContractVersion,
 		Goal: models.Goal{
 			ID:          goalID,
 			Description: params.Description,

@@ -20,6 +20,7 @@ import (
 	"github.com/liza-mas/liza/internal/identity"
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/paths"
+	"github.com/liza-mas/liza/internal/pipeline"
 	"github.com/liza-mas/liza/internal/statevalidate"
 )
 
@@ -162,6 +163,12 @@ func claimTask(projectRoot, taskID, agentID string, authority *models.AgentAutho
 	resolver, _, err := loadResolver(projectRoot)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load pipeline config: %w", err)
+	}
+	if request := state.OpenGraphReplanRequest(); request != nil {
+		return nil, &PreconditionError{Reason: fmt.Sprintf("dependency graph re-plan %s is %s; implementation claims are paused until native orchestrator validation completes", request.ID, request.Status)}
+	}
+	if err := statevalidate.ValidateDependencyGraph(state, resolver); err != nil {
+		return nil, &PreconditionError{Reason: err.Error()}
 	}
 
 	if task.RolePair == "" {
@@ -330,7 +337,7 @@ func completeClaimTaskAfterValidation(
 	strategy claimStrategy,
 	claimCtx claimContext,
 	pipelineTransitions map[models.TaskStatus][]models.TaskStatus,
-	resolver models.PipelineResolver,
+	resolver *pipeline.Resolver,
 	authority *models.AgentAuthority,
 ) (*ClaimResult, error) {
 	// --- Phase 2: Handle Worktree ---
@@ -436,6 +443,12 @@ func completeClaimTaskAfterValidation(
 
 		if task.Status != taskStatus {
 			return fmt.Errorf("race condition: task status changed from %s to %s", taskStatus, task.Status)
+		}
+		if request := state.OpenGraphReplanRequest(); request != nil {
+			return &PreconditionError{Reason: fmt.Sprintf("dependency graph re-plan %s is %s; implementation claims are paused", request.ID, request.Status)}
+		}
+		if err := statevalidate.ValidateDependencyGraph(state, resolver); err != nil {
+			return &PreconditionError{Reason: err.Error()}
 		}
 
 		if reason := models.DoerClaimBlockedReason(state, task, runtimeRole, agentID, resolver, now); reason != "" {

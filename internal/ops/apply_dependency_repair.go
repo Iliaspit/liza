@@ -18,8 +18,9 @@ import (
 // AppliedDependencyUpdate reports the committed canonical dependency state for
 // one task in a declarative repair.
 type AppliedDependencyUpdate struct {
-	TaskID                string   `json:"task_id"`
-	CanonicalDependencies []string `json:"canonical_dependencies"`
+	TaskID                       string                      `json:"task_id"`
+	CanonicalDependencies        []string                    `json:"canonical_dependencies"`
+	CanonicalDependencyContracts []models.DependencyContract `json:"canonical_dependency_contracts,omitempty"`
 }
 
 // ApplyDependencyRepairResult contains the committed declarative repair batch.
@@ -37,9 +38,11 @@ func (r *ApplyDependencyRepairResult) GetWarnings() []string {
 }
 
 type preparedDependencyUpdate struct {
-	task      *models.Task
-	requested models.DependencyUpdate
-	canonical []string
+	task               *models.Task
+	requested          models.DependencyUpdate
+	canonical          []string
+	canonicalContracts []models.DependencyContract
+	contractsSpecified bool
 }
 
 // ApplyDependencyRepair consumes one blocked task's declarative repair request
@@ -106,6 +109,10 @@ func applyDependencyRepairWithOptionalAuthority(projectRoot, sourceTaskID, reaso
 			if !slices.Equal(task.DependsOn, update.ExpectedDependsOn) {
 				return &PreconditionError{Reason: fmt.Sprintf("task %s dependencies changed since the repair request was created: got %v, expected %v", task.ID, task.DependsOn, update.ExpectedDependsOn)}
 			}
+			contractsSpecified := state.DependencyContractVersion >= models.DependencyContractVersion || update.ExpectedDependencyContracts != nil || update.DesiredDependencyContracts != nil
+			if contractsSpecified && !slices.Equal(task.DependencyContracts, update.ExpectedDependencyContracts) {
+				return &PreconditionError{Reason: fmt.Sprintf("task %s dependency contracts changed since the repair request was created", task.ID)}
+			}
 			for _, dependencyID := range update.DesiredDependsOn {
 				if dependencyID == task.ID {
 					return &PreconditionError{Reason: fmt.Sprintf("task %s cannot depend on itself", task.ID)}
@@ -119,10 +126,19 @@ func applyDependencyRepairWithOptionalAuthority(projectRoot, sourceTaskID, reaso
 			if err != nil {
 				return err
 			}
+			canonicalContracts := slices.Clone(task.DependencyContracts)
+			if contractsSpecified {
+				canonicalContracts, _, err = canonicalizeConcreteDependencyContracts(state, slices.Clone(update.DesiredDependencyContracts))
+				if err != nil {
+					return err
+				}
+			}
 			prepared = append(prepared, preparedDependencyUpdate{
-				task:      task,
-				requested: update,
-				canonical: append([]string{}, canonical...),
+				task:               task,
+				requested:          update,
+				canonical:          append([]string{}, canonical...),
+				canonicalContracts: canonicalContracts,
+				contractsSpecified: contractsSpecified,
 			})
 		}
 
@@ -135,30 +151,40 @@ func applyDependencyRepairWithOptionalAuthority(projectRoot, sourceTaskID, reaso
 		sourceUpdated := false
 		for _, update := range prepared {
 			update.task.DependsOn = append([]string{}, update.canonical...)
+			if update.contractsSpecified {
+				update.task.DependencyContracts = slices.Clone(update.canonicalContracts)
+			}
 			sourceUpdated = sourceUpdated || update.task.ID == sourceTaskID
 			note := fmt.Sprintf("applied dependency repair requested by %s", sourceTaskID)
+			extra := map[string]any{
+				"manual":                 true,
+				"operation":              models.RepairOperationApplyDependencyRepair,
+				"repair_source_task":     sourceTaskID,
+				"affected_task_ids":      append([]string{}, affectedTaskIDs...),
+				"expected_dependencies":  append([]string{}, update.requested.ExpectedDependsOn...),
+				"desired_dependencies":   append([]string{}, update.requested.DesiredDependsOn...),
+				"canonical_dependencies": append([]string{}, update.canonical...),
+				"repair_evidence":        append([]string{}, request.Evidence...),
+				"repair_validation":      append([]string{}, request.Validation...),
+				"repair_request_cleared": true,
+			}
+			if update.contractsSpecified {
+				extra["expected_dependency_contracts"] = slices.Clone(update.requested.ExpectedDependencyContracts)
+				extra["desired_dependency_contracts"] = slices.Clone(update.requested.DesiredDependencyContracts)
+				extra["canonical_dependency_contracts"] = slices.Clone(update.canonicalContracts)
+			}
 			update.task.History = append(update.task.History, models.TaskHistoryEntry{
 				Time:   now,
 				Event:  models.TaskEventDependenciesRewritten,
 				Agent:  &agentID,
 				Reason: &reason,
 				Note:   &note,
-				Extra: map[string]any{
-					"manual":                 true,
-					"operation":              models.RepairOperationApplyDependencyRepair,
-					"repair_source_task":     sourceTaskID,
-					"affected_task_ids":      append([]string{}, affectedTaskIDs...),
-					"expected_dependencies":  append([]string{}, update.requested.ExpectedDependsOn...),
-					"desired_dependencies":   append([]string{}, update.requested.DesiredDependsOn...),
-					"canonical_dependencies": append([]string{}, update.canonical...),
-					"repair_evidence":        append([]string{}, request.Evidence...),
-					"repair_validation":      append([]string{}, request.Validation...),
-					"repair_request_cleared": true,
-				},
+				Extra:  extra,
 			})
 			updates = append(updates, AppliedDependencyUpdate{
-				TaskID:                update.task.ID,
-				CanonicalDependencies: append([]string{}, update.canonical...),
+				TaskID:                       update.task.ID,
+				CanonicalDependencies:        append([]string{}, update.canonical...),
+				CanonicalDependencyContracts: slices.Clone(update.canonicalContracts),
 			})
 		}
 		if !sourceUpdated {

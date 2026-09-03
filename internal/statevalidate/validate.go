@@ -203,6 +203,9 @@ func ValidateState(state *models.State, projectRoot string, skipSpecFileCheck bo
 			return validateDependencies(state, projectRoot, skipSpecFileCheck, resolver, cfg, warnWriter)
 		},
 		func(state *models.State, projectRoot string, skipSpecFileCheck bool) error {
+			return ValidateDependencyGraph(state, resolver)
+		},
+		func(state *models.State, projectRoot string, skipSpecFileCheck bool) error {
 			warnBlockedReasonMissingDependsOn(state, warnWriter)
 			return nil
 		},

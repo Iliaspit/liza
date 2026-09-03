@@ -255,6 +255,9 @@ func RenderOrchestratorDashboard(state *models.State, projectRoot, agentID strin
 	}
 
 	wakeTrigger := determineWakeTrigger(totalTasks, blocked, hypothesisExhausted, immediateDiscoveries, sprintCompleteForWake, codingComplete, planningTasks, m2oReadyCount)
+	if state.OpenGraphReplanRequest() != nil {
+		wakeTrigger = "GRAPH_REPLAN_REQUEST"
+	}
 	var integrationProjection EffectiveIntegrationCompletion
 	if wakeTrigger == "CODING_COMPLETE" || wakeTrigger == "SPRINT_COMPLETE" {
 		decision, evaluationErr := ops.EvaluateLiveIntegrationProgress(state, projectRoot)
@@ -270,6 +273,10 @@ func RenderOrchestratorDashboard(state *models.State, projectRoot, agentID strin
 		return "", "", fmt.Errorf("building wake template data: %w", wakeErr)
 	}
 	wakeData.Integration = integrationProjection
+	if request := state.OpenGraphReplanRequest(); request != nil {
+		wakeData.GraphReplanRequestID = request.ID
+		wakeData.GraphReplanDiagnostic = request.Diagnostic
+	}
 
 	wakeInstructions, instrErr := buildInstructionsForWakeTrigger(wakeTrigger, agentID, wakeData, planningTasks)
 	if instrErr != nil {
@@ -303,6 +310,10 @@ func RenderOrchestratorDashboard(state *models.State, projectRoot, agentID strin
 	}
 	writeActiveTaskDigest(&b, state.Tasks)
 	writeIntegrationProgressDiagnostic(&b, integrationProjection)
+	if request := state.OpenGraphReplanRequest(); request != nil {
+		b.WriteString("\nGRAPH RE-PLAN REQUEST:\n")
+		b.WriteString(fmt.Sprintf("- ID: %s\n- Run: %s\n- Graph generation: %s\n- Requested by: %s\n- Status: %s\n- Diagnostic: %s\n", request.ID, request.RunID, request.GraphGeneration, request.RequestedBy, request.Status, request.Diagnostic))
+	}
 
 	binaryName := promptBinaryName()
 	b.WriteString("\nDEPENDENCY-CLOSURE RULE:\n")
@@ -324,6 +335,7 @@ func RenderOrchestratorDashboard(state *models.State, projectRoot, agentID strin
   %[1]s sprint-checkpoint --json
 - %[1]s update-sprint-metrics — Recompute sprint metrics from current state
   %[1]s update-sprint-metrics --json
+- %[1]s claim-graph-replan / complete-graph-replan — Orchestrator-only graph repair requested by an external controller. The request grants the controller no task mutation authority.
 
 ANOMALY LOGGING:
 | Event | Type | Required Fields |

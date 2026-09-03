@@ -255,6 +255,13 @@ func TestTaskDependencyWorkflow(t *testing.T) {
 		Priority:    1,
 		SpecRef:     "specs/feature.md",
 		DependsOn:   []string{"task-1"},
+		DependencyContracts: []models.DependencyContract{{
+			ProviderTask: "task-1",
+			Purpose:      "Use the completed prerequisite feature",
+			Gate:         models.DependencyGateBeforeStart,
+			Severity:     models.DependencySeverityCritical,
+			Supplies:     "Merged prerequisite feature",
+		}},
 	}
 	if err := commands.AddTaskCommand(statePath, logPath, task2Input, "orchestrator-1"); err != nil {
 		t.Fatalf("AddTask task-2 failed: %v", err)
@@ -1986,6 +1993,7 @@ func TestArchRefPropagation(t *testing.T) {
 }
 
 func masterArchitectureOutput(archRef string) []models.OutputEntry {
+	providerOutput := 0
 	return []models.OutputEntry{
 		{
 			Desc:     "Design API boundary",
@@ -2008,6 +2016,13 @@ func masterArchitectureOutput(archRef string) []models.OutputEntry {
 			SpecRef:   "specs/master.md",
 			ArchRef:   archRef,
 			DependsOn: []string{"0"},
+			DependencyContracts: []models.DependencyContract{{
+				ProviderOutput: &providerOutput,
+				Purpose:        "Use the approved API boundary when defining storage",
+				Gate:           models.DependencyGateBeforeStart,
+				Severity:       models.DependencySeverityCritical,
+				Supplies:       "Approved API boundary contract",
+			}},
 			Decomposition: &models.DecompositionManifest{
 				OwnedFiles:        []string{"internal/storage/repository.go"},
 				OwnedModules:      []string{"internal/storage"},

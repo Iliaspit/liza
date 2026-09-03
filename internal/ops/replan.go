@@ -125,26 +125,27 @@ func Replan(projectRoot string, input *ReplanInput) (*ReplanResult, error) {
 		// Create new task inheriting fields from original
 		originalID := task.ID
 		newTask := models.Task{
-			ID:          newTaskID,
-			Type:        task.Type,
-			RolePair:    task.RolePair,
-			Description: task.Description,
-			Status:      initialStatus,
-			Priority:    task.Priority,
-			ParentTask:  task.ParentTask,
-			ParentTasks: slices.Clone(task.ParentTasks),
-			SpecRef:     task.SpecRef,
-			EpicRef:     task.EpicRef,
-			PlanRef:     task.PlanRef,
-			ArchRef:     task.ArchRef,
-			Kind:        task.Kind,
-			RCARequired: task.RCARequired,
-			DoneWhen:    task.DoneWhen,
-			Scope:       task.Scope,
-			DependsOn:   slices.Clone(task.DependsOn),
-			Supersedes:  &originalID,
-			Created:     now,
-			History:     []models.TaskHistoryEntry{},
+			ID:                  newTaskID,
+			Type:                task.Type,
+			RolePair:            task.RolePair,
+			Description:         task.Description,
+			Status:              initialStatus,
+			Priority:            task.Priority,
+			ParentTask:          task.ParentTask,
+			ParentTasks:         slices.Clone(task.ParentTasks),
+			SpecRef:             task.SpecRef,
+			EpicRef:             task.EpicRef,
+			PlanRef:             task.PlanRef,
+			ArchRef:             task.ArchRef,
+			Kind:                task.Kind,
+			RCARequired:         task.RCARequired,
+			DoneWhen:            task.DoneWhen,
+			Scope:               task.Scope,
+			DependsOn:           slices.Clone(task.DependsOn),
+			DependencyContracts: slices.Clone(task.DependencyContracts),
+			Supersedes:          &originalID,
+			Created:             now,
+			History:             []models.TaskHistoryEntry{},
 		}
 		state.Tasks = append(state.Tasks, newTask)
 
@@ -155,7 +156,7 @@ func Replan(projectRoot string, input *ReplanInput) (*ReplanResult, error) {
 			}
 			changed := false
 			for j := range state.Tasks[i].DependsOn {
-				if state.Tasks[i].DependsOn[j] == task.ID {
+				if state.Tasks[i].DependsOn[j] == originalID {
 					state.Tasks[i].DependsOn[j] = newTaskID
 					changed = true
 				}
@@ -163,6 +164,11 @@ func Replan(projectRoot string, input *ReplanInput) (*ReplanResult, error) {
 			if changed {
 				state.Tasks[i].DependsOn = dedupeStrings(state.Tasks[i].DependsOn)
 			}
+			state.Tasks[i].DependencyContracts = replaceDependencyContracts(state.Tasks[i].DependencyContracts, originalID, []string{newTaskID})
+		}
+
+		if err := statevalidate.ValidateDependencyGraph(state, resolver); err != nil {
+			return &PreconditionError{Reason: err.Error()}
 		}
 
 		// Warn about terminal tasks that still depend on the old ID
@@ -171,10 +177,10 @@ func Replan(projectRoot string, input *ReplanInput) (*ReplanResult, error) {
 			if !state.Tasks[i].Status.IsTerminal() {
 				continue
 			}
-			if slices.Contains(state.Tasks[i].DependsOn, task.ID) {
+			if slices.Contains(state.Tasks[i].DependsOn, originalID) {
 				warnings = append(warnings,
 					fmt.Sprintf("task %s is %s and depends on replanned task %s — consider replanning %s too",
-						state.Tasks[i].ID, state.Tasks[i].Status, task.ID, state.Tasks[i].ID))
+						state.Tasks[i].ID, state.Tasks[i].Status, originalID, state.Tasks[i].ID))
 			}
 		}
 
@@ -190,11 +196,11 @@ func Replan(projectRoot string, input *ReplanInput) (*ReplanResult, error) {
 			Timestamp: now,
 			Event:     "replan",
 			Summary: fmt.Sprintf("Replanned task %s → %s (role_pair: %s, spec: %s)",
-				task.ID, newTaskID, task.RolePair, task.SpecRef),
+				originalID, newTaskID, task.RolePair, task.SpecRef),
 		})
 
 		result = ReplanResult{
-			OriginalTaskID: task.ID,
+			OriginalTaskID: originalID,
 			NewTaskID:      newTaskID,
 			RolePair:       task.RolePair,
 			SpecRef:        task.SpecRef,

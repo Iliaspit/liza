@@ -19,19 +19,20 @@ import (
 
 // AddTaskInput represents the input parameters for adding a task.
 type AddTaskInput struct {
-	ID            string   `json:"id"`
-	Type          string   `json:"type,omitempty"`
-	RolePair      string   `json:"role_pair,omitempty"`
-	Description   string   `json:"desc"`
-	SpecRef       string   `json:"spec"`
-	PlanRef       string   `json:"plan_ref,omitempty"`
-	DoneWhen      string   `json:"done"`
-	Validation    []string `json:"validation,omitempty"`
-	DestructiveDB bool     `json:"destructive_db,omitempty"`
-	Scope         string   `json:"scope"`
-	Priority      int      `json:"priority"`
-	RCARequired   bool     `json:"rca_required,omitempty"`
-	DependsOn     []string `json:"depends,omitempty"`
+	ID                  string                      `json:"id"`
+	Type                string                      `json:"type,omitempty"`
+	RolePair            string                      `json:"role_pair,omitempty"`
+	Description         string                      `json:"desc"`
+	SpecRef             string                      `json:"spec"`
+	PlanRef             string                      `json:"plan_ref,omitempty"`
+	DoneWhen            string                      `json:"done"`
+	Validation          []string                    `json:"validation,omitempty"`
+	DestructiveDB       bool                        `json:"destructive_db,omitempty"`
+	Scope               string                      `json:"scope"`
+	Priority            int                         `json:"priority"`
+	RCARequired         bool                        `json:"rca_required,omitempty"`
+	DependsOn           []string                    `json:"depends,omitempty"`
+	DependencyContracts []models.DependencyContract `json:"dependency_contracts,omitempty"`
 }
 
 // AddTaskResult contains the outcome of adding a task.
@@ -143,22 +144,23 @@ func addTaskWithOptionalAuthority(statePath, logPath string, input *AddTaskInput
 	}
 
 	newTask := models.Task{
-		ID:            input.ID,
-		Type:          taskType,
-		RolePair:      input.RolePair,
-		Description:   input.Description,
-		Status:        initialStatus,
-		Priority:      input.Priority,
-		SpecRef:       paths.NormalizeSpecRef(input.SpecRef),
-		PlanRef:       paths.NormalizeSpecRef(input.PlanRef),
-		DoneWhen:      input.DoneWhen,
-		Validation:    slices.Clone(input.Validation),
-		DestructiveDB: input.DestructiveDB,
-		RCARequired:   input.RCARequired,
-		Scope:         input.Scope,
-		DependsOn:     normalizedDeps,
-		Created:       now,
-		History:       []models.TaskHistoryEntry{},
+		ID:                  input.ID,
+		Type:                taskType,
+		RolePair:            input.RolePair,
+		Description:         input.Description,
+		Status:              initialStatus,
+		Priority:            input.Priority,
+		SpecRef:             paths.NormalizeSpecRef(input.SpecRef),
+		PlanRef:             paths.NormalizeSpecRef(input.PlanRef),
+		DoneWhen:            input.DoneWhen,
+		Validation:          slices.Clone(input.Validation),
+		DestructiveDB:       input.DestructiveDB,
+		RCARequired:         input.RCARequired,
+		Scope:               input.Scope,
+		DependsOn:           normalizedDeps,
+		DependencyContracts: slices.Clone(input.DependencyContracts),
+		Created:             now,
+		History:             []models.TaskHistoryEntry{},
 	}
 
 	var postValidationErr error
@@ -184,6 +186,9 @@ func addTaskWithOptionalAuthority(statePath, logPath string, input *AddTaskInput
 
 		if err := statevalidate.ValidateAddedTask(state, projectRoot, input.ID, false, io.Discard); err != nil {
 			return err
+		}
+		if err := statevalidate.ValidateDependencyGraph(state, resolver); err != nil {
+			return &PreconditionError{Reason: err.Error()}
 		}
 		if err := statevalidate.ValidateState(state, projectRoot, false, io.Discard); err != nil {
 			postValidationErr = err

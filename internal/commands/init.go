@@ -1138,8 +1138,9 @@ func InitCommandWithConfig(params InitParams) error {
 
 	// Create initial state
 	state := &models.State{
-		Version:         1,
-		PipelineVersion: pipelineVersion,
+		Version:                   1,
+		PipelineVersion:           pipelineVersion,
+		DependencyContractVersion: models.DependencyContractVersion,
 		Goal: models.Goal{
 			ID:          goalID,
 			Description: description,

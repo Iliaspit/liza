@@ -47,6 +47,8 @@ type wakeTemplateData struct {
 	ResolvedFanOutTaskType     string
 	EntryPoints                []wakeEntryPointData // available entry-points for LLM classification
 	Integration                EffectiveIntegrationCompletion
+	GraphReplanRequestID       string
+	GraphReplanDiagnostic      string
 }
 
 // EffectiveIntegrationCompletion is the read-only wake projection of the
@@ -388,6 +390,8 @@ func resolveTaskType(resolver *pipeline.Resolver, rolePair string) string {
 func buildInstructionsForWakeTrigger(wakeTrigger, agentID string, wakeData wakeTemplateData, planningTasks []planningTaskData) (string, error) {
 	agentData := wakeTemplateData{AgentID: agentID}
 	switch wakeTrigger {
+	case "GRAPH_REPLAN_REQUEST":
+		return fmt.Sprintf("Claim graph re-plan request %s with `%s claim-graph-replan %s --agent-id %s --json`. Re-read durable tasks, candidates, and evidence; diagnose the graph fault; use only Lisa-native task operations for the smallest in-scope correction. Then run `%s complete-graph-replan %s --diagnosis \"...\" [--updates-file <json>] --agent-id %s --json`. Refuse product, scope, or acceptance changes. Current diagnostic: %s", wakeData.GraphReplanRequestID, promptBinaryName(), wakeData.GraphReplanRequestID, agentID, promptBinaryName(), wakeData.GraphReplanRequestID, agentID, wakeData.GraphReplanDiagnostic), nil
 	case "INITIAL_PLANNING":
 		wakeData.AgentID = agentID
 		return executeTemplate("wake_initial_planning", wakeData)

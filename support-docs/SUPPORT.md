@@ -229,12 +229,14 @@ Key task fields:
 - `iteration` — doer iteration count
 - `review_cycles_current` / `review_cycles_total` — rejection count
 - `blocked_reason` / `blocked_questions` — why the task is stuck
-- `repair_request` — optional complete orchestrator-only repair request captured when the blocker is a state transition the assigned agent cannot perform (`operation`, `target`, `evidence`, `validation`, and either `command` for command-based non-dependency requests or `dependency_updates` for `apply-dependency-repair`)
+- `repair_request` — optional complete orchestrator-only repair request captured when the blocker is a state transition the assigned agent cannot perform (`operation`, `target`, `evidence`, `validation`, and either `command` for command-based non-dependency requests or `dependency_updates` for `apply-dependency-repair`; typed runs include expected/desired dependency contracts beside each expected/desired dependency list)
 - `rejection_reason` — reviewer feedback on rejection
 - `depends_on` — task IDs that must be directly MERGED before this task is claimable and must not point downstream in the pipeline
+- `dependency_contracts` — typed meaning for every dependency: one `provider_task`, exact `purpose`, lifecycle `gate` (`before_start`, `before_approval_merge`, or `advisory`), deterministic `severity`, and exact supplied artifact, contract, or acceptance check
 - `output[]` — structured output entries (used by `§BRAND_BINARY_NAME§ proceed` to create child tasks)
   - `output[].depends_on` — sibling output indexes resolved during `proceed`
   - `output[].task_depends_on` — existing concrete task IDs copied to generated child tasks
+  - `output[].dependency_contracts` — uses `provider_output` for a sibling index or `provider_task` for an existing task; `before_start` providers must exactly match the scheduler dependencies
   - `output[].destructive_db` — requires non-empty validation, with every command starting `§BRAND_ENV_PREFIX§_ALLOW_DESTRUCTIVE_DB=1 ` or `env §BRAND_ENV_PREFIX§_ALLOW_DESTRUCTIVE_DB=1 `; copied only to per-subtask children
 - `history[]` — timestamped event log per task
 
@@ -256,6 +258,21 @@ Use the dedicated CLI operation for every state mutation. In particular:
 - for multiple active tasks or complete dependency lists, store a command-free `apply-dependency-repair` JSON request with `§BRAND_BINARY_NAME§ mark-blocked --repair-request-file <path>`, then have the orchestrator run `§BRAND_BINARY_NAME§ apply-dependency-repair <blocked-task-id> --reason <reason>`;
 - use `§BRAND_BINARY_NAME§ repair-superseded-dependencies <task-id> --reason <reason>` for all illegal downstream direct edges on one `SUPERSEDED` task;
 - use `§BRAND_BINARY_NAME§ unblock-task`, `§BRAND_BINARY_NAME§ cancel-task`, `§BRAND_BINARY_NAME§ supersede-task`, `§BRAND_BINARY_NAME§ release-claim`, or `§BRAND_BINARY_NAME§ recover-task` for their declared transitions.
+
+For a proven missing provider or dependency cycle, an external controller may
+only append an identity- and graph-generation-bound request:
+
+```bash
+§BRAND_BINARY_NAME§ -C <project-root> request-graph-replan --run-id <goal-id> --requested-by <controller-id> --reason "<proven graph deadlock>" --json
+```
+
+This command cannot supply or mutate tasks or edges. It wakes the registered
+native orchestrator, which claims the request with `claim-graph-replan`, makes
+the smallest in-scope correction through generation-fenced native operations,
+and closes it with `complete-graph-replan --diagnosis ... --updates-file ...`.
+The close fails unless scope, acceptance, candidate lineage, ownership, and the
+complete corrected graph validate. The audit record preserves requester,
+native diagnostic, orchestrator generation, graph changes, and validation.
 
 Before any dependency repair, perform semantic verification by re-reading the
 affected tasks and their planning/decomposition context. Confirm that a

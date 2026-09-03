@@ -2,6 +2,7 @@ package ops
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -11,6 +12,7 @@ import (
 	"github.com/liza-mas/liza/internal/errors"
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/paths"
+	"github.com/liza-mas/liza/internal/statevalidate"
 )
 
 // MarkBlockedResult contains the outcome of marking a task as blocked.
@@ -122,6 +124,9 @@ func markBlockedWithOptionalAuthority(projectRoot, taskID, reason string, questi
 		task.RepairRequest = repairRequest
 		if len(dependsOn) > 0 {
 			task.DependsOn = append(task.DependsOn, dependsOn...)
+			if err := statevalidate.ValidateDependencyGraph(state, resolver); err != nil {
+				return &PreconditionError{Reason: err.Error()}
+			}
 		}
 		resultDependsOn = append([]string(nil), task.DependsOn...)
 		releaseAgentsForTask(state, taskID)
@@ -308,9 +313,11 @@ func normalizeDependencyUpdates(updates []models.DependencyUpdate) ([]models.Dep
 			return nil, err
 		}
 		normalized = append(normalized, models.DependencyUpdate{
-			TaskID:            taskID,
-			ExpectedDependsOn: expected,
-			DesiredDependsOn:  desired,
+			TaskID:                      taskID,
+			ExpectedDependsOn:           expected,
+			DesiredDependsOn:            desired,
+			ExpectedDependencyContracts: slices.Clone(update.ExpectedDependencyContracts),
+			DesiredDependencyContracts:  slices.Clone(update.DesiredDependencyContracts),
 		})
 	}
 	return normalized, nil
