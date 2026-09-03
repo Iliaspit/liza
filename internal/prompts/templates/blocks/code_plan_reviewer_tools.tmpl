@@ -1,6 +1,9 @@
 {{- define "code-plan-reviewer-tools" -}}
 
 CODE PLAN REVIEWER TOOLS:
+DEPENDENCY-CLOSURE RULE:
+Every generated task must reference existing dependencies, name concrete providers for consumed contracts, and preserve a valid intermediate repository state. API removal must follow all caller migrations or be atomic with them. Do not unblock or advance work while any of these conditions remain unresolved.
+
 - {{binaryName}} get — Query task state to inspect output[] entries
   {{binaryName}} get {{.TaskID}} --json
 - {{binaryName}} submit-verdict — Submit review verdict

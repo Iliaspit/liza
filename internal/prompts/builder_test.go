@@ -1152,6 +1152,51 @@ func testPipelineResolver(t *testing.T) *pipeline.Resolver {
 	return pipeline.NewResolver(cfg)
 }
 
+func TestDependencyClosureRuleRenderedExactlyOnceForAffectedRoles(t *testing.T) {
+	const rule = "Every generated task must reference existing dependencies, name concrete providers for consumed contracts, and preserve a valid intermediate repository state. API removal must follow all caller migrations or be atomic with them. Do not unblock or advance work while any of these conditions remain unresolved."
+
+	projectRoot := setupPipelineConfig(t)
+	resolver := testPipelineResolver(t)
+	for _, role := range []string{
+		"architect",
+		"code-planner",
+		"architecture-reviewer",
+		"code-plan-reviewer",
+		"orchestrator",
+	} {
+		t.Run(role, func(t *testing.T) {
+			data := &RoleContextData{
+				Role: role, AgentID: role + "-1", TaskID: "task-1",
+				Worktree:    filepath.Join(projectRoot, ".worktrees", "task-1"),
+				ProjectRoot: projectRoot,
+			}
+			if role == "orchestrator" {
+				state := testhelpers.CreateValidState()
+				state.Tasks = nil
+				dashboard, wakeInstruction, err := RenderOrchestratorDashboard(state, projectRoot, data.AgentID)
+				if err != nil {
+					t.Fatalf("RenderOrchestratorDashboard: %v", err)
+				}
+				data.RoleType = "orchestrator"
+				data.DashboardOutput = dashboard
+				data.WakeInstruction = wakeInstruction
+			}
+
+			sections, err := resolver.ContextSections(role)
+			if err != nil {
+				t.Fatalf("ContextSections(%q): %v", role, err)
+			}
+			output, err := BuildRoleContext(role, sections, data)
+			if err != nil {
+				t.Fatalf("BuildRoleContext(%q): %v", role, err)
+			}
+			if got := strings.Count(output, rule); got != 1 {
+				t.Fatalf("rendered %s prompt contains dependency-closure rule %d times, want 1", role, got)
+			}
+		})
+	}
+}
+
 func TestRenderOrchestratorDashboard_EntryPoints(t *testing.T) {
 	tests := []struct {
 		name           string

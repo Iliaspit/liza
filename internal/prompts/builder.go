@@ -305,6 +305,8 @@ func RenderOrchestratorDashboard(state *models.State, projectRoot, agentID strin
 	writeIntegrationProgressDiagnostic(&b, integrationProjection)
 
 	binaryName := promptBinaryName()
+	b.WriteString("\nDEPENDENCY-CLOSURE RULE:\n")
+	b.WriteString("Every generated task must reference existing dependencies, name concrete providers for consumed contracts, and preserve a valid intermediate repository state. API removal must follow all caller migrations or be atomic with them. Do not unblock or advance work while any of these conditions remain unresolved.\n")
 	b.WriteString("\nORCHESTRATOR COMMANDS:\n")
 	b.WriteString(fmt.Sprintf(`- %[1]s add-tasks — Add one or more tasks to blackboard (atomic per task, with validation)
   %[1]s add-tasks --tasks-file <path.json> --agent-id "%[2]s" --json

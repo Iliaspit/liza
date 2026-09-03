@@ -1,6 +1,9 @@
 {{- define "code-planner-tools" -}}
 
 CODE PLANNER TOOLS:
+DEPENDENCY-CLOSURE RULE:
+Every generated task must reference existing dependencies, name concrete providers for consumed contracts, and preserve a valid intermediate repository state. API removal must follow all caller migrations or be atomic with them. Do not unblock or advance work while any of these conditions remain unresolved.
+
 - {{binaryName}} submit-for-review — Submit code plan for review
   {{binaryName}} submit-for-review {{.TaskID}} HEAD --agent-id {{.AgentID}} --json
   Submission requires a new worktree commit for this task: stage the intended files, create the submission commit, confirm `git -C {{.Worktree}} status --short` is clean, then submit with HEAD. Do NOT submit the pre-change HEAD.
