@@ -387,9 +387,15 @@ func submitVerdict(projectRoot, taskID, verdict, reason, agentID string, authori
 			})
 			clearAttemptState(task, attemptStateReviewRejection)
 
-			// Refresh lease — coder needs time to address rejection.
-			// If escalation triggers below, lease is cleared along with assignment.
-			renewLease(state, task)
+			// Refresh the lease only while the rejected handoff still has an
+			// assigned doer. The doer may have exhausted its await budget before
+			// the reviewer submits a verdict; recreating a lease after that release
+			// would persist an ownerless rejected task.
+			if task.AssignedTo != nil {
+				renewLease(state, task)
+			} else {
+				task.LeaseExpires = nil
+			}
 
 			reviewLimit := effectiveReviewCycleLimit(state.Config)
 			iterationLimit := effectiveCoderIterationLimit(task, state.Config)

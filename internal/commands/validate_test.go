@@ -405,6 +405,70 @@ func TestValidateCommandWithOptions_RepairInvalidDoerOwnershipDeadOrMissingPID(t
 	}
 }
 
+func TestValidateCommandWithOptions_RepairOrphanedRejectedLeasesAtomically(t *testing.T) {
+	now := time.Now().UTC()
+	tmpDir := t.TempDir()
+	statePath, _ := testhelpers.SetupLizaDir(t, tmpDir)
+	testhelpers.SetupPipelineConfig(t, tmpDir)
+
+	state := testhelpers.CreateValidState()
+	codeTask := testhelpers.BuildTaskByStatus("code-task", models.TaskStatusRejected, now)
+	architectureTask := testhelpers.BuildTaskByStatus("architecture-task", models.TaskStatusRejected, now)
+	architectureTask.Status = models.TaskStatus("ARCHITECTURE_REJECTED")
+	architectureTask.RolePair = "architecture-pair"
+	baseCommit := "abc1234"
+	for _, task := range []*models.Task{&codeTask, &architectureTask} {
+		task.AssignedTo = nil
+		task.LeaseExpires = testhelpers.TimePtr(now.Add(30 * time.Minute))
+		task.BaseCommit = &baseCommit
+		task.Iteration = 3
+	}
+	state.Tasks = []models.Task{codeTask, architectureTask}
+	state.Sprint.Scope.Planned = []string{codeTask.ID, architectureTask.ID}
+	state.Agents = map[string]models.Agent{}
+	bb := testhelpers.WriteInitialState(t, statePath, state)
+
+	var warnBuf bytes.Buffer
+	SetWarnWriter(&warnBuf)
+	t.Cleanup(func() { SetWarnWriter(os.Stderr) })
+
+	if err := ValidateCommandWithOptions(statePath, ValidateOptions{
+		SkipSpecFileCheck: true,
+		Repair:            true,
+	}); err != nil {
+		t.Fatalf("ValidateCommandWithOptions() repair error = %v", err)
+	}
+	if !strings.Contains(warnBuf.String(), "REPAIRED: invalid active doer ownership cleared for 2 task(s)") {
+		t.Fatalf("repair warning = %q, want two repaired tasks", warnBuf.String())
+	}
+
+	repaired, err := bb.Read()
+	if err != nil {
+		t.Fatalf("read repaired state: %v", err)
+	}
+	for _, want := range []struct {
+		id     string
+		status models.TaskStatus
+	}{
+		{id: codeTask.ID, status: models.TaskStatusRejected},
+		{id: architectureTask.ID, status: models.TaskStatus("ARCHITECTURE_REJECTED")},
+	} {
+		task := repaired.FindTask(want.id)
+		if task == nil {
+			t.Fatalf("%s missing after repair", want.id)
+		}
+		if task.Status != want.status {
+			t.Fatalf("%s status = %s, want %s", want.id, task.Status, want.status)
+		}
+		if task.AssignedTo != nil || task.LeaseExpires != nil {
+			t.Fatalf("%s ownership = assigned_to %v lease_expires %v, want both nil", want.id, task.AssignedTo, task.LeaseExpires)
+		}
+		if task.Worktree == nil || task.BaseCommit == nil || task.Iteration != 3 {
+			t.Fatalf("%s handoff metadata changed: worktree=%v base_commit=%v iteration=%d", want.id, task.Worktree, task.BaseCommit, task.Iteration)
+		}
+	}
+}
+
 func TestValidateCommandWithOptions_RepairInvalidDoerOwnershipSkipsSentinel(t *testing.T) {
 	now := time.Now().UTC()
 	tmpDir := t.TempDir()

@@ -1789,6 +1789,42 @@ func TestSubmitVerdict_RejectedRefreshesLease(t *testing.T) {
 	}
 }
 
+func TestSubmitVerdict_RejectedWithoutAssignedDoerDoesNotCreateLease(t *testing.T) {
+	tmpDir := t.TempDir()
+	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)
+
+	now := time.Now().UTC()
+	state := testhelpers.CreateValidState()
+	task := testhelpers.BuildTaskByStatus("task-1", models.TaskStatusReviewing, now)
+	task.AssignedTo = nil
+	task.LeaseExpires = nil
+	state.Tasks = []models.Task{task}
+	state.Agents["code-reviewer-1"] = models.Agent{
+		Role:   "code-reviewer",
+		Status: models.AgentStatusWorking,
+	}
+	testhelpers.WriteInitialState(t, stateFile, state)
+
+	if _, err := SubmitVerdict(tmpDir, "task-1", "REJECTED", "Needs work", "code-reviewer-1", ""); err != nil {
+		t.Fatalf("SubmitVerdict() error: %v", err)
+	}
+
+	readState, err := db.New(stateFile).Read()
+	if err != nil {
+		t.Fatalf("read state: %v", err)
+	}
+	rejected := readState.FindTask("task-1")
+	if rejected == nil {
+		t.Fatal("task not found")
+	}
+	if rejected.Status != models.TaskStatusRejected {
+		t.Fatalf("status = %s, want %s", rejected.Status, models.TaskStatusRejected)
+	}
+	if rejected.AssignedTo != nil || rejected.LeaseExpires != nil {
+		t.Fatalf("rejected ownership = assigned_to %v lease_expires %v, want both nil", rejected.AssignedTo, rejected.LeaseExpires)
+	}
+}
+
 func TestSubmitVerdict_EscalationClearsLease(t *testing.T) {
 	tmpDir := t.TempDir()
 	stateFile, _ := testhelpers.SetupLizaDir(t, tmpDir)

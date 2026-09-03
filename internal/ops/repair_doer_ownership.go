@@ -12,7 +12,9 @@ import (
 )
 
 // RepairInvalidDoerOwnership clears active doer claims whose owner process is
-// gone or whose task-side and agent-side owner state cannot both be true.
+// gone or whose task-side and agent-side owner state cannot both be true. It
+// also clears ownerless leases from rejected tasks while preserving their
+// handoff metadata.
 // Unlike review repair, live doer PIDs are never repaired automatically because
 // the task worktree may contain unsubmitted edits.
 func RepairInvalidDoerOwnership(statePath, projectRoot, logPath, reason string) (int, error) {
@@ -40,14 +42,18 @@ func RepairInvalidDoerOwnership(statePath, projectRoot, logPath, reason string) 
 			if err != nil {
 				return err
 			}
-			if revertStatus == "" {
+			orphanedRejectedLease := isRejectedDoerRelease(task, pb.pr) && task.AssignedTo == nil && task.LeaseExpires != nil
+			if revertStatus == "" && !orphanedRejectedLease {
 				continue
 			}
 			if task.AssignedTo != nil && strings.HasPrefix(*task.AssignedTo, "$") {
 				continue
 			}
 
-			repairReason := invalidOrDeadActiveDoerOwnershipReason(state, task, pb.pr)
+			repairReason := "lease_expires without assigned_to"
+			if !orphanedRejectedLease {
+				repairReason = invalidOrDeadActiveDoerOwnershipReason(state, task, pb.pr)
+			}
 			if repairReason == "" {
 				continue
 			}
@@ -70,10 +76,14 @@ func RepairInvalidDoerOwnership(statePath, projectRoot, logPath, reason string) 
 				}
 			}
 
-			if err := task.TransitionWith(revertStatus, pb.transitions); err != nil {
-				return err
+			if orphanedRejectedLease {
+				task.LeaseExpires = nil
+			} else {
+				if err := task.TransitionWith(revertStatus, pb.transitions); err != nil {
+					return err
+				}
+				clearDoerClaimFields(task)
 			}
-			clearDoerClaimFields(task)
 
 			if doerID != "" {
 				if agent, ok := state.Agents[doerID]; ok {
