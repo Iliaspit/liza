@@ -175,6 +175,7 @@ pipeline:
         - assigned-task
         - worktree-rules
         - collective-plan-scoping
+        - handoff-resume
         - prior-rejection
         - prior-attempt
         - integration-fix
@@ -203,6 +204,7 @@ pipeline:
         - review-task
         - worktree-rules
         - collective-plan-scoping
+        - handoff-resume
         - prior-rejection
         - reviewer-state-transitions
         - code-plan-reviewer-tools

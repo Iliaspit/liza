@@ -259,8 +259,13 @@ Use the dedicated CLI operation for every state mutation. In particular:
 - use `§BRAND_BINARY_NAME§ repair-superseded-dependencies <task-id> --reason <reason>` for all illegal downstream direct edges on one `SUPERSEDED` task;
 - use `§BRAND_BINARY_NAME§ unblock-task`, `§BRAND_BINARY_NAME§ cancel-task`, `§BRAND_BINARY_NAME§ supersede-task`, `§BRAND_BINARY_NAME§ release-claim`, or `§BRAND_BINARY_NAME§ recover-task` for their declared transitions.
 
-For a proven missing provider or dependency cycle, an external controller may
-only append an identity- and graph-generation-bound request:
+For code-planning tasks, the latest durable `unblock-task --reason` is rendered
+once for both the planner and reviewer, including runs with an older frozen
+pipeline, so an approved continuation or scope authorization survives review.
+
+For a proven missing provider, dependency cycle, or fully dependency-stalled
+run with durable BLOCKED reasons, an external controller may only append an
+identity- and graph-generation-bound request:
 
 ```bash
 §BRAND_BINARY_NAME§ -C <project-root> request-graph-replan --run-id <goal-id> --requested-by <controller-id> --reason "<proven graph deadlock>" --json

@@ -91,7 +91,11 @@ func RequestGraphReplan(projectRoot string, input RequestGraphReplanInput) (*Req
 		}
 		graphErr := statevalidate.ValidateDependencyGraph(state, resolver)
 		if graphErr == nil {
-			return &PreconditionError{Reason: "dependency graph is valid; a re-plan request requires a proven graph diagnostic"}
+			stallDiagnostic := dependencyStallDiagnostic(state, resolver)
+			if stallDiagnostic == "" {
+				return &PreconditionError{Reason: "dependency graph is valid; a re-plan request requires a proven graph diagnostic or a fully dependency-stalled run"}
+			}
+			graphErr = fmt.Errorf("%s", stallDiagnostic)
 		}
 		request := models.GraphReplanRequest{
 			ID: requestID, RunID: input.RunID, GraphGeneration: generation,
@@ -110,6 +114,44 @@ func RequestGraphReplan(projectRoot string, input RequestGraphReplanInput) (*Req
 	}
 	_ = log.New(lp.LogPath()).Append(log.Entry{Timestamp: now, Agent: input.RequestedBy, Action: requestGraphReplanOperation, Detail: result.Request.ID + ": " + input.Reason})
 	return &result, nil
+}
+
+// dependencyStallDiagnostic admits a native orchestrator re-plan only when
+// durable state proves that all remaining allocation is dependency-stalled.
+// This covers semantic deadlocks recorded by BLOCKED tasks before a missing
+// provider can be represented as a concrete graph edge.
+func dependencyStallDiagnostic(state *models.State, resolver models.PipelineResolver) string {
+	readiness := models.GetTaskReadiness(state, resolver)
+	if readiness.Claimable != 0 || readiness.Reviewable != 0 || len(activeNonOrchestratorOwnership(state)) != 0 {
+		return ""
+	}
+
+	dependencyResolver := models.NewDependencyResolver(state)
+	blockedTasks := make([]string, 0)
+	dependencyHeld := make([]string, 0)
+	for i := range state.Tasks {
+		task := &state.Tasks[i]
+		if task.Status == models.TaskStatusBlocked && task.BlockedReason != nil && strings.TrimSpace(*task.BlockedReason) != "" {
+			blockedTasks = append(blockedTasks, task.ID)
+		}
+		if models.BlockedByDependencies(task, resolver, dependencyResolver) {
+			dependencyHeld = append(dependencyHeld, task.ID)
+		}
+	}
+	if len(blockedTasks) == 0 || len(dependencyHeld) == 0 {
+		return ""
+	}
+	sort.Strings(blockedTasks)
+	sort.Strings(dependencyHeld)
+	heldCount := len(dependencyHeld)
+	const heldSampleLimit = 8
+	if len(dependencyHeld) > heldSampleLimit {
+		dependencyHeld = dependencyHeld[:heldSampleLimit]
+	}
+	return fmt.Sprintf(
+		"structurally valid dependency graph has no claimable or reviewable work; blocked tasks with durable reasons: %s; %d dependency-held tasks (sample: %s)",
+		strings.Join(blockedTasks, ", "), heldCount, strings.Join(dependencyHeld, ", "),
+	)
 }
 
 // ClaimGraphReplan binds the request to the one registered orchestrator and

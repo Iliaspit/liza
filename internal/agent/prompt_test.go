@@ -341,6 +341,56 @@ func TestBuildPrompt_CoderReceivesLatestActionableUnblockReason(t *testing.T) {
 	}
 }
 
+func TestBuildPrompt_PlannerAndReviewerReceiveDurableUnblockAuthorization(t *testing.T) {
+	now := time.Now().UTC()
+	blockedReason := "scope authorization required"
+	unblockReason := "Controller-approved scope replacement authorizes only a.ts, b.ts, and c.ts."
+	checkpointNote := "planner checkpoint after applying the authorization"
+	state := &models.State{
+		Version: 1,
+		Goal: models.Goal{
+			ID: "goal-1", Description: "Test goal", SpecRef: "spec.md",
+			Status: models.GoalStatusInProgress, Created: now.Add(-time.Hour),
+		},
+		Tasks: []models.Task{{
+			ID: "task-1", RolePair: "code-planning-pair", Description: "Test task",
+			Status: models.TaskStatusCodePlanning, Priority: 1, SpecRef: "spec.md",
+			DoneWhen: "Task is complete", Created: now.Add(-time.Hour),
+			History: []models.TaskHistoryEntry{
+				{Time: now.Add(-3 * time.Minute), Event: models.TaskEventBlocked, Reason: &blockedReason},
+				{Time: now.Add(-2 * time.Minute), Event: models.TaskEventUnblocked, Reason: &unblockReason},
+				{Time: now.Add(-time.Minute), Event: models.TaskEventPreExecutionCheckpoint, Note: &checkpointNote},
+			},
+		}},
+		Agents: make(map[string]models.Agent),
+		Config: models.Config{IntegrationBranch: "main"},
+	}
+
+	projectRoot := t.TempDir()
+	testhelpers.SetupPipelineConfig(t, projectRoot)
+	for _, role := range []string{models.RoleCodePlanner, models.RoleCodePlanReviewer} {
+		t.Run(role, func(t *testing.T) {
+			state.Tasks[0].Status = models.TaskStatusCodePlanning
+			if role == models.RoleCodePlanReviewer {
+				state.Tasks[0].Status = models.TaskStatusCodingPlanToReview
+				state.Tasks[0].History = append(state.Tasks[0].History, models.TaskHistoryEntry{
+					Time: now, Event: models.TaskEventSubmittedForReview,
+				})
+			}
+			prompt, err := testBuildPrompt(t, state, SupervisorConfig{
+				Role: role, AgentID: role + "-1", ProjectRoot: projectRoot,
+				SpecsDir: filepath.Join(projectRoot, "specs"), StatePath: filepath.Join(projectRoot, "state.yaml"),
+			}, "task-1")
+			if err != nil {
+				t.Fatalf("BuildPrompt: %v", err)
+			}
+			if got := strings.Count(prompt, unblockReason); got != 1 {
+				t.Fatalf("prompt contains unblock authorization %d times, want exactly once\n%s", got, prompt)
+			}
+		})
+	}
+}
+
 func TestBuildOrchestratorRoleContextDataScipIndexesUseProjectRoot(t *testing.T) {
 	tmpDir := t.TempDir()
 	testhelpers.SetupTestGitRepo(t, tmpDir)

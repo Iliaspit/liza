@@ -82,6 +82,12 @@ func buildPromptWithContext(state *models.State, config SupervisorConfig, taskID
 	if err != nil {
 		return "", err
 	}
+	if data.UnblockReason != "" && (config.Role == models.RoleCodePlanner || config.Role == models.RoleCodePlanReviewer) && !slices.Contains(sections, "handoff-resume") {
+		// Older frozen pipelines predate planner/reviewer continuation context.
+		// Inject the existing block here so a binary upgrade repairs live runs
+		// without mutating their pipeline or Lisa state.
+		sections = append(sections, "handoff-resume")
+	}
 
 	context, err := prompts.BuildRoleContext(config.Role, sections, data)
 	if err != nil {
@@ -391,6 +397,9 @@ func buildTaskRoleContextData(task *models.Task, state *models.State, config Sup
 			}
 		}
 	}
+	if config.Role == models.RoleCodePlanner || config.Role == models.RoleCodePlanReviewer {
+		data.UnblockReason = latestTaskUnblockReason(task)
+	}
 
 	// Reviewer-specific fields
 	if roleType == "reviewer" {
@@ -666,6 +675,20 @@ func latestActionableTaskUnblockReason(task *models.Task) string {
 		return ""
 	}
 	return prompts.TruncateText(reason, maxControllerNotePromptBytes)
+}
+
+// latestTaskUnblockReason returns the newest durable unblock reason even after
+// planning or submission progress. Planning authorization must remain visible
+// to both the planner and its reviewer for the lifetime of that task.
+func latestTaskUnblockReason(task *models.Task) string {
+	for i := len(task.History) - 1; i >= 0; i-- {
+		entry := task.History[i]
+		if entry.Event != models.TaskEventUnblocked || entry.Reason == nil || strings.TrimSpace(*entry.Reason) == "" {
+			continue
+		}
+		return prompts.TruncateText(*entry.Reason, maxControllerNotePromptBytes)
+	}
+	return ""
 }
 
 // latestActionableTaskHumanNote returns the newest task-scoped human note only

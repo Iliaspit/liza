@@ -143,6 +143,111 @@ func TestClaimTaskRejectsUnsafeCompleteDependencyGraph(t *testing.T) {
 	}
 }
 
+func TestGraphReplanRequestAcceptsFullyDependencyStalledRun(t *testing.T) {
+	t.Parallel()
+
+	projectRoot := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, projectRoot)
+	statePath, _ := testhelpers.SetupLizaDir(t, projectRoot)
+	state := graphReplanDependencyStallState()
+	testhelpers.WriteInitialState(t, statePath, state)
+
+	requested, err := RequestGraphReplan(projectRoot, RequestGraphReplanInput{
+		RunID:       state.Goal.ID,
+		RequestedBy: "codex-controller-thread-1",
+		Reason:      "blocked implementation waits for a provider that dependency-held planning has not materialized",
+	})
+	if err != nil {
+		t.Fatalf("RequestGraphReplan() error: %v", err)
+	}
+	for _, want := range []string{
+		"no claimable or reviewable work",
+		"blocked-implementation",
+		"dependency-held-plan",
+	} {
+		if !strings.Contains(requested.Request.Diagnostic, want) {
+			t.Fatalf("diagnostic = %q, want %q", requested.Request.Diagnostic, want)
+		}
+	}
+
+	persisted, err := db.New(statePath).Read()
+	if err != nil {
+		t.Fatalf("read request state: %v", err)
+	}
+	if persisted.FindTask("blocked-implementation").Status != models.TaskStatusBlocked ||
+		!slices.Equal(persisted.FindTask("dependency-held-plan").DependsOn, []string{"blocked-implementation"}) {
+		t.Fatal("controller request mutated task lifecycle or dependency state")
+	}
+}
+
+func TestGraphReplanRequestRejectsUnprovenSemanticStall(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		mutate func(*models.State)
+	}{
+		{
+			name: "claimable work remains",
+			mutate: func(state *models.State) {
+				state.Tasks = append(state.Tasks, testhelpers.BuildTaskByStatus("independent-work", models.TaskStatusReady, time.Now().UTC()))
+				state.Sprint.Scope.Planned = append(state.Sprint.Scope.Planned, "independent-work")
+			},
+		},
+		{
+			name: "blocked evidence has no durable reason",
+			mutate: func(state *models.State) {
+				state.FindTask("blocked-implementation").BlockedReason = nil
+			},
+		},
+		{
+			name: "worker ownership remains active",
+			mutate: func(state *models.State) {
+				owner := "coder-1"
+				state.FindTask("blocked-implementation").AssignedTo = &owner
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			projectRoot := t.TempDir()
+			testhelpers.SetupTestGitRepo(t, projectRoot)
+			statePath, _ := testhelpers.SetupLizaDir(t, projectRoot)
+			state := graphReplanDependencyStallState()
+			tt.mutate(state)
+			testhelpers.WriteInitialState(t, statePath, state)
+
+			_, err := RequestGraphReplan(projectRoot, RequestGraphReplanInput{
+				RunID: state.Goal.ID, RequestedBy: "controller-1", Reason: "unproven stall",
+			})
+			if err == nil || !strings.Contains(err.Error(), "fully dependency-stalled run") {
+				t.Fatalf("RequestGraphReplan() error = %v, want fail-closed semantic-stall rejection", err)
+			}
+		})
+	}
+}
+
+func graphReplanDependencyStallState() *models.State {
+	state := testhelpers.CreateValidState()
+	state.DependencyContractVersion = models.DependencyContractVersion
+	state.Goal.SpecRef = "README.md"
+	now := time.Now().UTC()
+	blocked := testhelpers.BuildTaskByStatus("blocked-implementation", models.TaskStatusBlocked, now)
+	blocked.AssignedTo = nil
+	plan := testhelpers.BuildTaskByStatus("dependency-held-plan", models.TaskStatusDraftCodingPlan, now)
+	plan.DependsOn = []string{blocked.ID}
+	plan.DependencyContracts = []models.DependencyContract{{
+		ProviderTask: blocked.ID, Purpose: "Consume the implementation contract", Gate: models.DependencyGateBeforeStart,
+		Severity: models.DependencySeverityCritical, Supplies: "Implementation contract",
+	}}
+	state.Tasks = []models.Task{blocked, plan}
+	state.Sprint.Scope.Planned = []string{blocked.ID, plan.ID}
+	state.Agents["orchestrator-1"] = testhelpers.RegisteredTestAgent("orchestrator")
+	return state
+}
+
 func graphReplanCycleState() *models.State {
 	state := testhelpers.CreateValidState()
 	state.DependencyContractVersion = models.DependencyContractVersion
