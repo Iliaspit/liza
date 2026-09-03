@@ -119,7 +119,6 @@ func RepairInvalidDoerOwnership(statePath, projectRoot, logPath, reason string) 
 
 	return repaired, nil
 }
-
 // DoerRepairRefusedError reports invalid doer ownership rows that were unsafe
 // to repair automatically because their assigned process was still live.
 type DoerRepairRefusedError struct {
