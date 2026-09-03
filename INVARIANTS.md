@@ -88,6 +88,11 @@ Agent cannot claim if already assigned to another executing task.
 
 Unassigned `unblock-task` may restore a repaired task with valid pending dependencies to its role-pair initial status. The restored task remains dependency-held and unclaimable until every direct dependency is `MERGED`; `unblock-task --assign-to` remains rejected while any dependency is unmet.
 
+For coder continuation, the newest actionable `unblock-task` reason is rendered
+as orchestrator unblock context until later semantic execution progress makes
+it stale. Claim, release, and owned-task resume bookkeeping do not consume that
+context.
+
 **Enforced:** spec, code (`claim_task.go`)
 
 ### 3.4 Dependency Direction
@@ -97,6 +102,14 @@ Task dependencies cannot point downstream in the configured pipeline topology. A
 Supersession paths count as dependency paths: if `depends_on: old-task` resolves through `old-task.superseded_by` to a downstream task, the dependency is invalid. Terminal status does not exempt a task from direction validation. When a task is superseded, its own illegal downstream direct edges are pruned and audited while legal historical dependencies are retained; existing corrupted `SUPERSEDED` metadata is repaired only through the orchestrator-only `repair-superseded-dependencies` transaction, which removes all illegal downstream edges and validates the full candidate state before commit. `output[].task_depends_on` is validated against every per-subtask outgoing transition target that can consume that output, and explicit writes reject terminal non-MERGED task IDs. Generated child `depends_on` is canonicalized after sibling, concrete `task_depends_on`, and inherited phase-gate dependencies are composed; crash recovery validates the same final child `depends_on` set before patching or appending child tasks. Operational dependency surfaces are canonicalized at mutation and transition boundaries: superseded dependencies are rewritten to legal replacements, cancelled or unreplaced retired dependencies are removed, downstream replacements that are already satisfied are not encoded on children, and illegal pending replacements fail the affected mutation or transition before the dependency rewrite is written. Retired `SUPERSEDED` and `ABANDONED` task output remains historical audit data unless it can still drive crash recovery.
 
 Manual active-graph repair preserves the same boundary. `retarget-dependency` changes one direct edge on a non-terminal task. A repair spanning multiple tasks or complete dependency lists must be persisted as a command-free `apply-dependency-repair` request through `mark-blocked --repair-request-file`; its unique updates carry explicit expected and desired lists. The orchestrator consumes that stored request in one locked mutation, rejects any stale expectation or invalid complete candidate, writes every canonical list and audit entry together, and clears the request only on success. No partial update is persisted, and validation plus unblocking remain explicit follow-up steps.
+
+The architect, code planner, architecture reviewer, code-plan reviewer, and
+orchestrator prompts also share one dependency-closure rule: generated tasks
+must reference existing dependencies, identify concrete providers for consumed
+contracts, and preserve a valid intermediate repository state; API removal
+must follow all caller migrations or be atomic with them; unresolved closure
+blocks approval, unblocking, and advancement. This is a behavioral prompt gate
+in addition to the structural dependency validation above.
 
 **Protects against:** Earlier pipeline phases waiting on later phases, deadlocked planning tasks, hidden cross-phase blockers.
 
@@ -132,7 +145,7 @@ Every non-empty task ID must identify exactly one task in `state.yaml`.
 | Per-role-key instance limits: max N instances per role (configurable) | Resource contention | code (`resolver.MaxInstances()`) |
 | WORKING agent must have `current_task` and valid `lease_expires` | Ghost agents, phantom work | spec, code (`validate_agent.go`) |
 | Active doer ownership: tasks in a pipeline executing state must have `assigned_to` pointing to an agent with the exact doer role for the task's `role_pair`, valid owner metadata, and either status `WORKING` with matching `current_task`, status `HANDOFF` with `handoff_pending` and matching `current_task`, or the owned-executing recovery state | Dead doers holding work, cross-role doer claims | spec, code |
-| Rejected doer ownership: tasks in a pipeline rejected state with `assigned_to` and an unexpired `lease_expires` can be reclaimed only by that same agent; an expired lease permits reassignment; `assigned_to` without `lease_expires` is corrupted state requiring repair before any reclaim | Ownership collisions, lost rejected work, noisy claim loops | spec, code (`claim_task.go`, `diagnostics.go`) |
+| Rejected doer ownership: tasks in a pipeline rejected state with `assigned_to` and an unexpired `lease_expires` can be reclaimed only by that same agent; an expired lease permits reassignment; `assigned_to` without `lease_expires` is corrupted state requiring repair before any reclaim; ownerless rejected tasks must not retain `lease_expires`, and validation repair clears an orphaned lease without discarding handoff metadata | Ownership collisions, lost rejected work, noisy claim loops | spec, code (`claim_task.go`, `diagnostics.go`, `submit_verdict.go`, `repair_doer_ownership.go`) |
 | Active review ownership: tasks in a pipeline reviewing state (`ReviewingStatus` or `Reviewing2Status`) must have `reviewing_by` pointing to an agent with the exact reviewer role for the task's `role_pair`, status `REVIEWING`, matching `current_task`, valid review lease, and live-matching or live-unknown reviewer process evidence. Passive reviewer ownership while awaiting resubmission or reclaiming a just-submitted task requires reviewer status `WAITING`, matching `current_task`, an unexpired review lease, and live-matching or live-unknown reviewer process evidence. Missing, unusable, dead, mismatched, or non-observing reviewer process/agent evidence is stale ownership. | Dead reviewers holding review work, cross-role review claims | spec, code |
 | No two agents assigned to same executing task | Ownership collisions | spec, code (`validate_task.go`) |
 | Agent ID format: `{role}-{number}` (e.g., `coder-1`) | Identity spoofing, cross-role execution | code (registration validation) |
@@ -197,6 +210,7 @@ Integration-fix claims clear active `output[]`, `review_commit`, approvals, `mer
 | If integration tests fail → rollback via `update-ref` to pre-merge HEAD | Failed integrations propagating | spec, code |
 | If post-merge `ValidateArtifactRefs` fails → rollback via `update-ref` to pre-merge HEAD | Backstop for broken blackboard artifact refs after ref advancement | spec, code (`wt_merge.go`, `validate.go`) |
 | Worktree path is deterministic: `.worktrees/{taskID}` | Directory traversal, path confusion | code (`claim_task.go`, `wt_create.go`) |
+| With `LIZA_ALLOW_LINKED_PROJECT_ROOT=1`, an explicitly selected linked integration worktree containing `.liza` remains the Lisa project root; lifecycle locks dereference its `.git` file, while Git worktree mutations serialize on the resolved common Git directory | Main-checkout state leakage, invalid `.git` lock paths, concurrent worktree metadata mutation | code (`paths.go`, `project_lock.go`, `worktree.go`) |
 | A configured `post_worktree_cmd` must succeed before a provider session starts, on claim, resume, review, recovery, and recreate paths; failure fails closed with a masked, bounded diagnostic and degrades the agent, releasing rather than blocking reviewer tasks | Agents burning iterations on unprepared worktrees, silent setup failure, lost review-ready work | spec (`worktree-management.md`), code (`claim_task.go`, `wt_create.go`, `claiming.go`, `worktree_check.go`, `agent_health.go`), ADR-0117 |
 | ABANDONED/SUPERSEDED/MERGED tasks: worktree must be deleted; BLOCKED worktrees may be preserved only for explicit repair/unblock workflows | Stale worktrees, resource leaks, lost repair work | spec (`worktree-management.md`) |
 | Rejected-task reclaim preserves the task worktree/branch for same-owner reclaim and post-expiry reassignment; a missing directory reattaches a valid branch, recreation from integration occurs only when no reusable valid artifact exists, and unclassifiable artifacts fail closed without deletion | Lost rejected work, destructive recovery, inconsistent reassignment semantics | spec, code (`claim_task.go`) |
