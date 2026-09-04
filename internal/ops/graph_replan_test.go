@@ -1,6 +1,7 @@
 package ops
 
 import (
+	"io"
 	"slices"
 	"strings"
 	"testing"
@@ -8,6 +9,7 @@ import (
 
 	"github.com/liza-mas/liza/internal/db"
 	"github.com/liza-mas/liza/internal/models"
+	"github.com/liza-mas/liza/internal/statevalidate"
 	"github.com/liza-mas/liza/internal/testhelpers"
 )
 
@@ -128,6 +130,125 @@ func TestClaimGraphReplanFailsClosedWhenGraphGenerationChanged(t *testing.T) {
 	}
 }
 
+func TestRefreshGraphReplanAtomicallySupersedesStaleCandidateRequest(t *testing.T) {
+	t.Parallel()
+
+	projectRoot := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, projectRoot)
+	statePath, _ := testhelpers.SetupLizaDir(t, projectRoot)
+	state := graphReplanDependencyStallState()
+	bb := testhelpers.WriteInitialState(t, statePath, state)
+	const (
+		controller = "codex-controller-thread-1"
+		reason     = "blocked implementation still requires a concrete provider"
+	)
+	requested, err := RequestGraphReplan(projectRoot, RequestGraphReplanInput{
+		RunID: state.Goal.ID, RequestedBy: controller, Reason: reason,
+	})
+	if err != nil {
+		t.Fatalf("RequestGraphReplan() error: %v", err)
+	}
+	authority := models.AgentAuthority{ID: "orchestrator-1", Generation: testhelpers.TestAgentGeneration}
+	if _, err := ClaimGraphReplan(projectRoot, requested.Request.ID, authority); err != nil {
+		t.Fatalf("ClaimGraphReplan() error: %v", err)
+	}
+	if err := bb.Modify(func(current *models.State) error {
+		commit := "candidate-after-request"
+		current.FindTask("blocked-implementation").BaseCommit = &commit
+		return nil
+	}); err != nil {
+		t.Fatalf("advance candidate lineage: %v", err)
+	}
+
+	refreshed, err := RefreshGraphReplan(projectRoot, RefreshGraphReplanInput{
+		RequestID: requested.Request.ID, RunID: state.Goal.ID, RequestedBy: controller, Reason: reason,
+	})
+	if err != nil {
+		t.Fatalf("RefreshGraphReplan() error: %v", err)
+	}
+	if refreshed.Superseded.Status != models.GraphReplanSuperseded || refreshed.Request.Status != models.GraphReplanPending {
+		t.Fatalf("refresh result = %+v, want superseded predecessor and pending successor", refreshed)
+	}
+	if refreshed.Request.ID == requested.Request.ID || refreshed.Request.PredecessorRequestID != requested.Request.ID || refreshed.Superseded.SuccessorRequestID != refreshed.Request.ID {
+		t.Fatalf("refresh linkage = %+v, want distinct bidirectionally linked requests", refreshed)
+	}
+
+	replayed, err := RefreshGraphReplan(projectRoot, RefreshGraphReplanInput{
+		RequestID: requested.Request.ID, RunID: state.Goal.ID, RequestedBy: controller, Reason: reason,
+	})
+	if err != nil {
+		t.Fatalf("replayed RefreshGraphReplan() error: %v", err)
+	}
+	persisted, err := db.New(statePath).Read()
+	if err != nil {
+		t.Fatalf("read refreshed state: %v", err)
+	}
+	if !replayed.Idempotent || replayed.Request.ID != refreshed.Request.ID || len(persisted.GraphReplanRequests) != 2 {
+		t.Fatalf("replayed refresh = %+v with %d requests, want one idempotent successor", replayed, len(persisted.GraphReplanRequests))
+	}
+	if open := persisted.OpenGraphReplanRequest(); open == nil || open.ID != refreshed.Request.ID {
+		t.Fatalf("open request = %+v, want refreshed successor", open)
+	}
+	if got := persisted.FindTask("dependency-held-plan"); !slices.Equal(got.DependsOn, []string{"blocked-implementation"}) {
+		t.Fatalf("refresh mutated task graph: %v", got.DependsOn)
+	}
+	if err := statevalidate.ValidateState(persisted, projectRoot, false, io.Discard); err != nil {
+		t.Fatalf("refreshed state is invalid: %v", err)
+	}
+}
+
+func TestRefreshGraphReplanRejectsCurrentRequest(t *testing.T) {
+	t.Parallel()
+
+	projectRoot := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, projectRoot)
+	statePath, _ := testhelpers.SetupLizaDir(t, projectRoot)
+	state := graphReplanDependencyStallState()
+	testhelpers.WriteInitialState(t, statePath, state)
+	request, err := RequestGraphReplan(projectRoot, RequestGraphReplanInput{
+		RunID: state.Goal.ID, RequestedBy: "controller-1", Reason: "proven dependency stall",
+	})
+	if err != nil {
+		t.Fatalf("RequestGraphReplan() error: %v", err)
+	}
+
+	_, err = RefreshGraphReplan(projectRoot, RefreshGraphReplanInput{
+		RequestID: request.Request.ID, RunID: state.Goal.ID, RequestedBy: "controller-1", Reason: "proven dependency stall",
+	})
+	if err == nil || !strings.Contains(err.Error(), "still current") {
+		t.Fatalf("RefreshGraphReplan() error = %v, want current-request rejection", err)
+	}
+}
+
+func TestRefreshGraphReplanRejectsScopeOrAcceptanceChange(t *testing.T) {
+	t.Parallel()
+
+	projectRoot := t.TempDir()
+	testhelpers.SetupTestGitRepo(t, projectRoot)
+	statePath, _ := testhelpers.SetupLizaDir(t, projectRoot)
+	state := graphReplanDependencyStallState()
+	bb := testhelpers.WriteInitialState(t, statePath, state)
+	request, err := RequestGraphReplan(projectRoot, RequestGraphReplanInput{
+		RunID: state.Goal.ID, RequestedBy: "controller-1", Reason: "proven dependency stall",
+	})
+	if err != nil {
+		t.Fatalf("RequestGraphReplan() error: %v", err)
+	}
+	if err := bb.Modify(func(current *models.State) error {
+		current.FindTask("blocked-implementation").Scope = "broadened product scope"
+		return nil
+	}); err != nil {
+		t.Fatalf("change scope: %v", err)
+	}
+
+	_, err = RefreshGraphReplan(projectRoot, RefreshGraphReplanInput{
+		RequestID: request.Request.ID, RunID: state.Goal.ID, RequestedBy: "controller-1", Reason: "proven dependency stall",
+	})
+	if err == nil || !strings.Contains(err.Error(), "refresh is forbidden") {
+		t.Fatalf("RefreshGraphReplan() error = %v, want scope-boundary rejection", err)
+	}
+}
+
 func TestClaimTaskRejectsUnsafeCompleteDependencyGraph(t *testing.T) {
 	t.Parallel()
 
@@ -236,7 +357,7 @@ func graphReplanDependencyStallState() *models.State {
 	now := time.Now().UTC()
 	blocked := testhelpers.BuildTaskByStatus("blocked-implementation", models.TaskStatusBlocked, now)
 	blocked.AssignedTo = nil
-	plan := testhelpers.BuildTaskByStatus("dependency-held-plan", models.TaskStatusDraftCodingPlan, now)
+	plan := testhelpers.BuildTaskByStatus("dependency-held-plan", models.TaskStatusReady, now)
 	plan.DependsOn = []string{blocked.ID}
 	plan.DependencyContracts = []models.DependencyContract{{
 		ProviderTask: blocked.ID, Purpose: "Consume the implementation contract", Gate: models.DependencyGateBeforeStart,

@@ -271,7 +271,18 @@ identity- and graph-generation-bound request:
 §BRAND_BINARY_NAME§ -C <project-root> request-graph-replan --run-id <goal-id> --requested-by <controller-id> --reason "<proven graph deadlock>" --json
 ```
 
-This command cannot supply or mutate tasks or edges. It wakes the registered
+If that request becomes stale because its graph or candidate fingerprint
+changes while scope and acceptance remain unchanged, refresh it atomically
+instead of retrying it:
+
+```bash
+§BRAND_BINARY_NAME§ -C <project-root> refresh-graph-replan <request-id> --run-id <goal-id> --requested-by <controller-id> --reason "<current proven graph deadlock>" --json
+```
+
+Neither controller command can supply or mutate tasks or edges. Refresh marks
+the stale request superseded and appends one linked, current-fingerprint
+successor in the same locked transaction; replay returns that same successor.
+The open request wakes the registered
 native orchestrator, which claims the request with `claim-graph-replan`, makes
 the smallest in-scope correction through generation-fenced native operations,
 and closes it with `complete-graph-replan --diagnosis ... --updates-file ...`.

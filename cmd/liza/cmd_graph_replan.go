@@ -45,6 +45,34 @@ var requestGraphReplanCmd = &cobra.Command{
 	},
 }
 
+var refreshGraphReplanCmd = &cobra.Command{
+	Use:   "refresh-graph-replan <request-id>",
+	Short: "Replace one stale graph re-plan request with a current identity-bound request",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) (retErr error) {
+		finish := prepareGraphReplanJSON(cmd, &retErr)
+		defer finish()
+		projectRoot, err := requireProjectRoot()
+		if err != nil {
+			return err
+		}
+		runID, _ := cmd.Flags().GetString("run-id")
+		requestedBy, _ := cmd.Flags().GetString("requested-by")
+		reason, _ := cmd.Flags().GetString("reason")
+		result, err := ops.RefreshGraphReplan(projectRoot, ops.RefreshGraphReplanInput{
+			RequestID: args[0], RunID: runID, RequestedBy: requestedBy, Reason: reason,
+		})
+		if isJSON(cmd) {
+			return jsonout.WriteResult(os.Stdout, result, nil, err)
+		}
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(cmd.OutOrStdout(), "Graph re-plan refreshed: %s -> %s\n", result.Superseded.ID, result.Request.ID)
+		return nil
+	},
+}
+
 var claimGraphReplanCmd = &cobra.Command{
 	Use:   "claim-graph-replan <request-id>",
 	Short: "Bind a graph re-plan request to the current native orchestrator generation",
@@ -149,8 +177,8 @@ func prepareGraphReplanJSON(cmd *cobra.Command, retErr *error) func() {
 }
 
 func init() {
-	rootCmd.AddCommand(requestGraphReplanCmd, claimGraphReplanCmd, completeGraphReplanCmd)
-	for _, command := range []*cobra.Command{requestGraphReplanCmd, claimGraphReplanCmd, completeGraphReplanCmd} {
+	rootCmd.AddCommand(requestGraphReplanCmd, refreshGraphReplanCmd, claimGraphReplanCmd, completeGraphReplanCmd)
+	for _, command := range []*cobra.Command{requestGraphReplanCmd, refreshGraphReplanCmd, claimGraphReplanCmd, completeGraphReplanCmd} {
 		addJSONFlag(command)
 	}
 	requestGraphReplanCmd.Flags().String("run-id", "", "exact Lisa goal ID for this run (required)")
@@ -159,6 +187,12 @@ func init() {
 	_ = requestGraphReplanCmd.MarkFlagRequired("run-id")
 	_ = requestGraphReplanCmd.MarkFlagRequired("requested-by")
 	_ = requestGraphReplanCmd.MarkFlagRequired("reason")
+	refreshGraphReplanCmd.Flags().String("run-id", "", "exact Lisa goal ID for this run (required)")
+	refreshGraphReplanCmd.Flags().String("requested-by", "", "same controller identity that owns the stale request (required)")
+	refreshGraphReplanCmd.Flags().String("reason", "", "current proven graph-deadlock reason (required)")
+	_ = refreshGraphReplanCmd.MarkFlagRequired("run-id")
+	_ = refreshGraphReplanCmd.MarkFlagRequired("requested-by")
+	_ = refreshGraphReplanCmd.MarkFlagRequired("reason")
 	addAgentIDFlag(claimGraphReplanCmd)
 	addAgentIDFlag(completeGraphReplanCmd)
 	completeGraphReplanCmd.Flags().String("diagnosis", "", "orchestrator diagnosis (required)")

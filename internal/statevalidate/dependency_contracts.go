@@ -64,6 +64,13 @@ func ValidateDependencyGraph(state *models.State, resolver *pipeline.Resolver) e
 
 func validateGraphReplanRequests(state *models.State) []string {
 	seen := map[string]bool{}
+	byID := make(map[string]*models.GraphReplanRequest, len(state.GraphReplanRequests))
+	for index := range state.GraphReplanRequests {
+		request := &state.GraphReplanRequests[index]
+		if request.ID != "" && byID[request.ID] == nil {
+			byID[request.ID] = request
+		}
+	}
 	open := 0
 	var issues []string
 	for index, request := range state.GraphReplanRequests {
@@ -92,6 +99,14 @@ func validateGraphReplanRequests(state *models.State) []string {
 		case models.GraphReplanCompleted:
 			if request.Orchestrator == nil || request.StartedAt == nil || request.CompletedAt == nil || request.ResultGeneration == "" || request.Diagnosis == "" || len(request.GraphChanges) == 0 || request.ValidationResult != "valid" {
 				issues = append(issues, prefix+" completed request lacks ownership, diagnosis, graph changes, result generation, or valid result")
+			}
+		case models.GraphReplanSuperseded:
+			successor := byID[request.SuccessorRequestID]
+			if request.SupersededAt == nil || request.SuccessorRequestID == "" || successor == nil || successor.PredecessorRequestID != request.ID {
+				issues = append(issues, prefix+" superseded request lacks a linked successor")
+			}
+			if (request.Orchestrator == nil) != (request.StartedAt == nil) || request.CompletedAt != nil {
+				issues = append(issues, prefix+" superseded request has inconsistent repair or completion metadata")
 			}
 		default:
 			issues = append(issues, prefix+" has invalid status "+string(request.Status))

@@ -20,6 +20,7 @@ import (
 
 const (
 	requestGraphReplanOperation  = "request-graph-replan"
+	refreshGraphReplanOperation  = "refresh-graph-replan"
 	claimGraphReplanOperation    = "claim-graph-replan"
 	completeGraphReplanOperation = "complete-graph-replan"
 )
@@ -31,6 +32,19 @@ type RequestGraphReplanInput struct {
 }
 
 type RequestGraphReplanResult struct {
+	Request    models.GraphReplanRequest `json:"request"`
+	Idempotent bool                      `json:"idempotent"`
+}
+
+type RefreshGraphReplanInput struct {
+	RequestID   string
+	RunID       string
+	RequestedBy string
+	Reason      string
+}
+
+type RefreshGraphReplanResult struct {
+	Superseded models.GraphReplanRequest `json:"superseded"`
 	Request    models.GraphReplanRequest `json:"request"`
 	Idempotent bool                      `json:"idempotent"`
 }
@@ -75,7 +89,9 @@ func RequestGraphReplan(projectRoot string, input RequestGraphReplanInput) (*Req
 			return &PreconditionError{Reason: fmt.Sprintf("run identity mismatch: got %q, want Lisa goal %q", input.RunID, state.Goal.ID)}
 		}
 		taskIDs, edges, generation := statevalidate.DependencyGraphSnapshot(state)
-		requestID := graphReplanRequestID(input.RunID, generation)
+		scopeFingerprint := statevalidate.ScopeContractFingerprint(state)
+		candidateFingerprint := statevalidate.CandidateLineageFingerprint(state)
+		requestID := graphReplanRequestID(input.RunID, generation, scopeFingerprint, candidateFingerprint)
 		for i := range state.GraphReplanRequests {
 			existing := &state.GraphReplanRequests[i]
 			if existing.ID == requestID {
@@ -97,14 +113,7 @@ func RequestGraphReplan(projectRoot string, input RequestGraphReplanInput) (*Req
 			}
 			graphErr = fmt.Errorf("%s", stallDiagnostic)
 		}
-		request := models.GraphReplanRequest{
-			ID: requestID, RunID: input.RunID, GraphGeneration: generation,
-			ScopeFingerprint:     statevalidate.ScopeContractFingerprint(state),
-			CandidateFingerprint: statevalidate.CandidateLineageFingerprint(state),
-			RequestedBy:          input.RequestedBy, Reason: input.Reason, Diagnostic: graphErr.Error(),
-			RequestedAt: now, Status: models.GraphReplanPending,
-			InitialTaskIDs: slices.Clone(taskIDs), InitialEdges: slices.Clone(edges),
-		}
+		request := newGraphReplanRequest(input.RunID, input.RequestedBy, input.Reason, graphErr.Error(), generation, scopeFingerprint, candidateFingerprint, taskIDs, edges, now)
 		state.GraphReplanRequests = append(state.GraphReplanRequests, request)
 		result = RequestGraphReplanResult{Request: request}
 		return nil
@@ -113,6 +122,91 @@ func RequestGraphReplan(projectRoot string, input RequestGraphReplanInput) (*Req
 		return nil, fmt.Errorf("request graph re-plan: %w", err)
 	}
 	_ = log.New(lp.LogPath()).Append(log.Entry{Timestamp: now, Agent: input.RequestedBy, Action: requestGraphReplanOperation, Detail: result.Request.ID + ": " + input.Reason})
+	return &result, nil
+}
+
+// RefreshGraphReplan atomically supersedes one stale request and creates its
+// current-state successor. It changes no task or dependency and is safe to
+// replay after an interrupted controller call.
+func RefreshGraphReplan(projectRoot string, input RefreshGraphReplanInput) (*RefreshGraphReplanResult, error) {
+	input.RequestID = strings.TrimSpace(input.RequestID)
+	input.RunID = strings.TrimSpace(input.RunID)
+	input.RequestedBy = strings.TrimSpace(input.RequestedBy)
+	input.Reason = strings.TrimSpace(input.Reason)
+	if input.RequestID == "" || input.RunID == "" || input.RequestedBy == "" || input.Reason == "" {
+		return nil, &PreconditionError{Reason: "request_id, run_id, requested_by, and reason are required"}
+	}
+	resolver, _, err := loadResolver(projectRoot)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load pipeline config: %w", err)
+	}
+	lp := paths.New(projectRoot)
+	bb := db.For(lp.StatePath())
+	var result RefreshGraphReplanResult
+	now := time.Now().UTC()
+	err = bb.Modify(func(state *models.State) error {
+		if input.RunID != state.Goal.ID {
+			return &PreconditionError{Reason: fmt.Sprintf("run identity mismatch: got %q, want Lisa goal %q", input.RunID, state.Goal.ID)}
+		}
+		request := findGraphReplanRequest(state, input.RequestID)
+		if request == nil {
+			return &PreconditionError{Reason: fmt.Sprintf("graph re-plan request %s not found", input.RequestID)}
+		}
+		if request.Status == models.GraphReplanSuperseded {
+			successor := findGraphReplanRequest(state, request.SuccessorRequestID)
+			if successor == nil || successor.PredecessorRequestID != request.ID || successor.RequestedBy != input.RequestedBy || successor.Reason != input.Reason {
+				return &PreconditionError{Reason: "superseded graph re-plan request does not match this refresh"}
+			}
+			result = RefreshGraphReplanResult{Superseded: *request, Request: *successor, Idempotent: true}
+			return nil
+		}
+		if request.Status != models.GraphReplanPending && request.Status != models.GraphReplanRepairing {
+			return &PreconditionError{Reason: fmt.Sprintf("graph re-plan request %s is %s", input.RequestID, request.Status)}
+		}
+		if request.RunID != input.RunID || request.RequestedBy != input.RequestedBy {
+			return &PreconditionError{Reason: "graph re-plan request ownership does not match this refresh"}
+		}
+		if open := state.OpenGraphReplanRequest(); open == nil || open.ID != request.ID {
+			return &PreconditionError{Reason: "graph re-plan request is not the run's current open request"}
+		}
+		if active := activeNonOrchestratorOwnership(state); len(active) > 0 {
+			return &PreconditionError{Reason: "cannot refresh graph re-plan while worker ownership is active: " + strings.Join(active, ", ")}
+		}
+
+		taskIDs, edges, generation := statevalidate.DependencyGraphSnapshot(state)
+		scopeFingerprint := statevalidate.ScopeContractFingerprint(state)
+		candidateFingerprint := statevalidate.CandidateLineageFingerprint(state)
+		if scopeFingerprint != request.ScopeFingerprint {
+			return &PreconditionError{Reason: "scope or acceptance changed since the graph re-plan request; controller refresh is forbidden"}
+		}
+		if generation == request.GraphGeneration && candidateFingerprint == request.CandidateFingerprint {
+			return &PreconditionError{Reason: "graph re-plan request is still current and must be completed, not refreshed"}
+		}
+		graphErr := statevalidate.ValidateDependencyGraph(state, resolver)
+		if graphErr == nil {
+			stallDiagnostic := dependencyStallDiagnostic(state, resolver)
+			if stallDiagnostic == "" {
+				return &PreconditionError{Reason: "current state no longer proves a dependency graph fault or full dependency stall"}
+			}
+			graphErr = fmt.Errorf("%s", stallDiagnostic)
+		}
+		requestID := graphReplanRequestID(input.RunID, generation, scopeFingerprint, candidateFingerprint)
+		if findGraphReplanRequest(state, requestID) != nil {
+			return &PreconditionError{Reason: fmt.Sprintf("current graph re-plan request %s already exists", requestID)}
+		}
+		successor := newGraphReplanRequest(input.RunID, input.RequestedBy, input.Reason, graphErr.Error(), generation, scopeFingerprint, candidateFingerprint, taskIDs, edges, now)
+		successor.PredecessorRequestID = request.ID
+		request.Status = models.GraphReplanSuperseded
+		request.SupersededAt = &now
+		request.SuccessorRequestID = successor.ID
+		state.GraphReplanRequests = append(state.GraphReplanRequests, successor)
+		result = RefreshGraphReplanResult{Superseded: *request, Request: successor}
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("refresh graph re-plan: %w", err)
+	}
+	_ = log.New(lp.LogPath()).Append(log.Entry{Timestamp: now, Agent: input.RequestedBy, Action: refreshGraphReplanOperation, Detail: input.RequestID + " -> " + result.Request.ID + ": " + input.Reason})
 	return &result, nil
 }
 
@@ -291,8 +385,17 @@ func findGraphReplanRequest(state *models.State, requestID string) *models.Graph
 	return nil
 }
 
-func graphReplanRequestID(runID, generation string) string {
-	digest := sha256.Sum256([]byte(runID + "\x00" + generation))
+func newGraphReplanRequest(runID, requestedBy, reason, diagnostic, generation, scopeFingerprint, candidateFingerprint string, taskIDs []string, edges []models.DependencyGraphEdge, now time.Time) models.GraphReplanRequest {
+	return models.GraphReplanRequest{
+		ID: graphReplanRequestID(runID, generation, scopeFingerprint, candidateFingerprint), RunID: runID, GraphGeneration: generation,
+		ScopeFingerprint: scopeFingerprint, CandidateFingerprint: candidateFingerprint,
+		RequestedBy: requestedBy, Reason: reason, Diagnostic: diagnostic, RequestedAt: now, Status: models.GraphReplanPending,
+		InitialTaskIDs: slices.Clone(taskIDs), InitialEdges: slices.Clone(edges),
+	}
+}
+
+func graphReplanRequestID(runID, generation, scopeFingerprint, candidateFingerprint string) string {
+	digest := sha256.Sum256([]byte(strings.Join([]string{runID, generation, scopeFingerprint, candidateFingerprint}, "\x00")))
 	return "graph-replan-" + hex.EncodeToString(digest[:8])
 }
 

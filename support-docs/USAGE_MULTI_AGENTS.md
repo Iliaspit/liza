@@ -637,17 +637,24 @@ Use `§BRAND_BINARY_NAME§ -C <project-root> ...` to select a §BRAND_NAME_TITLE
 | `§BRAND_BINARY_NAME§ clear-stale-review-claims` | Clear expired review leases                                                                                          |
 | `§BRAND_BINARY_NAME§ get <query>` | Query state data (tasks, agents, etc.)                                                                               |
 | `§BRAND_BINARY_NAME§ request-graph-replan --run-id <goal-id> --requested-by <controller-id> --reason "..."` | Append a controller request for a proven invalid dependency graph or fully dependency-stalled run with durable BLOCKED reasons; grants no task mutation authority |
+| `§BRAND_BINARY_NAME§ refresh-graph-replan <request-id> --run-id <goal-id> --requested-by <controller-id> --reason "..."` | Atomically supersede one stale request and append its current-fingerprint successor; idempotent and grants no task mutation authority |
 | `§BRAND_BINARY_NAME§ claim-graph-replan <request-id>` / `complete-graph-replan <request-id>` | Registered orchestrator claims, repairs through native operations, and closes the generation-fenced request after full validation |
 
 An external controller cannot add, replace, retarget, or otherwise mutate Lisa
 tasks through the graph re-plan request. `request-graph-replan` atomically binds
-the request to the exact Lisa goal and dependency-graph generation and is
+the request to the exact Lisa goal, graph, scope, acceptance, and candidate
+fingerprints and is
 idempotent for the same controller identity and reason. The native orchestrator
 is woken, re-reads durable task/candidate/evidence state, claims the request with
 its current registration generation, and performs only the smallest in-scope
 native repair. `complete-graph-replan` records the diagnosis and exact graph
 diff and refuses completion if ownership, scope, acceptance, candidate lineage,
 or final graph validation is unsafe.
+If the graph or candidate fingerprint changes before completion while scope and
+acceptance remain unchanged, the orchestrator must not retry the stale
+operation. The controller uses `refresh-graph-replan`; Lisa preserves the
+superseded request and atomically creates one linked current-state request.
+Scope or acceptance drift remains a fail-closed product boundary.
 
 For a repair spanning multiple active tasks or complete dependency lists, write
 a JSON request with operation `apply-dependency-repair`, the blocked source task

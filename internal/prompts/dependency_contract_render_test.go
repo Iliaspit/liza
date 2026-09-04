@@ -49,6 +49,8 @@ func TestGraphReplanWakePromptKeepsControllerReadOnly(t *testing.T) {
 	for _, want := range []string{
 		"claim-graph-replan graph-replan-abc",
 		"complete-graph-replan graph-replan-abc",
+		"do not retry the unchanged operation",
+		"refresh-graph-replan",
 		"use only Lisa-native task operations",
 		"Refuse product, scope, or acceptance changes",
 	} {

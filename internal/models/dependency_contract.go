@@ -50,9 +50,10 @@ type DependencyContract struct {
 type GraphReplanStatus string
 
 const (
-	GraphReplanPending   GraphReplanStatus = "pending"
-	GraphReplanRepairing GraphReplanStatus = "repairing"
-	GraphReplanCompleted GraphReplanStatus = "completed"
+	GraphReplanPending    GraphReplanStatus = "pending"
+	GraphReplanRepairing  GraphReplanStatus = "repairing"
+	GraphReplanCompleted  GraphReplanStatus = "completed"
+	GraphReplanSuperseded GraphReplanStatus = "superseded"
 )
 
 // DependencyGraphEdge is the audit representation used to bind a re-plan
@@ -88,6 +89,9 @@ type GraphReplanRequest struct {
 	ValidationResult     string                `yaml:"validation_result,omitempty" json:"validation_result,omitempty"`
 	InitialTaskIDs       []string              `yaml:"initial_task_ids,omitempty" json:"initial_task_ids,omitempty"`
 	InitialEdges         []DependencyGraphEdge `yaml:"initial_edges,omitempty" json:"initial_edges,omitempty"`
+	PredecessorRequestID string                `yaml:"predecessor_request_id,omitempty" json:"predecessor_request_id,omitempty"`
+	SupersededAt         *time.Time            `yaml:"superseded_at,omitempty" json:"superseded_at,omitempty"`
+	SuccessorRequestID   string                `yaml:"successor_request_id,omitempty" json:"successor_request_id,omitempty"`
 }
 
 func (s *State) OpenGraphReplanRequest() *GraphReplanRequest {
