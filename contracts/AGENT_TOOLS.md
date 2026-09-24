@@ -50,6 +50,10 @@ or Bash/RTK use, read
 `~/§BRAND_GLOBAL_DIRNAME§/support-docs/CLAUDE_TOOL_NOTES.md`. These notes
 do not apply to other providers. Codex sessions prefix shell commands with
 `rtk`; do not infer Claude-specific behavior from that rule.
+Codex RTK exceptions: use `rtk proxy <command>` for Vitest/Jest metadata or
+help commands, and `rtk proxy pytest --collect-only ...` when collection output
+is needed. Normal RTK rewriting can misreport these results; do not rerun
+passing commands merely because RTK output is short.
 
 Before creating or changing a GitHub issue, PR, review, comment, or release,
 read `~/§BRAND_GLOBAL_DIRNAME§/support-docs/GIT_PROTOCOL.md`.

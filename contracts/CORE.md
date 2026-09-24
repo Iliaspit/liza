@@ -166,7 +166,7 @@ of a changed candidate, read `TASK_EXECUTION.md` for self-review, deliverables,
 partial completion, and debt handling. If any required item remains incomplete,
 report its status and reason. For analysis, re-read load-bearing claims, mark
 each as evidenced or unverified, and challenge evidence set aside because it
-opposed the conclusion.
+opposed the conclusion. Research tasks deliver findings, not code.
 
 ### Rule 4: FAST PATH (Task)
 

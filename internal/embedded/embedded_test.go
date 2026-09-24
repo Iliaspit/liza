@@ -91,12 +91,18 @@ func TestContractProgressiveDisclosureKeepsMandatoryGates(t *testing.T) {
 		"No state change without prior approval/checkpoint",
 		"No logged, displayed, committed, or diffed secret",
 		"support-docs/TASK_EXECUTION.md",
+		"Research tasks deliver findings, not code",
 	} {
 		if !strings.Contains(string(core), want) {
 			t.Errorf("CORE.md missing mandatory gate or task trigger: %q", want)
 		}
 	}
-	for _, want := range []string{"support-docs/TOOL_ROUTING.md", "support-docs/CLAUDE_TOOL_NOTES.md"} {
+	for _, want := range []string{
+		"support-docs/TOOL_ROUTING.md",
+		"support-docs/CLAUDE_TOOL_NOTES.md",
+		"rtk proxy pytest --collect-only",
+		"Vitest/Jest metadata",
+	} {
 		if !strings.Contains(string(tools), want) {
 			t.Errorf("AGENT_TOOLS.md missing on-demand trigger: %q", want)
 		}
