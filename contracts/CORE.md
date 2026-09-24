@@ -280,7 +280,7 @@ tiers. Setup/config/troubleshooting details are on demand in
 ## Protocol References
 
 Before triggering work, read the applicable
-`~/§BRAND_GLOBAL_DIRNAME§/skills/<name>/SKILL.md` completely:
+`~/§BRAND_GLOBAL_DIRNAME§/skills/<name>/SKILL.md` completely and follow it:
 
 | Skill | Trigger |
 |-------|---------|
@@ -306,6 +306,9 @@ In Pairing mode: Do not make any edits to files without first presenting the pro
 
 Full means fresh-session initialization; Working Set and Kernel are
 mid-session degradation tiers (subagents instead return partial results).
+At state transitions or after extended time, Pairing asks
+`"Drift check: Still on [task]? Key constraint: [X]. (Confirm or correct)"`;
+Multi-Agent re-reads its blackboard task and verifies checkpoint alignment.
 On context reset, plan-to-execution transition, degraded recall, or drift,
 read `~/§BRAND_GLOBAL_DIRNAME§/support-docs/CONTRACT_RECOVERY.md` before
 acting for the re-read list, announcements, mode-specific response, and

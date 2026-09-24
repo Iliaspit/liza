@@ -92,6 +92,8 @@ func TestContractProgressiveDisclosureKeepsMandatoryGates(t *testing.T) {
 		"No logged, displayed, committed, or diffed secret",
 		"support-docs/TASK_EXECUTION.md",
 		"support-docs/CONTRACT_RECOVERY.md",
+		"SKILL.md` completely and follow it",
+		"At state transitions or after extended time, Pairing asks",
 		"Before execution, perform the security checklist",
 		"Research tasks deliver findings, not code",
 	} {
