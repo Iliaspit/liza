@@ -44,6 +44,9 @@ func TestListEmbeddedFiles(t *testing.T) {
 		"support-docs/USAGE_MULTI_AGENTS.md":    false,
 		"support-docs/CONTRACT_RECOVERY.md":     false,
 		"support-docs/GIT_PROTOCOL.md":          false,
+		"support-docs/TASK_EXECUTION.md":        false,
+		"support-docs/TOOL_ROUTING.md":          false,
+		"support-docs/CLAUDE_TOOL_NOTES.md":     false,
 	}
 
 	for _, file := range files {
@@ -60,12 +63,49 @@ func TestListEmbeddedFiles(t *testing.T) {
 }
 
 func TestAgentToolsOptionalIndexGuidance(t *testing.T) {
-	content, err := contractsFS.ReadFile("contracts/AGENT_TOOLS.md")
+	contract, err := contractsFS.ReadFile("contracts/AGENT_TOOLS.md")
 	if err != nil {
 		t.Fatalf("reading embedded AGENT_TOOLS.md: %v", err)
 	}
+	if !strings.Contains(string(contract), "support-docs/TOOL_ROUTING.md") {
+		t.Fatal("embedded AGENT_TOOLS.md missing on-demand tool routing trigger")
+	}
+	content, err := supportDocsFS.ReadFile("support-docs/TOOL_ROUTING.md")
+	if err != nil {
+		t.Fatalf("reading embedded TOOL_ROUTING.md: %v", err)
+	}
 
 	assertAgentToolsOptionalIndexGuidance(t, string(content))
+}
+
+func TestContractProgressiveDisclosureKeepsMandatoryGates(t *testing.T) {
+	core, err := contractsFS.ReadFile("contracts/CORE.md")
+	if err != nil {
+		t.Fatalf("reading embedded CORE.md: %v", err)
+	}
+	tools, err := contractsFS.ReadFile("contracts/AGENT_TOOLS.md")
+	if err != nil {
+		t.Fatalf("reading embedded AGENT_TOOLS.md: %v", err)
+	}
+	for _, want := range []string{
+		"No state change without prior approval/checkpoint",
+		"No logged, displayed, committed, or diffed secret",
+		"support-docs/TASK_EXECUTION.md",
+	} {
+		if !strings.Contains(string(core), want) {
+			t.Errorf("CORE.md missing mandatory gate or task trigger: %q", want)
+		}
+	}
+	for _, want := range []string{"support-docs/TOOL_ROUTING.md", "support-docs/CLAUDE_TOOL_NOTES.md"} {
+		if !strings.Contains(string(tools), want) {
+			t.Errorf("AGENT_TOOLS.md missing on-demand trigger: %q", want)
+		}
+	}
+	for _, name := range []string{"TASK_EXECUTION.md", "TOOL_ROUTING.md", "CLAUDE_TOOL_NOTES.md"} {
+		if _, err := supportDocsFS.ReadFile("support-docs/" + name); err != nil {
+			t.Errorf("reading embedded %s: %v", name, err)
+		}
+	}
 }
 
 func TestLessonCaptureUsesGuardrailsAgentIndex(t *testing.T) {
@@ -184,12 +224,12 @@ func assertAgentToolsOptionalIndexGuidance(t *testing.T, content string) {
 		"scip-search packages --index <index-path>",
 		"scip-search impact --index <index-path>",
 		"disabled, unavailable, or not advertised",
-		"fall back to `rg`, `ast-grep`, direct reads",
+		"fall back to `rg`, `ast-grep`, and direct reads",
 		"Morph MCP only when policy exposes it",
 	}
 	for _, want := range required {
 		if !strings.Contains(content, want) {
-			t.Errorf("embedded AGENT_TOOLS.md missing optional-index guidance: %q", want)
+			t.Errorf("embedded TOOL_ROUTING.md missing optional-index guidance: %q", want)
 		}
 	}
 
@@ -203,7 +243,7 @@ func assertAgentToolsOptionalIndexGuidance(t *testing.T, content string) {
 	}
 	for _, text := range forbidden {
 		if strings.Contains(content, text) {
-			t.Errorf("embedded AGENT_TOOLS.md contains project-specific generated path guidance: %q", text)
+			t.Errorf("embedded TOOL_ROUTING.md contains project-specific generated path guidance: %q", text)
 		}
 	}
 }

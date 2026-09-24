@@ -23,9 +23,16 @@ func TestIndexingActivationFreshSetupInstallsGenericOptionalIndexGuidance(t *tes
 		t.Fatalf("SetupCommand(): %v", err)
 	}
 
-	content, err := os.ReadFile(filepath.Join(targetDir, "AGENT_TOOLS.md"))
+	contract, err := os.ReadFile(filepath.Join(targetDir, "AGENT_TOOLS.md"))
 	if err != nil {
 		t.Fatalf("ReadFile(AGENT_TOOLS.md): %v", err)
+	}
+	if !strings.Contains(string(contract), "support-docs/TOOL_ROUTING.md") {
+		t.Fatal("installed AGENT_TOOLS.md missing on-demand routing trigger")
+	}
+	content, err := os.ReadFile(filepath.Join(targetDir, "support-docs", "TOOL_ROUTING.md"))
+	if err != nil {
+		t.Fatalf("ReadFile(TOOL_ROUTING.md): %v", err)
 	}
 
 	text := string(content)
@@ -38,7 +45,7 @@ func TestIndexingActivationFreshSetupInstallsGenericOptionalIndexGuidance(t *tes
 		"scip-search packages --index <index-path>",
 		"scip-search impact --index <index-path>",
 		"disabled, unavailable, or not advertised",
-		"fall back to `rg`, `ast-grep`, direct reads",
+		"fall back to `rg`, `ast-grep`, and direct reads",
 		"Morph MCP only when policy exposes it",
 	)
 	assertIndexingActivationContainsNone(t, text,

@@ -16,6 +16,9 @@ Contract split complete. Original `_archive/CONTRACT_FOR_PAIRING_AGENTS_v3.md` p
 | [MULTI_AGENT_MODE.md](MULTI_AGENT_MODE.md) | Peer-supervised §BRAND_NAME_TITLE§ system | Complete |
 | [CONTRACT_RECOVERY.md](../support-docs/CONTRACT_RECOVERY.md) | On-demand RESET, conflict, tool-failure, and batch recovery | Complete |
 | [GIT_PROTOCOL.md](../support-docs/GIT_PROTOCOL.md) | On-demand Git and exploratory-state protocol | Complete |
+| [TASK_EXECUTION.md](../support-docs/TASK_EXECUTION.md) | On-demand implementation, validation, and completion procedure | Complete |
+| [TOOL_ROUTING.md](../support-docs/TOOL_ROUTING.md) | On-demand indexed-search, tool routing, and command reference | Complete |
+| [CLAUDE_TOOL_NOTES.md](../support-docs/CLAUDE_TOOL_NOTES.md) | Claude-only tool compatibility notes | Complete |
 | [CONTRACT_FOR_PAIRING_AGENTS_v3.md](_archive/CONTRACT_FOR_PAIRING_AGENTS_v3.md) | Original monolithic contract (reference) | Preserved |
 
 ## Deployment
@@ -57,13 +60,14 @@ guide for user-facing setup. The installed configuration reference is
 - Protocol References (Debugging, Test, Architecture, Tools)
 - Context Management
 - Security Protocol
-- Recovery and Git triggers (full protocols in on-demand support docs)
+- Task execution, recovery, and Git triggers (full procedures in on-demand support docs)
 - Mental Models
 - Anti-Gaming Clause
 
-The two support protocols are packaged with global support docs but are not
-part of the mandatory startup read. Agents read them at the trigger named in
-CORE. The mode annex, guardrails, and AGENT_TOOLS remain mandatory at startup.
+These support protocols are packaged with global support docs but are not part
+of the mandatory startup read. Agents read them at the triggers named in CORE
+or AGENT_TOOLS. The mode annex, guardrails, and the concise AGENT_TOOLS kernel
+remain mandatory at startup.
 
 ### PAIRING_MODE.md — Human-supervised collaboration
 - Contract Authority (human overrides)

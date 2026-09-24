@@ -122,7 +122,7 @@ Generated SCIP indexes were refreshed before this prompt was built and reflect t
 {{ .DisplayLanguage }} index: {{ .ShellIndexPath }}
 {{- end }}
 
-Use `~/{{globalDirName}}/AGENT_TOOLS.md` for `scip-search` command syntax, routing rules, and freshness caveats.
+Use `~/{{globalDirName}}/support-docs/TOOL_ROUTING.md` for `scip-search` command syntax, routing rules, and freshness caveats.
 {{- end }}
 
 {{- if .StacklitIndexes }}
@@ -134,7 +134,7 @@ Stacklit index files are available for this target. They are repository snapshot
 
 Stacklit index: {{ .ShellIndexPath }}
 {{- end }}
-Use `~/{{globalDirName}}/AGENT_TOOLS.md` for Stacklit command syntax, routing rules, and freshness caveats.
+Use `~/{{globalDirName}}/support-docs/TOOL_ROUTING.md` for Stacklit command syntax, routing rules, and freshness caveats.
 {{- end }}
 
 {{- if .FunctionalClusters }}
@@ -146,7 +146,7 @@ Functional Clusters artifacts are available for this target. They are advisory c
 
 Functional Clusters artifact: {{ .ShellIndexPath }}
 {{- end }}
-Use `~/{{globalDirName}}/AGENT_TOOLS.md` for Functional Clusters command syntax, routing rules, and freshness caveats.
+Use `~/{{globalDirName}}/support-docs/TOOL_ROUTING.md` for Functional Clusters command syntax, routing rules, and freshness caveats.
 {{- end }}
 
 {{- if .SembleSearch }}
@@ -155,6 +155,6 @@ Use `~/{{globalDirName}}/AGENT_TOOLS.md` for Functional Clusters command syntax,
 Semble is available for semantic repository search in this target root:
 {{ .SembleSearch.ShellTargetRoot }}
 
-Use `~/{{globalDirName}}/AGENT_TOOLS.md` for Semble command syntax, content modes, routing rules, and proof requirements.
+Use `~/{{globalDirName}}/support-docs/TOOL_ROUTING.md` for Semble command syntax, content modes, routing rules, and proof requirements.
 {{- end }}
 {{- end -}}

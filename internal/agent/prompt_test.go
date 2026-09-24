@@ -517,7 +517,7 @@ func TestBuildPromptWithContextScipIndexesUseTaskWorktree(t *testing.T) {
 	if strings.Contains(prompt, taskTypescriptIndex) {
 		t.Fatalf("prompt contains missing task typescript SCIP index path %q", taskTypescriptIndex)
 	}
-	if !strings.Contains(prompt, "Use `~/"+paths.GlobalDirName()+"/AGENT_TOOLS.md` for `scip-search` command syntax, routing rules, and freshness caveats.") {
+	if !strings.Contains(prompt, "Use `~/"+paths.GlobalDirName()+"/support-docs/TOOL_ROUTING.md` for `scip-search` command syntax, routing rules, and freshness caveats.") {
 		t.Fatalf("prompt missing AGENT_TOOLS scip-search usage pointer")
 	}
 	if strings.Contains(prompt, "scip-search implementations --index") {
@@ -643,7 +643,7 @@ func TestBuildPromptWithContextStacklitIndexUsesTaskWorktree(t *testing.T) {
 	if !strings.Contains(prompt, "Stacklit index: "+shellQuoteForTest(taskStacklitIndex)) {
 		t.Fatalf("prompt missing task worktree Stacklit index path %q", taskStacklitIndex)
 	}
-	if !strings.Contains(prompt, "Use `~/"+paths.GlobalDirName()+"/AGENT_TOOLS.md` for Stacklit command syntax, routing rules, and freshness caveats.") {
+	if !strings.Contains(prompt, "Use `~/"+paths.GlobalDirName()+"/support-docs/TOOL_ROUTING.md` for Stacklit command syntax, routing rules, and freshness caveats.") {
 		t.Fatalf("prompt missing AGENT_TOOLS Stacklit usage pointer")
 	}
 	if strings.Contains(prompt, "stacklit derive --ai-summary -i") {
@@ -701,7 +701,7 @@ func TestBuildPromptWithContextFunctionalClustersUsesTaskWorktree(t *testing.T) 
 	if !strings.Contains(prompt, "Functional Clusters artifact: "+shellQuoteForTest(taskArtifact)) {
 		t.Fatalf("prompt missing task worktree Functional Clusters artifact path %q", taskArtifact)
 	}
-	if !strings.Contains(prompt, "Use `~/"+paths.GlobalDirName()+"/AGENT_TOOLS.md` for Functional Clusters command syntax, routing rules, and freshness caveats.") {
+	if !strings.Contains(prompt, "Use `~/"+paths.GlobalDirName()+"/support-docs/TOOL_ROUTING.md` for Functional Clusters command syntax, routing rules, and freshness caveats.") {
 		t.Fatalf("prompt missing AGENT_TOOLS Functional Clusters usage pointer")
 	}
 	if strings.Contains(prompt, "functional-clusters list --clusters") {
@@ -777,7 +777,7 @@ func TestBuildPromptWithContextSembleSearchUsesRoleWorktreeRoot(t *testing.T) {
 			if !strings.Contains(prompt, shellQuoteForTest(taskWorktree)) {
 				t.Fatalf("prompt missing shell-quoted role worktree Semble target root for %q", taskWorktree)
 			}
-			if !strings.Contains(prompt, "Use `~/"+paths.GlobalDirName()+"/AGENT_TOOLS.md` for Semble command syntax, content modes, routing rules, and proof requirements.") {
+			if !strings.Contains(prompt, "Use `~/"+paths.GlobalDirName()+"/support-docs/TOOL_ROUTING.md` for Semble command syntax, content modes, routing rules, and proof requirements.") {
 				t.Fatalf("prompt missing AGENT_TOOLS Semble usage pointer")
 			}
 			if strings.Contains(prompt, "env HF_HUB_OFFLINE=1 semble search") {
@@ -1568,7 +1568,7 @@ func TestBuildOrchestratorPromptContextScipIndexesRenderFromProjectRoot(t *testi
 	if !strings.Contains(prompt, projectGoIndex) {
 		t.Fatalf("prompt missing project-root SCIP index path %q", projectGoIndex)
 	}
-	if !strings.Contains(prompt, "Use `~/"+paths.GlobalDirName()+"/AGENT_TOOLS.md` for `scip-search` command syntax, routing rules, and freshness caveats.") {
+	if !strings.Contains(prompt, "Use `~/"+paths.GlobalDirName()+"/support-docs/TOOL_ROUTING.md` for `scip-search` command syntax, routing rules, and freshness caveats.") {
 		t.Fatalf("prompt missing AGENT_TOOLS scip-search usage pointer")
 	}
 	if strings.Contains(prompt, "scip-search symbols --index") {
@@ -1608,7 +1608,7 @@ func TestBuildOrchestratorPromptContextStacklitIndexRendersFromProjectRoot(t *te
 	if !strings.Contains(prompt, "Stacklit index: "+shellQuoteForTest(projectStacklitIndex)) {
 		t.Fatalf("prompt missing project-root Stacklit index path %q", projectStacklitIndex)
 	}
-	if !strings.Contains(prompt, "Use `~/"+paths.GlobalDirName()+"/AGENT_TOOLS.md` for Stacklit command syntax, routing rules, and freshness caveats.") {
+	if !strings.Contains(prompt, "Use `~/"+paths.GlobalDirName()+"/support-docs/TOOL_ROUTING.md` for Stacklit command syntax, routing rules, and freshness caveats.") {
 		t.Fatalf("prompt missing AGENT_TOOLS Stacklit usage pointer")
 	}
 	if strings.Contains(prompt, "stacklit derive --ai-summary -i") {
@@ -1651,7 +1651,7 @@ func TestBuildOrchestratorPromptContextFunctionalClustersRendersFromProjectRoot(
 	if !strings.Contains(prompt, "Functional Clusters artifact: "+shellQuoteForTest(projectArtifact)) {
 		t.Fatalf("prompt missing project-root Functional Clusters artifact path %q", projectArtifact)
 	}
-	if !strings.Contains(prompt, "Use `~/"+paths.GlobalDirName()+"/AGENT_TOOLS.md` for Functional Clusters command syntax, routing rules, and freshness caveats.") {
+	if !strings.Contains(prompt, "Use `~/"+paths.GlobalDirName()+"/support-docs/TOOL_ROUTING.md` for Functional Clusters command syntax, routing rules, and freshness caveats.") {
 		t.Fatalf("prompt missing AGENT_TOOLS Functional Clusters usage pointer")
 	}
 	if strings.Contains(prompt, "functional-clusters list --clusters") {
@@ -1746,7 +1746,7 @@ func TestBuildOrchestratorPromptContextSembleSearchUsesSafeProjectRoot(t *testin
 	if !strings.Contains(prompt, shellQuoteForTest(tmpDir)) {
 		t.Fatalf("prompt missing safe project-root Semble target root for %q", tmpDir)
 	}
-	if !strings.Contains(prompt, "Use `~/"+paths.GlobalDirName()+"/AGENT_TOOLS.md` for Semble command syntax, content modes, routing rules, and proof requirements.") {
+	if !strings.Contains(prompt, "Use `~/"+paths.GlobalDirName()+"/support-docs/TOOL_ROUTING.md` for Semble command syntax, content modes, routing rules, and proof requirements.") {
 		t.Fatalf("prompt missing AGENT_TOOLS Semble usage pointer")
 	}
 	if strings.Contains(prompt, "env HF_HUB_OFFLINE=1 semble search") {

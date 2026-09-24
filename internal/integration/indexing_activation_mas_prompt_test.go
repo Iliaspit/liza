@@ -87,16 +87,16 @@ func TestIndexingActivationMASPromptsRenderEnabledMetadataFromRoleTargetRoots(t 
 			assertIndexingActivationContainsAll(t, prompt,
 				"=== STACKLIT INDEX ===",
 				"Stacklit index: "+shellQuoteForIndexingActivationTest(stacklitIndex),
-				"Use `~/"+paths.GlobalDirName()+"/AGENT_TOOLS.md` for Stacklit command syntax, routing rules, and freshness caveats.",
+				"Use `~/"+paths.GlobalDirName()+"/support-docs/TOOL_ROUTING.md` for Stacklit command syntax, routing rules, and freshness caveats.",
 				"=== SCIP-SEARCH INDEXES ===",
 				"Go index: "+shellQuoteForIndexingActivationTest(scipIndex),
-				"Use `~/"+paths.GlobalDirName()+"/AGENT_TOOLS.md` for `scip-search` command syntax, routing rules, and freshness caveats.",
+				"Use `~/"+paths.GlobalDirName()+"/support-docs/TOOL_ROUTING.md` for `scip-search` command syntax, routing rules, and freshness caveats.",
 				"=== FUNCTIONAL CLUSTERS ===",
 				"Functional Clusters artifact: "+shellQuoteForIndexingActivationTest(functionalClustersArtifact),
-				"Use `~/"+paths.GlobalDirName()+"/AGENT_TOOLS.md` for Functional Clusters command syntax, routing rules, and freshness caveats.",
+				"Use `~/"+paths.GlobalDirName()+"/support-docs/TOOL_ROUTING.md` for Functional Clusters command syntax, routing rules, and freshness caveats.",
 				"=== SEMBLE SEARCH ===",
 				shellQuoteForIndexingActivationTest(tt.targetRoot),
-				"Use `~/"+paths.GlobalDirName()+"/AGENT_TOOLS.md` for Semble command syntax, content modes, routing rules, and proof requirements.",
+				"Use `~/"+paths.GlobalDirName()+"/support-docs/TOOL_ROUTING.md` for Semble command syntax, content modes, routing rules, and proof requirements.",
 			)
 			assertIndexingActivationContainsNone(t, prompt, tt.forbiddenPaths...)
 		})
@@ -142,7 +142,7 @@ func TestIndexingActivationMASPromptsOmitFailedOptionalToolOnly(t *testing.T) {
 			assertIndexingActivationContainsAll(t, prompt,
 				"=== STACKLIT INDEX ===",
 				"Stacklit index: "+shellQuoteForIndexingActivationTest(filepath.Join(targetRoot, "stacklit.json")),
-				"Use `~/"+paths.GlobalDirName()+"/AGENT_TOOLS.md` for Stacklit command syntax, routing rules, and freshness caveats.",
+				"Use `~/"+paths.GlobalDirName()+"/support-docs/TOOL_ROUTING.md` for Stacklit command syntax, routing rules, and freshness caveats.",
 			)
 			assertIndexingActivationContainsNone(t, prompt,
 				"=== SCIP-SEARCH INDEXES ===",

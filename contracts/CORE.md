@@ -137,8 +137,7 @@ stop and use the mode contract's Struggle Protocol.
 ### Rule 2: Definition of Ready (DoR)
 
 Clarify any ambiguity before solving; never guess unstated requirements or
-silently choose defaults. Confirm understanding and scope, compare 2–3 options
-for non-trivial work, and scale architectural analysis to complexity.
+silently choose defaults. Confirm understanding and scope.
 
 **Assumptions:** Tag `ASSUMPTION` or `DERIVED`; derived implications inherit
 assumption status. Count leaf assumptions, not roots; treat material effects on
@@ -151,18 +150,10 @@ irreversible operation → BLOCKED.
 I will validate by [concrete test/command]." If ambiguous → BLOCKED.
 
 **Atomic Intent:** One intent per task; propose splitting feature + refactor.
-
-**Before execution:** Declare `Doc Impact: none | [affected docs]` and
-`Test Impact: none — existing tests cover | [tests to write/update]`. API or
-interface changes affect usage docs; behavior affects specs; new capabilities
-affect feature docs; config affects setup docs. Claiming no doc impact requires
-searching related docs/specs and checking documented siblings. Claiming no test
-impact requires existing coverage of the changed behavior; justify any new
-behavior without tests.
-
-**Spec trigger:** If clarification reveals scope ambiguity, propose a spec in
-`specs/` and await approval (spec → code → docs). In Spike mode, the spec is
-the work; propose iterative updates rather than a pre-code gate.
+If clarification reveals scope ambiguity, propose a spec before implementation.
+Before implementation planning or state-changing work, read
+`~/§BRAND_GLOBAL_DIRNAME§/support-docs/TASK_EXECUTION.md` for doc/test impact,
+spec triggers, and task procedure.
 
 ### Rule 3: Definition of Done (DoD)
 
@@ -170,45 +161,18 @@ Complete only when approved code, test, and doc deliverables are done, declared
 "none" impacts remain valid, pre-commit passes on every touched file, and all
 tests pass. A known failure, including a pre-existing one, prevents DONE unless
 the partial-completion path is explicitly accepted. Validation must exercise
-the changed behavior; record commands and outputs and externalize necessary
-understanding in docs, specs, or comments.
-
-**Self-review:** Re-read the diff for P0-P2 security, correctness, and data
-integrity issues. Every changed line must trace to approved intent,
-validation, doc impact, or change-caused cleanup. Ask whether you would approve
-it and whether a future reader will understand it; fix concerns before
-presenting and escalate P0-P2 issues to the Code Review Protocol. For an
-analysis or proposal, re-read it, mark each load-bearing claim with evidence
-or as unverified, and challenge evidence omitted because it opposed the result.
-
-**Deliverables:** Standard: code/tests/docs. Spike: complete spec with code
-scaffolding and relaxed code gates. Research: findings document, no code.
-
-**Batch Edit Protocol:** For multi-file changes, list all files, make the
-planned edits, run pre-commit on all modified files, and fix its issues before
-tests, DONE, or new work. Pre-commit also precedes tests for single-file work.
-
-**Partial Completion:** Report `PARTIAL COMPLETION: N/M`, completed items, and
-each remainder's issue/status: Blocked (dependency, missing info, tool failure),
-Descoped (narrowed scope), or Deferred by choice (explicit rationale). Deferral
-triggers Rule 7's Post-Hoc Discovery Protocol.
-
-**Tech Debt Tracking:** When deferring, making trade-offs, or accepting
-concerns, record deliberate debt in `TECH_DEBT.md` with what, why, and a payback
-trigger; without a trigger it is not debt. For a small local simplification
-without project-level debt, state its ceiling and upgrade trigger inline.
+the changed behavior; record commands and outputs. Before claiming completion
+of a changed candidate, read `TASK_EXECUTION.md` for self-review, deliverables,
+partial completion, and debt handling. If any required item remains incomplete,
+report its status and reason. For analysis, re-read load-bearing claims, mark
+each as evidenced or unverified, and challenge evidence set aside because it
+opposed the conclusion.
 
 ### Rule 4: FAST PATH (Task)
 
-Trivial, zero-risk changes may bypass formal DoR/DoD ceremony.
-Note: Debugging Protocol has its own Fast Path.
-
-Eligible only for a single-file, single-intent change with an established
-precedent, no assumptions, and reversibility in under one minute. Never use
-this path for control flow, try/except, validation, parsing, error handling,
-deletions not explicitly marked as dead code, or an assumption-dependent change.
-It still requires the Intent Gate, mode-specific gate artifact, passing
-pre-commit, and applicable tests.
+The fast path is only for trivial, zero-risk changes; it never bypasses the
+Intent Gate, mode-specific gate, pre-commit, or applicable tests. Read
+`TASK_EXECUTION.md` before using it. Debugging has its own fast path.
 
 ### Rule 5: Validate Agent Claims Against External Reality, Not Internal State
 
@@ -237,20 +201,9 @@ propose the smallest useful version first; ask before building the full version.
 Aesthetic preference alone is not
 authorization; name the concrete failure or constraint.
 
-**Minimality:** Trace the touched flow before choosing the smallest *correct*
-solution. Prefer no new component when none is needed, then native platform or
-stdlib, sound existing code, installed dependencies, and finally minimal custom
-code. This is a tie-breaker, not a rigid hierarchy. Never simplify away
-trust-boundary checks, data-loss prevention, security, accessibility, requested
-behavior, or necessary investigation. Check available libraries before adding
-a dependency or writing 30+ lines for a generic need.
-
-**Creation/refactoring:** Match existing file and directory conventions. Keep
-refactors separate from functional changes; one intent per commit. Remove only
-items made unused by this change, not pre-existing dead code or other owners'
-work. A claimed prerequisite must name what fails without it. Before ≥10 lines
-of utility-like code, search for existing patterns, reuse or extract where
-sound, and propose a shared location before writing a new utility inline.
+For implementation, follow `TASK_EXECUTION.md` for minimality, creation,
+refactoring, and dependency checks. Never simplify away security, data-loss
+prevention, accessibility, or requested behavior.
 
 ### Rule 7: Think Before Acting
 
@@ -259,21 +212,17 @@ checkpoint, and obtain approval or finish the authorized internal ceremony.
 
 **Tags:** `ASSUMPTION`, `BLOCKED`, `DEGRADED`, `RISK`, `EVIDENCED`
 
-**Post-Hoc Discovery:** If rationale changes during execution, stop at the next
-safe point, explain what changed and why, and re-checkpoint if scope or risk
-changed. Continue only within approved scope. A violation is not discovery.
+**Post-Hoc Discovery:** If rationale changes during execution, stop and
+re-checkpoint if scope or risk changes; see `TASK_EXECUTION.md`. A violation is
+not discovery.
 
 **Quick self-check:** Is the gate complete, the state correct, the action within
 the checkpoint, and success verifiable? Could the result still be regretted?
 If any answer is no or uncertain, stop and clarify.
 
-**Think consequences:** Check dependent modules, schema/migration, security,
-performance, and retry/idempotency effects before a change.
-
-**Depth:** Classify Reversible, Costly, or Irreversible; warn unless Reversible.
-For trivial/local work, check quickly and ask if unsure; for medium work, use
-the full checklist and note unknowns; for costly/irreversible work, deeply
-trace and obtain explicit sign-off per item.
+**Think consequences:** Before a change, assess dependencies, security, data,
+and reversibility using `TASK_EXECUTION.md`; costly/irreversible work needs
+explicit sign-off.
 
 ### Rule 8: Task Ownership
 

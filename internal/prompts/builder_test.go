@@ -495,7 +495,7 @@ func TestBuildBasePromptScipSearchRendersSuppliedIndexes(t *testing.T) {
 
 	assertContains("=== SCIP-SEARCH INDEXES ===")
 	assertContains("Generated SCIP indexes were refreshed before this prompt was built and reflect the current target tree at prompt construction time; they will not reflect subsequent agent edits.")
-	assertContains("Use `~/" + paths.GlobalDirName() + "/AGENT_TOOLS.md` for `scip-search` command syntax, routing rules, and freshness caveats.")
+	assertContains("Use `~/" + paths.GlobalDirName() + "/support-docs/TOOL_ROUTING.md` for `scip-search` command syntax, routing rules, and freshness caveats.")
 
 	for _, command := range []string{
 		"scip-search symbols --index",
@@ -578,7 +578,7 @@ func TestBuildBasePromptStacklitRendersSuppliedIndex(t *testing.T) {
 		"=== STACKLIT INDEX ===",
 		"Stacklit index: " + quotedPath,
 		"Stacklit index files are available for this target. They are repository snapshots that may lag behind current edits or failed refresh attempts; use them for orientation, then verify against source files before editing.",
-		"Use `~/" + paths.GlobalDirName() + "/AGENT_TOOLS.md` for Stacklit command syntax, routing rules, and freshness caveats.",
+		"Use `~/" + paths.GlobalDirName() + "/support-docs/TOOL_ROUTING.md` for Stacklit command syntax, routing rules, and freshness caveats.",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("BuildBasePrompt() missing expected stacklit content:\n%q", want)
@@ -618,8 +618,8 @@ func TestBuildBasePromptStacklitAndScipUnifiedQueryRouting(t *testing.T) {
 	for _, want := range []string{
 		"Stacklit index: '" + stacklitPath + "'",
 		"Go index: '" + scipPath + "'",
-		"Use `~/" + paths.GlobalDirName() + "/AGENT_TOOLS.md` for Stacklit command syntax, routing rules, and freshness caveats.",
-		"Use `~/" + paths.GlobalDirName() + "/AGENT_TOOLS.md` for `scip-search` command syntax, routing rules, and freshness caveats.",
+		"Use `~/" + paths.GlobalDirName() + "/support-docs/TOOL_ROUTING.md` for Stacklit command syntax, routing rules, and freshness caveats.",
+		"Use `~/" + paths.GlobalDirName() + "/support-docs/TOOL_ROUTING.md` for `scip-search` command syntax, routing rules, and freshness caveats.",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("missing supplied index guidance %q", want)
@@ -656,7 +656,7 @@ func TestBuildBasePromptFunctionalClustersRendersSuppliedArtifact(t *testing.T) 
 		"=== FUNCTIONAL CLUSTERS ===",
 		"Functional Clusters artifact: " + quotedPath,
 		"Functional Clusters artifacts are available for this target. They are advisory capability snapshots that may lag behind current edits or failed refresh attempts; use them for orientation, then verify against source files before editing.",
-		"Use `~/" + paths.GlobalDirName() + "/AGENT_TOOLS.md` for Functional Clusters command syntax, routing rules, and freshness caveats.",
+		"Use `~/" + paths.GlobalDirName() + "/support-docs/TOOL_ROUTING.md` for Functional Clusters command syntax, routing rules, and freshness caveats.",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("BuildBasePrompt() missing expected Functional Clusters content:\n%q", want)
@@ -728,7 +728,7 @@ func TestBuildBasePromptSembleSearchRendersPromptMetadata(t *testing.T) {
 		"=== SEMBLE SEARCH ===",
 		"Semble is available for semantic repository search in this target root:",
 		quotedRoot,
-		"Use `~/" + paths.GlobalDirName() + "/AGENT_TOOLS.md` for Semble command syntax, content modes, routing rules, and proof requirements.",
+		"Use `~/" + paths.GlobalDirName() + "/support-docs/TOOL_ROUTING.md` for Semble command syntax, content modes, routing rules, and proof requirements.",
 		"Stacklit index: '/abs/worktree with spaces/stacklit.json'",
 		"Go index: '/abs/worktree with spaces/" + paths.ProjectDirName() + "/scip/go.scip'",
 	} {
@@ -778,7 +778,7 @@ func TestBuildBasePromptSembleOnlyRoutingOmitsUnavailableOptionalTools(t *testin
 
 	for _, want := range []string{
 		"=== SEMBLE SEARCH ===",
-		"Use `~/" + paths.GlobalDirName() + "/AGENT_TOOLS.md` for Semble command syntax, content modes, routing rules, and proof requirements.",
+		"Use `~/" + paths.GlobalDirName() + "/support-docs/TOOL_ROUTING.md` for Semble command syntax, content modes, routing rules, and proof requirements.",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("BuildBasePrompt() missing Semble-only routing guidance:\n%q", want)
