@@ -102,6 +102,8 @@ func TestContractProgressiveDisclosureKeepsMandatoryGates(t *testing.T) {
 		"support-docs/CLAUDE_TOOL_NOTES.md",
 		"rtk proxy pytest --collect-only",
 		"Vitest/Jest metadata",
+		"API access (read or",
+		"support-docs/GIT_PROTOCOL.md",
 	} {
 		if !strings.Contains(string(tools), want) {
 			t.Errorf("AGENT_TOOLS.md missing on-demand trigger: %q", want)

@@ -55,8 +55,8 @@ help commands, and `rtk proxy pytest --collect-only ...` when collection output
 is needed. Normal RTK rewriting can misreport these results; do not rerun
 passing commands merely because RTK output is short.
 
-Before creating or changing a GitHub issue, PR, review, comment, or release,
-read `~/§BRAND_GLOBAL_DIRNAME§/support-docs/GIT_PROTOCOL.md`.
+Before any GitHub issue, PR, review, release, comment, or API access (read or
+write), read `~/§BRAND_GLOBAL_DIRNAME§/support-docs/GIT_PROTOCOL.md`.
 
 ## Trusted support tools
 
