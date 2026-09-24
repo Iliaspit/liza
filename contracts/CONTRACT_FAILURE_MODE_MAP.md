@@ -166,7 +166,7 @@ Rule 1's integrity backstop.
 [CSEC]: CORE.md#security-protocol
 [CA]: CORE.md#anti-gaming-clause
 [PA]: PAIRING_MODE.md#contract-authority
-[PC]: PAIRING_MODE.md#collaboration-philosophy
+[PC]: PAIRING_MODE.md#collaboration
 [PS]: PAIRING_MODE.md#core-rule-extensions
 [PE]: PAIRING_MODE.md#approval-request-standard
 [MA]: MULTI_AGENT_MODE.md#contract-authority

@@ -45,6 +45,8 @@ func TestListEmbeddedFiles(t *testing.T) {
 		"support-docs/CONTRACT_RECOVERY.md":     false,
 		"support-docs/GIT_PROTOCOL.md":          false,
 		"support-docs/TASK_EXECUTION.md":        false,
+		"support-docs/PAIRING_APPROVAL.md":      false,
+		"support-docs/PAIRING_PROCEDURES.md":    false,
 		"support-docs/TOOL_ROUTING.md":          false,
 		"support-docs/CLAUDE_TOOL_NOTES.md":     false,
 	}
@@ -130,6 +132,53 @@ func TestContractProgressiveDisclosureKeepsMandatoryGates(t *testing.T) {
 	for _, name := range []string{"TASK_EXECUTION.md", "TOOL_ROUTING.md", "CLAUDE_TOOL_NOTES.md"} {
 		if _, err := supportDocsFS.ReadFile("support-docs/" + name); err != nil {
 			t.Errorf("reading embedded %s: %v", name, err)
+		}
+	}
+}
+
+func TestPairingProceduresRemainRoutedAndPackaged(t *testing.T) {
+	pairing, err := contractsFS.ReadFile("contracts/PAIRING_MODE.md")
+	if err != nil {
+		t.Fatalf("reading embedded PAIRING_MODE.md: %v", err)
+	}
+	for _, want := range []string{
+		"Gate cleared** = Human explicitly approves",
+		"support-docs/PAIRING_PROCEDURES.md",
+		"support-docs/PAIRING_APPROVAL.md",
+		"Before any approval request, read",
+		"before interpreting conditional approval",
+		"Start yes/no answers with yes or no",
+		"At DoD, read",
+		"Before proposing contract changes, read Pairing Procedures",
+	} {
+		if !strings.Contains(string(pairing), want) {
+			t.Errorf("PAIRING_MODE.md missing mandatory gate or on-demand trigger: %q", want)
+		}
+	}
+	procedures, err := supportDocsFS.ReadFile("support-docs/PAIRING_PROCEDURES.md")
+	if err != nil {
+		t.Fatalf("reading embedded PAIRING_PROCEDURES.md: %v", err)
+	}
+	for _, want := range []string{
+		"## Collaboration Modes",
+		"## Retrospective",
+		"## Contract Maintenance",
+	} {
+		if !strings.Contains(string(procedures), want) {
+			t.Errorf("PAIRING_PROCEDURES.md missing routed rule: %q", want)
+		}
+	}
+	approval, err := supportDocsFS.ReadFile("support-docs/PAIRING_APPROVAL.md")
+	if err != nil {
+		t.Fatalf("reading embedded PAIRING_APPROVAL.md: %v", err)
+	}
+	for _, want := range []string{
+		"## Approval Request Standard",
+		"## Change Summary",
+		"Material divergence between approved scope and execution",
+	} {
+		if !strings.Contains(string(approval), want) {
+			t.Errorf("PAIRING_APPROVAL.md missing routed rule: %q", want)
 		}
 	}
 }
@@ -509,6 +558,8 @@ func TestWriteGlobalFiles(t *testing.T) {
 	expectedFiles := []string{
 		filepath.Join(tmpDir, "CORE.md"),
 		filepath.Join(tmpDir, "PAIRING_MODE.md"),
+		filepath.Join(tmpDir, "support-docs", "PAIRING_APPROVAL.md"),
+		filepath.Join(tmpDir, "support-docs", "PAIRING_PROCEDURES.md"),
 		filepath.Join(tmpDir, "skills", "adr-backfill", "SKILL.md"),
 		filepath.Join(tmpDir, "skills", "code-review", "SKILL.md"),
 		filepath.Join(tmpDir, "skills", "clean-code", "languages", "go.md"),

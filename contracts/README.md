@@ -17,6 +17,8 @@ Contract split complete. Original `_archive/CONTRACT_FOR_PAIRING_AGENTS_v3.md` p
 | [CONTRACT_RECOVERY.md](../support-docs/CONTRACT_RECOVERY.md) | On-demand context, RESET, conflict, tool-failure, and batch recovery | Complete |
 | [GIT_PROTOCOL.md](../support-docs/GIT_PROTOCOL.md) | On-demand Git and exploratory-state protocol | Complete |
 | [TASK_EXECUTION.md](../support-docs/TASK_EXECUTION.md) | On-demand implementation, validation, and completion procedure | Complete |
+| [PAIRING_APPROVAL.md](../support-docs/PAIRING_APPROVAL.md) | On-demand Pairing approval and reviewer handoff | Complete |
+| [PAIRING_PROCEDURES.md](../support-docs/PAIRING_PROCEDURES.md) | On-demand Pairing collaboration, recovery, retrospective, and contract-maintenance detail | Complete |
 | [TOOL_ROUTING.md](../support-docs/TOOL_ROUTING.md) | On-demand indexed-search, tool routing, and command reference | Complete |
 | [CLAUDE_TOOL_NOTES.md](../support-docs/CLAUDE_TOOL_NOTES.md) | Claude-only tool compatibility notes | Complete |
 | [CONTRACT_FOR_PAIRING_AGENTS_v3.md](_archive/CONTRACT_FOR_PAIRING_AGENTS_v3.md) | Original monolithic contract (reference) | Preserved |
@@ -72,13 +74,11 @@ remain mandatory at startup.
 ### PAIRING_MODE.md — Human-supervised collaboration
 - Contract Authority (human overrides)
 - Gate Semantics (Pairing): approval request → human approves
-- Collaboration Philosophy and Modes
-- Approval Request Standard
+- Collaboration and approval triggers (details in on-demand Pairing Procedures and Pairing Approval)
 - Skills Integration
 - Subagent Mode/Delegation
 - Context Management
-- Retrospective Protocol
-- Magic Phrases
+- Retrospective trigger and Magic Phrases
 - Session Initialization
 - Collaboration Continuity
 
