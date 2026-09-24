@@ -71,7 +71,9 @@ FORBIDDEN:
 {{- if ne .Role "orchestrator"}}
 - Do NOT skip worktrees or "simplify" the protocol
 {{- end}}
+{{- if ne .Role "architect"}}
 - Do NOT make architecture decisions - follow the spec exactly
+{{- end}}
 - Do NOT use TodoWrite — the blackboard tracks state (see MAM contract)
 
 SESSION EXIT CODES (observed by supervisor — not Bash commands):
@@ -91,9 +93,9 @@ FIRST ACTIONS:
    - ~/{{globalDirName}}/MULTI_AGENT_MODE.md
    - ~/{{globalDirName}}/AGENT_TOOLS.md
    - {{.ProjectRoot}}/GUARDRAILS.md   (may be absent)
-   Read all three in ONE call via filesystem/read_multiple_files or equivalent tolerating per-path errors,
-   or read them one at a time sequentially. Do NOT use cat if file-read tools are available.
-   Do NOT pre-check existence with Bash as a separate step; use a tolerant multi-read or sequential reads.
+   Read them one at a time in this order, as CORE.md requires. Do NOT use cat if
+   file-read tools are available. Do NOT pre-check existence with Bash; a missing
+   GUARDRAILS.md is optional.
    The session-init hook only tolerates a narrow GUARDRAILS.md compatibility wrapper.
 {{- if .TaskID}}
 2. Query your assigned task: {{binaryName}} get {{.TaskID}} --json

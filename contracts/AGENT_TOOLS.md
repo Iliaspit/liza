@@ -23,8 +23,7 @@ When Stacklit and `scip-search` are available, use them as the pre-edit impact b
 1. Use `apply_patch` only for edits that touch one file, with a separate call per file; use `morph-mcp` only for broad, context-heavy, or fast-apply edits. A shell `workdir` does not relocate a patch capability that exposes no `workdir`; resolve each target from the exact recorded absolute worktree, express it from the patch tool's actual root, and stop if the capability cannot reach it.
 2. Use native manifests, lockfiles, and language-native commands for dependency, build, and validation evidence.
 3. Validate edits with native build/test/lint/typecheck commands plus pre-commit on touched files.
-4. Use `context7` → `Ref` → `deepwiki` → `WebFetch` for docs, repo architecture, and web lookup.
-5. In MAS worktrees, do not use workspace-level or IDE/LSP-backed tools.
+4. Use the Tool Routing table for docs, repo architecture, and web lookup.
 
 ## Forbidden tools
 
@@ -42,12 +41,12 @@ Pairing mode: user-personal workspace tools may exist, but they do not replace s
 
 ## Tool Routing
 
-**Pre-Action Check:** Before file/search/web operations, use the default capability/tool from the table below. Table entries use capability labels, sometimes illustrated with concrete provider-surface examples; if the current session exposes the same capability under a different name, use the equivalent tool.
-Default tools are mandatory unless the fallback condition applies or the tool is unavailable, errors, or is unsupported by the provider.
-MCP server/tool names may be normalized differently across providers (for example `-` vs `_`). Treat concrete names below as examples; use the equivalent exposed name in the current session.
-If a default or preferred MCP capability is referenced here but is not currently exposed in the tool list, use your tool-loading mechanism (e.g. `ToolSearch`, `tool_search`) to load that capability before falling back. Fallback is allowed only after the tool cannot be found/loaded, the loaded tool errors, or the result is insufficient.
-Fallback tools are permitted ONLY when the fallback condition is met OR the default tool returns an error.
-For any MCP-backed default row in the tables below, if the tool is unavailable in the current session, errors, or is unsupported by the provider, use the row fallback tool.
+**Pre-Action Check:** Before file/search/web operations, use the table's default
+capability (provider names may vary; use the equivalent exposed tool). Use a
+fallback only when its row permits it or the default is unavailable,
+unsupported, errors, or is insufficient. For an unexposed preferred/default MCP
+capability, try the session's tool loader (e.g. `ToolSearch` or `tool_search`)
+before falling back; do not infer that a differently named equivalent is absent.
 
 ### Operations
 
@@ -56,13 +55,18 @@ For any MCP-backed default row in the tables below, if the tool is unavailable i
 | Read multiple files | Native batch reads / parallel Read calls | shell reads | Need line-numbered source snippets or provider Read is unavailable |
 | Single-file read (targeted) | `nl -ba <file> \| sed -n '<start>,<end>p'` | Read | Native read is lower-noise, already available, or line numbers are not needed |
 | Directory exploration | `rg --files`, `find`, or `ls` | native tree/list capability | Need a structured tree and native shell output is insufficient |
-| File discovery | `rg --files` | native filename search / `find` | `rg` unavailable |
-| Project structure / modules | `stacklit derive/get-module -i <supplied-index>` | native manifest reads + `rg --files` / `find` | No Stacklit index path supplied, Stacklit unavailable, or result insufficient |
+| File discovery | `rg --files` | Glob / native filename search / `find` | `rg` unavailable |
+| Project structure / modules | `stacklit derive/get-module/get-dependencies -i <supplied-index>` | native manifest reads + `rg --files` / `find` + exact source reads | No Stacklit index path supplied, Stacklit unavailable, or result insufficient |
 | Functional cluster context | `functional-clusters list/explain --clusters <supplied-artifact>` | Stacklit + `scip-search` + direct reads | No clusters artifact supplied, artifact stale/insufficient, or command unavailable |
 | Dependency inspection | Native manifest reads + lockfiles | language-native dependency commands | Manifest/lockfile inspection is insufficient |
 | Literal/regex code search | `rg` | — | — |
+| Structural code pattern | `ast-grep` | `rg` regex approximation | `ast-grep` unavailable |
+| Semantic repository search | Semble with a supplied target root | Morph MCP codebase search, then `rg` + exact reads (`ast-grep` for structural patterns) | Semble disabled, unavailable, not advertised, or insufficient; Morph only when policy exposes it |
 | Symbol discovery | `scip-search symbols --index <supplied-index>` | `rg` pattern search | No SCIP index path supplied, `scip-search` unavailable, or result insufficient |
 | Symbol lookup | `scip-search symbols --index <supplied-index>` + direct reads | `rg` + direct reads | No SCIP index path supplied, `scip-search` unavailable, or result insufficient |
+| Find references | `scip-search references --index <supplied-index>` by name or exact symbol (`--location-only` for exact symbol) | `rg` | No SCIP index path supplied, `scip-search` unavailable, or result insufficient |
+| Static call/dependency hints | `scip-search symbols --nested-json`, then `impact` or `graph` with exact symbol + direct reads | `rg` + direct reads | No SCIP index path supplied, `scip-search` unavailable, or result insufficient |
+| Multi-file structural analysis | Stacklit modules/dependencies + `scip-search`/`ast-grep` as needed | `rg` + direct reads | Supplied indexes unavailable or insufficient |
 | Package discovery | `scip-search packages --index <supplied-index>` | manifest reads + `rg` | No SCIP index path supplied, `scip-search` unavailable, or result insufficient |
 | File edit | apply_patch | morph-mcp edit_file | Edit is broad, context-heavy, or benefits from fast-apply semantics |
 | Web content | WebFetch | fetch MCP | Need raw HTML, pagination, or blocked |
@@ -70,23 +74,7 @@ For any MCP-backed default row in the tables below, if the tool is unavailable i
 | Library API docs | context7 query docs | Ref | Unknown/niche library, need tutorials |
 | Library tutorials/guides | Ref doc search | WebFetch | Ref returns nothing useful |
 | Repo architecture | deepwiki repo architecture | WebFetch | deepwiki insufficient |
-| Code quality check (after edits) | Native build/test/lint/typecheck + direct reads | pre-commit touched files | No narrower native command exists |
-
-### Codebase Exploration
-
-| Question Type | Default Tool | Fallback | Use Fallback When |
-|-------------------------------------------|--------------|----------|-------------------|
-| Exact keyword ("TODO") | `rg` | — | — |
-| Structural code pattern (call shape, signature) | `ast-grep` | `rg` with regex approximation | — |
-| Find files by name | Glob | `rg --files` / native filename search | Glob unavailable |
-| Repo orientation and module impact | `stacklit derive/get-module/get-dependencies -i <supplied-index>` | `rg` + manifest reads + exact source reads | No Stacklit index path supplied, Stacklit unavailable, or index result insufficient |
-| Functional capability boundaries | `functional-clusters list/explain --clusters <supplied-artifact>` | Stacklit + `scip-search` + exact source reads | No clusters artifact supplied, artifact stale/insufficient, or command unavailable |
-| Semantic repository search ("how does X work?") | Semble with a §BRAND_NAME_TITLE§-supplied target root | Morph MCP codebase search, then `rg` + exact reads (`ast-grep` when structural search helps) | Semble is disabled, unavailable, not advertised, or insufficient; use Morph MCP only when policy exposes it |
-| Symbol info at position | `scip-search symbols --index <supplied-index>` + direct reads | `rg` + direct reads | No SCIP index path supplied, `scip-search` unavailable, or result insufficient |
-| Find references | `scip-search references --index <supplied-index> --name Foo` or `--symbol '<exact-symbol>' --location-only` | `rg` | No SCIP index path supplied, `scip-search` unavailable, or result insufficient |
-| Static call/dependency hints | `scip-search symbols --index <supplied-index> --name Foo --nested-json`, then `impact --symbol '<exact-symbol>' --one-line` or `graph --symbol '<exact-symbol>' --markdown` + direct reads | `rg` + direct reads | No SCIP index path supplied, `scip-search` unavailable, or result insufficient |
-| Cross-file definitions | `scip-search symbols --index <supplied-index>` + direct reads | `rg` + direct reads | No SCIP index path supplied, `scip-search` unavailable, or result insufficient |
-| Multi-file structural analysis | Stacklit module/dependency commands + `scip-search`/`ast-grep` as needed | `rg` + direct reads | Supplied indexes unavailable or insufficient |
+| Code quality check (after edits) | Native build/test/lint/typecheck as relevant + direct reads + pre-commit on touched files | — | — |
 
 **Additional caveats:**
 - **Semble**: use only an explicit target root supplied by §BRAND_NAME_TITLE§ or current session context that says Semble is available. Do not infer target roots, initialize Semble, or treat semantic results as proof.
@@ -133,7 +121,7 @@ semble find-related <file_path> <line> <target-root>
 - **Diff / review / exact file state**: `git` and native shell reads > cached/indexed summaries. Source-of-truth reads beat derived views.
 - **Repository navigation**: supplied Stacklit/Semble/SCIP first for orientation, conceptual discovery, and symbol/reference tracing; `rg`/`git grep` first for already-known literals, filenames, commands, and config keys.
 - **Tracked or historical search**: Use `git grep` when the question is scoped to tracked files, the index, `HEAD`, or another Git revision. Use `rg` for working-tree search, including unstaged and untracked files.
-- **File edits**: apply_patch > morph-mcp edit_file when the edit is broad, context-heavy, or benefits from fast-apply semantics.
+- **File edits**: `apply_patch` for one-file edits (one call per file); `morph-mcp edit_file` only for broad, context-heavy, or fast-apply edits.
 - **Web content**: WebFetch > fetch MCP when you need exact content, raw HTML, or pagination.
 - **Docs**: `context7` (API reference) > `Ref` (tutorials/niche docs) > `deepwiki` (repo architecture) > `WebFetch` (specific URL).
 
@@ -146,7 +134,7 @@ semble find-related <file_path> <line> <target-root>
 
 **Morph-MCP**:
 - *Fast Apply (`edit_file`)*: Shows only changed lines using `// ... existing code ...` placeholders. Avoids reading full files into context. Skip for files >2000 lines.
-- *codebase_search*: Multi-turn search subagent running parallel grep/read cycles. See "Codebase Exploration" section for when to use.
+- *codebase_search*: Multi-turn search subagent running parallel grep/read cycles. See the semantic repository search row under Tool Routing.
 
 **fetch MCP**: Exact content without summarization — use when you need raw HTML, pagination, or WebFetch is blocked.
 
@@ -166,38 +154,10 @@ semble find-related <file_path> <line> <target-root>
 
 Batch related operations within the same MCP server when possible.
 
-### PR
+### GitHub writes
 
-PR title MUST follow Conventional Commits.
-
-For non-trivial changes, synthesize the body from task context, specs/issues, existing behavior, diff, and validation evidence.
-
-Prefer these sections when relevant:
-- Summary
-- Problem / Why
-- Existing Context
-- Approach
-- Change Map
-- Reviewer Focus
-- Validation
-- Risks / Rollback
-- Not in Scope
-
-Reference specs/issues in Summary or Problem when present.
-
-For trivial changes, use a compact body, but still include why and validation.
-
-### GitHub
-
-Codex: DO NOT use `codex_apps.github`.
-
-Use `gh` (GitHub CLI) for GitHub issues, PRs, releases, and GitHub API queries when repository context and authentication are available. Prefer `gh` over raw `curl` calls to GitHub APIs.
-
-For any GitHub write that sends Markdown body text (issue/PR descriptions, comments, reviews, releases), DO write the intended Markdown to a temp file and pass that file to `gh` with `--body-file` or through a JSON payload file. Do not stream the body through stdin. After writing, read the body back with `gh api` and verify one or more unique exact phrases from the intended Markdown before claiming success.
-
-DO NOT use `gh pr edit --body-file -` or generate API JSON through stdout redirected from `rtk jq`; both patterns can produce empty or truncated bodies while reporting success.
-
-DO NOT probe `gh pr edit` syntax by appending `--help` to a partially formed edit command. Run `gh pr edit --help` as a standalone command before constructing the state-changing command.
+Before creating or changing a GitHub issue, PR, review, comment, or release,
+read and follow `~/§BRAND_GLOBAL_DIRNAME§/support-docs/GIT_PROTOCOL.md`.
 
 ### Claude-specific operational notes
 

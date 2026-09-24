@@ -14,6 +14,8 @@ Contract split complete. Original `_archive/CONTRACT_FOR_PAIRING_AGENTS_v3.md` p
 | [CORE.md](CORE.md) | Entry point + universal rules | Complete |
 | [PAIRING_MODE.md](PAIRING_MODE.md) | Human-supervised collaboration | Complete |
 | [MULTI_AGENT_MODE.md](MULTI_AGENT_MODE.md) | Peer-supervised §BRAND_NAME_TITLE§ system | Complete |
+| [CONTRACT_RECOVERY.md](../support-docs/CONTRACT_RECOVERY.md) | On-demand RESET, conflict, tool-failure, and batch recovery | Complete |
+| [GIT_PROTOCOL.md](../support-docs/GIT_PROTOCOL.md) | On-demand Git and exploratory-state protocol | Complete |
 | [CONTRACT_FOR_PAIRING_AGENTS_v3.md](_archive/CONTRACT_FOR_PAIRING_AGENTS_v3.md) | Original monolithic contract (reference) | Preserved |
 
 ## Deployment
@@ -55,11 +57,13 @@ guide for user-facing setup. The installed configuration reference is
 - Protocol References (Debugging, Test, Architecture, Tools)
 - Context Management
 - Security Protocol
-- Recovery Protocols
-- Git Protocol
+- Recovery and Git triggers (full protocols in on-demand support docs)
 - Mental Models
 - Anti-Gaming Clause
-- Context Management (degraded mode tiers)
+
+The two support protocols are packaged with global support docs but are not
+part of the mandatory startup read. Agents read them at the trigger named in
+CORE. The mode annex, guardrails, and AGENT_TOOLS remain mandatory at startup.
 
 ### PAIRING_MODE.md — Human-supervised collaboration
 - Contract Authority (human overrides)

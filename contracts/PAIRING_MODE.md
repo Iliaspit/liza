@@ -86,8 +86,11 @@ The following extend CORE.md rules with pairing-specific behavior:
 **Rule 6 Scope Discipline:**
 - **Permission Interpretation:** Broad permission ("as you like", "improve it") tests judgment. Ask: "targeted fixes or broader redesign?" Default to minimal.
 
-**Rule 8 Task Stack:**
-- Requests starting with "queue:" should be handled in FIFO order
+**Rule 8 Task Stack:** Process new user requests in LIFO order: pause the
+current task, track its suspension point as pending, and resume it after the
+newer task is resolved. Explicit reprioritization and the Critical Issue
+Protocol take precedence; a bug found during a task belongs to that task.
+Requests starting with "queue:" are handled in FIFO order instead.
 
 **Git Protocol: The human owns the index**
 Agents do not stage or unstage unsolicited; leave changes in the working tree.

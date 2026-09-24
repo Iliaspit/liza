@@ -65,14 +65,6 @@ INSTRUCTIONS:
 {{- if ne .PlanRef ""}}
 - Implementation plan: {{.PlanRef}} — verify against task decomposition and intent context
 {{- end}}
-{{- if .ValidationCommands }}
-
-CANONICAL VALIDATION:
-{{template "canonical-validation-note" .}}
-{{range .ValidationCommands -}}
-- {{.}}
-{{- end }}
-{{- end }}
 {{- if ne .ValidationPlan ""}}
 
 DOER VALIDATION PLAN: {{.ValidationPlan}}
@@ -81,18 +73,6 @@ DOER VALIDATION PLAN: {{.ValidationPlan}}
 {{- template "prior-feedback-review" .}}
 {{- end}}
 
-POST-VERDICT (MANDATORY for REJECTED):
-After submitting a REJECTED verdict, MUST run {{binaryName}} await-resubmission immediately:
-   {{binaryName}} await-resubmission {{.TaskID}} --agent-id {{.AgentID}} --json
-Do NOT exit. One call lasts at most 100 seconds.
-On `POLL`, run the same command again in the foreground. Repeat until a non-POLL outcome.
-There is no call limit and no argument to carry over: {{brandTitle}} tracks the remaining budget from your
-rejection time, and `timeout_seconds` is reported for visibility only.
-`TIMEOUT` is final budget exhaustion — exit normally.
-Harness backgrounding, a terminal/stop outcome, or exhausted retry policy means stop safely without custom polling or background execution.
-If the harness backgrounds await-resubmission and says it will notify on completion, end the turn; do NOT call Monitor, search for Monitor, ScheduleWakeup, or read/tail/sleep/poll the output file.
-- RESUBMITTED: discard prompt-time BASE COMMIT / REVIEW_COMMIT and re-review using the returned base_commit..review_commit boundary
-- TERMINAL/ABORTED: exit normally
 {{- else if eq .Role "code-plan-reviewer"}}
 
 REVIEW CHECKLIST:
@@ -131,14 +111,6 @@ not repairable by fixing the plan.
 ARCHITECTURE REFERENCE: {{.ArchRef}}
 Verify the code plan is consistent with the architecture document: component boundaries, interfaces, and structural decisions align with the architect's decomposition.
 {{- end}}
-{{- if .ValidationCommands }}
-
-CANONICAL VALIDATION:
-{{template "canonical-validation-note" .}}
-{{range .ValidationCommands -}}
-- {{.}}
-{{- end }}
-{{- end }}
 {{- if ne .ValidationPlan ""}}
 
 DOER VALIDATION PLAN: {{.ValidationPlan}}
@@ -176,14 +148,6 @@ Invoke skill: epic-writing for full anti-pattern and quality criteria.
 The review checklist below covers sizing and structural gates. The skill covers
 additional anti-patterns not duplicated here — check both when evaluating.
 
-Key anti-patterns beyond the checklist gates:
-- Vision Laundering: capabilities named after technical layers instead of user-facing behavior
-- Storified Epic: capabilities written at story granularity (Given/When/Then) — wrong altitude
-- Opaque Capability: Story Writer needs to re-read the vision to understand what to build
-- Missing Out of Scope: adjacent capabilities left unnamed — Story Writers will absorb them
-- Assumption Burial: strategic assumptions embedded in descriptions instead of surfaced
-- Premature Solutioning: capability descriptions name specific technologies instead of behavioral needs
-
 REVIEW CHECKLIST:
 | Gate | Reject if |
 |------|-----------|
@@ -214,7 +178,7 @@ REVIEW PHASE:
    output[] has one entry per capability with valid desc, done_when, scope, spec_ref, epic_ref, any declared validation with durable check/hook intent, and task_depends_on.
    Verify: spec_ref equals the task's own spec_ref (goal spec reference, same for all entries).
    Verify: each epic_ref is the epic document path with a #section-anchor matching the capability heading.
-7. Check each proposed capability against the review checklist and anti-pattern table above.
+7. Check each proposed capability against the review checklist and skill anti-patterns.
 8. Submit verdict with {{binaryName}} submit-verdict.
 {{- else if eq .Role "us-reviewer"}}
 
@@ -223,28 +187,7 @@ Invoke skill: spec-review for reviewing specifications.
 
 USER-STORY ANTI-PATTERNS (from user-story-writing skill):
 Also invoke skill: user-story-writing for anti-pattern awareness.
-
-Reject any user story exhibiting these anti-patterns:
-
-| Anti-pattern | Symptom |
-|-------------|---------|
-| Persona Laundering | Persona is a fig leaf on a technical task — no real user need |
-| Giant Story | Cannot be implemented in a single focused session |
-| Wishful Story | No testable acceptance criteria — hand-waving outcomes |
-| Hidden Coupling | References other components without declaring dependency |
-| Assumption Burial | Assumptions embedded in stories instead of surfaced explicitly |
-| Scope Absorption | Writing stories beyond what the task scopes |
-| Premature Solutioning | Acceptance criteria prescribe implementation instead of behavior |
-| Generic Persona | "As a User" where "User" could be any noun — lacks specificity |
-| Valueless Story | Hand-waving the "so that" clause — no clear value proposition |
-
-QUALITY GATES:
-- SMARC criteria: Specific, Measurable, Achievable, Relevant, Context-bound
-- Every story uses canonical form: "As a <persona>, I want to <action>, so that <outcome>"
-- Personas must be specific (environment, skill level) — not generic "User"
-- Acceptance criteria are contracts — they define done
-- Acceptance criteria must be user-observable
-- Assumptions are first-class outputs that resolve behavioral ambiguity
+Reject stories that violate its anti-pattern or quality criteria.
 {{- if ne .PriorRejection ""}}
 {{- template "prior-feedback-review" .}}
 {{- end}}
@@ -269,17 +212,9 @@ REVIEW PHASE:
 5. Read the epic ref above. Locate the assigned capability by matching task SCOPE.
    Verify stories only cover that capability section — not others in the same epic.
 6. Validate done_when criteria are satisfied.
-7. Check each user story against the anti-pattern checklist above.
+7. Check each user story against the user-story-writing skill's anti-patterns.
 8. Verify SMARC criteria compliance for every story.
 9. Verify acceptance criteria are testable and user-observable.
-{{- if .ValidationCommands }}
-
-CANONICAL VALIDATION:
-{{template "canonical-validation-note" .}}
-{{range .ValidationCommands -}}
-- {{.}}
-{{- end }}
-{{- end }}
 {{- if ne .ValidationPlan ""}}
 
 DOER VALIDATION PLAN: {{.ValidationPlan}}
@@ -304,14 +239,6 @@ REVIEW CHECKLIST:
 | Shared-file dependencies | Two output[] entries may modify the same files without depends_on |
 | arch_ref set | Output[] entries missing arch_ref pointing to the architecture document |
 | Spec alignment | Architecture decisions contradict or ignore spec requirements |
-{{- if .ValidationCommands }}
-
-CANONICAL VALIDATION:
-{{template "canonical-validation-note" .}}
-{{range .ValidationCommands -}}
-- {{.}}
-{{- end }}
-{{- end }}
 {{- if ne .ValidationPlan ""}}
 
 DOER VALIDATION PLAN: {{.ValidationPlan}}
@@ -398,17 +325,5 @@ INSTRUCTIONS:
 {{- template "prior-feedback-review" .}}
 {{- end}}
 
-POST-VERDICT (MANDATORY for REJECTED):
-After submitting a REJECTED verdict, MUST run {{binaryName}} await-resubmission immediately:
-   {{binaryName}} await-resubmission {{.TaskID}} --agent-id {{.AgentID}} --json
-Do NOT exit. One call lasts at most 100 seconds.
-On `POLL`, run the same command again in the foreground. Repeat until a non-POLL outcome.
-There is no call limit and no argument to carry over: {{brandTitle}} tracks the remaining budget from your
-rejection time, and `timeout_seconds` is reported for visibility only.
-`TIMEOUT` is final budget exhaustion — exit normally.
-Harness backgrounding, a terminal/stop outcome, or exhausted retry policy means stop safely without custom polling or background execution.
-If the harness backgrounds await-resubmission and says it will notify on completion, end the turn; do NOT call Monitor, search for Monitor, ScheduleWakeup, or read/tail/sleep/poll the output file.
-- RESUBMITTED: discard prompt-time BASE COMMIT / REVIEW_COMMIT and re-review using the returned base_commit..review_commit boundary
-- TERMINAL/ABORTED: exit normally
 {{- end}}
 {{- end -}}

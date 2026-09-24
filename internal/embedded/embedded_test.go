@@ -42,6 +42,8 @@ func TestListEmbeddedFiles(t *testing.T) {
 		"skills/clean-code/languages/go.md":     false,
 		"support-docs/SUPPORT.md":               false,
 		"support-docs/USAGE_MULTI_AGENTS.md":    false,
+		"support-docs/CONTRACT_RECOVERY.md":     false,
+		"support-docs/GIT_PROTOCOL.md":          false,
 	}
 
 	for _, file := range files {

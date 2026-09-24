@@ -150,6 +150,7 @@ func TestBuildBasePrompt(t *testing.T) {
 				"SESSION EXIT CODES",
 				"TIMESTAMPS:",
 				"FIRST ACTIONS:",
+				"Read them one at a time in this order, as CORE.md requires",
 				"Query your assigned task: " + brand.BinaryName + " get task-1 --json",
 				"Read the current spec reference:",
 				"Use the assigned task JSON from step 2. Read its `spec_ref`",
@@ -191,6 +192,19 @@ func TestBuildBasePrompt(t *testing.T) {
 				"You are a " + brand.NameTitle + " code-reviewer agent",
 				"QUERY TOOLS",
 			},
+		},
+		{
+			name: "architect may make assigned architecture decisions",
+			config: BasePromptConfig{
+				Role:        "architect",
+				AgentID:     "architect-1",
+				SpecsDir:    "/specs",
+				ProjectRoot: "/project",
+				StatePath:   "/project/" + paths.ProjectDirName() + "/state.yaml",
+				GoalDesc:    "Test goal",
+				GoalSpecRef: "specs/test.md",
+			},
+			wantNotContain: []string{"Do NOT make architecture decisions"},
 		},
 		{
 			name: "orchestrator role formatting",
@@ -1150,6 +1164,29 @@ func testPipelineResolver(t *testing.T) *pipeline.Resolver {
 		t.Fatalf("testPipelineResolver: %v", err)
 	}
 	return pipeline.NewResolver(cfg)
+}
+
+func TestReviewersAdvertiseOnDemandWritingSkills(t *testing.T) {
+	resolver := testPipelineResolver(t)
+	for role, required := range map[string]string{
+		"epic-plan-reviewer": "epic-writing",
+		"us-reviewer":        "user-story-writing",
+	} {
+		skills, err := resolver.Skills(role)
+		if err != nil {
+			t.Fatalf("Skills(%s): %v", role, err)
+		}
+		found := false
+		for _, skill := range skills {
+			if skill == required {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("Skills(%s) = %v, missing %s", role, skills, required)
+		}
+	}
 }
 
 func TestDependencyClosureRuleRenderedExactlyOnceForAffectedRoles(t *testing.T) {
@@ -2297,7 +2334,13 @@ func TestBuildRoleContext_AllRoles(t *testing.T) {
 		if strings.Contains(output, "First, run: /usr/bin/test -d") {
 			t.Error("code-reviewer prompt must not require a standalone worktree existence probe")
 		}
-		assertAwaitResubmissionPassiveGuidance(t, output, 2)
+		assertAwaitResubmissionPassiveGuidance(t, output, 1)
+		if strings.Contains(output, "After submitting verdict, EXIT immediately") {
+			t.Error("reviewer prompt must not exit before rejected-verdict resubmission wait")
+		}
+		if !strings.Contains(output, "After APPROVED, exit normally. After REJECTED") {
+			t.Error("reviewer prompt missing verdict-specific exit behavior")
+		}
 	})
 
 	t.Run("orchestrator", func(t *testing.T) {
@@ -2628,7 +2671,7 @@ func TestBuildRoleContext_AllRoles(t *testing.T) {
 			awaitResubmissionBoundaryGuidance,
 			"SPEC-REVIEW SKILL:",
 			"USER-STORY ANTI-PATTERNS",
-			"QUALITY GATES:",
+			"Reject stories that violate its anti-pattern or quality criteria.",
 			"CAPABILITY SCOPING:",
 			"Changed-file map and stat first:",
 			"git -C " + data.Worktree + " diff --name-only abc1234..def5678",
@@ -2961,6 +3004,32 @@ func TestBuildRoleContext_PlanRefAndValidationPlan(t *testing.T) {
 		}
 	})
 
+	t.Run("reviewer receives canonical validation once", func(t *testing.T) {
+		data := &RoleContextData{
+			Role: "code-reviewer", AgentID: "code-reviewer-1", RoleType: "reviewer",
+			TaskID: "task-review-validation", Description: "Review feature X",
+			DoneWhen: "Feature X works", Scope: "internal/feature",
+			Worktree:   projectRoot + "/.worktrees/task-review-validation",
+			BaseCommit: "abc1234", ReviewCommit: "def5678",
+			ValidationCommands: []string{"make test"},
+			ProjectRoot:        projectRoot,
+		}
+		sections, err := resolver.ContextSections("code-reviewer")
+		if err != nil {
+			t.Fatalf("ContextSections: %v", err)
+		}
+		output, err := BuildRoleContext("code-reviewer", sections, data)
+		if err != nil {
+			t.Fatalf("BuildRoleContext: %v", err)
+		}
+		if got := strings.Count(output, "CANONICAL VALIDATION:"); got != 1 {
+			t.Errorf("canonical validation headings = %d, want 1", got)
+		}
+		if got := strings.Count(output, "- make test"); got != 1 {
+			t.Errorf("canonical validation commands = %d, want 1", got)
+		}
+	})
+
 	t.Run("unsafe validation commands render with adjacent fallback", func(t *testing.T) {
 		data := &RoleContextData{
 			Role: "coder", AgentID: "coder-1", RoleType: "doer",
@@ -3185,12 +3254,14 @@ func TestBuildRoleContext_ValidationCommandShapeGuidance(t *testing.T) {
 }
 
 func TestReviewInstructions_PostVerdictResubmissionBoundaryGuidance(t *testing.T) {
-	tmpl := template.Must(template.New("").Funcs(funcMap).ParseFiles("templates/blocks/review_instructions.tmpl"))
+	projectRoot := setupPipelineConfig(t)
+	resolver := testPipelineResolver(t)
 
 	for _, role := range []string{"code-reviewer", "integration-reviewer"} {
 		t.Run(role, func(t *testing.T) {
-			data := RoleContextData{
+			data := &RoleContextData{
 				Role:           role,
+				RoleType:       "reviewer",
 				TaskID:         "task-review",
 				AgentID:        "reviewer-1",
 				Worktree:       "/tmp/worktree",
@@ -3198,17 +3269,17 @@ func TestReviewInstructions_PostVerdictResubmissionBoundaryGuidance(t *testing.T
 				ReviewCommit:   "review123",
 				GoalBaseCommit: "goalbase123",
 				GoalSlug:       "goal-slug",
+				ProjectRoot:    projectRoot,
 			}
-
-			var buf bytes.Buffer
-			if err := tmpl.ExecuteTemplate(&buf, "review-instructions", &data); err != nil {
-				t.Fatalf("failed to execute review-instructions template: %v", err)
+			sections, err := resolver.ContextSections(role)
+			if err != nil {
+				t.Fatalf("ContextSections: %v", err)
 			}
-
-			output := buf.String()
-			if !strings.Contains(output, "POST-VERDICT (MANDATORY for REJECTED)") {
-				t.Fatalf("%s prompt missing post-verdict block:\n%s", role, output)
+			output, err := BuildRoleContext(role, sections, data)
+			if err != nil {
+				t.Fatalf("BuildRoleContext: %v", err)
 			}
+			assertAwaitResubmissionPassiveGuidance(t, output, 1)
 			if !strings.Contains(output, "discard prompt-time BASE COMMIT / REVIEW_COMMIT") {
 				t.Fatalf("%s prompt missing resubmission boundary refresh guidance:\n%s", role, output)
 			}
@@ -3657,7 +3728,7 @@ func TestBlockReviewInstructions_IntegrationReviewer(t *testing.T) {
 	if !strings.Contains(result, "durable fix-task text") {
 		t.Error("expected fix-task validation satisfiability guidance")
 	}
-	assertAwaitResubmissionPassiveGuidance(t, result, 1)
+	assertAwaitResubmissionPassiveGuidance(t, result, 0)
 }
 
 func TestReviewInstructions_CodeReviewerSkipsIntegrationDriftWhenBranchMissing(t *testing.T) {
@@ -3847,7 +3918,7 @@ func TestReviewInstructions_OutputReviewersUseFullTaskJSON(t *testing.T) {
 				if !strings.Contains(output, "durable fix-task text") {
 					t.Fatalf("integration reviewer prompt missing fix-task validation guidance, got:\n%s", output)
 				}
-				assertAwaitResubmissionPassiveGuidance(t, output, 1)
+				assertAwaitResubmissionPassiveGuidance(t, output, 0)
 			} else if !strings.Contains(output, "durable check/hook intent") {
 				t.Fatalf("%s prompt missing output[] validation satisfiability guidance, got:\n%s", role, output)
 			}
