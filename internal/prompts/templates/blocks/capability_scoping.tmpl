@@ -3,51 +3,10 @@
 
 EPIC-WRITING SKILL:
 Invoke skill: epic-writing when writing each epic for this task.
-
-Key principles from the skill:
-- An epic bounds one cohesive capability area, expected to decompose into 3–8 user stories
-- Each capability section is a Story Writer task brief — must be self-contained
-- The Story Writer reads Personas + General Information + capability section — nothing else
-- Completion criteria must be falsifiable: all story ACs passing satisfies them
-- Personas must include environment/skill level where it affects product behavior
-- Out of Scope is not optional — it protects Story Writers from scope absorption
-- Assumptions resolve behavioral ambiguity only — no premature solutioning
-- If a single epic spans multiple independent capability areas, it is too broad — flag for splitting
-- Producing multiple well-sized epics from one vision source is normal planner behavior
-
-Anti-patterns to avoid:
-- Vision Laundering: capabilities named after technical layers instead of user-facing behavior
-- Giant Epic: multiple independent persona clusters or unrelated subsystems in one epic
-- Dwarf Epic: single user action with one AC — this is a story, not an epic
-- Storified Epic: capabilities written at story granularity (Given/When/Then)
-- Unfalsifiable Completion Criteria: "users have a better experience" — not falsifiable
-- Scope Absorption: vision says X, you write capabilities for X, Y, and Z
-- Opaque Capability: Story Writer needs to re-read the vision to understand what to build
 {{- else if eq .Role "us-writer"}}
 
 USER-STORY-WRITING SKILL:
 Invoke skill: user-story-writing before writing any stories.
-
-Key principles from the skill:
-- SMARC criteria: Specific, Measurable, Achievable, Relevant, Context-bound
-- Every story uses canonical form: "As a <persona>, I want to <action>, so that <outcome>"
-- Personas must be specific (environment, skill level) — not generic "User"
-- Acceptance criteria are contracts — they define done
-- Acceptance criteria must be user-observable
-- Assumptions are first-class outputs that resolve behavioral ambiguity
-- Edge cases use AC-NNN-Nb suffix
-- Self-review checklist must pass before submission
-
-Anti-patterns to avoid:
-- Persona Laundering: persona is a fig leaf on a technical task
-- Giant Story: cannot be implemented in a single focused session
-- Wishful Story: no testable ACs
-- Hidden Coupling: references other components without declaring dependency
-- Assumption Burial: assumptions embedded in stories instead of surfaced
-- Scope Absorption: writing stories beyond what the task scopes
-- Premature Solutioning: ACs prescribe implementation instead of behavior
-- Generic Persona: "As a User" where "User" could be any noun
-- Valueless Story: hand-waving the "so that" clause
 
 CAPABILITY SCOPING:
 The parent epic document contains multiple capabilities. Your task covers ONE capability only.

@@ -14,7 +14,16 @@ Contract split complete. Original `_archive/CONTRACT_FOR_PAIRING_AGENTS_v3.md` p
 | [CORE.md](CORE.md) | Entry point + universal rules | Complete |
 | [PAIRING_MODE.md](PAIRING_MODE.md) | Human-supervised collaboration | Complete |
 | [MULTI_AGENT_MODE.md](MULTI_AGENT_MODE.md) | Peer-supervised §BRAND_NAME_TITLE§ system | Complete |
+| [CONTRACT_RECOVERY.md](../support-docs/CONTRACT_RECOVERY.md) | On-demand context, RESET, conflict, tool-failure, and batch recovery | Complete |
+| [GIT_PROTOCOL.md](../support-docs/GIT_PROTOCOL.md) | On-demand Git and exploratory-state protocol | Complete |
+| [TASK_EXECUTION.md](../support-docs/TASK_EXECUTION.md) | On-demand implementation, validation, and completion procedure | Complete |
+| `support-docs/PAIRING_APPROVAL.md` | On-demand Pairing approval and reviewer handoff | Complete |
+| `support-docs/PAIRING_PROCEDURES.md` | On-demand Pairing collaboration, recovery, retrospective, and contract-maintenance detail | Complete |
+| [TOOL_ROUTING.md](../support-docs/TOOL_ROUTING.md) | On-demand indexed-search, tool routing, and command reference | Complete |
+| [CLAUDE_TOOL_NOTES.md](../support-docs/CLAUDE_TOOL_NOTES.md) | Claude-only tool compatibility notes | Complete |
 | [CONTRACT_FOR_PAIRING_AGENTS_v3.md](_archive/CONTRACT_FOR_PAIRING_AGENTS_v3.md) | Original monolithic contract (reference) | Preserved |
+
+`support-docs/...` paths are relative to the repository root or installed global directory.
 
 ## Deployment
 
@@ -55,22 +64,23 @@ guide for user-facing setup. The installed configuration reference is
 - Protocol References (Debugging, Test, Architecture, Tools)
 - Context Management
 - Security Protocol
-- Recovery Protocols
-- Git Protocol
+- Task execution, recovery, and Git triggers (full procedures in on-demand support docs)
 - Mental Models
 - Anti-Gaming Clause
-- Context Management (degraded mode tiers)
+
+These support protocols are packaged with global support docs but are not part
+of the mandatory startup read. Agents read them at the triggers named in CORE
+or AGENT_TOOLS. The mode annex, guardrails, and the concise AGENT_TOOLS kernel
+remain mandatory at startup.
 
 ### PAIRING_MODE.md — Human-supervised collaboration
 - Contract Authority (human overrides)
 - Gate Semantics (Pairing): approval request → human approves
-- Collaboration Philosophy and Modes
-- Approval Request Standard
+- Collaboration and approval triggers (details in on-demand Pairing Procedures and Pairing Approval)
 - Skills Integration
 - Subagent Mode/Delegation
 - Context Management
-- Retrospective Protocol
-- Magic Phrases
+- Retrospective trigger and Magic Phrases
 - Session Initialization
 - Collaboration Continuity
 

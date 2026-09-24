@@ -42,6 +42,13 @@ func TestListEmbeddedFiles(t *testing.T) {
 		"skills/clean-code/languages/go.md":     false,
 		"support-docs/SUPPORT.md":               false,
 		"support-docs/USAGE_MULTI_AGENTS.md":    false,
+		"support-docs/CONTRACT_RECOVERY.md":     false,
+		"support-docs/GIT_PROTOCOL.md":          false,
+		"support-docs/TASK_EXECUTION.md":        false,
+		"support-docs/PAIRING_APPROVAL.md":      false,
+		"support-docs/PAIRING_PROCEDURES.md":    false,
+		"support-docs/TOOL_ROUTING.md":          false,
+		"support-docs/CLAUDE_TOOL_NOTES.md":     false,
 	}
 
 	for _, file := range files {
@@ -58,12 +65,125 @@ func TestListEmbeddedFiles(t *testing.T) {
 }
 
 func TestAgentToolsOptionalIndexGuidance(t *testing.T) {
-	content, err := contractsFS.ReadFile("contracts/AGENT_TOOLS.md")
+	contract, err := contractsFS.ReadFile("contracts/AGENT_TOOLS.md")
 	if err != nil {
 		t.Fatalf("reading embedded AGENT_TOOLS.md: %v", err)
 	}
+	if !strings.Contains(string(contract), "support-docs/TOOL_ROUTING.md") {
+		t.Fatal("embedded AGENT_TOOLS.md missing on-demand tool routing trigger")
+	}
+	content, err := supportDocsFS.ReadFile("support-docs/TOOL_ROUTING.md")
+	if err != nil {
+		t.Fatalf("reading embedded TOOL_ROUTING.md: %v", err)
+	}
 
 	assertAgentToolsOptionalIndexGuidance(t, string(content))
+}
+
+func TestContractProgressiveDisclosureKeepsMandatoryGates(t *testing.T) {
+	core, err := contractsFS.ReadFile("contracts/CORE.md")
+	if err != nil {
+		t.Fatalf("reading embedded CORE.md: %v", err)
+	}
+	tools, err := contractsFS.ReadFile("contracts/AGENT_TOOLS.md")
+	if err != nil {
+		t.Fatalf("reading embedded AGENT_TOOLS.md: %v", err)
+	}
+	for _, want := range []string{
+		"No state change without prior approval/checkpoint",
+		"No logged, displayed, committed, or diffed secret",
+		"support-docs/TASK_EXECUTION.md",
+		"support-docs/CONTRACT_RECOVERY.md",
+		"SKILL.md` completely and follow it",
+		"At state transitions or after extended time, Pairing asks",
+		"Before execution, perform the security checklist",
+		"Research tasks deliver findings, not code",
+	} {
+		if !strings.Contains(string(core), want) {
+			t.Errorf("CORE.md missing mandatory gate or task trigger: %q", want)
+		}
+	}
+	for name, wants := range map[string][]string{
+		"CONTRACT_RECOVERY.md": {"Context Recovery and Continuity", "On context reset, plan-to-execution transition"},
+		"TASK_EXECUTION.md":    {"Security preflight before execution", "known dependency vulnerabilities checked"},
+	} {
+		content, err := supportDocsFS.ReadFile("support-docs/" + name)
+		if err != nil {
+			t.Fatalf("reading embedded %s: %v", name, err)
+		}
+		for _, want := range wants {
+			if !strings.Contains(string(content), want) {
+				t.Errorf("%s missing routed contract: %q", name, want)
+			}
+		}
+	}
+	for _, want := range []string{
+		"support-docs/TOOL_ROUTING.md",
+		"support-docs/CLAUDE_TOOL_NOTES.md",
+		"rtk proxy pytest --collect-only",
+		"Vitest/Jest metadata",
+		"API access (read or",
+		"support-docs/GIT_PROTOCOL.md",
+	} {
+		if !strings.Contains(string(tools), want) {
+			t.Errorf("AGENT_TOOLS.md missing on-demand trigger: %q", want)
+		}
+	}
+	for _, name := range []string{"TASK_EXECUTION.md", "TOOL_ROUTING.md", "CLAUDE_TOOL_NOTES.md"} {
+		if _, err := supportDocsFS.ReadFile("support-docs/" + name); err != nil {
+			t.Errorf("reading embedded %s: %v", name, err)
+		}
+	}
+}
+
+func TestPairingProceduresRemainRoutedAndPackaged(t *testing.T) {
+	pairing, err := contractsFS.ReadFile("contracts/PAIRING_MODE.md")
+	if err != nil {
+		t.Fatalf("reading embedded PAIRING_MODE.md: %v", err)
+	}
+	for _, want := range []string{
+		"Gate cleared** = Human explicitly approves",
+		"support-docs/PAIRING_PROCEDURES.md",
+		"support-docs/PAIRING_APPROVAL.md",
+		"Before entering or switching to any non-Autonomous collaboration",
+		"including a skill-selected mode or escalation",
+		"Before any approval request, read",
+		"before interpreting conditional approval",
+		"Start yes/no answers with yes or no",
+		"At DoD, read",
+		"Before proposing contract changes, read Pairing Procedures",
+		"If the recovered mode is non-Autonomous, re-read Pairing Procedures",
+	} {
+		if !strings.Contains(string(pairing), want) {
+			t.Errorf("PAIRING_MODE.md missing mandatory gate or on-demand trigger: %q", want)
+		}
+	}
+	procedures, err := supportDocsFS.ReadFile("support-docs/PAIRING_PROCEDURES.md")
+	if err != nil {
+		t.Fatalf("reading embedded PAIRING_PROCEDURES.md: %v", err)
+	}
+	for _, want := range []string{
+		"## Collaboration Modes",
+		"## Retrospective",
+		"## Contract Maintenance",
+	} {
+		if !strings.Contains(string(procedures), want) {
+			t.Errorf("PAIRING_PROCEDURES.md missing routed rule: %q", want)
+		}
+	}
+	approval, err := supportDocsFS.ReadFile("support-docs/PAIRING_APPROVAL.md")
+	if err != nil {
+		t.Fatalf("reading embedded PAIRING_APPROVAL.md: %v", err)
+	}
+	for _, want := range []string{
+		"## Approval Request Standard",
+		"## Change Summary",
+		"Material divergence between approved scope and execution",
+	} {
+		if !strings.Contains(string(approval), want) {
+			t.Errorf("PAIRING_APPROVAL.md missing routed rule: %q", want)
+		}
+	}
 }
 
 func TestLessonCaptureUsesGuardrailsAgentIndex(t *testing.T) {
@@ -182,12 +302,12 @@ func assertAgentToolsOptionalIndexGuidance(t *testing.T, content string) {
 		"scip-search packages --index <index-path>",
 		"scip-search impact --index <index-path>",
 		"disabled, unavailable, or not advertised",
-		"fall back to `rg`, `ast-grep`, direct reads",
+		"fall back to `rg`, `ast-grep`, and direct reads",
 		"Morph MCP only when policy exposes it",
 	}
 	for _, want := range required {
 		if !strings.Contains(content, want) {
-			t.Errorf("embedded AGENT_TOOLS.md missing optional-index guidance: %q", want)
+			t.Errorf("embedded TOOL_ROUTING.md missing optional-index guidance: %q", want)
 		}
 	}
 
@@ -201,7 +321,7 @@ func assertAgentToolsOptionalIndexGuidance(t *testing.T, content string) {
 	}
 	for _, text := range forbidden {
 		if strings.Contains(content, text) {
-			t.Errorf("embedded AGENT_TOOLS.md contains project-specific generated path guidance: %q", text)
+			t.Errorf("embedded TOOL_ROUTING.md contains project-specific generated path guidance: %q", text)
 		}
 	}
 }
@@ -441,6 +561,8 @@ func TestWriteGlobalFiles(t *testing.T) {
 	expectedFiles := []string{
 		filepath.Join(tmpDir, "CORE.md"),
 		filepath.Join(tmpDir, "PAIRING_MODE.md"),
+		filepath.Join(tmpDir, "support-docs", "PAIRING_APPROVAL.md"),
+		filepath.Join(tmpDir, "support-docs", "PAIRING_PROCEDURES.md"),
 		filepath.Join(tmpDir, "skills", "adr-backfill", "SKILL.md"),
 		filepath.Join(tmpDir, "skills", "code-review", "SKILL.md"),
 		filepath.Join(tmpDir, "skills", "clean-code", "languages", "go.md"),

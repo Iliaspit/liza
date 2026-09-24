@@ -25,6 +25,9 @@ The caller agent defines the task. The subagent executes within scope.
 - **Approval gates relaxed** — no external gates; internal ceremony remains (Intent Gate, DoR/DoD)
 - **Read-only by default** — no state-modifying actions unless brief contains `MODE: SUBAGENT READ-WRITE`
 
+**Gate semantics:** The internal Intent Gate statement is the gate artifact;
+completing it clears the gate without external approval.
+
 ### READ-WRITE Subagents
 
 When brief contains `MODE: SUBAGENT READ-WRITE`:

@@ -137,7 +137,14 @@ func TestSetupCommand_NewInstallAgentToolsOptionalIndexGuidance(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reading installed AGENT_TOOLS.md: %v", err)
 	}
-	assertAgentToolsOptionalIndexGuidance(t, string(content))
+	if !strings.Contains(string(content), "support-docs/TOOL_ROUTING.md") {
+		t.Fatal("installed AGENT_TOOLS.md missing on-demand tool routing trigger")
+	}
+	routing, err := os.ReadFile(filepath.Join(tmpDir, "support-docs", "TOOL_ROUTING.md"))
+	if err != nil {
+		t.Fatalf("reading installed TOOL_ROUTING.md: %v", err)
+	}
+	assertAgentToolsOptionalIndexGuidance(t, string(routing))
 }
 
 func TestSetupCommand_ExistingWithoutForce(t *testing.T) {
@@ -521,12 +528,12 @@ func assertAgentToolsOptionalIndexGuidance(t *testing.T, content string) {
 		"scip-search packages --index <index-path>",
 		"scip-search impact --index <index-path>",
 		"disabled, unavailable, or not advertised",
-		"fall back to `rg`, `ast-grep`, direct reads",
+		"fall back to `rg`, `ast-grep`, and direct reads",
 		"Morph MCP only when policy exposes it",
 	}
 	for _, want := range required {
 		if !strings.Contains(content, want) {
-			t.Errorf("AGENT_TOOLS.md missing optional-index guidance: %q", want)
+			t.Errorf("TOOL_ROUTING.md missing optional-index guidance: %q", want)
 		}
 	}
 
@@ -540,7 +547,7 @@ func assertAgentToolsOptionalIndexGuidance(t *testing.T, content string) {
 	}
 	for _, text := range forbidden {
 		if strings.Contains(content, text) {
-			t.Errorf("AGENT_TOOLS.md contains project-specific generated path guidance: %q", text)
+			t.Errorf("TOOL_ROUTING.md contains project-specific generated path guidance: %q", text)
 		}
 	}
 }

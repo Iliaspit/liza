@@ -9,7 +9,9 @@
     VERDICT
     )
     {{binaryName}} submit-verdict {{.TaskID}} REJECTED --reason "$reason" --agent-id {{.AgentID}} --json
-After submitting verdict, EXIT immediately. Your work is complete.
+After APPROVED, exit normally. After REJECTED, follow the
+reviewer-state-transitions await-resubmission rules; do not exit while that
+non-terminal wait is required.
 
 ❌ FAILURE MODE: Completing review, saying "I recommend APPROVED", then exiting WITHOUT running the command.
 The CLI command IS the deliverable. Analysis without command execution = nothing happened.
