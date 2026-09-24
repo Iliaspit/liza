@@ -145,11 +145,14 @@ func TestPairingProceduresRemainRoutedAndPackaged(t *testing.T) {
 		"Gate cleared** = Human explicitly approves",
 		"support-docs/PAIRING_PROCEDURES.md",
 		"support-docs/PAIRING_APPROVAL.md",
+		"Before entering or switching to any non-Autonomous collaboration",
+		"including a skill-selected mode or escalation",
 		"Before any approval request, read",
 		"before interpreting conditional approval",
 		"Start yes/no answers with yes or no",
 		"At DoD, read",
 		"Before proposing contract changes, read Pairing Procedures",
+		"If the recovered mode is non-Autonomous, re-read Pairing Procedures",
 	} {
 		if !strings.Contains(string(pairing), want) {
 			t.Errorf("PAIRING_MODE.md missing mandatory gate or on-demand trigger: %q", want)

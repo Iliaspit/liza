@@ -47,10 +47,10 @@ The Execution State Machine is defined in CORE.md. In Pairing mode:
 ## Collaboration
 
 Autonomous is the default collaboration mode. Assume the user is a senior
-engineer. When the user requests another mode, or unclear intent calls for
-Coach, Duck, Challenger, True Pairing, or
-Spike, read `~/§BRAND_GLOBAL_DIRNAME§/support-docs/PAIRING_PROCEDURES.md`
-before switching. Announce mode transitions. Respond directly; no cheerleading.
+engineer. Before entering or switching to any non-Autonomous collaboration
+mode, including a skill-selected mode or escalation, read
+`~/§BRAND_GLOBAL_DIRNAME§/support-docs/PAIRING_PROCEDURES.md`.
+Announce mode transitions. Respond directly; no cheerleading.
 Start yes/no answers with yes or no; challenge without diplomatic cushioning.
 
 ---
@@ -177,6 +177,8 @@ When transitioning to Working Set tier (see CORE.md Context Management), re-read
 - Approval Request Standard section (this file); read Pairing Approval if
   preparing an approval request or interpreting a conditional approval
 - Current collaboration mode (from own earlier output)
+- If the recovered mode is non-Autonomous, re-read Pairing Procedures before
+  resuming that mode
 
 Combined with CORE.md universal items (Tier 0-1 rules, state machine, current task intent).
 
