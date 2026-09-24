@@ -14,7 +14,7 @@ Contract split complete. Original `_archive/CONTRACT_FOR_PAIRING_AGENTS_v3.md` p
 | [CORE.md](CORE.md) | Entry point + universal rules | Complete |
 | [PAIRING_MODE.md](PAIRING_MODE.md) | Human-supervised collaboration | Complete |
 | [MULTI_AGENT_MODE.md](MULTI_AGENT_MODE.md) | Peer-supervised §BRAND_NAME_TITLE§ system | Complete |
-| [CONTRACT_RECOVERY.md](../support-docs/CONTRACT_RECOVERY.md) | On-demand RESET, conflict, tool-failure, and batch recovery | Complete |
+| [CONTRACT_RECOVERY.md](../support-docs/CONTRACT_RECOVERY.md) | On-demand context, RESET, conflict, tool-failure, and batch recovery | Complete |
 | [GIT_PROTOCOL.md](../support-docs/GIT_PROTOCOL.md) | On-demand Git and exploratory-state protocol | Complete |
 | [TASK_EXECUTION.md](../support-docs/TASK_EXECUTION.md) | On-demand implementation, validation, and completion procedure | Complete |
 | [TOOL_ROUTING.md](../support-docs/TOOL_ROUTING.md) | On-demand indexed-search, tool routing, and command reference | Complete |

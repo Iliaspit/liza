@@ -1,8 +1,28 @@
 # Contract Recovery Protocols
 
 Read this document when entering RESET, detecting source conflict, reaching the
-three-failure tool threshold, or encountering a partial multi-file edit. CORE
-defines the stop triggers and authority; this document supplies the response.
+three-failure tool threshold, encountering a partial multi-file edit, or
+recovering from context pressure/reset, a plan-to-execution transition, or
+drift. CORE defines triggers and authority; this document supplies response.
+
+## Context Recovery and Continuity
+
+On context reset, plan-to-execution transition, or first degraded recall,
+enter Working Set before acting. Re-read CORE Tier 0–1 and state machine,
+current task intent/validation, GUARDRAILS.md if present, the selected mode
+annex's re-read list, and the active skill SKILL.md. On first degradation,
+announce `"⚠️ WORKING SET — Context pressure. Re-reading mode essentials.
+Tier 2-3 best-effort."` If insufficient, enter Kernel: Pairing asks
+`"Context severely degraded. (C)heckpoint, (R)eset fresh?"`; Multi-Agent
+checkpoints to blackboard and self-terminates for supervisor restart.
+
+At state transitions or after extended time, Pairing asks
+`"Drift check: Still on [task]? Key constraint: [X]. (Confirm or correct)"`;
+Multi-Agent re-reads the blackboard task and verifies checkpoint alignment.
+Use `specs/`, `docs/`, and `lessons/` as durable memory: read current state,
+perform one atomic task, write updated state. Identify affected docs before
+changes. Subagents return partial results on context pressure instead of
+using Working Set or Kernel.
 
 ## RESET Protocol
 

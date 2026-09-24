@@ -53,6 +53,12 @@ item. If rationale changes during execution, stop at the next safe point,
 explain what changed and why, and re-checkpoint if scope or risk changed.
 Continue only within approved scope. A violation is not discovery.
 
+Security preflight before execution: confirm no credential file was read
+without authorization; no hardcoded secret; external input validation; SQL
+and command-injection prevention; safe deserialization; sanitized downstream
+output; unchanged auth/authz; known dependency vulnerabilities checked; and
+existing security invariants preserved.
+
 ## Fast path
 
 Trivial, zero-risk changes may bypass formal DoR/DoD ceremony. Debugging has

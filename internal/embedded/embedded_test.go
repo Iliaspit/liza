@@ -91,10 +91,26 @@ func TestContractProgressiveDisclosureKeepsMandatoryGates(t *testing.T) {
 		"No state change without prior approval/checkpoint",
 		"No logged, displayed, committed, or diffed secret",
 		"support-docs/TASK_EXECUTION.md",
+		"support-docs/CONTRACT_RECOVERY.md",
+		"Before execution, perform the security checklist",
 		"Research tasks deliver findings, not code",
 	} {
 		if !strings.Contains(string(core), want) {
 			t.Errorf("CORE.md missing mandatory gate or task trigger: %q", want)
+		}
+	}
+	for name, wants := range map[string][]string{
+		"CONTRACT_RECOVERY.md": {"Context Recovery and Continuity", "On context reset, plan-to-execution transition"},
+		"TASK_EXECUTION.md":    {"Security preflight before execution", "known dependency vulnerabilities checked"},
+	} {
+		content, err := supportDocsFS.ReadFile("support-docs/" + name)
+		if err != nil {
+			t.Fatalf("reading embedded %s: %v", name, err)
+		}
+		for _, want := range wants {
+			if !strings.Contains(string(content), want) {
+				t.Errorf("%s missing routed contract: %q", name, want)
+			}
 		}
 	}
 	for _, want := range []string{
