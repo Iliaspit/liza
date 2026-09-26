@@ -36,6 +36,49 @@ func TestPlanningAndReviewPromptsRenderDependencyContract(t *testing.T) {
 	}
 }
 
+func TestCodePlanningPromptsKeepCohesiveDeliverablesTogether(t *testing.T) {
+	t.Parallel()
+
+	data := &RoleContextData{Role: "code-planner", TaskID: "plan-1", AgentID: "code-planner-1", GoalSlug: "goal"}
+	planner, err := BuildRoleContext("code-planner", []string{"task-decomposition", "implementation-phase"}, data)
+	if err != nil {
+		t.Fatalf("BuildRoleContext(code-planner) error: %v", err)
+	}
+	for _, want := range []string{
+		"one coding task per coherent outcome or root cause",
+		"required tests (unit, integration, and E2E)",
+		"Do not split cohesive work solely to expose parallelism",
+		"not automatic separate tasks",
+		"One coding task may satisfy multiple rows, including E2E and DOC",
+	} {
+		if !strings.Contains(planner, want) {
+			t.Errorf("planner prompt missing %q", want)
+		}
+	}
+	for _, unwanted := range []string{"SEPARATE tasks for:", ">2 packages or >4 conditions"} {
+		if strings.Contains(planner, unwanted) {
+			t.Errorf("planner prompt retains over-decomposition instruction %q", unwanted)
+		}
+	}
+
+	data.Role = "code-plan-reviewer"
+	data.AgentID = "code-plan-reviewer-1"
+	reviewer, err := BuildRoleContext("code-plan-reviewer", []string{"review-instructions"}, data)
+	if err != nil {
+		t.Fatalf("BuildRoleContext(code-plan-reviewer) error: %v", err)
+	}
+	for _, want := range []string{
+		"Over-decomposition",
+		"actual writer capacity and review/merge overhead",
+		"the same task may own implementation, tests, and docs",
+		"e2e/doc coverage",
+	} {
+		if !strings.Contains(reviewer, want) {
+			t.Errorf("reviewer prompt missing %q", want)
+		}
+	}
+}
+
 func TestGraphReplanWakePromptKeepsControllerReadOnly(t *testing.T) {
 	t.Parallel()
 

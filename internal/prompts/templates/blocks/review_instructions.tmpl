@@ -78,9 +78,10 @@ DOER VALIDATION PLAN: {{.ValidationPlan}}
 REVIEW CHECKLIST:
 | Gate | Reject if |
 |------|-----------|
-| Single intent per task | Task description has conjunctions ("X and Y and Z") indicating multiple intents bundled together |
+| Coherent intent per task | Task bundles unrelated outcomes or root causes; required tests and docs for one outcome are not separate intents |
 | Falsifiable done_when | done_when is vague or untestable |
-| Scope smell | done_when spans >2 packages or >4 conditions — verify the task has a single intent; reject with split suggestion if composite |
+| Scope smell | Scope crosses an independent ownership or risk boundary without a justified split; file/package/condition counts alone do not prove a task is composite |
+| Over-decomposition | Plan splits one coherent outcome into implementation, test, doc, or file/package tasks without explaining why separate candidates are safer or faster than one task given actual writer capacity and review/merge overhead |
 | Dependency order | Tasks have circular or missing dependencies |
 | Executable dependency proof | Plan claims sibling child-task ordering without output[].depends_on sibling indexes; claims child ordering inherited across planning-task dependencies when the dependency did not execute the same transition name; output[].task_depends_on does not name existing concrete task IDs; requires a concrete dependency target that does not exist without marking the planning task BLOCKED; any dependency lacks dependency_contracts with an existing provider, exact purpose, supplied artifact/contract/check, lifecycle gate, and severity; before_start providers differ from output[].depends_on/output[].task_depends_on; the complete graph has a missing generated task, unresolved provider, or reverse validation cycle; or a dependency is stronger than its declared gate requires |
 | Shared-file dependency | Two tasks modify the same file but lack depends_on between them — parallel coders will hit merge conflicts |
@@ -92,7 +93,7 @@ REVIEW CHECKLIST:
 | validation satisfiable | An output[] validation command can exit 0 without exercising its intended check, or hook/check intent is not declared in durable plan/task text |
 | validation command shape | A validation[] command is not single-purpose and agent-executable. Forbidden validation command shapes: `cd ... &&`, command substitution/backticks, polling or tail pipelines, and task artifact paths outside the worktree. |
 | Cross-reference consistency | For every cross-reference in the plan ("owned by CPx", "depends on CPx", "out of scope for CPx"), the referenced task must explicitly state that responsibility, dependency, or exclusion. Reject if any dangling reference. |
-| e2e/doc coverage | Spec compliance matrix missing mandatory E2E or DOC impact rows, or rows marked N/A without justification, or feature adds user-visible behavior but no e2e test or doc update task planned |
+| e2e/doc coverage | Spec compliance matrix missing mandatory E2E or DOC impact rows, rows marked N/A without justification, or required E2E coverage or doc updates missing from task scope; the same task may own implementation, tests, and docs |
 {{- if .RCARequired}}
 | Root cause evidence | Plan has no "## Root Cause Analysis" section; a source or code-path claim lacks a file:line you can check; or a runtime claim lacks a checkable artifact — exact command and output, log excerpt, or explicit reporter attribution |
 | Mechanism, not category | RCA names a failure category ("race condition", "state corruption") without the code path that produces it |

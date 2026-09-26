@@ -119,6 +119,8 @@ planning against a hypothesis.
         | E2E | e2e test coverage for new behavior | Cross-cutting | <task(s) or "N/A: <justification>"> | Covered/N/A |
         | DOC | Documentation updates for changed behavior | Cross-cutting | <task(s) or "N/A: <justification>"> | Covered/N/A |
         N/A requires justification (e.g., "internal refactor, no user-visible change").
+        One coding task may satisfy multiple rows, including E2E and DOC. Do not
+        create separate tasks solely to populate these impact rows.
    d. output[] completeness: one entry per planned coding task, each with required fields
       (desc, done_when, scope, spec_ref, plan_ref) populated. depends_on set where tasks have ordering constraints.
    e. output[] parity: re-read the plan file at the path chosen in step 2 and verify each output[]
