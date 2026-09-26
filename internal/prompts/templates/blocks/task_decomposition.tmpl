@@ -1,14 +1,16 @@
 {{- define "task-decomposition" -}}
 
 TASK DECOMPOSITION PRINCIPLE:
-Each coding task MUST have a single intent — one observable behavior change.
-Smell: if the task description contains conjunctions ("X and Y and Z"), it is composite.
-Smell: if done_when lists assertions across more than 2 packages or >4 conditions, the task is too broad.
-Atomic exceptions exist (e.g., "add model field and update serializer") — use judgment.
-When a spec step is too large for one task, split it. When two spec steps are small and
-tightly coupled, combining them is acceptable — but the intent must still be singular.
-Keep closely related changes together — splitting cohesive work adds overhead without
-reducing risk. Split at natural seams between independent concerns.
+Default to one coding task per coherent outcome or root cause. Include its production
+changes, required tests (unit, integration, and E2E), fixtures, and relevant docs in
+the same task when they share one candidate and owner. These are deliverables of one
+intent, not separate intents merely because they touch different files or packages.
+Split only for independently useful outcomes, different ownership or permissions,
+a risk/isolation boundary, or a real dependency that makes separate candidates safer.
+For each split, explain why it is safer or faster than one task, accounting for actual
+writer capacity and review/merge overhead. File count, package count, conjunctions,
+and assertion count are signals to examine, not automatic split thresholds. Do not
+combine unrelated outcomes or root causes merely to reduce the task count.
 Declare dependency order between tasks — no circular or missing dependencies.
 Every dependency MUST include dependency_contracts metadata naming exactly one provider
 (provider_output for a sibling or provider_task for an existing task), its exact purpose,
@@ -30,16 +32,17 @@ link added serializes execution. Prefer wide task graphs over deep chains when
 integration risk is manageable. When splitting, ask: "can these run in parallel
 without touching the same files?" If yes, omit depends_on — wall-clock time shrinks.
 If shared files force ordering, that's correct; don't remove real dependencies for speed.
+Do not split cohesive work solely to expose parallelism when writer capacity is absent.
 Verify the plan covers ALL spec requirements — gaps will be rejected.
 TDD colocation: a behavior change and its unit tests are one intent, not two.
 Never split "implement X" from "test X" — coders do TDD inside each task.
-Integration tests spanning multiple components MAY be separate tasks.
+Integration tests spanning multiple independently owned outcomes MAY be separate tasks.
 
 Cross-cutting deliverables: features that add or change user-visible behavior need
-SEPARATE tasks for:
-- e2e tests: exercise the new behavior end-to-end through the project's integration test layer
-- Doc updates: update affected user-facing documentation and specifications
-These are first-class deliverables, not afterthoughts. They depend on the implementation tasks.
+E2E coverage through the project's integration test layer and updates to affected
+user-facing documentation and specifications. These are first-class deliverables,
+not automatic separate tasks. Split them only under the criteria above; preserve
+the independent code review and final integration/QA gates in either case.
 If the feature is purely internal with no user-visible change, note "N/A" with justification in the spec compliance matrix.
 
 REFACTORING TASKS:
