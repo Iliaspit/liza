@@ -37,11 +37,11 @@ func projectFileLock(projectRoot, purpose string) (*filelock.FileLock, error) {
 		pointer := strings.TrimSpace(string(contents))
 		const prefix = "gitdir:"
 		if !strings.HasPrefix(pointer, prefix) {
-			return nil, fmt.Errorf("Git metadata for %s lock is neither a directory nor a gitdir pointer: %s", purpose, gitMarker)
+			return nil, fmt.Errorf("invalid Git metadata for %s lock is neither a directory nor a gitdir pointer: %s", purpose, gitMarker)
 		}
 		gitDir = strings.TrimSpace(strings.TrimPrefix(pointer, prefix))
 		if gitDir == "" {
-			return nil, fmt.Errorf("Git metadata pointer for %s lock is empty: %s", purpose, gitMarker)
+			return nil, fmt.Errorf("empty Git metadata pointer for %s lock is empty: %s", purpose, gitMarker)
 		}
 		if !filepath.IsAbs(gitDir) {
 			gitDir = filepath.Join(filepath.Dir(gitMarker), gitDir)

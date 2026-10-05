@@ -97,3 +97,38 @@ Perplexity is for current information; context7 is for API docs (resolve ID,
 then query); Ref is for tutorials/niche docs; deepwiki is for repo architecture.
 Verify final technical/library answers against a primary documentation page.
 Batch related operations within the same MCP server when possible.
+
+## Shared Graphify owner and coverage
+
+For optional graph-shaped dependency, call-path, impact or architecture
+questions, use the installed `graphify` skill. The same owner works in any
+Git repository, independently of the installation directory and target stack.
+Invoke `node ~/§BRAND_GLOBAL_DIRNAME§/skills/graphify/scripts/graphify.mjs
+--root /canonical/absolute/repository status` first. Authorized owner roles
+may use `build`, `update` or `query "<question>"` with that same root. Agents
+using a supplied comparison endpoint use its prepared query client instead.
+
+The pinned Graphify 0.9.39 CLI's interpreter runs the version-checked native
+inventory bridge. Expected sources come from native detection, ignores and
+actual parser dispatch, reconciled with Git candidate paths. Read-only
+snapshots preserve source and ignore context; coverage verifies current AST
+stamps and graph contributions, with explicit error-free no-symbol results.
+Missing parsers, errors, reported parse recovery or omitted nested sources
+block publication. Inspect `graphify-out/coverage.json` for expected,
+extracted, excluded and failed paths/reasons. Its source digest and every
+published artifact are bound in `coverage-freshness.json`; graphs without
+complete current coverage fail status, health and query admission. A failed
+candidate leaves the previous accepted publication intact.
+
+Use `GRAPHIFY_AUTO_REFRESH=0` for frozen-candidate servers and
+`GRAPHIFY_PORT` for a selected authorized port. A query may otherwise refresh
+through the sole owner. Never use upstream commands or add target-local
+validators. No runtime, tool or package installation is implicit. Shared
+HTTP uses `liza.graphify.http.v1` and repository label `repository`.
+
+Coverage is structural accounting, not semantic completeness. Native parsers
+can miss symbols or call relationships even without reported errors. Check
+current source and tests before making claims; cite the source-bound query
+event, direct source confirmation and revision under CORE Rule 5. An index
+cannot prove absence, and truncated results cannot prove dependency closure.
+When unavailable or incomplete, use targeted direct reads and label the gap.

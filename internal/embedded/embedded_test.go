@@ -31,24 +31,27 @@ func TestListEmbeddedFiles(t *testing.T) {
 
 	// Verify key files exist
 	requiredFiles := map[string]bool{
-		"contracts/CORE.md":                     false,
-		"contracts/PAIRING_MODE.md":             false,
-		"contracts/MULTI_AGENT_MODE.md":         false,
-		"contracts/AGENT_TOOLS.md":              false,
-		"contracts/COLLABORATION_CONTINUITY.md": false,
-		"skills/adr-backfill/SKILL.md":          false,
-		"skills/code-review/SKILL.md":           false,
-		"skills/debugging/SKILL.md":             false,
-		"skills/clean-code/languages/go.md":     false,
-		"support-docs/SUPPORT.md":               false,
-		"support-docs/USAGE_MULTI_AGENTS.md":    false,
-		"support-docs/CONTRACT_RECOVERY.md":     false,
-		"support-docs/GIT_PROTOCOL.md":          false,
-		"support-docs/TASK_EXECUTION.md":        false,
-		"support-docs/PAIRING_APPROVAL.md":      false,
-		"support-docs/PAIRING_PROCEDURES.md":    false,
-		"support-docs/TOOL_ROUTING.md":          false,
-		"support-docs/CLAUDE_TOOL_NOTES.md":     false,
+		"contracts/CORE.md":                           false,
+		"contracts/PAIRING_MODE.md":                   false,
+		"contracts/MULTI_AGENT_MODE.md":               false,
+		"contracts/AGENT_TOOLS.md":                    false,
+		"contracts/COLLABORATION_CONTINUITY.md":       false,
+		"skills/adr-backfill/SKILL.md":                false,
+		"skills/graphify/SKILL.md":                    false,
+		"skills/graphify/scripts/graphify.mjs":        false,
+		"skills/graphify/scripts/native_inventory.py": false,
+		"skills/code-review/SKILL.md":                 false,
+		"skills/debugging/SKILL.md":                   false,
+		"skills/clean-code/languages/go.md":           false,
+		"support-docs/SUPPORT.md":                     false,
+		"support-docs/USAGE_MULTI_AGENTS.md":          false,
+		"support-docs/CONTRACT_RECOVERY.md":           false,
+		"support-docs/GIT_PROTOCOL.md":                false,
+		"support-docs/TASK_EXECUTION.md":              false,
+		"support-docs/PAIRING_APPROVAL.md":            false,
+		"support-docs/PAIRING_PROCEDURES.md":          false,
+		"support-docs/TOOL_ROUTING.md":                false,
+		"support-docs/CLAUDE_TOOL_NOTES.md":           false,
 	}
 
 	for _, file := range files {
@@ -2991,4 +2994,26 @@ func TestCleanStaleMCPEntry(t *testing.T) {
 			t.Errorf("file should be unchanged, got %s", data)
 		}
 	})
+}
+
+func TestSharedGraphifyAndEvidenceContractPackaging(t *testing.T) {
+	core, err := contractsFS.ReadFile("contracts/CORE.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, clause := range []string{"Every verifiable factual claim", "source/candidate revision", "exact executed command", "Custom", "AGENT_TOOLS.md guidance cannot remove"} {
+		if !strings.Contains(string(core), clause) {
+			t.Fatalf("CORE missing common evidence clause %q", clause)
+		}
+	}
+	for _, name := range []string{"skills/graphify/SKILL.md", "skills/graphify/scripts/graphify.mjs", "skills/graphify/scripts/native_inventory.py"} {
+		contents, err := skillsFS.ReadFile(name)
+		if err != nil || len(contents) == 0 {
+			t.Fatalf("missing owner closure %s: %v", name, err)
+		}
+	}
+	owner, _ := skillsFS.ReadFile("skills/graphify/scripts/graphify.mjs")
+	if !strings.Contains(string(owner), "suppliedRoot") || !strings.Contains(string(owner), "coverage.json") {
+		t.Fatal("packaged owner missing explicit root or coverage gate")
+	}
 }

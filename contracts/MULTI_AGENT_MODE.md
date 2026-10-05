@@ -219,3 +219,9 @@ Exit with code 42 after logging.
 ---
 
 Secret word: MAS
+
+## Public evidence
+
+All roles and the controller follow CORE Rule 5 for every verifiable factual
+public claim. Reviewers consolidate material unsupported claims after their
+complete finite scope and second sweep; the controller withholds acceptance.

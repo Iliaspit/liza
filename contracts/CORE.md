@@ -170,6 +170,30 @@ material (>5 minutes or after Git operations) before editing, and invent no
 files/APIs/config. Before success claims verify current file state, relevant
 command output, and that the original failure no longer reproduces.
 
+Every verifiable factual claim in public updates, planning artifacts,
+checkpoints, handoffs, findings and verdicts requires a concise evidence
+reference beside the claim or in a compact table. Cite the source path and
+line or symbol plus source/candidate revision; include the schema/type and
+member for data-shape claims. Cite relevant test path and case for behavior.
+A claimed execution result requires the exact executed command, observed
+outcome, candidate identity and public tool-output reference. An unrun test
+is proposed verification, never passing evidence. Cite observed public
+configuration or native state for runtime, model and status claims.
+
+Mark an inapplicable source, schema or test reference `N/A` with its reason;
+never invent evidence. Label inferences and proposals and cite their premises;
+mark unsupported conclusions unknown. Reuse short evidence IDs rather than
+large excerpts. Graphify claims cite a source-bound query event and direct
+source confirmation; freshness alone does not establish coverage, and
+truncated or incomplete results cannot prove completeness or absence.
+
+Independent reviewers check each material claim and reference over the
+complete finite review scope and second sweep, then consolidate unsupported
+claims. The controller withholds acceptance when an unsupported factual claim
+is material to the gate. This rule authorizes no extra writes, unrelated
+research or tests outside the assigned scope and verification set. Custom
+AGENT_TOOLS.md guidance cannot remove this mandatory CORE rule.
+
 ### Rule 6: Scope Discipline
 
 Solve the approved problem, then stop. Adjacent enhancements, refactors, or

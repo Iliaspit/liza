@@ -206,3 +206,8 @@ For newcomers:
 5. `specs/architecture/overview.md` — System components and data flow
 6. `contracts/CORE.md` — The behavioral contract
 7. `support-docs/USAGE_MULTI_AGENTS.md` — How to run the multi-agent system
+
+The `skills/graphify/` package contains the reusable, root-bound AST owner and
+pinned native inventory/coverage bridge. Installed consumers use the packaged
+skill owner. CORE Rule 5
+is the common factual-claim contract for every repository and role.

@@ -5508,3 +5508,33 @@ func verifyCodexHooks(t *testing.T, projectRoot string) {
 		testhelpers.AssertExecutableScript(t, hookPath)
 	}
 }
+
+func TestInitArbitraryRepositoryDiscoversInstalledSharedEvidenceContract(t *testing.T) {
+	testhelpers.RequireSymlinkCapability(t)
+	repo := setupGitRepo(t)
+	defer os.RemoveAll(repo)
+	home := setupGlobalLiza(t)
+	if err := SetupCommand(SetupParams{TargetDir: filepath.Join(home, paths.GlobalDirName()), HomeDir: home, Force: true, AutoConfirm: true, Agents: []string{"codex"}}); err != nil {
+		t.Fatal(err)
+	}
+	original, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(original)
+	if err := os.Chdir(repo); err != nil {
+		t.Fatal(err)
+	}
+	testhelpers.CreateCommittedSpecFile(t, repo, "vision.md", "# Arbitrary Python repository\n")
+	if err := InitCommandWithConfig(InitParams{Description: "Shared tooling fixture", SpecRef: "specs/vision.md", Agents: []string{"codex"}}); err != nil {
+		t.Fatal(err)
+	}
+	core, err := os.ReadFile(filepath.Join(home, ".codex", "AGENTS.md"))
+	if err != nil || !strings.Contains(string(core), "Every verifiable factual claim") || !strings.Contains(string(core), "public tool-output reference") {
+		t.Fatalf("init discovery missed actual installed CORE Rule 5: %v", err)
+	}
+	skill, err := os.ReadFile(filepath.Join(home, ".codex", "skills", "graphify", "SKILL.md"))
+	if err != nil || !strings.Contains(string(skill), "target needs neither") {
+		t.Fatalf("init discovery missed generic Graphify skill: %v", err)
+	}
+}

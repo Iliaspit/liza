@@ -4375,3 +4375,38 @@ func TestBuildInstructionsForWakeTrigger_ManyToOneReady(t *testing.T) {
 		t.Error("expected non-empty instructions for MANY_TO_ONE_READY")
 	}
 }
+
+func TestEveryBaseRoleLoadsInstalledCoreEvidenceContract(t *testing.T) {
+	roles := []string{"orchestrator", "epic-planner", "epic-plan-reviewer", "us-writer", "us-reviewer", "architect", "architecture-reviewer", "code-planner", "code-plan-reviewer", "coder", "code-reviewer", "integration-analyst", "integration-reviewer"}
+	for _, alternative := range []bool{false, true} {
+		t.Run(fmt.Sprintf("alternative-brand-%v", alternative), func(t *testing.T) {
+			if alternative {
+				withPromptBrandValues(t, func() {
+					brand.NameTitle = "Example"
+					brand.BinaryName = "example"
+					brand.GlobalDirName = ".example-contract"
+					brand.ProjectDirName = ".example-state"
+				})
+			}
+			for _, role := range roles {
+				output, err := BuildBasePrompt(BasePromptConfig{Role: role, AgentID: role + "-1", ProjectRoot: "/arbitrary/python-repo", SpecsDir: "/arbitrary/python-repo/specs", StatePath: "/arbitrary/python-repo/state", GoalDesc: "Fixture"})
+				if err != nil {
+					t.Fatal(err)
+				}
+				core := "~/" + brand.GlobalDirName + "/CORE.md"
+				sequence := output[strings.Index(output, "1. Read these contract files"):]
+				if !strings.Contains(sequence, core+" (fully;") {
+					t.Fatalf("role %s does not read full installed CORE", role)
+				}
+				if strings.Index(sequence, core) >= strings.Index(sequence, "MULTI_AGENT_MODE.md") || strings.Index(sequence, "MULTI_AGENT_MODE.md") >= strings.Index(sequence, "AGENT_TOOLS.md") {
+					t.Fatalf("role %s changed sequential initialization", role)
+				}
+				for _, want := range []string{"installed CORE.md Rule 5", "every verifiable factual public claim", "AGENT_TOOLS.md cannot remove", "entire installed CORE was already loaded"} {
+					if !strings.Contains(output, want) {
+						t.Fatalf("role %s missing %q", role, want)
+					}
+				}
+			}
+		})
+	}
+}

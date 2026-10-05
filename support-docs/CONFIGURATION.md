@@ -1188,3 +1188,10 @@ project configuration belongs in `§BRAND_PROJECT_DIRNAME§/state.yaml`.
 Do not change a role-pair or transition `task-slug` after related tasks have
 been created. Recovery derives deterministic child IDs from the frozen slug;
 changing it mid-run can make existing children appear missing.
+
+## Graphify
+
+Setup packages the shared `graphify` skill and native coverage bridge. The
+target is always an explicit canonical absolute `--root`; no target package
+manifest or local adapter is required. See TOOL_ROUTING.md for commands,
+coverage gates and `GRAPHIFY_AUTO_REFRESH`, `GRAPHIFY_PORT`, `GRAPHIFY_API_KEY`.

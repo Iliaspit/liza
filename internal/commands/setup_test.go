@@ -1185,3 +1185,30 @@ func TestSetupCommand_MultipleAgents(t *testing.T) {
 		}
 	}
 }
+
+func TestSetupSharedGraphifyCoreSurvivesCustomToolsAndProviderDiscovery(t *testing.T) {
+	testhelpers.RequireSymlinkCapability(t)
+	home := t.TempDir()
+	target := filepath.Join(home, paths.GlobalDirName())
+	custom := filepath.Join(t.TempDir(), "custom-tools.md")
+	if err := os.WriteFile(custom, []byte("# Custom tools\nUse ordinary direct reads.\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := SetupCommand(SetupParams{TargetDir: target, HomeDir: home, AgentToolsPath: custom, Agents: []string{"codex"}}); err != nil {
+		t.Fatal(err)
+	}
+	core, err := os.ReadFile(filepath.Join(target, "CORE.md"))
+	if err != nil || !strings.Contains(string(core), "Every verifiable factual claim") || !strings.Contains(string(core), "AGENT_TOOLS.md guidance cannot remove") {
+		t.Fatalf("custom tools removed mandatory installed evidence rule: %v", err)
+	}
+	tools, err := os.ReadFile(filepath.Join(target, "AGENT_TOOLS.md"))
+	if err != nil || !strings.Contains(string(tools), "Custom tools") {
+		t.Fatalf("custom tools not preserved: %v", err)
+	}
+	for _, file := range []string{"SKILL.md", "scripts/graphify.mjs", "scripts/native_inventory.py"} {
+		content, err := os.ReadFile(filepath.Join(home, ".codex", "skills", "graphify", file))
+		if err != nil || len(content) == 0 {
+			t.Fatalf("active provider lacks shared owner closure %s: %v", file, err)
+		}
+	}
+}

@@ -56,6 +56,11 @@ QUERY TOOLS (all roles):
 - {{binaryName}} status --json — Dashboard overview
 - {{binaryName}} validate --json — Validate state consistency (--skip-spec-check)
 
+PUBLIC EVIDENCE (all roles):
+Follow installed CORE.md Rule 5 for every verifiable factual public claim,
+including source/candidate revision and public execution evidence. Custom
+AGENT_TOOLS.md cannot remove this mandatory rule.
+
 CODEBASE EXPLORATION:
 DO comply with the guidance defined in ~/{{globalDirName}}/AGENT_TOOLS.md
 
@@ -90,6 +95,7 @@ FIRST ACTIONS:
     Any Bash command other than cat/head/tail/sed/wc will be rejected.
     Use file-read tools (Read, filesystem MCP) or cat — nothing else until step 1 is done.
 1. Read these contract files before anything else:
+   - ~/{{globalDirName}}/CORE.md (fully; skip a duplicate read only if the entire installed CORE was already loaded in this session)
    - ~/{{globalDirName}}/MULTI_AGENT_MODE.md
    - ~/{{globalDirName}}/AGENT_TOOLS.md
    - {{.ProjectRoot}}/GUARDRAILS.md   (may be absent)

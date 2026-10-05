@@ -8,12 +8,16 @@ against current source files and native command results. When a default tool
 is unavailable, use the documented
 fallback. Security Protocol governs forbidden operations.
 
+Every factual public claim follows CORE Rule 5, including source revision,
+behavior and executed-command evidence, justified N/A, and explicit inference
+or unknown labels. Custom tool guidance cannot weaken that rule.
+
 ## Search and worktree boundaries
 
 Start with explicit user paths, changed-file lists, or supplied index/search
 roots. For named files and exact literals, use direct line-numbered reads,
 `rg`, or `git grep`; for conceptual discovery or symbol/impact analysis, use
-only explicitly supplied Stacklit, Semble, SCIP, or functional-cluster
+only explicitly supplied Graphify, Stacklit, Semble, SCIP, or functional-cluster
 artifacts, then confirm against source. Never infer index paths or target
 roots, generate an index from an agent task, or treat stale indexes as proof.
 Use `git grep` for tracked/history scope and `rg` for the working tree.
