@@ -49,10 +49,55 @@ def relative(root: Path, value: str | Path) -> str:
     return rel
 
 
+# Observe actual native parser reads instead of duplicating its resolution
+# algorithms. The audit hook is active only during native extraction; imports
+# from the interpreter/runtime are allowed, source/context reads are root bound.
+_RESOLUTION_SCOPE: dict[str, Any] | None = None
+
+
+def audit_native_read(event: str, args: tuple[Any, ...]) -> None:
+    scope = _RESOLUTION_SCOPE
+    if scope is None or event != "open" or not isinstance(args[0], (str, bytes, os.PathLike)):
+        return
+    candidate = Path(os.fsdecode(args[0])).absolute()
+    root = scope["root"]
+    if candidate.is_relative_to(root):
+        if candidate.is_file():
+            scope["reads"].add(relative(root, candidate))
+        return
+    resolved = candidate.resolve()
+    if any(resolved.is_relative_to(prefix) for prefix in scope["runtime"]):
+        return
+    scope["outside"] = True
+    raise ValueError("native parser resolution escaped target root")
+
+
+sys.addaudithook(audit_native_read)
+
+
+def native_context(root: Path, expected: list[dict[str, str]], extract: Any) -> tuple[set[str], bool]:
+    global _RESOLUTION_SCOPE
+    scope: dict[str, Any] = {
+        "root": root,
+        "reads": set(),
+        "outside": False,
+        "runtime": {Path(sys.prefix).resolve(), Path(sys.base_prefix).resolve()},
+    }
+    _RESOLUTION_SCOPE = scope
+    try:
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            for entry in expected:
+                p = root / entry["path"]
+                extract._safe_extract_with_xaml_root(extract._get_extractor(p), p, root)
+    finally:
+        _RESOLUTION_SCOPE = None
+    return scope["reads"], scope["outside"]
+
+
 def inventory(root: Path, *, require_git: bool = True) -> dict[str, Any]:
     detect, extract = native_modules()
     with (
-        tempfile.TemporaryDirectory(prefix="liza-graphify-detect-") as cache,
+        tempfile.TemporaryDirectory(prefix="graphify-detect-") as cache,
         contextlib.redirect_stdout(io.StringIO()),
         contextlib.redirect_stderr(io.StringIO()),
     ):
@@ -136,7 +181,15 @@ def inventory(root: Path, *, require_git: bool = True) -> dict[str, Any]:
         relative(root, root / ".git/info/exclude")
         copies.add(".git/info/exclude")
         dispositions.setdefault(".git/info/exclude", "copied native Git ignore context")
+    reads, outside = native_context(root, expected, extract)
+    context_inputs = sorted(reads - {entry["path"] for entry in expected})
+    for rel in context_inputs:
+        copies.add(rel)
+        dispositions[rel] = "copied native parser resolution context; no AST contribution required"
+    if outside:
+        failures.append({"path": "(resolution)", "reason": "native parser context outside explicit target root"})
     return {
+        "contextInputs": context_inputs,
         "expected": sorted(expected, key=lambda x: x["path"]),
         "excluded": [{"path": p, "reason": r} for p, r in sorted(dispositions.items()) if r != "eligible"],
         "failures": failures,
@@ -188,8 +241,9 @@ def coverage(root: Path) -> dict[str, Any]:
                 {**entry, "disposition": "current AST stamp and graph contribution", "nodes": len(result["nodes"])}
             )
     return {
-        "schema": "liza.graphify.coverage.v1",
+        "schema": "graphify.coverage.v1",
         "parserVersion": VERSION,
+        "contextInputs": report["contextInputs"],
         "expected": report["expected"],
         "extracted": extracted,
         "excluded": report["excluded"],
@@ -207,8 +261,8 @@ def main() -> None:
     if not root.is_absolute() or root.resolve() != root or not root.is_dir():
         raise ValueError("canonical absolute root required")
     os.chdir(root)
-    if sys.argv[1] == "inventory":
-        report = inventory(root)
+    if sys.argv[1] in ("inventory", "snapshot-inventory"):
+        report = inventory(root, require_git=sys.argv[1] == "inventory")
     elif sys.argv[1] == "coverage":
         report = coverage(root)
     else:

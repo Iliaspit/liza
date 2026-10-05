@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -8,11 +8,11 @@ import {
   acquireGraphAccessLock, releaseGraphAccessLock, buildExtractArgs,
   buildChildEnv, createGraphSourceSnapshot, cleanupGraphSourceSnapshot,
   main, resolveGraphifyExecutable, runNativeBridge, validateCandidateCoverage,
-  validateGraphFreshness, computeSourceFingerprint, createPrivateTempRoot,
+  validateGraphFreshness, computeSourceFingerprint, createPrivateTempRoot, publishGraphSnapshot, PUBLISHED_GRAPH_ARTIFACTS,
 } from "../scripts/graphify.mjs";
 
 async function fixture(t) {
-  const root = await realpath(await mkdtemp(path.join(tmpdir(), "liza-shared-graphify-test-")));
+  const root = await realpath(await mkdtemp(path.join(tmpdir(), "shared-graphify-test-")));
   t.after(() => rm(root, { recursive: true, force: true }));
   assert.equal(spawnSync("git", ["init", "-q", root]).status, 0);
   await mkdir(path.join(root, "nested"));
@@ -95,4 +95,92 @@ test("native bridge rejects dropped nested graph contribution and missing AST st
   const missing = await runNativeBridge("coverage", snapshot.root, options);
   assert(missing.failures.some((entry) => entry.path === "main.go" && entry.reason.includes("stamp")));
   assert.equal((await computeSourceFingerprint(root, options)).sourceSha256, snapshot.sourceGeneration.sourceSha256);
+});
+
+
+test("publication transaction restores every accepted artifact after rename and finalize failures", async (t) => {
+  const root = await fixture(t);
+  const candidate = await fixture(t);
+  const files = [...PUBLISHED_GRAPH_ARTIFACTS, "coverage-freshness.json", ".graphify_root"];
+  for (const directory of [root, candidate]) await mkdir(path.join(directory, "graphify-out"));
+  for (const name of files) {
+    await writeFile(path.join(root, "graphify-out", name), "accepted:" + name);
+    await writeFile(path.join(candidate, "graphify-out", name), "candidate:" + name);
+  }
+  for (const failure of ["rename", "source-generation", "freshness-write", "commit"]) {
+    let renamed = 0;
+    await assert.rejects(publishGraphSnapshot(candidate, root, {
+      renameImpl: async (...args) => {
+        if (failure === "rename" && ++renamed === 2) throw new Error("rename fault");
+        return rename(...args);
+      },
+      finalize: async () => {
+        await writeFile(path.join(root, "graphify-out", "coverage-freshness.json"), "candidate-stamp");
+        if (failure !== "rename") throw new Error(failure + " fault");
+      },
+    }));
+    for (const name of files) assert.equal(await readFile(path.join(root, "graphify-out", name), "utf8"), "accepted:" + name);
+  }
+});
+
+test("native pnpm workspace context is copied, resolves imports, and context-only edits stale coverage", async (t) => {
+  const root = await fixture(t);
+  await mkdir(path.join(root, "packages", "library"), { recursive: true });
+  await writeFile(path.join(root, "pnpm-workspace.yaml"), "packages:\n  - 'packages/*'\n");
+  await writeFile(path.join(root, "packages", "library", "package.json"), JSON.stringify({ name: "@fixture/library", main: "index.ts" }));
+  await writeFile(path.join(root, "packages", "library", "index.ts"), "export function sharedAnswer() { return 42; }\n");
+  await writeFile(path.join(root, "caller.ts"), "import { sharedAnswer } from '@fixture/library';\nexport const answer = sharedAnswer();\n");
+  await mkdir(path.join(root, "config"));
+  await writeFile(path.join(root, "config", "base.config"), JSON.stringify({ compilerOptions: { paths: {} } }));
+  await writeFile(path.join(root, "tsconfig.json"), JSON.stringify({ extends: "./config/base.config" }));
+  const inventory = await runNativeBridge("inventory", root);
+  assert(inventory.contextInputs.includes("pnpm-workspace.yaml"));
+  assert(inventory.contextInputs.includes("config/base.config"));
+  assert(inventory.sourcePaths.includes("config/base.config"));
+  assert(inventory.sourcePaths.includes("pnpm-workspace.yaml"));
+  assert(!inventory.expected.some(x => x.path === "pnpm-workspace.yaml"));
+  const deps = { repoRoot: root, writeStdout() {}, writeStderr() {} };
+  assert.equal(await main(["build"], deps), 0);
+  const graph = JSON.parse(await readFile(path.join(root, "graphify-out", "graph.json"), "utf8"));
+  const nodes = new Map(graph.nodes.map(x => [x.id, x]));
+  assert(graph.links.some(x => {
+    const left = nodes.get(x.source), right = nodes.get(x.target);
+    return String(left?.source_file).endsWith("caller.ts") && String(right?.source_file).endsWith("packages/library/index.ts");
+  }), "actual native graph must resolve the workspace import");
+  assert.equal(await validateGraphFreshness(root), "current");
+  await writeFile(path.join(root, "pnpm-workspace.yaml"), "packages:\n  - 'different/*'\n");
+  await assert.rejects(validateGraphFreshness(root));
+});
+
+test("native ancestor and extends context cannot escape the explicit root", async (t) => {
+  const parent = await fixture(t);
+  const root = path.join(parent, "child");
+  await mkdir(root);
+  assert.equal(spawnSync("git", ["init", "-q", root]).status, 0);
+  await writeFile(path.join(root, "caller.ts"), "import { value } from '@fixture/value';\nexport const result = value;\n");
+  await writeFile(path.join(parent, "tsconfig.json"), JSON.stringify({ compilerOptions: { paths: { "@fixture/*": ["*"] } } }));
+  const report = await runNativeBridge("inventory", root);
+  assert(report.failures.some(x => x.reason.includes("outside explicit target root")));
+  assert.notEqual(await main(["build"], { repoRoot: root, writeStdout() {}, writeStderr() {} }), 0);
+  await writeFile(path.join(root, "tsconfig.json"), JSON.stringify({ extends: "../tsconfig.json" }));
+  const extended = await runNativeBridge("inventory", root);
+  assert(extended.failures.some(x => x.reason.includes("outside explicit target root")));
+});
+
+
+test("real refresh rolls back accepted artifacts when freshness publication fails", async (t) => {
+  const root = await fixture(t);
+  const deps = { repoRoot: root, writeStdout() {}, writeStderr() {} };
+  assert.equal(await main(["build"], deps), 0);
+  const files = [...PUBLISHED_GRAPH_ARTIFACTS, "coverage-freshness.json"];
+  const accepted = await Promise.all(files.map(name => readFile(path.join(root, "graphify-out", name))));
+  assert.notEqual(await main(["update"], {
+    ...deps,
+    writeFreshness: async () => {
+      await writeFile(path.join(root, "graphify-out", "coverage-freshness.json"), "failed candidate stamp");
+      throw new Error("injected freshness write failure");
+    },
+  }), 0);
+  for (let i = 0; i < files.length; i++) assert((await readFile(path.join(root, "graphify-out", files[i]))).equals(accepted[i]));
+  assert.equal(await validateGraphFreshness(root), "current");
 });

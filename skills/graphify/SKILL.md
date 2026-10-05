@@ -41,7 +41,7 @@ installation, downloads, Git hooks or package mutations. Executable version
 checks are compatibility checks, not package provenance guarantees.
 
 Shared HTTP queries require `GRAPHIFY_API_KEY` and use the repository-bound
-`liza.graphify.http.v1` protocol. `GRAPHIFY_PORT` selects the port. The normal
+`graphify.http.v1` protocol. `GRAPHIFY_PORT` selects the port. The normal
 server binds all interfaces for explicitly authorized VM use; controllers
 must bind loopback for local comparison runs. Never expose plain HTTP to a
 public network. Send only non-sensitive questions. Query text may be visible
@@ -52,3 +52,9 @@ and `.graphify-owner.lock.recovery/` in the explicit root.
 Consumers use the prepared endpoint and query client; agents do not create
 indexes or start services unless the assigned role explicitly owns them.
 If the tool is unavailable or incomplete, report that and use targeted reads.
+
+Native parser resolution inputs are observed through the pinned parser's actual
+file reads, copied into the snapshot, and bound into freshness separately from
+expected AST contributions. Ancestor or extends context outside the explicit
+repository root blocks extraction. Publication holds the target lock through
+artifact replacement, source recheck, freshness publication and rollback.

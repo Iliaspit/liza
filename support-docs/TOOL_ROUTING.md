@@ -124,7 +124,7 @@ Use `GRAPHIFY_AUTO_REFRESH=0` for frozen-candidate servers and
 `GRAPHIFY_PORT` for a selected authorized port. A query may otherwise refresh
 through the sole owner. Never use upstream commands or add target-local
 validators. No runtime, tool or package installation is implicit. Shared
-HTTP uses `liza.graphify.http.v1` and repository label `repository`.
+HTTP uses `graphify.http.v1` and repository label `repository`.
 
 Coverage is structural accounting, not semantic completeness. Native parsers
 can miss symbols or call relationships even without reported errors. Check

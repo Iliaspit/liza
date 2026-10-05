@@ -27,23 +27,23 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 export const REQUIRED_VERSION = "0.9.39";
 export const SETUP_COMMAND = `uv tool install graphifyy==${REQUIRED_VERSION}`;
 export const FORCE_SETUP_COMMAND = `uv tool install --force graphifyy==${REQUIRED_VERSION}`;
-export const MARKER_SCHEMA = "liza.graphify.v3";
-export const MARKER_EVENT = "liza:graphify";
+export const MARKER_SCHEMA = "graphify.v3";
+export const MARKER_EVENT = "graphify";
 export const MAX_QUESTION_CHARS = 4096;
 // All operations require a caller-supplied canonical absolute target root.
 export const REPO_ROOT = undefined;
 export const GRAPH_DIRECTORY = undefined;
 export const GRAPH_PATH = undefined;
 export const FRESHNESS_PATH = undefined;
-export const FRESHNESS_SCHEMA = "liza.graphify.freshness.v2";
-export const SHARED_GRAPH_SCHEMA = "liza.graphify.http.v1";
+export const FRESHNESS_SCHEMA = "graphify.freshness.v2";
+export const SHARED_GRAPH_SCHEMA = "graphify.http.v1";
 export const SHARED_GRAPH_HOST = "0.0.0.0";
 export const SHARED_GRAPH_PORT = 8080;
 export const MAX_REQUEST_BYTES = 8_192;
 export const GRAPH_LOCK_PATH = undefined;
-export const GRAPH_LOCK_SCHEMA = "liza.graphify.lock.v1";
+export const GRAPH_LOCK_SCHEMA = "graphify.lock.v1";
 export const GRAPH_LOCK_RECOVERY_PATH = undefined;
-export const GRAPH_LOCK_RECOVERY_SCHEMA = "liza.graphify.lock-recovery.v1";
+export const GRAPH_LOCK_RECOVERY_SCHEMA = "graphify.lock-recovery.v1";
 export const GRAPH_LOCK_WAIT_TIMEOUT_MS = 660_000;
 export const GRAPH_LOCK_POLL_MS = 100;
 export const GRAPH_LOCK_INITIALIZATION_GRACE_MS = 30_000;
@@ -386,7 +386,7 @@ export async function createPrivateTempRoot({
 } = {}) {
   let created = null;
   try {
-    created = await mkdtempImpl(path.join(tempDirectory, "liza-graphify-"));
+    created = await mkdtempImpl(path.join(tempDirectory, "graphify-"));
     if (platform !== "win32") {
       await chmodImpl(created, 0o700);
     }
@@ -1324,6 +1324,10 @@ export async function createGraphSourceSnapshot(
         await chmodImpl(directory, 0o500);
       }
     }
+    if (listSourcePaths === listGraphSourcePaths) {
+      const isolation = await runNativeBridge("snapshot-inventory", snapshotRoot, listOptions);
+      if (isolation.failures.length) throw new FreshnessStateError("coverage-incomplete");
+    }
     return Object.freeze({
       root: snapshotRoot,
       outputDirectory,
@@ -1494,6 +1498,7 @@ export async function publishGraphSnapshot(
     writeFileImpl = writeFile,
     pathApi = path,
     nonce = `${process.pid}-${randomBytes(8).toString("hex")}`,
+    finalize = async () => undefined,
   } = {},
 ) {
   const snapshotOutput = await validateOutputDirectory(snapshotRoot, {
@@ -1517,7 +1522,28 @@ export async function publishGraphSnapshot(
     pathApi,
   });
   const staged = [];
+  const previous = new Map();
+  const transactionFiles = [...PUBLISHED_GRAPH_ARTIFACTS, "coverage-freshness.json", ".graphify_root"];
+  for (const filename of transactionFiles) {
+    try {
+      const original = await readStableContainedFile(outputDirectory, filename, {
+        lstatImpl, readFileImpl, realpathImpl, pathApi,
+      });
+      previous.set(filename, original.bytes);
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw error;
+      previous.set(filename, null);
+    }
+  }
+  let changed = false;
+  const backups = [];
   try {
+    for (const [filename, bytes] of previous) {
+      if (bytes === null) continue;
+      const backup = pathApi.join(outputDirectory, `.graphify-rollback-${nonce}-${filename}`);
+      await writeFileImpl(backup, bytes, { flag: "wx", mode: 0o600 });
+      backups.push({ filename, path: backup });
+    }
     for (const filename of PUBLISHED_GRAPH_ARTIFACTS) {
       const source = await readStableContainedFile(snapshotOutput, filename, {
         lstatImpl,
@@ -1530,6 +1556,7 @@ export async function publishGraphSnapshot(
       staged.push(Object.freeze({ filename, path: stagedPath }));
     }
     await assertOwned();
+    changed = true;
     await rmImpl(pathApi.join(outputDirectory, "coverage-freshness.json"), { force: true });
     await assertOwned();
     await rmImpl(pathApi.join(outputDirectory, ".graphify_root"), { force: true });
@@ -1538,9 +1565,25 @@ export async function publishGraphSnapshot(
       await renameImpl(artifact.path, pathApi.join(outputDirectory, artifact.filename));
     }
     await assertOwned();
+    await finalize();
+    await assertOwned();
     return outputDirectory;
+  } catch (error) {
+    if (changed) {
+      // Recovery uses the real filesystem operations, independently of injected
+      // candidate failures. The exclusive owner gate spans commit and rollback.
+      for (const [filename, bytes] of previous) {
+        const destination = pathApi.join(outputDirectory, filename);
+        if (bytes === null) await rm(destination, { force: true });
+        else await rename(backups.find((backup) => backup.filename === filename).path, destination);
+      }
+    }
+    throw error;
   } finally {
-    await Promise.all(staged.map((artifact) => rmImpl(artifact.path, { force: true })));
+    // Scratch disposal does not turn a committed publication into a failed
+    // candidate; accepted bytes are independent of these private files.
+    await Promise.all([...staged, ...backups].map((artifact) =>
+      rm(artifact.path, { force: true }).catch(() => undefined)));
   }
 }
 
@@ -1563,7 +1606,7 @@ async function currentFreshnessRecord(repoRoot, options = {}, provenSource = nul
   const outputDirectory = await validateOutputDirectory(repoRoot, options);
   const coverageFile = await safeContainedFile(repoRoot, "graphify-out/coverage.json", options);
   const coverage = JSON.parse(await (options.readFileImpl ?? readFile)(coverageFile, "utf8"));
-  if (coverage.schema !== "liza.graphify.coverage.v1" || coverage.parserVersion !== REQUIRED_VERSION ||
+  if (coverage.schema !== "graphify.coverage.v1" || coverage.parserVersion !== REQUIRED_VERSION ||
       coverage.complete !== true || !Array.isArray(coverage.failures) || coverage.failures.length ||
       !Array.isArray(coverage.expected) || !Array.isArray(coverage.extracted) || !Array.isArray(coverage.excluded) ||
       coverage.expected.some((entry) => !isGraphSourcePath(entry.path) || typeof entry.parser !== "string") ||
@@ -2292,12 +2335,18 @@ export async function refreshStableGraph({
         continue;
       }
       await assertOwned();
-      await publishSnapshot(snapshot.root, repoRoot, { ...freshnessOptions, assertOwned });
-      await assertOwned();
-      await writeFreshness(repoRoot, snapshot.sourceGeneration, { ...freshnessOptions, assertOwned });
-      await assertOwned();
-      const freshness = await validateFreshness(repoRoot, freshnessOptions);
-      if (freshness !== "current") throw new FreshnessStateError("stale");
+      const finalize = async () => {
+        await assertOwned();
+        const committedSource = validateSourceGeneration(await computeSource(repoRoot, freshnessOptions));
+        if (!sameSourceGeneration(snapshot.sourceGeneration, committedSource)) {
+          throw new FreshnessStateError("unstable-source");
+        }
+        await writeFreshness(repoRoot, snapshot.sourceGeneration, { ...freshnessOptions, assertOwned });
+        await assertOwned();
+        const freshness = await validateFreshness(repoRoot, freshnessOptions);
+        if (freshness !== "current") throw new FreshnessStateError("stale");
+      };
+      await publishSnapshot(snapshot.root, repoRoot, { ...freshnessOptions, assertOwned, finalize });
       onLifecycle({ mode, attempt, outcome: "success" });
       return "current";
     } catch (error) {
