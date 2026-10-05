@@ -18,6 +18,7 @@ import sys
 import tempfile
 import unicodedata
 from pathlib import Path
+from types import FrameType
 from typing import Any
 
 VERSION = "0.9.39"
@@ -62,25 +63,42 @@ def audit_native_read(event: str, args: tuple[Any, ...]) -> None:
     candidate = Path(os.fsdecode(args[0])).absolute()
     root = scope["root"]
     if candidate.is_relative_to(root):
+        if scope["is_sensitive"](candidate):
+            scope["failures"].add((candidate.relative_to(root).as_posix(), "native sensitive parser context"))
+            raise ValueError("native parser resolution attempted sensitive context")
         if candidate.is_file():
-            scope["reads"].add(relative(root, candidate))
+            try:
+                scope["reads"].add(relative(root, candidate))
+            except ValueError:
+                scope["failures"].add(("(resolution)", "unsafe native parser context path"))
+                raise
         return
     resolved = candidate.resolve()
     if any(resolved.is_relative_to(prefix) for prefix in scope["runtime"]):
-        return
-    scope["outside"] = True
+        # Only the interpreter's import machinery may read its runtime here.
+        # Native resolver reads (including absolute extends paths beneath the
+        # interpreter prefix) have no import-loader frame and remain forbidden.
+        frame: FrameType | None = sys._getframe(1)
+        while frame is not None:
+            if frame.f_code.co_filename.startswith("<frozen importlib."):
+                return
+            frame = frame.f_back
+    scope["failures"].add(("(resolution)", "native parser context outside explicit target root"))
     raise ValueError("native parser resolution escaped target root")
 
 
 sys.addaudithook(audit_native_read)
 
 
-def native_context(root: Path, expected: list[dict[str, str]], extract: Any) -> tuple[set[str], bool]:
+def native_context(
+    root: Path, expected: list[dict[str, str]], detect: Any, extract: Any
+) -> tuple[set[str], list[dict[str, str]]]:
     global _RESOLUTION_SCOPE
     scope: dict[str, Any] = {
         "root": root,
         "reads": set(),
-        "outside": False,
+        "failures": set(),
+        "is_sensitive": detect._is_sensitive,
         "runtime": {Path(sys.prefix).resolve(), Path(sys.base_prefix).resolve()},
     }
     _RESOLUTION_SCOPE = scope
@@ -91,7 +109,7 @@ def native_context(root: Path, expected: list[dict[str, str]], extract: Any) -> 
                 extract._safe_extract_with_xaml_root(extract._get_extractor(p), p, root)
     finally:
         _RESOLUTION_SCOPE = None
-    return scope["reads"], scope["outside"]
+    return scope["reads"], [{"path": p, "reason": r} for p, r in sorted(scope["failures"])]
 
 
 def inventory(root: Path, *, require_git: bool = True) -> dict[str, Any]:
@@ -181,13 +199,12 @@ def inventory(root: Path, *, require_git: bool = True) -> dict[str, Any]:
         relative(root, root / ".git/info/exclude")
         copies.add(".git/info/exclude")
         dispositions.setdefault(".git/info/exclude", "copied native Git ignore context")
-    reads, outside = native_context(root, expected, extract)
+    reads, context_failures = native_context(root, expected, detect, extract)
     context_inputs = sorted(reads - {entry["path"] for entry in expected})
     for rel in context_inputs:
         copies.add(rel)
         dispositions[rel] = "copied native parser resolution context; no AST contribution required"
-    if outside:
-        failures.append({"path": "(resolution)", "reason": "native parser context outside explicit target root"})
+    failures.extend(context_failures)
     return {
         "contextInputs": context_inputs,
         "expected": sorted(expected, key=lambda x: x["path"]),
@@ -210,7 +227,7 @@ def coverage(root: Path) -> dict[str, Any]:
         if value:
             graph_sources.add(relative(root, value))
     extracted = []
-    for entry in report["expected"]:
+    for entry in report["expected"] if not report["failures"] else []:
         rel = entry["path"]
         p = root / rel
         extractor = extract._get_extractor(p)

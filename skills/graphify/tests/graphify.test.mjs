@@ -167,6 +167,51 @@ test("native ancestor and extends context cannot escape the explicit root", asyn
   assert(extended.failures.some(x => x.reason.includes("outside explicit target root")));
 });
 
+test("native sensitive context is denied before open; runtime-prefix resolver reads remain confined", async (t) => {
+  const cli = await resolveGraphifyExecutable();
+  if (!cli) return t.skip("pinned Graphify runtime unavailable");
+  const python = /^#!([^\r\n]+)/.exec(await readFile(cli.path, "utf8"))[1];
+  const root = await fixture(t);
+  const runtimeRoot = await fixture(t);
+  await writeFile(path.join(root, "caller.ts"), "import { value } from '@fixture/value';\nexport const answer = value;\n");
+  await writeFile(path.join(runtimeRoot, "caller.ts"), "import { value } from '@fixture/value';\nexport const answer = value;\n");
+  await writeFile(path.join(root, "tsconfig.json"), JSON.stringify({ extends: "./.env.context.json" }));
+  await writeFile(path.join(root, ".env.context.json"), "{}");
+  const probe = spawnSync(python, ["-c", `
+import importlib.util, json, os, sys
+from pathlib import Path
+spec = importlib.util.spec_from_file_location('bridge', sys.argv[1])
+bridge = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(bridge)
+root = Path(sys.argv[2])
+synthetic = root / '.env.context.json'
+attempts = []
+def observer(event, args):
+    if event == 'open' and isinstance(args[0], (str, bytes, os.PathLike)) and Path(os.fsdecode(args[0])).absolute() == synthetic:
+        attempts.append('open')
+        raise PermissionError('synthetic pre-open observer')
+sys.addaudithook(observer)
+sensitive = bridge.inventory(root)
+import graphify.extractors.resolution as resolution
+runtime_context = Path(resolution.__file__).resolve()
+assert runtime_context.is_relative_to(Path(sys.prefix).resolve())
+runtime_root = Path(sys.argv[3])
+(runtime_root / 'tsconfig.json').write_text(json.dumps({'extends': str(runtime_context)}))
+runtime = bridge.inventory(runtime_root)
+print(json.dumps({'sensitive': sensitive, 'runtime': runtime, 'attempts': len(attempts)}))
+`, path.resolve(import.meta.dirname, "../scripts/native_inventory.py"), root, runtimeRoot], { encoding: "utf8" });
+  assert.equal(probe.status, 0, probe.stderr);
+  const report = JSON.parse(probe.stdout);
+  assert.equal(report.attempts, 0, "bridge must reject before another pre-open observer sees sensitive access");
+  assert(report.sensitive.failures.some(x => x.path === ".env.context.json" && x.reason === "native sensitive parser context"));
+  assert(!report.sensitive.sourcePaths.includes(".env.context.json"));
+  assert(!report.sensitive.contextInputs.includes(".env.context.json"));
+  assert(report.sensitive.excluded.some(x => x.path === ".env.context.json" && x.reason === "native sensitive path"));
+  assert(!report.sensitive.failures.some(x => x.reason.includes("outside")));
+  assert(report.runtime.failures.some(x => x.reason.includes("outside explicit target root")));
+  assert.notEqual(await main(["build"], { repoRoot: root, writeStdout() {}, writeStderr() {} }), 0);
+});
+
 
 test("real refresh rolls back accepted artifacts when freshness publication fails", async (t) => {
   const root = await fixture(t);
