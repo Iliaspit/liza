@@ -21,7 +21,7 @@ import sys
 import tempfile
 import unicodedata
 from pathlib import Path
-from types import FrameType
+from types import CodeType, FrameType
 from typing import Any
 
 VERSION = "0.9.39"
@@ -738,50 +738,257 @@ def inventory(root: Path, *, require_git: bool = True) -> dict[str, Any]:
                 "failures": [{"path": p, "reason": r} for p, r in sorted(scope.failures)], "sourcePaths": sorted(copies)}
 
 
+def native_node_identity(node: Any) -> tuple[Any, ...] | None:
+    """Exact final native fields; never infer a source from a label or basename."""
+    if not isinstance(node, dict) or not isinstance(node.get("id"), str) or not node["id"]:
+        return None
+    fields = ("source_file", "label", "file_type", "source_location", "type", "confidence", "_origin")
+    if any(node.get(key) is not None and not isinstance(node.get(key), str) for key in fields):
+        return None
+    return (node["id"], *(node.get(key) for key in fields))
+
+
+@contextlib.contextmanager
+def observe_native_stubs(extract: Any, stubs: list[dict[str, Any]], *, categories: dict[int, str] | None = None) -> Any:
+    """Observe appends by the exact rescued and nested generic producers."""
+    original = extract._emit_rescued_import
+    codes = [code for code in extract._extract_generic.__code__.co_consts
+             if isinstance(code, CodeType) and code.co_name == "ensure_named_node"]
+    if len(codes) != 1:
+        raise ValueError("unsupported native generic reference producer")
+    producer_code = codes[0]
+    previous_profile = sys.getprofile()
+    calls: dict[int, tuple[list[dict[str, Any]], int]] = {}
+    categories = {} if categories is None else categories
+
+    def observed(result: dict[str, Any], *args: Any, **kwargs: Any) -> None:
+        before = len(result.get("nodes", []))
+        original(result, *args, **kwargs)
+        appended = result.get("nodes", [])[before:]
+        stubs.extend(appended)
+        categories.update((id(node), "rescued-reference") for node in appended)
+
+    def profile(frame: FrameType, event: str, arg: Any) -> None:
+        if frame.f_code is producer_code:
+            if event == "call":
+                nodes = frame.f_locals["nodes"]
+                calls[id(frame)] = (nodes, len(nodes))
+            elif event == "return":
+                nodes, before = calls.pop(id(frame))
+                appended = nodes[before:]
+                stubs.extend(appended)
+                categories.update((id(node), "generic-reference") for node in appended)
+        if previous_profile is not None:
+            previous_profile(frame, event, arg)
+
+    extract._emit_rescued_import = observed
+    try:
+        sys.setprofile(profile)
+        yield
+    finally:
+        sys.setprofile(previous_profile)
+        extract._emit_rescued_import = original
+
+
+def canonical_native_nodes(root: Path, extract: Any, results: dict[Path, dict[str, Any]], *,
+                           provenance: dict[int, tuple[str, str]] | None = None) -> list[dict[str, Any]]:
+    """Use actual native aggregation, deduplication and graph materialization.
+
+    No historical cache result or cache write participates. The caller retains
+    the filesystem observer around every native pass. Optional ephemeral object
+    provenance follows selected survivors, never different-source losers.
+    """
+    from graphify import build, dedup
+
+    provenance = {} if provenance is None else provenance
+    saved = extract.load_cached, extract._extract_sequential
+    saved_dedup = dedup._merge_missing_attributes, dedup.deduplicate_entities
+    copied: list[dict[str, Any]] = []  # Keep intermediate identities alive.
+    selected: list[dict[str, Any]] = []
+
+    def fresh_sequential(work: Any, per_file: Any, *args: Any, **kwargs: Any) -> None:
+        for index, path in work:
+            per_file[index] = results[path]
+
+    def observed_merge(survivor: dict[str, Any], duplicate: dict[str, Any]) -> dict[str, Any]:
+        merged = saved_dedup[0](survivor, duplicate)
+        copied.append(merged)
+        if id(survivor) in provenance and merged.get("source_file") == survivor.get("source_file"):
+            provenance[id(merged)] = provenance[id(survivor)]
+        return merged
+
+    def observed_dedup(*args: Any, **kwargs: Any) -> Any:
+        result = saved_dedup[1](*args, **kwargs)
+        selected.extend(result[0])
+        return result
+
+    extract.load_cached = lambda *args, **kwargs: None
+    extract._extract_sequential = fresh_sequential
+    dedup._merge_missing_attributes, dedup.deduplicate_entities = observed_merge, observed_dedup
+    try:
+        result = extract.extract(list(results), root=root, cache_root=root, parallel=False)
+        if not isinstance(result, dict) or not isinstance(result.get("nodes"), list):
+            raise ValueError("invalid native aggregation result")
+        if any(native_node_identity(node) is None for node in result["nodes"]):
+            raise ValueError("invalid native aggregation node")
+        graph = build.build([result], dedup=True, dedup_llm_backend=None, root=root)
+        survivors = {node["id"]: node for node in selected}
+        final = []
+        final_provenance = {}
+        for node_id, attributes in graph.nodes(data=True):
+            node = {"id": node_id, **attributes}
+            if native_node_identity(node) is None:
+                raise ValueError("invalid final native node")
+            final.append(node)
+            survivor = survivors.get(node_id)
+            if (survivor is not None and id(survivor) in provenance
+                    and survivor.get("source_file") == node.get("source_file")):
+                final_provenance[id(node)] = provenance[id(survivor)]
+        provenance.clear()
+        provenance.update(final_provenance)
+        return final
+    finally:
+        dedup._merge_missing_attributes, dedup.deduplicate_entities = saved_dedup
+        extract.load_cached, extract._extract_sequential = saved
+
+
 def coverage(root: Path) -> dict[str, Any]:
     detect, extract = native_modules()
     report = inventory(root, require_git=False)
-    graph = json.loads((root / "graphify-out/graph.json").read_text())
-    manifest = json.loads((root / "graphify-out/manifest.json").read_text())
-    if not isinstance(manifest, dict) or not isinstance(graph.get("nodes"), list):
-        raise ValueError("invalid native artifact shape")
-    graph_sources = set()
-    for node in graph["nodes"]:
-        value = node.get("source_file")
-        if value:
-            graph_sources.add(relative(root, value))
+    failures = report["failures"]
+    inventory_safe = not failures
+    artifacts: dict[str, Any] = {}
+    for name in ("graph", "manifest"):
+        try:
+            artifacts[name] = json.loads((root / f"graphify-out/{name}.json").read_text())
+        except (json.JSONDecodeError, UnicodeError, OSError, RecursionError):
+            failures.append({"path": f"({name})", "reason": "invalid native artifact JSON or unreadable artifact"})
+            artifacts[name] = {"nodes": []} if name == "graph" else {}
+    graph, manifest = artifacts["graph"], artifacts["manifest"]
+    if not isinstance(manifest, dict):
+        failures.append({"path": "(manifest)", "reason": "invalid native artifact shape"})
+        manifest = {}
+    if not isinstance(graph, dict) or not isinstance(graph.get("nodes"), list):
+        failures.append({"path": "(graph)", "reason": "invalid native artifact shape"})
+        graph_nodes = []
+    else:
+        graph_nodes = graph["nodes"]
+    published = []
+    for node in graph_nodes:
+        if native_node_identity(node) is None:
+            failures.append({"path": "(graph)", "reason": "invalid native graph node or source shape"})
+        else:
+            published.append(node)
     extracted = []
+    results: dict[Path, dict[str, Any]] = {}
+    stubs: list[dict[str, Any]] = []
+    reference_kinds: dict[int, str] = {}
+    stamped: set[str] = set()
+    admitted: set[str] = set()
+    provenance: dict[int, tuple[str, str]] = {}
     scope = NativeScope(root, detect)
-    scope.preflight()
-    for entry in report["expected"] if not report["failures"] else []:
+    try:
+        scope.preflight()
+    except (ValueError, OSError):
+        failures.append({"path": "(scan)", "reason": "native coverage control preflight failed"})
+        inventory_safe = False
+    for entry in report["expected"] if inventory_safe else []:
         rel = entry["path"]
         p = root / rel
-        with scope.active(), contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
-            extractor = extract._get_extractor(p)
-            result = extract._safe_extract_with_xaml_root(extractor, p, root)
+        before = len(stubs)
+        try:
+            with scope.active(), observe_native_stubs(extract, stubs, categories=reference_kinds), contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                extractor = extract._get_extractor(p)
+                result = extract._safe_extract_with_xaml_root(extractor, p, root)
+        except (ValueError, OSError):
+            failures.append({"path": rel, "reason": "native extractor error or forbidden I/O"})
+            continue
+        if not isinstance(result, dict):
+            failures.append({"path": rel, "reason": "invalid native extraction result"})
+            continue
         if result.get("error"):
             report["failures"].append({"path": rel, "reason": "native extractor error or missing parser dependency"})
             continue
+        if (not isinstance(result.get("nodes"), list) or not isinstance(result.get("edges"), list)
+                or any(native_node_identity(node) is None for node in result["nodes"])):
+            report["failures"].append({"path": rel, "reason": "invalid native extraction result"})
+            continue
+        # Recovered nodes still determine native collision/resolution identities.
+        # They never participate in contribution, stamp or extraction admission.
+        results[p] = result
+        stub_objects = {id(node) for node in stubs[before:]}
+        for node in result["nodes"]:
+            if id(node) in stub_objects:
+                provenance[id(node)] = (reference_kinds[id(node)], "")
+            elif node.get("source_file") == str(p):
+                provenance[id(node)] = ("recovered" if result.get("parse_errors") else "genuine", rel)
         if result.get("parse_errors"):
             report["failures"].append({"path": rel, "reason": "native parser reported recovery/errors"})
-            continue
-        if not isinstance(result.get("nodes"), list) or not isinstance(result.get("edges"), list):
-            report["failures"].append({"path": rel, "reason": "invalid native extraction result"})
             continue
         if not result["nodes"]:
             extracted.append({**entry, "disposition": "error-free native no-symbol result", "nodes": 0})
             continue
+        admitted.add(rel)
         stamp = manifest.get(rel)
-        digest = hashlib.md5(p.read_bytes(), usedforsecurity=False).hexdigest()
-        if not isinstance(stamp, dict) or stamp.get("ast_hash") != digest or stamp.get("mtime") != p.stat().st_mtime:
+        try:
+            with scope.active():
+                digest = hashlib.md5(p.read_bytes(), usedforsecurity=False).hexdigest()
+                mtime = p.stat().st_mtime
+        except (ValueError, OSError):
+            failures.append({"path": rel, "reason": "native source stamp read failed"})
+            continue
+        if not isinstance(stamp, dict) or stamp.get("ast_hash") != digest or stamp.get("mtime") != mtime:
             report["failures"].append({"path": rel, "reason": "missing or stale native AST stamp"})
-        elif rel not in graph_sources:
+        else:
+            stamped.add(rel)
+    native_nodes = []
+    if results:
+        try:
+            with scope.active(), contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                native_nodes = canonical_native_nodes(root, extract, results, provenance=provenance)
+        except (ValueError, OSError, TypeError, KeyError, AttributeError):
+            failures.append({"path": "(graph)", "reason": "native identity aggregation failed or forbidden I/O"})
+    occurrences: dict[tuple[Any, ...], list[tuple[str, str]]] = {}
+    for node in native_nodes:
+        occurrences.setdefault(native_node_identity(node), []).append(provenance.get(id(node), ("unowned", "")))
+    graph_sources = set()
+    expected_paths = {entry["path"] for entry in report["expected"]}
+    for node in published:
+        identity = native_node_identity(node)
+        available = occurrences.get(identity)
+        if not available:
+            reason = "unrecognized or excess native graph node occurrence" if node.get("source_file") else "unrecognized or excess source-less native graph node occurrence"
+            failures.append({"path": "(graph)", "reason": reason})
+            continue
+        category, owner = available.pop()
+        if category in ("rescued-reference", "generic-reference"):
+            continue  # Producer-proven metadata: no Path, traversal or contribution.
+        value = node.get("source_file")
+        if not value:
+            failures.append({"path": "(graph)", "reason": "unrecognized source-less native graph node"})
+            continue
+        if value not in expected_paths:
+            failures.append({"path": "(graph)", "reason": "unrecognized native graph source reference"})
+            continue
+        try:
+            with scope.active():
+                rel = relative(root, value)
+        except (ValueError, OSError):
+            failures.append({"path": "(graph)", "reason": "unsafe native graph source reference"})
+            continue
+        if category == "genuine" and owner == rel and rel in admitted:
+            graph_sources.add(rel)
+    for entry in report["expected"]:
+        rel = entry["path"]
+        if rel not in admitted:
+            continue
+        if rel not in graph_sources:
             report["failures"].append(
                 {"path": rel, "reason": "native eligible source has no published graph contribution"}
             )
-        else:
+        elif rel in stamped:
             extracted.append(
-                {**entry, "disposition": "current AST stamp and graph contribution", "nodes": len(result["nodes"])}
+                {**entry, "disposition": "current AST stamp and graph contribution", "nodes": len(results[root / rel]["nodes"])}
             )
     report["failures"].extend({"path": p, "reason": r} for p, r in sorted(scope.failures))
     return {

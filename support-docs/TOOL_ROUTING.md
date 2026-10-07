@@ -112,13 +112,41 @@ The pinned Graphify 0.9.39 CLI's interpreter runs the version-checked native
 inventory bridge. Expected sources come from native detection, ignores and
 actual parser dispatch, reconciled with Git candidate paths. Read-only
 snapshots preserve source and ignore context; coverage verifies current AST
-stamps and graph contributions, with explicit error-free no-symbol results.
+stamps and freshly observed file-backed contributions, with explicit error-free
+no-symbol results. It observes objects emitted by the pinned native
+`_emit_rescued_import` and exact nested generic `ensure_named_node` producers,
+with restored hooks and a chained/restored profiler, and uses native aggregation of
+fresh per-file results, retaining well-shaped recovered results only for native
+identity reconciliation, then actual code-only native build/dedup for final
+IDs, labels and graph cardinality without publication/LLM calls. Observed native
+selected-survivor copies/materialization retain same-source provenance;
+references/recovery and different-source losers cannot confer file credit.
+Published tuples consume final native occurrences; copied genuine/reference
+records reject.
+Recovered sources retain failures and cannot gain contribution/stamp admission.
+Cache reuse/writes are disabled; the filesystem observer stays active and hooks
+are restored in `finally`. Published nodes match exact
+native ID, source, label, file type, location, type, confidence and origin fields.
+Only producer-proven stubs remain metadata without file access or contribution.
+Unknown/malformed references, unproven source-less nodes and unreadable/invalid/deep
+graph or manifest JSON return incomplete coverage while other safe file checks
+finish; a forged dependency stub cannot replace genuine contribution.
 Missing parsers, errors, reported parse recovery or omitted nested sources
 block publication. Inspect `graphify-out/coverage.json` for expected,
 extracted, excluded and failed paths/reasons. Its source digest and every
 published artifact are bound in `coverage-freshness.json`; graphs without
 complete current coverage fail status, health and query admission. A failed
 candidate leaves the previous accepted publication intact.
+For a declared selected AST index, use exact root-anchored native
+`.graphifyignore` exclusions and retain their census/accounting register.
+Completeness describes that selected inventory; included parser recovery still
+rejects. Safe excluded regular files may be observed/copied as resolution
+context without AST admission. Ignored unsafe/link paths gain no content/target
+permission. Exact-pattern near misses remain included; source, context and
+ignore-control drift stale accepted artifacts. Require direct-source evidence
+for every excluded path and relevant caller/consumer at the same frozen source
+revision, refreshed after revision changes. Graph results cannot establish
+absence across exclusions or full-repository AST completeness.
 Inventory has a finite 120-second bound. Inventory bridge subprocess failures report
 only the bridge action and safe failure class, including timeout; child stderr
 is omitted. A returned incomplete report remains a coverage failure.

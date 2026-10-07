@@ -367,9 +367,492 @@ test("native bridge rejects dropped nested graph contribution and missing AST st
   await writeFile(manifestPath, JSON.stringify(manifest));
   const missing = await runNativeBridge("coverage", snapshot.root, options);
   assert(missing.failures.some((entry) => entry.path === "main.go" && entry.reason.includes("stamp")));
+  manifest["main.go"] = { ast_hash: createHash("md5").update(await readFile(path.join(snapshot.root, "main.go"))).digest("hex"),
+    mtime: (await stat(path.join(snapshot.root, "main.go"))).mtimeMs / 1000 + 1 };
+  await writeFile(manifestPath, JSON.stringify(manifest));
+  const stale = await runNativeBridge("coverage", snapshot.root, options);
+  assert(stale.failures.some(entry => entry.path === "main.go" && entry.reason.includes("stamp")));
+  assert(stale.failures.some(entry => entry.path === "nested/api.py" && entry.reason.includes("contribution")),
+    "independent per-file failures must survive a stale stamp elsewhere");
   assert.equal((await computeSourceFingerprint(root, options)).sourceSha256, snapshot.sourceGeneration.sourceSha256);
 });
 
+test("actual rescued dependency stubs survive canonical collisions without filesystem contribution or failed publication", async (t) => {
+  if (!await resolveGraphifyExecutable()) return t.skip("pinned Graphify runtime unavailable");
+  const root = await fixture(t);
+  await writeFile(path.join(root, "tsconfig.json"), JSON.stringify({ compilerOptions: {
+    baseUrl: ".", paths: { "@missing/*": ["absent/*"] },
+  } }));
+  const source = [
+    'const scoped = import("@playwright/test");',
+    'const builtin = import("node:fs");',
+    'const relative = import("./missing-target");',
+    'const alias = import("@missing/target");',
+    'export const retained = 42;',
+  ].join("\n") + "\n";
+  await writeFile(path.join(root, "imports.ts"), source);
+  // The package's raw "test" id collides with an actual file's canonical id.
+  await writeFile(path.join(root, "test.ts"), "export const testValue = 1;\n");
+  const errors = [];
+  const deps = { repoRoot: root, writeStdout() {}, writeStderr: text => errors.push(text) };
+  assert.equal(await main(["build"], deps), 0, errors.join(""));
+  const graph = JSON.parse(await readFile(path.join(root, "graphify-out/graph.json"), "utf8"));
+  for (const label of ["@playwright/test", "node:fs", "./missing-target", "@missing/target"]) {
+    assert(graph.nodes.some(node => node.label === label && node._origin === "ast"), label);
+  }
+  const coverage = JSON.parse(await readFile(path.join(root, "graphify-out/coverage.json"), "utf8"));
+  assert.equal(coverage.complete, true);
+  assert.deepEqual(coverage.failures, []);
+  assert(coverage.extracted.some(entry => entry.path === "imports.ts" && entry.nodes > 0));
+  assert(coverage.extracted.some(entry => entry.path === "test.ts" && entry.nodes > 0));
+  const names = [...PUBLISHED_GRAPH_ARTIFACTS, "coverage-freshness.json"];
+  const accepted = await Promise.all(names.map(name => readFile(path.join(root, "graphify-out", name))));
+  await writeFile(path.join(root, "imports.ts"), source + "export function broken( {\n");
+  assert.notEqual(await main(["update"], deps), 0, "actual parser recovery must reject the candidate");
+  const preserved = await Promise.all(names.map(name => readFile(path.join(root, "graphify-out", name))));
+  preserved.forEach((bytes, index) => assert(bytes.equals(accepted[index]), names[index]));
+});
+
+test("producer-proven references reject dropped or forged contribution and malformed graph shapes with bounded reports", async (t) => {
+  if (!await resolveGraphifyExecutable()) return t.skip("pinned Graphify runtime unavailable");
+  const root = await fixture(t);
+  await writeFile(path.join(root, "imports.ts"), 'const scoped = import("@playwright/test");\nexport const real = 1;\n');
+  const tempRoot = await createPrivateTempRoot();
+  const options = { childEnv: buildChildEnv({ tempRoot }) };
+  const snapshot = await createGraphSourceSnapshot(root, tempRoot, options);
+  t.after(async () => { await cleanupGraphSourceSnapshot(snapshot.root); await rm(tempRoot, { recursive: true, force: true }); });
+  const cli = await resolveGraphifyExecutable();
+  const result = await runGuardedNativeStage(buildExtractArgs(snapshot.root), snapshot.root, { ...options, graphifyExecutable: cli });
+  assert(result.ok, result.stderr);
+  const graphPath = path.join(snapshot.root, "graphify-out/graph.json");
+  const original = JSON.parse(await readFile(graphPath, "utf8"));
+  const stub = original.nodes.find(node => node.label === "@playwright/test");
+  assert(stub, "the actual pinned producer must emit this dependency stub");
+  const native = original.nodes.find(node => node.source_file === "nested/api.py");
+  assert(native);
+  const sourceLess = { ...stub };
+  delete sourceLess.source_file;
+  const cases = [
+    ["dropped genuine imports source", { ...original, nodes: original.nodes.filter(node => node.source_file !== "imports.ts") }, "imports.ts", "contribution"],
+    ["forged stub at expected source", { ...original, nodes: [
+      ...original.nodes.filter(node => node.source_file !== "nested/api.py"),
+      { ...stub, id: native.id, source_file: "nested/api.py" },
+    ] }, "nested/api.py", "contribution"],
+    ["unknown missing reference", { ...original, nodes: [...original.nodes, { ...stub, id: "unknown", source_file: "unknown/missing" }] }, "(graph)", "unrecognized"],
+    ["unsafe source reference", { ...original, nodes: [...original.nodes, { ...stub, id: "unsafe", source_file: "../outside" }] }, "(graph)", "unrecognized"],
+    ["mismatched producer fields", { ...original, nodes: original.nodes.map(node => node === stub ? { ...node, label: "invented package" } : node) }, "(graph)", "unrecognized"],
+    ["graph null", null, "(graph)", "shape"],
+    ["graph array", [], "(graph)", "shape"],
+    ["nodes object", { nodes: {} }, "(graph)", "shape"],
+    ["node null", { ...original, nodes: [...original.nodes, null] }, "(graph)", "shape"],
+    ["node array", { ...original, nodes: [...original.nodes, []] }, "(graph)", "shape"],
+    ["source list", { ...original, nodes: [...original.nodes, { ...stub, source_file: ["nested/api.py"] }] }, "(graph)", "shape"],
+    ["source number", { ...original, nodes: [...original.nodes, { ...stub, source_file: 7 }] }, "(graph)", "shape"],
+    ["source absent", { ...original, nodes: [...original.nodes, { ...sourceLess, id: "source_absent" }] }, "(graph)", "source-less"],
+    ["source null", { ...original, nodes: [...original.nodes, { ...stub, id: "source_null", source_file: null }] }, "(graph)", "source-less"],
+    ["source empty", { ...original, nodes: [...original.nodes, { ...stub, id: "source_empty", source_file: "" }] }, "(graph)", "source-less"],
+    ["genuine occurrence clone", { ...original, nodes: [...original.nodes, { ...native }] }, "(graph)", "occurrence"],
+    ["rescued reference occurrence clone", { ...original, nodes: [...original.nodes, { ...stub }] }, "(graph)", "occurrence"],
+  ];
+  for (const [name, graph, failedPath, reason] of cases) {
+    await t.test(name, async () => {
+      await writeFile(graphPath, JSON.stringify(graph));
+      const report = await runNativeBridge("coverage", snapshot.root, options);
+      assert.equal(report.complete, false);
+      assert(report.failures.some(entry => entry.path === failedPath && entry.reason.includes(reason)), JSON.stringify(report.failures));
+      assert(report.extracted.some(entry => entry.path === "main.go") ||
+        report.failures.some(entry => entry.path === "main.go" && entry.reason.includes("contribution")),
+      "safe independent source checks must finish even when the graph has no usable nodes");
+      assert(!JSON.stringify(report).includes("FileNotFoundError"));
+    });
+  }
+  await writeFile(graphPath, JSON.stringify(original));
+  assert.equal((await runNativeBridge("coverage", snapshot.root, options)).complete, true);
+  for (const name of ["graph", "manifest"]) {
+    const artifact = path.join(snapshot.root, "graphify-out", `${name}.json`);
+    const bytes = await readFile(artifact);
+    const decodeReason = "invalid native artifact JSON or unreadable artifact";
+    const artifactCases = [
+      { kind: "malformed JSON", input: "{invalid native JSON", reasons: [decodeReason] },
+      { kind: "invalid UTF-8", input: Buffer.from([0xff]), reasons: [decodeReason] },
+      { kind: "valid deep JSON", input: "[".repeat(20000) + "0" + "]".repeat(20000),
+        reasons: [decodeReason, "invalid native artifact shape"] },
+      { kind: "missing artifact", input: null, reasons: [decodeReason] },
+    ];
+    for (const { kind, input, reasons } of artifactCases) {
+      await t.test(`${name}: ${kind}`, async () => {
+        try {
+          if (input === null) await rm(artifact);
+          else await writeFile(artifact, input);
+          const report = await runNativeBridge("coverage", snapshot.root, options);
+          const diagnostic = `${name}: ${kind}; failures=${JSON.stringify(report.failures)}`;
+          assert.equal(report.complete, false, diagnostic);
+          assert(report.failures.some(entry => entry.path === `(${name})` && reasons.includes(entry.reason)), diagnostic);
+          assert(report.failures.some(entry => entry.path === "main.go" && entry.reason.includes(name === "manifest" ? "stamp" : "contribution")),
+            `safe per-file checks must finish; ${diagnostic}`);
+          assert(!JSON.stringify(report).includes("invalid native JSON"), `artifact contents cannot leak; ${diagnostic}`);
+        } finally {
+          await writeFile(artifact, bytes);
+        }
+      });
+    }
+  }
+
+  // This selects the real recursive stdlib Python scanner in each test child.
+  // It proves owner RecursionError handling, not default C-scanner recursion.
+  for (const name of ["graph", "manifest"]) {
+    await t.test(`${name}: stdlib Python-scanner RecursionError unit regression`, async () => {
+      const recursion = await pythonProbe(snapshot.root, `
+os.chdir(root)
+bridge.native_modules()
+from graphify import build, dedup
+original_limit = sys.getrecursionlimit()
+original_decoder = json._default_decoder
+decoder = json.JSONDecoder()
+decoder.scan_once = json.scanner.py_make_scanner(decoder)
+safe_limit = 1000
+deep = '[' * 2048 + '"private recursive fixture marker"' + ']' * 2048
+name = sys.argv[3]
+artifact = root / ('graphify-out/' + name + '.json')
+original_bytes = artifact.read_bytes()
+try:
+    json._default_decoder = decoder
+    assert bridge.json is json
+    artifact.write_text(deep)
+    sys.setrecursionlimit(safe_limit)
+    try:
+        json.loads(artifact.read_text())
+    except RecursionError:
+        pass
+    else:
+        raise AssertionError(name + ': stdlib Python scanner must raise actual RecursionError')
+    sys.setrecursionlimit(safe_limit)
+    report = bridge.coverage(root)
+    diagnostic = name + ': failures=' + json.dumps(report['failures'])
+    assert not report['complete'], diagnostic
+    assert any(entry['path'] == '(' + name + ')' and entry['reason'] == 'invalid native artifact JSON or unreadable artifact' for entry in report['failures']), diagnostic
+    assert any(entry['path'] == 'main.go' and ('stamp' if name == 'manifest' else 'contribution') in entry['reason'] for entry in report['failures']), diagnostic
+    assert 'private recursive fixture marker' not in json.dumps(report), diagnostic
+finally:
+    try:
+        artifact.write_bytes(original_bytes)
+    finally:
+        json._default_decoder = original_decoder
+        sys.setrecursionlimit(original_limit)
+assert artifact.read_bytes() == original_bytes
+assert json._default_decoder is original_decoder
+assert sys.getrecursionlimit() == original_limit
+assert bridge._RESOLUTION_SCOPE is None
+print(json.dumps({'artifact': name, 'decoder': 'stdlib Python scanner', 'decoderRecursionObserved': True, 'coverageIncomplete': True, 'safeSourceChecks': True, 'artifactRestored': True, 'decoderRestored': True, 'limitRestored': True}))
+`, name);
+      assert.deepEqual(recursion, {
+        artifact: name, decoder: "stdlib Python scanner", decoderRecursionObserved: true,
+        coverageIncomplete: true, safeSourceChecks: true, artifactRestored: true, decoderRestored: true, limitRestored: true,
+      });
+    });
+  }
+
+  await t.test("native producer and aggregation hooks restore after success and rejection", async () => {
+    const observation = await pythonProbe(snapshot.root, `
+os.chdir(root)
+detect, extract = bridge.native_modules()
+from graphify import dedup
+saved = extract._emit_rescued_import, extract.load_cached, extract._extract_sequential
+saved_dedup = dedup._merge_missing_attributes, dedup.deduplicate_entities
+saved_profile = sys.getprofile()
+observed = []
+categories = {}
+scope = bridge.NativeScope(root, detect)
+scope.preflight()
+with scope.active(), bridge.observe_native_stubs(extract, observed, categories=categories):
+    fresh = extract._safe_extract_with_xaml_root(extract._get_extractor(root / 'imports.ts'), root / 'imports.ts', root)
+assert observed and observed[0]['label'] == '@playwright/test'
+assert any(node is observed[0] for node in fresh['nodes']), 'observe actual appended producer object'
+assert categories[id(observed[0])] == 'rescued-reference'
+provenance = {id(observed[0]): ('rescued-reference', '')}
+with scope.active():
+    nodes = bridge.canonical_native_nodes(root, extract, {root / 'imports.ts': fresh}, provenance=provenance)
+assert any(bridge.native_node_identity(node) == bridge.native_node_identity(observed[0]) and provenance.get(id(node)) == ('rescued-reference', '') for node in nodes), 'native materialization must retain observed reference provenance'
+assert (extract._emit_rescued_import, extract.load_cached, extract._extract_sequential) == saved
+assert (dedup._merge_missing_attributes, dedup.deduplicate_entities) == saved_dedup
+assert sys.getprofile() is saved_profile
+original_aggregate = extract.extract
+def rejected(*args, **kwargs):
+    raise ValueError('controlled aggregation rejection')
+extract.extract = rejected
+try:
+    try: bridge.canonical_native_nodes(root, extract, {root / 'imports.ts': fresh})
+    except ValueError: pass
+    else: raise AssertionError('expected rejection')
+finally:
+    extract.extract = original_aggregate
+assert (extract._emit_rescued_import, extract.load_cached, extract._extract_sequential) == saved
+assert (dedup._merge_missing_attributes, dedup.deduplicate_entities) == saved_dedup
+try:
+    with bridge.observe_native_stubs(extract, []):
+        raise ValueError('controlled observation rejection')
+except ValueError: pass
+assert extract._emit_rescued_import == saved[0]
+assert sys.getprofile() is saved_profile
+assert bridge._RESOLUTION_SCOPE is None
+print(json.dumps({'restored': True, 'producerLabel': observed[0]['label']}))
+`);
+    assert.deepEqual(observation, { restored: true, producerLabel: "@playwright/test" });
+  });
+  await t.test("malformed fresh results and forbidden aggregation context keep bounded failures", async () => {
+    const outside = path.join(tempRoot, "forbidden-context.txt");
+    await writeFile(outside, "private synthetic context must never enter diagnostics");
+    const rejected = await pythonProbe(snapshot.root, `
+os.chdir(root)
+_, extract = bridge.native_modules()
+saved = extract._safe_extract_with_xaml_root, extract.extract
+reports = []
+for malformed in (None, {'nodes': [None], 'edges': []}, {'nodes': [{'id': 'bad', 'source_file': []}], 'edges': []}):
+    def selective(parser, path, anchor):
+        if path.name == 'imports.ts': return malformed
+        return saved[0](parser, path, anchor)
+    extract._safe_extract_with_xaml_root = selective
+    try: reports.append(bridge.coverage(root))
+    finally: extract._safe_extract_with_xaml_root = saved[0]
+for report in reports:
+    assert not report['complete']
+    assert any(x['path'] == 'imports.ts' and x['reason'] == 'invalid native extraction result' for x in report['failures'])
+    assert any(x['path'] == 'main.go' for x in report['extracted'])
+def outside_aggregate(*args, **kwargs):
+    Path(sys.argv[3]).read_text()
+    return saved[1](*args, **kwargs)
+extract.extract = outside_aggregate
+try: blocked = bridge.coverage(root)
+finally: extract.extract = saved[1]
+assert not blocked['complete']
+assert any(x['reason'] == 'native identity aggregation failed or forbidden I/O' for x in blocked['failures'])
+assert 'private synthetic context' not in json.dumps(blocked)
+assert bridge._RESOLUTION_SCOPE is None
+print(json.dumps({'malformedResults': len(reports), 'aggregationPermissionDenied': True}))
+`, outside);
+    assert.deepEqual(rejected, { malformedResults: 3, aggregationPermissionDenied: true });
+  });
+});
+
+
+test("actual generic Python reference producers retain source-less collisions with final cardinality and copied-survivor provenance", async (t) => {
+  const root = await fixture(t);
+  const source = "from pathlib import Path\nfrom typing import Any\nfrom http.server import BaseHTTPRequestHandler\nclass Handler(BaseHTTPRequestHandler):\n    pass\ndef consume(value: Path) -> Any:\n    return value\n";
+  for (const file of ["first.py", "second.py"]) await writeFile(path.join(root, file), source);
+  const errors = [];
+  const deps = { repoRoot: root, writeStdout() {}, writeStderr: text => errors.push(text) };
+  assert.equal(await main(["build"], deps), 0, errors.join(""));
+  const graphPath = path.join(root, "graphify-out/graph.json");
+  const original = JSON.parse(await readFile(graphPath, "utf8"));
+  const references = original.nodes.filter(node => node.source_file === "" && ["Path", "Any", "BaseHTTPRequestHandler"].includes(node.label));
+  for (const label of ["Path", "Any", "BaseHTTPRequestHandler"]) {
+    assert(references.filter(node => node.label === label).length >= 2, `actual source-less cross-file ${label} collision`);
+  }
+  const cloned = { ...original, nodes: [...original.nodes, { ...references[0] }] };
+  await writeFile(graphPath, JSON.stringify(cloned));
+  const excess = await runNativeBridge("coverage", root);
+  assert.equal(excess.complete, false);
+  assert(excess.failures.some(entry => entry.reason.includes("occurrence")));
+  assert(excess.extracted.some(entry => entry.path === "main.go"));
+  await writeFile(graphPath, JSON.stringify({ ...original, nodes: original.nodes.filter(node => node.source_file !== "first.py") }));
+  const dropped = await runNativeBridge("coverage", root);
+  assert.equal(dropped.complete, false);
+  assert(dropped.failures.some(entry => entry.path === "first.py" && entry.reason.includes("contribution")),
+    "remaining references cannot replace a dropped genuine source");
+  await writeFile(graphPath, JSON.stringify(original));
+
+  const observation = await pythonProbe(root, `
+os.chdir(root)
+detect, extract = bridge.native_modules()
+from graphify import dedup
+saved_profile = sys.getprofile()
+outer_events = []
+def outer(frame, event, arg):
+    if frame.f_code is extract._extract_generic.__code__ and event == 'call': outer_events.append(event)
+sys.setprofile(outer)
+observed = []
+categories = {}
+scope = bridge.NativeScope(root, detect)
+scope.preflight()
+try:
+    with scope.active(), bridge.observe_native_stubs(extract, observed, categories=categories):
+        fresh = extract._safe_extract_with_xaml_root(extract._get_extractor(root / 'first.py'), root / 'first.py', root)
+    assert sys.getprofile() is outer and outer_events
+finally:
+    sys.setprofile(saved_profile)
+assert {'Path', 'Any', 'BaseHTTPRequestHandler'} <= {node['label'] for node in observed}
+assert all(categories[id(node)] == 'generic-reference' for node in observed)
+assert all(any(node is emitted for node in fresh['nodes']) for emitted in observed)
+reference_objects = {id(node) for node in observed}
+provenance = {id(node): ('generic-reference', '') if id(node) in reference_objects else ('genuine', 'first.py') for node in fresh['nodes']}
+# Force a same-source duplicate of actual fresh output through native dedup's
+# copy path, rather than substituting a survivor or final graph implementation.
+owned = next(node for node in fresh['nodes'] if id(node) not in reference_objects and node.get('source_file') == str(root / 'first.py'))
+duplicate = dict(owned)
+fresh['nodes'].append(duplicate)
+provenance[id(duplicate)] = ('genuine', 'first.py')
+original_merge = dedup._merge_missing_attributes
+copies = []
+def record_merge(survivor, loser):
+    merged = original_merge(survivor, loser)
+    copies.append((survivor, loser, merged))
+    return merged
+dedup._merge_missing_attributes = record_merge
+try:
+    with scope.active():
+        final = bridge.canonical_native_nodes(root, extract, {root / 'first.py': fresh}, provenance=provenance)
+finally:
+    dedup._merge_missing_attributes = original_merge
+assert copies and all(merged is not survivor for survivor, _, merged in copies)
+assert len({node['id'] for node in final}) == len(final), 'final native graph cardinality'
+assert any(provenance.get(id(node)) == ('genuine', 'first.py') for node in final)
+assert all(provenance.get(id(node)) == ('generic-reference', '') for node in final if not node.get('source_file'))
+assert sys.getprofile() is saved_profile and bridge._RESOLUTION_SCOPE is None
+print(json.dumps({'observedLabels': sorted({node['label'] for node in observed}), 'nativeCopiedSurvivor': True, 'restored': True}))
+`);
+  assert(observation.observedLabels.includes("Path"));
+  assert(observation.observedLabels.includes("Any"));
+  assert(observation.observedLabels.includes("BaseHTTPRequestHandler"));
+  assert.equal(observation.nativeCopiedSurvivor, true);
+  assert.equal(observation.restored, true);
+});
+
+test("native publication labels reconcile duplicate file-only barrels, declarations and tests through build and update", async (t) => {
+  const root = await fixture(t);
+  await writeFile(path.join(root, "shared.ts"), "export const value = 1;\n");
+  for (const directory of ["left", "right"]) {
+    await mkdir(path.join(root, directory));
+    await writeFile(path.join(root, directory, "index.ts"), 'export { value } from "../shared";\n');
+    await writeFile(path.join(root, directory, "types.d.ts"), "export {};\n");
+    await writeFile(path.join(root, directory, "only.test.ts"), `describe("${directory}", () => { it("runs", () => {}); });\n`);
+  }
+  const errors = [];
+  const deps = { repoRoot: root, writeStdout() {}, writeStderr: text => errors.push(text) };
+  assert.equal(await main(["build"], deps), 0, errors.join(""));
+  const expected = ["left", "right"].flatMap(directory => ["index.ts", "types.d.ts", "only.test.ts"].map(name => `${directory}/${name}`));
+  for (const action of ["build", "update"]) {
+    if (action === "update") {
+      await writeFile(path.join(root, "left/index.ts"), 'export { value as renamed } from "../shared";\n');
+      assert.equal(await main(["update"], deps), 0, errors.join(""));
+    }
+    const coverage = JSON.parse(await readFile(path.join(root, "graphify-out/coverage.json"), "utf8"));
+    const graph = JSON.parse(await readFile(path.join(root, "graphify-out/graph.json"), "utf8"));
+    assert.equal(coverage.complete, true);
+    assert.deepEqual(coverage.failures, []);
+    for (const file of expected) {
+      assert(coverage.extracted.some(entry => entry.path === file), `${action}: ${file}`);
+      assert(graph.nodes.some(node => node.source_file === file && node.label === file), `${action}: native qualified label ${file}`);
+    }
+  }
+  const graphPath = path.join(root, "graphify-out/graph.json");
+  const graph = JSON.parse(await readFile(graphPath, "utf8"));
+  graph.nodes = graph.nodes.filter(node => node.source_file !== "left/index.ts");
+  await writeFile(graphPath, JSON.stringify(graph));
+  const dropped = await runNativeBridge("coverage", root);
+  assert.equal(dropped.complete, false);
+  assert(dropped.failures.some(entry => entry.path === "left/index.ts" && entry.reason.includes("contribution")));
+});
+
+test("fresh recovered nodes retain native collision identities without extraction or stamp admission", async (t) => {
+  const root = await fixture(t);
+  await mkdir(path.join(root, "left"));
+  await mkdir(path.join(root, "right"));
+  await writeFile(path.join(root, "shared.ts"), "export interface Value { value: number }\nexport const value = 1;\n");
+  await writeFile(path.join(root, "right/index.ts"), 'export { value } from "../shared";\n');
+  await writeFile(path.join(root, "left/index.js"), "export const retained = 1;\n");
+  const errors = [];
+  const deps = { repoRoot: root, writeStdout() {}, writeStderr: text => errors.push(text) };
+  assert.equal(await main(["build"], deps), 0, errors.join(""));
+  const names = [...PUBLISHED_GRAPH_ARTIFACTS, "coverage-freshness.json"];
+  const accepted = await Promise.all(names.map(name => readFile(path.join(root, "graphify-out", name))));
+  const recovering = new Map([
+    ["left/index.ts", 'declare const store: { get<T>(): T };\nexport const value = store.get<typeof import("../shared")>();\n'],
+    ["generic.ts", 'declare const store: { get<T>(): T };\nexport const value = store.get<typeof import("./shared")>();\n'],
+    ["jsx.tsx", "export const view = <div>Review & Publish</div>;\n"],
+    ["assertion.mjs", "export const values = {} as Record<string, number>;\n"],
+  ]);
+  for (const [file, source] of recovering) await writeFile(path.join(root, file), source);
+  const tempRoot = await createPrivateTempRoot();
+  const options = { childEnv: buildChildEnv({ tempRoot }) };
+  const snapshot = await createGraphSourceSnapshot(root, tempRoot, options);
+  t.after(async () => { await cleanupGraphSourceSnapshot(snapshot.root); await rm(tempRoot, { recursive: true, force: true }); });
+  const stage = await runGuardedNativeStage(buildExtractArgs(snapshot.root), snapshot.root, { ...options, graphifyExecutable: await resolveGraphifyExecutable() });
+  assert(stage.ok, stage.stderr);
+  const report = await runNativeBridge("coverage", snapshot.root, options);
+  assert.equal(report.complete, false);
+  assert.deepEqual(report.failures.map(entry => [entry.path, entry.reason]).sort(),
+    [...recovering.keys()].map(file => [file, "native parser reported recovery/errors"]).sort(),
+    "recoveries must reject without false identity/contribution failures in the remaining corpus");
+  for (const file of recovering.keys()) assert(!report.extracted.some(entry => entry.path === file), file);
+  for (const file of ["right/index.ts", "left/index.js"]) assert(report.extracted.some(entry => entry.path === file), file);
+  assert.notEqual(await main(["update"], deps), 0);
+  const preserved = await Promise.all(names.map(name => readFile(path.join(root, "graphify-out", name))));
+  preserved.forEach((bytes, index) => assert(bytes.equals(accepted[index]), names[index]));
+});
+
+test("selected AST scope uses exact native exclusions with accounted context and strict included recovery", async (t) => {
+  const root = await fixture(t);
+  const unsupported = 'declare const store: { get<T>(): T };\nexport const value = store.get<typeof import("./shared")>();\n';
+  await writeFile(path.join(root, "shared.ts"), "export interface Value { value: number }\n");
+  await writeFile(path.join(root, "excluded.ts"), unsupported);
+  await writeFile(path.join(root, "nested/excluded.ts"), "export const nearMiss = 1;\n");
+  await writeFile(path.join(root, "imports.ts"), 'export const dependency = import("@excluded");\n');
+  const config = { compilerOptions: { baseUrl: ".", paths: { "@excluded": ["excluded.ts"] } } };
+  await writeFile(path.join(root, "tsconfig.json"), JSON.stringify(config));
+  const ignore = "ignored.py\n/excluded.ts\n/tsconfig.json\n";
+  await writeFile(path.join(root, ".graphifyignore"), ignore);
+  const errors = [];
+  const deps = { repoRoot: root, writeStdout() {}, writeStderr: text => errors.push(text) };
+  assert.equal(await main(["build"], deps), 0, errors.join(""));
+  const selected = JSON.parse(await readFile(path.join(root, "graphify-out/coverage.json"), "utf8"));
+  assert.equal(selected.complete, true);
+  assert(selected.expected.some(entry => entry.path === "nested/excluded.ts"), "an exact root pattern cannot exclude a near miss");
+  assert(!selected.expected.some(entry => entry.path === "excluded.ts"));
+  assert(!selected.extracted.some(entry => entry.path === "excluded.ts"));
+  const excluded = selected.accounting.entries.find(entry => entry.path === "excluded.ts");
+  assert.equal(excluded.nativeIgnored, true);
+  assert.equal(excluded.type, "regular");
+  assert.equal(excluded.copied, excluded.context, "excluded CODE bytes may be copied only as observed native context");
+  assert(selected.excluded.some(entry => entry.path === "excluded.ts" && entry.reason === excluded.disposition));
+  const graph = JSON.parse(await readFile(path.join(root, "graphify-out/graph.json"), "utf8"));
+  if (excluded.context) {
+    assert(selected.contextInputs.includes("excluded.ts"));
+  } else {
+    assert(!selected.contextInputs.includes("excluded.ts"));
+    assert(graph.nodes.some(node => node.source_file === "excluded.ts" && node.label === "@excluded"),
+      "an uncopied excluded import target must remain an actual producer-observed stub, without AST contribution");
+  }
+  const context = selected.accounting.entries.find(entry => entry.path === "tsconfig.json");
+  assert.equal(context.nativeIgnored, true);
+  assert.equal(context.context, true);
+  assert.equal(context.copied, true);
+  assert(selected.contextInputs.includes("tsconfig.json"), "the native importer must read ignored safe resolution context");
+  assert(!selected.expected.some(entry => entry.path === "tsconfig.json"));
+  await writeFile(path.join(root, "excluded.ts"), unsupported + "// same selected scope, changed direct-source revision\n");
+  await assert.rejects(validateGraphFreshness(root), error => error.kind === "stale");
+  assert.equal(await main(["update"], deps), 0, errors.join(""));
+  config.compilerOptions.strict = true;
+  await writeFile(path.join(root, "tsconfig.json"), JSON.stringify(config));
+  await assert.rejects(validateGraphFreshness(root), error => error.kind === "stale");
+  assert.equal(await main(["update"], deps), 0, errors.join(""));
+  const names = [...PUBLISHED_GRAPH_ARTIFACTS, "coverage-freshness.json"];
+  const accepted = await Promise.all(names.map(name => readFile(path.join(root, "graphify-out", name))));
+  await writeFile(path.join(root, ".graphifyignore"), "ignored.py\n/tsconfig.json\n");
+  await assert.rejects(validateGraphFreshness(root), error => error.kind === "stale");
+  assert.notEqual(await main(["update"], deps), 0, "including the unsupported syntax must retain strict parser admission");
+  const preserved = await Promise.all(names.map(name => readFile(path.join(root, "graphify-out", name))));
+  preserved.forEach((bytes, index) => assert(bytes.equals(accepted[index]), names[index]));
+  await writeFile(path.join(root, ".graphifyignore"), ignore);
+  await writeFile(path.join(root, "nested/excluded.ts"), unsupported);
+  const live = await runNativeBridge("coverage", root);
+  assert(live.failures.some(entry => entry.path === "nested/excluded.ts" && entry.reason.includes("recovery")),
+    "the exact-pattern near miss must remain eligible and reject recovery");
+  await rm(path.join(root, "excluded.ts"));
+  await symlink(path.join(root, "shared.ts"), path.join(root, "excluded.ts"));
+  const guarded = await runNativeBridge("inventory", root);
+  assert(guarded.failures.length > 0, "an imported excluded link cannot gain source/context permission");
+  assert(!guarded.contextInputs.includes("excluded.ts"));
+});
 
 test("publication transaction restores every accepted artifact after rename and finalize failures", async (t) => {
   const root = await fixture(t);

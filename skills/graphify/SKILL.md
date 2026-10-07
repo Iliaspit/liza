@@ -20,9 +20,29 @@ gate; `GRAPHIFY_AUTO_REFRESH=0` disables this for frozen candidates.
 The owner validates Graphify 0.9.39, invokes native discovery and parser
 dispatch in that CLI's interpreter, and reconciles native discovery with Git's
 candidate inventory. It copies sources and ignore context to a private
-read-only snapshot. Current native AST stamps and graph contributions are
-required for supported sources; error-free native no-symbol results are
-recorded explicitly. Unsupported, ignored and non-code paths have exclusion
+read-only snapshot. Current native AST stamps and freshly observed file-backed
+graph contributions are required for supported sources; error-free native
+no-symbol results are recorded explicitly. Coverage observes dependency stub
+objects appended by pinned `_emit_rescued_import` and the exact nested generic
+`ensure_named_node` code object, using restored hooks and a chained/restored
+profiler. It runs native
+aggregation on fresh per-file results, including well-shaped recovered results
+for identity reconciliation only, with cache reuse/writes disabled and the
+filesystem observer active. Recovered sources retain failures and never gain
+contribution/stamp admission. The actual native code-only build/dedup pass
+provides final IDs, labels and graph cardinality without publication or LLM
+calls. Observed selected-survivor copies and graph materialization retain only
+their same-source provenance; references/recovery and different-source losers
+never confer file credit. Published tuples consume final native occurrences,
+so genuine or reference clones reject. Object provenance survives native passes;
+all temporary hooks are restored in `finally`.
+Published nodes match exact final native ID, source, label, file type, location,
+type, confidence and origin fields. Only observed stubs may remain metadata
+without filesystem access or source contribution. Unknown, malformed or
+unproven source-less nodes and unreadable/invalid/deep graph or manifest JSON return
+incomplete coverage while independent safe source checks continue. A stub
+aimed at an expected file cannot replace genuine observed contribution.
+Unsupported, ignored and non-code paths have exclusion
 reasons. Exact UTF-8/NFC identities proven ignored by the pinned native matcher
 are accounted with their no-follow file type and metadata, including literal
 POSIX backslashes and ignored links. This exception grants no content, target,
@@ -48,6 +68,19 @@ binds coverage and every published artifact. Old graphs without complete coverag
 are not ready. Coverage proves inventory accounting, not complete symbol or
 call semantics; truncation and language parser limitations cannot establish
 absence or dependency completeness. Confirm useful results in current source.
+
+An explicitly selected AST index may use exact root-anchored `.graphifyignore`
+rules for ordinary safe unsupported-syntax files. The full census and exclusion
+register remain accounted; completeness describes the selected native AST
+inventory. Included recovery still rejects. Excluded ordinary files can become
+observed, copied resolution context without AST admission; ignored unsafe/link
+identities gain no content or target permission. Exact-pattern near misses stay
+eligible, and source, context or ignore-control drift stales accepted artifacts.
+Inspect every excluded source and its relevant callers/consumers directly at the
+same frozen source revision and record that evidence alongside graph results.
+Refresh direct evidence when the revision changes. Graph results cannot prove
+absence of dependencies or defects across exclusions or full-repository AST
+completeness.
 
 The owner preserves bounded subprocesses, exclusive per-root locking,
 live-source generation rechecks, one retry on source change and staged
