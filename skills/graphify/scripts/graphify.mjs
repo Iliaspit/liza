@@ -25,6 +25,8 @@ import { performance } from "node:perf_hooks";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 export const REQUIRED_VERSION = "0.9.39";
+export const ACCOUNTING_SCHEMA = "graphify.accounting.v1";
+export const COVERAGE_SCHEMA = "graphify.coverage.v2";
 export const SETUP_COMMAND = `uv tool install graphifyy==${REQUIRED_VERSION}`;
 export const FORCE_SETUP_COMMAND = `uv tool install --force graphifyy==${REQUIRED_VERSION}`;
 export const MARKER_SCHEMA = "graphify.v3";
@@ -35,7 +37,7 @@ export const REPO_ROOT = undefined;
 export const GRAPH_DIRECTORY = undefined;
 export const GRAPH_PATH = undefined;
 export const FRESHNESS_PATH = undefined;
-export const FRESHNESS_SCHEMA = "graphify.freshness.v2";
+export const FRESHNESS_SCHEMA = "graphify.freshness.v3";
 export const SHARED_GRAPH_SCHEMA = "graphify.http.v1";
 export const SHARED_GRAPH_HOST = "0.0.0.0";
 export const SHARED_GRAPH_PORT = 8080;
@@ -62,7 +64,7 @@ export const UPDATE_SEED_ARTIFACTS = PUBLISHED_GRAPH_ARTIFACTS.filter((name) => 
 
 export const STAGE_LIMITS = Object.freeze({
   version: Object.freeze({ timeoutMs: 10_000, maxStdoutBytes: 1_024, maxStderrBytes: 8_192 }),
-  inventory: Object.freeze({ timeoutMs: 30_000, maxStdoutBytes: 4_194_304, maxStderrBytes: 8_192 }),
+  inventory: Object.freeze({ timeoutMs: 30_000, maxStdoutBytes: 33_554_432, maxStderrBytes: 8_192 }),
   build: Object.freeze({ timeoutMs: 600_000, maxStdoutBytes: 65_536, maxStderrBytes: 65_536 }),
   cluster: Object.freeze({ timeoutMs: 60_000, maxStdoutBytes: 65_536, maxStderrBytes: 65_536 }),
   update: Object.freeze({ timeoutMs: 300_000, maxStdoutBytes: 65_536, maxStderrBytes: 65_536 }),
@@ -319,6 +321,7 @@ export function buildChildEnv({
   }
 
   Object.assign(childEnv, {
+    GRAPHIFY_SCRATCH_ROOT: tempRoot,
     HOME: path.join(tempRoot, "home"),
     XDG_CONFIG_HOME: path.join(tempRoot, "xdg-config"),
     XDG_CACHE_HOME: path.join(tempRoot, "xdg-cache"),
@@ -328,6 +331,8 @@ export function buildChildEnv({
     TEMP: path.join(tempRoot, "tmp"),
     GRAPHIFY_NO_BACKUP: "1",
     GRAPHIFY_QUERY_LOG_DISABLE: "1",
+    GRAPHIFY_MAX_WORKERS: "1",
+    PYTHONDONTWRITEBYTECODE: "1",
   });
   if (windows) {
     Object.assign(childEnv, {
@@ -1041,7 +1046,7 @@ export function buildGitInventoryArgs(repoRoot) {
   return ["-C", repoRoot, "ls-files", "-z", "--cached", "--others", "--exclude-standard"];
 }
 
-export async function runNativeBridge(action, repoRoot, options = {}) {
+async function nativeBridgeProcess(action, repoRoot, options = {}) {
   const executable = options.graphifyExecutable ?? await resolveGraphifyExecutable(options);
   if (!executable) throw new FreshnessStateError("unavailable");
   await (options.recheckIdentity ?? recheckExecutableIdentity)(executable);
@@ -1051,33 +1056,113 @@ export async function runNativeBridge(action, repoRoot, options = {}) {
   const interpreterStats = await stat(interpreter, { bigint: true });
   const python = { path: await realpath(interpreter), identity: captureExecutableIdentity(interpreterStats) };
   await recheckExecutableIdentity(python);
-  const result = await (options.runProcess ?? runBoundedProcess)({
-    executable: interpreter,
-    args: [path.join(path.dirname(fileURLToPath(import.meta.url)), "native_inventory.py"), action, repoRoot],
-    cwd: repoRoot,
-    env: options.childEnv ?? process.env,
-    platform: options.platform ?? process.platform,
-    ...STAGE_LIMITS.inventory,
-    timeoutMs: action === "coverage" ? STAGE_LIMITS.build.timeoutMs : STAGE_LIMITS.inventory.timeoutMs,
-  });
+  const platform = options.platform ?? process.platform;
+  const ownedTempRoot = options.childEnv ? null : await createPrivateTempRoot({ platform });
+  try {
+    return await (options.runProcess ?? runBoundedProcess)({
+      executable: interpreter,
+      args: ["-B", path.join(path.dirname(fileURLToPath(import.meta.url)), "native_inventory.py"), action, repoRoot, ...(options.nativeArgs ?? [])],
+      cwd: repoRoot,
+      env: options.childEnv ?? buildChildEnv({ baseEnv: options.baseEnv ?? process.env, tempRoot: ownedTempRoot, platform }),
+      platform,
+      ...(action === "cli" ? STAGE_LIMITS[options.nativeArgs[0] === "extract" ? "build" : options.nativeArgs[0] === "cluster-only" ? "cluster" : "update"] : STAGE_LIMITS.inventory),
+      ...(action === "coverage" ? { timeoutMs: STAGE_LIMITS.build.timeoutMs } : {}),
+    });
+  } finally {
+    if (ownedTempRoot !== null) await rm(ownedTempRoot, { recursive: true, force: true });
+  }
+}
+
+export async function runNativeBridge(action, repoRoot, options = {}) {
+  const result = await nativeBridgeProcess(action, repoRoot, options);
   if (!result.ok) throw new FreshnessStateError("coverage-incomplete");
   try { return JSON.parse(result.stdout); }
   catch { throw new FreshnessStateError("coverage-incomplete"); }
 }
 
+export async function runGuardedNativeStage(nativeArgs, repoRoot, options = {}) {
+  return nativeBridgeProcess("cli", repoRoot, { ...options, nativeArgs });
+}
+
+function isInventoryIdentity(value) {
+  return typeof value === "string" && value.length > 0 && value.normalize("NFC") === value &&
+    !value.includes("\0") && !path.posix.isAbsolute(value) &&
+    !/[\uD800-\uDFFF]/u.test(value.replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]/gu, "")) &&
+    value.split("/").every(part => part !== "" && part !== "." && part !== "..");
+}
+
+function compareInventoryPaths(left, right) {
+  return Buffer.compare(Buffer.from(left, "utf8"), Buffer.from(right, "utf8"));
+}
+
+export function validateAccounting(accounting) {
+  if (!accounting || accounting.schema !== ACCOUNTING_SCHEMA || !Array.isArray(accounting.entries) || !Array.isArray(accounting.controls)) {
+    throw new FreshnessStateError("coverage-incomplete");
+  }
+  const entries = new Map();
+  let previous = "";
+  for (const entry of accounting.entries) {
+    const exceptional = !isGraphSourcePath(entry.path) || entry.type === "symlink";
+    if (!isInventoryIdentity(entry.path) || compareInventoryPaths(entry.path, previous) <= 0 ||
+        !["regular", "directory", "symlink"].includes(entry.type) ||
+        ![entry.device, entry.inode].every(v => typeof v === "string" && /^\d+$/.test(v)) ||
+        !Number.isInteger(entry.mode) || entry.mode < 0 || entry.mode > 0o7777 ||
+        typeof entry.disposition !== "string" || !entry.disposition ||
+        [entry.copied, entry.context, entry.nativeIgnored, entry.gitCandidate].some(v => typeof v !== "boolean") ||
+        (entry.type !== "directory" && ![entry.size, entry.mtimeNs, entry.ctimeNs].every(v => typeof v === "string" && /^-?\d+$/.test(v))) ||
+        (entry.copied && (entry.type !== "regular" || !isGraphSourcePath(entry.path))) ||
+        (entry.context && !entry.copied) ||
+        (exceptional && !(entry.nativeIgnored && entry.disposition === "native ignore rule" && !entry.copied && !entry.context))) {
+      throw new FreshnessStateError("coverage-incomplete");
+    }
+    previous = entry.path;
+    entries.set(entry.path, entry);
+  }
+  previous = "";
+  for (const control of accounting.controls) {
+    if (!isGraphSourcePath(control.path) || compareInventoryPaths(control.path, previous) <= 0 || !/^[a-f0-9]{64}$/.test(control.sha256) ||
+        entries.get(control.path)?.type !== "regular" || entries.get(control.path)?.copied !== true) {
+      throw new FreshnessStateError("coverage-incomplete");
+    }
+    previous = control.path;
+  }
+  return accounting;
+}
+
+function accountingDigest(accounting) {
+  return createHash("sha256").update(JSON.stringify(validateAccounting(accounting))).digest("hex");
+}
+
 export async function listGraphSourcePaths(repoRoot, options = {}) {
   const inventory = await (options.listInventory ?? ((root, opts) => runNativeBridge("inventory", root, opts)))(repoRoot, options);
   if (inventory.failures.length) throw new FreshnessStateError("coverage-incomplete");
+  validateAccounting(inventory.accounting);
   return Object.freeze(inventory.sourcePaths);
 }
 
 export async function validateCandidateCoverage(snapshotRoot, expected, source, options = {}) {
   const report = await runNativeBridge("coverage", snapshotRoot, options);
+  validateAccounting(expected.accounting);
+  validateAccounting(report.accounting);
   const actual = report.expected.map((entry) => entry.path);
   const wanted = expected.expected.map((entry) => entry.path);
   if (JSON.stringify(actual) !== JSON.stringify(wanted)) {
     report.failures.push({ path: "(inventory)", reason: "snapshot source inventory differs from live native discovery" });
   }
+  if (JSON.stringify(report.accounting.controls) !== JSON.stringify(expected.accounting.controls)) {
+    report.failures.push({ path: "(controls)", reason: "snapshot native ignore controls differ from source accounting" });
+  }
+  const actualEntries = new Map(report.accounting.entries.map(entry => [entry.path, entry]));
+  for (const entry of expected.accounting.entries.filter(entry => entry.copied)) {
+    const actualEntry = actualEntries.get(entry.path);
+    if (!actualEntry || actualEntry.type !== "regular" || !actualEntry.copied || actualEntry.context !== entry.context || actualEntry.disposition !== entry.disposition) {
+      report.failures.push({ path: entry.path, reason: "snapshot copied source/context disposition differs from live accounting" });
+    }
+  }
+  // Omitted exclusions are source census records, never fabricated snapshot
+  // files. Copy them only after reconciling every actually copied member.
+  report.accounting = expected.accounting;
+  report.accountingSha256 = accountingDigest(expected.accounting);
   report.excluded = expected.excluded;
   report.sourceSha256 = source.sourceSha256;
   report.complete = report.failures.length === 0;
@@ -1180,9 +1265,18 @@ export async function computeSourceFingerprint(
     ...listOptions
   } = {},
 ) {
-  const sourcePaths = await listSourcePaths(repoRoot, listOptions);
+  const inventory = listSourcePaths === listGraphSourcePaths
+    ? await (listOptions.listInventory ?? ((root, opts) => runNativeBridge("inventory", root, opts)))(repoRoot, listOptions)
+    : null;
+  if (inventory?.failures.length) throw new FreshnessStateError("coverage-incomplete");
+  const sourcePaths = validateSourceInventory(inventory?.sourcePaths ?? await listSourcePaths(repoRoot, listOptions));
   const contentDigest = createHash("sha256");
   const generationDigest = createHash("sha256");
+  const accountingSha256 = inventory === null ? null : accountingDigest(inventory.accounting);
+  for (const digest of [contentDigest, generationDigest]) digest.update(`${ACCOUNTING_SCHEMA}\0${accountingSha256 ?? "explicit-test-inventory"}\0`);
+  if (inventory && JSON.stringify(sourcePaths) !== JSON.stringify(inventory.accounting.entries.filter(entry => entry.copied).map(entry => entry.path))) {
+    throw new FreshnessStateError("coverage-incomplete");
+  }
   for (const relativePath of sourcePaths) {
     let source;
     try {
@@ -1211,6 +1305,7 @@ export async function computeSourceFingerprint(
     sourceFileCount: sourcePaths.length,
     sourceSha256: contentDigest.digest("hex"),
     sourceGenerationSha256: generationDigest.digest("hex"),
+    accountingSha256,
   });
 }
 
@@ -1218,7 +1313,7 @@ function validateSourceInventory(sourcePaths) {
   if (
     !Array.isArray(sourcePaths) ||
     sourcePaths.some((relativePath) => !isGraphSourcePath(relativePath)) ||
-    sourcePaths.some((relativePath, index) => index > 0 && relativePath <= sourcePaths[index - 1])
+    sourcePaths.some((relativePath, index) => index > 0 && compareInventoryPaths(relativePath, sourcePaths[index - 1]) <= 0)
   ) {
     throw new FreshnessStateError("unavailable");
   }
@@ -1255,11 +1350,18 @@ export async function createGraphSourceSnapshot(
     if (!isContainedPath(realTempRoot, snapshotRoot, pathApi)) {
       throw new AdapterRuntimeError("source snapshot escaped temporary root");
     }
-    const sourcePaths = validateSourceInventory(
-      await listSourcePaths(repoRoot, listOptions),
-    );
+    const inventory = listSourcePaths === listGraphSourcePaths
+      ? await (listOptions.listInventory ?? ((root, opts) => runNativeBridge("inventory", root, opts)))(repoRoot, listOptions)
+      : null;
+    if (inventory?.failures.length) throw new FreshnessStateError("coverage-incomplete");
+    const sourcePaths = validateSourceInventory(inventory?.sourcePaths ?? await listSourcePaths(repoRoot, listOptions));
     const contentDigest = createHash("sha256");
     const generationDigest = createHash("sha256");
+    const accountingSha256 = inventory === null ? null : accountingDigest(inventory.accounting);
+    for (const digest of [contentDigest, generationDigest]) digest.update(`${ACCOUNTING_SCHEMA}\0${accountingSha256 ?? "explicit-test-inventory"}\0`);
+    if (inventory && JSON.stringify(sourcePaths) !== JSON.stringify(inventory.accounting.entries.filter(entry => entry.copied).map(entry => entry.path))) {
+      throw new FreshnessStateError("coverage-incomplete");
+    }
     const sourceDirectories = new Set([snapshotRoot]);
 
     for (const relativePath of sourcePaths) {
@@ -1328,15 +1430,19 @@ export async function createGraphSourceSnapshot(
       const isolation = await runNativeBridge("snapshot-inventory", snapshotRoot, listOptions);
       if (isolation.failures.length) throw new FreshnessStateError("coverage-incomplete");
     }
+    const sourceGeneration = Object.freeze({
+      sourceFileCount: sourcePaths.length,
+      sourceSha256: contentDigest.digest("hex"),
+      sourceGenerationSha256: generationDigest.digest("hex"),
+      accountingSha256,
+    });
+    const finalSource = await computeSourceFingerprint(repoRoot, { ...listOptions, listSourcePaths, lstatImpl, readFileImpl, realpathImpl, pathApi });
+    if (!sameSourceGeneration(sourceGeneration, finalSource)) throw new FreshnessStateError("unstable-source");
     return Object.freeze({
       root: snapshotRoot,
       outputDirectory,
-      inventory: await (listOptions.listInventory ?? ((root, opts) => runNativeBridge("inventory", root, opts)))(repoRoot, listOptions),
-      sourceGeneration: Object.freeze({
-        sourceFileCount: sourcePaths.length,
-        sourceSha256: contentDigest.digest("hex"),
-        sourceGenerationSha256: generationDigest.digest("hex"),
-      }),
+      inventory,
+      sourceGeneration,
     });
   } catch (error) {
     if (created !== null) {
@@ -1606,13 +1712,19 @@ async function currentFreshnessRecord(repoRoot, options = {}, provenSource = nul
   const outputDirectory = await validateOutputDirectory(repoRoot, options);
   const coverageFile = await safeContainedFile(repoRoot, "graphify-out/coverage.json", options);
   const coverage = JSON.parse(await (options.readFileImpl ?? readFile)(coverageFile, "utf8"));
-  if (coverage.schema !== "graphify.coverage.v1" || coverage.parserVersion !== REQUIRED_VERSION ||
+  const accounting = validateAccounting(coverage.accounting);
+  const entries = new Map(accounting.entries.map(entry => [entry.path, entry]));
+  if (coverage.schema !== COVERAGE_SCHEMA || coverage.parserVersion !== REQUIRED_VERSION ||
       coverage.complete !== true || !Array.isArray(coverage.failures) || coverage.failures.length ||
       !Array.isArray(coverage.expected) || !Array.isArray(coverage.extracted) || !Array.isArray(coverage.excluded) ||
-      coverage.expected.some((entry) => !isGraphSourcePath(entry.path) || typeof entry.parser !== "string") ||
+      coverage.expected.some((entry) => !isGraphSourcePath(entry.path) || typeof entry.parser !== "string" ||
+        entries.get(entry.path)?.disposition !== "eligible" || entries.get(entry.path)?.copied !== true) ||
       coverage.extracted.some((entry) => !isGraphSourcePath(entry.path) || !Number.isSafeInteger(entry.nodes) ||
         entry.nodes < 0 || !["error-free native no-symbol result", "current AST stamp and graph contribution"].includes(entry.disposition)) ||
-      coverage.excluded.some((entry) => !isGraphSourcePath(entry.path) || typeof entry.reason !== "string" || !entry.reason) ||
+      coverage.excluded.some((entry) => !isInventoryIdentity(entry.path) || entries.get(entry.path)?.disposition !== entry.reason || entry.reason === "eligible") ||
+      new Set(coverage.excluded.map(entry => entry.path)).size !== coverage.excluded.length ||
+      JSON.stringify(coverage.excluded.map(entry => entry.path)) !== JSON.stringify(accounting.entries.filter(entry => entry.disposition !== "eligible").map(entry => entry.path)) ||
+      coverage.accountingSha256 !== accountingDigest(accounting) ||
       JSON.stringify(coverage.expected.map((entry) => entry.path)) !== JSON.stringify(coverage.extracted.map((entry) => entry.path)) ||
       new Set(coverage.expected.map((entry) => entry.path)).size !== coverage.expected.length) {
     throw new FreshnessStateError("coverage-incomplete");
@@ -1626,7 +1738,7 @@ async function currentFreshnessRecord(repoRoot, options = {}, provenSource = nul
       ? computeSourceFingerprint(repoRoot, options)
       : Promise.resolve(validateSourceGeneration(provenSource)),
   ]);
-  if (coverage.sourceSha256 !== source.sourceSha256) throw new FreshnessStateError("stale");
+  if (coverage.sourceSha256 !== source.sourceSha256 || coverage.accountingSha256 !== source.accountingSha256) throw new FreshnessStateError("stale");
   return Object.freeze({
     schema: FRESHNESS_SCHEMA,
     graphifyVersion: REQUIRED_VERSION,
@@ -2289,14 +2401,10 @@ export async function refreshStableGraph({
       if (mode === "update") await seedSnapshot(repoRoot, snapshot.root, freshnessOptions);
       await assertOwned();
       await recheckIdentity(executable);
-      const result = await runProcess({
-        executable: executable.path,
-        args: mode === "build" ? buildExtractArgs(snapshot.root) : buildUpdateArgs(snapshot.root),
-        cwd: snapshot.root,
-        env: childEnv,
-        platform,
-        ...STAGE_LIMITS[mode],
-      });
+      const result = await runGuardedNativeStage(
+        mode === "build" ? buildExtractArgs(snapshot.root) : buildUpdateArgs(snapshot.root),
+        snapshot.root, { graphifyExecutable: executable, recheckIdentity, runProcess, childEnv, platform },
+      );
       if (!result.ok) throw new AdapterRuntimeError(`${mode} failed`);
       if (mode === "build") {
         await assertOwned();
@@ -2305,14 +2413,8 @@ export async function refreshStableGraph({
           ...childEnv,
           GRAPHIFY_VIZ_NODE_LIMIT: "20000",
         });
-        const clusterResult = await runProcess({
-          executable: executable.path,
-          args: buildClusterArgs(snapshot.root),
-          cwd: snapshot.root,
-          env: clusterEnv,
-          platform,
-          ...STAGE_LIMITS.cluster,
-        });
+        const clusterResult = await runGuardedNativeStage(buildClusterArgs(snapshot.root), snapshot.root,
+          { graphifyExecutable: executable, recheckIdentity, runProcess, childEnv: clusterEnv, platform });
         if (!clusterResult.ok) throw new AdapterRuntimeError("cluster failed");
       }
       await assertOwned();

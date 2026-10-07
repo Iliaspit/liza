@@ -23,13 +23,25 @@ candidate inventory. It copies sources and ignore context to a private
 read-only snapshot. Current native AST stamps and graph contributions are
 required for supported sources; error-free native no-symbol results are
 recorded explicitly. Unsupported, ignored and non-code paths have exclusion
-reasons. Scan errors, ambiguous paths, missing parsers, extractor errors,
+reasons. Exact UTF-8/NFC identities proven ignored by the pinned native matcher
+are accounted with their no-follow file type and metadata, including literal
+POSIX backslashes and ignored links. This exception grants no content, target,
+resolve or readlink access and never applies to AST sources, copied inputs or
+parser context. Unignored unsafe paths and ambiguous identities fail closed.
+Scan errors, missing parsers, extractor errors,
 reported parse recovery and dropped sources block publication. A failed
 candidate preserves the previous published graph and freshness record.
 
-`graphify-out/coverage.json` records expected, extracted, excluded and failed
-paths, parser version, source digest and structural coverage. Freshness binds
-coverage and every published artifact. Old graphs without complete coverage
+`graphify-out/coverage.json` (`graphify.coverage.v2`) records expected, extracted,
+excluded and failed paths, parser version and `graphify.accounting.v1`: the
+complete typed no-follow census, native dispositions, Git candidates, control
+digests and copied/context membership. Versioned source-generation and
+`graphify.freshness.v3` digests bind this accounting as well as copied bytes.
+The root owner paths `graphify-out`, `.graphify-owner.lock` and
+`.graphify-owner.lock.recovery` are reserved bookkeeping outside the source
+census. Exclusions derive exactly from noneligible census records; transient
+owner entries are not source identities or fabricated exclusions. Freshness
+binds coverage and every published artifact. Old graphs without complete coverage
 are not ready. Coverage proves inventory accounting, not complete symbol or
 call semantics; truncation and language parser limitations cannot establish
 absence or dependency completeness. Confirm useful results in current source.
@@ -58,3 +70,33 @@ file reads, copied into the snapshot, and bound into freshness separately from
 expected AST contributions. Ancestor or extends context outside the explicit
 repository root blocks extraction. Publication holds the target lock through
 artifact replacement, source recheck, freshness publication and rollback.
+
+Discovery, eager context observation and the official native extract/update/
+cluster-only operations execute under one scoped filesystem observer in the
+pinned interpreter. Native ignore/sensitivity/noise algorithms are retained.
+Controls are validated before native loaders; unsupported Git pointers,
+metadata-dependent links and content-dependent sensitivity that cannot be
+decided without a forbidden read fail explicitly. Missing ancestor probes are
+distinguished from existing forbidden contents. Runtime imports/resources are
+allowed only for that purpose; a parser context under the interpreter prefix
+is still forbidden. Interpreter bootstrap metadata is limited to the trusted
+`sysconfig` executable-resolution and optional build-marker probes, with
+recorded parent/link identities checked before delegation; this authorizes no
+content reads. Fresh private inventory cache directories are canonicalized and
+validated before native use. Default bridge callers receive the same private
+child environment and cleanup as explicit owner calls. Caught I/O violations
+remain failures. CLI scratch permission requires one canonical, no-follow,
+private current-user-owned directory supplied as `GRAPHIFY_SCRATCH_ROOT`, with
+the matching private HOME/XDG/TMPDIR children created by `buildChildEnv`.
+Raw ambient prefixes, aliases, non-directories and unowned or nonprivate roots
+are rejected; the directory identity is rechecked before cache permission.
+This capability does not authorize source or context reads outside its boundary.
+Extraction and update use one worker; unobserved parser subprocesses, including
+Fortran cpp fallback, block publication. After control preflight, only the exact root-bound
+Git inventory and current-root `git rev-parse HEAD` metadata probes are allowed.
+Their capture pipes are authorized only while the validated native subprocess
+constructor creates and wraps those FIFO descriptors; unrelated regular-file
+or pipe descriptors retain the source/context checks. Adapter primitives and
+outer scopes are restored after each stage. Add/remove/type/disposition/control
+drift is rechecked during
+snapshot creation, before publication, at finalization and at later admission.

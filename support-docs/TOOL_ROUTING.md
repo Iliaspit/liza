@@ -120,6 +120,47 @@ published artifact are bound in `coverage-freshness.json`; graphs without
 complete current coverage fail status, health and query admission. A failed
 candidate leaves the previous accepted publication intact.
 
+`graphify.coverage.v2` includes versioned typed accounting of every no-follow
+census identity, native disposition, Git candidate, validated ignore control
+and copied/context member. `graphify.freshness.v3` binds accounting and copied
+bytes. Old or malformed accounting is not ready. Only native-proven ignored
+identities may retain literal POSIX backslashes or link types; they are never
+copied or followed. AST sources, copied inputs and parser context retain strict
+path validation. Unsupported control pointers and metadata-dependent link
+behavior fail rather than inventing a pruning decision.
+Root `graphify-out`, `.graphify-owner.lock` and `.graphify-owner.lock.recovery`
+are reserved owner bookkeeping outside the source census. Every exclusion
+must match exactly one noneligible typed census record; transient owner
+entries cannot enter exclusions or the source fingerprint.
+
+The original eager parser-context observer is also active for actual native
+discovery, extract, update and the existing local cluster-only operation via
+the official pinned entry point. Scoped metadata and pre-open checks run before
+target access, retain violations caught by native code and restore outer
+scopes. Sensitivity is established before a source/context read; a helper that
+needs forbidden contents to decide fails closed. Ancestor metadata probes do
+not authorize outside-root contents. Runtime import/resource permission does
+not authorize parser context under the interpreter prefix. Interpreter bootstrap
+metadata checks permit only trusted `sysconfig` executable-resolution and
+optional build-marker identities, with parent/link identity rechecks and no
+content permission.
+Freshly created inventory scratch is canonical and private before native cache
+use; default bridge calls also create and clean a private child environment.
+Direct CLI and supplied child environments must declare one canonical private
+current-user-owned `GRAPHIFY_SCRATCH_ROOT` and matching private HOME/XDG/TMPDIR
+children. Raw broad prefixes, aliases, links, non-directories and unowned or
+nonprivate roots fail before CLI execution. Cache permission uses only this
+directory capability and rechecks its identity; runtime/source/context
+permissions are not expanded. One-worker extract and update keep observation
+in the same process; parser subprocesses are
+rejected. After control preflight, the exact root-bound Git inventory and
+current-root `git rev-parse HEAD` metadata probes may run. Only FIFO capture
+descriptors created and wrapped inside their validated native constructor have
+transport permission; arbitrary descriptors and executable, shell or outside-root
+working directory overrides remain rejected. Accounting drift is checked during
+snapshot construction, before publication, at finalization and during
+status/health/query admission.
+
 Use `GRAPHIFY_AUTO_REFRESH=0` for frozen-candidate servers and
 `GRAPHIFY_PORT` for a selected authorized port. A query may otherwise refresh
 through the sole owner. Never use upstream commands or add target-local
