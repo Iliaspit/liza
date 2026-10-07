@@ -428,11 +428,14 @@ class NativeScope:
                     patterns.extend(self.detect._load_dir_own_ignore(self.root / rel))
             for pattern in ["graphify-out/", ".graphify-owner.lock/", ".graphify-owner.lock.recovery/"]:
                 patterns.append((self.root, self.detect._parse_gitignore_line(pattern)))
+            # The complete pattern list is now frozen. Cache only the native
+            # matcher's evaluations for this preflight, never I/O permissions.
+            ignore_cache: dict[Path, bool] = {}
             for rel, entry in sorted(self.census.items()):
                 p = MetadataPath(self.root / rel)
                 if entry["type"] == "unsupported":
                     self.deny(rel, "unsupported native inventory file type")
-                if self.detect._is_ignored(p, self.root, patterns):
+                if self.detect._is_ignored(p, self.root, patterns, _cache=ignore_cache):
                     self.ignored.add(rel)
                     if "\\" in rel or entry["type"] == "symlink":
                         self.exceptional.add(rel)
@@ -621,6 +624,17 @@ def native_context(
     return scope.reads, [{"path": p, "reason": r} for p, r in sorted(scope.failures)]
 
 
+def excluded_ancestor(rel: str, dispositions: dict[str, str]) -> str | None:
+    """Closest excluded ancestor, bounded by path depth, not census size."""
+    parent = rel.rpartition("/")[0]
+    while parent:
+        reason = dispositions.get(parent)
+        if reason in ("native noise directory", "native ignore rule"):
+            return reason
+        parent = parent.rpartition("/")[0]
+    return None
+
+
 def inventory(root: Path, *, require_git: bool = True) -> dict[str, Any]:
     detect, extract = native_modules()
     dispositions: dict[str, str] = {}
@@ -681,15 +695,16 @@ def inventory(root: Path, *, require_git: bool = True) -> dict[str, Any]:
                 for rel, entry in sorted(scope.census.items()):
                     if rel in dispositions:
                         continue
-                    parents = [p for p, reason in dispositions.items() if reason in ("native noise directory", "native ignore rule") and rel.startswith(p + "/")]
                     if rel in scope.ignored:
                         dispositions[rel] = "native ignore rule"
-                    elif parents:
-                        dispositions[rel] = dispositions[max(parents, key=len)]
+                    elif (reason := excluded_ancestor(rel, dispositions)) is not None:
+                        dispositions[rel] = reason
                     elif entry["type"] == "directory":
                         dispositions[rel] = "directory metadata"
                     elif rel in scope.controls:
                         dispositions[rel] = "copied native ignore context"
+                    elif Path(rel).name in detect._SKIP_FILES:
+                        dispositions[rel] = "native skipped file"
                     else:
                         p = root / rel
                         if scope.sensitive(p):

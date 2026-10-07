@@ -31,6 +31,9 @@ parser context. Unignored unsafe paths and ambiguous identities fail closed.
 Scan errors, missing parsers, extractor errors,
 reported parse recovery and dropped sources block publication. A failed
 candidate preserves the previous published graph and freshness record.
+Native skipped files use the pinned `_SKIP_FILES` exact basename set and an
+explicit exclusion; this does not prove a native ignore rule or grant path
+permission. Renamed ordinary JSON remains eligible for native dispatch.
 
 `graphify-out/coverage.json` (`graphify.coverage.v2`) records expected, extracted,
 excluded and failed paths, parser version and `graphify.accounting.v1`: the
@@ -48,7 +51,9 @@ absence or dependency completeness. Confirm useful results in current source.
 
 The owner preserves bounded subprocesses, exclusive per-root locking,
 live-source generation rechecks, one retry on source change and staged
-publication with freshness written last. It performs no automatic tool
+publication with freshness written last. Inventory has a finite 120-second
+bound. Inventory bridge transport failures retain the action and safe failure class
+(including timeout), without child stderr. It performs no automatic tool
 installation, downloads, Git hooks or package mutations. Executable version
 checks are compatibility checks, not package provenance guarantees.
 
@@ -100,3 +105,7 @@ or pipe descriptors retain the source/context checks. Adapter primitives and
 outer scopes are restored after each stage. Add/remove/type/disposition/control
 drift is rechecked during
 snapshot creation, before publication, at finalization and at later admission.
+After all ignore patterns are loaded, preflight shares only the pinned native
+matcher's local cache. Reconciliation checks native-ignored membership first
+and finds the closest excluded ancestor by path components. Source/context
+permission, identity and generation checks remain live and uncached.

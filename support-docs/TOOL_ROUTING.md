@@ -119,6 +119,9 @@ extracted, excluded and failed paths/reasons. Its source digest and every
 published artifact are bound in `coverage-freshness.json`; graphs without
 complete current coverage fail status, health and query admission. A failed
 candidate leaves the previous accepted publication intact.
+Inventory has a finite 120-second bound. Inventory bridge subprocess failures report
+only the bridge action and safe failure class, including timeout; child stderr
+is omitted. A returned incomplete report remains a coverage failure.
 
 `graphify.coverage.v2` includes versioned typed accounting of every no-follow
 census identity, native disposition, Git candidate, validated ignore control
@@ -132,6 +135,10 @@ Root `graphify-out`, `.graphify-owner.lock` and `.graphify-owner.lock.recovery`
 are reserved owner bookkeeping outside the source census. Every exclusion
 must match exactly one noneligible typed census record; transient owner
 entries cannot enter exclusions or the source fingerprint.
+The pinned native `_SKIP_FILES` set supplies exact basename exclusions before
+CODE-gap reconciliation. A skipped file is not native-ignored unless the
+native matcher independently proves it; renamed ordinary JSON stays eligible.
+This disposition grants no exceptional path or content permission.
 
 The original eager parser-context observer is also active for actual native
 discovery, extract, update and the existing local cluster-only operation via
@@ -160,6 +167,10 @@ transport permission; arbitrary descriptors and executable, shell or outside-roo
 working directory overrides remain rejected. Accounting drift is checked during
 snapshot construction, before publication, at finalization and during
 status/health/query admission.
+Preflight freezes the complete ignore pattern list before sharing the native
+matcher's cache within that preflight. Reconciliation checks native-ignored
+membership first, then the closest excluded ancestor by path components.
+Permission, identity and generation checks are never cached.
 
 Use `GRAPHIFY_AUTO_REFRESH=0` for frozen-candidate servers and
 `GRAPHIFY_PORT` for a selected authorized port. A query may otherwise refresh

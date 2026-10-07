@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { mkdtemp, mkdir, readFile, realpath, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
@@ -12,7 +12,7 @@ import {
   main, resolveGraphifyExecutable, runNativeBridge, validateCandidateCoverage,
   validateGraphFreshness, computeSourceFingerprint, createPrivateTempRoot, publishGraphSnapshot, PUBLISHED_GRAPH_ARTIFACTS,
   runGuardedNativeStage, runBoundedProcess, runQueryHttpServer, refreshStableGraph, validateAccounting,
-  seedGraphUpdateSnapshot,
+  seedGraphUpdateSnapshot, STAGE_LIMITS,
 } from "../scripts/graphify.mjs";
 
 async function pythonProbe(root, source, ...args) {
@@ -53,6 +53,188 @@ async function fixture(t) {
   await writeFile(path.join(root, "unsupported.r"), "print(1)\n");
   return root;
 }
+
+test("native skipped basenames remain explicit accounting exclusions while renamed JSON stays eligible", async (t) => {
+  const root = await fixture(t);
+  const result = await pythonProbe(root, `
+detect, _ = bridge.native_modules()
+skipped = sorted(detect._SKIP_FILES)
+for name in skipped:
+    (root / name).write_text('{}')
+(root / 'nested/package-lock.json').write_text('{}')
+(root / 'nested/renamed-lock.json').write_text('{"answer": 42}')
+(root / 'package-lock.json.backup.json').write_text('{"answer": 42}')
+(root / 'ignored-lock').mkdir()
+(root / 'ignored-lock/package-lock.json').write_text('{}')
+(root / '.graphifyignore').write_text('ignored.py\\nignored-lock/\\n')
+attempts = []
+blocked = {root / name for name in skipped} | {root / 'nested/package-lock.json'}
+def observer(event, args):
+    if event == 'open' and isinstance(args[0], (str, bytes, os.PathLike)) and Path(os.fsdecode(args[0])).absolute() in blocked:
+        attempts.append(str(args[0])); raise AssertionError('skipped file content was accessed')
+sys.addaudithook(observer)
+report = bridge.inventory(root)
+print(json.dumps({'report': report, 'skipped': skipped, 'attempts': attempts}))
+`);
+  const { report } = result;
+  assert.deepEqual(result.attempts, []);
+  assert.deepEqual(report.failures, []);
+  validateAccounting(report.accounting);
+  for (const name of [...result.skipped, "nested/package-lock.json"]) {
+    const entry = report.accounting.entries.find(x => x.path === name);
+    assert.equal(entry.disposition, "native skipped file", name);
+    assert.equal(entry.nativeIgnored, false, name);
+    assert.equal(entry.copied, false, name);
+    assert.equal(entry.context, false, name);
+    assert(!report.expected.some(x => x.path === name), name);
+    assert(!report.sourcePaths.includes(name), name);
+    assert(report.excluded.some(x => x.path === name && x.reason === "native skipped file"), name);
+  }
+  const ignored = report.accounting.entries.find(x => x.path === "ignored-lock/package-lock.json");
+  assert.equal(ignored.disposition, "native ignore rule");
+  assert.equal(ignored.nativeIgnored, true);
+  for (const name of ["nested/renamed-lock.json", "package-lock.json.backup.json"]) {
+    assert(report.expected.some(x => x.path === name && x.parser === "extract_json"), name);
+    assert(report.sourcePaths.includes(name), name);
+  }
+  const outside = await fixture(t);
+  await rm(path.join(root, "package-lock.json"));
+  await symlink(path.join(outside, "main.go"), path.join(root, "package-lock.json"));
+  const linked = await runNativeBridge("inventory", root);
+  assert(linked.failures.some(x => x.path === "package-lock.json" && x.reason === "unsafe unignored native inventory path"));
+  assert(!linked.sourcePaths.includes("package-lock.json"));
+});
+
+test("large nested native census shares the frozen matcher cache and reconciles ancestors by bounded components", async (t) => {
+  const root = await fixture(t);
+  const result = await pythonProbe(root, `
+detect, _ = bridge.native_modules()
+(root / '.graphifyignore').write_text('ignored.py\\ngroup-*/ignored/\\n!group-*/ignored/deep/reinclude.py\\n')
+for i in range(40):
+    base = root / ('group-%02d' % i)
+    (base / 'ignored/deep').mkdir(parents=True)
+    (base / 'coverage/deep').mkdir(parents=True)
+    (base / 'coverage/lcov.info').write_text('synthetic coverage marker')
+    (base / 'live').mkdir()
+    (base / 'live/api.py').write_text('def live(): return 42\\n')
+    (base / '.graphifyignore').write_text('local.py\\n')
+    (base / 'local.py').write_text('def local(): pass\\n')
+    for j in range(40):
+        (base / 'ignored/deep' / ('file-%02d.py' % j)).write_text('def ignored(): pass\\n')
+        (base / 'coverage/deep' / ('file-%02d.py' % j)).write_text('def generated(): pass\\n')
+    (base / 'ignored/deep/reinclude.py').write_text('def still_ignored(): pass\\n')
+native_match = detect._is_ignored
+cache_objects, cache_sizes = [], []
+def observed_match(path, *args, **kwargs):
+    if isinstance(path, bridge.MetadataPath):
+        cache = kwargs.get('_cache')
+        assert isinstance(cache, dict), 'preflight must supply native matcher cache'
+        cache_objects.append(cache)
+        cache_sizes.append(len(cache))
+    return native_match(path, *args, **kwargs)
+detect._is_ignored = observed_match
+ancestor = bridge.excluded_ancestor
+ancestor_calls = []
+def observed_ancestor(rel, dispositions):
+    ancestor_calls.append(rel)
+    return ancestor(rel, dispositions)
+bridge.excluded_ancestor = observed_ancestor
+report = bridge.inventory(root)
+assert len(cache_objects) > 3128
+assert all(cache is cache_objects[0] for cache in cache_objects)
+assert max(cache_sizes) > 100, 'native evaluations must populate the shared cache'
+assert not any('/ignored/' in p for p in ancestor_calls), 'native ignored membership must precede ancestor lookup'
+class ComponentsOnly(dict):
+    def __init__(self, *args):
+        super().__init__(*args); self.lookups = []
+    def get(self, key, *args):
+        self.lookups.append(key); return super().get(key, *args)
+    def items(self): raise AssertionError('unbounded disposition scan')
+    def __iter__(self): raise AssertionError('unbounded disposition scan')
+dispositions = ComponentsOnly({**{'irrelevant-%d' % i: 'native ignore rule' for i in range(10000)},
+                              'a': 'native ignore rule', 'a/b': 'native noise directory', 'a/b/c': 'directory metadata'})
+assert ancestor('a/b/c/file.py', dispositions) == 'native noise directory'
+assert dispositions.lookups == ['a/b/c', 'a/b']
+dispositions.lookups.clear()
+assert ancestor('sibling/deep/file.py', dispositions) is None
+assert dispositions.lookups == ['sibling/deep', 'sibling']
+print(json.dumps({'report': report, 'calls': len(cache_objects), 'populated': max(cache_sizes)}))
+`);
+  const { report } = result;
+  assert.deepEqual(report.failures, []);
+  validateAccounting(report.accounting);
+  const entries = new Map(report.accounting.entries.map(x => [x.path, x]));
+  assert(report.accounting.entries.length > 3128);
+  for (let i = 0; i < 40; i++) {
+    const base = `group-${String(i).padStart(2, "0")}`;
+    for (let j = 0; j < 40; j++) {
+      const file = `deep/file-${String(j).padStart(2, "0")}.py`;
+      for (const [dir, reason, nativeIgnored] of [["ignored", "native ignore rule", true], ["coverage", "native noise directory", false]]) {
+        const entry = entries.get(`${base}/${dir}/${file}`);
+        assert.equal(entry.disposition, reason, entry.path);
+        assert.equal(entry.nativeIgnored, nativeIgnored, entry.path);
+        assert.equal(entry.copied, false, entry.path);
+        assert.equal(entry.context, false, entry.path);
+      }
+    }
+    assert.equal(entries.get(`${base}/ignored/deep/reinclude.py`).disposition, "native ignore rule");
+    assert.equal(entries.get(`${base}/coverage/lcov.info`).disposition, "native noise directory");
+    assert.equal(entries.get(`${base}/local.py`).disposition, "native ignore rule");
+    assert.equal(entries.get(`${base}/live/api.py`).disposition, "eligible");
+    assert(report.expected.some(x => x.path === `${base}/live/api.py`));
+    assert(report.sourcePaths.includes(`${base}/live/api.py`));
+  }
+});
+
+test("bounded inventory timeout retains safe action diagnostics, terminates its child and preserves accepted publication", async (t) => {
+  const root = await fixture(t);
+  assert.equal(STAGE_LIMITS.inventory.timeoutMs, 120_000);
+  const deps = { repoRoot: root, writeStdout() {}, writeStderr() {} };
+  assert.equal(await main(["build"], deps), 0);
+  const names = [...PUBLISHED_GRAPH_ARTIFACTS, "coverage-freshness.json"];
+  const accepted = new Map(await Promise.all(names.map(async name => {
+    try { return [name, await readFile(path.join(root, "graphify-out", name))]; }
+    catch (error) { if (error.code === "ENOENT") return [name, null]; throw error; }
+  })));
+  const children = [], scratch = [], diagnostics = [];
+  const timeoutInventory = async request => {
+    if (request.args[2] !== "inventory") return runBoundedProcess(request);
+    assert.equal(request.timeoutMs, 120_000);
+    scratch.push(request.env.GRAPHIFY_SCRATCH_ROOT);
+    return runBoundedProcess({ ...request, executable: process.execPath,
+      args: ["-e", "process.stderr.write('synthetic private child stderr'); setInterval(() => {}, 1000)"],
+      timeoutMs: 100, terminationGraceMs: 100,
+      spawnImpl: (...args) => { const child = spawn(...args); children.push(child); return child; },
+    });
+  };
+  await assert.rejects(runNativeBridge("inventory", root, { runProcess: timeoutInventory }), error => {
+    assert.equal(error.kind, "coverage-incomplete");
+    assert.equal(error.bridgeAction, "inventory");
+    assert.equal(error.bridgeFailure, "timeout");
+    assert.equal(error.message, "native bridge inventory failed: timeout");
+    return true;
+  });
+  assert.equal(await main(["build"], { ...deps, runProcess: timeoutInventory, writeStderr: value => diagnostics.push(value) }), 1);
+  assert(diagnostics.join("").includes("native bridge inventory failed: timeout"));
+  assert(!diagnostics.join("").includes("synthetic private child stderr"));
+  for (const child of children) {
+    assert(child.exitCode !== null || child.signalCode !== null, "owned child must terminate");
+    assert.throws(() => process.kill(child.pid, 0), error => error.code === "ESRCH");
+  }
+  for (const directory of scratch) await assert.rejects(stat(directory), error => error.code === "ENOENT");
+  for (const [name, bytes] of accepted) {
+    if (bytes === null) await assert.rejects(stat(path.join(root, "graphify-out", name)), error => error.code === "ENOENT");
+    else assert.deepEqual(await readFile(path.join(root, "graphify-out", name)), bytes, name);
+  }
+  const incomplete = await runNativeBridge("inventory", root, { runProcess: async () => ({ ok: true, stdout: JSON.stringify({ failures: [{ path: "bad.py", reason: "native scan error" }] }) }) });
+  assert.deepEqual(incomplete.failures, [{ path: "bad.py", reason: "native scan error" }]);
+  await assert.rejects(runNativeBridge("coverage", root, { runProcess: async () => ({ ok: false, failure: "synthetic private child stderr", stderr: "private" }) }), error => {
+    assert.equal(error.bridgeAction, "coverage");
+    assert.equal(error.bridgeFailure, "transport");
+    assert(!error.message.includes("private"));
+    return true;
+  });
+});
 
 test("explicit canonical target required; CLI never derives root from installation", async () => {
   assert.equal(await main(["status"], { writeStderr() {} }), 2);

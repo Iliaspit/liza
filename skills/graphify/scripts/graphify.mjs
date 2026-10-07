@@ -64,7 +64,7 @@ export const UPDATE_SEED_ARTIFACTS = PUBLISHED_GRAPH_ARTIFACTS.filter((name) => 
 
 export const STAGE_LIMITS = Object.freeze({
   version: Object.freeze({ timeoutMs: 10_000, maxStdoutBytes: 1_024, maxStderrBytes: 8_192 }),
-  inventory: Object.freeze({ timeoutMs: 30_000, maxStdoutBytes: 33_554_432, maxStderrBytes: 8_192 }),
+  inventory: Object.freeze({ timeoutMs: 120_000, maxStdoutBytes: 33_554_432, maxStderrBytes: 8_192 }),
   build: Object.freeze({ timeoutMs: 600_000, maxStdoutBytes: 65_536, maxStderrBytes: 65_536 }),
   cluster: Object.freeze({ timeoutMs: 60_000, maxStdoutBytes: 65_536, maxStderrBytes: 65_536 }),
   update: Object.freeze({ timeoutMs: 300_000, maxStdoutBytes: 65_536, maxStderrBytes: 65_536 }),
@@ -98,6 +98,15 @@ export class FreshnessStateError extends AdapterRuntimeError {
   constructor(kind) {
     super(`graph freshness is ${kind}`);
     this.kind = kind;
+  }
+}
+class NativeBridgeError extends FreshnessStateError {
+  constructor(action, failure) {
+    super("coverage-incomplete");
+    this.bridgeAction = ["inventory", "snapshot-inventory", "coverage", "cli"].includes(action) ? action : "unknown";
+    this.bridgeFailure = ["timeout", "spawn", "signal", "exit", "termination", "stdout-overflow", "stderr-overflow", "invalid-report"].includes(failure)
+      ? failure : "transport";
+    this.message = `native bridge ${this.bridgeAction} failed: ${this.bridgeFailure}`;
   }
 }
 export class GraphLockError extends AdapterRuntimeError {}
@@ -1075,9 +1084,9 @@ async function nativeBridgeProcess(action, repoRoot, options = {}) {
 
 export async function runNativeBridge(action, repoRoot, options = {}) {
   const result = await nativeBridgeProcess(action, repoRoot, options);
-  if (!result.ok) throw new FreshnessStateError("coverage-incomplete");
+  if (!result.ok) throw new NativeBridgeError(action, result.failure);
   try { return JSON.parse(result.stdout); }
-  catch { throw new FreshnessStateError("coverage-incomplete"); }
+  catch { throw new NativeBridgeError(action, "invalid-report"); }
 }
 
 export async function runGuardedNativeStage(nativeArgs, repoRoot, options = {}) {
@@ -2732,6 +2741,9 @@ export async function main(argv = process.argv.slice(2), dependencies = {}) {
       }
     }
   } catch (error) {
+    if (error instanceof NativeBridgeError) {
+      writeStderr(`[graphify] ${error.message}\n`);
+    }
     if (error instanceof GraphStateError && error.kind === "missing") {
       code = 4;
       outcome = "graph-missing";
