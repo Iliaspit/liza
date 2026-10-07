@@ -13,6 +13,7 @@ import {
   validateGraphFreshness, computeSourceFingerprint, createPrivateTempRoot, publishGraphSnapshot, PUBLISHED_GRAPH_ARTIFACTS,
   runGuardedNativeStage, runBoundedProcess, runQueryHttpServer, refreshStableGraph, validateAccounting,
   seedGraphUpdateSnapshot, STAGE_LIMITS,
+  writeFreshnessMetadata,
 } from "../scripts/graphify.mjs";
 
 async function pythonProbe(root, source, ...args) {
@@ -51,6 +52,13 @@ async function fixture(t) {
   await writeFile(path.join(root, ".graphifyignore"), "ignored.py\n");
   await writeFile(path.join(root, "ignored.py"), "def excluded(): pass\n");
   await writeFile(path.join(root, "unsupported.r"), "print(1)\n");
+  return root;
+}
+
+async function mixedOrderingFixture(t) {
+  const root = await fixture(t);
+  await writeFile(path.join(root, "a-first.py"), "def first_symbol():\n    return 1\n");
+  await writeFile(path.join(root, "z-data.json"), '{"fixture_value":42}\n');
   return root;
 }
 
@@ -296,6 +304,44 @@ test("real pinned parser: arbitrary Go/Python root, nested source, empty and exp
   await writeFile(path.join(root, "nested", "api.py"), "def answer():\n    return 42\n");
   await rm(path.join(root, "graphify-out", "coverage.json"));
   assert.equal(await main(["status"], deps), 5, "old coverage-less graph must never be ready");
+});
+
+test("real native mixed dispositions retain expected inventory order and reordered coverage cannot mint freshness", async (t) => {
+  const root = await mixedOrderingFixture(t);
+  const errors = [];
+  const deps = { repoRoot: root, writeStdout() {}, writeStderr: text => errors.push(text) };
+  assert.equal(await main(["build"], deps), 0, errors.join(""));
+  const output = path.join(root, "graphify-out");
+  const coveragePath = path.join(output, "coverage.json");
+  const coverage = JSON.parse(await readFile(coveragePath, "utf8"));
+  const expectedPaths = ["a-first.py", "empty.py", "main.go", "nested/api.py", "z-data.json"];
+  assert.equal(coverage.complete, true);
+  assert.deepEqual(coverage.failures, []);
+  assert.deepEqual(coverage.expected.map(entry => entry.path), expectedPaths);
+  assert.deepEqual(coverage.extracted.map(entry => entry.path), expectedPaths);
+  const noSymbol = coverage.extracted.find(entry => entry.path === "z-data.json");
+  assert.equal(noSymbol.disposition, "error-free native no-symbol result");
+  assert.equal(noSymbol.nodes, 0);
+  const contributed = coverage.extracted.find(entry => entry.path === "a-first.py");
+  assert.equal(contributed.disposition, "current AST stamp and graph contribution");
+  assert(contributed.nodes > 0);
+  const graph = JSON.parse(await readFile(path.join(output, "graph.json"), "utf8"));
+  assert(graph.nodes.some(node => node.source_file === "a-first.py" && node.label === "first_symbol()"));
+  assert.equal(await validateGraphFreshness(root), "current");
+  assert.equal(await main(["status"], deps), 0);
+
+  const sourceGeneration = await computeSourceFingerprint(root);
+  const freshnessPath = path.join(output, "coverage-freshness.json");
+  const acceptedFreshness = await readFile(freshnessPath);
+  const reordered = structuredClone(coverage);
+  reordered.extracted = [noSymbol, ...reordered.extracted.filter(entry => entry.path !== "z-data.json")];
+  assert.deepEqual([...reordered.extracted.map(entry => entry.path)].sort(), expectedPaths);
+  assert.notDeepEqual(reordered.extracted.map(entry => entry.path), expectedPaths);
+  await writeFile(coveragePath, JSON.stringify(reordered));
+  await assert.rejects(writeFreshnessMetadata(root, sourceGeneration), error => error.kind === "coverage-incomplete");
+  assert.deepEqual(await readFile(freshnessPath), acceptedFreshness, "reordered coverage cannot replace accepted freshness");
+  await assert.rejects(validateGraphFreshness(root), error => error.kind === "coverage-incomplete");
+  assert.notEqual(await main(["status"], deps), 0);
 });
 
 test("whole-owner update publishes changed source through native update with current coverage and freshness", async (t) => {
@@ -1591,9 +1637,14 @@ test("old, duplicate and forged exceptional accounting cannot enter status/healt
 });
 
 test("real loopback HTTP admits current coverage then rejects accounting drift", async (t) => {
-  const root = await fixture(t);
+  const root = await mixedOrderingFixture(t);
   const deps = { repoRoot: root, baseEnv: { ...process.env, GRAPHIFY_AUTO_REFRESH: "0" }, writeStdout() {}, writeStderr() {} };
   assert.equal(await main(["build"], deps), 0);
+  const coverage = JSON.parse(await readFile(path.join(root, "graphify-out", "coverage.json"), "utf8"));
+  assert.equal(coverage.extracted[0].path, "a-first.py");
+  assert.equal(coverage.extracted[0].disposition, "current AST stamp and graph contribution");
+  assert(coverage.extracted.some(entry => entry.path === "z-data.json" && entry.disposition === "error-free native no-symbol result"));
+  assert.deepEqual(coverage.extracted.map(entry => entry.path), coverage.expected.map(entry => entry.path));
   const signals = new EventEmitter(), apiKey = "synthetic-loopback-key-123";
   let announce;
   const listening = new Promise(resolve => { announce = resolve; });

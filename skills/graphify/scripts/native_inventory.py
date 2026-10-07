@@ -991,6 +991,9 @@ def coverage(root: Path) -> dict[str, Any]:
                 {**entry, "disposition": "current AST stamp and graph contribution", "nodes": len(results[root / rel]["nodes"])}
             )
     report["failures"].extend({"path": p, "reason": r} for p, r in sorted(scope.failures))
+    # Both admission paths must retain the authoritative expected inventory order.
+    expected_order = {entry["path"]: index for index, entry in enumerate(report["expected"])}
+    extracted.sort(key=lambda entry: expected_order[entry["path"]])
     return {
         "schema": "graphify.coverage.v2",
         "accounting": report["accounting"],

@@ -58,7 +58,9 @@ permission. Renamed ordinary JSON remains eligible for native dispatch.
 `graphify-out/coverage.json` (`graphify.coverage.v2`) records expected, extracted,
 excluded and failed paths, parser version and `graphify.accounting.v1`: the
 complete typed no-follow census, native dispositions, Git candidates, control
-digests and copied/context membership. Versioned source-generation and
+digests and copied/context membership. Extracted records retain the exact expected
+inventory path order across no-symbol and graph-contribution dispositions;
+freshness rejects a reordered report. Versioned source-generation and
 `graphify.freshness.v3` digests bind this accounting as well as copied bytes.
 The root owner paths `graphify-out`, `.graphify-owner.lock` and
 `.graphify-owner.lock.recovery` are reserved bookkeeping outside the source
