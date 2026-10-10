@@ -809,8 +809,8 @@ func RunSupervisor(ctx context.Context, config SupervisorConfig) error {
 			if hbErr := checkHeartbeat(); hbErr != nil {
 				return hbErr
 			}
-			if errors.Is(err, errGoalComplete) {
-				GetLogger().Info("Goal complete, supervisor exiting")
+			if errors.Is(err, errGoalComplete) || errors.Is(err, errSystemStopped) {
+				GetLogger().Info("System stopped, supervisor exiting", "reason", err)
 				return nil
 			}
 			return err

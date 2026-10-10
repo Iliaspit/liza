@@ -5,6 +5,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -16,6 +17,60 @@ import (
 	"github.com/liza-mas/liza/internal/paths"
 	"github.com/liza-mas/liza/internal/testhelpers"
 )
+
+func TestAutoResumeCompletionAdmissionPreservesHeldState(t *testing.T) {
+	for _, sprintStatus := range []models.SprintStatus{models.SprintStatusCheckpoint, models.SprintStatusCompleted} {
+		for _, hold := range []string{"PAUSED", "CIRCUIT_BREAKER_TRIPPED", "STOPPED", "HALT", "DISABLED"} {
+			for _, interval := range []string{"before resume", "before reconciliation write"} {
+				t.Run(string(sprintStatus)+"/"+hold+"/"+interval, func(t *testing.T) {
+					fixture := newEffectiveCompletionFixture(t, false)
+					fixture.mutateState(t, func(s *models.State) {
+						s.Config.AutoResume = true
+						s.Sprint.Status = sprintStatus
+						s.Sprint.CheckpointTrigger = ""
+						s.Sprint.Scope.Planned = []string{fixture.terminalID}
+					})
+					var held *models.State
+					if interval == "before resume" {
+						held = installAutomaticResumeHold(t, fixture.stateFile, hold)
+					} else {
+						previous := testReconcileIntegrationAnalysesHooks
+						t.Cleanup(func() { testReconcileIntegrationAnalysesHooks = previous })
+						testReconcileIntegrationAnalysesHooks = &reconcileIntegrationAnalysesTestHooks{
+							beforeValidation: func(*models.State) {
+								held = installAutomaticResumeHold(t, fixture.stateFile, hold)
+							},
+						}
+					}
+					_, err := AutoResume(fixture.projectRoot, "auto-resume")
+					if err == nil || held == nil || (!strings.Contains(err.Error(), "explicit operator") && !strings.Contains(err.Error(), "disabled")) {
+						t.Fatalf("AutoResume error = %v, held = %v; want admission refusal", err, held != nil)
+					}
+					if got := fixture.readState(t); !reflect.DeepEqual(got, held) {
+						t.Fatal("completion reconciliation changed held goal/task/sprint/history state")
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestOperatorResumeCompletionPreservesOptInIndependence(t *testing.T) {
+	fixture := newEffectiveCompletionFixture(t, true)
+	fixture.mutateState(t, func(s *models.State) {
+		s.Config.AutoResume = false
+		s.Config.Mode = models.SystemModePaused
+		s.Sprint.Status = models.SprintStatusCheckpoint
+		s.Sprint.CheckpointTrigger = ""
+		s.Sprint.Scope.Planned = []string{fixture.terminalID}
+	})
+	if _, err := Resume(fixture.projectRoot, "human"); err != nil {
+		t.Fatal(err)
+	}
+	if got := fixture.readState(t); got.Sprint.Status != models.SprintStatusCompleted || got.Config.Mode != models.SystemModeRunning || got.Config.AutoResume {
+		t.Fatalf("operator completion did not preserve explicit authority: %+v", got.Sprint)
+	}
+}
 
 func TestEffectiveIntegrationCompletionGate(t *testing.T) {
 	t.Run("stale clean evidence rejects every completion-capable path before progression mutation", func(t *testing.T) {

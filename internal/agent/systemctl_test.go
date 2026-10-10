@@ -164,8 +164,8 @@ func TestWaitWhilePausedAutoResumePreservesStoppedActiveHalt(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
 	defer cancel()
-	if err := waitWhilePaused(ctx, tmpDir, "doer"); !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("waitWhilePaused() error = %v, want context deadline while HALT remains blocked", err)
+	if err := waitWhilePaused(ctx, tmpDir, "doer"); !errors.Is(err, errSystemStopped) {
+		t.Fatalf("waitWhilePaused() error = %v, want clean stopped exit", err)
 	}
 
 	after, err := db.For(statePath).Read()
@@ -213,6 +213,60 @@ func TestWaitWhilePausedHardModesBlockTransitionCheckpointRoleException(t *testi
 				t.Fatal("waitWhilePaused() error = nil, want context timeout while hard mode blocks")
 			}
 		})
+	}
+}
+
+func TestWaitWhilePausedStoppedAndHaltBlockTransitionCheckpointException(t *testing.T) {
+	for _, trigger := range []string{models.CheckpointTriggerPlanningComplete, models.CheckpointTriggerManyToOneReady} {
+		for _, roleType := range []string{"doer", "reviewer", "orchestrator"} {
+			for _, hold := range []string{"STOPPED", "HALT", "LEGACY_HALT"} {
+				for _, autoResume := range []bool{false, true} {
+					t.Run(trigger+"/"+roleType+"/"+hold+"/"+map[bool]string{false: "manual", true: "automatic"}[autoResume], func(t *testing.T) {
+						root := t.TempDir()
+						stateFile, _ := testhelpers.SetupLizaDir(t, root)
+						state := testhelpers.CreateValidState()
+						state.Config.AutoResume = autoResume
+						state.Sprint.Status = models.SprintStatusCheckpoint
+						state.Sprint.CheckpointTrigger = trigger
+						switch hold {
+						case "STOPPED":
+							state.Config.Mode = models.SystemModeStopped
+						case "HALT":
+							state.CircuitBreaker.CurrentResponse = &models.CircuitBreakerResponse{Response: models.CircuitBreakerResponseHalt}
+						case "LEGACY_HALT":
+							state.CircuitBreaker.Status = "TRIGGERED"
+							state.CircuitBreaker.CurrentTrigger = &models.CircuitBreakerTrigger{Pattern: "retry_cluster", Timestamp: time.Now().UTC()}
+						}
+						testhelpers.WriteInitialState(t, stateFile, state)
+						before, err := db.For(stateFile).Read()
+						if err != nil {
+							t.Fatal(err)
+						}
+						resumeCalls := 0
+						previous := resumeCheckpoint
+						t.Cleanup(func() { resumeCheckpoint = previous })
+						resumeCheckpoint = func(string, string) (*ops.ResumeResult, error) {
+							resumeCalls++
+							return nil, errors.New("unexpected automatic resume")
+						}
+						ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+						defer cancel()
+						err = waitWhilePaused(ctx, root, roleType)
+						want := context.DeadlineExceeded
+						if hold == "STOPPED" {
+							want = errSystemStopped
+						}
+						if !errors.Is(err, want) || resumeCalls != 0 {
+							t.Fatalf("wait error = %v, resume calls = %d; want %v and no resume", err, resumeCalls, want)
+						}
+						after, err := db.For(stateFile).Read()
+						if err != nil || !reflect.DeepEqual(after, before) {
+							t.Fatalf("pause waiter changed held state: %v", err)
+						}
+					})
+				}
+			}
+		}
 	}
 }
 

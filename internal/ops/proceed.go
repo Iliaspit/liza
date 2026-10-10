@@ -22,6 +22,8 @@ import (
 // condition in ExecuteAvailableTransitions, not a configuration error.
 var errTransitionAlreadyExecuted = errors.New("transition already executed")
 
+var beforeAvailableTransitionsMutationTestHook func()
+
 // perSubtaskChildID returns the deterministic child task ID for a per-subtask transition.
 func perSubtaskChildID(parentID, transitionName string, index int) string {
 	return fmt.Sprintf("%s-%s-%d", parentID, transitionName, index)
@@ -1099,7 +1101,9 @@ func extraToStringSlice(v any) []string {
 // Cycle detection: true cycle members get a transition_cycle_blocked history event
 // and are skipped from execution. Tasks downstream of those cycles are skipped
 // until the upstream cycle is resolved.
-func ExecuteAvailableTransitions(projectRoot string, triggerFilter string) ([]ProceedResult, error) {
+// Optional admission predicates run against the current state inside the write
+// transaction. Automatic resume uses them to preserve operator holds and opt-in.
+func ExecuteAvailableTransitions(projectRoot string, triggerFilter string, admission ...func(*models.State) error) ([]ProceedResult, error) {
 	resolver, _, err := loadResolverWithRuntimePolicy(projectRoot)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load pipeline config: %w", err)
@@ -1124,7 +1128,15 @@ func ExecuteAvailableTransitions(projectRoot string, triggerFilter string) ([]Pr
 	now := time.Now().UTC()
 	var results []ProceedResult
 
+	if beforeAvailableTransitionsMutationTestHook != nil {
+		beforeAvailableTransitionsMutationTestHook()
+	}
 	err = blackboard.Modify(func(s *models.State) error {
+		for _, admit := range admission {
+			if err := admit(s); err != nil {
+				return err
+			}
+		}
 		var pending []pendingTx
 		origIdx := 0
 

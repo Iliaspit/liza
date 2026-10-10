@@ -88,6 +88,10 @@ func TestSetAutoResumeResultAndPreservation(t *testing.T) {
 	before := testhelpers.CreateValidState()
 	before.Config.AutoResume = false
 	testhelpers.WriteInitialState(t, file, before)
+	before, err := db.For(file).Read()
+	if err != nil {
+		t.Fatal(err)
+	}
 	result, err := SetAutoResume(root, true, "operator[governance-v20]")
 	if err != nil {
 		t.Fatal(err)

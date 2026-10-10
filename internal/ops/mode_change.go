@@ -256,7 +256,7 @@ func changeMode(projectRoot, reason, changedBy string, target models.SystemMode)
 		if err := previousMode.ValidateTransition(target); err != nil {
 			return &PreconditionError{Reason: err.Error()}
 		}
-		if target == models.SystemModeRunning && hasActiveHaltResponse(s) {
+		if target == models.SystemModeRunning && HasActiveHaltResponse(s) {
 			return &PreconditionError{Reason: fmt.Sprintf("cannot start while an active HALT response is unresolved; use %q to acknowledge it", brand.Command("resume"))}
 		}
 
@@ -279,7 +279,8 @@ func changeMode(projectRoot, reason, changedBy string, target models.SystemMode)
 	}, nil
 }
 
-func hasActiveHaltResponse(s *models.State) bool {
+// HasActiveHaltResponse includes typed HALTs and the legacy triggered boundary.
+func HasActiveHaltResponse(s *models.State) bool {
 	if s.CircuitBreaker.CurrentResponse != nil {
 		return s.CircuitBreaker.CurrentResponse.Response == models.CircuitBreakerResponseHalt
 	}
@@ -449,6 +450,21 @@ func AutoResume(projectRoot, changedBy string) (*ResumeResult, error) {
 	return resume(projectRoot, changedBy, resumeOriginAutomatic)
 }
 
+func requireAutomaticResumeAdmission(s *models.State) error {
+	mode := s.Config.Mode
+	if mode == "" {
+		mode = models.SystemModeRunning
+	}
+	if mode == models.SystemModePaused || mode == models.SystemModeCircuitBreakerTripped ||
+		mode == models.SystemModeStopped || HasActiveHaltResponse(s) {
+		return &PreconditionError{Reason: fmt.Sprintf("automatic resume cannot clear %s mode or an active HALT; explicit operator resume required", mode)}
+	}
+	if !s.Config.AutoResume {
+		return &PreconditionError{Reason: "automatic resume is disabled"}
+	}
+	return nil
+}
+
 func resume(projectRoot, changedBy string, origin resumeOrigin) (*ResumeResult, error) {
 	lizaPaths := paths.New(projectRoot)
 	statePath := lizaPaths.StatePath()
@@ -457,8 +473,15 @@ func resume(projectRoot, changedBy string, origin resumeOrigin) (*ResumeResult, 
 	if err != nil {
 		return nil, fmt.Errorf("failed to read state before resume: %w", err)
 	}
+	var admission []func(*models.State) error
+	if origin == resumeOriginAutomatic {
+		admission = append(admission, requireAutomaticResumeAdmission)
+		if err := requireAutomaticResumeAdmission(preflightState); err != nil {
+			return nil, err
+		}
+	}
 	preflightStoppedWithActiveHalt := origin == resumeOriginOperator &&
-		preflightState.Config.Mode == models.SystemModeStopped && hasActiveHaltResponse(preflightState)
+		preflightState.Config.Mode == models.SystemModeStopped && HasActiveHaltResponse(preflightState)
 	requiresCompletion := false
 	if !preflightStoppedWithActiveHalt {
 		requiresCompletion, err = resumeRequiresEffectiveIntegrationCompletion(preflightState, projectRoot)
@@ -484,14 +507,14 @@ func resume(projectRoot, changedBy string, origin resumeOrigin) (*ResumeResult, 
 			}
 			// Check inside the locked mutation: a human pause or HALT may arrive
 			// after preflight. Automatic continuation cannot acknowledge either.
-			if origin == resumeOriginAutomatic && (currentMode == models.SystemModePaused ||
-				currentMode == models.SystemModeCircuitBreakerTripped || currentMode == models.SystemModeStopped ||
-				hasActiveHaltResponse(s)) {
-				return &PreconditionError{Reason: fmt.Sprintf("automatic resume cannot clear %s mode or an active HALT; explicit operator resume required", currentMode)}
+			if origin == resumeOriginAutomatic {
+				if err := requireAutomaticResumeAdmission(s); err != nil {
+					return err
+				}
 			}
 
 			stoppedWithActiveHalt := origin == resumeOriginOperator &&
-				currentMode == models.SystemModeStopped && hasActiveHaltResponse(s)
+				currentMode == models.SystemModeStopped && HasActiveHaltResponse(s)
 			// STOPPED normally rejects resume. An active HALT is the sole exception:
 			// acknowledge it without restarting agents or mutating sprint state.
 			if currentMode == models.SystemModeStopped && !stoppedWithActiveHalt {
@@ -556,7 +579,7 @@ func resume(projectRoot, changedBy string, origin resumeOrigin) (*ResumeResult, 
 		})
 	}
 	if requiresCompletion {
-		err = withEffectiveIntegrationCompletionAuthorization(projectRoot, "resume", false, resumeMutation)
+		err = withEffectiveIntegrationCompletionAuthorization(projectRoot, "resume", false, resumeMutation, admission...)
 	} else {
 		err = resumeMutation(nil)
 	}
@@ -575,11 +598,11 @@ func resume(projectRoot, changedBy string, origin resumeOrigin) (*ResumeResult, 
 	var transitionsExecuted int
 	var transitionError string
 	if runTransitionsAfterResume {
-		if results, err := ExecuteAvailableTransitions(projectRoot, ""); err != nil {
+		if results, err := ExecuteAvailableTransitions(projectRoot, "", admission...); err != nil {
 			transitionError = err.Error()
 		} else {
 			transitionsExecuted = len(results)
-			if err := clearTransitionCheckpointTrigger(projectRoot); err != nil {
+			if err := clearTransitionCheckpointTrigger(projectRoot, admission...); err != nil {
 				transitionError = err.Error()
 			}
 		}
@@ -595,10 +618,15 @@ func resume(projectRoot, changedBy string, origin resumeOrigin) (*ResumeResult, 
 	}, nil
 }
 
-func clearTransitionCheckpointTrigger(projectRoot string) error {
+func clearTransitionCheckpointTrigger(projectRoot string, admission ...func(*models.State) error) error {
 	statePath := paths.New(projectRoot).StatePath()
 	blackboard := db.For(statePath)
 	return blackboard.Modify(func(s *models.State) error {
+		for _, admit := range admission {
+			if err := admit(s); err != nil {
+				return err
+			}
+		}
 		if models.IsTransitionCheckpointTrigger(s.Sprint.CheckpointTrigger) {
 			s.Sprint.CheckpointTrigger = ""
 		}

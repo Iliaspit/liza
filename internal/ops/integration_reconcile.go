@@ -49,11 +49,12 @@ func ReconcileIntegrationAnalyses(projectRoot string) (*ReconcileIntegrationAnal
 
 // reconcileIntegrationAnalysesWithCompletionLockHeld is used by progression,
 // whose caller already holds the non-reentrant integration completion lock.
-func reconcileIntegrationAnalysesWithCompletionLockHeld(projectRoot string) (*ReconcileIntegrationAnalysesResult, error) {
-	return reconcileIntegrationAnalyses(projectRoot, true)
+// Origin-specific admission is rechecked inside the projection's state mutation.
+func reconcileIntegrationAnalysesWithCompletionLockHeld(projectRoot string, admission ...func(*models.State) error) (*ReconcileIntegrationAnalysesResult, error) {
+	return reconcileIntegrationAnalyses(projectRoot, true, admission...)
 }
 
-func reconcileIntegrationAnalyses(projectRoot string, completionLockHeld bool) (*ReconcileIntegrationAnalysesResult, error) {
+func reconcileIntegrationAnalyses(projectRoot string, completionLockHeld bool, admission ...func(*models.State) error) (*ReconcileIntegrationAnalysesResult, error) {
 	resolver, _, err := loadResolver(projectRoot)
 	if err != nil {
 		return nil, fmt.Errorf("load integration reconciliation pipeline: %w", err)
@@ -125,6 +126,11 @@ func reconcileIntegrationAnalyses(projectRoot string, completionLockHeld bool) (
 			}
 
 			return bb.Modify(func(current *models.State) error {
+				for _, admit := range admission {
+					if err := admit(current); err != nil {
+						return err
+					}
+				}
 				if !sameIntegrationReconciliationInput(snapshot, current) {
 					return errIntegrationReconcileChanged
 				}

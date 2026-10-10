@@ -54,6 +54,7 @@ func withEffectiveIntegrationCompletionAuthorization(
 	projectRoot, operation string,
 	requireSettled bool,
 	fn func(*effectiveIntegrationCompletionAuthorization) error,
+	admission ...func(*models.State) error,
 ) error {
 	if !requireSettled {
 		state, err := db.For(paths.New(projectRoot).StatePath()).Read()
@@ -67,7 +68,7 @@ func withEffectiveIntegrationCompletionAuthorization(
 		}
 	}
 	return withEffectiveIntegrationCompletionLinearization(projectRoot, "progression "+operation, func() error {
-		authorization, err := authorizeEffectiveIntegrationCompletion(projectRoot, requireSettled)
+		authorization, err := authorizeEffectiveIntegrationCompletion(projectRoot, requireSettled, admission...)
 		if err != nil {
 			return err
 		}
@@ -80,7 +81,7 @@ func withEffectiveIntegrationCompletionAuthorization(
 // then evaluates completion against live integration HEAD under the integration
 // mutation lock. A nil contributing set remains available to pre-integration
 // phase handoffs, but never authorizes an explicit sprint-complete claim.
-func authorizeEffectiveIntegrationCompletion(projectRoot string, requireSettled bool) (*effectiveIntegrationCompletionAuthorization, error) {
+func authorizeEffectiveIntegrationCompletion(projectRoot string, requireSettled bool, admission ...func(*models.State) error) (*effectiveIntegrationCompletionAuthorization, error) {
 	state, err := db.For(paths.New(projectRoot).StatePath()).Read()
 	if err != nil {
 		return nil, fmt.Errorf("read integration completion precondition: %w", err)
@@ -89,7 +90,7 @@ func authorizeEffectiveIntegrationCompletion(projectRoot string, requireSettled 
 	if !cohortFrozen && !requireSettled {
 		return &effectiveIntegrationCompletionAuthorization{}, nil
 	}
-	if _, err := reconcileIntegrationAnalysesForProgression(projectRoot); err != nil {
+	if _, err := reconcileIntegrationAnalysesForProgression(projectRoot, admission...); err != nil {
 		return nil, fmt.Errorf("reconcile integration completion precondition: %w", err)
 	}
 

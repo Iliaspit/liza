@@ -277,6 +277,39 @@ func TestRunSupervisorPassesResolverDerivedRoleTypeToPauseWait(t *testing.T) {
 	}
 }
 
+func TestRunSupervisorExitsCleanlyWhenStoppedDuringPauseWait(t *testing.T) {
+	root := t.TempDir()
+	stateFile, _ := testhelpers.SetupLizaDir(t, root)
+	testhelpers.SetupPipelineConfig(t, root)
+	testhelpers.WriteInitialState(t, stateFile, testhelpers.CreateValidState())
+	previous := waitWhilePausedForSupervisor
+	t.Cleanup(func() { waitWhilePausedForSupervisor = previous })
+	waitCalls := 0
+	waitWhilePausedForSupervisor = func(context.Context, string, string) error {
+		waitCalls++
+		if err := db.For(stateFile).Modify(func(s *models.State) error {
+			s.Config.Mode = models.SystemModeStopped
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return errSystemStopped
+	}
+	config := SupervisorConfig{
+		AgentID: "coder-1", Role: "coder", ProjectRoot: root, StatePath: stateFile,
+		CLIName: "codex", Executor: &MockCLIExecutor{ExitCode: 0},
+	}
+	if err := RunSupervisor(context.Background(), config); err != nil {
+		t.Fatalf("stopped supervisor did not exit cleanly: %v", err)
+	}
+	if waitCalls != 1 {
+		t.Fatalf("pause waits = %d, want one clean stop", waitCalls)
+	}
+	if calls := config.Executor.(*MockCLIExecutor).GetCalls(); len(calls) != 0 {
+		t.Fatalf("stopped supervisor launched provider: %v", calls)
+	}
+}
+
 func TestMockLLMAgentResultCarriesUsageAndSessionMetadata(t *testing.T) {
 	mock := &MockLLMAgent{
 		ExitCode: 0,

@@ -1545,6 +1545,7 @@ func TestAutoResumeRejectsHardHoldAfterPreflight(t *testing.T) {
 			stateFile, _ := testhelpers.SetupLizaDir(t, root)
 			state := testhelpers.CreateValidState()
 			state.Config.Mode = models.SystemModeRunning
+			state.Config.AutoResume = true
 			state.Sprint.Status = models.SprintStatusCheckpoint
 			state.Sprint.CheckpointTrigger = "PLANNING_COMPLETE"
 			testhelpers.WriteInitialState(t, stateFile, state)
@@ -1579,5 +1580,122 @@ func TestAutoResumeRejectsHardHoldAfterPreflight(t *testing.T) {
 			}
 			beforeAutomaticResumeMutationTestHook = nil
 		})
+	}
+}
+
+func installAutomaticResumeHold(t *testing.T, stateFile, hold string) *models.State {
+	t.Helper()
+	if err := db.For(stateFile).Modify(func(s *models.State) error {
+		switch hold {
+		case "DISABLED":
+			s.Config.AutoResume = false
+		case "HALT":
+			s.CircuitBreaker.CurrentResponse = &models.CircuitBreakerResponse{Response: models.CircuitBreakerResponseHalt}
+		default:
+			s.Config.Mode = models.SystemMode(hold)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	held, err := db.For(stateFile).Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return held
+}
+
+func TestAutoResumeDisabledAfterPreflight(t *testing.T) {
+	root := t.TempDir()
+	stateFile, _ := testhelpers.SetupLizaDir(t, root)
+	state := testhelpers.CreateValidState()
+	state.Config.AutoResume = true
+	state.Sprint.Status = models.SprintStatusCheckpoint
+	state.Sprint.CheckpointTrigger = models.CheckpointTriggerPlanningComplete
+	testhelpers.WriteInitialState(t, stateFile, state)
+	var held *models.State
+	previous := beforeAutomaticResumeMutationTestHook
+	t.Cleanup(func() { beforeAutomaticResumeMutationTestHook = previous })
+	beforeAutomaticResumeMutationTestHook = func() {
+		held = installAutomaticResumeHold(t, stateFile, "DISABLED")
+	}
+	if _, err := AutoResume(root, "auto-resume"); err == nil || !strings.Contains(err.Error(), "disabled") {
+		t.Fatalf("AutoResume error = %v, want disabled", err)
+	}
+	got, err := db.For(stateFile).Read()
+	if err != nil || !reflect.DeepEqual(got, held) {
+		t.Fatalf("disabled automatic resume changed state: %v", err)
+	}
+}
+
+func newAutomaticTransitionFixture(t *testing.T) (string, string) {
+	t.Helper()
+	root := t.TempDir()
+	stateFile, _ := testhelpers.SetupLizaDir(t, root)
+	testhelpers.SetupPipelineConfig(t, root)
+	state := testhelpers.CreateValidState()
+	state.Config.AutoResume = true
+	state.PipelineVersion = 2
+	state.Sprint.Status = models.SprintStatusCheckpoint
+	state.Sprint.CheckpointTrigger = models.CheckpointTriggerPlanningComplete
+	state.Tasks = []models.Task{{
+		ID: "plan-ready", Type: models.TaskTypePlanning, RolePair: "code-planning-pair",
+		Description: "Ready plan", Status: models.TaskStatusMerged, Priority: 1,
+		Created: time.Now().UTC(), SpecRef: "README.md", DoneWhen: "Plan approved", Scope: "pkg/x",
+		Output:  []models.OutputEntry{{Desc: "Implement X", DoneWhen: "tests pass", Scope: "pkg/x", SpecRef: "specs/x.md"}},
+		History: []models.TaskHistoryEntry{},
+	}}
+	state.Sprint.Scope.Planned = []string{"plan-ready"}
+	testhelpers.WriteInitialState(t, stateFile, state)
+	return root, stateFile
+}
+
+func TestAutoResumeTransitionAdmissionAfterSprintMutation(t *testing.T) {
+	for _, hold := range []string{"PAUSED", "CIRCUIT_BREAKER_TRIPPED", "STOPPED", "HALT", "DISABLED"} {
+		t.Run(hold, func(t *testing.T) {
+			root, stateFile := newAutomaticTransitionFixture(t)
+			var held *models.State
+			previous := beforeAvailableTransitionsMutationTestHook
+			t.Cleanup(func() { beforeAvailableTransitionsMutationTestHook = previous })
+			beforeAvailableTransitionsMutationTestHook = func() {
+				held = installAutomaticResumeHold(t, stateFile, hold)
+			}
+			result, err := AutoResume(root, "auto-resume")
+			if err != nil || result.TransitionError == "" || result.TransitionsExecuted != 0 {
+				t.Fatalf("result = %+v, error = %v; want refused transition", result, err)
+			}
+			got, err := db.For(stateFile).Read()
+			if err != nil || !reflect.DeepEqual(got, held) {
+				t.Fatalf("held downstream transition changed state: %v", err)
+			}
+			if got.FindTask("plan-ready-code-0") != nil || got.FindTask("plan-ready").TransitionsExecuted["code-plan-to-coding"] {
+				t.Fatal("held transition created child or marker")
+			}
+		})
+	}
+}
+
+func TestAutomaticCheckpointClearAdmissionPreservesHold(t *testing.T) {
+	for _, hold := range []string{"PAUSED", "CIRCUIT_BREAKER_TRIPPED", "STOPPED", "HALT", "DISABLED"} {
+		t.Run(hold, func(t *testing.T) {
+			root, stateFile := newAutomaticTransitionFixture(t)
+			held := installAutomaticResumeHold(t, stateFile, hold)
+			if err := clearTransitionCheckpointTrigger(root, requireAutomaticResumeAdmission); err == nil {
+				t.Fatal("checkpoint clear ignored hold")
+			}
+			got, err := db.For(stateFile).Read()
+			if err != nil || !reflect.DeepEqual(got, held) {
+				t.Fatalf("checkpoint clear changed held state: %v", err)
+			}
+		})
+	}
+}
+
+func TestOperatorResumeDoesNotRequireAutomaticOptIn(t *testing.T) {
+	root, stateFile := newAutomaticTransitionFixture(t)
+	installAutomaticResumeHold(t, stateFile, "DISABLED")
+	result, err := Resume(root, "human")
+	if err != nil || result.TransitionsExecuted != 1 || result.TransitionError != "" {
+		t.Fatalf("operator result = %+v, error = %v", result, err)
 	}
 }

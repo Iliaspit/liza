@@ -774,6 +774,7 @@ func TestPlanningReviewChurnDocumentationContract(t *testing.T) {
 
 func TestSetAutoResumeCommand(t *testing.T) {
 	root := t.TempDir()
+	testhelpers.MustGit(t, root, "init")
 	file, _ := testhelpers.SetupLizaDir(t, root)
 	state := testhelpers.CreateValidState()
 	state.Config.AutoResume = false
@@ -797,7 +798,7 @@ func TestSetAutoResumeCommand(t *testing.T) {
 		if err := json.Unmarshal(output.Bytes(), &envelope); err != nil {
 			t.Fatal(err)
 		}
-		if !envelope.OK || envelope.Result.Enabled != (value == "true") || envelope.Result.ChangedBy != "operator[governance-v20]" {
+		if !envelope.OK || envelope.Result.Enabled != (value == "true") || envelope.Result.ChangedBy != "governance-v20" {
 			t.Fatalf("unexpected result: %s", output.String())
 		}
 		got, err := db.For(file).Read()

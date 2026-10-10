@@ -20,6 +20,8 @@ import (
 // pending transitions). The supervisor must handle this as a clean exit.
 var errGoalComplete = errors.New("goal complete")
 
+var errSystemStopped = errors.New("system stopped")
+
 // checkAbort returns true if system mode is STOPPED
 func checkAbort(projectRoot string) bool {
 	statePath := paths.New(projectRoot).StatePath()
@@ -84,7 +86,8 @@ func autoResumeAction(state *models.State) models.SprintStatus {
 }
 
 // waitWhilePaused blocks while system is PAUSED, CIRCUIT_BREAKER_TRIPPED,
-// or the current sprint checkpoint blocks this role type. Transition
+// an active HALT remains, or the current sprint checkpoint blocks this role type.
+// STOPPED returns a clean-exit sentinel even if it arrives after checkAbort. Transition
 // checkpoints gate orchestrator transition execution, but doer/reviewer roles
 // may continue existing claimable/reviewable work.
 func waitWhilePaused(ctx context.Context, projectRoot string, roleType string) error {
@@ -102,6 +105,11 @@ func waitWhilePaused(ctx context.Context, projectRoot string, roleType string) e
 			state, err := bb.Read()
 			if err == nil {
 				switch {
+				case state.Config.Mode == models.SystemModeStopped:
+					return errSystemStopped
+				case ops.HasActiveHaltResponse(state):
+					isPaused = true
+					pauseReason = "[HALT] Active HALT requires operator resume"
 				case state.Config.Mode == models.SystemModePaused:
 					isPaused = true
 					pauseReason = "[PAUSED] System mode is PAUSED"
