@@ -1,7 +1,10 @@
 package ops
 
 import (
+	"encoding/base64"
 	"errors"
+	"os"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
@@ -609,6 +612,217 @@ func TestLinearizableGoalCompleteStop(t *testing.T) {
 			t.Fatalf("stale post-check overwrote newer stop: mode=%s changed_by=%v want=%q", finalState.Config.Mode, finalState.Config.ModeChangedBy, secondToken)
 		}
 	})
+}
+
+func TestGoalCompleteStopMergeReceiptRetainsOrigin(t *testing.T) {
+	for _, automatic := range []bool{false, true} {
+		for _, boundary := range []string{"NONE", "DISABLED", "HALT", "LEGACY_HALT", "PAUSED", "CIRCUIT_BREAKER_TRIPPED", "ACTOR", "TOKEN"} {
+			name := "operator/"
+			if automatic {
+				name = "automatic/"
+			}
+			t.Run(name+boundary, func(t *testing.T) {
+				fixture := newEffectiveCompletionFixture(t, true)
+				fixture.mutateState(t, func(s *models.State) { s.Config.AutoResume = automatic })
+				stop := StopForGoalCompletion
+				if automatic {
+					stop = AutoStopForGoalCompletion
+				}
+				if _, err := stop(fixture.projectRoot, "goal complete"); err != nil {
+					t.Fatal(err)
+				}
+				taskID, agentID := fixture.installPublicIntegrationMutation(t)
+				before := fixture.readState(t)
+				var held *models.State
+				previous := integrationMutationReceiptPersistTestHook
+				t.Cleanup(func() { integrationMutationReceiptPersistTestHook = previous })
+				integrationMutationReceiptPersistTestHook = func(models.IntegrationMutationReceipt) {
+					switch boundary {
+					case "NONE":
+						held = fixture.readState(t)
+					case "ACTOR", "TOKEN":
+						fixture.mutateState(t, func(s *models.State) {
+							actor := "operator-shutdown"
+							if boundary == "TOKEN" {
+								token, ok := decodeGoalCompleteStopToken(*s.Config.ModeChangedBy)
+								if !ok {
+									t.Fatal("invalid fixture token")
+								}
+								token.SourceCommit = "unrelated-source"
+								var err error
+								actor, err = encodeGoalCompleteStopToken(token)
+								if err != nil {
+									t.Fatal(err)
+								}
+							}
+							s.Config.ModeChangedBy = &actor
+						})
+						held = fixture.readState(t)
+					default:
+						held = installAutomaticResumeHold(t, fixture.stateFile, boundary)
+					}
+				}
+				if _, err := MergeWorktree(fixture.projectRoot, taskID, agentID); err != nil {
+					t.Fatalf("MergeWorktree: %v", err)
+				}
+				got := fixture.readState(t)
+				wantReopen := boundary == "NONE" || (!automatic && (boundary == "DISABLED" || boundary == "HALT" || boundary == "LEGACY_HALT"))
+				if held == nil {
+					t.Fatal("receipt consumer not reached")
+				}
+				if wantReopen {
+					if got.Config.Mode != models.SystemModeRunning || got.Config.ModeChangedBy == nil || *got.Config.ModeChangedBy != taskID {
+						t.Fatalf("matching receipt did not reopen: %+v", got.Config)
+					}
+				} else if !reflect.DeepEqual(got.Config, held.Config) {
+					t.Fatalf("receipt replaced held mode/actor: got %+v, want %+v", got.Config, held.Config)
+				}
+				if !reflect.DeepEqual(got.CircuitBreaker, held.CircuitBreaker) {
+					t.Fatal("receipt changed HALT evidence")
+				}
+				oldReceipts := before.Goal.Integration.MutationReceipts
+				receipts := got.Goal.Integration.MutationReceipts
+				if len(receipts) != len(oldReceipts)+1 || !reflect.DeepEqual(receipts[:len(oldReceipts)], oldReceipts) {
+					t.Fatalf("valid merge receipt was not appended: %#v", receipts)
+				}
+				last := receipts[len(receipts)-1]
+				if last.TaskID != taskID || last.BeforeCommit != before.Goal.Integration.Closure.SourceCommit || last.AfterCommit == last.BeforeCommit {
+					t.Fatalf("unexpected receipt: %#v", last)
+				}
+			})
+		}
+	}
+}
+
+func TestGoalCompleteStopTokenAutomaticProvenance(t *testing.T) {
+	manualJSON := `{"analysis_key":"global:1","generation":1,"source_commit":"source-a","operation_id":"AAAAAAAAAAAAAAAAAAAAAA"}`
+	manualRaw := goalCompleteStopTokenPrefix + base64.RawURLEncoding.EncodeToString([]byte(manualJSON))
+	manual := goalCompleteStopToken{AnalysisKey: "global:1", Generation: 1, SourceCommit: "source-a", OperationID: "AAAAAAAAAAAAAAAAAAAAAA"}
+	encoded, err := encodeGoalCompleteStopToken(manual)
+	if err != nil || encoded != manualRaw {
+		t.Fatalf("old canonical manual representation changed: %q, %v", encoded, err)
+	}
+	if decoded, ok := decodeGoalCompleteStopToken(manualRaw); !ok || !reflect.DeepEqual(decoded, manual) {
+		t.Fatalf("old manual token did not round-trip: %+v, %t", decoded, ok)
+	}
+	automatic := manual
+	automatic.Automatic = true
+	encoded, err = encodeGoalCompleteStopToken(automatic)
+	if err != nil {
+		t.Fatal(err)
+	}
+	automaticJSON := strings.TrimSuffix(manualJSON, "}") + `,"automatic":true}`
+	if encoded != goalCompleteStopTokenPrefix+base64.RawURLEncoding.EncodeToString([]byte(automaticJSON)) {
+		t.Fatal("automatic marker is not canonical")
+	}
+	if decoded, ok := decodeGoalCompleteStopToken(encoded); !ok || !reflect.DeepEqual(decoded, automatic) {
+		t.Fatalf("automatic token lost origin: %+v, %t", decoded, ok)
+	}
+	for _, malformed := range []string{
+		strings.TrimSuffix(manualJSON, "}") + `,"automatic":false}`,
+		strings.TrimSuffix(manualJSON, "}") + `,"automatic":"true"}`,
+		strings.TrimSuffix(manualJSON, "}") + `,"automatic":true,"unknown":1}`,
+		strings.Replace(manualJSON, `"generation":1`, `"generation":0`, 1),
+	} {
+		if _, ok := decodeGoalCompleteStopToken(goalCompleteStopTokenPrefix + base64.RawURLEncoding.EncodeToString([]byte(malformed))); ok {
+			t.Fatalf("noncanonical or invalid token accepted: %s", malformed)
+		}
+	}
+}
+
+func TestGoalCompleteStopRestorationUsesPersistedOrigin(t *testing.T) {
+	for _, automatic := range []bool{false, true} {
+		for _, boundary := range []string{"NONE", "DISABLED", "HALT", "LEGACY_HALT", "PAUSED", "CIRCUIT_BREAKER_TRIPPED", "ACTOR", "TOKEN"} {
+			name := "operator/"
+			if automatic {
+				name = "automatic/"
+			}
+			t.Run(name+boundary, func(t *testing.T) {
+				fixture := newEffectiveCompletionFixture(t, true)
+				installGoalCompleteStopTestSeams(t, time.Unix(1_700_000_000, 0).UTC(), "AAAAAAAAAAAAAAAAAAAAAA")
+				fixture.mutateState(t, func(s *models.State) { s.Config.AutoResume = automatic })
+				stop := StopForGoalCompletion
+				if automatic {
+					stop = AutoStopForGoalCompletion
+				}
+				result, err := stop(fixture.projectRoot, "goal complete")
+				if err != nil {
+					t.Fatal(err)
+				}
+				switch boundary {
+				case "NONE":
+				case "ACTOR", "TOKEN":
+					fixture.mutateState(t, func(s *models.State) {
+						actor := "operator-shutdown"
+						if boundary == "TOKEN" {
+							token, _ := decodeGoalCompleteStopToken(result.ChangedBy)
+							token.OperationID = "AAAAAAAAAAAAAAAAAAAAAQ"
+							var err error
+							actor, err = encodeGoalCompleteStopToken(token)
+							if err != nil {
+								t.Fatal(err)
+							}
+						}
+						s.Config.ModeChangedBy = &actor
+					})
+				default:
+					installAutomaticResumeHold(t, fixture.stateFile, boundary)
+				}
+				held := fixture.readState(t)
+				if err := restoreRunningForExactGoalCompleteStop(fixture.projectRoot, result.ChangedBy); err != nil {
+					t.Fatal(err)
+				}
+				got := fixture.readState(t)
+				wantReopen := boundary == "NONE" || (!automatic && (boundary == "DISABLED" || boundary == "HALT" || boundary == "LEGACY_HALT"))
+				if wantReopen {
+					if got.Config.Mode != models.SystemModeRunning {
+						t.Fatalf("owned rollback did not reopen: %s", got.Config.Mode)
+					}
+				} else if !reflect.DeepEqual(got, held) {
+					t.Fatal("rollback changed a hold or replaced ownership")
+				}
+			})
+		}
+	}
+}
+
+func TestAutomaticGoalStopRollbackMergeReceiptsPersistUnderHold(t *testing.T) {
+	for _, hold := range []string{"DISABLED", "HALT", "LEGACY_HALT"} {
+		t.Run(hold, func(t *testing.T) {
+			fixture := newEffectiveCompletionFixture(t, true)
+			fixture.mutateState(t, func(s *models.State) { s.Config.AutoResume = true })
+			if _, err := AutoStopForGoalCompletion(fixture.projectRoot, "goal complete"); err != nil {
+				t.Fatal(err)
+			}
+			taskID, agentID := fixture.installPublicIntegrationMutation(t)
+			scripts := filepath.Join(fixture.projectRoot, "scripts")
+			if err := os.MkdirAll(scripts, 0755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(scripts, "integration-test.sh"), []byte("#!/bin/sh\nexit 1\n"), 0755); err != nil {
+				t.Fatal(err)
+			}
+			held := installAutomaticResumeHold(t, fixture.stateFile, hold)
+			_, err := MergeWorktree(fixture.projectRoot, taskID, agentID)
+			var failed *IntegrationFailedError
+			if !errors.As(err, &failed) || failed.RollbackError != nil {
+				t.Fatalf("expected test failure with successful rollback: %v", err)
+			}
+			got := fixture.readState(t)
+			if !reflect.DeepEqual(got.Config, held.Config) || !reflect.DeepEqual(got.CircuitBreaker, held.CircuitBreaker) {
+				t.Fatal("forward or rollback receipt reopened a held automatic stop")
+			}
+			receipts := got.Goal.Integration.MutationReceipts
+			prior := held.Goal.Integration.MutationReceipts
+			if len(receipts) != len(prior)+2 || !reflect.DeepEqual(receipts[:len(prior)], prior) {
+				t.Fatalf("forward/rollback receipts not retained: %#v", receipts)
+			}
+			forward, rollback := receipts[len(prior)], receipts[len(prior)+1]
+			if forward.TaskID != taskID || rollback.TaskID != taskID || forward.BeforeCommit != rollback.AfterCommit || forward.AfterCommit != rollback.BeforeCommit {
+				t.Fatalf("invalid forward/rollback receipt chain: %#v", receipts)
+			}
+		})
+	}
 }
 
 func installGoalCompleteStopTestSeams(t *testing.T, timestamp time.Time, operationIDs ...string) {

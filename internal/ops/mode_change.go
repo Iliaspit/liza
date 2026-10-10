@@ -29,6 +29,7 @@ type goalCompleteStopToken struct {
 	Generation   int    `json:"generation"`
 	SourceCommit string `json:"source_commit"`
 	OperationID  string `json:"operation_id"`
+	Automatic    bool   `json:"automatic,omitempty"`
 }
 
 var (
@@ -65,16 +66,20 @@ func Stop(projectRoot, reason, changedBy string) (*ModeChangeResult, error) {
 // StopForGoalCompletion stops only for clean integration evidence at current
 // HEAD and records exact ownership in the reserved ModeChangedBy token.
 func StopForGoalCompletion(projectRoot, reason string) (*ModeChangeResult, error) {
-	return stopForGoalCompletion(projectRoot, reason)
+	return stopForGoalCompletion(projectRoot, reason, resumeOriginOperator)
 }
 
 // AutoStopForGoalCompletion retains automatic admission through reconciliation
 // and the final stop write. Clean integration evidence cannot override a hold.
 func AutoStopForGoalCompletion(projectRoot, reason string) (*ModeChangeResult, error) {
-	return stopForGoalCompletion(projectRoot, reason, requireAutomaticResumeAdmission)
+	return stopForGoalCompletion(projectRoot, reason, resumeOriginAutomatic)
 }
 
-func stopForGoalCompletion(projectRoot, reason string, admission ...func(*models.State) error) (*ModeChangeResult, error) {
+func stopForGoalCompletion(projectRoot, reason string, origin resumeOrigin) (*ModeChangeResult, error) {
+	var admission []func(*models.State) error
+	if origin == resumeOriginAutomatic {
+		admission = append(admission, requireAutomaticResumeAdmission)
+	}
 	authorization, err := authorizeEffectiveIntegrationCompletion(projectRoot, true, admission...)
 	if err != nil {
 		return nil, err
@@ -88,6 +93,7 @@ func stopForGoalCompletion(projectRoot, reason string, admission ...func(*models
 		Generation:   authorization.generation,
 		SourceCommit: authorization.sourceCommit,
 		OperationID:  operationID,
+		Automatic:    origin == resumeOriginAutomatic,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("encode goal-complete stop token: %w", err)
@@ -138,7 +144,7 @@ func stopForGoalCompletion(projectRoot, reason string, admission ...func(*models
 			Previous: previousMode, New: models.SystemModeStopped, ChangedBy: rawToken, Reason: reason,
 		}, nil
 	}
-	restoreErr := restoreRunningForExactGoalCompleteStop(projectRoot, rawToken, admission...)
+	restoreErr := restoreRunningForExactGoalCompleteStop(projectRoot, rawToken)
 	if verificationErr != nil {
 		return nil, errors.Join(fmt.Errorf("verify goal-complete stop: %w", verificationErr), restoreErr)
 	}
@@ -158,7 +164,7 @@ func goalCompleteStopAuthorizationMatches(
 		snapshot.mutationReceiptCount == authorization.mutationReceiptCount
 }
 
-func restoreRunningForExactGoalCompleteStop(projectRoot, rawToken string, admission ...func(*models.State) error) error {
+func restoreRunningForExactGoalCompleteStop(projectRoot, rawToken string) error {
 	return withEffectiveIntegrationCompletionLinearization(projectRoot, "restore stale goal-complete stop", func() error {
 		if beforeGoalCompleteStopStateWriteTestHook != nil {
 			beforeGoalCompleteStopStateWriteTestHook(goalCompleteStopWriteRestore)
@@ -169,14 +175,9 @@ func restoreRunningForExactGoalCompleteStop(projectRoot, rawToken string, admiss
 				*state.Config.ModeChangedBy != rawToken {
 				return nil
 			}
-			// This operation owns the STOPPED mode, but a later HALT or disabled
-			// opt-in must still prevent an automatic restoration to RUNNING.
-			candidate := *state
-			candidate.Config.Mode = models.SystemModeRunning
-			for _, admit := range admission {
-				if err := admit(&candidate); err != nil {
-					return nil
-				}
+			token, ok := decodeGoalCompleteStopToken(rawToken)
+			if !ok || !goalCompleteStopMayReopen(state, token) {
+				return nil
 			}
 			if err := state.Config.Mode.ValidateTransition(models.SystemModeRunning); err != nil {
 				return &PreconditionError{Reason: err.Error()}
@@ -201,6 +202,9 @@ func invalidateGoalCompleteStopForMutation(state *models.State, receipt models.I
 		*state.Config.ModeChangedBy != rawToken {
 		return nil
 	}
+	if !goalCompleteStopMayReopen(state, token) {
+		return nil // Preserve the hold while the caller persists the valid receipt.
+	}
 	if err := state.Config.Mode.ValidateTransition(models.SystemModeRunning); err != nil {
 		return &PreconditionError{Reason: err.Error()}
 	}
@@ -210,6 +214,17 @@ func invalidateGoalCompleteStopForMutation(state *models.State, receipt models.I
 	state.Config.ModeChangedAt = &timestamp
 	state.Config.ModeChangedBy = &changedBy
 	return nil
+}
+
+// Callers first establish ownership of the STOPPED mode. The token's optional
+// marker retains automatic admission after that stop; old tokens remain manual.
+func goalCompleteStopMayReopen(state *models.State, token goalCompleteStopToken) bool {
+	if !token.Automatic {
+		return true
+	}
+	candidate := *state
+	candidate.Config.Mode = models.SystemModeRunning
+	return requireAutomaticResumeAdmission(&candidate) == nil
 }
 
 func newGoalCompleteStopOperationID() (string, error) {
