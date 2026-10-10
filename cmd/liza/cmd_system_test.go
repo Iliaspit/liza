@@ -812,3 +812,48 @@ func TestSetAutoResumeCommand(t *testing.T) {
 		}
 	}
 }
+
+func TestSetAutoResumeCallerLabelContract(t *testing.T) {
+	for _, phrase := range []string{"caller label", "not authentication or role authorization"} {
+		if !strings.Contains(setAutoResumeCmd.Long, phrase) {
+			t.Fatalf("help missing %q", phrase)
+		}
+	}
+	if strings.Contains(setAutoResumeCmd.Long, "audited operator identity") {
+		t.Fatal("help claims authenticated operator identity")
+	}
+	t.Setenv(brand.EnvName("AGENT_ID"), "")
+	t.Setenv("LIZA_AGENT_ID", "")
+	for _, label := range []string{"coder-1", ""} {
+		t.Run(label, func(t *testing.T) {
+			root := t.TempDir()
+			testhelpers.MustGit(t, root, "init")
+			file, _ := testhelpers.SetupLizaDir(t, root)
+			testhelpers.WriteInitialState(t, file, testhelpers.CreateValidState())
+			resetRootCmdForTest(t)
+			var output bytes.Buffer
+			rootCmd.SetOut(&output)
+			args := []string{"-C", root, "set-auto-resume", "true"}
+			want := "human"
+			if label != "" {
+				args = append(args, "--changed-by", label)
+				want = label
+			}
+			rootCmd.SetArgs(args)
+			if err := rootCmd.Execute(); err != nil {
+				t.Fatal(err)
+			}
+			var result struct {
+				Result struct {
+					ChangedBy string `json:"changed_by"`
+				} `json:"result"`
+			}
+			if err := json.Unmarshal(output.Bytes(), &result); err != nil {
+				t.Fatal(err)
+			}
+			if result.Result.ChangedBy != want {
+				t.Fatalf("returned label = %q, want %q", result.Result.ChangedBy, want)
+			}
+		})
+	}
+}

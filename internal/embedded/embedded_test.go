@@ -67,6 +67,63 @@ func TestListEmbeddedFiles(t *testing.T) {
 	}
 }
 
+func TestAutomaticResumeGuidanceContract(t *testing.T) {
+	root := findRepoRoot(t)
+	paths := []string{
+		"contracts/MULTI_AGENT_MODE.md", "support-docs/SUPPORT.md",
+		"support-docs/USAGE_MULTI_AGENTS.md", "support-docs/CONFIGURATION.md",
+		"specs/protocols/sprint-governance.md", "specs/architecture/state-machines.md",
+	}
+	obsolete := regexp.MustCompile("(?i)(agents (automatically call|auto-call)|agents call `[^`]*resume` automatically)")
+	check := func(t *testing.T, content string) {
+		t.Helper()
+		text := strings.Join(strings.Fields(content), " ")
+		if obsolete.MatchString(text) {
+			t.Fatal("obsolete automatic explicit-resume instruction")
+		}
+		for _, phrase := range []string{"ops.AutoResume", "Automatic agents must never invoke explicit operator", "ops.Resume", "PAUSED", "CIRCUIT_BREAKER_TRIPPED", "STOPPED", "HALT", "final QA"} {
+			if !strings.Contains(text, phrase) {
+				t.Errorf("automatic resume contract missing %q", phrase)
+			}
+		}
+	}
+	for _, path := range paths {
+		t.Run("canonical/"+path, func(t *testing.T) {
+			content, err := os.ReadFile(filepath.Join(root, path))
+			if err != nil {
+				t.Fatal(err)
+			}
+			check(t, string(content))
+		})
+		if strings.HasPrefix(path, "specs/") {
+			continue
+		}
+		t.Run("installed/"+path, func(t *testing.T) {
+			var content []byte
+			var err error
+			if strings.HasPrefix(path, "contracts/") {
+				content, err = contractsFS.ReadFile(path)
+			} else {
+				content, err = supportDocsFS.ReadFile(path)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			check(t, string(content))
+		})
+	}
+	contract, err := contractsFS.ReadFile("contracts/MULTI_AGENT_MODE.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := strings.Join(strings.Fields(string(contract)), " ")
+	for _, phrase := range []string{"supersedes only obsolete instructions", "Preserve those historical inputs unchanged", "unrelated support instructions and reviewed transition/final QA gates remain authoritative"} {
+		if !strings.Contains(text, phrase) {
+			t.Errorf("existing-run precedence missing %q", phrase)
+		}
+	}
+}
+
 func TestAgentToolsOptionalIndexGuidance(t *testing.T) {
 	contract, err := contractsFS.ReadFile("contracts/AGENT_TOOLS.md")
 	if err != nil {

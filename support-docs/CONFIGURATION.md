@@ -874,12 +874,14 @@ config:
 
 ### Auto-Resume (`auto_resume`)
 
-When enabled, agents automatically resume the system at CHECKPOINT and COMPLETED sprint states instead of blocking for manual `§BRAND_BINARY_NAME§ resume`. Defaults to `false`.
+When enabled, native supervisors use `ops.AutoResume` at CHECKPOINT and COMPLETED after the required reviewed milestones. Defaults to `false`. Automatic agents must never invoke explicit operator `§BRAND_BINARY_NAME§ resume` or `ops.Resume`. Reviewed transition and final QA gates remain required.
 
 - **At init time:** `§BRAND_BINARY_NAME§ init --auto-resume "Goal"`
 - **At runtime:** Press `y` in the TUI to toggle
 
-Use `§BRAND_BINARY_NAME§ pause` (or `p` in TUI) for a hard stop — pause is never auto-resumed.
+- **At runtime via CLI:** `§BRAND_BINARY_NAME§ set-auto-resume true|false --changed-by "<label>"`. The CLI returns the caller-provided label; it is not authentication or role authorization. The supported TUI toggle does not emit this CLI result.
+
+PAUSED, CIRCUIT_BREAKER_TRIPPED, STOPPED and active HALT remain binding. Disabling `auto_resume` prevents automatic mutation, including terminal completion. Use `§BRAND_BINARY_NAME§ pause` (or `p` in TUI) for a hard stop.
 
 ### No Follow-Up (`no_follow_up`)
 

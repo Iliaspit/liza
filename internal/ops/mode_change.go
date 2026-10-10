@@ -65,7 +65,17 @@ func Stop(projectRoot, reason, changedBy string) (*ModeChangeResult, error) {
 // StopForGoalCompletion stops only for clean integration evidence at current
 // HEAD and records exact ownership in the reserved ModeChangedBy token.
 func StopForGoalCompletion(projectRoot, reason string) (*ModeChangeResult, error) {
-	authorization, err := authorizeEffectiveIntegrationCompletion(projectRoot, true)
+	return stopForGoalCompletion(projectRoot, reason)
+}
+
+// AutoStopForGoalCompletion retains automatic admission through reconciliation
+// and the final stop write. Clean integration evidence cannot override a hold.
+func AutoStopForGoalCompletion(projectRoot, reason string) (*ModeChangeResult, error) {
+	return stopForGoalCompletion(projectRoot, reason, requireAutomaticResumeAdmission)
+}
+
+func stopForGoalCompletion(projectRoot, reason string, admission ...func(*models.State) error) (*ModeChangeResult, error) {
+	authorization, err := authorizeEffectiveIntegrationCompletion(projectRoot, true, admission...)
 	if err != nil {
 		return nil, err
 	}
@@ -94,6 +104,11 @@ func StopForGoalCompletion(projectRoot, reason string) (*ModeChangeResult, error
 			beforeGoalCompleteStopStateWriteTestHook(goalCompleteStopWriteStop)
 		}
 		return blackboard.Modify(func(state *models.State) error {
+			for _, admit := range admission {
+				if err := admit(state); err != nil {
+					return err
+				}
+			}
 			if err := authorization.validateState(state, true); err != nil {
 				return err
 			}
@@ -123,7 +138,7 @@ func StopForGoalCompletion(projectRoot, reason string) (*ModeChangeResult, error
 			Previous: previousMode, New: models.SystemModeStopped, ChangedBy: rawToken, Reason: reason,
 		}, nil
 	}
-	restoreErr := restoreRunningForExactGoalCompleteStop(projectRoot, rawToken)
+	restoreErr := restoreRunningForExactGoalCompleteStop(projectRoot, rawToken, admission...)
 	if verificationErr != nil {
 		return nil, errors.Join(fmt.Errorf("verify goal-complete stop: %w", verificationErr), restoreErr)
 	}
@@ -143,7 +158,7 @@ func goalCompleteStopAuthorizationMatches(
 		snapshot.mutationReceiptCount == authorization.mutationReceiptCount
 }
 
-func restoreRunningForExactGoalCompleteStop(projectRoot, rawToken string) error {
+func restoreRunningForExactGoalCompleteStop(projectRoot, rawToken string, admission ...func(*models.State) error) error {
 	return withEffectiveIntegrationCompletionLinearization(projectRoot, "restore stale goal-complete stop", func() error {
 		if beforeGoalCompleteStopStateWriteTestHook != nil {
 			beforeGoalCompleteStopStateWriteTestHook(goalCompleteStopWriteRestore)
@@ -153,6 +168,15 @@ func restoreRunningForExactGoalCompleteStop(projectRoot, rawToken string) error 
 			if state.Config.Mode != models.SystemModeStopped || state.Config.ModeChangedBy == nil ||
 				*state.Config.ModeChangedBy != rawToken {
 				return nil
+			}
+			// This operation owns the STOPPED mode, but a later HALT or disabled
+			// opt-in must still prevent an automatic restoration to RUNNING.
+			candidate := *state
+			candidate.Config.Mode = models.SystemModeRunning
+			for _, admit := range admission {
+				if err := admit(&candidate); err != nil {
+					return nil
+				}
 			}
 			if err := state.Config.Mode.ValidateTransition(models.SystemModeRunning); err != nil {
 				return &PreconditionError{Reason: err.Error()}

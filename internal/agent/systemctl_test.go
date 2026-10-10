@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -20,6 +21,147 @@ import (
 )
 
 // TestAutoResumeAction tests the pure decision function for auto-resume.
+func installWaiterHold(t *testing.T, stateFile, hold string) {
+	t.Helper()
+	if err := db.For(stateFile).Modify(func(s *models.State) error {
+		switch hold {
+		case "DISABLED":
+			s.Config.AutoResume = false
+		case "HALT":
+			s.CircuitBreaker.CurrentResponse = &models.CircuitBreakerResponse{Response: models.CircuitBreakerResponseHalt}
+		case "LEGACY_HALT":
+			s.CircuitBreaker.Status = "TRIGGERED"
+			s.CircuitBreaker.CurrentTrigger = &models.CircuitBreakerTrigger{Pattern: "retry_cluster", Timestamp: time.Now().UTC()}
+		default:
+			s.Config.Mode = models.SystemMode(hold)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCheckpointRefusalRechecksCurrentHold(t *testing.T) {
+	for _, role := range []string{"doer", "reviewer"} {
+		for _, trigger := range []string{models.CheckpointTriggerPlanningComplete, models.CheckpointTriggerManyToOneReady} {
+			for _, hold := range []string{"PAUSED", "CIRCUIT_BREAKER_TRIPPED", "STOPPED", "HALT", "LEGACY_HALT"} {
+				t.Run(role+"/"+string(trigger)+"/"+hold, func(t *testing.T) {
+					root := t.TempDir()
+					stateFile, _ := testhelpers.SetupLizaDir(t, root)
+					state := testhelpers.CreateValidState()
+					state.Config.AutoResume = true
+					state.Sprint.Status = models.SprintStatusCheckpoint
+					state.Sprint.CheckpointTrigger = trigger
+					testhelpers.WriteInitialState(t, stateFile, state)
+					previous := resumeCheckpoint
+					t.Cleanup(func() { resumeCheckpoint = previous })
+					calls := 0
+					resumeCheckpoint = func(string, string) (*ops.ResumeResult, error) {
+						calls++
+						installWaiterHold(t, stateFile, hold)
+						return nil, &ops.PreconditionError{Reason: "concurrent hold"}
+					}
+					ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+					defer cancel()
+					want := context.DeadlineExceeded
+					if hold == "STOPPED" {
+						want = errSystemStopped
+					}
+					if err := waitWhilePaused(ctx, root, role); !errors.Is(err, want) {
+						t.Fatalf("error = %v, want %v", err, want)
+					}
+					if calls != 1 {
+						t.Fatalf("resume calls = %d, want one before next poll", calls)
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestCheckpointRefusalReadFailureAndUnchangedCheckpoint(t *testing.T) {
+	for _, role := range []string{"doer", "reviewer", "orchestrator"} {
+		for _, readFailure := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/read_failure_%t", role, readFailure), func(t *testing.T) {
+				root := t.TempDir()
+				file, _ := testhelpers.SetupLizaDir(t, root)
+				state := testhelpers.CreateValidState()
+				state.Config.AutoResume = true
+				state.Sprint.Status = models.SprintStatusCheckpoint
+				state.Sprint.CheckpointTrigger = models.CheckpointTriggerPlanningComplete
+				testhelpers.WriteInitialState(t, file, state)
+				previous := resumeCheckpoint
+				t.Cleanup(func() { resumeCheckpoint = previous })
+				calls := 0
+				resumeCheckpoint = func(string, string) (*ops.ResumeResult, error) {
+					calls++
+					if readFailure {
+						if err := os.Remove(file); err != nil {
+							t.Fatal(err)
+						}
+					}
+					return nil, &ops.PreconditionError{Reason: "unchanged checkpoint"}
+				}
+				ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+				defer cancel()
+				err := waitWhilePaused(ctx, root, role)
+				if readFailure {
+					if err == nil || !strings.Contains(err.Error(), "read state after automatic resume refusal") {
+						t.Fatalf("read failure admitted role: %v", err)
+					}
+				} else if role == "orchestrator" {
+					if !errors.Is(err, context.DeadlineExceeded) {
+						t.Fatalf("error = %v", err)
+					}
+				} else if err != nil {
+					t.Fatalf("claimable checkpoint blocked: %v", err)
+				}
+				if calls != 1 {
+					t.Fatalf("resume calls = %d", calls)
+				}
+			})
+		}
+	}
+}
+
+func TestCompletedWaiterRetainsAutomaticStopAdmission(t *testing.T) {
+	for _, hold := range []string{"PAUSED", "CIRCUIT_BREAKER_TRIPPED", "STOPPED", "HALT", "LEGACY_HALT", "DISABLED"} {
+		t.Run(hold, func(t *testing.T) {
+			root := newAgentCleanCompletionProject(t, false)
+			file := paths.New(root).StatePath()
+			if err := db.For(file).Modify(func(s *models.State) error {
+				s.Config.AutoResume = true
+				s.Sprint.Status = models.SprintStatusCompleted
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			previous := resumeCompletedSprint
+			t.Cleanup(func() { resumeCompletedSprint = previous })
+			var held *models.State
+			resumeCompletedSprint = func(string, string) (*ops.ResumeResult, error) {
+				installWaiterHold(t, file, hold)
+				var err error
+				held, err = db.For(file).Read()
+				if err != nil {
+					t.Fatal(err)
+				}
+				return &ops.ResumeResult{SprintAdvanced: &ops.AdvanceSprintResult{}}, nil
+			}
+			if err := waitWhilePaused(context.Background(), root, "orchestrator"); err == nil || errors.Is(err, errGoalComplete) {
+				t.Fatalf("automatic waiter replaced hold: %v", err)
+			}
+			got, err := db.For(file).Read()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(got, held) {
+				t.Fatal("terminal consumer mutated held state")
+			}
+		})
+	}
+}
+
 func TestAutoResumeAction(t *testing.T) {
 	tests := []struct {
 		name       string

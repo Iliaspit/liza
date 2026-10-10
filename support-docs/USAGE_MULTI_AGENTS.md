@@ -323,7 +323,9 @@ By default, checkpoints and sprint completions require manual `§BRAND_BINARY_NA
 - **At init time:** `§BRAND_BINARY_NAME§ init --auto-resume "Goal"`
 - **At runtime:** Press `y` in the TUI to toggle (shows "Auto-resume: ON/OFF" on the status line)
 
-When auto-resume is enabled, agents automatically call `§BRAND_BINARY_NAME§ resume` when they detect CHECKPOINT or COMPLETED sprint status. Use `p` (pause) for a hard stop — pause is never auto-resumed.
+When auto-resume is enabled, native supervisors use `ops.AutoResume` at CHECKPOINT or COMPLETED after the required reviewed milestones. Automatic agents must never invoke explicit operator `§BRAND_BINARY_NAME§ resume` or `ops.Resume`. PAUSED, CIRCUIT_BREAKER_TRIPPED, STOPPED and active HALT remain binding; disabling `auto_resume` prevents automatic mutation, including terminal completion. Reviewed transition and final QA gates remain required.
+
+Operators can also set the runtime flag with `§BRAND_BINARY_NAME§ set-auto-resume true|false --changed-by "<label>"`. The CLI returns the caller-provided label; it is not authentication or role authorization. The TUI toggle remains supported and does not emit this CLI result.
 
 To start a completely fresh goal, stop the agents, clean the existing
 workspace, and re-initialize:

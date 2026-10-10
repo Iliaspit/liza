@@ -1591,6 +1591,9 @@ func installAutomaticResumeHold(t *testing.T, stateFile, hold string) *models.St
 			s.Config.AutoResume = false
 		case "HALT":
 			s.CircuitBreaker.CurrentResponse = &models.CircuitBreakerResponse{Response: models.CircuitBreakerResponseHalt}
+		case "LEGACY_HALT":
+			s.CircuitBreaker.Status = "TRIGGERED"
+			s.CircuitBreaker.CurrentTrigger = &models.CircuitBreakerTrigger{Pattern: "retry_cluster", Timestamp: time.Now().UTC()}
 		default:
 			s.Config.Mode = models.SystemMode(hold)
 		}
@@ -1625,6 +1628,87 @@ func TestAutoResumeDisabledAfterPreflight(t *testing.T) {
 	got, err := db.For(stateFile).Read()
 	if err != nil || !reflect.DeepEqual(got, held) {
 		t.Fatalf("disabled automatic resume changed state: %v", err)
+	}
+}
+
+func TestAutoStopForGoalCompletionPreservesConcurrentHold(t *testing.T) {
+	for _, boundary := range []string{"reconciliation", "stop"} {
+		for _, hold := range []string{"PAUSED", "CIRCUIT_BREAKER_TRIPPED", "STOPPED", "HALT", "LEGACY_HALT", "DISABLED"} {
+			t.Run(boundary+"/"+hold, func(t *testing.T) {
+				fixture := newEffectiveCompletionFixture(t, boundary == "stop")
+				fixture.mutateState(t, func(s *models.State) { s.Config.AutoResume = true })
+				var held *models.State
+				previousStop := beforeGoalCompleteStopStateWriteTestHook
+				previousReconcile := testReconcileIntegrationAnalysesHooks
+				t.Cleanup(func() {
+					beforeGoalCompleteStopStateWriteTestHook = previousStop
+					testReconcileIntegrationAnalysesHooks = previousReconcile
+				})
+				if boundary == "stop" {
+					beforeGoalCompleteStopStateWriteTestHook = func(stage string) {
+						if stage == goalCompleteStopWriteStop {
+							held = installAutomaticResumeHold(t, fixture.stateFile, hold)
+						}
+					}
+				} else {
+					testReconcileIntegrationAnalysesHooks = &reconcileIntegrationAnalysesTestHooks{
+						beforeValidation: func(*models.State) { held = installAutomaticResumeHold(t, fixture.stateFile, hold) },
+					}
+				}
+				if _, err := AutoStopForGoalCompletion(fixture.projectRoot, "automatic goal completion"); err == nil {
+					t.Fatal("automatic completion accepted a concurrent hold")
+				}
+				if held == nil {
+					t.Fatal("did not reach write boundary")
+				}
+				if got := fixture.readState(t); !reflect.DeepEqual(got, held) {
+					t.Fatalf("automatic completion mutated held state: got %+v, want %+v", got, held)
+				}
+			})
+		}
+	}
+}
+
+func TestAutoStopForGoalCompletionCleanAndOperatorCompatibility(t *testing.T) {
+	fixture := newEffectiveCompletionFixture(t, true)
+	fixture.mutateState(t, func(s *models.State) { s.Config.AutoResume = true })
+	if _, err := AutoStopForGoalCompletion(fixture.projectRoot, "automatic goal completion"); err != nil {
+		t.Fatal(err)
+	}
+	if got := fixture.readState(t); got.Config.Mode != models.SystemModeStopped {
+		t.Fatalf("mode = %s", got.Config.Mode)
+	}
+	operator := newEffectiveCompletionFixture(t, true)
+	operator.mutateState(t, func(s *models.State) { s.Config.AutoResume = false; s.Config.Mode = models.SystemModePaused })
+	if _, err := StopForGoalCompletion(operator.projectRoot, "operator completion"); err != nil {
+		t.Fatal(err)
+	}
+	if got := operator.readState(t); got.Config.Mode != models.SystemModeStopped {
+		t.Fatalf("operator mode = %s", got.Config.Mode)
+	}
+}
+
+func TestAutoStopForGoalCompletionStaleRollbackPreservesHold(t *testing.T) {
+	for _, hold := range []string{"HALT", "LEGACY_HALT", "DISABLED"} {
+		t.Run(hold, func(t *testing.T) {
+			fixture := newEffectiveCompletionFixture(t, true)
+			fixture.mutateState(t, func(s *models.State) { s.Config.AutoResume = true })
+			var held *models.State
+			previous := afterGoalCompleteStopModeWriteTestHook
+			t.Cleanup(func() { afterGoalCompleteStopModeWriteTestHook = previous })
+			afterGoalCompleteStopModeWriteTestHook = func(string) {
+				testhelpers.MustGit(t, fixture.projectRoot, "commit", "--allow-empty", "-m", "advance live head after stop")
+				head := testhelpers.MustGit(t, fixture.projectRoot, "rev-parse", "HEAD")
+				testhelpers.MustGit(t, fixture.projectRoot, "update-ref", "refs/heads/integration", head)
+				held = installAutomaticResumeHold(t, fixture.stateFile, hold)
+			}
+			if _, err := AutoStopForGoalCompletion(fixture.projectRoot, "automatic completion"); err == nil {
+				t.Fatal("accepted stale completion")
+			}
+			if held == nil || !reflect.DeepEqual(fixture.readState(t), held) {
+				t.Fatal("automatic rollback mutated hold")
+			}
+		})
 	}
 }
 

@@ -119,7 +119,7 @@ When implemented, watcher will post to webhook at 2h and 8h thresholds:
 - Unattended checkpoints are not errors; they're paused work awaiting decision
 
 **Auto-Resume Mode (`config.auto_resume: true`):**
-When enabled, agents automatically call `ops.Resume` when they detect CHECKPOINT or COMPLETED sprint status. Checkpoints and sprint completions are no longer human gates — the system rolls forward continuously. Use `liza pause` for a hard stop (pause is never auto-resumed). Toggle at runtime via TUI `[y] yolo`.
+When enabled, native supervisors use `ops.AutoResume` at CHECKPOINT or COMPLETED after the required reviewed milestones. Automatic agents must never invoke explicit operator `liza resume` or `ops.Resume`. Reviewed transition and final QA gates remain required. PAUSED, CIRCUIT_BREAKER_TRIPPED, STOPPED and active HALT remain binding; disabling `auto_resume` prevents automatic mutation, including terminal completion. Operators can set the flag with `liza set-auto-resume true|false --changed-by "<label>"` or the TUI `[y] yolo` toggle. The CLI returns a caller-provided label, not authentication or role authorization; the TUI does not emit this CLI result.
 
 **v1 Assumption: Human Availability**
 

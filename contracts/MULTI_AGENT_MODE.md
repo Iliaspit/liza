@@ -166,8 +166,12 @@ new evidence, or transfer consumed diagnostic allowances to another task or role
 Same-task diagnosis and correction retain independent review; changed integrated
 candidates require affected verification and fresh final QA.
 
-Opt-in native `auto_resume` executes existing manual transition triggers only
-after their native reviewed milestones. It cannot clear PAUSED,
+Opt-in native `auto_resume` uses `ops.AutoResume` to execute existing manual
+transition triggers only after their native reviewed milestones. Automatic agents
+must never invoke explicit operator `liza resume` or `ops.Resume`. Automatic
+completion also retains admission through reconciliation and the terminal stop;
+clean live-HEAD evidence does not override a concurrent hold or disabled opt-in.
+It cannot clear PAUSED,
 CIRCUIT_BREAKER_TRIPPED, STOPPED or an active HALT. Product/acceptance ambiguity,
 authorization changes and irreversible external decisions remain BLOCKED for
 the human. An explicit operator hold remains binding.
@@ -178,6 +182,11 @@ run. Read its exact replacement documents and content digests before any task
 action. Original product scope, model assignments, live-provider authorization,
 consumed packets, diagnostic allowances and unrelated gates remain authoritative.
 Without an explicit admission, use the run's frozen instructions.
+When explicitly included in the admission, this automatic-resume guidance
+supersedes only obsolete instructions in the run's frozen support documents to
+auto-call explicit operator resume. Preserve those historical inputs unchanged;
+all unrelated support instructions and reviewed transition/final QA gates remain
+authoritative.
 
 **Spec is Law:** Implementation must match spec exactly.
 - No "improvements" beyond spec

@@ -403,7 +403,7 @@ Example workflow:
 var setAutoResumeCmd = &cobra.Command{
 	Use:   "set-auto-resume <true|false>",
 	Short: "Enable or disable automatic native checkpoint continuation",
-	Long:  "Set auto_resume with an audited operator identity. Automatic continuation preserves PAUSED, CIRCUIT_BREAKER_TRIPPED, STOPPED and active HALT boundaries.",
+	Long:  "Set auto_resume and return the supplied caller label with the previous and enabled values. The label is not authentication or role authorization. Automatic continuation preserves PAUSED, CIRCUIT_BREAKER_TRIPPED, STOPPED and active HALT boundaries.",
 	Args: func(cmd *cobra.Command, args []string) error {
 		if len(args) != 1 || (args[0] != "true" && args[0] != "false") {
 			return fmt.Errorf("expected exactly true or false")

@@ -59,7 +59,7 @@ type goalCompletionStopFunc func(projectRoot, reason string) (*ops.ModeChangeRes
 var (
 	resumeCheckpoint      = ops.AutoResume
 	resumeCompletedSprint = ops.AutoResume
-	stopCompletedGoal     = ops.StopForGoalCompletion
+	stopCompletedGoal     = ops.AutoStopForGoalCompletion
 )
 
 func stopAfterCompletedResume(projectRoot string, result *ops.ResumeResult, stop goalCompletionStopFunc) error {
@@ -121,6 +121,20 @@ func waitWhilePaused(ctx context.Context, projectRoot string, roleType string) e
 						logger.Info("Auto-resuming from CHECKPOINT")
 						if _, resumeErr := resumeCheckpoint(projectRoot, "auto-resume"); resumeErr != nil {
 							logger.Warn("Auto-resume failed, waiting for next poll", "error", resumeErr)
+							// Refusal may reflect a hold committed after our snapshot.
+							// Reclassify before allowing the transition-checkpoint exception.
+							state, err = bb.Read()
+							if err != nil {
+								return fmt.Errorf("read state after automatic resume refusal: %w", err)
+							}
+							if state.Config.Mode == models.SystemModeStopped {
+								return errSystemStopped
+							}
+							if ops.HasActiveHaltResponse(state) || state.Config.Mode == models.SystemModePaused ||
+								state.Config.Mode == models.SystemModeCircuitBreakerTripped {
+								isPaused = true
+								pauseReason = "[HOLD] Automatic resume refused a current operator hold"
+							}
 						} else {
 							continue // state changed, re-read immediately
 						}

@@ -162,7 +162,9 @@ By default, checkpoints require manual `§BRAND_BINARY_NAME§ resume`. Auto-resu
 - At init: `§BRAND_BINARY_NAME§ init --auto-resume "Goal"`
 - At runtime: TUI `y` key toggles on/off
 
-When enabled, agents auto-call `§BRAND_BINARY_NAME§ resume` on CHECKPOINT or COMPLETED. Use `§BRAND_BINARY_NAME§ pause` for a hard stop (never auto-resumed).
+When enabled, native supervisors use `ops.AutoResume` on CHECKPOINT or COMPLETED after the required reviewed milestones. Automatic agents must never invoke explicit operator `§BRAND_BINARY_NAME§ resume` or `ops.Resume`. PAUSED, CIRCUIT_BREAKER_TRIPPED, STOPPED and active HALT remain binding; disabling `auto_resume` prevents automatic mutation, including terminal completion. Reviewed transition and final QA gates remain required.
+
+At runtime, operators can use `§BRAND_BINARY_NAME§ set-auto-resume true|false --changed-by "<label>"` or the TUI toggle. The CLI returns the caller-provided label; it is not authentication or role authorization. The TUI remains supported and does not emit this CLI result.
 
 ## Agent Review Cycles
 

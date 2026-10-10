@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"slices"
 	"strings"
@@ -307,6 +308,57 @@ func TestRunSupervisorExitsCleanlyWhenStoppedDuringPauseWait(t *testing.T) {
 	}
 	if calls := config.Executor.(*MockCLIExecutor).GetCalls(); len(calls) != 0 {
 		t.Fatalf("stopped supervisor launched provider: %v", calls)
+	}
+}
+
+func TestRunSupervisorDoesNotLaunchAfterAutomaticResumeRefusal(t *testing.T) {
+	for _, role := range []string{"coder", "code-reviewer"} {
+		for _, hold := range []string{"PAUSED", "CIRCUIT_BREAKER_TRIPPED", "STOPPED", "HALT", "LEGACY_HALT"} {
+			t.Run(role+"/"+hold, func(t *testing.T) {
+				root := t.TempDir()
+				file, _ := testhelpers.SetupLizaDir(t, root)
+				testhelpers.SetupPipelineConfig(t, root)
+				state := testhelpers.CreateValidState()
+				state.Config.AutoResume = true
+				state.Sprint.Status = models.SprintStatusCheckpoint
+				state.Sprint.CheckpointTrigger = models.CheckpointTriggerPlanningComplete
+				taskStatus := models.TaskStatusReady
+				if role == "code-reviewer" {
+					taskStatus = models.TaskStatusReadyForReview
+				}
+				state.Tasks = []models.Task{testhelpers.BuildTaskByStatus("claimable-task", taskStatus, time.Now().UTC())}
+				testhelpers.WriteInitialState(t, file, state)
+				previous := resumeCheckpoint
+				t.Cleanup(func() { resumeCheckpoint = previous })
+				calls := 0
+				resumeCheckpoint = func(string, string) (*ops.ResumeResult, error) {
+					calls++
+					installWaiterHold(t, file, hold)
+					return nil, &ops.PreconditionError{Reason: "concurrent hold"}
+				}
+				executor := &MockCLIExecutor{ExitCode: 0}
+				config := SupervisorConfig{AgentID: role + "-1", Role: role, ProjectRoot: root, StatePath: file, CLIName: "codex", Executor: executor}
+				ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+				defer cancel()
+				err := RunSupervisor(ctx, config)
+				if err != nil && !stderrors.Is(err, context.DeadlineExceeded) {
+					t.Fatalf("supervisor error: %v", err)
+				}
+				if calls != 1 {
+					t.Fatalf("resume calls = %d, want one", calls)
+				}
+				if calls := executor.GetCalls(); len(calls) != 0 {
+					t.Fatalf("provider launched after refusal: %v", calls)
+				}
+				got, readErr := db.For(file).Read()
+				if readErr != nil {
+					t.Fatal(readErr)
+				}
+				if !reflect.DeepEqual(got.Tasks, state.Tasks) {
+					t.Fatal("supervisor mutated claimable tasks under hold")
+				}
+			})
+		}
 	}
 }
 

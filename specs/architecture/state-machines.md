@@ -487,13 +487,18 @@ Goals span sprints. Unlike sprints, goals have no CHECKPOINT state — checkpoin
 **From CHECKPOINT:**
 - `liza resume` (planned tasks NOT all terminal) → IN_PROGRESS (continue same sprint)
 - `liza resume` (all planned tasks terminal) → COMPLETED (marks sprint done for human review)
-- Auto-resume (when `auto_resume` enabled): agents call `liza resume` automatically
+- Auto-resume (when `auto_resume` enabled): native supervisors use `ops.AutoResume` after required reviewed milestones
 - `liza stop` → ABORTED (stop)
 
 **From COMPLETED:**
 - `liza proceed <task-id> <transition>` → creates child tasks from parent task's `output[]` (manual transitions)
 - `liza resume` → archives sprint, creates new sprint (IN_PROGRESS) with child tasks
-- Auto-resume (when `auto_resume` enabled): agents call `liza resume` automatically to advance
+- Auto-resume (when `auto_resume` enabled): native supervisors use `ops.AutoResume` to advance after required reviewed milestones
+
+Automatic agents must never invoke explicit operator `liza resume` or `ops.Resume`.
+PAUSED, CIRCUIT_BREAKER_TRIPPED, STOPPED and active HALT remain binding; disabling
+`auto_resume` prevents automatic mutation, including terminal completion.
+Reviewed transition and final QA gates remain required.
 
 **Sprint advance flows:**
 
