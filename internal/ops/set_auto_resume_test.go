@@ -1,6 +1,7 @@
 package ops
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/liza-mas/liza/internal/db"
@@ -18,7 +19,7 @@ func TestSetAutoResume(t *testing.T) {
 		state.Config.AutoResume = false
 		testhelpers.WriteInitialState(t, stateFile, state)
 
-		if err := SetAutoResume(tmpDir, true); err != nil {
+		if _, err := SetAutoResume(tmpDir, true, "operator[test]"); err != nil {
 			t.Fatalf("SetAutoResume(true) error: %v", err)
 		}
 
@@ -40,7 +41,7 @@ func TestSetAutoResume(t *testing.T) {
 		state.Config.AutoResume = true
 		testhelpers.WriteInitialState(t, stateFile, state)
 
-		if err := SetAutoResume(tmpDir, false); err != nil {
+		if _, err := SetAutoResume(tmpDir, false, "operator[test]"); err != nil {
 			t.Fatalf("SetAutoResume(false) error: %v", err)
 		}
 
@@ -63,10 +64,10 @@ func TestSetAutoResume(t *testing.T) {
 		testhelpers.WriteInitialState(t, stateFile, state)
 
 		// Call twice with same value — should succeed both times.
-		if err := SetAutoResume(tmpDir, true); err != nil {
+		if _, err := SetAutoResume(tmpDir, true, "operator[test]"); err != nil {
 			t.Fatalf("first SetAutoResume(true) error: %v", err)
 		}
-		if err := SetAutoResume(tmpDir, true); err != nil {
+		if _, err := SetAutoResume(tmpDir, true, "operator[test]"); err != nil {
 			t.Fatalf("second SetAutoResume(true) error: %v", err)
 		}
 
@@ -79,4 +80,34 @@ func TestSetAutoResume(t *testing.T) {
 			t.Error("expected AutoResume=true after idempotent calls, got false")
 		}
 	})
+}
+
+func TestSetAutoResumeResultAndPreservation(t *testing.T) {
+	root := t.TempDir()
+	file, _ := testhelpers.SetupLizaDir(t, root)
+	before := testhelpers.CreateValidState()
+	before.Config.AutoResume = false
+	testhelpers.WriteInitialState(t, file, before)
+	result, err := SetAutoResume(root, true, "operator[governance-v20]")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Previous || !result.Enabled || result.ChangedBy != "operator[governance-v20]" {
+		t.Fatalf("wrong result: %+v", result)
+	}
+	got, err := db.For(file).Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	before.Config.AutoResume = true
+	if !reflect.DeepEqual(got, before) {
+		t.Fatal("setter changed state beyond auto_resume")
+	}
+	result, err = SetAutoResume(root, true, "operator[governance-v20]")
+	if err != nil || !result.Previous {
+		t.Fatalf("idempotent result: %+v, %v", result, err)
+	}
+	if _, err := SetAutoResume(root, false, ""); err == nil {
+		t.Fatal("missing actor accepted")
+	}
 }

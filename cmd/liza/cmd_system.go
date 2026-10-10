@@ -400,6 +400,26 @@ Example workflow:
 	},
 }
 
+var setAutoResumeCmd = &cobra.Command{
+	Use:   "set-auto-resume <true|false>",
+	Short: "Enable or disable automatic native checkpoint continuation",
+	Long:  "Set auto_resume with an audited operator identity. Automatic continuation preserves PAUSED, CIRCUIT_BREAKER_TRIPPED, STOPPED and active HALT boundaries.",
+	Args: func(cmd *cobra.Command, args []string) error {
+		if len(args) != 1 || (args[0] != "true" && args[0] != "false") {
+			return fmt.Errorf("expected exactly true or false")
+		}
+		return nil
+	},
+	RunE: func(cmd *cobra.Command, args []string) error {
+		projectRoot, err := requireProjectRoot()
+		if err != nil {
+			return err
+		}
+		result, err := ops.SetAutoResume(projectRoot, args[0] == "true", resolveChangedBy(cmd))
+		return jsonout.WriteResult(cmd.OutOrStdout(), result, nil, err)
+	},
+}
+
 var resumeCmd = &cobra.Command{
 	Use:   "resume",
 	Short: fmt.Sprintf("Resume the %s system or acknowledge an active HALT response", brand.NameTitle),
@@ -674,6 +694,7 @@ func init() {
 	rootCmd.AddCommand(proceedCmd)
 	rootCmd.AddCommand(replanCmd)
 	rootCmd.AddCommand(resumeCmd)
+	rootCmd.AddCommand(setAutoResumeCmd)
 	rootCmd.AddCommand(sprintCheckpointCmd)
 	rootCmd.AddCommand(getCmd)
 	rootCmd.AddCommand(statusCmd)
@@ -696,6 +717,7 @@ func init() {
 	addChangedByFlag(startCmd)
 	addChangedByFlag(replanCmd)
 	addChangedByFlag(resumeCmd)
+	addChangedByFlag(setAutoResumeCmd)
 
 	// JSON output flags
 	addJSONFlag(analyzeCmd)

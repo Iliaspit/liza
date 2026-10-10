@@ -37,6 +37,7 @@ var (
 	afterGoalCompleteStopAuthorizationTestHook func()
 	beforeGoalCompleteStopStateWriteTestHook   func(string)
 	afterGoalCompleteStopModeWriteTestHook     func(string)
+	beforeAutomaticResumeMutationTestHook      func()
 )
 
 // ModeChangeResult contains the outcome of a system mode change.
@@ -442,9 +443,8 @@ func Resume(projectRoot, changedBy string) (*ResumeResult, error) {
 	return resume(projectRoot, changedBy, resumeOriginOperator)
 }
 
-// AutoResume performs automatic checkpoint/completion recovery. It cannot
-// acknowledge an active HALT while the system is STOPPED; that boundary
-// requires an explicit operator Resume.
+// AutoResume performs automatic checkpoint/completion recovery. Operator pauses,
+// hard system modes, and active HALTs require an explicit operator Resume.
 func AutoResume(projectRoot, changedBy string) (*ResumeResult, error) {
 	return resume(projectRoot, changedBy, resumeOriginAutomatic)
 }
@@ -473,11 +473,21 @@ func resume(projectRoot, changedBy string, origin resumeOrigin) (*ResumeResult, 
 	runTransitionsAfterResume := false
 
 	resumeMutation := func(completionAuthorization *effectiveIntegrationCompletionAuthorization) error {
+		if origin == resumeOriginAutomatic && beforeAutomaticResumeMutationTestHook != nil {
+			beforeAutomaticResumeMutationTestHook()
+		}
 		return blackboard.Modify(func(s *models.State) error {
 			timestamp = time.Now()
 			currentMode := s.Config.Mode
 			if currentMode == "" {
 				currentMode = models.SystemModeRunning
+			}
+			// Check inside the locked mutation: a human pause or HALT may arrive
+			// after preflight. Automatic continuation cannot acknowledge either.
+			if origin == resumeOriginAutomatic && (currentMode == models.SystemModePaused ||
+				currentMode == models.SystemModeCircuitBreakerTripped || currentMode == models.SystemModeStopped ||
+				hasActiveHaltResponse(s)) {
+				return &PreconditionError{Reason: fmt.Sprintf("automatic resume cannot clear %s mode or an active HALT; explicit operator resume required", currentMode)}
 			}
 
 			stoppedWithActiveHalt := origin == resumeOriginOperator &&

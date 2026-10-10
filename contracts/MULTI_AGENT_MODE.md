@@ -74,7 +74,7 @@ The following CORE.md rules have modified behavior in Multi-Agent Mode:
 |-----------|---------------------|
 | **Rule 1 Struggle Protocol** | Log anomaly → set BLOCKED |
 | **Rule 4 FAST PATH** | Reduced checkpoint: intent + files only |
-| **Debugging Protocol** | Do NOT debug autonomously beyond quick hypothesis. Log anomaly → BLOCKED. Rationale: autonomous debugging risks cascading errors across agents. |
+| **Debugging Protocol** | Bounded source-based technical diagnosis is permitted inside the approved task fault domain. Preserve bug qualification, rejected hypotheses and evidence; use the same task's Coder → Code Reviewer loop. Unresolved contract or authority decisions → BLOCKED. |
 | **Context degradation** | Auto-checkpoint to blackboard, self-terminate |
 
 ---
@@ -155,6 +155,29 @@ If 2 different Code Reviewers fail to issue a verdict on the same task (exit wit
 ---
 
 ## Scope Discipline (§BRAND_NAME_TITLE§-Specific)
+
+**Technical continuation:** The Orchestrator owns technical prerequisite admission
+and blocked-task reassessment through supported `§BRAND_BINARY_NAME§ add-tasks`
+and `§BRAND_BINARY_NAME§ unblock-task` operations. Evidence must establish the
+existing observable contract, coherent fault domain, exact scope, dependencies,
+validation and remaining review gates before admitting work. Never reinterpret
+scope, specifications or acceptance criteria, repeat a rejected hypothesis without
+new evidence, or transfer consumed diagnostic allowances to another task or role.
+Same-task diagnosis and correction retain independent review; changed integrated
+candidates require affected verification and fresh final QA.
+
+Opt-in native `auto_resume` executes existing manual transition triggers only
+after their native reviewed milestones. It cannot clear PAUSED,
+CIRCUIT_BREAKER_TRIPPED, STOPPED or an active HALT. Product/acceptance ambiguity,
+authorization changes and irreversible external decisions remain BLOCKED for
+the human. An explicit operator hold remains binding.
+
+An explicitly authorized versioned governance admission may supersede only the
+named technical continuation/diagnosis ownership instructions of an initialized
+run. Read its exact replacement documents and content digests before any task
+action. Original product scope, model assignments, live-provider authorization,
+consumed packets, diagnostic allowances and unrelated gates remain authoritative.
+Without an explicit admission, use the run's frozen instructions.
 
 **Spec is Law:** Implementation must match spec exactly.
 - No "improvements" beyond spec

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"github.com/liza-mas/liza/internal/brand"
 	"github.com/liza-mas/liza/internal/db"
 	"github.com/liza-mas/liza/internal/models"
+	"github.com/liza-mas/liza/internal/testhelpers"
 )
 
 func TestTuiCmd_HeadlessFlag(t *testing.T) {
@@ -766,6 +768,46 @@ func TestPlanningReviewChurnDocumentationContract(t *testing.T) {
 	for _, want := range []string{"partial independent mitigation", "broader participant-reporting blind spot remains open"} {
 		if !strings.Contains(architectureEntry, want) {
 			t.Errorf("architecture entry missing %q", want)
+		}
+	}
+}
+
+func TestSetAutoResumeCommand(t *testing.T) {
+	root := t.TempDir()
+	file, _ := testhelpers.SetupLizaDir(t, root)
+	state := testhelpers.CreateValidState()
+	state.Config.AutoResume = false
+	testhelpers.WriteInitialState(t, file, state)
+	for _, value := range []string{"true", "false"} {
+		resetRootCmdForTest(t)
+		var output bytes.Buffer
+		rootCmd.SetOut(&output)
+		rootCmd.SetArgs([]string{"-C", root, "set-auto-resume", value, "--changed-by", "governance-v20"})
+		if err := rootCmd.Execute(); err != nil {
+			t.Fatal(err)
+		}
+		var envelope struct {
+			OK     bool `json:"ok"`
+			Result struct {
+				Previous  bool   `json:"previous"`
+				Enabled   bool   `json:"enabled"`
+				ChangedBy string `json:"changed_by"`
+			} `json:"result"`
+		}
+		if err := json.Unmarshal(output.Bytes(), &envelope); err != nil {
+			t.Fatal(err)
+		}
+		if !envelope.OK || envelope.Result.Enabled != (value == "true") || envelope.Result.ChangedBy != "operator[governance-v20]" {
+			t.Fatalf("unexpected result: %s", output.String())
+		}
+		got, err := db.For(file).Read()
+		if err != nil || got.Config.AutoResume != (value == "true") {
+			t.Fatalf("persisted auto_resume mismatch: %v", err)
+		}
+	}
+	for _, args := range [][]string{nil, {"yes"}, {"1"}, {"true", "false"}} {
+		if err := setAutoResumeCmd.Args(setAutoResumeCmd, args); err == nil {
+			t.Fatalf("invalid boolean accepted: %v", args)
 		}
 	}
 }

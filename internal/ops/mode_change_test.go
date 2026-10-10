@@ -1536,3 +1536,48 @@ func TestResume_NothingToResume(t *testing.T) {
 		t.Errorf("Expected PreconditionError, got %T", err)
 	}
 }
+
+// A pause/HALT arriving after preflight is authoritative inside the transaction.
+func TestAutoResumeRejectsHardHoldAfterPreflight(t *testing.T) {
+	for _, hold := range []string{"PAUSED", "CIRCUIT_BREAKER_TRIPPED", "STOPPED", "HALT"} {
+		t.Run(hold, func(t *testing.T) {
+			root := t.TempDir()
+			stateFile, _ := testhelpers.SetupLizaDir(t, root)
+			state := testhelpers.CreateValidState()
+			state.Config.Mode = models.SystemModeRunning
+			state.Sprint.Status = models.SprintStatusCheckpoint
+			state.Sprint.CheckpointTrigger = "PLANNING_COMPLETE"
+			testhelpers.WriteInitialState(t, stateFile, state)
+			var held *models.State
+			beforeAutomaticResumeMutationTestHook = func() {
+				if err := db.For(stateFile).Modify(func(s *models.State) error {
+					if hold == "HALT" {
+						s.CircuitBreaker.CurrentResponse = &models.CircuitBreakerResponse{Response: models.CircuitBreakerResponseHalt}
+					} else {
+						s.Config.Mode = models.SystemMode(hold)
+					}
+					return nil
+				}); err != nil {
+					t.Fatal(err)
+				}
+				var err error
+				held, err = db.For(stateFile).Read()
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			t.Cleanup(func() { beforeAutomaticResumeMutationTestHook = nil })
+			if _, err := AutoResume(root, "auto-resume"); err == nil || !strings.Contains(err.Error(), "explicit operator") {
+				t.Fatalf("automatic resume error = %v, want explicit operator hold", err)
+			}
+			got, err := db.For(stateFile).Read()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(got, held) {
+				t.Fatal("automatic resume mutated held mode/sprint/HALT/history")
+			}
+			beforeAutomaticResumeMutationTestHook = nil
+		})
+	}
+}
