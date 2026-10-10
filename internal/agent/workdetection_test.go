@@ -24,6 +24,59 @@ func testPipelineResolver(t *testing.T) models.PipelineResolver {
 	return pipeline.NewResolver(cfg)
 }
 
+func TestDetectOrchestratorWakeTriggers_HumanNoteAssessmentBoundary(t *testing.T) {
+	assessment := time.Date(2026, time.October, 6, 10, 0, 0, 0, time.UTC)
+	tests := []struct {
+		name            string
+		noteTime        time.Time
+		target          string
+		freshAssessment bool
+		want            OrchestratorWakeTrigger
+		count           int
+	}{
+		{"older", assessment.Add(-time.Nanosecond), "blocked-1", false, WakeTriggerNone, 0},
+		{"equal", assessment, "blocked-1", false, WakeTriggerNone, 0},
+		{"new targeted", assessment.Add(time.Nanosecond), "blocked-1", false, WakeTriggerBlocked, 1},
+		{"other blocked task", assessment.Add(time.Nanosecond), "blocked-2", false, WakeTriggerBlocked, 1},
+		{"unrelated", assessment.Add(time.Nanosecond), "missing-1", false, WakeTriggerNone, 0},
+		{"fresh assessment", assessment.Add(time.Nanosecond), "blocked-1", true, WakeTriggerNone, 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			state := testhelpers.CreateValidState()
+			for _, id := range []string{"blocked-1", "blocked-2"} {
+				task := testhelpers.BuildTaskByStatus(id, models.TaskStatusBlocked, assessment.Add(-time.Hour))
+				task.History = []models.TaskHistoryEntry{{Time: assessment, Event: models.TaskEventOrchestratorAssessment}}
+				state.Tasks = append(state.Tasks, task)
+			}
+			state.Sprint.Scope.Planned = []string{"blocked-1", "blocked-2"}
+			state.HumanNotes = []models.HumanNote{{Timestamp: tt.noteTime, For: tt.target, Message: "human decision", Extra: map[string]any{"changed_by": "human"}}}
+			if tt.freshAssessment {
+				state.FindTask("blocked-1").History = append(state.FindTask("blocked-1").History, models.TaskHistoryEntry{Time: tt.noteTime, Event: models.TaskEventOrchestratorAssessment})
+			}
+			wake := DetectOrchestratorWakeTriggers(state, nil, nil, nil)
+			if wake.Trigger != tt.want || wake.Count != tt.count {
+				t.Fatalf("wake = %#v, want %s count %d", wake, tt.want, tt.count)
+			}
+			// Isolate each task to prove which task is actionable, rather than
+			// allowing an aggregate count of one to mask wrong-target behavior.
+			for _, task := range state.Tasks {
+				isolated := *state
+				isolated.Tasks = []models.Task{task}
+				isolated.Sprint = state.Sprint
+				isolated.Sprint.Scope.Planned = []string{task.ID}
+				want := WakeTriggerNone
+				if task.ID == tt.target && tt.noteTime.After(assessment) && !tt.freshAssessment {
+					want = WakeTriggerBlocked
+				}
+				if result := DetectOrchestratorWakeTriggers(&isolated, nil, nil, nil); result.Trigger != want {
+					t.Fatalf("task %s wake = %#v, want %s", task.ID, result, want)
+				}
+			}
+		})
+	}
+}
+
 func TestCountClaimableTasks(t *testing.T) {
 	now := time.Now().UTC()
 
