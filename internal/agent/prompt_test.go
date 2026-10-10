@@ -197,6 +197,57 @@ func TestBuildPrompt(t *testing.T) {
 	}
 }
 
+func TestBuildPrompt_OrchestratorReceivesActionableHumanNote(t *testing.T) {
+	now := time.Date(2026, time.October, 10, 10, 0, 0, 0, time.UTC)
+	state := testhelpers.CreateValidState()
+	task := testhelpers.BuildTaskByStatus("planning-1", models.TaskStatusBlocked, now.Add(-time.Hour))
+	task.Type, task.RolePair = models.TaskTypePlanning, "code-planning-pair"
+	task.History = []models.TaskHistoryEntry{{Time: now.Add(-time.Minute), Event: models.TaskEventOrchestratorAssessment}}
+	state.Tasks = []models.Task{task}
+	state.Sprint.Scope.Planned = []string{task.ID}
+	message := strings.Repeat("Retain the existing scoped planning decision.\n", 60) + "FINAL HUMAN DECISION: resolve the clarified blocker and continue the preserved draft."
+	if len(message) <= 2048 {
+		t.Fatal("fixture must include the full multiline continuation beyond two KiB")
+	}
+	state.HumanNotes = []models.HumanNote{
+		{For: task.ID, Timestamp: now.Add(-time.Hour), Message: "stale human decision"},
+		{For: "other-1", Timestamp: now, Message: "unrelated human decision"},
+		{For: task.ID, Timestamp: now, Message: message, Extra: map[string]any{"changed_by": "human"}},
+	}
+	root := t.TempDir()
+	testhelpers.SetupPipelineConfig(t, root)
+	config := SupervisorConfig{Role: "orchestrator", AgentID: "orchestrator-1", ProjectRoot: root, SpecsDir: filepath.Join(root, "specs"), StatePath: paths.New(root).StatePath()}
+	before := DetectOrchestratorWakeTriggers(state, nil, nil, nil)
+	if before.Trigger != WakeTriggerBlocked || before.Count != 1 {
+		t.Fatalf("actionable note wake = %#v", before)
+	}
+	prompt, err := testBuildPrompt(t, state, config, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"ACTIONABLE HUMAN NOTES FOR BLOCKED TASKS:", "HUMAN NOTE: task=planning-1", "timestamp=" + now.Format(time.RFC3339Nano), message, "under existing lifecycle gates"} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("final orchestrator prompt missing %q", want)
+		}
+	}
+	for _, unwanted := range []string{"stale human decision", "unrelated human decision", "INCOMPLETE:"} {
+		if strings.Contains(prompt, unwanted) {
+			t.Fatalf("final prompt contains %q", unwanted)
+		}
+	}
+	state.Tasks[0].History = append(state.Tasks[0].History, models.TaskHistoryEntry{Time: now, Event: models.TaskEventOrchestratorAssessment})
+	if wake := DetectOrchestratorWakeTriggers(state, nil, nil, nil); wake.Trigger != WakeTriggerNone {
+		t.Fatalf("assessed note still wakes: %#v", wake)
+	}
+	after, err := testBuildPrompt(t, state, config, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(after, message) || strings.Contains(after, "ACTIONABLE HUMAN NOTES FOR BLOCKED TASKS:") {
+		t.Fatal("already-assessed human input remains in final prompt")
+	}
+}
+
 func TestBuildPrompt_CoderReceivesLatestActionableTaskHumanNote(t *testing.T) {
 	now := time.Now().UTC()
 	blockedReason := "provider schema rejected"

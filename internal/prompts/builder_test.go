@@ -2,6 +2,7 @@ package prompts
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 	"testing"
 	"text/template"
 	"time"
+	"unicode/utf8"
 
 	"github.com/liza-mas/liza/internal/brand"
 	"github.com/liza-mas/liza/internal/brandrender"
@@ -1081,6 +1083,171 @@ func TestRenderOrchestratorDashboard(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestRenderOrchestratorDashboard_ActionableHumanNotesAssessmentBoundary(t *testing.T) {
+	assessment := time.Date(2026, time.October, 10, 10, 0, 0, 0, time.UTC)
+	projectRoot := setupPipelineConfig(t)
+	tests := []struct {
+		name            string
+		target          string
+		noteTime        time.Time
+		status          models.TaskStatus
+		assessed        bool
+		freshAssessment bool
+		visible         bool
+	}{
+		{"new task note", "blocked-1", assessment.Add(time.Nanosecond), models.TaskStatusBlocked, true, false, true},
+		{"equal", "blocked-1", assessment, models.TaskStatusBlocked, true, false, false},
+		{"older", "blocked-1", assessment.Add(-time.Nanosecond), models.TaskStatusBlocked, true, false, false},
+		{"unrelated", "other-1", assessment.Add(time.Nanosecond), models.TaskStatusBlocked, true, false, false},
+		{"nonblocked", "blocked-1", assessment.Add(time.Nanosecond), models.TaskStatusReady, true, false, false},
+		{"already assessed", "blocked-1", assessment.Add(time.Nanosecond), models.TaskStatusBlocked, true, true, false},
+		{"never assessed", "blocked-1", assessment.Add(-time.Hour), models.TaskStatusBlocked, false, false, true},
+		{"legacy all target", "all", assessment.Add(time.Nanosecond), models.TaskStatusBlocked, true, false, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			state := testhelpers.CreateValidState()
+			task := testhelpers.BuildTaskByStatus("blocked-1", tt.status, assessment.Add(-time.Hour))
+			if tt.assessed {
+				task.History = append(task.History, models.TaskHistoryEntry{Time: assessment, Event: models.TaskEventOrchestratorAssessment})
+			}
+			if tt.freshAssessment {
+				task.History = append(task.History, models.TaskHistoryEntry{Time: tt.noteTime, Event: models.TaskEventOrchestratorAssessment})
+			}
+			state.Tasks = []models.Task{task}
+			state.Sprint.Scope.Planned = []string{task.ID}
+			message := "Human continuation: retain the draft.\nResolve this explicit decision before reassessing."
+			state.HumanNotes = []models.HumanNote{{Timestamp: tt.noteTime, For: tt.target, Message: message}}
+			before, err := json.Marshal(state)
+			if err != nil {
+				t.Fatal(err)
+			}
+			dashboard, _, err := RenderOrchestratorDashboard(state, projectRoot, "orchestrator-1")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(dashboard, message) != tt.visible {
+				t.Fatalf("message visibility = %v, want %v", strings.Contains(dashboard, message), tt.visible)
+			}
+			if strings.Contains(dashboard, "ACTIONABLE HUMAN NOTES FOR BLOCKED TASKS:") != tt.visible {
+				t.Fatalf("human-note section visibility differs from message visibility")
+			}
+			if tt.visible {
+				for _, want := range []string{"HUMAN NOTE: task=blocked-1", "timestamp=" + tt.noteTime.UTC().Format(time.RFC3339Nano), "target=" + tt.target, "under existing lifecycle gates"} {
+					if !strings.Contains(dashboard, want) {
+						t.Fatalf("dashboard missing %q", want)
+					}
+				}
+			}
+			after, err := json.Marshal(state)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(before, after) {
+				t.Fatal("rendering mutated source state")
+			}
+		})
+	}
+}
+
+func TestRenderOrchestratorDashboard_ActionableHumanNotesMultipleTasksAndOrdering(t *testing.T) {
+	assessment := time.Date(2026, time.October, 10, 10, 0, 0, 0, time.UTC)
+	state := testhelpers.CreateValidState()
+	for i := 0; i < 14; i++ {
+		task := testhelpers.BuildTaskByStatus(fmt.Sprintf("blocked-%02d", i), models.TaskStatusBlocked, assessment.Add(-time.Hour))
+		task.Priority = 2
+		task.History = []models.TaskHistoryEntry{{Time: assessment, Event: models.TaskEventOrchestratorAssessment}}
+		state.Tasks = append(state.Tasks, task)
+	}
+	state.Tasks[13].Priority = 1
+	state.HumanNotes = []models.HumanNote{
+		{For: "blocked-00", Timestamp: assessment.Add(2 * time.Second), Message: "second input for first task"},
+		{For: "blocked-13", Timestamp: assessment.Add(time.Second), Message: "input beyond digest cap"},
+		{For: "blocked-00", Timestamp: assessment.Add(time.Second), Message: "first input for first task"},
+		{For: "blocked-00", Timestamp: assessment.Add(2 * time.Second), Message: "stable tied input"},
+	}
+	dashboard, _, err := RenderOrchestratorDashboard(state, setupPipelineConfig(t), "orchestrator-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wants := []string{"input beyond digest cap", "first input for first task", "second input for first task", "stable tied input"}
+	last := -1
+	for _, want := range wants {
+		index := strings.Index(dashboard, want)
+		if index <= last {
+			t.Fatalf("missing or misordered message %q in dashboard", want)
+		}
+		last = index
+	}
+	if state.Tasks[0].ID != "blocked-00" || state.HumanNotes[0].Message != "second input for first task" {
+		t.Fatal("rendering reordered source slices")
+	}
+	state.Tasks[0], state.Tasks[13] = state.Tasks[13], state.Tasks[0]
+	second, _, err := RenderOrchestratorDashboard(state, setupPipelineConfig(t), "orchestrator-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	section := func(s string) string {
+		start := strings.Index(s, "ACTIONABLE HUMAN NOTES FOR BLOCKED TASKS:")
+		end := strings.Index(s[start:], "\nDEPENDENCY-CLOSURE RULE:")
+		return s[start : start+end]
+	}
+	if section(dashboard) != section(second) {
+		t.Fatal("human-note ordering depends on task slice order")
+	}
+}
+
+func TestRenderOrchestratorDashboard_ActionableHumanNotesBounds(t *testing.T) {
+	assessment := time.Date(2026, time.October, 10, 10, 0, 0, 0, time.UTC)
+	newState := func(message string) *models.State {
+		state := testhelpers.CreateValidState()
+		task := testhelpers.BuildTaskByStatus("blocked-1", models.TaskStatusBlocked, assessment.Add(-time.Hour))
+		task.History = []models.TaskHistoryEntry{{Time: assessment, Event: models.TaskEventOrchestratorAssessment}}
+		state.Tasks = []models.Task{task}
+		state.HumanNotes = []models.HumanNote{{For: task.ID, Timestamp: assessment.Add(time.Second), Message: message}}
+		return state
+	}
+	t.Run("multiline continuation over two KiB retained", func(t *testing.T) {
+		message := strings.Repeat("Retain this concrete planning decision.\n", 70) + "FINAL HUMAN DECISION: continue the preserved draft."
+		if len(message) <= 2048 {
+			t.Fatal("fixture must exceed two KiB")
+		}
+		var b strings.Builder
+		writeActionableHumanNotes(&b, newState(message))
+		if !strings.Contains(b.String(), message) || strings.Contains(b.String(), "INCOMPLETE:") {
+			t.Fatal("bounded continuation payload was truncated or changed")
+		}
+	})
+	t.Run("per-note UTF8-safe truncation", func(t *testing.T) {
+		message := strings.Repeat("λ", 4095) + "🙂" + "MISSING CONTINUATION"
+		var b strings.Builder
+		writeActionableHumanNotes(&b, newState(message))
+		out := b.String()
+		if !utf8.ValidString(out) || !strings.Contains(out, strings.Repeat("λ", 4095)) || strings.Contains(out, "MISSING CONTINUATION") {
+			t.Fatal("truncation corrupted Unicode or retained omitted suffix")
+		}
+		for _, want := range []string{"INCOMPLETE: human message truncated", "Keep this blocker", "bounded human clarification", "never infer missing content"} {
+			if !strings.Contains(out, want) {
+				t.Fatalf("missing safe truncation guidance %q", want)
+			}
+		}
+	})
+	t.Run("total section bounded", func(t *testing.T) {
+		state := newState(strings.Repeat("x", 8*1024))
+		for i := 0; i < 10; i++ {
+			state.HumanNotes = append(state.HumanNotes, state.HumanNotes[0])
+		}
+		var b strings.Builder
+		writeActionableHumanNotes(&b, state)
+		if b.Len() > 32*1024 || !strings.Contains(b.String(), "INCOMPLETE: additional actionable human notes omitted") {
+			t.Fatalf("section length = %d, missing bounded omission", b.Len())
+		}
+		if strings.Contains(b.String(), "get human_notes") || strings.Contains(b.String(), "read full") {
+			t.Fatal("incomplete notes prompted unsupported state access")
+		}
+	})
 }
 
 func TestRenderOrchestratorDashboard_BlockedDependencyRepairsRequireSemanticDirection(t *testing.T) {

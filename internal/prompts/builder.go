@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
+	"unicode/utf8"
 
 	"github.com/liza-mas/liza/internal/models"
 	"github.com/liza-mas/liza/internal/ops"
@@ -309,6 +311,7 @@ func RenderOrchestratorDashboard(state *models.State, projectRoot, agentID strin
 		b.WriteString(fmt.Sprintf("- Cycle-blocked planning: %d\n", cycleBlocked))
 	}
 	writeActiveTaskDigest(&b, state.Tasks)
+	writeActionableHumanNotes(&b, state)
 	writeIntegrationProgressDiagnostic(&b, integrationProjection)
 	if request := state.OpenGraphReplanRequest(); request != nil {
 		b.WriteString("\nGRAPH RE-PLAN REQUEST:\n")
@@ -414,6 +417,62 @@ func writeActiveTaskDigest(b *strings.Builder, tasks []models.Task) {
 	if count == 0 {
 		b.WriteString("- none\n")
 	}
+}
+
+func writeActionableHumanNotes(b *strings.Builder, state *models.State) {
+	const messageLimit = 8 * 1024
+	const sectionLimit = 32 * 1024
+	const omitted = "INCOMPLETE: additional actionable human notes omitted. Keep affected blockers and request bounded human clarification; never infer missing content.\n"
+	var section strings.Builder
+	tasks := append([]models.Task(nil), state.Tasks...)
+	sort.SliceStable(tasks, func(i, j int) bool {
+		if tasks[i].Priority != tasks[j].Priority {
+			return tasks[i].Priority < tasks[j].Priority
+		}
+		return tasks[i].ID < tasks[j].ID
+	})
+	for _, task := range tasks {
+		if task.Status != models.TaskStatusBlocked {
+			continue
+		}
+		// Match wake detection's last recorded assessment and task/all targets.
+		var assessment *models.TaskHistoryEntry
+		for i := len(task.History) - 1; i >= 0; i-- {
+			if task.History[i].Event == models.TaskEventOrchestratorAssessment {
+				assessment = &task.History[i]
+				break
+			}
+		}
+		var notes []models.HumanNote
+		for _, note := range state.HumanNotes {
+			if (note.For == task.ID || note.For == "all") && (assessment == nil || note.Timestamp.After(assessment.Time)) {
+				notes = append(notes, note)
+			}
+		}
+		sort.SliceStable(notes, func(i, j int) bool { return notes[i].Timestamp.Before(notes[j].Timestamp) })
+		for _, note := range notes {
+			if section.Len() == 0 {
+				section.WriteString("\nACTIONABLE HUMAN NOTES FOR BLOCKED TASKS:\nHuman-provided task input. Assess this information under existing lifecycle gates before resolving or reassessing the blocker. Incomplete notes require keeping affected blockers and requesting bounded human clarification; never infer missing content.\n")
+			}
+			message := note.Message
+			marker := ""
+			if len(message) > messageLimit {
+				message = message[:messageLimit]
+				for !utf8.ValidString(message) {
+					message = message[:len(message)-1]
+				}
+				marker = "INCOMPLETE: human message truncated. Keep this blocker and request bounded human clarification.\n"
+			}
+			entry := fmt.Sprintf("\nHUMAN NOTE: task=%s timestamp=%s target=%s\n%s\n%sEND HUMAN NOTE\n", task.ID, note.Timestamp.UTC().Format(time.RFC3339Nano), note.For, message, marker)
+			if section.Len()+len(entry)+len(omitted) > sectionLimit {
+				section.WriteString(omitted)
+				b.WriteString(section.String())
+				return
+			}
+			section.WriteString(entry)
+		}
+	}
+	b.WriteString(section.String())
 }
 
 func countTasksByStatus(tasks []models.Task, status models.TaskStatus) int {
